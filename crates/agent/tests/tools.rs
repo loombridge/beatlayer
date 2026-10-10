@@ -754,7 +754,10 @@ fn scheduled_commands_are_checked_when_scheduled_and_wait_for_the_song() {
 
 #[test]
 fn the_guide_s_example_runs_as_written() {
-    let start = guide::TEXT.find("```json\n").unwrap() + "```json\n".len();
+    // From the line after the fence, so a checkout with CRLF line endings
+    // (Git for Windows' default) reads it too.
+    let fence = guide::TEXT.find("```json").unwrap();
+    let start = fence + guide::TEXT[fence..].find('\n').unwrap() + 1;
     let end = start + guide::TEXT[start..].find("```").unwrap();
     let example: Value = serde_json::from_str(&guide::TEXT[start..end]).unwrap();
     let mut client = headless(false);

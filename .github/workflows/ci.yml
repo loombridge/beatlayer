@@ -1,0 +1,124 @@
+# Runs `cargo xtask check` on macOS (arm64), Windows (x64), and Linux (x64).
+#
+# The repository is private on GitHub's Free plan, so hosted-runner minutes are
+# limited, and a macOS minute counts as ten and a Windows minute as two. The
+# workflow keeps the bill down by:
+#
+# - skipping changes that touch only Markdown, docs/, or the licence, except
+#   the generated docs that `cargo xtask check` keeps in sync;
+# - cancelling a run when a newer commit supersedes it;
+# - restoring the dependency cache on every run, but saving it only from main,
+#   so pull requests share main's cache instead of filling the 10 GB quota;
+# - timing out a hung job after 30 minutes rather than the default six hours.
+#
+# A failure on one platform doesn't cancel the others (fail-fast is off). Most
+# authors can only test macOS locally, so one run should report every
+# platform's failures rather than one at a time.
+#
+# Every third-party action is pinned to a full commit SHA, with its version in
+# a comment. Update the SHA and the comment together.
+
+name: CI
+
+on:
+  # GitHub allows exceptions only in `paths`, not `paths-ignore`, so the
+  # filter includes everything, excludes prose, then brings back the generated
+  # docs that `cargo xtask check` keeps in sync with their sources. The last
+  # matching pattern wins.
+  pull_request:
+    branches: [main]
+    paths:
+      - "**"
+      - "!**.md"
+      - "!docs/**"
+      - "!LICENSE"
+      - "!.github/ISSUE_TEMPLATE/**"
+      - "docs/ui-parity/**"
+      - "docs/commands.md"
+  push:
+    branches: [main]
+    # Keep in step with the list above.
+    paths:
+      - "**"
+      - "!**.md"
+      - "!docs/**"
+      - "!LICENSE"
+      - "!.github/ISSUE_TEMPLATE/**"
+      - "docs/ui-parity/**"
+      - "docs/commands.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  # Line tables keep test backtraces readable while making the target
+  # directory, and so the cache, much smaller than full debug info.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  RUST_BACKTRACE: 1
+
+jobs:
+  check:
+    name: check (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS arm64
+            os: macos-15
+          - name: Windows x64
+            os: windows-2025
+          - name: Linux x64
+            os: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # rustfmt.toml asks for Unix line endings, and the Windows runner's Git
+      # would otherwise check files out with CRLF, failing `cargo fmt --check`.
+      - name: Keep LF line endings
+        run: git config --global core.autocrlf false
+
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # cpal's `asio` feature pulls in asio-sys, whose build script downloads
+      # Steinberg's ASIO SDK when CPAL_ASIO_DIR is unset. ASIO goes through
+      # azo instead (decision D9). Add any other crate whose build script
+      # downloads an SDK or binaries to the pattern.
+      - name: Refuse dependencies that download at build time
+        run: |
+          if grep -En '^name = "(asio-sys)"$' Cargo.lock; then
+            echo "::error file=Cargo.lock::A dependency's build script downloads an SDK at build time. ASIO goes through azo (decision D9), not cpal's asio feature."
+            exit 1
+          fi
+          echo "No build-time downloaders in Cargo.lock"
+
+      - name: Prepare the runner
+        uses: ./.github/actions/prepare
+
+      - name: Restore the dependency cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-bin: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
+        with:
+          tool: cargo-deny@0.20.2
+          # A prebuilt, checksummed binary or nothing: never compile it here.
+          fallback: none
+
+      - name: cargo xtask check
+        run: cargo xtask check

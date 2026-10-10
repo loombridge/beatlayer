@@ -383,9 +383,10 @@ const ENTRIES: &[Entry] = &[
         contexts: &[Session, Arrangement],
         keys: &[],
         description: "Sets a track's volume as a linear gain: 1 is unity (0 dB), 0.5 is about \
-            -6 dB, 2 is about +6 dB, and 0 is silence. Use it to balance tracks; the Main \
-            track's volume sets the song's output level. The value must be finite and at \
-            least 0.",
+            -6 dB (10^(dB/20) converts decibels), 2 is about +6 dB, and 0 is silence (-inf \
+            dB). Use it to balance tracks; the Main track's volume sets the song's output \
+            level. The engine glides to the new level over 20 ms, so a change never clicks. \
+            The value must be finite and at least 0.",
     },
     Entry {
         id: "mixer.set_pan",
@@ -395,7 +396,9 @@ const ENTRIES: &[Entry] = &[
         contexts: &[Session, Arrangement],
         keys: &[],
         description: "Sets a track's pan from -1 (fully left) through 0 (centre) to 1 (fully \
-            right). Use it to place a track in the stereo field.",
+            right). Use it to place a track in the stereo field. Panning keeps the power \
+            constant: at the centre both channels pass at 0 dB, and fully to one side that \
+            side is 3 dB louder and the other silent.",
     },
     Entry {
         id: "mixer.set_mute",
@@ -407,9 +410,10 @@ const ENTRIES: &[Entry] = &[
             Key::Toggles("S-TRACK-016", "mute"),
             Key::Toggles("S-TRANS-010", "mute"),
         ],
-        description: "Switches a track's activator: `mute` true deactivates the track, so it's \
-            silent, and false activates it again. Use it to silence a track without deleting \
-            it. Every track but Main has an activator.",
+        description: "Switches a track's activator: `mute` true deactivates the track, so its \
+            output and its post-fader sends are silent (its pre-fader sends still carry it), \
+            and false activates it again. Use it to silence a track without deleting it. \
+            Every track but Main has an activator.",
     },
     Entry {
         id: "mixer.set_solo",
@@ -418,8 +422,25 @@ const ENTRIES: &[Entry] = &[
         permission: Permission::Edit,
         contexts: MIXER,
         keys: &[Key::Toggles("S-TRACK-014", "solo")],
-        description: "Solos or unsolos a track, to hear it without the tracks that aren't \
-            soloed. Every track but Main can be soloed.",
+        description: "Solos or unsolos one track, leaving other tracks' solo switches as they \
+            are, as a Cmd-click (Ctrl-click) on a Solo switch does; to solo one track alone, \
+            use `mixer.solo_exclusive`. While any track is soloed, only soloed tracks, the \
+            groups that hold them, and the tracks inside soloed groups are heard. Return \
+            tracks stay audible if Solo in Place is on (`mixer.set_solo_in_place`); soloing a \
+            return silences every other track's output but keeps their sends to it. Every \
+            track but Main can be soloed.",
+    },
+    Entry {
+        id: "mixer.solo_exclusive",
+        action: Action::Apply("solo_exclusive"),
+        label: "Solo Track Exclusively",
+        permission: Permission::Edit,
+        contexts: MIXER,
+        keys: &[],
+        description: "Solos one track and unsolos every other track, in one undo step, as a \
+            click on a Solo switch does while Exclusive Solo is on (Live's default). Use it to \
+            hear one track on its own. To unsolo, use `mixer.set_solo` with `solo` false. Every \
+            track but Main can be soloed.",
     },
     Entry {
         id: "mixer.set_arm",
@@ -428,8 +449,61 @@ const ENTRIES: &[Entry] = &[
         permission: Permission::Edit,
         contexts: MIXER,
         keys: &[Key::Toggles("S-TRACK-013", "arm")],
-        description: "Arms or disarms a track for recording, so it records its input when \
-            recording starts. Only audio and MIDI tracks can be armed.",
+        description: "Arms or disarms one track for recording, leaving other tracks' arm \
+            switches as they are, so it records its input when recording starts (recording \
+            arrives in Phase 2; until then the switch is only saved). Only audio and MIDI \
+            tracks can be armed.",
+    },
+    Entry {
+        id: "mixer.arm_exclusive",
+        action: Action::Apply("arm_exclusive"),
+        label: "Arm Track Exclusively",
+        permission: Permission::Edit,
+        contexts: MIXER,
+        keys: &[],
+        description: "Arms one track and disarms every other track, in one undo step, as a \
+            click on an Arm switch does while Exclusive Arm is on (Live's default). Only audio \
+            and MIDI tracks can be armed.",
+    },
+    Entry {
+        id: "mixer.set_send",
+        action: Action::Apply("set_send"),
+        label: "Set Send Level",
+        permission: Permission::Edit,
+        contexts: &[Session, Arrangement],
+        keys: &[],
+        description: "Sets how much of a track's signal its send feeds to the return track \
+            `to`, as a linear gain from 0 (-inf dB, where every send starts) to 1 (0 dB). Use \
+            it to put a track through a return's effects, such as a shared reverb. Audio, \
+            MIDI, and group tracks have a send to every return; the return's Pre/Post switch \
+            (`mixer.set_send_tap`) decides whether the send takes the track's signal before \
+            or after its pan, volume, and activator.",
+    },
+    Entry {
+        id: "mixer.set_send_tap",
+        action: Action::Apply("set_send_tap"),
+        label: "Set Sends Pre/Post",
+        permission: Permission::Edit,
+        contexts: &[Session, Arrangement],
+        keys: &[],
+        description: "Sets a return track's Pre/Post switch, which decides where every send to \
+            that return takes its signal from each sending track: `post` (the default) after \
+            the track's pan, volume, and activator, so the send follows the fader; `pre` \
+            before them, straight after the track's devices, for a mix that ignores the \
+            faders, such as a monitor mix. Only return tracks have it.",
+    },
+    Entry {
+        id: "mixer.set_solo_in_place",
+        action: Action::Apply("set_solo_in_place"),
+        label: "Solo in Place",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Switches Solo in Place, the Options menu item. On (the default in a new \
+            set), soloing an audio, MIDI, or group track keeps the return tracks audible, so \
+            the soloed track is heard with its sends' effects; off, soloing such a track \
+            silences the returns too. It doesn't change what soloing a return does. The \
+            setting is saved with the set.",
     },
     Entry {
         id: "clip.create",

@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Merged over the Info.plist that cargo-packager generates, key by key. The
+  bundle identifier, version, minimum macOS version, category, and copyright
+  come from [package.metadata.packager] in crates/app/Cargo.toml.
+  `cargo xtask package` checks the result.
+-->
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+
+	<!-- Apple Silicon only (platform decision in docs/02-architecture.md). -->
+	<key>LSArchitecturePriority</key>
+	<array>
+		<string>arm64</string>
+	</array>
+
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Beatlayer records from your microphone and other audio inputs.</string>
+
+	<!-- A project is a folder holding a .blset file (see "Project files and interop"). -->
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Beatlayer Project</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>io.loombridge.beatlayer.project</string>
+			</array>
+		</dict>
+	</array>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>io.loombridge.beatlayer.project</string>
+			<key>UTTypeDescription</key>
+			<string>Beatlayer Project</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+				<string>public.content</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>blset</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
+</dict>
+</plist>

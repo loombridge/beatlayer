@@ -13,7 +13,8 @@ Beatlayer is an open-source digital audio workstation with the workflow of Ablet
 3. [docs/03-build-plan.md](docs/03-build-plan.md): work packages, human tasks, and the status table. "How an agent uses this plan" is the procedure for every package.
 4. [CONTRIBUTING.md ("Building without Ableton's code")](https://github.com/loombridge/beatlayer/blob/main/CONTRIBUTING.md#building-without-abletons-code): what you may and may not learn from Ableton Live.
 5. [docs/04-parity-matrix.md](docs/04-parity-matrix.md): every Live 12 feature and the milestone that covers it.
-6. [docs/ui-parity/](docs/ui-parity/) (from WP-0.13): where everything sits in Live 12's interface, and every shortcut. Read it before any UI work.
+6. [docs/05-improvements.md](docs/05-improvements.md): improvements over Live, and the rules for adding them (add, don't move).
+7. [docs/ui-parity/](docs/ui-parity/) (from WP-0.13): where everything sits in Live 12's interface, and every shortcut. Read it before any UI work.
 
 ## Lines not crossed
 

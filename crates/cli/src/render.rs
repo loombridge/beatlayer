@@ -15,7 +15,7 @@ use std::time::Instant;
 
 use bl_core::time::SampleRate;
 use bl_engine::{
-    EngineConfig, Offline, Output, Registry, Report, ScheduledCommand, TransportCommand,
+    EngineConfig, Offline, Output, Registry, Report, ScheduledCommand, TransportCommand, When,
 };
 use bl_model::{DeviceId, Document};
 
@@ -83,6 +83,25 @@ impl Summary {
     }
 }
 
+/// A transport command on a frame of the render: the transport moves as a
+/// person or an agent would move it, on that exact frame, whatever the
+/// block size.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Cue {
+    /// The frame, from the render's first.
+    pub at: u64,
+    /// What the transport does there.
+    pub command: TransportCommand,
+}
+
+impl Cue {
+    /// Play from the start: what `bl-cli render` does.
+    pub const PLAY: Self = Self {
+        at: 0,
+        command: TransportCommand::Play,
+    };
+}
+
 /// Plays `document` from its start, with `schedule`'s commands scheduled
 /// before the first block, and hands each block's output to `sink`.
 ///
@@ -93,12 +112,34 @@ pub fn render(
     document: &Document,
     schedule: &[ScheduledCommand],
     settings: &Settings,
+    sink: impl FnMut(&Output<'_>),
+) -> Summary {
+    render_cued(document, schedule, &[Cue::PLAY], settings, sink)
+}
+
+/// Renders `document` with `schedule`'s commands scheduled and the
+/// transport moved by `cues`, each on its frame, and hands each block's
+/// output to `sink`. The song starts stopped, with its insert marker at
+/// 1.1.1: a render that plays has a cue that starts it.
+///
+/// # Panics
+///
+/// If `settings.block` is 0.
+pub fn render_cued(
+    document: &Document,
+    schedule: &[ScheduledCommand],
+    cues: &[Cue],
+    settings: &Settings,
     mut sink: impl FnMut(&Output<'_>),
 ) -> Summary {
     let config = EngineConfig::new(settings.sample_rate, settings.block);
     let mut offline = Offline::new(config, Registry::new());
     let unhosted = offline.sync(document);
-    offline.sender().transport(TransportCommand::Play);
+    for cue in cues {
+        offline
+            .sender()
+            .transport_at(cue.command, When::Frame(cue.at));
+    }
     for &command in schedule {
         offline.sender().schedule(command);
     }

@@ -2672,8 +2672,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Option+Space"]
 win = ["Ctrl+Space"]
-status = "pending"
-package = "WP-1.5"
+status = "bound"
+commands = [
+  { id = "transport.play_from_insert_marker", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-ARR-033"
@@ -2684,8 +2686,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Cmd+Shift+Space"]
 win = ["Ctrl+Shift+Space"]
-status = "pending"
-package = "WP-1.5"
+status = "bound"
+commands = [
+  { id = "transport.insert_marker_to_playhead", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-ARR-034"
@@ -3045,8 +3049,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Space"]
 win = ["Space"]
-status = "pending"
-package = "WP-1.5"
+status = "bound"
+commands = [
+  { id = "transport.play_stop", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-TRANS-002"
@@ -3057,8 +3063,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Shift+Space"]
 win = ["Shift+Space"]
-status = "pending"
-package = "WP-1.5"
+status = "bound"
+commands = [
+  { id = "transport.continue", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-TRANS-003"
@@ -3093,8 +3101,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Home", "Fn+Left"]
 win = ["Home"]
-status = "pending"
-package = "WP-1.5"
+status = "bound"
+commands = [
+  { id = "transport.locate", contexts = ["global"], args = { position = 0 } },
+]
 
 [[shortcut]]
 id = "S-TRANS-006"

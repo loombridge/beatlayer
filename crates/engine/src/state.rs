@@ -4,7 +4,7 @@ use bl_core::time::{Frames, Ticks};
 use bl_model::TrackId;
 use rtrb::Consumer;
 
-use crate::message::Report;
+use crate::message::{LoopRegion, Report};
 
 /// How fast a meter falls after a peak, in decibels per second. A
 /// placeholder until the mixer (WP-1.6) sets the meters' ballistics.
@@ -42,6 +42,10 @@ pub struct EngineCounters {
     pub scheduled_fired: u64,
     /// Scheduled commands dropped because too many were waiting.
     pub scheduled_rejected: u64,
+    /// Transport commands for a frame dropped because too many were
+    /// waiting for theirs
+    /// ([`EngineConfig::max_scheduled`](crate::EngineConfig::max_scheduled)).
+    pub transport_overflowed: u64,
     /// Programs that didn't follow the running one, so their surviving nodes
     /// couldn't move across. Any is a bug.
     pub migration_mismatches: u64,
@@ -50,16 +54,26 @@ pub struct EngineCounters {
 }
 
 /// The engine as the audio thread last published it, after a block.
+///
+/// Every field comes from the same block, so a reader on any thread sees
+/// the playhead, the transport, and the meters as they were together: the
+/// UI draws its playhead from `position_ticks` while `playing`, and its
+/// insert marker and loop brace from the fields beside it.
 #[derive(Debug, PartialEq)]
 pub struct EngineState {
     /// Frames processed since the engine started: the engine clock.
     pub clock: u64,
     /// Whether the song is playing.
     pub playing: bool,
-    /// The playhead: the song position of the next frame to play.
+    /// The playhead: the song position of the next frame to play. While
+    /// stopped, it's where playback stopped, where Continue resumes.
     pub position: Frames,
     /// The playhead in ticks, through the running program's tempo map.
     pub position_ticks: Ticks,
+    /// The insert marker: where Play starts.
+    pub insert_marker: Ticks,
+    /// The Arrangement loop the engine plays, if it's on.
+    pub loop_region: Option<LoopRegion>,
     /// The running program's generation, if one has arrived.
     pub program: Option<u64>,
     /// Programs swapped in.
@@ -85,6 +99,8 @@ impl EngineState {
             playing: false,
             position: Frames::ZERO,
             position_ticks: Ticks::ZERO,
+            insert_marker: Ticks::ZERO,
+            loop_region: None,
             program: None,
             swaps: 0,
             cpu_load: 0.0,
@@ -116,6 +132,8 @@ impl Clone for EngineState {
             playing: self.playing,
             position: self.position,
             position_ticks: self.position_ticks,
+            insert_marker: self.insert_marker,
+            loop_region: self.loop_region,
             program: self.program,
             swaps: self.swaps,
             cpu_load: self.cpu_load,

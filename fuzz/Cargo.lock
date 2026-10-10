@@ -57,9 +57,11 @@ dependencies = [
 name = "bl-project"
 version = "0.0.0"
 dependencies = [
+ "bl-commands",
  "bl-core",
  "bl-model",
  "ruzstd",
+ "schemars",
  "serde",
  "serde_json",
 ]

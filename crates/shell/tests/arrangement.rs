@@ -50,6 +50,10 @@ impl SetStore for Preloaded {
         Err("not saved".to_owned())
     }
 
+    fn save_as(&mut self, _: &Path, _: &Editor) -> Result<(PathBuf, Vec<String>), String> {
+        Err("not saved".to_owned())
+    }
+
     fn close(&mut self) {}
 }
 

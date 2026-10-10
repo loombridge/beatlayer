@@ -219,6 +219,14 @@ impl SetStore for SceneStore {
         Err("the benchmark scene isn't saved".to_owned())
     }
 
+    fn save_as(
+        &mut self,
+        _chosen: &Path,
+        _editor: &Editor,
+    ) -> Result<(PathBuf, Vec<String>), String> {
+        Err("the benchmark scene isn't saved".to_owned())
+    }
+
     fn close(&mut self) {}
 }
 

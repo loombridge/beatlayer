@@ -540,6 +540,7 @@ dependencies = [
 name = "beatlayer"
 version = "0.0.0"
 dependencies = [
+ "bl-agent",
  "bl-analysis",
  "bl-audio-io",
  "bl-control",
@@ -620,6 +621,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ded4057c258ba199e2d26386d3af3780957ecaee6c4ef4041c6b4b8b97c0b06"
 
 [[package]]
+name = "bl-agent"
+version = "0.0.0"
+dependencies = [
+ "bl-commands",
+ "bl-core",
+ "bl-engine",
+ "bl-model",
+ "bl-shell",
+ "getrandom 0.3.4",
+ "schemars",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "bl-analysis"
 version = "0.0.0"
 dependencies = [
@@ -640,13 +656,16 @@ dependencies = [
 name = "bl-cli"
 version = "0.0.0"
 dependencies = [
+ "bl-agent",
  "bl-audio-io",
  "bl-core",
  "bl-devices",
  "bl-engine",
+ "bl-media",
  "bl-model",
  "bl-project",
  "bl-rt",
+ "bl-shell",
  "clap",
  "claxon",
  "flacenc",
@@ -794,10 +813,12 @@ version = "0.0.0"
 dependencies = [
  "bl-audio-io",
  "bl-commands",
+ "bl-core",
  "bl-model",
  "bl-project",
  "bl-rt",
  "bl-shell-spec",
+ "getrandom 0.3.4",
  "serde",
  "serde_json",
 ]

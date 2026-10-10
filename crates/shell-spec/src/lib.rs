@@ -8,12 +8,14 @@
 //! - [`menus`]: the menu bar in Live's order, each item tied to the command
 //!   it runs.
 //! - [`audio`] and [`settings`]: the data those commands take and return.
+//! - [`agent`]: the agent server's settings and commands (WP-1.15).
 //!
 //! `cargo xtask` checks the commands, lists them in `docs/commands.md`, and
 //! builds the keymap from this crate, so none of its tasks links an audio
 //! backend (which needs ALSA and JACK headers on Linux). `bl-shell`
 //! re-exports everything here.
 
+pub mod agent;
 pub mod audio;
 pub mod commands;
 pub mod menus;

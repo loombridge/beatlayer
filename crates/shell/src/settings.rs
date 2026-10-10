@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 pub use bl_shell_spec::settings::{SettingsPage, ThemeChoice};
 
+use crate::agent::AgentSettings;
 use crate::audio::{AudioSettings, ToneSettings};
 
 /// Everything the app keeps between starts, saved as JSON.
@@ -28,6 +29,9 @@ pub struct Preferences {
     pub window_size: Option<(f32, f32)>,
     /// The Settings page shown last.
     pub settings_page: SettingsPage,
+    /// The agent server: whether it runs, its port and token, and the
+    /// agents allowed to connect (WP-1.15).
+    pub agent: AgentSettings,
 }
 
 /// The file name of the preferences, inside the config directory.

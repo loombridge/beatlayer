@@ -72,7 +72,8 @@ pub const AUDIO_TOGGLE_ENGINE: &str = "audio.toggle_engine";
 /// `audio.set_test_tone`: switch the Audio settings' test tone.
 pub const AUDIO_SET_TEST_TONE: &str = "audio.set_test_tone";
 
-/// Every command [`register`] adds, so a host knows which IDs to send to
+/// Every command [`register`] adds apart from the agent server's
+/// ([`crate::agent::IDS`]), so a host knows which IDs to send to
 /// `bl-shell`'s `Shell::run`.
 pub const IDS: &[&str] = &[
     SET_NEW,
@@ -106,10 +107,11 @@ pub const IDS: &[&str] = &[
     AUDIO_SET_TEST_TONE,
 ];
 
-/// Whether `id` is one of the shell's commands.
+/// Whether `id` is one of the shell's commands: those in [`IDS`] and the
+/// agent server's ([`crate::agent::IDS`]).
 #[must_use]
 pub fn handles(id: &str) -> bool {
-    IDS.contains(&id)
+    IDS.contains(&id) || crate::agent::handles(id)
 }
 
 /// Arguments of `set.open` and `set.save_as`: a set file's path.
@@ -196,7 +198,8 @@ pub struct ViewResult {
     pub zoom: f32,
 }
 
-/// Adds the shell's commands to a registry.
+/// Adds the shell's commands to a registry, the agent server's
+/// ([`crate::agent`]) among them.
 ///
 /// # Errors
 ///
@@ -205,7 +208,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     for spec in specs() {
         registry.register(spec)?;
     }
-    Ok(())
+    crate::agent::register(registry)
 }
 
 #[expect(
@@ -538,7 +541,7 @@ mod tests {
     fn every_listed_id_is_registered_and_complete() {
         let mut registry = Registry::new();
         register(&mut registry).unwrap();
-        assert_eq!(registry.len(), IDS.len());
+        assert_eq!(registry.len(), IDS.len() + crate::agent::IDS.len());
         for id in IDS {
             assert!(registry.contains(id), "{id}");
         }

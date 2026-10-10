@@ -16,11 +16,14 @@
 //! - [`settings`]: preferences and where they're kept.
 //! - [`files`]: set files, through `bl-project`, and the factory default
 //!   set.
+//! - [`agent`]: the agent server's settings and token (WP-1.15); the app
+//!   runs the server itself, from `bl-agent`.
 //!
 //! The UI (`bl-ui`) draws the shell and the app (`beatlayer`) wires it to
 //! windows, native menus, and file dialogs. Nothing here depends on a UI
 //! crate, so every command and setting can be driven and tested headless.
 
+pub mod agent;
 pub mod audio;
 pub mod files;
 pub mod settings;

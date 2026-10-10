@@ -10,9 +10,15 @@ publish.workspace = true
 [dependencies]
 bl-audio-io.workspace = true
 bl-commands.workspace = true
+# IDs for objects a command will create, which the agent API hands out.
+bl-core.workspace = true
 bl-model.workspace = true
 bl-project.workspace = true
 bl-shell-spec.workspace = true
+# The agent server's token (WP-1.15): the operating system's secure random
+# source. The version egui's hashing already brings in, so nothing new enters
+# the build.
+getrandom = "0.3.4"
 serde = { version = "1.0.228", default-features = false, features = ["std", "derive"] }
 serde_json = "1"
 

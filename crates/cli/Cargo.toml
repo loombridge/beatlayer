@@ -1,6 +1,6 @@
 [package]
 name = "bl-cli"
-description = "Headless tool: render, inspect, convert, and benchmark projects."
+description = "Headless tool: render, inspect, convert, and benchmark projects, and serve the agent API."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,6 +12,9 @@ publish.workspace = true
 asio = ["bl-audio-io/asio"]
 
 [dependencies]
+# `bl-cli mcp`: the agent API over stdio, on a headless shell (WP-1.15).
+bl-agent.workspace = true
+bl-shell.workspace = true
 bl-project.workspace = true
 bl-engine.workspace = true
 bl-devices.workspace = true
@@ -34,6 +37,10 @@ claxon = "0.4.3"
 # The golden references' manifest.
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.151"
+
+[dev-dependencies]
+# The agent API's tests hash generated stems as importing them would.
+bl-media.workspace = true
 
 [lints]
 workspace = true

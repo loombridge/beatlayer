@@ -100,6 +100,9 @@ pub enum UserEvent {
     /// A native menu item was chosen.
     #[cfg(any(target_os = "macos", windows))]
     Menu(muda::MenuEvent),
+    /// Waveform peaks became ready or were invalidated, so the Arrangement
+    /// View redraws (WP-1.8a).
+    Peaks,
 }
 
 impl From<egui_winit::accesskit_winit::Event> for UserEvent {
@@ -154,7 +157,18 @@ pub fn run(args: Args) -> Result<(), String> {
     } else {
         AudioHost::new(prefs.audio.clone())
     };
-    let mut shell = Shell::new(prefs, config_dir, audio, Box::new(ProjectFiles::new()));
+    let mut main_ui = MainWindowUi::new();
+    let mut shell = if args.benchmark_scene {
+        // The Arrangement benchmark scene (WP-1.8a), with its peaks in
+        // memory.
+        let scene = bl_ui::arrangement::benchmark::scene(200, 25, 64);
+        main_ui
+            .arrangement_mut()
+            .set_peak_source(Box::new(scene.peaks), None);
+        bl_ui::arrangement::benchmark::shell_with(scene.editor)
+    } else {
+        Shell::new(prefs, config_dir, audio, Box::new(ProjectFiles::new()))
+    };
     shell.start_audio();
     if let Some(error) = prefs_error {
         shell.set_message(error, true);
@@ -174,6 +188,14 @@ pub fn run(args: Args) -> Result<(), String> {
         .build()
         .map_err(|e| format!("couldn't start the event loop: {e}"))?;
     let proxy = event_loop.create_proxy();
+    if !args.benchmark_scene {
+        start_peaks(&mut main_ui, &proxy);
+    }
+    for (id, command_args) in &args.commands {
+        if let Err(error) = shell.invoke(id, command_args.clone()) {
+            eprintln!("beatlayer: --command {id}: {error}");
+        }
+    }
     #[cfg(any(target_os = "macos", windows))]
     {
         let menu_proxy = proxy.clone();
@@ -197,7 +219,7 @@ pub fn run(args: Args) -> Result<(), String> {
         proxy,
         main: None,
         settings: None,
-        main_ui: MainWindowUi::new(),
+        main_ui,
         settings_ui: SettingsUi::new(),
         main_keys: KeyDispatcher::new(platform),
         settings_keys: KeyDispatcher::new(platform),
@@ -212,6 +234,40 @@ pub fn run(args: Args) -> Result<(), String> {
         .map_err(|e| format!("the event loop failed: {e}"))?;
     host.shell.audio_mut().stop();
     Ok(())
+}
+
+/// Gives the Arrangement View its waveform peaks: `bl-media`'s background
+/// peak cache, saving peak files in the platform's cache folder, over a
+/// media store that the browser (WP-1.10) and set loading fill. A thread
+/// passes the cache's events on and wakes the loop, so a waveform appears
+/// when its peaks are ready and is redrawn when they're invalidated.
+fn start_peaks(main_ui: &mut MainWindowUi, proxy: &EventLoopProxy<UserEvent>) {
+    let store = Arc::new(bl_media::MediaStore::new());
+    let cache =
+        match bl_media::PeakCache::new(store, bl_media::PeakCacheOptions::platform_default()) {
+            Ok(cache) => Arc::new(cache),
+            Err(error) => {
+                eprintln!("beatlayer: waveforms are off: {error}");
+                return;
+            }
+        };
+    let events = cache.subscribe();
+    let (forward, received) = std::sync::mpsc::channel();
+    let proxy = proxy.clone();
+    let spawned = std::thread::Builder::new()
+        .name("bl-peak-events".to_owned())
+        .spawn(move || {
+            // Ends when the cache, and with it the sender, is dropped.
+            for event in events {
+                if forward.send(event).is_err() || proxy.send_event(UserEvent::Peaks).is_err() {
+                    break;
+                }
+            }
+        });
+    let events = spawned.is_ok().then_some(received);
+    main_ui
+        .arrangement_mut()
+        .set_peak_source(Box::new(cache), events);
 }
 
 impl Host {
@@ -308,6 +364,14 @@ impl Host {
                 MINIMUM.y + if DRAWN_TITLE_BAR { TITLE_BAR } else { 0.0 },
             ));
         let surface = self.create_surface(event_loop, with_title_bar(attributes), None)?;
+        if let Some(render) = surface.painter.render_state() {
+            // The Arrangement View's own pipelines (WP-1.8a).
+            bl_ui::arrangement::gpu::install(
+                &render.device,
+                render.target_format,
+                &mut render.renderer.write().callback_resources,
+            );
+        }
         fit_title_bar(&surface.window);
         if let Some((_, h)) = outer {
             // Make the outer frame W x H, whatever the title bar's height on
@@ -472,6 +536,9 @@ impl Host {
             match event {
                 UiEvent::Invoke(invocation) => self.invoke(&invocation),
                 UiEvent::FocusArea(area) => self.shell.set_focused_area(area),
+                UiEvent::ArrangementViewport { width, height } => {
+                    self.shell.set_arrangement_viewport(width, height);
+                }
             }
         }
         self.after_commands(event_loop);
@@ -796,6 +863,11 @@ impl ApplicationHandler<UserEvent> for Host {
                     Ak::AccessibilityDeactivated => surface.ctx.disable_accesskit(),
                 }
                 surface.window.request_redraw();
+            }
+            UserEvent::Peaks => {
+                if let Some(main) = &self.main {
+                    main.window.request_redraw();
+                }
             }
             #[cfg(any(target_os = "macos", windows))]
             UserEvent::Menu(event) => {

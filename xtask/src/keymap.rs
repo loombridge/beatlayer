@@ -49,13 +49,32 @@ const SYSTEM: &[(&str, &str)] = &[
     ),
 ];
 
-/// Shortcuts the focused control handles, with which control.
+/// Shortcuts the focused control handles, with which control. The
+/// Arrangement View reads three itself because each has keys that act
+/// differently, and the keymap gives a shortcut one command with one set of
+/// arguments (WP-1.8a); each runs a registered command with the arguments
+/// its key means.
 const WIDGET: &[(&str, &str)] = &[
     (
         "S-SET-003",
         "the focused Settings chooser steps to the next or previous choice",
     ),
     ("S-SET-004", "the focused Settings switch toggles"),
+    (
+        "S-ARR-020",
+        "the Arrangement View: with title bars selected, Left folds and Right unfolds them \
+         (`arrangement.fold_tracks`); U is S-TRACK-010's binding",
+    ),
+    (
+        "S-ARR-022",
+        "the Arrangement View: Option-Plus (Alt-Plus) makes the selected tracks taller and \
+         Option-Minus (Alt-Minus) shorter (`arrangement.set_track_height`)",
+    ),
+    (
+        "S-A11Y-003",
+        "the Arrangement View: Up and Down select the track above or below \
+         (`arrangement.select_tracks`)",
+    ),
 ];
 
 /// The package that binds each M1 shortcut the shell doesn't: exact IDs
@@ -69,7 +88,7 @@ const OWNERS: &[(&str, &str)] = &[
     ("S-FOCUS-013", "WP-1.14"),
     ("S-FOCUS-014", "WP-1.14"),
     ("S-FILE-007", "WP-1.12"),
-    ("S-EDIT-012", "WP-1.8a"),
+    ("S-EDIT-012", "WP-1.8b"),
     ("S-ENV-004", "WP-1.8b"),
     ("S-ZOOM-003", "WP-1.8a"),
     ("S-ZOOM-004", "WP-1.8a"),
@@ -90,7 +109,7 @@ const OWNERS: &[(&str, &str)] = &[
     ("S-ARR-033", "WP-1.5"),
     ("S-ARR-034", "WP-1.8a"),
     ("S-ARR-035", "WP-1.9"),
-    ("S-TRACK-005", "WP-1.8a"),
+    ("S-TRACK-005", "WP-1.8b"),
     ("S-TRACK-008", "WP-1.8a"),
     ("S-TRACK-009", "WP-1.8a"),
     ("S-TRACK-010", "WP-1.8a"),

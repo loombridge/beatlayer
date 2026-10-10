@@ -28,6 +28,12 @@ Options:
       --screenshot FILE  Draw the main window (with --settings, the Settings
                          window) offscreen, save it as a PNG, and quit; no
                          window opens
+      --benchmark-scene  Show the Arrangement benchmark scene (200 tracks,
+                         5,000 clips with waveforms) instead of a new set
+      --command ID[=JSON]
+                         Run a command at start-up, such as
+                         arrangement.optimize_height or
+                         arrangement.zoom='{\"factor\":4}'; repeatable
 ";
 
 /// What the command line asked for.
@@ -40,6 +46,8 @@ pub struct Args {
     pub drawn_menus: bool,
     pub screenshot: Option<PathBuf>,
     pub set: Option<PathBuf>,
+    pub benchmark_scene: bool,
+    pub commands: Vec<(String, serde_json::Value)>,
 }
 
 enum Parsed {
@@ -79,6 +87,20 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, String> {
             "--drawn-menus" => parsed.drawn_menus = true,
             "--screenshot" => {
                 parsed.screenshot = Some(it.next().ok_or("--screenshot takes a file")?.into());
+            }
+            "--benchmark-scene" => parsed.benchmark_scene = true,
+            "--command" => {
+                let text = it.next().ok_or("--command takes a command ID")?;
+                let (id, args) = match text.split_once('=') {
+                    Some((id, json)) => (
+                        id.to_owned(),
+                        serde_json::from_str(json).map_err(|e| {
+                            format!("--command {id}: the arguments aren't JSON: {e}")
+                        })?,
+                    ),
+                    None => (text.clone(), serde_json::json!({})),
+                };
+                parsed.commands.push((id, args));
             }
             other if other.starts_with('-') => {
                 return Err(format!("unknown option {other}\n\n{USAGE}"));

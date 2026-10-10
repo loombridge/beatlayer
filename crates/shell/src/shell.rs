@@ -9,6 +9,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
+use crate::arrangement::{ArrangementView, TransportView, ViewError, Viewport};
 use crate::audio::{AudioHost, ConfigureAudio, ToneSettings};
 use crate::commands::{
     self as ids, PathArgs, SaveAsArgs, SetResult, SettingsArgs, SwitchResult, TestToneArgs,
@@ -16,6 +17,7 @@ use crate::commands::{
 };
 use crate::files::{ProjectFiles, SetStore, factory_default_set};
 use crate::settings::{Preferences, SettingsPage, ThemeChoice};
+use bl_shell_spec::arrangement as view_ids;
 
 /// The views the main window's main area shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -214,6 +216,10 @@ pub struct Shell {
     effects: Vec<Effect>,
     message: Option<Message>,
     revision: u64,
+    /// What the Arrangement View shows (WP-1.8a).
+    arrangement: ArrangementView,
+    /// A number that changes whenever the document may have changed.
+    document_revision: u64,
 }
 
 impl fmt::Debug for Shell {
@@ -251,7 +257,7 @@ impl Shell {
     ) -> Self {
         let mut registry = Registry::new();
         model::register(&mut registry).expect("the document's command IDs are unique");
-        ids::register(&mut registry).expect("the shell's command IDs are unique");
+        crate::register(&mut registry).expect("the shell's command IDs are unique");
         debug_assert!(registry.problems().is_empty(), "{:?}", registry.problems());
         audio.set_tone(prefs.tone);
         Self {
@@ -273,6 +279,8 @@ impl Shell {
             effects: Vec::new(),
             message: None,
             revision: 0,
+            arrangement: ArrangementView::new(),
+            document_revision: 0,
         }
     }
 
@@ -499,6 +507,51 @@ impl Shell {
         self.revision = self.revision.wrapping_add(1);
     }
 
+    /// A number that changes whenever the document may have changed: after
+    /// every document command, undo and redo, and a new or opened set. Views
+    /// that index the document rebuild their index when it changes.
+    #[must_use]
+    pub fn document_revision(&self) -> u64 {
+        self.document_revision
+    }
+
+    /// Records that the document may have changed: drops view state for
+    /// tracks that are gone.
+    fn document_changed(&mut self) {
+        self.document_revision = self.document_revision.wrapping_add(1);
+        self.arrangement
+            .forget_missing_tracks(self.editor.document());
+    }
+
+    /// What the Arrangement View shows (WP-1.8a).
+    #[must_use]
+    pub fn arrangement(&self) -> &ArrangementView {
+        &self.arrangement
+    }
+
+    /// Records the size of the Arrangement's scrolling lanes, as the main
+    /// window lays them out, so its view commands (zooming around the
+    /// middle, Optimize Height and Width, Follow) work with what's on
+    /// screen.
+    pub fn set_arrangement_viewport(&mut self, width: f32, height: f32) {
+        if self
+            .arrangement
+            .set_viewport(Viewport { width, height }, self.editor.document())
+        {
+            self.touch();
+        }
+    }
+
+    /// Takes the transport's latest state from the engine (the playhead,
+    /// whether it plays, the loop brace), for the Arrangement View to draw
+    /// and, with Follow on, to keep in view. The host calls it as the
+    /// engine's UI state changes; the transport package (WP-1.5) wires it.
+    pub fn set_transport(&mut self, transport: TransportView) {
+        if self.arrangement.set_transport(transport) {
+            self.touch();
+        }
+    }
+
     /// The effects commands have asked for since the last call.
     pub fn take_effects(&mut self) -> Vec<Effect> {
         std::mem::take(&mut self.effects)
@@ -525,10 +578,17 @@ impl Shell {
             WindowKind::Main => {
                 let mut contexts = Vec::with_capacity(3);
                 match self.focused_area {
-                    Area::MainView => contexts.push(match self.main_view {
-                        MainView::Arrangement => Context::Arrangement,
-                        MainView::Session => Context::Session,
-                    }),
+                    Area::MainView => match self.main_view {
+                        MainView::Arrangement => {
+                            // A selected title bar's keys come first
+                            // (shortcuts.md, `track-headers`).
+                            if self.arrangement.title_bars_selected() {
+                                contexts.push(Context::TrackHeaders);
+                            }
+                            contexts.push(Context::Arrangement);
+                        }
+                        MainView::Session => contexts.push(Context::Session),
+                    },
                     Area::Browser => contexts.push(Context::Browser),
                     Area::Detail => contexts.push(Context::DeviceView),
                     Area::ControlBar | Area::StatusBar => {}
@@ -551,7 +611,7 @@ impl Shell {
             ids::VIEW_TOGGLE_BROWSER => Some(self.browser),
             ids::FOCUS_TOGGLE_TAB_NAVIGATION => Some(self.prefs.tab_navigation),
             ids::AUDIO_TOGGLE_ENGINE => Some(self.audio.engine_on()),
-            _ => None,
+            _ => self.arrangement.switch_state(id),
         }
     }
 
@@ -599,6 +659,18 @@ impl Shell {
         }
         if ids::handles(id) {
             return true;
+        }
+        if view_ids::handles(id) {
+            let args = if args.is_null() {
+                json!({})
+            } else {
+                args.clone()
+            };
+            return spec
+                .args
+                .as_ref()
+                .is_some_and(|schema| bl_commands::validate(schema, &args).is_ok())
+                && self.arrangement.can_run(id, &args, self.editor.document());
         }
         let Ok(args) = self.filled_args(id, args.clone()) else {
             return false;
@@ -749,8 +821,29 @@ impl Shell {
                     message: error.to_string(),
                 })?;
             self.dirty = true;
+            self.document_changed();
             self.touch();
             return Ok(to_value(&changes));
+        }
+        if view_ids::handles(id) {
+            let result = self
+                .arrangement
+                .run(id, args, self.editor.document())
+                .map_err(|error| match error {
+                    ViewError::InvalidArgs(message) => ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message,
+                    },
+                    ViewError::Unavailable(reason) => ShellError::Unavailable {
+                        command: id.to_owned(),
+                        reason,
+                    },
+                });
+            if id != view_ids::STATE {
+                // A query changes nothing a window shows.
+                self.touch();
+            }
+            return result.map(|state| to_value(&state));
         }
         if !ids::handles(id) {
             return Err(ShellError::UnknownCommand(id.to_owned()));
@@ -810,6 +903,8 @@ impl Shell {
                 self.dirty = false;
                 self.main_view = MainView::Arrangement;
                 self.message = None;
+                self.arrangement.reset();
+                self.document_changed();
                 Ok(self.set_result())
             }
             ids::SET_OPEN => {
@@ -826,6 +921,8 @@ impl Shell {
                 self.set_path = Some(opened);
                 self.dirty = false;
                 self.message = None;
+                self.arrangement.reset();
+                self.document_changed();
                 Ok(self.set_result())
             }
             ids::SET_SAVE => {
@@ -853,6 +950,7 @@ impl Shell {
                 if self.dirty {
                     self.editor = snapshot(&self.saved);
                     self.dirty = false;
+                    self.document_changed();
                 }
                 Ok(self.set_result())
             }

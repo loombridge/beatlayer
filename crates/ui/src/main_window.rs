@@ -1,6 +1,7 @@
 //! The main window: the Control Bar, the browser, the main view, the detail
 //! area, and the Status Bar, placed by the layout layer (L-WIN, L-CTRL,
-//! L-STAT). Views that later packages build are placeholders that say so.
+//! L-STAT). The main view shows the Arrangement View (WP-1.8a); views that
+//! later packages build are placeholders that say so.
 
 use std::time::Duration;
 
@@ -12,6 +13,7 @@ use egui::{
 };
 use serde_json::json;
 
+use crate::arrangement::ArrangementUi;
 use crate::layout::{ELEMENTS, Element, Kind, ShellLayout, Strip, TITLE_BAR};
 use crate::theme::Theme;
 use crate::widgets::{Look, element};
@@ -24,10 +26,18 @@ pub enum UiEvent {
     /// The person clicked in an area, which takes the keyboard focus
     /// (I-FOCUS-001).
     FocusArea(Area),
+    /// The Arrangement's track lanes are laid out at a new size, in points,
+    /// for the host to pass to [`Shell::set_arrangement_viewport`].
+    ArrangementViewport {
+        /// From the lanes' left edge to the track headers.
+        width: f32,
+        /// From under the rulers to the pinned return tracks.
+        height: f32,
+    },
 }
 
 /// The main window's UI state between frames.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct MainWindowUi {
     /// A focus move asked for by a command, done in the next frame.
     focus_request: Option<FocusRequest>,
@@ -39,6 +49,8 @@ pub struct MainWindowUi {
     /// A move to the next or previous control, done at the start of the
     /// next frame (egui forgets one asked for between frames).
     move_focus: Option<egui::FocusDirection>,
+    /// The Arrangement View's caches and gestures (WP-1.8a).
+    arrangement: ArrangementUi,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -74,7 +86,19 @@ impl MainWindowUi {
             last_control: Element::BrowserToggle,
             hovered: None,
             move_focus: None,
+            arrangement: ArrangementUi::new(),
         }
+    }
+
+    /// The Arrangement View, to give it a peak source or read what it drew.
+    pub fn arrangement_mut(&mut self) -> &mut ArrangementUi {
+        &mut self.arrangement
+    }
+
+    /// The Arrangement View.
+    #[must_use]
+    pub fn arrangement(&self) -> &ArrangementUi {
+        &self.arrangement
     }
 
     /// Carries out an effect that moves the keyboard focus in this window.
@@ -145,7 +169,7 @@ impl MainWindowUi {
                     "The browser arrives with WP-1.10.",
                 );
             }
-            self.main_view(ui, shell, theme, layout.main_view);
+            self.main_view(ui, shell, theme, layout.main_view, &mut events);
             self.info_view(ui, theme, layout.info_view);
             placeholder(
                 ui,
@@ -272,11 +296,19 @@ impl MainWindowUi {
         );
     }
 
-    fn main_view(&mut self, ui: &mut Ui, shell: &Shell, theme: &Theme, rect: Rect) {
+    fn main_view(
+        &mut self,
+        ui: &mut Ui,
+        shell: &Shell,
+        theme: &Theme,
+        rect: Rect,
+        events: &mut Vec<UiEvent>,
+    ) {
         let (name, note) = match shell.main_view() {
             MainView::Arrangement => (
                 "Arrangement View",
-                "The Arrangement's tracks, clips, and ruler arrive with WP-1.8a.",
+                "Tracks and their clips along the song's timeline, with the rulers above and \
+                 the track headers at the right.",
             ),
             MainView::Session => (
                 "Session View",
@@ -284,11 +316,18 @@ impl MainWindowUi {
             ),
         };
         let response = ui.interact(rect, main_view_id(), Sense::click());
-        if self.focus_request == Some(FocusRequest::MainView) {
+        let pressed_here = ui.input(|i| {
+            i.pointer.any_pressed() && i.pointer.press_origin().is_some_and(|p| rect.contains(p))
+        });
+        if self.focus_request == Some(FocusRequest::MainView) || pressed_here {
+            // A click in the view gives it the keyboard (I-FOCUS-001).
             response.request_focus();
             self.focus_request = None;
         }
-        draw_pane(ui, theme, rect, name, note);
+        match shell.main_view() {
+            MainView::Arrangement => self.arrangement.show(ui, shell, theme, rect, events),
+            MainView::Session => draw_pane(ui, theme, rect, name, note),
+        }
         if response.has_focus() {
             ui.painter().rect_stroke(
                 rect.shrink(1.0),
@@ -525,6 +564,21 @@ fn look(element: Element, shell: &Shell) -> Look {
                 },
             }
         }
+        Element::Follow => {
+            let view = shell.arrangement();
+            Look {
+                on: view.follow(),
+                value: Some(
+                    match (view.follow(), view.follow_paused()) {
+                        (true, true) => "on, paused",
+                        (true, false) => "on",
+                        (false, _) => "off",
+                    }
+                    .to_owned(),
+                ),
+                ..Look::default()
+            }
+        }
         Element::SessionView => Look {
             on: shell.main_view() == MainView::Session,
             ..Look::default()
@@ -562,6 +616,10 @@ pub fn sample_rate_text(rate: u32) -> String {
 fn click(element: Element, shell: &Shell) -> Option<Invocation> {
     match element {
         Element::BrowserToggle => Some(Invocation::new(ids::VIEW_TOGGLE_BROWSER, json!({}))),
+        Element::Follow => Some(Invocation::new(
+            bl_shell::arrangement_commands::FOLLOW,
+            json!({}),
+        )),
         Element::SampleRate => Some(Invocation::new(
             ids::APP_SETTINGS,
             json!({ "page": "audio" }),

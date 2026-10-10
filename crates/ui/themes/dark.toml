@@ -34,6 +34,37 @@ focus = "#79c0ff"
 # Meters.
 meter = "#5ccf8a"
 meter_hot = "#f2c14e"
+# The Arrangement View (WP-1.8a). Track lanes, the selected tracks' lanes,
+# and the lines between tracks.
+lane = "#2a2f36"
+lane_selected = "#323944"
+lane_line = "#1d2126"
+# Grid lines: at each bar, and between.
+grid_bar = "#3c434d"
+grid_beat = "#323840"
+# The rulers and the scrub area, and their tick marks.
+ruler = "#262a30"
+ruler_tick = "#6b7580"
+# The playhead and the insert marker.
+playhead = "#f2f4f7"
+insert_marker = "#79c0ff"
+# The loop brace while the loop is on, and while it's off.
+loop_on = "#35c2b0"
+loop_off = "#59626d"
+# The time selection, drawn translucent over the lanes.
+time_selection = "#9fc8ff"
+# A clip's name, over its colour, and its waveform.
+clip_text = "#101317"
+waveform = "#14181d"
+# A deactivated clip.
+clip_muted = "#6a717a"
+# The Overview's outline round the part in view.
+overview_outline = "#e4e8ee"
+# Beatlayer's own track colours, given to new tracks in turn.
+track_palette = [
+  "#e0675a", "#e8945a", "#e6c35c", "#a8c95a", "#5fbf6e", "#4fbfa3", "#4fb0d6",
+  "#5b8ce0", "#7f74db", "#a46bd6", "#d46bb8", "#d9708a", "#9aa6b2", "#c2a382",
+]
 
 [sizes]
 # Text sizes in points.

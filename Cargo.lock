@@ -218,6 +218,7 @@ dependencies = [
  "azo",
  "bl-rt",
  "cpal",
+ "rtrb",
 ]
 
 [[package]]

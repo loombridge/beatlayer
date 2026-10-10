@@ -11,6 +11,11 @@
 //!   planar `f32`, so recording (WP-2.13) uses the same callback as playback.
 //! - [`Stream`]: starts and stops the device and reports what it actually
 //!   runs at ([`StreamInfo`]) and what went wrong ([`StreamStats`]).
+//! - [`Supervisor`]: keeps a stream running through device changes. When the
+//!   device goes away, its sample rate changes, the stream stalls, or the
+//!   machine sleeps, it closes the stream, says why ([`DeviceStatus`],
+//!   [`DeviceEvent`]), and opens it again when the device can run, asking a
+//!   [`StreamClient`] for the callback each time (WP-1.13).
 //!
 //! # Backends
 //!
@@ -57,8 +62,10 @@ mod buffer;
 mod cpal_backend;
 mod error;
 mod null;
+mod power;
 mod runner;
 mod stats;
+mod supervisor;
 
 #[cfg(all(windows, feature = "asio"))]
 mod asio;
@@ -71,8 +78,13 @@ use std::str::FromStr;
 pub use bl_rt::{Priority, Promotion, ThreadReport, Workgroup, WorkgroupJoin};
 pub use buffer::{AudioBuffer, AudioBufferMut};
 pub use error::{Error, ErrorKind};
-pub use null::{NullBackend, NullOptions, Pacing};
+pub use null::{NullBackend, NullControl, NullOptions, NullPower, Pacing};
+pub use power::{ClockJump, ClockReading, DEFAULT_SLEEP_THRESHOLD, PowerEvent, PowerMonitor};
 pub use stats::{DROPOUT_MERGE, StreamStats};
+pub use supervisor::{
+    BackendFactory, Cause, DeviceEvent, DeviceStatus, Interruption, StreamClient, Supervisor,
+    SupervisorOptions,
+};
 
 /// The sample rates Beatlayer offers when a device accepts a range.
 pub const STANDARD_SAMPLE_RATES: [u32; 13] = [

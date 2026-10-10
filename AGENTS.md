@@ -25,7 +25,9 @@ Beatlayer is an open-source digital audio workstation with the workflow of Ablet
 
 ## How work is done
 
-One work package per branch (`wp/<id>-<slug>`) and per pull request, with acceptance evidence pasted in the PR. `cargo xtask check` must pass. The maintainer merges.
+One work package per branch (`wp/<id>-<slug>`) and per pull request, with acceptance evidence pasted in the PR. `cargo xtask check` must pass.
+
+Merging: on 10 October 2026 the maintainer delegated merging to the orchestrating agent, to keep building phase after phase. That agent merges a pull request when `cargo xtask check` and CI pass, the integration review finds no blocker, and the acceptance evidence is complete. A criterion that's pending only on hardware or on the maintainer's judgement doesn't block a merge; it stays listed under the human tasks. Decisions marked for the maintainer in the build plan (such as H8, the UI framework) still go to the maintainer.
 
 One-time setup: install Rust with rustup (the repo pins the toolchain in `rust-toolchain.toml`), then `cargo install --locked cargo-deny`.
 

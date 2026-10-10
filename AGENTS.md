@@ -31,4 +31,4 @@ One-time setup: install Rust with rustup (the repo pins the toolchain in `rust-t
 
 ## Where things stand (10 October 2026)
 
-WP-0.1 (workspace and tooling) is in review on branch `wp/0.1-workspace-tooling`. Every crate is a stub. Next: the local Phase 0 packages (WP-0.5, 0.6, 0.7, the UI spike, 0.12, and WP-0.3 on macOS).
+WP-0.1 (workspace and tooling) is merged; every crate is a stub. The repository is `loombridge/beatlayer` on GitHub, private until the alpha. Next: the rest of Phase 0.

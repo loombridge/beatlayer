@@ -100,6 +100,39 @@ pub fn shortcut_table(root: &Path) -> Result<bl_commands::ShortcutTable, String>
     ))
 }
 
+/// A shortcut as the keymap needs it (WP-1.7).
+pub struct KeySource {
+    pub id: String,
+    pub action: String,
+    pub context: String,
+    pub kind: String,
+    pub trigger: String,
+    pub milestone: String,
+    pub mac: Vec<String>,
+    pub win: Vec<String>,
+}
+
+/// The validated shortcut map as the keymap generator needs it: the Live
+/// version observed, and every shortcut in the reference's order.
+pub fn key_sources(root: &Path) -> Result<(String, Vec<KeySource>), String> {
+    let map = load(root)?;
+    let sources = map
+        .shortcuts
+        .into_iter()
+        .map(|s| KeySource {
+            id: s.id,
+            action: s.action,
+            context: s.context,
+            kind: s.kind,
+            trigger: s.trigger,
+            milestone: s.milestone,
+            mac: s.mac,
+            win: s.win,
+        })
+        .collect();
+    Ok((map.live_version, sources))
+}
+
 fn load(root: &Path) -> Result<Map, String> {
     let text = std::fs::read_to_string(root.join(TOML_PATH))
         .map_err(|e| format!("couldn't read {TOML_PATH}: {e}"))?;

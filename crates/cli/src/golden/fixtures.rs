@@ -2,8 +2,11 @@
 //!
 //! Until clips play (WP-1.4), the engine's sound sources are test tones, so
 //! each fixture is test tones through tracks, groups, returns, and faders,
-//! with commands scheduled at musical positions. Tones play at −24 dBFS or
-//! so, louder than the test tone's default of −60, so that a level error
+//! with commands scheduled at musical positions. The transport's fixtures
+//! (WP-1.5) use the beat tone, which sounds only while the song plays and
+//! whose every sample follows the song position in ticks, so a render shows
+//! the frame each start, stop, and loop lands on. Tones play at −24 dBFS
+//! or so, louder than the tones' default of −60, so that a level error
 //! shows above the cross-platform threshold. These renders are files for
 //! tests, never played on a device.
 //!
@@ -11,11 +14,12 @@
 //! `cargo xtask golden --update` and say why in the pull request.
 
 use bl_core::time::{Bpm, TempoMap, Ticks, TimeSignature, TimeSignatureChange, TimeSignatureMap};
-use bl_engine::nodes::{TEST_TONE, fader, test_tone};
-use bl_engine::{Action, NodeKey, ParamValue, ScheduledCommand};
+use bl_engine::nodes::{BEAT_TONE, TEST_TONE, beat_tone, fader, test_tone};
+use bl_engine::{Action, NodeKey, ParamValue, ScheduledCommand, TransportCommand};
 use bl_model::{Command, Device, DeviceId, DeviceKind, Editor, ParamId, TrackId, TrackKind};
 
 use super::{Fixture, SAMPLE_RATE, Scene};
+use crate::render::Cue;
 
 pub(super) const FIXTURES: &[Fixture] = &[
     Fixture {
@@ -46,12 +50,33 @@ pub(super) const FIXTURES: &[Fixture] = &[
                 mute and unmute, a level, frequencies, and volumes, each on its exact frame.",
         build: scheduled_commands,
     },
+    Fixture {
+        name: "start-mid-bar",
+        about: "The transport on frames no block starts on: Play from an insert marker in the \
+                middle of bar 2, Stop, Continue Playback, Stop twice (back to 1.1.1), and Play \
+                again, sounded by the beat tone.",
+        build: start_mid_bar,
+    },
+    Fixture {
+        name: "loop-wraps",
+        about: "Playback from 1.1.1 into an Arrangement loop of a beat and a half at 130 BPM, \
+                which wraps four times on its exact frames; the loop is in the set, so a saved \
+                set renders the same.",
+        build: loop_wraps,
+    },
+    Fixture {
+        name: "tempo-ramp-loop",
+        about: "A loop inside a tempo ramp from 90 to 150 BPM that runs on past the loop's \
+                end: each pass speeds up, and the wrap lands where the tempo map puts the end.",
+        build: tempo_ramp_loop,
+    },
 ];
 
 /// A song under construction.
 struct Song {
     editor: Editor,
     schedule: Vec<ScheduledCommand>,
+    cues: Vec<Cue>,
 }
 
 impl Song {
@@ -59,7 +84,39 @@ impl Song {
         Self {
             editor: Editor::new(),
             schedule: Vec::new(),
+            cues: Vec::new(),
         }
+    }
+
+    /// Adds a beat tone at the end of a track's chain.
+    fn beat_tone(&mut self, track: TrackId, cycles_per_beat: f64, dbfs: f64) -> DeviceId {
+        let id = self.editor.new_id();
+        let kind = DeviceKind::Native {
+            device_type: BEAT_TONE.to_owned(),
+        };
+        let mut device = Device::new(id, "Beat Tone", kind);
+        device
+            .params
+            .insert(beat_tone::CYCLES_PER_BEAT, cycles_per_beat);
+        device.params.insert(beat_tone::LEVEL, dbfs);
+        self.apply(Command::InsertDevice {
+            track,
+            index: 0,
+            device,
+        });
+        id
+    }
+
+    /// Moves the transport on frame `at` of the render.
+    fn cue(&mut self, at: u64, command: TransportCommand) {
+        self.cues.push(Cue { at, command });
+    }
+
+    /// Puts the loop brace at `start` for `length`, and switches the loop
+    /// on.
+    fn loop_on(&mut self, start: Ticks, length: Ticks) {
+        self.apply(Command::SetLoop { start, length });
+        self.apply(Command::SetLoopEnabled { enabled: true });
     }
 
     fn apply(&mut self, command: Command) {
@@ -154,11 +211,17 @@ impl Song {
         });
     }
 
-    /// The finished song, `seconds` long.
+    /// The finished song, `seconds` long. Without cues, it plays from its
+    /// start.
     fn finish(self, seconds: f64) -> Scene {
         Scene {
             editor: self.editor,
             schedule: self.schedule,
+            cues: if self.cues.is_empty() {
+                vec![Cue::PLAY]
+            } else {
+                self.cues
+            },
             frames: SAMPLE_RATE.seconds_to_frames(seconds).get() as u64,
         }
     }
@@ -283,4 +346,62 @@ fn scheduled_commands() -> Scene {
     }
     // Three bars.
     song.finish(3.75)
+}
+
+/// Spec: transport R1 to R6, on exact frames.
+fn start_mid_bar() -> Scene {
+    let mut song = Song::new();
+    let track = song.track(TrackKind::Midi, "Beat", None);
+    // 440 Hz at 120 BPM.
+    song.beat_tone(track, 220.0, -24.0);
+    let marker = song.at("2.2.3");
+    for (at, command) in [
+        // The insert marker moves while the song is stopped, silently.
+        (0, TransportCommand::Locate(marker)),
+        (30_001, TransportCommand::Play),
+        (90_017, TransportCommand::Stop),
+        (100_003, TransportCommand::Continue),
+        (140_009, TransportCommand::Stop),
+        (140_500, TransportCommand::Stop),
+        (150_011, TransportCommand::Play),
+    ] {
+        song.cue(at, command);
+    }
+    song.finish(3.75)
+}
+
+/// Spec: transport R13, R14, R16.
+fn loop_wraps() -> Scene {
+    let mut song = Song::new();
+    song.apply(Command::SetTempo {
+        tempo: TempoMap::constant(bpm(130.0)),
+    });
+    let track = song.track(TrackKind::Midi, "Beat", None);
+    song.beat_tone(track, 220.0, -24.0);
+    // From 1.2.3 to 1.4.1: frames 33,231 to 66,462.
+    let start = song.at("1.2.3");
+    song.loop_on(start, Ticks::QUARTER * 3 / 2);
+    song.finish(4.0)
+}
+
+/// Spec: transport R13, R15.
+fn tempo_ramp_loop() -> Scene {
+    let mut song = Song::new();
+    // 90 BPM for a bar, then a ramp to 150 over two bars.
+    let tempo = TempoMap::from_breakpoints([
+        (Ticks::ZERO, bpm(90.0)),
+        (Ticks::WHOLE, bpm(90.0)),
+        (Ticks::WHOLE * 3, bpm(150.0)),
+    ])
+    .expect("the tempo map is valid");
+    song.apply(Command::SetTempo { tempo });
+    let track = song.track(TrackKind::Midi, "Beat", None);
+    song.beat_tone(track, 220.0, -24.0);
+    // From 2.2.1 to 2.3.3, inside the ramp.
+    let start = song.at("2.2.1");
+    song.loop_on(start, Ticks::QUARTER * 3 / 2);
+    let bar_2 = song.at("2.1.1");
+    song.cue(0, TransportCommand::Locate(bar_2));
+    song.cue(0, TransportCommand::Play);
+    song.finish(4.5)
 }

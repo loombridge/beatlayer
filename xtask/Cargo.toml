@@ -9,10 +9,15 @@ publish.workspace = true
 
 [dependencies]
 # Builds the command registry to check it and generate docs/commands.md
-# (WP-0.14). Headless crates only: xtask never links a UI crate.
+# (WP-0.14) and the keymap (WP-1.7). Data crates only: xtask never links a UI
+# crate or an audio backend (the `layers` step checks), so its tasks need no
+# ALSA or JACK headers on Linux.
 bl-commands.workspace = true
+# The transport's commands (WP-1.5).
+bl-engine.workspace = true
 bl-model.workspace = true
 bl-project.workspace = true
+bl-shell-spec.workspace = true
 serde_json = "1"
 # Reads docs/ui-parity/shortcuts.toml. Parsing only: no serde derive, no writer.
 toml = { version = "1", default-features = false, features = ["std", "parse", "serde"] }

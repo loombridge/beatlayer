@@ -1,0 +1,25 @@
+[package]
+name = "bl-shell"
+description = "The app shell's headless half: the shell's state and commands at work (files, views, settings), the audio host, and preferences."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+bl-audio-io.workspace = true
+bl-commands.workspace = true
+bl-model.workspace = true
+bl-project.workspace = true
+bl-shell-spec.workspace = true
+serde = { version = "1.0.228", default-features = false, features = ["std", "derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+# The allocation trap, so tests can show the audio callback stays off the
+# heap (the real-time rules).
+bl-rt.workspace = true
+
+[lints]
+workspace = true

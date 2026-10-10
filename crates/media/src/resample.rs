@@ -45,6 +45,10 @@ pub struct RateConverter {
     from: u32,
     to: u32,
     channels: usize,
+    /// The FFT resampler's block sizes (input, output), when it's the one in
+    /// use: output is a sum of whole blocks, so it repeats exactly only for
+    /// input that starts on a block boundary.
+    grid: Option<(usize, usize)>,
     /// Owned staging buffers, so a chunk needs no allocation.
     input: Vec<Vec<f32>>,
     output: Vec<Vec<f32>>,
@@ -63,20 +67,21 @@ impl RateConverter {
             )));
         }
         let divisor = gcd(from, to);
+        let mut grid = None;
         let inner: Box<dyn Resampler<f32>> =
             if from / divisor <= MAX_FFT_BLOCK && to / divisor <= MAX_FFT_BLOCK {
-                Box::new(
-                    Fft::<f32>::new_custom(
-                        from as usize,
-                        to as usize,
-                        CHUNK,
-                        SUB_CHUNKS,
-                        channels,
-                        WindowFunction::BlackmanHarris2,
-                        FixedSync::Input,
-                    )
-                    .map_err(|e| MediaError::Resample(e.to_string()))?,
+                let fft = Fft::<f32>::new_custom(
+                    from as usize,
+                    to as usize,
+                    CHUNK,
+                    SUB_CHUNKS,
+                    channels,
+                    WindowFunction::BlackmanHarris2,
+                    FixedSync::Input,
                 )
+                .map_err(|e| MediaError::Resample(e.to_string()))?;
+                grid = Some((fft.fft_size_in(), fft.fft_size_out()));
+                Box::new(fft)
             } else {
                 let parameters =
                     SincInterpolationParameters::new(SINC_LEN, WindowFunction::BlackmanHarris2)
@@ -101,6 +106,7 @@ impl RateConverter {
             from,
             to,
             channels,
+            grid,
             input,
             output,
         })
@@ -141,6 +147,17 @@ impl RateConverter {
     #[must_use]
     pub fn output_delay(&self) -> usize {
         self.inner.output_delay()
+    }
+
+    /// The block sizes of the FFT resampler, input frames and output frames,
+    /// when the rates' ratio lets it run (see the module's notes); `None`
+    /// when the sinc resampler converts. Started on a multiple of the input
+    /// block, after [`RateConverter::reset`], the converter's output repeats
+    /// the output of a whole-buffer conversion from the matching output
+    /// block on, which is how disk streaming seeks without a seam.
+    #[must_use]
+    pub fn block_sizes(&self) -> Option<(usize, usize)> {
+        self.grid
     }
 
     /// Clears the converter's history, to start a new stream.

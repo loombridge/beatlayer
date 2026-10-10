@@ -4,11 +4,28 @@ description = "Views, widgets, GPU canvases, theming, and accessibility."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-license.workspace = true
+# The code is GPL-3.0-or-later; the bundled Inter typeface (fonts/inter) is
+# OFL-1.1, which deny.toml allows for fonts.
+license = "GPL-3.0-or-later AND OFL-1.1"
 publish.workspace = true
 
 [dependencies]
+bl-commands.workspace = true
+bl-core.workspace = true
 bl-model.workspace = true
+bl-engine.workspace = true
+bl-shell.workspace = true
+# Pinned exactly and upgraded deliberately (ADR-001). Without
+# `default_fonts`: epaint_default_fonts' licences fail deny.toml, and the UI
+# bundles its own typeface. AccessKit is always on in egui 0.36.
+egui = { version = "=0.36.2", default-features = false }
+serde = { version = "1.0.228", default-features = false, features = ["std", "derive"] }
+serde_json = "1"
+# Reads the keymap and the theme files. Parsing only.
+toml = { version = "1", default-features = false, features = ["std", "parse", "serde"] }
+
+[dev-dependencies]
+# The transport's commands, which the keymap test checks bindings against.
 bl-engine.workspace = true
 
 [lints]

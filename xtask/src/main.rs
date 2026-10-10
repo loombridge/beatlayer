@@ -10,6 +10,7 @@ use serde_json::Value;
 
 mod commands;
 mod dashboard;
+mod keymap;
 mod progress;
 mod ui_parity;
 
@@ -18,12 +19,15 @@ Usage: cargo xtask <task>
 
 Tasks:
   check          Run every check: format, clippy, tests, layers, the UI parity
-                 reference, the command reference, deny, and the deny self-test
+                 reference, the command reference, the keymap, deny, and the deny
+                 self-test
   layers         Check the crate layering rules
   ui-parity      Validate docs/ui-parity/shortcuts.toml and regenerate shortcuts.md
                  (with --check, fail instead of writing if shortcuts.md is out of date)
   commands       Check the command registry and regenerate docs/commands.md
                  (with --check, fail instead of writing if commands.md is out of date)
+  keymap         Regenerate crates/ui/keymaps/live12.toml from shortcuts.toml and the
+                 command registry (with --check, fail instead if it's out of date)
   deny-selftest  Prove that deny.toml still rejects an incompatible licence
   golden         Render the golden fixtures and null-test them against their references
                  in tests/golden/ (`cargo test` does too). With --update, remake the
@@ -68,6 +72,17 @@ const UI_CRATES: &[&str] = &[
     "xilem",
 ];
 
+/// Audio backends and the crates that link the platforms' audio libraries,
+/// which `xtask` must not reach.
+const AUDIO_CRATES: &[&str] = &[
+    "bl-audio-io",
+    "cpal",
+    "alsa",
+    "alsa-sys",
+    "jack",
+    "jack-sys",
+];
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = workspace_root().and_then(|root| run(&root, &args));
@@ -95,6 +110,11 @@ fn run(root: &Path, args: &[String]) -> Result<(), String> {
             [] => commands::generate(root),
             [flag] if flag == "--check" => commands::check(root),
             _ => Err(format!("usage: cargo xtask commands [--check]\n\n{USAGE}")),
+        },
+        Some("keymap") => match options {
+            [] => keymap::generate(root),
+            [flag] if flag == "--check" => keymap::check(root),
+            _ => Err(format!("usage: cargo xtask keymap [--check]\n\n{USAGE}")),
         },
         Some("deny-selftest") => deny_selftest(root),
         Some("golden") => golden(root, options),
@@ -159,6 +179,7 @@ fn check(root: &Path) -> Result<(), String> {
         ("layers", Box::new(|| layers(root))),
         ("ui parity reference", Box::new(|| ui_parity::check(root))),
         ("command reference", Box::new(|| commands::check(root))),
+        ("keymap", Box::new(|| keymap::check(root))),
         (
             "licences, advisories, bans, sources",
             Box::new(|| cargo(root, &["deny", "--locked", "check"])),
@@ -206,6 +227,11 @@ fn layers(root: &Path) -> Result<(), String> {
     for member in &graph.members {
         let name = graph.name(member);
         if name == "xtask" {
+            // Every task builds xtask, so it links no audio backend: on
+            // Linux that would need ALSA and JACK headers for any task.
+            if let Some(path) = graph.path_to(member, |dep| AUDIO_CRATES.contains(&dep)) {
+                violations.push(format!("xtask links an audio backend: {path}"));
+            }
             continue;
         }
         if name != APP

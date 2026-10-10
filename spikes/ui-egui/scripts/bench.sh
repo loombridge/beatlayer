@@ -13,7 +13,10 @@
 #                  matches, and is repeated if something matched while it ran.
 #   READY_CMD      a command that succeeds when the machine is ready (for
 #                  example, the display is awake and unlocked); each run waits
-#                  for it. A run the spike flags with a WARNING is repeated.
+#                  for it before starting.
+#
+# A run the spike flags with a WARNING (frames not presented, or not paced by
+# the display) is repeated, up to five attempts.
 set -euo pipefail
 
 out=${1:-bench-results}
@@ -38,9 +41,12 @@ run_once() {
     done
     "$bin" --bench --bench-seconds "$seconds" "$@" --bench-out "$out/$name.csv" \
         >"$out/$name.txt" 2>&1 &
+    # READY_CMD isn't polled during the run: a check that talks to the window
+    # server once a second (as a display-state query does) delayed a frame
+    # every time it ran. The spike's own WARNING catches a display that sleeps.
     local pid=$! overlapped=0
     while kill -0 "$pid" 2>/dev/null; do
-        if busy || ! ready; then
+        if busy; then
             overlapped=1
         fi
         sleep 1

@@ -84,7 +84,7 @@ pub struct App {
     pub bench: Option<Script>,
     pub bench_phase: Phase,
     /// The track-name labels drawn last frame, for tests and tooling.
-    pub name_rects: Vec<(usize, Rect)>,
+    pub name_rects: Vec<(usize, Rect, egui::Id)>,
     frame_ms: f32,
     timeline_list: DenseList,
     meter_list: DenseList,
@@ -746,8 +746,17 @@ impl App {
                     )
                 })
                 .inner;
-            self.name_rects.push((t, response.rect));
-            if response.double_clicked() {
+            self.name_rects.push((t, response.rect, response.id));
+            // A double-click renames. Assistive technology can't double-click,
+            // so its press action renames too, as do Enter and F2 when the
+            // name has keyboard focus.
+            let (pressed, key) = ui.input(|i| {
+                (
+                    i.has_accesskit_action_request(response.id, accesskit::Action::Click),
+                    i.key_pressed(Key::Enter) || i.key_pressed(Key::F2),
+                )
+            });
+            if response.double_clicked() || pressed || (key && response.has_focus()) {
                 self.start_rename(t);
             }
         }
@@ -864,6 +873,19 @@ fn knob(ui: &mut Ui, value: &mut f32, label: String, ppp: f32) -> Response {
 
     let current = f64::from(*value);
     response.widget_info(|| WidgetInfo::slider(true, current, &label));
+    // Declare the range and the actions handled above, as egui's Slider does.
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_min_numeric_value(0.0);
+        node.set_max_numeric_value(1.0);
+        node.set_numeric_value_step(0.05);
+        node.add_action(accesskit::Action::SetValue);
+        if current < 1.0 {
+            node.add_action(accesskit::Action::Increment);
+        }
+        if current > 0.0 {
+            node.add_action(accesskit::Action::Decrement);
+        }
+    });
 
     let painter = ui.painter();
     let centre = rect.center();
@@ -983,11 +1005,63 @@ mod tests {
     }
 
     #[test]
+    fn a_screen_reader_can_step_a_knob() {
+        let ctx = context();
+        let mut app = small_app();
+        frame(&ctx, &mut app, input(0.0, vec![]));
+        let out = frame(&ctx, &mut app, input(0.1, vec![]));
+        let label = format!("{} gain", app.scene.tracks[0].name);
+        let update = out.platform_output.accesskit_update.expect("a tree");
+        let (knob, node) = update
+            .nodes
+            .iter()
+            .find(|(_, n)| n.label() == Some(label.as_str()))
+            .expect("the first track's knob");
+        assert!(node.supports_action(accesskit::Action::Increment));
+        assert!(node.supports_action(accesskit::Action::SetValue));
+
+        let before = app.scene.tracks[0].gain;
+        let increment = Event::AccessKitActionRequest(accesskit::ActionRequest {
+            action: accesskit::Action::Increment,
+            target_tree: accesskit::TreeId::ROOT,
+            target_node: *knob,
+            data: None,
+        });
+        frame(&ctx, &mut app, input(0.2, vec![increment]));
+        assert!((app.scene.tracks[0].gain - (before + 0.05)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_screen_reader_press_on_a_track_name_renames_it() {
+        let ctx = context();
+        let mut app = small_app();
+        frame(&ctx, &mut app, input(0.0, vec![]));
+        let (track, _, id) = app.name_rects[4];
+        let press = Event::AccessKitActionRequest(accesskit::ActionRequest {
+            action: accesskit::Action::Click,
+            target_tree: accesskit::TreeId::ROOT,
+            target_node: id.accesskit_id(),
+            data: None,
+        });
+        frame(&ctx, &mut app, input(0.1, vec![press]));
+        assert_eq!(app.rename.as_ref().map(|r| r.track), Some(track));
+        // The next frame shows a text field in the tree, named by its text.
+        let out = frame(&ctx, &mut app, input(0.2, vec![]));
+        let name = app.scene.tracks[track].name.clone();
+        assert!(
+            nodes(&out)
+                .iter()
+                .any(|(role, _, value)| *role == accesskit::Role::TextInput && *value == name),
+            "no text input holding {name:?}"
+        );
+    }
+
+    #[test]
     fn double_clicking_a_track_name_renames_it() {
         let ctx = context();
         let mut app = small_app();
         frame(&ctx, &mut app, input(0.0, vec![]));
-        let (track, rect) = app.name_rects[2];
+        let (track, rect, _) = app.name_rects[2];
         let at = rect.center();
         let click = |pressed| Event::PointerButton {
             pos: at,
@@ -1045,7 +1119,7 @@ mod tests {
             .expect("a clip near the start");
         let start = app.scene.clips[id as usize].start_beat;
         // Rows line up with the track names egui laid out.
-        let (_, name) = app.name_rects[track];
+        let (_, name, _) = app.name_rects[track];
         let y = name.center().y;
         let x = HEADER_WIDTH
             + ((f64::from(start) + 0.5 - app.view.scroll_beats) * app.view.points_per_beat) as f32;

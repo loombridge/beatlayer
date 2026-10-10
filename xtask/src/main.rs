@@ -252,6 +252,10 @@ fn deny_selftest(root: &Path) -> Result<(), String> {
 fn rtsan(root: &Path, test_args: &[String]) -> Result<(), String> {
     let runtime = rtsan_runtime()?;
     eprintln!("RealtimeSanitizer runtime: {}", runtime.display());
+    let options = rtsan_options(&runtime);
+    if let Some(options) = &options {
+        eprintln!("RTSAN_OPTIONS={options}");
+    }
     let harness = root.join(RTSAN_DIR);
     let lockfile = harness.join("Cargo.lock");
     std::fs::copy(root.join("Cargo.lock"), &lockfile)
@@ -266,6 +270,9 @@ fn rtsan(root: &Path, test_args: &[String]) -> Result<(), String> {
             .env_remove("RUSTFLAGS")
             .env_remove("CARGO_ENCODED_RUSTFLAGS")
             .current_dir(&harness);
+        if let Some(options) = &options {
+            command.env("RTSAN_OPTIONS", options);
+        }
         command
     };
     let run = |what: &str, args: &[&str]| -> Result<(), String> {
@@ -293,9 +300,40 @@ fn rtsan(root: &Path, test_args: &[String]) -> Result<(), String> {
         "rtsan/: clippy",
         &["clippy", "--all-targets", "--", "-D", "warnings"],
     )?;
-    let mut test = vec!["test", "--"];
+    // Every test binary runs even if one fails, so a run shows all failures.
+    let mut test = vec!["test", "--no-fail-fast", "--"];
     test.extend(test_args.iter().map(String::as_str));
     run("rtsan/: the real-time tests under RealtimeSanitizer", &test)
+}
+
+/// RTSAN_OPTIONS for the tests: the caller's, plus, on Linux, the path to the
+/// `llvm-symbolizer` that came with the runtime, so reports name functions
+/// (macOS uses `atos`). `None` if there's nothing to set.
+fn rtsan_options(runtime: &Path) -> Option<String> {
+    let caller = std::env::var("RTSAN_OPTIONS")
+        .ok()
+        .filter(|o| !o.is_empty());
+    let symbolizer = (cfg!(target_os = "linux")
+        && !caller
+            .as_deref()
+            .is_some_and(|o| o.contains("external_symbolizer_path")))
+    .then(|| symbolizer_beside(runtime))
+    .flatten()
+    .map(|path| format!("external_symbolizer_path={}", path.display()));
+    match (caller, symbolizer) {
+        (Some(caller), Some(symbolizer)) => Some(format!("{caller}:{symbolizer}")),
+        (caller, symbolizer) => caller.or(symbolizer),
+    }
+}
+
+/// The `llvm-symbolizer` of the LLVM install a runtime belongs to: the
+/// runtime sits in `<llvm>/lib/clang/<version>/lib/<target>/`, and the
+/// symbolizer in `<llvm>/bin/`.
+fn symbolizer_beside(runtime: &Path) -> Option<PathBuf> {
+    runtime
+        .ancestors()
+        .map(|dir| dir.join("bin").join("llvm-symbolizer"))
+        .find(|path| path.is_file())
 }
 
 /// Fails unless every package `harness_lock` resolves is in `main_lock` at
@@ -641,6 +679,22 @@ mod tests {
     }
 
     #[test]
+    fn the_symbolizer_is_found_beside_the_runtime() {
+        let llvm = std::env::temp_dir().join(format!("xtask-llvm-{}", std::process::id()));
+        let runtime_dir = llvm.join("lib/clang/20/lib/linux");
+        std::fs::create_dir_all(&runtime_dir).unwrap();
+        std::fs::create_dir_all(llvm.join("bin")).unwrap();
+        let runtime = runtime_dir.join("libclang_rt.rtsan-x86_64.a");
+        std::fs::write(&runtime, b"").unwrap();
+        let missing = symbolizer_beside(&runtime);
+        std::fs::write(llvm.join("bin/llvm-symbolizer"), b"").unwrap();
+        let found = symbolizer_beside(&runtime);
+        std::fs::remove_dir_all(&llvm).unwrap();
+        assert_eq!(missing, None);
+        assert_eq!(found, Some(llvm.join("bin").join("llvm-symbolizer")));
+    }
+
+    #[test]
     fn lockfiles_list_their_packages_with_versions() {
         let lockfile = "\
 version = 4
@@ -683,6 +737,9 @@ source = \"registry+https://github.com/rust-lang/crates.io-index\"
         found.sort();
         std::fs::remove_dir_all(&root).unwrap();
         assert_eq!(found.len(), 2);
-        assert!(found[1].to_string_lossy().contains("/23/"));
+        assert!(
+            found[1].components().any(|part| part.as_os_str() == "23"),
+            "{found:?}"
+        );
     }
 }

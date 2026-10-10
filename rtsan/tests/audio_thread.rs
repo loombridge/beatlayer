@@ -318,7 +318,13 @@ fn a_callback_that_takes_a_mutex_is_stopped_by_rtsan() {
     if cfg!(target_os = "macos") {
         assert!(stderr.contains("pthread_mutex_lock"), "{stderr}");
     }
-    // The report's stack runs through the runner into the callback.
-    assert!(stderr.contains("Locker"), "{stderr}");
+    // The report's stack runs through the runner into the callback. Naming
+    // functions needs a symbolizer (`atos` on macOS; on Linux, the
+    // `llvm-symbolizer` that `cargo xtask rtsan` finds next to the runtime).
+    if stderr.contains("invalid path to external symbolizer") {
+        eprintln!("note: no llvm-symbolizer, so the report can't name the callback");
+    } else {
+        assert!(stderr.contains("Locker"), "{stderr}");
+    }
     eprintln!("--- child_callback_takes_a_mutex ---\n{stderr}");
 }

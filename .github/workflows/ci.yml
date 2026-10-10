@@ -147,9 +147,11 @@ jobs:
 
       # Ubuntu 24.04's own LLVM is 18, which predates RealtimeSanitizer (LLVM
       # 20). apt.llvm.org publishes LLVM 20 for Ubuntu as signed binary
-      # packages; this installs only the compiler-rt runtimes. Nothing
-      # downloads or builds LLVM's source, and the harness's build script
-      # fails rather than fetch a runtime if RTSAN_LIB_PATH is missing.
+      # packages; this installs the compiler-rt runtimes and, from llvm-20,
+      # llvm-symbolizer, which `cargo xtask rtsan` finds next to the runtime
+      # so reports name functions. Nothing downloads or builds LLVM's source,
+      # and the harness's build script fails rather than fetch a runtime if
+      # RTSAN_LIB_PATH is missing.
       - name: Install LLVM 20's RealtimeSanitizer runtime
         run: |
           curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
@@ -166,7 +168,7 @@ jobs:
           echo "deb [signed-by=/etc/apt/keyrings/apt.llvm.org.asc] https://apt.llvm.org/noble/ llvm-toolchain-noble-20 main" \
             | sudo tee /etc/apt/sources.list.d/llvm-20.list
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends libclang-rt-20-dev
+          sudo apt-get install --yes --no-install-recommends libclang-rt-20-dev llvm-20
           runtime=$(find /usr/lib/llvm-20 -name 'libclang_rt.rtsan*.a' -print -quit)
           if [ -z "$runtime" ]; then
             echo "::error::libclang-rt-20-dev has no RealtimeSanitizer runtime"

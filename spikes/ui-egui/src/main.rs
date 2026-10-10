@@ -46,6 +46,8 @@ Usage: ui-egui-spike [options]
   --bench-out FILE      Write every frame's timing to FILE as CSV
   --meters-off          Start with the meters stopped (for idle measurements)
   --open-plugin-window  Open the plug-in editor stand-in at start-up
+  --pointer-lock-test   Report which pointer-grab modes the platform accepts,
+                        then exit
   --on-top              Keep the main window above others (implied by
                         --bench, so the window is never occluded mid-run)
   --no-activate         On macOS, don't make the spike the active app
@@ -61,6 +63,7 @@ struct Args {
     bench_out: Option<PathBuf>,
     meters_off: bool,
     open_plugin_window: bool,
+    pointer_lock_test: bool,
     on_top: bool,
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     no_activate: bool,
@@ -77,6 +80,7 @@ fn parse_args() -> Result<Args, String> {
         bench_out: None,
         meters_off: false,
         open_plugin_window: false,
+        pointer_lock_test: false,
         on_top: false,
         no_activate: false,
         x11: false,
@@ -104,6 +108,7 @@ fn parse_args() -> Result<Args, String> {
             }
             "--meters-off" => args.meters_off = true,
             "--open-plugin-window" => args.open_plugin_window = true,
+            "--pointer-lock-test" => args.pointer_lock_test = true,
             "--on-top" => args.on_top = true,
             "--no-activate" => args.no_activate = true,
             "--x11" => args.x11 = true,
@@ -319,6 +324,11 @@ impl Host {
                 "first frame after {:.0} ms",
                 self.started.elapsed().as_secs_f64() * 1000.0
             );
+            if self.args.pointer_lock_test {
+                pointer_lock_test(&main.window);
+                event_loop.exit();
+                return;
+            }
         }
 
         if repaint_delay.is_zero() {
@@ -564,6 +574,24 @@ impl ApplicationHandler<UserEvent> for Host {
     }
 }
 
+/// Reports which pointer-grab modes the platform accepts, releasing each one
+/// straight away, with the pointer hidden as it is during a knob drag.
+fn pointer_lock_test(window: &Window) {
+    window.set_cursor_visible(false);
+    for (name, mode) in [
+        ("locked", CursorGrabMode::Locked),
+        ("confined", CursorGrabMode::Confined),
+    ] {
+        match window.set_cursor_grab(mode) {
+            Ok(()) => println!("pointer grab {name}: ok"),
+            Err(e) => println!("pointer grab {name}: {e}"),
+        }
+        let released = window.set_cursor_grab(CursorGrabMode::None);
+        println!("pointer grab released: {released:?}");
+    }
+    window.set_cursor_visible(true);
+}
+
 /// The 1, 5, and 15-minute load averages, to show how busy the machine was.
 fn load_average() -> String {
     #[cfg(unix)]
@@ -613,10 +641,16 @@ fn main() {
 
     let scene = scene::Scene::generate(scene::Config::BENCH);
     println!(
-        "scene: {} tracks, {} clips, {} peak bytes, {} files; fingerprint {:016x}; generated in {:.0} ms",
+        "scene: {} tracks, {} clips, {} peak bytes ({} at 256 samples per peak), {} files; \
+         fingerprint {:016x}; generated in {:.0} ms",
         scene.tracks.len(),
         scene.clips.len(),
         scene.peaks.len(),
+        scene
+            .clips
+            .iter()
+            .map(|c| c.levels[0].len as usize * 2)
+            .sum::<usize>(),
         scene.files.len(),
         scene.fingerprint(),
         started.elapsed().as_secs_f64() * 1000.0

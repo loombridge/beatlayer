@@ -215,7 +215,9 @@ fn save_set(dir: &Path, name: &str) -> PathBuf {
 /// it nulls against the same reference. Only fixtures that play from the
 /// start with nothing scheduled: a set holds no scheduled commands or
 /// transport moves. (It does hold its Arrangement loop, which
-/// `loop-wraps` plays.)
+/// `loop-wraps` plays, and its mixer: sends, Pre/Post switches, solo, and
+/// Solo in Place, which `pan-and-sends`, `solo-in-place`, and
+/// `solo-a-return` play.)
 #[test]
 fn bl_cli_render_writes_what_the_harness_renders() {
     let temp = TempDir::new("render");
@@ -271,7 +273,7 @@ fn bl_cli_render_writes_what_the_harness_renders() {
         assert!(render.same_bits(&fixture.render()), "{}", fixture.name);
         rendered += 1;
     }
-    assert_eq!(rendered, 4);
+    assert_eq!(rendered, 7);
     assert!(!fs::read_dir(&temp.0).unwrap().any(|entry| {
         entry
             .unwrap()

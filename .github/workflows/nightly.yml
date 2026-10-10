@@ -149,18 +149,29 @@ jobs:
         run: |
           archive="cargo-packager-$CARGO_PACKAGER_VERSION-$TARGET.tar.gz"
           url="https://github.com/cargo-bins/cargo-quickinstall/releases/download/cargo-packager-$CARGO_PACKAGER_VERSION/$archive"
-          dir="$RUNNER_TEMP/cargo-packager"
-          mkdir -p "$dir"
-          curl --fail --silent --show-error --location --retry 3 --output "$dir/$archive" "$url"
-          if command -v sha256sum > /dev/null; then
-            (cd "$dir" && echo "$SHA256  $archive" | sha256sum --check)
-          else
-            (cd "$dir" && echo "$SHA256  $archive" | shasum -a 256 --check)
-          fi
-          tar -xzf "$dir/$archive" -C "$dir"
-          binary=$(find "$dir" -type f -name "cargo-packager$EXE" | head -n 1)
-          mkdir -p "$HOME/.cargo/bin"
-          mv "$binary" "$HOME/.cargo/bin/"
+          mkdir -p "$RUNNER_TEMP/cargo-packager"
+          # Relative paths inside: GNU tar on Windows reads the `D:` of an
+          # absolute path as a remote host.
+          (
+            cd "$RUNNER_TEMP/cargo-packager"
+            curl --fail --silent --show-error --location --retry 3 --output "$archive" "$url"
+            # macOS's sha256sum takes different options from GNU's, so this
+            # compares the digest itself.
+            if command -v sha256sum > /dev/null; then
+              actual=$(sha256sum "$archive" | cut -d ' ' -f 1)
+            else
+              actual=$(shasum -a 256 "$archive" | cut -d ' ' -f 1)
+            fi
+            if [ "$actual" != "$SHA256" ]; then
+              echo "::error::$archive has SHA-256 $actual, not the pinned $SHA256"
+              exit 1
+            fi
+            echo "$archive: SHA-256 matches"
+            tar -xzf "$archive"
+            binary=$(find . -type f -name "cargo-packager$EXE" | head -n 1)
+            mkdir -p "$HOME/.cargo/bin"
+            mv "$binary" "$HOME/.cargo/bin/"
+          )
           cargo packager --version
 
       - name: Package

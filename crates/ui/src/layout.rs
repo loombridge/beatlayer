@@ -214,7 +214,7 @@ use Strip::{ControlBar as CB, StatusBar as SB};
 #[rustfmt::skip]
 pub const ELEMENTS: &[Placement] = &[
     p(E::BrowserToggle, "L-CTRL-001", "Show/Hide Browser", CB, 9.0, 18.0, Left, Switch, None),
-    p(E::BrowserMenu, "L-CTRL-001", "Browser Config Menu", CB, 27.0, 8.0, Left, MenuArrow, Some("WP-1.10")),
+    p(E::BrowserMenu, "L-CTRL-001", "Browser Config Menu", CB, 27.0, 8.0, Left, MenuArrow, Some("M6")),
     p(E::TapTempo, "L-CTRL-004", "Tap Tempo", CB, 54.0, 28.0, Left, Button, Some("WP-1.5")),
     p(E::Tempo, "L-CTRL-005", "Tempo", CB, 82.0, 44.0, Left, Value, Some("WP-1.5")),
     p(E::NudgeDown, "L-CTRL-006", "Phase Nudge Down", CB, 126.0, 18.0, Left, Button, Some("M7")),
@@ -409,6 +409,97 @@ impl ShellLayout {
             .find(|(e, _)| *e == element)
             .map(|(_, rect)| *rect)
             .expect("every element is laid out")
+    }
+}
+
+/// A row's height in the browser's sidebar and content pane. Not measured
+/// in Live (browser, "To observe in Live").
+pub const BROWSER_ROW: f32 = 17.0;
+
+/// The browser's parts inside its column (L-BRW rows), from layout.md's
+/// measurements in Live 12.4.3 at 1600 × 1000 points. The top row and the
+/// sidebar keep their size; the search field and the content pane stretch
+/// with the column, which keeps Live's 302 points until it can be widened
+/// (I-DRAG-027). The Filter View (L-BRW-007) is an M6 feature and hidden, so
+/// the column header row sits at the content pane's top.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BrowserLayout {
+    /// The browser column (L-WIN-004).
+    pub column: Rect,
+    /// Browse Back (L-BRW-001).
+    pub back: Rect,
+    /// Browse Forward (L-BRW-001).
+    pub forward: Rect,
+    /// The search field (L-BRW-001).
+    pub search: Rect,
+    /// The Show Filter View toggle (L-BRW-001).
+    pub filter_toggle: Rect,
+    /// The Filter View Menu (L-BRW-001).
+    pub filter_menu: Rect,
+    /// The sidebar (L-BRW-002).
+    pub sidebar: Rect,
+    /// The content pane (L-BRW-006).
+    pub content: Rect,
+    /// The column header row, with Name (L-BRW-009).
+    pub header: Rect,
+    /// The item list (L-BRW-010).
+    pub list: Rect,
+    /// The preview strip at the content pane's bottom (L-BRW-011).
+    pub strip: Rect,
+    /// The Preview switch, at the strip's left (L-BRW-011).
+    pub preview_toggle: Rect,
+    /// The waveform of the file previewed, beside the switch.
+    pub preview_wave: Rect,
+}
+
+impl BrowserLayout {
+    /// Lays the browser out in its column.
+    #[must_use]
+    pub fn compute(column: Rect) -> Self {
+        // Offsets from layout.md's window coordinates: the column spans x 9
+        // to 311 and y 61 to 766 at the reference size.
+        let x = |window_x: f32| column.left() + window_x - 9.0;
+        let top = |window_y: f32| column.top() + window_y - 61.0;
+        let row = |x0: f32, x1: f32| Rect::from_min_max(pos2(x0, top(62.0)), pos2(x1, top(80.0)));
+        let right = column.right();
+        let body_top = top(84.0);
+        let sidebar = Rect::from_min_max(
+            pos2(column.left(), body_top),
+            pos2(x(109.0), column.bottom()),
+        );
+        let content = Rect::from_min_max(pos2(x(110.0), body_top), pos2(right, column.bottom()));
+        let header = Rect::from_min_max(content.min, pos2(right, content.top() + 19.0));
+        // The strip from y 744 to the column's bottom (766).
+        let strip = Rect::from_min_max(pos2(content.left(), column.bottom() - 22.0), content.max);
+        let list = Rect::from_min_max(
+            pos2(content.left(), header.bottom()),
+            pos2(right, strip.top()),
+        );
+        let preview_toggle = Rect::from_min_size(
+            pos2(content.left() + 4.0, strip.top() + 4.0),
+            vec2(14.0, 14.0),
+        );
+        let preview_wave = Rect::from_min_max(
+            pos2(preview_toggle.right() + 4.0, strip.top() + 2.0),
+            pos2(right - 2.0, strip.bottom() - 2.0),
+        );
+        Self {
+            column,
+            back: row(x(9.0), x(27.0)),
+            forward: row(x(29.0), x(47.0)),
+            // The search field ends 41 points short of the column's right,
+            // and the filter controls keep their place from the right.
+            search: row(x(50.0), right - 41.0),
+            filter_toggle: row(right - 36.0, right - 18.0),
+            filter_menu: row(right - 14.0, right - 2.0),
+            sidebar,
+            content,
+            header,
+            list,
+            strip,
+            preview_toggle,
+            preview_wave,
+        }
     }
 }
 
@@ -684,6 +775,45 @@ mod tests {
                 assert!(rects.last().unwrap().right() <= size.x.max(MINIMUM.x) - MARGIN + 0.01);
             }
         }
+    }
+
+    // Spec: browser R1.
+    #[test]
+    fn the_browser_layout_follows_layout_md() {
+        let shell = ShellLayout::compute(REFERENCE, true).translate(vec2(0.0, TITLE_BAR));
+        let column = shell.browser.unwrap();
+        // L-WIN-004: x 9 to 311, y 61 to 766.
+        assert_eq!(
+            (column.left(), column.right(), column.top(), column.bottom()),
+            (9.0, 311.0, 61.0, 766.0)
+        );
+        let browser = BrowserLayout::compute(column);
+        // L-BRW-001: Back at 9, Forward at 29, search 50 to 270, the filter
+        // toggle at 275 and its menu at 297.
+        assert_eq!(browser.back.left(), 9.0);
+        assert_eq!(browser.forward.left(), 29.0);
+        assert_eq!(
+            (browser.search.left(), browser.search.right()),
+            (50.0, 270.0)
+        );
+        assert_eq!(browser.filter_toggle.left(), 275.0);
+        assert_eq!(browser.filter_menu.left(), 297.0);
+        assert!(browser.search.top() >= 61.0 && browser.search.bottom() <= 82.0);
+        // L-BRW-002 and 006: the sidebar 9 to 109 and the content pane 110
+        // to 311, from y 84.
+        assert_eq!(
+            (browser.sidebar.left(), browser.sidebar.right()),
+            (9.0, 109.0)
+        );
+        assert_eq!(
+            (browser.content.left(), browser.content.right()),
+            (110.0, 311.0)
+        );
+        assert_eq!(browser.sidebar.top(), 84.0);
+        // L-BRW-010 and 011: the list to y 744, the Preview switch at x 114,
+        // y 748.
+        assert_eq!(browser.list.bottom(), 744.0);
+        assert_eq!(browser.preview_toggle.min, pos2(114.0, 748.0));
     }
 
     #[test]

@@ -9,10 +9,12 @@
 //! - [`places`]: the User Library's place and starting folders.
 //! - [`preview`]: decoding previews in the background.
 //! - [`arrange`]: putting files into the Arrangement.
+//! - [`drop`]: where a drag from the browser lands in the Arrangement.
 //!
 //! The behaviour is in `docs/specs/browser.md`.
 
 pub mod arrange;
+pub mod drop;
 pub mod index;
 pub mod listing;
 pub mod places;
@@ -193,6 +195,9 @@ pub struct BrowserView {
     loading: Option<(u64, PathBuf)>,
     playing: Option<Playing>,
     preview_rate: u32,
+    /// The waveform overview of the file previewed last, for the preview
+    /// strip.
+    overview: Option<(PathBuf, Arc<[[f32; 2]]>)>,
     focus: Part,
     focus_requests: u64,
     waker: Waker,
@@ -239,6 +244,7 @@ impl BrowserView {
             loading: None,
             playing: None,
             preview_rate: 48_000,
+            overview: None,
             focus: Part::Content,
             focus_requests: 0,
             waker,
@@ -711,6 +717,9 @@ impl BrowserView {
             }
             self.loading = None;
             polled.changed = true;
+            if loaded.result.is_ok() {
+                self.overview = Some((loaded.path.clone(), loaded.overview.into()));
+            }
             match loaded.result {
                 Ok(data) => match audio.play_preview(Box::new(MediaSamples(data))) {
                     Ok(generation) => {
@@ -744,6 +753,15 @@ impl BrowserView {
             }
         }
         polled
+    }
+
+    /// The file previewed last and its waveform overview, for the preview
+    /// strip: the lowest and highest sample of equal stretches of it.
+    #[must_use]
+    pub fn preview_overview(&self) -> Option<(&Path, &[[f32; 2]])> {
+        self.overview
+            .as_ref()
+            .map(|(path, overview)| (path.as_path(), &overview[..]))
     }
 
     /// Whether a preview is loading or playing, so the UI redraws its

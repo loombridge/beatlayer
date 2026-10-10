@@ -18,6 +18,7 @@
 //! `egui::Context` and synthetic input.
 
 pub mod arrangement;
+pub mod browser;
 pub mod input;
 pub mod keymap;
 pub mod layout;

@@ -320,8 +320,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Option+5"]
 win = ["Alt+5"]
-status = "pending"
-package = "WP-1.10"
+status = "bound"
+commands = [
+  { id = "focus.browser", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-FOCUS-007"
@@ -3188,8 +3190,8 @@ trigger = "press"
 milestone = "M1"
 mac = ["Down", "Up"]
 win = ["Down", "Up"]
-status = "pending"
-package = "WP-1.10"
+status = "widget"
+handler = "the browser's list: Up and Down select the item above or below (`browser.select`), previewing it while Preview is on"
 
 [[shortcut]]
 id = "S-BRW-002"
@@ -3214,8 +3216,8 @@ trigger = "press"
 milestone = "M1"
 mac = ["Left", "Right"]
 win = ["Left", "Right"]
-status = "pending"
-package = "WP-1.10"
+status = "widget"
+handler = "the browser's list: Right opens the selected folder and Left closes it (`browser.open_folder`); Left inside a folder selects the folder"
 
 [[shortcut]]
 id = "S-BRW-004"
@@ -3226,8 +3228,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Enter"]
 win = ["Enter"]
-status = "pending"
-package = "WP-1.10"
+status = "bound"
+commands = [
+  { id = "browser.load_selected", contexts = ["browser"] },
+]
 
 [[shortcut]]
 id = "S-BRW-005"
@@ -3238,8 +3242,8 @@ trigger = "press"
 milestone = "M1"
 mac = ["Shift+Enter", "Right"]
 win = ["Shift+Enter", "Right"]
-status = "pending"
-package = "WP-1.10"
+status = "widget"
+handler = "the browser's list: Shift-Enter, and Right on a file, preview the selected file (`browser.preview`)"
 
 [[shortcut]]
 id = "S-BRW-006"
@@ -3250,8 +3254,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Cmd+F"]
 win = ["Ctrl+F"]
-status = "pending"
-package = "WP-1.10"
+status = "bound"
+commands = [
+  { id = "browser.focus_search", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-BRW-007"
@@ -3262,8 +3268,8 @@ trigger = "press"
 milestone = "M1"
 mac = ["Down", "Enter"]
 win = ["Down", "Enter"]
-status = "pending"
-package = "WP-1.10"
+status = "widget"
+handler = "the browser's search field: Down and Enter move to the first result (`focus.browser`, `browser.select`)"
 
 [[shortcut]]
 id = "S-BRW-008"
@@ -3818,8 +3824,8 @@ trigger = "press"
 milestone = "M1"
 mac = ["Shift+Up", "Shift+Down"]
 win = ["Shift+Up", "Shift+Down"]
-status = "pending"
-package = "WP-1.10"
+status = "widget"
+handler = "the browser's list: Shift-Up and Shift-Down extend the selection (`browser.select`)"
 
 [[shortcut]]
 id = "S-A11Y-016"
@@ -3830,8 +3836,8 @@ trigger = "press"
 milestone = "M1"
 mac = ["Up", "Down"]
 win = ["Up", "Down"]
-status = "pending"
-package = "WP-1.10"
+status = "widget"
+handler = "the browser's sidebar: Up and Down choose the label above or below (`browser.open_place`)"
 
 [[shortcut]]
 id = "S-A11Y-017"
@@ -3842,8 +3848,8 @@ trigger = "press"
 milestone = "M1"
 mac = ["Left", "Right"]
 win = ["Left", "Right"]
-status = "pending"
-package = "WP-1.10"
+status = "widget"
+handler = "the browser: Right moves from the sidebar to the list, and Left at the list's top level back (`focus.browser`)"
 
 [[shortcut]]
 id = "S-A11Y-018"

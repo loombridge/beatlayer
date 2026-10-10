@@ -1,7 +1,8 @@
 //! The main window: the Control Bar, the browser, the main view, the detail
 //! area, and the Status Bar, placed by the layout layer (L-WIN, L-CTRL,
-//! L-STAT). The main view shows the Arrangement View (WP-1.8a); views that
-//! later packages build are placeholders that say so.
+//! L-STAT). The browser fills its column (WP-1.10), the main view shows the
+//! Arrangement View (WP-1.8a); views that later packages build are
+//! placeholders that say so.
 
 use std::time::Duration;
 
@@ -14,6 +15,7 @@ use egui::{
 use serde_json::json;
 
 use crate::arrangement::ArrangementUi;
+use crate::browser::BrowserUi;
 use crate::layout::{ELEMENTS, Element, Kind, ShellLayout, Strip, TITLE_BAR};
 use crate::theme::Theme;
 use crate::widgets::{Look, element};
@@ -51,6 +53,8 @@ pub struct MainWindowUi {
     move_focus: Option<egui::FocusDirection>,
     /// The Arrangement View's caches and gestures (WP-1.8a).
     arrangement: ArrangementUi,
+    /// The browser's scrolling and search field (WP-1.10).
+    browser: BrowserUi,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -87,7 +91,14 @@ impl MainWindowUi {
             hovered: None,
             move_focus: None,
             arrangement: ArrangementUi::new(),
+            browser: BrowserUi::new(),
         }
+    }
+
+    /// The browser, to read what it drew.
+    #[must_use]
+    pub fn browser(&self) -> &BrowserUi {
+        &self.browser
     }
 
     /// The Arrangement View, to give it a peak source or read what it drew.
@@ -159,17 +170,13 @@ impl MainWindowUi {
             self.track_area_clicks(ctx, &layout, &mut events);
             self.control_bar(ui, shell, theme, &layout, &mut events);
             if let Some(browser) = layout.browser {
-                placeholder(
-                    ui,
-                    theme,
-                    "region-browser",
-                    browser,
-                    Role::Group,
-                    "Browser",
-                    "The browser arrives with WP-1.10.",
-                );
+                self.browser.show(ui, shell, theme, browser, &mut events);
             }
             self.main_view(ui, shell, theme, layout.main_view, &mut events);
+            // Files dragged from the browser, or from Finder or Explorer,
+            // land in the Arrangement (WP-1.10).
+            self.browser
+                .drop_overlay(ui, shell, theme, layout.main_view, &mut events);
             self.info_view(ui, theme, layout.info_view);
             placeholder(
                 ui,

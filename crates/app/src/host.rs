@@ -103,6 +103,9 @@ pub enum UserEvent {
     /// Waveform peaks became ready or were invalidated, so the Arrangement
     /// View redraws (WP-1.8a).
     Peaks,
+    /// The browser's background work has news: its index grew, or a
+    /// preview was decoded (WP-1.10).
+    Browser,
 }
 
 impl From<egui_winit::accesskit_winit::Event> for UserEvent {
@@ -173,6 +176,9 @@ pub fn run(args: Args) -> Result<(), String> {
     if let Some(error) = prefs_error {
         shell.set_message(error, true);
     }
+    if !args.benchmark_scene {
+        open_user_library(&mut shell, &args);
+    }
     if let Some(set) = &args.set {
         let _ = shell.invoke(ids::SET_OPEN, json!({ "path": set.to_string_lossy() }));
     }
@@ -189,7 +195,16 @@ pub fn run(args: Args) -> Result<(), String> {
         .map_err(|e| format!("couldn't start the event loop: {e}"))?;
     let proxy = event_loop.create_proxy();
     if !args.benchmark_scene {
-        start_peaks(&mut main_ui, &proxy);
+        start_peaks(&shell, &mut main_ui, &proxy);
+    }
+    {
+        // The browser's index and preview decoder wake the loop.
+        let proxy = std::sync::Mutex::new(proxy.clone());
+        shell.set_waker(Arc::new(move || {
+            if let Ok(proxy) = proxy.lock() {
+                let _ = proxy.send_event(UserEvent::Browser);
+            }
+        }));
     }
     for (id, command_args) in &args.commands {
         if let Err(error) = shell.invoke(id, command_args.clone()) {
@@ -236,13 +251,37 @@ pub fn run(args: Args) -> Result<(), String> {
     Ok(())
 }
 
+/// Gives the browser its User Library (browser R3): the folder the
+/// preferences or `--user-library` name, or the platform's default place,
+/// made with its starting folders the first time.
+fn open_user_library(shell: &mut Shell, args: &Args) {
+    let Some(library) = args
+        .user_library
+        .clone()
+        .or_else(|| shell.preferences().browser.user_library.clone())
+        .or_else(bl_shell::browser::places::default_user_library)
+    else {
+        return;
+    };
+    if let Err(error) = bl_shell::browser::places::create_user_library(&library) {
+        shell.set_message(
+            format!(
+                "The User Library couldn't be made at {}: {error}",
+                library.display()
+            ),
+            true,
+        );
+    }
+    shell.set_user_library(Some(library));
+}
+
 /// Gives the Arrangement View its waveform peaks: `bl-media`'s background
-/// peak cache, saving peak files in the platform's cache folder, over a
-/// media store that the browser (WP-1.10) and set loading fill. A thread
-/// passes the cache's events on and wakes the loop, so a waveform appears
-/// when its peaks are ready and is redrawn when they're invalidated.
-fn start_peaks(main_ui: &mut MainWindowUi, proxy: &EventLoopProxy<UserEvent>) {
-    let store = Arc::new(bl_media::MediaStore::new());
+/// peak cache, saving peak files in the platform's cache folder, over the
+/// shell's media store, which the browser (WP-1.10) and set loading fill. A
+/// thread passes the cache's events on and wakes the loop, so a waveform
+/// appears when its peaks are ready and is redrawn when they're invalidated.
+fn start_peaks(shell: &Shell, main_ui: &mut MainWindowUi, proxy: &EventLoopProxy<UserEvent>) {
+    let store = shell.media_store();
     let cache =
         match bl_media::PeakCache::new(store, bl_media::PeakCacheOptions::platform_default()) {
             Ok(cache) => Arc::new(cache),
@@ -453,6 +492,11 @@ impl Host {
     }
 
     fn redraw(&mut self, kind: WindowKind, event_loop: &ActiveEventLoop) {
+        if kind == WindowKind::Main {
+            // The browser's background work: index updates, a decoded
+            // preview, a preview that ended.
+            self.shell.poll();
+        }
         let Some(mut surface) = self.surface(kind).take() else {
             return;
         };
@@ -658,6 +702,18 @@ impl Host {
                     .set_buttons(rfd::MessageButtons::Ok)
                     .show();
             }
+            Effect::PickFolder => {
+                let mut dialog = rfd::FileDialog::new().set_title("Add Folder to Browser");
+                if let Some(main) = &self.main {
+                    dialog = dialog.set_parent(main.window.as_ref());
+                }
+                if let Some(path) = dialog.pick_folder() {
+                    self.invoke(&Invocation::new(
+                        bl_shell::browser_commands::ADD_FOLDER,
+                        json!({ "path": path.to_string_lossy() }),
+                    ));
+                }
+            }
             Effect::OpenSettings => self.open_settings_window(event_loop),
             Effect::CloseSettings => {
                 self.settings = None;
@@ -861,6 +917,12 @@ impl ApplicationHandler<UserEvent> for Host {
                 surface.window.request_redraw();
             }
             UserEvent::Peaks => {
+                if let Some(main) = &self.main {
+                    main.window.request_redraw();
+                }
+            }
+            UserEvent::Browser => {
+                self.shell.poll();
                 if let Some(main) = &self.main {
                     main.window.request_redraw();
                 }

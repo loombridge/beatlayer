@@ -45,6 +45,37 @@ pub struct Loaded {
     pub path: PathBuf,
     /// The audio at the requested rate, or the error.
     pub result: Result<SampleData, String>,
+    /// A waveform overview for the preview strip: the lowest and highest
+    /// sample of each of [`OVERVIEW_POINTS`] stretches, every channel
+    /// together.
+    pub overview: Vec<[f32; 2]>,
+}
+
+/// How many stretches a preview's waveform overview has.
+pub const OVERVIEW_POINTS: usize = 256;
+
+/// The lowest and highest sample of each of `points` equal stretches of
+/// `data`, every channel together.
+#[must_use]
+pub fn overview(data: &SampleData, points: usize) -> Vec<[f32; 2]> {
+    let frames = data.frames();
+    if frames == 0 || points == 0 {
+        return Vec::new();
+    }
+    (0..points)
+        .map(|point| {
+            let start = point * frames / points;
+            let end = ((point + 1) * frames / points).max(start + 1).min(frames);
+            let mut range = [0.0f32, 0.0f32];
+            for channel in data.channels() {
+                for sample in &channel[start..end] {
+                    range[0] = range[0].min(*sample);
+                    range[1] = range[1].max(*sample);
+                }
+            }
+            range
+        })
+        .collect()
 }
 
 struct Request {
@@ -100,10 +131,15 @@ impl Loader {
                             request = newer;
                         }
                         let result = decode(&request.path, request.rate);
+                        let overview = result
+                            .as_ref()
+                            .map(|data| overview(data, OVERVIEW_POINTS))
+                            .unwrap_or_default();
                         let loaded = Loaded {
                             id: request.id,
                             path: request.path,
                             result,
+                            overview,
                         };
                         if results.send(loaded).is_err() {
                             return;

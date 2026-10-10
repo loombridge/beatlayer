@@ -289,7 +289,7 @@ fn added_folders_are_kept_and_removed() {
 
     // Kept between launches.
     let prefs = Preferences::load(&config).unwrap();
-    assert_eq!(prefs.browser.folders, [loops.clone()]);
+    assert_eq!(prefs.browser.folders, std::slice::from_ref(&loops));
     let mut relaunched = Shell::new(
         prefs,
         None,
@@ -990,4 +990,36 @@ fn focus_moves_to_the_browser_and_its_parts() {
             .take_effects()
             .contains(&Effect::FocusArea(Area::Browser))
     );
+}
+
+// Spec: browser R13. Where a drop lands, headless: the rows the Arrangement
+// shows at its default zoom of 30 points a bar.
+#[test]
+fn drop_targets_follow_the_rows_and_the_grid() {
+    use bl_shell::browser::drop::drop_target;
+
+    let shell = Shell::headless();
+    let doc = shell.editor().document();
+    let view = shell.arrangement();
+    let tracks: Vec<TrackId> = doc.top_level().collect();
+    let at = |x: f32, y: f32, ignore_snap: bool| drop_target(view, doc, 569.0, x, y, ignore_snap);
+    // The MIDI tracks (rows 0 and 1) take no audio.
+    assert_eq!(at(10.0, 40.0, false), None);
+    // "3 Audio" is the third 88-point row; 2.3 bars in snaps to the bar.
+    let target = at(69.0, 200.0, false).unwrap();
+    assert_eq!(target.track, Some(tracks[2]));
+    assert_eq!(target.at, Ticks(2 * BAR));
+    assert_eq!((target.top, target.height), (176.0, 88.0));
+    // Cmd (Alt) held ignores the grid.
+    assert_eq!(
+        at(69.0, 200.0, true).unwrap().at,
+        Ticks(2 * BAR + BAR * 3 / 10)
+    );
+    // Below the last track: the drop area, for a new track.
+    let area = at(69.0, 400.0, false).unwrap();
+    assert_eq!(area.track, None);
+    assert_eq!(area.top, 352.0);
+    // Outside the lanes.
+    assert_eq!(at(-1.0, 200.0, false), None);
+    assert_eq!(at(10.0, 600.0, false), None);
 }

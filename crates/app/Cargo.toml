@@ -97,7 +97,7 @@ icons = [
 resources = [
     "../../LICENSE",
     "../../README.md",
-    "../ui/fonts/inter/LICENSE.txt",
+    "../ui/fonts/inter/Inter-OFL.txt",
 ]
 
 [package.metadata.packager.macos]

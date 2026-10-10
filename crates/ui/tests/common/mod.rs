@@ -31,6 +31,7 @@ pub struct Node {
     pub disabled: bool,
     pub numeric: Option<f64>,
     pub children: Vec<accesskit::NodeId>,
+    pub bounds: Option<accesskit::Rect>,
 }
 
 pub struct Harness {
@@ -161,6 +162,7 @@ impl Harness {
                 description: node.description().unwrap_or_default().to_owned(),
                 disabled: node.is_disabled(),
                 numeric: node.numeric_value(),
+                bounds: node.bounds(),
                 children: node.children().to_vec(),
             })
             .collect()

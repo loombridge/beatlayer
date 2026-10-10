@@ -258,6 +258,12 @@ impl Host {
             let outer_size = surface.window.outer_size().to_logical::<f32>(scale);
             let inner_size = surface.window.inner_size().to_logical::<f32>(scale);
             let decoration = outer_size.height - inner_size.height;
+            if std::env::var_os("BEATLAYER_TRACE").is_some() {
+                eprintln!(
+                    "main window: outer {} x {} points, content {} x {}, title bar {decoration}",
+                    outer_size.width, outer_size.height, inner_size.width, inner_size.height
+                );
+            }
             let wanted = (h - decoration).min(height);
             if decoration > 0.0 && (inner_size.height - wanted).abs() > 0.5 {
                 let _ = surface

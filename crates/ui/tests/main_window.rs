@@ -284,3 +284,43 @@ fn with_the_engine_off_the_cpu_meter_reads_off() {
     h.click(rect.left_center() + egui::vec2(20.0, 0.0));
     assert!(h.shell.settings_open());
 }
+
+/// The side-by-side comparison's Beatlayer column: where each control is
+/// actually drawn, read back from the accessibility tree, against the
+/// layout layer (and so against layout.md's measurements of Live; see
+/// `tests/layout.rs`). Run with `--nocapture` to print the table, in
+/// window points with Live's 23-point title bar.
+#[test]
+fn controls_are_drawn_where_the_layout_places_them() {
+    let mut h = Harness::new(Window::Main);
+    let output = h.settle();
+    let nodes = Harness::nodes(&output);
+    let layout = ShellLayout::compute(REFERENCE, true);
+    println!("| Row | Element | x from | x to | y from | y to |");
+    for placement in ELEMENTS {
+        let node = nodes
+            .iter()
+            .find(|n| n.label == placement.name && n.bounds.is_some())
+            .unwrap_or_else(|| panic!("{} isn't drawn", placement.name));
+        let bounds = node.bounds.unwrap();
+        let rect = layout.rect(placement.element);
+        let drawn = [bounds.x0, bounds.x1, bounds.y0, bounds.y1];
+        let laid_out = [rect.left(), rect.right(), rect.top(), rect.bottom()].map(f64::from);
+        for (d, l) in drawn.iter().zip(laid_out) {
+            assert!(
+                (d - l).abs() < 0.5,
+                "{}: drawn {drawn:?}, laid out {laid_out:?}",
+                placement.name
+            );
+        }
+        println!(
+            "| {} | {} | {:.0} | {:.0} | {:.0} | {:.0} |",
+            placement.row,
+            placement.name,
+            bounds.x0,
+            bounds.x1,
+            bounds.y0 + f64::from(bl_ui::layout::TITLE_BAR),
+            bounds.y1 + f64::from(bl_ui::layout::TITLE_BAR)
+        );
+    }
+}

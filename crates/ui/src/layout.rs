@@ -168,7 +168,10 @@ pub struct Placement {
     pub pending: Option<&'static str>,
 }
 
-#[expect(clippy::too_many_arguments, reason = "one row of the placement table, field by field")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one row of the placement table, field by field"
+)]
 const fn p(
     element: Element,
     row: &'static str,

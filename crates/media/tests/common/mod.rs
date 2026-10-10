@@ -3,6 +3,8 @@
 
 #![allow(dead_code)]
 
+pub mod wav;
+
 use std::path::PathBuf;
 
 /// A folder for one test's files, removed when dropped.

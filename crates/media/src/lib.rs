@@ -1,6 +1,6 @@
 //! Media for Beatlayer: decoding, sample-rate conversion, content hashing,
-//! the media store, and peak files. Disk streaming (WP-1.3) and encoding
-//! (WP-1.12) build on this crate.
+//! the media store, peak files, and disk streaming. Encoding (WP-1.12)
+//! builds on this crate.
 //!
 //! - [`Decoder`] reads WAV (including Broadcast Wave), RF64 and BW64 over
 //!   4 GB, AIFF and AIFF-C, FLAC, MP3, Ogg Vorbis, and MPEG-4 with AAC or
@@ -19,9 +19,13 @@
 //!   laid out for the GPU. [`PeakCache`] builds them in the background, keyed
 //!   by content hash, saves them in the platform's cache folder, and drops
 //!   them when their source file changes. See [`peaks`] for the layout.
+//! - [`stream`]: disk streaming. A [`Streamer`]'s disk thread reads long
+//!   files ahead of the playhead, and an [`AudioSource`] ([`StreamSource`]
+//!   or [`MemorySource`]) is what a clip player reads on the audio thread.
 //!
-//! Nothing here runs on an audio thread: decoding reads files and allocates.
-//! The engine receives `Arc<SampleData>`, which it reads without locks.
+//! Decoding reads files and allocates, so it never runs on an audio thread.
+//! The engine receives `Arc<SampleData>`, which it reads without locks, or
+//! an [`AudioSource`], whose reads are real-time safe.
 
 mod decode;
 mod error;
@@ -32,6 +36,7 @@ mod resample;
 mod rf64;
 mod sample_data;
 mod store;
+pub mod stream;
 
 pub use decode::{Codec, Container, Decoder, MediaInfo, decode_file, probe};
 pub use error::MediaError;
@@ -40,3 +45,7 @@ pub use peaks::{PeakCache, PeakCacheOptions, PeakEvent, PeakStatus, Peaks};
 pub use resample::{RateConverter, convert_sample_rate, converted_len};
 pub use sample_data::SampleData;
 pub use store::{MediaEntry, MediaStatus, MediaStore};
+pub use stream::{
+    AudioSource, Filled, MemorySource, PlanarMut, Source, StreamConfig, StreamId, StreamSource,
+    StreamStats, Streamer, StreamerStats, Transition,
+};

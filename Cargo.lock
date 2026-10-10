@@ -730,10 +730,16 @@ dependencies = [
 name = "bl-media"
 version = "0.0.0"
 dependencies = [
+ "bl-audio-io",
+ "bl-core",
  "bl-dsp",
+ "bl-engine",
+ "bl-model",
+ "bl-rt",
  "blake3",
  "rayon",
  "realfft",
+ "rtrb",
  "rubato",
  "serde_json",
  "symphonia",

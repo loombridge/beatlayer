@@ -16,16 +16,19 @@ use serde::{Deserialize, Serialize};
 )]
 #[serde(rename_all = "snake_case")]
 pub enum Permission {
-    /// Reads the project or the app's state and changes nothing.
+    /// Changes nothing in the project or on disk: queries, and moving the
+    /// keyboard focus or the view.
     Read,
-    /// Changes the project in a way undo reverses. Deleting a track, clip,
-    /// or device is an edit, because undo brings it back.
+    /// An undoable change to the project, or a preference that's trivially
+    /// changed back.
     Edit,
-    /// Loses something undo can't bring back: deletes or overwrites a file,
-    /// discards unsaved changes, clears the undo history, or quits.
+    /// Removes project content (deleting tracks, clips, or devices), or
+    /// loses work that undo can't restore: discards unsaved changes,
+    /// overwrites a file, or quits. An agent asks first even when undo could
+    /// restore the content.
     Destructive,
-    /// Reaches outside the project: files elsewhere on disk, the network,
-    /// audio and MIDI devices, or other applications.
+    /// Reaches outside the project: files outside the project folder, the
+    /// network, audio and MIDI devices, or other applications.
     External,
 }
 
@@ -48,18 +51,22 @@ impl Permission {
     #[must_use]
     pub const fn meaning(self) -> &'static str {
         match self {
-            Self::Read => "Reads the project or the app's state and changes nothing.",
+            Self::Read => {
+                "Changes nothing in the project or on disk: queries, and moving the keyboard \
+                 focus or the view."
+            }
             Self::Edit => {
-                "Changes the project in a way undo reverses, including deleting tracks, clips, \
-                 and devices."
+                "An undoable change to the project, or a preference that's trivially changed \
+                 back."
             }
             Self::Destructive => {
-                "Loses something undo can't bring back: deletes or overwrites a file, discards \
-                 unsaved changes, clears the undo history, or quits."
+                "Removes project content (deleting tracks, clips, or devices), or loses work \
+                 that undo can't restore: discards unsaved changes, overwrites a file, or \
+                 quits. An agent asks first even when undo could restore the content."
             }
             Self::External => {
-                "Reaches outside the project: files elsewhere on disk, the network, audio and \
-                 MIDI devices, or other applications."
+                "Reaches outside the project: files outside the project folder, the network, \
+                 audio and MIDI devices, or other applications."
             }
         }
     }

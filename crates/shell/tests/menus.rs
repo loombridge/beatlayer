@@ -1,0 +1,117 @@
+//! The menu bar against the command registry: every item reaches a
+//! registered command or is marked pending, and items enable with what can
+//! run now (D16, D17). Its rows, separators, and labels are checked against
+//! `docs/ui-parity/menus.md` in `bl-shell-spec`.
+
+use std::collections::BTreeSet;
+use std::path::PathBuf;
+
+use bl_commands::Registry;
+use bl_shell::menus::{Action, MenuPlatform, menu_bar};
+use bl_shell::{Shell, commands};
+use serde_json::json;
+
+fn repo() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
+#[test]
+fn every_item_reaches_a_command_or_is_pending() {
+    let mut registry = Registry::new();
+    bl_model::registry::register(&mut registry).unwrap();
+    commands::register(&mut registry).unwrap();
+    let shortcuts = std::fs::read_to_string(repo().join("docs/ui-parity/shortcuts.toml")).unwrap();
+    for platform in [MenuPlatform::Mac, MenuPlatform::Other] {
+        for menu in menu_bar(platform) {
+            for item in menu.walk() {
+                match item.action {
+                    Action::Command(id) => assert!(registry.contains(id), "{}: {id}", item.row),
+                    Action::Shortcut(ids) => {
+                        assert!(!ids.is_empty());
+                        for id in ids {
+                            assert!(
+                                shortcuts.contains(&format!("id = \"{id}\"")),
+                                "{}: {id} isn't in shortcuts.toml",
+                                item.row
+                            );
+                        }
+                    }
+                    Action::Pending(Some(id)) => {
+                        assert!(shortcuts.contains(&format!("id = \"{id}\"")), "{id}");
+                    }
+                    Action::Submenu => assert!(!item.items.is_empty(), "{}", item.row),
+                    Action::Pending(None)
+                    | Action::System(_)
+                    | Action::Omitted(_)
+                    | Action::Separator => {}
+                }
+                if item.is_shown() {
+                    assert!(!item.label.contains("Live"), "{}: {}", item.row, item.label);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn every_shell_command_is_on_a_menu_or_a_control() {
+    // Commands reached only from the Settings window's controls, the
+    // Status Bar, the save-changes dialog (Don't Save), or agents.
+    let elsewhere: BTreeSet<&str> = [
+        commands::SET_DISCARD_CHANGES,
+        commands::SETTINGS_NEXT_PAGE,
+        commands::SETTINGS_PREVIOUS_PAGE,
+        commands::SETTINGS_SET_THEME,
+        commands::AUDIO_DEVICES,
+        commands::AUDIO_STATUS,
+        commands::AUDIO_CONFIGURE,
+        commands::AUDIO_SET_TEST_TONE,
+    ]
+    .into();
+    let bar = menu_bar(MenuPlatform::Mac);
+    let on_menus: BTreeSet<&str> = bar
+        .iter()
+        .flat_map(|menu| menu.walk().filter_map(|item| item.command()))
+        .collect();
+    for id in commands::IDS {
+        assert!(
+            on_menus.contains(id) || elsewhere.contains(id),
+            "{id} is on no menu"
+        );
+    }
+}
+
+#[test]
+fn menu_items_enable_with_what_can_run_now() {
+    let mut shell = Shell::headless();
+    assert!(shell.can_invoke("set.new", &json!({})));
+    assert!(shell.can_invoke("app.settings", &json!({})));
+    assert!(
+        !shell.can_invoke("edit.undo", &json!({})),
+        "nothing to undo"
+    );
+    assert!(
+        !shell.can_invoke("window.close", &json!({})),
+        "no secondary window"
+    );
+    assert!(
+        !shell.can_invoke("track.delete", &json!({})),
+        "deleting needs a selected track"
+    );
+    assert!(
+        !shell.can_invoke("set.discard_changes", &json!({})),
+        "nothing to discard"
+    );
+    shell
+        .invoke("track.create", json!({ "kind": "midi" }))
+        .unwrap();
+    assert!(shell.can_invoke("edit.undo", &json!({})));
+    assert!(shell.can_invoke("set.discard_changes", &json!({})));
+
+    // Close Window (Cmd/Ctrl-W, S-FILE-009) acts on a secondary window in
+    // front, and is disabled with the main window in front.
+    shell.run("app.settings", json!({})).unwrap();
+    assert!(shell.can_invoke("window.close", &json!({})));
+    shell.set_focused_window(bl_shell::WindowKind::Main);
+    assert!(!shell.can_invoke("window.close", &json!({})));
+}

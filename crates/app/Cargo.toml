@@ -23,7 +23,73 @@ bl-midi-io.workspace = true
 bl-control.workspace = true
 bl-link.workspace = true
 bl-interop.workspace = true
+bl-shell.workspace = true
 bl-ui.workspace = true
+# The window: egui driven through egui-winit and egui-wgpu from Beatlayer's
+# own winit event loop (ADR-001). All pinned exactly and upgraded together,
+# with the features the egui spike (WP-0.8b) proved against deny.toml:
+# no egui default fonts (the UI bundles its own), and winit's Wayland
+# decorations without title text (the titled variant pulls in an
+# unmaintained crate).
+egui = { version = "=0.36.2", default-features = false }
+egui-winit = { version = "=0.36.2", default-features = false, features = [
+    "accesskit",
+    "clipboard",
+    "wayland",
+    "x11",
+] }
+egui-wgpu = { version = "=0.36.2", default-features = false, features = [
+    "winit",
+    "wayland",
+    "x11",
+    "macos-window-resize-jitter-fix",
+] }
+winit = { version = "=0.30.13", default-features = false, features = [
+    "rwh_06",
+    "x11",
+    "wayland",
+    "wayland-dlopen",
+    "wayland-csd-adwaita-notitle",
+] }
+# The GPU backends egui-wgpu draws with.
+wgpu = { version = "=30.0.1", default-features = false, features = [
+    "std",
+    "parking_lot",
+    "metal",
+    "dx12",
+    "vulkan",
+    "wgsl",
+] }
+pollster = "0.4"
+# File dialogs (open, save as) and message boxes (save changes?, About).
+rfd = { version = "=0.17.2", default-features = false, features = ["xdg-portal"] }
+# Writes `--screenshot` captures of Beatlayer's own window.
+png = "0.18"
+serde_json = "1"
+
+# Native menus on macOS and Windows; Linux draws its menu bar with egui,
+# because muda's Linux menus need GTK windows.
+[target.'cfg(any(target_os = "macos", windows))'.dependencies]
+muda = { version = "=0.21.2", default-features = false }
+raw-window-handle = "0.6"
+
+# Live's compact title bar on macOS (D22): fits AppKit's title bar view to
+# 23 points. The versions and features muda, rfd, and arboard already use,
+# so nothing new enters the build.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.5"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "NSApplication",
+    "NSButton",
+    "NSControl",
+    "NSMenu",
+    "NSMenuItem",
+    "NSResponder",
+    "NSView",
+    "NSWindow",
+    "objc2-core-foundation",
+] }
 
 [lints]
 workspace = true
@@ -45,8 +111,12 @@ icons = [
     "packaging/icons/icon.ico",
     "packaging/icons/*.png",
 ]
-# The GPL travels with the binaries.
-resources = ["../../LICENSE", "../../README.md"]
+# The GPL travels with the binaries, and the OFL with the bundled typeface.
+resources = [
+    "../../LICENSE",
+    "../../README.md",
+    "../ui/fonts/inter/Inter-OFL.txt",
+]
 
 [package.metadata.packager.macos]
 minimum-system-version = "13.0"

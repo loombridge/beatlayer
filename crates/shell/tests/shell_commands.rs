@@ -179,15 +179,18 @@ impl Drop for TestDir {
 
 #[test]
 fn sets_round_trip_through_project_files_headless() {
-    // Spec: app-shell R2, R3, R4. D17: driven through Shell::run, as an
-    // agent drives it, on bl-project's real set files.
+    // Spec: app-shell R2, R3, R4, R17. D17: driven through Shell::run, as
+    // an agent drives it, on bl-project's real set files.
     let dir = TestDir::new("round-trip");
     let song = dir.path("Demo Project/Demo.blset");
     let mut shell = Shell::headless();
     shell
         .invoke("track.create", json!({ "kind": "audio", "name": "Bass" }))
         .unwrap();
-    let saved = shell.run("set.save_as", json!({ "path": song })).unwrap();
+    // The first save makes the set's project folder.
+    let saved = shell
+        .run("set.save_as", json!({ "path": dir.path("Demo.blset") }))
+        .unwrap();
     assert_eq!(saved, json!({ "path": song, "name": "Demo" }));
     assert!(!shell.is_dirty());
     assert_eq!(bl_project::load(&song).unwrap().1.revision, 1);
@@ -235,9 +238,11 @@ fn opening_never_loses_unsaved_changes_without_an_explicit_discard() {
     // Finding 7 of the WP-1.7 review: set.open is external, and losing work
     // is its own, destructive step (set.discard_changes).
     let dir = TestDir::new("discard");
-    let song = dir.path("Song.blset");
     let mut shell = Shell::headless();
-    shell.run("set.save_as", json!({ "path": song })).unwrap();
+    let saved = shell
+        .run("set.save_as", json!({ "path": dir.path("Song.blset") }))
+        .unwrap();
+    let song = saved["path"].as_str().unwrap().to_owned();
     shell
         .invoke(
             "track.create",
@@ -339,6 +344,16 @@ impl SetStore for MemoryStore {
         saved.retain(|(p, _)| p != path);
         saved.push((path.to_owned(), tracks));
         Ok(Vec::new())
+    }
+
+    /// Saves exactly where asked: project folders are `ProjectFiles`'s.
+    fn save_as(
+        &mut self,
+        chosen: &Path,
+        editor: &Editor,
+    ) -> Result<(PathBuf, Vec<String>), String> {
+        let warnings = self.save(chosen, editor)?;
+        Ok((chosen.to_owned(), warnings))
     }
 
     fn close(&mut self) {}

@@ -112,12 +112,25 @@ pub fn handles(id: &str) -> bool {
     IDS.contains(&id)
 }
 
-/// Arguments of `set.open` and `set.save_as`: a set file's path.
+/// Arguments of `set.open`: a set file's path.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PathArgs {
     /// The set file's path, absolute or relative to the app's working
     /// directory.
+    pub path: String,
+}
+
+/// Arguments of `set.save_as`: where to save the set, as a save dialog
+/// gives it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SaveAsArgs {
+    /// A folder and the set's name, as a set file's path such as
+    /// `/Music/Tango.blset`, absolute or relative to the app's working
+    /// directory. The set goes in that folder if it's a project folder (it
+    /// holds a set already), and otherwise in a new `<name> Project`
+    /// folder inside it; the result says where.
     pub path: String,
 }
 
@@ -170,7 +183,8 @@ pub struct TestToneState {
 /// What `set.open`, `set.save`, and `set.save_as` return.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SetResult {
-    /// The set's file, if it has one.
+    /// The set's file, if it has one: after `set.save_as`, where the set
+    /// was saved, which can be inside a new project folder.
     pub path: Option<String>,
     /// The set's name, as the title bar shows it.
     pub name: String,
@@ -243,8 +257,9 @@ fn specs() -> Vec<CommandSpec> {
         CommandSpec::new(SET_SAVE, "Save Beatlayer Set")
             .description(
                 "Saves the set to its file, replacing the file's previous contents, which are \
-                 kept in the `Backup` folder beside it (the last 10 saves). Fails if the set has \
-                 never been saved; use `set.save_as` to give it a file first.",
+                 kept in the `Backup` folder of the set's project folder (the last 10 saves). \
+                 Fails if the set has never been saved; use `set.save_as` to give it a file \
+                 and a project folder first.",
             )
             .permission(Permission::Destructive)
             .context(Global)
@@ -253,15 +268,24 @@ fn specs() -> Vec<CommandSpec> {
             .result::<SetResult>(),
         CommandSpec::new(SET_SAVE_AS, "Save Beatlayer Set As...")
             .description(
-                "Saves the set to a new file at `path` (a `.blset` file; its folder is \
-                 created if needed), which becomes the set's file. An existing file at `path` \
-                 is replaced, and kept in the `Backup` folder beside it. A person choosing the \
-                 menu item or pressing the shortcut picks the path in a dialog.",
+                "Saves the set under a new name or in a new place, always inside a project \
+                 folder, and that file becomes the set's. `path` gives a folder and the set's \
+                 name, such as `/Music/Tango.blset` (`.blset` is added if it's missing). If the \
+                 folder is a project folder, one that already holds a `.blset` set, the set \
+                 joins that project as `<name>.blset` there; a set of that name there is \
+                 replaced, and the replaced version kept in that project's `Backup` folder. \
+                 Otherwise a new project folder, `<name> Project`, is made in the folder (or \
+                 `<name> Project 2` and so on if that name is taken, so nothing is \
+                 overwritten), and the set is saved inside it, as `/Music/Tango \
+                 Project/Tango.blset`. The result's `path` is where the set was saved. Moving \
+                 to another project folder keeps the set using the same media files. A person \
+                 choosing the menu item or pressing the shortcut picks the path in a dialog \
+                 that opens in the set's project folder.",
             )
             .permission(Permission::External)
             .context(Global)
             .binding("S-FILE-004")
-            .args::<PathArgs>()
+            .args::<SaveAsArgs>()
             .result::<SetResult>(),
         CommandSpec::new(SET_DISCARD_CHANGES, "Don't Save")
             .description(

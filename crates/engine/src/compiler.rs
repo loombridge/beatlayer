@@ -7,7 +7,7 @@ use bl_model::{Change, ChangeSet, DeviceId, DeviceKind, Document, Mixer, OrdMap,
 
 use crate::EngineConfig;
 use crate::gc::{GcHandle, Program};
-use crate::message::ParamEvent;
+use crate::message::{LoopRegion, ParamEvent, TransportCommand};
 use crate::node::{Node, NodeKey, ParamValue};
 use crate::nodes::{Fader, fader};
 use crate::program::{EngineProgram, Migration, NodeSlot, Span, Task};
@@ -23,6 +23,10 @@ use crate::registry::Registry;
 pub struct Update {
     /// The new program, if the edit needs one.
     pub program: Option<Program>,
+    /// Transport commands the document asks for: the Arrangement loop, sent
+    /// with every program and whenever the loop changes. They take effect
+    /// after the program, so the loop's frames follow its tempo map.
+    pub transport: Vec<TransportCommand>,
     /// Parameter changes, which take effect at the start of the next block
     /// after the program, if there is one.
     pub params: Vec<ParamEvent>,
@@ -35,7 +39,7 @@ impl Update {
     /// Whether the update holds nothing to send.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.program.is_none() && self.params.is_empty()
+        self.program.is_none() && self.transport.is_empty() && self.params.is_empty()
     }
 }
 
@@ -60,8 +64,9 @@ struct Placed {
 /// one, and compiles only if the song's structure changed: tracks added,
 /// removed, or moved; devices added, removed, moved, or switched on or off;
 /// the tempo or time-signature map. Mixer settings and device parameters
-/// become [`ParamEvent`]s for the nodes that already run them, and clip
-/// changes will travel as node data (WP-1.4), so neither recompiles.
+/// become [`ParamEvent`]s for the nodes that already run them, the
+/// Arrangement loop becomes a [`TransportCommand::SetLoop`], and clip
+/// changes will travel as node data (WP-1.4), so none of them recompiles.
 ///
 /// Each program lists the nodes it takes over from the program compiled
 /// before it, so programs must reach the audio thread in the order they
@@ -109,7 +114,13 @@ impl Compiler {
             self.compile(document)
         } else {
             self.synced = Some(document.clone());
-            Update::default()
+            let mut update = Update::default();
+            if old.settings().arrangement_loop != document.settings().arrangement_loop {
+                update
+                    .transport
+                    .push(TransportCommand::SetLoop(loop_region(document)));
+            }
+            update
         };
         update.params = params;
         update
@@ -153,6 +164,7 @@ impl Compiler {
         self.synced = Some(document.clone());
         Update {
             program: Some(self.gc.program(program)),
+            transport: vec![TransportCommand::SetLoop(loop_region(document))],
             params: Vec::new(),
             unhosted: build.unhosted,
         }
@@ -293,6 +305,17 @@ fn with_dependents(mut tasks: Vec<Task>, dependents: &[Vec<u32>]) -> Vec<Task> {
     tasks
 }
 
+/// The loop the engine plays for `document`: its loop brace if the Loop
+/// switch is on.
+#[must_use]
+pub(crate) fn loop_region(document: &Document) -> Option<LoopRegion> {
+    let brace = document.settings().arrangement_loop;
+    brace.enabled.then(|| LoopRegion {
+        start: brace.start,
+        end: brace.end(),
+    })
+}
+
 /// Whether a change set needs a new program; collects parameter changes for
 /// the nodes that keep running either way.
 fn needs_program(
@@ -301,7 +324,12 @@ fn needs_program(
     new: &Document,
     params: &mut Vec<ParamEvent>,
 ) -> bool {
-    let mut recompile = changes.settings || changes.layout;
+    // The tempo map travels in the program. The Arrangement loop doesn't: a
+    // loop edit is a transport command (see `Compiler::sync`).
+    let (before, after) = (old.settings(), new.settings());
+    let settings = changes.settings
+        && (before.tempo != after.tempo || before.time_signatures != after.time_signatures);
+    let mut recompile = settings || changes.layout;
     for (&id, &change) in &changes.tracks {
         match (change, old.track(id), new.track(id)) {
             (Change::Modified, Some(before), Some(after)) => {

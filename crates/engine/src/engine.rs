@@ -14,7 +14,7 @@ use rtrb::{Producer, PushError, RingBuffer};
 use crate::EngineConfig;
 use crate::compiler::{Compiler, Update};
 use crate::gc::{Collector, DROP_PERIOD, DropThread, GcHandle};
-use crate::message::{Message, ParamEvent, Report, ScheduledCommand, TransportCommand};
+use crate::message::{Message, ParamEvent, Report, ScheduledCommand, TransportCommand, When};
 use crate::node::{NodeData, NodeKey};
 use crate::processor::Processor;
 use crate::registry::Registry;
@@ -57,10 +57,14 @@ pub struct Sender {
 }
 
 impl Sender {
-    /// Sends a compiler update: its program, then its parameter changes.
+    /// Sends a compiler update: its program, then its transport commands (the
+    /// Arrangement loop), then its parameter changes.
     pub fn send_update(&mut self, update: Update) {
         if let Some(program) = update.program {
             self.push(Message::Program(program));
+        }
+        for command in update.transport {
+            self.push(Message::Transport(command, When::Now));
         }
         for event in update.params {
             self.push(Message::Param(event));
@@ -82,7 +86,19 @@ impl Sender {
     /// Sends a transport command, which takes effect at the start of the
     /// next block.
     pub fn transport(&mut self, command: TransportCommand) {
-        self.push(Message::Transport(command));
+        self.transport_at(command, When::Now);
+    }
+
+    /// Sends a transport command that takes effect on a frame of the engine
+    /// clock ([`When::Frame`]), splitting the block it falls in, so a start
+    /// lands on its exact sample whatever the block size. A frame already
+    /// past takes effect at the start of the next block. Commands for the
+    /// same frame take effect in the order they were sent. As many as
+    /// [`EngineConfig::max_scheduled`](crate::EngineConfig::max_scheduled)
+    /// can wait for their frames; the engine drops and counts any more
+    /// ([`EngineCounters::transport_overflowed`](crate::EngineCounters::transport_overflowed)).
+    pub fn transport_at(&mut self, command: TransportCommand, at: When) {
+        self.push(Message::Transport(command, at));
     }
 
     /// Schedules a command at a musical position.
@@ -156,7 +172,7 @@ enum Request {
     Sync(Box<Document>),
     Param(ParamEvent),
     Data(NodeKey, NodeData),
-    Transport(TransportCommand),
+    Transport(TransportCommand, When),
     Schedule(ScheduledCommand),
     Cancel(u64),
     Flush(mpsc::Sender<()>),
@@ -244,19 +260,33 @@ impl Engine {
         self.gc.data(value)
     }
 
-    /// Starts the song.
+    /// Plays from the insert marker ([`TransportCommand::Play`]).
     pub fn play(&self) {
-        self.request(Request::Transport(TransportCommand::Play));
+        self.transport(TransportCommand::Play);
     }
 
-    /// Stops the song.
+    /// Stops the song, or returns it to 1.1.1 if it's stopped
+    /// ([`TransportCommand::Stop`]).
     pub fn stop(&self) {
-        self.request(Request::Transport(TransportCommand::Stop));
+        self.transport(TransportCommand::Stop);
     }
 
-    /// Moves the song position.
+    /// Moves the insert marker, and the playhead if the song is playing
+    /// ([`TransportCommand::Locate`]).
     pub fn locate(&self, at: bl_core::time::Ticks) {
-        self.request(Request::Transport(TransportCommand::Locate(at)));
+        self.transport(TransportCommand::Locate(at));
+    }
+
+    /// Sends a transport command, which takes effect at the start of the
+    /// audio thread's next block.
+    pub fn transport(&self, command: TransportCommand) {
+        self.transport_at(command, When::Now);
+    }
+
+    /// Sends a transport command for a frame of the engine clock (see
+    /// [`Sender::transport_at`]).
+    pub fn transport_at(&self, command: TransportCommand, at: When) {
+        self.request(Request::Transport(command, at));
     }
 
     /// Schedules a command at a musical position (D17).
@@ -380,7 +410,7 @@ fn compile_loop(
                 }
                 Request::Param(event) => sender.send_param(event),
                 Request::Data(key, data) => sender.send_data(key, data),
-                Request::Transport(command) => sender.transport(command),
+                Request::Transport(command, at) => sender.transport_at(command, at),
                 Request::Schedule(command) => sender.schedule(command),
                 Request::Cancel(id) => sender.cancel(id),
                 Request::Flush(ack) => flushes.push(ack),

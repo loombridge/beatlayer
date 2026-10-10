@@ -90,6 +90,8 @@ enum Op {
     SetDeviceParam(Index, u8, f64),
     SetTempo(f64),
     SetTimeSignature(u8, u8),
+    SetLoop(i16, u16),
+    SetLoopEnabled(bool),
 }
 
 /// Clip data: usually whatever fits the track, sometimes the other kind.
@@ -162,6 +164,9 @@ fn op() -> impl Strategy<Value = Op> {
         3 => (i(), 0u8..8, value(-100.0..100.0)).prop_map(|(d, p, v)| Op::SetDeviceParam(d, p, v)),
         1 => (20.0..999.0).prop_map(Op::SetTempo),
         1 => (1u8..=12, 0u8..5).prop_map(|(n, d)| Op::SetTimeSignature(n, d)),
+        // Sometimes before 1.1.1 or empty, which the document refuses.
+        1 => (-2i16..64, 0u16..64).prop_map(|(start, length)| Op::SetLoop(start, length)),
+        1 => any::<bool>().prop_map(Op::SetLoopEnabled),
     ]
 }
 
@@ -430,6 +435,11 @@ impl Op {
                     TimeSignature::new(*numerator, 1 << d).unwrap(),
                 ),
             },
+            Self::SetLoop(start, length) => Command::SetLoop {
+                start: Ticks::QUARTER * i64::from(*start),
+                length: Ticks::QUARTER * i64::from(*length),
+            },
+            Self::SetLoopEnabled(enabled) => Command::SetLoopEnabled { enabled: *enabled },
         }
     }
 }

@@ -20,7 +20,10 @@ type Register = fn(&mut Registry) -> Result<(), RegisterError>;
 
 /// Each crate's function that registers its commands. Add a crate here when
 /// it starts registering commands, so they're checked and listed.
-const PROVIDERS: &[(&str, Register)] = &[("bl-model", bl_model::registry::register)];
+const PROVIDERS: &[(&str, Register)] = &[
+    ("bl-model", bl_model::registry::register),
+    ("bl-engine", bl_engine::transport::register),
+];
 
 /// Regenerates `docs/commands.md`, after checking the registry.
 pub fn generate(root: &Path) -> Result<(), String> {

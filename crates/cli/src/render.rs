@@ -5,24 +5,31 @@
 //! processor a device's audio thread runs, one block after another on this
 //! thread. So a render is what the engine plays, and nothing in it depends
 //! on timing: the same set renders to the same samples every time, at any
-//! block size.
+//! block size. The set's clips play their audio files through the media
+//! store, which finds each file by the path in the set's media table,
+//! relative to the project folder, and checks it still holds its content.
 
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::Arc;
 use std::time::Instant;
 
-use bl_core::time::SampleRate;
+use bl_core::time::{SampleRate, Ticks};
 use bl_engine::{
-    EngineConfig, Offline, Output, Registry, Report, ScheduledCommand, TransportCommand, When,
+    EngineConfig, MediaLibrary, MediaMap, Offline, Output, Registry, Report, ScheduledCommand,
+    TransportCommand, When,
 };
-use bl_model::{DeviceId, Document};
+use bl_media::MediaStore;
+use bl_model::{ContentHash, DeviceId, Document};
+use bl_project::{Project, ProjectFolder};
 
 use crate::Outcome;
 
-/// How long `bl-cli render` renders when neither `--seconds` nor `--bars`
-/// says. A set has no end until clips play (WP-1.4).
+/// How long `bl-cli render` renders a set without clips when neither
+/// `--seconds` nor `--bars` says. A set with clips renders to the end of its
+/// last clip.
 pub const DEFAULT_SECONDS: f64 = 10.0;
 
 /// The longest render `bl-cli render` makes: a day.
@@ -57,6 +64,9 @@ pub struct Summary {
     /// Devices no factory makes a node for, whose tracks' audio passes
     /// through where they'd be.
     pub unhosted: Vec<DeviceId>,
+    /// Media that clips name and the media library couldn't supply, whose
+    /// clips played silence.
+    pub missing_media: Vec<ContentHash>,
     /// What the engine reported: the scheduled commands that fired, and any
     /// it had no room for.
     pub reports: Vec<Report>,
@@ -103,7 +113,8 @@ impl Cue {
 }
 
 /// Plays `document` from its start, with `schedule`'s commands scheduled
-/// before the first block, and hands each block's output to `sink`.
+/// before the first block, and hands each block's output to `sink`. It has
+/// no media, so any clips play silence: [`render_with`] gives them some.
 ///
 /// # Panics
 ///
@@ -120,7 +131,8 @@ pub fn render(
 /// Renders `document` with `schedule`'s commands scheduled and the
 /// transport moved by `cues`, each on its frame, and hands each block's
 /// output to `sink`. The song starts stopped, with its insert marker at
-/// 1.1.1: a render that plays has a cue that starts it.
+/// 1.1.1: a render that plays has a cue that starts it. It has no media, so
+/// any clips play silence: [`render_with`] gives them some.
 ///
 /// # Panics
 ///
@@ -130,11 +142,29 @@ pub fn render_cued(
     schedule: &[ScheduledCommand],
     cues: &[Cue],
     settings: &Settings,
+    sink: impl FnMut(&Output<'_>),
+) -> Summary {
+    let none: Arc<dyn MediaLibrary> = Arc::new(MediaMap::new());
+    render_with(document, none, schedule, cues, settings, sink)
+}
+
+/// [`render_cued`], with the clips' audio from `media`.
+///
+/// # Panics
+///
+/// If `settings.block` is 0.
+pub fn render_with(
+    document: &Document,
+    media: Arc<dyn MediaLibrary>,
+    schedule: &[ScheduledCommand],
+    cues: &[Cue],
+    settings: &Settings,
     mut sink: impl FnMut(&Output<'_>),
 ) -> Summary {
     let config = EngineConfig::new(settings.sample_rate, settings.block);
-    let mut offline = Offline::new(config, Registry::new());
+    let mut offline = Offline::new(config, Registry::new().with_media(media));
     let unhosted = offline.sync(document);
+    let missing_media = offline.missing_media().to_vec();
     for cue in cues {
         offline
             .sender()
@@ -146,6 +176,7 @@ pub fn render_cued(
     let mut summary = Summary {
         channels: config.channels,
         unhosted,
+        missing_media,
         ..Summary::default()
     };
     offline.render(settings.frames, |output| {
@@ -219,7 +250,8 @@ pub struct RenderArgs {
     /// The WAV file to write. An existing file is replaced.
     pub output: PathBuf,
 
-    /// How long to render, in seconds. Defaults to 10 unless `--bars` is
+    /// How long to render, in seconds. Defaults to the end of the set's
+    /// last clip, or 10 seconds in a set without clips, unless `--bars` is
     /// given.
     #[arg(long, conflicts_with = "bars", allow_negative_numbers = true)]
     pub seconds: Option<f64>,
@@ -273,9 +305,15 @@ pub fn run(args: &RenderArgs) -> Outcome {
         block: args.block,
         frames,
     };
+    let folder = if args.project.is_dir() {
+        ProjectFolder::new(&args.project)
+    } else {
+        ProjectFolder::of_set(&args.project)
+    };
+    let media = media_store(&project, folder.root());
 
     let began = Instant::now();
-    let summary = write_wav(&args.output, document, &settings, args.format)?;
+    let summary = write_wav(&args.output, document, media, &settings, args.format)?;
     let took = began.elapsed().as_secs_f64();
     let seconds = frames as f64 / sample_rate.as_f64();
 
@@ -305,6 +343,20 @@ pub fn run(args: &RenderArgs) -> Outcome {
         println!(
             "heap operations: {} in the engine's blocks (allocation trap on)",
             summary.heap_operations
+        );
+    }
+    if !summary.missing_media.is_empty() {
+        let hashes: Vec<String> = summary
+            .missing_media
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+        eprintln!(
+            "warning: {} audio file{} missing or changed, so {} clips play silence: {}",
+            hashes.len(),
+            if hashes.len() == 1 { " is" } else { "s are" },
+            if hashes.len() == 1 { "its" } else { "their" },
+            hashes.join(", ")
         );
     }
     if !summary.unhosted.is_empty() {
@@ -340,6 +392,33 @@ pub fn run(args: &RenderArgs) -> Outcome {
     })
 }
 
+/// A media store holding `project`'s media table, each file's path resolved
+/// against `folder`. Nothing is read until a clip needs its audio.
+#[must_use]
+pub fn media_store(project: &Project, folder: &Path) -> Arc<dyn MediaLibrary> {
+    let store = MediaStore::new();
+    for file in project.media.iter() {
+        if let Some(path) = file.path.resolve(folder) {
+            store.add_reference(
+                bl_media::ContentHash::from_bytes(file.hash.0),
+                path,
+                file.size,
+            );
+        }
+    }
+    Arc::new(store)
+}
+
+/// Where the song ends: the end of its last clip, if it has clips.
+#[must_use]
+pub fn song_end(document: &Document) -> Option<Ticks> {
+    document
+        .tracks()
+        .flat_map(bl_model::Track::clips)
+        .map(bl_model::Clip::end)
+        .max()
+}
+
 /// The number of frames to render.
 fn length(
     document: &Document,
@@ -347,12 +426,14 @@ fn length(
     bars: Option<u32>,
     rate: SampleRate,
 ) -> Result<u64, String> {
+    let settings = document.settings();
     let frames = if let Some(bars) = bars {
         if bars == 0 {
             return Err("--bars must be at least 1".into());
         }
-        let settings = document.settings();
         let end = settings.time_signatures.bar_start(i64::from(bars));
+        settings.tempo.ticks_to_frames(end, rate).get()
+    } else if let (None, Some(end)) = (seconds, song_end(document)) {
         settings.tempo.ticks_to_frames(end, rate).get()
     } else {
         let seconds = seconds.unwrap_or(DEFAULT_SECONDS);
@@ -372,17 +453,19 @@ fn length(
     Ok(frames.max(1) as u64)
 }
 
-/// Renders `document` into a WAV file at `path`. The file is written beside
-/// it under a temporary name and renamed into place when it's complete, so
-/// a failure leaves no partial file at `path`.
+/// Renders `document` into a WAV file at `path`, with its clips' audio from
+/// `media`. The file is written beside it under a temporary name and
+/// renamed into place when it's complete, so a failure leaves no partial
+/// file at `path`.
 fn write_wav(
     path: &Path,
     document: &Document,
+    media: Arc<dyn MediaLibrary>,
     settings: &Settings,
     format: Format,
 ) -> Result<Summary, String> {
     let partial = partial_path(path);
-    let result = write_wav_to(&partial, document, settings, format).and_then(|summary| {
+    let result = write_wav_to(&partial, document, media, settings, format).and_then(|summary| {
         fs::rename(&partial, path)
             .map(|()| summary)
             .map_err(|error| format!("can't write {}: {error}", path.display()))
@@ -396,6 +479,7 @@ fn write_wav(
 fn write_wav_to(
     path: &Path,
     document: &Document,
+    media: Arc<dyn MediaLibrary>,
     settings: &Settings,
     format: Format,
 ) -> Result<Summary, String> {
@@ -415,7 +499,7 @@ fn write_wav_to(
     };
     let mut writer = hound::WavWriter::create(path, spec).map_err(failed)?;
     let mut error = None;
-    let summary = render(document, &[], settings, |output| {
+    let summary = render_with(document, media, &[], &[Cue::PLAY], settings, |output| {
         if error.is_some() {
             return;
         }
@@ -483,6 +567,42 @@ mod tests {
         assert!(length(&document, Some(0.0), None, SampleRate::HZ_48000).is_err());
         assert!(length(&document, Some(f64::NAN), None, SampleRate::HZ_48000).is_err());
         assert!(length(&document, None, Some(0), SampleRate::HZ_48000).is_err());
+    }
+
+    #[test]
+    fn a_set_with_clips_renders_to_the_end_of_its_last_clip() {
+        use bl_model::{AudioData, Clip, ClipData, Command, Editor, TrackKind};
+
+        let mut editor = Editor::new();
+        let track = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id: track,
+                kind: TrackKind::Audio,
+                name: String::new(),
+                parent: None,
+                index: 0,
+            })
+            .unwrap();
+        for (start, length) in [
+            (Ticks::QUARTER * 3, Ticks::QUARTER),
+            (Ticks::ZERO, Ticks::QUARTER),
+        ] {
+            let data = ClipData::Audio(AudioData::new(ContentHash([1; 32])));
+            let clip = Clip::new(editor.new_id(), start, length, data);
+            editor.apply(Command::CreateClip { track, clip }).unwrap();
+        }
+        let document = editor.document();
+        assert_eq!(song_end(document), Some(Ticks::WHOLE));
+        // Four beats at 120 BPM: two seconds, unless told otherwise.
+        assert_eq!(
+            length(document, None, None, SampleRate::HZ_48000),
+            Ok(96_000)
+        );
+        assert_eq!(
+            length(document, Some(1.0), None, SampleRate::HZ_48000),
+            Ok(48_000)
+        );
     }
 
     #[test]

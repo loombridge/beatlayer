@@ -2,10 +2,11 @@
 //! offline and null-tested against reference renders stored in
 //! `tests/golden/`.
 //!
-//! Each fixture ([`fixtures`]) is a document, the commands scheduled on it,
-//! the transport's moves (each a [`Cue`] on a frame; most fixtures just
-//! play from the start), and a length. The harness renders it with
-//! [`render::render_cued`], the code behind `bl-cli render`, at
+//! Each fixture ([`fixtures`]) is a document, the audio files its clips
+//! play (each made in code, as a WAV file in memory), the commands
+//! scheduled on it, the transport's moves (each a [`Cue`] on a frame; most
+//! fixtures just play from the start), and a length. The harness renders it
+//! with [`render::render_with`], the code behind `bl-cli render`, at
 //! [`SAMPLE_RATE`] in blocks of [`BLOCK`] frames, and compares the render
 //! with its reference ([`null_test`]):
 //!
@@ -26,7 +27,8 @@
 //!
 //! A render also fails if it has a sample that isn't finite, touches the
 //! heap inside an engine block (where the allocation trap is installed),
-//! leaves a scheduled command unfired, or has a device no node plays.
+//! leaves a scheduled command unfired, has a device no node plays, or has a
+//! clip whose audio is missing.
 //!
 //! References change only when someone runs `cargo xtask golden --update`
 //! (which runs `bl-cli golden --update`), never in a test, and the pull
@@ -39,10 +41,11 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use bl_core::time::SampleRate;
-use bl_engine::ScheduledCommand;
-use bl_model::{Document, Editor};
+use bl_engine::{MediaMap, ScheduledCommand};
+use bl_model::{ContentHash, Document, Editor};
 use serde::{Deserialize, Serialize};
 
 use crate::Outcome;
@@ -84,12 +87,18 @@ pub struct Fixture {
     build: fn() -> Scene,
 }
 
-/// A fixture's song: its document, what's scheduled on it, how the
-/// transport moves, and how long it plays.
+/// A fixture's song: its document, the audio files its clips play, what's
+/// scheduled on it, how the transport moves, and how long it plays.
 #[derive(Debug)]
 pub struct Scene {
     /// The editor holding the song, with the IDs it handed out.
     pub editor: Editor,
+    /// The audio files the song's clips play, as files on disk would hold
+    /// them.
+    pub files: Vec<MediaFile>,
+    /// The same files decoded, by content hash: what the media store would
+    /// give the engine.
+    pub media: MediaMap,
     /// Commands scheduled before the first block.
     pub schedule: Vec<ScheduledCommand>,
     /// The transport's moves, each on its frame. Most fixtures play from
@@ -97,6 +106,17 @@ pub struct Scene {
     pub cues: Vec<Cue>,
     /// Frames to render, at [`SAMPLE_RATE`].
     pub frames: u64,
+}
+
+/// An audio file a fixture's clips play, made in code.
+#[derive(Clone, Debug)]
+pub struct MediaFile {
+    /// A file name for it, such as `chirp.wav`.
+    pub name: String,
+    /// The content hash its clips name it by: the BLAKE3 hash of `bytes`.
+    pub hash: ContentHash,
+    /// The file's bytes.
+    pub bytes: Vec<u8>,
 }
 
 impl Scene {
@@ -149,8 +169,9 @@ impl Fixture {
             frames: scene.frames,
         };
         let mut samples = Vec::with_capacity(scene.frames as usize * 2);
-        let summary = render::render_cued(
+        let summary = render::render_with(
             scene.document(),
+            Arc::new(scene.media.clone()),
             &scene.schedule,
             &scene.cues,
             &settings,
@@ -253,6 +274,12 @@ impl Render {
             problems.push(format!(
                 "{} devices have no node to play them",
                 summary.unhosted.len()
+            ));
+        }
+        if !summary.missing_media.is_empty() {
+            problems.push(format!(
+                "{} audio files the clips play are missing",
+                summary.missing_media.len()
             ));
         }
         problems

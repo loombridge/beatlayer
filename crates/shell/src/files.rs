@@ -6,10 +6,11 @@
 //! in the project folder's `Backup/`, and every load checked. Tests can
 //! pass a store of their own.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use bl_model::{Editor, TrackId, TrackKind, registry};
-use bl_project::{Media, Project, SetFile};
+use bl_model::{ContentHash, Editor, TrackId, TrackKind, registry};
+use bl_project::{Media, MediaPath, MediaRef, Project, SetFile};
 use serde_json::json;
 
 /// Reads and writes set files, and remembers the open set's file between
@@ -39,6 +40,19 @@ pub trait SetStore {
 
     /// Forgets the open set's file, as a new set has none.
     fn close(&mut self);
+
+    /// Records a file the set's clips play (WP-1.10), by its content hash,
+    /// its path on disk, and its size, so the next save lists it in the
+    /// set's media table. A store that keeps no media table ignores it.
+    fn add_media(&mut self, hash: ContentHash, path: &Path, size: u64) {
+        let _ = (hash, path, size);
+    }
+
+    /// The open set's media files with their paths on disk, for the media
+    /// store after the set is opened (WP-1.10).
+    fn media_files(&self) -> Vec<(ContentHash, PathBuf, u64)> {
+        Vec::new()
+    }
 }
 
 /// Beatlayer's set files, through `bl-project`. It keeps the open set's
@@ -48,6 +62,9 @@ pub trait SetStore {
 pub struct ProjectFiles {
     set: Option<SetFile>,
     media: Media,
+    /// Files added since the set was opened, by their paths on disk, for
+    /// the next save's media table.
+    added: BTreeMap<ContentHash, (PathBuf, u64)>,
 }
 
 impl ProjectFiles {
@@ -72,11 +89,39 @@ impl SetStore for ProjectFiles {
         let opened = set.path().to_owned();
         self.set = Some(set);
         self.media = project.media;
+        self.added.clear();
         Ok((editor, opened))
     }
 
     fn save(&mut self, path: &Path, editor: &Editor) -> Result<Vec<String>, String> {
-        let project = Project::from_editor(editor, self.media.clone());
+        let mut warnings = Vec::new();
+        let mut media = self.media.clone();
+        // Files the set gained, by their paths from the project folder.
+        let folder = std::path::absolute(path)
+            .ok()
+            .and_then(|p| p.parent().map(Path::to_path_buf));
+        for (hash, (file, size)) in &self.added {
+            let relative = folder.as_deref().and_then(|folder| {
+                std::path::absolute(file)
+                    .ok()
+                    .and_then(|file| MediaPath::between(folder, &file))
+            });
+            match relative {
+                Some(relative) => {
+                    media.insert(MediaRef {
+                        hash: *hash,
+                        path: relative,
+                        size: *size,
+                    });
+                }
+                None => warnings.push(format!(
+                    "{} can't be reached from the project folder, so the set doesn't record \
+                     where it is",
+                    file.display()
+                )),
+            }
+        }
+        let project = Project::from_editor(editor, media.clone());
         let mut set = self
             .set
             .clone()
@@ -88,12 +133,40 @@ impl SetStore for ProjectFiles {
         }
         .map_err(|error| error.to_string())?;
         self.set = Some(set);
-        Ok(report.warnings)
+        self.media = media;
+        warnings.extend(report.warnings);
+        Ok(warnings)
     }
 
     fn close(&mut self) {
         self.set = None;
         self.media = Media::new();
+        self.added.clear();
+    }
+
+    fn add_media(&mut self, hash: ContentHash, path: &Path, size: u64) {
+        self.added.insert(hash, (path.to_path_buf(), size));
+    }
+
+    fn media_files(&self) -> Vec<(ContentHash, PathBuf, u64)> {
+        let folder = self
+            .set
+            .as_ref()
+            .and_then(|set| set.path().parent().map(Path::to_path_buf));
+        let mut files: Vec<(ContentHash, PathBuf, u64)> = folder
+            .map(|folder| {
+                self.media
+                    .iter()
+                    .filter_map(|file| Some((file.hash, file.path.resolve(&folder)?, file.size)))
+                    .collect()
+            })
+            .unwrap_or_default();
+        files.extend(
+            self.added
+                .iter()
+                .map(|(hash, (path, size))| (*hash, path.clone(), *size)),
+        );
+        files
     }
 }
 

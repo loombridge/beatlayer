@@ -19,6 +19,8 @@
 //! - [`arrangement`]: what the Arrangement View shows (zoom, scroll, Follow,
 //!   the editing grid, track heights, the insert marker and selection),
 //!   changed by its view commands (WP-1.8a).
+//! - [`browser`]: the browser (places, browsing, search, preview, adding
+//!   files to the Arrangement), changed by its commands (WP-1.10).
 //!
 //! The UI (`bl-ui`) draws the shell and the app (`beatlayer`) wires it to
 //! windows, native menus, and file dialogs. Nothing here depends on a UI
@@ -26,12 +28,15 @@
 
 pub mod arrangement;
 pub mod audio;
+pub mod browser;
 pub mod files;
 pub mod settings;
 mod shell;
 
 /// The Arrangement View's command IDs and their argument and result types.
 pub use bl_shell_spec::arrangement as arrangement_commands;
+/// The browser's command IDs and their argument and result types.
+pub use bl_shell_spec::browser as browser_commands;
 pub use bl_shell_spec::{commands, menus, register};
 pub use shell::{
     Area, Effect, Invocation, MainView, Message, Shell, ShellError, WindowKind, ZOOM_STEPS,

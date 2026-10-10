@@ -16,6 +16,7 @@
 //! website, account, store, pack service, and Max for Live) are left out
 //! ([`Action::Omitted`]). Decision D21 records the rule.
 
+use crate::browser::{ADD_FOLDER as BROWSER_ADD_FOLDER, SET_PREVIEW as BROWSER_PREVIEW};
 use crate::commands::{
     APP_ABOUT, APP_HIDE, APP_QUIT, APP_SETTINGS, AUDIO_TOGGLE_ENGINE, FOCUS_ARRANGEMENT,
     FOCUS_CONTROL_BAR, FOCUS_NEXT, FOCUS_PREVIOUS, FOCUS_TOGGLE_TAB_NAVIGATION, SET_NEW, SET_OPEN,
@@ -194,7 +195,11 @@ const FILE: &[Row] = &[
     ("M-FILE-004", "Close Window", Cmd(WINDOW_CLOSE)),
     SEPARATOR,
     ("M-FILE-005", "Install Pack...", Pending(None)),
-    ("M-FILE-006", "Add Folder to Browser...", Pending(None)),
+    (
+        "M-FILE-006",
+        "Add Folder to Browser...",
+        Cmd(BROWSER_ADD_FOLDER),
+    ),
     SEPARATOR,
     ("M-FILE-007", "Manage Files", Pending(None)),
     ("M-FILE-008", "Open Beatlayer Set Backups", Pending(None)),
@@ -604,7 +609,7 @@ const OPTIONS: &[Row] = &[
     ("M-OPT-003", "Edit Key Map", Key(&["S-MAP-002"])),
     ("M-OPT-004", "Computer MIDI Keyboard", Key(&["S-MAP-003"])),
     ("M-OPT-005", "MIDI Note Editor Preview", Pending(None)),
-    ("M-OPT-006", "Browser File Preview", Pending(None)),
+    ("M-OPT-006", "Browser File Preview", Cmd(BROWSER_PREVIEW)),
     SEPARATOR,
     ("M-OPT-007", "External Sync", Pending(None)),
     ("M-OPT-008", "Delay Compensation", Pending(None)),

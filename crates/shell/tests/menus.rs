@@ -19,7 +19,8 @@ fn repo() -> PathBuf {
 fn every_item_reaches_a_command_or_is_pending() {
     let mut registry = Registry::new();
     bl_model::registry::register(&mut registry).unwrap();
-    commands::register(&mut registry).unwrap();
+    // The shell's commands, the Arrangement View's, and the browser's.
+    bl_shell::register(&mut registry).unwrap();
     let shortcuts = std::fs::read_to_string(repo().join("docs/ui-parity/shortcuts.toml")).unwrap();
     for platform in [MenuPlatform::Mac, MenuPlatform::Other] {
         for menu in menu_bar(platform) {

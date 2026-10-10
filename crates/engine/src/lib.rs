@@ -28,6 +28,7 @@
 //! | [`DropThread`] | drop | Frees what the audio thread let go of |
 //! | [`Monitor`] | any one | Reads the playhead, meters, and CPU load the audio thread publishes |
 //! | [`Offline`] | any one | All of the above on one thread, faster than real time, with no device |
+//! | [`preview::PreviewVoice`] | audio | The browser's preview, a voice of its own beside the song (WP-1.10) |
 //!
 //! An offline render needs no threads: [`Offline`] compiles, sends, and
 //! processes in turn on one thread, collecting garbage as it goes, and runs
@@ -62,6 +63,7 @@ mod message;
 mod node;
 pub mod nodes;
 mod offline;
+pub mod preview;
 mod processor;
 mod program;
 mod registry;

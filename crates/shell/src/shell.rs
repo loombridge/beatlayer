@@ -2,8 +2,10 @@
 
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use bl_commands::{Context, NoArgs, Registry};
+use bl_media::MediaStore;
 use bl_model::{Editor, TrackId, TrackKind, registry as model};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -11,6 +13,7 @@ use serde_json::{Value, json};
 
 use crate::arrangement::{ArrangementView, TransportView, ViewError, Viewport};
 use crate::audio::{AudioHost, ConfigureAudio, ToneSettings};
+use crate::browser::{self, BrowserError, BrowserView, Waker};
 use crate::commands::{
     self as ids, PathArgs, SetResult, SettingsArgs, SwitchResult, TestToneArgs, TestToneState,
     ThemeArgs, ViewResult,
@@ -18,6 +21,7 @@ use crate::commands::{
 use crate::files::{ProjectFiles, SetStore, factory_default_set};
 use crate::settings::{Preferences, SettingsPage, ThemeChoice};
 use bl_shell_spec::arrangement as view_ids;
+use bl_shell_spec::browser as browser_ids;
 
 /// The views the main window's main area shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -128,6 +132,9 @@ pub enum Effect {
         /// Whether it moves backwards.
         backwards: bool,
     },
+    /// Ask for a folder, then add it to the browser's Places with
+    /// `browser.add_folder` (WP-1.10).
+    PickFolder,
 }
 
 /// A line for the Status Bar's message area (L-STAT-002).
@@ -220,6 +227,11 @@ pub struct Shell {
     arrangement: ArrangementView,
     /// A number that changes whenever the document may have changed.
     document_revision: u64,
+    /// The browser (WP-1.10).
+    browser_view: BrowserView,
+    /// The media the set's clips play, which the browser fills and the
+    /// Arrangement's waveforms read.
+    media: Arc<MediaStore>,
 }
 
 impl fmt::Debug for Shell {
@@ -260,7 +272,11 @@ impl Shell {
         crate::register(&mut registry).expect("the shell's command IDs are unique");
         debug_assert!(registry.problems().is_empty(), "{:?}", registry.problems());
         audio.set_tone(prefs.tone);
+        let browser_view = BrowserView::new(&prefs.browser, Waker::default());
+        audio.set_preview_gain(prefs.browser.preview_volume as f32);
         Self {
+            browser_view,
+            media: Arc::new(MediaStore::new()),
             registry,
             editor: factory_default_set(),
             saved: factory_default_set(),
@@ -541,6 +557,119 @@ impl Shell {
         }
     }
 
+    /// The browser (WP-1.10).
+    #[must_use]
+    pub fn browser_view(&self) -> &BrowserView {
+        &self.browser_view
+    }
+
+    /// The browser's preview as the audio thread last reported it, for the
+    /// preview strip.
+    #[must_use]
+    pub fn browser_preview(&self) -> browser_ids::PreviewState {
+        self.browser_view.preview_state(&self.audio)
+    }
+
+    /// The media the set's clips play: the browser registers the files it
+    /// adds, and the Arrangement's peak cache reads them.
+    #[must_use]
+    pub fn media_store(&self) -> Arc<MediaStore> {
+        Arc::clone(&self.media)
+    }
+
+    /// Makes background work (the browser's index and preview decoder) call
+    /// `wake` when it has news, so the host runs [`Shell::poll`].
+    pub fn set_waker(&self, wake: Arc<dyn Fn() + Send + Sync>) {
+        self.browser_view.waker().set(wake);
+    }
+
+    /// Uses `path` as the browser's User Library, as the app does at
+    /// start-up with the preference or the default place (browser R3).
+    pub fn set_user_library(&mut self, path: Option<PathBuf>) {
+        self.browser_view.set_user_library(path);
+        self.touch();
+    }
+
+    /// Takes background work's news: the browser's index, a decoded
+    /// preview, a preview that finished. The host calls it every frame and
+    /// when woken; a failure shows in the Status Bar. Returns whether
+    /// anything a window shows changed.
+    pub fn poll(&mut self) -> bool {
+        let polled = self.browser_view.poll(&mut self.audio);
+        if let Some(error) = polled.error {
+            self.set_message(error, true);
+        }
+        if polled.changed {
+            self.touch();
+        }
+        polled.changed
+    }
+
+    /// Tells the browser the set's file changed, so Current Project follows
+    /// it (browser R4).
+    fn set_file_changed(&mut self) {
+        let folder = self
+            .set_path
+            .as_deref()
+            .and_then(|path| std::path::absolute(path).ok())
+            .and_then(|path| path.parent().map(Path::to_path_buf));
+        self.browser_view.set_project(folder);
+    }
+
+    /// Runs a browser command and carries out what it asks of the rest of
+    /// the shell.
+    fn run_browser(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        let context = browser::Context {
+            insert_marker: self.arrangement.insert_marker(),
+            selected_track: self.arrangement.selected_tracks().first().copied(),
+            editor: &mut self.editor,
+            audio: &mut self.audio,
+            media: &self.media,
+        };
+        let outcome = self
+            .browser_view
+            .run(id, args, context)
+            .map_err(|error| match error {
+                BrowserError::InvalidArgs(message) => ShellError::InvalidArgs {
+                    command: id.to_owned(),
+                    message,
+                },
+                BrowserError::Unavailable(reason) => ShellError::Unavailable {
+                    command: id.to_owned(),
+                    reason,
+                },
+                BrowserError::Failed(message) => ShellError::Failed {
+                    command: id.to_owned(),
+                    message,
+                },
+            })?;
+        for file in &outcome.media {
+            self.store.add_media(file.hash, &file.path, file.size);
+        }
+        if outcome.document_changed {
+            self.dirty = true;
+            self.document_changed();
+        }
+        if outcome.prefs_changed {
+            self.prefs.browser = self
+                .browser_view
+                .prefs(self.prefs.browser.user_library.clone());
+            self.save_preferences();
+        }
+        if outcome.show_browser {
+            self.browser = true;
+        }
+        if outcome.focus {
+            self.focused_window = WindowKind::Main;
+            self.focused_area = Area::Browser;
+            self.effects.push(Effect::FocusArea(Area::Browser));
+        }
+        if id != browser_ids::STATE {
+            self.touch();
+        }
+        Ok(outcome.value)
+    }
+
     /// The effects commands have asked for since the last call.
     pub fn take_effects(&mut self) -> Vec<Effect> {
         std::mem::take(&mut self.effects)
@@ -578,7 +707,7 @@ impl Shell {
                         }
                         MainView::Session => contexts.push(Context::Session),
                     },
-                    Area::Browser => contexts.push(Context::Browser),
+                    Area::Browser => contexts.push(self.browser_view.focus().context()),
                     Area::Detail => contexts.push(Context::DeviceView),
                     Area::ControlBar | Area::StatusBar => {}
                 }
@@ -600,6 +729,7 @@ impl Shell {
             ids::VIEW_TOGGLE_BROWSER => Some(self.browser),
             ids::FOCUS_TOGGLE_TAB_NAVIGATION => Some(self.prefs.tab_navigation),
             ids::AUDIO_TOGGLE_ENGINE => Some(self.audio.engine_on()),
+            browser_ids::SET_PREVIEW => Some(self.browser_view.preview_on()),
             _ => self.arrangement.switch_state(id),
         }
     }
@@ -648,6 +778,22 @@ impl Shell {
         }
         if ids::handles(id) {
             return true;
+        }
+        if browser_ids::handles(id) {
+            // A person adding a folder picks it in a dialog.
+            if id == browser_ids::ADD_FOLDER && args.get("path").is_none() {
+                return true;
+            }
+            let args = if args.is_null() {
+                json!({})
+            } else {
+                args.clone()
+            };
+            return spec
+                .args
+                .as_ref()
+                .is_some_and(|schema| bl_commands::validate(schema, &args).is_ok())
+                && self.browser_view.can_run(id, &args);
         }
         if view_ids::handles(id) {
             let args = if args.is_null() {
@@ -760,6 +906,10 @@ impl Shell {
                 self.effects.push(Effect::PickSavePath { then: None });
                 Ok(Value::Null)
             }
+            browser_ids::ADD_FOLDER if !has("path") => {
+                self.effects.push(Effect::PickFolder);
+                Ok(Value::Null)
+            }
             "track.create" if !has("id") => {
                 let mut args = self.filled_args(id, args)?;
                 let new: TrackId = self.editor.new_id();
@@ -834,6 +984,9 @@ impl Shell {
             }
             return result.map(|state| to_value(&state));
         }
+        if browser_ids::handles(id) {
+            return self.run_browser(id, args);
+        }
         if !ids::handles(id) {
             return Err(ShellError::UnknownCommand(id.to_owned()));
         }
@@ -894,6 +1047,7 @@ impl Shell {
                 self.message = None;
                 self.arrangement.reset();
                 self.document_changed();
+                self.set_file_changed();
                 Ok(self.set_result())
             }
             ids::SET_OPEN => {
@@ -912,6 +1066,13 @@ impl Shell {
                 self.message = None;
                 self.arrangement.reset();
                 self.document_changed();
+                // The set's files go into the media store, so its clips'
+                // waveforms build (browser R15).
+                for (hash, path, size) in self.store.media_files() {
+                    self.media
+                        .add_reference(bl_media::ContentHash::from_bytes(hash.0), path, size);
+                }
+                self.set_file_changed();
                 Ok(self.set_result())
             }
             ids::SET_SAVE => {
@@ -1131,6 +1292,7 @@ impl Shell {
     fn saved_as(&mut self, path: PathBuf, warnings: &[String]) {
         self.saved = snapshot(&self.editor);
         self.set_path = Some(path);
+        self.set_file_changed();
         self.dirty = false;
         self.message = (!warnings.is_empty()).then(|| Message {
             text: format!("The set was saved, but: {}", warnings.join("; ")),

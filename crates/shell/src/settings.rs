@@ -28,6 +28,8 @@ pub struct Preferences {
     pub window_size: Option<(f32, f32)>,
     /// The Settings page shown last.
     pub settings_page: SettingsPage,
+    /// The browser's places and preview (WP-1.10).
+    pub browser: crate::browser::BrowserPrefs,
 }
 
 /// The file name of the preferences, inside the config directory.

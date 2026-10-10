@@ -795,6 +795,8 @@ dependencies = [
  "bl-audio-io",
  "bl-commands",
  "bl-core",
+ "bl-engine",
+ "bl-media",
  "bl-model",
  "bl-project",
  "bl-rt",

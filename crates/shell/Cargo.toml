@@ -11,6 +11,12 @@ publish.workspace = true
 bl-audio-io.workspace = true
 bl-commands.workspace = true
 bl-core.workspace = true
+# The browser's preview voice on the audio thread, and the drop thread that
+# frees what it lets go of (WP-1.10).
+bl-engine.workspace = true
+# The browser decodes previews and registers the files it adds to the set
+# in the media store (WP-1.10).
+bl-media.workspace = true
 bl-model.workspace = true
 bl-project.workspace = true
 bl-shell-spec.workspace = true

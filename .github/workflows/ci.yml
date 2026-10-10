@@ -4,7 +4,8 @@
 # limited, and a macOS minute counts as ten and a Windows minute as two. The
 # workflow keeps the bill down by:
 #
-# - skipping changes that touch only Markdown, docs/, or the licence;
+# - skipping changes that touch only Markdown, docs/, or the licence, except
+#   the generated docs that `cargo xtask check` keeps in sync;
 # - cancelling a run when a newer commit supersedes it;
 # - restoring the dependency cache on every run, but saving it only from main,
 #   so pull requests share main's cache instead of filling the 10 GB quota;
@@ -20,21 +21,31 @@
 name: CI
 
 on:
+  # GitHub allows exceptions only in `paths`, not `paths-ignore`, so the
+  # filter includes everything, excludes prose, then brings back the generated
+  # docs that `cargo xtask check` keeps in sync with their sources. The last
+  # matching pattern wins.
   pull_request:
     branches: [main]
-    paths-ignore:
-      - "**.md"
-      - "docs/**"
-      - "LICENSE"
-      - ".github/ISSUE_TEMPLATE/**"
+    paths:
+      - "**"
+      - "!**.md"
+      - "!docs/**"
+      - "!LICENSE"
+      - "!.github/ISSUE_TEMPLATE/**"
+      - "docs/ui-parity/**"
+      - "docs/commands.md"
   push:
     branches: [main]
     # Keep in step with the list above.
-    paths-ignore:
-      - "**.md"
-      - "docs/**"
-      - "LICENSE"
-      - ".github/ISSUE_TEMPLATE/**"
+    paths:
+      - "**"
+      - "!**.md"
+      - "!docs/**"
+      - "!LICENSE"
+      - "!.github/ISSUE_TEMPLATE/**"
+      - "docs/ui-parity/**"
+      - "docs/commands.md"
   workflow_dispatch:
 
 permissions:

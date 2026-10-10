@@ -116,6 +116,8 @@ A commit with nothing on the indented line under it isn't signed off.
 
 If an AI coding agent wrote some or all of your change, you're still the person certifying it. Review the change, then sign it off yourself. The agent records its part with a `Co-Authored-By` trailer, and never adds a `Signed-off-by` line, in your name or its own, because only a person can give the certificate.
 
+The maintainer's own work is the exception. Commits that the maintainer's agents make on the maintainer's behalf, in work packages from the build plan, are the maintainer's contributions and carry no sign-off (10 October 2026). The DCO check applies to everyone else.
+
 ### Checking sign-offs
 
 For now, the reviewer checks sign-offs by hand. An automatic check in CI follows the CI work in WP-0.2.
@@ -137,4 +139,4 @@ Write prose, including documents, code comments, commit messages, and pull reque
 
 ## Licence
 
-Beatlayer is licensed under GPL-3.0-or-later ([LICENSE](LICENSE)), and you contribute under the same licence. The licence and the DCO are both waiting for the maintainer's confirmation, as decision D3 in [the architecture](docs/02-architecture.md#decisions-log) and human task H2 in the build plan.
+Beatlayer is licensed under GPL-3.0-or-later ([LICENSE](LICENSE)), and you contribute under the same licence. The maintainer confirmed the licence and the DCO on 10 October 2026 (decision D3 in [the architecture](docs/02-architecture.md#decisions-log), human task H2 in the build plan).

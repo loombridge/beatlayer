@@ -13,7 +13,8 @@
 //!   the zoom commands work from.
 //! - [`editing`]: the Arrangement's editing commands (WP-1.8b): selecting,
 //!   moving, copying, resizing, splitting, deleting, and duplicating clips,
-//!   and the clipboard.
+//!   and the clipboard; [`context_menus`], the clip and time-selection
+//!   menus that reach them.
 //!
 //! `cargo xtask` checks the commands, lists them in `docs/commands.md`, and
 //! builds the keymap from this crate, so none of its tasks links an audio
@@ -23,6 +24,7 @@
 pub mod arrangement;
 pub mod audio;
 pub mod commands;
+pub mod context_menus;
 pub mod editing;
 pub mod menus;
 pub mod settings;

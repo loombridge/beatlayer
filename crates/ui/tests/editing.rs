@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use bl_core::time::Ticks;
 use bl_media::Peaks;
-use bl_model::{AudioData, Clip, ClipData, ClipId, Command, ContentHash, Document, TrackId};
+use bl_model::{AudioData, Clip, ClipData, ClipId, Command, Document, TrackId};
 use bl_shell::arrangement_commands::{self as view_ids, ArrangementState};
 use bl_shell::editing_commands as ids;
 use bl_shell::files::factory_default_set;
@@ -579,5 +579,93 @@ fn edit_commands_are_bound_in_the_arrangement() {
             "{shortcut}"
         );
     }
-    let _ = ContentHash([0; 32]);
+}
+
+impl Set {
+    /// A right-click at a point; returns the frame with the menu open.
+    fn right_click(&mut self, at: Pos2) -> egui::FullOutput {
+        self.h.frame(vec![Event::PointerMoved(at)]);
+        for pressed in [true, false] {
+            self.h.frame(vec![Event::PointerButton {
+                pos: at,
+                button: PointerButton::Secondary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            }]);
+        }
+        self.h.settle()
+    }
+
+    /// Clicks the open menu's item labelled `label`, and says whether it
+    /// was enabled.
+    fn choose(&mut self, output: &egui::FullOutput, label: &str) -> bool {
+        let nodes = Harness::nodes(output);
+        let node = nodes
+            .iter()
+            .rfind(|n| names(&n.label, label) && n.bounds.is_some())
+            .unwrap_or_else(|| panic!("no menu item {label:?}"));
+        let enabled = !node.disabled;
+        let bounds = node.bounds.unwrap();
+        let at = pos2(
+            ((bounds.x0 + bounds.x1) / 2.0) as f32,
+            ((bounds.y0 + bounds.y1) / 2.0) as f32,
+        );
+        self.click(at, Modifiers::NONE);
+        enabled
+    }
+}
+
+/// Whether a menu item's accessible label names `item`: the label, then
+/// the keys shown beside it.
+fn names(label: &str, item: &str) -> bool {
+    label == item || label.starts_with(&format!("{item} "))
+}
+
+#[test]
+fn context_menus_reach_the_edits_and_the_grid() {
+    // Spec: arrangement-editing R17 (menus.md C-CLIP-ARR, C-TIME;
+    // I-CLICK-032).
+    let mut s = set();
+    let a = s.a;
+    // A clip's menu: right-clicking selects the clip; Duplicate runs.
+    let output = s.right_click(pos2(x(3.0), AUDIO_3.1));
+    assert_eq!(s.state().selected_clips, [a]);
+    let labels: Vec<String> = Harness::nodes(&output)
+        .iter()
+        .map(|n| n.label.clone())
+        .collect();
+    for item in [
+        "Cut",
+        "Copy",
+        "Duplicate",
+        "Delete",
+        "Crop Clip",
+        "Triplet Grid",
+    ] {
+        assert!(
+            labels.iter().any(|l| names(l, item)),
+            "{item} in {labels:?}"
+        );
+    }
+    assert!(s.choose(&output, "Duplicate"));
+    let copy = s.state().selected_clips[0];
+    assert_ne!(copy, a);
+    assert_eq!(s.bars(copy), (6.0, 10.0));
+    assert_eq!(s.undo_label().as_deref(), Some("Duplicate"));
+    // Items no package has built yet are there, and disabled.
+    let output = s.right_click(pos2(x(7.0), AUDIO_3.1));
+    assert!(!s.choose(&output, "Crop Clip"));
+    assert_eq!(s.steps(), 1);
+
+    // The lanes' menu: right-clicking an empty lane places the insert
+    // marker; the grid's choices set the grid.
+    let output = s.right_click(pos2(x(20.0), AUDIO_4.1));
+    assert_eq!(s.state().insert_marker, Ticks(20 * BAR));
+    assert!(s.choose(&output, "1/4"));
+    let grid = s.state().grid;
+    assert!(grid.fixed);
+    assert_eq!(grid.label, "1/4");
+    let output = s.right_click(pos2(x(20.0), AUDIO_4.1));
+    assert!(s.choose(&output, "Narrow"));
+    assert!(!s.state().grid.fixed);
 }

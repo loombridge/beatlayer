@@ -16,6 +16,7 @@
 //! `docs/specs/arrangement-editing.md`.
 
 pub mod benchmark;
+pub mod context_menu;
 pub mod editing;
 pub mod gpu;
 pub mod headers;
@@ -40,6 +41,7 @@ use egui::{
 };
 use serde_json::{Value, json};
 
+use self::context_menu::ContextMenus;
 use self::editing::{ClipGestures, EditKeys, Lanes};
 use self::gpu::{ArrangementCallback, Shared, SharedFrame, Slot, lock};
 use self::headers::Header;
@@ -154,6 +156,8 @@ pub struct ArrangementUi {
     reported_viewport: Option<(f32, f32)>,
     /// Editing gestures under way (WP-1.8b).
     clips: ClipGestures,
+    /// The clip and time-selection context menus (WP-1.8b).
+    menus: ContextMenus,
 }
 
 impl std::fmt::Debug for ArrangementUi {
@@ -193,6 +197,7 @@ impl ArrangementUi {
             drag: None,
             reported_viewport: None,
             clips: ClipGestures::default(),
+            menus: ContextMenus::new(),
         }
     }
 
@@ -335,7 +340,23 @@ impl ArrangementUi {
                 },
             ));
         self.draw_labels(ui, doc, theme, lanes);
-        self.lanes_input(ui, view, doc, &layout, horizontal, events);
+        let lanes_response = self.lanes_input(ui, view, doc, &layout, horizontal, events);
+        // WP-1.8b: right-clicking a clip or the lanes opens their menu.
+        if lanes_response.secondary_clicked()
+            && let Some(pos) = lanes_response.interact_pointer_pos()
+        {
+            let clip_lanes = Lanes {
+                view,
+                doc,
+                rect: lanes,
+                horizontal,
+                shown: &self.shown,
+                rows: &self.rows,
+                scroll_y,
+            };
+            self.menus.open(&clip_lanes, pos, events);
+        }
+        lanes_response.context_menu(|ui| self.menus.show(ui, shell, events));
         self.draw_overlays(ui, view, theme, &layout, horizontal);
 
         // The rulers.
@@ -432,7 +453,7 @@ impl ArrangementUi {
         layout: &ArrangementLayout,
         horizontal: Horizontal,
         events: &mut Vec<UiEvent>,
-    ) {
+    ) -> egui::Response {
         let lanes = layout.lanes;
         let scroll_y = view.scroll_y() as f32;
         let response = ui.interact(lanes, lanes_id(), Sense::click_and_drag());
@@ -585,6 +606,7 @@ impl ArrangementUi {
         if pan_keys && response.hovered() {
             ui.ctx().set_cursor_icon(CursorIcon::Grab);
         }
+        response
     }
 
     fn draw_overlays(

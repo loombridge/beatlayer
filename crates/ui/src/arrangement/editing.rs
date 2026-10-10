@@ -67,7 +67,7 @@ pub(super) struct Lanes<'a> {
 
 impl Lanes<'_> {
     /// The position under a point.
-    fn at(&self, pos: Pos2) -> Ticks {
+    pub(super) fn at(&self, pos: Pos2) -> Ticks {
         self.horizontal.at(f64::from(pos.x - self.rect.left()))
     }
 
@@ -76,6 +76,11 @@ impl Lanes<'_> {
         let y = pos.y - self.rect.top() + self.scroll_y;
         let index = first_row_at(self.rows, y);
         (index < self.rows.len() && self.rows[index].top <= y).then_some(index)
+    }
+
+    /// The track whose lane is under a point, if any.
+    pub(super) fn track_at(&self, pos: Pos2) -> Option<TrackId> {
+        self.row_at(pos).map(|row| self.rows[row].track)
     }
 
     /// The clip under a point, and where on it.

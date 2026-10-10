@@ -3,13 +3,16 @@
 use std::collections::BTreeMap;
 
 use imbl::ordmap::DiffItem;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 use crate::document::Document;
 use crate::ids::{ClipId, DeviceId, TrackId};
 use crate::track::Track;
 
 /// How one object differs between two versions.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum Change {
     /// It's only in the newer version.
     Added,
@@ -25,7 +28,16 @@ pub enum Change {
 /// the parts of the engine program they feed and keep the rest. Finding
 /// them skips every node the two versions share, so the cost follows the
 /// size of the change rather than the size of the song.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+///
+/// It's also what a command run by ID returns (see [`crate::registry`]),
+/// serialised with each map keyed by ID.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[schemars(
+    description = "What a command changed: whether the tempo or time-signature maps changed, \
+                   whether the track list changed, and which tracks, clips, and devices were \
+                   added, removed, or modified, keyed by ID. Every field is empty or false if \
+                   nothing changed."
+)]
 pub struct ChangeSet {
     /// The tempo map or time-signature map changed.
     pub settings: bool,

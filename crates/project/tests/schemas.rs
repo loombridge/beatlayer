@@ -105,7 +105,7 @@ fn fixture_project() -> Project {
         editor.new_id(),
         Ticks::ZERO,
         Ticks::WHOLE * 4,
-        ClipData::Audio(AudioData { media: kick_sample }),
+        ClipData::Audio(AudioData::new(kick_sample)),
     );
     clip.name = "Kick loop".to_owned();
     editor

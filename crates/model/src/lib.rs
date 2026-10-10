@@ -71,7 +71,7 @@ mod shared;
 mod track;
 
 pub use changes::{Change, ChangeSet};
-pub use clip::{AudioData, Clip, ClipData, MidiData, Note};
+pub use clip::{AudioData, Clip, ClipData, EDGE_FADE_SECONDS, MidiData, Note};
 pub use command::Command;
 pub use device::{Device, DeviceKind, PluginFormat};
 pub use document::{ArrangementLoop, Document, Settings};

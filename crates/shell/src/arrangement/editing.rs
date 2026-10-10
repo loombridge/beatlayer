@@ -14,7 +14,7 @@
 //! `Shell::gesture`). The behaviour is in
 //! `docs/specs/arrangement-editing.md`.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 use bl_core::time::Ticks;
 use bl_model::{
@@ -109,6 +109,15 @@ pub fn lanes(doc: &Document) -> Vec<TrackId> {
         .collect()
 }
 
+/// Each lane's place in [`lanes`], for looking many up.
+fn lane_positions(doc: &Document) -> HashMap<TrackId, usize> {
+    lanes(doc)
+        .into_iter()
+        .enumerate()
+        .map(|(index, track)| (track, index))
+        .collect()
+}
+
 fn lane_index(lanes: &[TrackId], track: TrackId) -> Option<usize> {
     lanes.iter().position(|id| *id == track)
 }
@@ -197,7 +206,7 @@ fn clear(
     };
     let covered: Vec<(ClipId, Ticks, Ticks)> = lane
         .clips()
-        .filter(|c| !keep.contains(&c.id) && c.start < end && c.end() > start)
+        .filter(|c| c.start < end && c.end() > start && !keep.contains(&c.id))
         .map(|c| (c.id, c.start, c.end()))
         .collect();
     for (clip, from, to) in covered {
@@ -466,21 +475,16 @@ fn delete_target(editor: &mut Editor, target: &Target) -> Result<(), EditFailure
 
 /// The span the clips cover and their tracks in display order.
 fn span_of(doc: &Document, clips: &[ClipId]) -> Option<(Ticks, Ticks, Vec<TrackId>)> {
-    let lanes = lanes(doc);
-    let mut tracks: Vec<TrackId> = clips.iter().filter_map(|c| doc.clip_track(*c)).collect();
-    tracks.sort_by_key(|t| lane_index(&lanes, *t).unwrap_or(usize::MAX));
-    tracks.dedup();
-    let start = clips
-        .iter()
-        .filter_map(|c| doc.clip(*c))
-        .map(|c| c.start)
-        .min()?;
-    let end = clips
-        .iter()
-        .filter_map(|c| doc.clip(*c))
-        .map(Clip::end)
-        .max()?;
-    Some((start, end, tracks))
+    let positions = lane_positions(doc);
+    let tracks: BTreeSet<TrackId> = clips.iter().filter_map(|c| doc.clip_track(*c)).collect();
+    let mut tracks: Vec<TrackId> = tracks.into_iter().collect();
+    tracks.sort_by_key(|t| positions.get(t).copied().unwrap_or(usize::MAX));
+    let (mut start, mut end) = (Ticks::MAX, Ticks::MIN);
+    for clip in clips.iter().filter_map(|c| doc.clip(*c)) {
+        start = start.min(clip.start);
+        end = end.max(clip.end());
+    }
+    (start <= end).then_some((start, end, tracks))
 }
 
 impl ArrangementView {
@@ -836,12 +840,13 @@ pub fn run(
                 }
             };
             // Where each clip goes, checked before anything changes.
+            let positions = lane_positions(doc);
             let mut moves = Vec::with_capacity(clips.len());
             for clip in &clips {
                 let value = doc.clip(*clip).expect("the clips exist");
                 let from = doc
                     .clip_track(*clip)
-                    .and_then(|t| lane_index(&lanes, t))
+                    .and_then(|t| positions.get(&t).copied())
                     .unwrap_or(0);
                 let destination = from
                     .checked_add_signed(shift)
@@ -877,6 +882,22 @@ pub fn run(
                         })
                         .collect();
                     place(editor, placements)
+                } else if shift == 0 {
+                    // In time only: one command, however many clips.
+                    if by != Ticks::ZERO {
+                        apply(
+                            editor,
+                            Command::MoveClips {
+                                clips: clips.clone(),
+                                by,
+                            },
+                        )?;
+                    }
+                    let keep: BTreeSet<ClipId> = clips.iter().copied().collect();
+                    for (_, track, start, end) in &moves {
+                        clear(editor, *track, *start, *end, &keep)?;
+                    }
+                    Ok(clips.clone())
                 } else {
                     for (clip, track, start, _) in &moves {
                         apply(
@@ -1195,16 +1216,16 @@ pub fn run(
 
 /// The earliest of the clips, the topmost of those that start together.
 fn earliest(doc: &Document, lanes: &[TrackId], clips: &[ClipId]) -> ClipId {
+    let start = |c: &ClipId| doc.clip(*c).map_or(Ticks::MAX, |c| c.start);
+    let first = clips.iter().map(start).min().unwrap_or(Ticks::MAX);
     clips
         .iter()
         .copied()
+        .filter(|c| start(c) == first)
         .min_by_key(|c| {
-            (
-                doc.clip(*c).map_or(Ticks::MAX, |c| c.start),
-                doc.clip_track(*c)
-                    .and_then(|t| lane_index(lanes, t))
-                    .unwrap_or(usize::MAX),
-            )
+            doc.clip_track(*c)
+                .and_then(|t| lane_index(lanes, t))
+                .unwrap_or(usize::MAX)
         })
         .unwrap_or(clips[0])
 }

@@ -26,6 +26,12 @@
 //!   zoomed out, all 5,000 clips: the architecture's target.
 //! - `whole`: all 200 tracks and all 512 bars on screen in every frame, so
 //!   every frame builds all 5,000 clips and their waveforms: the worst case.
+//! - `drag` (WP-1.8b): all 200 tracks on screen, 64 bars across, while a
+//!   drag moves one clip on every track: each frame runs the move inside
+//!   the drag's transaction (`Shell::gesture`) from where it began, so the
+//!   set changes every frame and the view rebuilds its clip index and
+//!   lanes.
+//! - `drag-all` (WP-1.8b): as `drag`, moving all 5,000 clips.
 
 use std::time::{Duration, Instant};
 
@@ -49,6 +55,8 @@ enum Config {
     Standard,
     AllTracks,
     Whole,
+    Drag,
+    DragAll,
 }
 
 impl Config {
@@ -57,6 +65,8 @@ impl Config {
             Self::Standard => "standard",
             Self::AllTracks => "all-tracks",
             Self::Whole => "whole",
+            Self::Drag => "drag",
+            Self::DragAll => "drag-all",
         }
     }
 }
@@ -114,6 +124,8 @@ fn args() -> Result<Args, String> {
                     "standard" => Config::Standard,
                     "all-tracks" => Config::AllTracks,
                     "whole" => Config::Whole,
+                    "drag" => Config::Drag,
+                    "drag-all" => Config::DragAll,
                     other => return Err(format!("no config called {other}")),
                 }];
             }
@@ -414,6 +426,28 @@ fn main() -> Result<(), String> {
     println!("|---|---|---|---|---|---|---|---|");
     for config in &args.configs {
         let scene = benchmark::scene(200, 25, 64);
+        // The clips a drag moves: the first on each track, or all of them.
+        let dragged: Vec<bl_model::ClipId> = {
+            let doc = scene.editor.document();
+            scene
+                .tracks
+                .iter()
+                .flat_map(|t| {
+                    let mut clips: Vec<_> = doc.track(*t).unwrap().clips().collect();
+                    clips.sort_by_key(|c| c.start);
+                    let take = if *config == Config::DragAll {
+                        clips.len()
+                    } else {
+                        1
+                    };
+                    clips
+                        .into_iter()
+                        .take(take)
+                        .map(|c| c.id)
+                        .collect::<Vec<_>>()
+                })
+                .collect()
+        };
         let mut shell = benchmark::shell_with(scene.editor);
         let mut main = MainWindowUi::new();
         main.arrangement_mut()
@@ -444,8 +478,21 @@ fn main() -> Result<(), String> {
             }
             let (left, span) = match config {
                 Config::Whole => (0.0, 512.0 + (frame % 2) as f64 * 0.01),
+                Config::Drag | Config::DragAll => (0.0, 64.0),
                 _ => scripted(t, duration),
             };
+            if matches!(config, Config::Drag | Config::DragAll) && frame >= 1 {
+                // A drag swinging between 0 and 8 bars later, a sixteenth at
+                // a time.
+                let sixteenths = (64.0 * (1.0 - (t * 1.3).cos())).round() as i64;
+                let invocation = bl_shell::Invocation::new(
+                    bl_shell::editing_commands::MOVE_CLIPS,
+                    json!({ "clips": dragged, "by": Ticks::SIXTEENTH.get() * sixteenths }),
+                );
+                shell
+                    .gesture(bl_shell::GesturePhase::Update, Some(&invocation))
+                    .map_err(|e| e.to_string())?;
+            }
             let bar = Ticks::WHOLE.get() as f64;
             shell
                 .run(

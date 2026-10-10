@@ -6,12 +6,17 @@ use std::process::{Command, ExitCode};
 
 use serde_json::Value;
 
+mod ui_parity;
+
 const USAGE: &str = "\
 Usage: cargo xtask <task>
 
 Tasks:
-  check          Run every check: format, clippy, tests, layers, deny, and the deny self-test
+  check          Run every check: format, clippy, tests, layers, the UI parity
+                 reference, deny, and the deny self-test
   layers         Check the crate layering rules
+  ui-parity      Validate docs/ui-parity/shortcuts.toml and regenerate shortcuts.md
+                 (with --check, fail instead of writing if shortcuts.md is out of date)
   deny-selftest  Prove that deny.toml still rejects an incompatible licence
   help           Show this message
 ";
@@ -40,7 +45,8 @@ const UI_CRATES: &[&str] = &[
 ];
 
 fn main() -> ExitCode {
-    let result = workspace_root().and_then(|root| run(&root, std::env::args().nth(1).as_deref()));
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let result = workspace_root().and_then(|root| run(&root, &args));
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(message) => {
@@ -50,10 +56,17 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(root: &Path, task: Option<&str>) -> Result<(), String> {
+fn run(root: &Path, args: &[String]) -> Result<(), String> {
+    let task = args.first().map(String::as_str);
+    let options = args.get(1..).unwrap_or_default();
     match task {
         Some("check") => check(root),
         Some("layers") => layers(root),
+        Some("ui-parity") => match options {
+            [] => ui_parity::generate(root),
+            [flag] if flag == "--check" => ui_parity::check(root),
+            _ => Err(format!("usage: cargo xtask ui-parity [--check]\n\n{USAGE}")),
+        },
         Some("deny-selftest") => deny_selftest(root),
         None | Some("help" | "-h" | "--help") => {
             print!("{USAGE}");
@@ -95,6 +108,7 @@ fn check(root: &Path) -> Result<(), String> {
             Box::new(|| cargo(root, &["test", "--workspace", "--all-features", "--locked"])),
         ),
         ("layers", Box::new(|| layers(root))),
+        ("ui parity reference", Box::new(|| ui_parity::check(root))),
         (
             "licences, advisories, bans, sources",
             Box::new(|| cargo(root, &["deny", "--locked", "check"])),

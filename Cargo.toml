@@ -1,7 +1,8 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "xtask"]
-exclude = ["xtask/fixtures"]
+# Spikes are throwaway experiments with their own lockfiles (WP-0.8a, 0.8b).
+exclude = ["xtask/fixtures", "spikes"]
 
 [workspace.package]
 version = "0.0.0"

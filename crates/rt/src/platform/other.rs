@@ -4,8 +4,16 @@ use std::time::Duration;
 
 use crate::thread::{Priority, Promotion};
 
+pub(crate) fn warm_up() {}
+
 #[derive(Debug, Default)]
 pub(crate) struct HeldPriority;
+
+impl HeldPriority {
+    pub(crate) fn revert(&mut self) {}
+
+    pub(crate) fn forget(&mut self) {}
+}
 
 pub(crate) fn current_priority() -> Priority {
     Priority::Unknown

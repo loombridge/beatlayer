@@ -1,0 +1,43 @@
+# The RealtimeSanitizer harness: Beatlayer's real-time tests, run under LLVM's
+# RealtimeSanitizer (RTSan).
+#
+# It's a workspace of its own, excluded from the main one, for two reasons:
+#
+# - Nothing in it can enter the main dependency graph. Crates that bind RTSan
+#   (`rtsan-standalone-sys`) fetch or build LLVM in their build scripts, which
+#   the build plan forbids, so this harness uses none: `build.rs` links a
+#   runtime already installed on the machine, named by RTSAN_LIB_PATH.
+# - `.cargo/config.toml` builds every crate with `--cfg bl_rtsan`, which turns
+#   on bl-rt's calls into the runtime, in a target directory of its own.
+#
+# Run it with `cargo xtask rtsan`, which finds an installed runtime, copies the
+# main workspace's Cargo.lock here so both build the same versions, and runs
+# the tests. CI runs it on Linux with LLVM 20's runtime from apt.llvm.org.
+
+[workspace]
+
+[package]
+name = "bl-rtsan"
+description = "Beatlayer's real-time tests under RealtimeSanitizer, linked against an installed runtime."
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.99"
+license = "GPL-3.0-or-later"
+publish = false
+
+[dependencies]
+bl-rt = { path = "../crates/rt" }
+bl-audio-io = { path = "../crates/audio-io" }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2.190"
+
+[lints.rust]
+rust_2018_idioms = { level = "warn", priority = -1 }
+unsafe_op_in_unsafe_fn = "deny"
+unused_must_use = "deny"
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(bl_rtsan)"] }
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+undocumented_unsafe_blocks = "warn"

@@ -7,20 +7,15 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
-[features]
-# RealtimeSanitizer (LLVM's RTSan) around every real-time section. Turning the
-# feature on changes nothing by itself: the runtime is linked only when the
-# build also sets RTSAN_ENABLE, and `cargo xtask rtsan` sets it together with
-# RTSAN_LIB_PATH, a runtime already on this machine. Without RTSAN_LIB_PATH,
-# rtsan-standalone-sys would clone and build LLVM's compiler-rt, so never set
-# RTSAN_ENABLE by hand. Default features are off, which keeps it from
-# downloading prebuilt libraries with curl.
-rtsan = ["dep:rtsan-standalone"]
+# RealtimeSanitizer has no feature and no dependency here. The harness in
+# `rtsan/`, a workspace of its own, builds this crate with `--cfg bl_rtsan`
+# and links a runtime already installed on the machine (see `src/sanitize.rs`).
 
 [dependencies]
 # The lock-free logger's per-thread queues (decision D14).
 rtrb = "0.4.0"
-rtsan-standalone = { version = "0.3.0", default-features = false, optional = true }
+# Audio threads' set-up reports, handed to whoever reads them (decision D14).
+triple_buffer = "9.0.0"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.190"
@@ -31,8 +26,3 @@ windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_System_Th
 
 [lints]
 workspace = true
-
-[[test]]
-name = "rtsan"
-path = "tests/rtsan.rs"
-required-features = ["rtsan"]

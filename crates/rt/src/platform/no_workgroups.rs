@@ -8,8 +8,25 @@ use crate::workgroup::WorkgroupError;
 #[derive(Debug, Clone)]
 pub(crate) enum RawWorkgroup {}
 
-/// Never exists, like [`RawWorkgroup`].
-pub(crate) enum RawJoinToken {}
+/// Nothing to store: no workgroup can be joined.
+pub(crate) struct Token;
+
+impl Token {
+    pub(crate) fn new() -> Self {
+        Self
+    }
+}
+
+/// No exit hook is needed where no thread can join a workgroup.
+pub(crate) fn init_exit_hook(_leave: unsafe extern "C" fn(*mut std::ffi::c_void)) -> bool {
+    false
+}
+
+pub(crate) fn set_exit_hook(_value: *mut std::ffi::c_void) {}
+
+pub(crate) fn take_exit_hook() -> *mut std::ffi::c_void {
+    std::ptr::null_mut()
+}
 
 const NO_WORKGROUPS: &str = "audio workgroups exist only on macOS";
 
@@ -27,19 +44,15 @@ pub(crate) fn workgroup_description(workgroup: &RawWorkgroup) -> String {
     match *workgroup {}
 }
 
-pub(crate) fn workgroup_addr(workgroup: &RawWorkgroup) -> usize {
-    match *workgroup {}
-}
-
 pub(crate) fn workgroup_max_parallel_threads(workgroup: &RawWorkgroup) -> Option<u32> {
     match *workgroup {}
 }
 
-pub(crate) fn workgroup_join(workgroup: &RawWorkgroup) -> Result<RawJoinToken, i32> {
+pub(crate) fn workgroup_join(workgroup: &RawWorkgroup, _token: &mut Token) -> Result<(), i32> {
     match *workgroup {}
 }
 
-pub(crate) fn workgroup_leave(workgroup: &RawWorkgroup, _token: RawJoinToken) {
+pub(crate) fn workgroup_leave(workgroup: &RawWorkgroup, _token: &mut Token) {
     match *workgroup {}
 }
 

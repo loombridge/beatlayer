@@ -344,7 +344,9 @@ impl Backend for AsioBackend {
         }
 
         let counters = Arc::new(Counters::new());
-        // The driver's thread gets MMCSS "Pro Audio" on its first block.
+        // The driver's thread is set up in its first block, which plays
+        // silence: MMCSS "Pro Audio", unless the driver already runs it at
+        // THREAD_PRIORITY_TIME_CRITICAL, as most do.
         let thread_config = RtThreadConfig {
             period: frames_to_duration(u64::from(frames), sample_rate),
             promote: true,

@@ -219,17 +219,23 @@ pub fn permit<R>(f: impl FnOnce() -> R) -> R {
 
 /// A forbidden section that ends when the guard drops, for code that can't
 /// put the section in a closure. It's tied to the thread it was made on.
+///
+/// Where the trap isn't installed (release builds), it does nothing and
+/// touches no thread-local, so an audio thread's first block doesn't make
+/// macOS allocate thread-local storage for it.
 #[derive(Debug)]
 #[must_use = "the section ends when the guard drops"]
 pub struct Forbid {
+    counted: bool,
     _not_send: std::marker::PhantomData<*const ()>,
 }
 
 impl Forbid {
     /// Starts a forbidden section on this thread.
     pub fn enter() -> Self {
-        let _ = FORBID.try_with(|f| f.set(f.get() + 1));
+        let counted = is_installed() && FORBID.try_with(|f| f.set(f.get() + 1)).is_ok();
         Self {
+            counted,
             _not_send: std::marker::PhantomData,
         }
     }
@@ -237,13 +243,38 @@ impl Forbid {
 
 impl Drop for Forbid {
     fn drop(&mut self) {
-        let _ = FORBID.try_with(|f| f.set(f.get() - 1));
+        if self.counted {
+            let _ = FORBID.try_with(|f| f.set(f.get() - 1));
+        }
     }
 }
 
-/// Violations on this thread since it started. Real-time safe.
+/// Violations on this thread since it started. Real-time safe; where the
+/// trap isn't installed it's always 0 and touches no thread-local.
 pub fn thread_violations() -> u64 {
+    if !is_installed() {
+        return 0;
+    }
     COUNT.try_with(Cell::get).unwrap_or(0)
+}
+
+/// Touches the calling thread's trap counters, so that macOS, which
+/// allocates a thread's thread-local storage on first touch, does so now
+/// rather than in the thread's first real-time section. Set-up on threads
+/// Beatlayer starts calls it.
+///
+/// A thread an audio API owns can't run anything before its first block, so
+/// in builds with the trap that block's section is where macOS allocates
+/// these counters. That allocation is the system's, through `malloc`, so the
+/// trap doesn't count it, and it happens once per thread, in debug and test
+/// builds only.
+pub fn prepare_thread() {
+    if is_installed() {
+        let _ = FORBID.try_with(Cell::get);
+        let _ = PERMIT.try_with(Cell::get);
+        let _ = COUNT.try_with(Cell::get);
+        let _ = LAST.try_with(Cell::get);
+    }
 }
 
 /// The latest violation on this thread, if any. Real-time safe.

@@ -4,8 +4,10 @@
 //!
 //! - [`thread`]: real-time priority per platform (the Mach time-constraint
 //!   policy on macOS, MMCSS "Pro Audio" on Windows, `SCHED_FIFO` or rtkit on
-//!   Linux) and [`prepare_current_thread`], the set-up each real-time thread
-//!   runs once.
+//!   Linux) and the set-up each real-time thread runs once:
+//!   [`prepare_current_thread`] on threads Beatlayer starts, and
+//!   [`AudioThreadSetup`] on threads an audio API owns, where it allocates
+//!   nothing and nothing in it blocks.
 //! - [`workgroup`]: macOS audio workgroups, joined so the scheduler treats a
 //!   device's I/O thread and Beatlayer's real-time threads as one job.
 //! - [`denormals`]: flushing subnormal floats to zero.
@@ -64,7 +66,10 @@ mod dbus;
 #[cfg(any(target_os = "linux", all(test, unix)))]
 mod rtkit;
 
-pub use thread::{Priority, Promotion, RtThreadConfig, ThreadReport, prepare_current_thread};
+pub use thread::{
+    AudioThreadSetup, Priority, Promotion, RtThreadConfig, ThreadReport, ThreadReports,
+    prepare_current_thread,
+};
 pub use workgroup::{WorkInterval, Workgroup, WorkgroupJoin};
 
 /// Runs `f` as a real-time section on this thread: denormals are flushed to

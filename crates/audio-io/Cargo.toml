@@ -12,18 +12,12 @@ publish.workspace = true
 # directly, so no Steinberg SDK is downloaded at build time (decision D9). The
 # dependency is Windows-only, so the feature does nothing on other platforms.
 asio = ["dep:azo"]
-# Every audio block under RealtimeSanitizer, for `cargo xtask rtsan` (see
-# bl-rt's `rtsan` feature).
-rtsan = ["bl-rt/rtsan"]
 
 [dependencies]
 bl-rt.workspace = true
 # Core Audio, WASAPI shared, and ALSA. Pinned to 0.18 until its duplex streams
 # land (see the architecture's audio I/O section).
 cpal = "0.18.2"
-# The audio thread's set-up report, handed to whoever reads the stream's
-# statistics (decision D14).
-triple_buffer = "9.0.0"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # JACK alongside ALSA. Building needs the ALSA and JACK development headers and
@@ -38,8 +32,3 @@ azo = { version = "0.4.0", optional = true }
 
 [lints]
 workspace = true
-
-[[test]]
-name = "rtsan"
-path = "tests/rtsan.rs"
-required-features = ["rtsan"]

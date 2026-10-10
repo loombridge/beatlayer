@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode};
+use std::process::{Command, ExitCode, Stdio};
 
 use serde_json::Value;
 
@@ -13,16 +13,15 @@ Tasks:
   check          Run every check: format, clippy, tests, layers, deny, and the deny self-test
   layers         Check the crate layering rules
   deny-selftest  Prove that deny.toml still rejects an incompatible licence
-  rtsan          Run the real-time tests under LLVM's RealtimeSanitizer, with a runtime
-                 already on this machine (Homebrew's llvm on macOS, LLVM 20 or later on
-                 Linux, or the file RTSAN_LIB_PATH names). Arguments after `--` go to
-                 the test binaries; `-- --nocapture` shows the sanitizer's reports.
+  rtsan          Run the real-time tests in rtsan/ under LLVM's RealtimeSanitizer, with a
+                 runtime already on this machine (the file RTSAN_LIB_PATH names, or
+                 Homebrew's llvm on macOS, or LLVM 20 or later on Linux). Arguments after
+                 `--` go to the test binaries; `-- --nocapture` shows the reports.
   help           Show this message
 ";
 
-/// The packages with RealtimeSanitizer tests (a `tests/rtsan.rs` that needs
-/// their `rtsan` feature).
-const RTSAN_PACKAGES: &[&str] = &["bl-rt", "bl-audio-io"];
+/// The RealtimeSanitizer harness, a workspace of its own (see its Cargo.toml).
+const RTSAN_DIR: &str = "rtsan";
 
 /// The only crate allowed to depend on `bl-ui`.
 const APP: &str = "beatlayer";
@@ -91,7 +90,11 @@ fn check(root: &Path) -> Result<(), String> {
     let steps: Vec<Step<'_>> = vec![
         (
             "format",
-            Box::new(|| cargo(root, &["fmt", "--all", "--check"])),
+            Box::new(|| {
+                cargo(root, &["fmt", "--all", "--check"])?;
+                // The RealtimeSanitizer harness is a workspace of its own.
+                cargo(root.join(RTSAN_DIR).as_path(), &["fmt", "--check"])
+            }),
         ),
         (
             "clippy",
@@ -219,77 +222,109 @@ fn deny_selftest(root: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Runs each package's RealtimeSanitizer tests with RTSan linked in.
+/// Runs the RealtimeSanitizer harness in `rtsan/`, a workspace of its own, with
+/// a runtime already on this machine.
 ///
-/// `rtsan-standalone-sys` links the runtime only when `RTSAN_ENABLE` is set,
-/// and takes it from `RTSAN_LIB_PATH` when that is set; otherwise its build
-/// script would fetch LLVM's source and build it. So this task always sets
-/// both, to a runtime it found on this machine, and stops if there's none.
-/// It builds in `target/rtsan`, so switching RTSan on and off doesn't
-/// rebuild the normal target directory.
+/// The harness's build script links the runtime that `RTSAN_LIB_PATH` names
+/// and never fetches one, so this task finds one first and stops with
+/// instructions if there's none. The harness has no lockfile of its own: the
+/// task copies the main workspace's, so the harness builds exactly the
+/// versions the main workspace locked and `cargo deny` checked, and checks
+/// that afterwards. It builds in `target/rtsan`, with `--cfg bl_rtsan` from
+/// `rtsan/.cargo/config.toml`, so the main target directory isn't rebuilt.
 fn rtsan(root: &Path, test_args: &[String]) -> Result<(), String> {
     let runtime = rtsan_runtime()?;
     eprintln!("RealtimeSanitizer runtime: {}", runtime.display());
-    let target_dir = root.join("target").join("rtsan");
-    let cargo_test = |package: &str, extra: &[&str]| {
+    let harness = root.join(RTSAN_DIR);
+    let lockfile = harness.join("Cargo.lock");
+    std::fs::copy(root.join("Cargo.lock"), &lockfile)
+        .map_err(|e| format!("couldn't copy Cargo.lock into {RTSAN_DIR}/: {e}"))?;
+    let cargo_in_harness = |args: &[&str]| {
         let mut command = Command::new(cargo_bin());
         command
-            .args(["test", "--locked", "-p", package, "--features", "rtsan"])
-            .args(["--test", "rtsan"])
-            .args(extra)
-            .env("RTSAN_ENABLE", "1")
+            .args(args)
             .env("RTSAN_LIB_PATH", &runtime)
-            .env("CARGO_TARGET_DIR", &target_dir)
-            .current_dir(root);
+            .env("CARGO_TARGET_DIR", root.join("target").join("rtsan"))
+            // RUSTFLAGS would replace the harness's `--cfg bl_rtsan`.
+            .env_remove("RUSTFLAGS")
+            .env_remove("CARGO_ENCODED_RUSTFLAGS")
+            .current_dir(&harness);
         command
     };
-    for package in RTSAN_PACKAGES {
-        eprintln!("\n==> {package}: tests/rtsan.rs under RealtimeSanitizer");
-        let built = cargo_test(package, &["--no-run"])
+    let run = |what: &str, args: &[&str]| -> Result<(), String> {
+        eprintln!("\n==> {what}");
+        let mut command = cargo_in_harness(args);
+        if args.first() == Some(&"metadata") {
+            command.stdout(Stdio::null());
+        }
+        let status = command
             .status()
-            .map_err(|e| format!("couldn't run cargo test: {e}"))?;
-        if !built.success() {
-            return Err(format!("{package}'s RealtimeSanitizer tests didn't build"));
+            .map_err(|e| format!("couldn't run cargo: {e}"))?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(format!("{what} failed"))
         }
-        if cfg!(target_os = "macos") {
-            resign_rtsan_copies(&target_dir)?;
-        }
-        let passed_on: Vec<&str> = test_args.iter().map(String::as_str).collect();
-        let status = cargo_test(package, &[&["--"][..], &passed_on].concat())
-            .status()
-            .map_err(|e| format!("couldn't run cargo test: {e}"))?;
-        if !status.success() {
-            return Err(format!("{package}'s RealtimeSanitizer tests failed"));
-        }
-    }
-    Ok(())
+    };
+
+    run(
+        "rtsan/: resolve with the main workspace's lockfile",
+        &["metadata", "--format-version", "1"],
+    )?;
+    same_versions(&root.join("Cargo.lock"), &lockfile)?;
+    run(
+        "rtsan/: clippy",
+        &["clippy", "--all-targets", "--", "-D", "warnings"],
+    )?;
+    let mut test = vec!["test", "--"];
+    test.extend(test_args.iter().map(String::as_str));
+    run("rtsan/: the real-time tests under RealtimeSanitizer", &test)
 }
 
-/// Signs again the copies of the runtime that `rtsan-standalone-sys` keeps in
-/// its build output. Its build script changes each copy's install name, which
-/// invalidates the copy's signature, and macOS kills any process that loads a
-/// library with an invalid signature. An ad hoc signature, which is what
-/// Homebrew's copy has, is enough.
-fn resign_rtsan_copies(target_dir: &Path) -> Result<(), String> {
-    let pattern = format!(
-        "{}/debug/build/rtsan-standalone-sys-*/out/libclang_rt.rtsan_osx_dynamic.dylib",
-        target_dir.display()
-    );
-    for copy in expand(&pattern).into_iter().filter(|p| p.is_file()) {
-        let status = Command::new("codesign")
-            .args(["--force", "--sign", "-"])
-            .arg(&copy)
-            .output()
-            .map_err(|e| format!("couldn't run codesign: {e}"))?;
-        if !status.status.success() {
-            return Err(format!(
-                "couldn't sign {}: {}",
-                copy.display(),
-                String::from_utf8_lossy(&status.stderr)
-            ));
+/// Fails unless every package `harness_lock` resolves is in `main_lock` at
+/// the same version, apart from the harness itself.
+fn same_versions(main_lock: &Path, harness_lock: &Path) -> Result<(), String> {
+    let read = |path: &Path| {
+        std::fs::read_to_string(path).map_err(|e| format!("couldn't read {}: {e}", path.display()))
+    };
+    let main = locked_packages(&read(main_lock)?);
+    let drifted: Vec<String> = locked_packages(&read(harness_lock)?)
+        .into_iter()
+        .filter(|(name, _)| name != "bl-rtsan")
+        .filter(|package| !main.contains(package))
+        .map(|(name, version)| format!("{name} {version}"))
+        .collect();
+    if drifted.is_empty() {
+        eprintln!("the harness builds only versions the main Cargo.lock has");
+        Ok(())
+    } else {
+        Err(format!(
+            "the harness resolved versions the main Cargo.lock doesn't have: {}",
+            drifted.join(", ")
+        ))
+    }
+}
+
+/// The `(name, version)` of every package in a Cargo.lock.
+fn locked_packages(lockfile: &str) -> BTreeSet<(String, String)> {
+    let value = |line: &str, key: &str| {
+        line.strip_prefix(key)
+            .and_then(|rest| rest.strip_prefix(" = \""))
+            .and_then(|rest| rest.strip_suffix('"'))
+            .map(str::to_owned)
+    };
+    let mut packages = BTreeSet::new();
+    let mut name = None;
+    for line in lockfile.lines() {
+        if line == "[[package]]" {
+            name = None;
+        } else if let Some(found) = value(line, "name") {
+            name = Some(found);
+        } else if let (Some(version), Some(found)) = (value(line, "version"), name.take()) {
+            packages.insert((found, version));
         }
     }
-    Ok(())
+    packages
 }
 
 /// The RealtimeSanitizer runtime to link: `RTSAN_LIB_PATH` if set, otherwise
@@ -586,6 +621,33 @@ mod tests {
         assert!(!matches_glob("darwin", "darwinx"));
         assert!(matches_glob("a*b*c", "aXbYc"));
         assert!(!matches_glob("a*b*c", "aXcYb"));
+    }
+
+    #[test]
+    fn lockfiles_list_their_packages_with_versions() {
+        let lockfile = "\
+version = 4
+
+[[package]]
+name = \"bl-rt\"
+version = \"0.0.0\"
+dependencies = [
+ \"rtrb\",
+]
+
+[[package]]
+name = \"rtrb\"
+version = \"0.4.0\"
+source = \"registry+https://github.com/rust-lang/crates.io-index\"
+";
+        let packages = locked_packages(lockfile);
+        assert_eq!(
+            packages.into_iter().collect::<Vec<_>>(),
+            [
+                ("bl-rt".to_owned(), "0.0.0".to_owned()),
+                ("rtrb".to_owned(), "0.4.0".to_owned())
+            ]
+        );
     }
 
     #[test]

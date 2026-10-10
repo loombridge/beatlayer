@@ -1,7 +1,7 @@
 //! macOS: the Mach time-constraint policy, and audio workgroups through
 //! Beatlayer's own bindings to `os_workgroup` and Core Audio.
 
-use std::ffi::{CStr, CString, c_char, c_int, c_void};
+use std::ffi::{CStr, CString, c_char, c_void};
 use std::ptr::{self, NonNull};
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -138,11 +138,35 @@ mod ffi {
 }
 
 // ---------------------------------------------------------------------------
-// Priority
+// Threads and priority
+
+/// The kernel's ID for the calling thread. It's 64 bits and never reused
+/// while the system runs. Reading it touches no thread-local storage, which
+/// macOS allocates lazily on a thread's first use, so it's safe on a thread
+/// an audio API owns from its first instruction.
+pub(crate) fn thread_id() -> u64 {
+    let mut id = 0u64;
+    // SAFETY: a null thread means the calling thread, and `id` is writable.
+    // It reads the ID libpthread stored when the thread started.
+    unsafe { libc::pthread_threadid_np(0, &mut id) };
+    id
+}
+
+/// Does, off the real-time path, the one-time work that the calls made on an
+/// audio thread would otherwise do there: reading the clock's timebase.
+pub(crate) fn warm_up() {
+    timebase();
+}
 
 /// Nothing to undo on macOS: the policy goes with the thread.
 #[derive(Debug, Default)]
 pub(crate) struct HeldPriority;
+
+impl HeldPriority {
+    pub(crate) fn revert(&mut self) {}
+
+    pub(crate) fn forget(&mut self) {}
+}
 
 /// Mach absolute-time ticks per nanosecond, as a fraction.
 fn timebase() -> (u64, u64) {
@@ -205,15 +229,23 @@ pub(crate) fn current_priority() -> Priority {
         };
     }
 
-    let mut policy: c_int = 0;
-    // SAFETY: `sched_param` is plain data, so zeroed is a valid value.
-    let mut param: libc::sched_param = unsafe { std::mem::zeroed() };
-    // SAFETY: both pointers are to live locals.
-    let status =
-        unsafe { libc::pthread_getschedparam(libc::pthread_self(), &mut policy, &mut param) };
-    if status == 0 {
+    // Not `pthread_getschedparam`, which takes libpthread's global thread
+    // list lock: this runs on audio threads.
+    let mut info = libc::thread_extended_info::default();
+    let mut count = libc::THREAD_EXTENDED_INFO_COUNT;
+    // SAFETY: `info` and `count` describe a buffer of the size the flavour
+    // needs.
+    let status = unsafe {
+        libc::thread_info(
+            this_thread(),
+            libc::THREAD_EXTENDED_INFO as libc::thread_flavor_t,
+            (&raw mut info).cast(),
+            &mut count,
+        )
+    };
+    if status == libc::KERN_SUCCESS {
         Priority::Normal {
-            level: param.sched_priority,
+            level: info.pth_priority,
         }
     } else {
         Priority::Unknown
@@ -295,8 +327,60 @@ impl Drop for RawWorkgroup {
     }
 }
 
-/// A join token at a stable address, as `os_workgroup_join` filled it in.
-pub(crate) struct RawJoinToken(Box<ffi::os_workgroup_join_token_s>);
+/// A join token, as `os_workgroup_join` fills it in. Callers keep it boxed,
+/// at a stable address, from the join to the leave.
+pub(crate) struct Token(ffi::os_workgroup_join_token_s);
+
+impl Token {
+    pub(crate) fn new() -> Self {
+        Self(ffi::os_workgroup_join_token_s {
+            sig: 0,
+            opaque: [0; 36],
+        })
+    }
+}
+
+/// The process's one thread-exit hook for workgroup joins: a pthread key
+/// whose destructor runs on a thread as it exits, before the system checks
+/// that the thread left its workgroup. Made once, off the real-time path.
+static EXIT_KEY: OnceLock<Option<libc::pthread_key_t>> = OnceLock::new();
+
+/// Makes the exit hook's key, with `leave` as its destructor, if it doesn't
+/// exist yet. Returns whether it exists.
+pub(crate) fn init_exit_hook(leave: unsafe extern "C" fn(*mut c_void)) -> bool {
+    EXIT_KEY
+        .get_or_init(|| {
+            let mut key = 0;
+            // SAFETY: `key` is writable and `leave` is a valid destructor.
+            (unsafe { libc::pthread_key_create(&mut key, Some(leave)) } == 0).then_some(key)
+        })
+        .is_some()
+}
+
+/// Hands `value` to the calling thread's exit hook. Allocation-free: macOS
+/// keeps a thread's key values inside its thread structure. The hook must
+/// exist ([`init_exit_hook`]).
+pub(crate) fn set_exit_hook(value: *mut c_void) {
+    if let Some(Some(key)) = EXIT_KEY.get() {
+        // SAFETY: the key exists; the value is the caller's to hand over.
+        unsafe { libc::pthread_setspecific(*key, value) };
+    }
+}
+
+/// Takes back what [`set_exit_hook`] handed over on this thread, or null.
+pub(crate) fn take_exit_hook() -> *mut c_void {
+    let Some(Some(key)) = EXIT_KEY.get() else {
+        return ptr::null_mut();
+    };
+    // SAFETY: the key exists.
+    let value = unsafe { libc::pthread_getspecific(*key) };
+    if !value.is_null() {
+        // SAFETY: as above; clearing the value means the destructor won't
+        // see it.
+        unsafe { libc::pthread_setspecific(*key, ptr::null()) };
+    }
+    value
+}
 
 fn global(selector: u32) -> ffi::AudioObjectPropertyAddress {
     ffi::AudioObjectPropertyAddress {
@@ -503,11 +587,6 @@ pub(crate) fn workgroup_description(workgroup: &RawWorkgroup) -> String {
     }
 }
 
-/// The workgroup's address, which identifies it.
-pub(crate) fn workgroup_addr(workgroup: &RawWorkgroup) -> usize {
-    workgroup.as_ptr().addr()
-}
-
 pub(crate) fn workgroup_max_parallel_threads(workgroup: &RawWorkgroup) -> Option<u32> {
     // SAFETY: a null attribute asks for the default answer.
     let threads =
@@ -515,25 +594,19 @@ pub(crate) fn workgroup_max_parallel_threads(workgroup: &RawWorkgroup) -> Option
     u32::try_from(threads).ok().filter(|&n| n > 0)
 }
 
-pub(crate) fn workgroup_join(workgroup: &RawWorkgroup) -> Result<RawJoinToken, i32> {
-    let mut token = Box::new(ffi::os_workgroup_join_token_s {
-        sig: 0,
-        opaque: [0; 36],
-    });
+/// Joins the calling thread to `workgroup`, filling in `token`. Allocation-free.
+pub(crate) fn workgroup_join(workgroup: &RawWorkgroup, token: &mut Token) -> Result<(), i32> {
     // SAFETY: the workgroup is alive and the token is writable memory of
     // the size the SDK declares.
-    let status = unsafe { ffi::os_workgroup_join(workgroup.as_ptr(), &mut *token) };
-    if status == 0 {
-        Ok(RawJoinToken(token))
-    } else {
-        Err(status)
-    }
+    let status = unsafe { ffi::os_workgroup_join(workgroup.as_ptr(), &mut token.0) };
+    if status == 0 { Ok(()) } else { Err(status) }
 }
 
-pub(crate) fn workgroup_leave(workgroup: &RawWorkgroup, mut token: RawJoinToken) {
-    // SAFETY: `token` came from joining this workgroup on this thread (the
-    // public token isn't `Send`), and is used once.
-    unsafe { ffi::os_workgroup_leave(workgroup.as_ptr(), &mut *token.0) };
+/// Leaves `workgroup`. The caller makes sure `token` holds this thread's
+/// successful join of it, and leaves once.
+pub(crate) fn workgroup_leave(workgroup: &RawWorkgroup, token: &mut Token) {
+    // SAFETY: as the caller promises.
+    unsafe { ffi::os_workgroup_leave(workgroup.as_ptr(), &mut token.0) };
 }
 
 pub(crate) fn work_interval_create(name: &str) -> Result<RawWorkgroup, WorkgroupError> {

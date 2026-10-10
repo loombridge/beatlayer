@@ -14,6 +14,10 @@
 //! full queue drops the record and counts it ([`dropped`]), so a thread that
 //! logs too much loses lines rather than time.
 //!
+//! A thread an audio API owns can't register: Beatlayer's first code on it
+//! is a device callback, already under a deadline. Code there logs to a
+//! [`Writer`] made beforehand, which needs nothing from the thread.
+//!
 //! [`prepare_current_thread`]: crate::thread::prepare_current_thread
 
 use std::cell::RefCell;
@@ -199,8 +203,28 @@ impl fmt::Display for Record {
 ///
 /// Evaluates to `true` if the record was queued, `false` if it was dropped
 /// because the thread isn't registered or its queue is full.
+///
+/// Code that may run on more than one thread over its life, such as an audio
+/// callback a backend can move, logs to a [`Writer`] it owns instead, with
+/// `to:`. That needs no registration on the thread, so it works on a thread
+/// an audio API owns from its first block:
+///
+/// ```
+/// use bl_rt::log::{Level, Writer};
+///
+/// let mut log = Writer::new();
+/// bl_rt::rt_log!(to: log, Level::Info, "{} frames", 128u32);
+/// ```
 #[macro_export]
 macro_rules! rt_log {
+    (to: $writer:expr, $level:expr, $message:literal $(, $arg:expr)* $(,)?) => {
+        $writer.log($crate::log::Record::new(
+            $level,
+            ::core::module_path!(),
+            $message,
+            &[$($crate::log::Arg::from($arg)),*],
+        ))
+    };
     ($level:expr, $message:literal $(, $arg:expr)* $(,)?) => {
         $crate::log::log($crate::log::Record::new(
             $level,
@@ -231,14 +255,18 @@ pub fn register_current_thread() {
     if registered {
         return;
     }
-    let (producer, consumer) = RingBuffer::new(QUEUE_CAPACITY);
-    {
-        let mut queues = QUEUES.lock().unwrap_or_else(PoisonError::into_inner);
-        // Forget queues whose threads have exited and that hold nothing.
-        queues.retain(|queue| !(queue.consumer.is_abandoned() && queue.consumer.is_empty()));
-        queues.push(Queue { consumer });
-    }
+    let producer = new_queue();
     let _ = WRITER.try_with(|writer| *writer.borrow_mut() = Some(producer));
+}
+
+/// Makes a queue and gives its reading end to the drain.
+fn new_queue() -> Producer<Record> {
+    let (producer, consumer) = RingBuffer::new(QUEUE_CAPACITY);
+    let mut queues = QUEUES.lock().unwrap_or_else(PoisonError::into_inner);
+    // Forget queues whose writers have gone and that hold nothing.
+    queues.retain(|queue| !(queue.consumer.is_abandoned() && queue.consumer.is_empty()));
+    queues.push(Queue { consumer });
+    producer
 }
 
 /// Queues `record` on this thread's queue. Real-time safe: wait-free, no
@@ -257,6 +285,45 @@ pub fn log(record: Record) -> bool {
         DROPPED.fetch_add(1, Relaxed);
     }
     queued
+}
+
+/// A queue of its own, for code that may run on different threads over its
+/// life, one at a time: an audio callback, which a backend can move to
+/// another thread. Unlike [`log`], it uses no thread-local, so it works on a
+/// thread nobody registered, from that thread's first instruction.
+///
+/// Make it off the real-time path (it allocates and takes the drain's lock);
+/// [`log`](Self::log) is then real-time safe. [`rt_log!`](crate::rt_log)
+/// writes to one with `to:`.
+#[derive(Debug)]
+pub struct Writer {
+    producer: Producer<Record>,
+}
+
+impl Default for Writer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Writer {
+    /// A new queue, which [`drain`] reads with the others.
+    pub fn new() -> Self {
+        Self {
+            producer: new_queue(),
+        }
+    }
+
+    /// Queues `record`. Real-time safe: wait-free, no allocation, no
+    /// thread-local. Returns `false`, and counts the record as dropped, if
+    /// the queue is full.
+    pub fn log(&mut self, record: Record) -> bool {
+        let queued = self.producer.push(record).is_ok();
+        if !queued {
+            DROPPED.fetch_add(1, Relaxed);
+        }
+        queued
+    }
 }
 
 /// Records dropped since the process started.
@@ -400,6 +467,41 @@ mod tests {
         assert_eq!(texts[0], "block 0 at 48000 Hz");
         assert_eq!(texts[9], "block 9 at 48000 Hz");
         assert!(records.windows(2).all(|w| w[0].at <= w[1].at));
+    }
+
+    #[test]
+    fn a_writer_logs_from_any_thread_without_registering_or_allocating() {
+        let _turn = turn();
+        let mut writer = Writer::new();
+        let mut serials = Vec::new();
+        for _ in 0..2 {
+            let (back, serial, report) = thread::spawn(move || {
+                let serial = crate::thread::serial();
+                let (queued, report) = crate::trap::watch(|| {
+                    crate::trap::forbid(|| rt_log!(to: writer, Level::Info, "from {}", serial))
+                });
+                assert!(queued);
+                (writer, serial, report.map(|r| r.to_string()))
+            })
+            .join()
+            .unwrap();
+            writer = back;
+            assert_eq!(report, None);
+            serials.push(serial);
+        }
+        let mut texts = Vec::new();
+        drain(|record| {
+            if serials.contains(&record.thread) {
+                texts.push(record.text());
+            }
+        });
+        assert_eq!(
+            texts,
+            [
+                format!("from {}", serials[0]),
+                format!("from {}", serials[1])
+            ]
+        );
     }
 
     #[test]

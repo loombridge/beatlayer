@@ -1,11 +1,23 @@
-//! rtkit (`org.freedesktop.RealtimeKit1`): asks the system service to make
-//! the calling thread real-time.
+//! rtkit (`org.freedesktop.RealtimeKit1`): asks the system service to make a
+//! thread of this process real-time.
 //!
 //! rtkit grants `SCHED_RR` up to its `MaxRealtimePriority` (20 by default),
 //! and only to a process whose `RLIMIT_RTTIME` hard limit is at most its
-//! `RTTimeUSecMax` (200 ms by default): a real-time thread that runs that
-//! long without sleeping is sent `SIGXCPU`, so a runaway thread can't freeze
-//! the desktop. This module lowers the limit before asking.
+//! `RTTimeUSecMax` (200 ms by default): when a real-time thread runs that
+//! long without blocking, the kernel sends `SIGKILL` (`SIGXCPU` at a lower
+//! soft limit), so a runaway thread can't freeze the desktop. This module
+//! lowers both limits to that value before asking.
+//!
+//! The limit is per process, and lowering a hard limit can't be undone, so
+//! from the first request on it applies to every real-time thread in the
+//! process, including plug-ins' threads: if any of them runs that long
+//! without blocking, the kernel ends the process. The architecture's
+//! real-time section records this. Where the process may set `SCHED_FIFO`
+//! itself, rtkit isn't asked and the limit isn't touched.
+//!
+//! The conversation is a round trip to another process over a socket, with a
+//! two-second timeout, so it never runs on an audio thread. rtkit takes the
+//! thread's ID, which lets a helper thread ask on an audio thread's behalf.
 
 use std::time::Duration;
 
@@ -16,20 +28,14 @@ const SERVICE: &str = "org.freedesktop.RealtimeKit1";
 const PATH: &str = "/org/freedesktop/RealtimeKit1";
 const TIMEOUT: Duration = Duration::from_secs(2);
 
-/// Asks rtkit to make the calling thread real-time at `wanted`, or at rtkit's
-/// maximum if that's lower. Returns the priority granted.
+/// Asks rtkit to make thread `tid` of this process real-time at `wanted`, or
+/// at rtkit's maximum if that's lower. Returns the priority granted. Blocks
+/// for up to the D-Bus timeout per message.
 #[cfg(target_os = "linux")]
-pub(crate) fn make_current_thread_realtime(wanted: i32) -> Result<i32, Refusal> {
+pub(crate) fn make_thread_realtime(tid: u64, wanted: i32) -> Result<i32, Refusal> {
     let mut connection = Connection::open(&crate::dbus::system_bus_path(), TIMEOUT)
         .map_err(|e| refusal(&e, true))?;
-    // SAFETY: `gettid` always succeeds.
-    let tid = unsafe { libc::gettid() };
-    request(
-        &mut connection,
-        u64::try_from(tid).unwrap_or(0),
-        wanted,
-        lower_rttime_limit,
-    )
+    request(&mut connection, tid, wanted, lower_rttime_limit)
 }
 
 /// The conversation with rtkit, apart from the socket and the process limit,

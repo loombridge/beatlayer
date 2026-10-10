@@ -4,27 +4,21 @@
 //! calls, and a few hundred more with versions that check whether the
 //! calling thread is inside a real-time section, and stop the program with a
 //! report and a stack trace if it is. That catches what the allocation trap
-//! can't: locks, blocking system calls, and allocation by C code.
+//! can't: locks, blocking system calls, and allocation by C code, including
+//! the operating system's own.
 //!
-//! It costs nothing unless a build asks for it. Three things must line up:
-//!
-//! 1. The `rtsan` feature of this crate (or of `bl-audio-io`, which passes
-//!    it on).
-//! 2. `RTSAN_ENABLE` set while building, which makes `rtsan-standalone-sys`
-//!    link the runtime.
-//! 3. `RTSAN_LIB_PATH` naming a runtime already on the machine:
-//!    `libclang_rt.rtsan_osx_dynamic.dylib` from Homebrew's `llvm` on macOS,
-//!    or `libclang_rt.rtsan*.a` from LLVM 20 or later on Linux. Without it,
-//!    the build script would fetch and build LLVM's source, which Beatlayer's
-//!    rules forbid.
-//!
-//! `cargo xtask rtsan` finds the runtime, sets all three, and runs the tests
-//! written for RTSan, in their own target directory so the normal build isn't
-//! disturbed.
+//! It costs nothing unless a build asks for it, and no build of Beatlayer's
+//! workspace can: the code below exists only under `--cfg bl_rtsan`, which
+//! only the harness in `rtsan/` sets. That harness is a Cargo workspace of
+//! its own, outside the main one, so nothing that could fetch or build LLVM
+//! is in the main dependency graph. Its build script links a runtime already
+//! on the machine, named by `RTSAN_LIB_PATH`:
+//! `libclang_rt.rtsan_osx_dynamic.dylib` from Homebrew's `llvm` on macOS, or
+//! `libclang_rt.rtsan*.a` from LLVM 20 or later on Linux. `cargo xtask rtsan`
+//! finds one and runs the harness's tests.
 
 /// Whether this build runs real-time sections under RealtimeSanitizer.
-pub const ACTIVE: bool = cfg!(feature = "rtsan")
-    && option_env!("RTSAN_ENABLE").is_some()
+pub const ACTIVE: bool = cfg!(bl_rtsan)
     && cfg!(any(
         target_os = "macos",
         all(
@@ -32,6 +26,22 @@ pub const ACTIVE: bool = cfg!(feature = "rtsan")
             any(target_arch = "x86_64", target_arch = "aarch64")
         )
     ));
+
+/// The runtime's entry points (`compiler-rt/lib/rtsan/rtsan.h`), which the
+/// harness links.
+#[cfg(bl_rtsan)]
+mod ffi {
+    use std::ffi::c_char;
+
+    unsafe extern "C" {
+        pub(super) fn __rtsan_realtime_enter();
+        pub(super) fn __rtsan_realtime_exit();
+        pub(super) fn __rtsan_disable();
+        pub(super) fn __rtsan_enable();
+        pub(super) fn __rtsan_ensure_initialized();
+        pub(super) fn __rtsan_notify_blocking_call(function: *const c_char);
+    }
+}
 
 /// Marks the calling thread as inside a real-time section until it drops.
 #[derive(Debug)]
@@ -42,8 +52,12 @@ pub(crate) struct Scope {
 impl Scope {
     #[inline]
     pub(crate) fn enter() -> Self {
-        #[cfg(feature = "rtsan")]
-        rtsan_standalone::realtime_enter();
+        // SAFETY: the runtime keeps a per-thread depth; this guard pairs the
+        // enter with an exit on the same thread.
+        #[cfg(bl_rtsan)]
+        unsafe {
+            ffi::__rtsan_realtime_enter()
+        };
         Self {
             _not_send: std::marker::PhantomData,
         }
@@ -53,23 +67,42 @@ impl Scope {
 impl Drop for Scope {
     #[inline]
     fn drop(&mut self) {
-        #[cfg(feature = "rtsan")]
-        rtsan_standalone::realtime_exit();
+        // SAFETY: pairs the enter in `Scope::enter` on this thread.
+        #[cfg(bl_rtsan)]
+        unsafe {
+            ffi::__rtsan_realtime_exit()
+        };
     }
 }
 
 /// Initialises the sanitizer's runtime, if it's linked. Set-up calls this so
 /// the runtime's own first-use work never happens inside a real-time section.
 pub fn ensure_initialized() {
-    #[cfg(feature = "rtsan")]
-    rtsan_standalone::ensure_initialized();
+    // SAFETY: may be called any number of times, from any thread.
+    #[cfg(bl_rtsan)]
+    unsafe {
+        ffi::__rtsan_ensure_initialized()
+    };
 }
 
 /// Runs `f` with RTSan's reports switched off, for a call that RTSan can't
 /// see is safe. Each use needs a comment saying why it's safe.
 pub fn unchecked<R>(f: impl FnOnce() -> R) -> R {
-    #[cfg(feature = "rtsan")]
-    let _off = rtsan_standalone::ScopedDisabler::default();
+    #[cfg(bl_rtsan)]
+    struct Enable;
+    #[cfg(bl_rtsan)]
+    impl Drop for Enable {
+        fn drop(&mut self) {
+            // SAFETY: pairs the disable below on this thread.
+            unsafe { ffi::__rtsan_enable() };
+        }
+    }
+    // SAFETY: paired with the enable when `_enable` drops, even on unwind.
+    #[cfg(bl_rtsan)]
+    let _enable = {
+        unsafe { ffi::__rtsan_disable() };
+        Enable
+    };
     f()
 }
 
@@ -77,8 +110,11 @@ pub fn unchecked<R>(f: impl FnOnce() -> R) -> R {
 /// real-time section is reported even if nothing it calls is intercepted:
 /// for example a function that spins on a lock built from atomics.
 pub fn notify_blocking(function: &'static std::ffi::CStr) {
-    #[cfg(feature = "rtsan")]
-    rtsan_standalone::notify_blocking_call(function);
-    #[cfg(not(feature = "rtsan"))]
+    // SAFETY: `function` is a valid C string for the life of the program.
+    #[cfg(bl_rtsan)]
+    unsafe {
+        ffi::__rtsan_notify_blocking_call(function.as_ptr())
+    };
+    #[cfg(not(bl_rtsan))]
     let _ = function;
 }

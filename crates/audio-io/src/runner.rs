@@ -3,8 +3,8 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use bl_rt::log::Level;
-use bl_rt::{RtThreadConfig, ThreadReport, WorkgroupJoin, rt_log};
+use bl_rt::log::{Level, Writer};
+use bl_rt::{AudioThreadSetup, RtThreadConfig, WorkgroupJoin, rt_log};
 
 use crate::stats::{Counters, DROPOUT_MERGE, GapDetector};
 use crate::{AudioBuffer, AudioBufferMut, AudioCallback, ProcessContext};
@@ -16,9 +16,19 @@ use crate::{AudioBuffer, AudioBufferMut, AudioCallback, ProcessContext};
 /// device callback and [`run`](Self::run) once per block, from the backend's
 /// audio thread, and nothing else touches the callback while the stream runs.
 /// That makes this the place for what every audio thread needs: real-time
-/// set-up on each new thread ([`prepare_thread`](Self::prepare_thread)), and
-/// every block run as a real-time section (denormals flushed, heap use
-/// trapped, RealtimeSanitizer watching when it's built in).
+/// set-up on each new thread, and every block run as a real-time section
+/// (denormals flushed, heap use trapped, RealtimeSanitizer watching when
+/// it's built in).
+///
+/// The audio thread usually belongs to the audio API, so Beatlayer's first
+/// code on it is a block with its deadline already running. Everything the
+/// set-up needs is allocated here, when the stream opens, and the block that
+/// finds itself on a new thread does the set-up instead of calling the
+/// callback, as a real-time section like any other, and plays silence (see
+/// [`AudioThreadSetup`]). That happens before a stream's first block, and
+/// again whenever a block arrives on a different thread, because a backend
+/// can move its callback mid-stream (Core Audio does when the default device
+/// changes).
 pub(crate) struct CallbackRunner {
     callback: Box<dyn AudioCallback>,
     counters: Arc<Counters>,
@@ -30,13 +40,11 @@ pub(crate) struct CallbackRunner {
     last_detection: Option<u64>,
     /// [`DROPOUT_MERGE`] in frames.
     merge_frames: u64,
-    /// What each new audio thread's set-up asks for.
-    thread_config: RtThreadConfig,
-    /// The [thread serial](bl_rt::thread::serial) of the thread set up last,
-    /// or 0 before the first.
-    prepared_on: u64,
-    /// Where set-up reports go, for [`StreamStats`](crate::StreamStats).
-    report: triple_buffer::Input<Option<ThreadReport>>,
+    /// Each new audio thread's set-up, prepared when the stream opened.
+    setup: AudioThreadSetup,
+    /// Where the audio thread logs. Made here, so logging needs nothing from
+    /// a thread the audio API owns.
+    log: Writer,
 }
 
 impl CallbackRunner {
@@ -44,6 +52,9 @@ impl CallbackRunner {
     /// whose callback takes longer than the block lasts counts as late; the
     /// free-running null device turns this off because it has no deadlines.
     /// `thread_config` is what each audio thread's set-up asks for.
+    ///
+    /// Runs when the stream opens, off the audio thread: it allocates what
+    /// the audio thread's set-up and logging will need.
     pub(crate) fn new(
         callback: Box<dyn AudioCallback>,
         counters: Arc<Counters>,
@@ -51,7 +62,8 @@ impl CallbackRunner {
         check_deadlines: bool,
         thread_config: RtThreadConfig,
     ) -> Self {
-        let report = counters.thread_report_input();
+        let (setup, reports) = AudioThreadSetup::new(thread_config);
+        counters.set_thread_reports(reports);
         Self {
             callback,
             counters,
@@ -61,9 +73,8 @@ impl CallbackRunner {
             check_deadlines,
             last_detection: None,
             merge_frames: duration_to_frames(DROPOUT_MERGE, sample_rate),
-            thread_config,
-            prepared_on: 0,
-            report,
+            setup,
+            log: Writer::new(),
         }
     }
 
@@ -73,23 +84,48 @@ impl CallbackRunner {
         self.counters.record_device_callback(frames);
     }
 
-    /// Runs one block: sets up the calling thread if it's new, then, as a
-    /// real-time section, clears `output`, calls the callback, and counts
-    /// gaps and late blocks. `timestamp` is when the device handles the
-    /// block's first frame on the backend's clock, if the backend says.
+    /// Runs one block as a real-time section. On a thread that's already set
+    /// up, it clears `output`, calls the callback, and counts gaps and late
+    /// blocks. On a new thread, it sets the thread up instead and leaves
+    /// `output` silent. `timestamp` is when the device handles the block's
+    /// first frame on the backend's clock, if the backend says.
     pub(crate) fn run(
         &mut self,
         timestamp: Option<Duration>,
         input: &AudioBuffer<'_>,
         output: &mut AudioBufferMut<'_>,
     ) {
-        self.prepare_thread();
         let heap_before = bl_rt::trap::thread_violations();
-        bl_rt::realtime(|| self.run_block(timestamp, input, output));
-        let heap_operations = bl_rt::trap::thread_violations() - heap_before;
+        bl_rt::realtime(|| {
+            if self.setup.is_current_thread() {
+                self.run_block(timestamp, input, output);
+            } else {
+                self.set_up_in_block(timestamp, output);
+            }
+        });
+        self.count_heap_use(heap_before);
+    }
+
+    /// Sets up the calling thread now, if it isn't yet, so its first block
+    /// can go to the callback. For a backend that drives a thread of its
+    /// own: it calls this before its first block, before the block's
+    /// deadline starts. The set-up still runs as a real-time section.
+    pub(crate) fn prepare_thread(&mut self) {
+        if !self.setup.is_current_thread() {
+            let heap_before = bl_rt::trap::thread_violations();
+            bl_rt::realtime(|| self.set_up_thread());
+            self.count_heap_use(heap_before);
+        }
+    }
+
+    /// Counts and logs heap use in the real-time section that just ended, if
+    /// the allocation trap saw any since `before`.
+    fn count_heap_use(&mut self, before: u64) {
+        let heap_operations = bl_rt::trap::thread_violations() - before;
         if heap_operations > 0 {
             self.counters.record_heap_operations(heap_operations);
             rt_log!(
+                to: self.log,
                 Level::Error,
                 "{} heap operations on the audio thread in the block at frame {}",
                 heap_operations,
@@ -98,30 +134,27 @@ impl CallbackRunner {
         }
     }
 
-    /// Sets up the calling thread for real-time work if this runner hasn't
-    /// yet: raises its priority, joins the workgroup, and reports how that
-    /// went. Runs before a stream's first block, and again whenever a block
-    /// arrives on a different thread, because a backend can move its
-    /// callback mid-stream (Core Audio does when the default device changes).
-    ///
-    /// A backend that drives its own thread may call this before its first
-    /// block, so the thread is ready before the block's deadline starts.
-    pub(crate) fn prepare_thread(&mut self) {
-        let thread = bl_rt::thread::serial();
-        if thread == self.prepared_on {
-            return;
-        }
-        self.prepared_on = thread;
-        let report = bl_rt::prepare_current_thread(&self.thread_config);
-        self.report.write(Some(report));
+    /// Undoes the set-up on a thread the backend owns and is about to end:
+    /// leaves the workgroup now, rather than in thread-exit clean-up.
+    pub(crate) fn release_thread(&mut self) {
+        self.setup.release();
+    }
+
+    /// The set-up itself: allocation-free, and nothing in it blocks (see
+    /// [`AudioThreadSetup::enter`]).
+    fn set_up_thread(&mut self) {
+        let report = self.setup.enter();
         let setups = self.counters.record_thread_setup();
         self.counters.mark_audio_thread_started();
         rt_log!(
+            to: self.log,
             Level::Info,
             "audio thread set up (set-up {} of this stream): {} priority, workgroup {}",
             setups,
             if report.priority.is_realtime() {
                 "real-time"
+            } else if report.promotion == bl_rt::Promotion::Pending {
+                "raising to real-time"
             } else {
                 "normal"
             },
@@ -134,14 +167,16 @@ impl CallbackRunner {
         );
     }
 
-    /// Undoes [`prepare_thread`](Self::prepare_thread) on a thread the
-    /// backend owns and is about to end: leaves the workgroup now rather than
-    /// in thread-exit clean-up, whose order the system doesn't promise.
-    pub(crate) fn release_thread(&mut self) {
-        if self.prepared_on == bl_rt::thread::serial() {
-            bl_rt::thread::release_current_thread();
-            self.prepared_on = 0;
-        }
+    /// The block that finds the callback on a new thread: sets the thread up
+    /// and leaves `output` silent, so set-up never shares a deadline with
+    /// audio work. The block still passes on the device's clock, so the
+    /// callback's next block starts after it.
+    fn set_up_in_block(&mut self, timestamp: Option<Duration>, output: &mut AudioBufferMut<'_>) {
+        let began = Instant::now();
+        self.set_up_thread();
+        output.fill(0.0);
+        let took = began.elapsed();
+        self.finish_block(timestamp, output.frames(), took);
     }
 
     fn run_block(
@@ -150,15 +185,8 @@ impl CallbackRunner {
         input: &AudioBuffer<'_>,
         output: &mut AudioBufferMut<'_>,
     ) {
-        if self.counters.take_resync() {
-            self.gaps.reset();
-        }
-
         let frames = output.frames();
         debug_assert_eq!(input.frames(), frames, "input and output blocks differ");
-        let lasts = frames_to_duration(frames as u64, self.sample_rate);
-        let gap = timestamp.is_some_and(|start| self.gaps.observe(start, lasts));
-
         output.fill(0.0);
         let ctx = ProcessContext {
             sample_rate: self.sample_rate,
@@ -169,7 +197,17 @@ impl CallbackRunner {
         let began = Instant::now();
         self.callback.process(&ctx, input, output);
         let took = began.elapsed();
+        self.finish_block(timestamp, frames, took);
+    }
 
+    /// Counts a block of `frames` that took `took`: checks the device clock
+    /// for a gap, the deadline, and new xruns, and moves the stream on.
+    fn finish_block(&mut self, timestamp: Option<Duration>, frames: usize, took: Duration) {
+        if self.counters.take_resync() {
+            self.gaps.reset();
+        }
+        let lasts = frames_to_duration(frames as u64, self.sample_rate);
+        let gap = timestamp.is_some_and(|start| self.gaps.observe(start, lasts));
         let late = self.check_deadlines && took > lasts;
         self.counters.record_block(frames, took, late, gap);
         let xrun = self.counters.take_new_xruns() > 0;
@@ -274,6 +312,7 @@ mod tests {
         let (recorder, seen) = Recorder::new(3);
         let counters = Arc::new(Counters::new());
         let mut runner = runner(recorder, &counters);
+        runner.prepare_thread();
         // The previous block's samples are still in the scratch buffer.
         let mut out = PlanarScratch::new(2, 64);
         for block in 0..3u64 {
@@ -293,6 +332,93 @@ mod tests {
             stats.heap_operations, 0,
             "the runner's own path stays off the heap"
         );
+    }
+
+    /// A thread the audio API owns runs Beatlayer's code first in a block:
+    /// that block sets the thread up and plays silence, and the callback's
+    /// first block is the next one, at the next position on the device's
+    /// clock.
+    #[test]
+    fn a_new_threads_first_block_sets_it_up_and_plays_silence() {
+        let (recorder, seen) = Recorder::new(3);
+        let counters = Arc::new(Counters::new());
+        let mut runner = runner(recorder, &counters);
+        let mut out = PlanarScratch::new(2, 64);
+        // Left over from before, so a silent block can be told apart.
+        out.view_mut(64).fill(0.5);
+        let mut silent = Vec::new();
+        for block in 0..3u64 {
+            let mut view = out.view_mut(64);
+            let start = frames_to_duration(block * 64, 48_000);
+            runner.run(Some(start), &AudioBuffer::empty(64), &mut view);
+            silent.push(view.as_buffer().iter().flatten().all(|&s| s == 0.0));
+        }
+        assert_eq!(silent, [true, false, false]);
+        let positions: Vec<u64> = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(ctx, _)| ctx.position)
+            .collect();
+        assert_eq!(
+            positions,
+            [64, 128],
+            "the set-up block isn't the callback's"
+        );
+        let stats = counters.snapshot();
+        assert_eq!((stats.blocks, stats.frames), (3, 192));
+        assert_eq!(
+            (stats.gaps, stats.dropouts),
+            (0, 0),
+            "the device clock runs on"
+        );
+        assert_eq!(stats.audio_thread_setups, 1);
+    }
+
+    /// The set-up a block does on a new thread, with everything a real
+    /// stream asks for (real-time priority and, on macOS, a workgroup it
+    /// really joins), allocates nothing. The runner runs it inside the
+    /// block's real-time section, so the trap counts what it does.
+    #[test]
+    fn set_up_in_a_block_stays_off_the_heap() {
+        #[cfg(target_os = "macos")]
+        let interval = bl_rt::WorkInterval::new("bl-audio-io runner test").unwrap();
+        let counters = Arc::new(Counters::new());
+        let mut runner = CallbackRunner::new(
+            Box::new(Recorder::new(8).0),
+            Arc::clone(&counters),
+            48_000,
+            true,
+            RtThreadConfig {
+                period: frames_to_duration(128, 48_000),
+                promote: true,
+                #[cfg(target_os = "macos")]
+                workgroup: Some(interval.workgroup().clone()),
+                #[cfg(not(target_os = "macos"))]
+                workgroup: None,
+            },
+        );
+        let (runner, first) = std::thread::spawn(move || {
+            let mut out = PlanarScratch::new(1, 128);
+            let ((), heap) = bl_rt::trap::watch(|| block_at(&mut runner, &mut out, 0));
+            block_at(&mut runner, &mut out, 128);
+            runner.release_thread();
+            (runner, heap.map(|heap| heap.to_string()))
+        })
+        .join()
+        .unwrap();
+        drop(runner);
+        assert_eq!(first, None, "the set-up block touched the heap");
+        let stats = counters.snapshot();
+        assert_eq!(stats.heap_operations, 0);
+        assert_eq!(stats.audio_thread_setups, 1);
+        let report = stats.audio_thread.expect("a set-up report");
+        #[cfg(any(target_os = "macos", windows))]
+        assert!(report.priority.is_realtime(), "{}", report.priority);
+        #[cfg(target_os = "macos")]
+        assert_eq!(report.workgroup, WorkgroupJoin::Joined);
+        #[cfg(target_os = "linux")]
+        let _ = report;
     }
 
     #[test]
@@ -365,7 +491,7 @@ mod tests {
             .unwrap();
         }
         let stats = counters.snapshot();
-        assert_eq!(stats.blocks, 6);
+        assert_eq!(stats.blocks, 6, "two of them set threads up");
         assert_eq!(stats.audio_thread_setups, 2);
         let report = stats.audio_thread.expect("a set-up report");
         assert_eq!(report.promotion, bl_rt::Promotion::NotRequested);
@@ -389,12 +515,13 @@ mod tests {
         let counters = Arc::new(Counters::new());
         let mut runner = runner(Allocator, &counters);
         let mut out = PlanarScratch::new(1, 128);
-        block_at(&mut runner, &mut out, 0);
+        block_at(&mut runner, &mut out, 0); // Sets the thread up.
         block_at(&mut runner, &mut out, 128);
+        block_at(&mut runner, &mut out, 256);
         assert_eq!(
             counters.snapshot().heap_operations,
             4,
-            "an allocation and a free per block"
+            "an allocation and a free per block the callback ran"
         );
     }
 
@@ -415,6 +542,7 @@ mod tests {
         let result = Arc::new(AtomicU32::new(u32::MAX));
         let counters = Arc::new(Counters::new());
         let mut runner = runner(Halver(Arc::clone(&result)), &counters);
+        runner.prepare_thread();
         block_at(&mut runner, &mut PlanarScratch::new(1, 128), 0);
         assert_eq!(f32::from_bits(result.load(Ordering::Relaxed)), 0.0);
         let outside = black_box(f32::MIN_POSITIVE) / black_box(2.0f32);

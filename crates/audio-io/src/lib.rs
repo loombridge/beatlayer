@@ -470,7 +470,8 @@ pub struct ProcessContext {
     pub sample_rate: u32,
     /// Frames in this block.
     pub frames: usize,
-    /// Frames the stream processed before this block.
+    /// Frames the stream played before this block, including any silent
+    /// block in which a new audio thread was set up.
     pub position: u64,
     /// When the device handles this block, on the backend's clock, if the
     /// backend says. Only differences between timestamps mean anything.

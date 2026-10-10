@@ -1,6 +1,9 @@
 //! Each platform's way of reading and raising thread priority, and of
 //! handling workgroups (macOS only). Every module provides the same items:
-//! `HeldPriority`, `current_priority`, `promote`, and the workgroup calls.
+//! `warm_up`, `HeldPriority` (with `revert` and `forget`),
+//! `current_priority`, `promote`, and the workgroup calls. Linux adds
+//! `promote_thread` and `priority_of`, which take a thread ID, for the
+//! helper thread that raises audio threads there.
 
 #[cfg(target_os = "macos")]
 mod macos;

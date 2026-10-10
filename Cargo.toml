@@ -2,7 +2,9 @@
 resolver = "3"
 members = ["crates/*", "xtask"]
 # Spikes are throwaway experiments with their own lockfiles (WP-0.8a, 0.8b).
-exclude = ["xtask/fixtures", "spikes"]
+# `rtsan` is the RealtimeSanitizer harness, a workspace of its own so that
+# nothing able to fetch LLVM is ever in this workspace's graph (WP-0.4).
+exclude = ["xtask/fixtures", "spikes", "rtsan"]
 
 [workspace.package]
 version = "0.0.0"
@@ -34,6 +36,8 @@ bl-ui = { path = "crates/ui" }
 [workspace.lints.rust]
 rust_2018_idioms = { level = "warn", priority = -1 }
 unsafe_op_in_unsafe_fn = "deny"
+# `bl_rtsan` is set only by the RealtimeSanitizer harness in `rtsan/`.
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(bl_rtsan)"] }
 unused_must_use = "deny"
 
 [workspace.lints.clippy]

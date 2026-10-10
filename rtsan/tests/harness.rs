@@ -1,5 +1,6 @@
-//! RealtimeSanitizer catches what the allocation trap can't. Run these with
-//! `cargo xtask rtsan`; in a build without RTSan linked they skip and say so.
+//! RealtimeSanitizer catches what the allocation trap can't. These tests run
+//! `bl-rt`'s harness under it, with the trap installed as in every Beatlayer
+//! test binary.
 //!
 //! Each `child_*` test breaks one real-time rule. RTSan stops a process at
 //! its first violation, so the checks run each child in a process of its own
@@ -15,14 +16,11 @@ use std::time::Duration;
 
 use bl_rt::log::Level;
 
-fn active() -> bool {
-    if !bl_rt::sanitize::ACTIVE {
-        eprintln!(
-            "skipped: RealtimeSanitizer isn't linked into this build; run `cargo xtask rtsan`"
-        );
-    }
-    bl_rt::sanitize::ACTIVE
-}
+// Without `--cfg bl_rtsan` (`rtsan/.cargo/config.toml`), this doesn't build.
+const _: () = assert!(
+    bl_rt::sanitize::ACTIVE,
+    "bl-rt wasn't built with --cfg bl_rtsan; run `cargo xtask rtsan`"
+);
 
 fn run_child(name: &str) -> Output {
     Command::new(std::env::current_exe().unwrap())
@@ -96,29 +94,23 @@ fn child_allocates() {
 
 #[test]
 fn a_test_that_takes_a_mutex_fails_under_rtsan() {
-    if active() {
-        // Linux's report names the futex system call instead; CI checks it.
-        let call = if cfg!(target_os = "macos") {
-            "pthread_mutex_lock"
-        } else {
-            "Intercepted call to real-time unsafe function"
-        };
-        assert_caught("child_takes_a_mutex", call);
-    }
+    // Linux reports the futex system call that a waiting mutex makes.
+    let call = if cfg!(target_os = "macos") {
+        "pthread_mutex_lock"
+    } else {
+        "Intercepted call to real-time unsafe function"
+    };
+    assert_caught("child_takes_a_mutex", call);
 }
 
 #[test]
 fn a_test_that_sleeps_fails_under_rtsan() {
-    if active() {
-        assert_caught("child_sleeps", "sleep");
-    }
+    assert_caught("child_sleeps", "sleep");
 }
 
 #[test]
 fn a_test_that_allocates_fails_under_rtsan() {
-    if active() {
-        assert_caught("child_allocates", "malloc");
-    }
+    assert_caught("child_allocates", "malloc");
 }
 
 /// What a real-time thread does every block, done under RTSan: clock reads,
@@ -126,20 +118,21 @@ fn a_test_that_allocates_fails_under_rtsan() {
 /// whole test binary, which fails the run.
 #[test]
 fn the_harness_itself_passes_under_rtsan() {
-    let rtsan = active();
     thread::spawn(move || {
         let report = bl_rt::prepare_current_thread(&bl_rt::RtThreadConfig {
             period: Duration::from_millis(5),
             promote: false,
             workgroup: None,
         });
-        assert_eq!(report.sanitizer_active, rtsan);
+        assert!(report.sanitizer_active);
         let counter = std::sync::atomic::AtomicU64::new(0);
+        let mut writer = bl_rt::log::Writer::new();
         for block in 0..100u64 {
             bl_rt::rt_test!({
                 let began = std::time::Instant::now();
                 counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 bl_rt::rt_log!(Level::Debug, "block {} took {}", block, began.elapsed());
+                bl_rt::rt_log!(to: writer, Level::Debug, "block {}", block);
                 assert!(bl_rt::denormals::flushing() || !bl_rt::denormals::SUPPORTED);
             });
         }

@@ -81,7 +81,25 @@ fn child_takes_a_mutex() {
 #[test]
 #[ignore = "breaks a real-time rule on purpose; run by a test below"]
 fn child_sleeps() {
-    bl_rt::rt_test!({ thread::sleep(Duration::from_micros(10)) });
+    bl_rt::rt_test!({ sleep_briefly() });
+}
+
+/// Sleeps for 10 µs. Rust's `thread::sleep` is `nanosleep` on macOS, which
+/// RTSan intercepts, but `clock_nanosleep` on Linux, which LLVM 20's RTSan
+/// doesn't stop (CI showed it), so on Linux this calls `nanosleep` itself.
+/// The architecture's real-time rule 1 records the gap.
+fn sleep_briefly() {
+    #[cfg(target_os = "linux")]
+    {
+        let request = libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 10_000,
+        };
+        // SAFETY: `request` is a valid duration and the remainder may be null.
+        unsafe { libc::nanosleep(&request, std::ptr::null_mut()) };
+    }
+    #[cfg(not(target_os = "linux"))]
+    thread::sleep(Duration::from_micros(10));
 }
 
 #[test]

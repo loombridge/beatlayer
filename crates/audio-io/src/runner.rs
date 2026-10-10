@@ -3,6 +3,9 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use bl_rt::log::Level;
+use bl_rt::{RtThreadConfig, ThreadReport, WorkgroupJoin, rt_log};
+
 use crate::stats::{Counters, DROPOUT_MERGE, GapDetector};
 use crate::{AudioBuffer, AudioBufferMut, AudioCallback, ProcessContext};
 
@@ -12,8 +15,10 @@ use crate::{AudioBuffer, AudioBufferMut, AudioCallback, ProcessContext};
 /// Every backend calls [`device_callback`](Self::device_callback) once per
 /// device callback and [`run`](Self::run) once per block, from the backend's
 /// audio thread, and nothing else touches the callback while the stream runs.
-/// That makes this the place for anything that must happen on the audio thread
-/// (see [`on_audio_thread_start`](Self::on_audio_thread_start)).
+/// That makes this the place for what every audio thread needs: real-time
+/// set-up on each new thread ([`prepare_thread`](Self::prepare_thread)), and
+/// every block run as a real-time section (denormals flushed, heap use
+/// trapped, RealtimeSanitizer watching when it's built in).
 pub(crate) struct CallbackRunner {
     callback: Box<dyn AudioCallback>,
     counters: Arc<Counters>,
@@ -21,23 +26,32 @@ pub(crate) struct CallbackRunner {
     position: u64,
     gaps: GapDetector,
     check_deadlines: bool,
-    started: bool,
     /// Where the latest dropout detection happened, in stream frames.
     last_detection: Option<u64>,
     /// [`DROPOUT_MERGE`] in frames.
     merge_frames: u64,
+    /// What each new audio thread's set-up asks for.
+    thread_config: RtThreadConfig,
+    /// The [thread serial](bl_rt::thread::serial) of the thread set up last,
+    /// or 0 before the first.
+    prepared_on: u64,
+    /// Where set-up reports go, for [`StreamStats`](crate::StreamStats).
+    report: triple_buffer::Input<Option<ThreadReport>>,
 }
 
 impl CallbackRunner {
     /// A runner for a stream at `sample_rate`. With `check_deadlines`, a block
     /// whose callback takes longer than the block lasts counts as late; the
     /// free-running null device turns this off because it has no deadlines.
+    /// `thread_config` is what each audio thread's set-up asks for.
     pub(crate) fn new(
         callback: Box<dyn AudioCallback>,
         counters: Arc<Counters>,
         sample_rate: u32,
         check_deadlines: bool,
+        thread_config: RtThreadConfig,
     ) -> Self {
+        let report = counters.thread_report_input();
         Self {
             callback,
             counters,
@@ -45,9 +59,11 @@ impl CallbackRunner {
             position: 0,
             gaps: GapDetector::default(),
             check_deadlines,
-            started: false,
             last_detection: None,
             merge_frames: duration_to_frames(DROPOUT_MERGE, sample_rate),
+            thread_config,
+            prepared_on: 0,
+            report,
         }
     }
 
@@ -57,19 +73,83 @@ impl CallbackRunner {
         self.counters.record_device_callback(frames);
     }
 
-    /// Runs one block: clears `output`, calls the callback, and counts gaps
-    /// and late blocks. `timestamp` is when the device handles the block's
-    /// first frame on the backend's clock, if the backend says.
+    /// Runs one block: sets up the calling thread if it's new, then, as a
+    /// real-time section, clears `output`, calls the callback, and counts
+    /// gaps and late blocks. `timestamp` is when the device handles the
+    /// block's first frame on the backend's clock, if the backend says.
     pub(crate) fn run(
         &mut self,
         timestamp: Option<Duration>,
         input: &AudioBuffer<'_>,
         output: &mut AudioBufferMut<'_>,
     ) {
-        if !self.started {
-            self.started = true;
-            self.on_audio_thread_start();
+        self.prepare_thread();
+        let heap_before = bl_rt::trap::thread_violations();
+        bl_rt::realtime(|| self.run_block(timestamp, input, output));
+        let heap_operations = bl_rt::trap::thread_violations() - heap_before;
+        if heap_operations > 0 {
+            self.counters.record_heap_operations(heap_operations);
+            rt_log!(
+                Level::Error,
+                "{} heap operations on the audio thread in the block at frame {}",
+                heap_operations,
+                self.position
+            );
         }
+    }
+
+    /// Sets up the calling thread for real-time work if this runner hasn't
+    /// yet: raises its priority, joins the workgroup, and reports how that
+    /// went. Runs before a stream's first block, and again whenever a block
+    /// arrives on a different thread, because a backend can move its
+    /// callback mid-stream (Core Audio does when the default device changes).
+    ///
+    /// A backend that drives its own thread may call this before its first
+    /// block, so the thread is ready before the block's deadline starts.
+    pub(crate) fn prepare_thread(&mut self) {
+        let thread = bl_rt::thread::serial();
+        if thread == self.prepared_on {
+            return;
+        }
+        self.prepared_on = thread;
+        let report = bl_rt::prepare_current_thread(&self.thread_config);
+        self.report.write(Some(report));
+        let setups = self.counters.record_thread_setup();
+        self.counters.mark_audio_thread_started();
+        rt_log!(
+            Level::Info,
+            "audio thread set up (set-up {} of this stream): {} priority, workgroup {}",
+            setups,
+            if report.priority.is_realtime() {
+                "real-time"
+            } else {
+                "normal"
+            },
+            match report.workgroup {
+                WorkgroupJoin::None => "none",
+                WorkgroupJoin::Joined => "joined",
+                WorkgroupJoin::AlreadyMember => "already a member",
+                WorkgroupJoin::Failed(_) => "join failed",
+            }
+        );
+    }
+
+    /// Undoes [`prepare_thread`](Self::prepare_thread) on a thread the
+    /// backend owns and is about to end: leaves the workgroup now rather than
+    /// in thread-exit clean-up, whose order the system doesn't promise.
+    pub(crate) fn release_thread(&mut self) {
+        if self.prepared_on == bl_rt::thread::serial() {
+            bl_rt::thread::release_current_thread();
+            self.prepared_on = 0;
+        }
+    }
+
+    fn run_block(
+        &mut self,
+        timestamp: Option<Duration>,
+        input: &AudioBuffer<'_>,
+        output: &mut AudioBufferMut<'_>,
+    ) {
         if self.counters.take_resync() {
             self.gaps.reset();
         }
@@ -110,17 +190,6 @@ impl CallbackRunner {
         }
         self.last_detection = Some(self.position);
     }
-
-    /// Runs on the audio thread just before the stream's first block.
-    ///
-    /// WP-0.4 adds real-time priority, the macOS audio workgroup join,
-    /// denormal flushing, and the allocation trap here. A backend can move its
-    /// callback to a new thread mid-stream (Core Audio does when the default
-    /// device changes), so per-thread set-up should check the OS thread ID on
-    /// each block rather than rely on this running once per thread.
-    fn on_audio_thread_start(&mut self) {
-        self.counters.mark_audio_thread_started();
-    }
 }
 
 /// How long `frames` frames last at `sample_rate`.
@@ -139,10 +208,27 @@ fn duration_to_frames(duration: Duration, sample_rate: u32) -> u64 {
 mod tests {
     use super::*;
     use crate::buffer::PlanarScratch;
+    use std::hint::black_box;
     use std::sync::Mutex;
+    use std::sync::atomic::{AtomicU32, Ordering};
 
-    /// Records each block's context and whether its output arrived silent.
-    struct Recorder(Arc<Mutex<Vec<(ProcessContext, bool)>>>);
+    /// Each block's context and whether its output arrived silent.
+    type Seen = Arc<Mutex<Vec<(ProcessContext, bool)>>>;
+
+    /// Records what [`Seen`] holds.
+    struct Recorder(Seen);
+
+    impl Recorder {
+        /// A recorder with room for `blocks` blocks, ready to record without
+        /// allocating.
+        fn new(blocks: usize) -> (Self, Seen) {
+            let seen = Arc::new(Mutex::new(Vec::with_capacity(blocks)));
+            // A mutex may allocate on its first lock (macOS's does), so take
+            // that first lock here rather than in a block.
+            drop(seen.lock().unwrap());
+            (Self(Arc::clone(&seen)), seen)
+        }
+    }
 
     impl AudioCallback for Recorder {
         fn process(
@@ -152,22 +238,42 @@ mod tests {
             output: &mut AudioBufferMut<'_>,
         ) {
             let silent = output.as_buffer().iter().flatten().all(|&s| s == 0.0);
-            // Test code: a lock is fine off a real audio thread.
+            // Test code: nothing else holds the lock while blocks run.
             self.0.lock().unwrap().push((*ctx, silent));
             output.fill(1.0);
         }
     }
 
-    #[test]
-    fn blocks_carry_position_and_output_starts_silent() {
-        let seen = Arc::new(Mutex::new(Vec::new()));
-        let counters = Arc::new(Counters::new());
-        let mut runner = CallbackRunner::new(
-            Box::new(Recorder(Arc::clone(&seen))),
-            Arc::clone(&counters),
+    /// A runner that leaves its thread's priority alone, as tests should.
+    fn runner(callback: impl AudioCallback, counters: &Arc<Counters>) -> CallbackRunner {
+        CallbackRunner::new(
+            Box::new(callback),
+            Arc::clone(counters),
             48_000,
             true,
+            RtThreadConfig {
+                period: frames_to_duration(128, 48_000),
+                promote: false,
+                workgroup: None,
+            },
+        )
+    }
+
+    fn block_at(runner: &mut CallbackRunner, out: &mut PlanarScratch, frames: u64) {
+        let start = frames_to_duration(frames, 48_000);
+        let len = out.capacity();
+        runner.run(
+            Some(start),
+            &AudioBuffer::empty(len),
+            &mut out.view_mut(len),
         );
+    }
+
+    #[test]
+    fn blocks_carry_position_and_output_starts_silent() {
+        let (recorder, seen) = Recorder::new(3);
+        let counters = Arc::new(Counters::new());
+        let mut runner = runner(recorder, &counters);
         // The previous block's samples are still in the scratch buffer.
         let mut out = PlanarScratch::new(2, 64);
         for block in 0..3u64 {
@@ -183,61 +289,37 @@ mod tests {
         let stats = counters.snapshot();
         assert_eq!((stats.blocks, stats.frames, stats.gaps), (3, 192, 0));
         assert!(stats.audio_thread_started);
+        assert_eq!(
+            stats.heap_operations, 0,
+            "the runner's own path stays off the heap"
+        );
     }
 
     #[test]
     fn a_jump_in_timestamps_is_a_gap_until_a_resync() {
         let counters = Arc::new(Counters::new());
-        let seen = Arc::new(Mutex::new(Vec::new()));
-        let mut runner = CallbackRunner::new(
-            Box::new(Recorder(seen)),
-            Arc::clone(&counters),
-            48_000,
-            true,
-        );
+        let mut runner = runner(Recorder::new(8).0, &counters);
         let mut out = PlanarScratch::new(1, 128);
-        let mut block_at = |frames: u64, runner: &mut CallbackRunner| {
-            let start = frames_to_duration(frames, 48_000);
-            runner.run(
-                Some(start),
-                &AudioBuffer::empty(128),
-                &mut out.view_mut(128),
-            );
-        };
-        block_at(0, &mut runner);
-        block_at(128, &mut runner);
-        block_at(384, &mut runner); // One block missing.
+        block_at(&mut runner, &mut out, 0);
+        block_at(&mut runner, &mut out, 128);
+        block_at(&mut runner, &mut out, 384); // One block missing.
         assert_eq!(counters.snapshot().gaps, 1);
 
         counters.request_resync();
-        block_at(48_000, &mut runner);
+        block_at(&mut runner, &mut out, 48_000);
         assert_eq!(counters.snapshot().gaps, 1, "a resync forgets the clock");
     }
 
     #[test]
     fn detections_close_together_are_one_dropout() {
         let counters = Arc::new(Counters::new());
-        let seen = Arc::new(Mutex::new(Vec::new()));
-        let mut runner = CallbackRunner::new(
-            Box::new(Recorder(seen)),
-            Arc::clone(&counters),
-            48_000,
-            true,
-        );
+        let mut runner = runner(Recorder::new(64).0, &counters);
         let mut out = PlanarScratch::new(1, 128);
-        let mut block_at = |frames: u64, runner: &mut CallbackRunner| {
-            let start = frames_to_duration(frames, 48_000);
-            runner.run(
-                Some(start),
-                &AudioBuffer::empty(128),
-                &mut out.view_mut(128),
-            );
-        };
-        block_at(0, &mut runner);
-        block_at(128, &mut runner);
+        block_at(&mut runner, &mut out, 0);
+        block_at(&mut runner, &mut out, 128);
         assert_eq!(counters.snapshot().dropouts, 0);
 
-        block_at(384, &mut runner); // A gap.
+        block_at(&mut runner, &mut out, 384); // A gap.
         assert_eq!(counters.snapshot().dropouts, 1);
 
         // The backend reports the same glitch a moment later.
@@ -247,19 +329,99 @@ mod tests {
             2,
             "not merged until a block runs"
         );
-        block_at(512, &mut runner);
+        block_at(&mut runner, &mut out, 512);
         let stats = counters.snapshot();
         assert_eq!((stats.dropouts, stats.gaps, stats.xruns), (1, 1, 1));
 
         // After more than 100 ms of clean audio, another gap is another dropout.
         let mut at = 640;
         for _ in 0..40 {
-            block_at(at, &mut runner);
+            block_at(&mut runner, &mut out, at);
             at += 128;
         }
         assert_eq!(counters.snapshot().dropouts, 1);
-        block_at(at + 1_000, &mut runner);
+        block_at(&mut runner, &mut out, at + 1_000);
         assert_eq!(counters.snapshot().dropouts, 2);
+    }
+
+    #[test]
+    fn each_new_thread_is_set_up_once() {
+        let counters = Arc::new(Counters::new());
+        let mut runner = runner(Recorder::new(8).0, &counters);
+        assert_eq!(counters.snapshot().audio_thread, None);
+        // Blocks arrive on one thread, then the backend moves to another, as
+        // Core Audio does when the default device changes.
+        let mut at = 0;
+        for _ in 0..2 {
+            (runner, at) = std::thread::spawn(move || {
+                let mut out = PlanarScratch::new(1, 128);
+                for _ in 0..3 {
+                    block_at(&mut runner, &mut out, at);
+                    at += 128;
+                }
+                (runner, at)
+            })
+            .join()
+            .unwrap();
+        }
+        let stats = counters.snapshot();
+        assert_eq!(stats.blocks, 6);
+        assert_eq!(stats.audio_thread_setups, 2);
+        let report = stats.audio_thread.expect("a set-up report");
+        assert_eq!(report.promotion, bl_rt::Promotion::NotRequested);
+        assert_eq!(report.workgroup, WorkgroupJoin::None);
+        assert_eq!(report.denormals_flushed, bl_rt::denormals::SUPPORTED);
+        assert!(report.trap_installed);
+        assert_eq!(stats.gaps, 0, "a new thread doesn't break the clock");
+    }
+
+    /// Allocates and frees in every block.
+    struct Allocator;
+
+    impl AudioCallback for Allocator {
+        fn process(&mut self, _: &ProcessContext, _: &AudioBuffer<'_>, _: &mut AudioBufferMut<'_>) {
+            black_box(Box::new(0u64));
+        }
+    }
+
+    #[test]
+    fn heap_use_in_a_block_is_counted() {
+        let counters = Arc::new(Counters::new());
+        let mut runner = runner(Allocator, &counters);
+        let mut out = PlanarScratch::new(1, 128);
+        block_at(&mut runner, &mut out, 0);
+        block_at(&mut runner, &mut out, 128);
+        assert_eq!(
+            counters.snapshot().heap_operations,
+            4,
+            "an allocation and a free per block"
+        );
+    }
+
+    /// Halves the smallest normal float, which gives a denormal unless the
+    /// block runs with denormals flushed, and keeps the result.
+    struct Halver(Arc<AtomicU32>);
+
+    impl AudioCallback for Halver {
+        fn process(&mut self, _: &ProcessContext, _: &AudioBuffer<'_>, _: &mut AudioBufferMut<'_>) {
+            let half = black_box(f32::MIN_POSITIVE) / black_box(2.0f32);
+            self.0.store(half.to_bits(), Ordering::Relaxed);
+        }
+    }
+
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64", target_arch = "aarch64"))]
+    #[test]
+    fn blocks_run_with_denormals_flushed_to_zero() {
+        let result = Arc::new(AtomicU32::new(u32::MAX));
+        let counters = Arc::new(Counters::new());
+        let mut runner = runner(Halver(Arc::clone(&result)), &counters);
+        block_at(&mut runner, &mut PlanarScratch::new(1, 128), 0);
+        assert_eq!(f32::from_bits(result.load(Ordering::Relaxed)), 0.0);
+        let outside = black_box(f32::MIN_POSITIVE) / black_box(2.0f32);
+        assert!(
+            outside.is_subnormal(),
+            "the thread's own setting is restored"
+        );
     }
 
     #[test]

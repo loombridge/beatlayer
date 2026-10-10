@@ -23,6 +23,7 @@ use azo::driver::{Driver, Metadata, Proxy};
 use azo::dto::{BufferSize, ChannelId, Granularity};
 use azo::sys::{Bool, Callbacks, MessageSelector, SampleRate, SampleType, Time, TimeInfoFlags};
 use azo::utils::Host;
+use bl_rt::RtThreadConfig;
 
 use crate::buffer::PlanarScratch;
 use crate::runner::{CallbackRunner, frames_to_duration};
@@ -343,8 +344,20 @@ impl Backend for AsioBackend {
         }
 
         let counters = Arc::new(Counters::new());
+        // The driver's thread gets MMCSS "Pro Audio" on its first block.
+        let thread_config = RtThreadConfig {
+            period: frames_to_duration(u64::from(frames), sample_rate),
+            promote: true,
+            workgroup: None,
+        };
         let render = Render {
-            runner: CallbackRunner::new(callback, Arc::clone(&counters), sample_rate, true),
+            runner: CallbackRunner::new(
+                callback,
+                Arc::clone(&counters),
+                sample_rate,
+                true,
+                thread_config,
+            ),
             frames: frames as usize,
             inputs: Vec::new(),
             outputs: Vec::new(),
@@ -389,6 +402,7 @@ impl Backend for AsioBackend {
             requested_buffer_size: request.buffer_size,
             buffer_size: Some(frames),
             max_block_frames: frames,
+            workgroup: None,
         };
         // From here, dropping `stream` releases the slot and the buffers.
         let mut stream = AsioStream {

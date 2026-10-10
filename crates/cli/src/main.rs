@@ -1,5 +1,10 @@
 //! `bl-cli`: render, inspect, convert, and benchmark projects without a UI.
 
+// Debug builds count heap use on audio threads (the real-time rules allow
+// none); `bl-cli tone` fails if it finds any.
+#[cfg(debug_assertions)]
+bl_rt::install_trap!();
+
 mod devices;
 mod tone;
 
@@ -24,7 +29,8 @@ enum Command {
     Devices(devices::DevicesArgs),
     /// Play a 440 Hz sine on a device and count dropouts.
     ///
-    /// Exits with status 1 if the stream fails or any dropout is detected.
+    /// Exits with status 1 if the stream fails, any dropout is detected, or
+    /// (in a debug build) the audio thread touches the heap.
     Tone(tone::ToneArgs),
 }
 

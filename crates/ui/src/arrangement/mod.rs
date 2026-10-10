@@ -754,6 +754,15 @@ impl ArrangementUi {
         response.widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, "Overview"));
         ui.ctx().accesskit_node_builder(response.id, |node| {
             node.set_role(Role::ScrollBar);
+            let signatures = &doc.settings().time_signatures;
+            let bar = |at: Ticks| rulers::position_label(signatures, at, 0);
+            node.set_value(format!(
+                "bars {} to {} in view, of bars {} to {}",
+                bar(range.start),
+                bar(range.end),
+                bar(Ticks::ZERO),
+                bar(end)
+            ));
             node.set_description(
                 "The whole arrangement, with the part in view outlined. Drag sideways to \
                  scroll, up and down to zoom."
@@ -849,6 +858,15 @@ impl ArrangementUi {
         time.widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, "Time Ruler"));
         ui.ctx().accesskit_node_builder(time.id, |node| {
             node.set_role(Role::ScrollBar);
+            let tempo = &doc.settings().tempo;
+            let range = horizontal.range(layout.time_ruler.width());
+            let seconds = |at: Ticks| tempo.ticks_to_seconds(at.max(Ticks::ZERO));
+            node.set_value(format!(
+                "{} to {}",
+                rulers::time_label(seconds(range.start), false),
+                rulers::time_label(seconds(range.end), false)
+            ));
+            node.set_description("Drag sideways to scroll.".to_owned());
         });
     }
 

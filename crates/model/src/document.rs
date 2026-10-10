@@ -1,7 +1,7 @@
 //! The document: the whole song as an immutable, persistent tree.
 
 use bl_core::id::Id;
-use bl_core::time::{TempoMap, TimeSignatureMap};
+use bl_core::time::{TempoMap, Ticks, TimeSignatureMap};
 use imbl::{OrdMap, Vector};
 use serde::{Deserialize, Serialize};
 
@@ -18,6 +18,52 @@ pub struct Settings {
     pub tempo: TempoMap,
     /// The time-signature map. The default is 4/4 throughout.
     pub time_signatures: TimeSignatureMap,
+    /// The Arrangement loop: the loop brace and the Loop switch. A set saved
+    /// before WP-1.5 has none and loads with the default; a set whose loop is
+    /// the default doesn't write it, so the saved form of such a set is
+    /// unchanged.
+    #[serde(default, skip_serializing_if = "ArrangementLoop::is_default")]
+    pub arrangement_loop: ArrangementLoop,
+}
+
+/// The Arrangement loop: where the loop brace sits, and whether the Loop
+/// switch is on. With it on, playback that reaches the brace's end jumps
+/// back to its start (`docs/specs/transport.md`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ArrangementLoop {
+    /// Where the brace starts: 0 (1.1.1) or later.
+    pub start: Ticks,
+    /// How long it is: more than 0.
+    pub length: Ticks,
+    /// Whether the Loop switch is on.
+    pub enabled: bool,
+}
+
+impl ArrangementLoop {
+    /// A new set's loop: four 4/4 bars from 1.1.1, switched off.
+    pub const DEFAULT: Self = Self {
+        start: Ticks::ZERO,
+        length: Ticks(bl_core::time::TICKS_PER_QUARTER * 16),
+        enabled: false,
+    };
+
+    /// Where the brace ends: its start plus its length.
+    #[must_use]
+    pub fn end(&self) -> Ticks {
+        self.start.saturating_add(self.length)
+    }
+
+    /// Whether this is [`ArrangementLoop::DEFAULT`].
+    #[must_use]
+    pub fn is_default(&self) -> bool {
+        *self == Self::DEFAULT
+    }
+}
+
+impl Default for ArrangementLoop {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
 }
 
 /// A song: its settings, its tracks, and everything on them.
@@ -357,5 +403,53 @@ mod tests {
     fn documents_cross_threads() {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<Document>();
+    }
+
+    // Spec: transport R18
+    #[test]
+    fn a_new_sets_loop_is_four_bars_from_the_start_and_off() {
+        let (main, _) = track_ids(0);
+        let brace = Document::new(main).settings().arrangement_loop;
+        assert_eq!(brace.start, Ticks::ZERO);
+        assert_eq!(brace.length, Ticks::WHOLE * 4);
+        assert_eq!(brace.end(), Ticks::WHOLE * 4);
+        assert!(!brace.enabled);
+        assert!(brace.is_default());
+    }
+
+    // Spec: transport R16, R17
+    #[test]
+    fn the_loop_is_part_of_the_set_and_saved_when_it_isnt_the_default() {
+        let (main, _) = track_ids(0);
+        let mut doc = Document::new(main);
+        let saved = serde_json::to_value(&doc).unwrap();
+        assert!(
+            saved["settings"].get("arrangement_loop").is_none(),
+            "a default loop isn't written, so sets saved before it look the same"
+        );
+        doc.apply(&Command::SetLoop {
+            start: Ticks::WHOLE,
+            length: Ticks::QUARTER * 3,
+        })
+        .unwrap();
+        doc.apply(&Command::SetLoopEnabled { enabled: true })
+            .unwrap();
+        let saved = serde_json::to_value(&doc).unwrap();
+        assert_eq!(
+            saved["settings"]["arrangement_loop"],
+            serde_json::json!({ "start": 2_822_400, "length": 2_116_800, "enabled": true })
+        );
+        let loaded: Document = serde_json::from_value(saved).unwrap();
+        assert_eq!(loaded, doc);
+        // A refused change leaves the brace as it was.
+        let before = doc.clone();
+        assert!(
+            doc.apply(&Command::SetLoop {
+                start: Ticks::ZERO,
+                length: Ticks::ZERO,
+            })
+            .is_err()
+        );
+        assert_eq!(doc, before);
     }
 }

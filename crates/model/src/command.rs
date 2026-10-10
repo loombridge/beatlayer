@@ -45,6 +45,19 @@ pub enum Command {
         /// The new time-signature map.
         time_signatures: TimeSignatureMap,
     },
+    /// Moves the Arrangement loop brace, leaving the Loop switch as it is.
+    SetLoop {
+        /// Where the loop starts: 0 (1.1.1) or later.
+        start: Ticks,
+        /// How long it is: more than 0.
+        length: Ticks,
+    },
+    /// Switches the Arrangement loop on or off, leaving the brace where it
+    /// is.
+    SetLoopEnabled {
+        /// Whether playback loops between the brace's start and end.
+        enabled: bool,
+    },
 
     /// Creates an empty track with default mixer settings.
     ///
@@ -253,6 +266,8 @@ impl Command {
         match self {
             Self::SetTempo { .. } => "Change tempo",
             Self::SetTimeSignatures { .. } => "Change time signatures",
+            Self::SetLoop { .. } => "Change loop",
+            Self::SetLoopEnabled { .. } => "Switch loop",
             Self::CreateTrack { .. } => "Create track",
             Self::DeleteTrack { .. } => "Delete track",
             Self::MoveTrack { .. } => "Move track",
@@ -322,6 +337,17 @@ impl Document {
                 if self.settings.time_signatures != *time_signatures {
                     self.settings.time_signatures = time_signatures.clone();
                 }
+                Ok(())
+            }
+            Command::SetLoop { start, length } => {
+                check_extent(*start, *length)?;
+                let brace = &mut self.settings.arrangement_loop;
+                brace.start = *start;
+                brace.length = *length;
+                Ok(())
+            }
+            Command::SetLoopEnabled { enabled } => {
+                self.settings.arrangement_loop.enabled = *enabled;
                 Ok(())
             }
             Command::CreateTrack {

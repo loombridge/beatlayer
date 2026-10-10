@@ -701,6 +701,7 @@ name = "bl-engine"
 version = "0.0.0"
 dependencies = [
  "bl-audio-io",
+ "bl-commands",
  "bl-core",
  "bl-dsp",
  "bl-model",
@@ -708,6 +709,9 @@ dependencies = [
  "libm",
  "rtgc",
  "rtrb",
+ "schemars",
+ "serde",
+ "serde_json",
  "triple_buffer",
 ]
 
@@ -730,10 +734,16 @@ dependencies = [
 name = "bl-media"
 version = "0.0.0"
 dependencies = [
+ "bl-audio-io",
+ "bl-core",
  "bl-dsp",
+ "bl-engine",
+ "bl-model",
+ "bl-rt",
  "blake3",
  "rayon",
  "realfft",
+ "rtrb",
  "rubato",
  "serde_json",
  "symphonia",
@@ -770,10 +780,12 @@ dependencies = [
 name = "bl-project"
 version = "0.0.0"
 dependencies = [
+ "bl-commands",
  "bl-core",
  "bl-model",
  "proptest",
  "ruzstd",
+ "schemars",
  "serde",
  "serde_json",
 ]
@@ -1345,7 +1357,7 @@ version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab8ecd87370524b461f8557c119c405552c396ed91fc0a8eec68679eab26f94a"
 dependencies = [
- "libloading 0.8.9",
+ "libloading 0.7.4",
 ]
 
 [[package]]
@@ -3981,7 +3993,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.5",
  "windows-sys 0.61.2",
@@ -5237,7 +5249,9 @@ name = "xtask"
 version = "0.0.0"
 dependencies = [
  "bl-commands",
+ "bl-engine",
  "bl-model",
+ "bl-project",
  "bl-shell-spec",
  "serde_json",
  "toml",

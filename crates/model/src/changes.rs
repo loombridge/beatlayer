@@ -33,13 +33,14 @@ pub enum Change {
 /// serialised with each map keyed by ID.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[schemars(
-    description = "What a command changed: whether the tempo or time-signature maps changed, \
-                   whether the track list changed, and which tracks, clips, and devices were \
-                   added, removed, or modified, keyed by ID. Every field is empty or false if \
-                   nothing changed."
+    description = "What a command changed: whether the song settings (the tempo map, the \
+                   time-signature map, or the Arrangement loop) changed, whether the track list \
+                   changed, and which tracks, clips, and devices were added, removed, or \
+                   modified, keyed by ID. Every field is empty or false if nothing changed."
 )]
 pub struct ChangeSet {
-    /// The tempo map or time-signature map changed.
+    /// The song settings changed: the tempo map, the time-signature map, or
+    /// the Arrangement loop.
     pub settings: bool,
     /// The track tree changed: a track was added, removed, or moved, so
     /// routing may have changed.

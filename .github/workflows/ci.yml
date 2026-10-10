@@ -1,7 +1,14 @@
-# Runs `cargo xtask check` on Windows (x64) and Linux (x64) for every pull
-# request and every push to main, and on all three platforms, macOS (arm64)
-# included, when started by hand from the Actions tab. Alongside, it runs the
-# real-time tests under RealtimeSanitizer on Linux (x64).
+# Runs `cargo xtask check` on Linux (x64) for every pull request, on Windows
+# (x64) and Linux for every push to main, and on Windows and Linux when started
+# by hand (`gh workflow run ci.yml --ref <branch>`), with macOS (arm64) too if
+# the run asks for it. Alongside, it runs the real-time tests under
+# RealtimeSanitizer on Linux (x64).
+#
+# Windows left per-change CI on 11 October 2026: the organisation's Free-plan
+# minutes, shared with its other private repositories, were 86% spent by the
+# 11th, and a Windows minute costs 1.7 Linux minutes. A Windows failure now
+# shows on main, and is fixed forward; start a run by hand on a branch whose
+# change is Windows-specific.
 #
 # The repository is private on GitHub's Free plan, so hosted-runner minutes are
 # limited, and a macOS minute counts as ten and a Windows minute as two. The maintainer
@@ -53,6 +60,11 @@ on:
       - "docs/ui-parity/**"
       - "docs/commands.md"
   workflow_dispatch:
+    inputs:
+      macos:
+        description: Also run on macOS (a macOS minute costs ten Linux minutes)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -77,8 +89,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macOS only on a manual run; see the note at the top.
-        include: ${{ fromJSON(github.event_name == 'workflow_dispatch' && '[{"name":"macOS arm64","os":"macos-15"},{"name":"Windows x64","os":"windows-2025"},{"name":"Linux x64","os":"ubuntu-24.04"}]' || '[{"name":"Windows x64","os":"windows-2025"},{"name":"Linux x64","os":"ubuntu-24.04"}]') }}
+        # Linux for pull requests; Windows too on main and by hand; macOS only
+        # when a manual run asks. See the note at the top.
+        include: ${{ fromJSON(github.event_name == 'pull_request' && '[{"name":"Linux x64","os":"ubuntu-24.04"}]' || (inputs.macos && '[{"name":"macOS arm64","os":"macos-15"},{"name":"Windows x64","os":"windows-2025"},{"name":"Linux x64","os":"ubuntu-24.04"}]' || '[{"name":"Windows x64","os":"windows-2025"},{"name":"Linux x64","os":"ubuntu-24.04"}]')) }}
     defaults:
       run:
         shell: bash

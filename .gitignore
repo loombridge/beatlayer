@@ -1,2 +1,5 @@
 /target
 .DS_Store
+# Agent worktrees and per-machine Claude settings
+/.claude/worktrees/
+/.claude/settings.local.json

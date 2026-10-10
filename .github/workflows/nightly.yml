@@ -1,0 +1,154 @@
+# Builds release binaries of `beatlayer` and `bl-cli` for macOS (arm64),
+# Windows (x64), and Linux (x64) every night, and on demand from the Actions
+# tab. Each platform's binaries, with the licence and readme, are uploaded as
+# one archive and kept for seven days.
+#
+# A macOS minute counts as ten against the Free plan's allowance, so a
+# scheduled run first checks whether any code changed since the last
+# successful nightly, and builds nothing if only docs or Markdown changed.
+# A manual run always builds.
+#
+# The binaries are unsigned. Packaging, signing, and installers come with
+# WP-0.11 and the human tasks H4 and H5.
+#
+# Every third-party action is pinned to a full commit SHA, with its version in
+# a comment. Update the SHA and the comment together.
+
+name: Nightly
+
+on:
+  schedule:
+    # 02:37 UTC, off the hour, when GitHub's scheduler is least busy.
+    - cron: "37 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  decide:
+    name: decide whether to build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      build: ${{ steps.decide.outputs.build }}
+    steps:
+      - name: Compare with the last successful nightly
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          build=true
+          if [ "$EVENT" = schedule ]; then
+            last=$(gh run list --repo "$REPO" --workflow nightly.yml --branch main \
+              --status success --limit 1 --json headSha --jq '.[0].headSha // empty') || last=""
+            if [ -z "$last" ]; then
+              echo "Found no earlier successful nightly, so building."
+            elif changed=$(gh api "repos/$REPO/compare/$last...$HEAD_SHA" --jq '.files[].filename'); then
+              total=$(printf '%s' "$changed" | grep -c . || true)
+              code=$(printf '%s\n' "$changed" | grep -Ev '\.md$|^docs/|^LICENSE$|^\.github/ISSUE_TEMPLATE/' || true)
+              # The compare API lists at most 300 files; a list that long may be cut short.
+              if [ "$total" -lt 300 ] && [ -z "$code" ]; then
+                echo "Nothing but docs changed since $last, so skipping the build."
+                build=false
+              else
+                echo "Code changed since $last, so building:"
+                printf '%s\n' "$code" | sed -n '1,20p'
+              fi
+            else
+              echo "Couldn't compare with $last, so building."
+            fi
+          fi
+          echo "build=$build" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: build (${{ matrix.name }})
+    needs: decide
+    if: needs.decide.outputs.build == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS arm64
+            os: macos-15
+            target: aarch64-apple-darwin
+            exe: ""
+          - name: Windows x64
+            os: windows-2025
+            target: x86_64-pc-windows-msvc
+            exe: .exe
+          - name: Linux x64
+            os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            exe: ""
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Prepare the runner
+        uses: ./.github/actions/prepare
+
+      - name: Restore the dependency cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-bin: false
+
+      - name: Build release binaries
+        run: cargo build --release --locked --package beatlayer --package bl-cli
+
+      - name: Stage the binaries
+        env:
+          TARGET: ${{ matrix.target }}
+          EXE: ${{ matrix.exe }}
+        run: |
+          name="beatlayer-nightly-$(date -u +%Y%m%d)-${GITHUB_SHA::7}-$TARGET"
+          mkdir -p "dist/$name"
+          cp "target/release/beatlayer$EXE" "target/release/bl-cli$EXE" LICENSE README.md "dist/$name/"
+          echo "STAGED=$name" >> "$GITHUB_ENV"
+
+      - name: Archive (tar.gz)
+        if: runner.os != 'Windows'
+        env:
+          # Stops macOS tar adding AppleDouble files for extended attributes.
+          COPYFILE_DISABLE: 1
+        run: |
+          tar -C dist -czf "dist/$STAGED.tar.gz" "$STAGED"
+          echo "ARCHIVE=$STAGED.tar.gz" >> "$GITHUB_ENV"
+
+      - name: Archive (zip)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "dist/$env:STAGED" -DestinationPath "dist/$env:STAGED.zip"
+          "ARCHIVE=$env:STAGED.zip" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      # With `archive: false` the file is uploaded as it is, rather than zipped
+      # again, and the artefact takes the file's name.
+      - name: Upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          path: dist/${{ env.ARCHIVE }}
+          archive: false
+          retention-days: 7
+          if-no-files-found: error

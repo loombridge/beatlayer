@@ -1,0 +1,18 @@
+[package]
+name = "bl-commands"
+description = "The command registry: every action a person or an agent can take, with its schema, description, permission class, contexts, and default bindings."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Pinned: the command reference (docs/commands.md) is generated from these
+# schemas, so an upgrade is a deliberate change that regenerates it.
+schemars = { version = "=1.2.2", default-features = false, features = ["std", "derive"] }
+serde = { version = "1.0.228", default-features = false, features = ["std", "derive"] }
+serde_json = "1"
+
+[lints]
+workspace = true

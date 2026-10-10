@@ -28,6 +28,9 @@ publish = false
 [dependencies]
 bl-rt = { path = "../crates/rt" }
 bl-audio-io = { path = "../crates/audio-io" }
+bl-core = { path = "../crates/core" }
+bl-engine = { path = "../crates/engine" }
+bl-model = { path = "../crates/model" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.190"

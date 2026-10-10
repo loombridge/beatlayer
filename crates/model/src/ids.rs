@@ -2,8 +2,10 @@
 
 use core::fmt;
 use core::str::FromStr;
+use std::borrow::Cow;
 
 use bl_core::id::Id;
+use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 macro_rules! object_id {
@@ -48,6 +50,28 @@ macro_rules! object_id {
                 write!(f, concat!($label, " {}"), self.0)
             }
         }
+
+        impl JsonSchema for $name {
+            fn schema_name() -> Cow<'static, str> {
+                Cow::Borrowed(stringify!($name))
+            }
+
+            fn schema_id() -> Cow<'static, str> {
+                Cow::Borrowed(concat!("bl_model::", stringify!($name)))
+            }
+
+            fn json_schema(_: &mut SchemaGenerator) -> Schema {
+                json_schema!({
+                    "description": concat!(
+                        "The ID of a ", $label,
+                        ": a positive integer, unique within the project and never reused."
+                    ),
+                    "type": "integer",
+                    "format": "uint64",
+                    "minimum": 1
+                })
+            }
+        }
     };
 }
 
@@ -72,8 +96,14 @@ object_id!(
 /// Native devices number their parameters in their descriptors (WP-2.5).
 /// Plug-ins use their format's own parameter IDs, which for CLAP and VST3 are
 /// 32-bit.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(transparent)]
+#[schemars(
+    description = "A device parameter's number. Native devices number their own parameters; \
+                   plug-ins use their format's parameter IDs."
+)]
 pub struct ParamId(pub u32);
 
 /// The content hash of a media file: 32 bytes, shown as 64 lowercase hex
@@ -144,6 +174,26 @@ fn hex_digit(digit: u8) -> Option<u8> {
 impl Serialize for ContentHash {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.collect_str(self)
+    }
+}
+
+impl JsonSchema for ContentHash {
+    fn schema_name() -> Cow<'static, str> {
+        Cow::Borrowed("ContentHash")
+    }
+
+    fn schema_id() -> Cow<'static, str> {
+        Cow::Borrowed("bl_model::ContentHash")
+    }
+
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "The content hash of a media file in the project's media store, as 64 hex digits. Clips name their audio by hash, never by path.",
+            "type": "string",
+            "pattern": "^[0-9a-fA-F]{64}$",
+            "minLength": 64,
+            "maxLength": 64
+        })
     }
 }
 

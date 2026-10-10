@@ -9,3 +9,6 @@
 //!   build runs it, without the allocation trap. The set-up for a thread an
 //!   audio API owns runs inside a real-time section from that thread's first
 //!   instruction, and a null-device stream runs clean.
+//! - `tests/engine.rs`: the engine's audio-thread work: 1,000 program swaps
+//!   with node migration, parameter changes, scheduled commands, node data,
+//!   and the state for the UI, every block a real-time section.

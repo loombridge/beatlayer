@@ -1,0 +1,40 @@
+[package]
+name = "beatlayer-fuzz"
+version = "0.0.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+publish = false
+description = "Fuzz targets for Beatlayer's file readers, run with cargo-fuzz on a nightly toolchain"
+
+[package.metadata]
+cargo-fuzz = true
+
+# A standalone workspace, like spikes/: cargo-fuzz needs a nightly toolchain
+# and libFuzzer, while the product builds on the pinned stable one. It keeps
+# its own Cargo.lock, so its dependencies never touch the product's.
+[workspace]
+
+[dependencies]
+bl-core = { path = "../crates/core" }
+bl-project = { path = "../crates/project" }
+libfuzzer-sys = "=0.4.13"
+
+[[bin]]
+name = "set_file"
+path = "fuzz_targets/set_file.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "set_json"
+path = "fuzz_targets/set_json.rs"
+test = false
+doc = false
+bench = false
+
+[profile.release]
+# Keep overflow checks and debug assertions on, so the fuzzer finds what a
+# debug build would panic on.
+debug-assertions = true
+overflow-checks = true

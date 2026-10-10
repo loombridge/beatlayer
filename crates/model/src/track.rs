@@ -3,6 +3,7 @@
 use core::fmt;
 
 use imbl::{OrdMap, Vector};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::clip::Clip;
@@ -13,8 +14,11 @@ use crate::shared::Shared;
 /// The kind of a track, fixed when the track is created.
 ///
 /// The rules for each kind are in `docs/specs/tracks-and-undo.md`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
+#[schemars(description = "The kind of a track, fixed when the track is created.")]
 pub enum TrackKind {
     /// Holds audio clips.
     Audio,

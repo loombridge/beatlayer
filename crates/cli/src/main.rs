@@ -6,6 +6,7 @@
 bl_rt::install_trap!();
 
 mod devices;
+mod engine_smoke;
 mod tone;
 
 use std::process::ExitCode;
@@ -32,6 +33,14 @@ enum Command {
     /// Exits with status 1 if the stream fails, any dropout is detected, or
     /// (in a debug build) the audio thread touches the heap.
     Tone(tone::ToneArgs),
+    /// Play a small song through the engine while recompiling it, and count
+    /// dropouts and swaps.
+    ///
+    /// Two test tones and a counter node, on the null device unless another
+    /// is named. Exits with status 1 if the stream fails, any dropout is
+    /// detected, the audio thread touches the heap (in a debug build), or
+    /// the counter node loses its state in a swap.
+    EngineSmoke(engine_smoke::EngineSmokeArgs),
 }
 
 fn main() -> ExitCode {
@@ -39,6 +48,7 @@ fn main() -> ExitCode {
     let outcome = match &cli.command {
         Command::Devices(args) => devices::run(args),
         Command::Tone(args) => tone::run(args),
+        Command::EngineSmoke(args) => engine_smoke::run(args),
     };
     outcome.unwrap_or_else(|message| {
         eprintln!("error: {message}");

@@ -5,6 +5,7 @@ use std::collections::BTreeSet;
 use bl_core::id::Id;
 use bl_core::time::{TempoMap, Ticks, TimeSignatureMap};
 use imbl::Vector;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::clip::{Clip, ClipData};
@@ -25,7 +26,12 @@ use crate::track::{Track, TrackKind};
 /// [`Document::apply`] checks a command in full before it takes effect, and a
 /// rejected command leaves the document as it was. Setting a value to what it
 /// already is succeeds and changes nothing.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+///
+/// Each variant is a command in the registry, with an ID such as
+/// `track.create`, so people and agents can run it by name with JSON
+/// arguments: see [`crate::registry`]. The variants' docs are the argument
+/// descriptions agents read, so they say `null` where Rust says `None`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "op", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum Command {
@@ -44,7 +50,7 @@ pub enum Command {
     ///
     /// An audio, MIDI, or group track goes at `index` among the top-level
     /// tracks, or among the tracks in the group `parent`. A return track goes
-    /// at `index` among the returns, and `parent` must be `None`. Main can't
+    /// at `index` among the returns, and `parent` must be empty. Main can't
     /// be created.
     CreateTrack {
         /// The new track's ID.
@@ -53,7 +59,7 @@ pub enum Command {
         kind: TrackKind,
         /// Its name.
         name: String,
-        /// The group to put it in, or `None` for the top level.
+        /// The group to put it in, or `null` (or nothing) for the top level.
         parent: Option<TrackId>,
         /// Where it goes in its list, from 0 to the list's length.
         index: usize,
@@ -71,7 +77,8 @@ pub enum Command {
     MoveTrack {
         /// The track.
         track: TrackId,
-        /// The group to move it into, or `None` for the top level.
+        /// The group to move it into, or `null` (or nothing) for the top
+        /// level.
         parent: Option<TrackId>,
         /// Where it goes in that list.
         index: usize,
@@ -87,14 +94,17 @@ pub enum Command {
     SetVolume {
         /// The track.
         track: TrackId,
-        /// The gain.
+        /// The gain: 1 is unity (0 dB), 0.5 about −6 dB, and 0 silence.
+        #[schemars(range(min = 0.0))]
         volume: f64,
     },
     /// Sets a track's pan, from −1 to 1.
     SetPan {
         /// The track.
         track: TrackId,
-        /// The pan position.
+        /// The pan position, from −1 (left) through 0 (centre) to 1
+        /// (right).
+        #[schemars(range(min = -1.0, max = 1.0))]
         pan: f64,
     },
     /// Mutes or unmutes a track other than Main.

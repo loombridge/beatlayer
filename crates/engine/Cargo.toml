@@ -1,0 +1,15 @@
+[package]
+name = "bl-engine"
+description = "The real-time engine: compiler, graph, scheduler, transport, clip players, mixer, delay compensation, automation, and metering."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+bl-core.workspace = true
+bl-dsp.workspace = true
+
+[lints]
+workspace = true

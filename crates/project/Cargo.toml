@@ -1,0 +1,14 @@
+[package]
+name = "bl-project"
+description = "Project files: schema versions and migrations, autosave, crash recovery, and sample collection."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+bl-model.workspace = true
+
+[lints]
+workspace = true

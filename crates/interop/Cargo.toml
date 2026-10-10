@@ -1,0 +1,15 @@
+[package]
+name = "bl-interop"
+description = "Standard MIDI Files, DAWproject import and export, and Ableton Live set import."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+bl-model.workspace = true
+bl-project.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,15 @@
+[package]
+name = "bl-control"
+description = "MIDI and key mapping, control surfaces, Push, and the scripting host."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+bl-model.workspace = true
+bl-midi-io.workspace = true
+
+[lints]
+workspace = true

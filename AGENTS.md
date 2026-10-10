@@ -18,7 +18,7 @@ Beatlayer is an open-source digital audio workstation with the workflow of Ablet
 
 - No Ableton code, content, or trademarks, by any route.
 - No allocation, lock, or blocking call on an audio thread.
-- Engine, model, and device crates never depend on a UI crate.
+- Engine, model, and device crates never depend on a UI crate. `cargo xtask layers` enforces this.
 - Every feature has a headless test path.
 - No dependency whose licence `cargo deny` rejects. No plug-in binaries or third-party audio in the repo.
 - No `git add -A`.
@@ -27,6 +27,8 @@ Beatlayer is an open-source digital audio workstation with the workflow of Ablet
 
 One work package per branch (`wp/<id>-<slug>`) and per pull request, with acceptance evidence pasted in the PR. `cargo xtask check` must pass. The maintainer merges.
 
+One-time setup: install Rust with rustup (the repo pins the toolchain in `rust-toolchain.toml`), then `cargo install --locked cargo-deny`.
+
 ## Where things stand (10 October 2026)
 
-Planning documents drafted for the maintainer's review. No code yet. Next: Phase 0 (WP-0.1).
+WP-0.1 (workspace and tooling) is in review on branch `wp/0.1-workspace-tooling`. Every crate is a stub. Next: the local Phase 0 packages (WP-0.5, 0.6, 0.7, the UI spike, 0.12, and WP-0.3 on macOS).

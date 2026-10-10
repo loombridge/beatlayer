@@ -1,0 +1,13 @@
+[package]
+name = "bl-core"
+description = "Time types, tempo map, IDs, units, and shared errors."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

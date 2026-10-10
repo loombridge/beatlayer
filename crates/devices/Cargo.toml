@@ -1,0 +1,15 @@
+[package]
+name = "bl-devices"
+description = "Native instruments, audio effects, and MIDI effects."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+bl-dsp.workspace = true
+bl-engine.workspace = true
+
+[lints]
+workspace = true

@@ -10,6 +10,23 @@ publish.workspace = true
 [dependencies]
 bl-core.workspace = true
 bl-dsp.workspace = true
+# The compiler reads documents (WP-0.9).
+bl-model.workspace = true
+# The lock-free logger for the audio thread.
+bl-rt.workspace = true
+# The queue from the compiler to the audio thread, and the audio thread's
+# reports back (decision D14).
+rtrb = "0.4.0"
+# Deferred drops: what the audio thread lets go of is freed on the drop thread
+# (decision D14). The local collector gives each engine its own.
+rtgc = { version = "0.4.0", default-features = false, features = ["std", "local_collector"] }
+# Engine state for the UI: playhead, meters, CPU load (decision D14).
+triple_buffer = "9.0.0"
+
+[dev-dependencies]
+# The stress test plays through the null device, which counts dropouts and
+# heap use on its audio thread.
+bl-audio-io.workspace = true
 
 [lints]
 workspace = true

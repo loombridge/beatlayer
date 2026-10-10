@@ -606,11 +606,13 @@ impl Shell {
     }
 
     /// Tells the browser the set's file changed, so Current Project follows
-    /// it (browser R4).
+    /// it (browser R4). A set that isn't a file on disk (one a test or the
+    /// benchmark holds in memory) has no project folder.
     fn set_file_changed(&mut self) {
         let folder = self
             .set_path
             .as_deref()
+            .filter(|path| path.is_file())
             .and_then(|path| std::path::absolute(path).ok())
             .and_then(|path| path.parent().map(Path::to_path_buf));
         self.browser_view.set_project(folder);

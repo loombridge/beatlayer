@@ -13,14 +13,19 @@
 //! which the Arrangement benchmark measures with the same renderer.
 //!
 //! ```sh
-//! cargo run --release -p bl-ui --example browser_bench -- [--frames N] [--files N] [--accesskit]
+//! cargo run --release -p bl-ui --example browser_bench -- [--frames N] [--files N] [--accesskit] [--scene]
 //! ```
+//!
+//! With `--scene`, the Arrangement beside it shows the Arrangement
+//! benchmark's scene (200 tracks, 5,000 clips with waveforms) instead of a
+//! new set.
 
 use std::path::PathBuf;
 use std::time::Duration;
 
 use bl_shell::Shell;
 use bl_shell::browser_commands as ids;
+use bl_ui::arrangement::benchmark;
 use bl_ui::main_window::{MainWindowUi, UiEvent};
 use bl_ui::theme::{Theme, fonts};
 use egui::{Event, MouseWheelUnit, Pos2, RawInput, Rect, TouchPhase, vec2};
@@ -58,7 +63,7 @@ fn percentile(sorted: &[f64], p: f64) -> f64 {
 
 /// Runs `frames` frames and returns each one's CPU time in milliseconds,
 /// sorted, and the most rows the browser built in one.
-fn run(shell: &mut Shell, frames: usize, accesskit: bool) -> (Vec<f64>, usize) {
+fn run(shell: &mut Shell, frames: usize, accesskit: bool, scene: bool) -> (Vec<f64>, usize) {
     let ctx = egui::Context::default();
     ctx.set_fonts(fonts());
     if accesskit {
@@ -67,6 +72,12 @@ fn run(shell: &mut Shell, frames: usize, accesskit: bool) -> (Vec<f64>, usize) {
     let theme = Theme::builtin(shell.theme());
     theme.apply(&ctx);
     let mut main = MainWindowUi::new();
+    if scene {
+        // The same seeded scene the shell shows, for its peaks.
+        let scene = benchmark::scene(200, 25, 64);
+        main.arrangement_mut()
+            .set_peak_source(Box::new(scene.peaks), None);
+    }
     let size = vec2(1600.0, 1000.0);
     let mut times = Vec::with_capacity(frames);
     let mut most_rows = 0;
@@ -117,12 +128,14 @@ fn main() {
     let mut frames = 600usize;
     let mut files = 100_000usize;
     let mut accesskit = false;
+    let mut scene = false;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--frames" => frames = args.next().and_then(|n| n.parse().ok()).expect("a number"),
             "--files" => files = args.next().and_then(|n| n.parse().ok()).expect("a number"),
             "--accesskit" => accesskit = true,
+            "--scene" => scene = true,
             other => panic!("unknown option {other}"),
         }
     }
@@ -136,7 +149,11 @@ fn main() {
         }
         std::fs::File::create(folder.join(format!("Sample {i}.wav"))).expect("made a file");
     }
-    let mut shell = Shell::headless();
+    let mut shell = if scene {
+        benchmark::shell_with(benchmark::scene(200, 25, 64).editor)
+    } else {
+        Shell::headless()
+    };
     shell.set_user_library(Some(library));
     while shell.browser_view().index_state().indexing {
         shell.poll();
@@ -151,15 +168,20 @@ fn main() {
         .run(ids::SET_PREVIEW, json!({ "on": false }))
         .expect("switched preview off");
     println!(
-        "the content pane lists {} rows{}",
+        "the content pane lists {} rows{}{}",
         shell.browser_view().row_count(),
+        if scene {
+            ", beside the benchmark scene (200 tracks, 5,000 clips)"
+        } else {
+            ""
+        },
         if accesskit { ", AccessKit on" } else { "" }
     );
-    let (shown, rows) = run(&mut shell, frames, accesskit);
+    let (shown, rows) = run(&mut shell, frames, accesskit, scene);
     shell
         .run(bl_shell::commands::VIEW_TOGGLE_BROWSER, json!({}))
         .expect("hid the browser");
-    let (hidden, _) = run(&mut shell, frames, accesskit);
+    let (hidden, _) = run(&mut shell, frames, accesskit, scene);
     let line = |name: &str, t: &[f64]| {
         println!(
             "{name}: median {:.3} ms, p99 {:.3} ms, max {:.3} ms over {} frames",

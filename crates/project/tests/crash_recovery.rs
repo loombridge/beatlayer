@@ -19,7 +19,7 @@ mod common;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::mpsc;
+use std::sync::{PoisonError, RwLock, RwLockReadGuard, mpsc};
 use std::time::{Duration, Instant};
 
 use bl_core::time::Ticks;
@@ -41,6 +41,17 @@ const CHILD_CONTINUOUS: &str = "BL_PROJECT_TEST_RECOVERY_CONTINUOUS";
 /// The child reports that every edit so far is on disk after every this
 /// many edits.
 const FLUSH_EVERY: u64 = 5;
+
+/// The timing test runs alone. The other tests here start children that
+/// edit and write to disk without pause, so beside them it would time the
+/// machine's load rather than the journal (on a two-core CI runner, an edit
+/// took 1.2 s at most beside them). They share this lock; it takes it whole.
+static ALONE: RwLock<()> = RwLock::new(());
+
+/// Lets the other tests run together, but not beside the timing test.
+fn beside_others() -> RwLockReadGuard<'static, ()> {
+    ALONE.read().unwrap_or_else(PoisonError::into_inner)
+}
 
 /// Applies edit number `n`: one of a fixed cycle of edits, chosen and
 /// aimed by `n` and the song as it stands, so the parent can replay
@@ -325,6 +336,7 @@ fn setup(label: &str) -> Setup {
 #[test]
 fn a_killed_session_is_offered_and_every_edit_recovered() {
     // Spec: crash-recovery R2, R3, R5
+    let _shared = beside_others();
     const ROUNDS: u64 = 12;
     let setup = setup("killed");
     let mut random = Random(0x5eed_0011);
@@ -414,6 +426,7 @@ fn a_killed_session_is_offered_and_every_edit_recovered() {
 #[test]
 fn with_save_continuously_a_killed_session_reopens_at_its_last_edit() {
     // Spec: crash-recovery R8
+    let _shared = beside_others();
     const ROUNDS: u64 = 4;
     let setup = setup("continuous");
     let mut random = Random(0x5eed_0012);
@@ -469,6 +482,7 @@ fn with_save_continuously_a_killed_session_reopens_at_its_last_edit() {
 #[test]
 fn edits_are_journalled_within_a_second() {
     // Spec: crash-recovery R1
+    let _alone = ALONE.write().unwrap_or_else(PoisonError::into_inner);
     let dir = TestDir::new("latency");
     let set_path = dir.path().join("Large.blset");
     let mut set = SetFile::new(&set_path);
@@ -527,6 +541,7 @@ fn edits_are_journalled_within_a_second() {
 #[test]
 fn with_save_continuously_every_journalled_edit_is_saved() {
     // Spec: crash-recovery R8
+    let _shared = beside_others();
     let setup = setup("every-edit");
     let (set, base) = SetFile::open(&setup.set).unwrap();
     let mut autosave = Autosave::start(&setup.recovery).unwrap();

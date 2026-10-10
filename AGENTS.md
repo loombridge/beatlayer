@@ -18,6 +18,7 @@ Beatlayer is an open-source digital audio workstation with the workflow of Ablet
 ## Lines not crossed
 
 - No Ableton code, content, or trademarks, by any route.
+- Every user-facing action is a registered command with a schema, a description, and a permission class, so agents reach every feature through the agent API (decision D17).
 - The UI matches Live 12's placement, menus, and key bindings ([docs/ui-parity/](docs/ui-parity/), decision D16), with Beatlayer's own icons, typeface, and colours. A deliberate difference needs a decisions-log entry.
 - No allocation, lock, or blocking call on an audio thread.
 - Engine, model, and device crates never depend on a UI crate. `cargo xtask layers` enforces this.

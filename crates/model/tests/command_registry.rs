@@ -45,7 +45,11 @@ fn every_document_command_is_registered() {
         .iter()
         .map(|variant| variant["properties"]["op"]["const"].as_str().unwrap())
         .collect();
-    assert_eq!(ops.len(), 25, "WP-0.6 defined 25 commands");
+    assert_eq!(
+        ops.len(),
+        26,
+        "WP-0.6 defined 25 commands, and WP-1.8b added trim_clip_start"
+    );
 
     for op in &ops {
         let variant = tagged_variant(&enum_schema, "op", op).unwrap();
@@ -223,6 +227,16 @@ fn every_command_runs_by_id() {
         panic!("{clip:?}");
     };
     assert_eq!(midi.notes.len(), 2);
+    // Trimming the left edge keeps the end and the contents in place.
+    agent.run(
+        "clip.trim_start",
+        json!({ "clip": loop_clip, "start": quarter }),
+    );
+    let trimmed = agent.editor.document().clip(loop_clip).unwrap();
+    assert_eq!(
+        (trimmed.start.0, trimmed.end().0, trimmed.offset.0),
+        (quarter, bar, quarter)
+    );
     agent.run("clip.delete", json!({ "clip": loop_clip }));
     assert!(agent.editor.document().clip(loop_clip).is_none());
 
@@ -411,6 +425,13 @@ fn schemas_match_what_commands_serialise() {
             },
         ),
         (
+            "clip.trim_start",
+            Command::TrimClipStart {
+                clip,
+                start: Ticks::QUARTER,
+            },
+        ),
+        (
             "device.insert",
             Command::InsertDevice {
                 track,
@@ -585,7 +606,9 @@ fn bindings_follow_the_spec() {
     );
     // Spec: command-bindings R3
     assert_eq!(bindings("track.delete"), ["S-TRACK-018"]);
-    assert_eq!(bindings("clip.delete"), ["S-EDIT-005"]);
+    // The Arrangement's Delete deletes its selection, clips or time
+    // (`arrangement.delete`, WP-1.8b), so `clip.delete` has no key.
+    assert!(bindings("clip.delete").is_empty());
     assert_eq!(bindings("device.remove"), ["S-EDIT-005"]);
     // Spec: command-bindings R4
     assert_eq!(bindings("track.rename"), ["S-TRACK-004"]);
@@ -612,7 +635,6 @@ fn bindings_follow_the_spec() {
         "edit.redo",
         "track.create",
         "track.delete",
-        "clip.delete",
         "device.remove",
         "track.rename",
         "clip.rename",

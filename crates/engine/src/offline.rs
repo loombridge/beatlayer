@@ -170,8 +170,9 @@ mod tests {
 
     use super::*;
     use crate::message::{Action, ScheduledCommand, TransportCommand};
+    use crate::mixer;
     use crate::node::{NodeKey, ParamValue};
-    use crate::nodes::{TEST_TONE, fader, test_tone};
+    use crate::nodes::{TEST_TONE, test_tone};
 
     /// A group holding a tone, a tone on its own, and, from beat 3, a ramp
     /// from 120 to 180 BPM over four beats.
@@ -243,8 +244,8 @@ mod tests {
                 }
             } else {
                 Action::Param {
-                    key: NodeKey::Fader(track),
-                    param: fader::VOLUME,
+                    key: NodeKey::Mixer(track),
+                    param: mixer::track::VOLUME,
                     value: ParamValue::Set(1.0 / f64::from(eighth)),
                 }
             };

@@ -223,7 +223,12 @@ fn sets_round_trip_through_project_files_headless() {
     shell.run("set.new", json!({})).unwrap();
     let folder = dir.path("Demo Project");
     let opened = shell.run("set.open", json!({ "path": folder })).unwrap();
-    assert_eq!(opened["path"], song);
+    // Compared as paths: Windows writes the separator `song` spells as `/`
+    // as `\`.
+    assert_eq!(
+        Path::new(opened["path"].as_str().unwrap()),
+        Path::new(&song)
+    );
 
     // Saving after opening carries the revision count on.
     shell.run("set.save", json!({})).unwrap();

@@ -19,6 +19,7 @@ allow = [
     # Permissive.
     "0BSD",
     "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",
     "BSD-3-Clause",
     "BSL-1.0",
@@ -37,6 +38,9 @@ allow = [
     # Strong copyleft that can be combined with GPL-3.0-or-later.
     "GPL-2.0-or-later",
     "GPL-3.0-or-later",
+    # Fonts only: bundled typefaces are distributed alongside the code, which
+    # OFL-1.1 permits (10 October 2026). A code crate under OFL needs review.
+    "OFL-1.1",
 ]
 # Deliberately absent:
 # - GPL-2.0-only: can't be combined with GPL-3.0.

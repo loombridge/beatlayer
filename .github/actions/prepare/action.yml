@@ -1,0 +1,54 @@
+# Shared by the CI and nightly workflows, so both build against the same
+# toolchain and system packages. Run it after actions/checkout and before
+# Swatinem/rust-cache, which keys its cache on the installed rustc.
+
+name: Prepare the runner
+description: >-
+  Installs the Rust toolchain that rust-toolchain.toml pins and, on Linux, the
+  system packages Beatlayer's crates build against.
+
+runs:
+  using: composite
+  steps:
+    - name: Install the pinned Rust toolchain
+      shell: bash
+      run: |
+        # With no argument, rustup installs the toolchain, profile, and
+        # components named in rust-toolchain.toml.
+        rustup toolchain install --no-self-update
+        rustup show active-toolchain
+        cargo --version
+
+    - name: Install Linux system packages
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        # Build tools: pkg-config finds system libraries; libclang runs bindgen
+        #   (the PipeWire bindings use it).
+        # Audio: ALSA, JACK, and PipeWire headers for the audio I/O backends.
+        # Windowing: X11, XCB, xkbcommon, Wayland, GL, and fontconfig headers
+        #   for the UI candidates (GPUI, egui) and for plug-in editor windows
+        #   (baseview or winit).
+        sudo apt-get update
+        sudo apt-get install --yes --no-install-recommends \
+          pkg-config \
+          libclang-dev \
+          libasound2-dev \
+          libjack-jackd2-dev \
+          libpipewire-0.3-dev \
+          libx11-dev \
+          libx11-xcb-dev \
+          libxcb1-dev \
+          libxcb-dri2-0-dev \
+          libxcb-icccm4-dev \
+          libxcb-render0-dev \
+          libxcb-shape0-dev \
+          libxcb-xfixes0-dev \
+          libxcursor-dev \
+          libxi-dev \
+          libxrandr-dev \
+          libxkbcommon-dev \
+          libxkbcommon-x11-dev \
+          libwayland-dev \
+          libgl-dev \
+          libfontconfig-dev

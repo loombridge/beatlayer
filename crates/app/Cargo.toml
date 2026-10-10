@@ -27,3 +27,30 @@ bl-ui.workspace = true
 
 [lints]
 workspace = true
+
+# Packaging with cargo-packager (decision D15). This table is the whole
+# configuration; run it with `cargo xtask package`, which adds the version, the
+# build and output directories, and the signing identity when the signing
+# secrets exist (H4, H5). Paths are relative to this file.
+[package.metadata.packager]
+product-name = "Beatlayer"
+identifier = "io.loombridge.beatlayer"
+publisher = "Loombridge"
+description = "An open-source digital audio workstation."
+copyright = "Copyright © 2026 the Beatlayer contributors. Licensed under GPL-3.0-or-later."
+category = "Music"
+binaries = [{ path = "beatlayer", main = true }, { path = "bl-cli" }]
+icons = [
+    "packaging/icons/icon.icns",
+    "packaging/icons/icon.ico",
+    "packaging/icons/*.png",
+]
+# The GPL travels with the binaries.
+resources = ["../../LICENSE", "../../README.md"]
+
+[package.metadata.packager.macos]
+minimum-system-version = "13.0"
+# Merged over the generated Info.plist: architecture, microphone use, and the
+# project document type.
+info-plist-path = "packaging/macos/Info.plist"
+entitlements = "packaging/macos/entitlements.plist"

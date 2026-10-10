@@ -1,0 +1,2117 @@
+{
+  "root": "fj",
+  "gpui_focus": "fi",
+  "active_descendant_focus": null,
+  "frame": {
+    "rendered_at": "2026-10-10T17:41:49.658+01:00",
+    "frame_number": 48,
+    "window_title": "Beatlayer GPUI spike",
+    "node_count": 166,
+    "tab_stop_count": 48,
+    "viewport_size": {
+      "width": 1600.0,
+      "height": 1000.0
+    },
+    "scale_factor": 2.0
+  },
+  "nodes": {
+    "a": {
+      "accesskit_id": "17508374420563602353",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Stop meters"
+      }
+    },
+    "b": {
+      "accesskit_id": "12635939152188757133",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Open plug-in window"
+      }
+    },
+    "c": {
+      "accesskit_id": "8274242688165691218",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Zoom out"
+      }
+    },
+    "d": {
+      "accesskit_id": "18062726307561915780",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Zoom in"
+      }
+    },
+    "e": {
+      "accesskit_id": "2560416498635839850",
+      "aria": {
+        "role": "Label",
+        "value": "1 Guitar"
+      }
+    },
+    "f": {
+      "accesskit_id": "17323195649048293151",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Mute",
+        "toggled": "False"
+      }
+    },
+    "g": {
+      "accesskit_id": "440543473057543511",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Solo",
+        "toggled": "False"
+      }
+    },
+    "h": {
+      "accesskit_id": "3183815732682955303",
+      "aria": {
+        "role": "Slider",
+        "on_action": [
+          "Focus",
+          "Decrement",
+          "Increment"
+        ],
+        "label": "Volume",
+        "numeric_value": 75.0,
+        "min_numeric_value": 0.0,
+        "max_numeric_value": 100.0,
+        "numeric_value_step": 1.0
+      }
+    },
+    "i": {
+      "accesskit_id": "4935848410121926554",
+      "children": [
+        "e",
+        "f",
+        "g",
+        "h"
+      ],
+      "aria": {
+        "role": "Group",
+        "label": "Track 1"
+      }
+    },
+    "j": {
+      "accesskit_id": "6958921173939037461",
+      "aria": {
+        "role": "Label",
+        "value": "2 Vox"
+      }
+    },
+    "k": {
+      "accesskit_id": "14026588880968566588",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Mute",
+        "toggled": "False"
+      }
+    },
+    "l": {
+      "accesskit_id": "9140732732220587128",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Solo",
+        "toggled": "False"
+      }
+    },
+    "m": {
+      "accesskit_id": "5616904551227674326",
+      "aria": {
+        "role": "Slider",
+        "on_action": [
+          "Focus",
+          "Decrement",
+          "Increment"
+        ],
+        "label": "Volume",
+        "numeric_value": 75.0,
+        "min_numeric_value": 0.0,
+        "max_numeric_value": 100.0,
+        "numeric_value_step": 1.0
+      }
+    },
+    "n": {
+      "accesskit_id": "18374477723887551316",
+      "children": [
+        "j",
+        "k",
+        "l",
+        "m"
+      ],
+      "aria": {
+        "role": "Group",
+        "label": "Track 2"
+      }
+    },
+    "o": {
+      "accesskit_id": "15866060210135708579",
+      "aria": {
+        "role": "Label",
+        "value": "3 Vox"
+      }
+    },
+    "p": {
+      "accesskit_id": "5984118457150255311",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Mute",
+        "toggled": "False"
+      }
+    },
+    "q": {
+      "accesskit_id": "13557246021660566324",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Solo",
+        "toggled": "False"
+      }
+    },
+    "r": {
+      "accesskit_id": "13340324815244405456",
+      "aria": {
+        "role": "Slider",
+        "on_action": [
+          "Focus",
+          "Decrement",
+          "Increment"
+        ],
+        "label": "Volume",
+        "numeric_value": 75.0,
+        "min_numeric_value": 0.0,
+        "max_numeric_value": 100.0,
+        "numeric_value_step": 1.0
+      }
+    },
+    "s": {
+      "accesskit_id": "7975773516055186739",
+      "children": [
+        "o",
+        "p",
+        "q",
+        "r"
+      ],
+      "aria": {
+        "role": "Group",
+        "label": "Track 3"
+      }
+    },
+    "t": {
+      "accesskit_id": "10638206390005774220",
+      "aria": {
+        "role": "Label",
+        "value": "4 FX"
+      }
+    },
+    "u": {
+      "accesskit_id": "8705354690175059068",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Mute",
+        "toggled": "False"
+      }
+    },
+    "v": {
+      "accesskit_id": "543448176512809956",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Solo",
+        "toggled": "False"
+      }
+    },
+    "w": {
+      "accesskit_id": "1593214443408994683",
+      "aria": {
+        "role": "Slider",
+        "on_action": [
+          "Focus",
+          "Decrement",
+          "Increment"
+        ],
+        "label": "Volume",
+        "numeric_value": 75.0,
+        "min_numeric_value": 0.0,
+        "max_numeric_value": 100.0,
+        "numeric_value_step": 1.0
+      }
+    },
+    "x": {
+      "accesskit_id": "9340026822329398262",
+      "children": [
+        "t",
+        "u",
+        "v",
+        "w"
+      ],
+      "aria": {
+        "role": "Group",
+        "label": "Track 4"
+      }
+    },
+    "y": {
+      "accesskit_id": "473615527307600486",
+      "aria": {
+        "role": "Label",
+        "value": "5 Lead"
+      }
+    },
+    "z": {
+      "accesskit_id": "2427491286378015059",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Mute",
+        "toggled": "False"
+      }
+    },
+    "aa": {
+      "accesskit_id": "9669742011681009524",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Solo",
+        "toggled": "False"
+      }
+    },
+    "ab": {
+      "accesskit_id": "3685284434512268307",
+      "aria": {
+        "role": "Slider",
+        "on_action": [
+          "Focus",
+          "Decrement",
+          "Increment"
+        ],
+        "label": "Volume",
+        "numeric_value": 75.0,
+        "min_numeric_value": 0.0,
+        "max_numeric_value": 100.0,
+        "numeric_value_step": 1.0
+      }
+    },
+    "ac": {
+      "accesskit_id": "1142284922425817271",
+      "children": [
+        "y",
+        "z",
+        "aa",
+        "ab"
+      ],
+      "aria": {
+        "role": "Group",
+        "label": "Track 5"
+      }
+    },
+    "ad": {
+      "accesskit_id": "9428018304311417914",
+      "aria": {
+        "role": "Label",
+        "value": "6 Arp"
+      }
+    },
+    "ae": {
+      "accesskit_id": "9236425211912843062",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Mute",
+        "toggled": "False"
+      }
+    },
+    "af": {
+      "accesskit_id": "12612170510634381941",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Solo",
+        "toggled": "False"
+      }
+    },
+    "ag": {
+      "accesskit_id": "9996284711610297323",
+      "aria": {
+        "role": "Slider",
+        "on_action": [
+          "Focus",
+          "Decrement",
+          "Increment"
+        ],
+        "label": "Volume",
+        "numeric_value": 75.0,
+        "min_numeric_value": 0.0,
+        "max_numeric_value": 100.0,
+        "numeric_value_step": 1.0
+      }
+    },
+    "ah": {
+      "accesskit_id": "5844559999031415339",
+      "children": [
+        "ad",
+        "ae",
+        "af",
+        "ag"
+      ],
+      "aria": {
+        "role": "Group",
+        "label": "Track 6"
+      }
+    },
+    "ai": {
+      "accesskit_id": "3063287194108194848",
+      "aria": {
+        "role": "Label",
+        "value": "7 Vox"
+      }
+    },
+    "aj": {
+      "accesskit_id": "14467155363609574320",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Mute",
+        "toggled": "False"
+      }
+    },
+    "ak": {
+      "accesskit_id": "6680938003319842446",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Solo",
+        "toggled": "False"
+      }
+    },
+    "al": {
+      "accesskit_id": "189045457291536784",
+      "aria": {
+        "role": "Slider",
+        "on_action": [
+          "Focus",
+          "Decrement",
+          "Increment"
+        ],
+        "label": "Volume",
+        "numeric_value": 75.0,
+        "min_numeric_value": 0.0,
+        "max_numeric_value": 100.0,
+        "numeric_value_step": 1.0
+      }
+    },
+    "am": {
+      "accesskit_id": "17680403264895031206",
+      "children": [
+        "ai",
+        "aj",
+        "ak",
+        "al"
+      ],
+      "aria": {
+        "role": "Group",
+        "label": "Track 7"
+      }
+    },
+    "an": {
+      "accesskit_id": "2493099063232075209",
+      "aria": {
+        "role": "Label",
+        "value": "8 Kick"
+      }
+    },
+    "ao": {
+      "accesskit_id": "5387649520410012435",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Mute",
+        "toggled": "False"
+      }
+    },
+    "ap": {
+      "accesskit_id": "104876138054387243",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Solo",
+        "toggled": "False"
+      }
+    },
+    "aq": {
+      "accesskit_id": "16843545708712812044",
+      "aria": {
+        "role": "Slider",
+        "on_action": [
+          "Focus",
+          "Decrement",
+          "Increment"
+        ],
+        "label": "Volume",
+        "numeric_value": 75.0,
+        "min_numeric_value": 0.0,
+        "max_numeric_value": 100.0,
+        "numeric_value_step": 1.0
+      }
+    },
+    "ar": {
+      "accesskit_id": "7992616655527465762",
+      "children": [
+        "an",
+        "ao",
+        "ap",
+        "aq"
+      ],
+      "aria": {
+        "role": "Group",
+        "label": "Track 8"
+      }
+    },
+    "as": {
+      "accesskit_id": "5118800431068482694",
+      "aria": {
+        "role": "Label",
+        "value": "9 Snare"
+      }
+    },
+    "at": {
+      "accesskit_id": "3128068201290845974",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Mute",
+        "toggled": "False"
+      }
+    },
+    "au": {
+      "accesskit_id": "8276392306517320686",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Solo",
+        "toggled": "False"
+      }
+    },
+    "av": {
+      "accesskit_id": "12571873255643354210",
+      "aria": {
+        "role": "Slider",
+        "on_action": [
+          "Focus",
+          "Decrement",
+          "Increment"
+        ],
+        "label": "Volume",
+        "numeric_value": 75.0,
+        "min_numeric_value": 0.0,
+        "max_numeric_value": 100.0,
+        "numeric_value_step": 1.0
+      }
+    },
+    "aw": {
+      "accesskit_id": "14082131687765184081",
+      "children": [
+        "as",
+        "at",
+        "au",
+        "av"
+      ],
+      "aria": {
+        "role": "Group",
+        "label": "Track 9"
+      }
+    },
+    "ax": {
+      "accesskit_id": "14142410014045629675",
+      "aria": {
+        "role": "Label",
+        "value": "10 Pad"
+      }
+    },
+    "ay": {
+      "accesskit_id": "4096058126159975415",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Mute",
+        "toggled": "False"
+      }
+    },
+    "az": {
+      "accesskit_id": "10978604332349674830",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Solo",
+        "toggled": "False"
+      }
+    },
+    "ba": {
+      "accesskit_id": "13218113266681189971",
+      "aria": {
+        "role": "Slider",
+        "on_action": [
+          "Focus",
+          "Decrement",
+          "Increment"
+        ],
+        "label": "Volume",
+        "numeric_value": 75.0,
+        "min_numeric_value": 0.0,
+        "max_numeric_value": 100.0,
+        "numeric_value_step": 1.0
+      }
+    },
+    "bb": {
+      "accesskit_id": "14239575109757029173",
+      "children": [
+        "ax",
+        "ay",
+        "az",
+        "ba"
+      ],
+      "aria": {
+        "role": "Group",
+        "label": "Track 10"
+      }
+    },
+    "bc": {
+      "accesskit_id": "15833468403176854806",
+      "aria": {
+        "role": "Label",
+        "value": "11 Guitar"
+      }
+    },
+    "bd": {
+      "accesskit_id": "6357477973896385482",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Mute",
+        "toggled": "False"
+      }
+    },
+    "be": {
+      "accesskit_id": "543338020497811409",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Solo",
+        "toggled": "False"
+      }
+    },
+    "bf": {
+      "accesskit_id": "13347201340033825900",
+      "aria": {
+        "role": "Slider",
+        "on_action": [
+          "Focus",
+          "Decrement",
+          "Increment"
+        ],
+        "label": "Volume",
+        "numeric_value": 75.0,
+        "min_numeric_value": 0.0,
+        "max_numeric_value": 100.0,
+        "numeric_value_step": 1.0
+      }
+    },
+    "bg": {
+      "accesskit_id": "9224494124203944708",
+      "children": [
+        "bc",
+        "bd",
+        "be",
+        "bf"
+      ],
+      "aria": {
+        "role": "Group",
+        "label": "Track 11"
+      }
+    },
+    "bh": {
+      "accesskit_id": "848968996440823637",
+      "aria": {
+        "role": "Label",
+        "value": "12 Bass"
+      }
+    },
+    "bi": {
+      "accesskit_id": "4990671228706549622",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Mute",
+        "toggled": "False"
+      }
+    },
+    "bj": {
+      "accesskit_id": "14042619248074503944",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Solo",
+        "toggled": "False"
+      }
+    },
+    "bk": {
+      "accesskit_id": "6277653799198299954",
+      "aria": {
+        "role": "Slider",
+        "on_action": [
+          "Focus",
+          "Decrement",
+          "Increment"
+        ],
+        "label": "Volume",
+        "numeric_value": 75.0,
+        "min_numeric_value": 0.0,
+        "max_numeric_value": 100.0,
+        "numeric_value_step": 1.0
+      }
+    },
+    "bl": {
+      "accesskit_id": "17875377782363562658",
+      "children": [
+        "bh",
+        "bi",
+        "bj",
+        "bk"
+      ],
+      "aria": {
+        "role": "Group",
+        "label": "Track 12"
+      }
+    },
+    "bm": {
+      "accesskit_id": "16925567817185189341",
+      "aria": {
+        "role": "Label",
+        "value": "13 FX"
+      }
+    },
+    "bn": {
+      "accesskit_id": "7351964743428502859",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Mute",
+        "toggled": "False"
+      }
+    },
+    "bo": {
+      "accesskit_id": "16340409539426398446",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Solo",
+        "toggled": "False"
+      }
+    },
+    "bp": {
+      "accesskit_id": "6481014980044917004",
+      "aria": {
+        "role": "Slider",
+        "on_action": [
+          "Focus",
+          "Decrement",
+          "Increment"
+        ],
+        "label": "Volume",
+        "numeric_value": 75.0,
+        "min_numeric_value": 0.0,
+        "max_numeric_value": 100.0,
+        "numeric_value_step": 1.0
+      }
+    },
+    "bq": {
+      "accesskit_id": "4269434660564793519",
+      "children": [
+        "bm",
+        "bn",
+        "bo",
+        "bp"
+      ],
+      "aria": {
+        "role": "Group",
+        "label": "Track 13"
+      }
+    },
+    "br": {
+      "accesskit_id": "12758392353737149187",
+      "aria": {
+        "role": "Label",
+        "value": "14 Lead"
+      }
+    },
+    "bs": {
+      "accesskit_id": "5296373035625550515",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Mute",
+        "toggled": "False"
+      }
+    },
+    "bt": {
+      "accesskit_id": "11193737414646166703",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Solo",
+        "toggled": "False"
+      }
+    },
+    "bu": {
+      "accesskit_id": "6851998643680070553",
+      "aria": {
+        "role": "Slider",
+        "on_action": [
+          "Focus",
+          "Decrement",
+          "Increment"
+        ],
+        "label": "Volume",
+        "numeric_value": 75.0,
+        "min_numeric_value": 0.0,
+        "max_numeric_value": 100.0,
+        "numeric_value_step": 1.0
+      }
+    },
+    "bv": {
+      "accesskit_id": "10362404901348971426",
+      "children": [
+        "br",
+        "bs",
+        "bt",
+        "bu"
+      ],
+      "aria": {
+        "role": "Group",
+        "label": "Track 14"
+      }
+    },
+    "bw": {
+      "accesskit_id": "10223043746405865503",
+      "aria": {
+        "role": "Label",
+        "value": "15 Perc"
+      }
+    },
+    "bx": {
+      "accesskit_id": "15754038087535717935",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Mute",
+        "toggled": "False"
+      }
+    },
+    "by": {
+      "accesskit_id": "4955306324733502869",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Solo",
+        "toggled": "False"
+      }
+    },
+    "bz": {
+      "accesskit_id": "16438746214738117219",
+      "aria": {
+        "role": "Slider",
+        "on_action": [
+          "Focus",
+          "Decrement",
+          "Increment"
+        ],
+        "label": "Volume",
+        "numeric_value": 75.0,
+        "min_numeric_value": 0.0,
+        "max_numeric_value": 100.0,
+        "numeric_value_step": 1.0
+      }
+    },
+    "ca": {
+      "accesskit_id": "11237721745024085031",
+      "children": [
+        "bw",
+        "bx",
+        "by",
+        "bz"
+      ],
+      "aria": {
+        "role": "Group",
+        "label": "Track 15"
+      }
+    },
+    "cb": {
+      "accesskit_id": "3994423401027106654",
+      "aria": {
+        "role": "Label",
+        "value": "16 FX"
+      }
+    },
+    "cc": {
+      "accesskit_id": "1445860505148763082",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Mute",
+        "toggled": "False"
+      }
+    },
+    "cd": {
+      "accesskit_id": "14180287036659248385",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Solo",
+        "toggled": "False"
+      }
+    },
+    "ce": {
+      "accesskit_id": "4911129452924019533",
+      "aria": {
+        "role": "Slider",
+        "on_action": [
+          "Focus",
+          "Decrement",
+          "Increment"
+        ],
+        "label": "Volume",
+        "numeric_value": 75.0,
+        "min_numeric_value": 0.0,
+        "max_numeric_value": 100.0,
+        "numeric_value_step": 1.0
+      }
+    },
+    "cf": {
+      "accesskit_id": "5346116104044539731",
+      "children": [
+        "cb",
+        "cc",
+        "cd",
+        "ce"
+      ],
+      "aria": {
+        "role": "Group",
+        "label": "Track 16"
+      }
+    },
+    "cg": {
+      "accesskit_id": "10670988092958627538",
+      "aria": {
+        "role": "Label",
+        "value": "17 Pad"
+      }
+    },
+    "ch": {
+      "accesskit_id": "12000384082925332329",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Mute",
+        "toggled": "False"
+      }
+    },
+    "ci": {
+      "accesskit_id": "9841486477729808745",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Solo",
+        "toggled": "False"
+      }
+    },
+    "cj": {
+      "accesskit_id": "14034132370729645789",
+      "aria": {
+        "role": "Slider",
+        "on_action": [
+          "Focus",
+          "Decrement",
+          "Increment"
+        ],
+        "label": "Volume",
+        "numeric_value": 75.0,
+        "min_numeric_value": 0.0,
+        "max_numeric_value": 100.0,
+        "numeric_value_step": 1.0
+      }
+    },
+    "ck": {
+      "accesskit_id": "2082937468603125741",
+      "children": [
+        "cg",
+        "ch",
+        "ci",
+        "cj"
+      ],
+      "aria": {
+        "role": "Group",
+        "label": "Track 17"
+      }
+    },
+    "cl": {
+      "accesskit_id": "9494211404057689913",
+      "aria": {
+        "role": "Label",
+        "value": "18 Arp"
+      }
+    },
+    "cm": {
+      "accesskit_id": "4017166592203476879",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Mute",
+        "toggled": "False"
+      }
+    },
+    "cn": {
+      "accesskit_id": "7069114324971091004",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Solo",
+        "toggled": "False"
+      }
+    },
+    "co": {
+      "accesskit_id": "11759831008421424445",
+      "aria": {
+        "role": "Slider",
+        "on_action": [
+          "Focus",
+          "Decrement",
+          "Increment"
+        ],
+        "label": "Volume",
+        "numeric_value": 75.0,
+        "min_numeric_value": 0.0,
+        "max_numeric_value": 100.0,
+        "numeric_value_step": 1.0
+      }
+    },
+    "cp": {
+      "accesskit_id": "4101170222114469005",
+      "children": [
+        "cl",
+        "cm",
+        "cn",
+        "co"
+      ],
+      "aria": {
+        "role": "Group",
+        "label": "Track 18"
+      }
+    },
+    "cq": {
+      "accesskit_id": "5552734081063962717",
+      "aria": {
+        "role": "Label",
+        "value": "19 Strings"
+      }
+    },
+    "cr": {
+      "accesskit_id": "3123904832712563934",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Mute",
+        "toggled": "False"
+      }
+    },
+    "cs": {
+      "accesskit_id": "13532329713382392078",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Solo",
+        "toggled": "False"
+      }
+    },
+    "ct": {
+      "accesskit_id": "10866607802048748093",
+      "aria": {
+        "role": "Slider",
+        "on_action": [
+          "Focus",
+          "Decrement",
+          "Increment"
+        ],
+        "label": "Volume",
+        "numeric_value": 75.0,
+        "min_numeric_value": 0.0,
+        "max_numeric_value": 100.0,
+        "numeric_value_step": 1.0
+      }
+    },
+    "cu": {
+      "accesskit_id": "10457616950163889907",
+      "children": [
+        "cq",
+        "cr",
+        "cs",
+        "ct"
+      ],
+      "aria": {
+        "role": "Group",
+        "label": "Track 19"
+      }
+    },
+    "cv": {
+      "accesskit_id": "11852324614668441355",
+      "aria": {
+        "role": "Label",
+        "value": "20 Bass"
+      }
+    },
+    "cw": {
+      "accesskit_id": "4164095718923024817",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Mute",
+        "toggled": "False"
+      }
+    },
+    "cx": {
+      "accesskit_id": "16708239452532361017",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Solo",
+        "toggled": "False"
+      }
+    },
+    "cy": {
+      "accesskit_id": "15604341348885706668",
+      "aria": {
+        "role": "Slider",
+        "on_action": [
+          "Focus",
+          "Decrement",
+          "Increment"
+        ],
+        "label": "Volume",
+        "numeric_value": 75.0,
+        "min_numeric_value": 0.0,
+        "max_numeric_value": 100.0,
+        "numeric_value_step": 1.0
+      }
+    },
+    "cz": {
+      "accesskit_id": "9285876588432122867",
+      "children": [
+        "cv",
+        "cw",
+        "cx",
+        "cy"
+      ],
+      "aria": {
+        "role": "Group",
+        "label": "Track 20"
+      }
+    },
+    "da": {
+      "accesskit_id": "11992427945882164173",
+      "aria": {
+        "role": "Label",
+        "value": "21 Lead"
+      }
+    },
+    "db": {
+      "accesskit_id": "16464443373845600555",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Mute",
+        "toggled": "False"
+      }
+    },
+    "dc": {
+      "accesskit_id": "11810695805893698682",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Solo",
+        "toggled": "False"
+      }
+    },
+    "dd": {
+      "accesskit_id": "6770285937162703258",
+      "aria": {
+        "role": "Slider",
+        "on_action": [
+          "Focus",
+          "Decrement",
+          "Increment"
+        ],
+        "label": "Volume",
+        "numeric_value": 75.0,
+        "min_numeric_value": 0.0,
+        "max_numeric_value": 100.0,
+        "numeric_value_step": 1.0
+      }
+    },
+    "de": {
+      "accesskit_id": "10725031735820191717",
+      "children": [
+        "da",
+        "db",
+        "dc",
+        "dd"
+      ],
+      "aria": {
+        "role": "Group",
+        "label": "Track 21"
+      }
+    },
+    "df": {
+      "accesskit_id": "6934832915465811199",
+      "aria": {
+        "role": "Label",
+        "value": "22 Pluck"
+      }
+    },
+    "dg": {
+      "accesskit_id": "2511911596623561098",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Mute",
+        "toggled": "False"
+      }
+    },
+    "dh": {
+      "accesskit_id": "10776095466431838192",
+      "aria": {
+        "role": "Button",
+        "on_action": [
+          "Click",
+          "Focus"
+        ],
+        "label": "Solo",
+        "toggled": "False"
+      }
+    },
+    "di": {
+      "accesskit_id": "10350589568955075515",
+      "aria": {
+        "role": "Slider",
+        "on_action": [
+          "Focus",
+          "Decrement",
+          "Increment"
+        ],
+        "label": "Volume",
+        "numeric_value": 75.0,
+        "min_numeric_value": 0.0,
+        "max_numeric_value": 100.0,
+        "numeric_value_step": 1.0
+      }
+    },
+    "dj": {
+      "accesskit_id": "1196682371907721282",
+      "children": [
+        "df",
+        "dg",
+        "dh",
+        "di"
+      ],
+      "aria": {
+        "role": "Group",
+        "label": "Track 22"
+      }
+    },
+    "dk": {
+      "accesskit_id": "5856414124562051376",
+      "children": [
+        "i",
+        "n",
+        "s",
+        "x",
+        "ac",
+        "ah",
+        "am",
+        "ar",
+        "aw",
+        "bb",
+        "bg",
+        "bl",
+        "bq",
+        "bv",
+        "ca",
+        "cf",
+        "ck",
+        "cp",
+        "cu",
+        "cz",
+        "de",
+        "dj"
+      ],
+      "aria": {
+        "role": "List",
+        "label": "Tracks"
+      }
+    },
+    "dl": {
+      "accesskit_id": "17172182077989996577",
+      "aria": {
+        "role": "Group",
+        "label": "Arrangement"
+      }
+    },
+    "dm": {
+      "accesskit_id": "10697477660386213054",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "One-shots/smooth metallic 116 bpm 000000.wav",
+        "selected": false,
+        "position_in_set": 1,
+        "size_of_set": 100000
+      }
+    },
+    "dn": {
+      "accesskit_id": "4987661743448652276",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "Vocals/glassy wide 106 bpm 000001.wav",
+        "selected": false,
+        "position_in_set": 2,
+        "size_of_set": 100000
+      }
+    },
+    "do": {
+      "accesskit_id": "18409185487215430781",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "Bass/digital metallic 95 bpm 000002.wav",
+        "selected": false,
+        "position_in_set": 3,
+        "size_of_set": 100000
+      }
+    },
+    "dp": {
+      "accesskit_id": "8274183272107599720",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "Vocals/smooth airy 91 bpm 000003.wav",
+        "selected": false,
+        "position_in_set": 4,
+        "size_of_set": 100000
+      }
+    },
+    "dq": {
+      "accesskit_id": "10050155101142305156",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "Drums/analog gritty 137 bpm 000004.wav",
+        "selected": false,
+        "position_in_set": 5,
+        "size_of_set": 100000
+      }
+    },
+    "dr": {
+      "accesskit_id": "12483004071001525491",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "Textures/warm tight 143 bpm 000005.wav",
+        "selected": false,
+        "position_in_set": 6,
+        "size_of_set": 100000
+      }
+    },
+    "ds": {
+      "accesskit_id": "16401572870513705844",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "Synth/tape metallic 116 bpm 000006.wav",
+        "selected": false,
+        "position_in_set": 7,
+        "size_of_set": 100000
+      }
+    },
+    "dt": {
+      "accesskit_id": "12583171472534656580",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "Drums/tape vinyl 108 bpm 000007.wav",
+        "selected": false,
+        "position_in_set": 8,
+        "size_of_set": 100000
+      }
+    },
+    "du": {
+      "accesskit_id": "11529419005355729893",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "Keys/warm punchy 104 bpm 000008.wav",
+        "selected": false,
+        "position_in_set": 9,
+        "size_of_set": 100000
+      }
+    },
+    "dv": {
+      "accesskit_id": "1878638795728947813",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "FX/punchy analog 109 bpm 000009.wav",
+        "selected": false,
+        "position_in_set": 10,
+        "size_of_set": 100000
+      }
+    },
+    "dw": {
+      "accesskit_id": "7100706233559861573",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "Bass/dusty vinyl 139 bpm 000010.wav",
+        "selected": false,
+        "position_in_set": 11,
+        "size_of_set": 100000
+      }
+    },
+    "dx": {
+      "accesskit_id": "4155861735087227293",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "Synth/lofi vinyl 91 bpm 000011.wav",
+        "selected": false,
+        "position_in_set": 12,
+        "size_of_set": 100000
+      }
+    },
+    "dy": {
+      "accesskit_id": "5541225231048950743",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "Bass/crisp tight 112 bpm 000012.wav",
+        "selected": false,
+        "position_in_set": 13,
+        "size_of_set": 100000
+      }
+    },
+    "dz": {
+      "accesskit_id": "7253835335804203555",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "Vocals/bright lofi 101 bpm 000013.wav",
+        "selected": false,
+        "position_in_set": 14,
+        "size_of_set": 100000
+      }
+    },
+    "ea": {
+      "accesskit_id": "7198334365769361993",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "Loops/punchy dusty 89 bpm 000014.wav",
+        "selected": false,
+        "position_in_set": 15,
+        "size_of_set": 100000
+      }
+    },
+    "eb": {
+      "accesskit_id": "13975045620415263045",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "FX/wide tight 123 bpm 000015.wav",
+        "selected": false,
+        "position_in_set": 16,
+        "size_of_set": 100000
+      }
+    },
+    "ec": {
+      "accesskit_id": "18213215847066266238",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "Loops/crisp tight 93 bpm 000016.wav",
+        "selected": false,
+        "position_in_set": 17,
+        "size_of_set": 100000
+      }
+    },
+    "ed": {
+      "accesskit_id": "11554541752213171723",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "Textures/gritty lofi 113 bpm 000017.wav",
+        "selected": false,
+        "position_in_set": 18,
+        "size_of_set": 100000
+      }
+    },
+    "ee": {
+      "accesskit_id": "1147000221614860083",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "Keys/punchy tape 104 bpm 000018.wav",
+        "selected": false,
+        "position_in_set": 19,
+        "size_of_set": 100000
+      }
+    },
+    "ef": {
+      "accesskit_id": "12975873854230689734",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "Textures/tight dusty 112 bpm 000019.wav",
+        "selected": false,
+        "position_in_set": 20,
+        "size_of_set": 100000
+      }
+    },
+    "eg": {
+      "accesskit_id": "14199103964740681512",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "Drums/lofi crisp 146 bpm 000020.wav",
+        "selected": false,
+        "position_in_set": 21,
+        "size_of_set": 100000
+      }
+    },
+    "eh": {
+      "accesskit_id": "1167421434454669772",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "Keys/glassy analog 152 bpm 000021.wav",
+        "selected": false,
+        "position_in_set": 22,
+        "size_of_set": 100000
+      }
+    },
+    "ei": {
+      "accesskit_id": "9266362441148179898",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "One-shots/metallic punchy 109 bpm 000022.wav",
+        "selected": false,
+        "position_in_set": 23,
+        "size_of_set": 100000
+      }
+    },
+    "ej": {
+      "accesskit_id": "17995324866878917211",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "Keys/crisp smooth 136 bpm 000023.wav",
+        "selected": false,
+        "position_in_set": 24,
+        "size_of_set": 100000
+      }
+    },
+    "ek": {
+      "accesskit_id": "249637989213506815",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "Loops/vinyl digital 141 bpm 000024.wav",
+        "selected": false,
+        "position_in_set": 25,
+        "size_of_set": 100000
+      }
+    },
+    "el": {
+      "accesskit_id": "8734117573276349332",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "Synth/smooth crisp 141 bpm 000025.wav",
+        "selected": false,
+        "position_in_set": 26,
+        "size_of_set": 100000
+      }
+    },
+    "em": {
+      "accesskit_id": "706305799478396979",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "Loops/punchy analog 106 bpm 000026.wav",
+        "selected": false,
+        "position_in_set": 27,
+        "size_of_set": 100000
+      }
+    },
+    "en": {
+      "accesskit_id": "11224439872940912531",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "Drums/dusty lofi 105 bpm 000027.wav",
+        "selected": false,
+        "position_in_set": 28,
+        "size_of_set": 100000
+      }
+    },
+    "eo": {
+      "accesskit_id": "4166800354983401748",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "One-shots/tape airy 97 bpm 000028.wav",
+        "selected": false,
+        "position_in_set": 29,
+        "size_of_set": 100000
+      }
+    },
+    "ep": {
+      "accesskit_id": "16518632967786936522",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "Loops/vinyl lofi 141 bpm 000029.wav",
+        "selected": false,
+        "position_in_set": 30,
+        "size_of_set": 100000
+      }
+    },
+    "eq": {
+      "accesskit_id": "9054338574417063764",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "Synth/punchy bright 83 bpm 000030.wav",
+        "selected": false,
+        "position_in_set": 31,
+        "size_of_set": 100000
+      }
+    },
+    "er": {
+      "accesskit_id": "3611846240353178714",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "Vocals/wooden bright 104 bpm 000031.wav",
+        "selected": false,
+        "position_in_set": 32,
+        "size_of_set": 100000
+      }
+    },
+    "es": {
+      "accesskit_id": "17991702380399612007",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "Bass/smooth dusty 87 bpm 000032.wav",
+        "selected": false,
+        "position_in_set": 33,
+        "size_of_set": 100000
+      }
+    },
+    "et": {
+      "accesskit_id": "10683212868831667192",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "FX/airy metallic 111 bpm 000033.wav",
+        "selected": false,
+        "position_in_set": 34,
+        "size_of_set": 100000
+      }
+    },
+    "eu": {
+      "accesskit_id": "17300563494840961260",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "Bass/lofi vinyl 159 bpm 000034.wav",
+        "selected": false,
+        "position_in_set": 35,
+        "size_of_set": 100000
+      }
+    },
+    "ev": {
+      "accesskit_id": "13122259492561357041",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "Textures/gritty metallic 137 bpm 000035.wav",
+        "selected": false,
+        "position_in_set": 36,
+        "size_of_set": 100000
+      }
+    },
+    "ew": {
+      "accesskit_id": "5167527609279930958",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "FX/warm gritty 99 bpm 000036.wav",
+        "selected": false,
+        "position_in_set": 37,
+        "size_of_set": 100000
+      }
+    },
+    "ex": {
+      "accesskit_id": "5856677362724448500",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "Textures/metallic smooth 117 bpm 000037.wav",
+        "selected": false,
+        "position_in_set": 38,
+        "size_of_set": 100000
+      }
+    },
+    "ey": {
+      "accesskit_id": "9889005222708478077",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "Keys/smooth smooth 123 bpm 000038.wav",
+        "selected": false,
+        "position_in_set": 39,
+        "size_of_set": 100000
+      }
+    },
+    "ez": {
+      "accesskit_id": "16346944652486617601",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "Loops/tight lofi 105 bpm 000039.wav",
+        "selected": false,
+        "position_in_set": 40,
+        "size_of_set": 100000
+      }
+    },
+    "fa": {
+      "accesskit_id": "6790691167207955035",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "One-shots/dark gritty 99 bpm 000040.wav",
+        "selected": false,
+        "position_in_set": 41,
+        "size_of_set": 100000
+      }
+    },
+    "fb": {
+      "accesskit_id": "6512814764636329783",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "One-shots/analog analog 141 bpm 000041.wav",
+        "selected": false,
+        "position_in_set": 42,
+        "size_of_set": 100000
+      }
+    },
+    "fc": {
+      "accesskit_id": "11957669223630692052",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "Synth/bright analog 158 bpm 000042.wav",
+        "selected": false,
+        "position_in_set": 43,
+        "size_of_set": 100000
+      }
+    },
+    "fd": {
+      "accesskit_id": "11085866906135287376",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "Loops/wide smooth 151 bpm 000043.wav",
+        "selected": false,
+        "position_in_set": 44,
+        "size_of_set": 100000
+      }
+    },
+    "fe": {
+      "accesskit_id": "12184303626914091002",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "One-shots/wide lofi 157 bpm 000044.wav",
+        "selected": false,
+        "position_in_set": 45,
+        "size_of_set": 100000
+      }
+    },
+    "ff": {
+      "accesskit_id": "14543758467529430846",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "Drums/digital digital 120 bpm 000045.wav",
+        "selected": false,
+        "position_in_set": 46,
+        "size_of_set": 100000
+      }
+    },
+    "fg": {
+      "accesskit_id": "15731890888571477950",
+      "aria": {
+        "role": "ListItem",
+        "on_action": [
+          "Click"
+        ],
+        "label": "One-shots/dark wooden 124 bpm 000046.wav",
+        "selected": false,
+        "position_in_set": 47,
+        "size_of_set": 100000
+      }
+    },
+    "fh": {
+      "accesskit_id": "1281655483647445150",
+      "children": [
+        "dm",
+        "dn",
+        "do",
+        "dp",
+        "dq",
+        "dr",
+        "ds",
+        "dt",
+        "du",
+        "dv",
+        "dw",
+        "dx",
+        "dy",
+        "dz",
+        "ea",
+        "eb",
+        "ec",
+        "ed",
+        "ee",
+        "ef",
+        "eg",
+        "eh",
+        "ei",
+        "ej",
+        "ek",
+        "el",
+        "em",
+        "en",
+        "eo",
+        "ep",
+        "eq",
+        "er",
+        "es",
+        "et",
+        "eu",
+        "ev",
+        "ew",
+        "ex",
+        "ey",
+        "ez",
+        "fa",
+        "fb",
+        "fc",
+        "fd",
+        "fe",
+        "ff",
+        "fg"
+      ],
+      "aria": {
+        "role": "Group",
+        "label": "Browser"
+      }
+    },
+    "fi": {
+      "accesskit_id": "8923652643010160342",
+      "children": [
+        "a",
+        "b",
+        "c",
+        "d",
+        "dk",
+        "dl",
+        "fh"
+      ],
+      "aria": {
+        "role": "Application",
+        "on_action": [
+          "Focus"
+        ],
+        "label": "Beatlayer GPUI spike"
+      }
+    },
+    "fj": {
+      "accesskit_id": "0",
+      "children": [
+        "fi"
+      ],
+      "aria": {
+        "role": "Window",
+        "label": "Beatlayer GPUI spike"
+      }
+    }
+  }
+}

@@ -30,7 +30,7 @@ Beatlayer is in Phase 0 of its [build plan](docs/03-build-plan.md). The workspac
    cargo xtask check
    ```
 
-Read [AGENTS.md](AGENTS.md) before contributing. Every contribution follows the [clean-room policy](https://github.com/loombridge/beatlayer/blob/main/CONTRIBUTING.md#building-without-abletons-code).
+Read [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md) before contributing. Every contribution follows the [clean-room policy](https://github.com/loombridge/beatlayer/blob/main/CONTRIBUTING.md#building-without-abletons-code).
 
 ## Licence
 

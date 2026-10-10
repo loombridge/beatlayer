@@ -30,6 +30,9 @@ pub struct ClipSpan {
     pub start: i64,
     /// Where it ends.
     pub end: i64,
+    /// Where its contents begin: its start less its offset (WP-1.8b), so a
+    /// split clip's waveform carries on from where it was.
+    pub origin: i64,
     /// The clip.
     pub id: ClipId,
     /// Whether it's deactivated.
@@ -89,6 +92,7 @@ impl ClipIndex {
                 .map(|clip| ClipSpan {
                     start: clip.start.get(),
                     end: clip.end().get(),
+                    origin: clip.content_start().get(),
                     id: clip.id,
                     muted: clip.mute,
                     media: match &clip.data {
@@ -176,6 +180,8 @@ pub struct LanesInput<'a> {
     pub theme: &'a Theme,
     /// The selected tracks.
     pub selected: &'a [TrackId],
+    /// The selected clips (WP-1.8b).
+    pub selected_clips: &'a [ClipId],
     /// The grid's spacing.
     pub grid_step: Step,
 }
@@ -250,6 +256,7 @@ pub fn build_lanes(
         pixels_per_point,
         theme,
         selected,
+        selected_clips,
         grid_step,
     } = *input;
     let colors = &theme.colors;
@@ -406,7 +413,7 @@ pub fn build_lanes(
                             &WaveClip {
                                 peaks,
                                 base: *base,
-                                start: Ticks(span.start),
+                                start: Ticks(span.origin),
                                 draw: (dx0.max(x0), dx1.min(x1)),
                                 band,
                             },
@@ -421,6 +428,21 @@ pub fn build_lanes(
                             },
                         );
                     }
+                }
+            }
+            if selected_clips.contains(&span.id) && !row.folded && h >= 2.0 {
+                // Spec: arrangement-editing R15. The title row, or a band
+                // along the top of a short clip, and an outline.
+                let band = title_height(h).max((h * 0.25).clamp(px, 4.0));
+                let highlight = colors.time_selection.0;
+                rect(out, [dx0, top, dx1, top + band], highlight);
+                let line = (2.0 * px).min((bottom - top) / 2.0);
+                rect(out, [dx0, bottom - line, dx1, bottom], highlight);
+                if x0 >= left_limit {
+                    rect(out, [x0, top, x0 + line, bottom], highlight);
+                }
+                if x1 <= right_limit {
+                    rect(out, [x1 - line, top, x1, bottom], highlight);
                 }
             }
             if x1 - x0 >= 20.0 && h >= 12.0 {
@@ -440,10 +462,12 @@ pub fn build_lanes(
 }
 
 /// A clip's waveform to draw: its peaks, where they are in the peak
-/// buffer, where the clip starts, and what part of it to draw.
+/// buffer, where the clip's contents begin, and what part of it to draw.
 struct WaveClip<'a> {
     peaks: &'a Peaks,
     base: u64,
+    /// Where the media's first frame plays: the clip's start less its
+    /// offset.
     start: Ticks,
     /// The left and right edges to draw, on screen.
     draw: (f32, f32),
@@ -452,9 +476,9 @@ struct WaveClip<'a> {
 }
 
 /// Adds one waveform band per channel and returns how many. The media plays
-/// from its first frame at the clip's start, at its own speed (WP-1.4 adds
-/// clip regions; warping is M4), so the frame under a point is worked out
-/// through the tempo map at the drawn part's left edge.
+/// from its first frame where the clip's contents begin, at its own speed
+/// (WP-1.4 adds clip regions; warping is M4), so the frame under a point is
+/// worked out through the tempo map at the drawn part's left edge.
 fn waveform(
     out: &mut SlotData,
     clip: &WaveClip<'_>,

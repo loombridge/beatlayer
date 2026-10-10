@@ -11,6 +11,9 @@
 //! - [`arrangement`]: the Arrangement View's view commands (WP-1.8a): zoom,
 //!   scroll, Follow, the editing grid, track heights, and the selection
 //!   the zoom commands work from.
+//! - [`editing`]: the Arrangement's editing commands (WP-1.8b): selecting,
+//!   moving, copying, resizing, splitting, deleting, and duplicating clips,
+//!   and the clipboard.
 //!
 //! `cargo xtask` checks the commands, lists them in `docs/commands.md`, and
 //! builds the keymap from this crate, so none of its tasks links an audio
@@ -20,17 +23,20 @@
 pub mod arrangement;
 pub mod audio;
 pub mod commands;
+pub mod editing;
 pub mod menus;
 pub mod settings;
 
 use bl_commands::{RegisterError, Registry};
 
-/// Adds the shell's commands and the Arrangement View's to a registry.
+/// Adds the shell's commands and the Arrangement View's (its view and its
+/// editing commands) to a registry.
 ///
 /// # Errors
 ///
 /// [`RegisterError`] if one of their IDs is already registered.
 pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     commands::register(registry)?;
-    arrangement::register(registry)
+    arrangement::register(registry)?;
+    editing::register(registry)
 }

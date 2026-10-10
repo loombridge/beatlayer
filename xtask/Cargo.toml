@@ -13,6 +13,8 @@ publish.workspace = true
 # crate or an audio backend (the `layers` step checks), so its tasks need no
 # ALSA or JACK headers on Linux.
 bl-commands.workspace = true
+# The transport's commands (WP-1.5).
+bl-engine.workspace = true
 bl-model.workspace = true
 bl-shell-spec.workspace = true
 serde_json = "1"

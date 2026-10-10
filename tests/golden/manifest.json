@@ -9,6 +9,14 @@
       "bits": 24,
       "render_hash": "fnv1a64:c17524eb7b7ac83d"
     },
+    "loop-wraps": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 192000,
+      "bits": 24,
+      "render_hash": "fnv1a64:c71fb87f5f72e151"
+    },
     "scheduled-commands": {
       "made_on": "macos-aarch64",
       "sample_rate": 48000,
@@ -25,6 +33,14 @@
       "bits": 24,
       "render_hash": "fnv1a64:3f5ec3c200bdc825"
     },
+    "start-mid-bar": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 180000,
+      "bits": 24,
+      "render_hash": "fnv1a64:11a4a71893fbbcad"
+    },
     "summed-tracks": {
       "made_on": "macos-aarch64",
       "sample_rate": 48000,
@@ -40,6 +56,14 @@
       "frames": 192000,
       "bits": 24,
       "render_hash": "fnv1a64:7d21e690ed5feebd"
+    },
+    "tempo-ramp-loop": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 216000,
+      "bits": 24,
+      "render_hash": "fnv1a64:5c64fa15b51bc1d1"
     }
   }
 }

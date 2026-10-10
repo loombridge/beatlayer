@@ -701,6 +701,7 @@ name = "bl-engine"
 version = "0.0.0"
 dependencies = [
  "bl-audio-io",
+ "bl-commands",
  "bl-core",
  "bl-dsp",
  "bl-model",
@@ -708,6 +709,9 @@ dependencies = [
  "libm",
  "rtgc",
  "rtrb",
+ "schemars",
+ "serde",
+ "serde_json",
  "triple_buffer",
 ]
 
@@ -5234,6 +5238,7 @@ name = "xtask"
 version = "0.0.0"
 dependencies = [
  "bl-commands",
+ "bl-engine",
  "bl-model",
  "bl-shell-spec",
  "serde_json",

@@ -212,8 +212,10 @@ fn save_set(dir: &Path, name: &str) -> PathBuf {
 }
 
 /// `bl-cli render` on a saved set writes the render the harness makes, so
-/// it nulls against the same reference. Only fixtures with nothing
-/// scheduled: a set holds no scheduled commands.
+/// it nulls against the same reference. Only fixtures that play from the
+/// start with nothing scheduled: a set holds no scheduled commands or
+/// transport moves. (It does hold its Arrangement loop, which
+/// `loop-wraps` plays.)
 #[test]
 fn bl_cli_render_writes_what_the_harness_renders() {
     let temp = TempDir::new("render");
@@ -222,7 +224,7 @@ fn bl_cli_render_writes_what_the_harness_renders() {
     let mut rendered = 0;
     for fixture in fixtures() {
         let scene = fixture.scene();
-        if !scene.schedule.is_empty() {
+        if !scene.plays_as_saved() {
             continue;
         }
         let set = save_set(&temp.0, fixture.name);
@@ -269,7 +271,7 @@ fn bl_cli_render_writes_what_the_harness_renders() {
         assert!(render.same_bits(&fixture.render()), "{}", fixture.name);
         rendered += 1;
     }
-    assert_eq!(rendered, 3);
+    assert_eq!(rendered, 4);
     assert!(!fs::read_dir(&temp.0).unwrap().any(|entry| {
         entry
             .unwrap()

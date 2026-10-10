@@ -277,6 +277,7 @@ impl EngineProgram {
                     events: scratch.as_slice(),
                     transport,
                     sample_rate: self.sample_rate,
+                    tempo: &self.tempo,
                 };
                 node.process(&mut block);
             }

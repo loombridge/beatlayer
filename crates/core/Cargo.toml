@@ -14,6 +14,10 @@ serde = ["dep:serde"]
 schemars = ["serde", "dep:schemars"]
 
 [dependencies]
+# Pure-Rust maths for the tempo map's ramps, so conversions round alike on
+# every platform (see `time/tempo.rs`). No default features, so no
+# architecture-specific code paths either.
+libm = { version = "0.2.16", default-features = false }
 serde = { version = "1.0.228", default-features = false, features = ["std", "derive"], optional = true }
 # Pinned: the command reference (docs/commands.md) is generated from these
 # schemas, so an upgrade is a deliberate change that regenerates it.

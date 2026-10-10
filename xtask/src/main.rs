@@ -27,6 +27,10 @@ Tasks:
   keymap         Regenerate crates/ui/keymaps/live12.toml from shortcuts.toml and the
                  command registry (with --check, fail instead if it's out of date)
   deny-selftest  Prove that deny.toml still rejects an incompatible licence
+  golden         Render the golden fixtures and null-test them against their references
+                 in tests/golden/ (`cargo test` does too). With --update, remake the
+                 references whose renders changed; say why in the pull request. Fixture
+                 names after the options pick some; the default is all.
   package        Build this platform's packages with cargo-packager and check they start
   rtsan          Run the real-time tests in rtsan/ under LLVM's RealtimeSanitizer, with a
                  runtime already on this machine (the file RTSAN_LIB_PATH names, or
@@ -106,6 +110,7 @@ fn run(root: &Path, args: &[String]) -> Result<(), String> {
             _ => Err(format!("usage: cargo xtask keymap [--check]\n\n{USAGE}")),
         },
         Some("deny-selftest") => deny_selftest(root),
+        Some("golden") => golden(root, options),
         Some("package") => package::package(root),
         Some("rtsan") => {
             let passed_on = match options.first().map(String::as_str) {
@@ -241,6 +246,37 @@ fn layers(root: &Path) -> Result<(), String> {
             violations.join("\n  ")
         ))
     }
+}
+
+/// Runs `bl-cli golden` on tests/golden/, passing `--update` and fixture
+/// names through. References are remade only when someone asks, here or
+/// with `bl-cli golden --update`, never in a test.
+fn golden(root: &Path, options: &[String]) -> Result<(), String> {
+    if let Some(flag) = options
+        .iter()
+        .find(|option| option.starts_with('-') && *option != "--update")
+    {
+        return Err(format!(
+            "unexpected `{flag}`; usage: cargo xtask golden [--update] [FIXTURE...]"
+        ));
+    }
+    let dir = root.join("tests").join("golden");
+    let dir = dir
+        .to_str()
+        .ok_or("the repository's path isn't valid UTF-8")?;
+    let mut args = vec![
+        "run",
+        "--quiet",
+        "--locked",
+        "--package",
+        "bl-cli",
+        "--",
+        "golden",
+        "--dir",
+        dir,
+    ];
+    args.extend(options.iter().map(String::as_str));
+    cargo(root, &args)
 }
 
 /// Runs cargo-deny against a fixture that depends on a GPL-2.0-only crate,

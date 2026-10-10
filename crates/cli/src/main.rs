@@ -1,7 +1,7 @@
 //! `bl-cli`: render, inspect, convert, and benchmark projects without a UI.
 
 // Debug builds count heap use on audio threads (the real-time rules allow
-// none); `bl-cli tone` fails if it finds any.
+// none); `bl-cli tone`, `render`, and `golden` fail if they find any.
 #[cfg(debug_assertions)]
 bl_rt::install_trap!();
 
@@ -41,6 +41,22 @@ enum Command {
     /// detected, the audio thread touches the heap (in a debug build), or
     /// the counter node loses its state in a swap.
     EngineSmoke(engine_smoke::EngineSmokeArgs),
+    /// Render a set to a WAV file, faster than real time, with no audio
+    /// device.
+    ///
+    /// The song plays from its start through the same engine code a device
+    /// runs. The same set renders to the same samples every time. Exits with
+    /// status 1 if a sample isn't finite or (in a debug build) the engine
+    /// touches the heap inside a block.
+    Render(bl_cli::render::RenderArgs),
+    /// Render the golden fixtures and null-test them against their
+    /// references in tests/golden.
+    ///
+    /// A render must be bit-exact on the platform that made its reference,
+    /// and below −96 dBFS elsewhere. Exits with status 1 if any fails. With
+    /// --update, remakes the references whose renders changed: say why in
+    /// the pull request.
+    Golden(bl_cli::golden::GoldenArgs),
 }
 
 fn main() -> ExitCode {
@@ -49,6 +65,8 @@ fn main() -> ExitCode {
         Command::Devices(args) => devices::run(args),
         Command::Tone(args) => tone::run(args),
         Command::EngineSmoke(args) => engine_smoke::run(args),
+        Command::Render(args) => bl_cli::render::run(args),
+        Command::Golden(args) => bl_cli::golden::run(args),
     };
     outcome.unwrap_or_else(|message| {
         eprintln!("error: {message}");

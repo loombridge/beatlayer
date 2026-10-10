@@ -26,6 +26,12 @@ pub mod test_tone {
 
 /// The test tone: a sine at a set frequency and level, added to every
 /// channel. It plays whether or not the transport runs.
+///
+/// Its sine and its decibel conversion come from `libm`, a pure-Rust maths
+/// library, rather than the platform's, whose last bit can differ between
+/// platforms and between versions of one operating system. So the tone is
+/// the same to the bit everywhere, and the golden renders built on it are
+/// bit-exact on every platform (WP-0.10).
 #[derive(Debug)]
 pub struct TestTone {
     /// Where the sine is in its cycle, from 0 to 1.
@@ -68,7 +74,7 @@ impl TestTone {
                     ParamValue::Set(db) if !db.is_nan() => db.min(0.0),
                     _ => test_tone::DEFAULT_LEVEL,
                 };
-                self.amplitude = 10f64.powf(db / 20.0) as f32;
+                self.amplitude = libm::pow(10.0, db / 20.0) as f32;
             }
             _ => {}
         }
@@ -86,7 +92,7 @@ impl Node for TestTone {
             for channel in block.channels_mut() {
                 let mut phase = start;
                 for sample in &mut channel[segment.range.clone()] {
-                    *sample += (phase * TAU).sin() as f32 * self.amplitude;
+                    *sample += libm::sin(phase * TAU) as f32 * self.amplitude;
                     phase += self.step;
                     if phase >= 1.0 {
                         phase -= 1.0;

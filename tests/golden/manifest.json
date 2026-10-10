@@ -1,0 +1,45 @@
+{
+  "about": "Golden references: each fixture in crates/cli/src/golden/fixtures.rs rendered to a 24-bit FLAC file. render_hash is an FNV-1a hash of the 32-bit float render the reference was made from. `cargo test` null-tests every fixture against its reference: bit-exact on the platform in made_on, below -96 dBFS elsewhere. Change references only with `cargo xtask golden --update`, and say why in the pull request.",
+  "references": {
+    "group-and-return": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 96000,
+      "bits": 24,
+      "render_hash": "fnv1a64:c17524eb7b7ac83d"
+    },
+    "scheduled-commands": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 180000,
+      "bits": 24,
+      "render_hash": "fnv1a64:e3803be5063fa0b9"
+    },
+    "single-tone": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 96000,
+      "bits": 24,
+      "render_hash": "fnv1a64:3f5ec3c200bdc825"
+    },
+    "summed-tracks": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 96000,
+      "bits": 24,
+      "render_hash": "fnv1a64:ce040b1bcfba7771"
+    },
+    "tempo-change": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 192000,
+      "bits": 24,
+      "render_hash": "fnv1a64:7d21e690ed5feebd"
+    }
+  }
+}

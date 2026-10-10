@@ -14,6 +14,9 @@ bl-dsp.workspace = true
 bl-model.workspace = true
 # The lock-free logger for the audio thread.
 bl-rt.workspace = true
+# Pure-Rust maths for the test tone, so it renders alike on every platform
+# (WP-0.10). No default features, so no architecture-specific code paths.
+libm = { version = "0.2.16", default-features = false }
 # The queue from the compiler to the audio thread, and the audio thread's
 # reports back (decision D14).
 rtrb = "0.4.0"

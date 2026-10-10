@@ -9,6 +9,31 @@ publish.workspace = true
 
 [dependencies]
 bl-dsp.workspace = true
+blake3 = { version = "1.8.7", default-features = false, features = ["std"] }
+# Pinned exactly: rubato had five major releases in 2026 (architecture, "Media
+# and warping"), and a resampler change alters every converted sample.
+rubato = { version = "=5.0.1", default-features = false, features = ["fft_resampler"] }
+symphonia = { version = "0.6.1", default-features = false, features = [
+    "opt-simd",
+    "wav",
+    "aiff",
+    "pcm",
+    "adpcm",
+    "flac",
+    "mp3",
+    "ogg",
+    "vorbis",
+    "isomp4",
+    "aac",
+    "alac",
+    "id3v1",
+    "id3v2",
+] }
+
+[dev-dependencies]
+# Spectra for the conversion and decode measurements.
+realfft = "3.5.0"
+serde_json = "1"
 
 [lints]
 workspace = true

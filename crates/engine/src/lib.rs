@@ -27,10 +27,12 @@
 //! | [`Processor`] | audio | Runs the program each block |
 //! | [`DropThread`] | drop | Frees what the audio thread let go of |
 //! | [`Monitor`] | any one | Reads the playhead, meters, and CPU load the audio thread publishes |
+//! | [`Offline`] | any one | All of the above on one thread, faster than real time, with no device |
 //!
-//! An offline render needs no threads: [`channel`] makes the sender,
-//! processor, and monitor, and one thread compiles, sends, and processes in
-//! turn, collecting garbage with a [`Collector`] as it goes.
+//! An offline render needs no threads: [`Offline`] compiles, sends, and
+//! processes in turn on one thread, collecting garbage as it goes, and runs
+//! each block as a real-time section, as a device's audio thread does.
+//! Underneath, [`channel`] makes the sender, processor, and monitor:
 //!
 //! ```
 //! use bl_core::time::SampleRate;
@@ -59,6 +61,7 @@ mod gc;
 mod message;
 mod node;
 pub mod nodes;
+mod offline;
 mod processor;
 mod program;
 mod registry;
@@ -77,6 +80,7 @@ pub use node::{
     Block, Node, NodeConfig, NodeData, NodeEvent, NodeKey, ParamValue, Segment, Segments,
     TransportInfo, segments,
 };
+pub use offline::Offline;
 pub use processor::{Output, Processor};
 pub use program::EngineProgram;
 pub use registry::{NodeFactory, Registry};

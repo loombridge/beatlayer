@@ -13,7 +13,8 @@ Beatlayer is an open-source digital audio workstation with the workflow of Ablet
 3. [docs/03-build-plan.md](docs/03-build-plan.md): work packages, human tasks, and the status table. "How an agent uses this plan" is the procedure for every package.
 4. [CONTRIBUTING.md ("Building without Ableton's code")](https://github.com/loombridge/beatlayer/blob/main/CONTRIBUTING.md#building-without-abletons-code): what you may and may not learn from Ableton Live.
 5. [docs/04-parity-matrix.md](docs/04-parity-matrix.md): every Live 12 feature and the milestone that covers it.
-6. [docs/ui-parity/](docs/ui-parity/) (from WP-0.13): where everything sits in Live 12's interface, and every shortcut. Read it before any UI work.
+6. [docs/05-improvements.md](docs/05-improvements.md): improvements over Live, and the rules for adding them (add, don't move).
+7. [docs/ui-parity/](docs/ui-parity/) (from WP-0.13): where everything sits in Live 12's interface, and every shortcut. Read it before any UI work.
 
 ## Lines not crossed
 
@@ -36,4 +37,4 @@ One-time setup: install Rust with rustup (the repo pins the toolchain in `rust-t
 
 ## Where things stand (10 October 2026)
 
-WP-0.1 (workspace and tooling) is merged; every crate is a stub. The repository is `loombridge/beatlayer` on GitHub, private until the alpha. Next: the rest of Phase 0.
+Phase 0. Merged: WP-0.1 (workspace and tooling) and WP-0.2 (CI on macOS, Windows, and Linux). The UI toolkit is egui ([ADR-001](docs/adr/ADR-001-ui-toolkit-egui.md)). In review: WP-0.3, 0.4, 0.5, 0.6, 0.8a, 0.8b, 0.12, and 0.13. Next: WP-0.7, 0.9, 0.11, and 0.14. The build plan's status table is the live queue.

@@ -1,0 +1,767 @@
+//! Property tests for commands, transactions, and undo (WP-0.6 acceptance).
+//!
+//! Each case applies a random sequence of 1 to 200 commands to a small song,
+//! then undoes every step and checks the song is back where it started, then
+//! redoes every step and checks it's back where it ended. Commands pick their
+//! targets from the song as it stands, so most succeed; the ones that are
+//! rejected must leave the song untouched.
+//!
+//! Along the way every change set is checked against one worked out the slow
+//! way, by flattening both versions into plain maps, and the start and end
+//! are also compared as JSON, so the check doesn't rest on pointer sharing.
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use bl_core::id::Id;
+use bl_core::time::{Bpm, TempoMap, Ticks, TimeSignature, TimeSignatureMap};
+use bl_model::{
+    AudioData, Change, ChangeSet, Clip, ClipData, ClipId, Command, ContentHash, Device, DeviceId,
+    DeviceKind, Document, EditError, Editor, MidiData, Mixer, Note, ParamId, PluginFormat, TrackId,
+    TrackKind,
+};
+use proptest::prelude::*;
+use proptest::sample::Index;
+use proptest::test_runner::FileFailurePersistence;
+
+const CASES: u32 = 1_000;
+
+/// 1,000 cases each. Failures are saved next to this file and replayed first
+/// on later runs.
+fn config() -> ProptestConfig {
+    ProptestConfig {
+        cases: CASES,
+        failure_persistence: Some(Box::new(FileFailurePersistence::WithSource(
+            "proptest-regressions",
+        ))),
+        ..ProptestConfig::default()
+    }
+}
+
+/// A command with its targets still to be chosen from the song.
+#[derive(Clone, Debug)]
+enum Op {
+    CreateTrack {
+        kind: TrackKind,
+        parent: Index,
+        index: Index,
+    },
+    DeleteTrack(Index),
+    MoveTrack {
+        track: Index,
+        parent: Index,
+        index: Index,
+    },
+    RenameTrack(Index, u8),
+    SetVolume(Index, f64),
+    SetPan(Index, f64),
+    SetMute(Index, bool),
+    SetSolo(Index, bool),
+    SetArm(Index, bool),
+    CreateClip {
+        track: Index,
+        start: u16,
+        length: u16,
+        data: Data,
+    },
+    DeleteClip(Index),
+    MoveClip {
+        clip: Index,
+        track: Index,
+        start: u16,
+    },
+    MoveClips(Vec<Index>, i16),
+    SetClipLength(Index, u16),
+    RenameClip(Index, u8),
+    SetClipMute(Index, bool),
+    SetClipData(Index, Data),
+    InsertDevice {
+        track: Index,
+        index: Index,
+        params: Vec<(u8, f64)>,
+    },
+    RemoveDevice(Index),
+    MoveDevice {
+        device: Index,
+        track: Index,
+        index: Index,
+    },
+    RenameDevice(Index, u8),
+    SetDeviceEnabled(Index, bool),
+    SetDeviceParam(Index, u8, f64),
+    SetTempo(f64),
+    SetTimeSignature(u8, u8),
+}
+
+/// Clip data: usually whatever fits the track, sometimes the other kind.
+#[derive(Clone, Debug)]
+struct Data {
+    swap_kind: bool,
+    media: u8,
+    notes: Vec<(u8, u8, u8, u8)>,
+}
+
+fn data() -> impl Strategy<Value = Data> {
+    (
+        prop::bool::weighted(0.05),
+        any::<u8>(),
+        prop::collection::vec((0u8..=127, 0u8..=127, 0u8..64, 1u8..16), 0..6),
+    )
+        .prop_map(|(swap_kind, media, notes)| Data {
+            swap_kind,
+            media,
+            notes,
+        })
+}
+
+fn kind() -> impl Strategy<Value = TrackKind> {
+    prop_oneof![
+        4 => Just(TrackKind::Audio),
+        4 => Just(TrackKind::Midi),
+        3 => Just(TrackKind::Group),
+        2 => Just(TrackKind::Return),
+        1 => Just(TrackKind::Main),
+    ]
+}
+
+/// Mostly in range, sometimes not.
+fn value(range: core::ops::Range<f64>) -> impl Strategy<Value = f64> {
+    prop_oneof![
+        20 => range,
+        1 => Just(-1.5),
+        1 => Just(f64::NAN),
+    ]
+}
+
+fn op() -> impl Strategy<Value = Op> {
+    let i = any::<Index>;
+    prop_oneof![
+        4 => (kind(), i(), i()).prop_map(|(kind, parent, index)| Op::CreateTrack { kind, parent, index }),
+        1 => i().prop_map(Op::DeleteTrack),
+        2 => (i(), i(), i()).prop_map(|(track, parent, index)| Op::MoveTrack { track, parent, index }),
+        1 => (i(), any::<u8>()).prop_map(|(t, n)| Op::RenameTrack(t, n)),
+        2 => (i(), value(0.0..2.0)).prop_map(|(t, v)| Op::SetVolume(t, v)),
+        2 => (i(), value(-1.0..1.0)).prop_map(|(t, v)| Op::SetPan(t, v)),
+        1 => (i(), any::<bool>()).prop_map(|(t, b)| Op::SetMute(t, b)),
+        1 => (i(), any::<bool>()).prop_map(|(t, b)| Op::SetSolo(t, b)),
+        1 => (i(), any::<bool>()).prop_map(|(t, b)| Op::SetArm(t, b)),
+        5 => (i(), any::<u16>(), 1u16..256, data())
+            .prop_map(|(track, start, length, data)| Op::CreateClip { track, start, length, data }),
+        1 => i().prop_map(Op::DeleteClip),
+        3 => (i(), i(), any::<u16>()).prop_map(|(clip, track, start)| Op::MoveClip { clip, track, start }),
+        2 => (prop::collection::vec(i(), 1..5), any::<i16>()).prop_map(|(c, by)| Op::MoveClips(c, by)),
+        2 => (i(), 0u16..256).prop_map(|(c, l)| Op::SetClipLength(c, l)),
+        1 => (i(), any::<u8>()).prop_map(|(c, n)| Op::RenameClip(c, n)),
+        1 => (i(), any::<bool>()).prop_map(|(c, b)| Op::SetClipMute(c, b)),
+        2 => (i(), data()).prop_map(|(c, d)| Op::SetClipData(c, d)),
+        3 => (i(), i(), prop::collection::vec((0u8..8, value(-100.0..100.0)), 0..4))
+            .prop_map(|(track, index, params)| Op::InsertDevice { track, index, params }),
+        1 => i().prop_map(Op::RemoveDevice),
+        2 => (i(), i(), i()).prop_map(|(device, track, index)| Op::MoveDevice { device, track, index }),
+        1 => (i(), any::<u8>()).prop_map(|(d, n)| Op::RenameDevice(d, n)),
+        1 => (i(), any::<bool>()).prop_map(|(d, b)| Op::SetDeviceEnabled(d, b)),
+        3 => (i(), 0u8..8, value(-100.0..100.0)).prop_map(|(d, p, v)| Op::SetDeviceParam(d, p, v)),
+        1 => (20.0..999.0).prop_map(Op::SetTempo),
+        1 => (1u8..=12, 0u8..5).prop_map(|(n, d)| Op::SetTimeSignature(n, d)),
+    ]
+}
+
+/// The objects in a song, for choosing targets.
+struct Targets {
+    tracks: Vec<TrackId>,
+    groups: Vec<TrackId>,
+    clips: Vec<ClipId>,
+    devices: Vec<DeviceId>,
+}
+
+impl Targets {
+    fn of(doc: &Document) -> Self {
+        let tracks = doc.track_order();
+        let groups = tracks
+            .iter()
+            .copied()
+            .filter(|t| doc.track(*t).unwrap().kind() == TrackKind::Group)
+            .collect();
+        Self {
+            tracks,
+            groups,
+            clips: doc.clip_ids().collect(),
+            devices: doc.device_ids().collect(),
+        }
+    }
+
+    fn track(&self, i: &Index) -> TrackId {
+        *i.get(&self.tracks)
+    }
+
+    /// A group, or the top level.
+    fn parent(&self, i: &Index) -> Option<TrackId> {
+        match i.index(self.groups.len() + 1) {
+            0 => None,
+            n => Some(self.groups[n - 1]),
+        }
+    }
+
+    /// An existing clip, or (if there are none) one that doesn't exist.
+    fn clip(&self, i: &Index) -> ClipId {
+        if self.clips.is_empty() {
+            ClipId(Id::new(u64::MAX).unwrap())
+        } else {
+            *i.get(&self.clips)
+        }
+    }
+
+    fn device(&self, i: &Index) -> DeviceId {
+        if self.devices.is_empty() {
+            DeviceId(Id::new(u64::MAX).unwrap())
+        } else {
+            *i.get(&self.devices)
+        }
+    }
+}
+
+/// An insertion index into a list of `len`, now and then one past the end.
+fn slot(i: &Index, len: usize) -> usize {
+    i.index(len + 2)
+}
+
+fn sixteenths(n: impl Into<i64>) -> Ticks {
+    Ticks::SIXTEENTH * n.into()
+}
+
+fn clip_data(data: &Data, track_kind: Option<TrackKind>) -> ClipData {
+    let audio = (track_kind == Some(TrackKind::Audio)) != data.swap_kind;
+    if audio {
+        ClipData::Audio(AudioData {
+            media: ContentHash([data.media; 32]),
+        })
+    } else {
+        ClipData::Midi(MidiData::new(data.notes.iter().map(
+            |&(key, velocity, start, length)| Note {
+                key,
+                velocity,
+                start: sixteenths(start),
+                length: sixteenths(length),
+            },
+        )))
+    }
+}
+
+impl Op {
+    fn command(&self, editor: &mut Editor) -> Command {
+        let doc = editor.document();
+        let at = Targets::of(doc);
+        let kind_of = |t: TrackId| doc.track(t).map(|t| t.kind());
+        let list_len = |parent: Option<TrackId>, kind: TrackKind| match (kind, parent) {
+            (TrackKind::Return, _) => doc.returns().len(),
+            (_, None) => doc.top_level().len(),
+            (_, Some(p)) => doc.track(p).unwrap().children().len(),
+        };
+        let chain_len = |t: TrackId| doc.track(t).unwrap().devices().len();
+        let name = |n: u8| format!("name {n}");
+        match self {
+            Self::CreateTrack {
+                kind,
+                parent,
+                index,
+            } => {
+                let parent = at.parent(parent);
+                let index = slot(index, list_len(parent, *kind));
+                Command::CreateTrack {
+                    id: editor.new_id(),
+                    kind: *kind,
+                    name: name(0),
+                    parent,
+                    index,
+                }
+            }
+            Self::DeleteTrack(t) => Command::DeleteTrack { track: at.track(t) },
+            Self::MoveTrack {
+                track,
+                parent,
+                index,
+            } => {
+                let track = at.track(track);
+                let parent = at.parent(parent);
+                let len = list_len(parent, kind_of(track).unwrap());
+                Command::MoveTrack {
+                    track,
+                    parent,
+                    index: slot(index, len.saturating_sub(1)),
+                }
+            }
+            Self::RenameTrack(t, n) => Command::RenameTrack {
+                track: at.track(t),
+                name: name(*n),
+            },
+            Self::SetVolume(t, volume) => Command::SetVolume {
+                track: at.track(t),
+                volume: *volume,
+            },
+            Self::SetPan(t, pan) => Command::SetPan {
+                track: at.track(t),
+                pan: *pan,
+            },
+            Self::SetMute(t, mute) => Command::SetMute {
+                track: at.track(t),
+                mute: *mute,
+            },
+            Self::SetSolo(t, solo) => Command::SetSolo {
+                track: at.track(t),
+                solo: *solo,
+            },
+            Self::SetArm(t, arm) => Command::SetArm {
+                track: at.track(t),
+                arm: *arm,
+            },
+            Self::CreateClip {
+                track,
+                start,
+                length,
+                data,
+            } => {
+                let track = at.track(track);
+                let data = clip_data(data, kind_of(track));
+                let mut clip = Clip::new(
+                    editor.new_id(),
+                    sixteenths(*start),
+                    sixteenths(*length),
+                    data,
+                );
+                clip.name = name(0);
+                Command::CreateClip { track, clip }
+            }
+            Self::DeleteClip(c) => Command::DeleteClip { clip: at.clip(c) },
+            Self::MoveClip { clip, track, start } => Command::MoveClip {
+                clip: at.clip(clip),
+                track: at.track(track),
+                start: sixteenths(*start),
+            },
+            Self::MoveClips(clips, by) => Command::MoveClips {
+                clips: clips
+                    .iter()
+                    .map(|c| at.clip(c))
+                    .collect::<BTreeSet<_>>()
+                    .into_iter()
+                    .collect(),
+                by: sixteenths(*by),
+            },
+            Self::SetClipLength(c, length) => Command::SetClipLength {
+                clip: at.clip(c),
+                length: sixteenths(*length),
+            },
+            Self::RenameClip(c, n) => Command::RenameClip {
+                clip: at.clip(c),
+                name: name(*n),
+            },
+            Self::SetClipMute(c, mute) => Command::SetClipMute {
+                clip: at.clip(c),
+                mute: *mute,
+            },
+            Self::SetClipData(c, data) => {
+                let clip = at.clip(c);
+                let track_kind = doc.clip_track(clip).and_then(kind_of);
+                Command::SetClipData {
+                    clip,
+                    data: clip_data(data, track_kind),
+                }
+            }
+            Self::InsertDevice {
+                track,
+                index,
+                params,
+            } => {
+                let track = at.track(track);
+                let index = slot(index, chain_len(track));
+                let kind = if params.len() % 2 == 0 {
+                    DeviceKind::Native {
+                        device_type: "beatlayer.test".to_owned(),
+                    }
+                } else {
+                    DeviceKind::Plugin {
+                        format: PluginFormat::Clap,
+                        plugin_id: "org.example.test".to_owned(),
+                    }
+                };
+                let mut device = Device::new(editor.new_id(), name(0), kind);
+                for (param, value) in params {
+                    device.params.insert(ParamId((*param).into()), *value);
+                }
+                Command::InsertDevice {
+                    track,
+                    index,
+                    device,
+                }
+            }
+            Self::RemoveDevice(d) => Command::RemoveDevice {
+                device: at.device(d),
+            },
+            Self::MoveDevice {
+                device,
+                track,
+                index,
+            } => {
+                let device = at.device(device);
+                let track = at.track(track);
+                let len = chain_len(track) - usize::from(doc.device_track(device) == Some(track));
+                Command::MoveDevice {
+                    device,
+                    track,
+                    index: slot(index, len),
+                }
+            }
+            Self::RenameDevice(d, n) => Command::RenameDevice {
+                device: at.device(d),
+                name: name(*n),
+            },
+            Self::SetDeviceEnabled(d, enabled) => Command::SetDeviceEnabled {
+                device: at.device(d),
+                enabled: *enabled,
+            },
+            Self::SetDeviceParam(d, param, value) => Command::SetDeviceParam {
+                device: at.device(d),
+                param: ParamId((*param).into()),
+                value: *value,
+            },
+            Self::SetTempo(bpm) => Command::SetTempo {
+                tempo: TempoMap::constant(Bpm::new(*bpm).unwrap()),
+            },
+            Self::SetTimeSignature(numerator, d) => Command::SetTimeSignatures {
+                time_signatures: TimeSignatureMap::constant(
+                    TimeSignature::new(*numerator, 1 << d).unwrap(),
+                ),
+            },
+        }
+    }
+}
+
+/// A small song to start from: a group holding an audio track, a MIDI track,
+/// another audio track, and a return, with clips and devices, and an empty
+/// history.
+fn starting_song() -> Editor {
+    let mut editor = Editor::new();
+    let track = |editor: &mut Editor, kind, parent, index| {
+        let id = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id,
+                kind,
+                name: format!("{kind}"),
+                parent,
+                index,
+            })
+            .unwrap();
+        id
+    };
+    let group = track(&mut editor, TrackKind::Group, None, 0);
+    let audio = track(&mut editor, TrackKind::Audio, Some(group), 0);
+    let midi = track(&mut editor, TrackKind::Midi, None, 1);
+    track(&mut editor, TrackKind::Audio, None, 2);
+    let ret = track(&mut editor, TrackKind::Return, None, 0);
+    for (track, start) in [(audio, 0), (audio, 16), (midi, 0), (midi, 32)] {
+        let data = Data {
+            swap_kind: false,
+            media: 1,
+            notes: vec![(60, 100, 0, 4), (64, 90, 4, 4)],
+        };
+        let kind = editor.document().track(track).unwrap().kind();
+        let clip = Clip::new(
+            editor.new_id(),
+            sixteenths(start),
+            Ticks::WHOLE,
+            clip_data(&data, Some(kind)),
+        );
+        editor.apply(Command::CreateClip { track, clip }).unwrap();
+    }
+    let main = editor.document().main_id();
+    for track in [audio, midi, ret, main] {
+        let device = Device::new(
+            editor.new_id(),
+            "Utility",
+            DeviceKind::Native {
+                device_type: "beatlayer.utility".to_owned(),
+            },
+        );
+        editor
+            .apply(Command::InsertDevice {
+                track,
+                index: 0,
+                device,
+            })
+            .unwrap();
+    }
+    editor.clear_history().unwrap();
+    editor
+}
+
+/// A song flattened into plain maps, for working out change sets the slow
+/// way.
+struct Flat {
+    main: TrackId,
+    top: Vec<TrackId>,
+    returns: Vec<TrackId>,
+    tracks: BTreeMap<TrackId, (String, Mixer, Vec<TrackId>, Vec<DeviceId>)>,
+    clips: BTreeMap<ClipId, (TrackId, Clip)>,
+    devices: BTreeMap<DeviceId, (TrackId, Device)>,
+}
+
+impl Flat {
+    fn of(doc: &Document) -> Self {
+        let mut flat = Self {
+            main: doc.main_id(),
+            top: doc.top_level().collect(),
+            returns: doc.returns().collect(),
+            tracks: BTreeMap::new(),
+            clips: BTreeMap::new(),
+            devices: BTreeMap::new(),
+        };
+        for track in doc.tracks() {
+            let devices = track.devices().map(|d| d.id).collect();
+            let own = (
+                track.name().to_owned(),
+                *track.mixer(),
+                track.children().collect(),
+                devices,
+            );
+            flat.tracks.insert(track.id(), own);
+            for clip in track.clips() {
+                flat.clips.insert(clip.id, (track.id(), clip.clone()));
+            }
+            for device in track.devices() {
+                flat.devices.insert(device.id, (track.id(), device.clone()));
+            }
+        }
+        flat
+    }
+}
+
+fn diff<K: Ord + Copy, V: PartialEq>(
+    old: &BTreeMap<K, V>,
+    new: &BTreeMap<K, V>,
+) -> BTreeMap<K, Change> {
+    let mut changes = BTreeMap::new();
+    for (id, value) in old {
+        match new.get(id) {
+            None => {
+                changes.insert(*id, Change::Removed);
+            }
+            Some(other) if other != value => {
+                changes.insert(*id, Change::Modified);
+            }
+            Some(_) => {}
+        }
+    }
+    for id in new.keys() {
+        if !old.contains_key(id) {
+            changes.insert(*id, Change::Added);
+        }
+    }
+    changes
+}
+
+/// The change set between two versions, worked out without pointer sharing.
+fn slow_changes(old: &Document, new: &Document) -> ChangeSet {
+    let (a, b) = (Flat::of(old), Flat::of(new));
+    let children = |flat: &Flat| -> BTreeMap<TrackId, Vec<TrackId>> {
+        flat.tracks
+            .iter()
+            .map(|(id, own)| (*id, own.2.clone()))
+            .collect()
+    };
+    ChangeSet {
+        settings: old.settings() != new.settings(),
+        layout: a.main != b.main
+            || a.top != b.top
+            || a.returns != b.returns
+            || children(&a) != children(&b),
+        tracks: diff(&a.tracks, &b.tracks),
+        clips: diff(&a.clips, &b.clips),
+        devices: diff(&a.devices, &b.devices),
+    }
+}
+
+fn json(doc: &Document) -> String {
+    serde_json::to_string(doc).unwrap()
+}
+
+/// Checks one applied command: the result, the change set, and the rules.
+fn check_applied(
+    before: &Document,
+    result: Result<ChangeSet, EditError>,
+    editor: &Editor,
+) -> Result<Option<ChangeSet>, TestCaseError> {
+    let after = editor.document();
+    match result {
+        Ok(changes) => {
+            after.check_invariants().map_err(TestCaseError::fail)?;
+            prop_assert_eq!(&changes, &ChangeSet::between(before, after));
+            prop_assert_eq!(&changes, &slow_changes(before, after));
+            prop_assert_eq!(changes.is_empty(), before == after);
+            Ok(Some(changes))
+        }
+        Err(_) => {
+            prop_assert_eq!(before, after);
+            Ok(None)
+        }
+    }
+}
+
+/// Undoes every step, checking each version on the way, then redoes them.
+fn undo_and_redo_all(editor: &mut Editor, versions: &[Document]) -> Result<(), TestCaseError> {
+    let start = &versions[0];
+    let end = versions.last().unwrap();
+    let (start_json, end_json) = (json(start), json(end));
+    prop_assert_eq!(editor.document(), end);
+    prop_assert_eq!(editor.undo_history().len(), versions.len() - 1);
+
+    for expected in versions.iter().rev().skip(1) {
+        editor
+            .undo()
+            .map_err(|e| TestCaseError::fail(e.to_string()))?;
+        prop_assert_eq!(editor.document(), expected);
+    }
+    prop_assert_eq!(editor.undo(), Err(EditError::NothingToUndo));
+    prop_assert_eq!(editor.document(), start);
+    prop_assert_eq!(json(editor.document()), start_json);
+
+    for expected in versions.iter().skip(1) {
+        editor
+            .redo()
+            .map_err(|e| TestCaseError::fail(e.to_string()))?;
+        prop_assert_eq!(editor.document(), expected);
+    }
+    prop_assert_eq!(editor.redo(), Err(EditError::NothingToRedo));
+    prop_assert_eq!(editor.document(), end);
+    prop_assert_eq!(json(editor.document()), end_json.as_str());
+
+    let reloaded: Document = serde_json::from_str(&end_json).unwrap();
+    prop_assert_eq!(&reloaded, end);
+    Ok(())
+}
+
+proptest! {
+    #![proptest_config(config())]
+
+    /// The acceptance property: undoing every command gets the starting
+    /// document back, and redoing them gets the final one.
+    #[test]
+    fn undo_all_then_redo_all(ops in prop::collection::vec(op(), 1..=200)) {
+        let mut editor = starting_song();
+        let mut versions = vec![editor.document().clone()];
+        let mut created = BTreeSet::new();
+        for op in &ops {
+            let before = editor.document().clone();
+            let command = op.command(&mut editor);
+            let new_id = command.created_id();
+            let result = editor.apply(command);
+            if let Some(changes) = check_applied(&before, result, &editor)? {
+                if let Some(id) = new_id {
+                    // Every object ever created has its own ID.
+                    prop_assert!(created.insert(id));
+                }
+                if !changes.is_empty() {
+                    versions.push(editor.document().clone());
+                }
+            }
+        }
+        undo_and_redo_all(&mut editor, &versions)?;
+
+        // IDs used by undone objects stay used.
+        editor.clear_history().unwrap();
+        for id in created.iter().take(3) {
+            let reuse = Command::CreateTrack {
+                id: TrackId(*id),
+                kind: TrackKind::Audio,
+                name: String::new(),
+                parent: None,
+                index: 0,
+            };
+            prop_assert_eq!(editor.apply(reuse), Err(EditError::IdNotIssued(*id)));
+        }
+    }
+
+    /// Commands grouped into random, sometimes nested, sometimes cancelled
+    /// transactions: each outermost commit that changed something is one
+    /// step, a cancel puts the document back, and undoing every step still
+    /// gets the start back.
+    #[test]
+    fn transactions_are_steps(steps in prop::collection::vec(prop_oneof![
+        8 => op().prop_map(Some),
+        3 => Just(None),
+    ], 1..=200), closes in prop::collection::vec(any::<bool>(), 200)) {
+        let mut editor = starting_song();
+        let mut versions = vec![editor.document().clone()];
+        let mut open: Vec<Document> = Vec::new();
+        let mut closes = closes.into_iter().cycle();
+        for step in &steps {
+            match step {
+                Some(op) => {
+                    let before = editor.document().clone();
+                    let command = op.command(&mut editor);
+                    let result = editor.apply(command);
+                    let changes = check_applied(&before, result, &editor)?;
+                    if open.is_empty() && changes.is_some_and(|c| !c.is_empty()) {
+                        versions.push(editor.document().clone());
+                    }
+                }
+                // Open a transaction, or close one: commit or cancel.
+                None if open.is_empty() || closes.next().unwrap() => {
+                    editor.begin("Gesture");
+                    open.push(editor.document().clone());
+                }
+                None => {
+                    let start = open.pop().unwrap();
+                    if closes.next().unwrap() {
+                        let recorded = editor.commit().unwrap();
+                        let expected = open.is_empty() && start != *editor.document();
+                        prop_assert_eq!(recorded, expected);
+                        if recorded {
+                            versions.push(editor.document().clone());
+                        }
+                    } else {
+                        editor.cancel().unwrap();
+                        prop_assert_eq!(editor.document(), &start);
+                    }
+                }
+            }
+        }
+        while let Some(start) = open.pop() {
+            if editor.commit().unwrap() {
+                prop_assert!(open.is_empty() && start != *editor.document());
+                versions.push(editor.document().clone());
+            }
+        }
+        prop_assert_eq!(editor.commit(), Err(EditError::NoTransaction));
+        undo_and_redo_all(&mut editor, &versions)?;
+    }
+}
+
+/// Most generated commands succeed, so the properties test real edits rather
+/// than a stream of rejections.
+#[test]
+fn generated_commands_mostly_apply() {
+    use proptest::strategy::ValueTree;
+    use proptest::test_runner::TestRunner;
+
+    let mut runner = TestRunner::deterministic();
+    let mut editor = starting_song();
+    let (mut applied, mut total) = (0, 0);
+    for _ in 0..5_000 {
+        let op = op().new_tree(&mut runner).unwrap().current();
+        let command = op.command(&mut editor);
+        total += 1;
+        if editor.apply(command).is_ok() {
+            applied += 1;
+        }
+    }
+    let doc = editor.document();
+    println!(
+        "{applied} of {total} generated commands applied; the song ended with {} tracks, {} clips, and {} devices",
+        doc.track_count(),
+        doc.clip_count(),
+        doc.device_count()
+    );
+    assert!(
+        applied * 10 >= total * 7,
+        "only {applied} of {total} applied"
+    );
+}

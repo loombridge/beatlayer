@@ -1,8 +1,13 @@
-# Runs `cargo xtask check` on macOS (arm64), Windows (x64), and Linux (x64).
+# Runs `cargo xtask check` on Windows (x64) and Linux (x64) for every pull
+# request and every push to main, and on all three platforms, macOS (arm64)
+# included, when started by hand from the Actions tab.
 #
 # The repository is private on GitHub's Free plan, so hosted-runner minutes are
-# limited, and a macOS minute counts as ten and a Windows minute as two. The
-# workflow keeps the bill down by:
+# limited, and a macOS minute counts as ten and a Windows minute as two. The maintainer
+# decided on 10 October 2026 to leave macOS out of per-change CI: every agent
+# runs the full check on macOS locally and pastes the evidence in its pull
+# request, and macos-check.yml runs it on main every night that code changed.
+# The workflow also keeps the bill down by:
 #
 # - skipping changes that touch only Markdown, docs/, or the licence, except
 #   the generated docs that `cargo xtask check` keeps in sync;
@@ -71,13 +76,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - name: macOS arm64
-            os: macos-15
-          - name: Windows x64
-            os: windows-2025
-          - name: Linux x64
-            os: ubuntu-24.04
+        # macOS only on a manual run; see the note at the top.
+        include: ${{ fromJSON(github.event_name == 'workflow_dispatch' && '[{"name":"macOS arm64","os":"macos-15"},{"name":"Windows x64","os":"windows-2025"},{"name":"Linux x64","os":"ubuntu-24.04"}]' || '[{"name":"Windows x64","os":"windows-2025"},{"name":"Linux x64","os":"ubuntu-24.04"}]') }}
     defaults:
       run:
         shell: bash

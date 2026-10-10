@@ -1,0 +1,96 @@
+# Runs `cargo xtask check` on macOS (arm64) every night that code changed on
+# main, and on demand from the Actions tab.
+#
+# Per-change CI leaves macOS out to save minutes (a macOS minute counts as ten
+# on the Free plan; 10 October 2026). Agents run the full check on macOS
+# locally for every pull request, and this workflow confirms main on a clean
+# macOS runner. A scheduled run checks first whether any code changed in the
+# last 25 hours, and does nothing if only docs or Markdown changed.
+#
+# Every third-party action is pinned to a full commit SHA, with its version in
+# a comment. Update the SHA and the comment together.
+
+name: macOS check
+
+on:
+  schedule:
+    # 02:07 UTC, before the nightly build.
+    - cron: "7 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  RUST_BACKTRACE: 1
+
+jobs:
+  decide:
+    name: decide whether to check
+    runs-on: ubuntu-24.04
+    outputs:
+      run: ${{ steps.decide.outputs.run }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 200
+
+      - name: Decide
+        id: decide
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" != "schedule" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed=$(git log --since="25 hours ago" --format=%H -- . ':(exclude)docs' ':(exclude)*.md' ':(exclude)**/*.md' | head -1)
+          if [ -n "$changed" ]; then
+            echo "Code changed since yesterday's run; checking."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No code changed in the last 25 hours; nothing to check."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  check:
+    name: check (macOS arm64)
+    needs: decide
+    if: needs.decide.outputs.run == 'true'
+    runs-on: macos-15
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Prepare the runner
+        uses: ./.github/actions/prepare
+
+      - name: Restore the dependency cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-bin: false
+
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
+        with:
+          tool: cargo-deny@0.20.2
+          # A prebuilt, checksummed binary or nothing: never compile it here.
+          fallback: none
+
+      - name: cargo xtask check
+        run: cargo xtask check

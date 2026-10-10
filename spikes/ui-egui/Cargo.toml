@@ -1,0 +1,92 @@
+[workspace]
+# A standalone workspace: the root workspace excludes spikes/, and this spike
+# keeps its own Cargo.lock so its dependencies never touch the product's.
+
+[package]
+name = "ui-egui-spike"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.99"
+license = "GPL-3.0-or-later"
+publish = false
+description = "WP-0.8b: the egui UI spike for Beatlayer (throwaway)"
+
+[dependencies]
+# egui without `default_fonts`: epaint_default_fonts is licensed
+# "(MIT OR Apache-2.0) AND OFL-1.1 AND Ubuntu-font-1.0", which deny.toml
+# rejects, so the spike loads a system font instead.
+# AccessKit is always on in egui 0.36; egui-winit's `accesskit` feature
+# connects it to the platform.
+egui = { version = "=0.36.2", default-features = false, features = ["bytemuck"] }
+egui-winit = { version = "=0.36.2", default-features = false, features = [
+    "accesskit",
+    "clipboard",
+    "wayland",
+    "x11",
+] }
+egui-wgpu = { version = "=0.36.2", default-features = false, features = [
+    "winit",
+    "wayland",
+    "x11",
+    "macos-window-resize-jitter-fix",
+] }
+winit = "0.30.13"
+wgpu = { version = "=30.0.1", default-features = false, features = [
+    "std",
+    "parking_lot",
+    "metal",
+    "dx12",
+    "vulkan",
+    "wgsl",
+] }
+bytemuck = { version = "1", features = ["derive"] }
+raw-window-handle = "0.6"
+pollster = "0.4"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSResponder",
+    "NSView",
+    "NSWindow",
+    "objc2-quartz-core",
+] }
+objc2-quartz-core = { version = "0.3", default-features = false, features = [
+    "std",
+    "CALayer",
+    "objc2-core-graphics",
+] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGColor"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+x11rb = "0.13"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.60", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[profile.dev]
+# The scene generator computes two billion samples; unoptimised, start-up
+# and the tests crawl.
+opt-level = 1
+
+[profile.release]
+debug = "line-tables-only"
+
+[lints.rust]
+rust_2018_idioms = { level = "warn", priority = -1 }
+unsafe_op_in_unsafe_fn = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+undocumented_unsafe_blocks = "warn"

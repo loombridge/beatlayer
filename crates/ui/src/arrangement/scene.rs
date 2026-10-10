@@ -9,7 +9,7 @@
 //! the block shared with the GPU callback and keep their capacity, so a
 //! steady frame allocates nothing here.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use bl_core::time::{TempoMap, Ticks};
 use bl_media::Peaks;
@@ -348,7 +348,13 @@ pub fn build_lanes(
         }
     }
 
-    // Clips.
+    // Clips. A big selection is looked up through a set (WP-1.8b).
+    let selected_set: Option<HashSet<ClipId>> =
+        (selected_clips.len() > 16).then(|| selected_clips.iter().copied().collect());
+    let is_selected = |clip: ClipId| match &selected_set {
+        Some(set) => set.contains(&clip),
+        None => selected_clips.contains(&clip),
+    };
     let tempo = &doc.settings().tempo;
     let from = range.start.get();
     let to = range.end.get();
@@ -430,7 +436,7 @@ pub fn build_lanes(
                     }
                 }
             }
-            if selected_clips.contains(&span.id) && !row.folded && h >= 2.0 {
+            if is_selected(span.id) && !row.folded && h >= 2.0 {
                 // Spec: arrangement-editing R15. The title row, or a band
                 // along the top of a short clip, and an outline.
                 let band = title_height(h).max((h * 0.25).clamp(px, 4.0));

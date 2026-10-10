@@ -1,0 +1,44 @@
+# Beatlayer's dark theme: its own colours, never Ableton's (D16, clean-room
+# policy). Every colour the UI draws comes from a token here; light.toml has
+# the same tokens. Colours are #RRGGBB.
+
+name = "Dark"
+dark = true
+
+[colors]
+# Behind everything: the margins between panes.
+window = "#15181c"
+# Panes: the browser, the main view, the detail area.
+panel = "#22262c"
+# The Control Bar and Status Bar strips.
+bar = "#1b1f24"
+# A control's face.
+control = "#2f353d"
+control_hover = "#3a414b"
+control_pressed = "#46505b"
+# A switch that's on, and text on it.
+accent = "#35c2b0"
+accent_text = "#08201d"
+# The record button when armed, and errors.
+record = "#e5534b"
+error_text = "#ff8a80"
+# Text.
+text = "#e4e8ee"
+text_dim = "#9aa4b0"
+# Controls that later packages bring to life: drawn, but quieter.
+pending = "#5d6670"
+# Lines between parts of a pane.
+separator = "#0f1114"
+# The keyboard focus ring.
+focus = "#79c0ff"
+# Meters.
+meter = "#5ccf8a"
+meter_hot = "#f2c14e"
+
+[sizes]
+# Text sizes in points.
+text = 11.0
+small_text = 10.0
+heading = 12.0
+# Corner radius of controls.
+corner = 2.0

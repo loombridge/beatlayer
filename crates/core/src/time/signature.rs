@@ -135,7 +135,8 @@ struct Entry {
 /// Each change starts a new bar. A change that comes before the previous bar
 /// is full cuts that bar short: Live calls it a fragmentary bar, and it still
 /// counts as a bar. Bars are indexed from zero at tick zero here; the
-/// bar-beat-sixteenth display numbers them from 1.
+/// bar-beat-sixteenth display numbers them from 1, and from −1 before tick
+/// zero (there's no bar 0).
 ///
 /// Lookups neither allocate nor lock. Cloning is cheap: the changes are
 /// shared.
@@ -263,8 +264,9 @@ impl TimeSignatureMap {
     }
 
     /// `ticks` as bars, beats, and sixteenths, numbered from 1 as Live
-    /// displays them. A beat is one note of the denominator; anything finer
-    /// than a sixteenth is kept in [`BarBeatSixteenth::ticks`].
+    /// displays them. Bars before tick zero are −1, −2, and so on, with no
+    /// bar 0. A beat is one note of the denominator; anything finer than a
+    /// sixteenth is kept in [`BarBeatSixteenth::ticks`].
     #[must_use]
     pub fn to_bbs(&self, ticks: Ticks) -> BarBeatSixteenth {
         let (bar, into_bar) = self.bar_at(ticks);
@@ -274,7 +276,7 @@ impl TimeSignatureMap {
         BarBeatSixteenth {
             // Bar indexes are at most i64::MAX / 176,400, so this can't
             // overflow.
-            bar: bar + 1,
+            bar: BarBeatSixteenth::bar_number(bar),
             // These quotients are below 99, 16, and 176,400.
             beat: (into_bar / beat) as u32 + 1,
             sixteenth: (into_beat / Ticks::SIXTEENTH) as u32 + 1,
@@ -282,7 +284,8 @@ impl TimeSignatureMap {
         }
     }
 
-    /// The position of a bar-beat-sixteenth value.
+    /// The position of a bar-beat-sixteenth value. Bar 0 doesn't exist and
+    /// is read as bar −1, as Live reads it.
     ///
     /// # Errors
     ///
@@ -293,7 +296,7 @@ impl TimeSignatureMap {
     /// the range of [`Ticks`].
     pub fn from_bbs(&self, position: BarBeatSixteenth) -> Result<Ticks, TimeError> {
         let out_of_range = TimeError::PositionOutOfRange;
-        let index = position.bar.checked_sub(1).ok_or(out_of_range)?;
+        let index = position.bar_index();
         let start = self.bar_start(index);
         if start == Ticks::MIN || start == Ticks::MAX {
             return Err(out_of_range);
@@ -447,14 +450,38 @@ mod tests {
         assert_eq!(map.parse_position("3"), Ok(q(8)));
     }
 
+    /// Live has no bar 0: the bar before bar 1 is bar −1, and typing 0.3.1
+    /// gives -1.3.1, half a bar before 1.1.1 in 4/4 (observed in 12.4.3,
+    /// 10 October 2026).
     #[test]
     fn before_zero() {
         let map = TimeSignatureMap::default();
-        assert_eq!(map.to_bbs(Ticks(-1)).to_string(), "0.4.4");
-        assert_eq!(map.to_bbs(q(-4)), bbs(0, 1, 1));
-        assert_eq!(map.to_bbs(q(-5)), bbs(-1, 4, 1));
+        assert_eq!(map.to_bbs(q(-2)).to_string(), "-1.3.1");
+        assert_eq!(map.to_bbs(q(-1)).to_string(), "-1.4.1");
+        assert_eq!(map.to_bbs(Ticks(-1)).to_string(), "-1.4.4");
+        assert_eq!(map.to_bbs(q(-4)), bbs(-1, 1, 1));
+        assert_eq!(map.to_bbs(q(-5)), bbs(-2, 4, 1));
         assert_eq!(map.bar_start(-1), q(-4));
-        assert_eq!(map.from_bbs(bbs(-1, 4, 1)), Ok(q(-5)));
+        assert_eq!(map.from_bbs(bbs(-1, 3, 1)), Ok(q(-2)));
+        assert_eq!(map.from_bbs(bbs(-2, 4, 1)), Ok(q(-5)));
+        assert_eq!(map.parse_position("-1.3.1"), Ok(q(-2)));
+        assert_eq!(map.parse_position("0.3.1"), Ok(q(-2)));
+        assert_eq!(map.from_bbs(bbs(0, 3, 1)), Ok(q(-2)));
+        assert_eq!(map.parse_position("1"), Ok(Ticks::ZERO));
+        assert_eq!(
+            map.parse_position("-1.4.4"),
+            Ok(Ticks::ZERO - Ticks::SIXTEENTH)
+        );
+    }
+
+    /// Before tick zero the first signature holds, and bars still skip 0.
+    #[test]
+    fn before_zero_in_other_signatures() {
+        let six_eight = TimeSignatureMap::constant(sig(6, 8));
+        assert_eq!(six_eight.to_bbs(q(-1)).to_string(), "-1.5.1");
+        assert_eq!(six_eight.to_bbs(q(-3)).to_string(), "-1.1.1");
+        assert_eq!(six_eight.to_bbs(q(-4)).to_string(), "-2.5.1");
+        assert_eq!(six_eight.parse_position("0.5"), Ok(q(-1)));
     }
 
     #[test]

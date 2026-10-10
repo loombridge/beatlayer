@@ -7,7 +7,27 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+# ASIO on Windows through `azo`, which talks to ASIO drivers' COM interface
+# directly, so no Steinberg SDK is downloaded at build time (decision D9). The
+# dependency is Windows-only, so the feature does nothing on other platforms.
+asio = ["dep:azo"]
+
 [dependencies]
+# Core Audio, WASAPI shared, and ALSA. Pinned to 0.18 until its duplex streams
+# land (see the architecture's audio I/O section).
+cpal = "0.18.2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# JACK alongside ALSA. Building needs the ALSA and JACK development headers and
+# pkg-config. cpal's native PipeWire host (its `pipewire` feature) isn't on:
+# its build-time dependency `target-lexicon` is Apache-2.0 WITH LLVM-exception,
+# which deny.toml doesn't allow yet. PipeWire still plays through its ALSA
+# plug-in and its JACK server.
+cpal = { version = "0.18.2", features = ["jack"] }
+
+[target.'cfg(windows)'.dependencies]
+azo = { version = "0.4.0", optional = true }
 
 [lints]
 workspace = true

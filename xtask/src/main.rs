@@ -1,5 +1,7 @@
 //! Repository tasks. Run `cargo xtask help` for the list.
 
+mod package;
+
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
@@ -21,6 +23,7 @@ Tasks:
   commands       Check the command registry and regenerate docs/commands.md
                  (with --check, fail instead of writing if commands.md is out of date)
   deny-selftest  Prove that deny.toml still rejects an incompatible licence
+  package        Build this platform's packages with cargo-packager and check they start
   help           Show this message
 ";
 
@@ -76,6 +79,7 @@ fn run(root: &Path, args: &[String]) -> Result<(), String> {
             _ => Err(format!("usage: cargo xtask commands [--check]\n\n{USAGE}")),
         },
         Some("deny-selftest") => deny_selftest(root),
+        Some("package") => package::package(root),
         None | Some("help" | "-h" | "--help") => {
             print!("{USAGE}");
             Ok(())

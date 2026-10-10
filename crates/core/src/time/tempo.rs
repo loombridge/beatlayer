@@ -214,14 +214,22 @@ impl Piece {
     }
 }
 
+// The ramp's logarithm and exponential come from `libm`, a pure-Rust port of
+// musl's maths library, rather than the platform's. Each platform's own
+// `ln_1p` and `exp_m1` may round the last bit differently, and on a ramp that
+// can move a converted position across a frame boundary. With `libm`, every
+// platform converts every position to the same frame, so a golden render's
+// timing matches across platforms (WP-0.10). The rest of the arithmetic is
+// IEEE 754 operations, which every platform rounds alike.
+
 /// `ln(1 + x) / x`, which tends to 1 as `x` tends to 0.
 fn ln_1p_ratio(x: f64) -> f64 {
-    if x == 0.0 { 1.0 } else { x.ln_1p() / x }
+    if x == 0.0 { 1.0 } else { libm::log1p(x) / x }
 }
 
 /// `(e^y − 1) / y`, which tends to 1 as `y` tends to 0.
 fn exp_m1_ratio(y: f64) -> f64 {
-    if y == 0.0 { 1.0 } else { y.exp_m1() / y }
+    if y == 0.0 { 1.0 } else { libm::expm1(y) / y }
 }
 
 /// Rounds to the nearest integer, halves away from zero. Saturates beyond

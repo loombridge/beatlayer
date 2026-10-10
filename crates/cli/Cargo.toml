@@ -23,6 +23,25 @@ clap = { version = "4.6.7", features = ["derive"] }
 # Hands `engine-smoke`'s engine to the stream's callback once the stream has
 # opened at the device's rate.
 rtrb = "0.4.0"
+# `render` writes WAV files (the architecture's WAV encoder).
+hound = "3.5.1"
+# The golden references: FLAC, written by the architecture's FLAC encoder and
+# read back by an independent decoder, so a reference is checked by a second
+# implementation of the format. Both are pure Rust. No default features for
+# the encoder: no logging, no threads, no serde.
+flacenc = { version = "0.5.1", default-features = false }
+claxon = "0.4.3"
+# The golden references' manifest.
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.151"
 
 [lints]
 workspace = true
+
+# The library holds `render` and the golden-test harness, which the binary
+# and the integration tests share. The binary's own documentation would
+# collide with the library's, which has the same name.
+[[bin]]
+name = "bl-cli"
+path = "src/main.rs"
+doc = false

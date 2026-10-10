@@ -1,0 +1,15 @@
+//! What `bl-cli` shares with its tests: the offline render behind
+//! `bl-cli render`, and the golden-test harness behind `bl-cli golden` and
+//! `cargo test`.
+//!
+//! - [`render`]: a document played from its start through the engine on one
+//!   thread, faster than real time, and written to a WAV file.
+//! - [`golden`]: songs built in code (the fixtures), rendered and
+//!   null-tested against reference renders stored as FLAC files in
+//!   `tests/golden/`.
+
+pub mod golden;
+pub mod render;
+
+/// What a command returns: an exit code, or a message for a failure.
+pub type Outcome = Result<std::process::ExitCode, String>;

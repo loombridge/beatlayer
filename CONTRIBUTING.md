@@ -36,6 +36,12 @@ Beatlayer matches what Live does, not how Live's code does it. In short:
    cargo xtask check
    ```
 
+1. If a golden test fails, your change altered what the engine renders. If that's a mistake, fix it. If it's intended, remake the references and say in the pull request why each one changed:
+
+   ```sh
+   cargo xtask golden --update
+   ```
+
 ## Commit
 
 - Stage files by path. Never use `git add -A` or `git add .`, and check `git status` so build output, `.DS_Store`, and scratch files stay out.

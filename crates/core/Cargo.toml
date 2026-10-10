@@ -12,6 +12,10 @@ publish.workspace = true
 serde = ["dep:serde"]
 
 [dependencies]
+# Pure-Rust maths for the tempo map's ramps, so conversions round alike on
+# every platform (see `time/tempo.rs`). No default features, so no
+# architecture-specific code paths either.
+libm = { version = "0.2.16", default-features = false }
 serde = { version = "1.0.228", default-features = false, features = ["std", "derive"], optional = true }
 
 [dev-dependencies]

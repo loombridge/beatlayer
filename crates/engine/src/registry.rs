@@ -3,7 +3,7 @@
 use bl_model::{Device, DeviceKind};
 
 use crate::node::{Node, NodeConfig};
-use crate::nodes::{TEST_TONE, TestTone};
+use crate::nodes::{BEAT_TONE, BeatTone, TEST_TONE, TestTone};
 
 /// Makes nodes for devices. The compiler asks each factory in a
 /// [`Registry`] in turn. It runs off the audio thread, so a factory may
@@ -44,13 +44,15 @@ pub struct Registry {
 }
 
 impl Registry {
-    /// The engine's own devices: the test tone ([`TEST_TONE`]).
+    /// The engine's own devices: the test tone ([`TEST_TONE`]) and the beat
+    /// tone ([`BEAT_TONE`]).
     #[must_use]
     pub fn new() -> Self {
         let mut registry = Self::empty();
         registry.add_native(TEST_TONE, |device, config| {
             Box::new(TestTone::new(device, config))
         });
+        registry.add_native(BEAT_TONE, |device, _| Box::new(BeatTone::new(device)));
         registry
     }
 

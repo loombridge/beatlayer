@@ -37,13 +37,28 @@
 //! schema version (migrating older files through [`migrate`]), and every
 //! rule of the document model. A set that loads is one the editor can work
 //! on. The loader is fuzzed (`fuzz/` at the top of the repository).
+//!
+//! # Crash recovery and Save Continuously
+//!
+//! While a set is open, [`autosave::Autosave`] journals every finished edit
+//! within a second, on its own thread, in a hidden file beside the set
+//! ([`journal`]). If the app stops without closing the set, the next launch
+//! offers to recover it, exactly as it was. With Save Continuously on, the
+//! journal's entries are save points: loading a set opens it at its newest
+//! one, and they form its history since the last normal save. A normal save
+//! writes the next revision and retires the journal, so the set file's
+//! format is unchanged. The commands that reach these are in [`registry`].
 
+pub mod autosave;
 pub mod format;
+pub mod journal;
 pub mod migrate;
+pub mod registry;
 
 mod error;
 mod folder;
 mod media;
+mod patch;
 mod save;
 
 pub use error::{LoadError, SaveError};

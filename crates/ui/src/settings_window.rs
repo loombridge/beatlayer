@@ -3,7 +3,10 @@
 //! theme choice (L-SET-011) are built; the other pages are in the chooser
 //! and say which package builds them.
 
-use bl_shell::audio::{AudioDevices, AudioStatus, DeviceListing, TEST_TONE_DBFS, TEST_TONE_HZ};
+use bl_shell::audio::{
+    AudioDevices, AudioStatus, DeviceListing, TONE_MAX_DBFS, TONE_MAX_HZ, TONE_MIN_DBFS,
+    TONE_MIN_HZ,
+};
 use bl_shell::settings::{SettingsPage, ThemeChoice};
 use bl_shell::{Invocation, Shell, commands as ids};
 use egui::accesskit::Role;
@@ -13,7 +16,7 @@ use serde_json::{Value, json};
 use crate::layout::SettingsLayout;
 use crate::main_window::{UiEvent, sample_rate_text};
 use crate::theme::Theme;
-use crate::widgets::{Choice, chooser, switch};
+use crate::widgets::{Choice, chooser, number_box, switch};
 
 /// The Settings window's state between frames.
 #[derive(Clone, Debug)]
@@ -67,15 +70,27 @@ impl SettingsUi {
         }
     }
 
-    /// Draws the window and returns what the person did.
-    pub fn show(&mut self, root: &mut Ui, shell: &Shell, theme: &Theme) -> Vec<UiEvent> {
+    /// Draws the window and returns what the person did. With `title_bar`,
+    /// it draws Live's 23-point title bar along the top, for a window whose
+    /// content covers the system's title bar (macOS, D22).
+    pub fn show(
+        &mut self,
+        root: &mut Ui,
+        shell: &Shell,
+        theme: &Theme,
+        title_bar: bool,
+    ) -> Vec<UiEvent> {
         if let Some(direction) = self.move_focus.take() {
             root.ctx().memory_mut(|m| m.move_focus(direction));
         }
         let mut events = Vec::new();
+        if title_bar {
+            crate::main_window::draw_title_bar(root, theme, "Settings");
+        }
         let frame = Frame::NONE.fill(theme.colors.panel.0);
         CentralPanel::default().frame(frame).show(root, |ui| {
-            let layout = SettingsLayout::compute(ui.max_rect().size());
+            let area = ui.max_rect();
+            let layout = SettingsLayout::compute(area.size()).translate(area.min.to_vec2());
             page_chooser(ui, shell, theme, &layout, &mut events);
             let page = shell.settings_page();
             let mut rows = Rows::new(&layout, theme);
@@ -323,16 +338,49 @@ impl SettingsUi {
         };
         rows.text_row(ui, "Running At", &running);
 
+        // The test section (D23): Live's tone switch, Tone Volume, and Tone
+        // Frequency.
         rows.heading(ui, "Test");
-        let rect = rows.row(ui, "Test Tone", SettingsLayout::SWITCH);
-        if let Some(on) = switch(ui, theme, "test-tone", "Test Tone", rect, status.test_tone) {
+        let tone_args = |events: &mut Vec<UiEvent>, args: Value| {
             events.push(UiEvent::Invoke(Invocation::new(
                 ids::AUDIO_SET_TEST_TONE,
-                json!({ "on": on }),
+                args,
             )));
+        };
+        let rect = rows.row(ui, "Test Tone", SettingsLayout::SWITCH);
+        if let Some(on) = switch(ui, theme, "test-tone", "Test Tone", rect, status.test_tone) {
+            tone_args(events, json!({ "on": on }));
         }
-        rows.text_row(ui, "Tone Volume", &format!("{TEST_TONE_DBFS:.0} dB"));
-        rows.text_row(ui, "Tone Frequency", &format!("{TEST_TONE_HZ:.0} Hz"));
+        let tone = status.tone;
+        let rect = rows.row(ui, "Tone Volume", SettingsLayout::NUMBER);
+        if let Some(db) = number_box(
+            ui,
+            theme,
+            "tone-volume",
+            "Tone Volume",
+            rect,
+            tone.volume_db,
+            (TONE_MIN_DBFS, TONE_MAX_DBFS),
+            &|db, steps| (db + f64::from(steps)).round(),
+            &format!("{:.0} dB", tone.volume_db),
+        ) {
+            tone_args(events, json!({ "volume_db": db }));
+        }
+        let rect = rows.row(ui, "Tone Frequency", SettingsLayout::NUMBER);
+        if let Some(hz) = number_box(
+            ui,
+            theme,
+            "tone-frequency",
+            "Tone Frequency",
+            rect,
+            tone.frequency_hz,
+            (TONE_MIN_HZ, TONE_MAX_HZ),
+            // A semitone a step, to the nearest hertz.
+            &|hz, steps| (hz * 2f64.powf(f64::from(steps) / 12.0)).round(),
+            &format!("{:.0} Hz", tone.frequency_hz),
+        ) {
+            tone_args(events, json!({ "frequency_hz": hz }));
+        }
         let cpu = status
             .cpu_load
             .filter(|_| status.engine_on)

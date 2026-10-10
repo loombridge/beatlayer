@@ -9,12 +9,12 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
-use crate::audio::{AudioHost, ConfigureAudio};
+use crate::audio::{AudioHost, ConfigureAudio, ToneSettings};
 use crate::commands::{
-    self as ids, PathArgs, SetResult, SettingsArgs, SwitchResult, TestToneArgs, ThemeArgs,
-    ViewResult,
+    self as ids, PathArgs, SetResult, SettingsArgs, SwitchResult, TestToneArgs, TestToneState,
+    ThemeArgs, ViewResult,
 };
-use crate::files::{NoSetFiles, SetStore, factory_default_set};
+use crate::files::{ProjectFiles, SetStore, factory_default_set};
 use crate::settings::{Preferences, SettingsPage, ThemeChoice};
 
 /// The views the main window's main area shows.
@@ -95,7 +95,12 @@ pub enum Effect {
         then: Invocation,
     },
     /// Ask for a set file to open, then run `set.open` with it.
-    PickOpenPath,
+    PickOpenPath {
+        /// The person chose Don't Save first, so the unsaved changes go
+        /// (`set.discard_changes`) once a file is chosen, just before it
+        /// opens. Cancelling the dialog keeps them.
+        discard_changes: bool,
+    },
     /// Ask where to save the set, run `set.save_as` there, then run `then`
     /// if the save worked.
     PickSavePath {
@@ -191,6 +196,9 @@ impl std::error::Error for ShellError {}
 pub struct Shell {
     registry: Registry,
     editor: Editor,
+    /// The document as it was last opened or saved (or the factory default
+    /// set), which `set.discard_changes` goes back to.
+    saved: Editor,
     set_path: Option<PathBuf>,
     dirty: bool,
     store: Box<dyn SetStore>,
@@ -224,6 +232,11 @@ fn to_value<T: Serialize>(value: &T) -> Value {
     serde_json::to_value(value).unwrap_or(Value::Null)
 }
 
+/// A fresh editor on the same document, with an empty undo history.
+fn snapshot(editor: &Editor) -> Editor {
+    Editor::from_document(editor.document().clone(), editor.ids())
+}
+
 impl Shell {
     /// A shell with these preferences, saving them to `config_dir` (or
     /// nowhere), playing through `audio`, and opening and saving sets
@@ -233,16 +246,18 @@ impl Shell {
     pub fn new(
         prefs: Preferences,
         config_dir: Option<PathBuf>,
-        audio: AudioHost,
+        mut audio: AudioHost,
         store: Box<dyn SetStore>,
     ) -> Self {
         let mut registry = Registry::new();
         model::register(&mut registry).expect("the document's command IDs are unique");
         ids::register(&mut registry).expect("the shell's command IDs are unique");
         debug_assert!(registry.problems().is_empty(), "{:?}", registry.problems());
+        audio.set_tone(prefs.tone);
         Self {
             registry,
             editor: factory_default_set(),
+            saved: factory_default_set(),
             set_path: None,
             dirty: false,
             store,
@@ -262,14 +277,14 @@ impl Shell {
     }
 
     /// A shell for tests and headless runs: default preferences saved
-    /// nowhere, the null audio device, and no set files.
+    /// nowhere, the null audio device, and Beatlayer's set files.
     #[must_use]
     pub fn headless() -> Self {
         Self::new(
             Preferences::default(),
             None,
             AudioHost::null(Default::default()),
-            Box::new(NoSetFiles),
+            Box::new(ProjectFiles::new()),
         )
     }
 
@@ -563,6 +578,12 @@ impl Shell {
             model::REDO => return self.editor.can_redo(),
             ids::APP_HIDE => return cfg!(target_os = "macos"),
             ids::SET_OPEN | ids::SET_SAVE | ids::SET_SAVE_AS | ids::APP_SETTINGS => return true,
+            ids::SET_DISCARD_CHANGES => return self.dirty,
+            // The frontmost window must be a secondary one: with only the
+            // main window open, Close Window is disabled (M-FILE-004).
+            ids::WINDOW_CLOSE => {
+                return self.settings_open && self.focused_window == WindowKind::Settings;
+            }
             _ => {}
         }
         if ids::handles(id) {
@@ -647,8 +668,16 @@ impl Shell {
                         then: Invocation::new(id, args),
                     });
                 } else {
-                    self.effects.push(Effect::PickOpenPath);
+                    self.effects.push(Effect::PickOpenPath {
+                        discard_changes: false,
+                    });
                 }
+                Ok(Value::Null)
+            }
+            ids::SET_OPEN if self.dirty => {
+                self.effects.push(Effect::ConfirmDiscard {
+                    then: Invocation::new(id, args),
+                });
                 Ok(Value::Null)
             }
             ids::SET_SAVE if self.set_path.is_none() => {
@@ -669,23 +698,32 @@ impl Shell {
         }
     }
 
-    /// Runs what a confirmation dialog decided: after "Don't Save", `then`
-    /// runs without asking again.
+    /// Runs what the save-changes dialog decided, or what follows a save it
+    /// asked for: the unsaved changes go (`set.discard_changes`, a no-op
+    /// after a save), then `then` runs without asking again. Opening a set
+    /// asks for the file first and discards only once one is chosen, so
+    /// cancelling the file dialog keeps the changes.
     ///
     /// # Errors
     ///
     /// As [`Shell::run`].
     pub fn discard_and_invoke(&mut self, then: &Invocation) -> Result<Value, ShellError> {
-        self.dirty = false;
-        let result = self.invoke(&then.id, then.args.clone());
-        self.touch();
-        result
+        if then.id == ids::SET_OPEN && then.args.get("path").is_none() {
+            self.effects.push(Effect::PickOpenPath {
+                discard_changes: true,
+            });
+            self.touch();
+            return Ok(Value::Null);
+        }
+        self.invoke(ids::SET_DISCARD_CHANGES, json!({}))?;
+        self.invoke(&then.id, then.args.clone())
     }
 
     /// Runs a command with every argument given, as an agent or a test does.
-    /// It never asks: `set.new`, `set.open`, and `app.quit` discard unsaved
-    /// changes (the agent API asks the person first for destructive
-    /// commands).
+    /// It never asks: `set.new` and `app.quit` discard unsaved changes, and
+    /// `set.open` refuses while there are any, so an agent saves or runs
+    /// `set.discard_changes` first (the agent API asks the person before
+    /// destructive commands).
     ///
     /// # Errors
     ///
@@ -755,6 +793,8 @@ impl Shell {
             ids::SET_NEW => {
                 Self::args::<NoArgs>(id, args)?;
                 self.editor = factory_default_set();
+                self.saved = factory_default_set();
+                self.store.close();
                 self.set_path = None;
                 self.dirty = false;
                 self.main_view = MainView::Arrangement;
@@ -763,11 +803,18 @@ impl Shell {
             }
             ids::SET_OPEN => {
                 let PathArgs { path } = Self::args(id, args)?;
-                let path = PathBuf::from(path);
-                let editor = self.store.load(&path).map_err(failed)?;
+                if self.dirty {
+                    return Err(unavailable(
+                        "the set has unsaved changes; save them with `set.save` or \
+                         `set.save_as`, or throw them away with `set.discard_changes`, first",
+                    ));
+                }
+                let (editor, opened) = self.store.open(Path::new(&path)).map_err(failed)?;
+                self.saved = snapshot(&editor);
                 self.editor = editor;
-                self.set_path = Some(path);
+                self.set_path = Some(opened);
                 self.dirty = false;
+                self.message = None;
                 Ok(self.set_result())
             }
             ids::SET_SAVE => {
@@ -775,16 +822,23 @@ impl Shell {
                 let path = self.set_path.clone().ok_or_else(|| {
                     unavailable("the set has never been saved; use `set.save_as` to give it a file")
                 })?;
-                self.store.save(&path, &self.editor).map_err(failed)?;
-                self.dirty = false;
+                let warnings = self.store.save(&path, &self.editor).map_err(failed)?;
+                self.saved_as(path, &warnings);
                 Ok(self.set_result())
             }
             ids::SET_SAVE_AS => {
                 let PathArgs { path } = Self::args(id, args)?;
                 let path = PathBuf::from(path);
-                self.store.save(&path, &self.editor).map_err(failed)?;
-                self.set_path = Some(path);
-                self.dirty = false;
+                let warnings = self.store.save(&path, &self.editor).map_err(failed)?;
+                self.saved_as(path, &warnings);
+                Ok(self.set_result())
+            }
+            ids::SET_DISCARD_CHANGES => {
+                Self::args::<NoArgs>(id, args)?;
+                if self.dirty {
+                    self.editor = snapshot(&self.saved);
+                    self.dirty = false;
+                }
                 Ok(self.set_result())
             }
             ids::APP_QUIT => {
@@ -946,12 +1000,45 @@ impl Shell {
                 Ok(to_value(&SwitchResult { on }))
             }
             ids::AUDIO_SET_TEST_TONE => {
-                let TestToneArgs { on } = Self::args(id, args)?;
-                self.audio.set_test_tone(on);
-                Ok(to_value(&SwitchResult { on }))
+                let TestToneArgs {
+                    on,
+                    volume_db,
+                    frequency_hz,
+                } = Self::args(id, args)?;
+                if volume_db.is_some() || frequency_hz.is_some() {
+                    let current = self.audio.tone();
+                    self.audio.set_tone(ToneSettings {
+                        volume_db: volume_db.unwrap_or(current.volume_db),
+                        frequency_hz: frequency_hz.unwrap_or(current.frequency_hz),
+                    });
+                    self.prefs.tone = self.audio.tone();
+                    self.save_preferences();
+                }
+                if let Some(on) = on {
+                    self.audio.set_test_tone(on);
+                }
+                let tone = self.audio.tone();
+                Ok(to_value(&TestToneState {
+                    on: self.audio.test_tone(),
+                    volume_db: tone.volume_db,
+                    frequency_hz: tone.frequency_hz,
+                }))
             }
             _ => Err(ShellError::UnknownCommand(id.to_owned())),
         }
+    }
+
+    /// Records a save to `path`: it's the set's file, the set is clean, and
+    /// warnings from the save show in the Status Bar.
+    fn saved_as(&mut self, path: PathBuf, warnings: &[String]) {
+        self.saved = snapshot(&self.editor);
+        self.set_path = Some(path);
+        self.dirty = false;
+        self.message = (!warnings.is_empty()).then(|| Message {
+            text: format!("The set was saved, but: {}", warnings.join("; ")),
+            error: false,
+            action: None,
+        });
     }
 
     /// Closes the Settings window, as its close button or Esc does: the test

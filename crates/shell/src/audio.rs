@@ -1,5 +1,6 @@
 //! The audio host: the device the app plays through, the settings that
-//! choose it, and the CPU meter (L-SET-012, L-CTRL-023, L-CTRL-024).
+//! choose it, the test tone, and the CPU meter (L-SET-012, L-CTRL-023,
+//! L-CTRL-024).
 //!
 //! [`AudioHost`] owns one stream from `bl-audio-io`. Changing a setting
 //! ([`AudioHost::configure`]) closes the stream and opens a new one with the
@@ -7,259 +8,125 @@
 //! applies without restarting the app. If the device refuses, the previous
 //! settings are reopened and the error is reported.
 //!
-//! Until the engine exists (WP-0.9), the stream's callback is a stand-in
-//! that plays silence, or the Settings window's test tone at -60 dBFS, and
-//! measures how long it takes, which the CPU meter shows.
+//! The stream's callback ([`EngineCallback`]) is a stand-in until the app
+//! runs the engine: it plays silence, or the Settings window's test tone at
+//! the Tone Volume and Tone Frequency the person set (D23), and measures how
+//! long it takes, which the CPU meter shows. It runs on the audio thread, so
+//! it follows the real-time rules: no allocation, no lock, no blocking call
+//! (`tests/realtime.rs` checks it under the allocation trap).
+//!
+//! The settings and reports themselves are data in `bl-shell-spec`,
+//! re-exported here.
 
 use std::f64::consts::TAU;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering::Relaxed};
 use std::time::Instant;
 
 use bl_audio_io::{
     AudioBuffer, AudioBufferMut, AudioCallback, Backend, BackendKind, BufferSizes, DeviceId,
     DeviceInfo, DeviceSelector, Error, PortRequest, ProcessContext, Stream, StreamRequest,
+    StreamStats,
 };
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+pub use bl_shell_spec::audio::{
+    AudioDevices, AudioSettings, AudioStatus, ConfigureAudio, DeviceListing, DeviceRef, DriverInfo,
+    TONE_DEFAULT_DBFS, TONE_DEFAULT_HZ, TONE_MAX_DBFS, TONE_MAX_HZ, TONE_MIN_DBFS, TONE_MIN_HZ,
+    ToneSettings,
+};
 
-/// The level of the Settings window's test tone, in dBFS. Never louder.
-pub const TEST_TONE_DBFS: f64 = -60.0;
-/// The test tone's frequency in hertz.
-pub const TEST_TONE_HZ: f64 = 440.0;
-
-/// The test tone's peak amplitude: [`TEST_TONE_DBFS`] as a linear gain.
-#[must_use]
-pub fn test_tone_amplitude() -> f32 {
-    10f64.powf(TEST_TONE_DBFS / 20.0) as f32
-}
-
-/// The audio device settings, as the Settings window's Audio page sets them
-/// and the preferences file keeps them. `None` means the platform's or the
-/// device's own choice.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(default)]
-pub struct AudioSettings {
-    /// The driver type's ID (`coreaudio`, `wasapi`, `asio`, `jack`, `alsa`,
-    /// or `null`), or nothing for the platform's default.
-    pub driver: Option<String>,
-    /// The output device's ID, or nothing for the system's default output
-    /// device, which the stream then follows where the driver can.
-    pub output_device: Option<String>,
-    /// The input device's ID, or nothing for no input.
-    pub input_device: Option<String>,
-    /// The sample rate in hertz, or nothing for the device's current rate,
-    /// which leaves the device's own setting alone.
-    pub sample_rate: Option<u32>,
-    /// The buffer size in frames, or nothing for the device's default.
-    pub buffer_size: Option<u32>,
-    /// Output channels to open, or nothing for all the device has.
-    pub output_channels: Option<u16>,
-}
-
-/// Arguments of `audio.configure`: the settings to change. Fields left out
-/// keep their values.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct ConfigureAudio {
-    /// The driver type: an ID from `audio.devices`, such as `coreaudio`,
-    /// `wasapi`, `asio`, `jack`, `alsa`, or `null`. Changing it resets the
-    /// devices to the driver's defaults unless they're given too.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub driver: Option<String>,
-    /// The output device: an ID from `audio.devices`, or `default` for the
-    /// system's default output device.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output_device: Option<String>,
-    /// The input device: an ID from `audio.devices`, or `none` for no input.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub input_device: Option<String>,
-    /// The sample rate in hertz, or 0 for the device's current rate.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sample_rate: Option<u32>,
-    /// The buffer size in frames, or 0 for the device's default.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub buffer_size: Option<u32>,
-    /// Output channels to open, or 0 for all the device has.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub output_channels: Option<u16>,
-}
-
-/// A device in use, by ID and name.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct DeviceRef {
-    /// The device's ID, as `audio.configure` takes it.
-    pub id: String,
-    /// The name the system gives it.
-    pub name: String,
-}
-
-/// What `audio.status` returns.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct AudioStatus {
-    /// Whether the audio engine is on.
-    pub engine_on: bool,
-    /// The settings in force.
-    pub settings: AudioSettings,
-    /// The driver type in use (its ID).
-    pub driver: String,
-    /// The output device the stream opened, while one is open.
-    pub output_device: Option<DeviceRef>,
-    /// The input device the stream opened, if any.
-    pub input_device: Option<DeviceRef>,
-    /// Whether the stream follows the system's default output device.
-    pub follows_default: bool,
-    /// The sample rate the device runs at, in hertz, while a stream is open.
-    pub sample_rate: Option<u32>,
-    /// The buffer size the settings asked for, in frames.
-    pub requested_buffer_size: Option<u32>,
-    /// The buffer size the device actually delivers, in frames, once it has
-    /// called back, or what the driver says it set until then.
-    pub buffer_size: Option<u32>,
-    /// Output channels open.
-    pub output_channels: u16,
-    /// Input channels open.
-    pub input_channels: u16,
-    /// The output buffer's length in milliseconds.
-    pub buffer_ms: Option<f64>,
-    /// The share of each buffer's time spent processing audio, in percent,
-    /// averaged over the last measurement; nothing while the engine is off.
-    pub cpu_load: Option<f32>,
-    /// Dropouts since the stream opened.
-    pub dropouts: u64,
-    /// Whether the test tone plays.
-    pub test_tone: bool,
-    /// The last error from the device, if the stream couldn't open or failed.
-    pub error: Option<String>,
-}
-
-/// A driver type this build and machine offer.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct DriverInfo {
-    /// Its ID, as `audio.configure` takes it.
-    pub id: String,
-    /// Its name.
-    pub name: String,
-}
-
-/// One device, as `audio.devices` lists it.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct DeviceListing {
-    /// The device's ID, as `audio.configure` takes it.
-    pub id: String,
-    /// The name the system gives it.
-    pub name: String,
-    /// Output channels it has.
-    pub output_channels: u16,
-    /// Input channels it has.
-    pub input_channels: u16,
-    /// Whether the system uses it for output by default.
-    pub default_output: bool,
-    /// Whether the system uses it for input by default.
-    pub default_input: bool,
-    /// The sample rates it accepts, in hertz.
-    pub sample_rates: Vec<u32>,
-    /// The rate it runs at now, if known.
-    pub current_sample_rate: Option<u32>,
-    /// The buffer sizes it accepts, in frames: every size from the first to
-    /// the second number when `buffer_range` is true, otherwise exactly these.
-    /// Empty if the driver can't say before a stream runs.
-    pub buffer_sizes: Vec<u32>,
-    /// Whether `buffer_sizes` is a range (its first and last values).
-    pub buffer_range: bool,
-    /// The buffer size it prefers, if it says.
-    pub default_buffer_size: Option<u32>,
-}
-
-impl DeviceListing {
-    fn from_info(info: &DeviceInfo) -> Self {
-        let (buffer_sizes, buffer_range) = match &info.buffer_sizes {
-            BufferSizes::Range { min, max } => (vec![*min, *max], true),
-            BufferSizes::List(sizes) => (sizes.clone(), false),
-            BufferSizes::Unknown => (Vec::new(), false),
-        };
-        Self {
-            id: info.id.to_string(),
-            name: info.name.clone(),
-            output_channels: info.output_channels,
-            input_channels: info.input_channels,
-            default_output: info.is_default_output,
-            default_input: info.is_default_input,
-            sample_rates: info.sample_rates.clone(),
-            current_sample_rate: info.current_sample_rate,
-            buffer_sizes,
-            buffer_range,
-            default_buffer_size: info.default_buffer_size,
-        }
+/// A device as `audio.devices` lists it.
+fn listing(info: &DeviceInfo) -> DeviceListing {
+    let (buffer_sizes, buffer_range) = match &info.buffer_sizes {
+        BufferSizes::Range { min, max } => (vec![*min, *max], true),
+        BufferSizes::List(sizes) => (sizes.clone(), false),
+        BufferSizes::Unknown => (Vec::new(), false),
+    };
+    DeviceListing {
+        id: info.id.to_string(),
+        name: info.name.clone(),
+        output_channels: info.output_channels,
+        input_channels: info.input_channels,
+        default_output: info.is_default_output,
+        default_input: info.is_default_input,
+        sample_rates: info.sample_rates.clone(),
+        current_sample_rate: info.current_sample_rate,
+        buffer_sizes,
+        buffer_range,
+        default_buffer_size: info.default_buffer_size,
     }
-
-    /// The buffer sizes to offer in a chooser: powers of two within the
-    /// device's range, or its own list.
-    #[must_use]
-    pub fn buffer_choices(&self) -> Vec<u32> {
-        if self.buffer_range {
-            let (min, max) = (self.buffer_sizes[0], self.buffer_sizes[1]);
-            let mut sizes: Vec<u32> = (4..=13)
-                .map(|shift| 1u32 << shift)
-                .filter(|size| (min..=max).contains(size))
-                .collect();
-            if sizes.is_empty() {
-                sizes.push(min);
-            }
-            sizes
-        } else if self.buffer_sizes.is_empty() {
-            vec![64, 128, 256, 512, 1024, 2048]
-        } else {
-            self.buffer_sizes.clone()
-        }
-    }
-}
-
-/// What `audio.devices` returns.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct AudioDevices {
-    /// The driver types on offer, best first.
-    pub drivers: Vec<DriverInfo>,
-    /// The driver whose devices are listed: the one in use.
-    pub driver: String,
-    /// Its devices.
-    pub devices: Vec<DeviceListing>,
-    /// Why the devices couldn't be listed, if they couldn't.
-    pub error: Option<String>,
 }
 
 /// Opens a backend of a kind. The app uses `bl_audio_io::open_backend`;
 /// tests pass their own.
 pub type BackendFactory = Box<dyn Fn(BackendKind) -> Result<Box<dyn Backend>, Error>>;
 
-/// Counters the audio thread updates and the CPU meter reads: relaxed
-/// atomics only, so the audio thread never waits.
-#[derive(Debug, Default)]
-struct EngineShared {
+/// What the audio thread and the rest of the app share: relaxed atomics
+/// only, so the audio thread never waits.
+#[derive(Debug)]
+pub struct EngineShared {
     /// Nanoseconds the callback spent processing.
     busy_ns: AtomicU64,
     /// Nanoseconds of audio the callback produced.
     audio_ns: AtomicU64,
     /// Whether the test tone plays.
     tone: AtomicBool,
+    /// The test tone's peak amplitude, as `f32` bits.
+    tone_amplitude: AtomicU32,
+    /// The test tone's frequency in hertz, as `f32` bits.
+    tone_hz: AtomicU32,
 }
 
-/// The stand-in engine on the audio thread: silence, or the test tone at
-/// [`TEST_TONE_DBFS`], timed for the CPU meter. It allocates nothing, takes
-/// no lock, and makes no system call besides reading the clock.
+impl Default for EngineShared {
+    fn default() -> Self {
+        let shared = Self {
+            busy_ns: AtomicU64::new(0),
+            audio_ns: AtomicU64::new(0),
+            tone: AtomicBool::new(false),
+            tone_amplitude: AtomicU32::new(0),
+            tone_hz: AtomicU32::new(0),
+        };
+        shared.set_tone(ToneSettings::default());
+        shared
+    }
+}
+
+impl EngineShared {
+    /// Switches the test tone on or off.
+    pub fn set_tone_on(&self, on: bool) {
+        self.tone.store(on, Relaxed);
+    }
+
+    /// Sets the test tone's level and frequency, within the controls'
+    /// ranges.
+    pub fn set_tone(&self, tone: ToneSettings) {
+        let tone = tone.clamped();
+        self.tone_amplitude
+            .store(tone.amplitude().to_bits(), Relaxed);
+        self.tone_hz
+            .store((tone.frequency_hz as f32).to_bits(), Relaxed);
+    }
+
+    /// Nanoseconds of audio the callback has produced.
+    #[must_use]
+    pub fn audio_ns(&self) -> u64 {
+        self.audio_ns.load(Relaxed)
+    }
+}
+
+/// The stand-in engine on the audio thread: silence, or the test tone,
+/// timed for the CPU meter. It allocates nothing, takes no lock, and makes
+/// no system call besides reading the clock.
 pub struct EngineCallback {
     shared: Arc<EngineShared>,
     phase: f64,
-    amplitude: f32,
 }
 
 impl EngineCallback {
-    fn new(shared: Arc<EngineShared>) -> Self {
-        Self {
-            shared,
-            phase: 0.0,
-            amplitude: test_tone_amplitude(),
-        }
+    /// A callback reading the tone settings from `shared` and adding its
+    /// timings there.
+    #[must_use]
+    pub fn new(shared: Arc<EngineShared>) -> Self {
+        Self { shared, phase: 0.0 }
     }
 }
 
@@ -272,11 +139,13 @@ impl AudioCallback for EngineCallback {
     ) {
         let started = Instant::now();
         if self.shared.tone.load(Relaxed) {
-            let step = TEST_TONE_HZ / f64::from(ctx.sample_rate.max(1));
+            let amplitude = f32::from_bits(self.shared.tone_amplitude.load(Relaxed));
+            let hz = f64::from(f32::from_bits(self.shared.tone_hz.load(Relaxed)));
+            let step = hz / f64::from(ctx.sample_rate.max(1));
             let mut channels = output.iter_mut();
             if let Some(first) = channels.next() {
                 for sample in first.iter_mut() {
-                    *sample = (self.phase * TAU).sin() as f32 * self.amplitude;
+                    *sample = (self.phase * TAU).sin() as f32 * amplitude;
                     self.phase += step;
                     if self.phase >= 1.0 {
                         self.phase -= 1.0;
@@ -299,6 +168,7 @@ pub struct AudioHost {
     available: Vec<BackendKind>,
     factory: BackendFactory,
     settings: AudioSettings,
+    tone: ToneSettings,
     engine_on: bool,
     backend: Option<(BackendKind, Box<dyn Backend>)>,
     stream: Option<Box<dyn Stream>>,
@@ -358,6 +228,7 @@ impl AudioHost {
             available,
             factory,
             settings,
+            tone: ToneSettings::default(),
             engine_on: true,
             backend: None,
             stream: None,
@@ -450,13 +321,34 @@ impl AudioHost {
 
     /// Plays or stops the test tone.
     pub fn set_test_tone(&self, on: bool) {
-        self.shared.tone.store(on, Relaxed);
+        self.shared.set_tone_on(on);
     }
 
     /// Whether the test tone plays.
     #[must_use]
     pub fn test_tone(&self) -> bool {
         self.shared.tone.load(Relaxed)
+    }
+
+    /// The test tone's level and frequency.
+    #[must_use]
+    pub fn tone(&self) -> ToneSettings {
+        self.tone
+    }
+
+    /// Sets the test tone's level and frequency, brought within the
+    /// controls' ranges; a playing tone changes at the next block.
+    pub fn set_tone(&mut self, tone: ToneSettings) {
+        self.tone = tone.clamped();
+        self.shared.set_tone(self.tone);
+    }
+
+    /// The running stream's statistics: dropouts, buffer sizes, and the
+    /// heap operations the allocation trap counted inside audio blocks.
+    /// `None` while no stream is open.
+    #[must_use]
+    pub fn stats(&self) -> Option<StreamStats> {
+        self.stream.as_ref().map(|stream| stream.stats())
     }
 
     /// Applies new settings straight away: closes the stream and opens one
@@ -633,6 +525,7 @@ impl AudioHost {
             cpu_load: self.cpu_load,
             dropouts: stats.map_or(0, |stats| stats.dropouts),
             test_tone: self.test_tone(),
+            tone: self.tone,
             error: self.error.clone(),
         }
     }
@@ -652,7 +545,7 @@ impl AudioHost {
             .backend()
             .and_then(|backend| backend.devices().map_err(|e| e.to_string()));
         let (devices, error) = match listed {
-            Ok(devices) => (devices.iter().map(DeviceListing::from_info).collect(), None),
+            Ok(devices) => (devices.iter().map(listing).collect(), None),
             Err(error) => (Vec::new(), Some(error)),
         };
         AudioDevices {
@@ -684,25 +577,57 @@ fn selector(id: Option<&str>) -> Result<DeviceSelector, String> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn the_test_tone_never_exceeds_minus_60_dbfs() {
-        // Spec: app-shell R13.
-        let shared = Arc::new(EngineShared::default());
-        shared.tone.store(true, Relaxed);
-        let mut engine = EngineCallback::new(Arc::clone(&shared));
-        let mut data = vec![0.0f32; 2 * 4800];
-        let mut output = AudioBufferMut::new(&mut data, 2, 4800, 4800);
+    fn run_block(engine: &mut EngineCallback, data: &mut [f32], channels: usize, rate: u32) {
+        let frames = data.len() / channels;
+        let mut output = AudioBufferMut::new(data, channels, frames, frames);
         let ctx = ProcessContext {
-            sample_rate: 48_000,
-            frames: 4800,
+            sample_rate: rate,
+            frames,
             position: 0,
             timestamp: None,
         };
-        engine.process(&ctx, &AudioBuffer::empty(4800), &mut output);
-        let peak = data.iter().fold(0.0f32, |peak, s| peak.max(s.abs()));
-        assert!(peak > 0.0009, "the tone plays: {peak}");
-        assert!(peak <= 0.001 + 1e-7, "at most -60 dBFS: {peak}");
-        assert_eq!(shared.audio_ns.load(Relaxed), 100_000_000);
+        engine.process(&ctx, &AudioBuffer::empty(frames), &mut output);
+    }
+
+    fn peak(data: &[f32]) -> f32 {
+        data.iter().fold(0.0f32, |peak, s| peak.max(s.abs()))
+    }
+
+    #[test]
+    fn the_test_tone_plays_at_its_volume_and_frequency() {
+        // Spec: app-shell R13. Only the samples are checked; nothing plays.
+        let shared = Arc::new(EngineShared::default());
+        shared.set_tone_on(true);
+        let mut engine = EngineCallback::new(Arc::clone(&shared));
+        let mut data = vec![0.0f32; 2 * 4800];
+        run_block(&mut engine, &mut data, 2, 48_000);
+        let default = peak(&data);
+        let expected = 10f32.powf(-36.0 / 20.0);
+        assert!((default - expected).abs() < 1e-4, "-36 dBFS: {default}");
+        assert_eq!(shared.audio_ns(), 100_000_000);
+
+        shared.set_tone(ToneSettings {
+            volume_db: -60.0,
+            frequency_hz: 1000.0,
+        });
+        let mut data = vec![0.0f32; 4800];
+        run_block(&mut engine, &mut data, 1, 48_000);
+        let quiet = peak(&data);
+        assert!(quiet > 0.0009 && quiet <= 0.001 + 1e-7, "-60 dBFS: {quiet}");
+        // 1 kHz at 48 kHz: 48 samples a cycle, so 100 cycles and about as
+        // many upward zero crossings in 4800 samples.
+        let crossings = data
+            .windows(2)
+            .filter(|w| w[0] < 0.0 && w[1] >= 0.0)
+            .count();
+        assert!((99..=100).contains(&crossings), "{crossings}");
+
+        shared.set_tone(ToneSettings {
+            volume_db: 20.0,
+            frequency_hz: 440.0,
+        });
+        run_block(&mut engine, &mut data, 1, 48_000);
+        assert!(peak(&data) <= 1.0, "never past full scale");
     }
 
     #[test]
@@ -710,35 +635,7 @@ mod tests {
         let shared = Arc::new(EngineShared::default());
         let mut engine = EngineCallback::new(shared);
         let mut data = vec![0.0f32; 256];
-        let mut output = AudioBufferMut::new(&mut data, 1, 256, 256);
-        let ctx = ProcessContext {
-            sample_rate: 44_100,
-            frames: 256,
-            position: 0,
-            timestamp: None,
-        };
-        engine.process(&ctx, &AudioBuffer::empty(256), &mut output);
+        run_block(&mut engine, &mut data, 1, 44_100);
         assert!(data.iter().all(|s| *s == 0.0));
-    }
-
-    #[test]
-    fn buffer_choices_are_powers_of_two_in_range() {
-        let listing = DeviceListing {
-            id: "null:null".into(),
-            name: "Null".into(),
-            output_channels: 2,
-            input_channels: 2,
-            default_output: true,
-            default_input: true,
-            sample_rates: vec![48_000],
-            current_sample_rate: Some(48_000),
-            buffer_sizes: vec![30, 3000],
-            buffer_range: true,
-            default_buffer_size: Some(256),
-        };
-        assert_eq!(
-            listing.buffer_choices(),
-            [32, 64, 128, 256, 512, 1024, 2048]
-        );
     }
 }

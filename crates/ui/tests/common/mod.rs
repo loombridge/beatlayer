@@ -46,6 +46,8 @@ pub struct Harness {
     pub time: f64,
     pub size: egui::Vec2,
     pub events: Vec<UiEvent>,
+    /// Whether the window draws Live's title bar itself, as on macOS (D22).
+    pub title_bar: bool,
 }
 
 impl Harness {
@@ -75,7 +77,18 @@ impl Harness {
             time: 0.0,
             size,
             events: Vec::new(),
+            title_bar: false,
         }
+    }
+
+    /// A harness for a window that covers the system's title bar and draws
+    /// Live's, as on macOS (D22): its content is the whole window, 1600 x
+    /// 1000 points for the main window.
+    pub fn with_title_bar(window: Window) -> Self {
+        let mut harness = Self::new(window);
+        harness.size += vec2(0.0, bl_ui::layout::TITLE_BAR);
+        harness.title_bar = true;
+        harness
     }
 
     /// Runs one frame with these input events: key presses go through the
@@ -101,11 +114,12 @@ impl Harness {
         let main = &mut self.main;
         let settings = &mut self.settings;
         let window = self.window;
+        let title_bar = self.title_bar;
         let mut ui_events = Vec::new();
         let mut output = self.ctx.run_ui(input, |ui| {
             ui_events = match window {
-                Window::Main => main.show(ui, shell, theme, None),
-                Window::Settings => settings.show(ui, shell, theme),
+                Window::Main => main.show(ui, shell, theme, title_bar, None),
+                Window::Settings => settings.show(ui, shell, theme, title_bar),
             };
         });
         output.textures_delta.clear();

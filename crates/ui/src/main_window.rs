@@ -12,7 +12,7 @@ use egui::{
 };
 use serde_json::json;
 
-use crate::layout::{ELEMENTS, Element, Kind, ShellLayout, Strip};
+use crate::layout::{ELEMENTS, Element, Kind, ShellLayout, Strip, TITLE_BAR};
 use crate::theme::Theme;
 use crate::widgets::{Look, element};
 
@@ -91,13 +91,16 @@ impl MainWindowUi {
     }
 
     /// Draws the main window and returns what the person did. With
-    /// `menu_bar`, it also draws the menu bar along the top, for platforms
-    /// without a native one.
+    /// `title_bar`, it draws Live's 23-point title bar along the top, for a
+    /// window whose content covers the system's title bar (macOS, D22);
+    /// with `menu_bar`, the menu bar under it, for platforms without a
+    /// native one.
     pub fn show(
         &mut self,
         root: &mut Ui,
         shell: &Shell,
         theme: &Theme,
+        title_bar: bool,
         menu_bar: Option<DrawnMenuBar<'_>>,
     ) -> Vec<UiEvent> {
         let ctx = root.ctx().clone();
@@ -106,6 +109,9 @@ impl MainWindowUi {
             ctx.memory_mut(|m| m.move_focus(direction));
         }
         let mut events = Vec::new();
+        if title_bar {
+            draw_title_bar(root, theme, &shell.set_name());
+        }
         if let Some(bar) = menu_bar {
             egui::Panel::top("menu-bar")
                 .frame(Frame::NONE.fill(theme.colors.bar.0).inner_margin(2.0))
@@ -340,6 +346,33 @@ impl MainWindowUi {
             theme.colors.text_dim.0,
         );
     }
+}
+
+/// Draws Live's compact title bar across the top of a window (L-WIN-002,
+/// D22): [`TITLE_BAR`] points tall, the title centred. The system's window
+/// buttons sit over its left end, and the system's title bar view over all
+/// of it handles dragging and double-clicks, so this only paints. The
+/// title reaches assistive technology as the window's own title.
+pub fn draw_title_bar(root: &mut Ui, theme: &Theme, title: &str) {
+    egui::Panel::top("title-bar")
+        .exact_size(TITLE_BAR)
+        .resizable(false)
+        .show_separator_line(false)
+        .frame(Frame::NONE.fill(theme.colors.bar.0))
+        .show(root, |ui| {
+            let rect = ui.max_rect();
+            ui.painter().text(
+                rect.center(),
+                Align2::CENTER_CENTER,
+                title,
+                theme.font(),
+                theme.colors.text_dim.0,
+            );
+            ui.painter().line_segment(
+                [rect.left_bottom(), rect.right_bottom()],
+                Stroke::new(1.0, theme.colors.separator.0),
+            );
+        });
 }
 
 /// The focus direction for a move to the next or previous control.

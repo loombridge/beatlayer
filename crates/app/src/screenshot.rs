@@ -10,7 +10,7 @@ use std::io::BufWriter;
 use std::path::Path;
 
 use bl_shell::audio::AudioHost;
-use bl_shell::files::NoSetFiles;
+use bl_shell::files::ProjectFiles;
 use bl_shell::settings::Preferences;
 use bl_shell::{Shell, commands as ids};
 use bl_ui::layout::{SETTINGS_WINDOW, TITLE_BAR};
@@ -38,20 +38,24 @@ pub fn run(args: &Args, path: &Path) -> Result<(), String> {
     } else {
         AudioHost::new(prefs.audio.clone())
     };
-    let mut shell = Shell::new(prefs, None, audio, Box::new(NoSetFiles));
+    let mut shell = Shell::new(prefs, None, audio, Box::new(ProjectFiles::new()));
     shell.start_audio();
     let settings = args.open_settings;
     if settings {
         let _ = shell.invoke(ids::APP_SETTINGS, json!({}));
         let _ = shell.take_effects();
     }
-    // The content area: the window's size less Live's title bar, which
-    // layout.md's measurements include.
+    // The content area: on macOS the whole window, with Live's title bar
+    // drawn in it (D22), as the app draws it; elsewhere the window's size
+    // less the title bar, which layout.md's measurements include and the
+    // system draws there.
+    let title_bar = cfg!(target_os = "macos");
+    let below = if title_bar { 0.0 } else { TITLE_BAR };
     let size = if settings {
-        SETTINGS_WINDOW - vec2(0.0, TITLE_BAR)
+        SETTINGS_WINDOW - vec2(0.0, below)
     } else {
         let (w, h) = args.window_size.unwrap_or((1600.0, 1000.0));
-        vec2(w, h - TITLE_BAR)
+        vec2(w, h - below)
     };
 
     let ctx = egui::Context::default();
@@ -78,9 +82,9 @@ pub fn run(args: &Args, path: &Path) -> Result<(), String> {
         let shell = &shell;
         let mut frame_output = ctx.run_ui(input, |ui| {
             let _ = if settings {
-                settings_ui.show(ui, shell, &theme)
+                settings_ui.show(ui, shell, &theme, title_bar)
             } else {
-                main.show(ui, shell, &theme, None)
+                main.show(ui, shell, &theme, title_bar, None)
             };
         });
         textures.append(std::mem::take(&mut frame_output.textures_delta));

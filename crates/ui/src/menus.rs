@@ -5,7 +5,7 @@
 //! reads, whether it's enabled or checked, which keys it shows, and what it
 //! runs, so the native menus (in the app) and the drawn menu bar agree.
 
-use bl_shell::menus::{Action, Menu, MenuItem};
+use bl_shell::menus::{Action, Menu, MenuItem, shown};
 use bl_shell::{Invocation, Shell};
 use egui::Ui;
 use serde_json::{Value, json};
@@ -72,7 +72,7 @@ pub fn item_state(
             enabled: true,
             ..inert(None)
         },
-        Action::System(_) | Action::Omitted(_) => inert(None),
+        Action::System(_) | Action::Omitted(_) | Action::Separator => inert(None),
     }
 }
 
@@ -103,7 +103,11 @@ fn items(
     platform: Platform,
     events: &mut Vec<UiEvent>,
 ) {
-    for item in items_.iter().filter(|item| item.is_shown()) {
+    for item in shown(items_) {
+        if item.is_separator() {
+            ui.separator();
+            continue;
+        }
         if item.action == Action::Submenu {
             ui.menu_button(item.label, |ui| {
                 items(ui, &item.items, shell, keymap, platform, events);

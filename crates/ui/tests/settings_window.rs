@@ -14,6 +14,31 @@ use egui::accesskit::{Action, Role};
 use egui::{Id, Key, Modifiers};
 use serde_json::json;
 
+#[test]
+fn with_live_s_title_bar_drawn_the_page_chooser_sits_where_live_s_does() {
+    // D22, L-SET-001, L-SET-002: a 562 x 617 window, the first page row 25
+    // points tall from y 34, the chooser 140 points wide.
+    let mut h = Harness::with_title_bar(Window::Settings);
+    h.shell.invoke("app.settings", json!({})).unwrap();
+    h.shell.take_effects();
+    assert_eq!(h.size, egui::vec2(562.0, 617.0));
+    let nodes = Harness::nodes(&h.settle());
+    for (index, page) in SettingsPage::ALL.iter().enumerate() {
+        let node = nodes
+            .iter()
+            .find(|n| n.role == Role::Tab && n.label == page.label())
+            .unwrap();
+        let b = node.bounds.unwrap();
+        let top = 34.0 + 25.0 * index as f64;
+        assert!(
+            (b.y0 - top).abs() < 0.5 && (b.y1 - top - 25.0).abs() < 0.5,
+            "{}: {b:?}",
+            page.label()
+        );
+        assert!(b.x0.abs() < 0.5 && (b.x1 - 140.0).abs() < 0.5);
+    }
+}
+
 fn open_settings() -> Harness {
     let mut h = Harness::new(Window::Settings);
     h.shell.invoke("app.settings", json!({})).unwrap();
@@ -74,7 +99,11 @@ fn the_page_chooser_lists_every_page_in_order_with_audio_first_shown() {
         Harness::node(&nodes, "Audio Output Device").value,
         "System Default (Null device)"
     );
-    assert_eq!(Harness::node(&nodes, "Tone Volume").value, "-60 dB");
+    // D23: Live's tone controls, at the level and frequency of a new
+    // install.
+    assert_eq!(Harness::node(&nodes, "Tone Volume").value, "-36 dB");
+    assert_eq!(Harness::node(&nodes, "Tone Volume").role, Role::SpinButton);
+    assert_eq!(Harness::node(&nodes, "Tone Frequency").value, "440 Hz");
 }
 
 #[test]
@@ -185,6 +214,32 @@ fn the_test_tone_switch_plays_and_stops() {
     assert!(h.shell.audio().test_tone());
     let nodes = Harness::nodes(&h.frame(vec![]));
     assert_eq!(Harness::node(&nodes, "Test Tone").role, Role::Button);
+
+    // Tone Volume and Tone Frequency step from a screen reader and the
+    // keyboard (D23). The null device plays nothing.
+    let volume = Id::new(("number-box", "tone-volume"));
+    h.accesskit(volume, Action::Decrement);
+    h.settle();
+    assert_eq!(h.shell.audio().tone().volume_db, -37.0);
+    h.accesskit(volume, Action::Focus);
+    h.settle();
+    h.key(Key::ArrowDown, Modifiers::NONE);
+    h.key(Key::ArrowDown, Modifiers::NONE);
+    h.key(Key::ArrowUp, Modifiers::NONE);
+    h.settle();
+    assert_eq!(h.shell.audio().tone().volume_db, -38.0);
+    assert_eq!(h.shell.preferences().tone.volume_db, -38.0, "kept");
+    let frequency = Id::new(("number-box", "tone-frequency"));
+    h.accesskit(frequency, Action::Increment);
+    h.settle();
+    assert_eq!(
+        h.shell.audio().tone().frequency_hz,
+        466.0,
+        "a semitone up from 440 Hz"
+    );
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    assert_eq!(Harness::node(&nodes, "Tone Frequency").value, "466 Hz");
+
     h.key(Key::Escape, Modifiers::NONE);
     assert!(
         !h.shell.audio().test_tone(),

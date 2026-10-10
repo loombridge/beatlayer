@@ -1,6 +1,7 @@
-//! The menu bar against the UI parity reference: every row of
-//! `docs/ui-parity/menus.md` is in the model in Live's order, and every item
-//! reaches a registered command or is marked pending (D16, D17).
+//! The menu bar against the command registry: every item reaches a
+//! registered command or is marked pending, and items enable with what can
+//! run now (D16, D17). Its rows, separators, and labels are checked against
+//! `docs/ui-parity/menus.md` in `bl-shell-spec`.
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -12,47 +13,6 @@ use serde_json::json;
 
 fn repo() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
-}
-
-/// Each menu-bar section of menus.md, by heading, with its row IDs in order.
-fn reference_menus() -> Vec<(String, Vec<String>)> {
-    let text = std::fs::read_to_string(repo().join("docs/ui-parity/menus.md")).unwrap();
-    let mut menus: Vec<(String, Vec<String>)> = Vec::new();
-    for line in text.lines() {
-        if let Some(heading) = line.strip_prefix("## ") {
-            if heading.starts_with("Context menus") {
-                break;
-            }
-            menus.push((heading.to_owned(), Vec::new()));
-        } else if let Some(rest) = line.strip_prefix("| M-")
-            && let Some((menu, rows)) = menus.last_mut().map(|(m, r)| (m.clone(), r))
-        {
-            let id = format!("M-{}", rest.split('|').next().unwrap().trim());
-            assert!(!menu.is_empty());
-            rows.push(id);
-        }
-    }
-    menus.retain(|(_, rows)| !rows.is_empty());
-    menus
-}
-
-#[test]
-fn every_menu_row_is_in_the_model_in_order() {
-    let reference = reference_menus();
-    let bar = menu_bar(MenuPlatform::Mac);
-    assert_eq!(bar.len(), reference.len(), "nine menus");
-    for (menu, (heading, rows)) in bar.iter().zip(&reference) {
-        let ours: Vec<&str> = menu.walk().map(|item| item.row).collect();
-        assert_eq!(
-            ours, *rows,
-            "menu {} against menus.md's {heading}",
-            menu.title
-        );
-    }
-    assert!(
-        reference[0].0.starts_with("Live"),
-        "the application menu comes first on macOS"
-    );
 }
 
 #[test]
@@ -80,7 +40,10 @@ fn every_item_reaches_a_command_or_is_pending() {
                         assert!(shortcuts.contains(&format!("id = \"{id}\"")), "{id}");
                     }
                     Action::Submenu => assert!(!item.items.is_empty(), "{}", item.row),
-                    Action::Pending(None) | Action::System(_) | Action::Omitted(_) => {}
+                    Action::Pending(None)
+                    | Action::System(_)
+                    | Action::Omitted(_)
+                    | Action::Separator => {}
                 }
                 if item.is_shown() {
                     assert!(!item.label.contains("Live"), "{}: {}", item.row, item.label);
@@ -93,8 +56,9 @@ fn every_item_reaches_a_command_or_is_pending() {
 #[test]
 fn every_shell_command_is_on_a_menu_or_a_control() {
     // Commands reached only from the Settings window's controls, the
-    // Status Bar, or agents.
+    // Status Bar, the save-changes dialog (Don't Save), or agents.
     let elsewhere: BTreeSet<&str> = [
+        commands::SET_DISCARD_CHANGES,
         commands::SETTINGS_NEXT_PAGE,
         commands::SETTINGS_PREVIOUS_PAGE,
         commands::SETTINGS_SET_THEME,
@@ -134,8 +98,20 @@ fn menu_items_enable_with_what_can_run_now() {
         !shell.can_invoke("track.delete", &json!({})),
         "deleting needs a selected track"
     );
+    assert!(
+        !shell.can_invoke("set.discard_changes", &json!({})),
+        "nothing to discard"
+    );
     shell
         .invoke("track.create", json!({ "kind": "midi" }))
         .unwrap();
     assert!(shell.can_invoke("edit.undo", &json!({})));
+    assert!(shell.can_invoke("set.discard_changes", &json!({})));
+
+    // Close Window (Cmd/Ctrl-W, S-FILE-009) acts on a secondary window in
+    // front, and is disabled with the main window in front.
+    shell.run("app.settings", json!({})).unwrap();
+    assert!(shell.can_invoke("window.close", &json!({})));
+    shell.set_focused_window(bl_shell::WindowKind::Main);
+    assert!(!shell.can_invoke("window.close", &json!({})));
 }

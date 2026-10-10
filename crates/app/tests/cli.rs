@@ -45,7 +45,7 @@ fn check_loads_everything_the_window_needs() {
     let (code, stdout, _) = run(&["--check"]);
     assert_eq!(code, Some(0), "{stdout}");
     assert!(stdout.contains("0 problems"), "{stdout}");
-    assert!(stdout.contains("keymap of 343 shortcuts"), "{stdout}");
+    assert!(stdout.contains("keymap of 358 shortcuts"), "{stdout}");
     assert!(stdout.contains("9 menus"), "{stdout}");
 }
 

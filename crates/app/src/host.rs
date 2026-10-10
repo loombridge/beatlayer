@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bl_shell::audio::AudioHost;
-use bl_shell::files::NoSetFiles;
+use bl_shell::files::ProjectFiles;
 use bl_shell::menus::{Menu, MenuPlatform, menu_bar};
 use bl_shell::settings::{Preferences, ThemeChoice, default_config_dir};
 use bl_shell::{Effect, Invocation, Shell, WindowKind, commands as ids};
@@ -37,6 +37,60 @@ use crate::Args;
 
 /// How often the CPU meter reads the engine's load.
 const CPU_METER_PERIOD: Duration = Duration::from_millis(500);
+
+/// Whether Beatlayer's windows draw Live's compact title bar themselves
+/// (D22): on macOS, where layout.md measured Live's. Windows and Linux keep
+/// the system's title bar, since nothing has been observed there yet.
+const DRAWN_TITLE_BAR: bool = cfg!(target_os = "macos");
+
+/// The content height the system's title bar leaves, for a window `height`
+/// points tall with Live's title bar: the whole height where Beatlayer
+/// draws the title bar, and less [`TITLE_BAR`] where the system does.
+fn content_height(height: f32) -> f32 {
+    if DRAWN_TITLE_BAR {
+        height
+    } else {
+        height - TITLE_BAR
+    }
+}
+
+/// Whether a window draws the title bar now: not in full screen, where
+/// Live shows none (L-WIN-002).
+fn draws_title_bar(window: &Window) -> bool {
+    DRAWN_TITLE_BAR && window.fullscreen().is_none()
+}
+
+/// Window attributes with the system's title bar made way for Beatlayer's
+/// (macOS: a full-size content view under a transparent, untitled title
+/// bar, whose buttons and dragging stay the system's).
+fn with_title_bar(attributes: WindowAttributes) -> WindowAttributes {
+    #[cfg(target_os = "macos")]
+    {
+        use winit::platform::macos::WindowAttributesExtMacOS as _;
+        attributes
+            .with_titlebar_transparent(true)
+            .with_title_hidden(true)
+            .with_fullsize_content_view(true)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        attributes
+    }
+}
+
+/// Fits the system's title bar to Live's after the window opens or
+/// resizes (macOS; nothing elsewhere).
+fn fit_title_bar(window: &Window) {
+    #[cfg(target_os = "macos")]
+    {
+        crate::title_bar::fit(window);
+        if std::env::var_os("BEATLAYER_TRACE").is_some() {
+            eprintln!("title bar: {}", crate::title_bar::describe(window));
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = window;
+}
 
 /// Events sent into the loop from other threads.
 #[derive(Debug)]
@@ -100,7 +154,7 @@ pub fn run(args: Args) -> Result<(), String> {
     } else {
         AudioHost::new(prefs.audio.clone())
     };
-    let mut shell = Shell::new(prefs, config_dir, audio, Box::new(NoSetFiles));
+    let mut shell = Shell::new(prefs, config_dir, audio, Box::new(ProjectFiles::new()));
     shell.start_audio();
     if let Some(error) = prefs_error {
         shell.set_message(error, true);
@@ -236,9 +290,9 @@ impl Host {
         // reference size Live is measured at (1600 x 1000 points with the
         // title bar), shrunk to fit a smaller screen.
         let (outer, inner) = match (self.args.window_size, self.shell.preferences().window_size) {
-            (Some((w, h)), _) => (Some((w, h)), (w, h - TITLE_BAR)),
+            (Some((w, h)), _) => (Some((w, h)), (w, content_height(h))),
             (None, Some((w, h))) => (None, (w, h)),
-            (None, None) => (Some((1600.0, 1000.0)), (1600.0, 1000.0 - TITLE_BAR)),
+            (None, None) => (Some((1600.0, 1000.0)), (1600.0, content_height(1000.0))),
         };
         let (mut width, mut height) = inner;
         if let Some(monitor) = event_loop.primary_monitor() {
@@ -249,8 +303,12 @@ impl Host {
         let attributes = Window::default_attributes()
             .with_title(self.shell.set_name())
             .with_inner_size(LogicalSize::new(width, height))
-            .with_min_inner_size(LogicalSize::new(MINIMUM.x, MINIMUM.y));
-        let surface = self.create_surface(event_loop, attributes, None)?;
+            .with_min_inner_size(LogicalSize::new(
+                MINIMUM.x,
+                MINIMUM.y + if DRAWN_TITLE_BAR { TITLE_BAR } else { 0.0 },
+            ));
+        let surface = self.create_surface(event_loop, with_title_bar(attributes), None)?;
+        fit_title_bar(&surface.window);
         if let Some((_, h)) = outer {
             // Make the outer frame W x H, whatever the title bar's height on
             // this system (layout.md measures Live's window that way).
@@ -295,11 +353,12 @@ impl Host {
             .with_title("Settings")
             .with_inner_size(LogicalSize::new(
                 SETTINGS_WINDOW.x,
-                SETTINGS_WINDOW.y - TITLE_BAR,
+                content_height(SETTINGS_WINDOW.y),
             ))
             .with_resizable(false);
-        match self.create_surface(event_loop, attributes, self.main.as_ref()) {
+        match self.create_surface(event_loop, with_title_bar(attributes), self.main.as_ref()) {
             Ok(surface) => {
+                fit_title_bar(&surface.window);
                 surface.window.focus_window();
                 self.settings = Some(surface);
                 self.settings_ui.refresh();
@@ -354,6 +413,7 @@ impl Host {
             keymap: &self.keymap,
             platform: self.platform,
         });
+        let title_bar = draws_title_bar(&surface.window);
         let shell = &self.shell;
         let theme = &self.theme;
         let main_ui = &mut self.main_ui;
@@ -361,8 +421,8 @@ impl Host {
         let mut ui_events = Vec::new();
         let output = surface.ctx.run_ui(input, |ui| {
             ui_events = match kind {
-                WindowKind::Main => main_ui.show(ui, shell, theme, drawn),
-                WindowKind::Settings => settings_ui.show(ui, shell, theme),
+                WindowKind::Main => main_ui.show(ui, shell, theme, title_bar, drawn),
+                WindowKind::Settings => settings_ui.show(ui, shell, theme, title_bar),
             };
         });
 
@@ -461,23 +521,27 @@ impl Host {
     fn effect(&mut self, effect: Effect, event_loop: &ActiveEventLoop) {
         match effect {
             Effect::ConfirmDiscard { then } => self.confirm_discard(&then),
-            Effect::PickOpenPath => {
+            Effect::PickOpenPath { discard_changes } => {
                 let mut dialog = rfd::FileDialog::new()
-                    .set_title("Open Set")
+                    .set_title("Open Beatlayer Set")
                     .add_filter("Beatlayer Set", &["blset"]);
                 if let Some(main) = &self.main {
                     dialog = dialog.set_parent(main.window.as_ref());
                 }
                 if let Some(path) = dialog.pick_file() {
-                    self.invoke(&Invocation::new(
-                        ids::SET_OPEN,
-                        json!({ "path": path.to_string_lossy() }),
-                    ));
+                    let open =
+                        Invocation::new(ids::SET_OPEN, json!({ "path": path.to_string_lossy() }));
+                    if discard_changes {
+                        // The person chose Don't Save before picking it.
+                        let _ = self.shell.discard_and_invoke(&open);
+                    } else {
+                        self.invoke(&open);
+                    }
                 }
             }
             Effect::PickSavePath { then } => {
                 let mut dialog = rfd::FileDialog::new()
-                    .set_title("Save Set As")
+                    .set_title("Save Beatlayer Set As")
                     .add_filter("Beatlayer Set", &["blset"])
                     .set_file_name(format!("{}.blset", self.shell.set_name()));
                 if let Some(main) = &self.main {
@@ -612,7 +676,7 @@ impl Host {
 
     fn save_as_then(&mut self, then: Invocation) {
         let mut dialog = rfd::FileDialog::new()
-            .set_title("Save Set As")
+            .set_title("Save Beatlayer Set As")
             .add_filter("Beatlayer Set", &["blset"])
             .set_file_name(format!("{}.blset", self.shell.set_name()));
         if let Some(main) = &self.main {
@@ -663,6 +727,14 @@ impl ApplicationHandler<UserEvent> for Host {
                     (NonZeroU32::new(size.width), NonZeroU32::new(size.height))
             {
                 surface.painter.on_window_resized(ViewportId::ROOT, w, h);
+            }
+            if matches!(
+                event,
+                WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. }
+            ) {
+                // AppKit lays its title bar out again on a resize and on
+                // leaving full screen.
+                fit_title_bar(&surface.window);
             }
             response.repaint
         };

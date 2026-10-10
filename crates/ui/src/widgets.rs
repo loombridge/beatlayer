@@ -510,3 +510,99 @@ pub fn switch(
     response.widget_info(|| WidgetInfo::selected(WidgetType::Button, true, on, name));
     pressed.then_some(!on)
 }
+
+/// A number box in the Settings window, as Live's are: it shows the value
+/// with its unit, and dragging up or down, Up and Down with the keyboard
+/// focus on it, or a screen reader's increment and decrement step
+/// it. `step` gives the value `n` steps from a value; the result is kept
+/// within `range`. Returns the new value.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a number box has this many parts, and every call site sets them all"
+)]
+pub fn number_box(
+    ui: &mut Ui,
+    theme: &Theme,
+    id_salt: &str,
+    name: &str,
+    rect: Rect,
+    value: f64,
+    range: (f64, f64),
+    step: &dyn Fn(f64, i32) -> f64,
+    text: &str,
+) -> Option<f64> {
+    /// Points of drag per step.
+    const DRAG_PER_STEP: f32 = 3.0;
+    let id = Id::new(("number-box", id_salt));
+    let response = ui.interact(rect, id, Sense::click_and_drag());
+    let mut steps = 0i32;
+    if response.has_focus() {
+        ui.memory_mut(|m| {
+            m.set_focus_lock_filter(
+                id,
+                egui::EventFilter {
+                    vertical_arrows: true,
+                    ..Default::default()
+                },
+            );
+        });
+        steps += ui.input(|i| {
+            i32::from(i.key_pressed(egui::Key::ArrowUp))
+                - i32::from(i.key_pressed(egui::Key::ArrowDown))
+        });
+    }
+    steps += ui.input(|i| {
+        i.num_accesskit_action_requests(id, accesskit::Action::Increment) as i32
+            - i.num_accesskit_action_requests(id, accesskit::Action::Decrement) as i32
+    });
+    if response.dragged() {
+        let whole = ui.data_mut(|d| {
+            let pending = d.get_temp_mut_or(id, 0.0f32);
+            *pending -= response.drag_delta().y;
+            let whole = (*pending / DRAG_PER_STEP).trunc();
+            *pending -= whole * DRAG_PER_STEP;
+            whole
+        });
+        steps += whole as i32;
+    } else if response.drag_stopped() {
+        ui.data_mut(|d| d.remove::<f32>(id));
+    }
+    let changed = (steps != 0)
+        .then(|| step(value, steps).clamp(range.0, range.1))
+        .filter(|next| (next - value).abs() > f64::EPSILON);
+
+    let c = &theme.colors;
+    let painter = ui.painter_at(rect.expand(3.0));
+    let face = if response.hovered() || response.dragged() {
+        c.control_hover.0
+    } else {
+        c.control.0
+    };
+    painter.rect_filled(rect, theme.sizes.corner, face);
+    painter.text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        text,
+        theme.font(),
+        c.text.0,
+    );
+    if response.has_focus() {
+        painter.rect_stroke(
+            rect,
+            theme.sizes.corner,
+            Stroke::new(1.5, c.focus.0),
+            StrokeKind::Outside,
+        );
+    }
+    response.widget_info(|| WidgetInfo::slider(true, value, name));
+    ui.ctx().accesskit_node_builder(id, |node| {
+        node.set_role(Role::SpinButton);
+        node.set_value(text.to_owned());
+        node.set_numeric_value(value);
+        node.set_min_numeric_value(range.0);
+        node.set_max_numeric_value(range.1);
+        node.add_action(accesskit::Action::Increment);
+        node.add_action(accesskit::Action::Decrement);
+    });
+    changed
+}

@@ -111,8 +111,8 @@ context = "global"
 kind = "key"
 trigger = "press"
 milestone = "M9"
-mac = ["Cmd+Option+V"]
-win = ["Ctrl+Alt+V"]
+mac = ["Cmd+Option+Shift+V"]
+win = ["Ctrl+Alt+Shift+V"]
 status = "pending"
 
 [[shortcut]]
@@ -1281,7 +1281,7 @@ status = "pending"
 
 [[shortcut]]
 id = "S-CLIPMODE-003"
-action = "Show the Sample or Notes tab"
+action = "Show the Content Editor (the Sample or Notes tab)"
 context = "clip-view"
 kind = "key"
 trigger = "press"
@@ -1292,7 +1292,7 @@ status = "pending"
 
 [[shortcut]]
 id = "S-CLIPMODE-004"
-action = "Show the Envelopes tab"
+action = "Show the Envelope Editor (the Envelopes tab)"
 context = "clip-view"
 kind = "key"
 trigger = "press"
@@ -1303,7 +1303,7 @@ status = "pending"
 
 [[shortcut]]
 id = "S-CLIPMODE-005"
-action = "Show the MPE tab"
+action = "Show the Expression Editor (the MPE tab)"
 context = "clip-view"
 kind = "key"
 trigger = "press"
@@ -2156,7 +2156,7 @@ status = "pending"
 
 [[shortcut]]
 id = "S-SES-014"
-action = "Chain the selected clips with follow actions"
+action = "Create a follow action chain from the selected clips"
 context = "session"
 kind = "key"
 trigger = "press"
@@ -2594,7 +2594,7 @@ package = "WP-1.8b"
 
 [[shortcut]]
 id = "S-ARR-029"
-action = "Reverse the selected audio"
+action = "Reverse the selected clips"
 context = "arrangement"
 kind = "key"
 trigger = "press"
@@ -3998,3 +3998,173 @@ milestone = "M2"
 mac = ["Cmd+Option+Shift+drag"]
 win = ["Ctrl+Alt+Shift+drag"]
 status = "pending"
+
+[[shortcut]]
+id = "S-FILE-009"
+action = "Close the frontmost window"
+context = "global"
+kind = "key"
+trigger = "press"
+milestone = "M1"
+mac = ["Cmd+W"]
+win = ["Ctrl+W"]
+status = "bound"
+commands = [
+  { id = "window.close", contexts = ["global", "dialog", "settings"] },
+]
+
+[[shortcut]]
+id = "S-FILE-010"
+action = "Hide the other applications"
+context = "global"
+kind = "key"
+trigger = "press"
+milestone = "M1"
+mac = ["Cmd+Option+H"]
+win = []
+status = "system"
+handler = "macOS's standard Hide Others item in the application menu (M-APP-005)"
+
+[[shortcut]]
+id = "S-VIEW-022"
+action = "Hide or show the detail area (the Clip View or Device View)"
+context = "global"
+kind = "key"
+trigger = "press"
+milestone = "M2"
+mac = ["Cmd+Option+L"]
+win = ["Ctrl+Alt+L"]
+status = "pending"
+
+[[shortcut]]
+id = "S-VIEW-023"
+action = "Show the Max for Live window"
+context = "global"
+kind = "key"
+trigger = "press"
+milestone = "M9"
+mac = ["Cmd+Option+Shift+M"]
+win = ["Ctrl+Alt+Shift+M"]
+status = "pending"
+
+[[shortcut]]
+id = "S-DEV-012"
+action = "Show the selected rack's chain list"
+context = "device-view"
+kind = "key"
+trigger = "press"
+milestone = "M5"
+mac = ["Plus"]
+win = ["Plus"]
+status = "pending"
+
+[[shortcut]]
+id = "S-DEV-013"
+action = "Hide the selected rack's chain list"
+context = "device-view"
+kind = "key"
+trigger = "press"
+milestone = "M5"
+mac = ["Minus"]
+win = ["Minus"]
+status = "pending"
+
+[[shortcut]]
+id = "S-DEV-014"
+action = "Fold or unfold the selected device"
+context = "device-view"
+kind = "key"
+trigger = "press"
+milestone = "M2"
+mac = ["Minus"]
+win = ["Minus"]
+status = "pending"
+
+[[shortcut]]
+id = "S-SES-024"
+action = "Make launch quantisation smaller"
+context = "session"
+kind = "key"
+trigger = "press"
+milestone = "M3"
+mac = ["Cmd+1"]
+win = ["Ctrl+1"]
+status = "pending"
+
+[[shortcut]]
+id = "S-SES-025"
+action = "Make launch quantisation larger"
+context = "session"
+kind = "key"
+trigger = "press"
+milestone = "M3"
+mac = ["Cmd+2"]
+win = ["Ctrl+2"]
+status = "pending"
+
+[[shortcut]]
+id = "S-SES-026"
+action = "Toggle triplet launch quantisation"
+context = "session"
+kind = "key"
+trigger = "press"
+milestone = "M3"
+mac = ["Cmd+3"]
+win = ["Ctrl+3"]
+status = "pending"
+
+[[shortcut]]
+id = "S-SES-027"
+action = "Turn launch quantisation on or off"
+context = "session"
+kind = "key"
+trigger = "press"
+milestone = "M3"
+mac = ["Cmd+4"]
+win = ["Ctrl+4"]
+status = "pending"
+
+[[shortcut]]
+id = "S-SES-028"
+action = "Crop the selected clip"
+context = "session"
+kind = "key"
+trigger = "press"
+milestone = "M4"
+mac = ["Cmd+Shift+J"]
+win = ["Ctrl+Shift+J"]
+status = "pending"
+
+[[shortcut]]
+id = "S-ARR-037"
+action = "Insert an empty MIDI clip in the time selection"
+context = "arrangement"
+kind = "key"
+trigger = "press"
+milestone = "M2"
+mac = ["Cmd+Shift+M"]
+win = ["Ctrl+Shift+M"]
+status = "pending"
+
+[[shortcut]]
+id = "S-NOTE-044"
+action = "Turn Step Input Mode on or off"
+context = "note-editor"
+kind = "key"
+trigger = "press"
+milestone = "M6"
+mac = ["Cmd+Shift+B"]
+win = ["Ctrl+Shift+B"]
+status = "pending"
+
+[[shortcut]]
+id = "S-MENU-006"
+action = "Open the system's emoji and symbols picker"
+context = "global"
+kind = "key"
+trigger = "press"
+milestone = "M1"
+mac = ["Ctrl+Cmd+Space"]
+win = []
+status = "system"
+handler = "macOS's Emoji & Symbols item, which the system adds to the Edit menu (M-EDIT-040)"

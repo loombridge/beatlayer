@@ -7,9 +7,13 @@
 //! Live keep it here; the rest stretch with the window the way the rows
 //! say. Nothing else in the UI decides where a pane or a control goes.
 //!
-//! Coordinates are points in the window's content area. Live's measurements
-//! are from the top of the window frame, title bar included, so they're
-//! moved up by [`TITLE_BAR`].
+//! Coordinates are points in the content area below the title bar. Live's
+//! measurements are from the top of the window frame, title bar included,
+//! so they're moved up by [`TITLE_BAR`]. On macOS the window's content
+//! covers the whole frame and Beatlayer draws Live's 23-point title bar
+//! itself (D22), so the windows lay this out [`TITLE_BAR`] points down and
+//! every row lands at layout.md's window coordinates; on Windows and Linux
+//! the system's title bar sits above the content area instead.
 
 use egui::{Pos2, Rect, Vec2, pos2, vec2};
 
@@ -435,6 +439,9 @@ impl SettingsLayout {
     pub const CHOOSER: f32 = 108.0;
     /// An audio device chooser's width.
     pub const DEVICE_CHOOSER: f32 = 193.0;
+    /// A number box's width, such as Tone Volume's. Not measured in Live
+    /// (layout.md, L-SET-012): a switch's width until it is.
+    pub const NUMBER: f32 = 54.0;
 
     /// Lays out a Settings window content area of `size` points.
     #[must_use]
@@ -446,6 +453,19 @@ impl SettingsLayout {
             label_x: 154.0,
             control_x: 354.0,
             page: Rect::from_min_max(pos2(140.0, 0.0), size.to_pos2()),
+        }
+    }
+
+    /// The same layout moved by `offset`, for a content area that doesn't
+    /// start at the window's corner (below a drawn title bar).
+    #[must_use]
+    pub fn translate(self, offset: Vec2) -> Self {
+        Self {
+            chooser: self.chooser.translate(offset),
+            first_page: self.first_page.translate(offset),
+            label_x: self.label_x + offset.x,
+            control_x: self.control_x + offset.x,
+            page: self.page.translate(offset),
         }
     }
 

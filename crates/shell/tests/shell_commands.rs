@@ -5,10 +5,10 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use bl_commands::Context;
+use bl_commands::{Context, Permission};
 use bl_model::Editor;
 use bl_shell::audio::AudioHost;
-use bl_shell::files::{NO_SET_FILES, SetStore};
+use bl_shell::files::{ProjectFiles, SetStore};
 use bl_shell::settings::{Preferences, SettingsPage, ThemeChoice};
 use bl_shell::{Area, Effect, Invocation, MainView, Shell, ShellError, WindowKind};
 use serde_json::json;
@@ -108,11 +108,26 @@ fn quitting_or_starting_over_with_unsaved_changes_asks_first() {
             "{id}"
         );
     }
-    // "Don't Save" runs the command without asking again.
+    // "Don't Save" before opening asks for the file first, and the changes
+    // stay until one is chosen, so cancelling the dialog loses nothing.
     shell
         .discard_and_invoke(&Invocation::new("set.open", json!({})))
         .unwrap();
-    assert_eq!(shell.take_effects(), [Effect::PickOpenPath]);
+    assert_eq!(
+        shell.take_effects(),
+        [Effect::PickOpenPath {
+            discard_changes: true
+        }]
+    );
+    assert!(shell.is_dirty());
+    assert_eq!(track_names(&shell).len(), 5);
+    // "Don't Save" before a new set discards, then runs it without asking.
+    shell
+        .discard_and_invoke(&Invocation::new("set.new", json!({})))
+        .unwrap();
+    assert!(shell.take_effects().is_empty());
+    assert!(!shell.is_dirty());
+    assert_eq!(track_names(&shell).len(), 4);
     // An agent's run never asks.
     shell
         .invoke("track.create", json!({ "kind": "midi" }))
@@ -134,14 +149,162 @@ fn saving_an_untitled_set_asks_for_a_file() {
     assert!(matches!(error, ShellError::Unavailable { .. }), "{error}");
 }
 
+/// A folder for one test's files, removed when the test ends.
+struct TestDir(PathBuf);
+
+impl TestDir {
+    fn new(name: &str) -> Self {
+        let dir = std::env::temp_dir().join(format!(
+            "bl-shell-{name}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        Self(dir)
+    }
+
+    fn path(&self, name: &str) -> String {
+        self.0.join(name).to_string_lossy().into_owned()
+    }
+}
+
+impl Drop for TestDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 #[test]
-fn without_project_files_open_and_save_report_why() {
+fn sets_round_trip_through_project_files_headless() {
+    // Spec: app-shell R2, R3, R4. D17: driven through Shell::run, as an
+    // agent drives it, on bl-project's real set files.
+    let dir = TestDir::new("round-trip");
+    let song = dir.path("Demo Project/Demo.blset");
     let mut shell = Shell::headless();
+    shell
+        .invoke("track.create", json!({ "kind": "audio", "name": "Bass" }))
+        .unwrap();
+    let saved = shell.run("set.save_as", json!({ "path": song })).unwrap();
+    assert_eq!(saved, json!({ "path": song, "name": "Demo" }));
+    assert!(!shell.is_dirty());
+    assert_eq!(bl_project::load(&song).unwrap().1.revision, 1);
+
+    // A second save is the next revision, and backs up the first.
+    shell
+        .invoke("track.create", json!({ "kind": "midi", "name": "Keys" }))
+        .unwrap();
+    shell.run("set.save", json!({})).unwrap();
+    let (project, info) = bl_project::load(&song).unwrap();
+    assert_eq!(info.revision, 2);
+    assert_eq!(project.document, *shell.editor().document());
+    let backups = std::fs::read_dir(dir.0.join("Demo Project/Backup"))
+        .unwrap()
+        .count();
+    assert_eq!(backups, 1, "the replaced revision is kept");
+
+    // A new set, then the saved one opens exactly as it was saved.
+    let before = shell.editor().document().clone();
+    shell.run("set.new", json!({})).unwrap();
+    assert_eq!(track_names(&shell).len(), 4);
+    assert_eq!(shell.set_path(), None);
+    let opened = shell.run("set.open", json!({ "path": song })).unwrap();
+    assert_eq!(opened["name"], "Demo");
+    assert_eq!(*shell.editor().document(), before);
+    assert_eq!(
+        track_names(&shell),
+        ["1 MIDI", "2 MIDI", "3 Audio", "4 Audio", "Bass", "Keys"]
+    );
+    assert!(!shell.editor().can_undo(), "an opened set has no history");
+
+    // A project folder with one set opens that set.
+    shell.run("set.new", json!({})).unwrap();
+    let folder = dir.path("Demo Project");
+    let opened = shell.run("set.open", json!({ "path": folder })).unwrap();
+    assert_eq!(opened["path"], song);
+
+    // Saving after opening carries the revision count on.
+    shell.run("set.save", json!({})).unwrap();
+    assert_eq!(bl_project::load(&song).unwrap().1.revision, 3);
+}
+
+#[test]
+fn opening_never_loses_unsaved_changes_without_an_explicit_discard() {
+    // Finding 7 of the WP-1.7 review: set.open is external, and losing work
+    // is its own, destructive step (set.discard_changes).
+    let dir = TestDir::new("discard");
+    let song = dir.path("Song.blset");
+    let mut shell = Shell::headless();
+    shell.run("set.save_as", json!({ "path": song })).unwrap();
+    shell
+        .invoke(
+            "track.create",
+            json!({ "kind": "audio", "name": "Unsaved" }),
+        )
+        .unwrap();
+    assert!(shell.is_dirty());
+    let error = shell.run("set.open", json!({ "path": song })).unwrap_err();
+    assert!(matches!(error, ShellError::Unavailable { .. }), "{error}");
+    assert!(error.to_string().contains("set.discard_changes"), "{error}");
+    assert_eq!(track_names(&shell).len(), 5, "nothing changed");
+
+    // Discarding goes back to the last save, with an empty history.
+    shell.run("set.discard_changes", json!({})).unwrap();
+    assert!(!shell.is_dirty());
+    assert_eq!(track_names(&shell).len(), 4);
+    assert!(!shell.editor().can_undo());
+    shell.run("set.open", json!({ "path": song })).unwrap();
+
+    // An untitled set's changes go back to the factory default set.
+    shell.run("set.new", json!({})).unwrap();
+    shell
+        .invoke("track.create", json!({ "kind": "midi", "name": "Gone" }))
+        .unwrap();
+    shell.run("set.discard_changes", json!({})).unwrap();
+    assert_eq!(
+        track_names(&shell),
+        ["1 MIDI", "2 MIDI", "3 Audio", "4 Audio"]
+    );
+
+    // The permission classes say so.
+    let class = |id: &str| shell.registry().get(id).unwrap().permission;
+    assert_eq!(class("set.open"), Some(Permission::External));
+    assert_eq!(class("set.discard_changes"), Some(Permission::Destructive));
+    assert_eq!(class("set.new"), Some(Permission::Destructive));
+}
+
+#[test]
+fn files_that_cant_be_read_or_written_change_nothing_and_say_why() {
+    // Spec: app-shell R2.
+    let dir = TestDir::new("errors");
+    let mut shell = Shell::headless();
+    let missing = dir.path("Missing.blset");
     let error = shell
-        .invoke("set.save_as", json!({ "path": "/tmp/Song.blset" }))
+        .invoke("set.open", json!({ "path": missing }))
         .unwrap_err();
-    assert!(error.to_string().contains(NO_SET_FILES), "{error}");
+    assert!(matches!(error, ShellError::Failed { .. }), "{error}");
     assert!(shell.message().unwrap().error, "the Status Bar shows it");
+    assert_eq!(shell.set_name(), "Untitled");
+
+    let not_a_set = dir.path("Notes.blset");
+    std::fs::write(&not_a_set, "just text").unwrap();
+    let error = shell
+        .run("set.open", json!({ "path": not_a_set }))
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("isn't a Beatlayer set"),
+        "{error}"
+    );
+    assert_eq!(track_names(&shell).len(), 4);
+
+    // A path whose folder is a file can't be written.
+    let blocked = format!("{not_a_set}/Song.blset");
+    let error = shell
+        .run("set.save_as", json!({ "path": blocked }))
+        .unwrap_err();
+    assert!(matches!(error, ShellError::Failed { .. }), "{error}");
     assert_eq!(shell.set_path(), None);
 }
 
@@ -150,7 +313,7 @@ fn without_project_files_open_and_save_report_why() {
 struct MemoryStore(Rc<RefCell<Vec<(PathBuf, usize)>>>);
 
 impl SetStore for MemoryStore {
-    fn load(&self, path: &Path) -> Result<Editor, String> {
+    fn open(&mut self, path: &Path) -> Result<(Editor, PathBuf), String> {
         let saved = self.0.borrow();
         let (_, tracks) = saved
             .iter()
@@ -167,16 +330,18 @@ impl SetStore for MemoryStore {
             .unwrap();
         }
         editor.clear_history().unwrap();
-        Ok(editor)
+        Ok((editor, path.to_owned()))
     }
 
-    fn save(&self, path: &Path, editor: &Editor) -> Result<(), String> {
+    fn save(&mut self, path: &Path, editor: &Editor) -> Result<Vec<String>, String> {
         let tracks = editor.document().top_level().len();
         let mut saved = self.0.borrow_mut();
         saved.retain(|(p, _)| p != path);
         saved.push((path.to_owned(), tracks));
-        Ok(())
+        Ok(Vec::new())
     }
+
+    fn close(&mut self) {}
 }
 
 #[test]
@@ -326,7 +491,7 @@ fn preferences_are_saved_and_read_back() {
         Preferences::default(),
         Some(dir.clone()),
         AudioHost::null(Default::default()),
-        Box::new(bl_shell::files::NoSetFiles),
+        Box::new(ProjectFiles::new()),
     );
     shell
         .run("settings.set_theme", json!({ "theme": "light" }))

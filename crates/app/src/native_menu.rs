@@ -6,7 +6,7 @@
 //! keys (Tab, Delete, Space) still reach the window and the keymap. On
 //! Windows the keys are shown for reading; the keymap handles every press.
 
-use bl_shell::menus::{Action, Menu, MenuItem, SystemItem};
+use bl_shell::menus::{Action, Menu, MenuItem, SystemItem, shown};
 use bl_shell::{Invocation, Shell};
 use bl_ui::keymap::{Chord, Keymap, Platform};
 use bl_ui::menus::item_state;
@@ -138,8 +138,9 @@ fn add_items(
     platform: Platform,
     entries: &mut Vec<Entry>,
 ) -> Result<(), String> {
-    for item in items.iter().filter(|item| item.is_shown()) {
+    for item in shown(items) {
         let result = match item.action {
+            Action::Separator => parent.append(&PredefinedMenuItem::separator()),
             Action::Submenu => {
                 let submenu = Submenu::new(item.label, true);
                 add_items(&submenu, &item.items, shell, keymap, platform, entries)?;

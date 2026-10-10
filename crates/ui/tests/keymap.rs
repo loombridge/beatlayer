@@ -54,6 +54,7 @@ const SHELL: &[&str] = &[
     "S-FILE-004",
     "S-FILE-005",
     "S-FILE-006",
+    "S-FILE-009",
     "S-VIEW-001",
     "S-VIEW-003",
     "S-VIEW-010",
@@ -349,4 +350,32 @@ fn keys_resolve_to_commands_in_their_contexts() {
         None,
         "Esc closes nothing in the main window"
     );
+    // Cmd/Ctrl-W closes the frontmost window (S-FILE-009); with only the
+    // main window open the shell disables it.
+    for (platform, m) in [
+        (Platform::Mac, mods(true, false, false, false)),
+        (Platform::Other, mods(false, true, false, false)),
+    ] {
+        assert_eq!(
+            resolve(platform, Key::W, m, &settings).as_deref(),
+            Some("window.close")
+        );
+    }
+}
+
+#[test]
+fn platform_items_and_corrected_keys_follow_the_reference() {
+    let keymap = Keymap::live12();
+    // macOS's standard menus provide Hide Others and Emoji & Symbols with
+    // their keys.
+    for id in ["S-FILE-010", "S-MENU-006"] {
+        let entry = keymap.entry_for(id).unwrap();
+        assert!(matches!(entry.status, Status::System(_)), "{id}");
+    }
+    // The video window's keys as Live 12.4.3's View menu shows them, not
+    // the manual's (S-VIEW-009, corrected in WP-0.13b). It comes in M9.
+    let video = keymap.entry_for("S-VIEW-009").unwrap();
+    assert_eq!(video.mac, ["Cmd+Option+Shift+V"]);
+    assert_eq!(video.win, ["Ctrl+Alt+Shift+V"]);
+    assert!(matches!(video.status, Status::Pending { .. }));
 }

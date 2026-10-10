@@ -3,7 +3,7 @@
 //!
 //! [`register`] adds their specs, which are pure data, so `cargo xtask`
 //! can check them and list them in `docs/commands.md` without linking a UI
-//! crate. [`Shell::run`](crate::Shell::run) runs them by ID.
+//! crate or an audio host. `bl-shell`'s `Shell::run` runs them by ID.
 
 use bl_commands::Context::{Dialog, Global, Settings, TabFocus};
 use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};
@@ -21,6 +21,8 @@ pub const SET_OPEN: &str = "set.open";
 pub const SET_SAVE: &str = "set.save";
 /// `set.save_as`: save the set to a new file.
 pub const SET_SAVE_AS: &str = "set.save_as";
+/// `set.discard_changes`: throw away the set's unsaved changes.
+pub const SET_DISCARD_CHANGES: &str = "set.discard_changes";
 /// `app.quit`: quit.
 pub const APP_QUIT: &str = "app.quit";
 /// `app.hide`: hide the app (macOS).
@@ -71,12 +73,13 @@ pub const AUDIO_TOGGLE_ENGINE: &str = "audio.toggle_engine";
 pub const AUDIO_SET_TEST_TONE: &str = "audio.set_test_tone";
 
 /// Every command [`register`] adds, so a host knows which IDs to send to
-/// [`Shell::run`](crate::Shell::run).
+/// `bl-shell`'s `Shell::run`.
 pub const IDS: &[&str] = &[
     SET_NEW,
     SET_OPEN,
     SET_SAVE,
     SET_SAVE_AS,
+    SET_DISCARD_CHANGES,
     APP_QUIT,
     APP_HIDE,
     APP_ABOUT,
@@ -135,12 +138,33 @@ pub struct ThemeArgs {
     pub theme: ThemeChoice,
 }
 
-/// Arguments of `audio.set_test_tone`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+/// Arguments of `audio.set_test_tone`: what to change. Fields left out
+/// keep their values.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TestToneArgs {
     /// Whether the test tone plays.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
+    /// The tone's level in dBFS, from -60 to 0 (Tone Volume). Values
+    /// outside the range are brought within it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub volume_db: Option<f64>,
+    /// The tone's frequency in hertz, from 20 to 20,000 (Tone Frequency).
+    /// Values outside the range are brought within it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frequency_hz: Option<f64>,
+}
+
+/// What `audio.set_test_tone` returns: the test tone's state afterwards.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TestToneState {
+    /// Whether the test tone plays.
     pub on: bool,
+    /// Its level in dBFS.
+    pub volume_db: f64,
+    /// Its frequency in hertz.
+    pub frequency_hz: f64,
 }
 
 /// What `set.open`, `set.save`, and `set.save_as` return.
@@ -190,7 +214,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
 )]
 fn specs() -> Vec<CommandSpec> {
     vec![
-        CommandSpec::new(SET_NEW, "New Set")
+        CommandSpec::new(SET_NEW, "New Beatlayer Set")
             .description(
                 "Replaces the open set with the factory default set: four tracks (two MIDI, \
                  two audio) and two return tracks, shown in the Arrangement View. Unsaved \
@@ -202,37 +226,54 @@ fn specs() -> Vec<CommandSpec> {
             .binding("S-FILE-001")
             .args::<NoArgs>()
             .result::<SetResult>(),
-        CommandSpec::new(SET_OPEN, "Open Set...")
+        CommandSpec::new(SET_OPEN, "Open Beatlayer Set...")
             .description(
-                "Opens the set file at `path`, replacing the open set. Unsaved changes to the \
-                 open set are lost and its undo history is cleared. A person choosing the menu \
-                 item or pressing the shortcut picks the file in a dialog.",
+                "Opens the set file at `path` (or the only set in the project folder at \
+                 `path`), replacing the open set and clearing its undo history. It refuses \
+                 while the open set has unsaved changes: save them first with `set.save` or \
+                 `set.save_as`, or throw them away with `set.discard_changes`, so losing work \
+                 is always its own step. A person choosing the menu item or pressing the \
+                 shortcut is asked whether to save, then picks the file in a dialog.",
             )
             .permission(Permission::External)
             .context(Global)
             .binding("S-FILE-002")
             .args::<PathArgs>()
             .result::<SetResult>(),
-        CommandSpec::new(SET_SAVE, "Save Set")
+        CommandSpec::new(SET_SAVE, "Save Beatlayer Set")
             .description(
-                "Saves the set to its file, replacing the file's previous contents. Fails if \
-                 the set has never been saved; use `set.save_as` to give it a file first.",
+                "Saves the set to its file, replacing the file's previous contents, which are \
+                 kept in the `Backup` folder beside it (the last 10 saves). Fails if the set has \
+                 never been saved; use `set.save_as` to give it a file first.",
             )
             .permission(Permission::Destructive)
             .context(Global)
             .binding("S-FILE-003")
             .args::<NoArgs>()
             .result::<SetResult>(),
-        CommandSpec::new(SET_SAVE_AS, "Save Set As...")
+        CommandSpec::new(SET_SAVE_AS, "Save Beatlayer Set As...")
             .description(
-                "Saves the set to a new file at `path`, which becomes the set's file. An \
-                 existing file at `path` is replaced. A person choosing the menu item or \
-                 pressing the shortcut picks the path in a dialog.",
+                "Saves the set to a new file at `path` (a `.blset` file; its folder is \
+                 created if needed), which becomes the set's file. An existing file at `path` \
+                 is replaced, and kept in the `Backup` folder beside it. A person choosing the \
+                 menu item or pressing the shortcut picks the path in a dialog.",
             )
             .permission(Permission::External)
             .context(Global)
             .binding("S-FILE-004")
             .args::<PathArgs>()
+            .result::<SetResult>(),
+        CommandSpec::new(SET_DISCARD_CHANGES, "Don't Save")
+            .description(
+                "Throws away the open set's unsaved changes, as choosing Don't Save when asked \
+                 to save does: the set goes back to how it was when it was last opened or \
+                 saved (a set never saved goes back to the factory default set), and its undo \
+                 history is cleared. The changes can't be brought back. Nothing on disk \
+                 changes. Does nothing if there are no unsaved changes.",
+            )
+            .permission(Permission::Destructive)
+            .context(Global)
+            .args::<NoArgs>()
             .result::<SetResult>(),
         CommandSpec::new(APP_QUIT, "Quit Beatlayer")
             .description(
@@ -275,10 +316,13 @@ fn specs() -> Vec<CommandSpec> {
         CommandSpec::new(WINDOW_CLOSE, "Close Window")
             .description(
                 "Closes the frontmost secondary window, such as the Settings window. The main \
-                 window stays open; quit to close it.",
+                 window stays open; quit to close it. From the keyboard or the File menu it \
+                 acts only while a secondary window is in front, as in Live, where Close Window \
+                 is disabled with only the main window open.",
             )
             .permission(Permission::Read)
-            .contexts([Dialog, Settings])
+            .contexts([Global, Dialog, Settings])
+            .binding("S-FILE-009")
             .binding("S-VIEW-020")
             .binding("S-SET-007")
             .args::<NoArgs>()
@@ -421,7 +465,7 @@ fn specs() -> Vec<CommandSpec> {
                 "Chooses Beatlayer's dark or light theme, which every window uses straight \
                  away. The choice is kept for the next start. Changes nothing in the set.",
             )
-            .permission(Permission::Read)
+            .permission(Permission::Edit)
             .context(Settings)
             .args::<ThemeArgs>()
             .result::<()>(),
@@ -471,13 +515,18 @@ fn specs() -> Vec<CommandSpec> {
             .result::<SwitchResult>(),
         CommandSpec::new(AUDIO_SET_TEST_TONE, "Test Tone")
             .description(
-                "Plays or stops a 440 Hz test tone at -60 dBFS on every output channel, to \
-                 check that the device works. It stops when the Settings window closes.",
+                "Plays or stops the Audio settings' test tone, a sine wave on every output \
+                 channel for checking that the device works, and sets its level (Tone Volume, \
+                 -60 to 0 dBFS; -36 on a new install) and frequency (Tone Frequency, 20 Hz to \
+                 20 kHz; 440 Hz on a new install). Fields left out keep their values; the \
+                 level and frequency are kept for the next start. The tone stops when the \
+                 Settings window closes. Set a low level before switching it on: a loud tone \
+                 can hurt ears and speakers.",
             )
             .permission(Permission::External)
             .context(Settings)
             .args::<TestToneArgs>()
-            .result::<SwitchResult>(),
+            .result::<TestToneState>(),
     ]
 }
 

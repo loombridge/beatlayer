@@ -1,48 +1,99 @@
 //! Set files and the factory default set.
 //!
-//! The shell opens and saves sets through a [`SetStore`], so it doesn't
-//! depend on the project file format. Project files are WP-0.7's
-//! (`bl-project`); until the app wires its store in, [`NoSetFiles`]
-//! answers every open and save with a message saying so.
+//! The shell opens and saves sets through a [`SetStore`]. The app's store is
+//! [`ProjectFiles`], which reads and writes Beatlayer's set files with
+//! `bl-project` (WP-0.7): atomic saves, the last 10 replaced versions kept
+//! in the project folder's `Backup/`, and every load checked. Tests can
+//! pass a store of their own.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use bl_model::{Editor, TrackId, TrackKind, registry};
+use bl_project::{Media, Project, SetFile};
 use serde_json::json;
 
-/// Reads and writes set files.
+/// Reads and writes set files, and remembers the open set's file between
+/// saves.
 pub trait SetStore {
-    /// Reads the set at `path` into an editor with an empty undo history.
+    /// Reads the set at `path`, a set file or a project folder holding one
+    /// set, into an editor with an empty undo history. Returns the editor
+    /// and the set file's path. The store then treats that file as the open
+    /// set's.
     ///
     /// # Errors
     ///
-    /// A message saying why the set couldn't be read.
-    fn load(&self, path: &Path) -> Result<Editor, String>;
+    /// A message saying why the set couldn't be read. The store's open set
+    /// is then unchanged.
+    fn open(&mut self, path: &Path) -> Result<(Editor, PathBuf), String>;
 
-    /// Writes the editor's document to `path`, replacing any file there.
+    /// Writes the editor's document to `path`, replacing any file there:
+    /// the open set's next revision when `path` is its file, otherwise a
+    /// new file, which becomes the open set's. Returns warnings about
+    /// things that went wrong without stopping the save.
     ///
     /// # Errors
     ///
-    /// A message saying why the set couldn't be written.
-    fn save(&self, path: &Path, editor: &Editor) -> Result<(), String>;
+    /// A message saying why the set couldn't be written. Nothing at `path`
+    /// changes, and the store's open set is unchanged.
+    fn save(&mut self, path: &Path, editor: &Editor) -> Result<Vec<String>, String>;
+
+    /// Forgets the open set's file, as a new set has none.
+    fn close(&mut self);
 }
 
-/// The store used until project files are wired in: every open and save
-/// fails with a message that says so.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct NoSetFiles;
+/// Beatlayer's set files, through `bl-project`. It keeps the open set's
+/// file (for its revision count) and its media table, which the shell
+/// doesn't edit yet, so a save writes back what the load read.
+#[derive(Debug, Default)]
+pub struct ProjectFiles {
+    set: Option<SetFile>,
+    media: Media,
+}
 
-/// What [`NoSetFiles`] says.
-pub const NO_SET_FILES: &str = "Opening and saving sets needs the project file format (WP-0.7), which this build doesn't \
-     have yet.";
-
-impl SetStore for NoSetFiles {
-    fn load(&self, _path: &Path) -> Result<Editor, String> {
-        Err(NO_SET_FILES.to_owned())
+impl ProjectFiles {
+    /// A store with no set open.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    fn save(&self, _path: &Path, _editor: &Editor) -> Result<(), String> {
-        Err(NO_SET_FILES.to_owned())
+    /// The open set's file and what its last load or save said about it,
+    /// if it has one.
+    #[must_use]
+    pub fn set_file(&self) -> Option<&SetFile> {
+        self.set.as_ref()
+    }
+}
+
+impl SetStore for ProjectFiles {
+    fn open(&mut self, path: &Path) -> Result<(Editor, PathBuf), String> {
+        let (set, project) = SetFile::open(path).map_err(|error| error.to_string())?;
+        let editor = project.editor();
+        let opened = set.path().to_owned();
+        self.set = Some(set);
+        self.media = project.media;
+        Ok((editor, opened))
+    }
+
+    fn save(&mut self, path: &Path, editor: &Editor) -> Result<Vec<String>, String> {
+        let project = Project::from_editor(editor, self.media.clone());
+        let mut set = self
+            .set
+            .clone()
+            .unwrap_or_else(|| SetFile::new(path.to_owned()));
+        let report = if set.path() == path {
+            set.save(&project)
+        } else {
+            set.save_as(path.to_owned(), &project)
+        }
+        .map_err(|error| error.to_string())?;
+        self.set = Some(set);
+        Ok(report.warnings)
+    }
+
+    fn close(&mut self) {
+        self.set = None;
+        self.media = Media::new();
     }
 }
 
@@ -99,15 +150,5 @@ mod tests {
         assert_eq!(names, ["1 MIDI", "2 MIDI", "3 Audio", "4 Audio"]);
         assert_eq!(doc.returns().len(), 2);
         assert!(!editor.can_undo());
-    }
-
-    #[test]
-    fn without_project_files_open_and_save_say_why() {
-        let path = Path::new("Song.blset");
-        assert_eq!(NoSetFiles.load(path).err().unwrap(), NO_SET_FILES);
-        assert_eq!(
-            NoSetFiles.save(path, &Editor::new()).err().unwrap(),
-            NO_SET_FILES
-        );
     }
 }

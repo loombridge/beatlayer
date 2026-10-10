@@ -324,3 +324,61 @@ fn controls_are_drawn_where_the_layout_places_them() {
         );
     }
 }
+
+/// The bounds of the drawn node with this role and label, in window points.
+fn bounds_of(nodes: &[common::Node], role: Role, label: &str) -> [f64; 4] {
+    let node = nodes
+        .iter()
+        .find(|n| n.role == role && n.label == label && n.bounds.is_some())
+        .unwrap_or_else(|| panic!("{label} isn't drawn"));
+    let b = node.bounds.unwrap();
+    [b.x0, b.x1, b.y0, b.y1]
+}
+
+fn assert_near(drawn: [f64; 4], live: [f64; 4], what: &str) {
+    for (d, l) in drawn.iter().zip(live) {
+        assert!(
+            (d - l).abs() < 0.5,
+            "{what}: drawn {drawn:?}, Live {live:?}"
+        );
+    }
+}
+
+#[test]
+fn with_live_s_title_bar_drawn_top_anchored_rows_sit_at_layout_md_s_positions() {
+    // D22, L-WIN-002: on macOS the window's content covers the whole frame
+    // and Beatlayer draws Live's 23-point title bar, so at 1600 x 1000
+    // points every row sits at layout.md's window coordinates.
+    let mut h = Harness::with_title_bar(Window::Main);
+    assert_eq!(h.size, egui::vec2(1600.0, 1000.0));
+    let nodes = Harness::nodes(&h.settle());
+    // L-CTRL-004, L-CTRL-024, L-CTRL-027: controls 18 pt tall centred 37 pt
+    // from the top.
+    assert_near(
+        bounds_of(&nodes, Role::Button, "Tap Tempo"),
+        [54.0, 82.0, 28.0, 46.0],
+        "Tap Tempo",
+    );
+    let cpu = bounds_of(&nodes, Role::Meter, "CPU Load");
+    assert_near(cpu, [1439.0, 1488.0, 28.0, 46.0], "CPU Load");
+    // L-WIN-005: the main view from 61 pt down to the detail area.
+    let main = bounds_of(&nodes, Role::Pane, "Arrangement View");
+    assert_near(main, [320.0, 1591.0, 61.0, 766.0], "main view");
+    // L-WIN-007, L-STAT-008: the Status Bar from 968 to 993 pt, its
+    // controls inset 4 pt.
+    let mixer = bounds_of(&nodes, Role::Button, "Show/Hide Mixer");
+    assert_near(mixer, [1557.0, 1581.0, 972.0, 989.0], "Show/Hide Mixer");
+}
+
+#[test]
+fn without_a_drawn_title_bar_the_layout_starts_below_the_system_s() {
+    // Windows and Linux keep the system's title bar (unverified against
+    // Live there): the content area starts where Live's title bar ends.
+    let mut h = Harness::new(Window::Main);
+    let nodes = Harness::nodes(&h.settle());
+    assert_near(
+        bounds_of(&nodes, Role::Button, "Tap Tempo"),
+        [54.0, 82.0, 28.0 - 23.0, 46.0 - 23.0],
+        "Tap Tempo",
+    );
+}

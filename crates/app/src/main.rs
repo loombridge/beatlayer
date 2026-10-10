@@ -6,6 +6,8 @@ mod host;
 #[cfg(any(target_os = "macos", windows))]
 mod native_menu;
 mod screenshot;
+#[cfg(target_os = "macos")]
+mod title_bar;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -126,7 +128,16 @@ fn check() -> ExitCode {
         .filter(|e| e.status == bl_ui::keymap::Status::Bound)
         .count();
     let menus = bl_shell::menus::menu_bar(bl_shell::menus::MenuPlatform::current());
-    let items: usize = menus.iter().map(|m| m.walk().count()).sum();
+    let (items, separators) = menus.iter().flat_map(bl_shell::menus::Menu::walk).fold(
+        (0usize, 0usize),
+        |(items, separators), item| {
+            if item.is_separator() {
+                (items, separators + 1)
+            } else {
+                (items + 1, separators)
+            }
+        },
+    );
     for choice in [
         bl_shell::settings::ThemeChoice::Dark,
         bl_shell::settings::ThemeChoice::Light,
@@ -135,7 +146,7 @@ fn check() -> ExitCode {
     }
     println!(
         "{}: {} commands, {} problems; keymap of {} shortcuts, {bound} bound; {} menus, {items} \
-         items; themes and typeface loaded",
+         items, {separators} separators; themes and typeface loaded",
         version_line(),
         shell.registry().len(),
         problems.len(),

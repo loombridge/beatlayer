@@ -73,6 +73,24 @@ serde_json = "1"
 muda = { version = "=0.21.2", default-features = false }
 raw-window-handle = "0.6"
 
+# Live's compact title bar on macOS (D22): fits AppKit's title bar view to
+# 23 points. The versions and features muda, rfd, and arboard already use,
+# so nothing new enters the build.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.5"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "NSApplication",
+    "NSButton",
+    "NSControl",
+    "NSMenu",
+    "NSMenuItem",
+    "NSResponder",
+    "NSView",
+    "NSWindow",
+    "objc2-core-foundation",
+] }
+
 [lints]
 workspace = true
 

@@ -61,6 +61,17 @@ const UI_CRATES: &[&str] = &[
     "xilem",
 ];
 
+/// Audio backends and the crates that link the platforms' audio libraries,
+/// which `xtask` must not reach.
+const AUDIO_CRATES: &[&str] = &[
+    "bl-audio-io",
+    "cpal",
+    "alsa",
+    "alsa-sys",
+    "jack",
+    "jack-sys",
+];
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = workspace_root().and_then(|root| run(&root, &args));
@@ -202,6 +213,11 @@ fn layers(root: &Path) -> Result<(), String> {
     for member in &graph.members {
         let name = graph.name(member);
         if name == "xtask" {
+            // Every task builds xtask, so it links no audio backend: on
+            // Linux that would need ALSA and JACK headers for any task.
+            if let Some(path) = graph.path_to(member, |dep| AUDIO_CRATES.contains(&dep)) {
+                violations.push(format!("xtask links an audio backend: {path}"));
+            }
             continue;
         }
         if name != APP

@@ -13,7 +13,7 @@ use bl_audio_io::{
     StreamRequest, StreamStats,
 };
 use bl_shell::audio::{AudioHost, AudioSettings, AudioStatus};
-use bl_shell::files::NoSetFiles;
+use bl_shell::files::ProjectFiles;
 use bl_shell::settings::Preferences;
 use bl_shell::{Effect, Shell};
 use serde_json::{Value, json};
@@ -171,10 +171,42 @@ fn the_test_tone_switch_reaches_the_engine_and_stops_with_the_window() {
         .invoke("app.settings", json!({ "page": "audio" }))
         .unwrap();
     assert!(shell.take_effects().contains(&Effect::OpenSettings));
-    shell
+    // D23: Live's tone, volume, and frequency controls, at -36 dBFS and
+    // 440 Hz on a new install. The null device plays nothing.
+    let state = shell
         .run("audio.set_test_tone", json!({ "on": true }))
         .unwrap();
+    assert_eq!(
+        state,
+        json!({ "on": true, "volume_db": -36.0, "frequency_hz": 440.0 })
+    );
     assert!(shell.audio().test_tone());
+    let state = shell
+        .run(
+            "audio.set_test_tone",
+            json!({ "volume_db": -48.0, "frequency_hz": 1000.0 }),
+        )
+        .unwrap();
+    assert_eq!(
+        state,
+        json!({ "on": true, "volume_db": -48.0, "frequency_hz": 1000.0 })
+    );
+    assert_eq!(shell.audio().status().tone.volume_db, -48.0);
+    assert_eq!(shell.preferences().tone.frequency_hz, 1000.0, "kept");
+    let state = shell
+        .run(
+            "audio.set_test_tone",
+            json!({ "volume_db": 12.0, "frequency_hz": 1.0 }),
+        )
+        .unwrap();
+    assert_eq!(state["volume_db"], 0.0, "within the control's range");
+    assert_eq!(state["frequency_hz"], 20.0);
+    assert!(
+        shell
+            .run("audio.set_test_tone", json!({ "volume": -6 }))
+            .is_err(),
+        "unknown fields are refused"
+    );
     shell.invoke("window.close", json!({})).unwrap();
     assert!(!shell.audio().test_tone());
     assert!(shell.take_effects().contains(&Effect::CloseSettings));
@@ -275,7 +307,12 @@ fn two_device_shell() -> Shell {
         Box::new(|_| Ok(Box::new(TwoDevices))),
         AudioSettings::default(),
     );
-    let mut shell = Shell::new(Preferences::default(), None, audio, Box::new(NoSetFiles));
+    let mut shell = Shell::new(
+        Preferences::default(),
+        None,
+        audio,
+        Box::new(ProjectFiles::new()),
+    );
     shell.start_audio();
     shell
 }
@@ -341,7 +378,7 @@ fn on_the_default_device_a_buffer_change_applies_without_a_restart() {
         Preferences::default(),
         None,
         AudioHost::new(AudioSettings::default()),
-        Box::new(NoSetFiles),
+        Box::new(ProjectFiles::new()),
     );
     shell.start_audio();
     let first = wait_for(&mut shell, |s| s.buffer_size.is_some());

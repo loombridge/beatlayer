@@ -25,7 +25,8 @@ use crate::ui_parity::{self, KeySource};
 /// The generated keymap, relative to the workspace root.
 pub const PATH: &str = "crates/ui/keymaps/live12.toml";
 
-/// Shortcuts the operating system handles, with how.
+/// Shortcuts the operating system handles, with how: the platform's menus,
+/// and items its standard menus provide with their keys.
 const SYSTEM: &[(&str, &str)] = &[
     (
         "S-MENU-001",
@@ -38,6 +39,14 @@ const SYSTEM: &[(&str, &str)] = &[
         "the platform's menus choose the highlighted item",
     ),
     ("S-MENU-005", "macOS's Help menu searches the menus"),
+    (
+        "S-FILE-010",
+        "macOS's standard Hide Others item in the application menu (M-APP-005)",
+    ),
+    (
+        "S-MENU-006",
+        "macOS's Emoji & Symbols item, which the system adds to the Edit menu (M-EDIT-040)",
+    ),
 ];
 
 /// Shortcuts the focused control handles, with which control.

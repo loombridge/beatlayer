@@ -528,6 +528,8 @@ dependencies = [
  "egui-wgpu",
  "egui-winit",
  "muda",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
  "png",
  "pollster",
  "raw-window-handle",
@@ -745,6 +747,19 @@ name = "bl-shell"
 version = "0.0.0"
 dependencies = [
  "bl-audio-io",
+ "bl-commands",
+ "bl-model",
+ "bl-project",
+ "bl-rt",
+ "bl-shell-spec",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "bl-shell-spec"
+version = "0.0.0"
+dependencies = [
  "bl-commands",
  "bl-model",
  "schemars",
@@ -4674,7 +4689,7 @@ version = "0.0.0"
 dependencies = [
  "bl-commands",
  "bl-model",
- "bl-shell",
+ "bl-shell-spec",
  "serde_json",
  "toml",
 ]

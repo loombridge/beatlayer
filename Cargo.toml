@@ -1,0 +1,42 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "xtask"]
+exclude = ["xtask/fixtures"]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.99"
+license = "GPL-3.0-or-later"
+# Nothing is published to crates.io until the trademark search (H9) is done.
+publish = false
+
+[workspace.dependencies]
+bl-core = { path = "crates/core" }
+bl-model = { path = "crates/model" }
+bl-project = { path = "crates/project" }
+bl-dsp = { path = "crates/dsp" }
+bl-engine = { path = "crates/engine" }
+bl-devices = { path = "crates/devices" }
+bl-stretch = { path = "crates/stretch" }
+bl-media = { path = "crates/media" }
+bl-analysis = { path = "crates/analysis" }
+bl-plugin-host = { path = "crates/plugin-host" }
+bl-audio-io = { path = "crates/audio-io" }
+bl-midi-io = { path = "crates/midi-io" }
+bl-control = { path = "crates/control" }
+bl-link = { path = "crates/link" }
+bl-interop = { path = "crates/interop" }
+bl-ui = { path = "crates/ui" }
+
+[workspace.lints.rust]
+rust_2018_idioms = { level = "warn", priority = -1 }
+unsafe_op_in_unsafe_fn = "deny"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+dbg_macro = "warn"
+todo = "warn"
+undocumented_unsafe_blocks = "warn"
+unimplemented = "warn"

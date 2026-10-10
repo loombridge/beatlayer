@@ -1,0 +1,59 @@
+# Dependency policy, checked by `cargo xtask check` through cargo-deny.
+#
+# Beatlayer is GPL-3.0-or-later (decision D3), so every dependency must be
+# under a licence that can be combined with it. `cargo xtask deny-selftest`
+# proves this file still rejects an incompatible licence.
+
+[graph]
+all-features = true
+
+[advisories]
+ignore = []
+
+[licenses]
+confidence-threshold = 0.93
+# The allow-list is policy, not an inventory, so licences no dependency uses yet
+# are expected.
+unused-allowed-license = "allow"
+allow = [
+    # Permissive.
+    "0BSD",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+    # Weak copyleft that can be combined with GPL-3.0.
+    "MPL-2.0",
+    "LGPL-2.1-or-later",
+    "LGPL-3.0-only",
+    "LGPL-3.0-or-later",
+    # Strong copyleft that can be combined with GPL-3.0-or-later.
+    "GPL-2.0-or-later",
+    "GPL-3.0-or-later",
+]
+# Deliberately absent:
+# - GPL-2.0-only: can't be combined with GPL-3.0.
+# - GPL-3.0-only: compatible, but it would pin the whole app to GPL-3.0-only.
+#   Adding it needs a decision in the architecture's decisions log.
+# - AGPL, EPL, CDDL, SSPL, and proprietary licences.
+exceptions = []
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# Workspace crates refer to each other by path, without a version.
+allow-wildcard-paths = true
+highlight = "all"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

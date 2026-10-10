@@ -1,0 +1,29 @@
+[package]
+name = "beatlayer"
+description = "The Beatlayer application: wiring, windows, menus, and preferences."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+bl-core.workspace = true
+bl-model.workspace = true
+bl-project.workspace = true
+bl-dsp.workspace = true
+bl-engine.workspace = true
+bl-devices.workspace = true
+bl-stretch.workspace = true
+bl-media.workspace = true
+bl-analysis.workspace = true
+bl-plugin-host.workspace = true
+bl-audio-io.workspace = true
+bl-midi-io.workspace = true
+bl-control.workspace = true
+bl-link.workspace = true
+bl-interop.workspace = true
+bl-ui.workspace = true
+
+[lints]
+workspace = true

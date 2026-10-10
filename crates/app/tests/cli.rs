@@ -1,15 +1,17 @@
-//! The command-line flags of the `beatlayer` binary.
+//! The command-line flags of the `beatlayer` binary. None of these opens a
+//! window, so they run in CI and on packaged builds.
 
 use std::process::Command;
 
-fn run(args: &[&str]) -> (bool, String) {
+fn run(args: &[&str]) -> (Option<i32>, String, String) {
     let output = Command::new(env!("CARGO_BIN_EXE_beatlayer"))
         .args(args)
         .output()
         .expect("the beatlayer binary runs");
     (
-        output.status.success(),
+        output.status.code(),
         String::from_utf8(output.stdout).expect("stdout is UTF-8"),
+        String::from_utf8(output.stderr).expect("stderr is UTF-8"),
     )
 }
 
@@ -17,22 +19,41 @@ fn run(args: &[&str]) -> (bool, String) {
 fn version_prints_the_name_and_version() {
     let expected = format!("beatlayer {}\n", env!("CARGO_PKG_VERSION"));
     for flag in ["--version", "-V"] {
-        let (ok, stdout) = run(&[flag]);
-        assert!(ok, "{flag} exits successfully");
+        let (code, stdout, _) = run(&[flag]);
+        assert_eq!(code, Some(0), "{flag} exits successfully");
         assert_eq!(stdout, expected, "{flag}");
     }
 }
 
 #[test]
-fn help_lists_the_version_flag() {
-    let (ok, stdout) = run(&["--help"]);
-    assert!(ok);
-    assert!(stdout.contains("--version"), "{stdout}");
+fn help_lists_the_flags() {
+    let (code, stdout, _) = run(&["--help"]);
+    assert_eq!(code, Some(0));
+    for flag in [
+        "--version",
+        "--check",
+        "--config-dir",
+        "--screenshot",
+        "[set file]",
+    ] {
+        assert!(stdout.contains(flag), "{flag}: {stdout}");
+    }
 }
 
 #[test]
-fn other_arguments_are_left_alone() {
-    let (ok, stdout) = run(&["My Song.blset"]);
-    assert!(ok);
-    assert!(stdout.contains("has nothing to run yet"), "{stdout}");
+fn check_loads_everything_the_window_needs() {
+    let (code, stdout, _) = run(&["--check"]);
+    assert_eq!(code, Some(0), "{stdout}");
+    assert!(stdout.contains("0 problems"), "{stdout}");
+    assert!(stdout.contains("keymap of 358 shortcuts"), "{stdout}");
+    // macOS adds the application menu; Windows and Linux have the other eight.
+    let menus = if cfg!(target_os = "macos") { 9 } else { 8 };
+    assert!(stdout.contains(&format!("{menus} menus")), "{stdout}");
+}
+
+#[test]
+fn unknown_options_are_refused() {
+    let (code, _, stderr) = run(&["--fly"]);
+    assert_eq!(code, Some(2));
+    assert!(stderr.contains("unknown option --fly"), "{stderr}");
 }

@@ -343,13 +343,14 @@ const ENTRIES: &[Entry] = &[
         id: "track.delete",
         action: Action::Apply("delete_track"),
         label: "Delete Track",
-        permission: Permission::Edit,
+        permission: Permission::Destructive,
         contexts: &[TrackHeaders],
         keys: &[Key::Runs("S-TRACK-018")],
         description: "Deletes a track with its clips and devices. Deleting a group track also \
             deletes every track inside it. Use it to remove a track the song no longer needs; \
             to silence a track and keep it, use `mixer.set_mute`. Undo restores everything it \
-            deleted. The Main track can't be deleted.",
+            deleted, but because it removes the person's work an agent asks first. The Main \
+            track can't be deleted.",
     },
     Entry {
         id: "track.move",
@@ -448,11 +449,12 @@ const ENTRIES: &[Entry] = &[
         id: "clip.delete",
         action: Action::Apply("delete_clip"),
         label: "Delete Clip",
-        permission: Permission::Edit,
+        permission: Permission::Destructive,
         contexts: &[Arrangement],
         keys: &[Key::Runs("S-EDIT-005")],
-        description: "Deletes a clip from the arrangement. Undo restores it. To keep a clip \
-            but stop it playing, use `clip.set_mute`.",
+        description: "Deletes a clip from the arrangement. Undo restores it, but because it \
+            removes the person's work an agent asks first. To keep a clip but stop it playing, \
+            use `clip.set_mute`.",
     },
     Entry {
         id: "clip.move",
@@ -536,11 +538,12 @@ const ENTRIES: &[Entry] = &[
         id: "device.remove",
         action: Action::Apply("remove_device"),
         label: "Delete Device",
-        permission: Permission::Edit,
+        permission: Permission::Destructive,
         contexts: &[DeviceView],
         keys: &[Key::Runs("S-EDIT-005")],
         description: "Deletes a device from its track's chain, with its settings. Undo \
-            restores it. To bypass a device but keep it, use `device.set_enabled`.",
+            restores it, but because it removes the person's work an agent asks first. To \
+            bypass a device but keep it, use `device.set_enabled`.",
     },
     Entry {
         id: "device.move",

@@ -40,6 +40,8 @@ pub enum MediaError {
     Resample(String),
     /// The work was cancelled before it finished.
     Cancelled,
+    /// Disk streaming couldn't do what was asked.
+    Streaming(String),
 }
 
 impl fmt::Display for MediaError {
@@ -60,6 +62,7 @@ impl fmt::Display for MediaError {
             ),
             Self::Resample(what) => write!(f, "sample-rate conversion failed: {what}"),
             Self::Cancelled => f.write_str("cancelled"),
+            Self::Streaming(what) => write!(f, "disk streaming failed: {what}"),
         }
     }
 }

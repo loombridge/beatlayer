@@ -9,6 +9,8 @@ use std::process::{Command, ExitCode, Stdio};
 use serde_json::Value;
 
 mod commands;
+mod dashboard;
+mod progress;
 mod ui_parity;
 
 const USAGE: &str = "\
@@ -27,6 +29,11 @@ Tasks:
                  in tests/golden/ (`cargo test` does too). With --update, remake the
                  references whose renders changed; say why in the pull request. Fixture
                  names after the options pick some; the default is all.
+  progress       Print the roadmap's and the parity matrix's progress as JSON, read from
+                 origin/main (with --worktree, from the files on disk)
+  dashboard      Serve the progress page on http://localhost:4106 (or PORT, or --port N),
+                 reading origin/main and fetching it every two minutes (--worktree reads
+                 the files on disk). Localhost starts it from .claude/launch.json
   package        Build this platform's packages with cargo-packager and check they start
   rtsan          Run the real-time tests in rtsan/ under LLVM's RealtimeSanitizer, with a
                  runtime already on this machine (the file RTSAN_LIB_PATH names, or
@@ -91,6 +98,8 @@ fn run(root: &Path, args: &[String]) -> Result<(), String> {
         },
         Some("deny-selftest") => deny_selftest(root),
         Some("golden") => golden(root, options),
+        Some("progress") => dashboard::print(root, options),
+        Some("dashboard") => dashboard::serve(root, options),
         Some("package") => package::package(root),
         Some("rtsan") => {
             let passed_on = match options.first().map(String::as_str) {

@@ -16,6 +16,7 @@ bl-commands.workspace = true
 # The transport's commands (WP-1.5).
 bl-engine.workspace = true
 bl-model.workspace = true
+bl-project.workspace = true
 bl-shell-spec.workspace = true
 serde_json = "1"
 # Reads docs/ui-parity/shortcuts.toml. Parsing only: no serde derive, no writer.

@@ -8,7 +8,20 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+bl-core = { workspace = true, features = ["serde"] }
 bl-model.workspace = true
+# Pure-Rust zstd: no C toolchain, so Windows and Linux cross-checks build from
+# any host, and the fuzzer instruments the decoder along with the rest of the
+# loader. `hash` writes and checks the frame's content checksum.
+ruzstd = { version = "=0.9.0", default-features = false, features = ["std", "hash"] }
+serde = { version = "1.0.228", default-features = false, features = ["std", "derive"] }
+# `float_roundtrip` parses every f64 back to the exact value that was written;
+# without it, mixer and parameter values drift by one unit in the last place
+# over a save and load.
+serde_json = { version = "1.0.151", features = ["float_roundtrip"] }
+
+[dev-dependencies]
+proptest = { version = "1.11", default-features = false, features = ["std"] }
 
 [lints]
 workspace = true

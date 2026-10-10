@@ -5,11 +5,20 @@
 //! Every key press, menu choice, and click becomes a command invocation on
 //! the shell ([`Shell::invoke`]); what only the platform can do comes back
 //! as effects, which the host carries out here.
+//!
+//! While the person has the agent server switched on (Settings, Tempo &
+//! MIDI), the host runs it (`bl-agent`, WP-1.15): its threads hand each
+//! request to this event loop, which runs it on the same shell, and asks
+//! the person when an agent connects for the first time or wants to run a
+//! command that asks first.
 
 use std::num::NonZeroU32;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use bl_agent::Agent;
+use bl_agent::http::{HttpConfig, HttpServer, Served};
+use bl_shell::agent::AgentServerStatus;
 use bl_shell::audio::AudioHost;
 use bl_shell::files::ProjectFiles;
 use bl_shell::menus::{Menu, MenuPlatform, menu_bar};
@@ -100,6 +109,8 @@ pub enum UserEvent {
     /// A native menu item was chosen.
     #[cfg(any(target_os = "macos", windows))]
     Menu(muda::MenuEvent),
+    /// The agent server has a request for the main thread.
+    Agent,
 }
 
 impl From<egui_winit::accesskit_winit::Event> for UserEvent {
@@ -139,6 +150,12 @@ struct Host {
     shown_revision: Option<u64>,
     next_cpu_sample: Instant,
     quitting: bool,
+    agent: Agent,
+    /// The agent server while it runs, with the settings it started with.
+    agent_server: Option<(HttpServer, HttpConfig)>,
+    /// The settings the agent server last failed to start with, so it isn't
+    /// retried until they change.
+    agent_failed: Option<HttpConfig>,
 }
 
 /// Runs the app until it quits.
@@ -206,11 +223,18 @@ pub fn run(args: Args) -> Result<(), String> {
         shown_revision: None,
         next_cpu_sample: Instant::now() + CPU_METER_PERIOD,
         quitting: false,
+        agent: Agent::for_app(),
+        agent_server: None,
+        agent_failed: None,
     };
+    host.sync_agent_server();
     event_loop
         .run_app(&mut host)
         .map_err(|e| format!("the event loop failed: {e}"))?;
     host.shell.audio_mut().stop();
+    if let Some((server, _)) = host.agent_server.take() {
+        server.stop();
+    }
     Ok(())
 }
 
@@ -503,6 +527,7 @@ impl Host {
                 surface.ctx.set_zoom_factor(self.zoom);
             }
         }
+        self.sync_agent_server();
         if self.shown_revision != Some(self.shell.revision()) {
             self.shown_revision = Some(self.shell.revision());
             #[cfg(any(target_os = "macos", windows))]
@@ -625,6 +650,110 @@ impl Host {
                     }
                 }
             },
+        }
+    }
+
+    /// Starts, stops, or moves the agent server to match the settings, and
+    /// tells the shell how it's doing, for the Settings window.
+    fn sync_agent_server(&mut self) {
+        let settings = self.shell.agent_settings();
+        let wanted = (settings.server && !settings.token.is_empty()).then(|| HttpConfig {
+            port: settings.port,
+            token: settings.token.clone(),
+        });
+        let running = self.agent_server.as_ref().map(|(_, config)| config);
+        if running != wanted.as_ref() {
+            if let Some((server, _)) = self.agent_server.take() {
+                server.stop();
+            }
+            if let Some(config) = wanted.filter(|c| self.agent_failed.as_ref() != Some(c)) {
+                let proxy = Mutex::new(self.proxy.clone());
+                let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+                    if let Ok(proxy) = proxy.lock() {
+                        let _ = proxy.send_event(UserEvent::Agent);
+                    }
+                });
+                match HttpServer::start(&config, wake) {
+                    Ok(server) => {
+                        self.agent_failed = None;
+                        self.agent_server = Some((server, config));
+                    }
+                    Err(error) => {
+                        self.agent_failed = Some(config);
+                        self.shell.set_agent_status(AgentServerStatus {
+                            listening: None,
+                            error: Some(error.to_string()),
+                            sessions: 0,
+                        });
+                        return;
+                    }
+                }
+            }
+        }
+        if !self.shell.agent_settings().server {
+            self.agent_failed = None;
+        }
+        // Agents the person forgot lose their sessions.
+        let forgotten: Vec<String> = self
+            .agent
+            .sessions()
+            .filter(|(_, s)| s.protocol.is_some())
+            .map(|(_, s)| s.client.name.clone())
+            .filter(|name| self.shell.agent_settings().client(name).is_none())
+            .collect();
+        for name in forgotten {
+            self.agent.close_sessions_of(&name);
+        }
+        let status = match &self.agent_server {
+            Some((server, _)) => AgentServerStatus {
+                listening: Some(server.local_addr().to_string()),
+                error: None,
+                sessions: self.agent.sessions().count(),
+            },
+            None if self.agent_failed.is_some() => self.shell.agent_status().clone(),
+            None => AgentServerStatus::default(),
+        };
+        self.shell.set_agent_status(status);
+    }
+
+    /// Runs the agent server's waiting requests on the shell, asking the
+    /// person where a request needs it.
+    fn serve_agents(&mut self) {
+        let Some((server, _)) = &self.agent_server else {
+            return;
+        };
+        let jobs: Vec<_> = std::iter::from_fn(|| server.try_job()).collect();
+        for job in jobs {
+            match bl_agent::http::serve(&mut self.agent, &mut self.shell, job) {
+                Served::Done => {}
+                Served::Waiting(pending) => {
+                    let allow = self.ask_for_agent(&pending.question().text());
+                    pending.finish(&mut self.agent, &mut self.shell, allow);
+                }
+            }
+        }
+    }
+
+    /// Asks the person a question for an agent: whether it may connect, or
+    /// run a command that asks first. The call waits for the answer.
+    fn ask_for_agent(&self, text: &str) -> bool {
+        let mut dialog = rfd::MessageDialog::new()
+            .set_level(rfd::MessageLevel::Warning)
+            .set_title("Beatlayer")
+            .set_description(text)
+            .set_buttons(rfd::MessageButtons::OkCancelCustom(
+                "Allow".to_owned(),
+                "Don't Allow".to_owned(),
+            ));
+        if let Some(main) = &self.main {
+            main.window
+                .request_user_attention(Some(winit::window::UserAttentionType::Critical));
+            dialog = dialog.set_parent(main.window.as_ref());
+        }
+        match dialog.show() {
+            rfd::MessageDialogResult::Ok | rfd::MessageDialogResult::Yes => true,
+            rfd::MessageDialogResult::Custom(choice) => choice == "Allow",
+            _ => false,
         }
     }
 
@@ -792,6 +921,10 @@ impl ApplicationHandler<UserEvent> for Host {
                     Ak::AccessibilityDeactivated => surface.ctx.disable_accesskit(),
                 }
                 surface.window.request_redraw();
+            }
+            UserEvent::Agent => {
+                self.serve_agents();
+                self.after_commands(event_loop);
             }
             #[cfg(any(target_os = "macos", windows))]
             UserEvent::Menu(event) => {

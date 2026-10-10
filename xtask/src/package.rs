@@ -35,6 +35,51 @@ const PROJECT_EXTENSION: &str = "blset";
 /// The only architecture the macOS app runs on (docs/02-architecture.md).
 const MACOS_ARCH: &str = "arm64";
 
+/// A tool that would otherwise be downloaded while packaging, pinned to a
+/// fixed release and checked against its SHA-256 before every use.
+struct PinnedTool {
+    /// The file name cargo-packager or appimagetool looks for.
+    file: &'static str,
+    url: &'static str,
+    sha256: &'static str,
+}
+
+// The AppImage tools. cargo-packager 0.11.8 downloads linuxdeploy, its AppImage
+// plug-in, and AppRun from tags that move, and the plug-in's appimagetool
+// downloads the AppImage runtime from another, so the AppImage would be built
+// with whatever those tags held on the day. These pins replace all four
+// downloads; `prepare_appimage_tools` explains how. Each digest is the one
+// GitHub records for the release asset. To update a tool, change its URL and
+// digest together.
+
+/// linuxdeploy, which assembles the AppImage. Its release bundles
+/// linuxdeploy-plugin-appimage, and appimagetool inside that, so this pin
+/// covers the plug-in too.
+const LINUXDEPLOY: PinnedTool = PinnedTool {
+    file: "linuxdeploy-x86_64.AppImage",
+    url: "https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-x86_64.AppImage",
+    sha256: "c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d",
+};
+
+/// The AppRun launcher at the root of the AppImage: the copy cargo-packager
+/// uses, from Tauri's mirror of AppImageKit.
+const APPRUN: PinnedTool = PinnedTool {
+    file: "AppRun-x86_64",
+    url: "https://github.com/tauri-apps/binary-releases/releases/download/apprun-old/AppRun-x86_64",
+    sha256: "f30140a43a0a59e46db21bdefdf749b9e9f2c6946e92afabbacf98b8ae73fb4f",
+};
+
+/// The AppImage runtime, the loader at the start of every AppImage.
+/// appimagetool takes it from `LDAI_RUNTIME_FILE` instead of downloading one.
+const APPIMAGE_RUNTIME: PinnedTool = PinnedTool {
+    file: "runtime-x86_64",
+    url: "https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64",
+    sha256: "2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d",
+};
+
+/// What cargo-packager calls the AppImage plug-in it would download.
+const APPIMAGE_PLUGIN: &str = "linuxdeploy-plugin-appimage.AppImage";
+
 /// Variables that sign, notarise, or name a signing identity. GitHub Actions
 /// passes a missing secret as an empty string, so an empty variable counts as
 /// unset and is removed before cargo-packager sees it.
@@ -222,6 +267,13 @@ pub fn package(root: &Path) -> Result<(), String> {
     fs::create_dir_all(&out_dir)
         .map_err(|e| format!("couldn't create {}: {e}", out_dir.display()))?;
 
+    let appimage_tools = if platform == Platform::Linux {
+        eprintln!("\n==> pinned AppImage tools");
+        Some(prepare_appimage_tools(&target_dir)?)
+    } else {
+        None
+    };
+
     eprintln!("\n==> cargo packager ({})", platform.formats());
     let signing = Signing::from_env();
     signing.report(platform);
@@ -251,7 +303,15 @@ pub fn package(root: &Path) -> Result<(), String> {
         }
         Platform::Windows => {}
     }
+    if let Some(tools) = &appimage_tools {
+        packager
+            .env("XDG_CACHE_HOME", &tools.cache_home)
+            .env("LDAI_RUNTIME_FILE", &tools.runtime);
+    }
     run(&mut packager, "cargo packager")?;
+    if let Some(tools) = &appimage_tools {
+        tools.check_untouched()?;
+    }
 
     let scratch = out_dir.join(".smoke-test");
     let mut packages = Vec::new();
@@ -699,6 +759,157 @@ fn target_dir_arg(command: &mut Command, dir: &Path) {
     command.arg(format!("TARGETDIR={}", dir.display()));
 }
 
+/// The pinned AppImage tools, ready for cargo-packager.
+struct AppImageTools {
+    /// Given to cargo-packager as `XDG_CACHE_HOME`: its tools folder is
+    /// `.cargo-packager/AppImage` inside this.
+    cache_home: PathBuf,
+    /// Given to appimagetool as `LDAI_RUNTIME_FILE`.
+    runtime: PathBuf,
+}
+
+impl AppImageTools {
+    fn tools_dir(cache_home: &Path) -> PathBuf {
+        cache_home.join(".cargo-packager").join("AppImage")
+    }
+
+    /// Fails if cargo-packager added or replaced a tool, which would mean it
+    /// downloaded one instead of using the pinned copies.
+    fn check_untouched(&self) -> Result<(), String> {
+        let dir = Self::tools_dir(&self.cache_home);
+        let mut found: Vec<String> = fs::read_dir(&dir)
+            .map_err(|e| format!("couldn't read {}: {e}", dir.display()))?
+            .filter_map(Result::ok)
+            .map(|entry| file_name(&entry.path()))
+            .collect();
+        found.sort();
+        let mut expected = vec![LINUXDEPLOY.file, APPRUN.file, APPIMAGE_PLUGIN];
+        expected.sort_unstable();
+        if found == expected && dir.join(APPIMAGE_PLUGIN).is_dir() {
+            eprintln!("cargo-packager used the pinned AppImage tools");
+            Ok(())
+        } else {
+            Err(format!(
+                "cargo-packager changed its AppImage tools in {}: found {found:?}",
+                dir.display()
+            ))
+        }
+    }
+}
+
+/// Puts checked copies of the pinned AppImage tools where cargo-packager looks
+/// for them, so it downloads none of its own.
+///
+/// cargo-packager downloads a tool only if its tools folder has nothing by
+/// that name. linuxdeploy and AppRun go there as checked copies, fresh each
+/// run, because cargo-packager's script edits linuxdeploy's header in place.
+/// The AppImage plug-in's place gets an empty folder: cargo-packager then
+/// skips that download, and linuxdeploy, which passes over folders when it
+/// looks for plug-ins, falls back to the plug-in bundled in its own pinned
+/// release. The runtime stays in the download folder, for appimagetool.
+fn prepare_appimage_tools(target_dir: &Path) -> Result<AppImageTools, String> {
+    if std::env::consts::ARCH != "x86_64" {
+        return Err(format!(
+            "the AppImage tools are pinned for x86_64 only, not {}",
+            std::env::consts::ARCH
+        ));
+    }
+    let downloads = target_dir.join("appimage-tools");
+    let cache_home = downloads.join("cache");
+    let tools = AppImageTools::tools_dir(&cache_home);
+    remove_dir_if_present(&cache_home)?;
+    fs::create_dir_all(tools.join(APPIMAGE_PLUGIN))
+        .map_err(|e| format!("couldn't create {}: {e}", tools.display()))?;
+
+    for tool in [&LINUXDEPLOY, &APPRUN] {
+        let source = fetch_pinned(tool, &downloads)?;
+        let destination = tools.join(tool.file);
+        fs::copy(&source, &destination)
+            .map_err(|e| format!("couldn't copy {}: {e}", source.display()))?;
+        make_executable(&destination)?;
+    }
+    let runtime = fetch_pinned(&APPIMAGE_RUNTIME, &downloads)?;
+    Ok(AppImageTools {
+        cache_home,
+        runtime,
+    })
+}
+
+/// The pinned tool's file in `dir`, downloaded first if it isn't there, and
+/// checked against its SHA-256 every time. A file that doesn't match is
+/// deleted, so a later run downloads it again rather than trusting it.
+fn fetch_pinned(tool: &PinnedTool, dir: &Path) -> Result<PathBuf, String> {
+    fs::create_dir_all(dir).map_err(|e| format!("couldn't create {}: {e}", dir.display()))?;
+    let path = dir.join(tool.file);
+    if !path.exists() {
+        eprintln!("Downloading {}", tool.url);
+        let downloaded = run(
+            Command::new("curl")
+                .args(["--fail", "--silent", "--show-error", "--location"])
+                .args(["--retry", "3", "--output"])
+                .arg(&path)
+                .arg(tool.url),
+            "curl",
+        );
+        if let Err(message) = downloaded {
+            let _ = fs::remove_file(&path);
+            return Err(message);
+        }
+    }
+    let digest = sha256(&path)?;
+    if digest == tool.sha256 {
+        eprintln!("{}: SHA-256 matches the pin", tool.file);
+        Ok(path)
+    } else {
+        let _ = fs::remove_file(&path);
+        Err(format!(
+            "{} from {} has SHA-256 {digest}, not the pinned {}",
+            tool.file, tool.url, tool.sha256
+        ))
+    }
+}
+
+/// A file's SHA-256, from coreutils' `sha256sum`.
+fn sha256(path: &Path) -> Result<String, String> {
+    let output = Command::new("sha256sum")
+        .arg(path)
+        .output()
+        .map_err(|e| format!("couldn't run sha256sum: {e}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    match parse_digest(&stdout) {
+        Some(digest) if output.status.success() => Ok(digest.to_owned()),
+        _ => Err(format!(
+            "sha256sum couldn't hash {}: {}",
+            path.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        )),
+    }
+}
+
+/// The digest at the start of a `sha256sum` line, in lowercase hex.
+fn parse_digest(line: &str) -> Option<&str> {
+    let digest = line.split_whitespace().next()?;
+    // sha256sum marks a line whose file name it had to escape with a backslash.
+    let digest = digest.strip_prefix('\\').unwrap_or(digest);
+    (digest.len() == 64
+        && digest
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
+    .then_some(digest)
+}
+
+#[cfg(unix)]
+fn make_executable(path: &Path) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o755))
+        .map_err(|e| format!("couldn't make {} executable: {e}", path.display()))
+}
+
+#[cfg(not(unix))]
+fn make_executable(_path: &Path) -> Result<(), String> {
+    Ok(())
+}
+
 /// Makes `<main>_<version>_<arch>.tar.gz`, named like the AppImage, holding
 /// one folder with the binaries and the resources.
 fn make_tarball(
@@ -941,6 +1152,36 @@ mod tests {
         assert_eq!(binaries(&table).unwrap(), ["beatlayer", "bl-cli"]);
         let no_main = json!({ "binaries": [{ "path": "bl-cli" }] });
         assert!(binaries(&no_main).is_err());
+    }
+
+    #[test]
+    fn appimage_tools_come_from_fixed_releases_with_digests() {
+        for tool in [&LINUXDEPLOY, &APPRUN, &APPIMAGE_RUNTIME] {
+            let release = tool
+                .url
+                .strip_prefix("https://github.com/")
+                .and_then(|rest| rest.split("/releases/download/").nth(1))
+                .unwrap_or_else(|| panic!("{} isn't a GitHub release asset", tool.url));
+            let (tag, file) = release.split_once('/').unwrap();
+            assert_ne!(tag, "continuous", "{} comes from a moving tag", tool.url);
+            assert_eq!(file, tool.file, "{}", tool.url);
+            assert_eq!(
+                parse_digest(tool.sha256),
+                Some(tool.sha256),
+                "{}",
+                tool.file
+            );
+        }
+    }
+
+    #[test]
+    fn reads_sha256sum_output() {
+        let digest = "c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d";
+        assert_eq!(parse_digest(&format!("{digest}  file\n")), Some(digest));
+        assert_eq!(parse_digest(&format!("\\{digest}  a\\nb\n")), Some(digest));
+        assert_eq!(parse_digest(&digest.to_uppercase()), None);
+        assert_eq!(parse_digest("abc  file"), None);
+        assert_eq!(parse_digest(""), None);
     }
 
     #[test]

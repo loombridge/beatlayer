@@ -22,7 +22,10 @@
 # Every third-party action is pinned to a full commit SHA, with its version in
 # a comment. Update the SHA and the comment together. cargo-packager is pinned
 # the same way: a version here and in xtask/src/package.rs, and a SHA-256 for
-# each runner's prebuilt binary.
+# each runner's prebuilt binary. The tools that build the AppImage (linuxdeploy
+# with its plug-in, AppRun, and the AppImage runtime) are pinned to fixed
+# releases and SHA-256s in xtask/src/package.rs, which checks them before every
+# use and fails on a mismatch.
 
 name: Nightly
 

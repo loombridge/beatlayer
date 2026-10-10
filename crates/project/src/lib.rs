@@ -4,7 +4,8 @@
 //! A project is a folder ([`ProjectFolder`]) holding one or more sets. A set
 //! file (`.blset`) is one zstd frame holding the song as JSON, with a schema
 //! version, a revision count, the project's ID allocator, and the media table
-//! that says where the clips' audio files are ([`format`] has the layout).
+//! that says where the clips' audio files are ([`format`](mod@format) has the
+//! layout).
 //!
 //! ```no_run
 //! use bl_project::{Project, ProjectFolder, SetFile};

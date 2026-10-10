@@ -104,7 +104,7 @@ fn killed_saves_leave_a_readable_set() {
             .unwrap();
         let (lines, received) = mpsc::channel();
         let stdout = child.stdout.take().unwrap();
-        std::thread::spawn(move || {
+        let reader = std::thread::spawn(move || {
             for line in BufReader::new(stdout).lines() {
                 let Ok(line) = line else { break };
                 if lines.send((Instant::now(), line)).is_err() {
@@ -139,6 +139,9 @@ fn killed_saves_leave_a_readable_set() {
         std::thread::sleep(kill_at.saturating_duration_since(Instant::now()));
         child.kill().unwrap();
         child.wait().unwrap();
+        // The pipe is closed now, so once the reader stops, every line the
+        // child wrote is in the channel.
+        reader.join().unwrap();
         saves += 3;
         while let Ok((_, line)) = received.try_recv() {
             if let Some(revision) = line.strip_prefix("saved ") {
@@ -173,13 +176,14 @@ fn killed_saves_leave_a_readable_set() {
         );
     }
 
-    // Every backup the children made loads too.
+    // Every backup the children made loads too. A kill between making a
+    // backup and pruning the oldest leaves 11, until the next save prunes.
     let backups: Vec<_> = std::fs::read_dir(dir.path().join("Backup"))
         .unwrap()
         .map(|entry| entry.unwrap().path())
         .filter(|path| bl_project::is_set(path))
         .collect();
-    assert_eq!(backups.len(), 10);
+    assert!((10..=11).contains(&backups.len()), "{backups:?}");
     for backup in &backups {
         load(backup).unwrap();
     }

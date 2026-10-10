@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 655fd364c9122a25d62b2190878458dc3177b2ef935801959f520f7ba03c771d # shrinks to (map, ticks) = ([Ramp { start: Ticks(0), from: Bpm(881.536056398552), to: Bpm(16.199206558557538) }, Constant { start: Ticks(940), bpm: Bpm(1.0) }], Ticks(27)), rate = SampleRate(192000)

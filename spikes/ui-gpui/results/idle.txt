@@ -1,0 +1,38 @@
+$ scripts/idle.sh   (10 October 2026, 17:50, build before waveform layers)
+data: 200 tracks, 5000 clips, 44.8 MB of peaks, generated in 323 ms
+ready: pid 55420, window Some(829), first frame 523 ms after launch, scale factor 2
+plug-in window: window Some(833): NSView 0x8b5c24000 added to GPUI's NSView 0x8b4fe8a00 (flipped: false), frame 480x328 at y 0
+plug-in child view: first drawRect, 480x328 pt, in window: true
+sample 1: cpu 0.6% rss 158416 KiB
+sample 2: cpu 0.4% rss 158416 KiB
+sample 3: cpu 0.4% rss 158320 KiB
+sample 4: cpu 0.4% rss 158320 KiB
+sample 5: cpu 0.4% rss 158320 KiB
+sample 6: cpu 0.4% rss 158320 KiB
+sample 7: cpu 0.4% rss 158320 KiB
+sample 8: cpu 0.3% rss 158320 KiB
+sample 9: cpu 0.3% rss 158320 KiB
+sample 10: cpu 0.4% rss 158320 KiB
+sample 11: cpu 0.3% rss 158320 KiB
+sample 12: cpu 0.3% rss 158320 KiB
+sample 13: cpu 0.3% rss 158320 KiB
+sample 14: cpu 0.6% rss 158320 KiB
+sample 15: cpu 0.6% rss 158320 KiB
+sample 16: cpu 0.6% rss 158320 KiB
+sample 17: cpu 0.4% rss 158320 KiB
+sample 18: cpu 0.5% rss 158320 KiB
+sample 19: cpu 0.4% rss 158320 KiB
+sample 20: cpu 0.5% rss 158320 KiB
+sample 21: cpu 0.4% rss 158320 KiB
+sample 22: cpu 0.4% rss 158320 KiB
+sample 23: cpu 0.6% rss 158320 KiB
+sample 24: cpu 0.6% rss 158320 KiB
+sample 25: cpu 0.6% rss 158320 KiB
+sample 26: cpu 0.6% rss 158320 KiB
+sample 27: cpu 0.4% rss 158320 KiB
+sample 28: cpu 0.4% rss 158320 KiB
+sample 29: cpu 0.4% rss 158320 KiB
+sample 30: cpu 0.3% rss 158320 KiB
+mean %CPU over 30 ps samples: .44
+CPU time used in the window: .18 s of 30 s (.60%)
+resident memory at the end: 158320 KiB

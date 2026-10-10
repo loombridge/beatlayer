@@ -24,7 +24,7 @@ Beatlayer is an open-source digital audio workstation with the workflow of Ablet
 - No allocation, lock, or blocking call on an audio thread.
 - Engine, model, and device crates never depend on a UI crate. `cargo xtask layers` enforces this.
 - Every feature has a headless test path.
-- No dependency whose licence `cargo deny` rejects. No plug-in binaries or third-party audio in the repo.
+- No dependency whose licence `cargo deny` rejects. No plug-in binaries or third-party audio in the repo. `spikes/` is outside the workspace and exempt, because nothing there ships.
 - No `git add -A`.
 
 ## How work is done

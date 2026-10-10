@@ -1,0 +1,69 @@
+name: Bug report
+description: Something in Beatlayer doesn't work as it should.
+title: "Bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting a bug. Search the existing issues first, in case someone has reported it already.
+
+        Don't attach Ableton's content: its samples, presets, packs, or audio that Live rendered from them. Projects and audio you made from your own material are fine.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected to see instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The fewest steps that show the bug, starting from a new project if you can.
+      placeholder: |
+        1. Create a MIDI track.
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Beatlayer version
+      description: The release you installed, or the commit (`git rev-parse --short HEAD`) if you built Beatlayer yourself.
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - macOS (Apple Silicon)
+        - Windows (x64)
+        - Linux (x64)
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: os-version
+    attributes:
+      label: Operating system version
+      placeholder: macOS 26.1, Windows 11 24H2, Ubuntu 24.04
+    validations:
+      required: true
+  - type: textarea
+    id: audio-setup
+    attributes:
+      label: Audio and MIDI setup
+      description: If the bug involves audio or MIDI, give the interface, the driver (Core Audio, ASIO, WASAPI, PipeWire, JACK, or ALSA), the sample rate, the buffer size, and any controllers.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and crash reports
+      description: Paste any error output or crash report. It's formatted as code for you.
+      render: text
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: Plug-ins involved, screenshots, or a small project that shows the bug.

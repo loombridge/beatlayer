@@ -7,7 +7,16 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+# Serialise the time types with serde, for commands and project files.
+serde = ["dep:serde"]
+
 [dependencies]
+serde = { version = "1.0.228", default-features = false, features = ["std", "derive"], optional = true }
+
+[dev-dependencies]
+proptest = { version = "1.11", default-features = false, features = ["std"] }
+serde_json = "1"
 
 [lints]
 workspace = true

@@ -1,0 +1,8 @@
+bench: 30 s scripted scenario (horizontal scroll across 512 bars, zoom cycle every 5 s, 200 meters animating)
+scale factor: 2, lanes area: 1100 x 940 pt
+frames: 3599 (120.0 per second)
+frame interval ms: median 8.33, p99 8.74, max 21.35
+main-thread CPU per frame ms: median 5.14, p99 6.62, max 7.42
+process CPU per frame ms: median 5.37, p99 6.85, max 7.63
+frames over 16.7 ms: 1
+arrangement quads per frame: median 10612, max 15362

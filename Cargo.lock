@@ -288,6 +288,7 @@ dependencies = [
  "bl-commands",
  "bl-core",
  "bl-dsp",
+ "bl-media",
  "bl-model",
  "bl-rt",
  "libm",

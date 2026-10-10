@@ -1,18 +1,19 @@
 //! The compiler: turns a document into an engine program, and decides which
 //! edits need a new program at all.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use bl_model::{
-    Change, ChangeSet, DeviceId, DeviceKind, Document, Mixer, OrdMap, ParamId, SendTap, Track,
-    TrackId,
+    Change, ChangeSet, ContentHash, DeviceId, DeviceKind, Document, Mixer, OrdMap, ParamId,
+    SendTap, Track, TrackId, TrackKind,
 };
 
 use crate::EngineConfig;
+use crate::clips::{ClipList, ClipPlayer};
 use crate::gc::{GcHandle, Program};
 use crate::message::{LoopRegion, ParamEvent, TransportCommand};
 use crate::mixer::{self, Route, Solo, TrackMixer, route};
-use crate::node::{NodeKey, ParamValue};
+use crate::node::{NodeData, NodeKey, ParamValue};
 use crate::program::{EngineProgram, Input, Instance, Migration, NodeSlot, Span, Task};
 use crate::registry::Registry;
 
@@ -33,16 +34,27 @@ pub struct Update {
     /// Parameter changes, which take effect at the start of the next block
     /// after the program, if there is one.
     pub params: Vec<ParamEvent>,
+    /// Data for nodes, which reaches them after the program: the clips of
+    /// each audio track whose clips changed, for its clip player
+    /// ([`NodeKey::Player`]), placed under the program's tempo map.
+    pub data: Vec<(NodeKey, NodeData)>,
     /// Devices in the new program that no factory makes a node for, so their
     /// tracks' audio passes through where they'd be.
     pub unhosted: Vec<DeviceId>,
+    /// Media that clips in the tracks sent here name and the registry's
+    /// media library can't supply: missing, changed, or not audio. Those
+    /// clips play silence (`docs/specs/audio-clips.md`, R14).
+    pub missing: Vec<ContentHash>,
 }
 
 impl Update {
     /// Whether the update holds nothing to send.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.program.is_none() && self.transport.is_empty() && self.params.is_empty()
+        self.program.is_none()
+            && self.transport.is_empty()
+            && self.params.is_empty()
+            && self.data.is_empty()
     }
 }
 
@@ -50,8 +62,20 @@ impl Update {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Identity {
     Device(DeviceKind),
+    Player,
     Mixer,
     Route,
+}
+
+/// Which clip players a compile sends their clips to, besides the new ones
+/// (which get theirs whenever they have clips).
+#[derive(Debug, Default)]
+struct Resend {
+    /// Every player: the tempo map changed, or the program isn't built on
+    /// the last one synced.
+    all: bool,
+    /// The players of these tracks, whose clips changed.
+    tracks: BTreeSet<TrackId>,
 }
 
 /// Where a node sits in the last program compiled.
@@ -71,7 +95,9 @@ struct Placed {
 /// settings (volume, pan, the activator, solo, Solo in Place, send levels)
 /// and device parameters become [`ParamEvent`]s for the nodes that already
 /// run them, the Arrangement loop becomes a [`TransportCommand::SetLoop`],
-/// and clip changes will travel as node data (WP-1.4), so none of them
+/// and clip changes travel as node data: a track whose clips changed sends
+/// its clip player the whole list again, placed and with its audio from the
+/// registry's media library (`docs/specs/audio-clips.md`). None of them
 /// recompiles.
 ///
 /// Each program lists the nodes it takes over from the program compiled
@@ -117,8 +143,19 @@ impl Compiler {
         let mut params = Vec::new();
         let recompile = needs_program(&changes, &old, document, &mut params);
         solo_events(&changes, &old, document, &mut params);
+        // Tracks that held or hold a clip that changed.
+        let tracks: BTreeSet<TrackId> = changes
+            .clips
+            .keys()
+            .flat_map(|&clip| [old.clip_track(clip), document.clip_track(clip)])
+            .flatten()
+            .collect();
         let mut update = if recompile {
-            self.compile(document)
+            let resend = Resend {
+                all: old.settings().tempo != document.settings().tempo,
+                tracks,
+            };
+            self.compile_with(document, &resend)
         } else {
             self.synced = Some(document.clone());
             let mut update = Update::default();
@@ -127,6 +164,9 @@ impl Compiler {
                     .transport
                     .push(TransportCommand::SetLoop(loop_region(document)));
             }
+            for track in tracks {
+                self.send_clips(document, track, &mut update);
+            }
             update
         };
         update.params = params;
@@ -134,8 +174,41 @@ impl Compiler {
     }
 
     /// A whole new program for `document`. Nodes that the last program ran
-    /// migrate into it.
+    /// migrate into it, and every audio track's clip player is sent its
+    /// clips.
     pub fn compile(&mut self, document: &Document) -> Update {
+        let resend = Resend {
+            all: true,
+            tracks: BTreeSet::new(),
+        };
+        self.compile_with(document, &resend)
+    }
+
+    /// Sends `track`'s clip player its clips, if it's an audio track: a
+    /// list, placed under `document`'s tempo map, with each clip's audio from
+    /// the media library. An empty list clears the player's.
+    fn send_clips(&self, document: &Document, track: TrackId, update: &mut Update) {
+        let Some(track) = document
+            .track(track)
+            .filter(|track| track.kind() == TrackKind::Audio)
+        else {
+            return;
+        };
+        let built = ClipList::build(
+            track,
+            &document.settings().tempo,
+            self.config.sample_rate,
+            self.registry.media(),
+        );
+        update.missing.extend(built.missing);
+        update.missing.sort_unstable();
+        update.missing.dedup();
+        update
+            .data
+            .push((NodeKey::Player(track.id()), self.gc.data(built.list)));
+    }
+
+    fn compile_with(&mut self, document: &Document, resend: &Resend) -> Update {
         let solo = Solo::of(document);
         let mut build = Build::default();
         let mut main_inputs = Vec::new();
@@ -206,12 +279,27 @@ impl Compiler {
         self.generation = generation;
         self.layout = build.layout;
         self.synced = Some(document.clone());
-        Update {
+        let mut update = Update {
             program: Some(self.gc.program(program)),
             transport: vec![TransportCommand::SetLoop(loop_region(document))],
-            params: Vec::new(),
             unhosted: build.unhosted,
+            ..Update::default()
+        };
+        // A new player gets its track's clips if it has any; a player that
+        // migrated keeps its own unless they changed, or the tempo map
+        // moved them.
+        for track in document.tracks() {
+            let id = track.id();
+            let send = if build.new_players.contains(&id) {
+                track.clips().next().is_some()
+            } else {
+                resend.all || resend.tracks.contains(&id)
+            };
+            if send {
+                self.send_clips(document, id, &mut update);
+            }
         }
+        update
     }
 
     /// Forgets the last program, so the next compile makes every node anew
@@ -284,6 +372,17 @@ impl Compiler {
         };
         let config = self.config.node_config();
         let node_start = build.nodes.len() as u32;
+        // An audio track's clip player heads its chain.
+        if track.kind() == TrackKind::Audio {
+            let key = NodeKey::Player(track.id());
+            if self.previous(key, &Identity::Player).is_none() {
+                build.new_players.insert(track.id());
+            }
+            let slot = self.place(build, key, Identity::Player, || {
+                Instance::Device(Box::new(ClipPlayer::new(&config)))
+            });
+            build.nodes.push(slot);
+        }
         for device in track.devices() {
             let key = NodeKey::Device(device.id);
             let identity = Identity::Device(device.kind.clone());
@@ -390,6 +489,8 @@ struct Build {
     nodes: Vec<u32>,
     dependents: Vec<Vec<u32>>,
     unhosted: Vec<DeviceId>,
+    /// Tracks whose clip player is new in this program.
+    new_players: BTreeSet<TrackId>,
 }
 
 /// Fills in each task's span of the flattened dependents lists.
@@ -459,8 +560,8 @@ fn needs_program(
             _ => recompile = true,
         }
     }
-    // Clip changes never recompile: their data goes to the track's clip
-    // player as its own message once clips play (WP-1.4).
+    // Clip changes never recompile: `Compiler::sync` sends the track's clip
+    // player its clips as node data (`docs/specs/audio-clips.md`, R12).
     recompile
 }
 
@@ -871,14 +972,17 @@ mod tests {
         assert!(program.slots[slot as usize].bypass);
         let before = program.node_count();
 
-        // A new track brings a mixer, an output, and a send to the return;
-        // the rest migrate.
+        // A new audio track brings a clip player, a mixer, an output, and a
+        // send to the return; the rest migrate. With no clips, the player
+        // needs no data.
         let new = track(&mut f.editor, TrackKind::Audio, None);
         let update = f.sync();
         let program = update.program.as_ref().unwrap().get();
-        assert_eq!(program.node_count(), before + 3);
+        assert_eq!(program.node_count(), before + 4);
         assert_eq!(program.migration_count(), before);
+        assert!(update.data.is_empty());
         for key in [
+            NodeKey::Player(new),
             NodeKey::Mixer(new),
             NodeKey::Output(new),
             NodeKey::Send {
@@ -953,5 +1057,99 @@ mod tests {
         let program = update.program.as_ref().unwrap().get();
         assert_eq!(program.base(), None);
         assert_eq!(program.migration_count(), 0);
+    }
+
+    /// The clips in a data message for a clip player.
+    fn clips_in(update: &Update, track: TrackId) -> Option<usize> {
+        update
+            .data
+            .iter()
+            .find(|(key, _)| *key == NodeKey::Player(track))
+            .map(|(_, data)| data.downcast_ref::<ClipList>().unwrap().len())
+    }
+
+    // Spec: audio-clips R12
+    #[test]
+    fn clip_edits_send_the_tracks_clips_and_never_a_program() {
+        use bl_core::time::Ticks;
+        use bl_model::{AudioData, Clip, ClipData, ContentHash};
+
+        let mut f = Fixture::new();
+        let audio = track(&mut f.editor, TrackKind::Audio, None);
+        let other = track(&mut f.editor, TrackKind::Audio, None);
+        let mut media = crate::MediaMap::new();
+        let file = bl_media::SampleData::new(48_000, vec![vec![0.5; 480]]).unwrap();
+        media.insert(ContentHash([1; 32]), std::sync::Arc::new(file));
+        f.compiler.registry.set_media(std::sync::Arc::new(media));
+        // No clips yet: the new players need no data.
+        let update = f.sync();
+        assert!(update.program.is_some());
+        assert!(update.data.is_empty());
+
+        let new_clip = |f: &mut Fixture, media: u8| {
+            let id = f.editor.new_id();
+            let data = ClipData::Audio(AudioData::new(ContentHash([media; 32])));
+            f.apply(Command::CreateClip {
+                track: audio,
+                clip: Clip::new(id, Ticks::ZERO, Ticks::WHOLE, data),
+            })
+        };
+        let update = new_clip(&mut f, 1);
+        assert!(update.program.is_none());
+        assert_eq!(update.data.len(), 1);
+        assert_eq!(clips_in(&update, audio), Some(1));
+        assert!(update.missing.is_empty());
+        // A clip whose media the library doesn't have is reported, and its
+        // track's list leaves it out.
+        let update = new_clip(&mut f, 2);
+        assert_eq!(clips_in(&update, audio), Some(1));
+        assert_eq!(update.missing, vec![ContentHash([2; 32])]);
+
+        // Moving a clip to another track sends both tracks' lists.
+        let id = f
+            .editor
+            .document()
+            .track(audio)
+            .unwrap()
+            .clips()
+            .next()
+            .unwrap()
+            .id;
+        let update = f.apply(Command::MoveClip {
+            clip: id,
+            track: other,
+            start: Ticks::QUARTER,
+        });
+        assert!(update.program.is_none());
+        assert_eq!(clips_in(&update, audio), Some(0));
+        assert_eq!(clips_in(&update, other), Some(1));
+        // A deactivated clip leaves the list.
+        let update = f.apply(Command::SetClipMute {
+            clip: id,
+            mute: true,
+        });
+        assert_eq!(clips_in(&update, other), Some(0));
+        f.apply(Command::SetClipMute {
+            clip: id,
+            mute: false,
+        });
+
+        // A recompile sends lists only where they changed, unless the tempo
+        // map moved every clip.
+        let update = f.apply(Command::SetDeviceEnabled {
+            device: f.tone,
+            enabled: false,
+        });
+        assert!(update.program.is_some());
+        assert!(update.data.is_empty());
+        let update = f.apply(Command::SetTempo {
+            tempo: TempoMap::constant(Bpm::new(90.0).unwrap()),
+        });
+        assert!(update.program.is_some());
+        assert_eq!(clips_in(&update, audio), Some(0));
+        assert_eq!(update.missing, vec![ContentHash([2; 32])]);
+        assert_eq!(clips_in(&update, other), Some(1));
+        // MIDI tracks have no clip player yet (WP-2.1).
+        assert_eq!(update.data.len(), 2);
     }
 }

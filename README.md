@@ -30,7 +30,16 @@ Beatlayer is in Phase 0 of its [build plan](docs/03-build-plan.md). The workspac
    cargo xtask check
    ```
 
-Read [AGENTS.md](AGENTS.md) before contributing. Every contribution follows the [clean-room policy](https://github.com/loombridge/beatlayer/blob/main/CONTRIBUTING.md#building-without-abletons-code).
+1. To build this platform's package, install cargo-packager once, then package:
+
+   ```sh
+   cargo install --locked cargo-packager@0.11.8
+   cargo xtask package
+   ```
+
+   The packages land in `target/packages`: `Beatlayer.app` and a DMG on macOS, an MSI on Windows, and an AppImage and a tarball on Linux. They're unsigned unless the signing variables in `.github/workflows/nightly.yml` are set. The task then starts each packaged binary with `--version` to check it.
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md) before contributing. Every contribution follows the [clean-room policy](https://github.com/loombridge/beatlayer/blob/main/CONTRIBUTING.md#building-without-abletons-code).
 
 ## Licence
 

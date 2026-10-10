@@ -1,18 +1,26 @@
 //! Repository tasks. Run `cargo xtask help` for the list.
 
+mod package;
+
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 
 use serde_json::Value;
 
+mod ui_parity;
+
 const USAGE: &str = "\
 Usage: cargo xtask <task>
 
 Tasks:
-  check          Run every check: format, clippy, tests, layers, deny, and the deny self-test
+  check          Run every check: format, clippy, tests, layers, the UI parity
+                 reference, deny, and the deny self-test
   layers         Check the crate layering rules
+  ui-parity      Validate docs/ui-parity/shortcuts.toml and regenerate shortcuts.md
+                 (with --check, fail instead of writing if shortcuts.md is out of date)
   deny-selftest  Prove that deny.toml still rejects an incompatible licence
+  package        Build this platform's packages with cargo-packager and check they start
   rtsan          Run the real-time tests in rtsan/ under LLVM's RealtimeSanitizer, with a
                  runtime already on this machine (the file RTSAN_LIB_PATH names, or
                  Homebrew's llvm on macOS, or LLVM 20 or later on Linux). Arguments after
@@ -59,14 +67,22 @@ fn main() -> ExitCode {
 }
 
 fn run(root: &Path, args: &[String]) -> Result<(), String> {
-    match args.first().map(String::as_str) {
+    let task = args.first().map(String::as_str);
+    let options = args.get(1..).unwrap_or_default();
+    match task {
         Some("check") => check(root),
         Some("layers") => layers(root),
+        Some("ui-parity") => match options {
+            [] => ui_parity::generate(root),
+            [flag] if flag == "--check" => ui_parity::check(root),
+            _ => Err(format!("usage: cargo xtask ui-parity [--check]\n\n{USAGE}")),
+        },
         Some("deny-selftest") => deny_selftest(root),
+        Some("package") => package::package(root),
         Some("rtsan") => {
-            let passed_on = match args.get(1).map(String::as_str) {
+            let passed_on = match options.first().map(String::as_str) {
                 None => &[][..],
-                Some("--") => &args[2..],
+                Some("--") => &options[1..],
                 Some(other) => {
                     return Err(format!(
                         "unexpected `{other}`; put test arguments after `--`"
@@ -119,6 +135,7 @@ fn check(root: &Path) -> Result<(), String> {
             Box::new(|| cargo(root, &["test", "--workspace", "--all-features", "--locked"])),
         ),
         ("layers", Box::new(|| layers(root))),
+        ("ui parity reference", Box::new(|| ui_parity::check(root))),
         (
             "licences, advisories, bans, sources",
             Box::new(|| cargo(root, &["deny", "--locked", "check"])),

@@ -486,6 +486,20 @@ fn selected_clips_are_drawn_and_announced() {
         "{}",
         selected[0].value
     );
+    // The pointer says what a press would do.
+    let cursor = |s: &mut Set, at: Pos2| {
+        s.h.frame(vec![Event::PointerMoved(at)])
+            .platform_output
+            .cursor_icon
+    };
+    assert_eq!(
+        cursor(&mut s, pos2(x(6.0) - 1.0, AUDIO_3.1)),
+        egui::CursorIcon::ResizeHorizontal
+    );
+    assert_eq!(
+        cursor(&mut s, pos2(x(4.0), AUDIO_3.0)),
+        egui::CursorIcon::Grab
+    );
 }
 
 #[test]

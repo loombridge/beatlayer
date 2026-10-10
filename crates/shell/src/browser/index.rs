@@ -10,7 +10,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -233,13 +233,19 @@ impl Builder {
 struct Shared {
     latest: Mutex<Option<Arc<Snapshot>>>,
     generation: AtomicU64,
-    indexing: AtomicBool,
+    /// The last request indexed to its end.
+    done: AtomicU64,
 }
+
+/// A request to index places: its number and the places' roots.
+type Request = (u64, Vec<PathBuf>);
 
 /// The index of the places: the thread that builds it and the snapshot the
 /// browser searches.
 pub struct Index {
-    requests: Option<Sender<Vec<PathBuf>>>,
+    requests: Option<Sender<Request>>,
+    /// The number of the last request sent.
+    requested: u64,
     shared: Arc<Shared>,
     waker: Waker,
     roots: Vec<PathBuf>,
@@ -270,6 +276,7 @@ impl Index {
     pub fn new(waker: Waker) -> Self {
         Self {
             requests: None,
+            requested: 0,
             shared: Arc::new(Shared::default()),
             waker,
             roots: Vec::new(),
@@ -304,9 +311,12 @@ impl Index {
             }
             self.requests = Some(sender);
         }
-        self.shared.indexing.store(true, Ordering::Release);
         if let Some(sender) = &self.requests {
-            let _ = sender.send(self.roots.clone());
+            self.requested += 1;
+            if sender.send((self.requested, self.roots.clone())).is_err() {
+                // The thread has gone: nothing is being indexed.
+                self.shared.done.store(self.requested, Ordering::Release);
+            }
         }
     }
 
@@ -341,7 +351,7 @@ impl Index {
     /// Whether the thread is still indexing.
     #[must_use]
     pub fn indexing(&self) -> bool {
-        self.shared.indexing.load(Ordering::Acquire)
+        self.shared.done.load(Ordering::Acquire) < self.requested
     }
 
     /// Waits until the thread has indexed every place, or `timeout` passes,
@@ -364,25 +374,27 @@ impl Index {
 
 /// The index thread: indexes each request's places, starting again when a
 /// newer request arrives, until the browser goes away.
-fn run(requests: &Receiver<Vec<PathBuf>>, shared: &Shared, waker: &Waker) {
-    let Ok(mut roots) = requests.recv() else {
+fn run(requests: &Receiver<Request>, shared: &Shared, waker: &Waker) {
+    let Ok(mut request) = requests.recv() else {
         return;
     };
     loop {
         // Only the newest request counts.
         while let Ok(newer) = requests.try_recv() {
-            roots = newer;
+            request = newer;
         }
-        match walk(&roots, requests, shared, waker) {
+        match walk(&request.1, requests, shared, waker) {
             Walk::Done => {
-                shared.indexing.store(false, Ordering::Release);
+                // Published before it's marked done, so a browser that sees
+                // it done finds the snapshot.
+                shared.done.store(request.0, Ordering::Release);
                 waker.wake();
                 match requests.recv() {
-                    Ok(next) => roots = next,
+                    Ok(next) => request = next,
                     Err(_) => return,
                 }
             }
-            Walk::Restart(next) => roots = next,
+            Walk::Restart(next) => request = next,
             Walk::Stop => return,
         }
     }
@@ -390,7 +402,7 @@ fn run(requests: &Receiver<Vec<PathBuf>>, shared: &Shared, waker: &Waker) {
 
 enum Walk {
     Done,
-    Restart(Vec<PathBuf>),
+    Restart(Request),
     Stop,
 }
 
@@ -405,12 +417,7 @@ fn publish(builder: &Builder, shared: &Shared, waker: &Waker) {
 
 /// Walks every place, folder by folder, publishing as it goes. Links to
 /// folders aren't followed, so a loop can't trap it.
-fn walk(
-    roots: &[PathBuf],
-    requests: &Receiver<Vec<PathBuf>>,
-    shared: &Shared,
-    waker: &Waker,
-) -> Walk {
+fn walk(roots: &[PathBuf], requests: &Receiver<Request>, shared: &Shared, waker: &Waker) -> Walk {
     let mut builder = Builder::new(roots.to_vec());
     let mut published_at = Instant::now();
     let mut published_items = 0;

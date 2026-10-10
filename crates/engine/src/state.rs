@@ -1,6 +1,6 @@
 //! What the engine tells the UI: playhead, meters, CPU load, and reports.
 
-use bl_core::time::{Frames, Ticks};
+use bl_core::time::{Frames, SampleRate, Ticks};
 use bl_model::TrackId;
 use rtrb::Consumer;
 
@@ -52,7 +52,11 @@ pub struct EngineCounters {
 /// The engine as the audio thread last published it, after a block.
 #[derive(Debug, PartialEq)]
 pub struct EngineState {
-    /// Frames processed since the engine started: the engine clock.
+    /// The sample rate the engine runs at. It changes when the engine
+    /// restarts on a device at another rate (WP-1.13).
+    pub sample_rate: SampleRate,
+    /// Frames processed since the engine started: the engine clock. It
+    /// starts again from 0 when the engine restarts on a device.
     pub clock: u64,
     /// Whether the song is playing.
     pub playing: bool,
@@ -78,9 +82,11 @@ pub struct EngineState {
 }
 
 impl EngineState {
-    /// A state before the first block, with room for `tracks` meters.
-    pub(crate) fn with_capacity(tracks: usize) -> Self {
+    /// A state before the first block at `sample_rate`, with room for
+    /// `tracks` meters.
+    pub(crate) fn with_capacity(tracks: usize, sample_rate: SampleRate) -> Self {
         Self {
+            sample_rate,
             clock: 0,
             playing: false,
             position: Frames::ZERO,
@@ -112,6 +118,7 @@ impl Clone for EngineState {
         let mut meters = Vec::with_capacity(self.meters.capacity());
         meters.extend_from_slice(&self.meters);
         Self {
+            sample_rate: self.sample_rate,
             clock: self.clock,
             playing: self.playing,
             position: self.position,

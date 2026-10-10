@@ -2,7 +2,7 @@
 
 use std::time::Instant;
 
-use bl_core::time::{Frames, TempoMap};
+use bl_core::time::{Frames, TempoMap, Ticks};
 use bl_model::ParamId;
 use bl_rt::log::{Level, Writer};
 use bl_rt::rt_log;
@@ -33,6 +33,17 @@ struct Pending {
 struct Scheduled {
     command: ScheduledCommand,
     frame: Frames,
+}
+
+/// What one processor hands the next when the engine restarts on a device
+/// (WP-1.13): where the song was, in beats, and the scheduled commands that
+/// hadn't fired.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct Carry {
+    /// The song position.
+    pub(crate) position: Ticks,
+    /// Scheduled commands waiting to fire, in the order they arrived.
+    pub(crate) scheduled: Vec<ScheduledCommand>,
 }
 
 /// The engine on the audio thread: it runs the current program once per
@@ -161,6 +172,39 @@ impl Processor {
         self.last = frames;
         self.finish(began, frames);
         self.output()
+    }
+
+    /// Takes what's waiting on the queue and publishes the state, without
+    /// processing audio: a processor about to start on a device is ready,
+    /// and shows its program, position, and rate, before its first block.
+    /// Called off the audio thread.
+    pub(crate) fn prime(&mut self) {
+        self.drain();
+        self.publish(0.0);
+    }
+
+    /// Stops the transport and publishes a state with it stopped, silent
+    /// meters, and no load, for a processor whose stream has closed. Called
+    /// off the audio thread, once the stream is gone.
+    pub(crate) fn park(&mut self) {
+        self.playing = false;
+        if let Some(program) = self.program.as_mut() {
+            let program = program.get_mut();
+            program.meters.iter_mut().for_each(|peak| *peak = [0.0; 2]);
+        }
+        self.publish(0.0);
+    }
+
+    /// The song position in beats and the scheduled commands waiting to
+    /// fire, for the processor that takes over. Allocates: call it off the
+    /// audio thread.
+    pub(crate) fn carry(&self) -> Carry {
+        Carry {
+            position: self
+                .tempo()
+                .frames_to_ticks(self.position, self.config.sample_rate),
+            scheduled: self.scheduled.iter().map(|entry| entry.command).collect(),
+        }
     }
 
     /// The last block's output.
@@ -451,6 +495,11 @@ impl Processor {
             0.0
         };
         self.cpu_load_max = self.cpu_load_max.max(cpu_load);
+        self.publish(cpu_load);
+    }
+
+    /// Publishes the state for the UI, with this load.
+    fn publish(&mut self, cpu_load: f32) {
         let position_ticks = self
             .tempo()
             .frames_to_ticks(self.position, self.config.sample_rate);

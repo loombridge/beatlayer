@@ -158,6 +158,36 @@ impl Compiler {
         }
     }
 
+    /// Keeps `document` as the latest without compiling it, for an engine
+    /// with no device running it: [`reconfigure`](Self::reconfigure)
+    /// compiles it when one runs again. Only for that case: the next
+    /// [`sync`](Self::sync) compares with it as if its program had been
+    /// sent.
+    pub fn remember(&mut self, document: &Document) {
+        self.synced = Some(document.clone());
+    }
+
+    /// Switches to `config` (a device's new sample rate or block size) and
+    /// compiles the latest document anew for it, with every node made
+    /// afresh at the new settings and none taken over: the program for a
+    /// processor starting without one (WP-1.13). Empty if no document has
+    /// been synced yet.
+    pub fn reconfigure(&mut self, config: EngineConfig) -> Update {
+        let document = self.synced.take();
+        self.config = config;
+        self.reset();
+        match document {
+            Some(document) => self.compile(&document),
+            None => Update::default(),
+        }
+    }
+
+    /// The settings programs are compiled for.
+    #[must_use]
+    pub fn config(&self) -> &EngineConfig {
+        &self.config
+    }
+
     /// Forgets the last program, so the next compile makes every node anew
     /// and takes none over: for an audio thread that starts without one.
     pub fn reset(&mut self) {

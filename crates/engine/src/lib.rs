@@ -28,6 +28,14 @@
 //! | [`DropThread`] | drop | Frees what the audio thread let go of |
 //! | [`Monitor`] | any one | Reads the playhead, meters, and CPU load the audio thread publishes |
 //! | [`Offline`] | any one | All of the above on one thread, faster than real time, with no device |
+//! | [`AudioEngine`] | main | The engine on an audio device, kept going through device changes |
+//!
+//! On a device, [`AudioEngine`] runs the engine on a stream that
+//! `bl-audio-io`'s [`Supervisor`](bl_audio_io::Supervisor) keeps open (WP-1.13).
+//! When the device goes away, changes sample rate, stalls, or the machine
+//! sleeps, the engine stops cleanly and says why, and when the stream opens
+//! again it restarts with a processor made for the stream's rate and block
+//! size, the song recompiled for it and still at its position.
 //!
 //! An offline render needs no threads: [`Offline`] compiles, sends, and
 //! processes in turn on one thread, collecting garbage as it goes, and runs
@@ -56,6 +64,7 @@
 bl_rt::install_trap!();
 
 mod compiler;
+mod device;
 mod engine;
 mod gc;
 mod message;
@@ -72,7 +81,9 @@ pub mod testing;
 
 use bl_core::time::SampleRate;
 
+pub use bl_audio_io::{Cause, DeviceEvent, DeviceStatus, Interruption, SupervisorOptions};
 pub use compiler::{Compiler, Update};
+pub use device::AudioEngine;
 pub use engine::{CompileCounts, Engine, Sender, channel};
 pub use gc::{Collector, DROP_PERIOD, DropThread, GcHandle, Program};
 pub use message::{Action, ParamEvent, Report, ScheduledCommand, TransportCommand, When};

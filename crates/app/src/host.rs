@@ -544,6 +544,10 @@ impl Host {
                     .set_title("Save Beatlayer Set As")
                     .add_filter("Beatlayer Set", &["blset"])
                     .set_file_name(format!("{}.blset", self.shell.set_name()));
+                // Spec: app-shell R22.
+                if let Some(folder) = self.shell.save_dialog_folder() {
+                    dialog = dialog.set_directory(folder);
+                }
                 if let Some(main) = &self.main {
                     dialog = dialog.set_parent(main.window.as_ref());
                 }

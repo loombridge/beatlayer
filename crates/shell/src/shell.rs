@@ -11,8 +11,8 @@ use serde_json::{Value, json};
 
 use crate::audio::{AudioHost, ConfigureAudio, ToneSettings};
 use crate::commands::{
-    self as ids, PathArgs, SetResult, SettingsArgs, SwitchResult, TestToneArgs, TestToneState,
-    ThemeArgs, ViewResult,
+    self as ids, PathArgs, SaveAsArgs, SetResult, SettingsArgs, SwitchResult, TestToneArgs,
+    TestToneState, ThemeArgs, ViewResult,
 };
 use crate::files::{ProjectFiles, SetStore, factory_default_set};
 use crate::settings::{Preferences, SettingsPage, ThemeChoice};
@@ -355,6 +355,17 @@ impl Shell {
                 || "Untitled".to_owned(),
                 |s| s.to_string_lossy().into_owned(),
             )
+    }
+
+    /// The folder the Save Set As dialog opens in: the open set's project
+    /// folder, so keeping the suggestion saves into the same project
+    /// (app-shell R22), or `None` for a set never saved, whose dialog opens
+    /// where the system left it.
+    #[must_use]
+    pub fn save_dialog_folder(&self) -> Option<PathBuf> {
+        self.set_path
+            .as_deref()
+            .map(|path| bl_project::ProjectFolder::of_set(path).root().to_owned())
     }
 
     /// Whether the set has changes that aren't saved.
@@ -827,9 +838,13 @@ impl Shell {
                 Ok(self.set_result())
             }
             ids::SET_SAVE_AS => {
-                let PathArgs { path } = Self::args(id, args)?;
-                let path = PathBuf::from(path);
-                let warnings = self.store.save(&path, &self.editor).map_err(failed)?;
+                // Spec: app-shell R17 to R21. The store decides where in a
+                // project folder the set goes; the result says where.
+                let SaveAsArgs { path } = Self::args(id, args)?;
+                let (path, warnings) = self
+                    .store
+                    .save_as(Path::new(&path), &self.editor)
+                    .map_err(failed)?;
                 self.saved_as(path, &warnings);
                 Ok(self.set_result())
             }

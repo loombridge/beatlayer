@@ -46,7 +46,9 @@ fn check_loads_everything_the_window_needs() {
     assert_eq!(code, Some(0), "{stdout}");
     assert!(stdout.contains("0 problems"), "{stdout}");
     assert!(stdout.contains("keymap of 358 shortcuts"), "{stdout}");
-    assert!(stdout.contains("9 menus"), "{stdout}");
+    // macOS adds the application menu; Windows and Linux have the other eight.
+    let menus = if cfg!(target_os = "macos") { 9 } else { 8 };
+    assert!(stdout.contains(&format!("{menus} menus")), "{stdout}");
 }
 
 #[test]

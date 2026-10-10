@@ -1,14 +1,19 @@
 //! What a stream counts while it runs, and how it spots dropouts.
 
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering::Relaxed};
+use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
+
+use bl_rt::{ThreadReport, ThreadReports};
 
 /// A snapshot of a stream's counters since it opened.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct StreamStats {
-    /// Blocks passed to the callback.
+    /// Blocks the stream ran: every block passed to the callback, plus each
+    /// silent block a new audio thread spent on set-up (see
+    /// `audio_thread_setups`).
     pub blocks: u64,
-    /// Frames passed to the callback.
+    /// Frames in those blocks.
     pub frames: u64,
     /// Callbacks from the device, before large ones are split into blocks.
     pub device_callbacks: u64,
@@ -45,6 +50,20 @@ pub struct StreamStats {
     pub other_errors: u64,
     /// Whether the audio thread has run a block.
     pub audio_thread_started: bool,
+    /// How the latest audio thread was set up: its priority, workgroup, and
+    /// checks. `None` until the stream runs its first block.
+    pub audio_thread: Option<ThreadReport>,
+    /// How many times an audio thread was set up: once when the stream first
+    /// runs, and again each time the backend moves the callback to a new
+    /// thread (Core Audio does when the default device changes). On a thread
+    /// the audio API owns, set-up takes that thread's first block, which
+    /// plays silence and counts in `blocks` and `frames` without reaching
+    /// the callback.
+    pub audio_thread_setups: u64,
+    /// Heap operations inside audio blocks, which the allocation trap counts
+    /// in builds that install it (Beatlayer's debug and test builds). Any is
+    /// a bug: the real-time rules allow none.
+    pub heap_operations: u64,
 }
 
 /// How close in stream time two dropout detections must be to count as one
@@ -78,6 +97,12 @@ pub(crate) struct Counters {
     other_errors: AtomicU64,
     audio_thread_started: AtomicBool,
     resync: AtomicBool,
+    audio_thread_setups: AtomicU64,
+    heap_operations: AtomicU64,
+    /// The reading end of the audio thread's set-up reports. Only threads
+    /// that read statistics lock it; the audio thread writes the other end
+    /// without locking.
+    thread_reports: Mutex<Option<ThreadReports>>,
 }
 
 impl Counters {
@@ -102,7 +127,28 @@ impl Counters {
             other_errors: AtomicU64::new(0),
             audio_thread_started: AtomicBool::new(false),
             resync: AtomicBool::new(false),
+            audio_thread_setups: AtomicU64::new(0),
+            heap_operations: AtomicU64::new(0),
+            thread_reports: Mutex::new(None),
         }
+    }
+
+    /// Keeps the reading end of the audio thread's set-up reports, whose
+    /// writing end the [`CallbackRunner`](crate::runner::CallbackRunner) has.
+    pub(crate) fn set_thread_reports(&self, reports: ThreadReports) {
+        *self
+            .thread_reports
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(reports);
+    }
+
+    /// Counts an audio thread set-up and returns how many there have been.
+    pub(crate) fn record_thread_setup(&self) -> u64 {
+        self.audio_thread_setups.fetch_add(1, Relaxed) + 1
+    }
+
+    pub(crate) fn record_heap_operations(&self, count: u64) {
+        self.heap_operations.fetch_add(count, Relaxed);
     }
 
     pub(crate) fn record_device_callback(&self, frames: usize) {
@@ -202,6 +248,14 @@ impl Counters {
             realtime_denied: self.realtime_denied.load(Relaxed),
             other_errors: self.other_errors.load(Relaxed),
             audio_thread_started: self.audio_thread_started.load(Relaxed),
+            audio_thread: self
+                .thread_reports
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .as_mut()
+                .and_then(ThreadReports::latest),
+            audio_thread_setups: self.audio_thread_setups.load(Relaxed),
+            heap_operations: self.heap_operations.load(Relaxed),
         }
     }
 }

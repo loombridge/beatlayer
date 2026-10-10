@@ -8,9 +8,10 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use bl_audio_io::{
-    AudioBuffer, AudioBufferMut, AudioCallback, DeviceId, DeviceSelector, PortRequest,
-    ProcessContext, Stream, StreamInfo, StreamRequest, StreamStats,
+    AudioBuffer, AudioBufferMut, AudioCallback, BackendKind, DeviceId, DeviceSelector, PortRequest,
+    ProcessContext, Stream, StreamInfo, StreamRequest, StreamStats, ThreadReport, WorkgroupJoin,
 };
+use bl_rt::RtThreadConfig;
 
 use crate::Outcome;
 use crate::devices::{parse_backend, resolve};
@@ -58,6 +59,12 @@ pub(crate) struct ToneArgs {
     /// for three buffers' worth of time, to check that dropouts are caught.
     #[arg(long, value_name = "SECONDS")]
     glitch_every: Option<f64>,
+
+    /// Also report how the audio thread runs: its priority class, the audio
+    /// workgroup it joined (macOS), denormal flushing, and the allocation
+    /// trap; and print what the audio thread logs.
+    #[arg(long, short)]
+    pub(crate) verbose: bool,
 }
 
 /// The test tone: a sine on every output channel that remembers its peak.
@@ -180,25 +187,56 @@ pub(crate) fn run(args: &ToneArgs) -> Outcome {
         "bl-cli tone: {FREQUENCY} Hz sine at {:.1} dBFS for {} s",
         args.level, args.seconds
     );
-    print_info(stream.info());
+    print_info(stream.info(), args.verbose);
     println!();
 
+    // What the audio thread logs, printed as it arrives.
+    let log = if args.verbose {
+        let drain = bl_rt::log::Drain::spawn(Duration::from_millis(20), |record| {
+            println!("[rt log] {}: {}", record.level, record.text());
+        });
+        Some(drain.map_err(|e| format!("couldn't start the log thread: {e}"))?)
+    } else {
+        None
+    };
+
     stream.start().map_err(|e| e.to_string())?;
+    let worker = args
+        .verbose
+        .then(|| probe_worker(stream.as_ref()))
+        .flatten();
     let played = play(stream.as_mut(), args.seconds);
     let stopped = stream.stop();
     let stats = stream.stats();
     let info = stream.info().clone();
     drop(stream);
+    drop(log);
 
     println!();
     print_summary(&info, &stats, f32::from_bits(peak.load(Ordering::Relaxed)));
+    if args.verbose {
+        println!();
+        print_audio_thread(&info, &stats, worker);
+    }
     played?;
     stopped.map_err(|e| e.to_string())?;
+    let mut failed = false;
     if stats.dropouts > 0 {
         eprintln!("error: {} dropouts", stats.dropouts);
-        return Ok(ExitCode::FAILURE);
+        failed = true;
     }
-    Ok(ExitCode::SUCCESS)
+    if stats.heap_operations > 0 {
+        eprintln!(
+            "error: {} heap operations on the audio thread",
+            stats.heap_operations
+        );
+        failed = true;
+    }
+    Ok(if failed {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    })
 }
 
 /// Waits while the stream plays `seconds` of audio, logging progress and
@@ -288,7 +326,7 @@ fn events(before: &StreamStats, now: &StreamStats) -> Vec<String> {
     lines
 }
 
-fn print_info(info: &StreamInfo) {
+fn print_info(info: &StreamInfo, verbose: bool) {
     println!("  backend:     {}", info.backend);
     if let Some(device) = &info.output_device {
         let follows = if info.follows_default {
@@ -311,6 +349,116 @@ fn print_info(info: &StreamInfo) {
         .buffer_size
         .map_or_else(|| "nothing yet".to_owned(), |n| format!("{n} frames"));
     println!("  buffer:      requested {requested}, backend reports {reported}");
+    if verbose {
+        match &info.workgroup {
+            Some(workgroup) => println!("  workgroup:   {}", workgroup.label),
+            None => println!("  workgroup:   none (audio workgroups exist only on macOS)"),
+        }
+    }
+}
+
+/// Starts a real-time thread, joins it to the stream's workgroup, and leaves
+/// again, as the engine's worker pool will: evidence that Beatlayer's own
+/// threads can join a device's workgroup while it runs. `None` if the stream
+/// has no workgroup.
+fn probe_worker(stream: &dyn Stream) -> Option<ThreadReport> {
+    let workgroup = stream.workgroup()?;
+    let info = stream.info();
+    let frames = info.buffer_size.unwrap_or(info.max_block_frames);
+    let period = Duration::from_secs_f64(f64::from(frames) / f64::from(info.sample_rate));
+    thread::Builder::new()
+        .name("bl-cli worker probe".into())
+        .spawn(move || {
+            let report = bl_rt::prepare_current_thread(&RtThreadConfig {
+                period,
+                promote: true,
+                workgroup: Some(workgroup),
+            });
+            bl_rt::thread::release_current_thread();
+            report
+        })
+        .ok()?
+        .join()
+        .ok()
+}
+
+/// Describes whether a thread is in the stream's workgroup.
+fn workgroup_outcome(info: &StreamInfo, join: WorkgroupJoin, audio_thread: bool) -> String {
+    let label = info
+        .workgroup
+        .as_ref()
+        .map_or("its workgroup", |w| w.label.as_str());
+    match join {
+        WorkgroupJoin::None => "none".to_owned(),
+        WorkgroupJoin::Joined => format!("joined {label}"),
+        WorkgroupJoin::AlreadyMember if audio_thread && info.backend == BackendKind::CoreAudio => {
+            format!(
+                "already a member: Core Audio's I/O thread starts in {label}, so it didn't need to join"
+            )
+        }
+        WorkgroupJoin::AlreadyMember => {
+            format!("already in another workgroup, so it couldn't join {label}")
+        }
+        WorkgroupJoin::Failed(code) => format!("couldn't join {label}: errno {code}"),
+    }
+}
+
+/// The audio thread's set-up, and a probe worker's if there was one, for
+/// `--verbose`.
+fn print_audio_thread(info: &StreamInfo, stats: &StreamStats, worker: Option<ThreadReport>) {
+    println!("Audio thread");
+    let Some(report) = stats.audio_thread else {
+        println!("  never ran a block");
+        return;
+    };
+    println!("  priority:        {}", report.priority);
+    println!("                   {}", report.promotion);
+    println!(
+        "  workgroup:       {}",
+        workgroup_outcome(info, report.workgroup, true)
+    );
+    if let Some(workgroup) = &info.workgroup {
+        println!("                   {}", workgroup.description);
+        if let Some(threads) = workgroup.max_parallel_threads {
+            println!("                   up to {threads} threads in parallel");
+        }
+    }
+    println!(
+        "  denormals:       {}",
+        if report.denormals_flushed {
+            "flushed to zero in every block"
+        } else {
+            "not flushed (this CPU architecture isn't supported)"
+        }
+    );
+    if report.trap_installed {
+        println!(
+            "  allocation trap: on, {} heap operations in audio blocks",
+            stats.heap_operations
+        );
+    } else {
+        println!("  allocation trap: off (release build)");
+    }
+    println!(
+        "  sanitizer:       {}",
+        if report.sanitizer_active {
+            "RealtimeSanitizer is watching every block"
+        } else {
+            "off (`cargo xtask rtsan` runs the tests under RealtimeSanitizer)"
+        }
+    );
+    println!("  set-ups:         {}", stats.audio_thread_setups);
+
+    if let Some(worker) = worker {
+        println!();
+        println!("Worker thread (a probe, set up as the engine's real-time workers will be)");
+        println!("  priority:        {}", worker.priority);
+        println!("                   {}", worker.promotion);
+        println!(
+            "  workgroup:       {}",
+            workgroup_outcome(info, worker.workgroup, false)
+        );
+    }
 }
 
 fn print_summary(info: &StreamInfo, stats: &StreamStats, peak: f32) {

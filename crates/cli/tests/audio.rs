@@ -73,6 +73,77 @@ fn tone_plays_on_the_null_device_without_dropouts() {
 }
 
 #[test]
+fn tone_verbose_reports_how_the_audio_thread_runs() {
+    let output = bl_cli(&[
+        "tone",
+        "--backend",
+        "null",
+        "--buffer",
+        "256",
+        "--seconds",
+        "0.3",
+        "--level",
+        "-60",
+        "--verbose",
+    ]);
+    let text = stdout(&output);
+    assert!(output.status.success(), "{text}\n{}", stderr(&output));
+    let report = text
+        .split_once("\nAudio thread\n")
+        .map(|(_, report)| report)
+        .unwrap_or_else(|| panic!("no audio thread report:\n{text}"));
+    assert!(report.contains("  priority:        "), "{report}");
+    assert!(
+        report.contains("  denormals:       flushed to zero in every block"),
+        "{report}"
+    );
+    assert!(
+        report.contains("  allocation trap: on, 0 heap operations in audio blocks"),
+        "a debug build installs the trap: {report}"
+    );
+    assert!(report.contains("  set-ups:         1"), "{report}");
+    assert!(
+        text.contains("[rt log] info: audio thread set up (set-up 1 of this stream)"),
+        "the audio thread's log reaches the terminal: {text}"
+    );
+    if cfg!(target_os = "macos") {
+        assert!(
+            report.contains("real-time, Mach time-constraint policy (period 5.333 ms"),
+            "{report}"
+        );
+        assert!(
+            report
+                .contains("  workgroup:       joined the work interval \"Beatlayer null device\""),
+            "{report}"
+        );
+        assert!(
+            report.contains("name = Beatlayer null device"),
+            "the system's own description names it: {report}"
+        );
+    }
+    if cfg!(windows) {
+        assert!(report.contains("MMCSS task \"Pro Audio\""), "{report}");
+    }
+}
+
+#[test]
+fn tone_without_verbose_keeps_its_report_short() {
+    let output = bl_cli(&[
+        "tone",
+        "--backend",
+        "null",
+        "--seconds",
+        "0.1",
+        "--level",
+        "-60",
+    ]);
+    let text = stdout(&output);
+    assert!(output.status.success(), "{text}");
+    assert!(!text.contains("Audio thread"), "{text}");
+    assert!(!text.contains("[rt log]"), "{text}");
+}
+
+#[test]
 fn tone_counts_deliberate_overruns_as_dropouts() {
     let output = bl_cli(&[
         "tone",

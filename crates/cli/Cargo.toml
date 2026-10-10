@@ -16,6 +16,7 @@ bl-project.workspace = true
 bl-engine.workspace = true
 bl-devices.workspace = true
 bl-audio-io.workspace = true
+bl-rt.workspace = true
 clap = { version = "4.6.7", features = ["derive"] }
 
 [lints]

@@ -14,6 +14,7 @@ publish.workspace = true
 asio = ["dep:azo"]
 
 [dependencies]
+bl-rt.workspace = true
 # Core Audio, WASAPI shared, and ALSA. Pinned to 0.18 until its duplex streams
 # land (see the architecture's audio I/O section).
 cpal = "0.18.2"

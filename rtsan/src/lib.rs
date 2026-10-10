@@ -12,3 +12,7 @@
 //! - `tests/engine.rs`: the engine's audio-thread work: 1,000 program swaps
 //!   with node migration, parameter changes, scheduled commands, node data,
 //!   and the state for the UI, every block a real-time section.
+//! - `tests/clips.rs`: clip players reading looped, faded, and overlapping
+//!   clips, new clip lists swapped in as clips are edited (the old ones
+//!   freed by the collector), locates into clips, and tempo changes that
+//!   swap programs (WP-1.4).

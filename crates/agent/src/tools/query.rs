@@ -377,7 +377,10 @@ fn parse_path(path: &str) -> Result<Vec<Segment>, String> {
     let mut segments = Vec::new();
     let mut rest = path.trim();
     while !rest.is_empty() {
-        let lower = rest.to_lowercase();
+        // ASCII only: the keywords are ASCII, and a Unicode lowercase copy
+        // can differ in length (the Kelvin sign becomes `k`), which would
+        // put the slices below inside a character.
+        let lower = rest.to_ascii_lowercase();
         let ends_segment = |after: &str| {
             let after = after.trim_start();
             after.is_empty() || after.starts_with('/')
@@ -654,6 +657,20 @@ mod tests {
         ] {
             assert!(parse_path(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn keywords_match_ascii_only_so_other_letters_never_split_a_character() {
+        // The Kelvin sign lowercases to an ASCII `k` but takes three bytes,
+        // so matching keywords on a Unicode-lowercased copy would slice the
+        // path inside it.
+        for odd in ["trac\u{212a}s", "chec\u{212a}points / track #1"] {
+            assert!(parse_path(odd).is_err(), "{odd}");
+        }
+        assert_eq!(
+            parse_path("TRACKS").unwrap(),
+            vec![Segment::Keyword("tracks".to_owned())]
+        );
     }
 
     #[test]

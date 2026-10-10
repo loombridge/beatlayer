@@ -389,8 +389,11 @@ impl Autosave {
         }
         if read.uncommitted() == 0 {
             // Nothing to recover. A journal with save points is part of
-            // its set; any other is empty, and goes.
-            if read.committed_len == 0 {
+            // its set; any other is empty, and goes, if it's named as this
+            // session's journal: an index that names some other file
+            // (damaged, or not written by Beatlayer) never deletes it.
+            if read.committed_len == 0 && journal::session_of(&index.journal).as_deref() == Some(id)
+            {
                 let _ = std::fs::remove_file(&index.journal);
             }
             forget_session(&self.dir, id, lock);
@@ -1524,6 +1527,31 @@ mod tests {
         let autosave = Autosave::start(&recovery).unwrap();
         assert!(autosave.offers().is_empty());
         assert_eq!(dir.files(&recovery), ["1-2-3.lock", "1-2-3.session"]);
+    }
+
+    #[test]
+    fn an_index_never_deletes_a_file_that_isnt_its_journal() {
+        let dir = TestDir::new("foreign");
+        let recovery = dir.recovery();
+        std::fs::create_dir_all(&recovery).unwrap();
+        // A session whose index names a file that isn't its journal.
+        let other = dir.0.join("Notes.txt");
+        std::fs::write(&other, "not a journal").unwrap();
+        std::fs::write(recovery.join("1-2-4.lock"), "").unwrap();
+        let index = serde_json::json!({
+            "format": SESSION_FORMAT,
+            "version": 1,
+            "pid": 1,
+            "started": 0,
+            "set": null,
+            "journal": other,
+        });
+        std::fs::write(recovery.join("1-2-4.session"), index.to_string()).unwrap();
+        let autosave = Autosave::start(&recovery).unwrap();
+        assert!(autosave.offers().is_empty());
+        // The session is tidied away; the file it named is left alone.
+        assert_eq!(dir.files(&recovery), Vec::<String>::new());
+        assert_eq!(std::fs::read_to_string(&other).unwrap(), "not a journal");
     }
 
     #[test]

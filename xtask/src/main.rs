@@ -1,8 +1,10 @@
 //! Repository tasks. Run `cargo xtask help` for the list.
 
+mod package;
+
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode};
+use std::process::{Command, ExitCode, Stdio};
 
 use serde_json::Value;
 
@@ -18,8 +20,16 @@ Tasks:
   ui-parity      Validate docs/ui-parity/shortcuts.toml and regenerate shortcuts.md
                  (with --check, fail instead of writing if shortcuts.md is out of date)
   deny-selftest  Prove that deny.toml still rejects an incompatible licence
+  package        Build this platform's packages with cargo-packager and check they start
+  rtsan          Run the real-time tests in rtsan/ under LLVM's RealtimeSanitizer, with a
+                 runtime already on this machine (the file RTSAN_LIB_PATH names, or
+                 Homebrew's llvm on macOS, or LLVM 20 or later on Linux). Arguments after
+                 `--` go to the test binaries; `-- --nocapture` shows the reports.
   help           Show this message
 ";
+
+/// The RealtimeSanitizer harness, a workspace of its own (see its Cargo.toml).
+const RTSAN_DIR: &str = "rtsan";
 
 /// The only crate allowed to depend on `bl-ui`.
 const APP: &str = "beatlayer";
@@ -68,6 +78,19 @@ fn run(root: &Path, args: &[String]) -> Result<(), String> {
             _ => Err(format!("usage: cargo xtask ui-parity [--check]\n\n{USAGE}")),
         },
         Some("deny-selftest") => deny_selftest(root),
+        Some("package") => package::package(root),
+        Some("rtsan") => {
+            let passed_on = match options.first().map(String::as_str) {
+                None => &[][..],
+                Some("--") => &options[1..],
+                Some(other) => {
+                    return Err(format!(
+                        "unexpected `{other}`; put test arguments after `--`"
+                    ));
+                }
+            };
+            rtsan(root, passed_on)
+        }
         None | Some("help" | "-h" | "--help") => {
             print!("{USAGE}");
             Ok(())
@@ -83,7 +106,11 @@ fn check(root: &Path) -> Result<(), String> {
     let steps: Vec<Step<'_>> = vec![
         (
             "format",
-            Box::new(|| cargo(root, &["fmt", "--all", "--check"])),
+            Box::new(|| {
+                cargo(root, &["fmt", "--all", "--check"])?;
+                // The RealtimeSanitizer harness is a workspace of its own.
+                cargo(root.join(RTSAN_DIR).as_path(), &["fmt", "--check"])
+            }),
         ),
         (
             "clippy",
@@ -210,6 +237,260 @@ fn deny_selftest(root: &Path) -> Result<(), String> {
     }
     eprintln!("deny.toml rejects a GPL-2.0-only dependency, as intended");
     Ok(())
+}
+
+/// Runs the RealtimeSanitizer harness in `rtsan/`, a workspace of its own, with
+/// a runtime already on this machine.
+///
+/// The harness's build script links the runtime that `RTSAN_LIB_PATH` names
+/// and never fetches one, so this task finds one first and stops with
+/// instructions if there's none. The harness has no lockfile of its own: the
+/// task copies the main workspace's, so the harness builds exactly the
+/// versions the main workspace locked and `cargo deny` checked, and checks
+/// that afterwards. It builds in `target/rtsan`, with `--cfg bl_rtsan` from
+/// `rtsan/.cargo/config.toml`, so the main target directory isn't rebuilt.
+fn rtsan(root: &Path, test_args: &[String]) -> Result<(), String> {
+    let runtime = rtsan_runtime()?;
+    eprintln!("RealtimeSanitizer runtime: {}", runtime.display());
+    let options = rtsan_options(&runtime);
+    if let Some(options) = &options {
+        eprintln!("RTSAN_OPTIONS={options}");
+    }
+    let harness = root.join(RTSAN_DIR);
+    let lockfile = harness.join("Cargo.lock");
+    std::fs::copy(root.join("Cargo.lock"), &lockfile)
+        .map_err(|e| format!("couldn't copy Cargo.lock into {RTSAN_DIR}/: {e}"))?;
+    let cargo_in_harness = |args: &[&str]| {
+        let mut command = Command::new(cargo_bin());
+        command
+            .args(args)
+            .env("RTSAN_LIB_PATH", &runtime)
+            .env("CARGO_TARGET_DIR", root.join("target").join("rtsan"))
+            // RUSTFLAGS would replace the harness's `--cfg bl_rtsan`.
+            .env_remove("RUSTFLAGS")
+            .env_remove("CARGO_ENCODED_RUSTFLAGS")
+            .current_dir(&harness);
+        if let Some(options) = &options {
+            command.env("RTSAN_OPTIONS", options);
+        }
+        command
+    };
+    let run = |what: &str, args: &[&str]| -> Result<(), String> {
+        eprintln!("\n==> {what}");
+        let mut command = cargo_in_harness(args);
+        if args.first() == Some(&"metadata") {
+            command.stdout(Stdio::null());
+        }
+        let status = command
+            .status()
+            .map_err(|e| format!("couldn't run cargo: {e}"))?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(format!("{what} failed"))
+        }
+    };
+
+    run(
+        "rtsan/: resolve with the main workspace's lockfile",
+        &["metadata", "--format-version", "1"],
+    )?;
+    same_versions(&root.join("Cargo.lock"), &lockfile)?;
+    run(
+        "rtsan/: clippy",
+        &["clippy", "--all-targets", "--", "-D", "warnings"],
+    )?;
+    // Every test binary runs even if one fails, so a run shows all failures.
+    let mut test = vec!["test", "--no-fail-fast", "--"];
+    test.extend(test_args.iter().map(String::as_str));
+    run("rtsan/: the real-time tests under RealtimeSanitizer", &test)
+}
+
+/// RTSAN_OPTIONS for the tests: the caller's, plus, on Linux, the path to the
+/// `llvm-symbolizer` that came with the runtime, so reports name functions
+/// (macOS uses `atos`). `None` if there's nothing to set.
+fn rtsan_options(runtime: &Path) -> Option<String> {
+    let caller = std::env::var("RTSAN_OPTIONS")
+        .ok()
+        .filter(|o| !o.is_empty());
+    let symbolizer = (cfg!(target_os = "linux")
+        && !caller
+            .as_deref()
+            .is_some_and(|o| o.contains("external_symbolizer_path")))
+    .then(|| symbolizer_beside(runtime))
+    .flatten()
+    .map(|path| format!("external_symbolizer_path={}", path.display()));
+    match (caller, symbolizer) {
+        (Some(caller), Some(symbolizer)) => Some(format!("{caller}:{symbolizer}")),
+        (caller, symbolizer) => caller.or(symbolizer),
+    }
+}
+
+/// The `llvm-symbolizer` of the LLVM install a runtime belongs to: the
+/// runtime sits in `<llvm>/lib/clang/<version>/lib/<target>/`, and the
+/// symbolizer in `<llvm>/bin/`.
+fn symbolizer_beside(runtime: &Path) -> Option<PathBuf> {
+    runtime
+        .ancestors()
+        .map(|dir| dir.join("bin").join("llvm-symbolizer"))
+        .find(|path| path.is_file())
+}
+
+/// Fails unless every package `harness_lock` resolves is in `main_lock` at
+/// the same version, apart from the harness itself.
+fn same_versions(main_lock: &Path, harness_lock: &Path) -> Result<(), String> {
+    let read = |path: &Path| {
+        std::fs::read_to_string(path).map_err(|e| format!("couldn't read {}: {e}", path.display()))
+    };
+    let main = locked_packages(&read(main_lock)?);
+    let drifted: Vec<String> = locked_packages(&read(harness_lock)?)
+        .into_iter()
+        .filter(|(name, _)| name != "bl-rtsan")
+        .filter(|package| !main.contains(package))
+        .map(|(name, version)| format!("{name} {version}"))
+        .collect();
+    if drifted.is_empty() {
+        eprintln!("the harness builds only versions the main Cargo.lock has");
+        Ok(())
+    } else {
+        Err(format!(
+            "the harness resolved versions the main Cargo.lock doesn't have: {}",
+            drifted.join(", ")
+        ))
+    }
+}
+
+/// The `(name, version)` of every package in a Cargo.lock.
+fn locked_packages(lockfile: &str) -> BTreeSet<(String, String)> {
+    let value = |line: &str, key: &str| {
+        line.strip_prefix(key)
+            .and_then(|rest| rest.strip_prefix(" = \""))
+            .and_then(|rest| rest.strip_suffix('"'))
+            .map(str::to_owned)
+    };
+    let mut packages = BTreeSet::new();
+    let mut name = None;
+    for line in lockfile.lines() {
+        if line == "[[package]]" {
+            name = None;
+        } else if let Some(found) = value(line, "name") {
+            name = Some(found);
+        } else if let (Some(version), Some(found)) = (value(line, "version"), name.take()) {
+            packages.insert((found, version));
+        }
+    }
+    packages
+}
+
+/// The RealtimeSanitizer runtime to link: `RTSAN_LIB_PATH` if set, otherwise
+/// the newest one in the usual LLVM install locations.
+fn rtsan_runtime() -> Result<PathBuf, String> {
+    if let Some(path) = std::env::var_os("RTSAN_LIB_PATH") {
+        let path = PathBuf::from(path);
+        return if path.is_file() {
+            Ok(path)
+        } else {
+            Err(format!(
+                "RTSAN_LIB_PATH names {}, which isn't a file",
+                path.display()
+            ))
+        };
+    }
+    let mut found: Vec<PathBuf> = rtsan_patterns()
+        .iter()
+        .flat_map(|pattern| expand(pattern))
+        .filter(|path| path.is_file())
+        .collect();
+    // Version directories sort as text; good enough to prefer 23 over 20.
+    found.sort();
+    found.pop().ok_or_else(|| {
+        let install = if cfg!(target_os = "macos") {
+            "brew install llvm"
+        } else {
+            "install LLVM 20 or later's compiler-rt (for example `libclang-rt-20-dev` from apt.llvm.org)"
+        };
+        format!(
+            "no RealtimeSanitizer runtime found. Install one ({install}), or set RTSAN_LIB_PATH \
+             to libclang_rt.rtsan_osx_dynamic.dylib (macOS) or libclang_rt.rtsan*.a (Linux). \
+             Beatlayer never downloads it at build time."
+        )
+    })
+}
+
+/// Where LLVM packages put the RTSan runtime, with `*` for a version or
+/// target directory.
+fn rtsan_patterns() -> Vec<String> {
+    let arch = std::env::consts::ARCH;
+    if cfg!(target_os = "macos") {
+        let mut prefixes = vec![
+            "/opt/homebrew/opt/llvm".to_owned(),
+            "/usr/local/opt/llvm".to_owned(),
+        ];
+        if let Ok(output) = Command::new("brew").args(["--prefix", "llvm"]).output()
+            && output.status.success()
+        {
+            prefixes.push(String::from_utf8_lossy(&output.stdout).trim().to_owned());
+        }
+        prefixes
+            .iter()
+            .map(|prefix| {
+                format!("{prefix}/lib/clang/*/lib/darwin/libclang_rt.rtsan_osx_dynamic.dylib")
+            })
+            .collect()
+    } else {
+        vec![
+            format!("/usr/lib/llvm-*/lib/clang/*/lib/linux/libclang_rt.rtsan-{arch}.a"),
+            format!("/usr/lib/llvm-*/lib/clang/*/lib/{arch}-*-linux-gnu/libclang_rt.rtsan.a"),
+            format!("/usr/lib/clang/*/lib/linux/libclang_rt.rtsan-{arch}.a"),
+            format!("/usr/lib/clang/*/lib/{arch}-*-linux-gnu/libclang_rt.rtsan.a"),
+        ]
+    }
+}
+
+/// The paths matching `pattern`, where `*` stands for any run of characters
+/// within one path component.
+fn expand(pattern: &str) -> Vec<PathBuf> {
+    let mut paths = vec![PathBuf::from("/")];
+    for component in pattern.split('/').filter(|c| !c.is_empty()) {
+        let mut next = Vec::new();
+        for path in &paths {
+            if !component.contains('*') {
+                next.push(path.join(component));
+                continue;
+            }
+            let Ok(entries) = std::fs::read_dir(path) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                if matches_glob(component, &name.to_string_lossy()) {
+                    next.push(entry.path());
+                }
+            }
+        }
+        paths = next;
+    }
+    paths
+}
+
+/// Whether `name` matches `pattern`, where `*` matches any run of characters.
+fn matches_glob(pattern: &str, name: &str) -> bool {
+    let mut parts = pattern.split('*');
+    let first = parts.next().unwrap_or("");
+    let Some(mut rest) = name.strip_prefix(first) else {
+        return false;
+    };
+    let parts: Vec<&str> = parts.collect();
+    for (i, part) in parts.iter().enumerate() {
+        if i == parts.len() - 1 {
+            return rest.ends_with(part);
+        }
+        match rest.find(part) {
+            Some(at) => rest = &rest[at + part.len()..],
+            None => return false,
+        }
+    }
+    rest.is_empty()
 }
 
 /// The resolved dependency graph from `cargo metadata`, by package ID.
@@ -378,4 +659,87 @@ fn workspace_root() -> Result<PathBuf, String> {
         .parent()
         .map(Path::to_path_buf)
         .ok_or_else(|| format!("{} has no parent directory", manifest.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn globs_match_one_path_component() {
+        assert!(matches_glob("llvm-*", "llvm-20"));
+        assert!(!matches_glob("llvm-*", "clang-20"));
+        assert!(matches_glob("x86_64-*-linux-gnu", "x86_64-pc-linux-gnu"));
+        assert!(!matches_glob("x86_64-*-linux-gnu", "x86_64-pc-linux-musl"));
+        assert!(matches_glob("*", "23"));
+        assert!(matches_glob("darwin", "darwin"));
+        assert!(!matches_glob("darwin", "darwinx"));
+        assert!(matches_glob("a*b*c", "aXbYc"));
+        assert!(!matches_glob("a*b*c", "aXcYb"));
+    }
+
+    #[test]
+    fn the_symbolizer_is_found_beside_the_runtime() {
+        let llvm = std::env::temp_dir().join(format!("xtask-llvm-{}", std::process::id()));
+        let runtime_dir = llvm.join("lib/clang/20/lib/linux");
+        std::fs::create_dir_all(&runtime_dir).unwrap();
+        std::fs::create_dir_all(llvm.join("bin")).unwrap();
+        let runtime = runtime_dir.join("libclang_rt.rtsan-x86_64.a");
+        std::fs::write(&runtime, b"").unwrap();
+        let missing = symbolizer_beside(&runtime);
+        std::fs::write(llvm.join("bin/llvm-symbolizer"), b"").unwrap();
+        let found = symbolizer_beside(&runtime);
+        std::fs::remove_dir_all(&llvm).unwrap();
+        assert_eq!(missing, None);
+        assert_eq!(found, Some(llvm.join("bin").join("llvm-symbolizer")));
+    }
+
+    #[test]
+    fn lockfiles_list_their_packages_with_versions() {
+        let lockfile = "\
+version = 4
+
+[[package]]
+name = \"bl-rt\"
+version = \"0.0.0\"
+dependencies = [
+ \"rtrb\",
+]
+
+[[package]]
+name = \"rtrb\"
+version = \"0.4.0\"
+source = \"registry+https://github.com/rust-lang/crates.io-index\"
+";
+        let packages = locked_packages(lockfile);
+        assert_eq!(
+            packages.into_iter().collect::<Vec<_>>(),
+            [
+                ("bl-rt".to_owned(), "0.0.0".to_owned()),
+                ("rtrb".to_owned(), "0.4.0".to_owned())
+            ]
+        );
+    }
+
+    #[test]
+    fn expanding_a_pattern_walks_the_directories() {
+        let root = std::env::temp_dir().join(format!("xtask-glob-{}", std::process::id()));
+        for version in ["20", "23"] {
+            let dir = root.join("lib/clang").join(version).join("lib/darwin");
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("libclang_rt.rtsan_osx_dynamic.dylib"), b"").unwrap();
+        }
+        let pattern = format!(
+            "{}/lib/clang/*/lib/darwin/libclang_rt.rtsan_osx_dynamic.dylib",
+            root.display()
+        );
+        let mut found = expand(&pattern);
+        found.sort();
+        std::fs::remove_dir_all(&root).unwrap();
+        assert_eq!(found.len(), 2);
+        assert!(
+            found[1].components().any(|part| part.as_os_str() == "23"),
+            "{found:?}"
+        );
+    }
 }

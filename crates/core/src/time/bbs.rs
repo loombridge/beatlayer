@@ -8,6 +8,11 @@ use super::TimeError;
 /// A position as bars, beats, and sixteenths, numbered from 1 the way Live's
 /// position fields show it: tick zero is `1.1.1`.
 ///
+/// There's no bar 0. The bar before bar 1 is bar −1, then −2, and so on, so
+/// two beats before `1.1.1` in 4/4 is `-1.3.1`. As in Live, a bar of 0 typed
+/// or given to [`TimeSignatureMap::from_bbs`](super::TimeSignatureMap::from_bbs)
+/// is read as bar −1.
+///
 /// A beat is one note of the time signature's denominator, so 6/8 has six
 /// eighth-note beats of two sixteenths each. Turn ticks into this with
 /// [`TimeSignatureMap::to_bbs`](super::TimeSignatureMap::to_bbs) and back
@@ -18,8 +23,8 @@ use super::TimeError;
 /// The ordering is by bar, beat, sixteenth, then ticks, which is time order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct BarBeatSixteenth {
-    /// The bar, from 1 at tick zero. Bars before tick zero are numbered 0,
-    /// −1, and so on.
+    /// The bar, from 1 at tick zero. Bars before tick zero are numbered −1,
+    /// −2, and so on; there's no bar 0.
     pub bar: i64,
     /// The beat in the bar, from 1 up to the signature's numerator.
     pub beat: u32,
@@ -44,6 +49,25 @@ impl BarBeatSixteenth {
             ticks: 0,
         }
     }
+
+    /// The zero-based index of the bar: 0 for bar 1, −1 for bar −1. Bar 0
+    /// doesn't exist and is read as bar −1, as Live reads it.
+    pub(crate) const fn bar_index(self) -> i64 {
+        if self.bar > 0 {
+            self.bar - 1
+        } else if self.bar == 0 {
+            -1
+        } else {
+            self.bar
+        }
+    }
+
+    /// The bar number Live shows for the bar with zero-based `index`: one
+    /// more from tick zero on, the index itself before it, so no bar is
+    /// numbered 0.
+    pub(crate) const fn bar_number(index: i64) -> i64 {
+        if index >= 0 { index + 1 } else { index }
+    }
 }
 
 impl fmt::Display for BarBeatSixteenth {
@@ -54,17 +78,19 @@ impl fmt::Display for BarBeatSixteenth {
 
 /// Reads `bar`, `bar.beat`, or `bar.beat.sixteenth`, such as `5.2.3`. Missing
 /// fields are 1. The bar may be negative; the beat and sixteenth may not.
-/// Whether the beat and sixteenth exist in that bar is checked when the
-/// position is turned into ticks.
+/// Bar 0 reads as bar −1, as Live reads it: `0.3.1` is `-1.3.1`. Whether the
+/// beat and sixteenth exist in that bar is checked when the position is
+/// turned into ticks.
 impl FromStr for BarBeatSixteenth {
     type Err = TimeError;
 
     fn from_str(text: &str) -> Result<Self, TimeError> {
         let mut fields = text.trim().split('.');
-        let bar = fields
-            .next()
-            .and_then(|field| field.parse::<i64>().ok())
-            .ok_or(TimeError::ParsePosition)?;
+        let bar = match fields.next().map(str::parse::<i64>) {
+            Some(Ok(0)) => -1,
+            Some(Ok(bar)) => bar,
+            _ => return Err(TimeError::ParsePosition),
+        };
         let mut next = || match fields.next() {
             None => Ok(1),
             Some(field) if field.starts_with('+') => Err(TimeError::ParsePosition),
@@ -109,11 +135,37 @@ mod tests {
         }
     }
 
+    /// Live has no bar 0: typing 0.3.1 gives -1.3.1 (observed in 12.4.3,
+    /// 10 October 2026).
+    #[test]
+    fn bar_zero_reads_as_bar_minus_one() {
+        assert_eq!("0.3.1".parse(), Ok(BarBeatSixteenth::new(-1, 3, 1)));
+        assert_eq!("0".parse(), Ok(BarBeatSixteenth::new(-1, 1, 1)));
+        assert_eq!("-0.2".parse(), Ok(BarBeatSixteenth::new(-1, 2, 1)));
+        assert_eq!(
+            "0.3.1"
+                .parse::<BarBeatSixteenth>()
+                .map(|position| position.to_string()),
+            Ok("-1.3.1".to_owned())
+        );
+    }
+
+    #[test]
+    fn bar_indexes_skip_zero() {
+        for (bar, index) in [(2, 1), (1, 0), (0, -1), (-1, -1), (-2, -2)] {
+            assert_eq!(BarBeatSixteenth::new(bar, 1, 1).bar_index(), index, "{bar}");
+        }
+        for (index, bar) in [(1, 2), (0, 1), (-1, -1), (-2, -2)] {
+            assert_eq!(BarBeatSixteenth::bar_number(index), bar, "{index}");
+        }
+    }
+
     #[test]
     fn order_is_time_order() {
         let mut a = BarBeatSixteenth::new(1, 4, 4);
         a.ticks = 176_399;
         assert!(a < BarBeatSixteenth::new(2, 1, 1));
-        assert!(BarBeatSixteenth::new(-1, 4, 4) < BarBeatSixteenth::new(0, 1, 1));
+        assert!(BarBeatSixteenth::new(-1, 4, 4) < BarBeatSixteenth::START);
+        assert!(BarBeatSixteenth::new(-2, 4, 4) < BarBeatSixteenth::new(-1, 1, 1));
     }
 }

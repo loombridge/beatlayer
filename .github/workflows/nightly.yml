@@ -1,18 +1,31 @@
-# Builds release binaries of `beatlayer` and `bl-cli` for macOS (arm64),
-# Windows (x64), and Linux (x64) every night, and on demand from the Actions
-# tab. Each platform's binaries, with the licence and readme, are uploaded as
-# one archive and kept for seven days.
+# Builds Beatlayer's packages for macOS (arm64), Windows (x64), and Linux (x64)
+# with `cargo xtask package` every night, and on demand from the Actions tab: a
+# DMG holding Beatlayer.app on macOS, an MSI on Windows, and an AppImage and a
+# tarball on Linux. `cargo xtask package` starts each packaged binary with
+# `--version` to check it; on Windows the MSI is also installed, run, and
+# removed. Each package is uploaded on its own and kept for seven days.
 #
-# A macOS minute counts as ten against the Free plan's allowance, so a
-# scheduled run first checks whether any code changed since the last
-# successful nightly, and builds nothing if only docs or Markdown changed.
-# A manual run always builds.
+# A macOS minute counts as ten against the Free plan's allowance, so packaging
+# runs here rather than on every pull request, and a scheduled run first checks
+# whether any code changed since the last successful nightly, building nothing
+# if only docs or Markdown changed. A manual run always builds, on any branch.
 #
-# The binaries are unsigned. Packaging, signing, and installers come with
-# WP-0.11 and the human tasks H4 and H5.
+# Signing runs only when its secrets exist, and is skipped otherwise:
+# `cargo xtask package` treats an empty variable as unset and says what it
+# skipped. macOS needs a Developer ID (H4): APPLE_CERTIFICATE (the .p12 in
+# base64), APPLE_CERTIFICATE_PASSWORD, and APPLE_SIGNING_IDENTITY; with
+# APPLE_ID, APPLE_PASSWORD (an app-specific password), and APPLE_TEAM_ID it
+# also notarises. Windows needs a signing route (H5): WINDOWS_SIGN_COMMAND, a
+# command that signs the file at %1, plus whatever credentials that route
+# reads, added to the Package step's environment.
 #
 # Every third-party action is pinned to a full commit SHA, with its version in
-# a comment. Update the SHA and the comment together.
+# a comment. Update the SHA and the comment together. cargo-packager is pinned
+# the same way: a version here and in xtask/src/package.rs, and a SHA-256 for
+# each runner's prebuilt binary. The tools that build the AppImage (linuxdeploy
+# with its plug-in, AppRun, and the AppImage runtime) are pinned to fixed
+# releases and SHA-256s in xtask/src/package.rs, which checks them before every
+# use and fails on a mismatch.
 
 name: Nightly
 
@@ -75,8 +88,8 @@ jobs:
           fi
           echo "build=$build" >> "$GITHUB_OUTPUT"
 
-  build:
-    name: build (${{ matrix.name }})
+  package:
+    name: package (${{ matrix.name }})
     needs: decide
     if: needs.decide.outputs.build == 'true'
     runs-on: ${{ matrix.os }}
@@ -89,17 +102,28 @@ jobs:
             os: macos-15
             target: aarch64-apple-darwin
             exe: ""
+            packager-target: aarch64-apple-darwin
+            packager-sha256: 934703947b24b4b4bb11ddd08f5ab93d84956378278711261b7b8a210e08fd14
           - name: Windows x64
             os: windows-2025
             target: x86_64-pc-windows-msvc
             exe: .exe
+            packager-target: x86_64-pc-windows-msvc
+            packager-sha256: 24e25795c002e357ffadf9c5e990ba289215537286bcbea652a5967400782a3b
           - name: Linux x64
             os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
             exe: ""
+            # The static musl build runs whatever the runner's glibc.
+            packager-target: x86_64-unknown-linux-musl
+            packager-sha256: f33514070c58a44c4a7ecdc31349957a2a2b21cfab03109200842a1d78d9439d
     defaults:
       run:
         shell: bash
+    env:
+      # Keep in step with CARGO_PACKAGER_VERSION in xtask/src/package.rs, which
+      # refuses any other version.
+      CARGO_PACKAGER_VERSION: 0.11.8
     steps:
       - name: Check out
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -109,46 +133,121 @@ jobs:
       - name: Prepare the runner
         uses: ./.github/actions/prepare
 
+      # Saved only from main, as in CI, so a manual run on a branch doesn't
+      # fill the cache quota.
       - name: Restore the dependency cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Build release binaries
-        run: cargo build --release --locked --package beatlayer --package bl-cli
-
-      - name: Stage the binaries
+      # cargo-packager publishes no binaries of its own, so this takes
+      # cargo-quickinstall's build of the crates.io release, checked against
+      # the SHA-256 in the matrix, rather than compiling it every night.
+      - name: Install cargo-packager
         env:
-          TARGET: ${{ matrix.target }}
+          TARGET: ${{ matrix.packager-target }}
+          SHA256: ${{ matrix.packager-sha256 }}
           EXE: ${{ matrix.exe }}
         run: |
-          name="beatlayer-nightly-$(date -u +%Y%m%d)-${GITHUB_SHA::7}-$TARGET"
-          mkdir -p "dist/$name"
-          cp "target/release/beatlayer$EXE" "target/release/bl-cli$EXE" LICENSE README.md "dist/$name/"
-          echo "STAGED=$name" >> "$GITHUB_ENV"
+          archive="cargo-packager-$CARGO_PACKAGER_VERSION-$TARGET.tar.gz"
+          url="https://github.com/cargo-bins/cargo-quickinstall/releases/download/cargo-packager-$CARGO_PACKAGER_VERSION/$archive"
+          mkdir -p "$RUNNER_TEMP/cargo-packager"
+          # Relative paths inside: GNU tar on Windows reads the `D:` of an
+          # absolute path as a remote host.
+          (
+            cd "$RUNNER_TEMP/cargo-packager"
+            curl --fail --silent --show-error --location --retry 3 --output "$archive" "$url"
+            # macOS's sha256sum takes different options from GNU's, so this
+            # compares the digest itself.
+            if command -v sha256sum > /dev/null; then
+              actual=$(sha256sum "$archive" | cut -d ' ' -f 1)
+            else
+              actual=$(shasum -a 256 "$archive" | cut -d ' ' -f 1)
+            fi
+            if [ "$actual" != "$SHA256" ]; then
+              echo "::error::$archive has SHA-256 $actual, not the pinned $SHA256"
+              exit 1
+            fi
+            echo "$archive: SHA-256 matches"
+            tar -xzf "$archive"
+            binary=$(find . -type f -name "cargo-packager$EXE" | head -n 1)
+            mkdir -p "$HOME/.cargo/bin"
+            mv "$binary" "$HOME/.cargo/bin/"
+          )
+          cargo packager --version
 
-      - name: Archive (tar.gz)
-        if: runner.os != 'Windows'
+      - name: Package
         env:
-          # Stops macOS tar adding AppleDouble files for extended attributes.
-          COPYFILE_DISABLE: 1
-        run: |
-          tar -C dist -czf "dist/$STAGED.tar.gz" "$STAGED"
-          echo "ARCHIVE=$STAGED.tar.gz" >> "$GITHUB_ENV"
+          APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && secrets.APPLE_SIGNING_IDENTITY || '' }}
+          APPLE_CERTIFICATE: ${{ runner.os == 'macOS' && secrets.APPLE_CERTIFICATE || '' }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ runner.os == 'macOS' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          APPLE_ID: ${{ runner.os == 'macOS' && secrets.APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ runner.os == 'macOS' && secrets.APPLE_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ runner.os == 'macOS' && secrets.APPLE_TEAM_ID || '' }}
+          WINDOWS_SIGN_COMMAND: ${{ runner.os == 'Windows' && secrets.WINDOWS_SIGN_COMMAND || '' }}
+        run: cargo xtask package
 
-      - name: Archive (zip)
+      # The runner is an administrator, so the MSI can go through a real
+      # per-machine install and removal here. `cargo xtask package` only
+      # extracts it, so it never installs anything on a developer's machine.
+      - name: Install the MSI, run it, and remove it
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Compress-Archive -Path "dist/$env:STAGED" -DestinationPath "dist/$env:STAGED.zip"
-          "ARCHIVE=$env:STAGED.zip" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $msi = (Get-ChildItem target/packages/*.msi).FullName
+          $log = Join-Path $env:RUNNER_TEMP 'msi.log'
+          $install = Start-Process msiexec.exe -Wait -PassThru -ArgumentList "/i `"$msi`" /qn /l*v `"$log`""
+          if ($install.ExitCode -ne 0) { Get-Content $log -Tail 60; exit $install.ExitCode }
+          $installed = Join-Path $env:ProgramFiles 'Beatlayer\beatlayer.exe'
+          $expected = & target/release/beatlayer.exe --version
+          $actual = & $installed --version
+          "$installed --version"
+          $actual
+          $remove = Start-Process msiexec.exe -Wait -PassThru -ArgumentList "/x `"$msi`" /qn"
+          if ($actual -ne $expected) { "Expected: $expected"; exit 1 }
+          if (Test-Path $installed) { "Removing the MSI left $installed behind"; exit 1 }
+          exit $remove.ExitCode
 
-      # With `archive: false` the file is uploaded as it is, rather than zipped
-      # again, and the artefact takes the file's name.
-      - name: Upload
+      - name: Name the packages for the nightly
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          base="beatlayer-nightly-$(date -u +%Y%m%d)-${GITHUB_SHA::7}-$TARGET"
+          mkdir -p dist
+          shopt -s nullglob
+          n=0
+          for file in target/packages/*.dmg target/packages/*.msi target/packages/*.AppImage target/packages/*.tar.gz; do
+            case "$file" in
+              *.tar.gz) extension=tar.gz ;;
+              *) extension="${file##*.}" ;;
+            esac
+            n=$((n + 1))
+            cp "$file" "dist/$base.$extension"
+            echo "PACKAGE_$n=$base.$extension" >> "$GITHUB_ENV"
+            echo "$file -> dist/$base.$extension"
+          done
+          if [ "$n" -eq 0 ]; then
+            echo "::error::cargo xtask package left no packages in target/packages"
+            exit 1
+          fi
+
+      # With `archive: false` each file is uploaded as it is, rather than
+      # zipped again, and the artefact takes the file's name. That allows one
+      # file per upload, so Linux's second package has a step of its own.
+      - name: Upload the package
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          path: dist/${{ env.ARCHIVE }}
+          path: dist/${{ env.PACKAGE_1 }}
+          archive: false
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload the second package
+        if: env.PACKAGE_2 != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          path: dist/${{ env.PACKAGE_2 }}
           archive: false
           retention-days: 7
           if-no-files-found: error

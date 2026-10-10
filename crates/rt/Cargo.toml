@@ -1,0 +1,28 @@
+[package]
+name = "bl-rt"
+description = "The real-time thread harness: priority, audio workgroups, denormal flushing, the allocation trap, a lock-free logger, and RealtimeSanitizer."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# RealtimeSanitizer has no feature and no dependency here. The harness in
+# `rtsan/`, a workspace of its own, builds this crate with `--cfg bl_rtsan`
+# and links a runtime already installed on the machine (see `src/sanitize.rs`).
+
+[dependencies]
+# The lock-free logger's per-thread queues (decision D14).
+rtrb = "0.4.0"
+# Audio threads' set-up reports, handed to whoever reads them (decision D14).
+triple_buffer = "9.0.0"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2.190"
+
+[target.'cfg(windows)'.dependencies]
+# MMCSS ("Pro Audio") for audio threads.
+windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_System_Threading"] }
+
+[lints]
+workspace = true

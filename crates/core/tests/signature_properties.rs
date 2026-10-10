@@ -119,12 +119,14 @@ proptest! {
     }
 
     /// Bars start where `bar_start` says, one after another, and the bar
-    /// holding a bar's start is that bar.
+    /// holding a bar's start is that bar. Bars are numbered from 1 at tick
+    /// zero and from −1 before it, with no bar 0, as in Live.
     #[test]
     fn bars_tile_the_timeline(map in signature_map(), bar in -10_000i64..=100_000) {
         let start = map.bar_start(bar);
         prop_assert_eq!(map.bar_at(start), (bar, Ticks::ZERO));
         prop_assert!(start < map.bar_start(bar + 1));
-        prop_assert_eq!(map.to_bbs(start), BarBeatSixteenth::new(bar + 1, 1, 1));
+        let number = if bar >= 0 { bar + 1 } else { bar };
+        prop_assert_eq!(map.to_bbs(start), BarBeatSixteenth::new(number, 1, 1));
     }
 }

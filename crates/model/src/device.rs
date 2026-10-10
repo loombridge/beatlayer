@@ -5,12 +5,13 @@
 //! and WP-2.5 the parameter descriptors that give each value its range.
 
 use imbl::OrdMap;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{DeviceId, ParamId};
 
 /// A device in a track's chain: a native instrument or effect, or a plug-in.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Device {
     /// The device's ID.
     pub id: DeviceId,
@@ -27,6 +28,7 @@ pub struct Device {
     /// They serialise as a list of `[parameter, value]` pairs, since some
     /// formats can't key a map by number.
     #[serde(with = "param_pairs")]
+    #[schemars(with = "Vec<(ParamId, f64)>")]
     pub params: OrdMap<ParamId, f64>,
 }
 
@@ -45,7 +47,7 @@ impl Device {
 }
 
 /// What a device is.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DeviceKind {
     /// A device built into Beatlayer.
@@ -65,7 +67,7 @@ pub enum DeviceKind {
 }
 
 /// A plug-in format.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PluginFormat {
     /// CLAP.

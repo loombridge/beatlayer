@@ -8,6 +8,7 @@ use std::process::{Command, ExitCode, Stdio};
 
 use serde_json::Value;
 
+mod commands;
 mod ui_parity;
 
 const USAGE: &str = "\
@@ -15,10 +16,12 @@ Usage: cargo xtask <task>
 
 Tasks:
   check          Run every check: format, clippy, tests, layers, the UI parity
-                 reference, deny, and the deny self-test
+                 reference, the command reference, deny, and the deny self-test
   layers         Check the crate layering rules
   ui-parity      Validate docs/ui-parity/shortcuts.toml and regenerate shortcuts.md
                  (with --check, fail instead of writing if shortcuts.md is out of date)
+  commands       Check the command registry and regenerate docs/commands.md
+                 (with --check, fail instead of writing if commands.md is out of date)
   deny-selftest  Prove that deny.toml still rejects an incompatible licence
   golden         Render the golden fixtures and null-test them against their references
                  in tests/golden/ (`cargo test` does too). With --update, remake the
@@ -81,6 +84,11 @@ fn run(root: &Path, args: &[String]) -> Result<(), String> {
             [flag] if flag == "--check" => ui_parity::check(root),
             _ => Err(format!("usage: cargo xtask ui-parity [--check]\n\n{USAGE}")),
         },
+        Some("commands") => match options {
+            [] => commands::generate(root),
+            [flag] if flag == "--check" => commands::check(root),
+            _ => Err(format!("usage: cargo xtask commands [--check]\n\n{USAGE}")),
+        },
         Some("deny-selftest") => deny_selftest(root),
         Some("golden") => golden(root, options),
         Some("package") => package::package(root),
@@ -141,6 +149,7 @@ fn check(root: &Path) -> Result<(), String> {
         ),
         ("layers", Box::new(|| layers(root))),
         ("ui parity reference", Box::new(|| ui_parity::check(root))),
+        ("command reference", Box::new(|| commands::check(root))),
         (
             "licences, advisories, bans, sources",
             Box::new(|| cargo(root, &["deny", "--locked", "check"])),

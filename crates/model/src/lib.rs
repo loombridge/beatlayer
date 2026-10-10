@@ -50,6 +50,11 @@
 //! # Ok::<(), bl_model::EditError>(())
 //! ```
 //!
+//! Every command, and undo and redo, is also in the command registry
+//! (`bl-commands`), so people and agents can run it by ID with JSON
+//! arguments: see [`registry`]. The command reference is
+//! `docs/commands.md`.
+//!
 //! The rules taken from Live are in `docs/specs/tracks-and-undo.md`.
 
 mod changes;
@@ -60,6 +65,7 @@ mod document;
 mod editor;
 mod error;
 mod ids;
+pub mod registry;
 mod repr;
 mod shared;
 mod track;

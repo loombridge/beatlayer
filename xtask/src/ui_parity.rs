@@ -81,6 +81,25 @@ pub fn check(root: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// The validated shortcut map as the command registry needs it: contexts,
+/// and each shortcut's context and keys (WP-0.14).
+pub fn shortcut_table(root: &Path) -> Result<bl_commands::ShortcutTable, String> {
+    let map = load(root)?;
+    Ok(bl_commands::ShortcutTable::new(
+        map.contexts.into_iter().map(|context| context.id),
+        map.shortcuts
+            .into_iter()
+            .map(|shortcut| bl_commands::Shortcut {
+                id: shortcut.id,
+                action: shortcut.action,
+                context: shortcut.context,
+                mac: shortcut.mac,
+                win: shortcut.win,
+                milestone: shortcut.milestone,
+            }),
+    ))
+}
+
 fn load(root: &Path) -> Result<Map, String> {
     let text = std::fs::read_to_string(root.join(TOML_PATH))
         .map_err(|e| format!("couldn't read {TOML_PATH}: {e}"))?;

@@ -6,12 +6,13 @@
 
 use bl_core::time::Ticks;
 use imbl::Vector;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{ClipId, ContentHash};
 
 /// A clip on a track's arrangement lane.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Clip {
     /// The clip's ID.
     pub id: ClipId,
@@ -51,7 +52,7 @@ impl Clip {
 
 /// What a clip plays. An audio clip goes only on an audio track and a MIDI
 /// clip only on a MIDI track.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ClipData {
     /// Audio from the media store.
@@ -71,16 +72,22 @@ impl ClipData {
 /// An audio clip's data (a stub until WP-1.4).
 ///
 /// The samples stay in the media store; the clip holds only their hash.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[schemars(
+    description = "An audio clip's data. The samples stay in the media store; the clip names \
+                   them by content hash."
+)]
 pub struct AudioData {
     /// The media file the clip plays.
     pub media: ContentHash,
 }
 
 /// A MIDI clip's data (a stub until WP-2.1).
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[schemars(description = "A MIDI clip's data: its notes.")]
 pub struct MidiData {
     /// The notes, in no particular order.
+    #[schemars(with = "Vec<Note>")]
     pub notes: Vector<Note>,
 }
 
@@ -94,11 +101,13 @@ impl MidiData {
 }
 
 /// A note in a MIDI clip.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Note {
-    /// The MIDI key, from 0 to 127.
+    /// The MIDI key, from 0 to 127. Middle C (C3 in Live) is 60.
+    #[schemars(range(max = 127))]
     pub key: u8,
     /// The velocity, from 1 to 127.
+    #[schemars(range(min = 1, max = 127))]
     pub velocity: u8,
     /// Where the note starts, counted from the start of the clip. Never
     /// negative.

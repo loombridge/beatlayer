@@ -10,6 +10,8 @@ publish.workspace = true
 [features]
 # Serialise the time types with serde, for commands and project files.
 serde = ["dep:serde"]
+# JSON Schemas for the serde forms, for the command registry (WP-0.14).
+schemars = ["serde", "dep:schemars"]
 
 [dependencies]
 # Pure-Rust maths for the tempo map's ramps, so conversions round alike on
@@ -17,6 +19,9 @@ serde = ["dep:serde"]
 # architecture-specific code paths either.
 libm = { version = "0.2.16", default-features = false }
 serde = { version = "1.0.228", default-features = false, features = ["std", "derive"], optional = true }
+# Pinned: the command reference (docs/commands.md) is generated from these
+# schemas, so an upgrade is a deliberate change that regenerates it.
+schemars = { version = "=1.2.2", default-features = false, features = ["std"], optional = true }
 
 [dev-dependencies]
 proptest = { version = "1.11", default-features = false, features = ["std"] }

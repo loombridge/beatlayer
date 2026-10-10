@@ -15,6 +15,7 @@ publish = false
 [workspace.dependencies]
 bl-core = { path = "crates/core" }
 bl-model = { path = "crates/model" }
+bl-commands = { path = "crates/commands" }
 bl-project = { path = "crates/project" }
 bl-dsp = { path = "crates/dsp" }
 bl-engine = { path = "crates/engine" }

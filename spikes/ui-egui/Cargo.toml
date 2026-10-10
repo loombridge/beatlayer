@@ -30,7 +30,16 @@ egui-wgpu = { version = "=0.36.2", default-features = false, features = [
     "x11",
     "macos-window-resize-jitter-fix",
 ] }
-winit = "0.30.13"
+# Without winit's default `wayland-csd-adwaita`: its window titles pull in
+# ttf-parser, which RUSTSEC-2026-0192 marks unmaintained. The `notitle`
+# variant still draws Wayland decorations, without the title text.
+winit = { version = "0.30.13", default-features = false, features = [
+    "rwh_06",
+    "x11",
+    "wayland",
+    "wayland-dlopen",
+    "wayland-csd-adwaita-notitle",
+] }
 wgpu = { version = "=30.0.1", default-features = false, features = [
     "std",
     "parking_lot",

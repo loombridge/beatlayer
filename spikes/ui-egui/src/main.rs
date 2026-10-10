@@ -434,6 +434,14 @@ impl Host {
                 "WARNING: the window was occluded or lost its surface; these numbers are not valid"
             );
         }
+        // Any display paces frames at 4 ms or slower; much faster means
+        // nothing waited for vsync (the display slept or the screen locked).
+        if summary.interval_median < 4.0 {
+            println!(
+                "WARNING: frames weren't paced by the display (asleep or locked?); \
+                 these numbers are not valid"
+            );
+        }
         if let Some(path) = &self.args.bench_out {
             match bench::write_csv(path, &self.samples) {
                 Ok(()) => println!("frames written to {}", path.display()),

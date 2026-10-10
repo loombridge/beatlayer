@@ -11,6 +11,9 @@
 #   QUIET_FOR      a pgrep -f pattern for work that would skew the numbers
 #                  (another benchmark, a build). Each run waits until nothing
 #                  matches, and is repeated if something matched while it ran.
+#   READY_CMD      a command that succeeds when the machine is ready (for
+#                  example, the display is awake and unlocked); each run waits
+#                  for it. A run the spike flags with a WARNING is repeated.
 set -euo pipefail
 
 out=${1:-bench-results}
@@ -23,22 +26,30 @@ busy() {
     [[ -n "${QUIET_FOR:-}" ]] && pgrep -f "$QUIET_FOR" >/dev/null
 }
 
+ready() {
+    [[ -z "${READY_CMD:-}" ]] || $READY_CMD >/dev/null
+}
+
 run_once() {
     local name=$1
     shift
-    while busy; do
+    while busy || ! ready; do
         sleep 2
     done
     "$bin" --bench --bench-seconds "$seconds" "$@" --bench-out "$out/$name.csv" \
         >"$out/$name.txt" 2>&1 &
     local pid=$! overlapped=0
     while kill -0 "$pid" 2>/dev/null; do
-        if busy; then
+        if busy || ! ready; then
             overlapped=1
         fi
         sleep 1
     done
     wait "$pid"
+    # The spike warns when frames weren't presented or paced by the display.
+    if grep -q WARNING "$out/$name.txt"; then
+        overlapped=1
+    fi
     return "$overlapped"
 }
 
@@ -56,7 +67,7 @@ for run in $(seq 1 "$runs"); do
                     cat "$out/$name.txt"
                     break
                 fi
-                echo "something else ran during $name; repeating it"
+                echo "$name was disturbed (see its WARNING, or QUIET_FOR matched); repeating it"
             done
             sleep 3
         done

@@ -1,0 +1,46 @@
+name: Feature request
+description: Suggest a feature, or a change to how Beatlayer works.
+title: "Feature: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Beatlayer's scope is set by the [parity matrix](https://github.com/loombridge/beatlayer/blob/main/docs/04-parity-matrix.md): every Ableton Live 12 feature and the milestone that covers it. Check it first, because your feature may already be planned for a later milestone.
+
+        Describe Live's behaviour in your own words. Don't paste text from Ableton's manual or website.
+  - type: dropdown
+    id: parity
+    attributes:
+      label: How it relates to the parity matrix
+      options:
+        - It's a row in the parity matrix
+        - Live has it, but the parity matrix doesn't list it
+        - Live doesn't have it
+    validations:
+      required: true
+  - type: input
+    id: parity-row
+    attributes:
+      label: Parity-matrix row
+      description: The section and the Live feature, as the matrix names them. Leave it empty if there's no row.
+      placeholder: "Views and workflow: Undo History panel"
+  - type: textarea
+    id: need
+    attributes:
+      label: What you want to do
+      description: The task or workflow, and what stops you doing it in Beatlayer today.
+    validations:
+      required: true
+  - type: textarea
+    id: behaviour
+    attributes:
+      label: How it should behave
+      description: The behaviour you expect. If it should match Live, say how you know, such as a manual section or what you saw in a Live version you name.
+    validations:
+      required: true
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: Other software that does this well, sketches, or links.

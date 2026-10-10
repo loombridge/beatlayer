@@ -194,9 +194,10 @@ impl Decoder {
         self.position
     }
 
-    /// The number of damaged packets replaced with silence so far. Damage
-    /// doesn't stop decoding, so one bad packet doesn't lose a whole file, and
-    /// the silence keeps everything after it in time.
+    /// The number of packets the codec rejected as damaged so far. Each one
+    /// is replaced with silence of its length, so decoding carries on and
+    /// what follows stays in time. (Damage the container reader can't frame
+    /// is dropped or ends the file, as symphonia's readers decide.)
     #[must_use]
     pub fn damaged_packets(&self) -> u64 {
         match &self.inner {

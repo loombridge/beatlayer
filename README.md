@@ -34,6 +34,6 @@ Read [AGENTS.md](AGENTS.md) before contributing. Every contribution follows the 
 
 ## Licence
 
-GPL-3.0-or-later ([LICENSE](LICENSE)), pending the maintainer's confirmation (decision D3 in the architecture).
+GPL-3.0-or-later ([LICENSE](LICENSE)). Contributions are made under the Developer Certificate of Origin.
 
 Ableton, Ableton Live, and Push are trademarks of Ableton AG, and Max is a trademark of Cycling '74. Beatlayer isn't affiliated with or endorsed by either.

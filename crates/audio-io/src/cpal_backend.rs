@@ -19,14 +19,22 @@ use std::time::Duration;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SizedSample, SupportedBufferSize, SupportedStreamConfigRange};
 
+use bl_rt::RtThreadConfig;
+
 use crate::buffer::PlanarScratch;
 use crate::runner::{CallbackRunner, frames_to_duration};
 use crate::stats::Counters;
 use crate::{
     AudioBuffer, AudioCallback, Backend, BackendKind, BufferSizes, DEFAULT_MAX_BLOCK_FRAMES,
     DeviceId, DeviceInfo, DeviceSelector, Error, ErrorKind, OpenDevice, STANDARD_SAMPLE_RATES,
-    SampleFormat, Stream, StreamInfo, StreamRequest, StreamStats,
+    SampleFormat, Stream, StreamInfo, StreamRequest, StreamStats, Workgroup, WorkgroupInfo,
 };
+
+/// The buffer size assumed for an audio thread's scheduling period when the
+/// request leaves it to the device, which `cpal` reports only once audio
+/// runs. Only macOS uses the period, and only for a thread Core Audio hasn't
+/// already made real-time.
+const ASSUMED_BUFFER: u32 = 512;
 
 /// The `cpal` backends this machine can run, best first.
 pub(crate) fn available() -> Vec<BackendKind> {
@@ -228,9 +236,31 @@ impl Backend for CpalBackend {
             .unwrap_or(0)
             .max(DEFAULT_MAX_BLOCK_FRAMES);
 
+        // Core Audio's I/O thread is real-time and already in its device's
+        // workgroup; other real-time threads join the same one.
+        let workgroup = if self.kind == BackendKind::CoreAudio {
+            Workgroup::of_core_audio_device(id.local()).ok()
+        } else {
+            None
+        };
+        let thread_config = RtThreadConfig {
+            period: frames_to_duration(
+                u64::from(request.buffer_size.unwrap_or(ASSUMED_BUFFER)),
+                sample_rate,
+            ),
+            promote: true,
+            workgroup: workgroup.clone(),
+        };
+
         let counters = Arc::new(Counters::new());
         let render = Render {
-            runner: CallbackRunner::new(callback, Arc::clone(&counters), sample_rate, true),
+            runner: CallbackRunner::new(
+                callback,
+                Arc::clone(&counters),
+                sample_rate,
+                true,
+                thread_config,
+            ),
             scratch: PlanarScratch::new(channels.into(), max_block_frames as usize),
             channels: channels.into(),
             sample_rate,
@@ -249,11 +279,13 @@ impl Backend for CpalBackend {
             requested_buffer_size: request.buffer_size,
             buffer_size: stream.buffer_size().ok(),
             max_block_frames,
+            workgroup: workgroup.as_ref().map(WorkgroupInfo::of),
         };
         Ok(Box::new(CpalStream {
             stream,
             info,
             counters,
+            workgroup,
         }))
     }
 }
@@ -465,6 +497,7 @@ struct CpalStream {
     stream: cpal::Stream,
     info: StreamInfo,
     counters: Arc<Counters>,
+    workgroup: Option<Workgroup>,
 }
 
 impl Stream for CpalStream {
@@ -487,6 +520,10 @@ impl Stream for CpalStream {
 
     fn current_buffer_size(&self) -> Option<u32> {
         self.stream.buffer_size().ok()
+    }
+
+    fn workgroup(&self) -> Option<Workgroup> {
+        self.workgroup.clone()
     }
 }
 

@@ -16,7 +16,13 @@ bl-project.workspace = true
 bl-engine.workspace = true
 bl-devices.workspace = true
 bl-audio-io.workspace = true
+bl-core.workspace = true
+bl-model.workspace = true
+bl-rt.workspace = true
 clap = { version = "4.6.7", features = ["derive"] }
+# Hands `engine-smoke`'s engine to the stream's callback once the stream has
+# opened at the device's rate.
+rtrb = "0.4.0"
 
 [lints]
 workspace = true

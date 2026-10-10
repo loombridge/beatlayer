@@ -4,7 +4,9 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, JoinHandle};
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+use bl_rt::{RtThreadConfig, WorkInterval};
 
 use crate::buffer::PlanarScratch;
 use crate::runner::{CallbackRunner, frames_to_duration};
@@ -12,7 +14,7 @@ use crate::stats::Counters;
 use crate::{
     AudioCallback, Backend, BackendKind, BufferSizes, DeviceId, DeviceInfo, DeviceSelector, Error,
     ErrorKind, OpenDevice, PortRequest, STANDARD_SAMPLE_RATES, SampleFormat, Stream, StreamInfo,
-    StreamRequest, StreamStats,
+    StreamRequest, StreamStats, Workgroup, WorkgroupInfo,
 };
 
 const NAME: &str = "Null device";
@@ -152,12 +154,31 @@ impl Backend for NullBackend {
             ));
         }
 
+        // Paced in real time, the device's thread works like a sound card's:
+        // real-time priority and, on macOS, a work interval of its own, which
+        // it starts and finishes around each block. Free pacing runs blocks
+        // back to back without sleeping, which at real-time priority would
+        // starve other threads on its core (and on Linux, run past the CPU
+        // time rtkit allows a real-time thread).
+        let realtime = self.options.pacing == Pacing::RealTime;
+        let period = frames_to_duration(u64::from(frames), sample_rate);
+        let interval = if realtime {
+            WorkInterval::new("Beatlayer null device").ok()
+        } else {
+            None
+        };
+        let workgroup = interval.as_ref().map(|i| i.workgroup().clone());
         let counters = Arc::new(Counters::new());
         let runner = CallbackRunner::new(
             callback,
             Arc::clone(&counters),
             sample_rate,
-            self.options.pacing == Pacing::RealTime,
+            realtime,
+            RtThreadConfig {
+                period,
+                promote: realtime,
+                workgroup: workgroup.clone(),
+            },
         );
         let engine = NullEngine {
             runner,
@@ -167,6 +188,8 @@ impl Backend for NullBackend {
             sample_rate,
             options: self.options,
             blocks: 0,
+            interval,
+            period,
         };
         let device = || OpenDevice {
             id: Self::device_id(),
@@ -184,6 +207,7 @@ impl Backend for NullBackend {
             requested_buffer_size: request.buffer_size,
             buffer_size: Some(frames),
             max_block_frames: frames,
+            workgroup: workgroup.as_ref().map(WorkgroupInfo::of),
         };
         Ok(Box::new(NullStream {
             engine: Some(Box::new(engine)),
@@ -191,6 +215,7 @@ impl Backend for NullBackend {
             stop: Arc::new(AtomicBool::new(false)),
             info,
             counters,
+            workgroup,
         }))
     }
 }
@@ -205,12 +230,19 @@ struct NullEngine {
     options: NullOptions,
     /// Blocks run since the stream opened: the device clock.
     blocks: u64,
+    /// The thread's own workgroup (macOS, real-time pacing only).
+    interval: Option<WorkInterval>,
+    /// How long one block lasts.
+    period: Duration,
 }
 
 impl NullEngine {
     /// The device thread: runs blocks until `stop` is set or the frame limit
     /// is reached, then hands the engine back.
     fn run(mut self: Box<Self>, stop: &AtomicBool) -> Box<Self> {
+        // Set the thread up before the clock starts, so the first block isn't
+        // late by the time set-up takes.
+        self.runner.prepare_thread();
         let frames = self.frames as u64;
         let began = Instant::now();
         let first_block = self.blocks;
@@ -232,12 +264,21 @@ impl NullEngine {
             }
 
             let timestamp = frames_to_duration(self.blocks * frames, self.sample_rate);
+            if let Some(interval) = &self.interval {
+                // Only fails if the thread isn't in the interval, which set-up
+                // reports; the block runs either way.
+                let _ = interval.start(self.period);
+            }
             self.runner.device_callback(self.frames);
             let input = self.input.view(self.frames);
             let mut output = self.output.view_mut(self.frames);
             self.runner.run(Some(timestamp), &input, &mut output);
+            if let Some(interval) = &self.interval {
+                let _ = interval.finish();
+            }
             self.blocks += 1;
         }
+        self.runner.release_thread();
         self
     }
 }
@@ -250,6 +291,7 @@ struct NullStream {
     stop: Arc<AtomicBool>,
     info: StreamInfo,
     counters: Arc<Counters>,
+    workgroup: Option<Workgroup>,
 }
 
 impl Stream for NullStream {
@@ -304,6 +346,10 @@ impl Stream for NullStream {
 
     fn current_buffer_size(&self) -> Option<u32> {
         self.info.buffer_size
+    }
+
+    fn workgroup(&self) -> Option<Workgroup> {
+        self.workgroup.clone()
     }
 }
 
@@ -461,6 +507,71 @@ mod tests {
         assert!(run.stats.longest_block >= Duration::from_millis(20));
         assert_eq!(run.stats.gaps, 0, "the device clock stays contiguous");
         assert_eq!(run.faults, 0);
+    }
+
+    #[test]
+    fn a_real_time_null_device_runs_on_a_real_time_thread() {
+        let options = NullOptions {
+            pacing: Pacing::RealTime,
+            frame_limit: Some(10 * 128),
+        };
+        let run = run(options, 128, None);
+        assert_eq!(run.faults, 0);
+        assert_eq!(run.stats.audio_thread_setups, 1);
+        assert_eq!(run.stats.heap_operations, 0);
+        let report = run.stats.audio_thread.expect("a set-up report");
+        assert!(report.trap_installed);
+        assert_eq!(report.denormals_flushed, bl_rt::denormals::SUPPORTED);
+        // Linux needs rtprio limits or rtkit, which CI machines may lack.
+        #[cfg(any(target_os = "macos", windows))]
+        {
+            assert!(report.priority.is_realtime(), "{}", report.priority);
+            assert!(matches!(report.promotion, crate::Promotion::Raised(_)));
+        }
+        #[cfg(target_os = "macos")]
+        assert_eq!(report.workgroup, crate::WorkgroupJoin::Joined);
+    }
+
+    #[test]
+    fn a_free_running_null_device_leaves_its_thread_alone() {
+        let options = NullOptions {
+            pacing: Pacing::Free,
+            frame_limit: Some(10 * 128),
+        };
+        let report = run(options, 128, None)
+            .stats
+            .audio_thread
+            .expect("a set-up report");
+        assert_eq!(report.promotion, crate::Promotion::NotRequested);
+        assert!(!report.priority.is_realtime());
+        assert_eq!(report.workgroup, crate::WorkgroupJoin::None);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_real_time_null_stream_has_its_own_work_interval() {
+        let stream = NullBackend::new()
+            .open_stream(&duplex(256), Box::new(Silence))
+            .unwrap();
+        let info = stream.info().workgroup.clone().expect("a workgroup");
+        assert_eq!(info.label, "the work interval \"Beatlayer null device\"");
+        assert!(stream.workgroup().is_some());
+
+        let free = NullBackend::with_options(NullOptions {
+            pacing: Pacing::Free,
+            frame_limit: None,
+        });
+        let stream = free.open_stream(&duplex(256), Box::new(Silence)).unwrap();
+        assert!(stream.info().workgroup.is_none());
+    }
+
+    #[cfg(target_os = "macos")]
+    struct Silence;
+
+    #[cfg(target_os = "macos")]
+    impl AudioCallback for Silence {
+        fn process(&mut self, _: &ProcessContext, _: &AudioBuffer<'_>, _: &mut AudioBufferMut<'_>) {
+        }
     }
 
     #[test]

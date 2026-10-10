@@ -1,6 +1,7 @@
 # Runs `cargo xtask check` on Windows (x64) and Linux (x64) for every pull
 # request and every push to main, and on all three platforms, macOS (arm64)
-# included, when started by hand from the Actions tab.
+# included, when started by hand from the Actions tab. Alongside, it runs the
+# real-time tests under RealtimeSanitizer on Linux (x64).
 #
 # The repository is private on GitHub's Free plan, so hosted-runner minutes are
 # limited, and a macOS minute counts as ten and a Windows minute as two. The maintainer
@@ -94,12 +95,15 @@ jobs:
 
       # cpal's `asio` feature pulls in asio-sys, whose build script downloads
       # Steinberg's ASIO SDK when CPAL_ASIO_DIR is unset. ASIO goes through
-      # azo instead (decision D9). Add any other crate whose build script
-      # downloads an SDK or binaries to the pattern.
+      # azo instead (decision D9). rtsan-standalone-sys clones and builds
+      # LLVM's compiler-rt, or fetches prebuilt runtimes, unless it's handed
+      # one; the RealtimeSanitizer harness in rtsan/ links an installed
+      # runtime itself instead (WP-0.4). Add any other crate whose build
+      # script downloads an SDK or binaries to the pattern.
       - name: Refuse dependencies that download at build time
         run: |
-          if grep -En '^name = "(asio-sys)"$' Cargo.lock; then
-            echo "::error file=Cargo.lock::A dependency's build script downloads an SDK at build time. ASIO goes through azo (decision D9), not cpal's asio feature."
+          if grep -En '^name = "(asio-sys|rtsan-standalone-sys)"$' Cargo.lock; then
+            echo "::error file=Cargo.lock::A dependency's build script downloads code at build time. ASIO goes through azo (decision D9), not cpal's asio feature; RealtimeSanitizer is linked by rtsan/build.rs, not rtsan-standalone."
             exit 1
           fi
           echo "No build-time downloaders in Cargo.lock"
@@ -122,3 +126,72 @@ jobs:
 
       - name: cargo xtask check
         run: cargo xtask check
+
+  rtsan:
+    name: RealtimeSanitizer (Linux x64)
+    # Linux only: a macOS minute counts as ten on the Free plan, and the same
+    # tests run on macOS with `cargo xtask rtsan` and Homebrew's llvm.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Prepare the runner
+        uses: ./.github/actions/prepare
+
+      # Ubuntu 24.04's own LLVM is 18, which predates RealtimeSanitizer (LLVM
+      # 20). apt.llvm.org publishes LLVM 20 for Ubuntu as signed binary
+      # packages; this installs the compiler-rt runtimes and, from llvm-20,
+      # llvm-symbolizer, which `cargo xtask rtsan` finds next to the runtime
+      # so reports name functions. Nothing downloads or builds LLVM's source,
+      # and the harness's build script fails rather than fetch a runtime if
+      # RTSAN_LIB_PATH is missing.
+      - name: Install LLVM 20's RealtimeSanitizer runtime
+        run: |
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+            --output llvm-snapshot.gpg.key https://apt.llvm.org/llvm-snapshot.gpg.key
+          # apt.llvm.org's signing key, checked by fingerprint before apt
+          # trusts it.
+          expected=6084F3CF814B57C1CF12EFD515CF4D18AF4F7421
+          fingerprint=$(gpg --show-keys --with-colons llvm-snapshot.gpg.key | awk -F: '$1 == "fpr" { print $10; exit }')
+          if [ "$fingerprint" != "$expected" ]; then
+            echo "::error::apt.llvm.org's key has fingerprint ${fingerprint:-none}, not $expected"
+            exit 1
+          fi
+          sudo install -D --mode 0644 llvm-snapshot.gpg.key /etc/apt/keyrings/apt.llvm.org.asc
+          echo "deb [signed-by=/etc/apt/keyrings/apt.llvm.org.asc] https://apt.llvm.org/noble/ llvm-toolchain-noble-20 main" \
+            | sudo tee /etc/apt/sources.list.d/llvm-20.list
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends libclang-rt-20-dev llvm-20
+          runtime=$(find /usr/lib/llvm-20 -name 'libclang_rt.rtsan*.a' -print -quit)
+          if [ -z "$runtime" ]; then
+            echo "::error::libclang-rt-20-dev has no RealtimeSanitizer runtime"
+            exit 1
+          fi
+          echo "RealtimeSanitizer runtime: $runtime"
+          echo "RTSAN_LIB_PATH=$runtime" >> "$GITHUB_ENV"
+
+      # The harness builds with the main workspace's lockfile; `cargo xtask
+      # rtsan` copies it too, but the cache step reads the harness first.
+      - name: Give the harness the main lockfile
+        run: cp Cargo.lock rtsan/Cargo.lock
+
+      - name: Restore the dependency cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: |
+            . -> target
+            rtsan -> ../target/rtsan
+          cache-bin: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # --nocapture puts the sanitizer's reports from the deliberate
+      # violations in the log, as evidence that it's watching.
+      - name: cargo xtask rtsan
+        run: cargo xtask rtsan -- --nocapture

@@ -30,14 +30,28 @@
 //! `cpal`'s native PipeWire host stays off until `deny.toml` allows the
 //! licence of one of its build-time dependencies (see `Cargo.toml`).
 //!
-//! # Where the audio thread starts
+//! # The audio thread
 //!
 //! Every backend hands each block to one function, `CallbackRunner::run` in
 //! `runner.rs`, on whatever thread the backend uses for audio: Core Audio's
 //! I/O thread, WASAPI's or ALSA's render thread, the ASIO driver's thread, or
-//! the null device's `bl-audio-null` thread. Before a stream's first block it
-//! calls `CallbackRunner::on_audio_thread_start`. Those two are the single
-//! place to add real-time thread set-up and the allocation trap (WP-0.4).
+//! the null device's `bl-audio-null` thread. That makes it the one place for
+//! the real-time harness in `bl-rt`:
+//!
+//! - The first block on each new thread sets the thread up: real-time
+//!   priority (MMCSS "Pro Audio" on Windows, `SCHED_FIFO` or rtkit on Linux,
+//!   the Mach time-constraint policy on macOS) unless the backend already
+//!   gave it that, and on macOS the output device's audio workgroup. A
+//!   backend can move its callback to a new thread mid-stream (Core Audio
+//!   does when the default device changes), so set-up keys on the thread,
+//!   not the stream. [`StreamStats::audio_thread`] reports the outcome.
+//! - Every block runs as a real-time section: denormals flushed to zero,
+//!   heap use counted by the allocation trap in builds that install it
+//!   ([`StreamStats::heap_operations`]), and RealtimeSanitizer watching in
+//!   builds with the `rtsan` feature (`cargo xtask rtsan`).
+
+#[cfg(test)]
+bl_rt::install_trap!();
 
 mod buffer;
 mod cpal_backend;
@@ -54,6 +68,7 @@ mod wire;
 use std::fmt;
 use std::str::FromStr;
 
+pub use bl_rt::{Priority, Promotion, ThreadReport, Workgroup, WorkgroupJoin};
 pub use buffer::{AudioBuffer, AudioBufferMut};
 pub use error::{Error, ErrorKind};
 pub use null::{NullBackend, NullOptions, Pacing};
@@ -419,6 +434,33 @@ pub struct StreamInfo {
     pub buffer_size: Option<u32>,
     /// The largest block [`AudioCallback::process`] receives.
     pub max_block_frames: u32,
+    /// The macOS audio workgroup the stream's audio thread works in, as it
+    /// was when the stream opened. `None` on other platforms.
+    pub workgroup: Option<WorkgroupInfo>,
+}
+
+/// What a stream knows about its audio workgroup (macOS).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkgroupInfo {
+    /// Where it comes from, for example "the I/O workgroup of MacBook Pro
+    /// Speakers".
+    pub label: String,
+    /// The operating system's own description of it, which includes its name.
+    pub description: String,
+    /// How many threads the system suggests running in it at once: the size
+    /// for a real-time worker pool.
+    pub max_parallel_threads: Option<u32>,
+}
+
+impl WorkgroupInfo {
+    /// Describes `workgroup`.
+    pub fn of(workgroup: &Workgroup) -> Self {
+        Self {
+            label: workgroup.label().to_owned(),
+            description: workgroup.description(),
+            max_parallel_threads: workgroup.max_parallel_threads(),
+        }
+    }
 }
 
 /// Facts about one block, passed to [`AudioCallback::process`].
@@ -428,7 +470,8 @@ pub struct ProcessContext {
     pub sample_rate: u32,
     /// Frames in this block.
     pub frames: usize,
-    /// Frames the stream processed before this block.
+    /// Frames the stream played before this block, including any silent
+    /// block in which a new audio thread was set up.
     pub position: u64,
     /// When the device handles this block, on the backend's clock, if the
     /// backend says. Only differences between timestamps mean anything.
@@ -485,6 +528,14 @@ pub trait Stream {
     /// The buffer size the backend reports now, which can change while the
     /// stream runs (for example after the default device changes).
     fn current_buffer_size(&self) -> Option<u32>;
+
+    /// The audio workgroup the stream's audio thread works in (macOS), for
+    /// other real-time threads that work to the same deadline to join. It's
+    /// the one the stream opened with: a stream that follows the default
+    /// device keeps it after the default changes.
+    fn workgroup(&self) -> Option<Workgroup> {
+        None
+    }
 }
 
 /// The backends this build has and this machine can run, best first.

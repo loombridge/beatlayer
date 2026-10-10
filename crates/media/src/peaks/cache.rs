@@ -508,10 +508,12 @@ impl Shared {
                 }
             }
         };
-        self.settled.notify_all();
+        // Tell subscribers before waking waiters, so a caller that returns
+        // from `wait` and then subscribes never receives this build's event.
         if let Some(event) = event {
             self.emit(&event);
         }
+        self.settled.notify_all();
     }
 
     /// Drops a hash's peaks because its file is missing or changed. A
@@ -522,14 +524,15 @@ impl Shared {
         if let Some(Slot::Pending(progress)) = &removed {
             progress.cancel();
         }
-        self.settled.notify_all();
         let deleted = matches!(status, MediaStatus::Changed { .. }) && self.delete_file(hash);
+        // As in `settle`: subscribers hear of it before waiters wake.
         if removed.is_some() || deleted {
             self.emit(&PeakEvent::Invalidated {
                 hash,
                 status: status.clone(),
             });
         }
+        self.settled.notify_all();
     }
 
     fn load_file(&self, hash: ContentHash) -> Option<Peaks> {

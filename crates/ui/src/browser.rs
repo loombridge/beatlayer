@@ -124,6 +124,8 @@ pub struct BrowserUi {
     list_scroll: f32,
     sidebar_scroll: f32,
     search: String,
+    /// The shell's search text as this last saw or sent it.
+    search_seen: String,
     seen_focus_requests: u64,
     seen_cursor: Option<usize>,
     /// Where a Shift-extended selection started.
@@ -249,9 +251,11 @@ impl BrowserUi {
 
         // The search field (S-BRW-006, S-BRW-007).
         let view = shell.browser_view();
-        let focused = ui.memory(|m| m.has_focus(search_id()));
-        if !focused && self.search != view.search_text() {
-            self.search = view.search_text().to_owned();
+        // The shell's search changed by other means (an agent, Cmd-F's All):
+        // the field shows it.
+        if view.search_text() != self.search_seen {
+            self.search_seen = view.search_text().to_owned();
+            self.search.clone_from(&self.search_seen);
         }
         let (down, enter, escape) = ui.input(|i| {
             (
@@ -271,6 +275,7 @@ impl BrowserUi {
         }
         if response.changed() {
             invoke(events, ids::SEARCH, json!({ "query": self.search }));
+            self.search_seen.clone_from(&self.search);
         }
         if response.has_focus() && down {
             // Down moves to the results.
@@ -280,6 +285,7 @@ impl BrowserUi {
             self.go_to_results(shell, events);
         } else if response.lost_focus() && escape && !self.search.is_empty() {
             self.search.clear();
+            self.search_seen.clear();
             invoke(events, ids::SEARCH, json!({ "query": "" }));
         }
     }
@@ -645,7 +651,7 @@ impl BrowserUi {
         } else {
             theme.colors.text.0.gamma_multiply(0.92)
         };
-        painter.text(
+        let name = painter.text(
             pos2(indent + 12.0, rect.center().y),
             Align2::LEFT_CENTER,
             &item.name,
@@ -653,14 +659,18 @@ impl BrowserUi {
             text_colour,
         );
         if let Some(folder) = &item.folder {
-            // Search results name their folder, at the right.
-            painter.text(
-                pos2(rect.right() - 4.0, rect.center().y),
-                Align2::RIGHT_CENTER,
-                folder,
-                theme.small_font(),
-                theme.colors.pending.0,
-            );
+            // Search results name their folder at the right, in the room
+            // the name leaves, showing the folder's end when it's long.
+            let room = Rect::from_min_max(pos2(name.right() + 8.0, rect.top()), rect.max);
+            if room.width() > 12.0 {
+                painter.with_clip_rect(room).text(
+                    pos2(rect.right() - 4.0, rect.center().y),
+                    Align2::RIGHT_CENTER,
+                    folder,
+                    theme.small_font(),
+                    theme.colors.pending.0,
+                );
+            }
         }
 
         if response.double_clicked() {
@@ -845,7 +855,13 @@ impl BrowserUi {
             && !overview.is_empty()
         {
             let middle = wave.center().y;
-            let half = wave.height() / 2.0;
+            // Scaled to the file's peak, so a quiet file still shows its
+            // shape.
+            let peak = overview
+                .iter()
+                .fold(0.0f32, |peak, [low, high]| peak.max(-low).max(*high))
+                .max(1e-3);
+            let half = wave.height() / 2.0 / peak.min(1.0);
             let step = wave.width() / overview.len() as f32;
             for (i, [low, high]) in overview.iter().enumerate() {
                 let x = wave.left() + (i as f32 + 0.5) * step;

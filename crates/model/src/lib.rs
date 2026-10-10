@@ -74,7 +74,7 @@ pub use changes::{Change, ChangeSet};
 pub use clip::{AudioData, Clip, ClipData, MidiData, Note};
 pub use command::Command;
 pub use device::{Device, DeviceKind, PluginFormat};
-pub use document::{Document, Settings};
+pub use document::{ArrangementLoop, Document, Settings};
 pub use editor::{EditError, Editor};
 pub use error::ModelError;
 pub use ids::{ClipId, ContentHash, DeviceId, ParamId, ParseContentHashError, TrackId};

@@ -19,6 +19,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::error::{LoadError, SaveError};
 use crate::folder::{ProjectFolder, SET_EXTENSION};
 use crate::format::{LoadOptions, Project, SAVED_BY, SetInfo, decode, encode};
+use crate::journal::{self, Follows, fingerprint};
 use crate::migrate::SCHEMA_VERSION;
 
 /// Settings for saving a set.
@@ -73,6 +74,8 @@ pub struct SaveReport {
 pub struct SetFile {
     path: PathBuf,
     info: Option<SetInfo>,
+    /// The [`fingerprint`] of the file as last loaded or saved.
+    fingerprint: Option<u64>,
 }
 
 impl SetFile {
@@ -83,10 +86,13 @@ impl SetFile {
         Self {
             path: path.into(),
             info: None,
+            fingerprint: None,
         }
     }
 
-    /// Opens a set file, or the only set in a project folder.
+    /// Opens a set file, or the only set in a project folder, at its newest
+    /// save point: with Save Continuously's edits since the last save
+    /// applied, if there are any (see [`crate::journal`]).
     ///
     /// # Errors
     ///
@@ -105,10 +111,11 @@ impl SetFile {
         options: &LoadOptions,
     ) -> Result<(Self, Project), LoadError> {
         let path = find_set(path.as_ref())?;
-        let (project, info) = load_file(&path, options)?;
+        let (project, info, fingerprint) = load_file(&path, options)?;
         let set = Self {
             path,
             info: Some(info),
+            fingerprint: Some(fingerprint),
         };
         Ok((set, project))
     }
@@ -136,6 +143,32 @@ impl SetFile {
     #[must_use]
     pub fn revision(&self) -> u64 {
         self.info.as_ref().map_or(0, |info| info.revision)
+    }
+
+    /// The [`fingerprint`] of the file as last loaded or saved, or `None` if
+    /// it hasn't been yet.
+    #[must_use]
+    pub fn fingerprint(&self) -> Option<u64> {
+        self.fingerprint
+    }
+
+    /// The saved revision a journal of this set's edits follows, or `None`
+    /// for a set never saved.
+    #[must_use]
+    pub fn follows(&self) -> Option<Follows> {
+        Some(Follows {
+            revision: self.info.as_ref()?.revision,
+            fingerprint: self.fingerprint?,
+        })
+    }
+
+    /// The save points Save Continuously has kept since this revision was
+    /// saved, oldest first (see [`journal::save_points`]).
+    #[must_use]
+    pub fn save_points(&self) -> Vec<journal::SavePoint> {
+        self.follows()
+            .map(|follows| journal::save_points(&self.path, follows))
+            .unwrap_or_default()
     }
 
     /// Saves `project` as the next revision, keeping the last 10 replaced
@@ -171,6 +204,7 @@ impl SetFile {
             schema: SCHEMA_VERSION,
         };
         self.info = Some(info.clone());
+        self.fingerprint = Some(fingerprint(&bytes));
         Ok(SaveReport {
             info,
             backup: written.backup,
@@ -199,7 +233,8 @@ impl SetFile {
     }
 }
 
-/// Loads a set file, or the only set in a project folder.
+/// Loads a set file, or the only set in a project folder, at its newest
+/// save point (as [`SetFile::open`] does).
 ///
 /// # Errors
 ///
@@ -221,7 +256,7 @@ pub fn load_with(
     options: &LoadOptions,
 ) -> Result<(Project, SetInfo), LoadError> {
     let path = find_set(path.as_ref())?;
-    load_file(&path, options)
+    load_file(&path, options).map(|(project, info, _)| (project, info))
 }
 
 /// The set a path names: the path itself, or the only set in a folder.
@@ -244,7 +279,9 @@ fn find_set(path: &Path) -> Result<PathBuf, LoadError> {
     }
 }
 
-fn load_file(path: &Path, options: &LoadOptions) -> Result<(Project, SetInfo), LoadError> {
+/// Loads a set file and applies its newest save point, returning the file's
+/// fingerprint too.
+fn load_file(path: &Path, options: &LoadOptions) -> Result<(Project, SetInfo, u64), LoadError> {
     let io = |source| LoadError::Io {
         path: path.to_owned(),
         source,
@@ -264,7 +301,14 @@ fn load_file(path: &Path, options: &LoadOptions) -> Result<(Project, SetInfo), L
             limit: options.max_json_bytes,
         });
     }
-    decode(&bytes, options)
+    let (project, info) = decode(&bytes, options)?;
+    let fingerprint = fingerprint(&bytes);
+    let follows = Follows {
+        revision: info.revision,
+        fingerprint,
+    };
+    let project = journal::newest_save_point(path, follows, options).unwrap_or(project);
+    Ok((project, info, fingerprint))
 }
 
 /// The file-system operations a save makes, so tests can stop a save after
@@ -583,6 +627,15 @@ pub(crate) fn utc_stamp(time: SystemTime) -> String {
     )
 }
 
+/// A time in RFC 3339 form in UTC, to the second: `YYYY-MM-DDTHH:MM:SSZ`.
+/// Times before 1970 count as 1970.
+pub(crate) fn utc_rfc3339(time: SystemTime) -> String {
+    let stamp = utc_stamp(time);
+    let (date, clock) = stamp.split_at(10);
+    let clock = clock.trim_start();
+    format!("{date}T{}:{}:{}Z", &clock[..2], &clock[2..4], &clock[4..6])
+}
+
 /// The proleptic Gregorian date `days` after 1 January 1970, by Howard
 /// Hinnant's `civil_from_days` algorithm (public domain).
 fn civil_from_days(days: i64) -> (i64, u32, u32) {
@@ -679,6 +732,8 @@ mod tests {
     fn utc_stamps() {
         assert_eq!(utc_stamp(UNIX_EPOCH), "1970-01-01 000000");
         assert_eq!(utc_stamp(at(NOW)), "2026-10-10 143012");
+        assert_eq!(utc_rfc3339(at(NOW)), "2026-10-10T14:30:12Z");
+        assert_eq!(utc_rfc3339(UNIX_EPOCH), "1970-01-01T00:00:00Z");
         assert_eq!(utc_stamp(at(951_782_400)), "2000-02-29 000000");
         assert_eq!(utc_stamp(at(951_868_799)), "2000-02-29 235959");
         assert_eq!(utc_stamp(at(4_102_444_800)), "2100-01-01 000000");

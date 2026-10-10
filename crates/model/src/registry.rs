@@ -294,6 +294,34 @@ const ENTRIES: &[Entry] = &[
             and beats, not where clips sit in ticks.",
     },
     Entry {
+        id: "transport.set_loop",
+        action: Action::Apply("set_loop"),
+        label: "Set Loop Brace",
+        permission: Permission::Edit,
+        contexts: &[Global, Arrangement],
+        keys: &[],
+        description: "Moves the Arrangement loop brace to start at `start` and run for `length` \
+            ticks (705,600 to the quarter note; a 4/4 bar is 2,822,400), as the Control Bar's \
+            Loop Start and Loop Length fields do. It doesn't switch the loop on or off: use \
+            `transport.set_loop_enabled` for that. While the loop is on, playback that reaches \
+            the brace's end jumps back to its start; playback that starts at or after the end \
+            plays on. The start must be 0 (1.1.1) or later and the length more than 0. The \
+            brace is saved with the set, and undo moves it back.",
+    },
+    Entry {
+        id: "transport.set_loop_enabled",
+        action: Action::Apply("set_loop_enabled"),
+        label: "Arrangement Loop On/Off",
+        permission: Permission::Edit,
+        contexts: &[Global, Arrangement],
+        keys: &[],
+        description: "Switches the Arrangement loop on or off, as the Control Bar's Loop switch \
+            does, leaving the brace where it is. With it on, playback that reaches the brace's \
+            end jumps back to its start, on the exact sample, until it's switched off or \
+            playback stops. Use `transport.set_loop` to move the brace first. The switch is \
+            saved with the set, and undo switches it back.",
+    },
+    Entry {
         id: "track.create",
         action: Action::Apply("create_track"),
         label: "Insert Track",

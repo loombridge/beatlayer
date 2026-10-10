@@ -8,6 +8,7 @@
 //! | [`DC`] | adds a constant to every sample | the constant |
 //! | [`COUNTER`] | counts the frames it processes and publishes the count | none |
 //! | [`TRANSPORT`] | adds 1 to every sample while the song plays | none |
+//! | [`POSITION`] | adds each frame's song position while the song plays, and −1 while it's stopped | none |
 //! | [`DATA`] | adds the `f32` it was last sent as [`NodeData`] | none |
 //!
 //! All of them count themselves in a shared [`Probe`] when they're made and
@@ -27,6 +28,8 @@ pub const DC: &str = "test.dc";
 pub const COUNTER: &str = "test.counter";
 /// The transport probe's device type.
 pub const TRANSPORT: &str = "test.transport";
+/// The position probe's device type.
+pub const POSITION: &str = "test.position";
 /// The data probe's device type.
 pub const DATA: &str = "test.data";
 /// The DC node's value.
@@ -57,6 +60,12 @@ pub fn registry(probe: &Arc<Probe>) -> Registry {
     let p = Arc::clone(probe);
     registry.add_native(TRANSPORT, move |_, _| {
         Box::new(TransportProbe {
+            _tracked: Tracked::new(&p),
+        })
+    });
+    let p = Arc::clone(probe);
+    registry.add_native(POSITION, move |_, _| {
+        Box::new(PositionProbe {
             _tracked: Tracked::new(&p),
         })
     });
@@ -181,6 +190,29 @@ impl Node for TransportProbe {
         if block.transport().playing {
             let frames = block.frames();
             add(block, 0..frames, 1.0);
+        }
+    }
+}
+
+/// Adds each frame's song position while the song plays, and −1 while it's
+/// stopped. Positions are exact as `f32`s up to 2²⁴ frames (about 350
+/// seconds at 48 kHz).
+#[derive(Debug)]
+struct PositionProbe {
+    _tracked: Tracked,
+}
+
+impl Node for PositionProbe {
+    fn process(&mut self, block: &mut Block<'_>) {
+        let transport = block.transport();
+        for channel in block.channels_mut() {
+            for (i, sample) in channel.iter_mut().enumerate() {
+                *sample += if transport.playing {
+                    (transport.position.get() + i as i64) as f32
+                } else {
+                    -1.0
+                };
+            }
         }
     }
 }

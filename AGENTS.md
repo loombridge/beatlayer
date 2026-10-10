@@ -37,4 +37,4 @@ One-time setup: install Rust with rustup (the repo pins the toolchain in `rust-t
 
 ## Where things stand (10 October 2026)
 
-Phase 0. Merged: WP-0.1 (workspace and tooling) and WP-0.2 (CI on macOS, Windows, and Linux). The UI toolkit is egui ([ADR-001](docs/adr/ADR-001-ui-toolkit-egui.md)). In review: WP-0.3, 0.4, 0.5, 0.6, 0.8a, 0.8b, 0.12, and 0.13. Next: WP-0.7, 0.9, 0.11, and 0.14. The build plan's status table is the live queue.
+Phase 0. Merged: WP-0.1, 0.2 (CI), 0.5 (time and tempo), 0.8a and 0.8b (the UI spikes), and 0.12 (contributor docs). The UI toolkit is egui ([ADR-001](docs/adr/ADR-001-ui-toolkit-egui.md)). In review: WP-0.3, 0.4, 0.6, and 0.13. In progress: WP-0.11. Next: WP-0.7, 0.9, 0.10, and 0.14. The build plan's status table is the live queue.

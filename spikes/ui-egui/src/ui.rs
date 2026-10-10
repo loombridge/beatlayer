@@ -893,9 +893,10 @@ fn knob(ui: &mut Ui, value: &mut f32, label: String, ppp: f32) -> Response {
     let visuals = ui.style().interact(&response);
     painter.circle_filled(centre, radius, visuals.bg_fill);
     painter.circle_stroke(centre, radius, visuals.fg_stroke);
-    // 7 o'clock to 5 o'clock.
-    let angle = (-225.0f32 + 270.0 * *value).to_radians();
-    let tip = centre + vec2(angle.cos(), -angle.sin()) * (radius - 2.0);
+    // Clockwise from about 7:30 (0) through 12 (0.5) to about 4:30 (1), with
+    // angles measured in screen coordinates, where y points down.
+    let angle = (135.0f32 + 270.0 * *value).to_radians();
+    let tip = centre + vec2(angle.cos(), angle.sin()) * (radius - 2.0);
     painter.line_segment(
         [centre, tip],
         Stroke::new(2.0, Color32::from_rgb(240, 160, 60)),

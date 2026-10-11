@@ -10,6 +10,10 @@ publish.workspace = true
 [dependencies]
 bl-dsp.workspace = true
 bl-media.workspace = true
+# Spectra for the spectrum, the onsets, and the chroma (WP-1.16). The
+# version rubato's FFT resampler already brings in, so nothing new enters
+# the build.
+realfft = "3.5.0"
 
 [lints]
 workspace = true

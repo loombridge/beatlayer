@@ -39,6 +39,7 @@ use bl_shell_spec::browser as browser_ids;
 use bl_shell_spec::editing as edit_ids;
 use bl_shell_spec::export as export_ids;
 use bl_shell_spec::mixer_view as mixer_ids;
+use bl_shell_spec::perception as perception_ids;
 use bl_shell_spec::transport as transport_ids;
 
 /// The argument a key in a range (F1 to F8) adds to a toggling mixer
@@ -302,6 +303,8 @@ pub struct Shell {
     meters: Vec<bl_engine::TrackMeter>,
     /// Whether the meters were the engine's when last polled.
     metering: bool,
+    /// The agent API's last audio previews (WP-1.16).
+    previews: crate::perception::Previews,
 }
 
 impl fmt::Debug for Shell {
@@ -402,6 +405,7 @@ impl Shell {
             mixer: MixerView::new(),
             meters: Vec::new(),
             metering: false,
+            previews: crate::perception::Previews::default(),
         };
         shell.give_agents_tokens();
         shell
@@ -1795,14 +1799,13 @@ impl Shell {
         if browser_ids::handles(id) {
             return self.run_browser(id, args);
         }
+        if perception_ids::handles(id) {
+            return self.run_perception(id, args);
+        }
         if export_ids::handles(id) {
             // Spec: export R15. The set, its media, the Arrangement's time
             // selection, and the engine's rate; the export changes none.
-            let engine_rate = self
-                .audio
-                .sample_rate()
-                .or(self.audio.settings().sample_rate)
-                .unwrap_or(crate::export::DEFAULT_ENGINE_RATE);
+            let engine_rate = self.engine_rate();
             let args = Self::args(id, args)?;
             let media: Arc<dyn bl_engine::MediaLibrary> = self.media.clone();
             return crate::export::run_command(
@@ -1820,6 +1823,53 @@ impl Shell {
         let result = self.run_shell(id, args);
         self.touch();
         result
+    }
+
+    /// The engine's rate: the audio device's, or the rate set in the audio
+    /// settings, or 48 kHz when neither is known (the export spec, R6).
+    fn engine_rate(&self) -> u32 {
+        self.audio
+            .sample_rate()
+            .or(self.audio.settings().sample_rate)
+            .unwrap_or(crate::export::DEFAULT_ENGINE_RATE)
+    }
+
+    /// Runs a perception command (WP-1.16): an audio preview or an
+    /// analysis, rendered offline from the set as it is now. Neither
+    /// changes the set, the view, or the engine playing on the device.
+    fn run_perception(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        let source = crate::perception::Source {
+            document: self.editor.document(),
+            media: self.media.clone(),
+            selection: self.arrangement.time_selection(),
+            engine_rate: self.engine_rate(),
+        };
+        match id {
+            perception_ids::PREVIEW => {
+                let args = Self::args(id, args)?;
+                crate::perception::preview(&mut self.previews, &source, &args)
+                    .map(|result| to_value(&result))
+            }
+            perception_ids::ANALYZE => {
+                let args = Self::args(id, args)?;
+                crate::perception::analyze(&self.previews, &source, &args)
+                    .map(|result| to_value(&result))
+            }
+            _ => {
+                let _: perception_ids::CaptureArgs = Self::args(id, args)?;
+                Err(ShellError::Unavailable {
+                    command: id.to_owned(),
+                    reason: "a view capture is an image of the app's window, which only the                              agent API's `capture_view` tool returns, while the app's window                              is open"
+                        .to_owned(),
+                })
+            }
+        }
+    }
+
+    /// The agent API's last audio previews (WP-1.16).
+    #[must_use]
+    pub fn previews(&self) -> &crate::perception::Previews {
+        &self.previews
     }
 
     /// Arguments as a JSON object: `null` is no arguments.

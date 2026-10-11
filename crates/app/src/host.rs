@@ -15,18 +15,21 @@
 //! engine the shell plays the set through is the agent API's too
 //! ([`Agent::sync_engine`]): agents' transport commands and scheduled
 //! commands go on the queue the person's transport commands take, and
-//! fired scheduled commands come back as the agents' undo steps.
+//! fired scheduled commands come back as the agents' undo steps. An
+//! agent's view capture (WP-1.16) is read back from the window's next frame
+//! and encoded off this thread ([`crate::capture`]).
 
 use std::num::NonZeroU32;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
-use bl_agent::Agent;
 use bl_agent::http::{HttpConfig, HttpServer, Parked, Served};
+use bl_agent::{Agent, Captured};
 use bl_shell::agent::AgentServerStatus;
 use bl_shell::audio::AudioHost;
 use bl_shell::files::ProjectFiles;
 use bl_shell::menus::{Menu, MenuPlatform, menu_bar};
+use bl_shell::perception_commands::View;
 use bl_shell::settings::{Preferences, ThemeChoice, default_config_dir};
 use bl_shell::{Effect, Invocation, Shell, WindowKind, commands as ids};
 use bl_ui::input::KeyDispatcher;
@@ -56,6 +59,14 @@ const CPU_METER_PERIOD: Duration = Duration::from_millis(500);
 /// agents' scheduled commands wait to fire, so the set follows what played
 /// within a few milliseconds (WP-1.15b).
 const AGENT_ENGINE_PERIOD: Duration = Duration::from_millis(10);
+
+/// How long a view capture waits for its window to draw a frame before it
+/// fails (WP-1.16): a minimised or hidden window draws none.
+const CAPTURE_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// How often the loop asks a window to draw while a capture waits for a
+/// frame.
+const CAPTURE_PERIOD: Duration = Duration::from_millis(16);
 
 /// How long after a command the loop keeps looking at the engine's
 /// transport between frames, so a start or stop shows as soon as the engine
@@ -182,6 +193,8 @@ pub enum UserEvent {
     /// The browser's background work has news: its index grew, or a
     /// preview was decoded (WP-1.10).
     Browser,
+    /// A view capture has been encoded (WP-1.16).
+    Captured,
 }
 
 impl From<egui_winit::accesskit_winit::Event> for UserEvent {
@@ -233,6 +246,26 @@ struct Host {
     agent_failed: Option<HttpConfig>,
     /// Agents' calls waiting for the person's gesture to end.
     agent_parked: Vec<Parked>,
+    /// Agents' view captures waiting for a frame (WP-1.16).
+    captures: Vec<PendingCapture>,
+    /// Captures encoded off the main thread, coming back.
+    captured: (mpsc::Sender<Encoded>, mpsc::Receiver<Encoded>),
+}
+
+/// A view capture encoded off the main thread: its ticket, and the image
+/// or why there's none (WP-1.16).
+type Encoded = (u64, Result<Captured, String>);
+
+/// An agent's view capture waiting for its window's frame (WP-1.16).
+struct PendingCapture {
+    ticket: u64,
+    view: View,
+    max_size: u32,
+    window: WindowKind,
+    /// When it fails if no frame has come.
+    deadline: Instant,
+    /// When the loop last asked its window to draw.
+    redrawn: Instant,
 }
 
 /// Runs the app until it quits.
@@ -335,6 +368,8 @@ pub fn run(args: Args) -> Result<(), String> {
         agent_server: None,
         agent_failed: None,
         agent_parked: Vec::new(),
+        captures: Vec::new(),
+        captured: mpsc::channel(),
     };
     host.sync_agent_server();
     event_loop
@@ -664,6 +699,8 @@ impl Host {
             Vec::new(),
             &surface.window,
         );
+        // Agents' view captures (WP-1.16): this frame, drawn again offscreen.
+        self.capture_frame(kind, &surface, &primitives, output.pixels_per_point);
         let mut repaint_delay = Duration::MAX;
         if let Some(viewport) = output.viewport_output.get(&ViewportId::ROOT) {
             let mut actions = Vec::new();
@@ -756,6 +793,7 @@ impl Host {
             }
         }
         self.sync_agent_server();
+        self.take_captures();
         self.resume_agents();
         self.agent.sync_engine(&mut self.shell);
         if self.shown_revision != Some(self.shell.revision()) {
@@ -1002,7 +1040,9 @@ impl Host {
     /// waited for it, in the order they came, each as its own undo step
     /// (WP-1.15b).
     fn resume_agents(&mut self) {
-        if self.shell.gesture_under_way() || !self.agent.holds_calls() {
+        // Answered view captures come back even mid-gesture; the agent API
+        // holds everything else until the gesture ends.
+        if !self.agent.holds_calls() {
             return;
         }
         while let Some(served) =
@@ -1010,6 +1050,133 @@ impl Host {
         {
             self.agent_served(served);
             self.agent.sync_engine(&mut self.shell);
+        }
+    }
+
+    /// Takes the view captures agents asked for (WP-1.16): a view that isn't
+    /// on screen, or a minimised window, fails at once; otherwise its
+    /// window draws a frame that's read back.
+    fn take_captures(&mut self) {
+        for request in self.agent.take_capture_requests() {
+            let window =
+                crate::capture::window_of(request.view, &self.shell, self.settings.is_some())
+                    .and_then(|window| {
+                        let surface = match window {
+                            WindowKind::Main => self.main.as_ref(),
+                            WindowKind::Settings => self.settings.as_ref(),
+                        }
+                        .ok_or("that window isn't open")?;
+                        if surface.window.is_minimized() == Some(true) {
+                            return Err(
+                                "the window is minimised, so it isn't drawn; ask the person \
+                                    to bring it back"
+                                    .to_owned(),
+                            );
+                        }
+                        surface.window.request_redraw();
+                        Ok(window)
+                    });
+            match window {
+                Ok(window) => self.captures.push(PendingCapture {
+                    ticket: request.ticket,
+                    view: request.view,
+                    max_size: request.max_size,
+                    window,
+                    deadline: Instant::now() + CAPTURE_TIMEOUT,
+                    redrawn: Instant::now(),
+                }),
+                Err(message) => self.agent.finish_capture(request.ticket, Err(message)),
+            }
+        }
+    }
+
+    /// Captures the views agents asked for from the frame `kind`'s window
+    /// just drew: the frame's `primitives` drawn again offscreen with the
+    /// window's renderer and read back, then each view cropped, scaled, and
+    /// encoded on a thread of its own; [`UserEvent::Captured`] brings the
+    /// images back.
+    fn capture_frame(
+        &mut self,
+        kind: WindowKind,
+        surface: &Surface,
+        primitives: &[egui::ClippedPrimitive],
+        pixels_per_point: f32,
+    ) {
+        if !self.captures.iter().any(|c| c.window == kind) {
+            return;
+        }
+        let (mine, others): (Vec<_>, Vec<_>) = std::mem::take(&mut self.captures)
+            .into_iter()
+            .partition(|c| c.window == kind);
+        self.captures = others;
+        let size = surface.window.inner_size();
+        let frame = surface
+            .painter
+            .render_state()
+            .ok_or_else(|| "the window has no renderer".to_owned())
+            .and_then(|render| {
+                crate::capture::render_frame(
+                    &render.device,
+                    &render.queue,
+                    &mut render.renderer.write(),
+                    render.target_format,
+                    primitives,
+                    [size.width.max(1), size.height.max(1)],
+                    pixels_per_point,
+                    egui::Rgba::from(self.theme.colors.window.0),
+                )
+            })
+            .map(Arc::new);
+        for capture in mine {
+            let job = frame.clone().and_then(|image| {
+                crate::capture::region(capture.view, &self.shell, &self.main_ui)
+                    .map(|region| (image, region))
+            });
+            let (image, region) = match job {
+                Ok(job) => job,
+                Err(message) => {
+                    self.agent.finish_capture(capture.ticket, Err(message));
+                    continue;
+                }
+            };
+            let sender = self.captured.0.clone();
+            let proxy = self.proxy.clone();
+            let ticket = capture.ticket;
+            let max_size = capture.max_size;
+            let spawned = std::thread::Builder::new()
+                .name("view capture".to_owned())
+                .spawn(move || {
+                    let result = crate::capture::encode(&image, region, pixels_per_point, max_size);
+                    let _ = sender.send((ticket, result));
+                    let _ = proxy.send_event(UserEvent::Captured);
+                });
+            if spawned.is_err() {
+                self.agent
+                    .finish_capture(ticket, Err("couldn't start encoding the image".to_owned()));
+            }
+        }
+    }
+
+    /// Hands encoded captures back to the agent API, and fails captures
+    /// whose window drew no frame in time.
+    fn finish_captures(&mut self) {
+        while let Ok((ticket, result)) = self.captured.1.try_recv() {
+            self.agent.finish_capture(ticket, result);
+        }
+        let now = Instant::now();
+        let (late, waiting): (Vec<_>, Vec<_>) = std::mem::take(&mut self.captures)
+            .into_iter()
+            .partition(|c| c.deadline <= now);
+        self.captures = waiting;
+        for capture in late {
+            self.agent.finish_capture(
+                capture.ticket,
+                Err(
+                    "the window drew no frame to capture in time: it may be hidden or \
+                     minimised"
+                        .to_owned(),
+                ),
+            );
         }
     }
 
@@ -1111,6 +1278,8 @@ impl ApplicationHandler<UserEvent> for Host {
             event_loop.exit();
             return;
         }
+        // Agents can capture views now there's a window (WP-1.16).
+        self.agent.set_view_capture(true);
         if self.args.open_settings {
             self.invoke(&Invocation::new(ids::APP_SETTINGS, json!({})));
             self.after_commands(event_loop);
@@ -1216,6 +1385,10 @@ impl ApplicationHandler<UserEvent> for Host {
                     main.window.request_redraw();
                 }
             }
+            UserEvent::Captured => {
+                self.finish_captures();
+                self.after_commands(event_loop);
+            }
             #[cfg(any(target_os = "macos", windows))]
             UserEvent::Menu(event) => {
                 let invocation = self.native_menu.as_ref().and_then(|menu| {
@@ -1258,6 +1431,32 @@ impl ApplicationHandler<UserEvent> for Host {
         if self.agent.scheduled_waiting() > 0 && self.shell.audio().engine_running() {
             let next = now + AGENT_ENGINE_PERIOD;
             wake = Some(wake.map_or(next, |w| w.min(next)));
+        }
+        // View captures (WP-1.16): a window is asked to draw until it has,
+        // and a capture whose window draws nothing fails in time.
+        if !self.captures.is_empty() {
+            let before = self.captures.len();
+            self.finish_captures();
+            if self.captures.len() != before {
+                self.after_commands(event_loop);
+            }
+            for capture in &mut self.captures {
+                if now.duration_since(capture.redrawn) < CAPTURE_PERIOD {
+                    continue;
+                }
+                capture.redrawn = now;
+                let surface = match capture.window {
+                    WindowKind::Main => self.main.as_ref(),
+                    WindowKind::Settings => self.settings.as_ref(),
+                };
+                if let Some(surface) = surface {
+                    surface.window.request_redraw();
+                }
+            }
+            if !self.captures.is_empty() {
+                let next = now + CAPTURE_PERIOD;
+                wake = Some(wake.map_or(next, |w| w.min(next)));
+            }
         }
         if let Some(until) = self.watch_transport_until {
             if now < until {

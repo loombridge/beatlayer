@@ -300,66 +300,174 @@ fn check(job: &Job) -> Result<(), ExportError> {
     Ok(())
 }
 
-/// The render's frames in order to the file: converted down where the
-/// file's rate is lower, then written directly or to the scratch file.
-struct Pipeline {
-    converter: Option<Downsampler>,
-    out: Out,
-    channels: usize,
-    peak: f32,
-    non_finite: u64,
-    frames: u64,
+/// What to render: a range of the song, at a rate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Render {
+    /// Where the range starts.
+    pub start: Ticks,
+    /// How long it is.
+    pub length: Length,
+    /// The rate the frames come out at.
+    pub sample_rate: u32,
+    /// The engine's own rate: a lower `sample_rate` is rendered at it and
+    /// converted down.
+    pub engine_rate: u32,
+    /// The engine's block size, from 1 to 8,192 frames.
+    pub block: usize,
 }
 
+/// What a render did.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Rendered {
+    /// Frames handed on, at the render's `sample_rate`.
+    pub frames: u64,
+    /// Channels in each frame.
+    pub channels: u16,
+    /// The rate the engine rendered at.
+    pub render_rate: u32,
+    /// Frames the engine rendered.
+    pub rendered_frames: u64,
+    /// Media that clips name and the media library couldn't supply.
+    pub missing_media: Vec<ContentHash>,
+    /// Devices no factory makes a node for.
+    pub unhosted: Vec<DeviceId>,
+    /// Heap operations in the engine's blocks.
+    pub heap_operations: u64,
+}
+
+/// Renders a range of `document` offline, with its clips' audio from
+/// `media`, through the engine code that plays the set on a device
+/// ([`Offline`]): the song plays from the range's start, as Play does from
+/// an insert marker there, with the Arrangement loop off, as fast as the
+/// computer allows, on the calling thread. It hands `sink` the frames in
+/// order, interleaved, at the render's `sample_rate` (converted down with
+/// the media converter where that's below the engine's). Exports and the
+/// agent API's previews (WP-1.16) both render through it. It checks
+/// `cancel` between blocks and calls `progress` with the share rendered,
+/// from 0 to 1. `longest` is the most seconds it renders.
+///
+/// # Errors
+///
+/// [`ExportError`]: cancelled, a range it can't render, a sink that
+/// failed, or samples that aren't finite numbers.
+pub fn render(
+    document: &Document,
+    media: Arc<dyn MediaLibrary>,
+    spec: &Render,
+    longest: f64,
+    cancel: &AtomicBool,
+    progress: &mut dyn FnMut(f64),
+    sink: &mut dyn FnMut(&[f32]) -> Result<(), ExportError>,
+) -> Result<Rendered, ExportError> {
+    if !RATES.contains(&spec.sample_rate) {
+        return Err(ExportError::Invalid(format!(
+            "a sample rate of {} Hz; renders take {} to {} Hz",
+            spec.sample_rate,
+            RATES.start(),
+            RATES.end()
+        )));
+    }
+    if !RATES.contains(&spec.engine_rate) {
+        return Err(ExportError::Invalid(format!(
+            "an engine rate of {} Hz",
+            spec.engine_rate
+        )));
+    }
+    if !(1..=8192).contains(&spec.block) {
+        return Err(ExportError::Invalid(format!(
+            "a block of {} frames",
+            spec.block
+        )));
+    }
+    // Spec: export R6. A rate at or above the engine's renders at it; a
+    // lower one renders at the engine's and is converted down.
+    let render_hz = spec.sample_rate.max(spec.engine_rate);
+    let render_rate = SampleRate::new(render_hz)
+        .ok_or_else(|| ExportError::Invalid(format!("a rate of {render_hz} Hz")))?;
+    let tempo = &document.settings().tempo;
+    let first = tempo.ticks_to_frames(spec.start, render_rate).get();
+    let frames = match spec.length {
+        Length::Frames(frames) => frames,
+        Length::To(end) => {
+            u64::try_from(tempo.ticks_to_frames(end, render_rate).get() - first).unwrap_or(0)
+        }
+    };
+    if frames == 0 {
+        return Err(ExportError::Invalid(
+            "the range is shorter than one frame".to_owned(),
+        ));
+    }
+    if frames as f64 > longest * f64::from(render_hz) {
+        return Err(ExportError::Invalid(format!(
+            "the range is longer than the longest render, {longest} seconds"
+        )));
+    }
+
+    let config = EngineConfig::new(render_rate, spec.block);
+    let channels = config.channels;
+    let mut offline = Offline::new(config, Registry::new().with_media(media));
+    let unhosted = offline.sync(document);
+    let missing_media = offline.missing_media().to_vec();
+    // Spec: export R3. The range plays straight through from its start,
+    // as Play from an insert marker there does, without the loop.
+    offline.sender().transport(TransportCommand::SetLoop(None));
+    offline
+        .sender()
+        .transport(TransportCommand::Locate(spec.start));
+    offline
+        .sender()
+        .transport_at(TransportCommand::Play, When::Frame(0));
+
+    let mut converter = (spec.sample_rate < render_hz)
+        .then(|| Downsampler::new(render_hz, spec.sample_rate, channels, frames))
+        .transpose()?;
+    let mut non_finite = 0u64;
+    let mut out_frames = 0u64;
+    let mut forward = |samples: &[f32]| -> Result<(), ExportError> {
+        non_finite += samples.iter().filter(|s| !s.is_finite()).count() as u64;
+        out_frames += (samples.len() / channels) as u64;
+        sink(samples)
+    };
+    let mut samples = Vec::with_capacity(spec.block * channels);
+    let mut done = 0u64;
+    while done < frames {
+        if cancel.load(Ordering::Relaxed) {
+            return Err(ExportError::Cancelled);
+        }
+        let block = (spec.block as u64).min(frames - done) as usize;
+        let output = offline.process(block);
+        interleave(&output, &mut samples);
+        match converter.as_mut() {
+            Some(converter) => converter.push(&samples, &mut forward)?,
+            None => forward(&samples)?,
+        }
+        done += block as u64;
+        progress(done as f64 / frames as f64);
+    }
+    if let Some(converter) = converter.as_mut() {
+        converter.finish(&mut forward)?;
+    }
+    if non_finite > 0 {
+        return Err(ExportError::Failed(format!(
+            "{non_finite} samples of the render aren't finite numbers"
+        )));
+    }
+    Ok(Rendered {
+        frames: out_frames,
+        channels: channels as u16,
+        render_rate: render_hz,
+        rendered_frames: frames,
+        missing_media,
+        unhosted,
+        heap_operations: offline.heap_operations(),
+    })
+}
+
+/// Where an export's render goes: straight to the writer, or, with
+/// Normalize, to the scratch file for a second pass.
 enum Out {
     Writer(AudioWriter),
     Scratch(BufWriter<File>, Vec<u8>),
-}
-
-impl Pipeline {
-    /// Takes interleaved frames from the engine.
-    fn push(&mut self, samples: &[f32]) -> Result<(), ExportError> {
-        match self.converter.take() {
-            Some(mut converter) => {
-                let result = converter.push(samples, &mut |out| self.write(out));
-                self.converter = Some(converter);
-                result
-            }
-            None => self.write(samples),
-        }
-    }
-
-    /// Flushes the converter, if there is one.
-    fn finish(&mut self) -> Result<(), ExportError> {
-        match self.converter.take() {
-            Some(mut converter) => converter.finish(&mut |out| self.write(out)),
-            None => Ok(()),
-        }
-    }
-
-    fn write(&mut self, samples: &[f32]) -> Result<(), ExportError> {
-        for &sample in samples {
-            if sample.is_finite() {
-                self.peak = self.peak.max(sample.abs());
-            } else {
-                self.non_finite += 1;
-            }
-        }
-        self.frames += (samples.len() / self.channels) as u64;
-        match &mut self.out {
-            Out::Writer(writer) => writer
-                .write(samples)
-                .map_err(|error| ExportError::Failed(error.to_string())),
-            Out::Scratch(file, bytes) => {
-                bytes.clear();
-                for sample in samples {
-                    bytes.extend_from_slice(&sample.to_le_bytes());
-                }
-                file.write_all(bytes)
-                    .map_err(|error| ExportError::Failed(format!("the scratch file: {error}")))
-            }
-        }
-    }
 }
 
 fn interleave(output: &Output<'_>, samples: &mut Vec<f32>) {
@@ -369,10 +477,6 @@ fn interleave(output: &Output<'_>, samples: &mut Vec<f32>) {
     }
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "the render, the second pass, and the move into place, in order"
-)]
 fn run(
     document: &Document,
     media: Arc<dyn MediaLibrary>,
@@ -386,45 +490,6 @@ fn run(
     let failed = |what: &Path, error: &dyn std::fmt::Display| {
         ExportError::Failed(format!("{}: {error}", what.display()))
     };
-    // Spec: export R6. A rate at or above the engine's renders at it; a
-    // lower one renders at the engine's and is converted down.
-    let render_hz = job.sample_rate.max(job.engine_rate);
-    let render_rate = SampleRate::new(render_hz)
-        .ok_or_else(|| ExportError::Invalid(format!("a rate of {render_hz} Hz")))?;
-    let tempo = &document.settings().tempo;
-    let first = tempo.ticks_to_frames(job.start, render_rate).get();
-    let frames = match job.length {
-        Length::Frames(frames) => frames,
-        Length::To(end) => {
-            u64::try_from(tempo.ticks_to_frames(end, render_rate).get() - first).unwrap_or(0)
-        }
-    };
-    if frames == 0 {
-        return Err(ExportError::Invalid(
-            "the range is shorter than one frame".to_owned(),
-        ));
-    }
-    if frames as f64 > MAX_SECONDS * f64::from(render_hz) {
-        return Err(ExportError::Invalid(format!(
-            "the range is longer than the longest export, {MAX_SECONDS} seconds"
-        )));
-    }
-
-    let config = EngineConfig::new(render_rate, job.block);
-    let channels = config.channels;
-    let mut offline = Offline::new(config, Registry::new().with_media(media));
-    let unhosted = offline.sync(document);
-    let missing_media = offline.missing_media().to_vec();
-    // Spec: export R3. The range plays straight through from its start,
-    // as Play from an insert marker there does, without the loop.
-    offline.sender().transport(TransportCommand::SetLoop(None));
-    offline
-        .sender()
-        .transport(TransportCommand::Locate(job.start));
-    offline
-        .sender()
-        .transport_at(TransportCommand::Play, When::Frame(0));
-
     let spec = EncodeSpec {
         file_type: job.file_type,
         bit_depth: job.bit_depth,
@@ -434,56 +499,65 @@ fn run(
             Dither::None
         },
         sample_rate: job.sample_rate,
-        channels: channels as u16,
+        // The channels the engine renders, which `render` makes the same
+        // way.
+        channels: EngineConfig::new(
+            SampleRate::new(job.sample_rate.max(job.engine_rate))
+                .ok_or_else(|| ExportError::Invalid(format!("a rate of {} Hz", job.engine_rate)))?,
+            job.block,
+        )
+        .channels as u16,
     };
-    let out = if job.normalize {
+    let mut out = if job.normalize {
         let file = File::create(scratch).map_err(|error| failed(scratch, &error))?;
         Out::Scratch(BufWriter::with_capacity(1 << 16, file), Vec::new())
     } else {
         Out::Writer(AudioWriter::create(partial, spec).map_err(|error| failed(partial, &error))?)
     };
-    let converter = (job.sample_rate < render_hz)
-        .then(|| Downsampler::new(render_hz, job.sample_rate, channels, frames))
-        .transpose()?;
-    let mut pipeline = Pipeline {
-        converter,
-        out,
-        channels,
-        peak: 0.0,
-        non_finite: 0,
-        frames: 0,
-    };
 
     // Pass one: the render.
     let passes = if job.normalize { 2.0 } else { 1.0 };
-    let mut samples = Vec::with_capacity(job.block * channels);
-    let mut done = 0u64;
-    while done < frames {
-        if cancel.load(Ordering::Relaxed) {
-            return Err(ExportError::Cancelled);
-        }
-        let block = (job.block as u64).min(frames - done) as usize;
-        let output = offline.process(block);
-        interleave(&output, &mut samples);
-        pipeline.push(&samples)?;
-        done += block as u64;
-        progress(done as f64 / frames as f64 / passes);
-    }
-    pipeline.finish()?;
-    if pipeline.non_finite > 0 {
-        return Err(ExportError::Failed(format!(
-            "{} samples of the render aren't finite numbers",
-            pipeline.non_finite
-        )));
-    }
-    let heap_operations = offline.heap_operations();
-    drop(offline);
+    let mut peak = 0.0f32;
+    let rendered = render(
+        document,
+        media,
+        &Render {
+            start: job.start,
+            length: job.length,
+            sample_rate: job.sample_rate,
+            engine_rate: job.engine_rate,
+            block: job.block,
+        },
+        MAX_SECONDS,
+        cancel,
+        &mut |share| progress(share / passes),
+        &mut |samples| {
+            for &sample in samples {
+                if sample.is_finite() {
+                    peak = peak.max(sample.abs());
+                }
+            }
+            match &mut out {
+                Out::Writer(writer) => writer
+                    .write(samples)
+                    .map_err(|error| ExportError::Failed(error.to_string())),
+                Out::Scratch(file, bytes) => {
+                    bytes.clear();
+                    for sample in samples {
+                        bytes.extend_from_slice(&sample.to_le_bytes());
+                    }
+                    file.write_all(bytes)
+                        .map_err(|error| ExportError::Failed(format!("the scratch file: {error}")))
+                }
+            }
+        },
+    )?;
+    let channels = usize::from(rendered.channels);
 
     // Pass two, with Normalize: the scratch file through the gain to the
     // writer. Spec: export R8.
-    let mut peak = pipeline.peak;
     let mut gain = 1.0;
-    let writer = match pipeline.out {
+    let writer = match out {
         Out::Writer(writer) => writer,
         Out::Scratch(file, _) => {
             file.into_inner()
@@ -500,7 +574,7 @@ fn run(
             let chunk_frames = 8192;
             let mut bytes = vec![0u8; chunk_frames * channels * 4];
             let mut chunk = Vec::with_capacity(chunk_frames * channels);
-            let total = pipeline.frames;
+            let total = rendered.frames;
             let mut read = 0u64;
             peak = 0.0;
             while read < total {
@@ -541,15 +615,15 @@ fn run(
     progress(1.0);
     Ok(Report {
         frames: written,
-        channels: channels as u16,
-        render_rate: render_hz,
-        rendered_frames: frames,
+        channels: rendered.channels,
+        render_rate: rendered.render_rate,
+        rendered_frames: rendered.rendered_frames,
         peak,
         gain,
         took: began.elapsed(),
-        missing_media,
-        unhosted,
-        heap_operations,
+        missing_media: rendered.missing_media,
+        unhosted: rendered.unhosted,
+        heap_operations: rendered.heap_operations,
     })
 }
 

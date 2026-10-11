@@ -96,6 +96,9 @@ pub struct MainWindowUi {
     /// Whether a menu (the drawn menu bar's, a context menu, or the Mixer
     /// Config Menu) was open when the last frame ended: its keys go to it.
     menu_open: bool,
+    /// Where the last frame put the panes, in points, for view captures
+    /// (WP-1.16).
+    drawn: Option<ShellLayout>,
 }
 
 /// A move of the keyboard focus asked for by `focus.next`,
@@ -164,7 +167,16 @@ impl MainWindowUi {
             keymap: None,
             mixer_typing: false,
             menu_open: false,
+            drawn: None,
         }
+    }
+
+    /// Where the last frame put the panes, in points from the window's
+    /// top-left corner: the agent API's view captures crop to them
+    /// (WP-1.16). `None` before the first frame.
+    #[must_use]
+    pub fn drawn_layout(&self) -> Option<&ShellLayout> {
+        self.drawn.as_ref()
     }
 
     /// The mixers, to read what they drew.
@@ -291,6 +303,7 @@ impl MainWindowUi {
             );
             self.status_bar(ui, shell, theme, &layout, &mut events);
             outline_focused_area(ui, shell, theme, &layout);
+            self.drawn = Some(layout);
         });
         self.mixer_typing = crate::mixer::is_typing(ctx);
         self.menu_open = egui::Popup::is_any_open(ctx);

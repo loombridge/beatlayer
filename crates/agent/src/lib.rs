@@ -20,7 +20,11 @@
 //! one undo step labelled with the agent's name, or a dry run), `query`
 //! (by ID or readable path, with summaries), `transport` (play, stop,
 //! continue, locate, and the loop), `schedule` (commands at a bar and beat,
-//! on their exact sample), and `checkpoint`.
+//! on their exact sample), `checkpoint`, and perception (WP-1.16):
+//! `preview` (a range or a track rendered offline, returned as audio),
+//! `analyze` (loudness, peaks, spectrum, tempo, key, and transients as
+//! numbers), and `capture_view` (a view as an image, which the app's host
+//! draws: see [`Agent::take_capture_requests`]).
 //!
 //! # Where commands run
 //!
@@ -93,6 +97,7 @@
 //! # Ok::<(), String>(())
 //! ```
 
+pub mod base64;
 pub mod client;
 pub mod guide;
 pub mod http;
@@ -103,7 +108,7 @@ pub mod stdio;
 mod tools;
 
 pub use server::{
-    Agent, ClientInfo, Credential, Outcome, PROTOCOL_VERSIONS, Question, QuestionKind,
-    STDIO_SESSION, Session,
+    Agent, CaptureRequest, Captured, ClientInfo, Credential, Outcome, PROTOCOL_VERSIONS, Question,
+    QuestionKind, STDIO_SESSION, Session,
 };
 pub use tools::EngineMessage;

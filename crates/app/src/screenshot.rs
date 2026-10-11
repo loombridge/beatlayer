@@ -203,14 +203,21 @@ fn prefs_library(args: &Args) -> Option<std::path::PathBuf> {
         .and_then(|prefs| prefs.browser.user_library)
 }
 
-/// Renders egui's output into an image on the GPU, without a surface.
-fn render(
+/// Renders egui's output into an image on the GPU, without a surface. The
+/// view captures' test renders through it too (WP-1.16).
+pub(crate) fn render(
     ctx: &egui::Context,
-    output: egui::FullOutput,
+    mut output: egui::FullOutput,
     mut textures: egui::TexturesDelta,
     size: egui::Vec2,
     theme: &Theme,
 ) -> Result<ColorImage, String> {
+    // The textures to upload, taken out first: epaint panics if a delta is
+    // dropped unapplied, and every early return (no GPU adapter, as on CI's
+    // Linux machines) would drop one.
+    textures.append(std::mem::take(&mut output.textures_delta));
+    let uploads = std::mem::take(&mut textures.set);
+    textures.clear();
     let width = (size.x * SCALE).round() as u32;
     let height = (size.y * SCALE).round() as u32;
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
@@ -225,104 +232,22 @@ fn render(
         egui_wgpu::Renderer::new(&device, format, egui_wgpu::RendererOptions::default());
     // The Arrangement View's own pipelines (WP-1.8a).
     bl_ui::arrangement::gpu::install(&device, format, &mut renderer.callback_resources);
-    for (id, deltas) in &textures.set {
+    for (id, deltas) in &uploads {
         for delta in deltas {
             renderer.update_texture(&device, &queue, *id, delta);
         }
     }
-    textures.clear();
     let primitives = ctx.tessellate(output.shapes, output.pixels_per_point);
-    let screen = egui_wgpu::ScreenDescriptor {
-        size_in_pixels: [width, height],
-        pixels_per_point: output.pixels_per_point,
-    };
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("screenshot"),
-        size: wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
+    crate::capture::render_frame(
+        &device,
+        &queue,
+        &mut renderer,
         format,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
-    });
-    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-    let mut commands = renderer.update_buffers(&device, &queue, &mut encoder, &primitives, &screen);
-    let clear = egui::Rgba::from(theme.colors.window.0);
-    {
-        let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("screenshot"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &view,
-                depth_slice: None,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color {
-                        r: f64::from(clear.r()),
-                        g: f64::from(clear.g()),
-                        b: f64::from(clear.b()),
-                        a: 1.0,
-                    }),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            ..Default::default()
-        });
-        let mut pass = pass.forget_lifetime();
-        renderer.render(&mut pass, &primitives, &screen);
-    }
-    let padded = (width * 4).div_ceil(256) * 256;
-    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("screenshot"),
-        size: u64::from(padded) * u64::from(height),
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
-    encoder.copy_texture_to_buffer(
-        wgpu::TexelCopyTextureInfo {
-            texture: &texture,
-            mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
-        },
-        wgpu::TexelCopyBufferInfo {
-            buffer: &buffer,
-            layout: wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(padded),
-                rows_per_image: Some(height),
-            },
-        },
-        wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
-    );
-    commands.push(encoder.finish());
-    queue.submit(commands);
-    let slice = buffer.slice(..);
-    slice.map_async(wgpu::MapMode::Read, |_| {});
-    device
-        .poll(wgpu::PollType::wait_indefinitely())
-        .map_err(|e| format!("the GPU didn't finish: {e}"))?;
-    let data = slice
-        .get_mapped_range()
-        .map_err(|e| format!("couldn't read the image back: {e}"))?;
-    let mut pixels = Vec::with_capacity((width * height) as usize);
-    for row in data.chunks(padded as usize) {
-        for rgba in row[..(width * 4) as usize].chunks(4) {
-            pixels.push(egui::Color32::from_rgba_premultiplied(
-                rgba[0], rgba[1], rgba[2], rgba[3],
-            ));
-        }
-    }
-    Ok(ColorImage::new([width as usize, height as usize], pixels))
+        &primitives,
+        [width, height],
+        output.pixels_per_point,
+        egui::Rgba::from(theme.colors.window.0),
+    )
 }
 
 /// Writes an egui image as an RGBA PNG.

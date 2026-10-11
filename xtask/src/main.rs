@@ -1,5 +1,6 @@
 //! Repository tasks. Run `cargo xtask help` for the list.
 
+mod affected;
 mod package;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -19,9 +20,19 @@ const USAGE: &str = "\
 Usage: cargo xtask <task>
 
 Tasks:
-  check          Run every check: format, clippy, tests, layers, the UI parity
-                 reference, the command reference, the keymap, deny, the deny
-                 self-test, and private terms
+  check          Run every check: format, clippy, tests (cargo-nextest, then the
+                 doctests), layers, the UI parity reference, the command reference,
+                 the keymap, deny, the deny self-test, and private terms
+                 --affected [--base REF]: test only the packages changed since the
+                   merge base of REF (default origin/main) and HEAD, committed or
+                   not, and the packages that depend on them; the other steps stay
+                   workspace-wide, and some changes (Cargo.lock, xtask, CI, ...)
+                   still test everything
+                 --without-docs: run only the steps that read docs/ (the UI parity
+                   reference, the command reference, the keymap) as a checkout
+                   without it runs them, without touching docs/
+                 BL_TEST_DEPTH=full runs the property, stress, and kill tests at
+                 full depth; the default, quick, runs fewer cases of each
   layers         Check the crate layering rules
   ui-parity      Validate the shortcut reference and regenerate its Markdown form
                  (with --check, fail instead of writing if shortcuts.md is out of date)
@@ -51,6 +62,13 @@ Tasks:
 
 /// The RealtimeSanitizer harness, a workspace of its own (see its Cargo.toml).
 const RTSAN_DIR: &str = "rtsan";
+
+/// The cargo-nextest release the check is written for, and CI installs. Keep
+/// in step with `.config/nextest.toml` and the CI workflows.
+const NEXTEST_VERSION: &str = "0.9.146";
+
+/// The checks that read the planning documents in `docs/`.
+const DOCS_STEPS: &[&str] = &["ui parity reference", "command reference", "keymap"];
 
 /// The only crate allowed to depend on `bl-ui`.
 const APP: &str = "beatlayer";
@@ -102,7 +120,7 @@ fn run(root: &Path, args: &[String]) -> Result<(), String> {
     let task = args.first().map(String::as_str);
     let options = args.get(1..).unwrap_or_default();
     match task {
-        Some("check") => check(root),
+        Some("check") => check(root, &check_options(options)?),
         Some("layers") => layers(root),
         Some("ui-parity") => match options {
             [] => ui_parity::generate(root),
@@ -145,24 +163,106 @@ fn run(root: &Path, args: &[String]) -> Result<(), String> {
     }
 }
 
+/// What `cargo xtask check` was asked to do.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct CheckOptions {
+    /// Test only the packages changed since the merge base of this ref and
+    /// `HEAD`, and their dependents.
+    affected: Option<String>,
+    /// Run only the steps that read `docs/`, as a checkout without it does.
+    without_docs: bool,
+}
+
+fn check_options(options: &[String]) -> Result<CheckOptions, String> {
+    let usage = "usage: cargo xtask check [--affected [--base REF] | --without-docs]";
+    let mut affected = false;
+    let mut base = None;
+    let mut without_docs = false;
+    let mut options = options.iter();
+    while let Some(option) = options.next() {
+        match option.as_str() {
+            "--affected" => affected = true,
+            "--base" => {
+                let value = options
+                    .next()
+                    .ok_or_else(|| format!("--base needs a ref\n{usage}"))?;
+                base = Some(value.clone());
+            }
+            "--without-docs" => without_docs = true,
+            other => match other.strip_prefix("--base=") {
+                Some(value) => base = Some(value.to_owned()),
+                None => return Err(format!("unexpected `{other}`\n{usage}")),
+            },
+        }
+    }
+    if base.is_some() && !affected {
+        return Err(format!("--base goes with --affected\n{usage}"));
+    }
+    if without_docs && affected {
+        return Err(format!(
+            "--without-docs runs only the steps that read docs/, which --affected doesn't \
+             narrow; run the two separately\n{usage}"
+        ));
+    }
+    Ok(CheckOptions {
+        affected: affected.then(|| base.unwrap_or_else(|| "origin/main".to_owned())),
+        without_docs,
+    })
+}
+
+/// How deep the property, stress, and kill tests go: `BL_TEST_DEPTH`, quick
+/// unless it says full. The tests read it themselves; this catches a typo
+/// before anything runs.
+fn test_depth() -> Result<&'static str, String> {
+    match std::env::var("BL_TEST_DEPTH").as_deref() {
+        Err(_) | Ok("" | "quick") => Ok("quick"),
+        Ok("full") => Ok("full"),
+        Ok(other) => Err(format!(
+            "BL_TEST_DEPTH is `{other}`: set it to quick or full, or leave it unset for quick"
+        )),
+    }
+}
+
 /// Runs every check, reports each result, and fails if any failed.
-fn check(root: &Path) -> Result<(), String> {
-    require_cargo_deny()?;
-    // Without the planning documents, the checks that read the UI parity
-    // reference skip, and the command reference checks the registry alone.
-    let reference = ui_parity::reference_present(root);
-    let skipped: &[&str] = if reference {
-        &[]
-    } else {
-        &["ui parity reference", "keymap"]
+fn check(root: &Path, options: &CheckOptions) -> Result<(), String> {
+    if !options.without_docs {
+        require_cargo_deny()?;
+        require_cargo_nextest()?;
+    }
+    let depth = test_depth()?;
+    let workspace = affected::Workspace::from_metadata(&cargo_metadata(root)?)?;
+    let total = workspace.packages.len();
+    // Without --affected, every package's tests run.
+    let tests = options.affected.as_deref().map(|base| {
+        eprintln!("\n==> affected packages");
+        let tests = affected::select(root, &workspace, base);
+        eprintln!("{}", describe(&tests, total));
+        tests
+    });
+    let tested = match &tests {
+        Some(affected::Tests::Some { tested, .. }) => Some(tested),
+        None | Some(affected::Tests::All(_)) => None,
     };
+
+    // Without the planning documents, or with --without-docs, the checks that
+    // read the UI parity reference skip, and the command reference checks
+    // the registry alone.
+    let reference = !options.without_docs && ui_parity::reference_present(root);
+    let mut skipped: Vec<&str> = if reference {
+        vec![]
+    } else {
+        vec!["ui parity reference", "keymap"]
+    };
+    if tested.is_some_and(BTreeSet::is_empty) {
+        skipped.push("tests");
+    }
     let partial: &[&str] = if reference {
         &[]
     } else {
         &["command reference"]
     };
     type Step<'a> = (&'a str, Box<dyn Fn() -> Result<(), String> + 'a>);
-    let steps: Vec<Step<'_>> = vec![
+    let mut steps: Vec<Step<'_>> = vec![
         (
             "format",
             Box::new(|| {
@@ -189,10 +289,7 @@ fn check(root: &Path) -> Result<(), String> {
                 )
             }),
         ),
-        (
-            "tests",
-            Box::new(|| cargo(root, &["test", "--workspace", "--all-features", "--locked"])),
-        ),
+        ("tests", Box::new(|| run_tests(root, tested, depth))),
         ("layers", Box::new(|| layers(root))),
         ("ui parity reference", Box::new(|| ui_parity::check(root))),
         (
@@ -213,12 +310,19 @@ fn check(root: &Path) -> Result<(), String> {
         ("deny self-test", Box::new(|| deny_selftest(root))),
         ("private terms", Box::new(|| private_terms::check(root))),
     ];
+    if options.without_docs {
+        steps.retain(|(name, _)| DOCS_STEPS.contains(name));
+    }
 
     let mut failed = Vec::new();
     for (name, step) in &steps {
         eprintln!("\n==> {name}");
         if skipped.contains(name) {
-            eprintln!("{}", ui_parity::ABSENT);
+            if *name == "tests" {
+                eprintln!("skipped: no package changed");
+            } else {
+                eprintln!("{}", ui_parity::ABSENT);
+            }
             continue;
         }
         if let Err(message) = step() {
@@ -240,7 +344,15 @@ fn check(root: &Path) -> Result<(), String> {
         };
         eprintln!("{status:>6}  {name}");
     }
-    if !reference {
+    if let Some(tests) = &tests {
+        eprintln!("\nTests (--affected): {}", describe(tests, total));
+    }
+    if options.without_docs {
+        eprintln!(
+            "\n--without-docs ran the checks that read docs/ as a checkout without it runs \
+             them (skip, part), and left docs/ alone."
+        );
+    } else if !reference {
         eprintln!(
             "\nThe UI parity reference isn't published yet, so this checkout skipped what \
              reads it (skip, part). A maintainer's checkout runs every check."
@@ -251,6 +363,72 @@ fn check(root: &Path) -> Result<(), String> {
     } else {
         Err(format!("{} of {} checks failed", failed.len(), steps.len()))
     }
+}
+
+/// One line on what the tests step tests and why, for example `bl-ui changed
+/// → testing bl-ui, beatlayer (2 of 25)`.
+fn describe(tests: &affected::Tests, total: usize) -> String {
+    let list = |names: &BTreeSet<String>| {
+        names
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    match tests {
+        affected::Tests::All(why) => {
+            format!("{why} → testing every package ({total} of {total})")
+        }
+        affected::Tests::Some { tested, .. } if tested.is_empty() => {
+            format!("only prose changed → testing nothing (0 of {total})")
+        }
+        affected::Tests::Some { changed, tested } => format!(
+            "{} changed → testing {} ({} of {total})",
+            list(changed),
+            list(tested),
+            tested.len()
+        ),
+    }
+}
+
+/// Runs the tests with cargo-nextest, each in a process of its own and as
+/// many at once as there are cores, then the doctests, which nextest doesn't
+/// run, with `cargo test --doc`. `tested` names the packages whose tests run,
+/// or is `None` for every package.
+///
+/// Both always build the whole workspace, and a selection only filters what
+/// runs. Cargo unifies features across the packages it's asked to build, so
+/// building only some (`--package`) would build their dependencies with
+/// other features: code the full run never tests, and, for a change to
+/// bl-ui alone, some 65 crates (wgpu and egui among them) built a second
+/// time. Built as a whole, everything that hasn't changed is reused.
+fn run_tests(root: &Path, tested: Option<&BTreeSet<String>>, depth: &str) -> Result<(), String> {
+    eprintln!("test depth: {depth} (BL_TEST_DEPTH)");
+    let mut nextest = vec![
+        "nextest".to_owned(),
+        "run".to_owned(),
+        "--workspace".to_owned(),
+        "--all-features".to_owned(),
+        "--locked".to_owned(),
+    ];
+    if let Some(tested) = tested {
+        let filter = tested
+            .iter()
+            .map(|name| format!("package(={name})"))
+            .collect::<Vec<_>>()
+            .join(" | ");
+        // A package with no tests of its own is no failure.
+        nextest.extend(["--no-tests=pass".to_owned(), "-E".to_owned(), filter]);
+    }
+    let nextest: Vec<&str> = nextest.iter().map(String::as_str).collect();
+    // Both run, so one run reports every failure. The doctests are few and
+    // quick, so they all run.
+    let tests = cargo(root, &nextest);
+    let docs = cargo(
+        root,
+        &["test", "--doc", "--workspace", "--all-features", "--locked"],
+    );
+    tests.and(docs)
 }
 
 /// Enforces the layering in the architecture notes:
@@ -757,6 +935,21 @@ fn require_cargo_deny() -> Result<(), String> {
     }
 }
 
+fn require_cargo_nextest() -> Result<(), String> {
+    let installed = Command::new(cargo_bin())
+        .args(["nextest", "--version"])
+        .output()
+        .is_ok_and(|output| output.status.success());
+    if installed {
+        Ok(())
+    } else {
+        Err(format!(
+            "cargo-nextest isn't installed, and the check runs the tests with it. Install it \
+             with `cargo install --locked cargo-nextest@{NEXTEST_VERSION}`."
+        ))
+    }
+}
+
 /// The cargo that invoked this task, so the pinned toolchain is used.
 fn cargo_bin() -> String {
     std::env::var("CARGO").unwrap_or_else(|_| "cargo".into())
@@ -785,6 +978,41 @@ fn workspace_root() -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn check_options_parse() {
+        let parse =
+            |args: &[&str]| check_options(&args.iter().map(|&a| a.to_owned()).collect::<Vec<_>>());
+        assert_eq!(parse(&[]), Ok(CheckOptions::default()));
+        let affected = |base: &str| CheckOptions {
+            affected: Some(base.to_owned()),
+            without_docs: false,
+        };
+        assert_eq!(parse(&["--affected"]), Ok(affected("origin/main")));
+        assert_eq!(
+            parse(&["--affected", "--base", "origin/wp"]),
+            Ok(affected("origin/wp"))
+        );
+        assert_eq!(
+            parse(&["--base=upstream/main", "--affected"]),
+            Ok(affected("upstream/main"))
+        );
+        assert_eq!(
+            parse(&["--without-docs"]),
+            Ok(CheckOptions {
+                affected: None,
+                without_docs: true,
+            })
+        );
+        for bad in [
+            &["--base", "origin/main"][..],
+            &["--affected", "--base"],
+            &["--affected", "--without-docs"],
+            &["--everything"],
+        ] {
+            assert!(parse(bad).is_err(), "{bad:?}");
+        }
+    }
 
     #[test]
     fn globs_match_one_path_component() {

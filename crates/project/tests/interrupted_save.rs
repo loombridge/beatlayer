@@ -5,8 +5,10 @@
 //! saves new revisions of it back to back. The parent watches how long a
 //! save takes, kills the child at a random moment late in a save, when it's
 //! writing the file, and then checks the set still loads, at a revision no
-//! older than the last one the child finished. Twenty rounds; each child
-//! starts by opening what the last one left.
+//! older than the last one the child finished. Twenty rounds with
+//! `BL_TEST_DEPTH=full` (pushes to main, manual CI runs, and the nightly
+//! run), five with `quick`, the default for local runs and pull requests;
+//! each child starts by opening what the last one left.
 //!
 //! `save::tests::a_save_interrupted_at_any_step_leaves_a_readable_set` in
 //! the crate stops a save after each of its steps in turn, including halfway
@@ -22,12 +24,10 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use bl_project::{Project, SetFile, load};
-use common::{TestDir, large_song};
+use common::{TestDir, depth, large_song};
 
 /// Set for the child: the set file it saves to.
 const CHILD_SET: &str = "BL_PROJECT_TEST_SAVE_UNTIL_KILLED";
-
-const ROUNDS: usize = 20;
 
 /// The child's side. Does nothing unless the parent started it.
 #[test]
@@ -88,7 +88,8 @@ fn killed_saves_leave_a_readable_set() {
     let mut random = Random(0x5eed_0007);
     let mut last_saved = 1;
     let (mut mid_write, mut saves) = (0, 0);
-    for round in 0..ROUNDS {
+    let rounds = depth(20, 5);
+    for round in 0..rounds {
         let before = leftovers(dir.path());
         let mut child = Command::new(std::env::current_exe().unwrap())
             .args([
@@ -188,6 +189,6 @@ fn killed_saves_leave_a_readable_set() {
         load(backup).unwrap();
     }
     println!(
-        "{ROUNDS} children killed after {saves} finished saves; {mid_write} kills landed while the set file was being written; the set loaded every time"
+        "{rounds} children killed after {saves} finished saves; {mid_write} kills landed while the set file was being written; the set loaded every time"
     );
 }

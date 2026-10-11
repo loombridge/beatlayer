@@ -12,6 +12,11 @@
 //! BL_STEM_MINUTES=10 cargo test -p bl-engine --release --test streaming -- --nocapture
 //! ```
 //!
+//! It plays through the stems for 2 s, then for 1.5 s after each of three
+//! jumps, with `BL_TEST_DEPTH=full` (pushes to main, manual CI runs, and the
+//! nightly run); with `quick`, the default for local runs and pull requests,
+//! for half a second each time.
+//!
 //! Heap use is counted by a global allocator that wraps the allocation
 //! trap, so the audio thread still runs under the trap.
 
@@ -222,6 +227,17 @@ fn spread(mut times: Vec<Duration>) -> (f64, f64) {
     (ms(times[times.len() / 2]), ms(times[times.len() - 1]))
 }
 
+/// Whether the tests run at full depth: `BL_TEST_DEPTH=full`, as on pushes
+/// to main and the nightly run. Unset or `quick`, the default for local runs
+/// and pull requests, they run fewer cases or rounds of the same checks.
+fn full_depth() -> bool {
+    match std::env::var("BL_TEST_DEPTH").as_deref() {
+        Ok("full") => true,
+        Err(_) | Ok("" | "quick") => false,
+        Ok(other) => panic!("BL_TEST_DEPTH is `{other}`: set it to quick or full"),
+    }
+}
+
 // Spec: audio-clips R16, R17; disk-streaming R1, R3
 #[test]
 fn eight_long_stems_stream_in_bounded_memory_and_loading_them_never_delays_play_or_stop() {
@@ -333,15 +349,20 @@ fn eight_long_stems_stream_in_bounded_memory_and_loading_them_never_delays_play_
 
     // Play through the stems, and jump about in them: to a quarter, half,
     // and nine tenths of the way through, where nothing was preloaded.
+    let (play_for, after_jump) = if full_depth() {
+        (Duration::from_secs(2), Duration::from_millis(1_500))
+    } else {
+        (Duration::from_millis(500), Duration::from_millis(500))
+    };
     engine.play();
-    thread::sleep(Duration::from_secs(2));
+    thread::sleep(play_for);
     let length = Ticks::WHOLE * 30 * minutes as i64;
     for fraction in [4, 2] {
         engine.locate(Ticks(length.get() / fraction));
-        thread::sleep(Duration::from_millis(1_500));
+        thread::sleep(after_jump);
     }
     engine.locate(Ticks(length.get() / 10 * 9));
-    thread::sleep(Duration::from_millis(1_500));
+    thread::sleep(after_jump);
     let peak = PEAK.load(Relaxed) - baseline;
     let state = engine.state().clone();
     let disk = streams.stats();

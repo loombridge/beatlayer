@@ -5,6 +5,10 @@
 //! allocators) must come back from a save exactly as they went in: equal as
 //! values, and identical as JSON, so even the sign of a zero and the last
 //! bit of every f64 survive.
+//!
+//! `BL_TEST_DEPTH=full` (pushes to main, manual CI runs, and the nightly run)
+//! runs 1,000 encoding cases and 100 saving ones; `quick`, the default for
+//! local runs and pull requests, runs a tenth of each.
 
 mod common;
 
@@ -13,7 +17,7 @@ use std::process::Command;
 use bl_project::{
     LoadOptions, Project, SCHEMA_VERSION, SaveOptions, SetFile, decode, encode, encode_json, load,
 };
-use common::{TestDir, recipe};
+use common::{TestDir, depth, recipe};
 use proptest::prelude::*;
 use proptest::test_runner::FileFailurePersistence;
 
@@ -38,7 +42,7 @@ fn same(loaded: &Project, saved: &Project, revision: u64) -> Result<(), TestCase
 }
 
 proptest! {
-    #![proptest_config(config(1_000))]
+    #![proptest_config(config(depth(1_000, 100)))]
 
     /// Encoding then decoding gives the project back, and encoding is
     /// deterministic.
@@ -55,7 +59,7 @@ proptest! {
 }
 
 proptest! {
-    #![proptest_config(config(100))]
+    #![proptest_config(config(depth(100, 10)))]
 
     /// The acceptance property: saving to disk and loading gives the project
     /// back, save after save, with the revision counting up.

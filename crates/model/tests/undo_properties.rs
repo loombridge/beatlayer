@@ -9,6 +9,10 @@
 //! Along the way every change set is checked against one worked out the slow
 //! way, by flattening both versions into plain maps, and the start and end
 //! are also compared as JSON, so the check doesn't rest on pointer sharing.
+//!
+//! `BL_TEST_DEPTH` sets how many cases each property runs: 1,000 with
+//! `full` (pushes to main, manual CI runs, and the nightly run), 100 with
+//! `quick`, the default for local runs and pull requests.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -23,13 +27,22 @@ use proptest::prelude::*;
 use proptest::sample::Index;
 use proptest::test_runner::FileFailurePersistence;
 
-const CASES: u32 = 1_000;
+/// Whether the tests run at full depth: `BL_TEST_DEPTH=full`, as on pushes
+/// to main and the nightly run. Unset or `quick`, the default for local runs
+/// and pull requests, they run fewer cases or rounds of the same checks.
+fn full_depth() -> bool {
+    match std::env::var("BL_TEST_DEPTH").as_deref() {
+        Ok("full") => true,
+        Err(_) | Ok("" | "quick") => false,
+        Ok(other) => panic!("BL_TEST_DEPTH is `{other}`: set it to quick or full"),
+    }
+}
 
-/// 1,000 cases each. Failures are saved next to this file and replayed first
-/// on later runs.
+/// 1,000 cases each at full depth, 100 at quick. Failures are saved next to
+/// this file and replayed first on later runs.
 fn config() -> ProptestConfig {
     ProptestConfig {
-        cases: CASES,
+        cases: if full_depth() { 1_000 } else { 100 },
         failure_persistence: Some(Box::new(FileFailurePersistence::WithSource(
             "proptest-regressions",
         ))),

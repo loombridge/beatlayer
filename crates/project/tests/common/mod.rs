@@ -18,6 +18,22 @@ use bl_project::{Media, MediaPath, MediaRef, Project};
 use proptest::prelude::*;
 use proptest::sample::Index;
 
+/// Whether the tests run at full depth: `BL_TEST_DEPTH=full`, as on pushes
+/// to main and the nightly run. Unset or `quick`, the default for local runs
+/// and pull requests, they run fewer cases or rounds of the same checks.
+pub fn full_depth() -> bool {
+    match std::env::var("BL_TEST_DEPTH").as_deref() {
+        Ok("full") => true,
+        Err(_) | Ok("" | "quick") => false,
+        Ok(other) => panic!("BL_TEST_DEPTH is `{other}`: set it to quick or full"),
+    }
+}
+
+/// The full count at full depth, the quick one otherwise.
+pub fn depth<T>(full: T, quick: T) -> T {
+    if full_depth() { full } else { quick }
+}
+
 /// A folder for one test under Cargo's per-target scratch folder, emptied
 /// when it's made and deleted when it's dropped.
 pub struct TestDir(PathBuf);

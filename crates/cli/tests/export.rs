@@ -5,6 +5,11 @@
 //!
 //! Each export's engine blocks run under the allocation trap, and an export
 //! that touched the heap inside a block fails.
+//!
+//! With `BL_TEST_DEPTH=full` (pushes to main, manual CI runs, and the nightly
+//! run), every golden fixture exports as FLAC, WAV, and AIFF; with `quick`,
+//! the default for local runs and pull requests, each fixture exports as one
+//! of the three in turn, so every fixture and every format is still checked.
 
 bl_rt::install_trap!();
 
@@ -27,6 +32,17 @@ use bl_media::{BitDepth, Dither, FileType};
 use bl_model::{AudioData, Clip, ClipData, Command as Edit, ContentHash, Editor, TrackKind};
 use bl_project::{Media, MediaPath, MediaRef, Project};
 use bl_shell::export::{self, ExportError, Job, Length, Report};
+
+/// Whether the tests run at full depth: `BL_TEST_DEPTH=full`, as on pushes
+/// to main and the nightly run. Unset or `quick`, the default for local runs
+/// and pull requests, they run fewer cases or rounds of the same checks.
+fn full_depth() -> bool {
+    match std::env::var("BL_TEST_DEPTH").as_deref() {
+        Ok("full") => true,
+        Err(_) | Ok("" | "quick") => false,
+        Ok(other) => panic!("BL_TEST_DEPTH is `{other}`: set it to quick or full"),
+    }
+}
 
 fn golden_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/golden")
@@ -152,7 +168,13 @@ fn every_fixture_exports_as_its_golden_reference_to_the_bit() {
         let reference = read_flac(&fixture.reference_path(&dir)).expect("the reference reads");
         let exact = entry.made_on == platform();
 
-        for file_type in [FileType::Flac, FileType::Wav, FileType::Aiff] {
+        let formats = [FileType::Flac, FileType::Wav, FileType::Aiff];
+        let formats = if full_depth() {
+            &formats[..]
+        } else {
+            std::slice::from_ref(&formats[exported % formats.len()])
+        };
+        for &file_type in formats {
             let path = temp
                 .0
                 .join(format!("{}.{}", fixture.name, file_type.extension()));

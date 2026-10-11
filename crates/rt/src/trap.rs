@@ -447,10 +447,14 @@ mod tests {
     #[test]
     fn violations_on_one_thread_do_not_touch_another() {
         let before = thread_violations();
+        let total_before = total_violations();
+        // The box is made inside the section and dropped outside it: one
+        // violation, on the spawned thread. Count from here, since the
+        // test may run alone in its process.
         std::thread::spawn(|| forbid(|| black_box(Box::new(1u8))))
             .join()
             .unwrap();
         assert_eq!(thread_violations(), before);
-        assert!(total_violations() >= 2);
+        assert!(total_violations() > total_before);
     }
 }

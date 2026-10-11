@@ -145,7 +145,7 @@ const WIDGET: &[(&str, &str)] = &[
     ),
     // The value fields (WP-1.18): the Control Bar's transport section today,
     // each change running the field's registered command
-    // (docs/specs/control-bar-transport.md).
+    // (the control bar transport spec).
     (
         "S-VAL-001",
         "the focused value field steps its value (the Control Bar's position, loop, tempo, \

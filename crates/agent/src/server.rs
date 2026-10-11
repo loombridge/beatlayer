@@ -1,7 +1,7 @@
 //! The MCP server's state on the main thread: sessions, the methods MCP
-//! defines, and calls waiting for the person.
+//! defines, calls waiting for the person, and the engine the host attaches.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 
 use bl_engine::{EngineState, Report};
 use bl_shell::Shell;
@@ -53,15 +53,40 @@ impl Default for ClientInfo {
     }
 }
 
+/// How a session's requests show who sent them (WP-1.15b).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum Credential {
+    /// No token: the client started the server (`bl-cli mcp` over stdio) or
+    /// runs in its process. In the app it counts as the server's token.
+    #[default]
+    Local,
+    /// The agent server's token, which the Settings window shows: a client
+    /// asking to connect, which is asked about each time and is never
+    /// autonomous, whatever name it gives.
+    Server,
+    /// The own token of the allowed agent with this name: the requests are
+    /// that agent's, whatever name the client gives.
+    Agent(String),
+}
+
 /// One client's connection.
 #[derive(Clone, Debug, Default)]
 pub struct Session {
-    /// Who it is.
+    /// Who it is, as it said when it connected, or as its token says.
     pub client: ClientInfo,
     /// The protocol version agreed, once it's initialised.
     pub protocol: Option<String>,
     /// The names `run` gave new IDs (`{"$new": name}`), for `{"$ref": name}`.
     pub refs: BTreeMap<String, u64>,
+    /// How its requests show who sent them. Every request on a session
+    /// carries the credential it started with.
+    pub credential: Credential,
+    /// The allowed agent whose rights the session has (its approval, and
+    /// autonomous mode if the person switched it on): the agent whose own
+    /// token it carries, or the agent the person allowed when this session
+    /// first asked. `None` for a session the person allowed for itself
+    /// only, which asks first for every destructive and external command.
+    pub agent: Option<String>,
 }
 
 /// What handling a message came to.
@@ -72,6 +97,10 @@ pub enum Outcome {
     /// Ask the person, then call [`Agent::resolve`] with the answer; the
     /// reply comes from there.
     Ask(Question),
+    /// A tool call that waits for the person's gesture (a drag) to end, so
+    /// it lands after the drop as its own undo step. [`Agent::resume`] runs
+    /// it then and gives its outcome with this ticket.
+    Wait(u64),
 }
 
 /// Something only the person can answer.
@@ -97,6 +126,9 @@ pub enum QuestionKind {
     Confirm {
         /// Their most far-reaching class: destructive or external.
         class: bl_commands::Permission,
+        /// Every class among them that asks first, least reach first, such
+        /// as destructive and external for files dropped over a clip.
+        classes: Vec<bl_commands::Permission>,
         /// What would run, a line per command.
         summary: String,
     },
@@ -113,10 +145,18 @@ impl Question {
                  deleting or reaching outside the project.",
                 self.agent
             ),
-            QuestionKind::Confirm { class, summary } => format!(
+            QuestionKind::Confirm {
+                class,
+                classes,
+                summary,
+            } => format!(
                 "\u{201c}{}\u{201d} wants to run {} command{}:\n\n{summary}\n\nAllow it?",
                 self.agent,
-                class,
+                if classes.is_empty() {
+                    class.to_string()
+                } else {
+                    crate::tools::class_names(classes)
+                },
                 if summary.lines().count() == 1 {
                     ""
                 } else {
@@ -143,6 +183,22 @@ enum WaitingKind {
     Call { name: String, args: Value },
 }
 
+/// Something that waits for the person's gesture to end, in the order it
+/// came.
+#[derive(Clone, Debug)]
+enum Held {
+    /// A tool call.
+    Call {
+        ticket: u64,
+        session: String,
+        request: Value,
+        params: Value,
+    },
+    /// A report from the engine: a scheduled command fired, whose edit
+    /// runs on the document.
+    Report(Report),
+}
+
 /// The agent API on the main thread: every session, the project's
 /// checkpoints and scheduled commands, and calls waiting for the person.
 ///
@@ -157,6 +213,12 @@ pub struct Agent {
     state: State,
     waiting: BTreeMap<u64, Waiting>,
     next_question: u64,
+    /// What waits for the person's gesture to end, oldest first.
+    held: VecDeque<Held>,
+    next_ticket: u64,
+    /// The engine the host last attached ([`Agent::sync_engine`]), by its
+    /// generation, so a new one gets the commands still scheduled.
+    engine_generation: Option<u64>,
 }
 
 impl Agent {
@@ -182,6 +244,9 @@ impl Agent {
             state: State::default(),
             waiting: BTreeMap::new(),
             next_question: 0,
+            held: VecDeque::new(),
+            next_ticket: 0,
+            engine_generation: None,
         }
     }
 
@@ -192,11 +257,23 @@ impl Agent {
     }
 
     /// Starts a session with a new random ID, or the given one, and returns
-    /// its ID.
+    /// its ID. Its requests carry no token ([`Credential::Local`]).
     pub fn open_session(&mut self, id: Option<&str>) -> String {
+        self.open_session_as(id, Credential::Local)
+    }
+
+    /// Starts a session whose requests carry `credential`, with a new
+    /// random ID or the given one, and returns its ID.
+    pub fn open_session_as(&mut self, id: Option<&str>, credential: Credential) -> String {
         let id = id.map_or_else(new_session_id, str::to_owned);
-        self.sessions.entry(id.clone()).or_default();
+        self.sessions.entry(id.clone()).or_default().credential = credential;
         id
+    }
+
+    /// The credential the session's requests carry, if it's open.
+    #[must_use]
+    pub fn session_credential(&self, id: &str) -> Option<&Credential> {
+        self.sessions.get(id).map(|session| &session.credential)
     }
 
     /// Whether a session with this ID is open.
@@ -215,10 +292,13 @@ impl Agent {
         self.sessions.iter().map(|(id, s)| (id.as_str(), s))
     }
 
-    /// Ends every session of the agent called `client`, as forgetting its
-    /// approval does.
+    /// Ends every session with the rights of the agent called `client`, as
+    /// forgetting its approval does.
     pub fn close_sessions_of(&mut self, client: &str) {
-        self.sessions.retain(|_, s| s.client.name != client);
+        self.sessions.retain(|_, s| {
+            s.agent.as_deref() != Some(client)
+                && s.credential != Credential::Agent(client.to_owned())
+        });
     }
 
     /// Says whether an engine plays the song here. While one does, the
@@ -249,9 +329,123 @@ impl Agent {
     }
 
     /// Hands the agent API a report from the engine: a scheduled command
-    /// that fired runs on the document now, as its agent's undo step.
+    /// that fired runs on the document now, as its agent's undo step, or,
+    /// while the person's gesture is under way, once it ends.
     pub fn on_report(&mut self, shell: &mut Shell, report: Report) {
-        self.state.schedule.on_report(shell, report);
+        if shell.gesture_under_way() || !self.held.is_empty() {
+            self.held.push_back(Held::Report(report));
+        } else {
+            self.state.schedule.on_report(shell, report);
+        }
+    }
+
+    /// Brings the agent API and the shell's engine up to date, as the
+    /// app's host does after every event (WP-1.15b): says whether an engine
+    /// plays the set on a device, sends it what agents asked of it (the
+    /// transport's commands and scheduled commands) on the queue the
+    /// person's transport commands take, hands the engine's reports back
+    /// (fired scheduled commands run as their agents' undo steps), and takes
+    /// the engine's transport for `transport`'s `status`. A new engine, after
+    /// the device changed, gets every command still scheduled.
+    pub fn sync_engine(&mut self, shell: &mut Shell) {
+        let running = shell.audio().engine_running();
+        if running != self.state.engine_attached {
+            self.set_engine_attached(running);
+        }
+        // Reports from an engine that has closed still count.
+        for report in shell.audio_mut().take_reports() {
+            self.on_report(shell, report);
+        }
+        if !running {
+            // A transport command sent as the engine stopped has nothing to
+            // move; scheduled commands wait for the next engine.
+            self.state
+                .outbox
+                .retain(|message| !matches!(message, EngineMessage::Transport(_)));
+            return;
+        }
+        let generation = shell.audio().engine_generation();
+        if self.engine_generation != Some(generation) {
+            self.engine_generation = Some(generation);
+            // The new engine holds none of the scheduled commands: send
+            // every one still waiting, once.
+            self.state
+                .outbox
+                .retain(|message| matches!(message, EngineMessage::Transport(_)));
+            let waiting = self.state.schedule.waiting_commands();
+            self.state
+                .outbox
+                .extend(waiting.into_iter().map(EngineMessage::Schedule));
+        }
+        let audio = shell.audio_mut();
+        for message in std::mem::take(&mut self.state.outbox) {
+            // The engine ran while the call was handled; if it has just
+            // stopped, there's nothing to send to.
+            let _ = match message {
+                EngineMessage::Transport(command) => audio.send_transport(command),
+                EngineMessage::Schedule(command) => audio.schedule(command),
+                EngineMessage::Cancel(id) => audio.cancel(id),
+            };
+        }
+        let transport = audio.transport_state();
+        self.state.playhead = Some(Playhead::new(
+            transport.playing,
+            transport.position,
+            transport.insert_marker,
+        ));
+    }
+
+    /// How many scheduled commands wait to fire, so a host keeps handing
+    /// back the engine's reports while there are any.
+    #[must_use]
+    pub fn scheduled_waiting(&self) -> usize {
+        self.state.schedule.waiting()
+    }
+
+    /// Whether tool calls or engine reports wait for the person's gesture
+    /// to end.
+    #[must_use]
+    pub fn holds_calls(&self) -> bool {
+        !self.held.is_empty()
+    }
+
+    /// Once the person's gesture has ended, runs what waited for it in the
+    /// order it came, each call as its own undo step: engine reports run
+    /// their edits, and the next call that waited runs and gives its outcome
+    /// with the ticket its [`Outcome::Wait`] had. Call it again until it
+    /// gives `None`. While the gesture goes on, or a call it ran waits for
+    /// the person's answer, it gives `None`.
+    pub fn resume(&mut self, shell: &mut Shell) -> Option<(u64, Outcome)> {
+        loop {
+            if shell.gesture_under_way()
+                || self
+                    .waiting
+                    .values()
+                    .any(|w| matches!(w.kind, WaitingKind::Call { .. }))
+            {
+                return None;
+            }
+            match self.held.pop_front()? {
+                Held::Report(report) => self.state.schedule.on_report(shell, report),
+                Held::Call {
+                    ticket,
+                    session,
+                    request,
+                    params,
+                } => {
+                    let outcome = if self.sessions.contains_key(&session) {
+                        self.call(shell, &session, request, params, false)
+                    } else {
+                        Outcome::Reply(Some(jsonrpc::error_response(
+                            request,
+                            code::INVALID_REQUEST,
+                            "the session ended while the call waited",
+                        )))
+                    };
+                    return Some((ticket, outcome));
+                }
+            }
+        }
     }
 
     /// The questions waiting for the person, oldest first.
@@ -276,9 +470,9 @@ impl Agent {
         if self.mode == Mode::App
             && method != "initialize"
             && open.protocol.is_some()
-            && shell.agent_settings().client(&open.client.name).is_none()
+            && let Some(name) = open.agent.clone()
+            && shell.agent_settings().client(&name).is_none()
         {
-            let name = open.client.name.clone();
             self.sessions.remove(session);
             return Outcome::Reply(Some(jsonrpc::error_response(
                 id,
@@ -293,6 +487,19 @@ impl Agent {
             "initialize" => self.initialize(shell, session, id, &params),
             "ping" => reply(id, json!({})),
             "tools/list" => reply(id, json!({ "tools": tools::list() })),
+            // Spec: agent-permissions R5. While the person's hand is on the
+            // set, agents' calls wait, in order, and land after the drop.
+            "tools/call" if shell.gesture_under_way() || !self.held.is_empty() => {
+                self.next_ticket += 1;
+                let ticket = self.next_ticket;
+                self.held.push_back(Held::Call {
+                    ticket,
+                    session: session.to_owned(),
+                    request: id,
+                    params,
+                });
+                Outcome::Wait(ticket)
+            }
             "tools/call" => self.call(shell, session, id, params, false),
             "resources/list" => reply(id, json!({ "resources": [guide::listing()] })),
             "resources/templates/list" => reply(id, json!({ "resourceTemplates": [] })),
@@ -351,6 +558,7 @@ impl Agent {
         let entry = self.sessions.entry(session.to_owned()).or_default();
         entry.client = client.clone();
         entry.protocol = Some((*version).to_owned());
+        let credential = entry.credential.clone();
         let result = json!({
             "protocolVersion": version,
             "capabilities": {
@@ -364,7 +572,30 @@ impl Agent {
             },
             "instructions": guide::INSTRUCTIONS,
         });
-        if self.mode == Mode::App && shell.agent_settings().client(&client.name).is_none() {
+        if self.mode == Mode::App {
+            // Spec: agent-permissions R7, R8. An allowed agent's own token
+            // says who it is, whatever name its client gives; any other
+            // client is asked about, every time it connects.
+            if let Credential::Agent(name) = credential {
+                if shell.agent_settings().client(&name).is_none() {
+                    self.sessions.remove(session);
+                    return Outcome::Reply(Some(jsonrpc::error_response(
+                        id,
+                        code::NOT_ALLOWED,
+                        "that token belongs to no agent the person allows",
+                    )));
+                }
+                let entry = self.sessions.entry(session.to_owned()).or_default();
+                if entry.client.name != name {
+                    entry.client = ClientInfo {
+                        name: name.clone(),
+                        title: None,
+                        version: client.version,
+                    };
+                }
+                entry.agent = Some(name);
+                return reply(id, result);
+            }
             return self.ask(
                 session,
                 id,
@@ -424,12 +655,20 @@ impl Agent {
                 message,
             ))),
             Ok(ToolOutcome::Done(result)) => reply(id, tool_result(result, structured)),
-            Ok(ToolOutcome::Ask { class, summary }) => self.ask(
+            Ok(ToolOutcome::Ask {
+                class,
+                classes,
+                summary,
+            }) => self.ask(
                 session,
                 id,
                 WaitingKind::Call { name, args },
                 agent,
-                QuestionKind::Confirm { class, summary },
+                QuestionKind::Confirm {
+                    class,
+                    classes,
+                    summary,
+                },
             ),
         }
     }
@@ -463,7 +702,11 @@ impl Agent {
     /// to the request that asked, or `None` if no question has that ID.
     ///
     /// Allowing an agent to connect allows it for good
-    /// (`agent.approve_client`, run as the person). Allowing a call runs it.
+    /// (`agent.approve_client`, run as the person), making it its own token,
+    /// and the session gets its rights; if an agent with that name is
+    /// already allowed, the session is allowed for itself only, with none
+    /// of that agent's rights, since anyone can give a name. Allowing a call
+    /// runs it.
     pub fn resolve(&mut self, shell: &mut Shell, question: u64, allow: bool) -> Option<Value> {
         let Waiting {
             session,
@@ -477,11 +720,16 @@ impl Agent {
                     .get(&session)
                     .map(|s| s.client.name.clone())
                     .unwrap_or_default();
+                let known = shell.agent_settings().client(&name).is_some();
                 if allow
-                    && shell
-                        .run(AGENT_APPROVE_CLIENT, json!({ "client": name }))
-                        .is_ok()
+                    && (known
+                        || shell
+                            .run(AGENT_APPROVE_CLIENT, json!({ "client": name }))
+                            .is_ok())
                 {
+                    if let Some(open) = self.sessions.get_mut(&session) {
+                        open.agent = (!known).then_some(name);
+                    }
                     jsonrpc::response(request, result)
                 } else {
                     self.sessions.remove(&session);
@@ -502,12 +750,15 @@ impl Agent {
                         true,
                     ) {
                         Outcome::Reply(Some(reply)) => reply,
-                        // It was confirmed, so it never asks again.
-                        Outcome::Reply(None) | Outcome::Ask(_) => jsonrpc::error_response(
-                            request,
-                            code::INTERNAL_ERROR,
-                            "the call asked twice",
-                        ),
+                        // It was confirmed, so it never asks again, and it
+                        // runs straight away.
+                        Outcome::Reply(None) | Outcome::Ask(_) | Outcome::Wait(_) => {
+                            jsonrpc::error_response(
+                                request,
+                                code::INTERNAL_ERROR,
+                                "the call asked twice",
+                            )
+                        }
                     }
                 } else {
                     let structured = self

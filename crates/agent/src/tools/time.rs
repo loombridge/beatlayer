@@ -47,7 +47,10 @@ use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
 use super::run::resolve_placeholders;
-use super::{Ctx, ToolOutcome, args, describe_args, done, failed, step, tool_definition};
+use super::{
+    Ctx, ToolOutcome, args, class_names, describe_args, done, failed, step, tool_definition,
+};
+use bl_shell::permission::{CallPermission, raised_by_arguments};
 
 pub(crate) const TRANSPORT: &str = "transport";
 pub(crate) const SCHEDULE: &str = "schedule";
@@ -79,6 +82,14 @@ pub(crate) struct Playhead {
 }
 
 impl Playhead {
+    pub(crate) fn new(playing: bool, position: Ticks, insert_marker: Ticks) -> Self {
+        Self {
+            playing,
+            position,
+            insert_marker,
+        }
+    }
+
     pub(crate) fn of(state: &EngineState) -> Self {
         Self {
             playing: state.playing,
@@ -334,6 +345,8 @@ struct Entry {
     command: String,
     args: Value,
     label: String,
+    /// What the engine does on the frame.
+    action: Action,
     state: State,
 }
 
@@ -353,6 +366,20 @@ pub(crate) struct Schedule {
 }
 
 impl Schedule {
+    /// The engine's commands for those waiting to fire, for an engine that
+    /// has just started.
+    pub(crate) fn waiting_commands(&self) -> Vec<ScheduledCommand> {
+        self.entries
+            .iter()
+            .filter(|e| e.state == State::Waiting)
+            .map(|e| ScheduledCommand {
+                id: e.id,
+                at: e.at,
+                action: e.action,
+            })
+            .collect()
+    }
+
     /// How many are waiting to fire.
     pub(crate) fn waiting(&self) -> usize {
         self.entries
@@ -438,8 +465,10 @@ fn run_now(shell: &mut Shell, entry: &Entry) -> Result<(), String> {
                 .map_err(|error| error.to_string())
         })
     } else {
+        // The Arrangement's edits and the browser's drops are the agent's
+        // undo steps too.
         shell
-            .run(&entry.command, entry.args.clone())
+            .run_labelled(entry.label.clone(), &entry.command, entry.args.clone())
             .map(|_| ())
             .map_err(|error| error.to_string())
     }
@@ -601,9 +630,23 @@ pub(crate) fn schedule(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
                     ));
                 }
             }
+            // Spec: agent-permissions R1. Decided from its arguments against
+            // the song as it is now, when the person can be asked.
+            let call = if raised_by_arguments(&command) {
+                ctx.shell.call_permission(&command, &args)
+            } else {
+                CallPermission::registered(class)
+            };
+            let classes = call.classes();
+            let asking: Vec<Permission> = classes
+                .iter()
+                .copied()
+                .filter(|class| class.asks_first())
+                .collect();
             let shell = &*ctx.shell;
-            step!(ctx.permit(class, &[command.as_str()], || format!(
-                "At {position}: {label} ({class}): {}",
+            step!(ctx.permit(&classes, &[command.as_str()], || format!(
+                "At {position}: {label} ({}): {}",
+                class_names(&asking),
                 describe_args(shell, &args)
             )));
             ctx.session.refs = names;
@@ -617,6 +660,7 @@ pub(crate) fn schedule(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
                 command: command.clone(),
                 args: args.clone(),
                 label: format!("{}: {label} at {position}", ctx.session.client.label()),
+                action,
                 state: State::Waiting,
             };
             schedule.entries.push(entry);

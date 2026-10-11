@@ -432,7 +432,8 @@ fn specs() -> Vec<CommandSpec> {
              only to audio tracks and MIDI clips to MIDI tracks, and no clip can start before \
              1.1.1; if any would, nothing moves. The moved clips (or the copies) are selected \
              afterwards. Dragging a clip's title bar runs this, with Option (Ctrl on Windows) \
-             held to copy; the whole drag is one undo step.",
+             held to copy; the whole drag is one undo step. A move or copy that would replace \
+             part of another clip is destructive, so an agent asks first.",
         )
         .args::<MoveClipsArgs>(),
         edit(
@@ -446,7 +447,7 @@ fn specs() -> Vec<CommandSpec> {
              1.1.1, and a clip can't become shorter than a tick. Lengthening a clip over its \
              neighbour replaces the part it covers. Dragging a clip's edge runs this, and so \
              does Enter, then Left or Right, then Enter, from the keyboard; each is one undo \
-             step.",
+             step. Lengthening a clip over another is destructive, so an agent asks first.",
         )
         .binding("S-ARR-004")
         .args::<ResizeClipsArgs>(),
@@ -483,7 +484,8 @@ fn specs() -> Vec<CommandSpec> {
             "Places a copy of clips (`clips`, or the selected clips) right after the span they \
              cover, on the same tracks, or a copy of the material in a span of time on tracks \
              right after the span, and selects the copy, so running it again repeats the \
-             material. The copy replaces whatever it covers. Cmd-D (Ctrl-D) runs this on the \
+             material. The copy replaces whatever it covers; when that's part of another clip, \
+             it's destructive, so an agent asks first. Cmd-D (Ctrl-D) runs this on the \
              Arrangement's selection.",
         )
         .binding("S-EDIT-004")
@@ -518,7 +520,8 @@ fn specs() -> Vec<CommandSpec> {
             "Places the clipboard's material starting at `at` (left out, the time selection's \
              start or the insert marker), its first track's clips on `track` (left out, the \
              first selected track) and its other tracks' clips on the tracks after it, keeping \
-             their spacing. The material replaces what it covers and is selected afterwards. \
+             their spacing. The material replaces what it covers (destructive, so an agent \
+             asks first, when that's part of another clip) and is selected afterwards. \
              It fails, changing nothing, if a clip would land on a track of another kind or \
              there's nothing on the clipboard. Cmd-V (Ctrl-V) runs this.",
         )
@@ -531,7 +534,8 @@ fn specs() -> Vec<CommandSpec> {
             "Moves clips (`clips`, or the selected clips) one step of the editing grid earlier \
              (`left`) or later (`right`), as Left and Right do in the Arrangement; with no \
              clips selected it moves the insert marker one grid step instead, which changes \
-             nothing in the set. A clip can't move before 1.1.1.",
+             nothing in the set. A clip can't move before 1.1.1. A clip nudged over part of \
+             another replaces it, which is destructive, so an agent asks first.",
         )
         .args::<NudgeArgs>(),
         edit(

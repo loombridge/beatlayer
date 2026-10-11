@@ -7,6 +7,14 @@
 //! unless `bl-cli mcp` was started with `--autonomous`. Commands that change
 //! what agents may do (the agent server's own) are refused whatever the
 //! agent's mode.
+//!
+//! A call's class is decided from its arguments against the document as it
+//! is (WP-1.15b): placing clips over others, by moving, resizing, nudging,
+//! duplicating, pasting, or dropping files, is destructive as well as its
+//! registered class ([`bl_shell::permission`]). And an agent's autonomous
+//! mode belongs to its own token: only a session that carries it, or that
+//! the person allowed when it first connected, has the agent's rights
+//! ([`crate::Session::agent`]).
 
 use bl_commands::Permission;
 use bl_shell::Shell;
@@ -38,11 +46,12 @@ pub enum Decision {
 }
 
 /// Decides whether an agent may run commands whose most far-reaching
-/// class is `class`. `commands` are their IDs, for the messages.
+/// class is `class`. `agent` is the allowed agent whose rights the session
+/// has, if any; `commands` are their IDs, for the messages.
 pub(crate) fn decide(
     mode: Mode,
     shell: &Shell,
-    client: &str,
+    agent: Option<&str>,
     class: Permission,
     commands: &[&str],
 ) -> Decision {
@@ -70,7 +79,9 @@ pub(crate) fn decide(
                 if commands.len() == 1 { "is" } else { "include" }
             ))
         }
-        Mode::App if shell.agent_settings().is_autonomous(client) => Decision::Run,
+        Mode::App if agent.is_some_and(|agent| shell.agent_settings().is_autonomous(agent)) => {
+            Decision::Run
+        }
         Mode::App => Decision::Ask,
     }
 }
@@ -88,24 +99,28 @@ mod tests {
         let free = Mode::Headless { autonomous: true };
         for class in [Permission::Read, Permission::Edit] {
             assert_eq!(
-                decide(headless, &shell, "a", class, &["x.y"]),
+                decide(headless, &shell, Some("a"), class, &["x.y"]),
                 Decision::Run
             );
             assert_eq!(
-                decide(Mode::App, &shell, "a", class, &["x.y"]),
+                decide(Mode::App, &shell, Some("a"), class, &["x.y"]),
                 Decision::Run
             );
         }
         for class in [Permission::Destructive, Permission::External] {
-            let Decision::Refuse(message) = decide(headless, &shell, "a", class, &["track.delete"])
+            let Decision::Refuse(message) =
+                decide(headless, &shell, Some("a"), class, &["track.delete"])
             else {
                 panic!("headless refuses {class}");
             };
             assert!(message.contains("--autonomous"), "{message}");
             assert!(message.contains("`track.delete` is"), "{message}");
-            assert_eq!(decide(free, &shell, "a", class, &["x.y"]), Decision::Run);
             assert_eq!(
-                decide(Mode::App, &shell, "a", class, &["x.y"]),
+                decide(free, &shell, Some("a"), class, &["x.y"]),
+                Decision::Run
+            );
+            assert_eq!(
+                decide(Mode::App, &shell, Some("a"), class, &["x.y"]),
                 Decision::Ask
             );
         }
@@ -116,11 +131,29 @@ mod tests {
             .run("agent.set_autonomous", json!({ "client": "a", "on": true }))
             .unwrap();
         assert_eq!(
-            decide(Mode::App, &shell, "a", Permission::Destructive, &["x.y"]),
+            decide(
+                Mode::App,
+                &shell,
+                Some("a"),
+                Permission::Destructive,
+                &["x.y"]
+            ),
             Decision::Run
         );
         assert_eq!(
-            decide(Mode::App, &shell, "b", Permission::Destructive, &["x.y"]),
+            decide(
+                Mode::App,
+                &shell,
+                Some("b"),
+                Permission::Destructive,
+                &["x.y"]
+            ),
+            Decision::Ask
+        );
+        // Spec: agent-permissions R8. A session without the agent's rights
+        // asks, whatever name it gave.
+        assert_eq!(
+            decide(Mode::App, &shell, None, Permission::Destructive, &["x.y"]),
             Decision::Ask
         );
     }
@@ -132,7 +165,7 @@ mod tests {
             let decision = decide(
                 mode,
                 &shell,
-                "a",
+                Some("a"),
                 Permission::External,
                 &["agent.set_autonomous"],
             );

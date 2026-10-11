@@ -840,11 +840,13 @@ dependencies = [
  "bl-audio-io",
  "bl-commands",
  "bl-core",
+ "bl-engine",
  "bl-model",
  "bl-project",
  "bl-rt",
  "bl-shell-spec",
  "getrandom 0.3.4",
+ "rtrb",
  "serde",
  "serde_json",
 ]

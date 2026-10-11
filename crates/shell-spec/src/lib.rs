@@ -12,6 +12,9 @@
 //! - [`arrangement`]: the Arrangement View's view commands (WP-1.8a): zoom,
 //!   scroll, Follow, the editing grid, track heights, and the selection
 //!   the zoom commands work from.
+//! - [`transport`]: what the Control Bar's transport section shows
+//!   (`transport.state`), and the IDs of the transport's commands, which
+//!   `bl-engine` and `bl-model` register (WP-1.18).
 //!
 //! `cargo xtask` checks the commands, lists them in the command reference, and
 //! builds the keymap from this crate, so none of its tasks links an audio
@@ -24,15 +27,18 @@ pub mod audio;
 pub mod commands;
 pub mod menus;
 pub mod settings;
+pub mod transport;
 
 use bl_commands::{RegisterError, Registry};
 
-/// Adds the shell's commands and the Arrangement View's to a registry.
+/// Adds the shell's commands, the Arrangement View's, and the transport
+/// query to a registry.
 ///
 /// # Errors
 ///
 /// [`RegisterError`] if one of their IDs is already registered.
 pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     commands::register(registry)?;
-    arrangement::register(registry)
+    arrangement::register(registry)?;
+    transport::register(registry)
 }

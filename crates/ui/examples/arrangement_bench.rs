@@ -32,6 +32,10 @@
 //!   set changes every frame and the view rebuilds its clip index and
 //!   lanes.
 //! - `drag-all` (WP-1.8b): as `drag`, moving all 5,000 clips.
+//! - `mixer` (WP-1.9): the Arrangement with its mixer showing, the view
+//!   still at 64 bars, every track's meter moving every frame, and the
+//!   mixer scrolling across all 200 tracks and back.
+//! - `session-mixer` (WP-1.9): the same in the Session View's mixer.
 
 use std::time::{Duration, Instant};
 
@@ -57,6 +61,8 @@ enum Config {
     Whole,
     Drag,
     DragAll,
+    Mixer,
+    SessionMixer,
 }
 
 impl Config {
@@ -67,6 +73,8 @@ impl Config {
             Self::Whole => "whole",
             Self::Drag => "drag",
             Self::DragAll => "drag-all",
+            Self::Mixer => "mixer",
+            Self::SessionMixer => "session-mixer",
         }
     }
 }
@@ -126,6 +134,8 @@ fn args() -> Result<Args, String> {
                     "whole" => Config::Whole,
                     "drag" => Config::Drag,
                     "drag-all" => Config::DragAll,
+                    "mixer" => Config::Mixer,
+                    "session-mixer" => Config::SessionMixer,
                     other => return Err(format!("no config called {other}")),
                 }];
             }
@@ -449,6 +459,15 @@ fn main() -> Result<(), String> {
                 .collect()
         };
         let mut shell = benchmark::shell_with(scene.editor);
+        // The mixer configs' meters: every track, the returns, and Main.
+        let meter_tracks: Vec<bl_model::TrackId> = shell
+            .editor()
+            .document()
+            .tracks()
+            .map(bl_model::Track::id)
+            .collect();
+        let mut meters = Vec::with_capacity(meter_tracks.len());
+        let mut mixer_view = "arrangement";
         let mut main = MainWindowUi::new();
         main.arrangement_mut()
             .set_peak_source(Box::new(scene.peaks), None);
@@ -465,20 +484,79 @@ fn main() -> Result<(), String> {
         let mut waveforms = Vec::with_capacity(args.frames);
         let mut walls = Vec::with_capacity(args.frames);
         let mut waits = Vec::with_capacity(args.frames);
+        let mut columns = Vec::with_capacity(args.frames);
         let duration = args.frames as f64 / 60.0;
         for frame in 0..WARM_UP + args.frames {
             let t = frame.saturating_sub(WARM_UP) as f64 / 60.0;
             let start = thread_cpu_time();
             let wall_start = Instant::now();
             // The view for this frame.
-            if frame == 1 && *config != Config::Standard {
+            let mixing = matches!(config, Config::Mixer | Config::SessionMixer);
+            if frame == 0 && mixing {
+                let view = if *config == Config::Mixer {
+                    shell
+                        .run(
+                            bl_shell::mixer_view_commands::TOGGLE,
+                            json!({ "shown": true }),
+                        )
+                        .map_err(|e| e.to_string())?;
+                    "arrangement"
+                } else {
+                    shell
+                        .run("view.toggle_session_arrangement", json!({}))
+                        .map_err(|e| e.to_string())?;
+                    "session"
+                };
+                mixer_view = view;
+            }
+            if mixing {
+                // Every track's meter moves, and the mixer sweeps across
+                // all the tracks and back over the run.
+                meters.clear();
+                for (i, track) in meter_tracks.iter().enumerate() {
+                    let level = (0.5 + 0.5 * (t * 7.0 + i as f64 * 0.37).sin()) as f32;
+                    meters.push(bl_engine::TrackMeter {
+                        track: *track,
+                        peak: [level, level * 0.9],
+                        rms: [level * 0.5, level * 0.45],
+                    });
+                }
+                shell.set_meters(&meters);
+                let target =
+                    94.0 * 200.0 * (0.5 - 0.5 * (std::f64::consts::TAU * t / duration).cos());
+                let now = serde_json::from_value::<bl_shell::mixer_view::MixerViewState>(
+                    shell
+                        .run(bl_shell::mixer_view_commands::STATE, json!({}))
+                        .map_err(|e| e.to_string())?,
+                )
+                .map_err(|e| e.to_string())?;
+                let scrolled = if mixer_view == "session" {
+                    now.session.scroll
+                } else {
+                    now.arrangement.scroll
+                };
+                shell
+                    .run(
+                        bl_shell::mixer_view_commands::SCROLL,
+                        json!({ "view": mixer_view, "x": target - scrolled }),
+                    )
+                    .map_err(|e| e.to_string())?;
+            }
+            if frame == 1
+                && !matches!(
+                    config,
+                    Config::Standard | Config::Mixer | Config::SessionMixer
+                )
+            {
                 shell
                     .run(ids::OPTIMIZE_HEIGHT, json!({ "on": true }))
                     .map_err(|e| e.to_string())?;
             }
             let (left, span) = match config {
                 Config::Whole => (0.0, 512.0 + (frame % 2) as f64 * 0.01),
-                Config::Drag | Config::DragAll => (0.0, 64.0),
+                Config::Drag | Config::DragAll | Config::Mixer | Config::SessionMixer => {
+                    (0.0, 64.0)
+                }
                 _ => scripted(t, duration),
             };
             if matches!(config, Config::Drag | Config::DragAll) && frame >= 1 {
@@ -533,6 +611,7 @@ fn main() -> Result<(), String> {
                 let stats = main.arrangement().stats();
                 clips.push(stats.clips);
                 waveforms.push(stats.waveforms);
+                columns.push(main.mixer().built_columns());
             }
         }
         for list in [&mut cpu, &mut walls, &mut gpu_times, &mut waits] {
@@ -565,6 +644,14 @@ fn main() -> Result<(), String> {
             percentile(&waits, 50.0),
             percentile(&waits, 99.0),
         );
+        if matches!(config, Config::Mixer | Config::SessionMixer) {
+            eprintln!(
+                "{}: mixer columns built per frame: mean {:.1}, max {}",
+                config.name(),
+                mean(&columns),
+                max(&columns)
+            );
+        }
         if let Some(path) = &args.png
             && Some(config) == args.configs.last()
         {

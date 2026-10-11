@@ -18,6 +18,9 @@
 //!   menus that reach them.
 //! - [`browser`]: the browser's commands (WP-1.10): places, browsing,
 //!   search, preview, and adding files to the Arrangement.
+//! - [`mixer_view`]: the Mixer view's view commands (WP-1.9): showing and
+//!   hiding the mixer and its sections in both views, scrolling it, and
+//!   moving the focus to it.
 //! - [`transport`]: what the Control Bar's transport section shows
 //!   (`transport.state`), and the IDs of the transport's commands, which
 //!   `bl-engine` and `bl-model` register (WP-1.18).
@@ -37,14 +40,15 @@ pub mod context_menus;
 pub mod editing;
 pub mod export;
 pub mod menus;
+pub mod mixer_view;
 pub mod settings;
 pub mod transport;
 
 use bl_commands::{RegisterError, Registry};
 
 /// Adds the shell's commands, the Arrangement View's (its view and its
-/// editing commands), the transport query, the browser's, and the export
-/// command to a registry.
+/// editing commands), the transport query, the Mixer view's, the browser's,
+/// and the export command to a registry.
 ///
 /// # Errors
 ///
@@ -54,6 +58,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     arrangement::register(registry)?;
     editing::register(registry)?;
     transport::register(registry)?;
+    mixer_view::register(registry)?;
     browser::register(registry)?;
     export::register(registry)
 }

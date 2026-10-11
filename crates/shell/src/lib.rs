@@ -29,6 +29,10 @@
 //! - [`export`]: exporting audio (WP-1.12): a range rendered offline
 //!   through the engine and written to a WAV, AIFF, or FLAC file, which
 //!   `export.audio` runs.
+//! - [`mixer_view`] and [`mixer_controls`]: what the mixers show in the
+//!   Session and Arrangement Views (shown, scrolled, which sections),
+//!   changed by the `mixer_view.*` commands, and what a strip's controls
+//!   show and the `mixer.*` commands each change runs (WP-1.9).
 //! - [`permission`]: a call's permission class decided from its arguments,
 //!   for the agent API: placing clips over others is destructive
 //!   (WP-1.15b).
@@ -47,6 +51,8 @@ pub mod audio;
 pub mod browser;
 pub mod export;
 pub mod files;
+pub mod mixer_controls;
+pub mod mixer_view;
 pub mod permission;
 pub mod settings;
 mod shell;
@@ -61,11 +67,15 @@ pub use bl_shell_spec::browser as browser_commands;
 pub use bl_shell_spec::editing as editing_commands;
 /// The export command's ID and its argument and result types (WP-1.12).
 pub use bl_shell_spec::export as export_commands;
+/// The Mixer view's command IDs and their argument and result types
+/// (WP-1.9).
+pub use bl_shell_spec::mixer_view as mixer_view_commands;
 pub use bl_shell_spec::settings::ZOOM_STEPS;
 /// The transport's command IDs the shell's menus and controls run, and
 /// `transport.state`'s result.
 pub use bl_shell_spec::transport as transport_commands;
 pub use bl_shell_spec::{commands, context_menus, menus, register};
 pub use shell::{
-    Area, Effect, GesturePhase, Invocation, MainView, Message, Shell, ShellError, WindowKind,
+    Area, Effect, GesturePhase, Invocation, KEY_TRACK_NUMBER, MainView, Message, Shell, ShellError,
+    WindowKind,
 };

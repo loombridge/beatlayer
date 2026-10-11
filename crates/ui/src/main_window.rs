@@ -1,8 +1,9 @@
 //! The main window: the Control Bar, the browser, the main view, the detail
 //! area, and the Status Bar, placed by the layout layer (L-WIN, L-CTRL,
 //! L-STAT). The browser fills its column (WP-1.10), the main view shows the
-//! Arrangement View (WP-1.8a); views that later packages build are
-//! placeholders that say so.
+//! Arrangement View (WP-1.8a) with its mixer, or the Session View's columns
+//! and mixer (WP-1.9); views that later packages build are placeholders
+//! that say so.
 
 use std::time::Duration;
 
@@ -17,6 +18,7 @@ use crate::arrangement::ArrangementUi;
 use crate::browser::BrowserUi;
 use crate::control_bar::{self, TransportFields};
 use crate::layout::{ELEMENTS, Element, Kind, ShellLayout, Strip, title_bar_height};
+use crate::mixer::MixerUi;
 use crate::theme::Theme;
 use crate::widgets::{Look, element};
 
@@ -74,6 +76,14 @@ pub struct MainWindowUi {
     /// The Control Bar's transport fields: a value being typed, a drag
     /// (WP-1.18).
     transport: TransportFields,
+    /// The mixers (WP-1.9).
+    mixer: MixerUi,
+    /// The keymap the Mixer Config Menu shows its items' keys from, read
+    /// when it first opens.
+    keymap: Option<crate::keymap::Keymap>,
+    /// Whether a value was being typed into a track header's volume field
+    /// when the last frame ended.
+    mixer_typing: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -112,7 +122,16 @@ impl MainWindowUi {
             arrangement: ArrangementUi::new(),
             browser: BrowserUi::new(),
             transport: TransportFields::new(),
+            mixer: MixerUi::new(),
+            keymap: None,
+            mixer_typing: false,
         }
+    }
+
+    /// The mixers, to read what they drew.
+    #[must_use]
+    pub fn mixer(&self) -> &MixerUi {
+        &self.mixer
     }
 
     /// The browser, to read what it drew.
@@ -126,7 +145,7 @@ impl MainWindowUi {
     /// to a text field (the control bar transport spec, R10).
     #[must_use]
     pub fn is_typing(&self) -> bool {
-        self.transport.is_typing()
+        self.transport.is_typing() || self.mixer_typing
     }
 
     /// The Arrangement View, to give it a peak source or read what it drew.
@@ -217,9 +236,15 @@ impl MainWindowUi {
             );
             self.status_bar(ui, shell, theme, &layout, &mut events);
         });
-        if shell.playing() {
+        self.mixer_typing = crate::mixer::is_typing(ctx);
+        let metering = shell
+            .meters()
+            .iter()
+            .any(|m| m.peak.iter().chain(&m.rms).any(|level| *level > 0.0));
+        if shell.playing() || metering {
             // The playhead and the Arrangement Position fields move with
-            // the engine every frame (control-bar-transport R14).
+            // the engine every frame (control-bar-transport R14), and the
+            // meters until they're silent (mixer-view R10).
             ctx.request_repaint();
         } else if shell.audio().engine_on() {
             // The CPU meter updates a few times a second.
@@ -265,10 +290,20 @@ impl MainWindowUi {
             if placement.strip != strip {
                 continue;
             }
-            let look = self
+            let mut look = self
                 .transport
                 .look(shell, *el)
                 .unwrap_or_else(|| look(*el, shell));
+            if *el == Element::Message
+                && let Some(readout) = crate::mixer::take_readout(ui.ctx())
+            {
+                // Spec: mixer-view R6. While a fader is dragged, the Status
+                // Bar shows its volume.
+                look = Look {
+                    text: Some(readout),
+                    ..Look::default()
+                };
+            }
             let response = element(ui, theme, placement, *rect, &look);
             if self.focus_request == Some(FocusRequest::Element(*el)) {
                 response.request_focus();
@@ -290,7 +325,32 @@ impl MainWindowUi {
             {
                 events.push(UiEvent::Invoke(invocation));
             }
+            if *el == Element::MixerMenu {
+                self.mixer_menu(&response, shell, events);
+            }
         }
+    }
+
+    /// The Mixer Config Menu (L-STAT-008): the Mixer Controls choices, as
+    /// View ▸ Mixer Controls has them (the mixer view spec, R12).
+    fn mixer_menu(&mut self, response: &egui::Response, shell: &Shell, events: &mut Vec<UiEvent>) {
+        let keymap = self
+            .keymap
+            .get_or_insert_with(crate::keymap::Keymap::live12);
+        let platform = crate::keymap::Platform::current();
+        let menus = bl_shell::menus::menu_bar(bl_shell::menus::MenuPlatform::current());
+        let Some(controls) = menus
+            .iter()
+            .flat_map(bl_shell::menus::Menu::walk)
+            .find(|item| item.row == "M-VIEW-032")
+        else {
+            return;
+        };
+        egui::Popup::menu(response).show(|ui| {
+            for item in bl_shell::menus::shown(&controls.items) {
+                crate::menus::item(ui, item, shell, keymap, platform, events);
+            }
+        });
     }
 
     fn control_bar(
@@ -360,7 +420,8 @@ impl MainWindowUi {
             ),
             MainView::Session => (
                 "Session View",
-                "The Session View's clip slots and scenes arrive in milestone M3.",
+                "The tracks' columns and their mixer. The clip slots and scenes arrive in \
+                 milestone M3.",
             ),
         };
         let response = ui.interact(rect, main_view_id(), Sense::click());
@@ -373,8 +434,20 @@ impl MainWindowUi {
             self.focus_request = None;
         }
         match shell.main_view() {
-            MainView::Arrangement => self.arrangement.show(ui, shell, theme, rect, events),
-            MainView::Session => draw_pane(ui, theme, rect, name, note),
+            MainView::Arrangement => {
+                self.arrangement.show(ui, shell, theme, rect, events);
+                if let Some(mixer) = self.arrangement.mixer_rect() {
+                    self.mixer.show_mixer(
+                        ui,
+                        shell,
+                        theme,
+                        mixer,
+                        bl_shell::mixer_view::MixerOf::Arrangement,
+                        events,
+                    );
+                }
+            }
+            MainView::Session => self.mixer.show_session(ui, shell, theme, rect, events),
         }
         if response.has_focus() {
             ui.painter().rect_stroke(
@@ -600,6 +673,14 @@ fn look(element: Element, shell: &Shell) -> Look {
                 ..Look::default()
             }
         }
+        Element::MixerToggle => {
+            let shown = shell.mixer_view().of(shell.front_mixer()).shown;
+            Look {
+                on: shown,
+                value: Some(if shown { "shown" } else { "hidden" }.to_owned()),
+                ..Look::default()
+            }
+        }
         Element::SessionView => Look {
             on: shell.main_view() == MainView::Session,
             ..Look::default()
@@ -639,6 +720,11 @@ fn click(element: Element, shell: &Shell) -> Option<Invocation> {
         Element::BrowserToggle => Some(Invocation::new(ids::VIEW_TOGGLE_BROWSER, json!({}))),
         Element::Follow => Some(Invocation::new(
             bl_shell::arrangement_commands::FOLLOW,
+            json!({}),
+        )),
+        // Spec: mixer-view R11.
+        Element::MixerToggle => Some(Invocation::new(
+            bl_shell::mixer_view_commands::TOGGLE,
             json!({}),
         )),
         Element::SampleRate => Some(Invocation::new(

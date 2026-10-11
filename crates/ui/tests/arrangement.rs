@@ -544,8 +544,12 @@ fn every_part_reaches_assistive_technology() {
     let follow = Harness::node(&nodes, "Follow");
     assert!(!follow.disabled);
     assert_eq!(follow.value, "on");
+    // The headers' mixer controls work since WP-1.9 (the mixer view spec,
+    // R4); the sends wait for WP-2.19.
     let solo = nodes.iter().find(|n| n.label == "Solo").unwrap();
-    assert!(solo.disabled && solo.description.contains("WP-1.9"));
+    assert!(!solo.disabled);
+    let send = nodes.iter().find(|n| n.label == "Send A").unwrap();
+    assert!(send.disabled && send.description.contains("WP-2.19"));
     let locator = Harness::node(&nodes, "Set Locator");
     assert!(locator.disabled && locator.description.contains("M6"));
     for name in [

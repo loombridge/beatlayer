@@ -10,7 +10,7 @@ use super::{BarBeatSixteenth, Ticks, TimeError};
 /// of a whole note.
 ///
 /// The numerator runs from 1 to 99 and the denominator is 1, 2, 4, 8, or 16,
-/// the range Live accepts (see `docs/specs/musical-time.md`).
+/// the range Live accepts (see the musical time spec).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(
     feature = "serde",

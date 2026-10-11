@@ -15,7 +15,7 @@ bl-commands.workspace = true
 # are data crates, so `xtask` still links no audio host.
 bl-core = { workspace = true, features = ["serde", "schemars"] }
 bl-model.workspace = true
-# Pinned to bl-commands' version: the command reference (docs/commands.md) is
+# Pinned to bl-commands' version: the command reference is
 # generated from these schemas.
 schemars = { version = "=1.2.2", default-features = false, features = ["std", "derive"] }
 serde = { version = "1.0.228", default-features = false, features = ["std", "derive"] }

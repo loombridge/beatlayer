@@ -14,7 +14,7 @@
 //! - [`browser`]: the browser's commands (WP-1.10): places, browsing,
 //!   search, preview, and adding files to the Arrangement.
 //!
-//! `cargo xtask` checks the commands, lists them in `docs/commands.md`, and
+//! `cargo xtask` checks the commands, lists them in the command reference, and
 //! builds the keymap from this crate, so none of its tasks links an audio
 //! backend (which needs ALSA and JACK headers on Linux). `bl-shell`
 //! re-exports everything here.

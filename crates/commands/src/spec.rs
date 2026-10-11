@@ -156,7 +156,7 @@ impl CommandSpec {
 /// A default binding: a shortcut from the UI parity reference that runs a
 /// command.
 ///
-/// The shortcut is named by its ID in `docs/ui-parity/shortcuts.toml`, so
+/// The shortcut is named by its ID in the shortcut reference, so
 /// the keys come from the reference and can't drift from it. A command with
 /// no Live shortcut has no binding.
 ///

@@ -15,5 +15,13 @@
 //! - `tests/stream.rs`: disk streaming's audio-thread work: reads, jumps
 //!   that land in the look-ahead, a preload, a cue, or nowhere ready,
 //!   crossfades, and an underrun, every block a real-time section.
+//! - `tests/transport.rs`: the transport's audio-thread work: play, stop,
+//!   continue, the insert marker, commands on exact frames, the Arrangement
+//!   loop wrapping inside a tempo ramp, a tempo map swapped in during
+//!   playback, and the beat tone (WP-1.5).
+//! - `tests/mixer.rs`: the mixer's audio-thread work: volumes, pans, and
+//!   activators gliding, solo and Solo in Place, sends before and after the
+//!   fader, a program swap when a return's Pre/Post switch moves, and the
+//!   meters published after every block (WP-1.6).
 //! - `tests/preview.rs`: the browser's preview voice playing, replacing,
 //!   fading out, and letting go of 100 previews (WP-1.10).

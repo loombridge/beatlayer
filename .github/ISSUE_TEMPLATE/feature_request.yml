@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Beatlayer's scope is set by the [parity matrix](https://github.com/loombridge/beatlayer/blob/main/docs/04-parity-matrix.md): every Ableton Live 12 feature and the milestone that covers it. Check it first, because your feature may already be planned for a later milestone.
+        Beatlayer aims to cover every Ableton Live 12 feature, in milestones. Your feature may already be planned for a later one; say which Live feature it relates to.
 
         Describe Live's behaviour in your own words. Don't paste text from Ableton's manual or website.
   - type: dropdown

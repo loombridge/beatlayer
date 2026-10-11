@@ -21,6 +21,7 @@ bl-commands = { path = "crates/commands" }
 bl-project = { path = "crates/project" }
 bl-dsp = { path = "crates/dsp" }
 bl-engine = { path = "crates/engine" }
+bl-audio-engine = { path = "crates/audio-engine" }
 bl-devices = { path = "crates/devices" }
 bl-stretch = { path = "crates/stretch" }
 bl-media = { path = "crates/media" }

@@ -37,7 +37,6 @@ mod shell;
 pub use bl_shell_spec::arrangement as arrangement_commands;
 /// The browser's command IDs and their argument and result types.
 pub use bl_shell_spec::browser as browser_commands;
+pub use bl_shell_spec::settings::ZOOM_STEPS;
 pub use bl_shell_spec::{commands, menus, register};
-pub use shell::{
-    Area, Effect, Invocation, MainView, Message, Shell, ShellError, WindowKind, ZOOM_STEPS,
-};
+pub use shell::{Area, Effect, Invocation, MainView, Message, Shell, ShellError, WindowKind};

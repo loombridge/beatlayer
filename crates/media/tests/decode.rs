@@ -3,7 +3,7 @@
 //!
 //! The fixtures and the encoders that made them are listed in
 //! `tests/fixtures/media/manifest.json`; `tests/fixtures/gen/gen_media.py`
-//! makes them. The tolerances are in `docs/specs/audio-import.md`.
+//! makes them. The tolerances are in the audio import spec.
 //!
 //! Run with `--nocapture` to print the measurements.
 

@@ -3,7 +3,9 @@
 //! pixels, as on a Retina screen, and saves it as a PNG. No window opens,
 //! so a capture never takes the screen or the keyboard from anyone. The
 //! side-by-side comparison with Live uses it, and it renders exactly what
-//! the window would.
+//! the window would, at the interface zoom in the preferences or set with
+//! `--command view.set_zoom='{"percent":150}'` (WP-1.17): the window is
+//! then no smaller than its minimum at that zoom.
 
 use std::fs::File;
 use std::io::BufWriter;
@@ -13,11 +15,11 @@ use bl_shell::audio::AudioHost;
 use bl_shell::files::ProjectFiles;
 use bl_shell::settings::Preferences;
 use bl_shell::{Shell, commands as ids};
-use bl_ui::layout::{SETTINGS_WINDOW, TITLE_BAR};
+use bl_ui::layout::{TITLE_BAR, apply_zoom, minimum_window, settings_window};
 use bl_ui::main_window::{MainWindowUi, UiEvent};
 use bl_ui::settings_window::SettingsUi;
 use bl_ui::theme::{Theme, fonts};
-use egui::{ColorImage, Pos2, RawInput, Rect, vec2};
+use egui::{ColorImage, Pos2, RawInput, Rect, ViewportId, vec2};
 use egui_wgpu::wgpu;
 use serde_json::json;
 
@@ -76,12 +78,18 @@ pub fn run(args: &Args, path: &Path) -> Result<(), String> {
     // system draws there.
     let title_bar = cfg!(target_os = "macos");
     let below = if title_bar { 0.0 } else { TITLE_BAR };
-    let size = if settings {
-        SETTINGS_WINDOW - vec2(0.0, below)
-    } else {
-        let (w, h) = args.window_size.unwrap_or((1600.0, 1000.0));
-        vec2(w, h - below)
+    // The interface zoom, from the preferences or a `--command`: it changes
+    // the window's size only where the window would be under its minimum.
+    let mut zoom = shell.zoom();
+    let window_size = |zoom: f32| {
+        if settings {
+            settings_window(zoom, title_bar)
+        } else {
+            let (w, h) = args.window_size.unwrap_or((1600.0, 1000.0));
+            vec2(w, h - below).max(minimum_window(zoom, title_bar))
+        }
     };
+    let mut size = window_size(zoom);
 
     let ctx = egui::Context::default();
     ctx.set_fonts(fonts());
@@ -104,12 +112,23 @@ pub fn run(args: &Args, path: &Path) -> Result<(), String> {
     shell.poll();
     for frame in 0..4 {
         settings_ui.prepare(&mut shell);
-        let input = RawInput {
-            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size)),
+        // Each layout point is `zoom` points of the window, and each of
+        // those SCALE pixels.
+        if (shell.zoom() - zoom).abs() > 1e-6 {
+            zoom = shell.zoom();
+            size = window_size(zoom);
+        }
+        apply_zoom(&ctx, zoom);
+        let mut input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, size / zoom)),
             time: Some(f64::from(frame) / 60.0),
             ..Default::default()
         };
-        ctx.set_pixels_per_point(SCALE);
+        input
+            .viewports
+            .entry(ViewportId::ROOT)
+            .or_default()
+            .native_pixels_per_point = Some(SCALE);
         let shell_ref = &shell;
         let mut events = Vec::new();
         let mut frame_output = ctx.run_ui(input, |ui| {
@@ -148,12 +167,13 @@ pub fn run(args: &Args, path: &Path) -> Result<(), String> {
     let image = render(&ctx, output, textures, size, &theme)?;
     write_png(path, &image)?;
     println!(
-        "screenshot: {} ({} x {} pixels, {} x {} points)",
+        "screenshot: {} ({} x {} pixels, {} x {} points, zoom {}%)",
         path.display(),
         image.size[0],
         image.size[1],
         size.x,
-        size.y
+        size.y,
+        shell.zoom_percent()
     );
     shell.audio_mut().stop();
     Ok(())

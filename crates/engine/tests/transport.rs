@@ -1,6 +1,6 @@
 //! The transport (WP-1.5): play, stop, continue, the insert marker, and
 //! the Arrangement loop, each on its exact frame, following the tempo map,
-//! as `docs/specs/transport.md` specifies. A position probe on the only
+//! as the transport spec specifies. A position probe on the only
 //! track writes each frame's song position into the output, so a test reads
 //! the transport sample by sample. Every block runs as a real-time section
 //! under the allocation trap.

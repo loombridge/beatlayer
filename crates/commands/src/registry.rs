@@ -340,7 +340,7 @@ impl fmt::Display for Problem {
             ),
             Self::UnknownShortcut { command, shortcut } => write!(
                 f,
-                "{command}: binds {shortcut}, which isn't in docs/ui-parity/shortcuts.toml"
+                "{command}: binds {shortcut}, which isn't in the shortcut reference"
             ),
             Self::ShortcutContext {
                 command,
@@ -362,7 +362,7 @@ impl fmt::Display for Problem {
             ),
             Self::ContextDrift { missing, extra } => write!(
                 f,
-                "the registry's contexts differ from docs/ui-parity/shortcuts.toml (missing from \
+                "the registry's contexts differ from the shortcut reference (missing from \
                  the registry: {}; not in the reference: {})",
                 list_or_none(missing),
                 list_or_none(extra)

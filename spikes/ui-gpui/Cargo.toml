@@ -17,7 +17,7 @@ description = "WP-0.8a: the UI benchmark scene in GPUI. A throwaway spike."
 gpui = { package = "gpui-pre", version = "=0.3.8" }
 # `runtime_shaders` compiles the Metal shaders when the app starts, because
 # Xcode 27 ships the Metal compiler as a separate download that this Mac
-# doesn't have. See docs/spikes/ui-gpui.md.
+# doesn't have. See the UI spike reports.
 gpui_platform = { package = "gpui-pre-platform", version = "=0.3.8", features = ["font-kit", "wayland", "x11", "runtime_shaders"] }
 gpui-component = { version = "=0.7.1", default-features = false }
 raw-window-handle = "0.6.2"

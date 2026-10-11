@@ -2,7 +2,7 @@
 //! D17): files, windows, views, focus, settings, and the audio device.
 //!
 //! [`register`] adds their specs, which are pure data, so `cargo xtask`
-//! can check them and list them in `docs/commands.md` without linking a UI
+//! can check them and list them in the command reference without linking a UI
 //! crate or an audio host. `bl-shell`'s `Shell::run` runs them by ID.
 
 use bl_commands::Context::{Dialog, Global, Settings, TabFocus};

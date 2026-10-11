@@ -1,7 +1,7 @@
 //! Disk streaming: long files read from disk ahead of the playhead, on a
 //! disk thread, with the start of every clip preloaded so a launch or a
 //! locate never waits on the disk (WP-1.3; the behaviour is in
-//! `docs/specs/disk-streaming.md`).
+//! the disk streaming spec).
 //!
 //! - [`AudioSource`] is what a clip player reads, on the audio thread: a
 //!   block of frames from any position, with jumps handled by a

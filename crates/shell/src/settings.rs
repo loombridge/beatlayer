@@ -10,6 +10,7 @@ pub use bl_shell_spec::settings::{
     zoom_percent, zoom_step,
 };
 
+use crate::agent::AgentSettings;
 use crate::audio::{AudioSettings, ToneSettings};
 
 /// Everything the app keeps between starts, saved as JSON.
@@ -32,6 +33,9 @@ pub struct Preferences {
     pub window_size: Option<(f32, f32)>,
     /// The Settings page shown last.
     pub settings_page: SettingsPage,
+    /// The agent server: whether it runs, its port and token, and the
+    /// agents allowed to connect (WP-1.15).
+    pub agent: AgentSettings,
     /// The browser's places and preview (WP-1.10).
     pub browser: crate::browser::BrowserPrefs,
 }

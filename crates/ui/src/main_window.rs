@@ -6,7 +6,6 @@
 
 use std::time::Duration;
 
-use bl_core::time::Ticks;
 use bl_shell::{Area, Effect, Invocation, MainView, Shell, commands as ids};
 use egui::accesskit::Role;
 use egui::{
@@ -16,6 +15,7 @@ use serde_json::json;
 
 use crate::arrangement::ArrangementUi;
 use crate::browser::BrowserUi;
+use crate::control_bar::{self, TransportFields};
 use crate::layout::{ELEMENTS, Element, Kind, ShellLayout, Strip, title_bar_height};
 use crate::theme::Theme;
 use crate::widgets::{Look, element};
@@ -36,6 +36,12 @@ pub enum UiEvent {
         /// From under the rulers to the pinned return tracks.
         height: f32,
     },
+    /// A drag on a value began: the document commands it runs until
+    /// [`UiEvent::EndGesture`] are one undo step with this name, as
+    /// [`Shell::begin_gesture`] makes them.
+    BeginGesture(&'static str),
+    /// The drag ended ([`Shell::end_gesture`]).
+    EndGesture,
 }
 
 /// The main window's UI state between frames.
@@ -55,6 +61,9 @@ pub struct MainWindowUi {
     arrangement: ArrangementUi,
     /// The browser's scrolling and search field (WP-1.10).
     browser: BrowserUi,
+    /// The Control Bar's transport fields: a value being typed, a drag
+    /// (WP-1.18).
+    transport: TransportFields,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -92,6 +101,7 @@ impl MainWindowUi {
             move_focus: None,
             arrangement: ArrangementUi::new(),
             browser: BrowserUi::new(),
+            transport: TransportFields::new(),
         }
     }
 
@@ -99,6 +109,14 @@ impl MainWindowUi {
     #[must_use]
     pub fn browser(&self) -> &BrowserUi {
         &self.browser
+    }
+
+    /// Whether a value is being typed into a Control Bar field: while it
+    /// is, key presses go to the field rather than to shortcuts, as they do
+    /// to a text field (the control bar transport spec, R10).
+    #[must_use]
+    pub fn is_typing(&self) -> bool {
+        self.transport.is_typing()
     }
 
     /// The Arrangement View, to give it a peak source or read what it drew.
@@ -189,7 +207,11 @@ impl MainWindowUi {
             );
             self.status_bar(ui, shell, theme, &layout, &mut events);
         });
-        if shell.audio().engine_on() {
+        if shell.playing() {
+            // The playhead and the Arrangement Position fields move with
+            // the engine every frame (control-bar-transport R14).
+            ctx.request_repaint();
+        } else if shell.audio().engine_on() {
             // The CPU meter updates a few times a second.
             ctx.request_repaint_after(Duration::from_millis(500));
         }
@@ -233,11 +255,19 @@ impl MainWindowUi {
             if placement.strip != strip {
                 continue;
             }
-            let look = look(*el, shell);
+            let look = self
+                .transport
+                .look(shell, *el)
+                .unwrap_or_else(|| look(*el, shell));
             let response = element(ui, theme, placement, *rect, &look);
             if self.focus_request == Some(FocusRequest::Element(*el)) {
                 response.request_focus();
                 self.focus_request = None;
+            }
+            if placement.pending.is_none()
+                && let Some(field) = control_bar::field(*el)
+            {
+                self.transport.interact(ui, shell, field, &response, events);
             }
             if response.has_focus() && strip == Strip::ControlBar {
                 self.last_control = *el;
@@ -276,6 +306,7 @@ impl MainWindowUi {
                 .accessibility_parent(id),
             |ui| self.strip(ui, shell, theme, layout, Strip::ControlBar, events),
         );
+        self.transport.end_frame(ui);
     }
 
     fn status_bar(
@@ -497,7 +528,6 @@ fn look(element: Element, shell: &Shell) -> Look {
         text: Some(t.to_owned()),
         ..Look::default()
     };
-    let doc = shell.editor().document();
     match element {
         Element::BrowserToggle => Look {
             on: shell.browser_visible(),
@@ -512,50 +542,10 @@ fn look(element: Element, shell: &Shell) -> Look {
             ..Look::default()
         },
         Element::TapTempo => text("TAP"),
-        Element::Tempo => {
-            let bpm = doc.settings().tempo.bpm_at(Ticks::ZERO).get();
-            Look {
-                text: Some(format!("{bpm:.2}")),
-                number: Some(bpm),
-                ..Look::default()
-            }
-        }
-        Element::SignatureNumerator | Element::SignatureDenominator => {
-            let signature = doc.settings().time_signatures.signature_at(Ticks::ZERO);
-            let n = if element == Element::SignatureNumerator {
-                signature.numerator()
-            } else {
-                signature.denominator()
-            };
-            Look {
-                text: Some(n.to_string()),
-                number: Some(f64::from(n)),
-                ..Look::default()
-            }
-        }
+        // The transport section's values come from `control_bar`.
         Element::Quantization => text("1 Bar"),
         Element::RootNote => text("C"),
         Element::ScaleName => text("Major"),
-        Element::PositionBars
-        | Element::PositionBeats
-        | Element::PositionSixteenths
-        | Element::LoopStartBars
-        | Element::LoopStartBeats
-        | Element::LoopStartSixteenths => Look {
-            text: Some("1".to_owned()),
-            number: Some(1.0),
-            ..Look::default()
-        },
-        Element::LoopLengthBars => Look {
-            text: Some("4".to_owned()),
-            number: Some(4.0),
-            ..Look::default()
-        },
-        Element::LoopLengthBeats | Element::LoopLengthSixteenths => Look {
-            text: Some("0".to_owned()),
-            number: Some(0.0),
-            ..Look::default()
-        },
         Element::KeyMap => text("KEY"),
         Element::MidiMap => text("MIDI"),
         Element::SampleRate => {
@@ -653,7 +643,8 @@ fn click(element: Element, shell: &Shell) -> Option<Invocation> {
             Invocation::new(ids::VIEW_TOGGLE_SESSION_ARRANGEMENT, json!({})),
         ),
         Element::Message => shell.message().and_then(|m| m.action.clone()),
-        _ => None,
+        // Play, Stop, and the Loop switch (WP-1.18).
+        _ => control_bar::click(element, shell),
     }
 }
 

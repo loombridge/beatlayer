@@ -174,11 +174,10 @@ impl BrowserUi {
         let view = shell.browser_view();
         let region = Id::new("region-browser");
         let _ = ui.interact(column, region, Sense::hover());
-        let scale = ui.ctx().pixels_per_point();
         ui.ctx().accesskit_node_builder(region, |node| {
             node.set_role(Role::Group);
             node.set_label("Browser".to_owned());
-            node.set_bounds(bounds(column, scale));
+            node.set_bounds(bounds(column));
         });
         ui.painter().rect_filled(column, 0.0, theme.colors.panel.0);
 
@@ -525,11 +524,10 @@ impl BrowserUi {
         );
         let header_id = Id::new("browser-column-name");
         let _ = ui.interact(header, header_id, Sense::hover());
-        let scale = ui.ctx().pixels_per_point();
         ui.ctx().accesskit_node_builder(header_id, |node| {
             node.set_role(Role::ColumnHeader);
             node.set_label("Name".to_owned());
-            node.set_bounds(bounds(header, scale));
+            node.set_bounds(bounds(header));
         });
 
         let list = layout.list;
@@ -1239,15 +1237,16 @@ fn draw_target(
     }
 }
 
-/// A rectangle as AccessKit places it, in pixels: a node made only to name
-/// a part (a hover-only one) doesn't get its place by itself.
-fn bounds(rect: Rect, scale: f32) -> egui::accesskit::Rect {
-    let scale = f64::from(scale);
+/// A rectangle as AccessKit places it, in points: a node made only to name
+/// a part (a hover-only one) doesn't get its place by itself. The tree's
+/// root carries the interface zoom (WP-1.17), so its nodes' bounds are in
+/// points, as the main window's regions are.
+fn bounds(rect: Rect) -> egui::accesskit::Rect {
     egui::accesskit::Rect {
-        x0: f64::from(rect.left()) * scale,
-        y0: f64::from(rect.top()) * scale,
-        x1: f64::from(rect.right()) * scale,
-        y1: f64::from(rect.bottom()) * scale,
+        x0: rect.left().into(),
+        y0: rect.top().into(),
+        x1: rect.right().into(),
+        y1: rect.bottom().into(),
     }
 }
 

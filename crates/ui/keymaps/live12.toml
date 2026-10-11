@@ -857,8 +857,8 @@ trigger = "press"
 milestone = "M1"
 mac = ["Down", "Up"]
 win = ["Down", "Up"]
-status = "pending"
-package = "WP-1.5"
+status = "widget"
+handler = "the focused value field steps its value (the Control Bar's position, loop, tempo, and time-signature fields run `transport.locate`, `transport.set_loop`, `song.set_tempo`, `song.set_time_signatures`)"
 
 [[shortcut]]
 id = "S-VAL-002"
@@ -869,8 +869,8 @@ trigger = "press"
 milestone = "M1"
 mac = ["Shift+Down", "Shift+Up"]
 win = ["Shift+Down", "Shift+Up"]
-status = "pending"
-package = "WP-1.5"
+status = "widget"
+handler = "the focused value field steps its value in fine steps"
 
 [[shortcut]]
 id = "S-VAL-003"
@@ -881,8 +881,8 @@ trigger = "held"
 milestone = "M1"
 mac = ["Shift (hold while dragging)"]
 win = ["Shift (hold while dragging)"]
-status = "pending"
-package = "WP-1.5"
+status = "widget"
+handler = "the value field being dragged steps in fine steps"
 
 [[shortcut]]
 id = "S-VAL-004"
@@ -893,8 +893,8 @@ trigger = "press"
 milestone = "M1"
 mac = ["Delete"]
 win = ["Delete"]
-status = "pending"
-package = "WP-1.5"
+status = "widget"
+handler = "the focused value field returns to its default"
 
 [[shortcut]]
 id = "S-VAL-005"
@@ -905,8 +905,8 @@ trigger = "press"
 milestone = "M1"
 mac = ["0..9"]
 win = ["0..9"]
-status = "pending"
-package = "WP-1.5"
+status = "widget"
+handler = "the focused value field takes a typed value"
 
 [[shortcut]]
 id = "S-VAL-006"
@@ -917,8 +917,8 @@ trigger = "press"
 milestone = "M1"
 mac = ["Period", "Comma"]
 win = ["Period", "Comma"]
-status = "pending"
-package = "WP-1.5"
+status = "widget"
+handler = "the focused bar-beat-sixteenth field moves on to its next field"
 
 [[shortcut]]
 id = "S-VAL-007"
@@ -929,8 +929,8 @@ trigger = "press"
 milestone = "M1"
 mac = ["Esc"]
 win = ["Esc"]
-status = "pending"
-package = "WP-1.5"
+status = "widget"
+handler = "the focused value field drops a typed value"
 
 [[shortcut]]
 id = "S-VAL-008"
@@ -941,8 +941,8 @@ trigger = "press"
 milestone = "M1"
 mac = ["Enter"]
 win = ["Enter"]
-status = "pending"
-package = "WP-1.5"
+status = "widget"
+handler = "the focused value field sets a typed value"
 
 [[shortcut]]
 id = "S-ENV-001"
@@ -3080,7 +3080,7 @@ milestone = "M1"
 mac = ["Option+Space"]
 win = ["Ctrl+Space"]
 status = "pending"
-package = "WP-1.5"
+package = "WP-1.8b"
 
 [[shortcut]]
 id = "S-TRANS-004"
@@ -3092,7 +3092,7 @@ milestone = "M1"
 mac = ["Space"]
 win = ["Space"]
 status = "pending"
-package = "WP-1.5"
+package = "WP-1.8b"
 
 [[shortcut]]
 id = "S-TRANS-005"

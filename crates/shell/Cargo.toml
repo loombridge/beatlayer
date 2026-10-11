@@ -1,6 +1,6 @@
 [package]
 name = "bl-shell"
-description = "The app shell's headless half: the shell's state and commands at work (files, views, settings), the audio host, and preferences."
+description = "The app shell's headless half: the shell's state and commands at work (files, views, settings, the transport), the audio host running the engine, and preferences."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,9 +10,12 @@ publish.workspace = true
 [dependencies]
 bl-audio-io.workspace = true
 bl-commands.workspace = true
+# IDs for objects a command will create, which the agent API hands out.
 bl-core.workspace = true
-# The browser's preview voice on the audio thread, and the drop thread that
-# frees what it lets go of (WP-1.10).
+# The engine the app plays the set through, and the transport's commands
+# (WP-1.18), and the browser's preview voice on the audio thread with the
+# drop thread that frees what it lets go of (WP-1.10). It depends on no UI
+# crate.
 bl-engine.workspace = true
 # The browser decodes previews and registers the files it adds to the set
 # in the media store (WP-1.10).
@@ -20,8 +23,15 @@ bl-media.workspace = true
 bl-model.workspace = true
 bl-project.workspace = true
 bl-shell-spec.workspace = true
+# The agent server's token (WP-1.15): the operating system's secure random
+# source. The version egui's hashing already brings in, so nothing new enters
+# the build.
+getrandom = "0.3.4"
 serde = { version = "1.0.228", default-features = false, features = ["std", "derive"] }
 serde_json = "1"
+# Hands the engine's processor to the audio thread once the stream has
+# opened at its rate: the version bl-engine uses.
+rtrb = "0.4.0"
 
 [dev-dependencies]
 # The allocation trap, so tests can show the audio callback stays off the

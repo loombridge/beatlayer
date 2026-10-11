@@ -90,7 +90,7 @@ fn rate_and_channel_changes_apply_too() {
     // 0 means the device's current rate, as `audio.devices` lists it. On
     // Core Audio, and on the null device that stands in for it, opening the
     // device at 96 kHz set the device's own rate, which outlives the stream
-    // (docs/02-architecture.md, "Audio and MIDI I/O"), so that's 96 kHz now.
+    // (the architecture notes, "Audio and MIDI I/O"), so that's 96 kHz now.
     let devices: AudioDevices =
         serde_json::from_value(shell.run("audio.devices", json!({})).unwrap()).unwrap();
     let device = devices

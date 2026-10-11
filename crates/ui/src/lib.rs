@@ -12,6 +12,9 @@
 //! - [`main_window`], [`settings_window`], [`menus`], [`widgets`]: the
 //!   windows and controls. Every control has a role, a name, and a value
 //!   for assistive technology through AccessKit.
+//! - [`control_bar`]: the Control Bar's transport section (WP-1.18): Play,
+//!   Stop, the Loop switch, and the tempo, time-signature, position, and
+//!   loop fields, each running a registered command.
 //!
 //! Nothing here owns a window or an event loop: the app (`beatlayer`)
 //! drives these from its winit loop, and tests drive them headless with an
@@ -19,6 +22,7 @@
 
 pub mod arrangement;
 pub mod browser;
+pub mod control_bar;
 pub mod input;
 pub mod keymap;
 pub mod layout;

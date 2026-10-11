@@ -8,28 +8,34 @@
 //! - [`menus`]: the menu bar in Live's order, each item tied to the command
 //!   it runs.
 //! - [`audio`] and [`settings`]: the data those commands take and return.
+//! - [`agent`]: the agent server's settings and commands (WP-1.15).
 //! - [`arrangement`]: the Arrangement View's view commands (WP-1.8a): zoom,
 //!   scroll, Follow, the editing grid, track heights, and the selection
 //!   the zoom commands work from.
 //! - [`browser`]: the browser's commands (WP-1.10): places, browsing,
 //!   search, preview, and adding files to the Arrangement.
+//! - [`transport`]: what the Control Bar's transport section shows
+//!   (`transport.state`), and the IDs of the transport's commands, which
+//!   `bl-engine` and `bl-model` register (WP-1.18).
 //!
 //! `cargo xtask` checks the commands, lists them in the command reference, and
 //! builds the keymap from this crate, so none of its tasks links an audio
 //! backend (which needs ALSA and JACK headers on Linux). `bl-shell`
 //! re-exports everything here.
 
+pub mod agent;
 pub mod arrangement;
 pub mod audio;
 pub mod browser;
 pub mod commands;
 pub mod menus;
 pub mod settings;
+pub mod transport;
 
 use bl_commands::{RegisterError, Registry};
 
-/// Adds the shell's commands, the Arrangement View's, and the browser's to a
-/// registry.
+/// Adds the shell's commands, the Arrangement View's, the transport query,
+/// and the browser's to a registry.
 ///
 /// # Errors
 ///
@@ -37,5 +43,6 @@ use bl_commands::{RegisterError, Registry};
 pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     commands::register(registry)?;
     arrangement::register(registry)?;
+    transport::register(registry)?;
     browser::register(registry)
 }

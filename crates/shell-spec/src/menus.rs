@@ -408,7 +408,11 @@ const PLAYBACK: &[Row] = &[
     ("M-PLAY-001", "Play", Key(&["S-TRANS-001"])),
     ("M-PLAY-002", "Continue Playback", Key(&["S-TRANS-002"])),
     ("M-PLAY-003", "Play From Insert Marker", Key(&["S-ARR-032"])),
-    ("M-PLAY-004", "Return Play Position to 1.1.1", Pending(None)),
+    (
+        "M-PLAY-004",
+        "Return Play Position to 1.1.1",
+        Cmd(crate::transport::RETURN_TO_START),
+    ),
     (
         "M-PLAY-005",
         "Move Insert Marker To Playhead",

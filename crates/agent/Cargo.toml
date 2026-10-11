@@ -1,0 +1,27 @@
+[package]
+name = "bl-agent"
+description = "The agent API: the MCP server over stdio and Streamable HTTP, its tools, permissions, checkpoints, and scheduled commands."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+bl-commands.workspace = true
+bl-core.workspace = true
+# Scheduled commands reach the engine as its own messages (WP-0.9).
+bl-engine.workspace = true
+bl-model.workspace = true
+# Commands run through the shell, the one place every command runs (WP-1.7).
+bl-shell.workspace = true
+# Session IDs. The version egui's hashing already brings in, so nothing new
+# enters the build.
+getrandom = "0.3.4"
+# Pinned to bl-commands' version: the tools' input schemas come from it.
+schemars = { version = "=1.2.2", default-features = false, features = ["std", "derive"] }
+serde = { version = "1.0.228", default-features = false, features = ["std", "derive"] }
+serde_json = "1"
+
+[lints]
+workspace = true

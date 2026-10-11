@@ -4,21 +4,29 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use bl_commands::{Context, NoArgs, Registry};
+use bl_core::id::Id;
 use bl_core::time::Ticks;
 use bl_engine::transport as engine_transport;
-use bl_model::{Editor, TrackId, TrackKind, registry as model};
+use bl_model::{ChangeSet, Editor, TrackId, TrackKind, registry as model};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
+use crate::agent::{
+    self as agent, AgentServerState, AgentServerStatus, AgentSettings, AutonomousArgs, ClientArgs,
+    SetServerArgs,
+};
 use crate::arrangement::{ArrangementView, TransportView, ViewError, Viewport};
 use crate::audio::{AudioHost, ConfigureAudio, EngineTransport, ToneSettings};
 use crate::commands::{
     self as ids, PathArgs, SaveAsArgs, SetResult, SettingsArgs, SwitchResult, TestToneArgs,
-    TestToneState, ThemeArgs, ViewResult,
+    TestToneState, ThemeArgs, ViewResult, ZoomArgs,
 };
 use crate::files::{ProjectFiles, SetStore, factory_default_set};
-use crate::settings::{Preferences, SettingsPage, ThemeChoice};
+use crate::settings::{
+    Preferences, SettingsPage, ThemeChoice, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, zoom_factor,
+    zoom_percent, zoom_step,
+};
 use bl_shell_spec::arrangement as view_ids;
 use bl_shell_spec::transport as transport_ids;
 
@@ -65,9 +73,6 @@ pub enum Area {
     /// The Status Bar (L-WIN-007).
     StatusBar,
 }
-
-/// The interface zoom steps, as factors of 100%.
-pub const ZOOM_STEPS: [f32; 11] = [0.5, 0.67, 0.75, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0];
 
 /// A command and its arguments, kept to run later (after a dialog).
 #[derive(Clone, Debug, PartialEq)]
@@ -219,6 +224,7 @@ pub struct Shell {
     effects: Vec<Effect>,
     message: Option<Message>,
     revision: u64,
+    agent_status: AgentServerStatus,
     /// What the Arrangement View shows (WP-1.8a).
     arrangement: ArrangementView,
     /// A number that changes whenever the document may have changed.
@@ -293,6 +299,7 @@ impl Shell {
             effects: Vec::new(),
             message: None,
             revision: 0,
+            agent_status: AgentServerStatus::default(),
             arrangement: ArrangementView::new(),
             document_revision: 0,
             seen_insert_marker: None,
@@ -344,6 +351,56 @@ impl Shell {
     #[must_use]
     pub fn editor(&self) -> &Editor {
         &self.editor
+    }
+
+    /// Runs `edit` on the editor holding the document, and marks the set
+    /// changed if the document changed. The agent API (WP-1.15) edits this
+    /// way where one command at a time isn't enough: a batch of document
+    /// commands as one undo step labelled with the agent's name, a dry run
+    /// that applies a batch and cancels it, a new ID for an object a
+    /// command will create, and restoring a checkpoint. It runs document
+    /// commands with `bl_model::registry::run`, as [`Shell::run`] does.
+    ///
+    /// `edit` must leave no transaction open.
+    pub fn edit<T>(&mut self, edit: impl FnOnce(&mut Editor) -> T) -> T {
+        let before = self.editor.document().clone();
+        let result = edit(&mut self.editor);
+        debug_assert!(
+            !self.editor.in_transaction(),
+            "an edit left a transaction open"
+        );
+        if !ChangeSet::between(&before, self.editor.document()).is_empty() {
+            self.dirty = true;
+            self.document_changed();
+        }
+        self.touch();
+        result
+    }
+
+    /// A new ID for an object a command will create, such as a track's.
+    pub fn new_id<T: From<Id>>(&mut self) -> T {
+        self.editor.new_id()
+    }
+
+    /// The agent server's settings.
+    #[must_use]
+    pub fn agent_settings(&self) -> &AgentSettings {
+        &self.prefs.agent
+    }
+
+    /// What the app last said about the running agent server.
+    #[must_use]
+    pub fn agent_status(&self) -> &AgentServerStatus {
+        &self.agent_status
+    }
+
+    /// Records what the app says about the running agent server, for the
+    /// Settings window.
+    pub fn set_agent_status(&mut self, status: AgentServerStatus) {
+        if self.agent_status != status {
+            self.agent_status = status;
+            self.touch();
+        }
     }
 
     /// The audio device.
@@ -416,10 +473,30 @@ impl Shell {
         self.full_screen
     }
 
-    /// The interface zoom, where 1 is 100%.
+    /// The interface zoom, where 1 is 100%: a whole percentage from 50% to
+    /// 200% (WP-1.17). A preferences file with anything else starts at the
+    /// nearest limit, or at 100% if it isn't a number (interface-zoom R6).
     #[must_use]
     pub fn zoom(&self) -> f32 {
-        self.prefs.zoom.unwrap_or(1.0)
+        zoom_factor(self.zoom_percent())
+    }
+
+    /// The interface zoom as a whole percentage, as the Display & Input
+    /// page's Zoom shows it.
+    #[must_use]
+    pub fn zoom_percent(&self) -> u16 {
+        zoom_percent(self.prefs.zoom.unwrap_or(1.0))
+    }
+
+    /// Sets the interface zoom and keeps it in the preferences: none for
+    /// 100%, so a new install's file has no zoom in it.
+    fn set_zoom_percent(&mut self, percent: u16) {
+        let percent = percent.clamp(ZOOM_MIN_PERCENT, ZOOM_MAX_PERCENT);
+        let zoom = (percent != 100).then(|| zoom_factor(percent));
+        if self.prefs.zoom != zoom {
+            self.prefs.zoom = zoom;
+            self.save_preferences();
+        }
     }
 
     /// Whether the Settings window is open.
@@ -727,6 +804,17 @@ impl Shell {
             ids::APP_HIDE => return cfg!(target_os = "macos"),
             ids::SET_OPEN | ids::SET_SAVE | ids::SET_SAVE_AS | ids::APP_SETTINGS => return true,
             ids::SET_DISCARD_CHANGES => return self.dirty,
+            // Zoom In and Zoom Out stop at the zoom's ends (interface-zoom
+            // R3).
+            ids::VIEW_ZOOM_IN => return self.zoom_percent() < ZOOM_MAX_PERCENT,
+            ids::VIEW_ZOOM_OUT => return self.zoom_percent() > ZOOM_MIN_PERCENT,
+            // A person's Zoom setting always names a percentage in range.
+            ids::VIEW_SET_ZOOM => {
+                return spec
+                    .args
+                    .as_ref()
+                    .is_some_and(|schema| bl_commands::validate(schema, args).is_ok());
+            }
             // The frontmost window must be a secondary one: with only the
             // main window open, Close Window is disabled (M-FILE-004).
             ids::WINDOW_CLOSE => {
@@ -1131,20 +1219,20 @@ impl Shell {
                 };
                 Ok(self.view_result())
             }
+            // Spec: interface-zoom R3, R5, R6.
             ids::VIEW_ZOOM_IN | ids::VIEW_ZOOM_OUT | ids::VIEW_ZOOM_RESET => {
                 Self::args::<NoArgs>(id, args)?;
-                let zoom = self.zoom();
                 let next = match id {
-                    ids::VIEW_ZOOM_IN => ZOOM_STEPS.iter().copied().find(|z| *z > zoom + 0.001),
-                    ids::VIEW_ZOOM_OUT => {
-                        ZOOM_STEPS.iter().rev().copied().find(|z| *z < zoom - 0.001)
-                    }
-                    _ => Some(1.0),
+                    ids::VIEW_ZOOM_IN => zoom_step(self.zoom_percent(), 1),
+                    ids::VIEW_ZOOM_OUT => zoom_step(self.zoom_percent(), -1),
+                    _ => 100,
                 };
-                if let Some(next) = next {
-                    self.prefs.zoom = (next != 1.0).then_some(next);
-                    self.save_preferences();
-                }
+                self.set_zoom_percent(next);
+                Ok(self.view_result())
+            }
+            ids::VIEW_SET_ZOOM => {
+                let ZoomArgs { percent } = Self::args(id, args)?;
+                self.set_zoom_percent(percent);
                 Ok(self.view_result())
             }
             ids::FOCUS_CONTROL_BAR => {
@@ -1256,6 +1344,79 @@ impl Shell {
                     volume_db: tone.volume_db,
                     frequency_hz: tone.frequency_hz,
                 }))
+            }
+            agent::AGENT_SET_SERVER => {
+                let SetServerArgs { on, port } = Self::args(id, args)?;
+                if let Some(port) = port {
+                    if port < 1024 {
+                        return Err(ShellError::InvalidArgs {
+                            command: id.to_owned(),
+                            message: format!("port {port} is below 1024"),
+                        });
+                    }
+                    self.prefs.agent.port = port;
+                }
+                if let Some(on) = on {
+                    self.prefs.agent.server = on;
+                }
+                if self.prefs.agent.server && self.prefs.agent.token.is_empty() {
+                    self.prefs.agent.token = agent::new_token().map_err(failed)?;
+                }
+                self.save_preferences();
+                Ok(to_value(&AgentServerState::from(&self.prefs.agent)))
+            }
+            agent::AGENT_APPROVE_CLIENT => {
+                let ClientArgs { client } = Self::args(id, args)?;
+                if client.trim().is_empty() {
+                    return Err(ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message: "the agent's name is empty".to_owned(),
+                    });
+                }
+                if self.prefs.agent.client(&client).is_none() {
+                    self.prefs.agent.clients.push(agent::AgentClient {
+                        name: client,
+                        autonomous: false,
+                    });
+                    self.save_preferences();
+                }
+                Ok(to_value(&AgentServerState::from(&self.prefs.agent)))
+            }
+            agent::AGENT_FORGET_CLIENT => {
+                let ClientArgs { client } = Self::args(id, args)?;
+                let before = self.prefs.agent.clients.len();
+                self.prefs.agent.clients.retain(|c| c.name != client);
+                if self.prefs.agent.clients.len() == before {
+                    return Err(unavailable(&format!(
+                        "no agent called “{client}” is allowed"
+                    )));
+                }
+                self.save_preferences();
+                Ok(to_value(&AgentServerState::from(&self.prefs.agent)))
+            }
+            agent::AGENT_SET_AUTONOMOUS => {
+                let AutonomousArgs { client, on } = Self::args(id, args)?;
+                let Some(entry) = self
+                    .prefs
+                    .agent
+                    .clients
+                    .iter_mut()
+                    .find(|c| c.name == client)
+                else {
+                    return Err(unavailable(&format!(
+                        "no agent called “{client}” is allowed; it's allowed when it first \
+                         connects"
+                    )));
+                };
+                entry.autonomous = on;
+                self.save_preferences();
+                Ok(to_value(&AgentServerState::from(&self.prefs.agent)))
+            }
+            agent::AGENT_NEW_TOKEN => {
+                Self::args::<NoArgs>(id, args)?;
+                self.prefs.agent.token = agent::new_token().map_err(failed)?;
+                self.save_preferences();
+                Ok(to_value(&AgentServerState::from(&self.prefs.agent)))
             }
             _ => Err(ShellError::UnknownCommand(id.to_owned())),
         }

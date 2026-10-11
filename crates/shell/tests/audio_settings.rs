@@ -12,7 +12,7 @@ use bl_audio_io::{
     ErrorKind, NullBackend, OpenDevice, PortRequest, STANDARD_SAMPLE_RATES, Stream, StreamInfo,
     StreamRequest, StreamStats,
 };
-use bl_shell::audio::{AudioHost, AudioSettings, AudioStatus};
+use bl_shell::audio::{AudioDevices, AudioHost, AudioSettings, AudioStatus};
 use bl_shell::files::ProjectFiles;
 use bl_shell::settings::Preferences;
 use bl_shell::{Effect, Shell};
@@ -87,10 +87,21 @@ fn rate_and_channel_changes_apply_too() {
             )
             .unwrap(),
     );
+    // 0 means the device's current rate, as `audio.devices` lists it. On
+    // Core Audio, and on the null device that stands in for it, opening the
+    // device at 96 kHz set the device's own rate, which outlives the stream
+    // (docs/02-architecture.md, "Audio and MIDI I/O"), so that's 96 kHz now.
+    let devices: AudioDevices =
+        serde_json::from_value(shell.run("audio.devices", json!({})).unwrap()).unwrap();
+    let device = devices
+        .devices
+        .iter()
+        .find(|device| device.default_output)
+        .expect("the null device");
+    assert_eq!(device.current_sample_rate, Some(96_000));
     assert_eq!(
-        back.sample_rate,
-        Some(48_000),
-        "0 means the device's own rate"
+        back.sample_rate, device.current_sample_rate,
+        "0 means the device's current rate"
     );
     assert_eq!(back.output_channels, 2);
 }

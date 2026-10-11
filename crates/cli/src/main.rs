@@ -1,12 +1,15 @@
-//! `bl-cli`: render, inspect, convert, and benchmark projects without a UI.
+//! `bl-cli`: render, inspect, convert, and benchmark projects without a UI,
+//! and serve the agent API (`bl-cli mcp`).
 
 // Debug builds count heap use on audio threads (the real-time rules allow
 // none); `bl-cli tone`, `render`, and `golden` fail if they find any.
 #[cfg(debug_assertions)]
 bl_rt::install_trap!();
 
+mod device_changes;
 mod devices;
 mod engine_smoke;
+mod mcp;
 mod tone;
 
 use std::process::ExitCode;
@@ -41,6 +44,16 @@ enum Command {
     /// detected, the audio thread touches the heap (in a debug build), or
     /// the counter node loses its state in a swap.
     EngineSmoke(engine_smoke::EngineSmokeArgs),
+    /// Play a quiet tone through the engine and report what happens to the
+    /// device: unplugging, sample-rate changes, sleep and wake.
+    ///
+    /// On a real device it plays for --seconds while someone changes the
+    /// device, printing each message and recovery. With --simulate it puts
+    /// the null backend's simulated interface through each change in turn
+    /// and checks the engine recovers. Exits with status 1 if a check fails,
+    /// the device isn't running at the end, or (in a debug build) the audio
+    /// thread touches the heap.
+    DeviceChanges(device_changes::DeviceChangesArgs),
     /// Render a set to a WAV file, faster than real time, with no audio
     /// device.
     ///
@@ -57,6 +70,14 @@ enum Command {
     /// --update, remakes the references whose renders changed: say why in
     /// the pull request.
     Golden(bl_cli::golden::GoldenArgs),
+    /// Serve the agent API (MCP) on standard input and output, with no
+    /// window.
+    ///
+    /// An agent client starts it and sends JSON-RPC messages, one per line.
+    /// Commands run on a headless shell holding the factory default set, or
+    /// the set --set names. Destructive and external commands are refused
+    /// unless --autonomous is given, because there's no one to ask.
+    Mcp(mcp::McpArgs),
 }
 
 fn main() -> ExitCode {
@@ -65,8 +86,10 @@ fn main() -> ExitCode {
         Command::Devices(args) => devices::run(args),
         Command::Tone(args) => tone::run(args),
         Command::EngineSmoke(args) => engine_smoke::run(args),
+        Command::DeviceChanges(args) => device_changes::run(args),
         Command::Render(args) => bl_cli::render::run(args),
         Command::Golden(args) => bl_cli::golden::run(args),
+        Command::Mcp(args) => mcp::run(args),
     };
     outcome.unwrap_or_else(|message| {
         eprintln!("error: {message}");

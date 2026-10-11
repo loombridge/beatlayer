@@ -5,8 +5,12 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-pub use bl_shell_spec::settings::{SettingsPage, ThemeChoice};
+pub use bl_shell_spec::settings::{
+    SettingsPage, ThemeChoice, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, ZOOM_STEPS, zoom_factor,
+    zoom_percent, zoom_step,
+};
 
+use crate::agent::AgentSettings;
 use crate::audio::{AudioSettings, ToneSettings};
 
 /// Everything the app keeps between starts, saved as JSON.
@@ -22,12 +26,16 @@ pub struct Preferences {
     pub theme: ThemeChoice,
     /// Whether Tab moves the keyboard focus in the main window.
     pub tab_navigation: bool,
-    /// The interface zoom, where 1 is 100%.
+    /// The interface zoom, where 1 is 100%, or none for 100% (WP-1.17).
+    /// Read through `Shell::zoom`, which keeps it within 50% to 200%.
     pub zoom: Option<f32>,
     /// The main window's last size in points, as width and height.
     pub window_size: Option<(f32, f32)>,
     /// The Settings page shown last.
     pub settings_page: SettingsPage,
+    /// The agent server: whether it runs, its port and token, and the
+    /// agents allowed to connect (WP-1.15).
+    pub agent: AgentSettings,
 }
 
 /// The file name of the preferences, inside the config directory.

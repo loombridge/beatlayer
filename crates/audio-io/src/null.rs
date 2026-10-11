@@ -1,14 +1,25 @@
 //! The null device: runs the callback on a timer thread without hardware, so
 //! tests and CI exercise the whole stream path on any machine.
+//!
+//! A null backend can also simulate what real hardware does to a stream
+//! (WP-1.13): [`NullBackend::with_devices`] gives it several devices and a
+//! [`NullControl`] that unplugs and replugs them, changes their sample rates,
+//! stalls their streams, and puts the machine to sleep and wakes it. Each
+//! stream's thread notices on its next block, as a backend would, and
+//! reports through its [`StreamStats`] what `cpal` reports for the same
+//! event on macOS: a lost device, a stream invalidated by a rate change, or
+//! a default device that changed.
 
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use bl_rt::{RtThreadConfig, WorkInterval};
 
 use crate::buffer::PlanarScratch;
+use crate::power::{PowerEvent, PowerMonitor};
 use crate::runner::{CallbackRunner, frames_to_duration};
 use crate::stats::Counters;
 use crate::{
@@ -17,12 +28,15 @@ use crate::{
     StreamRequest, StreamStats, Workgroup, WorkgroupInfo,
 };
 
+const LOCAL: &str = "null";
 const NAME: &str = "Null device";
 const CHANNELS: u16 = 2;
 const DEFAULT_RATE: u32 = 48_000;
 const DEFAULT_BUFFER: u32 = 256;
 const MIN_BUFFER: u32 = 16;
 const MAX_BUFFER: u32 = 8192;
+/// How often a stream that isn't calling back looks again.
+const IDLE_PERIOD: Duration = Duration::from_millis(1);
 
 /// How the null device paces its blocks.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -47,12 +61,110 @@ pub struct NullOptions {
     pub frame_limit: Option<u64>,
 }
 
-/// A backend with one device, `null:null`, that runs the callback on a timer:
-/// two input and two output channels, the standard sample rates, and buffers
-/// of 16 to 8,192 frames. Input is silence.
-#[derive(Debug, Clone, Default)]
+/// One simulated device.
+#[derive(Debug)]
+struct SimDevice {
+    /// The backend's own ID for it, after `null:`.
+    local: String,
+    name: String,
+    present: AtomicBool,
+    /// The rate it runs at now.
+    rate: AtomicU32,
+    /// Bumped each time [`NullControl::set_sample_rate`] changes the rate
+    /// under the device's streams.
+    rate_changes: AtomicU64,
+}
+
+/// What one null backend's devices and streams share.
+#[derive(Debug)]
+struct World {
+    /// Fixed when the backend is made, so a stream's thread reads it without
+    /// a lock.
+    devices: Vec<SimDevice>,
+    /// While set, no stream calls back: the machine sleeps.
+    asleep: AtomicBool,
+    /// Bumped by [`NullControl::stall`]: streams opened before stop calling
+    /// back for good.
+    stalls: AtomicU64,
+    /// Power events for [`NullPower`], oldest first, and when the machine
+    /// went to sleep. Never touched by a stream's thread.
+    power: Mutex<(VecDeque<PowerEvent>, Option<Instant>)>,
+}
+
+impl World {
+    fn new(devices: &[(&str, &str)]) -> Self {
+        assert!(!devices.is_empty(), "a null backend needs a device");
+        for (i, (local, _)) in devices.iter().enumerate() {
+            assert!(
+                devices[..i].iter().all(|(other, _)| other != local),
+                "two null devices are called `{local}`"
+            );
+        }
+        Self {
+            devices: devices
+                .iter()
+                .map(|&(local, name)| SimDevice {
+                    local: local.to_owned(),
+                    name: name.to_owned(),
+                    present: AtomicBool::new(true),
+                    rate: AtomicU32::new(DEFAULT_RATE),
+                    rate_changes: AtomicU64::new(0),
+                })
+                .collect(),
+            asleep: AtomicBool::new(false),
+            stalls: AtomicU64::new(0),
+            power: Mutex::new((VecDeque::new(), None)),
+        }
+    }
+
+    /// The system default: the first device present. Allocation-free, so a
+    /// stream's thread can ask.
+    fn default_device(&self) -> Option<usize> {
+        self.devices
+            .iter()
+            .position(|d| d.present.load(Ordering::Acquire))
+    }
+
+    fn index(&self, local: &str) -> usize {
+        self.devices
+            .iter()
+            .position(|d| d.local == local)
+            .unwrap_or_else(|| panic!("the null backend has no device `{local}`"))
+    }
+
+    fn id(&self, index: usize) -> DeviceId {
+        DeviceId::new(BackendKind::Null, &self.devices[index].local)
+    }
+
+    fn push_power(&self, event: PowerEvent) {
+        let mut power = self.power.lock().unwrap_or_else(PoisonError::into_inner);
+        match event {
+            PowerEvent::Sleeping => power.1 = Some(Instant::now()),
+            PowerEvent::Woke { .. } => power.1 = None,
+        }
+        power.0.push_back(event);
+    }
+}
+
+/// A backend whose devices run the callback on a timer: two input and two
+/// output channels, the standard sample rates, and buffers of 16 to 8,192
+/// frames. Input is silence.
+///
+/// Made with [`new`](Self::new) or [`with_options`](Self::with_options), it
+/// has one device, `null:null`. Made with
+/// [`with_devices`](Self::with_devices), it has the devices asked for, and a
+/// [`NullControl`] that changes them under their streams. Clones share their
+/// devices.
+#[derive(Debug, Clone)]
 pub struct NullBackend {
     options: NullOptions,
+    world: Arc<World>,
+}
+
+impl Default for NullBackend {
+    fn default() -> Self {
+        Self::with_options(NullOptions::default())
+    }
 }
 
 impl NullBackend {
@@ -63,30 +175,70 @@ impl NullBackend {
 
     /// A null backend with these settings.
     pub fn with_options(options: NullOptions) -> Self {
-        Self { options }
+        Self::with_devices(options, &[(LOCAL, NAME)]).0
     }
 
-    /// The ID of the null device.
+    /// A null backend with these devices, as `(ID, name)` pairs: each ID
+    /// becomes `null:<ID>`. The first device present is the system default.
+    /// The [`NullControl`] simulates what hardware does to them.
+    ///
+    /// # Panics
+    ///
+    /// If `devices` is empty or names an ID twice.
+    pub fn with_devices(options: NullOptions, devices: &[(&str, &str)]) -> (Self, NullControl) {
+        let world = Arc::new(World::new(devices));
+        let control = NullControl {
+            world: Arc::clone(&world),
+        };
+        (Self { options, world }, control)
+    }
+
+    /// The ID of the device a plain null backend has.
     pub fn device_id() -> DeviceId {
-        DeviceId::new(BackendKind::Null, "null")
+        DeviceId::new(BackendKind::Null, LOCAL)
     }
 
-    fn device() -> DeviceInfo {
+    fn describe(&self, index: usize, default: Option<usize>) -> DeviceInfo {
+        let device = &self.world.devices[index];
         DeviceInfo {
-            id: Self::device_id(),
-            name: NAME.to_owned(),
-            is_default_output: true,
-            is_default_input: true,
+            id: self.world.id(index),
+            name: device.name.clone(),
+            is_default_output: default == Some(index),
+            is_default_input: default == Some(index),
             output_channels: CHANNELS,
             input_channels: CHANNELS,
             sample_rates: STANDARD_SAMPLE_RATES.to_vec(),
-            current_sample_rate: Some(DEFAULT_RATE),
+            current_sample_rate: Some(device.rate.load(Ordering::Acquire)),
             buffer_sizes: BufferSizes::Range {
                 min: MIN_BUFFER,
                 max: MAX_BUFFER,
             },
             default_buffer_size: Some(DEFAULT_BUFFER),
         }
+    }
+
+    /// The device a selector names, if it's present.
+    fn resolve(&self, selector: &DeviceSelector) -> Result<usize, Error> {
+        let index = match selector {
+            DeviceSelector::Default => self.world.default_device(),
+            DeviceSelector::Id(id) if id.backend() == BackendKind::Null => self
+                .world
+                .devices
+                .iter()
+                .position(|d| d.local == id.local())
+                .filter(|&i| self.world.devices[i].present.load(Ordering::Acquire)),
+            DeviceSelector::Id(_) => None,
+        };
+        index.ok_or_else(|| {
+            let what = match selector {
+                DeviceSelector::Default => "default device".to_owned(),
+                DeviceSelector::Id(id) => format!("device `{id}`"),
+            };
+            Error::new(
+                ErrorKind::DeviceNotFound,
+                format!("the null backend has no {what} now"),
+            )
+        })
     }
 }
 
@@ -96,14 +248,6 @@ fn channels_for(port: Option<&PortRequest>, direction: &str) -> Result<u16, Erro
     let Some(port) = port else {
         return Ok(0);
     };
-    if let DeviceSelector::Id(id) = &port.device
-        && *id != NullBackend::device_id()
-    {
-        return Err(Error::new(
-            ErrorKind::DeviceNotFound,
-            format!("the null backend has no device `{id}`"),
-        ));
-    }
     let channels = port.channels.unwrap_or(CHANNELS);
     if !(1..=CHANNELS).contains(&channels) {
         return Err(Error::new(
@@ -120,7 +264,11 @@ impl Backend for NullBackend {
     }
 
     fn devices(&self) -> Result<Vec<DeviceInfo>, Error> {
-        Ok(vec![Self::device()])
+        let default = self.world.default_device();
+        Ok((0..self.world.devices.len())
+            .filter(|&i| self.world.devices[i].present.load(Ordering::Acquire))
+            .map(|i| self.describe(i, default))
+            .collect())
     }
 
     fn open_stream(
@@ -128,16 +276,33 @@ impl Backend for NullBackend {
         request: &StreamRequest,
         callback: Box<dyn AudioCallback>,
     ) -> Result<Box<dyn Stream>, Error> {
-        if request.output.is_none() && request.input.is_none() {
+        let Some(selector) = request
+            .output
+            .as_ref()
+            .or(request.input.as_ref())
+            .map(|port| &port.device)
+        else {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
                 "a stream needs output, input, or both",
+            ));
+        };
+        let index = self.resolve(selector)?;
+        if let (Some(output), Some(input)) = (&request.output, &request.input)
+            && self.resolve(&input.device)? != self.resolve(&output.device)?
+        {
+            return Err(Error::new(
+                ErrorKind::UnsupportedConfig,
+                "a null stream's input and output are on one device",
             ));
         }
         let output_channels = channels_for(request.output.as_ref(), "output")?;
         let input_channels = channels_for(request.input.as_ref(), "input")?;
 
-        let sample_rate = request.sample_rate.unwrap_or(DEFAULT_RATE);
+        let device = &self.world.devices[index];
+        let sample_rate = request
+            .sample_rate
+            .unwrap_or_else(|| device.rate.load(Ordering::Acquire));
         if !STANDARD_SAMPLE_RATES.contains(&sample_rate) {
             return Err(Error::new(
                 ErrorKind::UnsupportedConfig,
@@ -153,6 +318,10 @@ impl Backend for NullBackend {
                 ),
             ));
         }
+        // As on Core Audio, opening a device at another rate sets the
+        // device's own rate. Its other streams aren't told.
+        device.rate.store(sample_rate, Ordering::Release);
+        let follows_default = *selector == DeviceSelector::Default;
 
         // Paced in real time, the device's thread works like a sound card's:
         // real-time priority and, on macOS, a work interval of its own, which
@@ -182,6 +351,7 @@ impl Backend for NullBackend {
         );
         let engine = NullEngine {
             runner,
+            counters: Arc::clone(&counters),
             input: PlanarScratch::new(input_channels.into(), frames as usize),
             output: PlanarScratch::new(output_channels.into(), frames as usize),
             frames: frames as usize,
@@ -190,16 +360,21 @@ impl Backend for NullBackend {
             blocks: 0,
             interval,
             period,
+            world: Arc::clone(&self.world),
+            device: index,
+            follows_default,
+            rate_changes_seen: device.rate_changes.load(Ordering::Acquire),
+            stalls_seen: self.world.stalls.load(Ordering::Acquire),
         };
-        let device = || OpenDevice {
-            id: Self::device_id(),
-            name: NAME.to_owned(),
+        let open = || OpenDevice {
+            id: self.world.id(index),
+            name: device.name.clone(),
         };
         let info = StreamInfo {
             backend: BackendKind::Null,
-            output_device: (output_channels > 0).then(device),
-            input_device: (input_channels > 0).then(device),
-            follows_default: false,
+            output_device: (output_channels > 0).then(open),
+            input_device: (input_channels > 0).then(open),
+            follows_default,
             sample_rate,
             output_channels,
             input_channels,
@@ -220,9 +395,146 @@ impl Backend for NullBackend {
     }
 }
 
+/// Simulates what hardware does to a null backend's devices, for tests of
+/// what happens to a stream when its device goes away, changes rate, stops
+/// responding, or the machine sleeps (WP-1.13). Each stream notices on its
+/// next block. Clones control the same devices.
+#[derive(Debug, Clone)]
+pub struct NullControl {
+    world: Arc<World>,
+}
+
+impl NullControl {
+    /// Unplugs a device: it leaves the device list, its streams stop calling
+    /// back and report it lost, and opening it fails until it's plugged back
+    /// in. A stream following the default device moves to the next device
+    /// present instead, and reports a device change.
+    ///
+    /// # Panics
+    ///
+    /// If the backend has no device with this ID, here and below.
+    pub fn unplug(&self, local: &str) {
+        let index = self.world.index(local);
+        self.world.devices[index]
+            .present
+            .store(false, Ordering::Release);
+    }
+
+    /// Plugs a device back in. Streams it had before stay dead, as they do on
+    /// real hardware; new ones open.
+    pub fn replug(&self, local: &str) {
+        let index = self.world.index(local);
+        self.world.devices[index]
+            .present
+            .store(true, Ordering::Release);
+    }
+
+    /// Whether a device is plugged in.
+    #[must_use]
+    pub fn is_present(&self, local: &str) -> bool {
+        self.world.devices[self.world.index(local)]
+            .present
+            .load(Ordering::Acquire)
+    }
+
+    /// Changes a device's sample rate, as another program or the system
+    /// might. A stream on that device at another rate stops and reports
+    /// that it must be rebuilt. (A stream following the default device keeps
+    /// running, as Core Audio converts for it.)
+    pub fn set_sample_rate(&self, local: &str, rate: u32) {
+        let device = &self.world.devices[self.world.index(local)];
+        if device.rate.swap(rate, Ordering::AcqRel) != rate {
+            device.rate_changes.fetch_add(1, Ordering::AcqRel);
+        }
+    }
+
+    /// A device's sample rate now.
+    #[must_use]
+    pub fn sample_rate(&self, local: &str) -> u32 {
+        self.world.devices[self.world.index(local)]
+            .rate
+            .load(Ordering::Acquire)
+    }
+
+    /// Makes every stream open now stop calling back for good, without
+    /// reporting anything, as a driver that has stopped responding does.
+    /// Streams opened afterwards run.
+    pub fn stall(&self) {
+        self.world.stalls.fetch_add(1, Ordering::AcqRel);
+    }
+
+    /// Puts the machine to sleep: no stream calls back until
+    /// [`wake`](Self::wake), and [`NullPower`] reports
+    /// [`PowerEvent::Sleeping`], as an operating system's notification would.
+    pub fn sleep(&self) {
+        self.world.asleep.store(true, Ordering::Release);
+        self.world.push_power(PowerEvent::Sleeping);
+    }
+
+    /// Wakes the machine: streams that were open call back again, and
+    /// [`NullPower`] reports [`PowerEvent::Woke`] with how long it slept.
+    pub fn wake(&self) {
+        let slept = {
+            let power = self
+                .world
+                .power
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            power.1.map(|since| since.elapsed())
+        };
+        self.world.asleep.store(false, Ordering::Release);
+        self.world.push_power(PowerEvent::Woke { slept });
+    }
+
+    /// Reports a power event through [`NullPower`] without changing any
+    /// device: for example a wake noticed afterwards, with streams that kept
+    /// running.
+    pub fn notify(&self, event: PowerEvent) {
+        self.world.push_power(event);
+    }
+
+    /// A [`PowerMonitor`] that reports what [`sleep`](Self::sleep),
+    /// [`wake`](Self::wake), and [`notify`](Self::notify) do. Give a
+    /// supervisor one; two would share the events between them.
+    #[must_use]
+    pub fn power(&self) -> NullPower {
+        NullPower {
+            world: Arc::clone(&self.world),
+        }
+    }
+}
+
+/// The power events a [`NullControl`] simulates, as a [`PowerMonitor`].
+#[derive(Debug)]
+pub struct NullPower {
+    world: Arc<World>,
+}
+
+impl PowerMonitor for NullPower {
+    fn poll(&mut self) -> Option<PowerEvent> {
+        self.world
+            .power
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .0
+            .pop_front()
+    }
+}
+
+/// What a null stream's thread does before a block.
+enum Health {
+    /// Run the block.
+    Run,
+    /// Don't call back now; look again shortly.
+    Idle,
+    /// The stream is dead.
+    End,
+}
+
 /// Everything the null device's thread owns while it runs.
 struct NullEngine {
     runner: CallbackRunner,
+    counters: Arc<Counters>,
     input: PlanarScratch,
     output: PlanarScratch,
     frames: usize,
@@ -234,18 +546,26 @@ struct NullEngine {
     interval: Option<WorkInterval>,
     /// How long one block lasts.
     period: Duration,
+    world: Arc<World>,
+    /// The device the stream runs on now.
+    device: usize,
+    /// Whether the stream follows the default device.
+    follows_default: bool,
+    rate_changes_seen: u64,
+    stalls_seen: u64,
 }
 
 impl NullEngine {
-    /// The device thread: runs blocks until `stop` is set or the frame limit
-    /// is reached, then hands the engine back.
+    /// The device thread: runs blocks until `stop` is set, the frame limit
+    /// is reached, or the device goes, then hands the engine back.
     fn run(mut self: Box<Self>, stop: &AtomicBool) -> Box<Self> {
         // Set the thread up before the clock starts, so the first block isn't
         // late by the time set-up takes.
         self.runner.prepare_thread();
         let frames = self.frames as u64;
-        let began = Instant::now();
-        let first_block = self.blocks;
+        let mut began = Instant::now();
+        let mut first_block = self.blocks;
+        let mut idle = false;
         while !stop.load(Ordering::Acquire) {
             if self
                 .options
@@ -253,6 +573,23 @@ impl NullEngine {
                 .is_some_and(|limit| self.blocks * frames >= limit)
             {
                 break;
+            }
+            match self.health() {
+                Health::Run => {}
+                Health::Idle => {
+                    idle = true;
+                    thread::sleep(IDLE_PERIOD);
+                    continue;
+                }
+                Health::End => break,
+            }
+            if idle {
+                // Calling back again after a pause: start the clock afresh
+                // rather than catch up on the blocks the pause skipped.
+                idle = false;
+                began = Instant::now();
+                first_block = self.blocks;
+                self.counters.request_resync();
             }
             if self.options.pacing == Pacing::RealTime {
                 let due = began
@@ -280,6 +617,43 @@ impl NullEngine {
         }
         self.runner.release_thread();
         self
+    }
+
+    /// What the simulated hardware lets the stream do now, reporting what a
+    /// backend would. Atomic loads only.
+    fn health(&mut self) -> Health {
+        let world = &self.world;
+        if world.stalls.load(Ordering::Acquire) != self.stalls_seen
+            || world.asleep.load(Ordering::Acquire)
+        {
+            return Health::Idle;
+        }
+        if self.follows_default {
+            // The default device's rate doesn't matter: Core Audio converts
+            // for a stream that follows the default.
+            match world.default_device() {
+                Some(device) if device == self.device => {}
+                Some(device) => {
+                    self.device = device;
+                    self.counters.record_device_change();
+                }
+                None => {
+                    self.counters.record_device_lost();
+                    return Health::End;
+                }
+            }
+            return Health::Run;
+        }
+        let device = &world.devices[self.device];
+        if !device.present.load(Ordering::Acquire) {
+            self.counters.record_device_lost();
+            Health::End
+        } else if device.rate_changes.load(Ordering::Acquire) != self.rate_changes_seen {
+            self.counters.record_invalidated();
+            Health::End
+        } else {
+            Health::Run
+        }
     }
 }
 
@@ -719,5 +1093,252 @@ mod tests {
             info.output_device.as_ref().map(|d| d.id.clone()),
             Some(NullBackend::device_id())
         );
+    }
+
+    /// Counts blocks and nothing else.
+    struct Count(Arc<AtomicU64>);
+
+    impl AudioCallback for Count {
+        fn process(&mut self, _: &ProcessContext, _: &AudioBuffer<'_>, _: &mut AudioBufferMut<'_>) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// A simulated backend with two devices, paced in real time at 64-frame
+    /// blocks (1.3 ms), so streams keep calling back without hurrying.
+    fn simulated() -> (NullBackend, NullControl) {
+        NullBackend::with_devices(
+            NullOptions::default(),
+            &[("built-in", "Built-in Output"), ("usb", "USB Interface")],
+        )
+    }
+
+    fn on(local: &str) -> StreamRequest {
+        StreamRequest {
+            buffer_size: Some(64),
+            ..StreamRequest::output(DeviceSelector::Id(DeviceId::new(BackendKind::Null, local)))
+        }
+    }
+
+    /// Opens and starts a stream, and returns it with its block counter.
+    fn started(
+        backend: &NullBackend,
+        request: &StreamRequest,
+    ) -> (Box<dyn Stream>, Arc<AtomicU64>) {
+        let blocks = Arc::new(AtomicU64::new(0));
+        let mut stream = backend
+            .open_stream(request, Box::new(Count(Arc::clone(&blocks))))
+            .unwrap();
+        stream.start().unwrap();
+        wait_for("the first blocks", || blocks.load(Ordering::Relaxed) > 4);
+        (stream, blocks)
+    }
+
+    fn wait_for(what: &str, mut done: impl FnMut() -> bool) {
+        let began = Instant::now();
+        while !done() {
+            assert!(
+                began.elapsed() < Duration::from_secs(10),
+                "waited for {what}"
+            );
+            thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    /// Whether `blocks` stays put for 50 ms, as a stream that's stopped
+    /// calling back does.
+    fn stays_still(blocks: &AtomicU64) -> bool {
+        let before = blocks.load(Ordering::Relaxed);
+        thread::sleep(Duration::from_millis(50));
+        blocks.load(Ordering::Relaxed) == before
+    }
+
+    fn present(backend: &NullBackend) -> Vec<String> {
+        backend
+            .devices()
+            .unwrap()
+            .into_iter()
+            .map(|d| d.id.local().to_owned())
+            .collect()
+    }
+
+    // Spec: device-changes R1
+    #[test]
+    fn an_unplugged_device_stops_its_streams_and_leaves_the_list() {
+        let (backend, control) = simulated();
+        let (stream, blocks) = started(&backend, &on("usb"));
+        control.unplug("usb");
+        wait_for("the loss", || stream.stats().device_lost);
+        assert!(stays_still(&blocks));
+        assert!(!control.is_present("usb"));
+        assert_eq!(present(&backend), ["built-in"]);
+        let refused = backend
+            .open_stream(&on("usb"), Box::new(Count(Arc::default())))
+            .err()
+            .unwrap();
+        assert_eq!(refused.kind(), ErrorKind::DeviceNotFound);
+
+        // Plugged back in, the old stream stays dead and a new one runs.
+        control.replug("usb");
+        assert!(stays_still(&blocks));
+        assert_eq!(present(&backend), ["built-in", "usb"]);
+        let (again, _) = started(&backend, &on("usb"));
+        assert!(!again.stats().device_lost);
+    }
+
+    // Spec: device-changes R3
+    #[test]
+    fn a_rate_change_invalidates_the_devices_streams() {
+        let (backend, control) = simulated();
+        let (stream, blocks) = started(&backend, &on("usb"));
+        let (other, other_blocks) = started(&backend, &on("built-in"));
+        control.set_sample_rate("usb", 44_100);
+        wait_for("the invalidation", || stream.stats().invalidated);
+        assert!(stays_still(&blocks));
+        assert!(
+            !stays_still(&other_blocks),
+            "another device's stream runs on"
+        );
+        assert!(!other.stats().invalidated);
+        let usb = backend
+            .devices()
+            .unwrap()
+            .into_iter()
+            .find(|d| d.id.local() == "usb")
+            .unwrap();
+        assert_eq!(usb.current_sample_rate, Some(44_100));
+        // A stream that doesn't ask for a rate opens at the device's.
+        let reopened = backend
+            .open_stream(&on("usb"), Box::new(Count(Arc::default())))
+            .unwrap();
+        assert_eq!(reopened.info().sample_rate, 44_100);
+        // Setting the same rate again changes nothing.
+        control.set_sample_rate("usb", 44_100);
+        assert_eq!(control.sample_rate("usb"), 44_100);
+    }
+
+    // Spec: device-changes R5
+    #[test]
+    fn a_stall_silences_the_streams_open_now_and_reports_nothing() {
+        let (backend, control) = simulated();
+        let (stream, blocks) = started(&backend, &on("usb"));
+        control.stall();
+        thread::sleep(Duration::from_millis(5));
+        assert!(stays_still(&blocks));
+        let stats = stream.stats();
+        assert!(!stats.device_lost && !stats.invalidated);
+        let (_fresh_stream, fresh) = started(&backend, &on("usb"));
+        assert!(!stays_still(&fresh), "a stream opened afterwards runs");
+    }
+
+    // Spec: device-changes R4
+    #[test]
+    fn sleep_pauses_every_stream_until_the_machine_wakes() {
+        let (backend, control) = simulated();
+        let mut power = control.power();
+        let (stream, blocks) = started(&backend, &on("usb"));
+        control.sleep();
+        thread::sleep(Duration::from_millis(5));
+        assert!(stays_still(&blocks));
+        assert_eq!(power.poll(), Some(PowerEvent::Sleeping));
+        assert_eq!(power.poll(), None);
+        control.wake();
+        assert!(!stays_still(&blocks), "streams call back again");
+        assert!(matches!(
+            power.poll(),
+            Some(PowerEvent::Woke { slept: Some(slept) }) if slept >= Duration::from_millis(50)
+        ));
+        let stats = stream.stats();
+        assert_eq!(stats.gaps, 0, "the clock starts afresh after the pause");
+        control.notify(PowerEvent::Woke { slept: None });
+        assert_eq!(power.poll(), Some(PowerEvent::Woke { slept: None }));
+    }
+
+    // Spec: device-changes R6
+    #[test]
+    fn a_default_stream_moves_when_its_device_goes() {
+        let (backend, control) = simulated();
+        let request = StreamRequest {
+            buffer_size: Some(64),
+            ..StreamRequest::output(DeviceSelector::Default)
+        };
+        let (stream, blocks) = started(&backend, &request);
+        assert!(stream.info().follows_default);
+        assert_eq!(
+            stream.info().output_device.as_ref().unwrap().id.local(),
+            "built-in"
+        );
+        control.unplug("built-in");
+        wait_for("the move", || stream.stats().device_changes == 1);
+        assert!(!stays_still(&blocks), "it carries on");
+        // A rate change on the new default doesn't stop it either.
+        control.set_sample_rate("usb", 96_000);
+        assert!(!stays_still(&blocks));
+        control.unplug("usb");
+        wait_for("the loss", || stream.stats().device_lost);
+        assert!(stays_still(&blocks));
+        assert!(backend.devices().unwrap().is_empty());
+        let refused = backend
+            .open_stream(&request, Box::new(Count(Arc::default())))
+            .err()
+            .unwrap();
+        assert_eq!(refused.kind(), ErrorKind::DeviceNotFound);
+    }
+
+    #[test]
+    fn a_streams_input_and_output_share_one_device() {
+        let (backend, _control) = simulated();
+        let usb = DeviceSelector::Id(DeviceId::new(BackendKind::Null, "usb"));
+        let request = StreamRequest {
+            output: Some(PortRequest {
+                device: usb.clone(),
+                channels: None,
+            }),
+            input: Some(PortRequest {
+                device: DeviceSelector::Default,
+                channels: None,
+            }),
+            ..StreamRequest::default()
+        };
+        let refused = backend
+            .open_stream(&request, Box::new(Count(Arc::default())))
+            .err()
+            .unwrap();
+        assert_eq!(refused.kind(), ErrorKind::UnsupportedConfig);
+        let request = StreamRequest {
+            input: Some(PortRequest {
+                device: usb,
+                channels: None,
+            }),
+            ..request
+        };
+        assert!(
+            backend
+                .open_stream(&request, Box::new(Count(Arc::default())))
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn opening_at_another_rate_sets_the_devices_rate() {
+        let (backend, control) = simulated();
+        let stream = backend
+            .open_stream(
+                &StreamRequest {
+                    sample_rate: Some(96_000),
+                    ..on("usb")
+                },
+                Box::new(Count(Arc::default())),
+            )
+            .unwrap();
+        assert_eq!(stream.info().sample_rate, 96_000);
+        assert_eq!(control.sample_rate("usb"), 96_000);
+        assert_eq!(control.sample_rate("built-in"), 48_000);
+    }
+
+    #[test]
+    #[should_panic(expected = "two null devices are called `a`")]
+    fn device_ids_are_unique() {
+        let _ = NullBackend::with_devices(NullOptions::default(), &[("a", "A"), ("a", "B")]);
     }
 }

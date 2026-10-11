@@ -14,6 +14,17 @@
 //! itself (D22), so the windows lay this out [`TITLE_BAR`] points down and
 //! every row lands at layout.md's window coordinates; on Windows and Linux
 //! the system's title bar sits above the content area instead.
+//!
+//! The interface zoom (WP-1.17, spec interface-zoom) scales all of it. The
+//! layout is computed in *layout points*, Live's points at 100%, and egui
+//! draws a layout point as `zoom` window points through its points-per-pixel
+//! ([`apply_zoom`]), so text is rasterised at the zoomed size and stays
+//! crisp. A window `zoom` times as large as another shows exactly what the
+//! other shows at 100%, every rectangle `zoom` times as large
+//! ([`layout_size`], [`ShellLayout::scale`]); its smallest size grows with
+//! the zoom ([`minimum_window`]). Only the drawn title bar keeps its 23
+//! window points, as the system's buttons in it don't scale
+//! ([`title_bar_height`]).
 
 use egui::{Pos2, Rect, Vec2, pos2, vec2};
 
@@ -25,9 +36,10 @@ pub const TITLE_BAR: f32 = 23.0;
 /// content area is 1600 × 977.
 pub const REFERENCE: Vec2 = vec2(1600.0, 1000.0 - TITLE_BAR);
 
-/// The smallest content area the shell lays out without overlapping
-/// controls: the Control Bar's stretching gaps (280 points at the reference
-/// width) close up at 1320 points.
+/// The smallest content area the shell lays out without overlapping, in
+/// layout points ([`minimum_window`] scales it by the zoom): the Control
+/// Bar's stretching gaps (280 points at the reference width) close up at
+/// 1320 points.
 pub const MINIMUM: Vec2 = vec2(1320.0, 640.0);
 
 /// The margin between panes and at the window's left and right edges
@@ -40,6 +52,119 @@ pub const SETTINGS_WINDOW: Vec2 = vec2(562.0, 617.0);
 /// A y position measured in Live's window, as a content-area position.
 const fn y(window_y: f32) -> f32 {
     window_y - TITLE_BAR
+}
+
+/// The size in layout points of a content area `content` window points
+/// across at `zoom` (1 is 100%): what the layout layer lays out.
+#[must_use]
+pub fn layout_size(content: Vec2, zoom: f32) -> Vec2 {
+    content / zoom
+}
+
+/// The main window's smallest inner size in window points at `zoom`:
+/// [`MINIMUM`] scaled by the zoom, with Live's title bar where Beatlayer
+/// draws it (`title_bar`, macOS), which keeps its height at every zoom
+/// (interface-zoom R7, R9).
+#[must_use]
+pub fn minimum_window(zoom: f32, title_bar: bool) -> Vec2 {
+    MINIMUM * zoom + vec2(0.0, if title_bar { TITLE_BAR } else { 0.0 })
+}
+
+/// The main window's minimum and its new inner size, in window points, when
+/// the zoom becomes `zoom` with the window `current` points inside, on a
+/// screen that allows at most `screen` (if it's known): the minimum at that
+/// zoom brought within the screen, and the window grown to it where it's
+/// smaller, never shrunk (interface-zoom R7). A screen too small for the
+/// zoom's minimum gets a window as big as it allows, and the layout keeps
+/// its minimum size, its far right and bottom out of view.
+#[must_use]
+pub fn fit_main_window(
+    current: Vec2,
+    zoom: f32,
+    title_bar: bool,
+    screen: Option<Vec2>,
+) -> (Vec2, Vec2) {
+    let minimum = minimum_window(zoom, title_bar);
+    let minimum = screen.map_or(minimum, |screen| minimum.min(screen));
+    (minimum, current.max(minimum))
+}
+
+/// The Settings window's inner size in window points at `zoom`: Live's 562
+/// × 617 points at 100% (L-SET-001), its content scaled by the zoom, with
+/// Live's title bar where Beatlayer draws it (interface-zoom R8).
+#[must_use]
+pub fn settings_window(zoom: f32, title_bar: bool) -> Vec2 {
+    (SETTINGS_WINDOW - vec2(0.0, TITLE_BAR)) * zoom
+        + vec2(0.0, if title_bar { TITLE_BAR } else { 0.0 })
+}
+
+/// The drawn title bar's height in layout points at `zoom`: always
+/// [`TITLE_BAR`] window points, since the system's window buttons in it
+/// don't scale (interface-zoom R9).
+#[must_use]
+pub fn title_bar_height(zoom: f32) -> f32 {
+    TITLE_BAR / zoom
+}
+
+/// Sets a window's interface zoom: egui draws each layout point as `zoom`
+/// times the screen's points (its points-per-pixel), so text and lines are
+/// drawn at the zoomed size rather than stretched. It also turns off egui's
+/// own zoom keys: the keymap's View menu keys zoom (S-ZOOM-001, 002), and
+/// Cmd-0 is Live's key for launch quantisation (S-GQ-005), so egui's
+/// Cmd-plus, Cmd-minus, and Cmd-0 would put the window out of step with the
+/// setting (interface-zoom R10).
+pub fn apply_zoom(ctx: &egui::Context, zoom: f32) {
+    ctx.options_mut(|options| options.zoom_with_keyboard = false);
+    ctx.set_zoom_factor(zoom);
+}
+
+/// Brings a window's zoom to `zoom` unless a mouse button is down in it,
+/// and returns the zoom the window's next frame draws at. The Settings
+/// window takes a new zoom this way, so dragging its Zoom setting doesn't
+/// rescale the window under the pointer: Live's Settings window changes
+/// when the mouse button is released (interface-zoom R4).
+pub fn follow_zoom(ctx: &egui::Context, applied: f32, zoom: f32) -> f32 {
+    if (applied - zoom).abs() < 1e-6 || ctx.input(|i| i.pointer.any_down()) {
+        return applied;
+    }
+    apply_zoom(ctx, zoom);
+    zoom
+}
+
+/// One placed row of layout.md: its ID, the part of it this rectangle is,
+/// and the rectangle.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Row {
+    /// The layout.md row, such as `L-CTRL-014`.
+    pub id: &'static str,
+    /// What the rectangle is, such as `Play`.
+    pub name: &'static str,
+    /// Where it is.
+    pub rect: Rect,
+}
+
+impl Row {
+    /// The row scaled by `factor` about the content area's corner: at a zoom
+    /// of `factor`, in window points.
+    #[must_use]
+    pub fn scale(self, factor: f32) -> Self {
+        Self {
+            rect: scale_rect(self.rect, factor),
+            ..self
+        }
+    }
+}
+
+const fn row(id: &'static str, name: &'static str, rect: Rect) -> Row {
+    Row { id, name, rect }
+}
+
+/// A rectangle scaled about the origin.
+fn scale_rect(rect: Rect, factor: f32) -> Rect {
+    Rect::from_min_max(
+        (rect.min.to_vec2() * factor).to_pos2(),
+        (rect.max.to_vec2() * factor).to_pos2(),
+    )
 }
 
 /// What kind of control an element is: how it's drawn and what it tells
@@ -404,6 +529,55 @@ impl ShellLayout {
         self
     }
 
+    /// The same layout scaled by `factor` about the content area's corner:
+    /// at a zoom of `factor`, where each rectangle is in window points.
+    #[must_use]
+    pub fn scale(mut self, factor: f32) -> Self {
+        let scale = |rect: &mut Rect| *rect = scale_rect(*rect, factor);
+        for rect in [
+            &mut self.content,
+            &mut self.control_bar,
+            &mut self.main_view,
+            &mut self.detail,
+            &mut self.info_view,
+            &mut self.device_view,
+            &mut self.status_bar,
+        ] {
+            scale(rect);
+        }
+        if let Some(browser) = &mut self.browser {
+            scale(browser);
+        }
+        for (_, rect) in &mut self.elements {
+            scale(rect);
+        }
+        self
+    }
+
+    /// Every layout.md row this layout places, panes first, then every
+    /// element in [`ELEMENTS`] order.
+    #[must_use]
+    pub fn rows(&self) -> Vec<Row> {
+        let mut rows = vec![
+            row("L-WIN-003", "Control Bar", self.control_bar),
+            row("L-WIN-005", "Main view", self.main_view),
+            row("L-WIN-006", "Detail area", self.detail),
+            row("L-INFO-001", "Info View", self.info_view),
+            row("L-DEV-001", "Device View", self.device_view),
+            row("L-WIN-007", "Status Bar", self.status_bar),
+        ];
+        if let Some(browser) = self.browser {
+            rows.insert(1, row("L-WIN-004", "Browser", browser));
+        }
+        rows.extend(
+            ELEMENTS
+                .iter()
+                .zip(&self.elements)
+                .map(|(placement, (_, rect))| row(placement.row, placement.name, *rect)),
+        );
+        rows
+    }
+
     /// An element's rectangle.
     #[must_use]
     pub fn rect(&self, element: Element) -> Rect {
@@ -579,6 +753,39 @@ impl ArrangementLayout {
         }
     }
 
+    /// Every layout.md row this layout places, top to bottom.
+    #[must_use]
+    pub fn rows(&self) -> Vec<Row> {
+        let mut rows = Vec::with_capacity(18);
+        if let Some(overview) = self.overview {
+            rows.push(row("L-ARR-001", "Overview", overview));
+        }
+        rows.extend([
+            row("L-ARR-002", "Beat-Time Ruler", self.beat_ruler),
+            row("L-ARR-003", "Scrub Area", self.scrub),
+            row("L-ARR-010", "Set Locator", self.set_locator),
+            row("L-ARR-010", "Automation Mode", self.automation_mode),
+            row("L-ARR-010", "Lock Envelopes", self.lock_envelopes),
+            row("L-ARR-010", "Previous Locator", self.previous_locator),
+            row("L-ARR-010", "Next Locator", self.next_locator),
+            row("L-ARR-005", "Track Lanes", self.lanes),
+            row("L-ARR-006", "Track Headers", self.headers),
+            row("L-ARR-014", "Return and Main Lanes", self.pinned_lanes),
+            row("L-ARR-014", "Return and Main Headers", self.pinned_headers),
+            row("L-ARR-015", "Grid", self.grid_indicator),
+            row("L-ARR-016", "Time Ruler", self.time_ruler),
+            row("L-ARR-017", "Waveform Zoom", self.waveform_zoom),
+            row(
+                "L-ARR-017",
+                "Waveform Vertical Zoom Level",
+                self.waveform_zoom_level,
+            ),
+            row("L-ARR-017", "Optimize Height", self.optimize_height),
+            row("L-ARR-017", "Optimize Width", self.optimize_width),
+        ]);
+        rows
+    }
+
     /// The pinned row at `index` of `count`, lanes and header together: the
     /// returns, then Main a point lower.
     #[must_use]
@@ -658,6 +865,16 @@ impl SettingsLayout {
     pub fn page_row(&self, index: usize) -> Rect {
         self.first_page
             .translate(vec2(0.0, Self::ROW * index as f32))
+    }
+
+    /// Every layout.md row this layout places: the page chooser and its
+    /// `pages` rows (L-SET-002), and the page beside it (L-SET-003).
+    #[must_use]
+    pub fn rows(&self, pages: usize) -> Vec<Row> {
+        let mut rows = vec![row("L-SET-002", "Page chooser", self.chooser)];
+        rows.extend((0..pages).map(|index| row("L-SET-002", "Page row", self.page_row(index))));
+        rows.push(row("L-SET-003", "Page", self.page));
+        rows
     }
 }
 

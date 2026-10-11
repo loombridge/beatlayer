@@ -1,14 +1,19 @@
 //! The Settings window (L-SET-001 to L-SET-003): the page chooser at the
-//! left, and the page at the right. The Audio page (L-SET-012) and the
-//! theme choice (L-SET-011) are built; the other pages are in the chooser
-//! and say which package builds them.
+//! left, and the page at the right. The Audio page (L-SET-012), the theme
+//! choice (L-SET-011), and the interface zoom (L-SET-010, WP-1.17) are
+//! built; the other pages are in the chooser and say which package builds
+//! them. The Tempo & MIDI page (L-SET-014) has the agent server's section
+//! (WP-1.15), which Live doesn't have: it sits with the control surfaces,
+//! the other way programs drive the app.
 
 use bl_shell::audio::{
     AudioDevices, AudioStatus, DeviceListing, TONE_MAX_DBFS, TONE_MAX_HZ, TONE_MIN_DBFS,
     TONE_MIN_HZ,
 };
-use bl_shell::settings::{SettingsPage, ThemeChoice};
-use bl_shell::{Invocation, Shell, commands as ids};
+use bl_shell::settings::{
+    SettingsPage, ThemeChoice, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, zoom_step,
+};
+use bl_shell::{Invocation, Shell, agent, commands as ids};
 use egui::accesskit::Role;
 use egui::{Align2, CentralPanel, Frame, Id, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use serde_json::{Value, json};
@@ -96,7 +101,18 @@ impl SettingsUi {
             let mut rows = Rows::new(&layout, theme);
             match page {
                 SettingsPage::Audio => self.audio_page(ui, shell, theme, &mut rows, &mut events),
+                SettingsPage::DisplayInput => {
+                    display_page(ui, shell, theme, &mut rows, &mut events);
+                }
                 SettingsPage::ThemeColors => theme_page(ui, shell, theme, &mut rows, &mut events),
+                SettingsPage::TempoMidi => {
+                    agents_section(ui, shell, theme, &mut rows, &mut events);
+                    rows.note(
+                        ui,
+                        "The Tempo Follower, control surface, and MIDI port settings come with \
+                         later packages; the Agents section will follow them.",
+                    );
+                }
                 other => rows.note(
                     ui,
                     &format!(
@@ -392,6 +408,46 @@ impl SettingsUi {
     }
 }
 
+/// Display & Input (L-SET-010): its Display section, Language then Zoom.
+/// The zoom box steps through the zoom's steps by mouse, keyboard, or
+/// assistive technology, and the main window follows straight away; this
+/// window follows when the mouse button is released (interface-zoom R4).
+fn display_page(
+    ui: &mut Ui,
+    shell: &Shell,
+    theme: &Theme,
+    rows: &mut Rows<'_>,
+    events: &mut Vec<UiEvent>,
+) {
+    rows.heading(ui, "Display");
+    // Beatlayer speaks only English until its translations (M9).
+    rows.text_row(ui, "Language", "English");
+    let percent = shell.zoom_percent();
+    let rect = rows.row(ui, "Zoom", SettingsLayout::NUMBER);
+    if let Some(next) = number_box(
+        ui,
+        theme,
+        "zoom",
+        "Zoom",
+        rect,
+        f64::from(percent),
+        (f64::from(ZOOM_MIN_PERCENT), f64::from(ZOOM_MAX_PERCENT)),
+        &|value, steps| f64::from(zoom_step(value as u16, steps)),
+        &format!("{percent} %"),
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            ids::VIEW_SET_ZOOM,
+            json!({ "percent": next as u16 }),
+        )));
+    }
+    rows.note(
+        ui,
+        "The zoom scales every window; View > Zoom and its keys change it too. The Display \
+         Options, Navigation and Keyboard, Mouse and Pen Input, and Application Options settings \
+         come with later packages.",
+    );
+}
+
 fn theme_page(
     ui: &mut Ui,
     shell: &Shell,
@@ -427,6 +483,113 @@ fn theme_page(
         ui,
         "Beatlayer's own dark and light themes. More of the Theme & Colors settings come in \
          milestone M6.",
+    );
+}
+
+/// The agent server's section (WP-1.15), on the Tempo & MIDI page: the
+/// switch, where agents connect, the token they need, and the agents the
+/// person has allowed, each with its autonomous switch.
+fn agents_section(
+    ui: &mut Ui,
+    shell: &Shell,
+    theme: &Theme,
+    rows: &mut Rows<'_>,
+    events: &mut Vec<UiEvent>,
+) {
+    let settings = shell.agent_settings();
+    let status = shell.agent_status();
+    let invoke = |events: &mut Vec<UiEvent>, id: &str, args: Value| {
+        events.push(UiEvent::Invoke(Invocation::new(id, args)));
+    };
+    rows.heading(ui, "Agents");
+    let rect = rows.row(ui, "Agent Server", SettingsLayout::SWITCH);
+    if let Some(on) = switch(
+        ui,
+        theme,
+        "agent-server",
+        "Agent Server",
+        rect,
+        settings.server,
+    ) {
+        invoke(events, agent::AGENT_SET_SERVER, json!({ "on": on }));
+    }
+    let state = match (&status.listening, &status.error) {
+        _ if !settings.server => "Off".to_owned(),
+        (_, Some(error)) => format!("Couldn't start: {error}"),
+        (Some(_), None) if status.sessions == 1 => "Listening, 1 agent session".to_owned(),
+        (Some(_), None) => format!("Listening, {} agent sessions", status.sessions),
+        (None, None) => "Starting".to_owned(),
+    };
+    rows.text_row(ui, "Status", &state);
+    rows.text_row(ui, "Address", &settings.url());
+    if !settings.token.is_empty() {
+        // The token on a line of its own, the page's whole width, so all 64
+        // digits show; it can be selected and copied.
+        let rect = rows.row(ui, "Token", SettingsLayout::CHOOSER);
+        if ui.put(rect, egui::Button::new("New Token")).clicked() {
+            invoke(events, agent::AGENT_NEW_TOKEN, json!({}));
+        }
+        let rect = Rect::from_min_size(
+            pos2(rows.layout.label_x, rows.y),
+            vec2(rows.right() - rows.layout.label_x, 18.0),
+        );
+        let mut token: &str = &settings.token;
+        let response = ui.put(
+            rect,
+            egui::TextEdit::singleline(&mut token)
+                .id_salt("agent-token")
+                .font(egui::FontId::proportional(theme.sizes.small_text * 0.9))
+                .clip_text(true),
+        );
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_label("Token".to_owned());
+            node.set_read_only();
+        });
+        rows.y += SettingsLayout::OPTION_ROW;
+    }
+    if !settings.clients.is_empty() {
+        rows.heading(ui, "Allowed Agents");
+        for client in &settings.clients {
+            let rect = rows.row(ui, &client.name, SettingsLayout::SWITCH);
+            let name = format!("Autonomous: {}", client.name);
+            if let Some(on) = switch(
+                ui,
+                theme,
+                &format!("agent-autonomous-{}", client.name),
+                &name,
+                rect,
+                client.autonomous,
+            ) {
+                invoke(
+                    events,
+                    agent::AGENT_SET_AUTONOMOUS,
+                    json!({ "client": client.name, "on": on }),
+                );
+            }
+            let forget = Rect::from_min_size(
+                rect.right_top() + vec2(8.0, 0.0),
+                vec2(SettingsLayout::SWITCH + 6.0, rect.height()),
+            );
+            let response = ui.put(forget, egui::Button::new("Forget"));
+            ui.ctx().accesskit_node_builder(response.id, |node| {
+                node.set_label(format!("Forget {}", client.name));
+            });
+            if response.clicked() {
+                invoke(
+                    events,
+                    agent::AGENT_FORGET_CLIENT,
+                    json!({ "client": client.name }),
+                );
+            }
+        }
+    }
+    rows.note(
+        ui,
+        "Agent clients on this computer, such as Claude Code, can read and edit the open set \
+         through the agent API at the address above, sending the token as a bearer token. \
+         Each agent is asked about once. Deleting or reaching outside the project asks you \
+         first unless the agent is autonomous (the switch beside its name). Web pages can't \
+         connect.",
     );
 }
 

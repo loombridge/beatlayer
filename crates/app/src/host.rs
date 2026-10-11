@@ -5,11 +5,20 @@
 //! Every key press, menu choice, and click becomes a command invocation on
 //! the shell ([`Shell::invoke`]); what only the platform can do comes back
 //! as effects, which the host carries out here.
+//!
+//! While the person has the agent server switched on (Settings, Tempo &
+//! MIDI), the host runs it (`bl-agent`, WP-1.15): its threads hand each
+//! request to this event loop, which runs it on the same shell, and asks
+//! the person when an agent connects for the first time or wants to run a
+//! command that asks first.
 
 use std::num::NonZeroU32;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use bl_agent::Agent;
+use bl_agent::http::{HttpConfig, HttpServer, Served};
+use bl_shell::agent::AgentServerStatus;
 use bl_shell::audio::AudioHost;
 use bl_shell::files::ProjectFiles;
 use bl_shell::menus::{Menu, MenuPlatform, menu_bar};
@@ -17,7 +26,7 @@ use bl_shell::settings::{Preferences, ThemeChoice, default_config_dir};
 use bl_shell::{Effect, Invocation, Shell, WindowKind, commands as ids};
 use bl_ui::input::KeyDispatcher;
 use bl_ui::keymap::{Keymap, Platform};
-use bl_ui::layout::{MINIMUM, SETTINGS_WINDOW, TITLE_BAR};
+use bl_ui::layout::{TITLE_BAR, apply_zoom, fit_main_window, follow_zoom, settings_window};
 use bl_ui::main_window::{DrawnMenuBar, MainWindowUi, UiEvent};
 use bl_ui::settings_window::SettingsUi;
 use bl_ui::theme::{Theme, fonts};
@@ -66,6 +75,55 @@ fn draws_title_bar(window: &Window) -> bool {
     DRAWN_TITLE_BAR && window.fullscreen().is_none()
 }
 
+/// The largest inner size, in points, a window opens at on a screen of
+/// `screen` points: room is left for the menu bar, the Dock, or the taskbar.
+fn screen_limit(screen: LogicalSize<f32>) -> egui::Vec2 {
+    egui::vec2(screen.width * 0.95, screen.height * 0.9)
+}
+
+/// The screen limit of the screen a window is on.
+fn window_screen_limit(window: &Window) -> Option<egui::Vec2> {
+    let monitor = window
+        .current_monitor()
+        .or_else(|| window.primary_monitor())?;
+    Some(screen_limit(
+        monitor.size().to_logical::<f32>(monitor.scale_factor()),
+    ))
+}
+
+/// A size brought within a screen limit, if there is one.
+fn within(size: egui::Vec2, limit: Option<egui::Vec2>) -> egui::Vec2 {
+    limit.map_or(size, |limit| size.min(limit))
+}
+
+/// Gives the main window its smallest size at `zoom`, and grows it to that
+/// if it's smaller, as far as its screen allows (interface-zoom R7). A
+/// screen too small for the zoom's minimum gets a window as big as it
+/// allows, showing the layout's minimum from its top-left corner.
+fn resize_main_window(window: &Window, zoom: f32) {
+    let inner = window.inner_size().to_logical::<f32>(window.scale_factor());
+    let inner = egui::vec2(inner.width, inner.height);
+    let (minimum, wanted) =
+        fit_main_window(inner, zoom, DRAWN_TITLE_BAR, window_screen_limit(window));
+    window.set_min_inner_size(Some(LogicalSize::new(minimum.x, minimum.y)));
+    if window.fullscreen().is_some() {
+        return;
+    }
+    if (wanted - inner).length() > 0.5 {
+        let _ = window.request_inner_size(LogicalSize::new(wanted.x, wanted.y));
+    }
+}
+
+/// Sizes the Settings window for `zoom`: Live's 562 × 617 points at 100%,
+/// its content scaled, within its screen (interface-zoom R8).
+fn fit_settings_window(window: &Window, zoom: f32) {
+    let size = within(
+        settings_window(zoom, DRAWN_TITLE_BAR),
+        window_screen_limit(window),
+    );
+    let _ = window.request_inner_size(LogicalSize::new(size.x, size.y));
+}
+
 /// Window attributes with the system's title bar made way for Beatlayer's
 /// (macOS: a full-size content view under a transparent, untitled title
 /// bar, whose buttons and dragging stay the system's).
@@ -106,6 +164,8 @@ pub enum UserEvent {
     /// A native menu item was chosen.
     #[cfg(any(target_os = "macos", windows))]
     Menu(muda::MenuEvent),
+    /// The agent server has a request for the main thread.
+    Agent,
     /// Waveform peaks became ready or were invalidated, so the Arrangement
     /// View redraws (WP-1.8a).
     Peaks,
@@ -125,6 +185,9 @@ struct Surface {
     painter: Painter,
     info: ViewportInfo,
     repaint_at: Option<Instant>,
+    /// The interface zoom the window draws at: the shell's, except while
+    /// the Settings window waits for a mouse button to be released.
+    zoom: f32,
 }
 
 struct Host {
@@ -132,7 +195,6 @@ struct Host {
     shell: Shell,
     theme_choice: ThemeChoice,
     theme: Theme,
-    zoom: f32,
     keymap: Keymap,
     platform: Platform,
     menus: Vec<Menu>,
@@ -150,6 +212,12 @@ struct Host {
     /// Until when the loop looks at the transport between frames.
     watch_transport_until: Option<Instant>,
     quitting: bool,
+    agent: Agent,
+    /// The agent server while it runs, with the settings it started with.
+    agent_server: Option<(HttpServer, HttpConfig)>,
+    /// The settings the agent server last failed to start with, so it isn't
+    /// retried until they change.
+    agent_failed: Option<HttpConfig>,
 }
 
 /// Runs the app until it quits.
@@ -216,7 +284,6 @@ pub fn run(args: Args) -> Result<(), String> {
     let platform = Platform::current();
     let menus = menu_bar(MenuPlatform::current());
     let mut host = Host {
-        zoom: shell.zoom(),
         args,
         shell,
         theme_choice,
@@ -237,11 +304,18 @@ pub fn run(args: Args) -> Result<(), String> {
         next_cpu_sample: Instant::now() + CPU_METER_PERIOD,
         watch_transport_until: None,
         quitting: false,
+        agent: Agent::for_app(),
+        agent_server: None,
+        agent_failed: None,
     };
+    host.sync_agent_server();
     event_loop
         .run_app(&mut host)
         .map_err(|e| format!("the event loop failed: {e}"))?;
     host.shell.audio_mut().stop();
+    if let Some((server, _)) = host.agent_server.take() {
+        server.stop();
+    }
     Ok(())
 }
 
@@ -300,7 +374,8 @@ impl Host {
         let ctx = egui::Context::default();
         ctx.set_fonts(fonts());
         self.theme.apply(&ctx);
-        ctx.set_zoom_factor(self.zoom);
+        let zoom = self.shell.zoom();
+        apply_zoom(&ctx, zoom);
         let mut state = egui_winit::State::new(
             ctx.clone(),
             ViewportId::ROOT,
@@ -347,6 +422,7 @@ impl Host {
             painter,
             info,
             repaint_at: None,
+            zoom,
         })
     }
 
@@ -359,19 +435,22 @@ impl Host {
             (None, Some((w, h))) => (None, (w, h)),
             (None, None) => (Some((1600.0, 1000.0)), (1600.0, content_height(1000.0))),
         };
-        let (mut width, mut height) = inner;
-        if let Some(monitor) = event_loop.primary_monitor() {
-            let size = monitor.size().to_logical::<f32>(monitor.scale_factor());
-            width = width.min(size.width * 0.95);
-            height = height.min(size.height * 0.9);
-        }
+        // No smaller than its minimum at the interface zoom, as far as the
+        // screen allows (interface-zoom R7).
+        let limit = event_loop
+            .primary_monitor()
+            .map(|monitor| screen_limit(monitor.size().to_logical(monitor.scale_factor())));
+        let (minimum, size) = fit_main_window(
+            within(egui::vec2(inner.0, inner.1), limit),
+            self.shell.zoom(),
+            DRAWN_TITLE_BAR,
+            limit,
+        );
+        let (width, height) = (size.x, size.y);
         let attributes = Window::default_attributes()
             .with_title(self.shell.set_name())
             .with_inner_size(LogicalSize::new(width, height))
-            .with_min_inner_size(LogicalSize::new(
-                MINIMUM.x,
-                MINIMUM.y + if DRAWN_TITLE_BAR { TITLE_BAR } else { 0.0 },
-            ));
+            .with_min_inner_size(LogicalSize::new(minimum.x, minimum.y));
         let surface = self.create_surface(event_loop, with_title_bar(attributes), None)?;
         if let Some(render) = surface.painter.render_state() {
             // The Arrangement View's own pipelines (WP-1.8a).
@@ -395,7 +474,7 @@ impl Host {
                     outer_size.width, outer_size.height, inner_size.width, inner_size.height
                 );
             }
-            let wanted = (h - decoration).min(height);
+            let wanted = (h - decoration).min(height).max(minimum.y);
             if decoration > 0.0 && (inner_size.height - wanted).abs() > 0.5 {
                 let _ = surface
                     .window
@@ -422,12 +501,15 @@ impl Host {
             settings.window.focus_window();
             return;
         }
+        // Live's size at 100%, its content scaled by the interface zoom
+        // (interface-zoom R8), within the screen.
+        let limit = event_loop
+            .primary_monitor()
+            .map(|monitor| screen_limit(monitor.size().to_logical(monitor.scale_factor())));
+        let size = within(settings_window(self.shell.zoom(), DRAWN_TITLE_BAR), limit);
         let attributes = Window::default_attributes()
             .with_title("Settings")
-            .with_inner_size(LogicalSize::new(
-                SETTINGS_WINDOW.x,
-                content_height(SETTINGS_WINDOW.y),
-            ))
+            .with_inner_size(LogicalSize::new(size.x, size.y))
             .with_resizable(false);
         match self.create_surface(event_loop, with_title_bar(attributes), self.main.as_ref()) {
             Ok(surface) => {
@@ -581,15 +663,35 @@ impl Host {
                 self.effect(effect, event_loop);
             }
         }
-        if self.shell.theme() != self.theme_choice || (self.shell.zoom() - self.zoom).abs() > 1e-6 {
+        if self.shell.theme() != self.theme_choice {
             self.theme_choice = self.shell.theme();
             self.theme = Theme::builtin(self.theme_choice);
-            self.zoom = self.shell.zoom();
             for surface in [&self.main, &self.settings].into_iter().flatten() {
                 self.theme.apply(&surface.ctx);
-                surface.ctx.set_zoom_factor(self.zoom);
             }
         }
+        // The interface zoom (interface-zoom R1, R4, R7, R8): the main
+        // window follows at once and keeps its size unless that's under its
+        // minimum at the new zoom; the Settings window follows once no mouse
+        // button is down in it, and takes its size at the new zoom.
+        let zoom = self.shell.zoom();
+        if let Some(main) = &mut self.main
+            && (main.zoom - zoom).abs() > 1e-6
+        {
+            apply_zoom(&main.ctx, zoom);
+            main.zoom = zoom;
+            resize_main_window(&main.window, zoom);
+            main.window.request_redraw();
+        }
+        if let Some(settings) = &mut self.settings {
+            let applied = follow_zoom(&settings.ctx, settings.zoom, zoom);
+            if (applied - settings.zoom).abs() > 1e-6 {
+                settings.zoom = applied;
+                fit_settings_window(&settings.window, applied);
+                settings.window.request_redraw();
+            }
+        }
+        self.sync_agent_server();
         if self.shown_revision != Some(self.shell.revision()) {
             self.shown_revision = Some(self.shell.revision());
             #[cfg(any(target_os = "macos", windows))]
@@ -716,6 +818,110 @@ impl Host {
                     }
                 }
             },
+        }
+    }
+
+    /// Starts, stops, or moves the agent server to match the settings, and
+    /// tells the shell how it's doing, for the Settings window.
+    fn sync_agent_server(&mut self) {
+        let settings = self.shell.agent_settings();
+        let wanted = (settings.server && !settings.token.is_empty()).then(|| HttpConfig {
+            port: settings.port,
+            token: settings.token.clone(),
+        });
+        let running = self.agent_server.as_ref().map(|(_, config)| config);
+        if running != wanted.as_ref() {
+            if let Some((server, _)) = self.agent_server.take() {
+                server.stop();
+            }
+            if let Some(config) = wanted.filter(|c| self.agent_failed.as_ref() != Some(c)) {
+                let proxy = Mutex::new(self.proxy.clone());
+                let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+                    if let Ok(proxy) = proxy.lock() {
+                        let _ = proxy.send_event(UserEvent::Agent);
+                    }
+                });
+                match HttpServer::start(&config, wake) {
+                    Ok(server) => {
+                        self.agent_failed = None;
+                        self.agent_server = Some((server, config));
+                    }
+                    Err(error) => {
+                        self.agent_failed = Some(config);
+                        self.shell.set_agent_status(AgentServerStatus {
+                            listening: None,
+                            error: Some(error.to_string()),
+                            sessions: 0,
+                        });
+                        return;
+                    }
+                }
+            }
+        }
+        if !self.shell.agent_settings().server {
+            self.agent_failed = None;
+        }
+        // Agents the person forgot lose their sessions.
+        let forgotten: Vec<String> = self
+            .agent
+            .sessions()
+            .filter(|(_, s)| s.protocol.is_some())
+            .map(|(_, s)| s.client.name.clone())
+            .filter(|name| self.shell.agent_settings().client(name).is_none())
+            .collect();
+        for name in forgotten {
+            self.agent.close_sessions_of(&name);
+        }
+        let status = match &self.agent_server {
+            Some((server, _)) => AgentServerStatus {
+                listening: Some(server.local_addr().to_string()),
+                error: None,
+                sessions: self.agent.sessions().count(),
+            },
+            None if self.agent_failed.is_some() => self.shell.agent_status().clone(),
+            None => AgentServerStatus::default(),
+        };
+        self.shell.set_agent_status(status);
+    }
+
+    /// Runs the agent server's waiting requests on the shell, asking the
+    /// person where a request needs it.
+    fn serve_agents(&mut self) {
+        let Some((server, _)) = &self.agent_server else {
+            return;
+        };
+        let jobs: Vec<_> = std::iter::from_fn(|| server.try_job()).collect();
+        for job in jobs {
+            match bl_agent::http::serve(&mut self.agent, &mut self.shell, job) {
+                Served::Done => {}
+                Served::Waiting(pending) => {
+                    let allow = self.ask_for_agent(&pending.question().text());
+                    pending.finish(&mut self.agent, &mut self.shell, allow);
+                }
+            }
+        }
+    }
+
+    /// Asks the person a question for an agent: whether it may connect, or
+    /// run a command that asks first. The call waits for the answer.
+    fn ask_for_agent(&self, text: &str) -> bool {
+        let mut dialog = rfd::MessageDialog::new()
+            .set_level(rfd::MessageLevel::Warning)
+            .set_title("Beatlayer")
+            .set_description(text)
+            .set_buttons(rfd::MessageButtons::OkCancelCustom(
+                "Allow".to_owned(),
+                "Don't Allow".to_owned(),
+            ));
+        if let Some(main) = &self.main {
+            main.window
+                .request_user_attention(Some(winit::window::UserAttentionType::Critical));
+            dialog = dialog.set_parent(main.window.as_ref());
+        }
+        match dialog.show() {
+            rfd::MessageDialogResult::Ok | rfd::MessageDialogResult::Yes => true,
+            rfd::MessageDialogResult::Custom(choice) => choice == "Allow",
+            _ => false,
         }
     }
 
@@ -883,6 +1089,10 @@ impl ApplicationHandler<UserEvent> for Host {
                     Ak::AccessibilityDeactivated => surface.ctx.disable_accesskit(),
                 }
                 surface.window.request_redraw();
+            }
+            UserEvent::Agent => {
+                self.serve_agents();
+                self.after_commands(event_loop);
             }
             UserEvent::Peaks => {
                 if let Some(main) = &self.main {

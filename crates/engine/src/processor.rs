@@ -2,7 +2,7 @@
 
 use std::time::Instant;
 
-use bl_core::time::{Frames, TempoMap, Ticks};
+use bl_core::time::{Frames, SampleRate, TempoMap, Ticks};
 use bl_model::ParamId;
 use bl_rt::log::{Level, Writer};
 use bl_rt::rt_log;
@@ -36,7 +36,7 @@ struct Scheduled {
 }
 
 /// A transport command waiting for its frame of the engine clock.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Timed {
     frame: u64,
     command: TransportCommand,
@@ -48,6 +48,93 @@ struct Timed {
 struct LoopFrames {
     start: Frames,
     end: Frames,
+}
+
+/// What one processor hands the next when the engine restarts on a device
+/// (WP-1.13): the engine clock, the transport (the song position and the
+/// insert marker, in beats, and the Arrangement loop), and the commands
+/// still waiting: scheduled ones for their beats, and transport commands
+/// for their frames of the clock. [`Processor::park`] makes it, and
+/// [`Restarter::restart`](crate::Restarter::restart) has the next
+/// processor take it over at its own rate, with the song stopped.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Carry {
+    /// The engine clock when the stream closed. The next processor's clock
+    /// carries on from it, so a frame sent for the clock means the same
+    /// frame either side of a restart.
+    clock: u64,
+    /// The rate the clock ran at.
+    sample_rate: SampleRate,
+    /// The song position: where playback stopped, where Continue resumes.
+    position: Ticks,
+    /// The insert marker: where Play starts.
+    insert_marker: Ticks,
+    /// The Arrangement loop, if it was on.
+    loop_region: Option<LoopRegion>,
+    /// Scheduled commands waiting to fire, in the order they arrived.
+    scheduled: Vec<ScheduledCommand>,
+    /// Transport commands waiting for their frames, in the order they came.
+    timed: Vec<Timed>,
+}
+
+impl Carry {
+    /// The engine clock when the stream closed.
+    #[must_use]
+    pub fn clock(&self) -> u64 {
+        self.clock
+    }
+
+    /// The rate the processor ran at.
+    #[must_use]
+    pub fn sample_rate(&self) -> SampleRate {
+        self.sample_rate
+    }
+
+    /// The song position, in beats: where playback stopped.
+    #[must_use]
+    pub fn position(&self) -> Ticks {
+        self.position
+    }
+
+    /// The insert marker.
+    #[must_use]
+    pub fn insert_marker(&self) -> Ticks {
+        self.insert_marker
+    }
+
+    /// The Arrangement loop, if it was on.
+    #[must_use]
+    pub fn loop_region(&self) -> Option<LoopRegion> {
+        self.loop_region
+    }
+
+    /// The scheduled commands waiting to fire, in the order they arrived.
+    #[must_use]
+    pub fn scheduled(&self) -> &[ScheduledCommand] {
+        &self.scheduled
+    }
+
+    /// The frame of the next processor's clock, running at `rate`, for
+    /// `frame` of this one's: as long after the restart as it was after the
+    /// stream closed. A frame already past stays past, so its command runs
+    /// as soon as the next processor starts.
+    pub(crate) fn frame_at(&self, frame: u64, rate: SampleRate) -> u64 {
+        if frame <= self.clock {
+            return frame;
+        }
+        let ahead = (frame - self.clock) as f64 * rate.as_f64() / self.sample_rate.as_f64();
+        // A float-to-integer cast saturates.
+        self.clock.saturating_add(ahead.round() as u64)
+    }
+}
+
+/// Whether a transport command starts the song from where it's stopped,
+/// which nothing does by itself across a restart (device-changes R7).
+pub(crate) fn starts_playback(command: TransportCommand) -> bool {
+    matches!(
+        command,
+        TransportCommand::Play | TransportCommand::Continue | TransportCommand::PlayStop
+    )
 }
 
 /// The engine on the audio thread: it runs the current program once per
@@ -213,6 +300,94 @@ impl Processor {
         self.last = frames;
         self.finish(began, frames);
         self.output()
+    }
+
+    /// Takes what's waiting on the queue and publishes the state, without
+    /// processing audio: a processor about to start on a device is ready,
+    /// and shows its program, position, and rate, before its first block.
+    /// Called off the audio thread.
+    pub(crate) fn prime(&mut self) {
+        self.drain();
+        self.publish(0.0);
+    }
+
+    /// Stops the transport where it is and publishes a state with it
+    /// stopped, silent meters, and no load, for a processor whose stream has
+    /// closed, and returns what the processor that takes over needs
+    /// ([`carry`](Self::carry), taken before the stop). Called off the audio
+    /// thread, once the stream is gone.
+    #[must_use]
+    pub fn park(&mut self) -> Carry {
+        let carry = self.carry();
+        // Spec: device-changes R1
+        self.playing = false;
+        self.silence_meters();
+        self.publish(0.0);
+        carry
+    }
+
+    /// Lets every meter fall to silence at once, for a processor that has
+    /// stopped making sound.
+    fn silence_meters(&mut self) {
+        if let Some(program) = self.program.as_mut() {
+            let program = program.get_mut();
+            program.silence_meters();
+        }
+    }
+
+    /// What the processor that takes over needs: the clock, the transport
+    /// in beats, the scheduled commands waiting to fire, and the transport
+    /// commands waiting for their frames. Of those, it leaves out any that
+    /// would start the song, which nothing does by itself after a restart
+    /// (device-changes R7), and, if the song is playing, any Stop, which the
+    /// restart has done already: run on the stopped song, it would send it
+    /// back to 1.1.1. Allocates: call it off the audio thread.
+    #[must_use]
+    pub fn carry(&self) -> Carry {
+        let rate = self.config.sample_rate;
+        let timed = self
+            .timed
+            .iter()
+            .filter(|entry| {
+                !starts_playback(entry.command)
+                    && !(self.playing && entry.command == TransportCommand::Stop)
+            })
+            .copied()
+            .collect();
+        Carry {
+            clock: self.clock,
+            sample_rate: rate,
+            position: self.tempo().frames_to_ticks(self.position, rate),
+            insert_marker: self.insert_marker,
+            loop_region: self.loop_region,
+            scheduled: self.scheduled.iter().map(|entry| entry.command).collect(),
+            timed,
+        }
+    }
+
+    /// Takes over from the processor before this one (WP-1.13): carries on
+    /// its clock, puts the song position and the insert marker on the same
+    /// beats at this processor's rate, plays the same loop, and waits for
+    /// the same commands, each transport command as long after the restart
+    /// as it was after the stream closed. The song is stopped
+    /// (device-changes R7), so Continue resumes where it was. Called off the
+    /// audio thread, before the first block, once the program is in place,
+    /// so positions fall on frames through its tempo map.
+    pub(crate) fn take_over(&mut self, carry: &Carry) {
+        let rate = self.config.sample_rate;
+        self.clock = carry.clock;
+        self.playing = false;
+        self.position = self.frames_at(carry.position);
+        self.insert_marker = carry.insert_marker;
+        self.loop_region = carry.loop_region;
+        self.update_loop_frames();
+        for &command in &carry.scheduled {
+            self.schedule(command);
+        }
+        for entry in &carry.timed {
+            self.queue_transport(entry.command, carry.frame_at(entry.frame, rate));
+        }
+        self.publish(0.0);
     }
 
     /// The last block's output.
@@ -625,6 +800,11 @@ impl Processor {
             0.0
         };
         self.cpu_load_max = self.cpu_load_max.max(cpu_load);
+        self.publish(cpu_load);
+    }
+
+    /// Publishes the state for the UI, with this load.
+    fn publish(&mut self, cpu_load: f32) {
         let position_ticks = self
             .tempo()
             .frames_to_ticks(self.position, self.config.sample_rate);

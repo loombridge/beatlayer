@@ -9,15 +9,20 @@
 //! While the person has the agent server switched on (Settings, Tempo &
 //! MIDI), the host runs it (`bl-agent`, WP-1.15): its threads hand each
 //! request to this event loop, which runs it on the same shell, and asks
-//! the person when an agent connects for the first time or wants to run a
-//! command that asks first.
+//! the person when an agent connects without its own token or wants to run
+//! a command that asks first. A call that comes while the person drags
+//! waits, and runs after the drop as its own undo step (WP-1.15b). The
+//! engine the shell plays the set through is the agent API's too
+//! ([`Agent::sync_engine`]): agents' transport commands and scheduled
+//! commands go on the queue the person's transport commands take, and
+//! fired scheduled commands come back as the agents' undo steps.
 
 use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use bl_agent::Agent;
-use bl_agent::http::{HttpConfig, HttpServer, Served};
+use bl_agent::http::{HttpConfig, HttpServer, Parked, Served};
 use bl_shell::agent::AgentServerStatus;
 use bl_shell::audio::AudioHost;
 use bl_shell::files::ProjectFiles;
@@ -46,6 +51,11 @@ use crate::Args;
 
 /// How often the CPU meter reads the engine's load.
 const CPU_METER_PERIOD: Duration = Duration::from_millis(500);
+
+/// How often the loop hands the engine's reports to the agent API while
+/// agents' scheduled commands wait to fire, so the set follows what played
+/// within a few milliseconds (WP-1.15b).
+const AGENT_ENGINE_PERIOD: Duration = Duration::from_millis(10);
 
 /// How long after a command the loop keeps looking at the engine's
 /// transport between frames, so a start or stop shows as soon as the engine
@@ -221,6 +231,8 @@ struct Host {
     /// The settings the agent server last failed to start with, so it isn't
     /// retried until they change.
     agent_failed: Option<HttpConfig>,
+    /// Agents' calls waiting for the person's gesture to end.
+    agent_parked: Vec<Parked>,
 }
 
 /// Runs the app until it quits.
@@ -322,6 +334,7 @@ pub fn run(args: Args) -> Result<(), String> {
         agent: Agent::for_app(),
         agent_server: None,
         agent_failed: None,
+        agent_parked: Vec::new(),
     };
     host.sync_agent_server();
     event_loop
@@ -742,6 +755,8 @@ impl Host {
             }
         }
         self.sync_agent_server();
+        self.resume_agents();
+        self.agent.sync_engine(&mut self.shell);
         if self.shown_revision != Some(self.shell.revision()) {
             self.shown_revision = Some(self.shell.revision());
             #[cfg(any(target_os = "macos", windows))]
@@ -889,12 +904,14 @@ impl Host {
         let settings = self.shell.agent_settings();
         let wanted = (settings.server && !settings.token.is_empty()).then(|| HttpConfig {
             port: settings.port,
-            token: settings.token.clone(),
+            token: settings.token.expose().to_owned(),
         });
         let running = self.agent_server.as_ref().map(|(_, config)| config);
         if running != wanted.as_ref() {
             if let Some((server, _)) = self.agent_server.take() {
                 server.stop();
+                // Their connections have closed.
+                self.agent_parked.clear();
             }
             if let Some(config) = wanted.filter(|c| self.agent_failed.as_ref() != Some(c)) {
                 let proxy = Mutex::new(self.proxy.clone());
@@ -923,12 +940,16 @@ impl Host {
         if !self.shell.agent_settings().server {
             self.agent_failed = None;
         }
+        // Each allowed agent's own token speaks for it (WP-1.15b).
+        if let Some((server, _)) = &self.agent_server {
+            server.set_agent_tokens(self.shell.agent_settings());
+        }
         // Agents the person forgot lose their sessions.
         let forgotten: Vec<String> = self
             .agent
             .sessions()
             .filter(|(_, s)| s.protocol.is_some())
-            .map(|(_, s)| s.client.name.clone())
+            .filter_map(|(_, s)| s.agent.clone())
             .filter(|name| self.shell.agent_settings().client(name).is_none())
             .collect();
         for name in forgotten {
@@ -953,14 +974,41 @@ impl Host {
             return;
         };
         let jobs: Vec<_> = std::iter::from_fn(|| server.try_job()).collect();
+        // What the engine has done, so `status` and scheduling see it.
+        self.agent.sync_engine(&mut self.shell);
         for job in jobs {
-            match bl_agent::http::serve(&mut self.agent, &mut self.shell, job) {
-                Served::Done => {}
-                Served::Waiting(pending) => {
-                    let allow = self.ask_for_agent(&pending.question().text());
-                    pending.finish(&mut self.agent, &mut self.shell, allow);
-                }
+            let served = bl_agent::http::serve(&mut self.agent, &mut self.shell, job);
+            self.agent_served(served);
+            // What a call asked of the engine goes to it straight away.
+            self.agent.sync_engine(&mut self.shell);
+        }
+    }
+
+    /// Carries out what serving an agent's request came to: asking the
+    /// person, or keeping a call until the person's gesture ends.
+    fn agent_served(&mut self, served: Served) {
+        match served {
+            Served::Done => {}
+            Served::Waiting(pending) => {
+                let allow = self.ask_for_agent(&pending.question().text());
+                pending.finish(&mut self.agent, &mut self.shell, allow);
             }
+            Served::Parked(parked) => self.agent_parked.push(parked),
+        }
+    }
+
+    /// Once the person's gesture has ended, runs the agents' calls that
+    /// waited for it, in the order they came, each as its own undo step
+    /// (WP-1.15b).
+    fn resume_agents(&mut self) {
+        if self.shell.gesture_under_way() || !self.agent.holds_calls() {
+            return;
+        }
+        while let Some(served) =
+            bl_agent::http::resume(&mut self.agent, &mut self.shell, &mut self.agent_parked)
+        {
+            self.agent_served(served);
+            self.agent.sync_engine(&mut self.shell);
         }
     }
 
@@ -1198,6 +1246,18 @@ impl ApplicationHandler<UserEvent> for Host {
             .audio()
             .is_running()
             .then_some(self.next_cpu_sample);
+        // Agents' scheduled commands that fire come back as their undo
+        // steps (WP-1.15b): hand the engine's reports over, and look again
+        // soon while any wait.
+        let revision = self.shell.revision();
+        self.agent.sync_engine(&mut self.shell);
+        if self.shell.revision() != revision {
+            self.after_commands(event_loop);
+        }
+        if self.agent.scheduled_waiting() > 0 && self.shell.audio().engine_running() {
+            let next = now + AGENT_ENGINE_PERIOD;
+            wake = Some(wake.map_or(next, |w| w.min(next)));
+        }
         if let Some(until) = self.watch_transport_until {
             if now < until {
                 // A start, stop, or jump shows at once: a change the

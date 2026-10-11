@@ -28,7 +28,7 @@ use bl_shell::Shell;
 use serde_json::{Value, json};
 
 use crate::jsonrpc;
-use crate::server::{Agent, Outcome, PROTOCOL_VERSIONS, Question};
+use crate::server::{Agent, Credential, Outcome, PROTOCOL_VERSIONS, Question};
 
 /// How a client reaches the server.
 pub trait Transport {
@@ -359,7 +359,8 @@ impl Transport for Http {
 
 /// The agent API in this process, with its own shell: for tests that also
 /// drive the shell or an engine between calls. Questions for the person go
-/// to `answer`.
+/// to `answer`. Its session carries no token unless it's made with
+/// [`InProcess::with_credential`], as one over HTTP carries one.
 pub struct InProcess {
     /// The agent API.
     pub agent: Agent,
@@ -384,8 +385,16 @@ impl std::fmt::Debug for InProcess {
 impl InProcess {
     /// The agent API with `shell`, declining every question.
     #[must_use]
-    pub fn new(mut agent: Agent, shell: Shell) -> Self {
-        let session = agent.open_session(None);
+    pub fn new(agent: Agent, shell: Shell) -> Self {
+        Self::with_credential(agent, shell, Credential::Local)
+    }
+
+    /// The agent API with `shell`, its session's requests carrying
+    /// `credential`, as an HTTP client's carry a token, declining every
+    /// question.
+    #[must_use]
+    pub fn with_credential(mut agent: Agent, shell: Shell, credential: Credential) -> Self {
+        let session = agent.open_session_as(None, credential);
         Self {
             agent,
             shell,
@@ -408,6 +417,14 @@ impl Transport for InProcess {
                 let allow = (self.answer)(&question);
                 Ok(self.agent.resolve(&mut self.shell, question.id, allow))
             }
+            // One thread can't wait for a gesture it would have to end
+            // itself: tests of waiting use `Agent::handle` and
+            // `Agent::resume`, or the HTTP server.
+            Outcome::Wait(_) => Err(
+                "the call waits for the person's gesture to end, which this client can't wait \
+                 for"
+                .to_owned(),
+            ),
         }
     }
 }

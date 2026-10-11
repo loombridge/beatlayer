@@ -41,6 +41,30 @@
 //! started with `--autonomous`. Commands that change what agents may do
 //! (`agent.*`) are always refused. See [`permission`].
 //!
+//! Since WP-1.15b a call's class is decided from its arguments against the
+//! set as it is: moving, resizing, nudging, duplicating, or pasting clips
+//! over others, or dropping files on them, deletes or shortens what they
+//! cover, so such a call is destructive as well. An agent's rights belong
+//! to its own token, which Beatlayer makes when the person allows it: a
+//! session carries a [`Credential`], and only one carrying the agent's own
+//! token (or the one the person allowed when it first asked) has that
+//! agent's approval and autonomous mode, whatever name its client gives.
+//!
+//! # The person's gestures
+//!
+//! While the person drags clips or a value, the drag is one undo step in
+//! the making. Tool calls that come meanwhile wait ([`Outcome::Wait`]), and
+//! so do scheduled commands that fire; once the drag ends,
+//! [`Agent::resume`] runs them in the order they came, each its own undo
+//! step labelled with its agent's name.
+//!
+//! # The engine
+//!
+//! The host attaches the engine it plays the set through with
+//! [`Agent::sync_engine`]: agents' transport and scheduled commands go on
+//! the queue the person's transport commands take, and the engine's
+//! reports and transport come back.
+//!
 //! # Example
 //!
 //! ```
@@ -79,6 +103,7 @@ pub mod stdio;
 mod tools;
 
 pub use server::{
-    Agent, ClientInfo, Outcome, PROTOCOL_VERSIONS, Question, QuestionKind, STDIO_SESSION, Session,
+    Agent, ClientInfo, Credential, Outcome, PROTOCOL_VERSIONS, Question, QuestionKind,
+    STDIO_SESSION, Session,
 };
 pub use tools::EngineMessage;

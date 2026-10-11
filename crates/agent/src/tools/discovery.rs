@@ -9,7 +9,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use super::{Ctx, ToolOutcome, args, done, failed, step, tool_definition};
-use crate::permission::{Decision, decide};
+use crate::permission::Decision;
 
 pub(crate) const LIST: &str = "list_commands";
 pub(crate) const DESCRIBE: &str = "describe_command";
@@ -67,17 +67,20 @@ pub(crate) fn describe_definition() -> Value {
 /// Whether running a command would ask the person first, or be refused.
 fn access(ctx: &Ctx<'_>, spec: &CommandSpec) -> &'static str {
     let class = spec.permission.unwrap_or(bl_commands::Permission::External);
-    match decide(
-        ctx.mode,
-        ctx.shell,
-        &ctx.session.client.name,
-        class,
-        &[spec.id.as_ref()],
-    ) {
+    match ctx.decide(class, &[spec.id.as_ref()]) {
         Decision::Run => "runs",
         Decision::Ask => "asks the person first",
         Decision::Refuse(_) => "refused to agents",
     }
+}
+
+/// What raises a command's class with its arguments, for the commands
+/// whose class can rise (WP-1.15b).
+fn raised(spec: &CommandSpec) -> Option<&'static str> {
+    bl_shell::permission::raised_by_arguments(&spec.id).then_some(
+        "destructive as well when it would place clips over others, deleting or shortening \
+         them, so it then asks the person first unless you're autonomous; a dry run says which",
+    )
 }
 
 /// The first sentence of a description.
@@ -143,6 +146,7 @@ pub(crate) fn list(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
                 "label": spec.label,
                 "permission": spec.permission,
                 "access": access(ctx, spec),
+                "raised_by_arguments": raised(spec),
                 "summary": summary(&spec.description),
             })
         })
@@ -160,6 +164,9 @@ pub(crate) fn describe(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
     let mut described = serde_json::to_value(spec).unwrap_or(Value::Null);
     if let Some(object) = described.as_object_mut() {
         object.insert("access".to_owned(), json!(access(ctx, spec)));
+        if let Some(raised) = raised(spec) {
+            object.insert("raised_by_arguments".to_owned(), json!(raised));
+        }
         if let Some(permission) = spec.permission {
             object.insert("permission_meaning".to_owned(), json!(permission.meaning()));
         }

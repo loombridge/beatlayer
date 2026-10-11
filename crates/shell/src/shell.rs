@@ -27,6 +27,7 @@ use crate::commands::{
     TestToneArgs, TestToneState, ThemeArgs, ViewResult, ZoomArgs,
 };
 use crate::files::{ProjectFiles, SetStore, factory_default_set};
+use crate::permission::CallPermission;
 use crate::settings::{
     OnByDefault, Preferences, SettingsPage, ThemeChoice, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT,
     zoom_factor, zoom_percent, zoom_step,
@@ -344,7 +345,7 @@ impl Shell {
         let media = Arc::new(MediaStore::new());
         audio.set_media(Arc::clone(&media));
         audio.sync(editor.document());
-        Self {
+        let mut shell = Self {
             browser_view,
             media,
             registry,
@@ -372,6 +373,25 @@ impl Shell {
             edit_gesture: None,
             seen_insert_marker: None,
             gesture: false,
+        };
+        shell.give_agents_tokens();
+        shell
+    }
+
+    /// Makes each allowed agent that has no token of its own one (an agent
+    /// allowed before agents had them), and keeps them (WP-1.15b).
+    fn give_agents_tokens(&mut self) {
+        let mut made = false;
+        for client in &mut self.prefs.agent.clients {
+            if client.token.is_empty()
+                && let Ok(token) = agent::new_token()
+            {
+                client.token = token.into();
+                made = true;
+            }
+        }
+        if made {
+            self.save_preferences();
         }
     }
 
@@ -848,6 +868,79 @@ impl Shell {
     #[must_use]
     pub fn gesture_open(&self) -> bool {
         self.edit_gesture.is_some()
+    }
+
+    /// Whether the person's hand is on the set: a gesture that edits it
+    /// (a drag of clips, [`Shell::gesture`]) or one that drags a value
+    /// ([`Shell::begin_gesture`]) is under way. Its edits become one undo
+    /// step when it ends, so an agent's edits wait until then (WP-1.15b).
+    #[must_use]
+    pub fn gesture_under_way(&self) -> bool {
+        self.edit_gesture.is_some() || self.gesture
+    }
+
+    /// Runs a command as [`Shell::run`] does, recording what it changes in
+    /// the set as one undo step named `label`, such as an agent's edit
+    /// labelled with the agent's name. A command that changes nothing in
+    /// the set records nothing. Undo and redo can't be labelled, nor can a
+    /// command that replaces the set (opening or making one).
+    ///
+    /// # Errors
+    ///
+    /// As [`Shell::run`]; the set is unchanged.
+    pub fn run_labelled(
+        &mut self,
+        label: impl Into<std::borrow::Cow<'static, str>>,
+        id: &str,
+        args: Value,
+    ) -> Result<Value, ShellError> {
+        let labelled = !matches!(id, model::UNDO | model::REDO)
+            && (model::handles(id)
+                || edit_ids::handles(id)
+                || matches!(
+                    id,
+                    browser_ids::ADD_TO_ARRANGEMENT | browser_ids::LOAD_SELECTED
+                ));
+        if !labelled || self.edit_gesture.is_some() {
+            return self.run(id, args);
+        }
+        self.editor.begin(label);
+        let result = self.run(id, args);
+        if result.is_ok() {
+            if self.editor.commit().unwrap_or(false) {
+                self.dirty = true;
+            }
+        } else {
+            self.editor.cancel().ok();
+        }
+        self.touch();
+        result
+    }
+
+    /// What calling `id` with `args` needs, decided from its arguments
+    /// against the set as it is now: its registered class, and destructive
+    /// as well when it would delete or shorten clips it doesn't act on, as
+    /// moving, resizing, nudging, duplicating, or pasting clips over others,
+    /// or dropping files on them, does (WP-1.15b). Nothing changes. An
+    /// unknown command is external, the most a command can need.
+    pub fn call_permission(&mut self, id: &str, args: &Value) -> CallPermission {
+        let registered = self
+            .registry
+            .get(id)
+            .and_then(|spec| spec.permission)
+            .unwrap_or(bl_commands::Permission::External);
+        crate::permission::assess(
+            id,
+            args,
+            registered,
+            crate::permission::Scene {
+                insert_marker: self.arrangement.insert_marker(),
+                selected_track: self.arrangement.selected_tracks().first().copied(),
+                editor: &mut self.editor,
+                view: &self.arrangement,
+                clipboard: &self.clipboard,
+            },
+        )
     }
 
     /// Runs one step of a gesture that edits the set, such as dragging
@@ -1770,7 +1863,7 @@ impl Shell {
                     self.prefs.agent.server = on;
                 }
                 if self.prefs.agent.server && self.prefs.agent.token.is_empty() {
-                    self.prefs.agent.token = agent::new_token().map_err(failed)?;
+                    self.prefs.agent.token = agent::new_token().map_err(failed)?.into();
                 }
                 self.save_preferences();
                 Ok(to_value(&AgentServerState::from(&self.prefs.agent)))
@@ -1784,9 +1877,12 @@ impl Shell {
                     });
                 }
                 if self.prefs.agent.client(&client).is_none() {
+                    // Its rights go with a token of its own (WP-1.15b).
+                    let token = agent::new_token().map_err(failed)?;
                     self.prefs.agent.clients.push(agent::AgentClient {
                         name: client,
                         autonomous: false,
+                        token: token.into(),
                     });
                     self.save_preferences();
                 }
@@ -1824,7 +1920,25 @@ impl Shell {
             }
             agent::AGENT_NEW_TOKEN => {
                 Self::args::<NoArgs>(id, args)?;
-                self.prefs.agent.token = agent::new_token().map_err(failed)?;
+                self.prefs.agent.token = agent::new_token().map_err(failed)?.into();
+                self.save_preferences();
+                Ok(to_value(&AgentServerState::from(&self.prefs.agent)))
+            }
+            agent::AGENT_NEW_CLIENT_TOKEN => {
+                let ClientArgs { client } = Self::args(id, args)?;
+                let token = agent::new_token().map_err(failed)?;
+                let Some(entry) = self
+                    .prefs
+                    .agent
+                    .clients
+                    .iter_mut()
+                    .find(|c| c.name == client)
+                else {
+                    return Err(unavailable(&format!(
+                        "no agent called “{client}” is allowed"
+                    )));
+                };
+                entry.token = token.into();
                 self.save_preferences();
                 Ok(to_value(&AgentServerState::from(&self.prefs.agent)))
             }

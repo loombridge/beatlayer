@@ -115,9 +115,21 @@ pub(crate) enum ToolOutcome {
     Ask {
         /// The most far-reaching class among what it would run.
         class: Permission,
+        /// Every class among them that asks first, least reach first.
+        classes: Vec<Permission>,
         /// What it would do, for the person to read.
         summary: String,
     },
+}
+
+/// Classes as the person reads them, such as "destructive and external".
+pub(crate) fn class_names(classes: &[Permission]) -> String {
+    let names: Vec<&str> = classes.iter().map(|class| class.id()).collect();
+    match names.as_slice() {
+        [] => String::new(),
+        [one] => (*one).to_owned(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
 }
 
 impl Ctx<'_> {
@@ -125,25 +137,41 @@ impl Ctx<'_> {
     /// class is `class`: `Ok` to go ahead, or how the call ends instead.
     pub(crate) fn permit(
         &self,
-        class: Permission,
+        classes: &[Permission],
         commands: &[&str],
         summary: impl FnOnce() -> String,
     ) -> Result<(), ToolOutcome> {
-        match decide(
-            self.mode,
-            self.shell,
-            &self.session.client.name,
-            class,
-            commands,
-        ) {
+        let class = classes
+            .iter()
+            .copied()
+            .max()
+            .unwrap_or(Permission::External);
+        match self.decide(class, commands) {
             Decision::Run => Ok(()),
             Decision::Ask if self.confirmed => Ok(()),
             Decision::Ask => Err(ToolOutcome::Ask {
                 class,
+                classes: classes
+                    .iter()
+                    .copied()
+                    .filter(|class| class.asks_first())
+                    .collect(),
                 summary: summary(),
             }),
             Decision::Refuse(message) => Err(ToolOutcome::Done(Err(message))),
         }
+    }
+
+    /// Whether the agent may go ahead with commands whose most far-reaching
+    /// class is `class`, with the rights its session has.
+    pub(crate) fn decide(&self, class: Permission, commands: &[&str]) -> Decision {
+        decide(
+            self.mode,
+            self.shell,
+            self.session.agent.as_deref(),
+            class,
+            commands,
+        )
     }
 
     /// The agent's name, as undo steps and the person see it.

@@ -188,7 +188,7 @@ pub(crate) fn checkpoint(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
                 Permission::Edit
             };
             let tally = tally(&changes);
-            step!(ctx.permit(class, &["checkpoint.restore"], || format!(
+            step!(ctx.permit(&[class], &["checkpoint.restore"], || format!(
                 "Restore checkpoint \u{201c}{name}\u{201d} ({class}): it removes {} and changes \
                  {} of the tracks, clips, and devices.",
                 tally["removed"], tally["modified"]

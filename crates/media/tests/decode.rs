@@ -419,3 +419,30 @@ fn damaged_and_foreign_files_fail_cleanly() {
         }
     }
 }
+
+/// A fixed-blocksize FLAC stream whose header counts its short last block in
+/// the minimum block size, as some encoders write, decodes exactly as the
+/// same stream with the minimum the format calls for. Other decoders read
+/// such files; Beatlayer must too.
+#[test]
+fn a_flac_that_counts_its_short_last_block_decodes_as_written() {
+    let golden = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/golden/single-tone.flac");
+    let bytes = std::fs::read(&golden).unwrap();
+    let min = u16::from_be_bytes([bytes[8], bytes[9]]);
+    let max = u16::from_be_bytes([bytes[10], bytes[11]]);
+    assert_eq!(min, max, "the reference holds the format's minimum");
+
+    let mut quirky = bytes.clone();
+    quirky[8..10].copy_from_slice(&1792u16.to_be_bytes());
+    let decode = |bytes: Vec<u8>| {
+        bl_media::Decoder::from_reader(std::io::Cursor::new(bytes), Some("flac"))
+            .and_then(bl_media::Decoder::decode_to_end)
+            .unwrap()
+    };
+    let written = decode(bytes);
+    let read = decode(quirky);
+    assert_eq!(written.frames(), 96_000);
+    assert_eq!(read.frames(), written.frames());
+    assert!(read == written, "the samples match");
+}

@@ -17,16 +17,18 @@ The roadmap, the architecture, the build plan, and the parity plan with Ableton 
 ## Develop
 
 1. Install Rust with [rustup](https://rustup.rs). The repo pins the toolchain, so rustup fetches the right version on first build.
-1. Install cargo-deny, which checks dependency licences and advisories:
+1. Install cargo-deny, which checks dependency licences and advisories, and cargo-nextest, which runs the tests in parallel:
 
    ```sh
    cargo install --locked cargo-deny
+   cargo install --locked cargo-nextest@0.9.146
    ```
 
-1. Run every check: format, clippy, tests, crate layering, and the dependency policy.
+1. Run every check: format, clippy, tests, crate layering, and the dependency policy. While you work, `--affected` tests only the crates your branch changes and the crates that depend on them, and runs every other check in full.
 
    ```sh
    cargo xtask check
+   cargo xtask check --affected
    ```
 
 1. To build this platform's package, install cargo-packager once, then package:

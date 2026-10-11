@@ -32,11 +32,15 @@ Placement, menus, gestures and keyboard shortcuts match Live's, which is functio
 1. Build to the acceptance criteria. Each criterion is a test or a command whose output you paste into the pull request.
 1. Give every feature a headless test path, through `bl-cli` or a unit test. A feature that can only be tested by clicking isn't done.
 1. Keep to the rules in [AGENTS.md](AGENTS.md): no allocation, lock, or blocking call on an audio thread; engine, model, and device crates never depend on a UI crate; no dependency that `cargo deny` rejects; no plug-in binaries, Ableton files, or third-party audio in the repository.
-1. Run every check. It must pass before you open the pull request.
+1. Run the checks. `--affected` tests only the crates your branch changes, committed or not, and the crates that depend on them, and runs every other check (format, clippy, layering, the dependency policy) in full. It must pass before you open the pull request.
 
    ```sh
-   cargo xtask check
+   cargo xtask check --affected
    ```
+
+   A change to something every crate shares, such as `Cargo.lock`, xtask, or the shared test fixtures, still tests everything, and so does `cargo xtask check` without `--affected`. Pushes to `main` and the nightly run always test everything.
+
+   The tests run under cargo-nextest, in parallel. The property, stress, and kill tests run fewer cases by default (`BL_TEST_DEPTH=quick`); `BL_TEST_DEPTH=full cargo xtask check` runs them as `main` does.
 
 1. If a golden test fails, your change altered what the engine renders. If that's a mistake, fix it. If it's intended, remake the references and say in the pull request why each one changed:
 

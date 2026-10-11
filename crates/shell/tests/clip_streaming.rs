@@ -115,44 +115,47 @@ fn create_fades_on_clip_edges_is_a_kept_preference_that_new_clips_follow() {
     assert_eq!(spec.permission, Some(Permission::Edit));
     assert_eq!(spec.contexts, [Context::Settings]);
 
-    // Off until switched on (its default in a new install is still to
-    // observe in Live): a new clip has no fades.
-    assert!(!shell.create_fades_on_clip_edges());
-    let plain = add(&mut shell, &file);
-    assert_eq!((plain.fade_in, plain.fade_out), (0.0, 0.0));
-
-    let result = shell
-        .run(
-            commands::SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES,
-            json!({ "on": true }),
-        )
-        .unwrap();
-    assert_eq!(result, json!({ "on": true }));
+    // On, as Live's is on a new install: a new clip fades in and out over
+    // 4 ms.
     assert!(shell.create_fades_on_clip_edges());
     let faded = add(&mut shell, &file);
     assert_eq!(
         (faded.fade_in, faded.fade_out),
         (EDGE_FADE_SECONDS, EDGE_FADE_SECONDS)
     );
-    // Switching it isn't an edit of the set.
-    assert_eq!(shell.editor().undo_history().len(), 2);
 
-    // Kept for the next start.
-    assert!(
-        Preferences::load(&config)
-            .unwrap()
-            .create_fades_on_clip_edges
-    );
-    shell
+    // Off, a new clip has no fades.
+    let result = shell
         .run(
             commands::SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES,
             json!({ "on": false }),
         )
         .unwrap();
+    assert_eq!(result, json!({ "on": false }));
+    assert!(!shell.create_fades_on_clip_edges());
+    let plain = add(&mut shell, &file);
+    assert_eq!((plain.fade_in, plain.fade_out), (0.0, 0.0));
+    // Switching it isn't an edit of the set.
+    assert_eq!(shell.editor().undo_history().len(), 2);
+
+    // Kept for the next start.
     assert!(
         !Preferences::load(&config)
             .unwrap()
             .create_fades_on_clip_edges
+            .0
+    );
+    shell
+        .run(
+            commands::SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES,
+            json!({ "on": true }),
+        )
+        .unwrap();
+    assert!(
+        Preferences::load(&config)
+            .unwrap()
+            .create_fades_on_clip_edges
+            .0
     );
     assert!(
         shell

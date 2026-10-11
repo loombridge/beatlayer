@@ -2237,6 +2237,87 @@ mod tests {
         );
     }
 
+    // Spec: audio-clips R16. As observed in Live 12.4.6: a looped clip
+    // trimmed from bar 5 by exactly one loop length keeps its Start marker,
+    // and by a bar more moves it a bar on, wrapping inside the loop brace.
+    #[test]
+    fn trimming_a_looped_clip_wraps_its_start_marker_inside_the_loop() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        let clip = song.fresh();
+        // At 120 BPM a bar is two seconds: the brace is bars 1 to 9 of the
+        // file, and the clip lasts 24 bars.
+        let looped = AudioData {
+            looping: true,
+            loop_start: 0.0,
+            loop_end: Some(16.0),
+            ..AudioData::new(ContentHash([7; 32]))
+        };
+        song.apply(Command::CreateClip {
+            track,
+            clip: Clip::new(
+                clip,
+                Ticks::ZERO,
+                Ticks::WHOLE * 24,
+                ClipData::Audio(looped),
+            ),
+        })
+        .unwrap();
+        let start = |song: &Song| match song.doc.clip(clip).unwrap().data {
+            ClipData::Audio(audio) => audio.start,
+            ClipData::Midi(_) => unreachable!("an audio clip"),
+        };
+        let trim = |song: &mut Song, bar: i64| {
+            song.apply(Command::TrimClipStart {
+                clip,
+                start: Ticks::WHOLE * (bar - 1),
+            })
+            .unwrap();
+        };
+        trim(&mut song, 5);
+        assert_eq!(start(&song), 8.0, "bar 5 of the file");
+        trim(&mut song, 13);
+        assert_eq!(start(&song), 8.0, "one loop on: bar 5 again");
+        trim(&mut song, 14);
+        assert_eq!(start(&song), 10.0, "a bar more: bar 6");
+        trim(&mut song, 23);
+        assert_eq!(start(&song), 12.0, "past two wraps: bar 7");
+        // A brace that ends at the file's end has a length the set doesn't
+        // know, so the marker can't wrap.
+        let to_end = AudioData {
+            loop_end: None,
+            ..looped
+        };
+        let whole = Clip::new(
+            clip,
+            Ticks::ZERO,
+            Ticks::WHOLE * 24,
+            ClipData::Audio(to_end),
+        );
+        let part = whole.part(Ticks::WHOLE * 12, whole.end(), &TempoMap::default());
+        let ClipData::Audio(moved) = part.data else {
+            unreachable!("an audio clip");
+        };
+        assert_eq!(moved.start, 24.0);
+        // Unlooped, it doesn't wrap either.
+        let plain = Clip::new(
+            clip,
+            Ticks::ZERO,
+            Ticks::WHOLE * 24,
+            ClipData::Audio(AudioData {
+                looping: false,
+                ..looped
+            }),
+        );
+        let ClipData::Audio(moved) = plain
+            .part(Ticks::WHOLE * 12, plain.end(), &TempoMap::default())
+            .data
+        else {
+            unreachable!("an audio clip");
+        };
+        assert_eq!(moved.start, 24.0);
+    }
+
     // Spec: audio-clips R16; arrangement-editing R8, R16
     #[test]
     fn a_part_of_a_clip_plays_on_from_where_the_clip_was() {

@@ -28,8 +28,8 @@ use crate::commands::{
 };
 use crate::files::{ProjectFiles, SetStore, factory_default_set};
 use crate::settings::{
-    Preferences, SettingsPage, ThemeChoice, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, zoom_factor,
-    zoom_percent, zoom_step,
+    OnByDefault, Preferences, SettingsPage, ThemeChoice, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT,
+    zoom_factor, zoom_percent, zoom_step,
 };
 use bl_shell_spec::arrangement as view_ids;
 use bl_shell_spec::browser as browser_ids;
@@ -592,7 +592,7 @@ impl Shell {
     /// fades at their edges.
     #[must_use]
     pub fn create_fades_on_clip_edges(&self) -> bool {
-        self.prefs.create_fades_on_clip_edges
+        self.prefs.create_fades_on_clip_edges.0
     }
 
     /// The theme in use.
@@ -792,7 +792,7 @@ impl Shell {
             editor: &mut self.editor,
             audio: &mut self.audio,
             media: &self.media,
-            edge_fades: self.prefs.create_fades_on_clip_edges,
+            edge_fades: self.prefs.create_fades_on_clip_edges.0,
         };
         let outcome = self
             .browser_view
@@ -1687,7 +1687,7 @@ impl Shell {
             }
             ids::SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES => {
                 let SwitchArgs { on } = Self::args(id, args)?;
-                self.prefs.create_fades_on_clip_edges = on;
+                self.prefs.create_fades_on_clip_edges = OnByDefault(on);
                 self.save_preferences();
                 Ok(to_value(&SwitchResult { on }))
             }

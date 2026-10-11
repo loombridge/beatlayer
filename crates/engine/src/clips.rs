@@ -807,8 +807,9 @@ mod tests {
         inside.geometry.region_start = 150;
         assert_eq!(inside.run_at(0, 1000), (Some(150), 50));
         assert_eq!(inside.run_at(50, 1000), (Some(100), 100));
-        // One past the brace's end, as trimming a looped clip leaves it,
-        // starts as far into the repetitions (R16).
+        // Past the brace's end, as trimming a looped clip whose brace ends
+        // at the file's end leaves it, it starts as far into the
+        // repetitions (R16).
         let mut past = clip(true);
         past.geometry.region_start = 425;
         assert_eq!(past.run_at(0, 1000), (Some(125), 75));
@@ -880,6 +881,74 @@ mod tests {
                     g.file_frame(at),
                     "cut at {cut:?}, frame {at}"
                 );
+            }
+        }
+    }
+
+    // Spec: audio-clips R16. A looped clip's part has its Start marker
+    // wrapped back into the brace by whole lengths of it, in seconds. Where
+    // the brace's ends fall on frames, the part plays exactly what the whole
+    // clip did; where they don't, a wrap in seconds and the player's wrap in
+    // whole frames differ by the brace's fraction of a frame each time
+    // round, so the part drifts from the whole by at most that much per
+    // wrap, plus a frame of rounding.
+    #[test]
+    fn a_looped_parts_start_marker_wraps_exactly_where_the_brace_falls_on_frames() {
+        use bl_core::time::Ticks;
+        let rate = SampleRate::HZ_44100;
+        let tempo = TempoMap::default();
+        let id = ClipId(bl_core::id::Id::new(1).unwrap());
+        let r = rate.as_f64();
+        for (loop_end, exact) in [(0.81, true), (0.812_3, false)] {
+            let audio = AudioData {
+                start: 0.0123,
+                looping: true,
+                loop_start: 0.5,
+                loop_end: Some(loop_end),
+                ..AudioData::new(ContentHash([1; 32]))
+            };
+            let whole = Clip::new(id, Ticks(3_141), Ticks::WHOLE * 8, ClipData::Audio(audio));
+            let geometry = |clip: &Clip| {
+                let ClipData::Audio(audio) = &clip.data else {
+                    unreachable!("an audio clip")
+                };
+                Geometry::of(clip, audio, &tempo, rate, Some(1_000_000))
+            };
+            let g = geometry(&whole);
+            let len = (g.loop_end - g.loop_start) as i64;
+            let fraction = ((loop_end - 0.5) * r - len as f64).abs();
+            for i in 1..200 {
+                let cut = whole.start + Ticks(i * 56_789);
+                let part = whole.part(cut, whole.end(), &tempo);
+                let p = geometry(&part);
+                let ClipData::Audio(moved) = part.data else {
+                    unreachable!("an audio clip")
+                };
+                assert!(
+                    moved.start < loop_end,
+                    "the marker wrapped: {}",
+                    moved.start
+                );
+                // How many times round the brace the whole clip has gone.
+                let wraps = ((0.0123 + tempo.ticks_to_seconds(cut)
+                    - tempo.ticks_to_seconds(whole.start)
+                    - 0.5)
+                    / (loop_end - 0.5))
+                    .floor()
+                    .max(0.0);
+                for at in [p.start, p.start + 1, p.end - 1] {
+                    let (a, b) = (p.file_frame(at).unwrap(), g.file_frame(at).unwrap());
+                    let apart = (a as i64 - b as i64).rem_euclid(len);
+                    let apart = apart.min(len - apart);
+                    if exact {
+                        assert_eq!(apart, 0, "cut at {cut:?}");
+                    } else {
+                        assert!(
+                            apart as f64 <= wraps * fraction + 1.0,
+                            "cut at {cut:?}: {apart} frames after {wraps} wraps"
+                        );
+                    }
+                }
             }
         }
     }

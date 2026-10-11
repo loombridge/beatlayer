@@ -125,7 +125,22 @@ fn fold_clip(clip: &mut Map<String, Value>, tempo: &TempoMap) -> Result<(), Stri
             .ok_or("an audio clip's Start marker isn't a number")?,
     };
     let contents = Ticks(start.saturating_sub(offset));
-    let marker = marker + (tempo.ticks_to_seconds(Ticks(start)) - tempo.ticks_to_seconds(contents));
+    let mut marker =
+        marker + (tempo.ticks_to_seconds(Ticks(start)) - tempo.ticks_to_seconds(contents));
+    // A looped clip's marker wraps back inside its loop brace, as a trim
+    // does in version 2; a brace to the file's end has no known length.
+    let looping = audio.get("looping").and_then(Value::as_bool) == Some(true);
+    let loop_start = audio
+        .get("loop_start")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0);
+    if let (true, Some(loop_end)) = (looping, audio.get("loop_end").and_then(Value::as_f64)) {
+        let length = loop_end - loop_start;
+        if length > 0.0 && marker >= loop_end {
+            let into = (marker - loop_end).rem_euclid(length);
+            marker = loop_start + if into < length { into } else { 0.0 };
+        }
+    }
     if marker == 0.0 {
         audio.remove("start");
     } else {
@@ -230,6 +245,20 @@ mod tests {
         assert_eq!(clips[1], audio(None, Some(0.75)));
         assert_eq!(clips[2], audio(None, Some(0.75)));
         assert_eq!(clips[3], midi);
+        // A looped clip's marker wraps inside its brace: three quarters (1.5
+        // seconds) in, past a brace from 0.25 to 1.25, is 0.5.
+        let mut looped = audio(Some(tick(3)), None);
+        looped["data"]["audio"]["looping"] = json!(true);
+        looped["data"]["audio"]["loop_start"] = json!(0.25);
+        looped["data"]["audio"]["loop_end"] = json!(1.25);
+        let after = audio_offsets_to_start_markers(set(vec![looped.clone()])).unwrap();
+        let mut expected = looped;
+        expected.as_object_mut().unwrap().remove("offset");
+        expected["data"]["audio"]["start"] = json!(0.5);
+        assert_eq!(
+            after["document"]["tracks"][0]["children"][0]["clips"][0],
+            expected
+        );
         // A file the migration can't read says why.
         assert!(audio_offsets_to_start_markers(json!({})).is_err());
         let bad = json!({ "document": { "settings": { "tempo": "fast" } } });

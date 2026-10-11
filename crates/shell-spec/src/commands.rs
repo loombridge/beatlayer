@@ -546,7 +546,7 @@ fn specs() -> Vec<CommandSpec> {
             .context(Settings)
             .args::<ThemeArgs>()
             .result::<()>(),
-        // Record, Warp & Launch, Warp and Fades (L-SET-018; WP-1.4b): an
+        // Record, Warp & Launch, Warp/Fades (L-SET-018; WP-1.4b): an
         // edit-class preference, like the theme.
         CommandSpec::new(
             SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES,
@@ -554,11 +554,12 @@ fn specs() -> Vec<CommandSpec> {
         )
         .description(
             "Switches Create Fades on Clip Edges, on the Settings window's Record, Warp & Launch \
-             page. While it's on, each audio clip added to the Arrangement from now on gets \
-             fades of 4 ms (0.004 s) at both edges, so a clip that starts or ends mid-waveform \
-             doesn't click; clips already in the set keep their fades, which `clip.set_fades` \
-             changes. The setting is kept for the next start, and isn't part of the set or an \
-             undo step. The result's `on` is the setting afterwards.",
+             page; it's on in a new install, as Live's is. While it's on, each audio clip added \
+             to the Arrangement from now on gets fades of 4 ms (0.004 s) at both edges, so a \
+             clip that starts or ends mid-waveform doesn't click; clips already in the set keep \
+             their fades, which `clip.set_fades` changes. The setting is kept for the next \
+             start, and isn't part of the set or an undo step. The result's `on` is the setting \
+             afterwards.",
         )
         .permission(Permission::Edit)
         .context(Settings)

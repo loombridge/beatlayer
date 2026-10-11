@@ -96,27 +96,31 @@ fn an_agent_switches_create_fades_on_clip_edges() {
     assert_eq!(described["access"], "runs");
     assert!(described["description"].as_str().unwrap().contains("4 ms"));
 
-    assert_eq!(add(&mut client, &file), (0.0, 0.0), "off until switched on");
-    let result = call(
-        &mut client,
-        "run",
-        json!({ "commands": [{ "command": "settings.set_create_fades_on_clip_edges",
-                               "args": { "on": true } }] }),
-    );
-    assert_eq!(result["ran"], 1);
-    assert!(client.transport().shell.create_fades_on_clip_edges());
+    // On, as Live's is on a new install.
     assert_eq!(
         add(&mut client, &file),
         (EDGE_FADE_SECONDS, EDGE_FADE_SECONDS)
     );
-
-    call(
+    let result = call(
         &mut client,
         "run",
         json!({ "commands": [{ "command": "settings.set_create_fades_on_clip_edges",
                                "args": { "on": false } }] }),
     );
+    assert_eq!(result["ran"], 1);
     assert!(!client.transport().shell.create_fades_on_clip_edges());
     assert_eq!(add(&mut client, &file), (0.0, 0.0));
+
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "settings.set_create_fades_on_clip_edges",
+                               "args": { "on": true } }] }),
+    );
+    assert!(client.transport().shell.create_fades_on_clip_edges());
+    assert_eq!(
+        add(&mut client, &file),
+        (EDGE_FADE_SECONDS, EDGE_FADE_SECONDS)
+    );
     let _ = std::fs::remove_file(&file);
 }

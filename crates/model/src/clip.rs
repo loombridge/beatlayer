@@ -307,24 +307,32 @@ impl AudioData {
     /// The data of a clip whose left edge moved from `from` to `to`: its
     /// Start marker moves by the time between them under `tempo`, so the
     /// clip plays the same audio at the same moments (the audio clips spec,
-    /// R16). A marker that lands a hair before the file's start, as moving
-    /// back by the same ticks can, is the file's start; one further before
-    /// it is left negative, for the caller to refuse.
+    /// R16). With the loop on, a marker that moves later to or past the loop
+    /// brace's end wraps back inside the brace by whole lengths of it, as
+    /// Live's does; a brace that ends at the end of the file, whose length
+    /// the set doesn't know, can't wrap it. A marker that lands a hair
+    /// before the file's start, as moving back by the same ticks can, is
+    /// the file's start; one further before it is left negative, for the
+    /// caller to refuse.
     #[must_use]
     pub fn moved_by(self, from: Ticks, to: Ticks, tempo: &TempoMap) -> Self {
         if from == to {
             return self;
         }
         let by = tempo.ticks_to_seconds(to) - tempo.ticks_to_seconds(from);
-        let start = self.start + by;
-        Self {
-            start: if (-MARKER_SLACK..0.0).contains(&start) {
-                0.0
-            } else {
-                start
-            },
-            ..self
+        let mut start = self.start + by;
+        if (-MARKER_SLACK..0.0).contains(&start) {
+            start = 0.0;
         }
+        if let (true, true, Some(end)) = (self.looping, by > 0.0, self.loop_end) {
+            let length = end - self.loop_start;
+            if length > 0.0 && start >= end {
+                let into = (start - end).rem_euclid(length);
+                // Rounding can leave a remainder of a whole length.
+                start = self.loop_start + if into < length { into } else { 0.0 };
+            }
+        }
+        Self { start, ..self }
     }
 
     /// The same data with [`EDGE_FADE_SECONDS`] fades at both edges: what a

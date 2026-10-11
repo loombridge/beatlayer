@@ -173,6 +173,14 @@ const WIDGET: &[(&str, &str)] = &[
     ),
     ("S-VAL-007", "the focused value field drops a typed value"),
     ("S-VAL-008", "the focused value field sets a typed value"),
+    // WP-1.14: the context menus from the keyboard, each item running what
+    // a right-click's does.
+    (
+        "S-CTX-002",
+        "the focused view opens its selection's context menu: the Arrangement's clip or \
+         time-selection menu (its grid choices run `arrangement.set_grid`), or the chosen \
+         place's in the browser's sidebar (`browser.remove_folder`)",
+    ),
 ];
 
 /// The package that binds each M1 shortcut the shell doesn't: exact IDs
@@ -180,8 +188,6 @@ const WIDGET: &[(&str, &str)] = &[
 /// no command and no package here, or if this names WP-1.7 itself.
 const OWNERS: &[(&str, &str)] = &[
     ("S-VIEW-011", "WP-1.8a"),
-    ("S-FOCUS-013", "WP-1.14"),
-    ("S-FOCUS-014", "WP-1.14"),
     ("S-FILE-007", "WP-1.12"),
     ("S-EDIT-012", "WP-1.8b"),
     ("S-ENV-004", "WP-1.8b"),

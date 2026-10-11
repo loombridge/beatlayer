@@ -57,6 +57,18 @@ pub const FOCUS_NEXT: &str = "focus.next";
 pub const FOCUS_PREVIOUS: &str = "focus.previous";
 /// `focus.toggle_tab_navigation`: switch Use Tab Key to Move Focus.
 pub const FOCUS_TOGGLE_TAB_NAVIGATION: &str = "focus.toggle_tab_navigation";
+/// `focus.next_neighbor`: move the keyboard focus to the same control on
+/// the next track (WP-1.14).
+pub const FOCUS_NEXT_NEIGHBOR: &str = "focus.next_neighbor";
+/// `focus.previous_neighbor`: move the keyboard focus to the same control
+/// on the previous track (WP-1.14).
+pub const FOCUS_PREVIOUS_NEIGHBOR: &str = "focus.previous_neighbor";
+/// `focus.toggle_wrap_navigation`: switch Wrap Keyboard Navigation, which
+/// Settings calls Wrap Tab Navigation (WP-1.14).
+pub const FOCUS_TOGGLE_WRAP_NAVIGATION: &str = "focus.toggle_wrap_navigation";
+/// `settings.set_outline_view_in_focus`: switch Outline View in Focus
+/// (WP-1.14).
+pub const SETTINGS_SET_OUTLINE_VIEW_IN_FOCUS: &str = "settings.set_outline_view_in_focus";
 /// `settings.next_page`: show the next Settings page.
 pub const SETTINGS_NEXT_PAGE: &str = "settings.next_page";
 /// `settings.previous_page`: show the previous Settings page.
@@ -103,10 +115,14 @@ pub const IDS: &[&str] = &[
     FOCUS_NEXT,
     FOCUS_PREVIOUS,
     FOCUS_TOGGLE_TAB_NAVIGATION,
+    FOCUS_NEXT_NEIGHBOR,
+    FOCUS_PREVIOUS_NEIGHBOR,
+    FOCUS_TOGGLE_WRAP_NAVIGATION,
     SETTINGS_NEXT_PAGE,
     SETTINGS_PREVIOUS_PAGE,
     SETTINGS_SET_THEME,
     SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES,
+    SETTINGS_SET_OUTLINE_VIEW_IN_FOCUS,
     AUDIO_DEVICES,
     AUDIO_STATUS,
     AUDIO_CONFIGURE,
@@ -517,6 +533,44 @@ fn specs() -> Vec<CommandSpec> {
             .context(Global)
             .args::<NoArgs>()
             .result::<SwitchResult>(),
+        // The Navigate menu's neighbours (M-NAV-014, M-NAV-015; S-FOCUS-013,
+        // S-FOCUS-014), and its wrap switch (M-NAV-019), WP-1.14.
+        CommandSpec::new(FOCUS_NEXT_NEIGHBOR, "Next Neighbor")
+            .description(
+                "Moves the keyboard focus from a track's control to the same control on the \
+                 next track, such as from one track's volume to the next track's volume, in \
+                 the mixers and the Arrangement's track headers, without changing the \
+                 selected track. Navigate > Next Neighbor runs it whenever there's a next \
+                 track; Option-Tab (Ctrl-Tab) does while Use Tab Key to Move Focus is on. \
+                 Changes nothing in the set.",
+            )
+            .permission(Permission::Read)
+            .contexts([Global, TabFocus])
+            .binding("S-FOCUS-013")
+            .args::<NoArgs>()
+            .result::<()>(),
+        CommandSpec::new(FOCUS_PREVIOUS_NEIGHBOR, "Previous Neighbor")
+            .description(
+                "Moves the keyboard focus from a track's control to the same control on the \
+                 previous track, the reverse of `focus.next_neighbor`. Changes nothing in the \
+                 set.",
+            )
+            .permission(Permission::Read)
+            .contexts([Global, TabFocus])
+            .binding("S-FOCUS-014")
+            .args::<NoArgs>()
+            .result::<()>(),
+        CommandSpec::new(FOCUS_TOGGLE_WRAP_NAVIGATION, "Wrap Keyboard Navigation")
+            .description(
+                "Switches whether Tab and Shift-Tab wrap round at the ends of the focused area \
+                 or track: from its last control to its first, and from its first to its last. \
+                 It's on in a new install, as Live's is; while it's off, they stop at the ends. \
+                 The Settings window calls it Wrap Tab Navigation. Changes nothing in the set.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .args::<NoArgs>()
+            .result::<SwitchResult>(),
         CommandSpec::new(SETTINGS_NEXT_PAGE, "Next Settings Page")
             .description(
                 "Shows the next page of the Settings window, wrapping from the last to the \
@@ -565,6 +619,20 @@ fn specs() -> Vec<CommandSpec> {
         .context(Settings)
         .args::<SwitchArgs>()
         .result::<SwitchResult>(),
+        // Display & Input, Display Options (L-SET-010; WP-1.14).
+        CommandSpec::new(SETTINGS_SET_OUTLINE_VIEW_IN_FOCUS, "Outline View in Focus")
+            .description(
+                "Switches Outline View in Focus, on the Settings window's Display & Input page: \
+             while it's on, as it is in a new install (as Live's is), a border is drawn round \
+             the part of the main window that has the keyboard focus and an outline round the \
+             focused control; while it's off, nothing shows where the focus is. The setting is \
+             kept for the next start, and isn't part of the set or an undo step. The result's \
+             `on` is the setting afterwards.",
+            )
+            .permission(Permission::Edit)
+            .context(Settings)
+            .args::<SwitchArgs>()
+            .result::<SwitchResult>(),
         CommandSpec::new(AUDIO_DEVICES, "List Audio Devices")
             .description(
                 "Lists the driver types this computer offers and, for the chosen one, its \

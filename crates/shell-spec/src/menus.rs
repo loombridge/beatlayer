@@ -19,8 +19,9 @@
 use crate::browser::{ADD_FOLDER as BROWSER_ADD_FOLDER, SET_PREVIEW as BROWSER_PREVIEW};
 use crate::commands::{
     APP_ABOUT, APP_HIDE, APP_QUIT, APP_SETTINGS, AUDIO_TOGGLE_ENGINE, FOCUS_ARRANGEMENT,
-    FOCUS_CONTROL_BAR, FOCUS_NEXT, FOCUS_PREVIOUS, FOCUS_TOGGLE_TAB_NAVIGATION, SET_NEW, SET_OPEN,
-    SET_SAVE, SET_SAVE_AS, VIEW_FULL_SCREEN, VIEW_TOGGLE_BROWSER, VIEW_TOGGLE_SESSION_ARRANGEMENT,
+    FOCUS_CONTROL_BAR, FOCUS_NEXT, FOCUS_NEXT_NEIGHBOR, FOCUS_PREVIOUS, FOCUS_PREVIOUS_NEIGHBOR,
+    FOCUS_TOGGLE_TAB_NAVIGATION, FOCUS_TOGGLE_WRAP_NAVIGATION, SET_NEW, SET_OPEN, SET_SAVE,
+    SET_SAVE_AS, VIEW_FULL_SCREEN, VIEW_TOGGLE_BROWSER, VIEW_TOGGLE_SESSION_ARRANGEMENT,
     VIEW_ZOOM_IN, VIEW_ZOOM_OUT, VIEW_ZOOM_RESET, WINDOW_CLOSE,
 };
 use crate::mixer_view::{
@@ -586,8 +587,14 @@ const NAVIGATE: &[Row] = &[
     SEPARATOR,
     ("M-NAV-012", "Previous", Cmd(FOCUS_PREVIOUS)),
     ("M-NAV-013", "Next", Cmd(FOCUS_NEXT)),
-    ("M-NAV-014", "Previous Neighbor", Key(&["S-FOCUS-014"])),
-    ("M-NAV-015", "Next Neighbor", Key(&["S-FOCUS-013"])),
+    // Enabled whenever there's a neighbour, whatever the Tab setting
+    // (observed in Live 12.4.6).
+    (
+        "M-NAV-014",
+        "Previous Neighbor",
+        Cmd(FOCUS_PREVIOUS_NEIGHBOR),
+    ),
+    ("M-NAV-015", "Next Neighbor", Cmd(FOCUS_NEXT_NEIGHBOR)),
     SEPARATOR,
     ("M-NAV-016", "Browser History Back", Key(&["S-BRW-011"])),
     ("M-NAV-017", "Browser History Forward", Key(&["S-BRW-012"])),
@@ -597,7 +604,11 @@ const NAVIGATE: &[Row] = &[
         "Use Tab Key to Move Focus",
         Cmd(FOCUS_TOGGLE_TAB_NAVIGATION),
     ),
-    ("M-NAV-019", "Wrap Keyboard Navigation", Pending(None)),
+    (
+        "M-NAV-019",
+        "Wrap Keyboard Navigation",
+        Cmd(FOCUS_TOGGLE_WRAP_NAVIGATION),
+    ),
 ];
 
 const OPTIONS: &[Row] = &[
@@ -679,7 +690,8 @@ const OPTIONS: &[Row] = &[
     SEPARATOR,
     ("M-OPT-023", "Solo Switches", Pending(None)),
     ("M-OPT-024", "Cue Switches", Pending(None)),
-    ("M-OPT-025", "Solo in Place", Pending(None)),
+    // `bl-model`'s switch, which the shell turns to the other state.
+    ("M-OPT-025", "Solo in Place", Cmd("mixer.set_solo_in_place")),
     SEPARATOR,
     ("M-OPT-026", "Lock Envelopes", Pending(None)),
     ("M-OPT-027", "MIDI Arrangement Overdub", Pending(None)),

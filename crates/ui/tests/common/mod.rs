@@ -58,6 +58,9 @@ pub struct Harness {
     /// The transport the engine had published when the last frame began,
     /// which that frame drew (WP-1.18).
     pub engine: bl_shell::audio::EngineTransport,
+    /// The menu bar the main window draws itself, as on Linux, if any
+    /// (WP-1.14).
+    pub menu_bar: Option<Vec<bl_shell::menus::Menu>>,
 }
 
 impl Harness {
@@ -92,6 +95,7 @@ impl Harness {
             events: Vec::new(),
             title_bar: false,
             engine: bl_shell::audio::EngineTransport::default(),
+            menu_bar: None,
         }
     }
 
@@ -142,10 +146,18 @@ impl Harness {
         let settings = &mut self.settings;
         let window = self.window;
         let title_bar = self.title_bar;
+        let drawn = self
+            .menu_bar
+            .as_deref()
+            .map(|menus| bl_ui::main_window::DrawnMenuBar {
+                menus,
+                keymap: &self.keymap,
+                platform: Platform::Other,
+            });
         let mut ui_events = Vec::new();
         let mut output = self.ctx.run_ui(input, |ui| {
             ui_events = match window {
-                Window::Main => main.show(ui, shell, theme, title_bar, None),
+                Window::Main => main.show(ui, shell, theme, title_bar, drawn),
                 Window::Settings => settings.show(ui, shell, theme, title_bar),
             };
         });
@@ -160,6 +172,7 @@ impl Harness {
                     let _ = self.shell.invoke(&invocation.id, invocation.args.clone());
                 }
                 UiEvent::FocusArea(area) => self.shell.set_focused_area(*area),
+                UiEvent::FocusTrack(track) => self.shell.set_focused_track(*track),
                 UiEvent::ArrangementViewport { width, height } => {
                     self.shell.set_arrangement_viewport(*width, *height);
                 }

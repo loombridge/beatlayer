@@ -119,7 +119,8 @@ fn paint(
     } else {
         icon(&painter, placement.element, rect, ink, theme);
     }
-    if response.has_focus() {
+    // Spec: accessibility R7: the outline follows Outline View in Focus.
+    if response.has_focus() && crate::focus::outlined(&response.ctx) {
         painter.rect_stroke(
             rect,
             corner,
@@ -464,7 +465,8 @@ pub fn chooser<T: Clone + PartialEq>(
         ink,
         Stroke::NONE,
     ));
-    if response.has_focus() {
+    // Spec: accessibility R7: the outline follows Outline View in Focus.
+    if response.has_focus() && crate::focus::outlined(&response.ctx) {
         painter.rect_stroke(
             rect,
             theme.sizes.corner,
@@ -514,7 +516,8 @@ pub fn switch(
         theme.font(),
         if on { c.accent_text.0 } else { c.text.0 },
     );
-    if response.has_focus() {
+    // Spec: accessibility R7: the outline follows Outline View in Focus.
+    if response.has_focus() && crate::focus::outlined(&response.ctx) {
         painter.rect_stroke(
             rect,
             theme.sizes.corner,
@@ -604,7 +607,8 @@ pub fn number_box(
         theme.font(),
         c.text.0,
     );
-    if response.has_focus() {
+    // Spec: accessibility R7: the outline follows Outline View in Focus.
+    if response.has_focus() && crate::focus::outlined(&response.ctx) {
         painter.rect_stroke(
             rect,
             theme.sizes.corner,

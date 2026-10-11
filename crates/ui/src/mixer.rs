@@ -145,6 +145,9 @@ pub struct MixerUi {
     focus_to: Option<TrackId>,
     /// The columns the last frame built: tracks, returns, Main (R17).
     built: usize,
+    /// A track to scroll into view in a mixer, for a keyboard focus move to
+    /// one of its controls (the accessibility spec, R4).
+    reveal: Option<(MixerOf, TrackId)>,
 }
 
 impl MixerUi {
@@ -152,6 +155,12 @@ impl MixerUi {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Scrolls a track's column into view in a mixer, without moving the
+    /// focus: a focus move to one of its controls follows once it's drawn.
+    pub fn reveal(&mut self, of: MixerOf, track: TrackId) {
+        self.reveal = Some((of, track));
     }
 
     /// How many columns the last frame built.
@@ -279,6 +288,16 @@ impl MixerUi {
                 node.set_label(t.name().to_owned());
                 node.set_bounds(bounds(clip));
             });
+            crate::focus::register(
+                column_ui.ctx(),
+                group,
+                bl_shell::Area::MainView,
+                Some(crate::focus::TrackControl {
+                    place: Place::Mixer(of),
+                    track,
+                    slot: crate::focus::Slot::Column,
+                }),
+            );
             if focus.has_focus() {
                 self.column_keys(&column_ui, shell, &columns, track, of, events);
             }
@@ -316,7 +335,11 @@ impl MixerUi {
                 in_out_section(&mut column_ui, theme, column, span, t.kind());
             }
             if let Some(span) = layout.sends {
-                sends_section(&mut column_ui, theme, column, span, returns.len());
+                let names: Vec<&str> = returns
+                    .iter()
+                    .filter_map(|r| doc.track(*r).map(bl_model::Track::name))
+                    .collect();
+                sends_section(&mut column_ui, theme, column, span, &names);
             }
             if let Some(span) = layout.strip {
                 let strip = StripLayout::compute(column.rect, span);
@@ -413,6 +436,14 @@ impl MixerUi {
                 .or(columns.first())
                 .copied();
         }
+        if let Some((mixer, track)) = self.reveal
+            && mixer == of
+        {
+            self.reveal = None;
+            if let Some(index) = columns.iter().position(|c| *c == track) {
+                scroll_into_view(layout, index, of, events);
+            }
+        }
         let Some(target) = self.focus_to else {
             return;
         };
@@ -420,24 +451,31 @@ impl MixerUi {
             self.focus_to = None;
             return;
         };
-        let in_view = layout
-            .columns
-            .iter()
-            .any(|c| c.index == index && layout.tracks.contains_rect(c.rect.shrink(0.5)));
-        if !in_view {
-            let width = f64::from(crate::layout::mixer::COLUMN_WIDTH);
-            let left = width * index as f64 - f64::from(layout.scroll);
-            let x = if left < 0.0 {
-                left
-            } else {
-                left + width - f64::from(layout.tracks.width())
-            };
-            events.push(UiEvent::Invoke(Invocation::new(
-                ids::SCROLL,
-                json!({ "view": of, "x": x }),
-            )));
-        }
+        scroll_into_view(layout, index, of, events);
     }
+}
+
+/// Scrolls a mixer so the track column at `index` is wholly in view, if it
+/// isn't.
+fn scroll_into_view(layout: &MixerLayout, index: usize, of: MixerOf, events: &mut Vec<UiEvent>) {
+    let in_view = layout
+        .columns
+        .iter()
+        .any(|c| c.index == index && layout.tracks.contains_rect(c.rect.shrink(0.5)));
+    if in_view {
+        return;
+    }
+    let width = f64::from(crate::layout::mixer::COLUMN_WIDTH);
+    let left = width * index as f64 - f64::from(layout.scroll);
+    let x = if left < 0.0 {
+        left
+    } else {
+        left + width - f64::from(layout.tracks.width())
+    };
+    events.push(UiEvent::Invoke(Invocation::new(
+        ids::SCROLL,
+        json!({ "view": of, "x": x }),
+    )));
 }
 
 /// A row of title bars over a mixer's columns: the Session View's top row
@@ -588,14 +626,23 @@ fn in_out_section(ui: &mut Ui, theme: &Theme, column: &Column, span: (f32, f32),
 }
 
 /// The Sends section: a knob per return, disabled until WP-2.19 (R5).
-fn sends_section(ui: &mut Ui, theme: &Theme, column: &Column, span: (f32, f32), returns: usize) {
+/// Each send is named by its return track, as Live's accessibility tree
+/// names them ("A-Reverb"; observed in Live 12.4.6).
+fn sends_section(ui: &mut Ui, theme: &Theme, column: &Column, span: (f32, f32), returns: &[&str]) {
+    let names = returns;
+    let returns = names.len();
     for index in 0..returns {
         let rect = send_knob(column.rect, span, index, returns);
         let letter = char::from(b'A' + (index % 26) as u8).to_string();
         let (name, text) = if column.kind == ColumnKind::Main {
             (format!("Return {letter} Pre/Post"), "Post".to_owned())
         } else {
-            (format!("Send {letter}"), letter.clone())
+            (
+                names
+                    .get(index)
+                    .map_or_else(|| format!("Send {letter}"), |n| (*n).to_owned()),
+                letter.clone(),
+            )
         };
         pending(
             ui,
@@ -733,6 +780,54 @@ impl StripParts<'_> {
         self.shell.editor().document()
     }
 
+    /// Esc from a Session strip's control goes to the track's title bar,
+    /// which the column stands for (observed in Live 12.4.6; the
+    /// accessibility spec, R4). In the Arrangement, Esc is
+    /// `arrangement.focus_title_bar`'s key.
+    fn escape_to_title(&self, ui: &Ui, response: &Response) {
+        let Place::Mixer(of) = self.place else {
+            return;
+        };
+        if !response.has_focus() {
+            return;
+        }
+        // Keep the focus through Esc, to move it rather than drop it. The
+        // value controls set their own filter, which keeps it too.
+        let value = [
+            fader_id(self.place, self.track),
+            pan_id(self.place, self.track),
+        ];
+        if !value.contains(&response.id) {
+            ui.memory_mut(|m| {
+                m.set_focus_lock_filter(
+                    response.id,
+                    egui::EventFilter {
+                        escape: true,
+                        ..Default::default()
+                    },
+                );
+            });
+        }
+        if ui.input(|i| i.key_pressed(Key::Escape)) {
+            ui.memory_mut(|m| m.request_focus(column_id(of, self.track)));
+        }
+    }
+
+    /// Puts a control in the keyboard's order (the accessibility spec, R3
+    /// and R4).
+    fn register(&self, ui: &Ui, id: Id, slot: crate::focus::Slot) {
+        crate::focus::register(
+            ui.ctx(),
+            id,
+            bl_shell::Area::MainView,
+            Some(crate::focus::TrackControl {
+                place: self.place,
+                track: self.track,
+                slot,
+            }),
+        );
+    }
+
     /// The tracks a change reaches, each with its value: the changed track
     /// first.
     fn starts(&self, control: Control) -> Vec<(TrackId, f64)> {
@@ -786,6 +881,10 @@ impl StripParts<'_> {
                     id,
                     egui::EventFilter {
                         vertical_arrows: true,
+                        // Esc goes back to the track's title bar, or drops a
+                        // typed value, rather than just dropping the focus
+                        // (the accessibility spec, R4).
+                        escape: true,
                         ..Default::default()
                     },
                 );
@@ -925,6 +1024,7 @@ impl StripParts<'_> {
         let volume = track.mixer().volume;
         let id = volume_field_id(self.place, self.track);
         let response = ui.interact(rect, id, Sense::click_and_drag());
+        self.register(ui, id, crate::focus::Slot::Volume);
         self.value_drag(ui, &response, Control::Volume, events);
         self.value_keys(ui, &response, Control::Volume, events);
         let typed = self.typing(ui, &response, events);
@@ -1026,7 +1126,20 @@ impl StripParts<'_> {
                     }
                 }
                 // Esc drops what's typed; egui gives the keyboard back.
-                Key::Escape => entry = None,
+                // With nothing typed, it goes back to the track's title bar,
+                // as from any of a track's controls (the accessibility spec,
+                // R4; S-ARR-034).
+                Key::Escape => {
+                    if entry.is_none() && self.place == Place::Header {
+                        events.push(UiEvent::Invoke(Invocation::new(
+                            bl_shell::arrangement_commands::FOCUS_TITLE_BAR,
+                            json!({}),
+                        )));
+                    } else {
+                        ui.memory_mut(|m| m.surrender_focus(id));
+                    }
+                    entry = None;
+                }
                 Key::Backspace => {
                     if let Some(text) = entry.as_mut() {
                         text.pop();
@@ -1065,6 +1178,8 @@ impl StripParts<'_> {
             fader_id(self.place, self.track),
             Sense::click_and_drag(),
         );
+        self.register(ui, response.id, crate::focus::Slot::Volume);
+        self.escape_to_title(ui, &response);
         self.value_drag(ui, &response, Control::Volume, events);
         self.value_keys(ui, &response, Control::Volume, events);
         let c = &self.theme.colors;
@@ -1106,6 +1221,8 @@ impl StripParts<'_> {
             pan_id(self.place, self.track),
             Sense::click_and_drag(),
         );
+        self.register(ui, response.id, crate::focus::Slot::Pan);
+        self.escape_to_title(ui, &response);
         self.value_drag(ui, &response, Control::Pan, events);
         self.value_keys(ui, &response, Control::Pan, events);
         let c = &self.theme.colors;
@@ -1130,14 +1247,14 @@ impl StripParts<'_> {
             painter.line_segment([centre, tip], Stroke::new(2.0, c.text.0));
         }
         focus_ring(&painter, self.theme, rect, &response);
-        self.describe_value(
-            ui,
-            &response,
-            "Track Panning",
-            pan_text(pan),
-            pan,
-            (-1.0, 1.0),
-        );
+        // Live's tree calls it Track Pan, and Main's Main Pan (observed in
+        // Live 12.4.6; the accessibility spec, R1).
+        let name = if track.kind() == TrackKind::Main {
+            "Main Pan"
+        } else {
+            "Track Pan"
+        };
+        self.describe_value(ui, &response, name, pan_text(pan), pan, (-1.0, 1.0));
         if let Some(triangle) = triangle {
             // Spec: mixer-view R6 (I-CLICK-020): the triangle resets pan.
             let id = Id::new(("mixer-pan-reset", self.place, self.track));
@@ -1176,6 +1293,16 @@ impl StripParts<'_> {
         let on = switch.is_on(doc, self.track);
         let id = switch_id(self.place, switch, self.track);
         let response = ui.interact(rect, id, Sense::click());
+        self.register(
+            ui,
+            id,
+            match switch {
+                Switch::Activator => crate::focus::Slot::Activator,
+                Switch::Solo => crate::focus::Slot::Solo,
+                Switch::Arm => crate::focus::Slot::Arm,
+            },
+        );
+        self.escape_to_title(ui, &response);
         let pressed =
             response.clicked() || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter)));
         if pressed {
@@ -1241,7 +1368,16 @@ impl StripParts<'_> {
         let (peak, _) = self.levels();
         let loudest = f64::from(peak[0].max(peak[1]));
         let id = Id::new(("mixer-peak", self.place, self.track));
-        let response = ui.interact(rect, id, Sense::hover());
+        // In the strip's Tab order (observed in Live 12.4.6).
+        let response = ui.interact(rect, id, Sense::focusable_noninteractive());
+        self.register(ui, id, crate::focus::Slot::Peak);
+        self.escape_to_title(ui, &response);
+        focus_ring(
+            &ui.painter_at(rect.expand(3.0)),
+            self.theme,
+            rect,
+            &response,
+        );
         let c = &self.theme.colors;
         let painter = ui.painter_at(rect.expand(1.0));
         painter.rect_filled(rect, self.theme.sizes.corner, c.window.0);
@@ -1362,7 +1498,9 @@ fn digit(key: Key) -> Option<char> {
 }
 
 fn focus_ring(painter: &egui::Painter, theme: &Theme, rect: Rect, response: &Response) {
-    if response.has_focus() {
+    // Spec: accessibility R7. Live draws no outline round the focused
+    // control unless Outline View in Focus is on.
+    if response.has_focus() && crate::focus::outlined(&response.ctx) {
         painter.rect_stroke(
             rect,
             theme.sizes.corner,

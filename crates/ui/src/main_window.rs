@@ -54,6 +54,9 @@ pub enum UiEvent {
     BeginGesture(&'static str),
     /// The drag ended ([`Shell::end_gesture`]).
     EndGesture,
+    /// The keyboard focus is on this track's control, or on no track's,
+    /// for [`Shell::set_focused_track`] (WP-1.14).
+    FocusTrack(Option<bl_model::TrackId>),
 }
 
 /// The main window's UI state between frames.
@@ -66,9 +69,15 @@ pub struct MainWindowUi {
     last_control: Element,
     /// The element under the pointer, for the Info View.
     hovered: Option<Element>,
-    /// A move to the next or previous control, done at the start of the
-    /// next frame (egui forgets one asked for between frames).
-    move_focus: Option<egui::FocusDirection>,
+    /// A move to the next or previous control, or to a neighbour, done at
+    /// the start of the next frame from the order the last frame drew
+    /// (WP-1.14; the accessibility spec, R3 and R4).
+    focus_move: Option<FocusMove>,
+    /// The controls the last frame drew that the keyboard reaches.
+    order: crate::focus::Order,
+    /// A focus move waiting for its control to be drawn, with the frames
+    /// left to wait.
+    pending: Option<(Pending, u8)>,
     /// The Arrangement View's caches and gestures (WP-1.8a).
     arrangement: ArrangementUi,
     /// The browser's scrolling and search field (WP-1.10).
@@ -84,10 +93,37 @@ pub struct MainWindowUi {
     /// Whether a value was being typed into a track header's volume field
     /// when the last frame ended.
     mixer_typing: bool,
+    /// Whether a menu (the drawn menu bar's, a context menu, or the Mixer
+    /// Config Menu) was open when the last frame ended: its keys go to it.
+    menu_open: bool,
     /// Where the last frame put the panes, in points, for view captures
     /// (WP-1.16).
     drawn: Option<ShellLayout>,
 }
+
+/// A move of the keyboard focus asked for by `focus.next`,
+/// `focus.previous`, or a neighbour command.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct FocusMove {
+    backwards: bool,
+    neighbor: bool,
+}
+
+/// A focus move to a control the last frame didn't draw.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Pending {
+    /// A neighbour on a track brought into view.
+    Control(crate::focus::TrackControl),
+    /// The first (or last) of a track's controls, Tab from the view.
+    Enter {
+        place: crate::mixer::Place,
+        track: bl_model::TrackId,
+        backwards: bool,
+    },
+}
+
+/// How many frames a focus move waits for its control to be drawn.
+const PENDING_FRAMES: u8 = 8;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum FocusRequest {
@@ -121,13 +157,16 @@ impl MainWindowUi {
             focus_request: None,
             last_control: Element::BrowserToggle,
             hovered: None,
-            move_focus: None,
+            focus_move: None,
+            order: crate::focus::Order::default(),
+            pending: None,
             arrangement: ArrangementUi::new(),
             browser: BrowserUi::new(),
             transport: TransportFields::new(),
             mixer: MixerUi::new(),
             keymap: None,
             mixer_typing: false,
+            menu_open: false,
             drawn: None,
         }
     }
@@ -154,10 +193,12 @@ impl MainWindowUi {
 
     /// Whether a value is being typed into a Control Bar field: while it
     /// is, key presses go to the field rather than to shortcuts, as they do
-    /// to a text field (the control bar transport spec, R10).
+    /// to a text field (the control bar transport spec, R10). The same while
+    /// a menu is open, so its arrow keys, Enter, and Esc reach it (the
+    /// accessibility spec, R5).
     #[must_use]
     pub fn is_typing(&self) -> bool {
-        self.transport.is_typing() || self.mixer_typing
+        self.transport.is_typing() || self.mixer_typing || self.menu_open
     }
 
     /// The Arrangement View, to give it a peak source or read what it drew.
@@ -178,7 +219,15 @@ impl MainWindowUi {
                 self.focus_request = Some(FocusRequest::Element(self.last_control));
             }
             Effect::FocusArea(Area::MainView) => self.focus_request = Some(FocusRequest::MainView),
-            Effect::MoveFocus { backwards } => self.move_focus = Some(direction(*backwards)),
+            Effect::MoveFocus {
+                backwards,
+                neighbor,
+            } => {
+                self.focus_move = Some(FocusMove {
+                    backwards: *backwards,
+                    neighbor: *neighbor,
+                });
+            }
             _ => {}
         }
         ctx.request_repaint();
@@ -199,10 +248,16 @@ impl MainWindowUi {
     ) -> Vec<UiEvent> {
         let ctx = root.ctx().clone();
         let ctx = &ctx;
-        if let Some(direction) = self.move_focus.take() {
-            ctx.memory_mut(|m| m.move_focus(direction));
-        }
         let mut events = Vec::new();
+        // Spec: accessibility R3, R4, R7. The keyboard's moves go by the
+        // order the last frame drew.
+        crate::menus::menu_keys(ctx);
+        self.order = crate::focus::take(ctx);
+        crate::focus::set_outlined(ctx, shell.outline_view_in_focus());
+        if let Some(step) = self.focus_move.take() {
+            self.move_focus(ctx, shell, step, &mut events);
+        }
+        self.resolve_pending(ctx, &mut events);
         if title_bar {
             draw_title_bar(root, theme, &shell.set_name());
         }
@@ -247,9 +302,22 @@ impl MainWindowUi {
                 "No devices on this track. The Device View arrives with WP-2.4.",
             );
             self.status_bar(ui, shell, theme, &layout, &mut events);
+            outline_focused_area(ui, shell, theme, &layout);
             self.drawn = Some(layout);
         });
         self.mixer_typing = crate::mixer::is_typing(ctx);
+        self.menu_open = egui::Popup::is_any_open(ctx);
+        // The track whose control has the focus, for the neighbour items'
+        // state (the accessibility spec, R4).
+        let order = crate::focus::drawn(ctx);
+        let track = ctx
+            .memory(egui::Memory::focused)
+            .and_then(|id| order.find(id))
+            .and_then(|entry| entry.control)
+            .map(|control| control.track);
+        if track != shell.focused_track() {
+            events.push(UiEvent::FocusTrack(track));
+        }
         let metering = shell
             .meters()
             .iter()
@@ -264,6 +332,159 @@ impl MainWindowUi {
             ctx.request_repaint_after(Duration::from_millis(500));
         }
         events
+    }
+
+    /// Carries out a focus move from the last frame's order (the
+    /// accessibility spec, R3 and R4).
+    fn move_focus(
+        &mut self,
+        ctx: &Context,
+        shell: &Shell,
+        step: FocusMove,
+        events: &mut Vec<UiEvent>,
+    ) {
+        use crate::focus::Neighbor;
+        if egui::Popup::is_any_open(ctx) {
+            // An open menu keeps the keyboard.
+            return;
+        }
+        let focused = ctx.memory(egui::Memory::focused);
+        let tracks = track_order(shell);
+        let selected = shell
+            .arrangement()
+            .selected_tracks()
+            .iter()
+            .find(|t| tracks.contains(t))
+            .copied();
+        let place = match shell.main_view() {
+            MainView::Arrangement => crate::mixer::Place::Header,
+            MainView::Session => crate::mixer::Place::Mixer(bl_shell::mixer_view::MixerOf::Session),
+        };
+        if step.neighbor {
+            // From a track's control, or from the view at the selected
+            // track's title bar (Next Neighbor is enabled whenever there's a
+            // neighbour, observed in Live 12.4.6).
+            let current = focused
+                .and_then(|id| self.order.find(id))
+                .and_then(|entry| entry.control)
+                .or_else(|| {
+                    let track = selected.or(tracks.first().copied())?;
+                    Some(crate::focus::TrackControl {
+                        place,
+                        track,
+                        slot: match place {
+                            crate::mixer::Place::Header => crate::focus::Slot::Title,
+                            crate::mixer::Place::Mixer(_) => crate::focus::Slot::Column,
+                        },
+                    })
+                });
+            let Some(current) = current else {
+                return;
+            };
+            match self.order.neighbor(current, &tracks, step.backwards) {
+                Some(Neighbor::Focus(id)) => focus_on(ctx, id, events),
+                Some(Neighbor::Reveal(target)) => {
+                    self.reveal(target.place, target.track, events);
+                    self.pending = Some((Pending::Control(target), PENDING_FRAMES));
+                }
+                None => {}
+            }
+            return;
+        }
+        let in_view = focused == Some(main_view_id())
+            || (focused.is_none() && shell.focused_area() == Area::MainView);
+        if in_view && shell.main_view() == MainView::Session {
+            // From the Session View, Tab goes into the selected track's strip
+            // (the first track's), after its title bar.
+            let Some(track) = selected.or(tracks.first().copied()) else {
+                return;
+            };
+            match self.order.enter_track(place, track, step.backwards) {
+                Some(id) => focus_on(ctx, id, events),
+                None if !self.order.drew_track(place, track) => {
+                    self.reveal(place, track, events);
+                    self.pending = Some((
+                        Pending::Enter {
+                            place,
+                            track,
+                            backwards: step.backwards,
+                        },
+                        PENDING_FRAMES,
+                    ));
+                }
+                None => {}
+            }
+            return;
+        }
+        // The Arrangement runs through the view with the selected track's
+        // header in it (the first track's with none selected).
+        if let Some(id) = self.order.tab(
+            focused.filter(|id| *id != main_view_id()),
+            shell.focused_area(),
+            selected.or(tracks.first().copied()),
+            step.backwards,
+            shell.wrap_navigation(),
+        ) {
+            focus_on(ctx, id, events);
+        }
+    }
+
+    /// Brings a track into view in the headers or a mixer, for a focus
+    /// move to one of its controls.
+    fn reveal(
+        &mut self,
+        place: crate::mixer::Place,
+        track: bl_model::TrackId,
+        events: &mut Vec<UiEvent>,
+    ) {
+        match place {
+            crate::mixer::Place::Header => events.push(UiEvent::Invoke(Invocation::new(
+                bl_shell::arrangement_commands::SHOW_TRACK,
+                json!({ "track": track }),
+            ))),
+            crate::mixer::Place::Mixer(of) => self.mixer.reveal(of, track),
+        }
+    }
+
+    /// Focuses a control a focus move waits for, once it's drawn.
+    fn resolve_pending(&mut self, ctx: &Context, events: &mut Vec<UiEvent>) {
+        let Some((pending, frames)) = self.pending.take() else {
+            return;
+        };
+        let found = match pending {
+            Pending::Control(control) => self.order.control(control),
+            Pending::Enter {
+                place,
+                track,
+                backwards,
+            } => self.order.enter_track(place, track, backwards),
+        };
+        match found {
+            Some(id) => focus_on(ctx, id, events),
+            None if frames > 1 => self.pending = Some((pending, frames - 1)),
+            None => {}
+        }
+    }
+
+    /// The node a screen reader reads as the Arrangement View's focus while
+    /// the view itself has the keyboard: the selected clip, or the selected
+    /// track's title (the accessibility spec, R2).
+    fn active_descendant(&self, ctx: &Context, shell: &Shell) -> Option<Id> {
+        if shell.main_view() != MainView::Arrangement {
+            return None;
+        }
+        let view = shell.arrangement();
+        if let Some(clip) = self.arrangement.selected_clip_node(view) {
+            return Some(clip);
+        }
+        let drawn = crate::focus::drawn(ctx);
+        view.selected_tracks().iter().find_map(|track| {
+            drawn.control(crate::focus::TrackControl {
+                place: crate::mixer::Place::Header,
+                track: *track,
+                slot: crate::focus::Slot::Title,
+            })
+        })
     }
 
     fn track_area_clicks(&self, ctx: &Context, layout: &ShellLayout, events: &mut Vec<UiEvent>) {
@@ -318,6 +539,13 @@ impl MainWindowUi {
                 };
             }
             let response = element(ui, theme, placement, *rect, &look);
+            if is_live(*el) && response.sense.is_focusable() {
+                let area = match strip {
+                    Strip::ControlBar => Area::ControlBar,
+                    Strip::StatusBar => Area::StatusBar,
+                };
+                crate::focus::register(ui.ctx(), response.id, area, None);
+            }
             if self.focus_request == Some(FocusRequest::Element(*el)) {
                 response.request_focus();
                 self.focus_request = None;
@@ -361,7 +589,7 @@ impl MainWindowUi {
         };
         egui::Popup::menu(response).show(|ui| {
             for item in bl_shell::menus::shown(&controls.items) {
-                crate::menus::item(ui, item, shell, keymap, platform, events);
+                let _ = crate::menus::item(ui, item, shell, keymap, platform, events);
             }
         });
     }
@@ -462,18 +690,17 @@ impl MainWindowUi {
             }
             MainView::Session => self.mixer.show_session(ui, shell, theme, rect, events),
         }
-        if response.has_focus() {
-            ui.painter().rect_stroke(
-                rect.shrink(1.0),
-                0.0,
-                Stroke::new(1.0, theme.colors.focus.0),
-                StrokeKind::Inside,
-            );
-        }
+        // Spec: accessibility R2. With the view focused, the clip or track
+        // the keys select is its active descendant, so a screen reader reads
+        // it as the selection moves.
+        let active = self.active_descendant(ui.ctx(), shell);
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Panel, true, name));
         ui.ctx().accesskit_node_builder(response.id, |node| {
             node.set_role(Role::Pane);
             node.set_description(note.to_owned());
+            if let Some(id) = active {
+                node.set_active_descendant(id.accesskit_id());
+            }
         });
     }
 
@@ -517,6 +744,50 @@ impl MainWindowUi {
             egui::pos2(rect.left() + 8.0, y),
             galley,
             theme.colors.text_dim.0,
+        );
+    }
+}
+
+/// Moves the keyboard focus to a control: a part of the browser through
+/// `focus.browser`, so the shell knows which part's keys apply, and any
+/// other control directly.
+fn focus_on(ctx: &Context, id: Id, events: &mut Vec<UiEvent>) {
+    match crate::browser::part_of(id) {
+        Some(part) => events.push(UiEvent::Invoke(Invocation::new(
+            bl_shell::browser_commands::FOCUS_BROWSER,
+            json!({ "part": part }),
+        ))),
+        None => ctx.memory_mut(|m| m.request_focus(id)),
+    }
+}
+
+/// The tracks in the order the neighbour keys move through them: the
+/// mixer's columns (the Arrangement's track order), then the returns and
+/// Main.
+fn track_order(shell: &Shell) -> Vec<bl_model::TrackId> {
+    shell.neighbor_order()
+}
+
+/// Draws a border round the area with the keyboard focus while Outline View
+/// in Focus is on (the accessibility spec, R7; I-FOCUS-009). It's off by
+/// default, as Live's is, and then nothing shows where the focus is.
+fn outline_focused_area(ui: &Ui, shell: &Shell, theme: &Theme, layout: &ShellLayout) {
+    if !shell.outline_view_in_focus() || shell.focused_window() != bl_shell::WindowKind::Main {
+        return;
+    }
+    let rect = match shell.focused_area() {
+        Area::ControlBar => Some(layout.control_bar),
+        Area::Browser => layout.browser,
+        Area::MainView => Some(layout.main_view),
+        Area::Detail => Some(layout.detail),
+        Area::StatusBar => Some(layout.status_bar),
+    };
+    if let Some(rect) = rect {
+        ui.painter().rect_stroke(
+            rect.shrink(1.0),
+            0.0,
+            Stroke::new(1.0, theme.colors.focus.0),
+            StrokeKind::Inside,
         );
     }
 }

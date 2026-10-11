@@ -413,8 +413,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Option+Tab"]
 win = ["Ctrl+Tab"]
-status = "pending"
-package = "WP-1.14"
+status = "bound"
+commands = [
+  { id = "focus.next_neighbor", contexts = ["tab-focus"] },
+]
 
 [[shortcut]]
 id = "S-FOCUS-014"
@@ -425,8 +427,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Option+Shift+Tab"]
 win = ["Ctrl+Shift+Tab"]
-status = "pending"
-package = "WP-1.14"
+status = "bound"
+commands = [
+  { id = "focus.previous_neighbor", contexts = ["tab-focus"] },
+]
 
 [[shortcut]]
 id = "S-FILE-001"
@@ -3707,8 +3711,8 @@ trigger = "press"
 milestone = "M1"
 mac = ["Ctrl+Option+Shift+M"]
 win = ["Menu", "Shift+F10"]
-status = "pending"
-package = "WP-1.8b"
+status = "widget"
+handler = "the focused view opens its selection's context menu: the Arrangement's clip or time-selection menu (its grid choices run `arrangement.set_grid`), or the chosen place's in the browser's sidebar (`browser.remove_folder`)"
 
 [[shortcut]]
 id = "S-A11Y-001"

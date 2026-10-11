@@ -74,6 +74,16 @@ impl ContextMenus {
         }
     }
 
+    /// The keys opened a menu (S-CTX-002): the clips' if any are selected,
+    /// otherwise the time selection's.
+    pub fn open_from_keys(&mut self, clips_selected: bool) {
+        self.kind = if clips_selected {
+            MenuKind::Clip
+        } else {
+            MenuKind::Time
+        };
+    }
+
     /// Draws the open menu's items.
     pub fn show(&self, ui: &mut Ui, shell: &Shell, events: &mut Vec<UiEvent>) {
         let menu = match self.kind {
@@ -89,7 +99,9 @@ impl ContextMenus {
                 choices(ui, item.row, 3, AdaptiveGrid::ALL.len(), |ui, i| {
                     let choice = AdaptiveGrid::ALL[i];
                     let on = !grid.fixed_on && grid.adaptive == choice;
-                    if ui.selectable_label(on, choice.label()).clicked() {
+                    let response = ui.selectable_label(on, choice.label());
+                    crate::menus::register_item(ui.ctx(), &response);
+                    if response.clicked() {
                         invoke(events, view_ids::SET_GRID, json!({ "adaptive": choice }));
                         ui.close();
                     }
@@ -99,13 +111,17 @@ impl ContextMenus {
                 choices(ui, item.row, 5, FixedGrid::ALL.len(), |ui, i| {
                     let choice = FixedGrid::ALL[i];
                     let on = grid.fixed_on && grid.fixed == choice;
-                    if ui.selectable_label(on, choice.label()).clicked() {
+                    let response = ui.selectable_label(on, choice.label());
+                    crate::menus::register_item(ui.ctx(), &response);
+                    if response.clicked() {
                         invoke(events, view_ids::SET_GRID, json!({ "fixed": choice }));
                         ui.close();
                     }
                 });
             } else {
-                crate::menus::item(ui, item, shell, &self.keymap, self.platform, events);
+                let response =
+                    crate::menus::item(ui, item, shell, &self.keymap, self.platform, events);
+                crate::menus::take_focus_first(ui, &response);
             }
         }
     }

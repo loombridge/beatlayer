@@ -65,6 +65,12 @@ pub fn lanes_id() -> Id {
     Id::new("arrangement-lanes")
 }
 
+/// The ID of a clip's node in the accessibility tree.
+#[must_use]
+pub fn clip_id(clip: bl_model::ClipId) -> Id {
+    Id::new(("arrangement-clip", clip))
+}
+
 /// The ID of the beat-time ruler.
 #[must_use]
 pub fn beat_ruler_id() -> Id {
@@ -164,6 +170,8 @@ pub struct ArrangementUi {
     /// Where the last frame put the Arrangement's mixer, while it shows
     /// (WP-1.9).
     mixer: Option<Rect>,
+    /// The clips this frame put in the accessibility tree (WP-1.14).
+    described: Vec<bl_model::ClipId>,
 }
 
 impl std::fmt::Debug for ArrangementUi {
@@ -206,6 +214,7 @@ impl ArrangementUi {
             menus: ContextMenus::new(),
             playhead: None,
             mixer: None,
+            described: Vec::new(),
         }
     }
 
@@ -395,6 +404,34 @@ impl ArrangementUi {
             self.menus.open(&clip_lanes, pos, events);
         }
         lanes_response.context_menu(|ui| self.menus.show(ui, shell, events));
+        // S-CTX-002: the keys open the same menu, for the selected clips or
+        // at the insert marker (the accessibility spec, R8).
+        if ui.ctx().memory(|m| m.has_focus(main_view_id())) && crate::menus::context_menu_keys(ui) {
+            let clip = self
+                .shown
+                .iter()
+                .find(|s| view.is_clip_selected(s.clip) && lanes.intersects(s.rect));
+            let at = clip.map_or_else(
+                || {
+                    let x = lanes.left() + horizontal.x(view.insert_marker()) as f32;
+                    let row = view
+                        .selected_tracks()
+                        .first()
+                        .and_then(|t| self.rows.iter().find(|r| r.track == *t))
+                        .map_or(0.0, |r| r.top - scroll_y);
+                    pos2(
+                        x.clamp(lanes.left(), lanes.right()),
+                        (lanes.top() + row + 4.0).clamp(lanes.top(), lanes.bottom()),
+                    )
+                },
+                |shown| shown.rect.intersect(lanes).left_top() + egui::vec2(4.0, 4.0),
+            );
+            self.menus.open_from_keys(clip.is_some());
+            crate::menus::open_keyboard_context_menu(ui.ctx(), lanes_id(), at);
+        }
+        crate::menus::keyboard_context_menu(&lanes_response, |ui| {
+            self.menus.show(ui, shell, events);
+        });
         self.draw_overlays(ui, view, theme, &layout, horizontal);
 
         // The rulers.
@@ -1039,6 +1076,17 @@ impl ArrangementUi {
         }
     }
 
+    /// The selected clip this frame put in the accessibility tree, which
+    /// the view reports as its active descendant, so a screen reader reads
+    /// the clip the keys select (the accessibility spec, R2).
+    #[must_use]
+    pub fn selected_clip_node(&self, view: &ArrangementView) -> Option<Id> {
+        self.described
+            .iter()
+            .find(|clip| view.is_clip_selected(**clip))
+            .map(|clip| clip_id(*clip))
+    }
+
     fn header_controls(
         &self,
         ui: &mut Ui,
@@ -1133,6 +1181,10 @@ impl ArrangementUi {
             if response.clicked() {
                 invoke(events, command, json!({}));
             }
+            // Optimize Height and Width come after the selected track's
+            // header in the Arrangement's Tab order (observed in Live
+            // 12.4.6; the accessibility spec, R4).
+            crate::focus::register(ui.ctx(), id, bl_shell::Area::MainView, None);
             response.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, on, name));
         }
     }
@@ -1140,7 +1192,7 @@ impl ArrangementUi {
     /// The view's own accessible node, a pane named as the main view is, and
     /// the clips on screen as items in it.
     fn accessibility(
-        &self,
+        &mut self,
         ui: &mut Ui,
         view: &ArrangementView,
         doc: &Document,
@@ -1153,6 +1205,7 @@ impl ArrangementUi {
                 node.set_label("Track Lanes".to_owned());
             })
             .is_some();
+        self.described.clear();
         if !enabled {
             return;
         }
@@ -1168,7 +1221,8 @@ impl ArrangementUi {
             let Some(clip) = doc.clip(shown.clip) else {
                 continue;
             };
-            let id = Id::new(("arrangement-clip", shown.clip));
+            let id = clip_id(shown.clip);
+            self.described.push(shown.clip);
             let rect = shown.rect.intersect(lanes);
             let _ = ui.interact(rect, id, Sense::hover());
             let signatures = &doc.settings().time_signatures;
@@ -1213,16 +1267,21 @@ impl ArrangementUi {
         let focused = shell.focused_area() == bl_shell::Area::MainView
             && shell.focused_window() == bl_shell::WindowKind::Main
             && !ui.ctx().text_edit_focused()
-            && ui
-                .ctx()
-                .memory(|m| m.focused().is_none_or(|id| id == main_view_id()));
+            && ui.ctx().memory(|m| {
+                // The view, or a track's title bar in its Tab order, has
+                // the keyboard: the arrows move the selection.
+                m.focused().is_none_or(|id| {
+                    id == main_view_id()
+                        || self.rows.iter().any(|r| headers::title_id(r.track) == id)
+                })
+            });
         if !focused {
             return;
         }
-        if ui.ctx().memory(|m| m.has_focus(main_view_id())) {
+        if let Some(focused) = ui.ctx().memory(egui::Memory::focused) {
             ui.ctx().memory_mut(|m| {
                 m.set_focus_lock_filter(
-                    main_view_id(),
+                    focused,
                     EventFilter {
                         horizontal_arrows: true,
                         vertical_arrows: true,

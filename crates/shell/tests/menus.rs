@@ -85,6 +85,9 @@ fn every_shell_command_is_on_a_menu_or_a_control() {
         commands::SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES,
         // The Display & Input page's Zoom (interface-zoom R4).
         commands::VIEW_SET_ZOOM,
+        // The Display & Input page's Outline View in Focus (the
+        // accessibility spec, R7).
+        commands::SETTINGS_SET_OUTLINE_VIEW_IN_FOCUS,
         commands::AUDIO_DEVICES,
         commands::AUDIO_STATUS,
         commands::AUDIO_CONFIGURE,

@@ -548,7 +548,12 @@ fn every_part_reaches_assistive_technology() {
     // R4); the sends wait for WP-2.19.
     let solo = nodes.iter().find(|n| n.label == "Solo").unwrap();
     assert!(!solo.disabled);
-    let send = nodes.iter().find(|n| n.label == "Send A").unwrap();
+    // A send is named by its return track (observed in Live 12.4.6), or by
+    // its letter where the set has no return for it.
+    let send = nodes
+        .iter()
+        .find(|n| n.role == Role::Slider && n.description.contains("WP-2.19"))
+        .unwrap();
     assert!(send.disabled && send.description.contains("WP-2.19"));
     let locator = Harness::node(&nodes, "Set Locator");
     assert!(locator.disabled && locator.description.contains("M6"));

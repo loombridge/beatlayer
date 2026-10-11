@@ -30,6 +30,22 @@ use crate::layout::{ArrangementLayout, BROWSER_ROW, BrowserLayout};
 use crate::main_window::UiEvent;
 use crate::theme::Theme;
 
+/// The part of the browser a focus target is, as `focus.browser` names
+/// it: the keyboard moves between the parts through that command, so the
+/// shell knows which part's keys apply (the accessibility spec, R3).
+#[must_use]
+pub fn part_of(id: Id) -> Option<&'static str> {
+    if id == search_id() {
+        Some("search")
+    } else if id == sidebar_id() {
+        Some("sidebar")
+    } else if id == list_id() {
+        Some("content")
+    } else {
+        None
+    }
+}
+
 /// The search field's ID.
 #[must_use]
 pub fn search_id() -> Id {
@@ -269,6 +285,14 @@ impl BrowserUi {
             .font(theme.small_font())
             .margin(vec2(4.0, 2.0));
         let response = ui.put(layout.search, edit);
+        // Tab's order in the browser (the accessibility spec, R3;
+        // I-FOCUS-007): the search field, the sidebar, then the list.
+        crate::focus::register(ui.ctx(), response.id, bl_shell::Area::Browser, None);
+        // Live's Info View calls it the Search Field (observed in Live
+        // 12.4.6; the accessibility spec, R1).
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_label("Search Field".to_owned())
+        });
         if response.gained_focus() && view.focus() != Part::Search {
             invoke(events, ids::FOCUS_BROWSER, json!({ "part": "search" }));
         }
@@ -339,6 +363,7 @@ impl BrowserUi {
         let painter = ui.painter_at(area);
         painter.rect_filled(area, 0.0, theme.colors.bar.0);
         let region = ui.interact(area, sidebar_id(), Sense::click());
+        crate::focus::register(ui.ctx(), sidebar_id(), bl_shell::Area::Browser, None);
         ui.ctx().accesskit_node_builder(sidebar_id(), |node| {
             node.set_role(Role::List);
             node.set_label("Browser Sidebar".to_owned());
@@ -425,7 +450,8 @@ impl BrowserUi {
                 }
             }
         }
-        if ui.memory(|m| m.has_focus(sidebar_id())) {
+        // Spec: accessibility R7: outlined only with Outline View in Focus.
+        if ui.memory(|m| m.has_focus(sidebar_id())) && crate::focus::outlined(ui.ctx()) {
             ui.painter().rect_stroke(
                 area.shrink(1.0),
                 0.0,
@@ -474,12 +500,25 @@ impl BrowserUi {
         }
         if let Label::Folder(path) = &info.label {
             // C-BROWSER-017: a folder the person added.
-            response.context_menu(|ui| {
-                if ui.button("Remove from Sidebar").clicked() {
+            let menu = |ui: &mut Ui, events: &mut Vec<UiEvent>| {
+                let response = ui.button("Remove from Sidebar");
+                crate::menus::register_item(ui.ctx(), &response);
+                crate::menus::take_focus_first(ui, &response);
+                if response.clicked() {
                     invoke(events, ids::REMOVE_FOLDER, json!({ "path": path }));
                     ui.close();
                 }
-            });
+            };
+            response.context_menu(|ui| menu(ui, events));
+            // S-CTX-002: the keys open the chosen place's menu while the
+            // sidebar has the keyboard (the accessibility spec, R8).
+            if chosen
+                && ui.memory(|m| m.has_focus(sidebar_id()))
+                && crate::menus::context_menu_keys(ui)
+            {
+                crate::menus::open_keyboard_context_menu(ui.ctx(), id, rect.left_bottom());
+            }
+            crate::menus::keyboard_context_menu(&response, |ui| menu(ui, events));
         }
         response.widget_info(|| WidgetInfo::selected(WidgetType::Other, true, chosen, &info.name));
         ui.ctx().accesskit_node_builder(id, |node| {
@@ -532,6 +571,7 @@ impl BrowserUi {
 
         let list = layout.list;
         let region = ui.interact(list, list_id(), Sense::click());
+        crate::focus::register(ui.ctx(), list_id(), bl_shell::Area::Browser, None);
         ui.ctx().accesskit_node_builder(list_id(), |node| {
             node.set_role(Role::List);
             node.set_label("Browser Items".to_owned());
@@ -599,7 +639,8 @@ impl BrowserUi {
                 theme.colors.pending.0,
             );
         }
-        if ui.memory(|m| m.has_focus(list_id())) {
+        // Spec: accessibility R7: outlined only with Outline View in Focus.
+        if ui.memory(|m| m.has_focus(list_id())) && crate::focus::outlined(ui.ctx()) {
             ui.painter().rect_stroke(
                 list.shrink(1.0),
                 0.0,

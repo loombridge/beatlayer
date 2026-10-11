@@ -80,12 +80,16 @@ impl SettingsPage {
         }
     }
 
-    /// Whether this build has the page's settings, or only its place in the
-    /// chooser. The shell (WP-1.7) builds Audio and the theme choice, and
-    /// WP-1.17 Display & Input's Zoom.
+    /// Whether this build has any of the page's settings, or only its place
+    /// in the chooser. The shell (WP-1.7) builds Audio and the theme choice,
+    /// WP-1.17 Display & Input's Zoom, and WP-1.4b Record, Warp & Launch's
+    /// Create Fades on Clip Edges.
     #[must_use]
     pub const fn is_built(self) -> bool {
-        matches!(self, Self::Audio | Self::ThemeColors | Self::DisplayInput)
+        matches!(
+            self,
+            Self::Audio | Self::ThemeColors | Self::DisplayInput | Self::RecordWarpLaunch
+        )
     }
 
     /// The page `steps` places on, wrapping round.

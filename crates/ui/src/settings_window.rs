@@ -1,8 +1,8 @@
 //! The Settings window (L-SET-001 to L-SET-003): the page chooser at the
 //! left, and the page at the right. The Audio page (L-SET-012), the theme
-//! choice (L-SET-011), and the interface zoom (L-SET-010, WP-1.17) are
-//! built; the other pages are in the chooser and say which package builds
-//! them. The Tempo & MIDI page (L-SET-014) has the agent server's section
+//! choice (L-SET-011), the interface zoom (L-SET-010, WP-1.17), and Create
+//! Fades on Clip Edges (L-SET-018, WP-1.4b) are built; the other pages are
+//! in the chooser and say which package builds them. The Tempo & MIDI page (L-SET-014) has the agent server's section
 //! (WP-1.15), which Live doesn't have: it sits with the control surfaces,
 //! the other way programs drive the app.
 
@@ -105,6 +105,9 @@ impl SettingsUi {
                     display_page(ui, shell, theme, &mut rows, &mut events);
                 }
                 SettingsPage::ThemeColors => theme_page(ui, shell, theme, &mut rows, &mut events),
+                SettingsPage::RecordWarpLaunch => {
+                    record_warp_launch_page(ui, shell, theme, &mut rows, &mut events);
+                }
                 SettingsPage::TempoMidi => {
                     agents_section(ui, shell, theme, &mut rows, &mut events);
                     rows.note(
@@ -445,6 +448,41 @@ fn display_page(
         "The zoom scales every window; View > Zoom and its keys change it too. The Display \
          Options, Navigation and Keyboard, Mouse and Pen Input, and Application Options settings \
          come with later packages.",
+    );
+}
+
+/// Record, Warp & Launch (L-SET-018): its Warp and Fades section's Create
+/// Fades on Clip Edges, the only setting on the page that's built (WP-1.4b).
+/// In Live it's the section's fourth row, after the three warp settings, and
+/// the Record section comes before the section; where it lands once those
+/// are built is still to place.
+fn record_warp_launch_page(
+    ui: &mut Ui,
+    shell: &Shell,
+    theme: &Theme,
+    rows: &mut Rows<'_>,
+    events: &mut Vec<UiEvent>,
+) {
+    rows.heading(ui, "Warp and Fades");
+    let rect = rows.row(ui, "Create Fades on Clip Edges", SettingsLayout::SWITCH);
+    if let Some(on) = switch(
+        ui,
+        theme,
+        "create-fades-on-clip-edges",
+        "Create Fades on Clip Edges",
+        rect,
+        shell.create_fades_on_clip_edges(),
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            ids::SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES,
+            json!({ "on": on }),
+        )));
+    }
+    rows.note(
+        ui,
+        "New audio clips get 4 ms fades at their edges while this is on. The Record, Launch, \
+         and Tap Tempo settings, and Warp and Fades' Loop/Warp Short Samples, Auto-Warp Long \
+         Samples, and Default Warp Mode, come with later packages.",
     );
 }
 

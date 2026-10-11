@@ -42,8 +42,10 @@ use bl_engine::preview::{
     PreviewControl, PreviewSamples, PreviewShared, PreviewStatus, PreviewVoice, preview_channel,
 };
 use bl_engine::{
-    Collector, DROP_PERIOD, DropThread, Engine, EngineConfig, Processor, Registry, TransportCommand,
+    Collector, DROP_PERIOD, DropThread, Engine, EngineConfig, MediaLibrary, MediaStreams,
+    Processor, Registry, TransportCommand,
 };
+use bl_media::{MediaStore, StreamerStats};
 use bl_model::Document;
 pub use bl_shell_spec::audio::{
     AudioDevices, AudioSettings, AudioStatus, ConfigureAudio, DeviceListing, DeviceRef, DriverInfo,
@@ -289,6 +291,10 @@ pub struct AudioHost {
     preview: Option<PreviewControl>,
     /// Frees what the audio thread lets go of, such as finished previews.
     drop_thread: Option<DropThread>,
+    /// The set's media, which the engine's clips stream from (WP-1.4b).
+    media: Option<Arc<MediaStore>>,
+    /// The running engine's streams, for their figures.
+    streams: Option<Arc<MediaStreams>>,
 }
 
 impl std::fmt::Debug for AudioHost {
@@ -355,7 +361,27 @@ impl AudioHost {
             preview_shared: Arc::new(PreviewShared::default()),
             preview: None,
             drop_thread: None,
+            media: None,
+            streams: None,
         }
+    }
+
+    /// Plays clips' audio from `media`, streaming long files from disk, from
+    /// the next engine that starts (the audio clips spec, R16). Until then,
+    /// and without it, clips play silence.
+    pub fn set_media(&mut self, media: Arc<MediaStore>) {
+        self.media = Some(media);
+    }
+
+    /// The running engine's disk streaming figures: open streams, underruns
+    /// (what the disk overload indicator shows), and how busy the disk
+    /// thread is. `None` while no engine runs.
+    #[must_use]
+    pub fn disk_stats(&self) -> Option<StreamerStats> {
+        self.engine
+            .as_ref()
+            .and(self.streams.as_ref())
+            .map(|streams| streams.stats())
     }
 
     /// The settings in force.
@@ -727,7 +753,7 @@ impl AudioHost {
     /// set and the transport where the last engine left it (stopped), and
     /// hands its processor to the stream's callback through `handoff`.
     fn start_engine(
-        &self,
+        &mut self,
         info: &StreamInfo,
         mut handoff: Producer<Processor>,
     ) -> Result<Engine, String> {
@@ -735,7 +761,15 @@ impl AudioHost {
             .ok_or_else(|| "the device runs at 0 Hz".to_owned())?;
         let max_frames = (info.max_block_frames as usize).max(1);
         let config = EngineConfig::new(rate, max_frames);
-        let (engine, processor) = Engine::start(config, Registry::new())
+        let mut registry = Registry::new();
+        if let Some(media) = &self.media {
+            let streams = MediaStreams::new(Arc::clone(media))
+                .map_err(|e| format!("couldn't start the disk thread: {e}"))?;
+            let streams = Arc::new(streams);
+            registry.set_media(Arc::clone(&streams) as Arc<dyn MediaLibrary>);
+            self.streams = Some(streams);
+        }
+        let (engine, processor) = Engine::start(config, registry)
             .map_err(|e| format!("couldn't start the engine's threads: {e}"))?;
         if let Some(document) = &self.document {
             engine.sync(document);

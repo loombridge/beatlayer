@@ -356,7 +356,11 @@ fn dragging_an_edge_resizes_and_esc_cancels_a_drag() {
         true,
     );
     assert_eq!(s.bars(a), (3.0, 7.0));
-    assert_eq!(s.clip(a).offset, Ticks(BAR));
+    // An audio clip's Start marker moves on by the bar's two seconds.
+    let bl_model::ClipData::Audio(audio) = s.clip(a).data else {
+        panic!("an audio clip");
+    };
+    assert_eq!((s.clip(a).offset, audio.start), (Ticks::ZERO, 2.0));
     assert_eq!(s.steps(), 2);
 
     // Esc during a drag: the clip goes back and nothing is recorded.

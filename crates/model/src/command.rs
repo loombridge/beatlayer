@@ -236,8 +236,10 @@ pub enum Command {
         data: ClipData,
     },
     /// Moves a clip's left edge to `start`, keeping its end and where its
-    /// contents play: the clip shows more or less of its contents. Its
-    /// contents can't start after it.
+    /// contents play: the clip shows more or less of its contents. An audio
+    /// clip's Start marker moves by the time the edge moved, as Live's does,
+    /// and can't go before the start of its file; a MIDI clip's offset
+    /// moves by as many ticks, and its contents can't start after it.
     TrimClipStart {
         /// The clip.
         clip: ClipId,
@@ -590,16 +592,16 @@ impl Document {
                 Ok(())
             }
             Command::TrimClipStart { clip, start } => self.trim_clip_start(*clip, *start),
-            Command::SetClipRegion { clip, start, end } => self.edit_audio(*clip, |audio| {
+            Command::SetClipRegion { clip, start, end } => self.edit_markers(*clip, |audio| {
                 audio.start = *start;
                 audio.end = *end;
             }),
-            Command::SetClipLoop { clip, start, end } => self.edit_audio(*clip, |audio| {
+            Command::SetClipLoop { clip, start, end } => self.edit_markers(*clip, |audio| {
                 audio.loop_start = *start;
                 audio.loop_end = *end;
             }),
             Command::SetClipLoopEnabled { clip, enabled } => {
-                self.edit_audio(*clip, |audio| audio.looping = *enabled)
+                self.edit_markers(*clip, |audio| audio.looping = *enabled)
             }
             Command::SetClipGain { clip, gain } => {
                 self.edit_audio(*clip, |audio| audio.gain = *gain)
@@ -780,8 +782,7 @@ impl Document {
         self.check_fresh(clip.id.0)?;
         check_clip_fits(self.track_ref(track)?, &clip.data)?;
         check_extent(clip.start, clip.length)?;
-        check_offset(clip.offset)?;
-        check_clip_data(&clip.data)?;
+        check_clip(clip)?;
         self.track_mut(track)?
             .clips
             .insert(clip.id, Shared::new(clip.clone()));
@@ -833,21 +834,31 @@ impl Document {
 
     fn trim_clip_start(&mut self, id: ClipId, start: Ticks) -> Result<(), ModelError> {
         let clip = self.clip_ref(id)?;
-        let end = clip.end();
-        let offset = start
-            .checked_sub(clip.start)
-            .and_then(|by| by.checked_add(clip.offset))
-            .ok_or(ModelError::PositionOverflow)?;
-        let length = end.checked_sub(start).ok_or(ModelError::PositionOverflow)?;
-        check_extent(start, length)?;
-        check_offset(offset)?;
-        if clip.start != start {
-            let clip = self.clip_mut(id)?;
-            clip.start = start;
-            clip.length = length;
-            clip.offset = offset;
+        if clip.start == start {
+            return Ok(());
         }
+        let moved = clip.with_start(start, &self.settings.tempo)?;
+        check_extent(moved.start, moved.length)?;
+        check_clip(&moved)?;
+        *self.clip_mut(id)? = moved;
         Ok(())
+    }
+
+    /// Sets an audio clip's markers or loop with `edit`, if the result is
+    /// valid and its markers are in order, as Live keeps markers set by hand
+    /// (the audio clips spec, R3 and R4).
+    fn edit_markers(
+        &mut self,
+        id: ClipId,
+        edit: impl FnOnce(&mut AudioData),
+    ) -> Result<(), ModelError> {
+        let ClipData::Audio(current) = self.clip_ref(id)?.data else {
+            return Err(ModelError::NotAudioClip(id));
+        };
+        let mut next = current;
+        edit(&mut next);
+        check_marker_order(&next)?;
+        self.edit_audio(id, |audio| *audio = next)
     }
 
     /// Changes an audio clip's data with `edit`, if the result is valid.
@@ -1093,10 +1104,9 @@ pub(crate) fn check_clip_data(data: &ClipData) -> Result<(), ModelError> {
 /// finite and not negative.
 pub(crate) fn check_audio(audio: &AudioData) -> Result<(), ModelError> {
     let at_least_zero = |value: f64| value.is_finite() && value >= 0.0;
-    let after = |end: f64, start: f64| end.is_finite() && end > start;
     check_value("clip start", audio.start, at_least_zero(audio.start))?;
     if let Some(end) = audio.end {
-        check_value("clip end", end, after(end, audio.start))?;
+        check_value("clip end", end, end.is_finite() && end > 0.0)?;
     }
     check_value(
         "loop start",
@@ -1104,14 +1114,7 @@ pub(crate) fn check_audio(audio: &AudioData) -> Result<(), ModelError> {
         at_least_zero(audio.loop_start),
     )?;
     if let Some(end) = audio.loop_end {
-        check_value("loop end", end, after(end, audio.loop_start))?;
-        if audio.looping {
-            check_value(
-                "clip start (at or after the loop end)",
-                audio.start,
-                audio.start < end,
-            )?;
-        }
+        check_value("loop end", end, end.is_finite() && end > audio.loop_start)?;
     }
     check_value("clip gain", audio.gain, at_least_zero(audio.gain))?;
     check_value(
@@ -1124,6 +1127,36 @@ pub(crate) fn check_audio(audio: &AudioData) -> Result<(), ModelError> {
         audio.fade_out,
         at_least_zero(audio.fade_out),
     )
+}
+
+/// Checks that an audio clip's markers are in order, as setting them by hand
+/// keeps them: the End marker after the Start marker, and, while the loop is
+/// on, the Start marker before the loop brace's end. Trimming a clip's left
+/// edge or splitting it can move the Start marker past either (the audio
+/// clips spec, R16), where the clip plays as its markers say.
+pub(crate) fn check_marker_order(audio: &AudioData) -> Result<(), ModelError> {
+    if let Some(end) = audio.end {
+        check_value("clip end", end, end > audio.start)?;
+    }
+    if let (true, Some(end)) = (audio.looping, audio.loop_end) {
+        check_value(
+            "clip start (at or after the loop end)",
+            audio.start,
+            audio.start < end,
+        )?;
+    }
+    Ok(())
+}
+
+/// Checks a clip's offset and data: a MIDI clip's offset can't be negative,
+/// and an audio clip's is 0, since its Start marker says where it starts
+/// playing (the audio clips spec, R16).
+pub(crate) fn check_clip(clip: &Clip) -> Result<(), ModelError> {
+    check_offset(clip.offset)?;
+    if clip.data.is_audio() && clip.offset != Ticks::ZERO {
+        return Err(ModelError::AudioClipOffset(clip.offset));
+    }
+    check_clip_data(&clip.data)
 }
 
 /// Checks a device's parameter values.
@@ -2055,7 +2088,7 @@ mod tests {
     fn trimming_a_clip_start_keeps_its_contents_in_place() {
         // Spec: arrangement-editing R7, R16.
         let mut song = Song::new();
-        let track = song.track(TrackKind::Audio, None);
+        let track = song.track(TrackKind::Midi, None);
         let clip = song.clip(track, 4);
         let content = song.doc.clip(clip).unwrap().content_start();
         assert_eq!(content, Ticks::WHOLE);
@@ -2095,12 +2128,163 @@ mod tests {
             ModelError::EmptyLength(Ticks::ZERO)
         );
         // A new clip can't start before its contents either.
-        let mut early = Clip::new(song.fresh(), Ticks::ZERO, Ticks::WHOLE, audio());
+        let mut early = Clip::new(song.fresh(), Ticks::ZERO, Ticks::WHOLE, midi());
         early.offset = -Ticks::QUARTER;
         assert_eq!(
             song.reject(Command::CreateClip { track, clip: early }),
             ModelError::NegativeOffset(-Ticks::QUARTER)
         );
+    }
+
+    // Spec: audio-clips R16; arrangement-editing R7, R16
+    #[test]
+    fn trimming_an_audio_clips_left_edge_moves_its_start_marker() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        let clip = song.clip(track, 4);
+        let audio = |song: &Song| match song.doc.clip(clip).unwrap().data {
+            ClipData::Audio(audio) => audio,
+            ClipData::Midi(_) => unreachable!("an audio clip"),
+        };
+        // At 120 BPM a quarter note is half a second: trimming two quarters
+        // off the start moves the Start marker a second into the file, and
+        // the offset stays 0.
+        song.apply(Command::TrimClipStart {
+            clip,
+            start: Ticks::QUARTER * 6,
+        })
+        .unwrap();
+        let trimmed = song.doc.clip(clip).unwrap();
+        assert_eq!(
+            (trimmed.start, trimmed.end()),
+            (Ticks::QUARTER * 6, Ticks::WHOLE * 2)
+        );
+        assert_eq!(trimmed.offset, Ticks::ZERO);
+        assert_eq!(audio(&song).start, 1.0);
+
+        // Under a slower tempo, the same ticks are more seconds.
+        song.apply(Command::SetTempo {
+            tempo: TempoMap::constant(Bpm::new(60.0).unwrap()),
+        })
+        .unwrap();
+        song.apply(Command::TrimClipStart {
+            clip,
+            start: Ticks::QUARTER * 5,
+        })
+        .unwrap();
+        assert_eq!(audio(&song).start, 0.0);
+        song.apply(Command::TrimClipStart {
+            clip,
+            start: Ticks::QUARTER * 7,
+        })
+        .unwrap();
+        assert_eq!(audio(&song).start, 2.0);
+        // Back to the file's start, but no further.
+        song.apply(Command::TrimClipStart {
+            clip,
+            start: Ticks::QUARTER * 5,
+        })
+        .unwrap();
+        assert_eq!(audio(&song).start, 0.0);
+        assert_eq!(
+            song.reject(Command::TrimClipStart {
+                clip,
+                start: Ticks::QUARTER * 4,
+            }),
+            ModelError::BeforeFileStart(1.0)
+        );
+
+        // Past the End marker the clip plays silence there, and past the
+        // loop's end a looped clip plays on into its repetitions: setting
+        // the markers by hand keeps them in order, but trimming may not.
+        song.apply(Command::SetClipRegion {
+            clip,
+            start: 0.0,
+            end: Some(1.5),
+        })
+        .unwrap();
+        song.apply(Command::TrimClipStart {
+            clip,
+            start: Ticks::QUARTER * 7,
+        })
+        .unwrap();
+        assert_eq!((audio(&song).start, audio(&song).end), (2.0, Some(1.5)));
+        song.apply(Command::SetClipGain { clip, gain: 0.5 })
+            .unwrap();
+        assert!(matches!(
+            song.reject(Command::SetClipRegion {
+                clip,
+                start: 2.0,
+                end: Some(1.5),
+            }),
+            ModelError::InvalidValue { .. }
+        ));
+
+        // An audio clip never has an offset.
+        let mut offset = Clip::new(
+            song.fresh(),
+            Ticks::WHOLE * 4,
+            Ticks::WHOLE,
+            super::tests::audio(),
+        );
+        offset.offset = Ticks::QUARTER;
+        assert_eq!(
+            song.reject(Command::CreateClip {
+                track,
+                clip: offset,
+            }),
+            ModelError::AudioClipOffset(Ticks::QUARTER)
+        );
+    }
+
+    // Spec: audio-clips R16; arrangement-editing R8, R16
+    #[test]
+    fn a_part_of_a_clip_plays_on_from_where_the_clip_was() {
+        let tempo = TempoMap::from_breakpoints([
+            (Ticks::ZERO, Bpm::new(120.0).unwrap()),
+            (Ticks::WHOLE * 2, Bpm::new(90.0).unwrap()),
+        ])
+        .unwrap();
+        let audio = AudioData {
+            start: 0.25,
+            ..AudioData::new(ContentHash([7; 32]))
+        };
+        let whole = Clip::new(
+            ClipId(Id::new(9).unwrap()),
+            Ticks::WHOLE,
+            Ticks::WHOLE * 2,
+            ClipData::Audio(audio),
+        );
+        let at = Ticks::WHOLE * 2 + Ticks::QUARTER;
+        let part = whole.part(at, whole.end(), &tempo);
+        assert_eq!(
+            (part.start, part.end(), part.offset),
+            (at, whole.end(), Ticks::ZERO)
+        );
+        let ClipData::Audio(moved) = part.data else {
+            unreachable!("an audio clip");
+        };
+        // A bar and a quarter, slowing from 120 BPM towards 90: longer than
+        // the 2.5 s they'd last at 120.
+        let by = tempo.ticks_to_seconds(at) - tempo.ticks_to_seconds(Ticks::WHOLE);
+        assert!(by > 2.5 && by < 3.5, "{by}");
+        assert_eq!(moved.start, 0.25 + by);
+        assert_eq!(
+            AudioData {
+                start: 0.25,
+                ..moved
+            },
+            audio,
+            "only the Start marker moves"
+        );
+        // A MIDI clip's part keeps its notes and takes an offset.
+        let notes = Clip {
+            data: midi(),
+            ..whole
+        };
+        let part = notes.part(at, notes.end(), &tempo);
+        assert_eq!(part.offset, at - Ticks::WHOLE);
+        assert_eq!(part.content_start(), notes.content_start());
     }
 
     #[test]

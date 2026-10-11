@@ -63,6 +63,9 @@ pub const SETTINGS_NEXT_PAGE: &str = "settings.next_page";
 pub const SETTINGS_PREVIOUS_PAGE: &str = "settings.previous_page";
 /// `settings.set_theme`: choose the dark or light theme.
 pub const SETTINGS_SET_THEME: &str = "settings.set_theme";
+/// `settings.set_create_fades_on_clip_edges`: switch Create Fades on Clip
+/// Edges.
+pub const SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES: &str = "settings.set_create_fades_on_clip_edges";
 /// `audio.devices`: list drivers and devices.
 pub const AUDIO_DEVICES: &str = "audio.devices";
 /// `audio.status`: what the audio device runs at.
@@ -103,6 +106,7 @@ pub const IDS: &[&str] = &[
     SETTINGS_NEXT_PAGE,
     SETTINGS_PREVIOUS_PAGE,
     SETTINGS_SET_THEME,
+    SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES,
     AUDIO_DEVICES,
     AUDIO_STATUS,
     AUDIO_CONFIGURE,
@@ -154,6 +158,14 @@ pub struct SettingsArgs {
 pub struct ThemeArgs {
     /// The theme.
     pub theme: ThemeChoice,
+}
+
+/// Arguments of a command that switches a setting on or off.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SwitchArgs {
+    /// Whether the setting is on.
+    pub on: bool,
 }
 
 /// Arguments of `view.set_zoom`: the Display & Input page's Zoom.
@@ -534,6 +546,24 @@ fn specs() -> Vec<CommandSpec> {
             .context(Settings)
             .args::<ThemeArgs>()
             .result::<()>(),
+        // Record, Warp & Launch, Warp and Fades (L-SET-018; WP-1.4b): an
+        // edit-class preference, like the theme.
+        CommandSpec::new(
+            SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES,
+            "Create Fades on Clip Edges",
+        )
+        .description(
+            "Switches Create Fades on Clip Edges, on the Settings window's Record, Warp & Launch \
+             page. While it's on, each audio clip added to the Arrangement from now on gets \
+             fades of 4 ms (0.004 s) at both edges, so a clip that starts or ends mid-waveform \
+             doesn't click; clips already in the set keep their fades, which `clip.set_fades` \
+             changes. The setting is kept for the next start, and isn't part of the set or an \
+             undo step. The result's `on` is the setting afterwards.",
+        )
+        .permission(Permission::Edit)
+        .context(Settings)
+        .args::<SwitchArgs>()
+        .result::<SwitchResult>(),
         CommandSpec::new(AUDIO_DEVICES, "List Audio Devices")
             .description(
                 "Lists the driver types this computer offers and, for the chosen one, its \

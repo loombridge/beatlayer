@@ -345,7 +345,14 @@ fn material(doc: &Document, target: &Target) -> (Vec<(TrackId, Vec<Clip>)>, Tick
                     let mut clips: Vec<Clip> = doc.track(track).map_or_else(Vec::new, |t| {
                         t.clips()
                             .filter(|c| c.start < *end && c.end() > *start)
-                            .map(|c| piece(c, c.start.max(*start), c.end().min(*end)))
+                            .map(|c| {
+                                piece(
+                                    c,
+                                    c.start.max(*start),
+                                    c.end().min(*end),
+                                    &doc.settings().tempo,
+                                )
+                            })
                             .collect()
                     });
                     clips.sort_by_key(|c| (c.start, c.id));
@@ -522,7 +529,8 @@ pub fn resize_limits(
         match edge {
             Edge::End => earliest = earliest.max(-room),
             Edge::Start => {
-                earliest = earliest.max(-clip.offset.min(clip.start));
+                let tempo = &doc.settings().tempo;
+                earliest = earliest.max(clip.earliest_start(tempo) - clip.start);
                 latest = latest.min(room);
             }
         }
@@ -890,10 +898,15 @@ pub fn run(
                     Edge::Start if (clip.start + by).is_negative() => {
                         return Err(refused("a clip would start before 1.1.1"));
                     }
-                    Edge::Start if (clip.offset + by).is_negative() => {
+                    Edge::Start
+                        if clip
+                            .with_start(clip.start + by, &doc.settings().tempo)
+                            .is_err() =>
+                    {
                         return Err(refused(
-                            "a clip would start before its contents begin; it can't show more \
-                             of them than they hold",
+                            "a clip would start before its contents begin (an audio clip's \
+                             Start marker before the start of its file); it can't show more of \
+                             them than they hold",
                         ));
                     }
                     _ => {}

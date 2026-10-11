@@ -101,8 +101,9 @@ impl Song {
             .clone()
     }
 
-    /// `(start bar, end bar, offset in bars)` of each clip on a track, by
-    /// start.
+    /// `(start bar, end bar, how many bars into its contents it starts)` of
+    /// each clip on a track, by start: for an audio clip, its Start marker's
+    /// time before its start ([`Clip::origin`]).
     fn lane(&self, track: usize) -> Vec<(f64, f64, f64)> {
         let mut clips: Vec<(f64, f64, f64)> = self
             .doc()
@@ -113,7 +114,7 @@ impl Song {
                 (
                     c.start.get() as f64 / BAR as f64,
                     c.end().get() as f64 / BAR as f64,
-                    c.offset.get() as f64 / BAR as f64,
+                    (c.start - c.origin(&self.doc().settings().tempo)).get() as f64 / BAR as f64,
                 )
             })
             .collect();
@@ -354,8 +355,8 @@ fn a_clip_placed_over_another_replaces_what_it_covers() {
         .unwrap()
         .clone();
     assert_eq!(
-        right.content_start(),
-        s.clip(long).content_start(),
+        right.origin(&s.doc().settings().tempo),
+        s.clip(long).origin(&s.doc().settings().tempo),
         "both parts play the same media from the same place"
     );
     // Over its start: the long clip is trimmed from the left, and plays
@@ -444,10 +445,23 @@ fn splitting_keeps_what_each_part_plays() {
     assert_eq!(s.lane(2), [(0.0, 1.0, 0.0), (1.0, 4.0, 1.0)]);
     assert_eq!(s.lane(3), [(0.0, 4.0, 0.0)], "only the selected track");
     let part = s.clip(result.created[0]);
-    assert_eq!(part.content_start(), s.clip(a).content_start());
+    let tempo = &s.doc().settings().tempo;
+    assert_eq!(part.origin(tempo), s.clip(a).origin(tempo));
+    assert_eq!(part.name.as_str(), "Clip 0");
+    // The same file, from a bar (two seconds at 120 BPM) later: the Start
+    // marker moved, as Live's does, and nothing else.
+    let (bl_model::ClipData::Audio(moved), bl_model::ClipData::Audio(whole)) =
+        (&part.data, &s.clip(a).data)
+    else {
+        panic!("audio clips");
+    };
+    assert_eq!(moved.start, whole.start + 2.0);
     assert_eq!(
-        (part.name.as_str(), part.data.clone()),
-        ("Clip 0", s.clip(a).data)
+        bl_model::AudioData {
+            start: whole.start,
+            ..*moved
+        },
+        *whole
     );
     // At a time selection's edges: the part inside is selected.
     s.view(

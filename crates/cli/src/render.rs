@@ -18,8 +18,8 @@ use std::time::Instant;
 
 use bl_core::time::{SampleRate, Ticks};
 use bl_engine::{
-    EngineConfig, MediaLibrary, MediaMap, Offline, Output, Registry, Report, ScheduledCommand,
-    TransportCommand, When,
+    EngineConfig, MediaLibrary, MediaMap, MediaStreams, Offline, Output, Registry, Report,
+    ScheduledCommand, TransportCommand, When,
 };
 use bl_media::MediaStore;
 use bl_model::{ContentHash, DeviceId, Document};
@@ -392,8 +392,12 @@ pub fn run(args: &RenderArgs) -> Outcome {
     })
 }
 
-/// A media store holding `project`'s media table, each file's path resolved
-/// against `folder`. Nothing is read until a clip needs its audio.
+/// `project`'s media table, each file's path resolved against `folder`,
+/// for an offline render: long files stream from disk in blocking mode, so
+/// memory follows the streams' buffers rather than the files' lengths and
+/// the render is the same every time (the disk streaming spec, R8). Nothing
+/// is read until a clip needs its audio. If the disk thread can't start,
+/// files decode whole into memory instead.
 #[must_use]
 pub fn media_store(project: &Project, folder: &Path) -> Arc<dyn MediaLibrary> {
     let store = MediaStore::new();
@@ -406,7 +410,11 @@ pub fn media_store(project: &Project, folder: &Path) -> Arc<dyn MediaLibrary> {
             );
         }
     }
-    Arc::new(store)
+    let store = Arc::new(store);
+    match MediaStreams::blocking(Arc::clone(&store)) {
+        Ok(streams) => Arc::new(streams),
+        Err(_) => store,
+    }
 }
 
 /// Where the song ends: the end of its last clip, if it has clips.

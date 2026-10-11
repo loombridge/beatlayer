@@ -23,8 +23,8 @@ use crate::arrangement::{ArrangementView, TransportView, ViewError, Viewport};
 use crate::audio::{AudioHost, ConfigureAudio, EngineTransport, ToneSettings};
 use crate::browser::{self, BrowserError, BrowserView, Waker};
 use crate::commands::{
-    self as ids, PathArgs, SaveAsArgs, SetResult, SettingsArgs, SwitchResult, TestToneArgs,
-    TestToneState, ThemeArgs, ViewResult, ZoomArgs,
+    self as ids, PathArgs, SaveAsArgs, SetResult, SettingsArgs, SwitchArgs, SwitchResult,
+    TestToneArgs, TestToneState, ThemeArgs, ViewResult, ZoomArgs,
 };
 use crate::files::{ProjectFiles, SetStore, factory_default_set};
 use crate::settings::{
@@ -339,10 +339,13 @@ impl Shell {
         let browser_view = BrowserView::new(&prefs.browser, Waker::default());
         audio.set_preview_gain(prefs.browser.preview_volume as f32);
         let editor = factory_default_set();
+        // The engine's clips stream from the set's media (WP-1.4b).
+        let media = Arc::new(MediaStore::new());
+        audio.set_media(Arc::clone(&media));
         audio.sync(editor.document());
         Self {
             browser_view,
-            media: Arc::new(MediaStore::new()),
+            media,
             registry,
             editor,
             saved: factory_default_set(),
@@ -584,7 +587,14 @@ impl Shell {
         }
     }
 
-    /// The theme.
+    /// Whether Create Fades on Clip Edges is on: new audio clips get 4 ms
+    /// fades at their edges.
+    #[must_use]
+    pub fn create_fades_on_clip_edges(&self) -> bool {
+        self.prefs.create_fades_on_clip_edges
+    }
+
+    /// The theme in use.
     #[must_use]
     pub fn theme(&self) -> ThemeChoice {
         self.prefs.theme
@@ -781,6 +791,7 @@ impl Shell {
             editor: &mut self.editor,
             audio: &mut self.audio,
             media: &self.media,
+            edge_fades: self.prefs.create_fades_on_clip_edges,
         };
         let outcome = self
             .browser_view
@@ -1493,14 +1504,15 @@ impl Shell {
                 self.dirty = false;
                 self.message = None;
                 self.arrangement.reset();
-                self.new_set_transport();
-                self.document_changed();
                 // The set's files go into the media store, so its clips'
-                // waveforms build (browser R15).
+                // waveforms build (browser R15) and the engine finds their
+                // audio when the set reaches it.
                 for (hash, path, size) in self.store.media_files() {
                     self.media
                         .add_reference(bl_media::ContentHash::from_bytes(hash.0), path, size);
                 }
+                self.new_set_transport();
+                self.document_changed();
                 self.set_file_changed();
                 Ok(self.set_result())
             }
@@ -1652,6 +1664,12 @@ impl Shell {
                 self.prefs.theme = theme;
                 self.save_preferences();
                 Ok(Value::Null)
+            }
+            ids::SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES => {
+                let SwitchArgs { on } = Self::args(id, args)?;
+                self.prefs.create_fades_on_clip_edges = on;
+                self.save_preferences();
+                Ok(to_value(&SwitchResult { on }))
             }
             ids::AUDIO_DEVICES => {
                 Self::args::<NoArgs>(id, args)?;

@@ -38,6 +38,11 @@ pub struct Preferences {
     pub agent: AgentSettings,
     /// The browser's places and preview (WP-1.10).
     pub browser: crate::browser::BrowserPrefs,
+    /// Create Fades on Clip Edges (Record, Warp & Launch, L-SET-018): new
+    /// audio clips get 4 ms fades at their edges (WP-1.4b; the audio clips
+    /// spec, R7). Its default in a new install is still to observe in Live,
+    /// so it stays off, as clips were before the setting, until then.
+    pub create_fades_on_clip_edges: bool,
 }
 
 /// The file name of the preferences, inside the config directory.

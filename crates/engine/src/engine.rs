@@ -19,6 +19,7 @@ use crate::message::{Message, ParamEvent, Report, ScheduledCommand, TransportCom
 use crate::node::{NodeData, NodeKey};
 use crate::processor::{Carry, Processor, starts_playback};
 use crate::registry::Registry;
+use crate::sources::Loaded;
 use crate::state::{EngineState, Monitor};
 
 /// Makes the three ends of an engine: the [`Sender`] that feeds the audio
@@ -194,6 +195,8 @@ enum Request {
     Detach,
     /// Make a processor for these settings.
     Restart(Box<Restart>),
+    /// The loader opened a clip's source, or couldn't.
+    Loaded(Box<Loaded>),
     /// End the compiler thread.
     Shutdown,
 }
@@ -282,6 +285,7 @@ impl std::fmt::Debug for Request {
             Self::Flush(_) => "Flush",
             Self::Detach => "Detach",
             Self::Restart(_) => "Restart",
+            Self::Loaded(_) => "Loaded",
             Self::Shutdown => "Shutdown",
         })
     }
@@ -357,9 +361,17 @@ impl Engine {
         } else {
             (None, None)
         };
-        let compiler = Compiler::new(config, registry, gc.clone());
+        let mut compiler = Compiler::new(config, registry, gc.clone());
         let counts = Arc::new(Counts::default());
         let (requests, receiver) = mpsc::channel();
+        // Spec: audio-clips R17. Clips' sources open on a thread of their
+        // own, so loading a long file never holds up Play or Stop.
+        compiler.load_off_thread({
+            let requests = requests.clone();
+            move |loaded| {
+                let _ = requests.send(Request::Loaded(Box::new(loaded)));
+            }
+        })?;
         let (new_monitors, monitors) = mpsc::channel();
         let thread = {
             let counts = Arc::clone(&counts);
@@ -661,6 +673,13 @@ fn compile_loop(
                     } else {
                         // Nobody waits for it any more, so nothing runs it.
                         sender = None;
+                    }
+                }
+                Request::Loaded(loaded) => {
+                    // While no processor runs, the restart's compile asks
+                    // for every source again.
+                    if let Some(sender) = sender.as_mut() {
+                        sender.send_update(compiler.loaded(*loaded));
                     }
                 }
                 Request::Shutdown => return,

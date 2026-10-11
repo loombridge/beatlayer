@@ -681,10 +681,12 @@ const ENTRIES: &[Entry] = &[
         keys: &[],
         description: "Moves a clip's left edge to `start`, keeping its end and keeping its \
             contents where they play, as dragging the clip's left edge does: a later `start` \
-            hides the beginning of the clip, an earlier one shows more of it. The clip can't \
-            start before its contents begin (its offset stays at 0 or more), before 0, or at or \
-            after its end. To move a clip with its contents, use `clip.move`; to change where \
-            it ends, use `clip.set_length`.",
+            hides the beginning of the clip, an earlier one shows more of it. An audio clip's \
+            Start marker moves by the time the edge moved (seconds under the tempo map), as \
+            Live's does, so it can't go before the start of the file; a MIDI clip's offset \
+            moves by as many ticks and stays at 0 or more. The clip can't start before 0, or at \
+            or after its end. To move a clip with its contents, use `clip.move`; to change \
+            where it ends, use `clip.set_length`.",
     },
     Entry {
         id: "device.insert",

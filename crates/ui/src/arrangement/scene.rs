@@ -32,8 +32,10 @@ pub struct ClipSpan {
     pub start: i64,
     /// Where it ends.
     pub end: i64,
-    /// Where its contents begin: its start less its offset (WP-1.8b), so a
-    /// split clip's waveform carries on from where it was.
+    /// Where its contents begin: for an audio clip, where the start of its
+    /// file falls, its Start marker's time before its start (WP-1.4b); for a
+    /// MIDI clip, its start less its offset (WP-1.8b). A split clip's
+    /// waveform carries on from where it was.
     pub origin: i64,
     /// The clip.
     pub id: ClipId,
@@ -67,14 +69,14 @@ impl TrackClips {
 }
 
 impl TrackClips {
-    /// A track's clips, sorted by start.
-    fn of(track: &Track) -> Self {
+    /// A track's clips, sorted by start, placed under `tempo`.
+    fn of(track: &Track, tempo: &TempoMap) -> Self {
         let mut clips: Vec<ClipSpan> = track
             .clips()
             .map(|clip| ClipSpan {
                 start: clip.start.get(),
                 end: clip.end().get(),
-                origin: clip.content_start().get(),
+                origin: clip.origin(tempo).get(),
                 id: clip.id,
                 muted: clip.mute,
                 media: match &clip.data {
@@ -117,18 +119,24 @@ impl ClipIndex {
         let old = self.doc.replace(doc.clone());
         self.tracks.retain(|id, _| doc.track(*id).is_some());
         self.total = 0;
+        // A new tempo map moves where every audio clip's file starts.
+        let tempo = &doc.settings().tempo;
+        let same_tempo = old
+            .as_ref()
+            .is_some_and(|old| old.settings().tempo == *tempo);
         for track in doc.tracks() {
             let id = track.id();
             // The same node in both versions: the same clips.
-            let same = old
-                .as_ref()
-                .and_then(|old| old.track(id))
-                .is_some_and(|before| std::ptr::eq(before, track));
+            let same = same_tempo
+                && old
+                    .as_ref()
+                    .and_then(|old| old.track(id))
+                    .is_some_and(|before| std::ptr::eq(before, track));
             if !same {
                 if track.clips().len() == 0 {
                     self.tracks.remove(&id);
                 } else {
-                    self.tracks.insert(id, TrackClips::of(track));
+                    self.tracks.insert(id, TrackClips::of(track, tempo));
                 }
             }
             self.total += self.tracks.get(&id).map_or(0, |t| t.clips.len());

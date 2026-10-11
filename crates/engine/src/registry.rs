@@ -90,7 +90,8 @@ impl Registry {
         });
     }
 
-    /// Sets where clips' audio comes from: the project's media store, or a
+    /// Sets where clips' audio comes from: the project's media, streamed
+    /// ([`MediaStreams`](crate::MediaStreams)), or a
     /// [`MediaMap`](crate::MediaMap) of audio made in memory.
     pub fn set_media(&mut self, media: Arc<dyn MediaLibrary>) {
         self.media = Some(media);
@@ -113,6 +114,11 @@ impl Registry {
     /// Where clips' audio comes from, if anywhere.
     pub(crate) fn media(&self) -> Option<&dyn MediaLibrary> {
         self.media.as_deref()
+    }
+
+    /// The same, shared, for the loader thread.
+    pub(crate) fn shared_media(&self) -> Option<Arc<dyn MediaLibrary>> {
+        self.media.clone()
     }
 }
 

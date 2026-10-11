@@ -776,6 +776,8 @@ dependencies = [
  "bl-model",
  "bl-rt",
  "blake3",
+ "flacenc",
+ "hound",
  "rayon",
  "realfft",
  "rtrb",

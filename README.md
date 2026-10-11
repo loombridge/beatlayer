@@ -1,6 +1,12 @@
-# Beatlayer
+<p align="center">
+  <img src="assets/beatlayer.png" alt="Beatlayer's icon" width="160" height="160">
+</p>
 
-Beatlayer is an open-source digital audio workstation with the workflow of Ableton Live 12: Session and Arrangement views, warping, racks, and a full set of instruments and effects. It's written in Rust and runs natively on macOS (Apple Silicon), Windows, and Linux.
+<h1 align="center">Beatlayer</h1>
+
+<p align="center">An open-source, clean-room reimplementation of Ableton Live, rebuilt in pure Rust. If you know Ableton, you know Beatlayer.</p>
+
+It follows Live 12's workflow, with Session and Arrangement views, warping, racks, and a full set of instruments and effects, and runs natively on macOS (Apple Silicon), Windows, and Linux.
 
 Beatlayer is in early development: the playback core (Phase 1 of 10) is being built.
 

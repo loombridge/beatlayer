@@ -1047,7 +1047,7 @@ pub(crate) fn check_clip_data(data: &ClipData) -> Result<(), ModelError> {
     }
 }
 
-/// Checks an audio clip's data (`docs/specs/audio-clips.md`, R3 to R6): times
+/// Checks an audio clip's data (the audio clips spec, R3 to R6): times
 /// finite and not negative, each end after its start, the Start marker
 /// before the loop's end while the loop is on, and the gain and fades
 /// finite and not negative.

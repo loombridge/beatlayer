@@ -1,6 +1,6 @@
 //! Audio clip playback (WP-1.4): each audio track's clip player, the clips it
 //! plays, and where their audio comes from. The rules, and the Live sources
-//! behind them, are in `docs/specs/audio-clips.md`.
+//! behind them, are in the audio clips spec.
 //!
 //! Every audio track has a [`ClipPlayer`] at the head of its device chain
 //! ([`NodeKey::Player`](crate::NodeKey::Player)). The compiler works out the
@@ -302,7 +302,7 @@ impl ClipList {
 
 /// An audio track's clip player, at the head of its device chain: while the
 /// song plays, it adds the track's clips to the track's buffer, each where
-/// the song position says (`docs/specs/audio-clips.md`).
+/// the song position says (the audio clips spec).
 ///
 /// Its clips arrive as node data, a list the compiler made; until the first
 /// one does, and while the song is stopped, it adds nothing. Clips that

@@ -331,7 +331,7 @@ fn bl_cli_render_writes_24_bit_samples_as_the_references_hold_them() {
 
 /// A set with clips renders to the end of its last clip unless told
 /// otherwise; with its audio files gone, it still renders, its clips silent,
-/// and says which files are missing (`docs/specs/audio-clips.md`, R14).
+/// and says which files are missing (the audio clips spec, R14).
 #[test]
 fn bl_cli_render_plays_clips_to_their_end_and_names_missing_files() {
     let temp = TempDir::new("render-clips");

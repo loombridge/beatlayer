@@ -1,4 +1,4 @@
-//! Audio clip playback (`docs/specs/audio-clips.md`): clips placed through
+//! Audio clip playback (the audio clips spec): clips placed through
 //! the tempo map, their markers, loop, gain, and fades, sample-exact at any
 //! block size, edited without a recompile, and their media freed off the
 //! audio thread. Every block runs as a real-time section under the

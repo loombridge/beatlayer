@@ -43,7 +43,7 @@ pub struct Update {
     pub unhosted: Vec<DeviceId>,
     /// Media that clips in the tracks sent here name and the registry's
     /// media library can't supply: missing, changed, or not audio. Those
-    /// clips play silence (`docs/specs/audio-clips.md`, R14).
+    /// clips play silence (the audio clips spec, R14).
     pub missing: Vec<ContentHash>,
 }
 
@@ -97,7 +97,7 @@ struct Placed {
 /// run them, the Arrangement loop becomes a [`TransportCommand::SetLoop`],
 /// and clip changes travel as node data: a track whose clips changed sends
 /// its clip player the whole list again, placed and with its audio from the
-/// registry's media library (`docs/specs/audio-clips.md`). None of them
+/// registry's media library (the audio clips spec). None of them
 /// recompiles.
 ///
 /// Each program lists the nodes it takes over from the program compiled
@@ -561,7 +561,7 @@ fn needs_program(
         }
     }
     // Clip changes never recompile: `Compiler::sync` sends the track's clip
-    // player its clips as node data (`docs/specs/audio-clips.md`, R12).
+    // player its clips as node data (the audio clips spec, R12).
     recompile
 }
 

@@ -1,6 +1,6 @@
 //! WP-1.4's acceptance: in the clip fixtures' golden renders, every sample
 //! is the frame of its file the spec says. A model of clip playback, written
-//! here from `docs/specs/audio-clips.md` apart from the engine's code, works
+//! here from the audio clips spec apart from the engine's code, works
 //! out for each frame of the song which clip covers it, which frame of the
 //! clip's file plays there (from the Start and End markers and the loop),
 //! and at what level (the gain and the fades); each frame of the render must

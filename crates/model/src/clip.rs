@@ -1,7 +1,7 @@
 //! Arrangement clips and their data.
 //!
 //! An audio clip's data is its file, its Start and End markers, its loop,
-//! its gain, and its edge fades (WP-1.4, `docs/specs/audio-clips.md`). MIDI
+//! its gain, and its edge fades (WP-1.4, the audio clips spec). MIDI
 //! clip data is still a stub, enough to hold notes, until WP-2.1 adds
 //! velocity, probability, and the rest.
 
@@ -72,11 +72,11 @@ impl ClipData {
 
 /// The length of the fades Create Fades on Clip Edges gives the edges of a
 /// new audio clip, and the length a deleted fade goes back to while that
-/// setting is on: 4 ms (`docs/specs/audio-clips.md`, R7).
+/// setting is on: 4 ms (the audio clips spec, R7).
 pub const EDGE_FADE_SECONDS: f64 = 0.004;
 
 /// An audio clip's data: the file it plays and how it plays it
-/// (`docs/specs/audio-clips.md`).
+/// (the audio clips spec).
 ///
 /// The samples stay in the media store; the clip names them by content hash.
 /// Until warping (Phase 4), a clip plays unwarped, at its file's own speed,
@@ -160,7 +160,7 @@ impl AudioData {
 
     /// The same data with [`EDGE_FADE_SECONDS`] fades at both edges: what a
     /// new clip gets while Create Fades on Clip Edges is on
-    /// (`docs/specs/audio-clips.md`, R7).
+    /// (the audio clips spec, R7).
     #[must_use]
     pub fn with_edge_fades(self) -> Self {
         Self {

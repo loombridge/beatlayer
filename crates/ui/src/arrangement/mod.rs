@@ -161,6 +161,9 @@ pub struct ArrangementUi {
     /// The playhead the last frame drew: its position and its x, if it was
     /// in view (WP-1.18).
     playhead: Option<(Ticks, f32)>,
+    /// Where the last frame put the Arrangement's mixer, while it shows
+    /// (WP-1.9).
+    mixer: Option<Rect>,
 }
 
 impl std::fmt::Debug for ArrangementUi {
@@ -202,6 +205,7 @@ impl ArrangementUi {
             clips: ClipGestures::default(),
             menus: ContextMenus::new(),
             playhead: None,
+            mixer: None,
         }
     }
 
@@ -211,6 +215,13 @@ impl ArrangementUi {
     #[must_use]
     pub fn drawn_playhead(&self) -> Option<(Ticks, f32)> {
         self.playhead
+    }
+
+    /// Where the last frame put the Arrangement's mixer, if it shows: the
+    /// main window draws it there (WP-1.9).
+    #[must_use]
+    pub fn mixer_rect(&self) -> Option<Rect> {
+        self.mixer
     }
 
     /// Takes waveform peaks from `source`, such as the app's
@@ -255,7 +266,17 @@ impl ArrangementUi {
         let doc = shell.editor().document();
         let view = shell.arrangement();
         let pinned: Vec<TrackId> = bl_shell::arrangement::rows::pinned_tracks(doc).collect();
-        let layout = ArrangementLayout::compute(rect, view.overview(), pinned.len());
+        // With its mixer showing, the view splits (WP-1.9; L-ARR-018).
+        let layout = if shell
+            .mixer_view()
+            .of(bl_shell::mixer_view::MixerOf::Arrangement)
+            .shown
+        {
+            ArrangementLayout::compute_with_mixer(rect, view.overview(), pinned.len())
+        } else {
+            ArrangementLayout::compute(rect, view.overview(), pinned.len())
+        };
+        self.mixer = layout.mixer;
         let lanes = layout.lanes;
 
         // The lanes' size, for the view commands that need it.
@@ -420,7 +441,7 @@ impl ArrangementUi {
         }
 
         // The headers.
-        self.headers(ui, view, doc, theme, &layout, scroll_y, &pinned, events);
+        self.headers(ui, shell, theme, &layout, scroll_y, &pinned, events);
         self.header_controls(ui, view, theme, &layout, events);
         // Over the pinned rows' lanes, in the lanes' lower right corner.
         self.grid_indicator(ui, view, doc, theme, layout.grid_indicator);
@@ -928,14 +949,15 @@ impl ArrangementUi {
     fn headers(
         &self,
         ui: &mut Ui,
-        view: &ArrangementView,
-        doc: &Document,
+        shell: &Shell,
         theme: &Theme,
         layout: &ArrangementLayout,
         scroll_y: f32,
         pinned: &[TrackId],
         events: &mut Vec<UiEvent>,
     ) {
+        let view = shell.arrangement();
+        let doc = shell.editor().document();
         let column = layout.headers;
         let visible = rows_between(&self.rows, scroll_y, scroll_y + column.height());
         let selected = view.selected_tracks();
@@ -952,6 +974,7 @@ impl ArrangementUi {
                 &mut header_ui,
                 theme,
                 &Header {
+                    shell,
                     track,
                     rect: Rect::from_min_max(
                         pos2(column.left(), top),
@@ -987,6 +1010,7 @@ impl ArrangementUi {
                 ui,
                 theme,
                 &Header {
+                    shell,
                     track,
                     rect: Rect::from_min_max(
                         pos2(layout.pinned_headers.left(), row.top()),

@@ -28,6 +28,8 @@
 
 use egui::{Pos2, Rect, Vec2, pos2, vec2};
 
+pub mod mixer;
+
 /// Live's title bar height at the reference size (L-WIN-002). layout.md
 /// measures from the window's top edge; the content area starts below it.
 pub const TITLE_BAR: f32 = 23.0;
@@ -394,8 +396,8 @@ pub const ELEMENTS: &[Placement] = &[
     p(E::ClipSelector, "L-STAT-005", "Clip View Selector", SB, 1270.0, 198.0, Right, Display, Some("M2")),
     p(E::DeviceViewToggle, "L-STAT-006", "Show/Hide Device View", SB, 1486.0, 10.0, Right, Switch, Some("M2")),
     p(E::DeviceSelector, "L-STAT-007", "Device View Selector", SB, 1497.0, 41.0, Right, Display, Some("M2")),
-    p(E::MixerToggle, "L-STAT-008", "Show/Hide Mixer", SB, 1557.0, 24.0, Right, Switch, Some("WP-1.9")),
-    p(E::MixerMenu, "L-STAT-008", "Mixer Config Menu", SB, 1581.0, 10.0, Right, MenuArrow, Some("WP-1.9")),
+    p(E::MixerToggle, "L-STAT-008", "Show/Hide Mixer", SB, 1557.0, 24.0, Right, Switch, None),
+    p(E::MixerMenu, "L-STAT-008", "Mixer Config Menu", SB, 1581.0, 10.0, Right, MenuArrow, None),
 ];
 
 /// The placement of an element.
@@ -752,6 +754,8 @@ pub struct ArrangementLayout {
     pub optimize_height: Rect,
     /// Optimize Width, W (L-ARR-017).
     pub optimize_width: Rect,
+    /// The Arrangement's mixer, while it shows (L-ARR-018, WP-1.9).
+    pub mixer: Option<Rect>,
 }
 
 impl ArrangementLayout {
@@ -841,7 +845,29 @@ impl ArrangementLayout {
                 pos2(header_x(1390.0), bottom(747.0)),
                 pos2(header_x(1404.0), bottom(761.0)),
             ),
+            mixer: None,
         }
+    }
+
+    /// The same view with its mixer showing (L-ARR-018; the mixer view
+    /// spec, R2): the lanes, the header column, and the pinned returns and
+    /// Main move up into the top part of the split, the grid indicator with
+    /// them into the lanes' new lower right corner, and the mixer takes the
+    /// bottom part; the time ruler and the buttons under the header column
+    /// stay at the bottom.
+    #[must_use]
+    pub fn compute_with_mixer(view: Rect, overview: bool, pinned_rows: usize) -> Self {
+        let mut layout = Self::compute(view, overview, pinned_rows);
+        let (lanes_bottom, mixer) = mixer::arrangement_split(view);
+        let lift = layout.pinned_lanes.bottom() - lanes_bottom;
+        layout.pinned_lanes = layout.pinned_lanes.translate(vec2(0.0, -lift));
+        layout.pinned_headers = layout.pinned_headers.translate(vec2(0.0, -lift));
+        let lanes_bottom = layout.pinned_lanes.top().max(layout.lanes.top());
+        layout.lanes.max.y = lanes_bottom;
+        layout.headers.max.y = lanes_bottom;
+        layout.grid_indicator = layout.grid_indicator.translate(vec2(0.0, -lift));
+        layout.mixer = Some(mixer);
+        layout
     }
 
     /// Every layout.md row this layout places, top to bottom.
@@ -874,6 +900,9 @@ impl ArrangementLayout {
             row("L-ARR-017", "Optimize Height", self.optimize_height),
             row("L-ARR-017", "Optimize Width", self.optimize_width),
         ]);
+        if let Some(mixer) = self.mixer {
+            rows.push(row("L-ARR-018", "Arrangement Mixer", mixer));
+        }
         rows
     }
 

@@ -26,6 +26,10 @@
 //!   one undo step through [`Shell::gesture`].
 //! - [`browser`]: the browser (places, browsing, search, preview, adding
 //!   files to the Arrangement), changed by its commands (WP-1.10).
+//! - [`mixer_view`] and [`mixer_controls`]: what the mixers show in the
+//!   Session and Arrangement Views (shown, scrolled, which sections),
+//!   changed by the `mixer_view.*` commands, and what a strip's controls
+//!   show and the `mixer.*` commands each change runs (WP-1.9).
 //! - [`transport`]: the Control Bar's transport section: what its fields
 //!   show, and the command each change runs (WP-1.18). The transport's
 //!   commands themselves are `bl-engine`'s, which [`Shell`] registers and
@@ -40,6 +44,8 @@ pub mod arrangement;
 pub mod audio;
 pub mod browser;
 pub mod files;
+pub mod mixer_controls;
+pub mod mixer_view;
 pub mod settings;
 mod shell;
 pub mod transport;
@@ -51,11 +57,15 @@ pub use bl_shell_spec::browser as browser_commands;
 /// The Arrangement's editing command IDs and their argument and result
 /// types (WP-1.8b).
 pub use bl_shell_spec::editing as editing_commands;
+/// The Mixer view's command IDs and their argument and result types
+/// (WP-1.9).
+pub use bl_shell_spec::mixer_view as mixer_view_commands;
 pub use bl_shell_spec::settings::ZOOM_STEPS;
 /// The transport's command IDs the shell's menus and controls run, and
 /// `transport.state`'s result.
 pub use bl_shell_spec::transport as transport_commands;
 pub use bl_shell_spec::{commands, context_menus, menus, register};
 pub use shell::{
-    Area, Effect, GesturePhase, Invocation, MainView, Message, Shell, ShellError, WindowKind,
+    Area, Effect, GesturePhase, Invocation, KEY_TRACK_NUMBER, MainView, Message, Shell, ShellError,
+    WindowKind,
 };

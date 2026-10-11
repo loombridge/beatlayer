@@ -150,7 +150,8 @@ const WIDGET: &[(&str, &str)] = &[
         "S-VAL-001",
         "the focused value field steps its value (the Control Bar's position, loop, tempo, \
          and time-signature fields run `transport.locate`, `transport.set_loop`, \
-         `song.set_tempo`, `song.set_time_signatures`)",
+         `song.set_tempo`, `song.set_time_signatures`; the mixers' and the track headers' \
+         volume and pan run `mixer.set_volume` and `mixer.set_pan`)",
     ),
     (
         "S-VAL-002",
@@ -162,7 +163,8 @@ const WIDGET: &[(&str, &str)] = &[
     ),
     (
         "S-VAL-004",
-        "the focused value field returns to its default",
+        "the focused value field returns to its default (a mixer's volume to 0 dB, its pan to \
+         the centre)",
     ),
     ("S-VAL-005", "the focused value field takes a typed value"),
     (
@@ -178,8 +180,6 @@ const WIDGET: &[(&str, &str)] = &[
 /// no command and no package here, or if this names WP-1.7 itself.
 const OWNERS: &[(&str, &str)] = &[
     ("S-VIEW-011", "WP-1.8a"),
-    ("S-VIEW-012", "WP-1.9"),
-    ("S-VIEW-014", "WP-1.9"),
     ("S-FOCUS-013", "WP-1.14"),
     ("S-FOCUS-014", "WP-1.14"),
     ("S-FILE-007", "WP-1.12"),
@@ -203,7 +203,6 @@ const OWNERS: &[(&str, &str)] = &[
     ("S-ARR-032", "WP-1.5"),
     ("S-ARR-033", "WP-1.5"),
     ("S-ARR-034", "WP-1.8a"),
-    ("S-ARR-035", "WP-1.9"),
     ("S-TRACK-005", "WP-1.8b"),
     ("S-TRACK-008", "WP-1.8a"),
     ("S-TRACK-009", "WP-1.8a"),

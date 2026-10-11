@@ -93,6 +93,69 @@ fn a_fader_move_glides_from_value_to_value_with_no_zipper_noise() {
     assert!(steepest <= limit + 1e-5, "{steepest} > {limit}");
 }
 
+/// Spec: mixer-view R18. The fader-gesture fixture plays the volumes a fader
+/// dragged in the Session mixer set, one 60 Hz frame apart (`fader_gesture`
+/// in bl-ui's mixer test, which checks the window still makes exactly
+/// these). Dividing the render by the same tone at rest gives the gain on
+/// every frame, and it never moves faster than a 20 ms glide between two
+/// neighbouring volumes allows: a frame of the drag starts a new glide from
+/// wherever the last one had reached, at most a fifth of a step behind, so no
+/// frame's change is more than 1.2 steps over 960 frames. A fader that
+/// stepped would jump a whole step in one frame.
+#[test]
+fn a_fader_dragged_in_the_mixer_glides_with_no_zipper_noise() {
+    let frames = bl_cli::golden::fader_gesture_frames();
+    let biggest_step = frames
+        .windows(2)
+        .map(|pair| (pair[1].1 - pair[0].1).abs())
+        .fold(0.0f64, f64::max);
+    assert!(
+        biggest_step > 0.1,
+        "the drag moves the fader: {biggest_step}"
+    );
+    let fixture = fixture("fader-gesture").expect("the fixture exists");
+    let scene = fixture.scene();
+    assert_eq!(
+        scene.schedule.len(),
+        frames.len(),
+        "every frame of the drag"
+    );
+    let moved: Render = fixture.render();
+    assert!(moved.problems().is_empty(), "{:?}", moved.problems());
+    let dry = render_plain(scene.document(), scene.frames);
+    let glide = (SMOOTHING_SECONDS * SAMPLE_RATE.as_f64()).round();
+    let limit = 1.2 * biggest_step / glide;
+
+    let peak = dry.iter().fold(0.0f32, |p, s| p.max(s.abs()));
+    let mut steepest = 0.0f64;
+    let mut moving_frames = 0;
+    for channel in 0..2 {
+        let mut last: Option<(usize, f64)> = None;
+        for frame in 0..scene.frames as usize {
+            let i = frame * 2 + channel;
+            let x = f64::from(dry[i]);
+            if x.abs() < f64::from(peak) * 0.2 {
+                continue;
+            }
+            let gain = f64::from(moved.samples[i]) / x;
+            if let Some((then, before)) = last {
+                let slope = (gain - before).abs() / (frame - then) as f64;
+                steepest = steepest.max(slope);
+                if slope > 1e-6 {
+                    moving_frames += 1;
+                }
+            }
+            last = Some((frame, gain));
+        }
+    }
+    println!(
+        "fader-gesture: the gain moves on {moving_frames} frames, at most {steepest:.6} a frame; \
+         the glide's limit is {limit:.6}, and a step would be {biggest_step:.3}"
+    );
+    assert!(moving_frames > 20_000, "the render follows the drag");
+    assert!(steepest <= limit + 1e-5, "{steepest} > {limit}");
+}
+
 /// Spec: mixer R10, R11. Soloing the kick in place plays exactly what the
 /// same song plays with the hat and the bass deleted: the kick through its
 /// group, and its send through the return, to the bit.

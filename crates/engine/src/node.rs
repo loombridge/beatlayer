@@ -3,8 +3,9 @@
 use core::fmt;
 use core::ops::Range;
 use std::any::Any;
+use std::sync::LazyLock;
 
-use bl_core::time::{Frames, SampleRate};
+use bl_core::time::{Frames, SampleRate, TempoMap};
 use bl_model::{DeviceId, ParamId, TrackId};
 use rtgc::{ArcGc, LocalRtGc};
 
@@ -133,6 +134,10 @@ pub trait Node: Send + 'static {
 }
 
 /// One block of audio for a node to process, with what it needs to know.
+///
+/// A block is one unbroken stretch of the song: the engine splits its
+/// device blocks wherever the transport starts, stops, jumps, or loops, so
+/// the song position of frame `i` is the transport's position plus `i`.
 pub struct Block<'a> {
     pub(crate) data: &'a mut [f32],
     pub(crate) channels: usize,
@@ -141,12 +146,17 @@ pub struct Block<'a> {
     pub(crate) events: &'a [NodeEvent],
     pub(crate) transport: TransportInfo,
     pub(crate) sample_rate: SampleRate,
+    pub(crate) tempo: &'a TempoMap,
 }
+
+/// The tempo map of a block made outside a program: 120 BPM throughout.
+static DEFAULT_TEMPO: LazyLock<TempoMap> = LazyLock::new(TempoMap::default);
 
 impl<'a> Block<'a> {
     /// A block over planar audio: `channels` channels of `frames` frames,
     /// where channel `c` starts at `data[c * stride]`. For tests of nodes
-    /// outside a program.
+    /// outside a program. Its tempo map is 120 BPM throughout unless
+    /// [`Block::with_tempo`] gives another.
     ///
     /// # Panics
     ///
@@ -182,7 +192,14 @@ impl<'a> Block<'a> {
             events,
             transport,
             sample_rate,
+            tempo: &DEFAULT_TEMPO,
         }
+    }
+
+    /// The same block under another tempo map.
+    #[must_use]
+    pub fn with_tempo(self, tempo: &'a TempoMap) -> Self {
+        Self { tempo, ..self }
     }
 
     /// Frames in the block.
@@ -203,6 +220,14 @@ impl<'a> Block<'a> {
     /// The transport as the block starts.
     pub fn transport(&self) -> TransportInfo {
         self.transport
+    }
+
+    /// The song's tempo map, which places ticks on frames: the song
+    /// position of frame `i` in ticks is
+    /// `tempo().frames_to_ticks(transport().position + i, sample_rate())`.
+    /// Its conversions allocate nothing, so a node may call them.
+    pub fn tempo(&self) -> &'a TempoMap {
+        self.tempo
     }
 
     /// The parameter changes in this block, in the order they take effect.

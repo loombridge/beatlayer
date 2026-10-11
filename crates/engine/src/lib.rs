@@ -18,6 +18,11 @@
 //! ([`Sender::send_data`]). A [`ScheduledCommand`] runs at a musical
 //! position on its exact frame, which is how an agent plays in time (D17).
 //!
+//! The [`Processor`] owns the transport: play, stop, continue, the insert
+//! marker, and the Arrangement loop, each a [`TransportCommand`] that acts
+//! on an exact frame (`docs/specs/transport.md`). The [`transport`] module
+//! registers them as commands people and agents run by ID.
+//!
 //! The pieces, and the threads they live on:
 //!
 //! | Piece | Thread | Job |
@@ -68,6 +73,7 @@ mod processor;
 mod program;
 mod registry;
 mod state;
+pub mod transport;
 
 #[doc(hidden)]
 pub mod testing;
@@ -77,7 +83,9 @@ use bl_core::time::SampleRate;
 pub use compiler::{Compiler, Update};
 pub use engine::{CompileCounts, Engine, Sender, channel};
 pub use gc::{Collector, DROP_PERIOD, DropThread, GcHandle, Program};
-pub use message::{Action, ParamEvent, Report, ScheduledCommand, TransportCommand, When};
+pub use message::{
+    Action, LoopRegion, ParamEvent, Report, ScheduledCommand, TransportCommand, When,
+};
 pub use node::{
     Block, Node, NodeConfig, NodeData, NodeEvent, NodeKey, ParamValue, Segment, Segments,
     TransportInfo, segments,
@@ -104,7 +112,8 @@ pub struct EngineConfig {
     pub queue_capacity: usize,
     /// Parameter changes waiting for their frame, and in one block.
     pub max_pending_events: usize,
-    /// Scheduled commands waiting to fire.
+    /// Scheduled commands waiting to fire, and, separately, transport
+    /// commands waiting for their frames.
     pub max_scheduled: usize,
     /// Tracks with a meter in [`EngineState::meters`].
     pub max_tracks: usize,

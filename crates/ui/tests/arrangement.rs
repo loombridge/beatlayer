@@ -534,6 +534,11 @@ fn every_part_reaches_assistive_technology() {
     );
     let ruler = Harness::node(&nodes, "Beat-Time Ruler");
     assert_eq!(ruler.value, "bars 1 to 33");
+    let overview = Harness::node(&nodes, "Overview");
+    assert_eq!(overview.value, "bars 1 to 33 in view, of bars 1 to 495");
+    // 32 and a half bars at 120 BPM.
+    let time = Harness::node(&nodes, "Time Ruler");
+    assert_eq!(time.value, "0:00 to 1:05");
     let grid = Harness::node(&nodes, "Grid");
     assert_eq!(grid.value, "1/1, adaptive");
     let follow = Harness::node(&nodes, "Follow");

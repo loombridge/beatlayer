@@ -235,15 +235,21 @@ fn current_project_follows_the_set_file() {
     assert!(state.rows.is_empty());
     assert!(state.note.unwrap().contains("hasn't been saved"));
 
-    let project = scratch.path("Song Project");
-    wav(&project.join("Samples/Imported/Vox.wav"), 100);
-    shell
+    // Save Set As puts the set in a new "Song Project" folder (app-shell
+    // R17), which becomes Current Project.
+    let saved = shell
         .run(
             commands::SET_SAVE_AS,
-            json!({ "path": text(&project.join("Song.blset")) }),
+            json!({ "path": text(&scratch.path("Song.blset")) }),
         )
         .unwrap();
+    let project = Path::new(saved["path"].as_str().unwrap())
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    assert_eq!(project, scratch.path("Song Project"));
     assert_eq!(shell.browser_view().project(), Some(project.as_path()));
+    wav(&project.join("Samples/Imported/Vox.wav"), 100);
     let state: BrowserState = run(
         &mut shell,
         ids::OPEN_PLACE,
@@ -898,10 +904,15 @@ fn added_media_is_saved_and_registered_again() {
         ids::ADD_TO_ARRANGEMENT,
         json!({ "paths": [text(&pad)] }),
     );
-    let set = scratch.path("Song Project/Song.blset");
-    shell
-        .run(commands::SET_SAVE_AS, json!({ "path": text(&set) }))
+    let saved = shell
+        .run(
+            commands::SET_SAVE_AS,
+            json!({ "path": text(&scratch.path("Song.blset")) }),
+        )
         .unwrap();
+    // In the "Song Project" folder Save Set As makes (app-shell R17).
+    let set = PathBuf::from(saved["path"].as_str().unwrap());
+    assert_eq!(set, scratch.path("Song Project/Song.blset"));
     let (_, project) = bl_project::SetFile::open(&set).unwrap();
     let file = project.media.iter().next().expect("the pad is listed");
     assert_eq!(

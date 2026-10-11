@@ -3,9 +3,11 @@
 //! `tests/golden/`.
 //!
 //! Each fixture ([`fixtures`]) is a document, the commands scheduled on it,
-//! and a length. The harness renders it with [`render::render`], the code
-//! behind `bl-cli render`, at [`SAMPLE_RATE`] in blocks of [`BLOCK`] frames,
-//! and compares the render with its reference ([`null_test`]):
+//! the transport's moves (each a [`Cue`] on a frame; most fixtures just
+//! play from the start), and a length. The harness renders it with
+//! [`render::render_cued`], the code behind `bl-cli render`, at
+//! [`SAMPLE_RATE`] in blocks of [`BLOCK`] frames, and compares the render
+//! with its reference ([`null_test`]):
 //!
 //! - The reference is a 24-bit FLAC file, `<name>.flac`. The render is
 //!   rounded to 24 bits ([`render::to_i24`]) and subtracted from it sample
@@ -44,7 +46,7 @@ use bl_model::{Document, Editor};
 use serde::{Deserialize, Serialize};
 
 use crate::Outcome;
-use crate::render::{self, Settings, Summary, dbfs, to_i24};
+use crate::render::{self, Cue, Settings, Summary, dbfs, to_i24};
 
 /// The references' sample rate.
 pub const SAMPLE_RATE: SampleRate = SampleRate::HZ_48000;
@@ -82,14 +84,17 @@ pub struct Fixture {
     build: fn() -> Scene,
 }
 
-/// A fixture's song: its document, what's scheduled on it, and how long it
-/// plays.
+/// A fixture's song: its document, what's scheduled on it, how the
+/// transport moves, and how long it plays.
 #[derive(Debug)]
 pub struct Scene {
     /// The editor holding the song, with the IDs it handed out.
     pub editor: Editor,
     /// Commands scheduled before the first block.
     pub schedule: Vec<ScheduledCommand>,
+    /// The transport's moves, each on its frame. Most fixtures play from
+    /// the start: [`Cue::PLAY`] alone.
+    pub cues: Vec<Cue>,
     /// Frames to render, at [`SAMPLE_RATE`].
     pub frames: u64,
 }
@@ -99,6 +104,13 @@ impl Scene {
     #[must_use]
     pub fn document(&self) -> &Document {
         self.editor.document()
+    }
+
+    /// Whether the song plays from its start with nothing scheduled, as
+    /// `bl-cli render` plays a saved set.
+    #[must_use]
+    pub fn plays_as_saved(&self) -> bool {
+        self.schedule.is_empty() && self.cues == [Cue::PLAY]
     }
 }
 
@@ -137,9 +149,13 @@ impl Fixture {
             frames: scene.frames,
         };
         let mut samples = Vec::with_capacity(scene.frames as usize * 2);
-        let summary = render::render(scene.document(), &scene.schedule, &settings, |output| {
-            render::interleave(output, &mut samples);
-        });
+        let summary = render::render_cued(
+            scene.document(),
+            &scene.schedule,
+            &scene.cues,
+            &settings,
+            |output| render::interleave(output, &mut samples),
+        );
         Render {
             sample_rate: SAMPLE_RATE.hz(),
             channels: summary.channels,

@@ -42,6 +42,8 @@ fn registry() -> Registry {
     let mut registry = Registry::new();
     bl_model::registry::register(&mut registry).unwrap();
     bl_shell::register(&mut registry).unwrap();
+    // The transport's commands (WP-1.5), which the playback keys bind.
+    bl_engine::transport::register(&mut registry).unwrap();
     registry
 }
 

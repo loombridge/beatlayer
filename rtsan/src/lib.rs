@@ -12,5 +12,8 @@
 //! - `tests/engine.rs`: the engine's audio-thread work: 1,000 program swaps
 //!   with node migration, parameter changes, scheduled commands, node data,
 //!   and the state for the UI, every block a real-time section.
+//! - `tests/stream.rs`: disk streaming's audio-thread work: reads, jumps
+//!   that land in the look-ahead, a preload, a cue, or nowhere ready,
+//!   crossfades, and an underrun, every block a real-time section.
 //! - `tests/preview.rs`: the browser's preview voice playing, replacing,
 //!   fading out, and letting go of 100 previews (WP-1.10).

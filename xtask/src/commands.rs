@@ -22,6 +22,8 @@ type Register = fn(&mut Registry) -> Result<(), RegisterError>;
 /// it starts registering commands, so they're checked and listed.
 const PROVIDERS: &[(&str, Register)] = &[
     ("bl-model", bl_model::registry::register),
+    ("bl-project", bl_project::registry::register),
+    ("bl-engine", bl_engine::transport::register),
     ("bl-shell-spec", bl_shell_spec::register),
 ];
 

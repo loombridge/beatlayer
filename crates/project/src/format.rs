@@ -18,9 +18,10 @@
 //! reading the rest. Anything else may change from one schema version to
 //! the next (see [`crate::migrate`]).
 //!
-//! A frame is self-contained, so the continuous-save journal (IMP-05,
-//! WP-1.11) can append its own frames to a separate file, each naming the
-//! `revision` it follows, without changing what a normal save writes.
+//! A frame is self-contained, so the journal (IMP-05, WP-1.11) appends its
+//! own frames to a separate file beside the set, each naming the `revision`
+//! it follows, without changing what a normal save writes (see
+//! [`crate::journal`]).
 
 use std::io::Read;
 
@@ -139,6 +140,20 @@ struct Saving<'a> {
     document: &'a Document,
 }
 
+impl<'a> Saving<'a> {
+    fn of(project: &'a Project, revision: u64) -> Self {
+        Self {
+            format: FORMAT,
+            schema: SCHEMA_VERSION,
+            revision,
+            saved_by: SAVED_BY,
+            ids: project.ids,
+            media: &project.media,
+            document: &project.document,
+        }
+    }
+}
+
 /// The saved form, owned for reading. Field for field the same as
 /// [`Saving`].
 #[derive(Deserialize)]
@@ -169,16 +184,7 @@ struct Probe {
 /// [`SaveError::Encode`] if the project can't be written as JSON, which
 /// shouldn't happen for any project the model accepts.
 pub fn encode_json(project: &Project, revision: u64) -> Result<Vec<u8>, SaveError> {
-    let saving = Saving {
-        format: FORMAT,
-        schema: SCHEMA_VERSION,
-        revision,
-        saved_by: SAVED_BY,
-        ids: project.ids,
-        media: &project.media,
-        document: &project.document,
-    };
-    serde_json::to_vec(&saving).map_err(|error| SaveError::Encode {
+    serde_json::to_vec(&Saving::of(project, revision)).map_err(|error| SaveError::Encode {
         reason: error.to_string(),
     })
 }
@@ -291,11 +297,25 @@ pub fn decode_json(json: &[u8], options: &LoadOptions) -> Result<(Project, SetIn
 /// Decompresses a set file's one zstd frame, checking its checksum and that
 /// nothing follows it.
 fn decompress(bytes: &[u8], limit: usize) -> Result<Vec<u8>, LoadError> {
-    if !bytes.starts_with(&ZSTD_MAGIC) {
+    let mut rest = bytes;
+    let json = decompress_frame(&mut rest, limit)?;
+    if !rest.is_empty() {
+        return Err(LoadError::corrupt(format_args!(
+            "{} bytes follow the compressed data",
+            rest.len()
+        )));
+    }
+    Ok(json)
+}
+
+/// Decompresses the zstd frame at the start of `rest`, checking its
+/// checksum, and moves `rest` past it. The continuous-save journal is a run
+/// of these frames.
+pub(crate) fn decompress_frame(rest: &mut &[u8], limit: usize) -> Result<Vec<u8>, LoadError> {
+    if !rest.starts_with(&ZSTD_MAGIC) {
         return Err(LoadError::NotASet);
     }
-    let mut rest = bytes;
-    let mut decoder = StreamingDecoder::new(&mut rest).map_err(LoadError::corrupt)?;
+    let mut decoder = StreamingDecoder::new(&mut *rest).map_err(LoadError::corrupt)?;
     let mut json = Vec::new();
     let most = u64::try_from(limit).unwrap_or(u64::MAX).saturating_add(1);
     (&mut decoder)
@@ -314,14 +334,25 @@ fn decompress(bytes: &[u8], limit: usize) -> Result<Vec<u8>, LoadError> {
     {
         return Err(LoadError::corrupt("the checksum doesn't match"));
     }
-    drop(decoder);
-    if !rest.is_empty() {
-        return Err(LoadError::corrupt(format_args!(
-            "{} bytes follow the compressed data",
-            rest.len()
-        )));
-    }
     Ok(json)
+}
+
+/// The saved form of a project as a JSON value: what [`encode_json`] writes,
+/// before it's turned into text. The journal diffs these.
+pub(crate) fn to_value(project: &Project, revision: u64) -> Result<Value, SaveError> {
+    serde_json::to_value(Saving::of(project, revision)).map_err(|error| SaveError::Encode {
+        reason: error.to_string(),
+    })
+}
+
+/// Reads a saved form held as a JSON value, with every check
+/// [`decode_json`] makes.
+pub(crate) fn decode_value(
+    value: &Value,
+    options: &LoadOptions,
+) -> Result<(Project, SetInfo), LoadError> {
+    let json = serde_json::to_vec(value).map_err(LoadError::corrupt)?;
+    decode_json(&json, options)
 }
 
 #[cfg(test)]

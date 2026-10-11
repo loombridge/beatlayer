@@ -47,9 +47,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
 use super::run::resolve_placeholders;
-use super::{
-    Ctx, ToolOutcome, args, class_names, describe_args, done, failed, step, tool_definition,
-};
+use super::{Ctx, ToolOutcome, args, done, failed, question_line, step, tool_definition};
 use bl_shell::permission::{CallPermission, raised_by_arguments};
 
 pub(crate) const TRANSPORT: &str = "transport";
@@ -638,16 +636,10 @@ pub(crate) fn schedule(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
                 CallPermission::registered(class)
             };
             let classes = call.classes();
-            let asking: Vec<Permission> = classes
-                .iter()
-                .copied()
-                .filter(|class| class.asks_first())
-                .collect();
             let shell = &*ctx.shell;
             step!(ctx.permit(&classes, &[command.as_str()], || format!(
-                "At {position}: {label} ({}): {}",
-                class_names(&asking),
-                describe_args(shell, &args)
+                "At {position}: {}",
+                question_line(shell, &label, &call, &args)
             )));
             ctx.session.refs = names;
             let schedule = &mut ctx.state.schedule;

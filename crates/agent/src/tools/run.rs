@@ -19,7 +19,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
 use super::{
-    Ctx, ToolOutcome, args, class_names, describe_args, done, failed, step, tool_definition,
+    Ctx, ToolOutcome, args, class_names, done, failed, question_line, step, tool_definition,
 };
 
 pub(crate) const NAME: &str = "run";
@@ -266,21 +266,7 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
                 .iter()
                 .zip(&labels)
                 .filter(|(step, _)| step.call.class().asks_first())
-                .map(|(step, label)| {
-                    let asking: Vec<Permission> = step
-                        .call
-                        .classes()
-                        .into_iter()
-                        .filter(|class| class.asks_first())
-                        .collect();
-                    let args = describe_args(shell, &step.args);
-                    let classes = class_names(&asking);
-                    if args.is_empty() {
-                        format!("{label} ({classes})")
-                    } else {
-                        format!("{label} ({classes}): {args}")
-                    }
-                })
+                .map(|(step, label)| question_line(shell, label, &step.call, &step.args))
                 .collect();
             lines.join("\n")
         }));
@@ -304,7 +290,20 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
                 for (index, step) in ready.iter().enumerate() {
                     match model::run(editor, &step.id, step.args.clone()) {
                         Ok(changes) => {
-                            results.push(json!({ "command": step.id, "changes": changes }))
+                            let mut checked = json!({ "command": step.id, "changes": changes });
+                            // Spec: agent-permissions R11. `clip.set_data`
+                            // says whether it would delete notes.
+                            if raised_by_arguments(&step.id) {
+                                checked["permission"] = json!(class_names(&step.call.classes()));
+                                if let Some(fewer) = step.call.fewer_notes {
+                                    checked["fewer_notes"] = json!({
+                                        "clip": fewer.clip,
+                                        "has": fewer.has,
+                                        "leaves": fewer.leaves,
+                                    });
+                                }
+                            }
+                            results.push(checked);
                         }
                         Err(error) => {
                             failure =

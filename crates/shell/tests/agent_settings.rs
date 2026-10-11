@@ -39,7 +39,7 @@ fn the_server_starts_off_and_switching_it_on_makes_a_token_that_is_kept() {
         "results never carry the token"
     );
     let token = shell.agent_settings().token.clone();
-    assert_eq!(token.len(), 64);
+    assert_eq!(token.expose().len(), 64);
 
     // Off and on again keeps the token; a new port moves the address.
     shell
@@ -189,12 +189,21 @@ fn each_allowed_agent_gets_a_token_of_its_own_that_can_be_replaced() {
         "debug prints never show a token"
     );
 
-    // Replacing one changes only that agent's.
-    shell
+    // Replacing one changes only that agent's, and the result carries
+    // neither the old token nor the new one (WP-1.15c: the Settings
+    // window's New Token runs this).
+    let state = shell
         .run("agent.new_client_token", json!({ "client": "goose" }))
         .unwrap();
     assert_eq!(shell.agent_settings().clients[0].token, tokens[0]);
     assert_ne!(shell.agent_settings().clients[1].token, tokens[1]);
+    let new = shell.agent_settings().clients[1].token.expose().to_owned();
+    let text = state.to_string();
+    assert!(
+        !text.contains("token") && !text.contains(&tokens[1]) && !text.contains(&new),
+        "{text}"
+    );
+    assert!(!format!("{:?}", shell.agent_settings()).contains(&new));
     assert!(matches!(
         shell.run("agent.new_client_token", json!({ "client": "nobody" })),
         Err(ShellError::Unavailable { .. })
@@ -224,7 +233,7 @@ fn agents_allowed_before_agents_had_tokens_get_one_and_keep_it() {
     .unwrap();
     let shell = shell_saving_to(&dir);
     let token = shell.agent_settings().clients[0].token.clone();
-    assert_eq!(token.len(), 64);
+    assert_eq!(token.expose().len(), 64);
     assert!(shell.agent_settings().is_autonomous("claude-code"));
     let again = shell_saving_to(&dir);
     assert_eq!(again.agent_settings().clients[0].token, token);
@@ -318,4 +327,89 @@ fn loading_the_browser_s_files_is_destructive_where_a_clip_is_in_the_way() {
     assert!(over.may);
     let after = at(&mut shell, 3 * 2_822_400);
     assert_eq!(after.classes(), [Permission::External]);
+}
+
+#[test]
+fn clip_set_data_is_destructive_only_when_it_leaves_a_midi_clip_fewer_notes() {
+    // Spec: agent-permissions R11. Decided against the set as it is, and
+    // nothing changes.
+    use bl_commands::Permission;
+    let mut shell = Shell::headless();
+    let kind = |shell: &Shell, kind: bl_model::TrackKind| {
+        shell
+            .editor()
+            .document()
+            .tracks()
+            .find(|t| t.kind() == kind)
+            .unwrap()
+            .id()
+    };
+    let midi = kind(&shell, bl_model::TrackKind::Midi);
+    let audio = kind(&shell, bl_model::TrackKind::Audio);
+    let notes = |count: u64| {
+        let notes: Vec<_> = (0..count)
+            .map(|n| {
+                json!({ "key": 60 + n, "velocity": 100, "start": n * 705_600,
+                             "length": 705_600 })
+            })
+            .collect();
+        json!({ "midi": { "notes": notes } })
+    };
+    let bass: bl_model::ClipId = shell.new_id();
+    shell
+        .run(
+            "clip.create",
+            json!({ "track": midi, "clip": { "id": bass, "name": "Bass", "start": 0,
+                    "length": 2_822_400, "mute": false, "data": notes(3) } }),
+        )
+        .unwrap();
+    let before = shell.editor().document().clone();
+    let check = |shell: &mut Shell, data: serde_json::Value| {
+        shell.call_permission("clip.set_data", &json!({ "clip": bass, "data": data }))
+    };
+    let fewer = check(&mut shell, notes(1));
+    assert_eq!(fewer.classes(), [Permission::Edit, Permission::Destructive]);
+    let thinned = fewer.fewer_notes.unwrap();
+    assert_eq!((thinned.clip, thinned.has, thinned.leaves), (bass, 3, 1));
+    assert!(fewer.replaces.is_empty());
+    for (data, why) in [
+        (notes(3), "the same count"),
+        (notes(5), "more notes"),
+        (
+            json!({ "audio": { "media": "11".repeat(32) } }),
+            "audio on a MIDI track fails",
+        ),
+    ] {
+        let call = check(&mut shell, data);
+        assert_eq!(call.classes(), [Permission::Edit], "{why}");
+        assert!(call.fewer_notes.is_none(), "{why}");
+    }
+    assert_eq!(*shell.editor().document(), before, "nothing changed");
+    assert_eq!(
+        shell.editor().undo_history().count(),
+        1,
+        "only the clip's creation is an undo step"
+    );
+
+    // An audio clip's file replaced keeps its class.
+    let held: bl_model::ClipId = shell.new_id();
+    shell
+        .run(
+            "clip.create",
+            json!({ "track": audio, "clip": { "id": held, "name": "Held", "start": 0,
+                    "length": 2_822_400, "mute": false,
+                    "data": { "audio": { "media": "11".repeat(32) } } } }),
+        )
+        .unwrap();
+    let call = shell.call_permission(
+        "clip.set_data",
+        &json!({ "clip": held, "data": { "audio": { "media": "22".repeat(32) } } }),
+    );
+    assert_eq!(call.classes(), [Permission::Edit]);
+    // An unknown clip too.
+    let call = shell.call_permission(
+        "clip.set_data",
+        &json!({ "clip": 999_999, "data": notes(0) }),
+    );
+    assert_eq!(call.classes(), [Permission::Edit]);
 }

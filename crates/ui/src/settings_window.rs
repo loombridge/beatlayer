@@ -600,8 +600,9 @@ fn theme_page(
 }
 
 /// The agent server's section (WP-1.15), on the Tempo & MIDI page: the
-/// switch, where agents connect, the token they need, and the agents the
-/// person has allowed, each with its autonomous switch.
+/// switch, where agents connect, the server's token, and the agents the
+/// person has allowed, each with its autonomous switch and its own token
+/// (WP-1.15c).
 fn agents_section(
     ui: &mut Ui,
     shell: &Shell,
@@ -636,29 +637,11 @@ fn agents_section(
     rows.text_row(ui, "Status", &state);
     rows.text_row(ui, "Address", &settings.url());
     if !settings.token.is_empty() {
-        // The token on a line of its own, the page's whole width, so all 64
-        // digits show; it can be selected and copied.
         let rect = rows.row(ui, "Token", SettingsLayout::CHOOSER);
         if ui.put(rect, egui::Button::new("New Token")).clicked() {
             invoke(events, agent::AGENT_NEW_TOKEN, json!({}));
         }
-        let rect = Rect::from_min_size(
-            pos2(rows.layout.label_x, rows.y),
-            vec2(rows.right() - rows.layout.label_x, 18.0),
-        );
-        let mut token: &str = &settings.token;
-        let response = ui.put(
-            rect,
-            egui::TextEdit::singleline(&mut token)
-                .id_salt("agent-token")
-                .font(egui::FontId::proportional(theme.sizes.small_text * 0.9))
-                .clip_text(true),
-        );
-        ui.ctx().accesskit_node_builder(response.id, |node| {
-            node.set_label("Token".to_owned());
-            node.set_read_only();
-        });
-        rows.y += SettingsLayout::OPTION_ROW;
+        rows.token_field(ui, "agent-token", "Token", &settings.token);
     }
     if !settings.clients.is_empty() {
         rows.heading(ui, "Allowed Agents");
@@ -694,15 +677,38 @@ fn agents_section(
                     json!({ "client": client.name }),
                 );
             }
+            // Spec: agent-permissions R12. The agent's own token under its
+            // name, shown and replaced as the server's is.
+            if !client.token.is_empty() {
+                let new_token = rows.row(ui, "Token", SettingsLayout::CHOOSER);
+                let response = ui.put(new_token, egui::Button::new("New Token"));
+                ui.ctx().accesskit_node_builder(response.id, |node| {
+                    node.set_label(format!("New Token: {}", client.name));
+                });
+                if response.clicked() {
+                    invoke(
+                        events,
+                        agent::AGENT_NEW_CLIENT_TOKEN,
+                        json!({ "client": client.name }),
+                    );
+                }
+                rows.token_field(
+                    ui,
+                    &format!("agent-token-{}", client.name),
+                    &format!("Token: {}", client.name),
+                    &client.token,
+                );
+            }
         }
     }
     rows.note(
         ui,
         "Agent clients on this computer, such as Claude Code, can read and edit the open set \
          through the agent API at the address above, sending the token as a bearer token. \
-         Each agent is asked about once. Deleting or reaching outside the project asks you \
-         first unless the agent is autonomous (the switch beside its name). Web pages can't \
-         connect.",
+         An agent you allow gets its own token and isn't asked again. Clients using the \
+         server's token are asked each time. Deleting or reaching outside the project asks \
+         you first unless the agent is autonomous (the switch beside its name). Web pages \
+         can't connect.",
     );
 }
 
@@ -892,6 +898,32 @@ impl<'a> Rows<'a> {
             // Side by side, as Live's Exclusive Arm and Solo are.
             x += width + 4.0;
         }
+        self.y += SettingsLayout::OPTION_ROW;
+    }
+
+    /// A token on a line of its own, the page's whole width, so all 64
+    /// digits show; it can be selected and copied but not edited. This is
+    /// where the person sees a token: the only place the window reveals a
+    /// [`agent::Secret`].
+    fn token_field(&mut self, ui: &mut Ui, id_salt: &str, label: &str, token: &agent::Secret) {
+        let rect = Rect::from_min_size(
+            pos2(self.layout.label_x, self.y),
+            vec2(self.right() - self.layout.label_x, 18.0),
+        );
+        let mut text: &str = token.expose();
+        let response = ui.put(
+            rect,
+            egui::TextEdit::singleline(&mut text)
+                .id_salt(id_salt)
+                .font(egui::FontId::proportional(
+                    self.theme.sizes.small_text * 0.9,
+                ))
+                .clip_text(true),
+        );
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_label(label.to_owned());
+            node.set_read_only();
+        });
         self.y += SettingsLayout::OPTION_ROW;
     }
 

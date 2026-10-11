@@ -1,6 +1,6 @@
 //! The real-time thread harness: what every thread that runs audio needs
 //! before its first block, and the checks that keep it within the real-time
-//! rules in `docs/02-architecture.md`.
+//! rules in the architecture notes.
 //!
 //! - [`thread`]: real-time priority per platform (the Mach time-constraint
 //!   policy on macOS, MMCSS "Pro Audio" on Windows, `SCHED_FIFO` or rtkit on

@@ -1,6 +1,6 @@
 // The Arrangement View's dense drawing (WP-1.8a; ADR-001): instanced
 // rectangles for lanes, grid lines, and clips, and waveforms drawn straight
-// from peak data (docs/specs/waveform-peaks.md, "The peak data").
+// from peak data (the waveform peaks spec, "The peak data").
 
 struct Globals {
     // The target's size in pixels.

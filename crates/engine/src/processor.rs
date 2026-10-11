@@ -157,7 +157,7 @@ pub(crate) fn starts_playback(command: TransportCommand) -> bool {
 ///
 /// # The transport
 ///
-/// The processor owns the transport (`docs/specs/transport.md`): whether
+/// The processor owns the transport (the transport spec): whether
 /// the song plays, the song position (the next frame to play), the insert
 /// marker (where Play starts), and the Arrangement loop. Positions in ticks
 /// fall on frames through the running program's tempo map; when a new
@@ -524,7 +524,7 @@ impl Processor {
     }
 
     /// Runs a transport command now, at the playhead
-    /// (`docs/specs/transport.md`).
+    /// (the transport spec).
     fn transport(&mut self, command: TransportCommand) {
         match command {
             // Spec: transport R1, R11

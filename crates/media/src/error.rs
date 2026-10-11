@@ -42,6 +42,9 @@ pub enum MediaError {
     Cancelled,
     /// Disk streaming couldn't do what was asked.
     Streaming(String),
+    /// Writing an audio file failed, or its format can't hold what was
+    /// asked (WP-1.12).
+    Encode(String),
 }
 
 impl fmt::Display for MediaError {
@@ -63,6 +66,7 @@ impl fmt::Display for MediaError {
             Self::Resample(what) => write!(f, "sample-rate conversion failed: {what}"),
             Self::Cancelled => f.write_str("cancelled"),
             Self::Streaming(what) => write!(f, "disk streaming failed: {what}"),
+            Self::Encode(what) => write!(f, "couldn't write the audio file: {what}"),
         }
     }
 }

@@ -26,6 +26,9 @@
 //!   one undo step through [`Shell::gesture`].
 //! - [`browser`]: the browser (places, browsing, search, preview, adding
 //!   files to the Arrangement), changed by its commands (WP-1.10).
+//! - [`export`]: exporting audio (WP-1.12): a range rendered offline
+//!   through the engine and written to a WAV, AIFF, or FLAC file, which
+//!   `export.audio` runs.
 //! - [`permission`]: a call's permission class decided from its arguments,
 //!   for the agent API: placing clips over others is destructive
 //!   (WP-1.15b).
@@ -42,6 +45,7 @@ pub mod agent;
 pub mod arrangement;
 pub mod audio;
 pub mod browser;
+pub mod export;
 pub mod files;
 pub mod permission;
 pub mod settings;
@@ -55,6 +59,8 @@ pub use bl_shell_spec::browser as browser_commands;
 /// The Arrangement's editing command IDs and their argument and result
 /// types (WP-1.8b).
 pub use bl_shell_spec::editing as editing_commands;
+/// The export command's ID and its argument and result types (WP-1.12).
+pub use bl_shell_spec::export as export_commands;
 pub use bl_shell_spec::settings::ZOOM_STEPS;
 /// The transport's command IDs the shell's menus and controls run, and
 /// `transport.state`'s result.

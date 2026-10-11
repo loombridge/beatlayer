@@ -1,7 +1,7 @@
 //! The Control Bar's transport section without a window (WP-1.18): what
 //! each of its value fields shows, and the registered command each change
 //! runs, so the UI, agents, and tests share one implementation
-//! (`docs/specs/control-bar-transport.md`).
+//! (the control bar transport spec).
 //!
 //! The fields come in groups: the Arrangement Position, Loop Start, and
 //! Loop Length (each a bar, a beat, and a sixteenth field), the Tempo, and

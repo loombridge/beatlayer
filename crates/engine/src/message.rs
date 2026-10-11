@@ -89,7 +89,7 @@ pub enum TransportCommand {
     /// plays, carries on where it is, and while stopped, Continue still
     /// resumes where playback stopped. A position before 1.1.1 is taken as
     /// 1.1.1. A click in the Arrangement sends it
-    /// (`docs/specs/control-bar-transport.md`, R15).
+    /// (the control bar transport spec, R15).
     SetInsertMarker(Ticks),
     /// Sets the Arrangement loop, or switches it off with `None`.
     SetLoop(Option<LoopRegion>),

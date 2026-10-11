@@ -4,7 +4,7 @@
 //! the Control Bar, and agents reach one implementation; the Control Bar's
 //! fields turn into registered commands; and what the shell shows is what
 //! the engine published. The rules are in
-//! `docs/specs/control-bar-transport.md`.
+//! the control bar transport spec.
 
 use std::time::{Duration, Instant};
 

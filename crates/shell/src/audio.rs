@@ -14,7 +14,7 @@
 //! ([`AudioHost::send_transport`]), and reads back the playhead it
 //! publishes ([`AudioHost::transport_state`]). When the stream closes, the
 //! engine goes with it, and the next one starts with the same document and
-//! the song where it was, stopped (`docs/specs/control-bar-transport.md`,
+//! the song where it was, stopped (the control bar transport spec,
 //! R16). The stream's callback ([`EngineCallback`]) runs the engine's
 //! processor, plays the Settings window's test tone in its place while the
 //! tone is on, at the Tone Volume and Tone Frequency the person set (D23),

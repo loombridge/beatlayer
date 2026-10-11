@@ -338,7 +338,7 @@ use Strip::{ControlBar as CB, StatusBar as SB};
 /// next element's left edge, less a 2-point gap. The transport section
 /// (Tempo, the time signature, the Arrangement Position, Play, Stop, the
 /// loop fields, and the Loop switch) works from WP-1.18
-/// (`docs/specs/control-bar-transport.md`); Tap Tempo waits for M2.
+/// (the control bar transport spec); Tap Tempo waits for M2.
 #[rustfmt::skip]
 pub const ELEMENTS: &[Placement] = &[
     p(E::BrowserToggle, "L-CTRL-001", "Show/Hide Browser", CB, 9.0, 18.0, Left, Switch, None),

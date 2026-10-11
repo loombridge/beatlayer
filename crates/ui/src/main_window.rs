@@ -102,7 +102,7 @@ impl MainWindowUi {
 
     /// Whether a value is being typed into a Control Bar field: while it
     /// is, key presses go to the field rather than to shortcuts, as they do
-    /// to a text field (`docs/specs/control-bar-transport.md`, R10).
+    /// to a text field (the control bar transport spec, R10).
     #[must_use]
     pub fn is_typing(&self) -> bool {
         self.transport.is_typing()

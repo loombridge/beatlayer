@@ -192,7 +192,7 @@ impl ArrangementUi {
 
     /// The playhead the last frame drew: the position it showed, and its x
     /// in the window, or `None` if it was out of view. It's the engine's, as
-    /// the shell last took it (`docs/specs/control-bar-transport.md`, R14).
+    /// the shell last took it (the control bar transport spec, R14).
     #[must_use]
     pub fn drawn_playhead(&self) -> Option<(Ticks, f32)> {
         self.playhead

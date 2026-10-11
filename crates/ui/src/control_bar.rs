@@ -12,7 +12,7 @@
 //! (Shift for fine steps), Delete or a double-click for the default, and
 //! digits to type a value, with Period or Comma to the next field of a
 //! bar-beat-sixteenth value, Enter to set it, and Esc to drop it. The
-//! rules are in `docs/specs/control-bar-transport.md`.
+//! rules are in the control bar transport spec.
 
 use bl_shell::arrangement_commands::FOLLOW;
 use bl_shell::transport::{self, Field, Group};

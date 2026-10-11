@@ -651,7 +651,7 @@ impl Shell {
     /// plays, the insert marker) for the Arrangement View and the Control
     /// Bar, with the loop brace from the document. The window calls it
     /// before drawing each frame, so what it draws lags the engine by at
-    /// most a frame and an audio block (`docs/specs/control-bar-transport.md`,
+    /// most a frame and an audio block (the control bar transport spec,
     /// R14). Returns the transport it took.
     pub fn poll_engine(&mut self) -> EngineTransport {
         let engine = self.audio.transport_state();
@@ -1423,7 +1423,7 @@ impl Shell {
     }
 
     /// A new or opened set starts stopped at 1.1.1
-    /// (`docs/specs/control-bar-transport.md`, R16), with no gesture open
+    /// (the control bar transport spec, R16), with no gesture open
     /// on the editor it replaced.
     fn new_set_transport(&mut self) {
         self.gesture = false;

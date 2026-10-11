@@ -7,7 +7,7 @@
 //! document's (`bl_model::registry`); `bl-shell` registers and runs them
 //! all. This crate holds only their IDs, as data, so the menus can name
 //! them without linking the engine. The rules are in
-//! `docs/specs/control-bar-transport.md`.
+//! the control bar transport spec.
 
 use bl_commands::Context::Global;
 use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};

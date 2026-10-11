@@ -435,6 +435,8 @@ mod tests {
         }
         let image = match crate::screenshot::render(&ctx, last.unwrap(), textures, size, &theme) {
             Ok(image) => image,
+            // No adapter or device, as on CI's Linux machines: nothing to
+            // render with.
             Err(error) if error.starts_with("no GPU") => {
                 println!("skipped: {error}");
                 return;

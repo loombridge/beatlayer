@@ -206,11 +206,17 @@ fn prefs_library(args: &Args) -> Option<std::path::PathBuf> {
 /// view captures' test renders through it too (WP-1.16).
 pub(crate) fn render(
     ctx: &egui::Context,
-    output: egui::FullOutput,
+    mut output: egui::FullOutput,
     mut textures: egui::TexturesDelta,
     size: egui::Vec2,
     theme: &Theme,
 ) -> Result<ColorImage, String> {
+    // The textures to upload, taken out first: epaint panics if a delta is
+    // dropped unapplied, and every early return (no GPU adapter, as on CI's
+    // Linux machines) would drop one.
+    textures.append(std::mem::take(&mut output.textures_delta));
+    let uploads = std::mem::take(&mut textures.set);
+    textures.clear();
     let width = (size.x * SCALE).round() as u32;
     let height = (size.y * SCALE).round() as u32;
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
@@ -225,12 +231,11 @@ pub(crate) fn render(
         egui_wgpu::Renderer::new(&device, format, egui_wgpu::RendererOptions::default());
     // The Arrangement View's own pipelines (WP-1.8a).
     bl_ui::arrangement::gpu::install(&device, format, &mut renderer.callback_resources);
-    for (id, deltas) in &textures.set {
+    for (id, deltas) in &uploads {
         for delta in deltas {
             renderer.update_texture(&device, &queue, *id, delta);
         }
     }
-    textures.clear();
     let primitives = ctx.tessellate(output.shapes, output.pixels_per_point);
     crate::capture::render_frame(
         &device,

@@ -15,6 +15,14 @@ bl-core.workspace = true
 bl-model.workspace = true
 bl-engine.workspace = true
 bl-shell.workspace = true
+# Waveform peaks for the Arrangement View (WP-1.8a): the layout the shader
+# reads, and the background cache that builds them.
+bl-media.workspace = true
+# The Arrangement View draws its lanes through its own wgpu pipelines in an
+# egui paint callback (ADR-001). The versions and features the app already
+# uses, so nothing new enters the build.
+bytemuck = { version = "1.25", features = ["derive"] }
+egui-wgpu = { version = "=0.36.2", default-features = false }
 # Pinned exactly and upgraded deliberately (ADR-001). Without
 # `default_fonts`: epaint_default_fonts' licences fail deny.toml, and the UI
 # bundles its own typeface. AccessKit is always on in egui 0.36.
@@ -25,8 +33,22 @@ serde_json = "1"
 toml = { version = "1", default-features = false, features = ["std", "parse", "serde"] }
 
 [dev-dependencies]
-# The transport's commands, which the keymap test checks bindings against.
-bl-engine.workspace = true
+# The Arrangement benchmark (examples/arrangement_bench.rs) renders offscreen
+# on the GPU, with the backends the app uses, and can save a frame as a PNG.
+png = "0.18"
+pollster = "0.4"
+wgpu = { version = "=30.0.1", default-features = false, features = [
+    "std",
+    "parking_lot",
+    "metal",
+    "dx12",
+    "vulkan",
+    "wgsl",
+] }
+
+# The benchmark reads the main thread's CPU time, as the UI spikes did.
+[target.'cfg(unix)'.dev-dependencies]
+libc = "0.2"
 
 [lints]
 workspace = true

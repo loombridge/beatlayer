@@ -138,8 +138,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Cmd+Option+O"]
 win = ["Ctrl+Alt+O"]
-status = "pending"
-package = "WP-1.8a"
+status = "bound"
+commands = [
+  { id = "arrangement.overview", contexts = ["global", "arrangement"] },
+]
 
 [[shortcut]]
 id = "S-VIEW-012"
@@ -797,7 +799,7 @@ milestone = "M1"
 mac = ["Tab"]
 win = ["Tab"]
 status = "pending"
-package = "WP-1.8a"
+package = "WP-1.8b"
 
 [[shortcut]]
 id = "S-EDIT-013"
@@ -1170,8 +1172,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Plus"]
 win = ["Plus"]
-status = "pending"
-package = "WP-1.8a"
+status = "bound"
+commands = [
+  { id = "arrangement.zoom", contexts = ["arrangement"], args = { factor = 2.0 } },
+]
 
 [[shortcut]]
 id = "S-ZOOM-004"
@@ -1182,8 +1186,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Minus"]
 win = ["Minus"]
-status = "pending"
-package = "WP-1.8a"
+status = "bound"
+commands = [
+  { id = "arrangement.zoom", contexts = ["arrangement"], args = { factor = 0.5 } },
+]
 
 [[shortcut]]
 id = "S-ZOOM-005"
@@ -1194,8 +1200,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Option+Shift+F"]
 win = ["Alt+Shift+F"]
-status = "pending"
-package = "WP-1.8a"
+status = "bound"
+commands = [
+  { id = "arrangement.follow", contexts = ["global", "arrangement"] },
+]
 
 [[shortcut]]
 id = "S-ZOOM-006"
@@ -1206,8 +1214,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Shift+scroll"]
 win = ["Shift+scroll"]
-status = "pending"
-package = "WP-1.8a"
+status = "bound"
+commands = [
+  { id = "arrangement.scroll", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-ZOOM-007"
@@ -1218,8 +1228,10 @@ trigger = "held"
 milestone = "M1"
 mac = ["Cmd+Option+drag"]
 win = ["Ctrl+Alt+drag"]
-status = "pending"
-package = "WP-1.8a"
+status = "bound"
+commands = [
+  { id = "arrangement.scroll", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-ZOOM-008"
@@ -1893,8 +1905,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Cmd+1"]
 win = ["Ctrl+1"]
-status = "pending"
-package = "WP-1.8a"
+status = "bound"
+commands = [
+  { id = "arrangement.narrow_grid", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-GRID-003"
@@ -1905,8 +1919,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Cmd+2"]
 win = ["Ctrl+2"]
-status = "pending"
-package = "WP-1.8a"
+status = "bound"
+commands = [
+  { id = "arrangement.widen_grid", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-GRID-004"
@@ -1917,8 +1933,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Cmd+3"]
 win = ["Ctrl+3"]
-status = "pending"
-package = "WP-1.8a"
+status = "bound"
+commands = [
+  { id = "arrangement.triplet_grid", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-GRID-005"
@@ -1929,8 +1947,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Cmd+4"]
 win = ["Ctrl+4"]
-status = "pending"
-package = "WP-1.8a"
+status = "bound"
+commands = [
+  { id = "arrangement.snap_to_grid", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-GRID-006"
@@ -1941,8 +1961,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Cmd+5"]
 win = ["Ctrl+5"]
-status = "pending"
-package = "WP-1.8a"
+status = "bound"
+commands = [
+  { id = "arrangement.fixed_grid", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-GRID-007"
@@ -2491,8 +2513,8 @@ trigger = "press"
 milestone = "M1"
 mac = ["U", "Left", "Right"]
 win = ["U", "Left", "Right"]
-status = "pending"
-package = "WP-1.8a"
+status = "widget"
+handler = "the Arrangement View: with title bars selected, Left folds and Right unfolds them (`arrangement.fold_tracks`); U is S-TRACK-010's binding"
 
 [[shortcut]]
 id = "S-ARR-021"
@@ -2503,8 +2525,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Option+U"]
 win = ["Alt+U"]
-status = "pending"
-package = "WP-1.8a"
+status = "bound"
+commands = [
+  { id = "arrangement.unfold_all", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-ARR-022"
@@ -2515,8 +2539,8 @@ trigger = "press"
 milestone = "M1"
 mac = ["Option+Plus", "Option+Minus"]
 win = ["Alt+Plus", "Alt+Minus"]
-status = "pending"
-package = "WP-1.8a"
+status = "widget"
+handler = "the Arrangement View: Option-Plus (Alt-Plus) makes the selected tracks taller and Option-Minus (Alt-Minus) shorter (`arrangement.set_track_height`)"
 
 [[shortcut]]
 id = "S-ARR-023"
@@ -2527,8 +2551,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Option+Shift+F"]
 win = ["Ctrl+Shift+F"]
-status = "pending"
-package = "WP-1.8a"
+status = "bound"
+commands = [
+  { id = "arrangement.follow", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-ARR-024"
@@ -2539,8 +2565,10 @@ trigger = "held"
 milestone = "M1"
 mac = ["Cmd+Option+drag"]
 win = ["Ctrl+Alt+drag"]
-status = "pending"
-package = "WP-1.8a"
+status = "bound"
+commands = [
+  { id = "arrangement.scroll", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-ARR-025"
@@ -2551,8 +2579,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["H"]
 win = ["H"]
-status = "pending"
-package = "WP-1.8a"
+status = "bound"
+commands = [
+  { id = "arrangement.optimize_height", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-ARR-026"
@@ -2563,8 +2593,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["W"]
 win = ["W"]
-status = "pending"
-package = "WP-1.8a"
+status = "bound"
+commands = [
+  { id = "arrangement.optimize_width", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-ARR-027"
@@ -2612,8 +2644,10 @@ trigger = "latch"
 milestone = "M1"
 mac = ["Z"]
 win = ["Z"]
-status = "pending"
-package = "WP-1.8a"
+status = "bound"
+commands = [
+  { id = "arrangement.zoom_to_selection", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-ARR-031"
@@ -2624,8 +2658,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["X"]
 win = ["X"]
-status = "pending"
-package = "WP-1.8a"
+status = "bound"
+commands = [
+  { id = "arrangement.zoom_back", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-ARR-032"
@@ -2664,8 +2700,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Esc"]
 win = ["Esc"]
-status = "pending"
-package = "WP-1.8a"
+status = "bound"
+commands = [
+  { id = "arrangement.focus_title_bar", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-ARR-035"
@@ -2833,7 +2871,7 @@ milestone = "M1"
 mac = ["Tab"]
 win = ["Tab"]
 status = "pending"
-package = "WP-1.8a"
+package = "WP-1.8b"
 
 [[shortcut]]
 id = "S-TRACK-006"
@@ -2868,8 +2906,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Plus"]
 win = ["Plus"]
-status = "pending"
-package = "WP-1.8a"
+status = "bound"
+commands = [
+  { id = "arrangement.fold_groups", contexts = ["track-headers"], args = { fold = false } },
+]
 
 [[shortcut]]
 id = "S-TRACK-009"
@@ -2880,8 +2920,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Minus"]
 win = ["Minus"]
-status = "pending"
-package = "WP-1.8a"
+status = "bound"
+commands = [
+  { id = "arrangement.fold_groups", contexts = ["track-headers"], args = { fold = true } },
+]
 
 [[shortcut]]
 id = "S-TRACK-010"
@@ -2892,8 +2934,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["U"]
 win = ["U"]
-status = "pending"
-package = "WP-1.8a"
+status = "bound"
+commands = [
+  { id = "arrangement.fold_tracks", contexts = ["track-headers"] },
+]
 
 [[shortcut]]
 id = "S-TRACK-011"
@@ -3651,8 +3695,8 @@ trigger = "press"
 milestone = "M1"
 mac = ["Up", "Down"]
 win = ["Up", "Down"]
-status = "pending"
-package = "WP-1.8a"
+status = "widget"
+handler = "the Arrangement View: Up and Down select the track above or below (`arrangement.select_tracks`)"
 
 [[shortcut]]
 id = "S-A11Y-004"

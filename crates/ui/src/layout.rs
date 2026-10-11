@@ -227,7 +227,7 @@ pub const ELEMENTS: &[Placement] = &[
     p(E::ScaleMode, "L-CTRL-011", "Scale Mode", CB, 314.0, 18.0, Left, Switch, Some("M6")),
     p(E::RootNote, "L-CTRL-011", "Root Note", CB, 335.0, 44.0, Left, Chooser, Some("M6")),
     p(E::ScaleName, "L-CTRL-011", "Scale Name", CB, 381.0, 71.0, Left, Chooser, Some("M6")),
-    p(E::Follow, "L-CTRL-012", "Follow", CB, 555.0, 20.0, Middle, Switch, Some("WP-1.8a")),
+    p(E::Follow, "L-CTRL-012", "Follow", CB, 555.0, 20.0, Middle, Switch, None),
     p(E::PositionBars, "L-CTRL-013", "Arrangement Position Bars", CB, 582.0, 26.0, Middle, Value, Some("WP-1.5")),
     p(E::PositionBeats, "L-CTRL-013", "Arrangement Position Beats", CB, 608.0, 25.0, Middle, Value, Some("WP-1.5")),
     p(E::PositionSixteenths, "L-CTRL-013", "Arrangement Position Sixteenths", CB, 633.0, 26.0, Middle, Value, Some("WP-1.5")),
@@ -409,6 +409,187 @@ impl ShellLayout {
             .find(|(e, _)| *e == element)
             .map(|(_, rect)| *rect)
             .expect("every element is laid out")
+    }
+}
+
+/// The Arrangement View's track header column (L-ARR-006): 294 points at
+/// the right of the main view, whatever the window's width; the lanes take
+/// the rest.
+pub const ARRANGEMENT_HEADERS: f32 = 294.0;
+
+/// The gap between the track lanes and the header column (L-ARR-005, 006).
+pub const ARRANGEMENT_HEADER_GAP: f32 = 2.0;
+
+/// A pinned row's height: each return track and Main under the lanes
+/// (L-ARR-014).
+pub const PINNED_ROW: f32 = 18.0;
+
+/// The track header column's sub-columns, as offsets from its left edge
+/// (L-ARR-006 to 009): the title (fold button and name), In/Out, the mixer
+/// controls, and the meter.
+pub mod header_columns {
+    /// The title: fold button, then the name, in the track's colour.
+    pub const TITLE: (f32, f32) = (0.0, 103.0);
+    /// In/Out: input type and channel, monitoring, output type and channel.
+    pub const IN_OUT: (f32, f32) = (106.0, 179.0);
+    /// The mixer: activator, Solo, Arm; volume, pan; sends.
+    pub const MIXER: (f32, f32) = (182.0, 280.0);
+    /// The track's meter.
+    pub const METER: (f32, f32) = (283.0, 294.0);
+}
+
+/// The Arrangement View's parts inside the main view, from layout.md's
+/// L-ARR rows measured in Live 12.4.3 at 1600 × 1000 points. Rows from the
+/// top keep their distance from the main view's top, rows from the bottom
+/// from its bottom; the lanes and rulers stretch with the window and the
+/// header column keeps its width.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ArrangementLayout {
+    /// The whole view: the main view's rectangle.
+    pub view: Rect,
+    /// The Overview, while it shows (L-ARR-001).
+    pub overview: Option<Rect>,
+    /// The beat-time ruler, with the loop brace (L-ARR-002).
+    pub beat_ruler: Rect,
+    /// The scrub area, with the locators (L-ARR-003).
+    pub scrub: Rect,
+    /// Set Locator (L-ARR-010, first row).
+    pub set_locator: Rect,
+    /// Automation Mode (L-ARR-010, first row).
+    pub automation_mode: Rect,
+    /// Lock Envelopes (L-ARR-010, first row).
+    pub lock_envelopes: Rect,
+    /// Previous Locator, under Set Locator (L-ARR-010, second row).
+    pub previous_locator: Rect,
+    /// Next Locator, under Set Locator (L-ARR-010, second row).
+    pub next_locator: Rect,
+    /// The scrolling track lanes (L-ARR-005).
+    pub lanes: Rect,
+    /// The scrolling track headers beside them (L-ARR-006).
+    pub headers: Rect,
+    /// The return tracks' and Main's lanes, pinned under the others
+    /// (L-ARR-014).
+    pub pinned_lanes: Rect,
+    /// Their headers.
+    pub pinned_headers: Rect,
+    /// The grid spacing indicator (L-ARR-015).
+    pub grid_indicator: Rect,
+    /// The time ruler (L-ARR-016).
+    pub time_ruler: Rect,
+    /// The waveform zoom toggle (L-ARR-017).
+    pub waveform_zoom: Rect,
+    /// The Waveform Vertical Zoom Level field (L-ARR-017).
+    pub waveform_zoom_level: Rect,
+    /// Optimize Height, H (L-ARR-017).
+    pub optimize_height: Rect,
+    /// Optimize Width, W (L-ARR-017).
+    pub optimize_width: Rect,
+}
+
+impl ArrangementLayout {
+    /// Lays the Arrangement View out in the main view's rectangle `view`,
+    /// with or without the Overview, and with `pinned_rows` rows (the
+    /// return tracks and Main) pinned under the lanes.
+    #[must_use]
+    pub fn compute(view: Rect, overview: bool, pinned_rows: usize) -> Self {
+        // Offsets from layout.md's window coordinates: the main view starts
+        // at y 61 and ends at 766 at the reference size.
+        let top = |window_y: f32| view.top() + window_y - 61.0;
+        let bottom = |window_y: f32| view.bottom() - (766.0 - window_y);
+        // Without the Overview the rulers move up into its place.
+        let shift = if overview { 0.0 } else { -20.0 };
+        let lanes_right = view.right() - ARRANGEMENT_HEADERS - ARRANGEMENT_HEADER_GAP;
+        let headers_left = view.right() - ARRANGEMENT_HEADERS;
+        let header_x = |window_x: f32| headers_left + window_x - 1297.0;
+        let row = |x0: f32, x1: f32, window_y: f32| {
+            Rect::from_min_max(
+                pos2(header_x(x0), top(window_y) + shift),
+                pos2(header_x(x1), top(window_y) + shift + 16.0),
+            )
+        };
+
+        let pinned_rows = pinned_rows.max(1);
+        // Main sits a point below the returns (B at 706, Main at 725).
+        let pinned_bottom = bottom(743.0);
+        let gap = if pinned_rows > 1 { 1.0 } else { 0.0 };
+        let pinned_top = pinned_bottom - PINNED_ROW * pinned_rows as f32 - gap;
+        let lanes_top = top(119.0) + shift;
+        let lanes = Rect::from_min_max(
+            pos2(view.left(), lanes_top),
+            pos2(lanes_right, pinned_top.max(lanes_top)),
+        );
+        Self {
+            view,
+            overview: overview.then(|| {
+                Rect::from_min_max(pos2(view.left(), top(61.0)), pos2(lanes_right, top(74.0)))
+            }),
+            beat_ruler: Rect::from_min_max(
+                pos2(view.left(), top(81.0) + shift),
+                pos2(lanes_right, top(99.0) + shift),
+            ),
+            scrub: Rect::from_min_max(
+                pos2(view.left(), top(99.0) + shift),
+                pos2(lanes_right, top(115.0) + shift),
+            ),
+            set_locator: row(1299.0, 1335.0, 82.0),
+            automation_mode: row(1340.0, 1356.0, 82.0),
+            lock_envelopes: row(1360.0, 1376.0, 82.0),
+            previous_locator: row(1299.0, 1316.0, 100.0),
+            next_locator: row(1318.0, 1335.0, 100.0),
+            lanes,
+            headers: Rect::from_min_max(
+                pos2(headers_left, lanes.top()),
+                pos2(view.right(), lanes.bottom()),
+            ),
+            pinned_lanes: Rect::from_min_max(
+                pos2(view.left(), pinned_top),
+                pos2(lanes_right, pinned_bottom),
+            ),
+            pinned_headers: Rect::from_min_max(
+                pos2(headers_left, pinned_top),
+                pos2(view.right(), pinned_bottom),
+            ),
+            grid_indicator: Rect::from_min_max(
+                pos2(lanes_right - 30.0, bottom(728.0)),
+                pos2(lanes_right - 2.0, bottom(740.0)),
+            ),
+            time_ruler: Rect::from_min_max(
+                pos2(view.left(), bottom(746.0)),
+                pos2(lanes_right, bottom(760.0)),
+            ),
+            waveform_zoom: Rect::from_min_max(
+                pos2(header_x(1303.0), bottom(748.0)),
+                pos2(header_x(1313.0), bottom(760.0)),
+            ),
+            waveform_zoom_level: Rect::from_min_max(
+                pos2(header_x(1314.0), bottom(748.0)),
+                pos2(header_x(1351.0), bottom(760.0)),
+            ),
+            optimize_height: Rect::from_min_max(
+                pos2(header_x(1372.0), bottom(747.0)),
+                pos2(header_x(1386.0), bottom(761.0)),
+            ),
+            optimize_width: Rect::from_min_max(
+                pos2(header_x(1390.0), bottom(747.0)),
+                pos2(header_x(1404.0), bottom(761.0)),
+            ),
+        }
+    }
+
+    /// The pinned row at `index` of `count`, lanes and header together: the
+    /// returns, then Main a point lower.
+    #[must_use]
+    pub fn pinned_row(&self, index: usize, count: usize) -> Rect {
+        let gap = if count > 1 && index + 1 == count {
+            1.0
+        } else {
+            0.0
+        };
+        let y = self.pinned_lanes.top() + PINNED_ROW * index as f32 + gap;
+        Rect::from_min_max(
+            pos2(self.pinned_lanes.left(), y),
+            pos2(self.pinned_headers.right(), y + PINNED_ROW),
+        )
     }
 }
 

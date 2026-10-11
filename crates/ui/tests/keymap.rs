@@ -347,8 +347,20 @@ fn keys_resolve_to_commands_in_their_contexts() {
         .as_deref(),
         Some("settings.next_page")
     );
+    // Esc closes nothing in the main window: in the Arrangement it goes to
+    // the highlighted track's title bar (S-ARR-034, WP-1.8a).
     assert_eq!(
-        resolve(Platform::Mac, Key::Escape, Mods::default(), &main),
+        resolve(Platform::Mac, Key::Escape, Mods::default(), &main).as_deref(),
+        Some("arrangement.focus_title_bar"),
+        "Esc closes nothing in the main window"
+    );
+    assert_eq!(
+        resolve(
+            Platform::Mac,
+            Key::Escape,
+            Mods::default(),
+            &[Context::Global]
+        ),
         None,
         "Esc closes nothing in the main window"
     );

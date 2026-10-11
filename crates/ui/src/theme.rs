@@ -64,6 +64,24 @@ pub struct Colours {
     pub focus: Colour,
     pub meter: Colour,
     pub meter_hot: Colour,
+    pub lane: Colour,
+    pub lane_selected: Colour,
+    pub lane_line: Colour,
+    pub grid_bar: Colour,
+    pub grid_beat: Colour,
+    pub ruler: Colour,
+    pub ruler_tick: Colour,
+    pub playhead: Colour,
+    pub insert_marker: Colour,
+    pub loop_on: Colour,
+    pub loop_off: Colour,
+    pub time_selection: Colour,
+    pub clip_text: Colour,
+    pub waveform: Colour,
+    pub clip_muted: Colour,
+    pub overview_outline: Colour,
+    /// Track and clip colours, assigned to new tracks in turn.
+    pub track_palette: Vec<Colour>,
 }
 
 /// The size tokens, in points.

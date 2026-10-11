@@ -16,16 +16,22 @@
 //! - [`settings`]: preferences and where they're kept.
 //! - [`files`]: set files, through `bl-project`, and the factory default
 //!   set.
+//! - [`arrangement`]: what the Arrangement View shows (zoom, scroll, Follow,
+//!   the editing grid, track heights, the insert marker and selection),
+//!   changed by its view commands (WP-1.8a).
 //!
 //! The UI (`bl-ui`) draws the shell and the app (`beatlayer`) wires it to
 //! windows, native menus, and file dialogs. Nothing here depends on a UI
 //! crate, so every command and setting can be driven and tested headless.
 
+pub mod arrangement;
 pub mod audio;
 pub mod files;
 pub mod settings;
 mod shell;
 
+/// The Arrangement View's command IDs and their argument and result types.
+pub use bl_shell_spec::arrangement as arrangement_commands;
 pub use bl_shell_spec::{commands, menus, register};
 pub use shell::{
     Area, Effect, Invocation, MainView, Message, Shell, ShellError, WindowKind, ZOOM_STEPS,

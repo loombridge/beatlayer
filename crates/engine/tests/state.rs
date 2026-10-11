@@ -94,7 +94,7 @@ fn node_data_swaps_in_at_a_block_and_the_old_data_is_freed_off_the_audio_thread(
     assert_eq!(rig.collector.held(), 2);
 
     // Data for a node the program doesn't have is dropped, safely.
-    let gone = NodeKey::Fader(rig.editor.new_id());
+    let gone = NodeKey::Mixer(rig.editor.new_id());
     rig.sender.send_data(gone, gc.data(1.0f32));
     rig.block(64);
     let counters = rig.monitor.state().counters;

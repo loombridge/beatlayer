@@ -34,21 +34,22 @@ pub enum Change {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[schemars(
     description = "What a command changed: whether the song settings (the tempo map, the \
-                   time-signature map, or the Arrangement loop) changed, whether the track list \
-                   changed, and which tracks, clips, and devices were added, removed, or \
-                   modified, keyed by ID. Every field is empty or false if nothing changed."
+                   time-signature map, the Arrangement loop, or Solo in Place) changed, whether \
+                   the track list changed, and which tracks, clips, and devices were added, \
+                   removed, or modified, keyed by ID. Every field is empty or false if nothing \
+                   changed."
 )]
 pub struct ChangeSet {
-    /// The song settings changed: the tempo map, the time-signature map, or
-    /// the Arrangement loop.
+    /// The song settings changed: the tempo map, the time-signature map, the
+    /// Arrangement loop, or Solo in Place.
     pub settings: bool,
     /// The track tree changed: a track was added, removed, or moved, so
     /// routing may have changed.
     pub layout: bool,
-    /// Tracks whose own settings changed: name, mixer, the tracks inside a
-    /// group, or the order of the device chain. Changes to a track's clips or
-    /// to its devices' settings are listed under `clips` and `devices`
-    /// instead.
+    /// Tracks whose own settings changed: name, mixer, sends, the tracks
+    /// inside a group, or the order of the device chain. Changes to a track's
+    /// clips or to its devices' settings are listed under `clips` and
+    /// `devices` instead.
     pub tracks: BTreeMap<TrackId, Change>,
     /// Clips that changed, including clips moved to another track.
     pub clips: BTreeMap<ClipId, Change>,

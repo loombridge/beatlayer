@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::clip::Clip;
 use crate::command::{
     check_clip_data, check_clip_fits, check_device, check_extent, check_mixer, check_offset,
+    check_send_level,
 };
 use crate::device::Device;
 use crate::document::{Document, Index, Settings};
@@ -35,6 +36,10 @@ struct TrackRepr {
     kind: TrackKind,
     name: String,
     mixer: Mixer,
+    /// The sends that aren't at −∞ dB, as `[return track, level]` pairs.
+    /// Sets saved before WP-1.6 have none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    sends: Vec<(TrackId, f64)>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     devices: Vec<Device>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -72,6 +77,7 @@ impl TrackRepr {
             kind: track.kind,
             name: track.name.clone(),
             mixer: track.mixer,
+            sends: track.sends().collect(),
             devices: track.devices().cloned().collect(),
             clips: track.clips().cloned().collect(),
             children: track
@@ -157,6 +163,24 @@ impl Loader {
         let mut track = Track::new(id, repr.kind, repr.name);
         track.mixer = repr.mixer;
         check_mixer(&track)?;
+        if !repr.sends.is_empty() && !repr.kind.has_sends() {
+            return Err(wrong_kind_of(
+                id,
+                repr.kind,
+                "an audio, MIDI, or group track",
+            ));
+        }
+        for (to, level) in repr.sends {
+            // Main and the returns load before the tracks that send to them.
+            let target = self.tracks.get(&to).ok_or(ModelError::NoSuchTrack(to))?;
+            if target.kind != TrackKind::Return {
+                return Err(wrong_kind_of(to, target.kind, "a return track"));
+            }
+            check_send_level(level)?;
+            if track.sends.insert(to, level).is_some() {
+                return Err(ModelError::DuplicateId(to.0));
+            }
+        }
         for device in repr.devices {
             self.claim(device.id.0)?;
             check_device(&device)?;
@@ -193,11 +217,11 @@ impl Loader {
 }
 
 fn wrong_kind(track: &TrackRepr, needs: &'static str) -> ModelError {
-    ModelError::WrongTrackKind {
-        track: track.id,
-        kind: track.kind,
-        needs,
-    }
+    wrong_kind_of(track.id, track.kind, needs)
+}
+
+fn wrong_kind_of(track: TrackId, kind: TrackKind, needs: &'static str) -> ModelError {
+    ModelError::WrongTrackKind { track, kind, needs }
 }
 
 #[cfg(test)]

@@ -6,8 +6,8 @@
 //! These change only what the Arrangement View shows, never the set, so
 //! every one is in the read class. [`register`] adds their specs, which are
 //! pure data, so `cargo xtask` can check them and list them in
-//! `docs/commands.md`; `bl-shell` runs them by ID. The behaviour they follow
-//! is in `docs/specs/arrangement-view.md`.
+//! the command reference; `bl-shell` runs them by ID. The behaviour they follow
+//! is in the arrangement view spec.
 
 use bl_commands::Context::{Arrangement, Global, TrackHeaders};
 use bl_commands::{Binding, CommandSpec, NoArgs, Permission, RegisterError, Registry};

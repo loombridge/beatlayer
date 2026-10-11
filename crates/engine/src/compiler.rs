@@ -3,14 +3,17 @@
 
 use std::collections::BTreeMap;
 
-use bl_model::{Change, ChangeSet, DeviceId, DeviceKind, Document, Mixer, OrdMap, ParamId, Track};
+use bl_model::{
+    Change, ChangeSet, DeviceId, DeviceKind, Document, Mixer, OrdMap, ParamId, SendTap, Track,
+    TrackId,
+};
 
 use crate::EngineConfig;
 use crate::gc::{GcHandle, Program};
 use crate::message::{LoopRegion, ParamEvent, TransportCommand};
-use crate::node::{Node, NodeKey, ParamValue};
-use crate::nodes::{Fader, fader};
-use crate::program::{EngineProgram, Migration, NodeSlot, Span, Task};
+use crate::mixer::{self, Route, Solo, TrackMixer, route};
+use crate::node::{NodeKey, ParamValue};
+use crate::program::{EngineProgram, Input, Instance, Migration, NodeSlot, Span, Task};
 use crate::registry::Registry;
 
 /// What the audio thread needs after an edit: a new program if the edit
@@ -47,7 +50,8 @@ impl Update {
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Identity {
     Device(DeviceKind),
-    Fader,
+    Mixer,
+    Route,
 }
 
 /// Where a node sits in the last program compiled.
@@ -63,10 +67,12 @@ struct Placed {
 /// it compiled. [`Compiler::sync`] compares a new document with the last
 /// one, and compiles only if the song's structure changed: tracks added,
 /// removed, or moved; devices added, removed, moved, or switched on or off;
-/// the tempo or time-signature map. Mixer settings and device parameters
-/// become [`ParamEvent`]s for the nodes that already run them, the
-/// Arrangement loop becomes a [`TransportCommand::SetLoop`], and clip
-/// changes will travel as node data (WP-1.4), so none of them recompiles.
+/// a return's Pre/Post switch; the tempo or time-signature map. Mixer
+/// settings (volume, pan, the activator, solo, Solo in Place, send levels)
+/// and device parameters become [`ParamEvent`]s for the nodes that already
+/// run them, the Arrangement loop becomes a [`TransportCommand::SetLoop`],
+/// and clip changes will travel as node data (WP-1.4), so none of them
+/// recompiles.
 ///
 /// Each program lists the nodes it takes over from the program compiled
 /// before it, so programs must reach the audio thread in the order they
@@ -110,6 +116,7 @@ impl Compiler {
         let changes = ChangeSet::between(&old, document);
         let mut params = Vec::new();
         let recompile = needs_program(&changes, &old, document, &mut params);
+        solo_events(&changes, &old, document, &mut params);
         let mut update = if recompile {
             self.compile(document)
         } else {
@@ -129,16 +136,54 @@ impl Compiler {
     /// A whole new program for `document`. Nodes that the last program ran
     /// migrate into it.
     pub fn compile(&mut self, document: &Document) -> Update {
+        let solo = Solo::of(document);
         let mut build = Build::default();
         let mut main_inputs = Vec::new();
-        for id in document.top_level().chain(document.returns()) {
-            main_inputs.push(self.add_track(&mut build, document, id));
+        for id in document.top_level() {
+            let task = self.add_track(&mut build, document, &solo, id);
+            main_inputs.push(self.output(&mut build, &solo, id, task));
+        }
+
+        // Every audio, MIDI, and group track sends to every return, in the
+        // order the tracks show.
+        let senders: Vec<(TrackId, u32)> = document
+            .tracks()
+            .filter(|track| track.kind().has_sends())
+            .filter_map(|track| Some((track.id(), *build.task_of.get(&track.id())?)))
+            .collect();
+        let mut pre = false;
+        for id in document.returns() {
+            let track = document
+                .track(id)
+                .expect("a document's tree names only its own tracks");
+            let tap = track.mixer().tap;
+            pre |= tap == SendTap::Pre;
+            let inputs = senders
+                .iter()
+                .map(|&(sender, from)| Input {
+                    route: self.send(&mut build, document, &solo, sender, id),
+                    from,
+                    pre: tap == SendTap::Pre,
+                })
+                .collect();
+            let task = self.add_task(&mut build, track, inputs);
+            main_inputs.push(self.output(&mut build, &solo, id, task));
         }
         let output = self.add_task(&mut build, document.main(), main_inputs);
+
+        // Tracks that send keep their chain's output for pre-fader sends.
+        let mut kept = 0;
+        if pre {
+            for &(_, task) in &senders {
+                build.tasks[task as usize].pre = Some(kept);
+                kept += 1;
+            }
+        }
 
         let generation = self.generation + 1;
         let base = (self.generation > 0).then_some(self.generation);
         let tasks = build.tasks.len();
+        let size = self.config.channels * self.config.max_frames;
         let program = EngineProgram {
             generation,
             base,
@@ -150,14 +195,13 @@ impl Compiler {
             tasks: with_dependents(build.tasks, &build.dependents),
             task_inputs: build.inputs,
             task_nodes: build.nodes,
-            pool: vec![0.0; tasks * self.config.channels * self.config.max_frames],
+            pool: vec![0.0; tasks * size],
+            pre_pool: vec![0.0; kept as usize * size],
             channels: self.config.channels,
             max_frames: self.config.max_frames,
             output,
             tempo: document.settings().tempo.clone(),
             sample_rate: self.config.sample_rate,
-            peaks: vec![[0.0; 2]; tasks],
-            meters: vec![[0.0; 2]; tasks],
         };
         self.generation = generation;
         self.layout = build.layout;
@@ -170,6 +214,45 @@ impl Compiler {
         }
     }
 
+    /// Keeps `document` as the latest without compiling it, for an engine
+    /// with no device running it: [`reconfigure`](Self::reconfigure)
+    /// compiles it when one runs again. Only for that case: the next
+    /// [`sync`](Self::sync) compares with it as if its program had been
+    /// sent. Returns the [`TransportCommand::SetLoop`] a sync would have
+    /// sent if `document` changed the Arrangement loop: the program
+    /// compiled at the restart sets the loop too, but the processor that
+    /// takes over carries the loop it played, so a loop edit made meanwhile
+    /// must reach it after that.
+    #[must_use]
+    pub fn remember(&mut self, document: &Document) -> Option<TransportCommand> {
+        let changed = self.synced.as_ref().is_none_or(|old| {
+            old.settings().arrangement_loop != document.settings().arrangement_loop
+        });
+        self.synced = Some(document.clone());
+        changed.then(|| TransportCommand::SetLoop(loop_region(document)))
+    }
+
+    /// Switches to `config` (a device's new sample rate or block size) and
+    /// compiles the latest document anew for it, with every node made
+    /// afresh at the new settings and none taken over: the program for a
+    /// processor starting without one (WP-1.13). Empty if no document has
+    /// been synced yet.
+    pub fn reconfigure(&mut self, config: EngineConfig) -> Update {
+        let document = self.synced.take();
+        self.config = config;
+        self.reset();
+        match document {
+            Some(document) => self.compile(&document),
+            None => Update::default(),
+        }
+    }
+
+    /// The settings programs are compiled for.
+    #[must_use]
+    pub fn config(&self) -> &EngineConfig {
+        &self.config
+    }
+
     /// Forgets the last program, so the next compile makes every node anew
     /// and takes none over: for an audio thread that starts without one.
     pub fn reset(&mut self) {
@@ -179,87 +262,150 @@ impl Compiler {
     }
 
     /// Adds a track and, first, the tracks that feed it. Returns its task.
-    fn add_track(&self, build: &mut Build, document: &Document, id: bl_model::TrackId) -> u32 {
+    fn add_track(&self, build: &mut Build, document: &Document, solo: &Solo, id: TrackId) -> u32 {
         let track = document
             .track(id)
             .expect("a document's tree names only its own tracks");
-        let inputs = track
-            .children()
-            .map(|child| self.add_track(build, document, child))
-            .collect();
+        let mut inputs = Vec::with_capacity(track.children().len());
+        for child in track.children() {
+            let task = self.add_track(build, document, solo, child);
+            inputs.push(self.output(build, solo, child, task));
+        }
         self.add_task(build, track, inputs)
     }
 
-    /// Adds the task for one track's chain, fed by `inputs`.
-    fn add_task(&self, build: &mut Build, track: &Track, inputs: Vec<u32>) -> u32 {
-        let task = build.tasks.len() as u32;
-        let input_span = span(&mut build.inputs, inputs.iter().copied());
-        for &input in &inputs {
-            build.dependents[input as usize].push(task);
+    /// The input that carries `track`'s output (its task, `task`) into its
+    /// group or Main.
+    fn output(&self, build: &mut Build, solo: &Solo, track: TrackId, task: u32) -> Input {
+        let config = self.config.node_config();
+        let route = self.place(build, NodeKey::Output(track), Identity::Route, || {
+            Instance::Route(Box::new(Route::new(1.0, solo.output_muted(track), &config)))
+        });
+        Input {
+            route,
+            from: task,
+            pre: false,
         }
+    }
+
+    /// The slot of `track`'s send to the return `to`.
+    fn send(
+        &self,
+        build: &mut Build,
+        document: &Document,
+        solo: &Solo,
+        track: TrackId,
+        to: TrackId,
+    ) -> u32 {
+        let config = self.config.node_config();
+        let level = document.track(track).map_or(0.0, |t| t.send(to));
+        self.place(build, NodeKey::Send { track, to }, Identity::Route, || {
+            Instance::Route(Box::new(Route::new(
+                level,
+                solo.send_muted(track, to),
+                &config,
+            )))
+        })
+    }
+
+    /// Adds the task for one track, fed by `inputs`.
+    fn add_task(&self, build: &mut Build, track: &Track, inputs: Vec<Input>) -> u32 {
+        let task = build.tasks.len() as u32;
+        for input in &inputs {
+            build.dependents[input.from as usize].push(task);
+        }
+        let dependencies = inputs.len() as u32;
+        let input_start = build.inputs.len() as u32;
+        build.inputs.extend(inputs);
+        let inputs = Span {
+            start: input_start,
+            end: build.inputs.len() as u32,
+        };
+        let config = self.config.node_config();
         let node_start = build.nodes.len() as u32;
         for device in track.devices() {
-            let config = self.config.node_config();
-            let placed = self.place(
-                build,
-                NodeKey::Device(device.id),
-                Identity::Device(device.kind.clone()),
-                !device.enabled,
-                || self.registry.create(device, &config),
-            );
-            match placed {
-                Some(slot) => build.nodes.push(slot),
-                None => build.unhosted.push(device.id),
-            }
+            let key = NodeKey::Device(device.id);
+            let identity = Identity::Device(device.kind.clone());
+            let node = match self.previous(key, &identity) {
+                Some(from) => Err(from),
+                None => match self.registry.create(device, &config) {
+                    Some(node) => Ok(Instance::Device(node)),
+                    None => {
+                        build.unhosted.push(device.id);
+                        continue;
+                    }
+                },
+            };
+            let slot = claim(build, key, identity, !device.enabled, node);
+            build.nodes.push(slot);
         }
-        let fader = self.place(
-            build,
-            NodeKey::Fader(track.id()),
-            Identity::Fader,
-            false,
-            || Some(Box::new(Fader::new(track.mixer()))),
-        );
-        build.nodes.extend(fader);
+        let nodes = Span {
+            start: node_start,
+            end: build.nodes.len() as u32,
+        };
+        let mixer = self.place(build, NodeKey::Mixer(track.id()), Identity::Mixer, || {
+            Instance::Mixer(Box::new(TrackMixer::new(track.mixer(), &config)))
+        });
         build.tasks.push(Task {
             track: track.id(),
-            inputs: input_span,
-            nodes: Span {
-                start: node_start,
-                end: build.nodes.len() as u32,
-            },
+            inputs,
+            nodes,
+            mixer,
+            pre: None,
             dependents: Span::default(),
-            dependencies: inputs.len() as u32,
+            dependencies,
         });
         build.dependents.push(Vec::new());
+        build.task_of.insert(track.id(), task);
         task
     }
 
-    /// Gives a node a slot: the node that ran under `key` in the last
-    /// program if it's the same kind of node, or a new one from `make`.
-    /// Returns `None`, adding nothing, if there's neither.
+    /// Where `key`'s node sat in the last program, if it was the same kind
+    /// of node, so it migrates.
+    fn previous(&self, key: NodeKey, identity: &Identity) -> Option<u32> {
+        self.layout
+            .get(&key)
+            .filter(|placed| placed.identity == *identity)
+            .map(|placed| placed.slot)
+    }
+
+    /// Gives a mixer or a route a slot: the one that ran under `key` in the
+    /// last program, or a new one from `make`.
     fn place(
         &self,
         build: &mut Build,
         key: NodeKey,
         identity: Identity,
-        bypass: bool,
-        make: impl FnOnce() -> Option<Box<dyn Node>>,
-    ) -> Option<u32> {
-        let slot = build.slots.len() as u32;
-        let node = match self.layout.get(&key) {
-            Some(placed) if placed.identity == identity => {
-                build.migrations.push(Migration {
-                    from: placed.slot,
-                    to: slot,
-                });
-                None
-            }
-            _ => Some(make()?),
+        make: impl FnOnce() -> Instance,
+    ) -> u32 {
+        let node = match self.previous(key, &identity) {
+            Some(from) => Err(from),
+            None => Ok(make()),
         };
-        build.slots.push(NodeSlot { key, node, bypass });
-        build.layout.insert(key, Placed { slot, identity });
-        Some(slot)
+        claim(build, key, identity, false, node)
     }
+}
+
+/// Puts a node in the next slot: a new node, or (`Err`) the slot of the node
+/// in the last program that migrates into it.
+fn claim(
+    build: &mut Build,
+    key: NodeKey,
+    identity: Identity,
+    bypass: bool,
+    node: Result<Instance, u32>,
+) -> u32 {
+    let slot = build.slots.len() as u32;
+    let node = match node {
+        Ok(node) => Some(node),
+        Err(from) => {
+            build.migrations.push(Migration { from, to: slot });
+            None
+        }
+    };
+    build.slots.push(NodeSlot { key, node, bypass });
+    build.layout.insert(key, Placed { slot, identity });
+    slot
 }
 
 impl std::fmt::Debug for Compiler {
@@ -278,20 +424,11 @@ struct Build {
     layout: BTreeMap<NodeKey, Placed>,
     migrations: Vec<Migration>,
     tasks: Vec<Task>,
-    inputs: Vec<u32>,
+    task_of: BTreeMap<TrackId, u32>,
+    inputs: Vec<Input>,
     nodes: Vec<u32>,
     dependents: Vec<Vec<u32>>,
     unhosted: Vec<DeviceId>,
-}
-
-/// Appends `items` to a flat list and returns where they went.
-fn span(list: &mut Vec<u32>, items: impl IntoIterator<Item = u32>) -> Span {
-    let start = list.len() as u32;
-    list.extend(items);
-    Span {
-        start,
-        end: list.len() as u32,
-    }
 }
 
 /// Fills in each task's span of the flattened dependents lists.
@@ -337,10 +474,15 @@ fn needs_program(
                     .devices()
                     .map(|d| d.id)
                     .eq(after.devices().map(|d| d.id));
-                if !same_chain || !before.children().eq(after.children()) {
+                // A return's Pre/Post switch moves where its sends tap.
+                if !same_chain
+                    || !before.children().eq(after.children())
+                    || before.mixer().tap != after.mixer().tap
+                {
                     recompile = true;
                 }
                 mixer_events(id, before.mixer(), after.mixer(), params);
+                send_events(old, new, before, after, params);
             }
             _ => recompile = true,
         }
@@ -361,26 +503,89 @@ fn needs_program(
     recompile
 }
 
-/// Parameter changes for a track's fader.
-fn mixer_events(
-    track: bl_model::TrackId,
-    before: &Mixer,
-    after: &Mixer,
-    params: &mut Vec<ParamEvent>,
-) {
-    let key = NodeKey::Fader(track);
-    let switch = |on: bool| if on { 1.0 } else { 0.0 };
+/// A switch as a parameter value.
+fn switch(on: bool) -> f64 {
+    if on { 1.0 } else { 0.0 }
+}
+
+/// Parameter changes for a track's mixer.
+fn mixer_events(track: TrackId, before: &Mixer, after: &Mixer, params: &mut Vec<ParamEvent>) {
+    let key = NodeKey::Mixer(track);
     if before.volume != after.volume {
-        params.push(ParamEvent::now(key, fader::VOLUME, after.volume));
+        params.push(ParamEvent::now(key, mixer::track::VOLUME, after.volume));
     }
     if before.pan != after.pan {
-        params.push(ParamEvent::now(key, fader::PAN, after.pan));
+        params.push(ParamEvent::now(key, mixer::track::PAN, after.pan));
     }
     if before.mute != after.mute {
-        params.push(ParamEvent::now(key, fader::MUTE, switch(after.mute)));
+        params.push(ParamEvent::now(key, mixer::track::MUTE, switch(after.mute)));
     }
-    if before.solo != after.solo {
-        params.push(ParamEvent::now(key, fader::SOLO, switch(after.solo)));
+}
+
+/// Parameter changes for a track's sends whose levels changed, to returns
+/// that were already there.
+fn send_events(
+    old: &Document,
+    new: &Document,
+    before: &Track,
+    after: &Track,
+    params: &mut Vec<ParamEvent>,
+) {
+    if !after.kind().has_sends() {
+        return;
+    }
+    for to in new.returns() {
+        let level = after.send(to);
+        if old.track(to).is_some() && before.send(to) != level {
+            let key = NodeKey::Send {
+                track: after.id(),
+                to,
+            };
+            params.push(ParamEvent::now(key, route::LEVEL, level));
+        }
+    }
+}
+
+/// Parameter changes for the outputs and sends whose solo state changed,
+/// among the tracks in both documents: every other route is new, and made
+/// with its state.
+fn solo_events(changes: &ChangeSet, old: &Document, new: &Document, params: &mut Vec<ParamEvent>) {
+    let solo_switched = changes.tracks.iter().any(|(&id, &change)| {
+        change == Change::Modified
+            && old.track(id).map(|t| t.mixer().solo) != new.track(id).map(|t| t.mixer().solo)
+    });
+    let in_place = old.settings().solo_in_place != new.settings().solo_in_place;
+    if !(changes.layout || solo_switched || in_place) {
+        return;
+    }
+    let (before, after) = (Solo::of(old), Solo::of(new));
+    let kept = |id: TrackId| old.track(id).is_some();
+    for track in new.tracks() {
+        let id = track.id();
+        if id == new.main_id() || !kept(id) {
+            continue;
+        }
+        let muted = after.output_muted(id);
+        if before.output_muted(id) != muted {
+            params.push(ParamEvent::now(
+                NodeKey::Output(id),
+                route::SOLO_MUTE,
+                switch(muted),
+            ));
+        }
+        if !track.kind().has_sends() {
+            continue;
+        }
+        for to in new.returns().filter(|&to| kept(to)) {
+            let muted = after.send_muted(id, to);
+            if before.send_muted(id, to) != muted {
+                params.push(ParamEvent::now(
+                    NodeKey::Send { track: id, to },
+                    route::SOLO_MUTE,
+                    switch(muted),
+                ));
+            }
+        }
     }
 }
 
@@ -409,7 +614,7 @@ fn param_events(
 #[cfg(test)]
 mod tests {
     use bl_core::time::{Bpm, SampleRate, TempoMap};
-    use bl_model::{Command, Device, Editor, TrackId, TrackKind};
+    use bl_model::{Command, Device, Editor, TrackKind};
 
     use super::*;
     use crate::gc::Collector;
@@ -506,18 +711,22 @@ mod tests {
         );
         assert_eq!(program.generation(), 1);
         assert_eq!(program.base(), None);
-        // A fader per track and the tone.
-        assert_eq!(program.node_count(), 6);
+        // A mixer per track, the tone, an output per track but Main, and a
+        // send from each of the three tracks that send to the return.
+        assert_eq!(program.node_count(), 5 + 1 + 4 + 3);
         assert!(update.unhosted.is_empty());
         // The graph a worker pool would walk reaches every task.
         let ready = program.ready_order();
         assert_eq!(ready.len(), program.task_count());
         let position = |t: u32| ready.iter().position(|&r| r == t).unwrap();
         for (t, task) in program.tasks.iter().enumerate() {
-            for &input in &program.task_inputs[task.inputs.range()] {
-                assert!(position(input) < position(t as u32));
+            for input in &program.task_inputs[task.inputs.range()] {
+                assert!(position(input.from) < position(t as u32));
             }
         }
+        // No return takes its sends before the mixer, so no task keeps a
+        // copy for them.
+        assert!(program.pre_pool.is_empty());
     }
 
     #[test]
@@ -531,7 +740,11 @@ mod tests {
         assert!(update.program.is_none());
         assert_eq!(
             update.params,
-            vec![ParamEvent::now(NodeKey::Fader(f.outer), fader::VOLUME, 0.5)]
+            vec![ParamEvent::now(
+                NodeKey::Mixer(f.outer),
+                mixer::track::VOLUME,
+                0.5
+            )]
         );
         let update = f.apply(Command::SetMute {
             track: f.outer,
@@ -539,7 +752,28 @@ mod tests {
         });
         assert_eq!(
             update.params,
-            vec![ParamEvent::now(NodeKey::Fader(f.outer), fader::MUTE, 1.0)]
+            vec![ParamEvent::now(
+                NodeKey::Mixer(f.outer),
+                mixer::track::MUTE,
+                1.0
+            )]
+        );
+        let update = f.apply(Command::SetSend {
+            track: f.inner,
+            to: f.ret,
+            level: 0.25,
+        });
+        assert!(update.program.is_none());
+        assert_eq!(
+            update.params,
+            vec![ParamEvent::now(
+                NodeKey::Send {
+                    track: f.inner,
+                    to: f.ret
+                },
+                route::LEVEL,
+                0.25
+            )]
         );
         let update = f.apply(Command::SetDeviceParam {
             device: f.tone,
@@ -571,6 +805,85 @@ mod tests {
         assert!(update.is_empty());
     }
 
+    // Spec: mixer R22
+    #[test]
+    fn solo_edits_close_and_open_routes_without_a_program() {
+        let mut f = Fixture::new();
+        f.sync();
+        let solo_mute = |key, on: bool| ParamEvent::now(key, route::SOLO_MUTE, switch(on));
+        let output = NodeKey::Output;
+        let send = |track, to| NodeKey::Send { track, to };
+
+        // Soloing the inner track silences the outer track and its send; the
+        // group holds the solo, and Solo in Place keeps the return.
+        let update = f.apply(Command::SetSolo {
+            track: f.inner,
+            solo: true,
+        });
+        assert!(update.program.is_none());
+        assert_eq!(
+            update.params,
+            vec![
+                solo_mute(output(f.outer), true),
+                solo_mute(send(f.outer, f.ret), true),
+            ]
+        );
+        // Without Solo in Place the return goes quiet too.
+        let update = f.apply(Command::SetSoloInPlace { enabled: false });
+        assert!(update.program.is_none());
+        assert_eq!(update.params, vec![solo_mute(output(f.ret), true)]);
+        // Soloing the return instead: the inner track's output closes, the
+        // outer track's send to the return opens, and the return is heard.
+        let update = f.apply(Command::SoloExclusive { track: f.ret });
+        assert_eq!(
+            update.params,
+            vec![
+                solo_mute(send(f.outer, f.ret), false),
+                solo_mute(output(f.group), true),
+                solo_mute(output(f.inner), true),
+                solo_mute(output(f.ret), false),
+            ]
+        );
+        // Nothing soloed: every route is open again.
+        let update = f.apply(Command::SetSolo {
+            track: f.ret,
+            solo: false,
+        });
+        assert_eq!(
+            update.params,
+            vec![
+                solo_mute(output(f.outer), false),
+                solo_mute(output(f.group), false),
+                solo_mute(output(f.inner), false),
+            ]
+        );
+        assert!(
+            f.apply(Command::SetSoloInPlace { enabled: true })
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn the_pre_post_switch_recompiles_and_keeps_every_node() {
+        let mut f = Fixture::new();
+        f.sync();
+        let update = f.apply(Command::SetSendTap {
+            track: f.ret,
+            tap: SendTap::Pre,
+        });
+        let program = update.program.as_ref().unwrap().get();
+        assert_eq!(program.migration_count(), program.node_count());
+        // The three tracks that send keep their chains' output.
+        let size = 2 * 64;
+        assert_eq!(program.pre_pool.len(), 3 * size);
+        let ret = program.tasks.iter().find(|t| t.track == f.ret).unwrap();
+        assert!(
+            program.task_inputs[ret.inputs.range()]
+                .iter()
+                .all(|input| input.pre)
+        );
+    }
+
     #[test]
     fn structural_edits_recompile_and_keep_surviving_nodes() {
         let mut f = Fixture::new();
@@ -595,14 +908,25 @@ mod tests {
         assert_eq!(program.migration_count(), program.node_count());
         let slot = program.slot_of(NodeKey::Device(f.tone)).unwrap();
         assert!(program.slots[slot as usize].bypass);
+        let before = program.node_count();
 
-        // A new track brings new nodes; the rest migrate.
+        // A new track brings a mixer, an output, and a send to the return;
+        // the rest migrate.
         let new = track(&mut f.editor, TrackKind::Audio, None);
         let update = f.sync();
         let program = update.program.as_ref().unwrap().get();
-        assert_eq!(program.node_count(), 7);
-        assert_eq!(program.migration_count(), 6);
-        assert!(program.slot_of(NodeKey::Fader(new)).is_some());
+        assert_eq!(program.node_count(), before + 3);
+        assert_eq!(program.migration_count(), before);
+        for key in [
+            NodeKey::Mixer(new),
+            NodeKey::Output(new),
+            NodeKey::Send {
+                track: new,
+                to: f.ret,
+            },
+        ] {
+            assert!(program.slot_of(key).is_some(), "{key}");
+        }
 
         // A tempo change recompiles, and the program carries the new map.
         let tempo = TempoMap::constant(Bpm::new(90.0).unwrap());
@@ -635,6 +959,13 @@ mod tests {
         for track in [f.inner, f.ret] {
             tone(&mut f.editor, track);
         }
+        f.editor
+            .apply(Command::SetSend {
+                track: f.outer,
+                to: f.ret,
+                level: 0.5,
+            })
+            .unwrap();
         let render = |f: &mut Fixture, ready: bool| {
             f.compiler.reset();
             let mut update = f.sync();

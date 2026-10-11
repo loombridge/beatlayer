@@ -11,7 +11,7 @@ use bl_model::registry::{self, RunError};
 use bl_model::{
     ArrangementLoop, AudioData, Change, ChangeSet, Clip, ClipData, ClipId, Command, ContentHash,
     Device, DeviceId, DeviceKind, EditError, Editor, MidiData, ModelError, Note, ParamId,
-    PluginFormat, TrackId, TrackKind,
+    PluginFormat, SendTap, TrackId, TrackKind,
 };
 use serde_json::{Value, json};
 
@@ -47,9 +47,9 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        28,
-        "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, and WP-1.8b \
-         trim_clip_start"
+        33,
+        "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five \
+         for the mixer, and WP-1.8b trim_clip_start"
     );
 
     for op in &ops {
@@ -156,12 +156,32 @@ fn every_command_runs_by_id() {
     agent.run("mixer.set_volume", json!({ "track": drums, "volume": 0.5 }));
     agent.run("mixer.set_pan", json!({ "track": drums, "pan": -0.25 }));
     agent.run("mixer.set_mute", json!({ "track": drums, "mute": true }));
-    agent.run("mixer.set_solo", json!({ "track": bass, "solo": true }));
-    agent.run("mixer.set_arm", json!({ "track": bass, "arm": true }));
-    let mixer = *agent.editor.document().track(drums).unwrap().mixer();
+    agent.run("mixer.set_solo", json!({ "track": drums, "solo": true }));
+    agent.run("mixer.solo_exclusive", json!({ "track": bass }));
+    agent.run("mixer.set_arm", json!({ "track": drums, "arm": true }));
+    agent.run("mixer.arm_exclusive", json!({ "track": bass }));
+    agent.run(
+        "mixer.set_send",
+        json!({ "track": group, "to": reverb, "level": 0.5 }),
+    );
+    agent.run(
+        "mixer.set_send_tap",
+        json!({ "track": reverb, "tap": "pre" }),
+    );
+    let changes = agent.run("mixer.set_solo_in_place", json!({ "enabled": false }));
+    assert!(changes.settings);
+    let document = agent.editor.document();
+    let mixer = *document.track(drums).unwrap().mixer();
     assert_eq!((mixer.volume, mixer.pan, mixer.mute), (0.5, -0.25, true));
-    let mixer = *agent.editor.document().track(bass).unwrap().mixer();
+    assert!(
+        !mixer.solo && !mixer.arm,
+        "released by the exclusive switches"
+    );
+    let mixer = *document.track(bass).unwrap().mixer();
     assert!(mixer.solo && mixer.arm);
+    assert_eq!(document.track(group).unwrap().send(reverb), 0.5);
+    assert_eq!(document.track(reverb).unwrap().mixer().tap, SendTap::Pre);
+    assert!(!document.settings().solo_in_place);
 
     // Song settings.
     let changes = agent.run(
@@ -397,7 +417,28 @@ fn schemas_match_what_commands_serialise() {
         ("mixer.set_pan", Command::SetPan { track, pan: 1.0 }),
         ("mixer.set_mute", Command::SetMute { track, mute: false }),
         ("mixer.set_solo", Command::SetSolo { track, solo: true }),
+        ("mixer.solo_exclusive", Command::SoloExclusive { track }),
         ("mixer.set_arm", Command::SetArm { track, arm: true }),
+        ("mixer.arm_exclusive", Command::ArmExclusive { track }),
+        (
+            "mixer.set_send",
+            Command::SetSend {
+                track,
+                to: TrackId(fresh()),
+                level: 1.0,
+            },
+        ),
+        (
+            "mixer.set_send_tap",
+            Command::SetSendTap {
+                track,
+                tap: SendTap::Pre,
+            },
+        ),
+        (
+            "mixer.set_solo_in_place",
+            Command::SetSoloInPlace { enabled: false },
+        ),
         (
             "clip.create",
             Command::CreateClip {
@@ -616,7 +657,7 @@ fn bad_requests_change_nothing() {
     );
 }
 
-/// The default bindings follow `docs/specs/command-bindings.md`.
+/// The default bindings follow the command bindings spec.
 #[test]
 fn bindings_follow_the_spec() {
     let commands = document_registry();

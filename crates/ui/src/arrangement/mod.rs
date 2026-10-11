@@ -11,9 +11,9 @@
 //! an egui paint callback ([`gpu`]); text, the rulers, and the headers
 //! through egui.
 //!
-//! The behaviour is in `docs/specs/arrangement-view.md`. Editing clips by
-//! mouse and keyboard is in [`editing`] (WP-1.8b), whose behaviour is in
-//! `docs/specs/arrangement-editing.md`.
+//! The behaviour is in the arrangement view spec. Editing clips by mouse and
+//! keyboard is in [`editing`] (WP-1.8b), whose behaviour is in the
+//! arrangement editing spec.
 
 pub mod benchmark;
 pub mod context_menu;

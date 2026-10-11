@@ -16,8 +16,8 @@ use bl_core::id::Id;
 use bl_core::time::{Bpm, TempoMap, Ticks, TimeSignature, TimeSignatureMap};
 use bl_model::{
     AudioData, Change, ChangeSet, Clip, ClipData, ClipId, Command, ContentHash, Device, DeviceId,
-    DeviceKind, Document, EditError, Editor, MidiData, Mixer, Note, ParamId, PluginFormat, TrackId,
-    TrackKind,
+    DeviceKind, Document, EditError, Editor, MidiData, Mixer, Note, ParamId, PluginFormat, SendTap,
+    TrackId, TrackKind,
 };
 use proptest::prelude::*;
 use proptest::sample::Index;
@@ -57,6 +57,12 @@ enum Op {
     SetMute(Index, bool),
     SetSolo(Index, bool),
     SetArm(Index, bool),
+    SoloExclusive(Index),
+    ArmExclusive(Index),
+    /// A send from one track to another, usually a return.
+    SetSend(Index, Index, f64),
+    SetSendTap(Index, bool),
+    SetSoloInPlace(bool),
     CreateClip {
         track: Index,
         start: u16,
@@ -147,6 +153,11 @@ fn op() -> impl Strategy<Value = Op> {
         1 => (i(), any::<bool>()).prop_map(|(t, b)| Op::SetMute(t, b)),
         1 => (i(), any::<bool>()).prop_map(|(t, b)| Op::SetSolo(t, b)),
         1 => (i(), any::<bool>()).prop_map(|(t, b)| Op::SetArm(t, b)),
+        1 => i().prop_map(Op::SoloExclusive),
+        1 => i().prop_map(Op::ArmExclusive),
+        3 => (i(), i(), value(0.0..1.0)).prop_map(|(t, to, v)| Op::SetSend(t, to, v)),
+        1 => (i(), any::<bool>()).prop_map(|(t, b)| Op::SetSendTap(t, b)),
+        1 => any::<bool>().prop_map(Op::SetSoloInPlace),
         5 => (i(), any::<u16>(), 1u16..256, data())
             .prop_map(|(track, start, length, data)| Op::CreateClip { track, start, length, data }),
         1 => i().prop_map(Op::DeleteClip),
@@ -316,6 +327,27 @@ impl Op {
                 track: at.track(t),
                 solo: *solo,
             },
+            Self::SoloExclusive(t) => Command::SoloExclusive { track: at.track(t) },
+            Self::ArmExclusive(t) => Command::ArmExclusive { track: at.track(t) },
+            Self::SetSend(t, to, level) => {
+                // Usually a return, if the song has one.
+                let returns: Vec<TrackId> = doc.returns().collect();
+                let to = if returns.is_empty() || to.index(8) == 0 {
+                    at.track(to)
+                } else {
+                    *to.get(&returns)
+                };
+                Command::SetSend {
+                    track: at.track(t),
+                    to,
+                    level: *level,
+                }
+            }
+            Self::SetSendTap(t, pre) => Command::SetSendTap {
+                track: at.track(t),
+                tap: if *pre { SendTap::Pre } else { SendTap::Post },
+            },
+            Self::SetSoloInPlace(enabled) => Command::SetSoloInPlace { enabled: *enabled },
             Self::SetArm(t, arm) => Command::SetArm {
                 track: at.track(t),
                 arm: *arm,
@@ -514,13 +546,22 @@ fn starting_song() -> Editor {
     editor
 }
 
+/// A track's own settings: name, mixer, sends, children, and chain order.
+type OwnSettings = (
+    String,
+    Mixer,
+    Vec<(TrackId, f64)>,
+    Vec<TrackId>,
+    Vec<DeviceId>,
+);
+
 /// A song flattened into plain maps, for working out change sets the slow
 /// way.
 struct Flat {
     main: TrackId,
     top: Vec<TrackId>,
     returns: Vec<TrackId>,
-    tracks: BTreeMap<TrackId, (String, Mixer, Vec<TrackId>, Vec<DeviceId>)>,
+    tracks: BTreeMap<TrackId, OwnSettings>,
     clips: BTreeMap<ClipId, (TrackId, Clip)>,
     devices: BTreeMap<DeviceId, (TrackId, Device)>,
 }
@@ -540,6 +581,7 @@ impl Flat {
             let own = (
                 track.name().to_owned(),
                 *track.mixer(),
+                track.sends().collect(),
                 track.children().collect(),
                 devices,
             );
@@ -585,7 +627,7 @@ fn slow_changes(old: &Document, new: &Document) -> ChangeSet {
     let children = |flat: &Flat| -> BTreeMap<TrackId, Vec<TrackId>> {
         flat.tracks
             .iter()
-            .map(|(id, own)| (*id, own.2.clone()))
+            .map(|(id, own)| (*id, own.3.clone()))
             .collect()
     };
     ChangeSet {

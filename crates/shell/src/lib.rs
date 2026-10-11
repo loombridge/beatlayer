@@ -38,8 +38,8 @@ pub use bl_shell_spec::arrangement as arrangement_commands;
 /// The Arrangement's editing command IDs and their argument and result
 /// types (WP-1.8b).
 pub use bl_shell_spec::editing as editing_commands;
+pub use bl_shell_spec::settings::ZOOM_STEPS;
 pub use bl_shell_spec::{commands, context_menus, menus, register};
 pub use shell::{
     Area, Effect, GesturePhase, Invocation, MainView, Message, Shell, ShellError, WindowKind,
-    ZOOM_STEPS,
 };

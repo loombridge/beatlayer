@@ -6,9 +6,9 @@
 //! [`ArrangementView::run`] carries out. None of it is song state: the set
 //! never changes here, and nothing here is an undo step.
 //!
-//! The behaviour is in `docs/specs/arrangement-view.md`. The clip selection
-//! and the edits that act on it are in [`editing`] (WP-1.8b), whose
-//! behaviour is in `docs/specs/arrangement-editing.md`.
+//! The behaviour is in the arrangement view spec. The clip selection and the
+//! edits that act on it are in [`editing`] (WP-1.8b), whose behaviour is in
+//! the arrangement editing spec.
 
 pub mod editing;
 pub mod grid;

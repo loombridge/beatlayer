@@ -14,7 +14,7 @@ use crate::document::Document;
 use crate::error::ModelError;
 use crate::ids::{ClipId, DeviceId, ParamId, TrackId};
 use crate::shared::Shared;
-use crate::track::{Track, TrackKind};
+use crate::track::{Mixer, SendTap, Track, TrackKind};
 
 /// One edit to a document.
 ///
@@ -140,6 +140,42 @@ pub enum Command {
         track: TrackId,
         /// Whether it's armed.
         arm: bool,
+    },
+    /// Solos a track other than Main and unsolos every other track, as one
+    /// edit.
+    SoloExclusive {
+        /// The track.
+        track: TrackId,
+    },
+    /// Arms an audio or MIDI track and disarms every other track, as one
+    /// edit.
+    ArmExclusive {
+        /// The track.
+        track: TrackId,
+    },
+    /// Sets the level of an audio, MIDI, or group track's send to a return
+    /// track, as linear gain from 0 (−∞ dB) to 1 (0 dB).
+    SetSend {
+        /// The sending track.
+        track: TrackId,
+        /// The return track the send feeds.
+        to: TrackId,
+        /// The level: 1 is 0 dB, 0.5 about −6 dB, and 0 sends nothing.
+        #[schemars(range(min = 0.0, max = 1.0))]
+        level: f64,
+    },
+    /// Sets where a return track's sends take their signal from the tracks
+    /// that send to it: after their mixer (`post`) or before it (`pre`).
+    SetSendTap {
+        /// The return track.
+        track: TrackId,
+        /// `pre` or `post`.
+        tap: SendTap,
+    },
+    /// Switches Solo in Place on or off.
+    SetSoloInPlace {
+        /// Whether soloing a track keeps the return tracks audible.
+        enabled: bool,
     },
 
     /// Puts a new clip on an audio or MIDI track. Its data must match the
@@ -277,6 +313,11 @@ impl Command {
             Self::SetMute { .. } => "Mute track",
             Self::SetSolo { .. } => "Solo track",
             Self::SetArm { .. } => "Arm track",
+            Self::SoloExclusive { .. } => "Solo track",
+            Self::ArmExclusive { .. } => "Arm track",
+            Self::SetSend { .. } => "Change send",
+            Self::SetSendTap { .. } => "Switch Pre/Post",
+            Self::SetSoloInPlace { .. } => "Switch Solo in Place",
             Self::CreateClip { .. } => "Create clip",
             Self::DeleteClip { .. } => "Delete clip",
             Self::MoveClip { .. } => "Move clip",
@@ -405,6 +446,51 @@ impl Document {
                 if current.mixer.arm != *arm {
                     self.track_mut(*track)?.mixer.arm = *arm;
                 }
+                Ok(())
+            }
+            Command::SoloExclusive { track } => {
+                check_kind(
+                    self.track_ref(*track)?,
+                    TrackKind::has_mute_and_solo,
+                    NOT_MAIN,
+                )?;
+                self.set_switch_exclusively(*track, |mixer| &mut mixer.solo);
+                Ok(())
+            }
+            Command::ArmExclusive { track } => {
+                check_kind(self.track_ref(*track)?, TrackKind::has_arm, AUDIO_OR_MIDI)?;
+                self.set_switch_exclusively(*track, |mixer| &mut mixer.arm);
+                Ok(())
+            }
+            Command::SetSend { track, to, level } => {
+                check_value("send level", *level, (0.0..=1.0).contains(level))?;
+                let sender = self.track_ref(*track)?;
+                check_kind(sender, TrackKind::has_sends, SENDER)?;
+                check_kind(
+                    self.track_ref(*to)?,
+                    |kind| kind == TrackKind::Return,
+                    RETURN,
+                )?;
+                if sender.send(*to) != *level {
+                    let sends = &mut self.track_mut(*track)?.sends;
+                    if *level == 0.0 {
+                        sends.remove(to);
+                    } else {
+                        sends.insert(*to, *level);
+                    }
+                }
+                Ok(())
+            }
+            Command::SetSendTap { track, tap } => {
+                let current = self.track_ref(*track)?;
+                check_kind(current, |kind| kind == TrackKind::Return, RETURN)?;
+                if current.mixer.tap != *tap {
+                    self.track_mut(*track)?.mixer.tap = *tap;
+                }
+                Ok(())
+            }
+            Command::SetSoloInPlace { enabled } => {
+                self.settings.solo_in_place = *enabled;
                 Ok(())
             }
             Command::CreateClip { track, clip } => self.create_clip(*track, clip),
@@ -542,7 +628,38 @@ impl Document {
             }
             doomed.extend(track.children.iter().copied());
         }
+        if kind == TrackKind::Return {
+            // Every send to the return goes with it.
+            let senders: Vec<TrackId> = self
+                .tracks
+                .iter()
+                .filter(|(_, track)| track.sends.contains_key(&id))
+                .map(|(&sender, _)| sender)
+                .collect();
+            for sender in senders {
+                self.track_mut(sender)?.sends.remove(&id);
+            }
+        }
         Ok(())
+    }
+
+    /// Turns a mixer switch (solo or arm) on for `track` and off on every
+    /// other track, touching only the tracks whose switch changes.
+    fn set_switch_exclusively(&mut self, track: TrackId, switch: fn(&mut Mixer) -> &mut bool) {
+        let changes: Vec<(TrackId, bool)> = self
+            .tracks
+            .iter()
+            .filter_map(|(&id, current)| {
+                let wanted = id == track;
+                let mut mixer = current.mixer;
+                (*switch(&mut mixer) != wanted).then_some((id, wanted))
+            })
+            .collect();
+        for (id, wanted) in changes {
+            if let Some(current) = self.tracks.get_mut(&id) {
+                *switch(&mut Shared::make_mut(current).mixer) = wanted;
+            }
+        }
     }
 
     fn move_track(
@@ -789,6 +906,8 @@ impl Document {
 
 const NOT_MAIN: &str = "a track other than Main";
 const AUDIO_OR_MIDI: &str = "an audio or MIDI track";
+const SENDER: &str = "an audio, MIDI, or group track";
+const RETURN: &str = "a return track";
 
 fn check_kind(
     track: &Track,
@@ -889,7 +1008,15 @@ pub(crate) fn check_mixer(track: &Track) -> Result<(), ModelError> {
     if mixer.arm {
         check_kind(track, TrackKind::has_arm, AUDIO_OR_MIDI)?;
     }
+    if mixer.tap != SendTap::Post {
+        check_kind(track, |kind| kind == TrackKind::Return, RETURN)?;
+    }
     Ok(())
+}
+
+/// Checks a send's level: above 0 (a send at 0 isn't stored) and at most 1.
+pub(crate) fn check_send_level(level: f64) -> Result<(), ModelError> {
+    check_value("send level", level, level > 0.0 && level <= 1.0)
 }
 
 fn insert_at<T: Clone>(list: &mut Vector<T>, index: usize, value: T) -> Result<(), ModelError> {
@@ -1324,6 +1451,137 @@ mod tests {
             assert_eq!(mixer.solo, mute_and_solo);
             assert_eq!(mixer.arm, arm);
         }
+    }
+
+    // Spec: mixer R7, R8
+    #[test]
+    fn audio_midi_and_group_tracks_send_to_returns() {
+        let mut song = Song::new();
+        let audio = song.track(TrackKind::Audio, None);
+        let group = song.track(TrackKind::Group, None);
+        let midi = song.track(TrackKind::Midi, Some(group));
+        let reverb = song.track(TrackKind::Return, None);
+        let delay = song.track(TrackKind::Return, None);
+        let main = song.main();
+
+        // Every send starts at -inf dB.
+        for track in [audio, group, midi] {
+            assert_eq!(song.doc.track(track).unwrap().send(reverb), 0.0);
+            assert_eq!(song.doc.track(track).unwrap().sends().len(), 0);
+        }
+        for (track, to, level) in [
+            (audio, reverb, 1.0),
+            (group, delay, 0.25),
+            (midi, reverb, 0.5),
+        ] {
+            song.apply(Command::SetSend { track, to, level }).unwrap();
+        }
+        let sends: Vec<_> = song.doc.track(audio).unwrap().sends().collect();
+        assert_eq!(sends, vec![(reverb, 1.0)]);
+        // Turning a send back down to -inf dB forgets it.
+        song.apply(Command::SetSend {
+            track: audio,
+            to: reverb,
+            level: 0.0,
+        })
+        .unwrap();
+        assert_eq!(song.doc.track(audio).unwrap().sends().len(), 0);
+
+        // Only audio, MIDI, and group tracks send, only to returns, and only
+        // between -inf and 0 dB.
+        for (track, to, level) in [
+            (reverb, delay, 0.5),
+            (main, reverb, 0.5),
+            (audio, group, 0.5),
+        ] {
+            assert!(matches!(
+                song.reject(Command::SetSend { track, to, level }),
+                ModelError::WrongTrackKind { .. }
+            ));
+        }
+        for level in [1.01, -0.1, f64::NAN] {
+            assert!(matches!(
+                song.reject(Command::SetSend {
+                    track: audio,
+                    to: reverb,
+                    level,
+                }),
+                ModelError::InvalidValue { .. }
+            ));
+        }
+
+        // The Pre/Post switch is a return's.
+        song.apply(Command::SetSendTap {
+            track: delay,
+            tap: SendTap::Pre,
+        })
+        .unwrap();
+        assert_eq!(song.doc.track(delay).unwrap().mixer().tap, SendTap::Pre);
+        for track in [audio, group, main] {
+            assert!(matches!(
+                song.reject(Command::SetSendTap {
+                    track,
+                    tap: SendTap::Pre,
+                }),
+                ModelError::WrongTrackKind { .. }
+            ));
+        }
+
+        // Deleting a return deletes the sends to it.
+        song.apply(Command::DeleteTrack { track: delay }).unwrap();
+        assert_eq!(song.doc.track(group).unwrap().sends().len(), 0);
+        assert_eq!(song.doc.track(midi).unwrap().send(reverb), 0.5);
+    }
+
+    // Spec: mixer R15
+    #[test]
+    fn exclusive_solo_and_arm_release_every_other_track() {
+        let mut song = Song::new();
+        let a = song.track(TrackKind::Audio, None);
+        let b = song.track(TrackKind::Midi, None);
+        let group = song.track(TrackKind::Group, None);
+        let ret = song.track(TrackKind::Return, None);
+        for track in [a, b, group, ret] {
+            song.apply(Command::SetSolo { track, solo: true }).unwrap();
+        }
+        song.apply(Command::SetArm {
+            track: a,
+            arm: true,
+        })
+        .unwrap();
+        song.apply(Command::SetArm {
+            track: b,
+            arm: true,
+        })
+        .unwrap();
+
+        song.apply(Command::SoloExclusive { track: group }).unwrap();
+        let soloed: Vec<_> = song
+            .doc
+            .tracks()
+            .filter(|t| t.mixer().solo)
+            .map(Track::id)
+            .collect();
+        assert_eq!(soloed, vec![group]);
+        song.apply(Command::ArmExclusive { track: b }).unwrap();
+        let armed: Vec<_> = song
+            .doc
+            .tracks()
+            .filter(|t| t.mixer().arm)
+            .map(Track::id)
+            .collect();
+        assert_eq!(armed, vec![b]);
+
+        // Main can't be soloed, and only audio and MIDI tracks armed.
+        let main = song.main();
+        assert!(matches!(
+            song.reject(Command::SoloExclusive { track: main }),
+            ModelError::WrongTrackKind { .. }
+        ));
+        assert!(matches!(
+            song.reject(Command::ArmExclusive { track: ret }),
+            ModelError::WrongTrackKind { .. }
+        ));
     }
 
     #[test]

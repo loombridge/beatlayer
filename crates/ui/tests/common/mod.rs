@@ -6,7 +6,7 @@
 use bl_shell::{Effect, Shell};
 use bl_ui::input::KeyDispatcher;
 use bl_ui::keymap::{Keymap, Platform};
-use bl_ui::layout::REFERENCE;
+use bl_ui::layout::{REFERENCE, apply_zoom, follow_zoom};
 use bl_ui::main_window::{MainWindowUi, UiEvent};
 use bl_ui::settings_window::SettingsUi;
 use bl_ui::theme::{Theme, fonts};
@@ -46,7 +46,12 @@ pub struct Harness {
     pub settings: SettingsUi,
     pub window: Window,
     pub time: f64,
+    /// The window's size in window points: at a zoom other than 100%, egui
+    /// lays out `size / zoom` layout points, as in the app.
     pub size: egui::Vec2,
+    /// The interface zoom the window draws at, which follows the shell's as
+    /// the app's windows do.
+    pub zoom: f32,
     pub events: Vec<UiEvent>,
     /// Whether the window draws Live's title bar itself, as on macOS (D22).
     pub title_bar: bool,
@@ -61,6 +66,8 @@ impl Harness {
         shell.start_audio();
         let theme = Theme::builtin(shell.theme());
         theme.apply(&ctx);
+        let zoom = shell.zoom();
+        apply_zoom(&ctx, zoom);
         let size = match window {
             Window::Main => REFERENCE,
             Window::Settings => {
@@ -78,6 +85,7 @@ impl Harness {
             window,
             time: 0.0,
             size,
+            zoom,
             events: Vec::new(),
             title_bar: false,
         }
@@ -98,8 +106,18 @@ impl Harness {
     /// are run on the shell, and their effects applied.
     pub fn frame(&mut self, events: Vec<Event>) -> FullOutput {
         self.time += 1.0 / 60.0;
+        // The zoom follows the shell's as in the app: the main window's at
+        // once, the Settings window's once no mouse button is down in it.
+        let zoom = self.shell.zoom();
+        self.zoom = match self.window {
+            Window::Main => {
+                apply_zoom(&self.ctx, zoom);
+                zoom
+            }
+            Window::Settings => follow_zoom(&self.ctx, self.zoom, zoom),
+        };
         let mut input = RawInput {
-            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, self.size)),
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, self.size / self.zoom)),
             time: Some(self.time),
             events,
             ..Default::default()

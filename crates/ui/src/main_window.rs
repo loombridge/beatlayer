@@ -81,6 +81,9 @@ pub struct MainWindowUi {
     /// The keymap the Mixer Config Menu shows its items' keys from, read
     /// when it first opens.
     keymap: Option<crate::keymap::Keymap>,
+    /// Whether a value was being typed into a track header's volume field
+    /// when the last frame ended.
+    mixer_typing: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -121,6 +124,7 @@ impl MainWindowUi {
             transport: TransportFields::new(),
             mixer: MixerUi::new(),
             keymap: None,
+            mixer_typing: false,
         }
     }
 
@@ -141,7 +145,7 @@ impl MainWindowUi {
     /// to a text field (the control bar transport spec, R10).
     #[must_use]
     pub fn is_typing(&self) -> bool {
-        self.transport.is_typing()
+        self.transport.is_typing() || self.mixer_typing
     }
 
     /// The Arrangement View, to give it a peak source or read what it drew.
@@ -232,6 +236,7 @@ impl MainWindowUi {
             );
             self.status_bar(ui, shell, theme, &layout, &mut events);
         });
+        self.mixer_typing = crate::mixer::is_typing(ctx);
         let metering = shell
             .meters()
             .iter()
@@ -285,10 +290,20 @@ impl MainWindowUi {
             if placement.strip != strip {
                 continue;
             }
-            let look = self
+            let mut look = self
                 .transport
                 .look(shell, *el)
                 .unwrap_or_else(|| look(*el, shell));
+            if *el == Element::Message
+                && let Some(readout) = crate::mixer::take_readout(ui.ctx())
+            {
+                // Spec: mixer-view R6. While a fader is dragged, the Status
+                // Bar shows its volume.
+                look = Look {
+                    text: Some(readout),
+                    ..Look::default()
+                };
+            }
             let response = element(ui, theme, placement, *rect, &look);
             if self.focus_request == Some(FocusRequest::Element(*el)) {
                 response.request_focus();

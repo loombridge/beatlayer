@@ -20,10 +20,10 @@ use bl_shell::mixer_view_commands as ids;
 use bl_shell::settings::zoom_factor;
 use bl_shell::{Shell, ZOOM_STEPS};
 use bl_ui::keymap::Platform;
-use bl_ui::layout::mixer::{MixerLayout, Sections, SessionLayout, arrangement_split};
+use bl_ui::layout::mixer::{MixerLayout, Sections, SessionLayout, arrangement_mixer};
 use bl_ui::layout::{ArrangementLayout, REFERENCE, Row, ShellLayout, TITLE_BAR};
 use bl_ui::menus::item_state;
-use bl_ui::mixer::{Place, fader_id, volume_field_id};
+use bl_ui::mixer::{Place, column_id, fader_id, volume_field_id};
 use common::{Harness, Node, Window, command};
 use egui::accesskit::{Action, Role};
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, Rect, Vec2, pos2, vec2};
@@ -182,17 +182,32 @@ fn layout_md() -> Option<String> {
     Some(std::fs::read_to_string(docs.join("ui-parity/layout.md")).unwrap())
 }
 
+/// A strip control's place relative to its strip section's top-left
+/// corner, as the observations give them.
+fn relative(rect: Rect, column: Rect, strip_top: f32) -> (f32, f32, f32, f32) {
+    (
+        rect.left() - column.left(),
+        rect.top() - strip_top,
+        rect.right() - column.left(),
+        rect.bottom() - strip_top,
+    )
+}
+
+/// The default set's strip section top in the Session mixer: the main
+/// view's bottom (766) less the colour strip (6.5) and the strip (123).
+const STRIP_TOP: f32 = 766.0 - 6.5 - 123.0;
+
 // Spec: mixer-view R1.
 #[test]
 fn the_session_mixer_sits_where_live_puts_it() {
     let mut h = session();
     let nodes = tree(&mut h);
     let mixer = rect_of(Harness::node(&nodes, "Session Mixer"));
-    // L-SES-009 under the 17-point status row, to the main view's bottom
-    // (766); its sections 115 + 56 + 123 points.
+    // L-SES-009 under the status row, to the main view's bottom (766): the
+    // sections 115 + 56 + 123 points and the 6.5-point colour strip.
     assert_eq!(
         (mixer.left(), mixer.top(), mixer.right(), mixer.bottom()),
-        (320.0, 472.0, 1591.0, 766.0)
+        (320.0, 766.0 - 300.5, 1591.0, 766.0)
     );
     // L-SES-001: columns from 320, 94 points each; L-SES-005 and 006: the
     // returns before Main, which ends at 1591 and is 104 points wide.
@@ -209,121 +224,72 @@ fn the_session_mixer_sits_where_live_puts_it() {
     assert!((column("B Return").left() - 1393.0).abs() <= 2.0);
     let main = column("Main");
     assert_eq!((main.left(), main.right()), (1487.0, 1591.0));
-    // The strip's controls sit in the strip's 123 points at the bottom.
-    let volume = rect_of(inside(&nodes, "1 MIDI", "Track Volume").unwrap());
-    assert!(volume.top() >= 643.0 && volume.left() >= 320.0 && volume.right() <= 414.0);
-    // The sends' 56 points over it, In/Out's 115 over them.
-    let send = rect_of(inside(&nodes, "1 MIDI", "Send A").unwrap());
-    assert!(send.top() >= 587.0 && send.bottom() <= 643.0);
-    let input = rect_of(inside(&nodes, "1 MIDI", "Input Type").unwrap());
-    assert!(input.top() >= 472.0 && input.bottom() <= 587.0);
+    // The sends' 56 points over the strip, In/Out's 115 over them.
+    let send = rect_of(inside(&nodes, "3 Audio", "Send A").unwrap());
+    assert!(send.top() >= STRIP_TOP - 56.0 && send.bottom() <= STRIP_TOP);
+    let input = rect_of(inside(&nodes, "3 Audio", "Input Type").unwrap());
+    assert!(input.top() >= STRIP_TOP - 171.0 && input.bottom() <= STRIP_TOP - 56.0);
 }
 
-// Spec: mixer-view R1, R12.
+// Spec: mixer-view R3. Where Live 12.4.6 has each control, relative to the
+// strip section's top-left corner (observed, ±1 point).
 #[test]
-fn hiding_sections_and_the_mixer_gives_the_slots_their_height() {
-    let mut h = session();
-    h.shell.run(ids::IN_OUT, json!({})).unwrap();
-    let nodes = tree(&mut h);
-    let mixer = rect_of(Harness::node(&nodes, "Session Mixer"));
-    assert_eq!(mixer.top(), 766.0 - 56.0 - 123.0);
-    assert!(inside(&nodes, "1 MIDI", "Input Type").is_none());
-    h.shell.run(ids::RETURN_TRACKS, json!({})).unwrap();
-    let nodes = tree(&mut h);
-    assert!(inside(&nodes, "Session Mixer", "A Return").is_none());
-    h.shell.run(ids::TOGGLE, json!({})).unwrap();
-    let nodes = tree(&mut h);
-    assert!(nodes.iter().all(|n| n.label != "Session Mixer"));
-}
-
-// Spec: mixer-view R2.
-#[test]
-fn the_arrangement_mixer_splits_the_main_view() {
-    let mut h = harness();
-    let before = rect_of(Harness::node(&tree(&mut h), "Track Lanes"));
-    h.shell.run(ids::TOGGLE, json!({})).unwrap();
-    let nodes = tree(&mut h);
-    let mixer = rect_of(Harness::node(&nodes, "Arrangement Mixer"));
-    // L-ARR-018: the mixer from 407 to 729; the lanes and pinned rows above
-    // 397.
-    assert_eq!(
-        (mixer.left(), mixer.top(), mixer.right(), mixer.bottom()),
-        (320.0, 407.0, 1591.0, 729.0)
-    );
-    let lanes = rect_of(Harness::node(&nodes, "Track Lanes"));
-    assert_eq!(lanes.top(), before.top());
-    assert!(lanes.bottom() <= 397.0);
-    // The time ruler stays at the bottom (L-ARR-016).
-    let time = rect_of(Harness::node(&nodes, "Time Ruler"));
-    assert_eq!((time.top(), time.bottom()), (746.0, 760.0));
-    // The strips stack from the mixer's bottom.
-    let volume = rect_of(inside(&nodes, "Arrangement Mixer", "Track Volume").unwrap());
-    assert!(volume.top() >= 729.0 - 123.0);
-    let layout = ArrangementLayout::compute_with_mixer(
-        Rect::from_min_max(pos2(320.0, 61.0), pos2(1591.0, 766.0)),
-        true,
-        3,
-    );
-    assert_eq!(layout.pinned_headers.bottom(), 397.0);
-    assert!(layout.grid_indicator.bottom() <= 397.0);
-    // Hidden again, the lanes have their height back.
-    h.shell.run(ids::TOGGLE, json!({})).unwrap();
-    let lanes = rect_of(Harness::node(&tree(&mut h), "Track Lanes"));
-    assert_eq!(lanes, before);
-}
-
-// Spec: mixer-view R3, R5.
-#[test]
-fn every_strip_has_its_controls_in_live_s_order() {
+fn every_strip_has_its_controls_where_live_has_them() {
     let mut h = session();
     let nodes = tree(&mut h);
-    let get = |column: &str, label: &str| inside(&nodes, column, label).map(rect_of);
-    for column in ["1 MIDI", "3 Audio"] {
-        let volume = get(column, "Track Volume").unwrap();
-        let pan = get(column, "Track Panning").unwrap();
-        let fader = get(column, "Track Volume Fader").unwrap();
-        let meter = get(column, "Track Meter").unwrap();
-        let activator = get(column, "Track Activator").unwrap();
-        let solo = get(column, "Solo").unwrap();
-        let arm = get(column, "Arm Recording").unwrap();
-        // The volume field and pan at the top left, pan under the field.
-        assert!(pan.top() >= volume.bottom(), "{column}");
-        assert!((pan.left() - volume.left()).abs() < 0.5, "{column}");
-        // The fader at the right, the meter at the column's right edge.
-        assert!(
-            fader.left() >= volume.right() && meter.left() >= fader.right(),
-            "{column}"
-        );
-        // Then the activator, Solo, and Arm.
-        for button in [activator, solo, arm] {
-            assert!(
-                button.top() >= fader.bottom() && button.top() >= pan.bottom(),
-                "{column}"
-            );
-        }
-        assert!(
-            activator.right() <= solo.left() && solo.right() <= arm.left(),
-            "{column}"
-        );
-        // In/Out in Live's order.
-        let rows: Vec<f32> = [
-            "Input Type",
-            "Input Channel",
-            "Monitor",
-            "Output Type",
-            "Output Channel",
-        ]
+    let column = rect_of(inside(&nodes, "Session Mixer", "3 Audio").unwrap());
+    let get = |label: &str| {
+        let rect = rect_of(inside(&nodes, "3 Audio", label).unwrap_or_else(|| panic!("{label}")));
+        relative(rect, column, STRIP_TOP)
+    };
+    // The top-left field is the peak level readout, not the volume.
+    assert_eq!(get("Peak Level"), (8.0, 13.0, 42.0, 24.0));
+    let peak = inside(&nodes, "3 Audio", "Peak Level").unwrap();
+    assert_eq!(peak.value, "minus infinity dB");
+    // Pan centred at (25, 46), about 25 points across.
+    let (l, t, r, b) = get("Track Panning");
+    assert_eq!(((l + r) / 2.0, (t + b) / 2.0), (25.0, 46.0));
+    assert!((r - l - 25.0).abs() <= 1.0);
+    // The activator, Solo, and Arm in a column at the left.
+    assert_eq!(get("Track Activator"), (15.0, 64.0, 36.0, 85.0));
+    assert_eq!(get("Solo"), (15.0, 91.0, 36.0, 102.5));
+    assert_eq!(get("Arm Recording"), (15.0, 106.0, 36.0, 119.0));
+    // The fader's handle column left of the 11-point meter.
+    let fader = get("Track Volume");
+    assert_eq!((fader.0, fader.2), (46.0, 59.0));
+    assert_eq!(get("Track Meter"), (60.0, 11.0, 71.0, 119.0));
+    // No volume number field in the strip: the only Track Volume is the
+    // fader.
+    let volumes = nodes
         .iter()
-        .map(|label| get(column, label).unwrap().top())
-        .collect();
-        assert!(rows.windows(2).all(|w| w[0] < w[1]), "{column}: {rows:?}");
-        // Sends A and B, staggered.
-        let (a, b) = (
-            get(column, "Send A").unwrap(),
-            get(column, "Send B").unwrap(),
-        );
-        assert!(a.right() <= b.left() && a.bottom() <= b.top(), "{column}");
-    }
+        .filter(|n| {
+            n.label == "Track Volume"
+                && Harness::descends_from(
+                    &nodes,
+                    n.id,
+                    inside(&nodes, "Session Mixer", "3 Audio").unwrap().id,
+                )
+        })
+        .count();
+    assert_eq!(volumes, 1);
+    // In/Out in Live's order.
+    let rows: Vec<f32> = [
+        "Input Type",
+        "Input Channel",
+        "Monitor",
+        "Output Type",
+        "Output Channel",
+    ]
+    .iter()
+    .map(|label| get(label).1)
+    .collect();
+    assert!(rows.windows(2).all(|w| w[0] < w[1]), "{rows:?}");
+    // A MIDI track without an instrument: a MIDI meter and the switches,
+    // no volume or pan.
+    assert!(inside(&nodes, "1 MIDI", "MIDI Meter").is_some());
+    assert!(inside(&nodes, "1 MIDI", "Track Volume").is_none());
+    assert!(inside(&nodes, "1 MIDI", "Track Panning").is_none());
+    assert!(inside(&nodes, "1 MIDI", "Arm Recording").is_some());
     // A return shows its letter and has no Arm; Main has no activator or
     // Solo of its own, but the cue volume and the Solo/Cue button.
     let activator = inside(&nodes, "A Return", "Track Activator").unwrap();
@@ -335,7 +301,7 @@ fn every_strip_has_its_controls_in_live_s_order() {
     let cue = inside(&nodes, "Main", "Cue Volume").unwrap();
     assert!(cue.disabled && cue.description.contains("Phase 3"));
     assert!(inside(&nodes, "Main", "Solo/Cue Mode").unwrap().disabled);
-    assert!(inside(&nodes, "Main", "Track Volume Fader").is_some());
+    assert!(inside(&nodes, "Main", "Track Volume").is_some());
     assert!(
         inside(&nodes, "Main", "Return A Pre/Post")
             .unwrap()
@@ -343,9 +309,115 @@ fn every_strip_has_its_controls_in_live_s_order() {
     );
 }
 
-// Spec: mixer-view R4.
+// Spec: mixer-view R3, R5. A group's strip has the activator and Solo but
+// no Arm, its In/Out only Audio To; it takes a number in the sequence.
 #[test]
-fn the_arrangement_headers_mixer_controls_are_live() {
+fn a_group_has_its_number_its_switches_and_audio_to() {
+    let mut h = session();
+    let t = tracks(&h.shell);
+    let group: TrackId = h.shell.new_id();
+    h.shell
+        .run(
+            "track.create",
+            json!({ "id": group, "kind": "group", "name": "3 Group", "index": 2 }),
+        )
+        .unwrap();
+    for (i, track) in [t[2], t[3]].iter().enumerate() {
+        h.shell
+            .run(
+                "track.move",
+                json!({ "track": track, "parent": group, "index": i }),
+            )
+            .unwrap();
+    }
+    let nodes = tree(&mut h);
+    let number = |name: &str| {
+        inside(&nodes, name, "Track Activator")
+            .unwrap()
+            .description
+            .split(':')
+            .next()
+            .unwrap()
+            .to_owned()
+    };
+    assert_eq!(number("3 Group"), "Track 3");
+    assert_eq!(number("3 Audio"), "Track 4");
+    assert_eq!(number("4 Audio"), "Track 5");
+    assert!(inside(&nodes, "3 Group", "Solo").is_some());
+    assert!(inside(&nodes, "3 Group", "Arm Recording").is_none());
+    assert!(inside(&nodes, "3 Group", "Input Type").is_none());
+    assert!(inside(&nodes, "3 Group", "Output Type").is_some());
+    // F3 switches the group's activator: F1 to F8 count it.
+    key(&mut h, Key::F3, Modifiers::NONE);
+    assert!(mixer(&h.shell, group).mute);
+}
+
+// Spec: mixer-view R1, R12.
+#[test]
+fn hiding_sections_and_the_mixer_gives_the_slots_their_height() {
+    let mut h = session();
+    h.shell.run(ids::IN_OUT, json!({})).unwrap();
+    let nodes = tree(&mut h);
+    let mixer = rect_of(Harness::node(&nodes, "Session Mixer"));
+    assert_eq!(mixer.top(), 766.0 - 6.5 - 56.0 - 123.0);
+    assert!(inside(&nodes, "3 Audio", "Input Type").is_none());
+    h.shell.run(ids::RETURN_TRACKS, json!({})).unwrap();
+    let nodes = tree(&mut h);
+    assert!(inside(&nodes, "Session Mixer", "A Return").is_none());
+    h.shell.run(ids::TOGGLE, json!({})).unwrap();
+    let nodes = tree(&mut h);
+    assert!(nodes.iter().all(|n| n.label != "Session Mixer"));
+}
+
+// Spec: mixer-view R2.
+#[test]
+fn the_arrangement_mixer_is_the_session_mixer_under_the_lanes() {
+    let mut h = harness();
+    let before = rect_of(Harness::node(&tree(&mut h), "Track Lanes"));
+    h.shell.run(ids::TOGGLE, json!({})).unwrap();
+    let nodes = tree(&mut h);
+    let mixer = rect_of(Harness::node(&nodes, "Arrangement Mixer"));
+    // Its sections start where the Session mixer's do, under a 17-point
+    // row of title bars; it runs to the main view's bottom.
+    assert_eq!(
+        (mixer.left(), mixer.top(), mixer.right(), mixer.bottom()),
+        (320.0, 766.0 - 300.5 - 17.0, 1591.0, 766.0)
+    );
+    // The same columns at the same x positions.
+    for (i, name) in ["1 MIDI", "2 MIDI", "3 Audio", "4 Audio"]
+        .iter()
+        .enumerate()
+    {
+        let rect = rect_of(inside(&nodes, "Arrangement Mixer", name).unwrap());
+        assert_eq!(rect.left(), 320.0 + 94.0 * i as f32, "{name}");
+    }
+    // The lanes, the pinned rows, and the time ruler stay above it.
+    let lanes = rect_of(Harness::node(&nodes, "Track Lanes"));
+    assert_eq!(lanes.top(), before.top());
+    let time = rect_of(Harness::node(&nodes, "Time Ruler"));
+    assert!(lanes.bottom() < time.top() && time.bottom() <= mixer.top());
+    let layout = ArrangementLayout::compute_with_mixer(
+        Rect::from_min_max(pos2(320.0, 61.0), pos2(1591.0, 766.0)),
+        true,
+        3,
+        Sections::DEFAULT,
+    );
+    assert!(layout.pinned_headers.bottom() <= layout.time_ruler.top());
+    assert_eq!(layout.mixer, Some(mixer));
+    // The strips sit as in the Session.
+    let column = rect_of(inside(&nodes, "Arrangement Mixer", "3 Audio").unwrap());
+    let peak = rect_of(inside(&nodes, "3 Audio", "Peak Level").unwrap());
+    assert_eq!(relative(peak, column, STRIP_TOP).0, 8.0);
+    assert_eq!(peak.top() - STRIP_TOP, 13.0);
+    // Hidden again, the lanes have their height back.
+    h.shell.run(ids::TOGGLE, json!({})).unwrap();
+    let lanes = rect_of(Harness::node(&tree(&mut h), "Track Lanes"));
+    assert_eq!(lanes, before);
+}
+
+// Spec: mixer-view R4, R6.
+#[test]
+fn the_arrangement_headers_mixer_controls_are_live_and_take_typed_values() {
     let mut h = harness();
     let t = tracks(&h.shell);
     let nodes = tree(&mut h);
@@ -360,7 +432,7 @@ fn the_arrangement_headers_mixer_controls_are_live() {
     assert!(solos[0].left() >= 1479.0 && solos[0].right() <= 1577.0);
     click(&mut h, solos[0].center(), Modifiers::NONE);
     assert!(mixer(&h.shell, t[0]).solo);
-    // Volume and pan step from the keyboard once clicked.
+    // The volume field steps from the keyboard once clicked.
     let mut volumes: Vec<Rect> = Harness::nodes(&h.settle())
         .iter()
         .filter(|n| n.label == "Track Volume")
@@ -370,6 +442,20 @@ fn the_arrangement_headers_mixer_controls_are_live() {
     click(&mut h, volumes[0].center(), Modifiers::NONE);
     key(&mut h, Key::ArrowDown, Modifiers::NONE);
     assert!((controls::gain_db(mixer(&h.shell, t[0]).volume) + 1.0).abs() < 1e-9);
+    // Typing -12 and Return sets −12.0 dB; while typing, keys go to the
+    // field.
+    for k in [Key::Minus, Key::Num1, Key::Num2] {
+        key(&mut h, k, Modifiers::NONE);
+    }
+    assert!(h.main.is_typing());
+    key(&mut h, Key::Enter, Modifiers::NONE);
+    assert!((controls::gain_db(mixer(&h.shell, t[0]).volume) + 12.0).abs() < 1e-9);
+    // Esc drops a typed value and gives the keyboard back.
+    key(&mut h, Key::Num3, Modifiers::NONE);
+    assert!(h.main.is_typing());
+    key(&mut h, Key::Escape, Modifiers::NONE);
+    assert!((controls::gain_db(mixer(&h.shell, t[0]).volume) + 12.0).abs() < 1e-9);
+    assert!(!h.main.is_typing());
     let nodes = tree(&mut h);
     let meters = nodes.iter().filter(|n| n.label == "Track Meter").count();
     assert!(meters >= 7, "a meter in every header: {meters}");
@@ -377,60 +463,78 @@ fn the_arrangement_headers_mixer_controls_are_live() {
 
 // Spec: mixer-view R6.
 #[test]
-fn dragging_a_fader_or_a_field_is_one_undo_step() {
+fn a_fader_drag_is_relative_one_undo_step_and_shows_in_the_status_bar() {
     let mut h = session();
     let t = tracks(&h.shell);
-    let fader = control(&mut h, "1 MIDI", "Track Volume Fader");
-    let handle = pos2(
-        fader.center().x,
-        fader.bottom() - fader.height() * controls::fader_position(1.0) as f32,
-    );
+    let fader = control(&mut h, "3 Audio", "Track Volume");
+    // Pressed anywhere on the fader, not on its handle: nothing jumps.
+    let at = pos2(fader.center().x, fader.bottom() - 2.0);
     let before = h.shell.editor().undo_history().len();
-    let positions = drag(
-        &mut h,
-        handle,
-        &[vec2(0.0, 2.0); 20],
-        Modifiers::NONE,
-        |h| controls::fader_position(mixer(&h.shell, t[0]).volume),
-    );
+    let mut readouts = Vec::new();
+    let volumes = drag(&mut h, at, &[vec2(0.0, -1.0); 30], Modifiers::NONE, |h| {
+        mixer(&h.shell, t[2]).volume
+    });
+    assert_eq!(volumes[0], 1.0, "a press doesn't move it");
     assert_eq!(h.shell.editor().undo_history().len(), before + 1);
     assert_eq!(
         h.shell.editor().undo_history().next(),
         Some(controls::VOLUME_GESTURE)
     );
-    // The handle follows the pointer: whatever egui's drag threshold took,
-    // every point after it moved the fader a point's worth.
-    let moved = positions[0] - positions.last().unwrap();
-    assert!(moved > 0.0);
-    let per_point = 1.0 / f64::from(fader.height());
+    // Up past the top: it stops at +6 dB.
+    assert!((controls::gain_db(*volumes.last().unwrap()) - 6.0).abs() < 1e-9);
+    // Down: about 40 points cover the whole range, and the Status Bar
+    // shows the volume while dragging.
+    let held = Event::ModifiersChanged(Modifiers::NONE);
+    h.frame(vec![held.clone(), Event::PointerMoved(at)]);
+    h.frame(vec![Event::PointerButton {
+        pos: at,
+        button: PointerButton::Primary,
+        pressed: true,
+        modifiers: Modifiers::NONE,
+    }]);
+    let mut y = at.y;
+    for _ in 0..12 {
+        y += 1.5;
+        let output = h.frame(vec![Event::PointerMoved(pos2(at.x, y))]);
+        let nodes = Harness::nodes(&output);
+        readouts.push(Harness::node(&nodes, "Status").value.clone());
+    }
+    let now = mixer(&h.shell, t[2]).volume;
     assert!(
-        moved <= 40.0 * per_point + 1e-9 && moved >= 30.0 * per_point,
-        "{moved}"
+        readouts
+            .last()
+            .is_some_and(|r| *r == controls::volume_readout(now)),
+        "{readouts:?}"
     );
-    // The field: 100 points of drag for the whole travel, Shift ten times
-    // finer.
-    let field = control(&mut h, "2 MIDI", "Track Volume");
-    let start = controls::fader_position(mixer(&h.shell, t[1]).volume);
-    drag(
-        &mut h,
-        field.center(),
-        &[vec2(0.0, -2.0); 10],
-        Modifiers::NONE,
-        |_| (),
+    // From the frame the drag starts (past egui's drag threshold) on.
+    let shown: Vec<&String> = readouts.iter().skip_while(|r| r.is_empty()).collect();
+    assert!(shown.len() >= 8, "{readouts:?}");
+    assert!(
+        shown.iter().all(|r| r.starts_with("Track Volume: ")),
+        "{readouts:?}"
     );
-    let coarse = controls::fader_position(mixer(&h.shell, t[1]).volume) - start;
-    assert!(coarse > 0.1 && coarse <= 0.2 + 1e-9, "{coarse}");
-    let start = controls::fader_position(mixer(&h.shell, t[1]).volume);
-    drag(
-        &mut h,
-        field.center(),
-        &[vec2(0.0, 2.0); 10],
-        Modifiers::SHIFT,
-        |_| (),
+    for _ in 0..40 {
+        y += 1.5;
+        h.frame(vec![Event::PointerMoved(pos2(at.x, y))]);
+    }
+    assert_eq!(
+        mixer(&h.shell, t[2]).volume,
+        0.0,
+        "−∞ within about 40 points"
     );
-    let fine = start - controls::fader_position(mixer(&h.shell, t[1]).volume);
-    assert!(fine > 0.01 && fine <= 0.02 + 1e-9, "{fine}");
-    // Pan: its whole range per 200 points.
+    h.frame(vec![Event::PointerButton {
+        pos: pos2(at.x, y),
+        button: PointerButton::Primary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    }]);
+    let nodes = tree(&mut h);
+    assert!(
+        !Harness::node(&nodes, "Status")
+            .value
+            .starts_with("Track Volume")
+    );
+    // Pan: its whole range per 200 points (not observed).
     let pan = control(&mut h, "3 Audio", "Track Panning");
     drag(
         &mut h,
@@ -447,9 +551,52 @@ fn dragging_a_fader_or_a_field_is_one_undo_step() {
     );
 }
 
+// Spec: mixer-view R6, R8. Two selected tracks move by the same dB, with
+// the keys and with a drag (observed).
+#[test]
+fn selected_tracks_move_by_the_same_db() {
+    let mut h = session();
+    let t = tracks(&h.shell);
+    for (track, db) in [(t[2], -50.0), (t[3], -40.0)] {
+        h.shell
+            .run(
+                "mixer.set_volume",
+                json!({ "track": track, "volume": controls::db_gain(db) }),
+            )
+            .unwrap();
+    }
+    h.shell
+        .run(
+            "arrangement.select_tracks",
+            json!({ "tracks": [t[2], t[3]] }),
+        )
+        .unwrap();
+    let fader = control(&mut h, "3 Audio", "Track Volume");
+    click(&mut h, fader.center(), Modifiers::NONE);
+    key(&mut h, Key::ArrowDown, Modifiers::NONE);
+    let db = |h: &Harness, track| {
+        (controls::gain_db(mixer(&h.shell, track).volume) * 10.0).round() / 10.0
+    };
+    assert_eq!((db(&h, t[2]), db(&h, t[3])), (-51.0, -41.0));
+    let before = h.shell.editor().undo_history().len();
+    // Long enough after the click that egui doesn't see a double-click.
+    h.time += 1.0;
+    drag(
+        &mut h,
+        fader.center(),
+        &[vec2(0.0, -1.0); 12],
+        Modifiers::NONE,
+        |_| (),
+    );
+    assert_eq!(h.shell.editor().undo_history().len(), before + 1);
+    let (a, b) = (db(&h, t[2]), db(&h, t[3]));
+    assert!(a > -51.0);
+    assert!(((a + 51.0) - (b + 41.0)).abs() < 0.11, "{a} {b}");
+}
+
 // Spec: mixer-view R6.
 #[test]
-fn double_click_delete_and_the_triangle_reset() {
+fn double_click_delete_keys_and_the_triangle() {
     let mut h = session();
     let t = tracks(&h.shell);
     for track in &t {
@@ -463,31 +610,31 @@ fn double_click_delete_and_the_triangle_reset() {
             .run("mixer.set_pan", json!({ "track": track, "pan": -0.5 }))
             .unwrap();
     }
-    let field = control(&mut h, "1 MIDI", "Track Volume");
-    double_click(&mut h, field.center());
-    assert_eq!(mixer(&h.shell, t[0]).volume, 1.0);
-    let fader = control(&mut h, "2 MIDI", "Track Volume Fader");
+    // A double-click on the fader resets it to 0 dB (observed).
+    let fader = control(&mut h, "3 Audio", "Track Volume");
+    double_click(&mut h, fader.center());
+    assert_eq!(mixer(&h.shell, t[2]).volume, 1.0);
+    let fader = control(&mut h, "4 Audio", "Track Volume");
     click(&mut h, fader.center(), Modifiers::NONE);
     key(&mut h, Key::Delete, Modifiers::NONE);
-    assert_eq!(mixer(&h.shell, t[1]).volume, 1.0);
-    let pan = control(&mut h, "1 MIDI", "Track Panning");
+    assert_eq!(mixer(&h.shell, t[3]).volume, 1.0);
+    let pan = control(&mut h, "3 Audio", "Track Panning");
     double_click(&mut h, pan.center());
-    assert_eq!(mixer(&h.shell, t[0]).pan, 0.0);
-    let triangle = control(&mut h, "2 MIDI", "Reset Panning");
+    assert_eq!(mixer(&h.shell, t[2]).pan, 0.0);
+    let triangle = control(&mut h, "4 Audio", "Reset Panning");
     click(&mut h, triangle.center(), Modifiers::NONE);
-    assert_eq!(mixer(&h.shell, t[1]).pan, 0.0);
-    // Up and Down step volume by a dB, Shift by a tenth.
-    let field = control(&mut h, "3 Audio", "Track Volume");
-    click(&mut h, field.center(), Modifiers::NONE);
+    assert_eq!(mixer(&h.shell, t[3]).pan, 0.0);
+    // Up and Down step a dB, Shift a tenth; the ends as recorded.
+    click(&mut h, fader.center(), Modifiers::NONE);
     key(&mut h, Key::ArrowUp, Modifiers::NONE);
-    let db = controls::gain_db(mixer(&h.shell, t[2]).volume);
-    assert!(
-        (db - (controls::gain_db(0.25).round() + 1.0)).abs() < 1e-9,
-        "{db}"
-    );
+    let db = |h: &Harness| (controls::gain_db(mixer(&h.shell, t[3]).volume) * 10.0).round() / 10.0;
+    assert_eq!(db(&h), 1.0);
     key(&mut h, Key::ArrowUp, Modifiers::SHIFT);
-    let fine = controls::gain_db(mixer(&h.shell, t[2]).volume);
-    assert!((fine - db - 0.1).abs() < 1e-9, "{fine}");
+    assert_eq!(db(&h), 1.1);
+    for _ in 0..6 {
+        key(&mut h, Key::ArrowUp, Modifiers::NONE);
+    }
+    assert_eq!(db(&h), 6.0, "it stops at the top");
 }
 
 // Spec: mixer-view R7.
@@ -551,17 +698,21 @@ fn meters_show_the_engine_s_levels_and_redraw_until_silent() {
     h.frame(vec![]);
     let half = controls::db_gain(-6.0) as f32;
     let meters = [TrackMeter {
-        track: t[0],
+        track: t[2],
         peak: [half, half * 0.5],
         rms: [half * 0.5, half * 0.25],
     }];
     h.shell.set_meters(&meters);
     let output = h.frame(vec![]);
     let nodes = Harness::nodes(&output);
-    let meter = inside(&nodes, "1 MIDI", "Track Meter").unwrap();
+    let meter = inside(&nodes, "3 Audio", "Track Meter").unwrap();
     assert_eq!(meter.role, Role::Meter);
     assert_eq!(meter.value, "peak -6.0, RMS -12.0");
     assert!((meter.numeric.unwrap() + 6.0).abs() < 1e-3);
+    assert_eq!(
+        inside(&nodes, "3 Audio", "Peak Level").unwrap().value,
+        "-6.0 dB"
+    );
     let delay = output
         .viewport_output
         .values()
@@ -571,7 +722,7 @@ fn meters_show_the_engine_s_levels_and_redraw_until_silent() {
     assert_eq!(delay, std::time::Duration::ZERO, "the meters redraw");
     // Silent meters stop redrawing every frame.
     h.shell.set_meters(&[TrackMeter {
-        track: t[0],
+        track: t[2],
         peak: [0.0; 2],
         rms: [0.0; 2],
     }]);
@@ -586,7 +737,7 @@ fn meters_show_the_engine_s_levels_and_redraw_until_silent() {
     assert!(delay > std::time::Duration::ZERO);
     let nodes = Harness::nodes(&output);
     assert_eq!(
-        inside(&nodes, "1 MIDI", "Track Meter").unwrap().value,
+        inside(&nodes, "3 Audio", "Track Meter").unwrap().value,
         "peak -inf, RMS -inf"
     );
 }
@@ -601,6 +752,16 @@ fn menu_item(h: &Harness, row: &str) -> bl_ui::menus::ItemState {
         .unwrap();
     item_state(item, &h.shell, &h.keymap, Platform::current())
 }
+
+const MIXER_CONTROLS: [&str; 7] = [
+    "In/Out",
+    "Sends",
+    "Volume",
+    "Track Options",
+    "Crossfader",
+    "Performance Impact",
+    "Return Tracks",
+];
 
 // Spec: mixer-view R11, R12.
 #[test]
@@ -618,65 +779,28 @@ fn the_status_bar_toggle_and_its_menu_show_and_hide_the_mixer() {
     let arrow = rect_of(Harness::node(&nodes, "Mixer Config Menu"));
     click(&mut h, arrow.center(), Modifiers::NONE);
     let nodes = tree(&mut h);
-    let mut items: Vec<(f32, String, bool)> = nodes
+    let name = |label: &str| {
+        let label = label.trim_start_matches("✔ ");
+        MIXER_CONTROLS
+            .iter()
+            .find(|name| label.starts_with(**name))
+            .copied()
+    };
+    let mut items: Vec<(f32, &str, bool)> = nodes
         .iter()
-        .filter(|n| {
-            n.role == Role::Button
-                && [
-                    "In/Out",
-                    "Sends",
-                    "Volume",
-                    "Track Options",
-                    "Crossfader",
-                    "Performance Impact",
-                    "Return Tracks",
-                ]
-                .iter()
-                .any(|label| n.label.trim_start_matches("✔ ").starts_with(label))
-        })
-        .map(|n| (rect_of(n).top(), n.label.clone(), n.disabled))
+        .filter(|n| n.role == Role::Button)
+        .filter_map(|n| name(&n.label).map(|l| (rect_of(n).top(), l, n.disabled)))
         .collect();
     items.sort_by(|a, b| a.0.total_cmp(&b.0));
-    let labels: Vec<String> = items
-        .iter()
-        .map(|(_, l, _)| {
-            let l = l.trim_start_matches("✔ ");
-            [
-                "In/Out",
-                "Sends",
-                "Volume",
-                "Track Options",
-                "Crossfader",
-                "Performance Impact",
-                "Return Tracks",
-            ]
-            .iter()
-            .find(|name| l.starts_with(**name))
-            .unwrap()
-            .to_string()
-        })
-        .collect();
-    assert_eq!(
-        labels,
-        [
-            "In/Out",
-            "Sends",
-            "Volume",
-            "Track Options",
-            "Crossfader",
-            "Performance Impact",
-            "Return Tracks"
-        ]
-    );
+    let labels: Vec<&str> = items.iter().map(|(_, l, _)| *l).collect();
+    assert_eq!(labels, MIXER_CONTROLS);
     // Track Options, Crossfader, and Performance Impact wait.
     assert!(items[3].2 && items[4].2 && items[5].2 && !items[1].2);
-    let sends = items[1].0;
     let at = nodes
         .iter()
-        .find(|n| n.label.trim_start_matches("✔ ").starts_with("Sends") && n.role == Role::Button)
+        .find(|n| n.role == Role::Button && name(&n.label) == Some("Sends"))
         .map(|n| rect_of(n).center())
         .unwrap();
-    let _ = sends;
     click(&mut h, at, Modifiers::NONE);
     assert!(!state(&mut h.shell).sends);
 }
@@ -695,17 +819,21 @@ fn the_view_menu_and_keys_show_and_hide_the_mixer_and_its_sections() {
     key(&mut h, Key::M, both);
     assert!(state(&mut h.shell).arrangement.shown);
     assert_eq!(menu_item(&h, "M-VIEW-031").checked, Some(true));
+    // In/Out ⌥⌘I, Sends ⌥⌘S, Return Tracks ⌥⌘R, each ticked in a new set;
+    // Volume ticked, with no key.
     for (row, key_) in [
         ("M-VIEW-032a", Key::I),
         ("M-VIEW-032b", Key::S),
         ("M-VIEW-032g", Key::R),
     ] {
-        assert_eq!(menu_item(&h, row).checked, Some(true), "{row}");
+        let item = menu_item(&h, row);
+        assert_eq!(item.checked, Some(true), "{row}");
+        assert!(item.chord.is_some(), "{row}");
         key(&mut h, key_, both);
         assert_eq!(menu_item(&h, row).checked, Some(false), "{row}");
     }
     let volume = menu_item(&h, "M-VIEW-032c");
-    assert!(volume.enabled && volume.checked == Some(true));
+    assert!(volume.enabled && volume.checked == Some(true) && volume.chord.is_none());
     for row in ["M-VIEW-032d", "M-VIEW-032e", "M-VIEW-032f", "M-VIEW-033a"] {
         assert!(!menu_item(&h, row).enabled, "{row} waits");
     }
@@ -713,36 +841,87 @@ fn the_view_menu_and_keys_show_and_hide_the_mixer_and_its_sections() {
     assert!(!shown.in_out && !shown.sends && !shown.return_tracks && shown.volume);
     key(&mut h, Key::M, both);
     assert!(!state(&mut h.shell).arrangement.shown);
+    // The submenus' separators, as observed: Volume | Track Options ...
+    // Performance Impact | Return Tracks; and In/Out, Volume, Track Options |
+    // Return Tracks.
+    let menus = menu_bar(MenuPlatform::current());
+    let shape = |row: &str| -> Vec<&str> {
+        menus
+            .iter()
+            .flat_map(bl_shell::menus::Menu::walk)
+            .find(|item| item.row == row)
+            .unwrap()
+            .items
+            .iter()
+            .map(|item| {
+                if item.is_separator() {
+                    "—"
+                } else {
+                    item.label
+                }
+            })
+            .collect()
+    };
+    assert_eq!(
+        shape("M-VIEW-032"),
+        [
+            "In/Out",
+            "Sends",
+            "Volume",
+            "—",
+            "Track Options",
+            "Crossfader",
+            "Performance Impact",
+            "—",
+            "Return Tracks"
+        ]
+    );
+    assert_eq!(
+        shape("M-VIEW-033"),
+        ["In/Out", "Volume", "Track Options", "—", "Return Tracks"]
+    );
+    // Arrangement Track Controls is disabled while the Session View is in
+    // front.
+    assert!(menu_item(&h, "M-VIEW-033").enabled);
+    h.shell
+        .run("view.toggle_session_arrangement", json!({}))
+        .unwrap();
+    assert!(!menu_item(&h, "M-VIEW-033").enabled);
 }
 
 // Spec: mixer-view R13.
 #[test]
-fn option_shift_m_moves_the_focus_to_the_mixer() {
+fn option_shift_m_puts_the_focus_in_the_mixer_at_the_selected_track() {
     let mut h = harness();
     let t = tracks(&h.shell);
-    let navigate = menu_item(&h, "M-NAV-010");
-    assert!(navigate.enabled);
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [t[1]] }))
+        .unwrap();
+    assert!(menu_item(&h, "M-NAV-010").enabled);
     key(&mut h, Key::M, Modifiers::ALT | Modifiers::SHIFT);
     h.settle();
     assert!(state(&mut h.shell).arrangement.shown);
-    let focused = h.ctx.memory(egui::Memory::focused);
-    assert_eq!(
-        focused,
-        Some(volume_field_id(Place::Mixer(MixerOf::Arrangement), t[0]))
-    );
-    key(&mut h, Key::ArrowUp, Modifiers::NONE);
-    assert!((controls::gain_db(mixer(&h.shell, t[0]).volume) - 1.0).abs() < 1e-9);
-    // With a track selected, its strip.
-    h.shell
-        .run("arrangement.select_tracks", json!({ "tracks": [t[2]] }))
-        .unwrap();
-    h.shell.set_focused_area(bl_shell::Area::MainView);
-    key(&mut h, Key::M, Modifiers::ALT | Modifiers::SHIFT);
-    h.settle();
     assert_eq!(
         h.ctx.memory(egui::Memory::focused),
-        Some(volume_field_id(Place::Mixer(MixerOf::Arrangement), t[2]))
+        Some(column_id(MixerOf::Arrangement, t[1]))
     );
+    // Right moves the selection to the next track, and the focus with it.
+    key(&mut h, Key::ArrowRight, Modifiers::NONE);
+    h.settle();
+    assert_eq!(h.shell.arrangement().selected_tracks(), [t[2]]);
+    assert_eq!(
+        h.ctx.memory(egui::Memory::focused),
+        Some(column_id(MixerOf::Arrangement, t[2]))
+    );
+    key(&mut h, Key::ArrowLeft, Modifiers::NONE);
+    h.settle();
+    assert_eq!(h.shell.arrangement().selected_tracks(), [t[1]]);
+    // Down changes nothing.
+    let volumes: Vec<f64> = t.iter().map(|x| mixer(&h.shell, *x).volume).collect();
+    key(&mut h, Key::ArrowDown, Modifiers::NONE);
+    let after: Vec<f64> = t.iter().map(|x| mixer(&h.shell, *x).volume).collect();
+    assert_eq!(volumes, after);
+    assert_eq!(h.shell.arrangement().selected_tracks(), [t[1]]);
     // In the Session View, Navigate ▸ Mixer is disabled, as Live shows it.
     h.shell
         .run("view.toggle_session_arrangement", json!({}))
@@ -762,7 +941,7 @@ fn many_tracks(h: &mut Harness, n: usize) {
 
 // Spec: mixer-view R14.
 #[test]
-fn the_wheel_scrolls_the_mixer() {
+fn the_wheel_scrolls_the_mixer_continuously() {
     let mut h = session();
     many_tracks(&mut h, 20);
     let mixer = rect_of(Harness::node(&tree(&mut h), "Session Mixer"));
@@ -784,9 +963,21 @@ fn the_wheel_scrolls_the_mixer() {
         inside(&nodes, "Session Mixer", "1 MIDI").is_none(),
         "scrolled out of view"
     );
+    // A column can be partly in view.
+    let lefts: Vec<f32> = nodes
+        .iter()
+        .filter(|n| n.role == Role::Group && n.label.ends_with(" Audio"))
+        .filter_map(|n| n.bounds.map(|b| b.x0 as f32))
+        .collect();
+    assert!(
+        lefts.iter().any(|x| (x - 320.0).abs() < 1e-3),
+        "the first column in view starts at the mixer's left"
+    );
     // The returns and Main stay put.
     let main = rect_of(inside(&nodes, "Session Mixer", "Main").unwrap());
     assert_eq!(main.right(), 1591.0);
+    let a = rect_of(inside(&nodes, "Session Mixer", "A Return").unwrap());
+    assert!((a.left() - 1298.0).abs() <= 2.0);
 }
 
 // Spec: mixer-view R15.
@@ -794,19 +985,17 @@ fn the_wheel_scrolls_the_mixer() {
 fn every_mixer_control_reaches_assistive_technology() {
     let mut h = session();
     let nodes = tree(&mut h);
-    for column in ["1 MIDI", "4 Audio", "A Return", "Main"] {
-        assert_eq!(
+    for column in ["3 Audio", "4 Audio", "A Return", "Main"] {
+        assert!(
             nodes
                 .iter()
-                .find(|n| n.label == column && n.role == Role::Group)
-                .map(|n| n.role),
-            Some(Role::Group),
+                .any(|n| n.label == column && n.role == Role::Group),
             "{column}"
         );
         for (label, role) in [
+            ("Peak Level", Role::Label),
             ("Track Volume", Role::Slider),
             ("Track Panning", Role::Slider),
-            ("Track Volume Fader", Role::Slider),
             ("Track Meter", Role::Meter),
         ] {
             let node = inside(&nodes, column, label).unwrap_or_else(|| panic!("{column}: {label}"));
@@ -817,32 +1006,33 @@ fn every_mixer_control_reaches_assistive_technology() {
             );
         }
     }
-    let volume = inside(&nodes, "1 MIDI", "Track Volume").unwrap();
+    let volume = inside(&nodes, "3 Audio", "Track Volume").unwrap();
     assert_eq!(volume.value, "0.0 dB");
     assert_eq!(
-        inside(&nodes, "1 MIDI", "Track Panning").unwrap().value,
+        inside(&nodes, "3 Audio", "Track Panning").unwrap().value,
         "C"
     );
-    let solo = inside(&nodes, "1 MIDI", "Solo").unwrap();
+    let solo = inside(&nodes, "3 Audio", "Solo").unwrap();
     assert_eq!((solo.role, solo.value.as_str()), (Role::Button, "off"));
-    let send = inside(&nodes, "1 MIDI", "Send A").unwrap();
+    let send = inside(&nodes, "3 Audio", "Send A").unwrap();
     assert!(send.disabled && send.description.contains("WP-2.19"));
-    let monitor = inside(&nodes, "1 MIDI", "Monitor").unwrap();
+    let monitor = inside(&nodes, "3 Audio", "Monitor").unwrap();
     assert!(monitor.disabled && monitor.description.contains("WP-2.13"));
-    // A screen reader's increment steps the volume.
+    // A screen reader's increment and decrement step the fader.
     let t = tracks(&h.shell);
     h.accesskit(
-        volume_field_id(Place::Mixer(MixerOf::Session), t[0]),
+        fader_id(Place::Mixer(MixerOf::Session), t[2]),
         Action::Increment,
     );
     h.settle();
-    assert!((controls::gain_db(mixer(&h.shell, t[0]).volume) - 1.0).abs() < 1e-9);
+    assert!((controls::gain_db(mixer(&h.shell, t[2]).volume) - 1.0).abs() < 1e-9);
     h.accesskit(
-        fader_id(Place::Mixer(MixerOf::Session), t[0]),
+        fader_id(Place::Mixer(MixerOf::Session), t[2]),
         Action::Decrement,
     );
     h.settle();
-    assert!(controls::gain_db(mixer(&h.shell, t[0]).volume).abs() < 1e-9);
+    assert!(controls::gain_db(mixer(&h.shell, t[2]).volume).abs() < 1e-9);
+    let _ = volume_field_id(Place::Header, t[2]);
 }
 
 // Spec: mixer-view R16.
@@ -850,8 +1040,6 @@ fn every_mixer_control_reaches_assistive_technology() {
 fn every_mixer_control_is_reachable_from_the_agent_api() {
     let mut h = session();
     let t = tracks(&h.shell);
-    // Every command a control runs is registered with a schema, a
-    // description, and a permission class, and an agent runs it by ID.
     for id in [
         "mixer.set_volume",
         "mixer.set_pan",
@@ -871,10 +1059,10 @@ fn every_mixer_control_is_reachable_from_the_agent_api() {
         );
     }
     for (id, args) in [
-        ("mixer.set_volume", json!({ "track": t[0], "volume": 0.5 })),
-        ("mixer.set_pan", json!({ "track": t[0], "pan": -1.0 })),
+        ("mixer.set_volume", json!({ "track": t[2], "volume": 0.5 })),
+        ("mixer.set_pan", json!({ "track": t[2], "pan": -1.0 })),
         ("mixer.solo_exclusive", json!({ "track": t[1] })),
-        ("mixer.arm_exclusive", json!({ "track": t[2] })),
+        ("mixer.arm_exclusive", json!({ "track": t[3] })),
         ("mixer.set_mute", json!({ "track": t[3], "mute": true })),
         (ids::IN_OUT, json!({ "shown": false })),
     ] {
@@ -882,31 +1070,29 @@ fn every_mixer_control_is_reachable_from_the_agent_api() {
             .run(id, args)
             .unwrap_or_else(|e| panic!("{id}: {e}"));
     }
-    // What the agent changed is what the window shows.
     let nodes = tree(&mut h);
     assert_eq!(
-        inside(&nodes, "1 MIDI", "Track Volume").unwrap().value,
+        inside(&nodes, "3 Audio", "Track Volume").unwrap().value,
         "-6.0 dB"
     );
     assert_eq!(
-        inside(&nodes, "1 MIDI", "Track Panning").unwrap().value,
+        inside(&nodes, "3 Audio", "Track Panning").unwrap().value,
         "50L"
     );
     assert_eq!(inside(&nodes, "2 MIDI", "Solo").unwrap().value, "on");
     assert_eq!(
-        inside(&nodes, "3 Audio", "Arm Recording").unwrap().value,
+        inside(&nodes, "4 Audio", "Arm Recording").unwrap().value,
         "on"
     );
     assert_eq!(
         inside(&nodes, "4 Audio", "Track Activator").unwrap().value,
         "off"
     );
-    assert!(inside(&nodes, "1 MIDI", "Input Type").is_none());
-    // And a control's change is the agent's command.
+    assert!(inside(&nodes, "3 Audio", "Input Type").is_none());
     let doc = h.shell.editor().document().clone();
-    let change = controls::moved(Control::Volume, &[(t[0], 0.5)], 0.1);
+    let change = controls::moved(Control::Volume, &[(t[2], 0.5)], 1.0);
     assert_eq!(change[0].id, "mixer.set_volume");
-    let click = controls::clicked(&doc, controls::Switch::Solo, t[0], &[], false);
+    let click = controls::clicked(&doc, controls::Switch::Solo, t[2], &[], false);
     assert_eq!(click[0].id, "mixer.solo_exclusive");
 }
 
@@ -918,8 +1104,6 @@ fn only_the_columns_in_view_are_built() {
     assert_eq!(h.shell.mixer_columns().len(), 200);
     h.settle();
     let built = h.main.mixer().built_columns();
-    // About ten track columns fit before the returns, plus two returns and
-    // Main.
     assert!(built <= 15, "{built}");
     h.shell
         .run(ids::SCROLL, json!({ "view": "session", "x": 94.0 * 150.0 }))
@@ -941,10 +1125,20 @@ fn mixer_rows(size: Vec2) -> Vec<Row> {
     let session = SessionLayout::compute(shell.main_view, Some(Sections::DEFAULT));
     let mut rows = session.rows();
     rows.extend(MixerLayout::compute(session.mixer.unwrap(), 4, 2, Sections::DEFAULT, 0.0).rows());
-    let arrangement = ArrangementLayout::compute_with_mixer(shell.main_view, true, 3);
+    let arrangement =
+        ArrangementLayout::compute_with_mixer(shell.main_view, true, 3, Sections::DEFAULT);
     rows.extend(arrangement.rows());
-    let (_, mixer) = arrangement_split(shell.main_view);
-    rows.extend(MixerLayout::compute(mixer, 4, 2, Sections::DEFAULT, 0.0).rows());
+    let mixer = arrangement_mixer(shell.main_view, Sections::DEFAULT);
+    rows.extend(
+        MixerLayout::compute(
+            mixer.with_min_y(mixer.top() + 17.0),
+            4,
+            2,
+            Sections::DEFAULT,
+            0.0,
+        )
+        .rows(),
+    );
     rows
 }
 
@@ -955,12 +1149,10 @@ fn mixer_rows_keep_their_places_at_every_zoom() {
     for percent in ZOOM_STEPS {
         let zoom = zoom_factor(percent);
         // A window `zoom` times as large lays out the same layout points.
-        let size = REFERENCE * zoom / zoom;
-        let zoomed: Vec<Row> = mixer_rows(size)
+        let zoomed: Vec<Row> = mixer_rows(REFERENCE)
             .into_iter()
             .map(|r| r.scale(zoom))
             .collect();
-        assert_eq!(zoomed.len(), at_100.len());
         for (a, b) in at_100.iter().zip(&zoomed) {
             let scaled = a.scale(zoom).rect;
             assert!(
@@ -984,7 +1176,7 @@ fn mixer_rows_keep_their_places_at_every_zoom() {
         let top = TITLE_BAR / zoom;
         let expected = ShellLayout::compute(REFERENCE, true).main_view;
         assert!(
-            (drawn.top() - (472.0 - TITLE_BAR + top)).abs() < 0.1,
+            (drawn.top() - (expected.bottom() - 300.5 + top)).abs() < 0.1,
             "{percent}%: {drawn:?}"
         );
         assert!((drawn.left() - expected.left()).abs() < 0.1, "{percent}%");
@@ -993,15 +1185,14 @@ fn mixer_rows_keep_their_places_at_every_zoom() {
             "{percent}%"
         );
     }
-    // Nothing in the mixers overlaps what it doesn't at 100%: the sections
-    // stack, the columns sit side by side.
-    let session_mixer: Vec<&Row> = at_100
+    // In the mixers, the sections stack without overlapping.
+    let sections: Vec<&Row> = at_100
         .iter()
         .filter(|r| r.id.starts_with("L-MIX"))
         .collect();
-    for pair in session_mixer.windows(2) {
+    for pair in sections.windows(2) {
         let (a, b) = (pair[0].rect, pair[1].rect);
-        if a.top() < 700.0 && b.top() < 700.0 {
+        if a.left() == b.left() && (a.top() - b.top()).abs() < 400.0 {
             assert!(a.bottom() <= b.top() + 1e-3 || b.bottom() <= a.top() + 1e-3);
         }
     }
@@ -1014,13 +1205,7 @@ fn every_cited_row_exists() {
         return;
     };
     let mut cited: Vec<&str> = mixer_rows(REFERENCE).iter().map(|r| r.id).collect();
-    cited.extend([
-        "L-STAT-008",
-        "L-ARR-006",
-        "L-ARR-009",
-        "L-MIX-004",
-        "L-MIX-009",
-    ]);
+    cited.extend(["L-STAT-008", "L-ARR-006", "L-ARR-009", "L-MIX-004"]);
     for row in cited {
         assert!(
             text.contains(&format!("| {row} |")),
@@ -1029,24 +1214,20 @@ fn every_cited_row_exists() {
     }
 }
 
-/// The scripted drag the golden render plays (R18): the first track's
-/// fader in the Session mixer, pressed on its handle, pulled down quickly,
-/// then up slowly past where it began, then down a little, at 60 frames a
-/// second, with the volume the set holds after every frame.
+/// The scripted drag the golden render plays (R18): the first audio
+/// track's fader in the Session mixer, pressed, pulled down, then up past
+/// where it began, then down a little, at 60 frames a second, with the
+/// volume the set holds after every frame.
 fn fader_gesture() -> Vec<f64> {
     let mut h = session();
     let t = tracks(&h.shell);
-    let fader = control(&mut h, "1 MIDI", "Track Volume Fader");
-    let handle = pos2(
-        fader.center().x,
-        fader.bottom() - fader.height() * controls::fader_position(1.0) as f32,
-    );
-    let mut steps = vec![vec2(0.0, 3.0); 12];
-    steps.extend(vec![vec2(0.0, -1.5); 30]);
+    let fader = control(&mut h, "3 Audio", "Track Volume");
+    let mut steps = vec![vec2(0.0, 1.5); 12];
+    steps.extend(vec![vec2(0.0, -0.75); 30]);
     steps.extend(vec![vec2(0.0, 0.0); 6]);
-    steps.extend(vec![vec2(0.0, 2.0); 8]);
-    let volumes = drag(&mut h, handle, &steps, Modifiers::NONE, |h| {
-        mixer(&h.shell, t[0]).volume
+    steps.extend(vec![vec2(0.0, 1.0); 8]);
+    let volumes = drag(&mut h, fader.center(), &steps, Modifiers::NONE, |h| {
+        mixer(&h.shell, t[2]).volume
     });
     assert_eq!(h.shell.editor().undo_history().len(), 1, "one undo step");
     volumes
@@ -1064,15 +1245,13 @@ fn gesture_file() -> PathBuf {
 #[test]
 fn a_fader_drag_runs_the_recorded_gesture() {
     let volumes = fader_gesture();
-    // It moves: down, then up past 0 dB, and every frame's volume is a
-    // fader setting.
     let lowest = volumes.iter().copied().fold(f64::INFINITY, f64::min);
     let highest = volumes.iter().copied().fold(0.0, f64::max);
     assert!(controls::gain_db(lowest) < -3.0 && controls::gain_db(highest) > 0.5);
     let recorded = json!({
-        "about": "The first track's volume after each 60 Hz frame of a fader drag in the Session \
-                  mixer, made by crates/ui/tests/mixer.rs (fader_gesture); the fader-gesture \
-                  golden fixture plays it.",
+        "about": "The first audio track's volume after each 60 Hz frame of a fader drag in the \
+                  Session mixer, made by crates/ui/tests/mixer.rs (fader_gesture); the \
+                  fader-gesture golden fixture plays it.",
         "frame_rate": 60,
         "volumes": volumes,
     });

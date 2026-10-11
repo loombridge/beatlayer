@@ -1,16 +1,15 @@
 //! The layout layer's mixer (WP-1.9): the Session View's columns and its
 //! mixer, the Arrangement's mixer, and the controls inside a strip, from
 //! layout.md's L-SES, L-MIX, and L-ARR-018 rows measured in Live 12.4.3 at
-//! 1600 × 1000 points (the mixer view spec, R1 to R3, R5).
+//! 1600 × 1000 points, and the strip's insides observed in Live 12.4.6 on
+//! 11 October 2026 (the mixer view spec, R1 to R5).
 //!
-//! What layout.md measured is placed exactly: the columns' widths and
-//! where they start, the returns and Main at the right, the title bars,
-//! the status row, the sections' heights and order, and the Arrangement's
-//! split. Inside a strip, layout.md gives only the order (the volume field
-//! and pan at the top left, the fader with its meter at the right, then the
-//! activator, Solo, and Arm), so the sizes there are Beatlayer's until Live
-//! is observed: every such value is in [`unmeasured`], and the mixer view
-//! spec lists them under "To observe in Live", item 5.
+//! The columns' widths and where they start, the returns and Main at the
+//! right, the title bars, the status row, the sections' heights and order,
+//! the colour strip, the Arrangement's mixer, and every control inside a
+//! strip are placed where Live has them. Only the In/Out rows' and the send
+//! knobs' sizes, which no observation has measured yet, are Beatlayer's
+//! ([`unmeasured`]).
 
 use egui::{Rect, pos2};
 
@@ -37,42 +36,24 @@ pub const STRIP_HEIGHT: f32 = 123.0;
 /// The Main track's column width (L-SES-006: 1487 to 1591).
 pub const MAIN_COLUMN: f32 = 104.0;
 
-/// The Arrangement's split at 1600 × 1000 (L-ARR-018): the part above the
-/// bottom strip runs from 61 to 729 (668 points), the lanes keep 61 to 397
-/// (336) and the mixer takes 407 to 729 (322).
-const SPLIT_SPAN: f32 = 668.0;
-const SPLIT_LANES: f32 = 336.0;
-const SPLIT_MIXER: f32 = 322.0;
+/// The track colour strip along each column's bottom, under the strip
+/// section (L-MIX-009; observed: about 6.5 points).
+pub const COLOUR_STRIP: f32 = 6.5;
 
-/// The Arrangement's bottom strip under the lanes or the mixer (the grid
-/// indicator's row, the time ruler, the waveform and Optimize buttons):
-/// from 729 to the main view's bottom, 766 (L-ARR-015 to 017, L-ARR-018).
-pub const ARRANGEMENT_BOTTOM_STRIP: f32 = 37.0;
+/// The row of track title bars along the top of the Arrangement's mixer
+/// (observed: each track's colour and name, about 17 points).
+pub const ARRANGEMENT_TITLE_ROW: f32 = 17.0;
 
-/// Sizes inside a strip and its sections that layout.md doesn't give:
-/// Beatlayer's until they're observed in Live (the mixer view spec, "To
-/// observe in Live", item 5). The meter's width is the Arrangement header's
-/// meter column's, which was measured (L-ARR-006: 1580 to 1591).
+/// Sizes no observation has measured yet: Beatlayer's until one does (the
+/// mixer view spec, "To observe in Live").
 pub mod unmeasured {
-    /// The margin inside a column.
+    /// The margin inside a column for the In/Out rows and the send knobs.
     pub const PAD: f32 = 4.0;
-    /// The width of the strip's left part, holding the volume field and pan.
-    pub const LEFT_PART: f32 = 40.0;
-    /// The volume field's height.
-    pub const FIELD: f32 = 14.0;
-    /// The pan reset triangle's height, above the knob.
-    pub const PAN_TRIANGLE: f32 = 6.0;
-    /// The pan knob's height.
-    pub const PAN_KNOB: f32 = 24.0;
-    /// The row of the activator, Solo, and Arm.
-    pub const BUTTONS: f32 = 16.0;
-    /// The gap between the fader and the meter.
-    pub const FADER_GAP: f32 = 3.0;
     /// An In/Out row's pitch: seven rows over the section.
     pub const IN_OUT_ROW: f32 = 16.0;
 }
 
-/// The meter's width (L-ARR-006's meter column, 11 points).
+/// The meter's width (observed: 11 points, as L-ARR-006's meter column).
 pub const METER_WIDTH: f32 = 11.0;
 
 /// Which sections show (View ▸ Mixer Controls).
@@ -97,10 +78,11 @@ impl Sections {
         returns: true,
     };
 
-    /// The height of the sections that show, stacked.
+    /// The height of the sections that show, stacked, with the colour strip
+    /// under them.
     #[must_use]
     pub fn height(self) -> f32 {
-        let mut height = 0.0;
+        let mut height = COLOUR_STRIP;
         if self.in_out {
             height += IN_OUT_HEIGHT;
         }
@@ -162,6 +144,8 @@ pub struct MixerLayout {
     pub sends: Option<(f32, f32)>,
     /// The strip's, if it shows.
     pub strip: Option<(f32, f32)>,
+    /// The colour strip's, at the bottom (L-MIX-009).
+    pub colour: (f32, f32),
     /// How far the track columns are scrolled, within what the set allows.
     pub scroll: f32,
 }
@@ -169,8 +153,9 @@ pub struct MixerLayout {
 impl MixerLayout {
     /// Lays out a mixer in `area` with `tracks` track columns and `returns`
     /// return columns, scrolled `scroll` points (kept within the tracks).
-    /// The sections stack from the area's bottom in the order In/Out,
-    /// Sends, the strip; any that don't fit are cut at the area's top.
+    /// The sections stack up from the area's bottom: the colour strip, then
+    /// the strip, Sends, and In/Out above it; any that don't fit are cut at
+    /// the area's top.
     #[must_use]
     pub fn compute(
         area: Rect,
@@ -223,7 +208,8 @@ impl MixerLayout {
             )
         });
 
-        let mut bottom = area.bottom();
+        let colour = (area.bottom() - COLOUR_STRIP, area.bottom());
+        let mut bottom = colour.0;
         let mut stack = |shown: bool, height: f32| {
             shown.then(|| {
                 let span = (bottom - height, bottom);
@@ -248,6 +234,7 @@ impl MixerLayout {
             in_out,
             sends,
             strip,
+            colour,
             scroll,
         }
     }
@@ -296,6 +283,11 @@ impl MixerLayout {
         if let Some(span) = self.strip {
             rows.push(super::row("L-MIX-003", "Mixer Strip", across(span)));
         }
+        rows.push(super::row(
+            "L-MIX-009",
+            "Track Colour Strips",
+            across(self.colour),
+        ));
         rows
     }
 }
@@ -358,84 +350,101 @@ impl SessionLayout {
     }
 }
 
-/// The Arrangement's split while its mixer shows (L-ARR-018): the bottom
-/// of the part the lanes keep, and the mixer's rectangle, for a main view
-/// `view`. The part above the bottom strip splits in Live's shares.
+/// The Arrangement's mixer while it shows (L-ARR-018; observed in 12.4.6):
+/// the Session mixer's columns and sections under the lanes, starting at
+/// the height the Session mixer's do, with a row of track title bars on
+/// top. Returns the mixer's rectangle, title row included, for a main view
+/// `view` and the sections that show; the lanes, the pinned returns and
+/// Main, and the time ruler take the rest above it.
 #[must_use]
-pub fn arrangement_split(view: Rect) -> (f32, Rect) {
-    let span_bottom = view.bottom() - ARRANGEMENT_BOTTOM_STRIP;
-    let span = (span_bottom - view.top()).max(0.0);
-    let lanes_bottom = view.top() + span * SPLIT_LANES / SPLIT_SPAN;
-    let mixer_top = span_bottom - span * SPLIT_MIXER / SPLIT_SPAN;
-    (
-        lanes_bottom,
-        Rect::from_min_max(
-            pos2(view.left(), mixer_top),
-            pos2(view.right(), span_bottom),
-        ),
+pub fn arrangement_mixer(view: Rect, sections: Sections) -> Rect {
+    let top = (view.bottom() - sections.height() - ARRANGEMENT_TITLE_ROW).max(view.top());
+    Rect::from_min_max(pos2(view.left(), top), view.max)
+}
+
+/// A strip control's rectangle from Live's position relative to the strip
+/// section's top-left corner.
+fn at(column: Rect, top: f32, x0: f32, y0: f32, x1: f32, y1: f32) -> Rect {
+    Rect::from_min_max(
+        pos2(column.left() + x0, top + y0),
+        pos2(column.left() + x1, top + y1),
     )
 }
 
-/// The controls inside one column's strip and sections. Their order is
-/// layout.md's (L-MIX-003); their sizes are [`unmeasured`].
+/// The meter scale's labels (dB below 0) and their heights in the strip
+/// section (observed).
+pub const SCALE_LABELS: [(&str, f32); 6] = [
+    ("0", 23.5),
+    ("12", 44.5),
+    ("24", 64.5),
+    ("36", 84.5),
+    ("48", 99.0),
+    ("60", 111.0),
+];
+
+/// The controls inside one column's strip section, where Live 12.4.6 has
+/// them (observed on an audio track at the default mixer height, ±1
+/// point): the peak level readout at the top left, the pan knob with its
+/// reset triangle under it, the activator, Solo, and Arm in a column at the
+/// left, the fader's handle left of the meter, and the meter's scale.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct StripLayout {
-    /// The volume field, top left.
-    pub volume_field: Rect,
-    /// The small triangle above the pan knob that resets it.
+    /// The peak level readout (x 8 to 42, y 13 to 24).
+    pub peak_field: Rect,
+    /// The small triangle above the pan knob that resets it (y about 30).
     pub pan_triangle: Rect,
-    /// The pan knob, under the volume field.
+    /// The pan knob, about 25 points across, centred at (25, 46).
     pub pan: Rect,
-    /// The fader, at the right.
+    /// The activator (x 15 to 36, y 64 to 85).
+    pub activator: Rect,
+    /// Solo (y 91 to 102.5).
+    pub solo: Rect,
+    /// Arm (y 106 to 119).
+    pub arm: Rect,
+    /// The fader: its handle's column (x 46 to 59) over its travel (the
+    /// meter's scale, +6 dB to −∞).
     pub fader: Rect,
-    /// The meter beside it, at the column's right edge.
+    /// The meter (x 60 to 71, y 11 to 119).
     pub meter: Rect,
-    /// The row under them: the activator, Solo, Arm (or, on Main, the cue
-    /// volume and the Solo/Cue button in the first two).
-    pub buttons: [Rect; 3],
+    /// The scale's labels' column (x 74 to 86).
+    pub labels: (f32, f32),
+    /// The strip section's top, which [`SCALE_LABELS`] count from.
+    pub top: f32,
 }
 
 impl StripLayout {
-    /// The strip's controls in `column` across the strip's span.
+    /// The strip's controls in `column` across the strip section's span.
     #[must_use]
     pub fn compute(column: Rect, span: (f32, f32)) -> Self {
-        use unmeasured::{BUTTONS, FADER_GAP, FIELD, LEFT_PART, PAD, PAN_KNOB, PAN_TRIANGLE};
-        let (top, bottom) = (span.0 + PAD, span.1 - PAD);
-        let left = column.left() + PAD;
-        let right = column.right() - PAD;
-        let buttons_top = bottom - BUTTONS;
-        let volume_field = Rect::from_min_max(pos2(left, top), pos2(left + LEFT_PART, top + FIELD));
-        let pan_triangle = Rect::from_min_max(
-            pos2(left, volume_field.bottom() + PAD),
-            pos2(left + LEFT_PART, volume_field.bottom() + PAD + PAN_TRIANGLE),
-        );
-        let pan = Rect::from_min_max(
-            pos2(left, pan_triangle.bottom()),
-            pos2(left + LEFT_PART, pan_triangle.bottom() + PAN_KNOB),
-        );
-        let meter = Rect::from_min_max(
-            pos2(right - METER_WIDTH, top),
-            pos2(right, buttons_top - PAD),
-        );
-        let fader = Rect::from_min_max(
-            pos2(left + LEFT_PART + PAD, top),
-            pos2(meter.left() - FADER_GAP, buttons_top - PAD),
-        );
-        let third = (right - left) / 3.0;
-        let button = |i: f32| {
-            Rect::from_min_max(
-                pos2(left + third * i + 1.0, buttons_top),
-                pos2(left + third * (i + 1.0) - 1.0, bottom),
-            )
-        };
+        let top = span.0;
+        let (travel_top, travel_bottom) = bl_shell::mixer_controls::FADER_TRAVEL;
         Self {
-            volume_field,
-            pan_triangle,
-            pan,
-            fader,
-            meter,
-            buttons: [button(0.0), button(1.0), button(2.0)],
+            peak_field: at(column, top, 8.0, 13.0, 42.0, 24.0),
+            pan_triangle: at(column, top, 22.0, 27.5, 28.0, 32.5),
+            pan: at(column, top, 12.5, 33.5, 37.5, 58.5),
+            activator: at(column, top, 15.0, 64.0, 36.0, 85.0),
+            solo: at(column, top, 15.0, 91.0, 36.0, 102.5),
+            arm: at(column, top, 15.0, 106.0, 36.0, 119.0),
+            fader: at(column, top, 46.0, travel_top, 59.0, travel_bottom),
+            meter: at(column, top, 60.0, 11.0, 71.0, 119.0),
+            labels: (column.left() + 74.0, column.left() + 86.0),
+            top,
         }
+    }
+
+    /// Every control, for checks.
+    #[must_use]
+    pub fn parts(&self) -> [Rect; 8] {
+        [
+            self.peak_field,
+            self.pan_triangle,
+            self.pan,
+            self.activator,
+            self.solo,
+            self.arm,
+            self.fader,
+            self.meter,
+        ]
     }
 }
 
@@ -530,13 +539,14 @@ mod tests {
             (61.0, 78.0)
         );
         let mixer = session.mixer.unwrap();
-        assert_eq!((mixer.top(), mixer.bottom()), (472.0, 766.0));
-        assert_eq!(session.status_row.bottom(), 472.0);
+        assert_eq!((mixer.top(), mixer.bottom()), (465.5, 766.0));
+        assert_eq!(session.status_row.bottom(), 465.5);
         assert_eq!(session.status_row.height(), 17.0);
         let layout = MixerLayout::compute(mixer, 4, 2, Sections::DEFAULT, 0.0);
-        assert_eq!(layout.in_out, Some((472.0, 587.0)));
-        assert_eq!(layout.sends, Some((587.0, 643.0)));
-        assert_eq!(layout.strip, Some((643.0, 766.0)));
+        assert_eq!(layout.in_out, Some((465.5, 580.5)));
+        assert_eq!(layout.sends, Some((580.5, 636.5)));
+        assert_eq!(layout.strip, Some((636.5, 759.5)));
+        assert_eq!(layout.colour, (759.5, 766.0));
         let hidden = SessionLayout::compute(view, None);
         assert_eq!(hidden.mixer, None);
         assert_eq!(hidden.status_row.bottom(), 766.0);
@@ -544,56 +554,64 @@ mod tests {
 
     // Spec: mixer-view R2.
     #[test]
-    fn the_arrangement_split_keeps_its_shares_at_every_height() {
-        let (lanes_bottom, mixer) = arrangement_split(main_view());
-        assert_eq!(lanes_bottom, 397.0);
-        assert_eq!((mixer.top(), mixer.bottom()), (407.0, 729.0));
-        for extra in [-200.0, 0.0, 300.0] {
-            let view = main_view().with_max_y(main_view().bottom() + extra);
-            let (lanes_bottom, mixer) = arrangement_split(view);
-            assert!(lanes_bottom < mixer.top());
-            assert_eq!(mixer.bottom(), view.bottom() - ARRANGEMENT_BOTTOM_STRIP);
-            let span = mixer.bottom() - view.top();
-            assert!(((lanes_bottom - view.top()) / span - 336.0 / 668.0).abs() < 1e-4);
-        }
+    fn the_arrangement_mixer_is_the_session_s_under_a_title_row() {
+        let view = main_view();
+        let session = SessionLayout::compute(view, Some(Sections::DEFAULT))
+            .mixer
+            .unwrap();
+        let mixer = arrangement_mixer(view, Sections::DEFAULT);
+        // Its sections start where the Session mixer's do, under a 17-point
+        // row of title bars.
+        assert_eq!(mixer.top(), session.top() - ARRANGEMENT_TITLE_ROW);
+        assert_eq!(mixer.bottom(), view.bottom());
+        let fewer = Sections {
+            in_out: false,
+            ..Sections::DEFAULT
+        };
+        assert_eq!(
+            arrangement_mixer(view, fewer).top(),
+            mixer.top() + IN_OUT_HEIGHT
+        );
     }
 
-    // Spec: mixer-view R3, R5.
+    // Spec: mixer-view R3.
     #[test]
-    fn a_strip_holds_its_controls_inside_its_column() {
-        let column = Rect::from_min_max(pos2(320.0, 472.0), pos2(414.0, 766.0));
-        let strip = StripLayout::compute(column, (643.0, 766.0));
-        let parts = [
-            strip.volume_field,
-            strip.pan_triangle,
-            strip.pan,
-            strip.fader,
-            strip.meter,
-            strip.buttons[0],
-            strip.buttons[1],
-            strip.buttons[2],
-        ];
-        for part in parts {
+    fn a_strip_holds_its_controls_where_live_has_them() {
+        let column = Rect::from_min_max(pos2(320.0, 465.5), pos2(414.0, 766.0));
+        let strip = StripLayout::compute(column, (636.5, 759.5));
+        for part in strip.parts() {
             assert!(column.contains_rect(part), "{part:?}");
-            assert!(part.top() >= 643.0 && part.bottom() <= 766.0, "{part:?}");
-            assert!(part.width() > 0.0 && part.height() > 0.0, "{part:?}");
+            assert!(part.top() >= 636.5 && part.bottom() <= 759.5, "{part:?}");
         }
-        // The volume field and pan at the top left, pan under the field; the
-        // fader at the right with the meter at the column's right edge; the
-        // buttons in a row under everything, left to right.
-        assert!(strip.pan.top() >= strip.volume_field.bottom());
-        assert!(strip.fader.left() >= strip.volume_field.right());
-        assert!(strip.meter.left() >= strip.fader.right());
-        assert_eq!(strip.meter.width(), 11.0);
-        assert!(strip.buttons[0].top() >= strip.fader.bottom());
-        assert!(strip.buttons[0].right() <= strip.buttons[1].left());
-        assert!(strip.buttons[1].right() <= strip.buttons[2].left());
+        // Relative to the strip section's corner, as observed.
+        let rel = |r: Rect| {
+            (
+                r.left() - 320.0,
+                r.top() - 636.5,
+                r.right() - 320.0,
+                r.bottom() - 636.5,
+            )
+        };
+        assert_eq!(rel(strip.peak_field), (8.0, 13.0, 42.0, 24.0));
+        assert_eq!(rel(strip.activator), (15.0, 64.0, 36.0, 85.0));
+        assert_eq!(rel(strip.solo), (15.0, 91.0, 36.0, 102.5));
+        assert_eq!(rel(strip.arm), (15.0, 106.0, 36.0, 119.0));
+        assert_eq!(rel(strip.meter), (60.0, 11.0, 71.0, 119.0));
+        assert_eq!(
+            (strip.fader.left() - 320.0, strip.fader.right() - 320.0),
+            (46.0, 59.0)
+        );
+        assert_eq!(strip.pan.center() - pos2(320.0, 636.5), vec2(25.0, 46.0));
+        // A column of switches, each under the last.
+        assert!(
+            strip.activator.bottom() <= strip.solo.top() && strip.solo.bottom() <= strip.arm.top()
+        );
         for i in 0..7 {
-            let row = in_out_row(column, (472.0, 587.0), i);
-            assert!(row.bottom() <= 587.0 && column.contains_rect(row));
+            let row = in_out_row(column, (465.5, 580.5), i);
+            assert!(row.bottom() <= 580.5 && column.contains_rect(row));
         }
-        let a = send_knob(column, (587.0, 643.0), 0, 2);
-        let b = send_knob(column, (587.0, 643.0), 1, 2);
+        let a = send_knob(column, (580.5, 636.5), 0, 2);
+        let b = send_knob(column, (580.5, 636.5), 1, 2);
         assert!(a.right() <= b.left() && a.bottom() <= b.top());
     }
 }

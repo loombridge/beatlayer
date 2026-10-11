@@ -69,7 +69,7 @@ pub fn item_state(
             inert(shortcut.and_then(|s| keymap.chord_for_shortcut(s, platform)))
         }
         Action::Submenu => ItemState {
-            enabled: true,
+            enabled: shell.can_open_submenu(item.row),
             ..inert(None)
         },
         Action::System(_) | Action::Omitted(_) | Action::Separator => inert(None),
@@ -109,8 +109,10 @@ fn items(
             continue;
         }
         if item.action == Action::Submenu {
-            ui.menu_button(item.label, |ui| {
-                items(ui, &item.items, shell, keymap, platform, events);
+            ui.add_enabled_ui(shell.can_open_submenu(item.row), |ui| {
+                ui.menu_button(item.label, |ui| {
+                    items(ui, &item.items, shell, keymap, platform, events);
+                });
             });
             continue;
         }

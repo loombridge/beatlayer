@@ -31,7 +31,7 @@
       "channels": 2,
       "frames": 96000,
       "bits": 24,
-      "render_hash": "fnv1a64:53839d9d7ddf61e9"
+      "render_hash": "fnv1a64:3c0075e142e604e9"
     },
     "fader-move": {
       "made_on": "macos-aarch64",

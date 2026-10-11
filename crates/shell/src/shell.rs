@@ -1129,6 +1129,14 @@ impl Shell {
         }
     }
 
+    /// Whether a submenu opens now: Arrangement Track Controls is disabled
+    /// while the Session View is in front (observed in Live 12.4.6; the
+    /// mixer view spec, R12).
+    #[must_use]
+    pub fn can_open_submenu(&self, row: &str) -> bool {
+        !(row == "M-VIEW-033" && self.main_view == MainView::Session)
+    }
+
     /// The label a menu shows for a command now: Undo and Redo name the step
     /// they act on, or say there's nothing (M-EDIT-001, M-EDIT-002).
     #[must_use]

@@ -165,7 +165,7 @@ fn specs() -> Vec<CommandSpec> {
              the Session View under the clip slots, in the Arrangement View under the track \
              lanes, which it splits. Acts on the view in front unless `view` names one; switches \
              unless `shown` says which. Each view keeps its own: a new set shows the Session's \
-             and hides the Arrangement's. Changes only the view.",
+             and hides the Arrangement's. Changes only the view, and isn't saved with the set.",
         )
         .context(Global)
         .binding("S-VIEW-014")
@@ -193,8 +193,8 @@ fn specs() -> Vec<CommandSpec> {
         view(
             VOLUME,
             "Mixer Volume",
-            "Shows or hides the mixers' strips (the meter, the volume fader and field, pan, the \
-             activator, Solo, and Arm), as View > Mixer Controls > Volume does. Switches unless \
+            "Shows or hides the mixers' strips (the peak level, pan, the activator, Solo, Arm, \
+             the volume fader, and the meter), as View > Mixer Controls > Volume does. Switches unless \
              `shown` says which. Changes only the view; the Arrangement's track headers keep \
              their controls.",
         )
@@ -224,9 +224,9 @@ fn specs() -> Vec<CommandSpec> {
             FOCUS,
             "Move Focus to Mixer",
             "Moves the keyboard focus to the Arrangement View's mixer, as Navigate > Mixer \
-             (Option-Shift-M) does, showing it if it's hidden: to the volume of the first \
-             selected track, or of the first track. Up and Down then change the volume. Changes \
-             only the view.",
+             (Option-Shift-M) does, showing it if it's hidden: to the selected track's column, \
+             or the first track's. Left and Right then move the track selection. Changes only \
+             the view.",
         )
         .context(Arrangement)
         .binding("S-ARR-035")

@@ -253,22 +253,24 @@ fn a_change_on_a_selected_track_changes_every_selected_track() {
     let doc = shell.editor().document().clone();
     let starts: Vec<(TrackId, f64)> = controls::targets(t[1], &selected, |_| true)
         .into_iter()
-        .map(|track| (track, Control::Volume.position(&doc, track).unwrap()))
+        .map(|track| (track, Control::Volume.value(&doc, track).unwrap()))
         .collect();
     assert_eq!(starts[0].0, t[1], "the clicked track first");
     let before = undo_steps(&shell);
+    // Nine points of drag down from 0 dB.
     apply(
         &mut shell,
         Control::Volume.gesture(),
-        controls::moved(Control::Volume, &starts, -0.1),
+        controls::moved(Control::Volume, &starts, -9.0),
     );
     assert_eq!(undo_steps(&shell), before + 1, "one step");
-    let doc = shell.editor().document();
-    let position = |track| Control::Volume.position(doc, track).unwrap();
-    // The difference between them stays; the unselected track doesn't move.
-    let gap_before = starts[0].1 - starts[1].1;
-    assert!((position(t[1]) - position(t[0]) - gap_before).abs() < 1e-9);
-    assert!((position(t[1]) - (starts[0].1 - 0.1)).abs() < 1e-9);
+    // The dragged track moves along the drag's scale, the other selected
+    // track by the same dB (observed), the unselected track not at all.
+    let db = |track| controls::gain_db(mixer(&shell, track).volume);
+    let moved_db = db(t[1]);
+    let expected = controls::gain_db(controls::drag_gain(controls::drag_points(1.0) + 9.0));
+    assert!((moved_db - expected).abs() < 1e-9);
+    assert!((db(t[0]) - (controls::gain_db(0.5) + moved_db)).abs() < 1e-9);
     assert_eq!(mixer(&shell, t[2]).volume, 1.0);
     assert_eq!(
         shell.editor().undo_history().next().unwrap(),
@@ -278,7 +280,7 @@ fn a_change_on_a_selected_track_changes_every_selected_track() {
     let doc = shell.editor().document().clone();
     let starts: Vec<(TrackId, f64)> = [t[0], t[1]]
         .iter()
-        .map(|track| (*track, Control::Pan.position(&doc, *track).unwrap()))
+        .map(|track| (*track, Control::Pan.value(&doc, *track).unwrap()))
         .collect();
     apply(
         &mut shell,

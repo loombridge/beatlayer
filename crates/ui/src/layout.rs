@@ -850,22 +850,21 @@ impl ArrangementLayout {
     }
 
     /// The same view with its mixer showing (L-ARR-018; the mixer view
-    /// spec, R2): the lanes, the header column, and the pinned returns and
-    /// Main move up into the top part of the split, the grid indicator with
-    /// them into the lanes' new lower right corner, and the mixer takes the
-    /// bottom part; the time ruler and the buttons under the header column
-    /// stay at the bottom.
+    /// spec, R2): the mixer, as tall as its title row and the `sections`
+    /// that show, takes the main view's bottom, and the rest of the view
+    /// (the rulers, the lanes, the pinned returns and Main, the grid
+    /// indicator, the time ruler, and the buttons under the header column)
+    /// is laid out above it as without one.
     #[must_use]
-    pub fn compute_with_mixer(view: Rect, overview: bool, pinned_rows: usize) -> Self {
-        let mut layout = Self::compute(view, overview, pinned_rows);
-        let (lanes_bottom, mixer) = mixer::arrangement_split(view);
-        let lift = layout.pinned_lanes.bottom() - lanes_bottom;
-        layout.pinned_lanes = layout.pinned_lanes.translate(vec2(0.0, -lift));
-        layout.pinned_headers = layout.pinned_headers.translate(vec2(0.0, -lift));
-        let lanes_bottom = layout.pinned_lanes.top().max(layout.lanes.top());
-        layout.lanes.max.y = lanes_bottom;
-        layout.headers.max.y = lanes_bottom;
-        layout.grid_indicator = layout.grid_indicator.translate(vec2(0.0, -lift));
+    pub fn compute_with_mixer(
+        view: Rect,
+        overview: bool,
+        pinned_rows: usize,
+        sections: mixer::Sections,
+    ) -> Self {
+        let mixer = mixer::arrangement_mixer(view, sections);
+        let mut layout = Self::compute(view.with_max_y(mixer.top()), overview, pinned_rows);
+        layout.view = view;
         layout.mixer = Some(mixer);
         layout
     }

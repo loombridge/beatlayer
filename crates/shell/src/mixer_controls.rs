@@ -4,36 +4,75 @@
 //! selection so the window and its tests share them. The rules are in the
 //! mixer view spec (R6 to R10).
 //!
-//! The fader's law and range, and the steps of drags and keys, are
-//! Beatlayer's until Live is observed (the mixer view spec, "To observe in
-//! Live", items 1 and 2).
+//! The fader's range, its scale, how far a drag moves it, and its key steps
+//! were observed in Live 12.4.6 on macOS on 11 October 2026 (the mixer view
+//! spec, sources). Pan's drag distance and how much finer Shift makes a drag
+//! weren't, and are listed there to observe.
 
 use bl_model::{Document, TrackId};
 use serde_json::json;
 
 use crate::Invocation;
 
-/// The fader's top, in dB: Beatlayer's until Live's is observed (the mixer
-/// spec's item 1).
+/// The fader's top, in dB (observed: +6.0 dB).
 pub const TOP_DB: f64 = 6.0;
 
-/// The fader's bottom step above silence, in dB: Down from here, or a
-/// fader dragged lower, reaches −∞ dB.
-pub const BOTTOM_DB: f64 = -70.0;
+/// The lowest finite volume, in dB (observed: −69.6 dB stays; −69.7 or
+/// lower is −∞).
+pub const LOWEST_DB: f64 = -69.6;
 
-/// The fader law's exponent: the gain is the top's gain times the fader's
-/// position to this power.
-const LAW: f64 = 4.0;
+/// Below this a volume is −∞ dB: between the lowest finite step and the
+/// next tenth down.
+const SILENCE_BELOW_DB: f64 = -69.65;
+
+/// The fader's and the meter's shared scale, as dB and the height in a
+/// strip, in points from the strip section's top, where the handle sits
+/// (observed: the handle sits on the meter's 0, 12, 24, 36, 48, and 60
+/// labels at those values, +6 dB 10.5 points above 0, and −∞ about 7.5
+/// points below −60). From −60 dB the scale runs straight to the bottom,
+/// reached at −70 dB.
+pub const FADER_SCALE: [(f64, f32); 8] = [
+    (6.0, 13.0),
+    (0.0, 23.5),
+    (-12.0, 44.5),
+    (-24.0, 64.5),
+    (-36.0, 84.5),
+    (-48.0, 99.0),
+    (-60.0, 111.0),
+    (-70.0, 118.5),
+];
+
+/// The fader's travel in a strip, top and bottom, in points from the strip
+/// section's top: from +6 dB to −∞.
+pub const FADER_TRAVEL: (f32, f32) = (13.0, 118.5);
+
+/// How far a drag moves the volume, as points of drag down from the top
+/// and the dB there (observed, sampling a drag from +6 dB every 9 points,
+/// then every 4.5). A drag is relative: it moves the value by the pointer's
+/// movement, not to the pointer.
+pub const DRAG_SCALE: [(f64, f64); 7] = [
+    (0.0, 6.0),
+    (9.0, 4.3),
+    (18.0, -2.6),
+    (27.0, -14.6),
+    (31.5, -29.4),
+    (36.0, -52.5),
+    (40.0, LOWEST_DB),
+];
+
+/// Points of drag from the top at which the volume is −∞ (observed: about
+/// 40 points for the whole range; −∞ at 40.5).
+pub const DRAG_RANGE: f64 = 40.5;
 
 /// How many pan steps there are to each side: pan reads 1L to 50L and 1R to
 /// 50R.
 pub const PAN_STEPS: f64 = 50.0;
 
-/// Points of vertical drag that move a volume field over the fader's whole
-/// travel, or a pan control over half its range.
-pub const DRAG_TRAVEL: f32 = 100.0;
+/// Points of vertical drag that move pan over half its range. Not observed
+/// (the mixer view spec, "To observe in Live").
+pub const PAN_DRAG_TRAVEL: f32 = 100.0;
 
-/// How much finer a drag is with Shift held.
+/// How much finer a drag is with Shift held. Not observed.
 pub const FINE: f32 = 10.0;
 
 /// The undo step a volume drag makes, named as Live names it (tracks and
@@ -63,22 +102,80 @@ pub fn db_gain(db: f64) -> f64 {
     }
 }
 
-/// Where a gain sits on the fader, from 0 (−∞ dB) to 1 (the top). Gains
-/// above the top sit at the top.
+/// The gain of a volume of `db`, kept within the fader's range: no higher
+/// than its top, and −∞ below its lowest finite step.
 #[must_use]
-pub fn fader_position(gain: f64) -> f64 {
-    if gain <= 0.0 || !gain.is_finite() {
-        return if gain.is_infinite() { 1.0 } else { 0.0 };
+pub fn volume_gain(db: f64) -> f64 {
+    if db.is_nan() || db < SILENCE_BELOW_DB {
+        0.0
+    } else {
+        db_gain(db.min(TOP_DB))
     }
-    (gain / db_gain(TOP_DB)).powf(1.0 / LAW).clamp(0.0, 1.0)
 }
 
-/// The gain at a place on the fader. Below the bottom step it's silence.
+/// Straight-line interpolation through `points`, sorted by their first
+/// value in either direction, clamped to the ends.
+fn through(points: &[(f64, f64)], x: f64) -> f64 {
+    let ascending = points[0].0 < points[points.len() - 1].0;
+    for pair in points.windows(2) {
+        let (a, b) = (pair[0], pair[1]);
+        let inside = if ascending {
+            x >= a.0 && x <= b.0
+        } else {
+            x <= a.0 && x >= b.0
+        };
+        if inside {
+            let t = (x - a.0) / (b.0 - a.0);
+            return a.1 + (b.1 - a.1) * t;
+        }
+    }
+    let before_first = if ascending {
+        x < points[0].0
+    } else {
+        x > points[0].0
+    };
+    if before_first {
+        points[0].1
+    } else {
+        points[points.len() - 1].1
+    }
+}
+
+/// Where a gain sits on the fader's (and the meter's) scale, from 0 (−∞ dB,
+/// the bottom) to 1 (+6 dB, the top). Gains above the top sit at the top.
 #[must_use]
-pub fn fader_gain(position: f64) -> f64 {
-    let position = position.clamp(0.0, 1.0);
-    let gain = db_gain(TOP_DB) * position.powf(LAW);
-    if gain_db(gain) < BOTTOM_DB { 0.0 } else { gain }
+pub fn fader_position(gain: f64) -> f64 {
+    let (top, bottom) = FADER_TRAVEL;
+    let y = if gain <= 0.0 || gain.is_nan() {
+        f64::from(bottom)
+    } else {
+        let scale: Vec<(f64, f64)> = FADER_SCALE
+            .iter()
+            .map(|(db, y)| (*db, f64::from(*y)))
+            .collect();
+        through(&scale, gain_db(gain))
+    };
+    ((f64::from(bottom) - y) / f64::from(bottom - top)).clamp(0.0, 1.0)
+}
+
+/// Where a gain is along a drag: points of drag down from +6 dB.
+#[must_use]
+pub fn drag_points(gain: f64) -> f64 {
+    let db = gain_db(gain);
+    if db < SILENCE_BELOW_DB {
+        return DRAG_RANGE;
+    }
+    let inverse: Vec<(f64, f64)> = DRAG_SCALE.iter().map(|(p, db)| (*db, *p)).collect();
+    through(&inverse, db.min(TOP_DB))
+}
+
+/// The gain at `points` of drag down from +6 dB: −∞ from [`DRAG_RANGE`] on.
+#[must_use]
+pub fn drag_gain(points: f64) -> f64 {
+    if points >= DRAG_RANGE {
+        return 0.0;
+    }
+    volume_gain(through(&DRAG_SCALE, points.max(0.0)))
 }
 
 /// Volume as the mixer shows it, in dB to one decimal: `0.0`, `-6.0`,
@@ -105,6 +202,13 @@ pub fn volume_spoken(gain: f64) -> String {
     }
 }
 
+/// What the Status Bar shows while a fader is dragged (observed:
+/// `Track Volume: -21.0 dB`).
+#[must_use]
+pub fn volume_readout(gain: f64) -> String {
+    format!("Track Volume: {} dB", volume_text(gain))
+}
+
 /// Pan as the mixer shows it: `C`, or a number from 1 to 50 and `L` or `R`.
 #[must_use]
 pub fn pan_text(pan: f64) -> String {
@@ -116,9 +220,9 @@ pub fn pan_text(pan: f64) -> String {
     }
 }
 
-/// A gain `steps` dB steps away (tenths of a dB with `fine`), from −∞ dB to
-/// the top: up from silence goes to the bottom step, down past it to
-/// silence (the mixer view spec, R6).
+/// A gain `steps` dB away (tenths of a dB with `fine`), as Up and Down step
+/// it (observed: from −68.5, Down gives −69.5 then −∞; from −∞, Up gives
+/// −69.0 then −68.0; from 5.5, Up gives 6.0).
 #[must_use]
 pub fn step_volume(gain: f64, steps: i32, fine: bool) -> f64 {
     if steps == 0 {
@@ -126,22 +230,26 @@ pub fn step_volume(gain: f64, steps: i32, fine: bool) -> f64 {
     }
     let step = if fine { 0.1 } else { 1.0 };
     let db = gain_db(gain);
-    let next = if db == f64::NEG_INFINITY {
-        if steps > 0 {
-            BOTTOM_DB + step * f64::from(steps - 1)
+    if db == f64::NEG_INFINITY {
+        return if steps > 0 {
+            volume_gain(-69.0 + step * f64::from(steps - 1))
         } else {
-            return 0.0;
-        }
-    } else {
-        // Round to the step first, so steps land on whole values.
-        let snapped = (db / step).round() * step;
-        snapped + step * f64::from(steps)
-    };
-    if next < BOTTOM_DB - 1e-9 {
-        0.0
-    } else {
-        db_gain(next.min(TOP_DB))
+            0.0
+        };
     }
+    // Rounded to a hundredth, so tenths stay tenths.
+    volume_gain(((db + step * f64::from(steps)) * 100.0).round() / 100.0)
+}
+
+/// A gain moved by `delta` dB, kept within the fader's range: several
+/// selected tracks move by the same dB (observed). A silent track stays
+/// silent.
+#[must_use]
+pub fn shift_volume(gain: f64, delta: f64) -> f64 {
+    if gain <= 0.0 {
+        return 0.0;
+    }
+    volume_gain(gain_db(gain) + delta)
 }
 
 /// A pan `steps` steps of 50 to a side away, within −1 to 1.
@@ -152,7 +260,7 @@ pub fn step_pan(pan: f64, steps: i32) -> f64 {
 }
 
 /// Where a meter of `amplitude` reaches, from 0 to 1, on the fader's scale,
-/// so a level and a fader setting at the same height match (R10).
+/// which the meter shares (observed).
 #[must_use]
 pub fn meter_position(amplitude: f32) -> f32 {
     fader_position(f64::from(amplitude)) as f32
@@ -168,38 +276,39 @@ pub enum Control {
 }
 
 impl Control {
-    /// The control's value on a track, in the units a drag moves: the
-    /// fader's position for volume, the pan for pan.
+    /// The control's value on a track: the volume's gain, or the pan.
     #[must_use]
-    pub fn position(self, doc: &Document, track: TrackId) -> Option<f64> {
+    pub fn value(self, doc: &Document, track: TrackId) -> Option<f64> {
         let mixer = doc.track(track)?.mixer();
         Some(match self {
-            Self::Volume => fader_position(mixer.volume),
+            Self::Volume => mixer.volume,
             Self::Pan => mixer.pan,
         })
     }
 
-    /// The command that sets it to a position.
+    /// The command that sets it to a value.
     #[must_use]
-    pub fn set(self, track: TrackId, position: f64) -> Invocation {
+    pub fn set(self, track: TrackId, value: f64) -> Invocation {
         match self {
             Self::Volume => Invocation::new(
                 "mixer.set_volume",
-                json!({ "track": track, "volume": fader_gain(position) }),
+                json!({ "track": track, "volume": value.max(0.0) }),
             ),
             Self::Pan => Invocation::new(
                 "mixer.set_pan",
-                json!({ "track": track, "pan": position.clamp(-1.0, 1.0) }),
+                json!({ "track": track, "pan": value.clamp(-1.0, 1.0) }),
             ),
         }
     }
 
-    /// The position range.
+    /// Points of vertical drag per unit a drag moves: volume moves by
+    /// points of drag along [`DRAG_SCALE`], pan by [`PAN_DRAG_TRAVEL`]
+    /// points per unit.
     #[must_use]
-    pub fn range(self) -> (f64, f64) {
+    pub fn drag_travel(self) -> f32 {
         match self {
-            Self::Volume => (0.0, 1.0),
-            Self::Pan => (-1.0, 1.0),
+            Self::Volume => 1.0,
+            Self::Pan => PAN_DRAG_TRAVEL,
         }
     }
 
@@ -212,11 +321,11 @@ impl Control {
         }
     }
 
-    /// Its default: 0 dB, or the centre.
+    /// Its default: 0 dB (a double-click's reset, observed), or the centre.
     #[must_use]
-    pub fn default_position(self) -> f64 {
+    pub fn default_value(self) -> f64 {
         match self {
-            Self::Volume => fader_position(1.0),
+            Self::Volume => 1.0,
             Self::Pan => 0.0,
         }
     }
@@ -331,16 +440,45 @@ pub fn targets(
     }
 }
 
-/// The commands that move a control on `starts` (each track with its
-/// position when the change began) by `delta`, each kept within the
-/// control's range, so the differences between them stay (R6, R8).
+/// The commands that move a control on `starts` (each track with its value
+/// when the change began, the changed track first) by `delta`, which a drag
+/// has moved since it began: for volume, points of drag up, which move the
+/// first track along [`DRAG_SCALE`] and every other by the same dB; for
+/// pan, the same amount on each (R6, R8). Every value stays within range,
+/// so a drag past an end must come back before the value moves again.
 #[must_use]
 pub fn moved(control: Control, starts: &[(TrackId, f64)], delta: f64) -> Vec<Invocation> {
-    let (low, high) = control.range();
-    starts
-        .iter()
-        .map(|(track, start)| control.set(*track, (start + delta).clamp(low, high)))
-        .collect()
+    let Some(&(_, first)) = starts.first() else {
+        return Vec::new();
+    };
+    match control {
+        Control::Volume => {
+            let now = drag_gain((drag_points(first) - delta).clamp(0.0, DRAG_RANGE));
+            let shift = if now <= 0.0 {
+                f64::NEG_INFINITY
+            } else {
+                gain_db(now) - gain_db(first).max(LOWEST_DB)
+            };
+            starts
+                .iter()
+                .enumerate()
+                .map(|(i, (track, start))| {
+                    let value = if i == 0 {
+                        now
+                    } else if shift == f64::NEG_INFINITY {
+                        0.0
+                    } else {
+                        shift_volume(*start, shift)
+                    };
+                    control.set(*track, value)
+                })
+                .collect()
+        }
+        Control::Pan => starts
+            .iter()
+            .map(|(track, start)| control.set(*track, (start + delta).clamp(-1.0, 1.0)))
+            .collect(),
+    }
 }
 
 /// The commands a click on a switch runs (R7, R8): `add` is Cmd (Ctrl)
@@ -405,6 +543,7 @@ mod tests {
         assert_eq!(volume_text(0.5), "-6.0");
         assert_eq!(volume_text(0.0), "-inf");
         assert_eq!(volume_text(0.999_99), "0.0");
+        assert_eq!(volume_readout(db_gain(-21.0)), "Track Volume: -21.0 dB");
         assert_eq!(volume_spoken(0.0), "minus infinity dB");
         assert_eq!(pan_text(0.0), "C");
         assert_eq!(pan_text(-0.5), "25L");
@@ -412,57 +551,111 @@ mod tests {
         assert_eq!(pan_text(0.004), "C");
     }
 
-    // Spec: mixer-view R6.
-    #[test]
-    fn the_fader_law_runs_from_silence_to_its_top_and_back() {
-        assert_eq!(fader_position(0.0), 0.0);
-        assert!((fader_position(db_gain(TOP_DB)) - 1.0).abs() < 1e-12);
-        assert_eq!(fader_position(100.0), 1.0);
-        assert_eq!(fader_gain(0.0), 0.0);
-        assert!((gain_db(fader_gain(1.0)) - TOP_DB).abs() < 1e-9);
-        // 0 dB at 84% of the travel, -6 dB at 71%, -20 dB at 47%.
-        assert!((fader_position(1.0) - 0.8409).abs() < 1e-3);
-        assert!((fader_position(db_gain(-6.0)) - 0.7079).abs() < 1e-3);
-        assert!((fader_position(db_gain(-20.0)) - 0.4729).abs() < 1e-3);
-        // A round trip lands where it began, and the bottom step is silence's
-        // neighbour.
-        for db in [-60.0, -30.0, -6.0, 0.0, 3.0, 6.0] {
-            let gain = db_gain(db);
-            assert!(
-                (fader_gain(fader_position(gain)) - gain).abs() < 1e-9,
-                "{db}"
-            );
-        }
-        assert_eq!(fader_gain(fader_position(db_gain(BOTTOM_DB - 1.0))), 0.0);
-        // Monotonic.
-        let mut last = -1.0;
-        for i in 0..=1000 {
-            let g = fader_gain(f64::from(i) / 1000.0);
-            assert!(g >= last);
-            last = g;
-        }
+    fn db(gain: f64) -> f64 {
+        (gain_db(gain) * 10.0).round() / 10.0
     }
 
     // Spec: mixer-view R6.
     #[test]
-    fn keys_step_volume_by_decibels_and_pan_by_units() {
-        assert!((gain_db(step_volume(1.0, 1, false)) - 1.0).abs() < 1e-9);
-        assert!((gain_db(step_volume(1.0, -3, false)) + 3.0).abs() < 1e-9);
-        assert!((gain_db(step_volume(1.0, 1, true)) - 0.1).abs() < 1e-9);
-        assert!((gain_db(step_volume(db_gain(5.5), 2, false)) - TOP_DB).abs() < 1e-9);
-        assert!((gain_db(step_volume(0.0, 1, false)) - BOTTOM_DB).abs() < 1e-9);
+    fn the_fader_s_range_and_scale_are_live_s() {
+        // +6 dB at the top, −∞ at the bottom, −69.6 dB the lowest finite.
+        assert_eq!(fader_position(db_gain(6.0)), 1.0);
+        assert_eq!(fader_position(db_gain(12.0)), 1.0);
+        assert_eq!(fader_position(0.0), 0.0);
+        assert_eq!(db(volume_gain(-69.6)), -69.6);
+        assert_eq!(volume_gain(-69.7), 0.0);
+        assert_eq!(db(volume_gain(9.0)), 6.0);
+        // The handle sits on the meter's labels: 0 dB at 23.5 points down
+        // the strip, −12 at 44.5, ... −60 at 111.
+        let (top, bottom) = FADER_TRAVEL;
+        let y = |gain: f64| bottom - (bottom - top) * fader_position(gain) as f32;
+        for (label, at) in [
+            (0.0, 23.5),
+            (-12.0, 44.5),
+            (-24.0, 64.5),
+            (-36.0, 84.5),
+            (-48.0, 99.0),
+            (-60.0, 111.0),
+        ] {
+            assert!((y(db_gain(label)) - at).abs() < 1e-3, "{label}");
+        }
+        // 0 dB about 88% of the way up.
+        assert!((fader_position(1.0) - 0.9).abs() < 0.03);
+        assert!((meter_position(1.0) - fader_position(1.0) as f32).abs() < 1e-6);
+    }
+
+    // Spec: mixer-view R6.
+    #[test]
+    fn a_drag_covers_the_range_in_about_40_points() {
+        // Sampled from +6 dB every 9 points, then every 4.5.
+        let samples = [
+            (0.0, 6.0),
+            (9.0, 4.3),
+            (18.0, -2.6),
+            (27.0, -14.6),
+            (31.5, -29.4),
+            (36.0, -52.5),
+        ];
+        for (points, expected) in samples {
+            assert_eq!(db(drag_gain(points)), expected, "{points}");
+            assert!(
+                (drag_points(db_gain(expected)) - points).abs() < 1e-6,
+                "{expected}"
+            );
+        }
+        assert_eq!(drag_gain(40.5), 0.0);
+        assert_eq!(drag_points(0.0), DRAG_RANGE);
+        // Relative and past the ends: down 100 points from 0 dB is −∞, and
+        // back up 10 points is still −∞ until the overshoot is undone.
+        let t = TrackId(bl_core::id::Id::new(9).unwrap());
+        let volume = |delta: f64| {
+            moved(Control::Volume, &[(t, 1.0)], delta)[0].args["volume"]
+                .as_f64()
+                .unwrap()
+        };
+        assert_eq!(volume(-100.0), 0.0);
+        assert_eq!(volume(-90.0), 0.0);
+        assert_eq!(db(volume(100.0)), 6.0);
+        assert!((db(volume(-9.0)) - db(drag_gain(drag_points(1.0) + 9.0))).abs() < 1e-9);
+    }
+
+    // Spec: mixer-view R6.
+    #[test]
+    fn keys_step_volume_as_live_does() {
+        assert_eq!(db(step_volume(1.0, 1, false)), 1.0);
+        assert_eq!(db(step_volume(1.0, -3, false)), -3.0);
+        assert_eq!(db(step_volume(1.0, 1, true)), 0.1);
+        // From −68.5, Down gives −69.5 then −∞; from −∞ Up gives −69.0
+        // then −68.0; from 5.5, Up stops at 6.0.
+        let a = step_volume(db_gain(-68.5), -1, false);
+        assert_eq!(db(a), -69.5);
+        assert_eq!(step_volume(a, -1, false), 0.0);
+        let b = step_volume(0.0, 1, false);
+        assert_eq!(db(b), -69.0);
+        assert_eq!(db(step_volume(b, 1, false)), -68.0);
+        assert_eq!(db(step_volume(db_gain(5.5), 1, false)), 6.0);
         assert_eq!(step_volume(0.0, -1, false), 0.0);
-        assert_eq!(step_volume(db_gain(BOTTOM_DB), -1, false), 0.0);
         assert_eq!(step_pan(0.0, 1), 0.02);
         assert_eq!(step_pan(0.99, 5), 1.0);
         assert_eq!(step_pan(-1.0, -1), -1.0);
     }
 
-    // Spec: mixer-view R10.
+    // Spec: mixer-view R8.
     #[test]
-    fn the_meter_scale_is_the_fader_s() {
-        assert_eq!(meter_position(0.0), 0.0);
-        assert!((f64::from(meter_position(1.0)) - fader_position(1.0)).abs() < 1e-6);
-        assert_eq!(meter_position(10.0), 1.0);
+    fn selected_tracks_move_by_the_same_db() {
+        // Observed: −53 → −46 moved the other −3 → +4.
+        let (a, b) = (
+            TrackId(bl_core::id::Id::new(1).unwrap()),
+            TrackId(bl_core::id::Id::new(2).unwrap()),
+        );
+        let start = db_gain(-53.0);
+        let up = drag_points(start) - drag_points(db_gain(-46.0));
+        let changes = moved(Control::Volume, &[(a, start), (b, db_gain(-3.0))], up);
+        let get = |i: usize| changes[i].args["volume"].as_f64().unwrap();
+        assert_eq!(db(get(0)), -46.0);
+        assert_eq!(db(get(1)), 4.0);
+        assert_eq!(db(shift_volume(db_gain(5.0), 3.0)), 6.0);
+        assert_eq!(shift_volume(0.0, 3.0), 0.0);
+        assert_eq!(shift_volume(db_gain(-69.0), -1.0), 0.0);
     }
 }

@@ -17,6 +17,9 @@ use muda::{CheckMenuItem, MenuId, PredefinedMenuItem, Submenu};
 enum Native {
     Item(muda::MenuItem),
     Check(CheckMenuItem),
+    /// A submenu, which some states disable whole (WP-1.9: Arrangement
+    /// Track Controls while the Session View is in front).
+    Submenu(Submenu),
 }
 
 struct Entry {
@@ -112,6 +115,7 @@ impl NativeMenu {
                     item.set_enabled(state.enabled);
                     item.set_checked(state.checked.unwrap_or(false));
                 }
+                Native::Submenu(submenu) => submenu.set_enabled(state.enabled),
             }
         }
     }
@@ -142,9 +146,15 @@ fn add_items(
         let result = match item.action {
             Action::Separator => parent.append(&PredefinedMenuItem::separator()),
             Action::Submenu => {
-                let submenu = Submenu::new(item.label, true);
+                let state = item_state(item, shell, keymap, platform);
+                let submenu = Submenu::new(item.label, state.enabled);
                 add_items(&submenu, &item.items, shell, keymap, platform, entries)?;
-                parent.append(&submenu)
+                let appended = parent.append(&submenu);
+                entries.push(Entry {
+                    model: item.clone(),
+                    native: Native::Submenu(submenu),
+                });
+                appended
             }
             Action::System(SystemItem::Services) => {
                 parent.append(&PredefinedMenuItem::services(None))
@@ -179,6 +189,7 @@ fn add_items(
                 let appended = match &native {
                     Native::Item(i) => parent.append(i),
                     Native::Check(i) => parent.append(i),
+                    Native::Submenu(i) => parent.append(i),
                 };
                 entries.push(Entry {
                     model: item.clone(),

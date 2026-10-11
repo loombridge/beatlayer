@@ -529,14 +529,17 @@ const VIEW: &[Row] = &[
     ("M-VIEW-032a", "In/Out", Cmd(MIXER_IN_OUT)),
     ("M-VIEW-032b", "Sends", Cmd(MIXER_SENDS)),
     ("M-VIEW-032c", "Volume", Cmd(MIXER_VOLUME)),
+    ("M-VIEW-032-sep1", "", Action::Separator),
     ("M-VIEW-032d", "Track Options", Pending(None)),
     ("M-VIEW-032e", "Crossfader", Pending(None)),
     ("M-VIEW-032f", "Performance Impact", Pending(None)),
+    ("M-VIEW-032-sep2", "", Action::Separator),
     ("M-VIEW-032g", "Return Tracks", Cmd(MIXER_RETURN_TRACKS)),
     ("M-VIEW-033", "Arrangement Track Controls", Submenu),
     ("M-VIEW-033a", "In/Out", Pending(None)),
     ("M-VIEW-033b", "Volume", Pending(None)),
     ("M-VIEW-033c", "Track Options", Pending(None)),
+    ("M-VIEW-033-sep1", "", Action::Separator),
     ("M-VIEW-033d", "Return Tracks", Pending(None)),
     SEPARATOR,
     ("M-VIEW-034", "Overview", Key(&["S-VIEW-011"])),
@@ -867,7 +870,7 @@ mod tests {
             );
             separators += ours.iter().filter(|row| **row == "—").count();
         }
-        assert_eq!(separators, 62, "README: 62 separators in the menu bar");
+        assert_eq!(separators, 65, "README: 65 separators in the menu bar");
     }
 
     #[test]

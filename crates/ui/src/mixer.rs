@@ -1,7 +1,7 @@
 //! The Mixer view (WP-1.9; the mixer view spec): the Session View's columns
 //! with their mixer, the Arrangement's mixer under its lanes, and the
-//! controls a strip and a track header share: the volume fader and field,
-//! pan, the meter, the activator, Solo, and Arm.
+//! controls a strip and a track header share: the volume fader and the
+//! header's volume field, pan, the meter, the activator, Solo, and Arm.
 //!
 //! Placement comes from the layout layer ([`crate::layout::mixer`]). Every
 //! control runs a registered command: the values are `bl-model`'s `mixer.*`
@@ -12,23 +12,25 @@
 //! `mixer_view.*` commands. Only the columns in view are built (R17).
 
 use bl_model::{Document, TrackId, TrackKind};
+use bl_shell::arrangement_commands::SELECT_TRACKS;
 use bl_shell::mixer_controls::{
-    self as controls, Control, DRAG_TRAVEL, FINE, Switch, meter_position, pan_text, volume_spoken,
-    volume_text,
+    self as controls, Control, FINE, Switch, meter_position, pan_text, volume_readout,
+    volume_spoken, volume_text,
 };
 use bl_shell::mixer_view::MixerOf;
 use bl_shell::mixer_view_commands as ids;
 use bl_shell::{Invocation, Shell};
 use egui::accesskit::{self, Action, Role};
 use egui::{
-    Align2, Color32, Id, Key, Rect, Response, Sense, Shape, Stroke, StrokeKind, Ui, WidgetInfo,
-    WidgetType, pos2, vec2,
+    Align2, Color32, Event, Id, Key, Rect, Response, Sense, Shape, Stroke, StrokeKind, Ui,
+    WidgetInfo, WidgetType, pos2, vec2,
 };
 use serde_json::json;
 
 use crate::arrangement::scene::track_colour;
 use crate::layout::mixer::{
-    Column, ColumnKind, MixerLayout, Sections, SessionLayout, StripLayout, in_out_row, send_knob,
+    ARRANGEMENT_TITLE_ROW, Column, ColumnKind, MixerLayout, SCALE_LABELS, Sections, SessionLayout,
+    StripLayout, in_out_row, send_knob,
 };
 use crate::main_window::UiEvent;
 use crate::theme::Theme;
@@ -45,7 +47,7 @@ pub fn sections(shell: &Shell) -> Sections {
     }
 }
 
-/// The ID of a volume field: in a mixer's strip, or a header's.
+/// The ID of a track header's volume field.
 #[must_use]
 pub fn volume_field_id(place: Place, track: TrackId) -> Id {
     Id::new(("mixer-volume", place, track))
@@ -75,6 +77,47 @@ pub fn meter_id(place: Place, track: TrackId) -> Id {
     Id::new(("mixer-meter", place, track))
 }
 
+/// The ID of a mixer's column, which takes the keyboard focus that
+/// Navigate ▸ Mixer gives the mixer (R13).
+#[must_use]
+pub fn column_id(of: MixerOf, track: TrackId) -> Id {
+    Id::new(("mixer-column", of, track))
+}
+
+/// Where the text the Status Bar shows while a fader is dragged is kept
+/// for the frame (R6).
+fn readout_id() -> Id {
+    Id::new("mixer-status-readout")
+}
+
+/// Where a value typed into a header's volume field is kept: the field and
+/// what's been typed.
+fn typing_id() -> Id {
+    Id::new("mixer-typing")
+}
+
+/// What the Status Bar shows this frame instead of its message, while a
+/// fader is dragged (observed: `Track Volume: -21.0 dB`). Taking it clears
+/// it for the next frame.
+#[must_use]
+pub fn take_readout(ctx: &egui::Context) -> Option<String> {
+    ctx.data_mut(|d| d.remove_temp::<String>(readout_id()))
+}
+
+/// Whether a track header's volume field has the keyboard, so a value can
+/// be typed into it: the keys then go to the field, as to a text field, not
+/// to shortcuts (so Minus starts a negative value rather than zooming). Esc,
+/// or a click elsewhere, gives them back.
+#[must_use]
+pub fn is_typing(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp::<(Id, String)>(typing_id()).is_some())
+        || ctx.memory(|m| {
+            m.focused().is_some_and(|id| {
+                ctx.data(|d| d.get_temp::<bool>(id.with("typed-field")).is_some())
+            })
+        })
+}
+
 /// Where a control is: one view's mixer, or the Arrangement's headers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Place {
@@ -93,10 +136,13 @@ struct ValueDrag {
 }
 
 /// The Mixer view's state between frames: the focus requests it has
-/// carried out. Drags keep their state in egui's memory, by control.
+/// carried out, and a column the focus moves to. Drags keep their state in
+/// egui's memory, by control.
 #[derive(Debug, Default)]
 pub struct MixerUi {
     focus_seen: u64,
+    /// The track whose column takes the focus once it's in view.
+    focus_to: Option<TrackId>,
     /// The columns the last frame built: tracks, returns, Main (R17).
     built: usize,
 }
@@ -130,43 +176,7 @@ impl MixerUi {
         let layout = SessionLayout::compute(rect, shown.then_some(sections));
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, 0.0, theme.colors.panel.0);
-        // The title bars, over every column (L-SES-002).
-        let doc = shell.editor().document();
-        let columns = shell.mixer_columns();
-        let returns: Vec<TrackId> = doc.returns().collect();
-        let scroll = shell.mixer_view().of(MixerOf::Session).scroll as f32;
-        let title_layout = MixerLayout::compute(
-            layout.title_bars,
-            columns.len(),
-            returns.len(),
-            sections,
-            scroll,
-        );
-        for column in title_layout.every_column() {
-            let track = column_track(doc, &columns, &returns, column);
-            let Some(t) = doc.track(track) else {
-                continue;
-            };
-            let bar = column.rect.shrink2(vec2(0.5, 0.0));
-            let bar = if column.kind == ColumnKind::Track {
-                bar.intersect(title_layout.tracks)
-            } else {
-                bar
-            };
-            let painter = ui.painter_at(bar);
-            painter.rect_filled(
-                bar,
-                0.0,
-                title_colour(theme, track, t.kind()).gamma_multiply(0.82),
-            );
-            painter.text(
-                pos2(bar.left() + 4.0, bar.center().y),
-                Align2::LEFT_CENTER,
-                t.name(),
-                theme.small_font(),
-                theme.colors.clip_text.0,
-            );
-        }
+        title_bars(ui, shell, theme, layout.title_bars, MixerOf::Session);
         // The slots and the status row arrive with the Session View (M3).
         painter.text(
             layout.slots.center(),
@@ -185,7 +195,8 @@ impl MixerUi {
     }
 
     /// Draws one view's mixer in `area` and adds what the person did to
-    /// `events` (R1 to R3, R5, R10, R14).
+    /// `events` (R1 to R3, R5, R10, R13, R14). The Arrangement's has a row
+    /// of title bars along its top.
     pub fn show_mixer(
         &mut self,
         ui: &mut Ui,
@@ -200,7 +211,6 @@ impl MixerUi {
         let returns: Vec<TrackId> = doc.returns().collect();
         let sections = sections(shell);
         let scroll = shell.mixer_view().of(of).scroll as f32;
-        let layout = MixerLayout::compute(area, columns.len(), returns.len(), sections, scroll);
         let region = Id::new(("mixer", of));
         let _ = ui.interact(area, region, Sense::hover());
         ui.ctx().accesskit_node_builder(region, |node| {
@@ -213,6 +223,23 @@ impl MixerUi {
         });
         ui.painter_at(area)
             .rect_filled(area, 0.0, theme.colors.panel.0);
+        let sections_area = if of == MixerOf::Arrangement {
+            let row = Rect::from_min_max(
+                area.min,
+                pos2(area.right(), area.top() + ARRANGEMENT_TITLE_ROW),
+            );
+            title_bars(ui, shell, theme, row, of);
+            area.with_min_y(row.bottom())
+        } else {
+            area
+        };
+        let layout = MixerLayout::compute(
+            sections_area,
+            columns.len(),
+            returns.len(),
+            sections,
+            scroll,
+        );
         if let Some(drop) = layout.drop_area {
             ui.painter_at(drop).text(
                 drop.center(),
@@ -243,13 +270,22 @@ impl MixerUi {
             };
             let mut column_ui = ui.new_child(egui::UiBuilder::new().max_rect(clip));
             column_ui.set_clip_rect(clip.intersect(area));
-            let group = Id::new(("mixer-column", of, track));
-            let _ = column_ui.interact(clip, group, Sense::hover());
+            // The column itself takes the keyboard focus Navigate ▸ Mixer
+            // gives the mixer; Left and Right then move the selection.
+            let group = column_id(of, track);
+            let focus = column_ui.interact(clip, group, Sense::focusable_noninteractive());
             column_ui.ctx().accesskit_node_builder(group, |node| {
                 node.set_role(Role::Group);
                 node.set_label(t.name().to_owned());
                 node.set_bounds(bounds(clip));
             });
+            if focus.has_focus() {
+                self.column_keys(&column_ui, shell, &columns, track, of, events);
+            }
+            if self.focus_to == Some(track) && clip.width() >= column.rect.width() - 0.5 {
+                focus.request_focus();
+                self.focus_to = None;
+            }
             let mut column_ui = column_ui.new_child(
                 egui::UiBuilder::new()
                     .max_rect(clip)
@@ -266,12 +302,21 @@ impl MixerUi {
                 [column.rect.right_top(), column.rect.right_bottom()],
                 Stroke::new(1.0, theme.colors.lane_line.0),
             );
+            // The track's colour along the column's bottom (L-MIX-009).
+            painter.rect_filled(
+                Rect::from_min_max(
+                    pos2(column.rect.left() + 0.5, layout.colour.0),
+                    pos2(column.rect.right() - 0.5, layout.colour.1),
+                ),
+                0.0,
+                title_colour(theme, track, t.kind()),
+            );
             let label = activator_label(column);
             if let Some(span) = layout.in_out {
                 in_out_section(&mut column_ui, theme, column, span, t.kind());
             }
             if let Some(span) = layout.sends {
-                sends_section(&mut column_ui, theme, column, span, returns.len(), t.kind());
+                sends_section(&mut column_ui, theme, column, span, returns.len());
             }
             if let Some(span) = layout.strip {
                 let strip = StripLayout::compute(column.rect, span);
@@ -285,8 +330,47 @@ impl MixerUi {
                 parts.strip(&mut column_ui, &strip, column.kind, events);
             }
         }
-        self.scroll(&ui, area, of, events);
-        self.focus(&ui, shell, &layout, &columns, of, events);
+        self.scroll(&ui, sections_area, of, events);
+        self.focus(shell, &layout, &columns, of, events);
+    }
+
+    /// Left and Right with a column focused move the track selection, and
+    /// the focus with it (R13).
+    fn column_keys(
+        &mut self,
+        ui: &Ui,
+        shell: &Shell,
+        columns: &[TrackId],
+        track: TrackId,
+        of: MixerOf,
+        events: &mut Vec<UiEvent>,
+    ) {
+        ui.memory_mut(|m| {
+            m.set_focus_lock_filter(
+                column_id(of, track),
+                egui::EventFilter {
+                    horizontal_arrows: true,
+                    vertical_arrows: true,
+                    ..Default::default()
+                },
+            );
+        });
+        let step = ui.input(|i| {
+            i32::from(i.key_pressed(Key::ArrowRight)) - i32::from(i.key_pressed(Key::ArrowLeft))
+        });
+        if step == 0 {
+            return;
+        }
+        let Some(at) = columns.iter().position(|c| *c == track) else {
+            return;
+        };
+        let next = (at as i64 + i64::from(step)).clamp(0, columns.len() as i64 - 1) as usize;
+        let _ = shell;
+        events.push(UiEvent::Invoke(Invocation::new(
+            SELECT_TRACKS,
+            json!({ "tracks": [columns[next]] }),
+        )));
+        self.focus_to = Some(columns[next]);
     }
 
     /// The wheel over the mixer scrolls its columns (R14).
@@ -307,10 +391,11 @@ impl MixerUi {
         }
     }
 
-    /// Carries out `mixer_view.focus` in the Arrangement's mixer (R13).
+    /// Carries out `mixer_view.focus` in the Arrangement's mixer: the focus
+    /// goes to the selected track's column, or the first's, scrolled into
+    /// view (R13).
     fn focus(
         &mut self,
-        ui: &Ui,
         shell: &Shell,
         layout: &MixerLayout,
         columns: &[TrackId],
@@ -318,36 +403,76 @@ impl MixerUi {
         events: &mut Vec<UiEvent>,
     ) {
         let requests = shell.mixer_view().focus_requests();
-        if of != MixerOf::Arrangement || requests == self.focus_seen {
-            return;
-        }
-        let target = shell
-            .arrangement()
-            .selected_tracks()
-            .iter()
-            .find_map(|t| columns.iter().position(|c| c == t))
-            .unwrap_or(0);
-        if columns.is_empty() || layout.strip.is_none() {
+        if of == MixerOf::Arrangement && requests != self.focus_seen {
             self.focus_seen = requests;
-            return;
+            self.focus_to = shell
+                .arrangement()
+                .selected_tracks()
+                .iter()
+                .find(|t| columns.contains(t))
+                .or(columns.first())
+                .copied();
         }
+        let Some(target) = self.focus_to else {
+            return;
+        };
+        let Some(index) = columns.iter().position(|c| *c == target) else {
+            self.focus_to = None;
+            return;
+        };
         let in_view = layout
             .columns
             .iter()
-            .any(|c| c.index == target && layout.tracks.contains_rect(c.rect.shrink(1.0)));
-        if in_view {
-            self.focus_seen = requests;
-            ui.memory_mut(|m| {
-                m.request_focus(volume_field_id(Place::Mixer(of), columns[target]));
-            });
-        } else {
-            let x = f64::from(crate::layout::mixer::COLUMN_WIDTH) * target as f64
-                - f64::from(layout.scroll);
+            .any(|c| c.index == index && layout.tracks.contains_rect(c.rect.shrink(0.5)));
+        if !in_view {
+            let width = f64::from(crate::layout::mixer::COLUMN_WIDTH);
+            let left = width * index as f64 - f64::from(layout.scroll);
+            let x = if left < 0.0 {
+                left
+            } else {
+                left + width - f64::from(layout.tracks.width())
+            };
             events.push(UiEvent::Invoke(Invocation::new(
                 ids::SCROLL,
                 json!({ "view": of, "x": x }),
             )));
         }
+    }
+}
+
+/// A row of title bars over a mixer's columns: the Session View's top row
+/// (L-SES-002) and the Arrangement mixer's top row, each track's colour and
+/// name.
+fn title_bars(ui: &Ui, shell: &Shell, theme: &Theme, row: Rect, of: MixerOf) {
+    let doc = shell.editor().document();
+    let columns = shell.mixer_columns();
+    let returns: Vec<TrackId> = doc.returns().collect();
+    let scroll = shell.mixer_view().of(of).scroll as f32;
+    let layout = MixerLayout::compute(row, columns.len(), returns.len(), sections(shell), scroll);
+    for column in layout.every_column() {
+        let track = column_track(doc, &columns, &returns, column);
+        let Some(t) = doc.track(track) else {
+            continue;
+        };
+        let bar = column.rect.shrink2(vec2(0.5, 0.0));
+        let bar = if column.kind == ColumnKind::Track {
+            bar.intersect(layout.tracks)
+        } else {
+            bar
+        };
+        let painter = ui.painter_at(bar);
+        painter.rect_filled(
+            bar,
+            0.0,
+            title_colour(theme, track, t.kind()).gamma_multiply(0.82),
+        );
+        painter.text(
+            pos2(bar.left() + 4.0, bar.center().y),
+            Align2::LEFT_CENTER,
+            t.name(),
+            theme.small_font(),
+            theme.colors.clip_text.0,
+        );
     }
 }
 
@@ -383,6 +508,15 @@ fn bounds(rect: Rect) -> accesskit::Rect {
     }
 }
 
+/// Whether a track's strip is a MIDI track's without an instrument: a
+/// dotted MIDI meter and the switches, without volume or pan (observed).
+/// Beatlayer has no instruments yet, so a MIDI track counts as one without
+/// while its chain holds no device that makes sound.
+fn midi_only(doc: &Document, track: TrackId) -> bool {
+    doc.track(track)
+        .is_some_and(|t| t.kind() == TrackKind::Midi && t.devices().len() == 0)
+}
+
 /// The In/Out section's rows, drawn and disabled until routing and
 /// recording (R5).
 fn in_out_section(ui: &mut Ui, theme: &Theme, column: &Column, span: (f32, f32), kind: TrackKind) {
@@ -412,12 +546,10 @@ fn in_out_section(ui: &mut Ui, theme: &Theme, column: &Column, span: (f32, f32),
             ("Output Type", "Main", "WP-2.19"),
             ("Output Channel", "", "WP-2.19"),
         ],
-        ColumnKind::Track => &[
-            ("To", "", ""),
-            ("Output Type", "Main", "WP-2.19"),
-            ("Output Channel", "", "WP-2.19"),
-        ],
-        ColumnKind::Return => &[("Audio To", "", ""), ("Output Type", "Main", "WP-2.19")],
+        // A group's and a return's In/Out show only Audio To (observed).
+        ColumnKind::Track | ColumnKind::Return => {
+            &[("Audio To", "", ""), ("Output Type", "Main", "WP-2.19")]
+        }
         ColumnKind::Main => &[
             ("Cue Out", "", ""),
             ("Cue Output", "1/2", "Phase 3"),
@@ -456,14 +588,7 @@ fn in_out_section(ui: &mut Ui, theme: &Theme, column: &Column, span: (f32, f32),
 }
 
 /// The Sends section: a knob per return, disabled until WP-2.19 (R5).
-fn sends_section(
-    ui: &mut Ui,
-    theme: &Theme,
-    column: &Column,
-    span: (f32, f32),
-    returns: usize,
-    kind: TrackKind,
-) {
+fn sends_section(ui: &mut Ui, theme: &Theme, column: &Column, span: (f32, f32), returns: usize) {
     for index in 0..returns {
         let rect = send_knob(column.rect, span, index, returns);
         let letter = char::from(b'A' + (index % 26) as u8).to_string();
@@ -472,7 +597,6 @@ fn sends_section(
         } else {
             (format!("Send {letter}"), letter.clone())
         };
-        let _ = kind;
         pending(
             ui,
             theme,
@@ -554,19 +678,28 @@ pub struct StripParts<'a> {
 }
 
 impl StripParts<'_> {
-    /// A whole strip (R3): the volume field, pan, the fader and its meter,
-    /// and the activator, Solo, and Arm (or Main's pending cue controls).
+    /// A whole strip (R3), where Live has each control: the peak level
+    /// readout, pan, the activator, Solo, and Arm in a column, the fader,
+    /// the meter, and its scale. A MIDI track without an instrument shows a
+    /// MIDI meter and the switches; Main shows the cue volume and the
+    /// Solo/Cue button, pending, in place of its switches.
     fn strip(&self, ui: &mut Ui, strip: &StripLayout, kind: ColumnKind, events: &mut Vec<UiEvent>) {
-        self.volume_field(ui, strip.volume_field, events);
-        self.pan(ui, strip.pan, Some(strip.pan_triangle), events);
-        self.fader(ui, strip.fader, events);
-        self.meter(ui, strip.meter);
+        let midi = midi_only(self.doc(), self.track);
+        if midi {
+            self.midi_meter(ui, strip.meter);
+        } else {
+            self.peak_field(ui, strip.peak_field);
+            self.pan(ui, strip.pan, Some(strip.pan_triangle), events);
+            self.fader(ui, strip.fader, events);
+            self.meter(ui, strip.meter);
+            self.scale(ui, strip);
+        }
         match kind {
             ColumnKind::Main => {
                 pending(
                     ui,
                     self.theme,
-                    strip.buttons[0],
+                    strip.activator,
                     Id::new(("mixer-cue-volume", self.place)),
                     Role::Slider,
                     "Cue Volume",
@@ -576,7 +709,7 @@ impl StripParts<'_> {
                 pending(
                     ui,
                     self.theme,
-                    strip.buttons[1],
+                    strip.solo,
                     Id::new(("mixer-solo-cue", self.place)),
                     Role::Button,
                     "Solo/Cue Mode",
@@ -585,10 +718,11 @@ impl StripParts<'_> {
                 );
             }
             _ => {
-                for (switch, rect) in [Switch::Activator, Switch::Solo, Switch::Arm]
-                    .into_iter()
-                    .zip(strip.buttons)
-                {
+                for (switch, rect) in [
+                    (Switch::Activator, strip.activator),
+                    (Switch::Solo, strip.solo),
+                    (Switch::Arm, strip.arm),
+                ] {
                     self.switch(ui, switch, rect, events);
                 }
             }
@@ -599,7 +733,8 @@ impl StripParts<'_> {
         self.shell.editor().document()
     }
 
-    /// The tracks a change reaches, each with where its control starts.
+    /// The tracks a change reaches, each with its value: the changed track
+    /// first.
     fn starts(&self, control: Control) -> Vec<(TrackId, f64)> {
         let doc = self.doc();
         controls::targets(
@@ -608,7 +743,7 @@ impl StripParts<'_> {
             |t| doc.track(t).is_some(),
         )
         .into_iter()
-        .filter_map(|t| control.position(doc, t).map(|p| (t, p)))
+        .filter_map(|t| control.value(doc, t).map(|v| (t, v)))
         .collect()
     }
 
@@ -626,7 +761,7 @@ impl StripParts<'_> {
 
     /// What every value control does besides its drag: a click focuses it;
     /// a double-click, Delete, and a screen reader's or the keyboard's
-    /// steps change it (R6, R8).
+    /// steps change it, on every selected track by the same dB (R6, R8).
     fn value_keys(
         &self,
         ui: &Ui,
@@ -644,7 +779,8 @@ impl StripParts<'_> {
         });
         let mut fine = false;
         let mut reset = response.double_clicked();
-        if response.has_focus() {
+        let entry_open = ui.data(|d| d.get_temp::<(Id, String)>(typing_id()).is_some());
+        if response.has_focus() && !entry_open {
             ui.memory_mut(|m| {
                 m.set_focus_lock_filter(
                     id,
@@ -657,7 +793,7 @@ impl StripParts<'_> {
             // The keys' own modifiers: Shift with Up or Down steps finely.
             ui.input(|i| {
                 for event in &i.events {
-                    if let egui::Event::Key {
+                    if let Event::Key {
                         key,
                         pressed: true,
                         modifiers,
@@ -677,25 +813,25 @@ impl StripParts<'_> {
         }
         let doc = self.doc();
         if reset {
-            // Spec: mixer-view R6 (I-CLICK-021, S-VAL-004).
+            // Spec: mixer-view R6 (I-CLICK-021, S-VAL-004; observed: a
+            // double-click resets the fader to 0 dB).
             let invocations = self
                 .starts(control)
                 .iter()
-                .map(|(t, _)| control.set(*t, control.default_position()))
+                .map(|(t, _)| control.set(*t, control.default_value()))
                 .collect();
             Self::run_all(events, control.gesture(), invocations);
         } else if steps != 0 {
-            // Spec: mixer-view R6 (S-VAL-001, S-VAL-002).
+            // Spec: mixer-view R6, R8 (S-VAL-001, S-VAL-002).
             let invocations = self
                 .starts(control)
                 .iter()
                 .filter_map(|(t, _)| {
                     let mixer = doc.track(*t)?.mixer();
                     Some(match control {
-                        Control::Volume => Invocation::new(
-                            "mixer.set_volume",
-                            json!({ "track": t, "volume": controls::step_volume(mixer.volume, steps, fine) }),
-                        ),
+                        Control::Volume => {
+                            control.set(*t, controls::step_volume(mixer.volume, steps, fine))
+                        }
                         Control::Pan => control.set(*t, controls::step_pan(mixer.pan, steps)),
                     })
                 })
@@ -704,14 +840,14 @@ impl StripParts<'_> {
         }
     }
 
-    /// A drag on a value control, moving every target by the same amount:
-    /// `travel` points of drag cover a unit of the control (R6, R8).
+    /// A drag on a value control: relative, moving the changed track along
+    /// its scale and every other target by the same dB (or pan) (R6, R8).
+    /// While volume is dragged, the Status Bar shows it.
     fn value_drag(
         &self,
         ui: &Ui,
         response: &Response,
         control: Control,
-        travel: f32,
         events: &mut Vec<UiEvent>,
     ) {
         let id = response.id.with("drag");
@@ -729,19 +865,27 @@ impl StripParts<'_> {
         }
         if response.dragged() {
             let dy = response.drag_delta().y;
+            // Read before taking egui's data, whose lock the input's would
+            // deadlock against.
+            let fine = ui.input(|i| i.modifiers.shift);
+            let drag = ui.data_mut(|d| {
+                let drag = d.get_temp_mut_or_default::<ValueDrag>(id);
+                if dy != 0.0 {
+                    drag.moved +=
+                        f64::from(-dy / control.drag_travel() / if fine { FINE } else { 1.0 });
+                }
+                drag.clone()
+            });
+            let changes = controls::moved(control, &drag.starts, drag.moved);
+            if control == Control::Volume
+                && let Some(volume) = changes
+                    .first()
+                    .and_then(|first| first.args["volume"].as_f64())
+            {
+                ui.data_mut(|d| d.insert_temp(readout_id(), volume_readout(volume)));
+            }
             if dy != 0.0 {
-                let fine = ui.input(|i| i.modifiers.shift);
-                let step = f64::from(-dy / travel / if fine { FINE } else { 1.0 });
-                let drag = ui.data_mut(|d| {
-                    let drag = d.get_temp_mut_or_default::<ValueDrag>(id);
-                    drag.moved += step;
-                    drag.clone()
-                });
-                events.extend(
-                    controls::moved(control, &drag.starts, drag.moved)
-                        .into_iter()
-                        .map(UiEvent::Invoke),
-                );
+                events.extend(changes.into_iter().map(UiEvent::Invoke));
             }
         }
         if response.drag_stopped() {
@@ -772,22 +916,22 @@ impl StripParts<'_> {
         });
     }
 
-    /// The volume field (R6): the level in dB, dragged, stepped, or reset.
+    /// A track header's volume field (R4, R6): the level in dB, dragged,
+    /// stepped, reset, or typed (`-12` and Return gives −12.0 dB).
     pub fn volume_field(&self, ui: &mut Ui, rect: Rect, events: &mut Vec<UiEvent>) {
         let Some(track) = self.doc().track(self.track) else {
             return;
         };
         let volume = track.mixer().volume;
-        let response = ui.interact(
-            rect,
-            volume_field_id(self.place, self.track),
-            Sense::click_and_drag(),
-        );
-        self.value_drag(ui, &response, Control::Volume, DRAG_TRAVEL, events);
+        let id = volume_field_id(self.place, self.track);
+        let response = ui.interact(rect, id, Sense::click_and_drag());
+        self.value_drag(ui, &response, Control::Volume, events);
         self.value_keys(ui, &response, Control::Volume, events);
+        let typed = self.typing(ui, &response, events);
         let c = &self.theme.colors;
         let painter = ui.painter_at(rect.expand(2.0));
-        let face = if response.dragged() || response.is_pointer_button_down_on() {
+        let face = if typed.is_some() || response.dragged() || response.is_pointer_button_down_on()
+        {
             c.control_pressed.0
         } else if response.hovered() {
             c.control_hover.0
@@ -798,7 +942,7 @@ impl StripParts<'_> {
         painter.text(
             rect.center(),
             Align2::CENTER_CENTER,
-            volume_text(volume),
+            typed.unwrap_or_else(|| volume_text(volume)),
             self.theme.small_font(),
             c.text.0,
         );
@@ -813,7 +957,104 @@ impl StripParts<'_> {
         );
     }
 
-    /// The fader (R6): dragged, the handle follows the pointer.
+    /// Typing into the focused volume field (observed in the Arrangement's
+    /// headers): digits, Minus, and Period type, Backspace takes back, Return
+    /// sets the value for every selected track by the same dB, Esc drops it.
+    /// Returns what's been typed.
+    fn typing(&self, ui: &Ui, response: &Response, events: &mut Vec<UiEvent>) -> Option<String> {
+        let id = response.id;
+        // Marks the field as one that takes typed values, for `is_typing`.
+        ui.data_mut(|d| d.insert_temp(id.with("typed-field"), true));
+        let mut entry = ui
+            .data(|d| d.get_temp::<(Id, String)>(typing_id()))
+            .filter(|(field, _)| *field == id)
+            .map(|(_, text)| text);
+        if !response.has_focus() {
+            if entry.is_some() {
+                ui.data_mut(|d| d.remove::<(Id, String)>(typing_id()));
+            }
+            return None;
+        }
+        let keys: Vec<Key> = ui.input_mut(|i| {
+            let mut taken = Vec::new();
+            i.events.retain(|event| match event {
+                Event::Key {
+                    key,
+                    pressed: true,
+                    modifiers,
+                    ..
+                } if !modifiers.command
+                    && !modifiers.ctrl
+                    && (digit(*key).is_some()
+                        || matches!(key, Key::Minus | Key::Period | Key::Backspace)
+                        || (entry.is_some() && key == &Key::Enter)
+                        || key == &Key::Escape) =>
+                {
+                    taken.push(*key);
+                    false
+                }
+                _ => true,
+            });
+            taken
+        });
+        for key in keys {
+            match key {
+                Key::Enter => {
+                    let text = entry.take().unwrap_or_default();
+                    if let Ok(db) = text.parse::<f64>() {
+                        let target = controls::volume_gain(db);
+                        let starts = self.starts(Control::Volume);
+                        let shift = controls::gain_db(target)
+                            - starts.first().map_or(0.0, |(_, g)| {
+                                controls::gain_db(*g).max(controls::LOWEST_DB)
+                            });
+                        let invocations = starts
+                            .iter()
+                            .enumerate()
+                            .map(|(i, (t, g))| {
+                                let value = if i == 0 {
+                                    target
+                                } else if target <= 0.0 {
+                                    0.0
+                                } else {
+                                    controls::shift_volume(*g, shift)
+                                };
+                                Control::Volume.set(*t, value)
+                            })
+                            .collect();
+                        Self::run_all(events, Control::Volume.gesture(), invocations);
+                    }
+                }
+                // Esc drops what's typed; egui gives the keyboard back.
+                Key::Escape => entry = None,
+                Key::Backspace => {
+                    if let Some(text) = entry.as_mut() {
+                        text.pop();
+                    }
+                }
+                key => {
+                    let c = digit(key).unwrap_or(match key {
+                        Key::Minus => '-',
+                        _ => '.',
+                    });
+                    let text = entry.get_or_insert_with(String::new);
+                    if text.len() < 8 {
+                        text.push(c);
+                    }
+                }
+            }
+        }
+        ui.data_mut(|d| match &entry {
+            Some(text) => {
+                d.insert_temp(typing_id(), (id, text.clone()));
+            }
+            None => d.remove::<(Id, String)>(typing_id()),
+        });
+        entry
+    }
+
+    /// The fader (R6): a relative drag moves the volume along the observed
+    /// drag scale; the handle sits on the meter's scale.
     pub fn fader(&self, ui: &mut Ui, rect: Rect, events: &mut Vec<UiEvent>) {
         let Some(track) = self.doc().track(self.track) else {
             return;
@@ -824,23 +1065,17 @@ impl StripParts<'_> {
             fader_id(self.place, self.track),
             Sense::click_and_drag(),
         );
-        self.value_drag(
-            ui,
-            &response,
-            Control::Volume,
-            rect.height().max(1.0),
-            events,
-        );
+        self.value_drag(ui, &response, Control::Volume, events);
         self.value_keys(ui, &response, Control::Volume, events);
         let c = &self.theme.colors;
-        let painter = ui.painter_at(rect.expand(2.0));
+        let painter = ui.painter_at(rect.expand(3.0));
         let x = rect.center().x;
         painter.line_segment(
             [pos2(x, rect.top()), pos2(x, rect.bottom())],
             Stroke::new(2.0, c.separator.0),
         );
         let y = rect.bottom() - rect.height() * controls::fader_position(volume) as f32;
-        let handle = Rect::from_center_size(pos2(x, y), vec2(rect.width().min(16.0), 5.0));
+        let handle = Rect::from_center_size(pos2(x, y), vec2(rect.width(), 5.0));
         let face = if response.dragged() {
             c.accent.0
         } else if response.hovered() {
@@ -853,7 +1088,7 @@ impl StripParts<'_> {
         self.describe_value(
             ui,
             &response,
-            "Track Volume Fader",
+            "Track Volume",
             volume_spoken(volume),
             controls::gain_db(volume).max(-1000.0),
             (-1000.0, controls::TOP_DB),
@@ -871,7 +1106,7 @@ impl StripParts<'_> {
             pan_id(self.place, self.track),
             Sense::click_and_drag(),
         );
-        self.value_drag(ui, &response, Control::Pan, DRAG_TRAVEL, events);
+        self.value_drag(ui, &response, Control::Pan, events);
         self.value_keys(ui, &response, Control::Pan, events);
         let c = &self.theme.colors;
         let painter = ui.painter_at(rect.expand(2.0));
@@ -885,7 +1120,8 @@ impl StripParts<'_> {
                 c.text.0,
             );
         } else {
-            // A knob: an arc from the top, round to where the pan points.
+            // A knob: a ring, and a line from its centre to where the pan
+            // points.
             let centre = rect.center();
             let radius = (rect.height().min(rect.width()) * 0.5 - 1.0).max(2.0);
             painter.circle_stroke(centre, radius, Stroke::new(1.0, c.separator.0));
@@ -930,7 +1166,8 @@ impl StripParts<'_> {
     }
 
     /// A switch (R7, R8): the activator, Solo, or Arm. Tracks without it
-    /// show nothing in its place.
+    /// show nothing in its place; a deactivated activator shows its number
+    /// on grey (observed).
     pub fn switch(&self, ui: &mut Ui, switch: Switch, rect: Rect, events: &mut Vec<UiEvent>) {
         let doc = self.doc();
         if !switch.on_track(doc, self.track) {
@@ -991,14 +1228,63 @@ impl StripParts<'_> {
         });
     }
 
-    /// The meter (R10): left and right side by side, peak then RMS over it,
-    /// on the fader's scale.
+    fn levels(&self) -> ([f32; 2], [f32; 2]) {
+        self.shell
+            .meter(self.track)
+            .map_or(([0.0; 2], [0.0; 2]), |m| (m.peak, m.rms))
+    }
+
+    /// The peak level readout at the strip's top left (observed: `-inf`
+    /// with nothing playing; the fader doesn't change it). It shows the
+    /// meter's peak; whether Live holds it until clicked isn't observed.
+    fn peak_field(&self, ui: &mut Ui, rect: Rect) {
+        let (peak, _) = self.levels();
+        let loudest = f64::from(peak[0].max(peak[1]));
+        let id = Id::new(("mixer-peak", self.place, self.track));
+        let response = ui.interact(rect, id, Sense::hover());
+        let c = &self.theme.colors;
+        let painter = ui.painter_at(rect.expand(1.0));
+        painter.rect_filled(rect, self.theme.sizes.corner, c.window.0);
+        painter.text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            volume_text(loudest),
+            self.theme.small_font(),
+            c.text_dim.0,
+        );
+        response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, "Peak Level"));
+        ui.ctx().accesskit_node_builder(id, |node| {
+            node.set_role(Role::Label);
+            node.set_label("Peak Level".to_owned());
+            node.set_value(volume_spoken(loudest));
+        });
+    }
+
+    /// The meter's scale beside it: 0, 12, 24, 36, 48, 60 dB below 0, where
+    /// the fader's handle sits at those values (observed).
+    fn scale(&self, ui: &Ui, strip: &StripLayout) {
+        let (left, right) = strip.labels;
+        let painter = ui.painter();
+        for (label, y) in SCALE_LABELS {
+            painter.text(
+                pos2((left + right) / 2.0, strip.top + y),
+                Align2::CENTER_CENTER,
+                label,
+                egui::FontId::proportional(self.theme.sizes.small_text * 0.8),
+                self.theme.colors.text_dim.0,
+            );
+        }
+    }
+
+    /// The meter (R10): left and right side by side on the fader's scale,
+    /// the peak and the RMS level drawn as the reference describes them
+    /// (both shown); how Live draws the two together with a signal isn't
+    /// observed yet.
     pub fn meter(&self, ui: &mut Ui, rect: Rect) {
         let c = &self.theme.colors;
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, 0.0, c.window.0);
-        let meter = self.shell.meter(self.track);
-        let (peak, rms) = meter.map_or(([0.0; 2], [0.0; 2]), |m| (m.peak, m.rms));
+        let (peak, rms) = self.levels();
         let half = rect.width() / 2.0;
         for side in 0..2 {
             let bar = Rect::from_min_max(
@@ -1006,20 +1292,15 @@ impl StripParts<'_> {
                 pos2(rect.left() + half * (side + 1) as f32 - 0.5, rect.bottom()),
             );
             let level = |amplitude: f32| bar.bottom() - bar.height() * meter_position(amplitude);
-            let colour = if peak[side] > 1.0 {
-                c.meter_hot.0
-            } else {
-                c.meter.0
-            };
             painter.rect_filled(
                 Rect::from_min_max(pos2(bar.left(), level(peak[side])), bar.max),
                 0.0,
-                colour.gamma_multiply(0.45),
+                c.meter.0.gamma_multiply(0.45),
             );
             painter.rect_filled(
                 Rect::from_min_max(pos2(bar.left(), level(rms[side])), bar.max),
                 0.0,
-                colour,
+                c.meter.0,
             );
         }
         let id = meter_id(self.place, self.track);
@@ -1039,6 +1320,45 @@ impl StripParts<'_> {
             node.set_numeric_value(controls::gain_db(f64::from(loudest)).max(-1000.0));
         });
     }
+
+    /// A MIDI track's meter (observed on a MIDI track without an
+    /// instrument: a dotted meter). It shows no notes until MIDI plays
+    /// (WP-2.1).
+    fn midi_meter(&self, ui: &mut Ui, rect: Rect) {
+        let c = &self.theme.colors;
+        let painter = ui.painter_at(rect);
+        let mut y = rect.bottom() - 2.0;
+        while y > rect.top() {
+            painter.circle_filled(pos2(rect.center().x, y), 1.0, c.separator.0);
+            y -= 4.0;
+        }
+        let id = meter_id(self.place, self.track);
+        let response = ui.interact(rect, id, Sense::hover());
+        response
+            .widget_info(|| WidgetInfo::labeled(WidgetType::ProgressIndicator, true, "MIDI Meter"));
+        ui.ctx().accesskit_node_builder(id, |node| {
+            node.set_role(Role::Meter);
+            node.set_label("MIDI Meter".to_owned());
+            node.set_value("no notes".to_owned());
+        });
+    }
+}
+
+/// The digit a key types, if it's a digit key.
+fn digit(key: Key) -> Option<char> {
+    Some(match key {
+        Key::Num0 => '0',
+        Key::Num1 => '1',
+        Key::Num2 => '2',
+        Key::Num3 => '3',
+        Key::Num4 => '4',
+        Key::Num5 => '5',
+        Key::Num6 => '6',
+        Key::Num7 => '7',
+        Key::Num8 => '8',
+        Key::Num9 => '9',
+        _ => return None,
+    })
 }
 
 fn focus_ring(painter: &egui::Painter, theme: &Theme, rect: Rect, response: &Response) {
@@ -1052,7 +1372,7 @@ fn focus_ring(painter: &egui::Painter, theme: &Theme, rect: Rect, response: &Res
     }
 }
 
-/// A colour for a column's title bar.
+/// A colour for a column's title bar and colour strip.
 #[must_use]
 pub fn title_colour(theme: &Theme, track: TrackId, kind: TrackKind) -> Color32 {
     if kind == TrackKind::Main {

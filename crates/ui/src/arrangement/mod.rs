@@ -272,7 +272,12 @@ impl ArrangementUi {
             .of(bl_shell::mixer_view::MixerOf::Arrangement)
             .shown
         {
-            ArrangementLayout::compute_with_mixer(rect, view.overview(), pinned.len())
+            ArrangementLayout::compute_with_mixer(
+                rect,
+                view.overview(),
+                pinned.len(),
+                crate::mixer::sections(shell),
+            )
         } else {
             ArrangementLayout::compute(rect, view.overview(), pinned.len())
         };

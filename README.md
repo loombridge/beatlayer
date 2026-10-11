@@ -10,10 +10,10 @@ Beatlayer is in Phase 0 of its [build plan](docs/03-build-plan.md). The workspac
 |---|---|
 | [Roadmap](docs/01-roadmap.md) | Principles, milestones from M0 to 1.0, scope, size, and risks |
 | [Architecture](docs/02-architecture.md) | The document, engine, and UI split; crates; threads; real-time rules; testing; packaging; the decisions log |
-| [Build plan](docs/03-build-plan.md) | Work packages, dependencies, acceptance criteria, human tasks, and the status table |
+| [Build plan](docs/03-build-plan.md) | Work packages, dependencies, acceptance criteria, and the status table |
 | [Parity matrix](docs/04-parity-matrix.md) | Every Ableton Live 12 feature and the milestone that covers it |
 | [Improvements](docs/05-improvements.md) | What Beatlayer does better than Live, without moving anything Live users know |
-| [Clean-room policy](https://github.com/loombridge/beatlayer/blob/main/CONTRIBUTING.md#building-without-abletons-code) | How Beatlayer learns from Live without using its code or content |
+| [Clean-room policy](CONTRIBUTING.md#building-without-abletons-code) | How Beatlayer learns from Live without using its code or content |
 
 ## Develop
 
@@ -39,7 +39,7 @@ Beatlayer is in Phase 0 of its [build plan](docs/03-build-plan.md). The workspac
 
    The packages land in `target/packages`: `Beatlayer.app` and a DMG on macOS, an MSI on Windows, and an AppImage and a tarball on Linux. They're unsigned unless the signing variables in `.github/workflows/nightly.yml` are set. The task then starts each packaged binary with `--version` to check it.
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md) before contributing. Every contribution follows the [clean-room policy](https://github.com/loombridge/beatlayer/blob/main/CONTRIBUTING.md#building-without-abletons-code).
+Read [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md) before contributing. Every contribution follows the [clean-room policy](CONTRIBUTING.md#building-without-abletons-code).
 
 ## Licence
 

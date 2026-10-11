@@ -22,7 +22,7 @@
 
 ## Clean-room declaration
 
-- [ ] I followed the [clean-room policy](https://github.com/loombridge/beatlayer/blob/main/CONTRIBUTING.md#building-without-abletons-code). This change contains no Ableton code or content, and doesn't use Ableton's trademarks as names.
+- [ ] I followed the [clean-room rules](https://github.com/loombridge/beatlayer/blob/main/CONTRIBUTING.md#building-without-abletons-code). This change contains no Ableton code or content, and doesn't use Ableton's trademarks as names.
 - [ ] Any Live behaviour this change reproduces is written down in a behaviour spec in `docs/specs/` that cites only allowed sources, or the change reproduces none.
 
 ## Sign-off

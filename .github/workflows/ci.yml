@@ -4,17 +4,13 @@
 # the run asks for it. Alongside, it runs the real-time tests under
 # RealtimeSanitizer on Linux (x64).
 #
-# Windows left per-change CI on 11 October 2026: the organisation's Free-plan
-# minutes, shared with its other private repositories, were 86% spent by the
-# 11th, and a Windows minute costs 1.7 Linux minutes. A Windows failure now
-# shows on main, and is fixed forward; start a run by hand on a branch whose
-# change is Windows-specific.
-#
-# The repository is private on GitHub's Free plan, so hosted-runner minutes are
-# limited, and a macOS minute counts as ten and a Windows minute as two. The maintainer
-# decided on 10 October 2026 to leave macOS out of per-change CI: every agent
-# runs the full check on macOS locally and pastes the evidence in its pull
-# request, and macos-check.yml runs it on main every night that code changed.
+# Hosted-runner minutes are limited while the repository is private, and a
+# macOS minute counts as ten Linux minutes and a Windows minute as about two.
+# So per-change CI runs Linux only. Windows runs on every push to main, where a
+# failure is fixed forward; start a run by hand on a branch whose change is
+# Windows-specific. macOS stays out of per-change CI: every author runs the
+# full check on macOS locally and pastes the summary in the pull request, and
+# macos-check.yml runs it on main every night that code changed.
 # The workflow also keeps the bill down by:
 #
 # - skipping changes that touch only Markdown, docs/, or the licence, except
@@ -142,7 +138,7 @@ jobs:
 
   rtsan:
     name: RealtimeSanitizer (Linux x64)
-    # Linux only: a macOS minute counts as ten on the Free plan, and the same
+    # Linux only: a macOS minute counts as ten Linux minutes, and the same
     # tests run on macOS with `cargo xtask rtsan` and Homebrew's llvm.
     runs-on: ubuntu-24.04
     timeout-minutes: 30

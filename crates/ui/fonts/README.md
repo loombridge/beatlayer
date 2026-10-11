@@ -1,6 +1,6 @@
 # Bundled typefaces
 
-Beatlayer's UI typeface is bundled into the binary, because egui's default fonts fail the licence policy and Ableton's typeface is Ableton's ([ADR-001](../../../docs/adr/ADR-001-ui-toolkit-egui.md), [clean-room policy](https://github.com/loombridge/beatlayer/blob/main/CONTRIBUTING.md#building-without-abletons-code)). The maintainer allowed OFL-1.1 for fonts on 10 October 2026.
+Beatlayer's UI typeface is bundled into the binary, because egui's default fonts fail the licence policy and Ableton's typeface is Ableton's ([ADR-001](../../../docs/adr/ADR-001-ui-toolkit-egui.md), [clean-room policy](../../../CONTRIBUTING.md#building-without-abletons-code)). `deny.toml` allows OFL-1.1 for fonts only.
 
 | File | Typeface | Version | Licence | Where it came from |
 |---|---|---|---|---|

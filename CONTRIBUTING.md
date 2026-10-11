@@ -6,21 +6,25 @@ Beatlayer is in Phase 0 of its [build plan](docs/03-build-plan.md), and the repo
 
 ## Read first
 
-1. [README.md](README.md) and [AGENTS.md](AGENTS.md): what Beatlayer is, the lines no change crosses, and where things stand.
-1. [The clean-room policy](https://github.com/loombridge/beatlayer/blob/main/CONTRIBUTING.md#building-without-abletons-code): what you may and may not learn from Ableton Live. Read it before you write anything.
+1. [README.md](README.md) and [AGENTS.md](AGENTS.md): what Beatlayer is, the lines no change crosses, and how work is done.
+1. [Building without Ableton's code](#building-without-abletons-code): what you may and may not learn from Ableton Live. Read it before you write anything.
 1. [The architecture](docs/02-architecture.md), at least the sections your change touches.
 1. [The build plan](docs/03-build-plan.md), and in it "How an agent uses this plan". That procedure is how every work package is done, by a person or an agent.
 
-## The clean room
+## Building without Ableton's code
 
-Beatlayer matches what Live does, not how Live's code does it. In short:
+Beatlayer matches what Ableton Live does, not how Live's code does it. Every contribution, from a person or an agent, keeps to these rules:
 
-- Learn only from what Live shows any user: the manual, running Live and watching it, and measuring its output from your own material.
-- Never copy Ableton's samples, presets, artwork, or manual text into the repository, and never use Ableton's trademarks as names.
+- **Learn only from what Live shows any user:** its public reference manual, release notes and product pages; running Live and watching what it does; measuring its output from your own material; and projects you made yourself in Live, for the importer. Paraphrase the manual; never copy its text.
+- **Never copy Ableton's content:** no samples, presets, wavetables, impulse responses, grooves, packs, artwork, icons, fonts, colour themes or manual text, in the repository or in Beatlayer's bundled content, and no audio Live rendered from Ableton's own content.
+- **Never use Ableton's trademarks as Beatlayer's names.** Beatlayer's devices and features have their own names. "Imports Ableton Live sets" is a statement of fact; "Ableton Live clone" isn't.
+- **Cite your sources.** A change that reproduces Live's behaviour starts with a behaviour spec in `docs/specs/`, citing a manual section, an observation of Live running (with its version and platform), or a measurement with its method.
+
+Placement, menus, gestures and keyboard shortcuts match Live's, which is functional parity; the look is Beatlayer's own.
 
 ## Find something to work on
 
-- **Work packages.** Most work is a package in the build plan. Take the first package in the status table whose status is `todo` and whose dependencies are `done`, or the one the maintainer gives you. Each package has its own branch, `wp/<id>-<slug>` (for example `wp/0.12-contributor-docs`), and its own pull request.
+- **Work packages.** Most work is a package in the build plan. Take the first package in the status table whose status is `todo` and whose dependencies are `done`, or the one a maintainer gives you. Each package has its own branch, `wp/<id>-<slug>` (for example `wp/0.12-contributor-docs`), and its own pull request.
 - **Bugs and features.** Open an issue first, with the bug report or feature request template. A feature request names the row of the [parity matrix](docs/04-parity-matrix.md) it relates to.
 - **Small fixes**, such as a typo or a broken link, can go straight to a pull request.
 
@@ -122,7 +126,7 @@ A commit with nothing on the indented line under it isn't signed off.
 
 If an AI coding agent wrote some or all of your change, you're still the person certifying it. Review the change, then sign it off yourself. The agent records its part with a `Co-Authored-By` trailer, and never adds a `Signed-off-by` line, in your name or its own, because only a person can give the certificate.
 
-The maintainer's own work is the exception. Commits that the maintainer's agents make on the maintainer's behalf, in work packages from the build plan, are the maintainer's contributions and carry no sign-off (10 October 2026). The DCO check applies to everyone else.
+The maintainers' own work is the exception. Commits that the maintainers' agents make in work packages from the build plan, authored as `Loombridge <code@loombridge.io>`, are the maintainers' contributions and carry no sign-off. The DCO check applies to everyone else.
 
 ### Checking sign-offs
 
@@ -131,9 +135,9 @@ For now, the reviewer checks sign-offs by hand. An automatic check in CI follows
 ## Open a pull request
 
 - Open it against `main`. For a work package, title it `WP-<id>: <package title>`.
-- Fill in every section of the template: the work package, what the change adds, the acceptance evidence, any deviation from the design with its reason, anything that needs the maintainer, and the clean-room declaration.
+- Fill in every section of the template: the work package, what the change adds, the acceptance evidence, any deviation from the design with its reason, anything that needs a maintainer, and the clean-room declaration.
 - Update any document whose facts your change alters, in the same pull request.
-- The maintainer reviews and merges. Don't merge your own pull request.
+- A maintainer reviews and merges. Don't merge your own pull request.
 
 ## Report a bug or ask for a feature
 
@@ -145,4 +149,4 @@ Write prose, including documents, code comments, commit messages, and pull reque
 
 ## Licence
 
-Beatlayer is licensed under GPL-3.0-or-later ([LICENSE](LICENSE)), and you contribute under the same licence. The maintainer confirmed the licence and the DCO on 10 October 2026 (decision D3 in [the architecture](docs/02-architecture.md#decisions-log), human task H2 in the build plan).
+Beatlayer is licensed under GPL-3.0-or-later ([LICENSE](LICENSE)), and you contribute under the same licence. The licence and the DCO are decision D3 in [the architecture](docs/02-architecture.md#decisions-log).

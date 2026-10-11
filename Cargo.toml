@@ -11,7 +11,7 @@ version = "0.0.0"
 edition = "2024"
 rust-version = "1.99"
 license = "GPL-3.0-or-later"
-# Nothing is published to crates.io until the trademark search (H9) is done.
+# Nothing is published to crates.io until the trademark search is done.
 publish = false
 
 [workspace.dependencies]

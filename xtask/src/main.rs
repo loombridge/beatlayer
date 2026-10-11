@@ -11,6 +11,7 @@ use serde_json::Value;
 mod commands;
 mod dashboard;
 mod keymap;
+mod private_terms;
 mod progress;
 mod ui_parity;
 
@@ -19,8 +20,8 @@ Usage: cargo xtask <task>
 
 Tasks:
   check          Run every check: format, clippy, tests, layers, the UI parity
-                 reference, the command reference, the keymap, deny, and the deny
-                 self-test
+                 reference, the command reference, the keymap, deny, the deny
+                 self-test, and private terms
   layers         Check the crate layering rules
   ui-parity      Validate docs/ui-parity/shortcuts.toml and regenerate shortcuts.md
                  (with --check, fail instead of writing if shortcuts.md is out of date)
@@ -29,6 +30,8 @@ Tasks:
   keymap         Regenerate crates/ui/keymaps/live12.toml from shortcuts.toml and the
                  command registry (with --check, fail instead if it's out of date)
   deny-selftest  Prove that deny.toml still rejects an incompatible licence
+  private-terms  Fail if a tracked file contains a word listed in .git/info/private-terms
+                 (maintainers' checkouts only; skipped without it)
   golden         Render the golden fixtures and null-test them against their references
                  in tests/golden/ (`cargo test` does too). With --update, remake the
                  references whose renders changed; say why in the pull request. Fixture
@@ -117,6 +120,7 @@ fn run(root: &Path, args: &[String]) -> Result<(), String> {
             _ => Err(format!("usage: cargo xtask keymap [--check]\n\n{USAGE}")),
         },
         Some("deny-selftest") => deny_selftest(root),
+        Some("private-terms") => private_terms::check(root),
         Some("golden") => golden(root, options),
         Some("progress") => dashboard::print(root, options),
         Some("dashboard") => dashboard::serve(root, options),
@@ -185,6 +189,7 @@ fn check(root: &Path) -> Result<(), String> {
             Box::new(|| cargo(root, &["deny", "--locked", "check"])),
         ),
         ("deny self-test", Box::new(|| deny_selftest(root))),
+        ("private terms", Box::new(|| private_terms::check(root))),
     ];
 
     let mut failed = Vec::new();

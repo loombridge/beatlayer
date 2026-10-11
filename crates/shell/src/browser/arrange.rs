@@ -192,9 +192,7 @@ pub fn add_files(
                 id,
                 at,
                 length,
-                ClipData::Audio(AudioData {
-                    media: file.media.hash,
-                }),
+                ClipData::Audio(AudioData::new(file.media.hash)),
             );
             clip.name.clone_from(&file.name);
             placing::clear(editor, track, at, at.saturating_add(length), &placed)?;

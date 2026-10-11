@@ -17,9 +17,12 @@
 //! edits into [`ParamEvent`]s, which reach their nodes on an exact frame.
 //! The [`mixer`] glides every gain to its new value, so a fader move never
 //! clicks, and works out who solo silences (the mixer spec).
-//! Node data, such as a clip's notes, is a message of its own
-//! ([`Sender::send_data`]). A [`ScheduledCommand`] runs at a musical
-//! position on its exact frame, which is how an agent plays in time (D17).
+//! Node data is a message of its own ([`Sender::send_data`]): each audio
+//! track's [`clips`] reach its clip player that way, placed through the
+//! tempo map with their audio from the registry's [`MediaLibrary`], so clip
+//! edits never compile either (the audio clips spec). A
+//! [`ScheduledCommand`] runs at a musical position on its exact frame,
+//! which is how an agent plays in time (D17).
 //!
 //! The [`Processor`] owns the transport: play, stop, continue, the insert
 //! marker, and the Arrangement loop, each a [`TransportCommand`] that acts
@@ -75,6 +78,7 @@
 #[cfg(test)]
 bl_rt::install_trap!();
 
+pub mod clips;
 mod compiler;
 mod engine;
 mod gc;
@@ -95,6 +99,7 @@ pub mod testing;
 
 use bl_core::time::SampleRate;
 
+pub use clips::{ClipPlayer, ClipSource, MediaLibrary, MediaMap};
 pub use compiler::{Compiler, Update};
 pub use engine::{CompileCounts, Engine, Restarter, Sender, channel};
 pub use gc::{Collector, DROP_PERIOD, DropThread, GcHandle, Program};

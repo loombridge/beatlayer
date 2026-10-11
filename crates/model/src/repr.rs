@@ -265,9 +265,7 @@ mod tests {
                     clip,
                     Ticks::WHOLE,
                     Ticks::WHOLE * 2,
-                    ClipData::Audio(AudioData {
-                        media: ContentHash([0xab; 32]),
-                    }),
+                    ClipData::Audio(AudioData::new(ContentHash([0xab; 32]))),
                 ),
             })
             .unwrap();
@@ -323,6 +321,68 @@ mod tests {
             value["settings"],
             serde_json::to_value(Settings::default()).unwrap()
         );
+    }
+
+    // Spec: audio-clips R15
+    #[test]
+    fn audio_clip_settings_are_saved_only_where_they_differ_from_a_new_clips() {
+        let (doc, _) = song();
+        let value = serde_json::to_value(&doc).unwrap();
+        // A new clip's data saves as its media alone, as before WP-1.4, so a
+        // set saved then loads as a new clip of the whole file.
+        let data = &value["tracks"][0]["children"][0]["clips"][0]["data"];
+        assert_eq!(data, &json!({ "audio": { "media": "ab".repeat(32) } }));
+
+        let mut editor = Editor::new();
+        let track = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id: track,
+                kind: TrackKind::Audio,
+                name: String::new(),
+                parent: None,
+                index: 0,
+            })
+            .unwrap();
+        let audio = AudioData {
+            start: 0.25,
+            end: Some(1.0),
+            looping: true,
+            loop_start: 0.5,
+            loop_end: Some(0.75),
+            gain: 0.5,
+            ..AudioData::new(ContentHash([1; 32])).with_edge_fades()
+        };
+        let clip = Clip::new(
+            editor.new_id(),
+            Ticks::ZERO,
+            Ticks::WHOLE,
+            ClipData::Audio(audio),
+        );
+        editor.apply(Command::CreateClip { track, clip }).unwrap();
+        let value = serde_json::to_value(editor.document()).unwrap();
+        assert_eq!(
+            value["tracks"][0]["clips"][0]["data"]["audio"],
+            json!({
+                "media": "01".repeat(32),
+                "start": 0.25,
+                "end": 1.0,
+                "looping": true,
+                "loop_start": 0.5,
+                "loop_end": 0.75,
+                "gain": 0.5,
+                "fade_in": 0.004,
+                "fade_out": 0.004,
+            })
+        );
+        let back = load(value).unwrap();
+        assert_eq!(&back, editor.document());
+
+        // Loading checks the settings as the commands do.
+        let mut bad = serde_json::to_value(editor.document()).unwrap();
+        bad["tracks"][0]["clips"][0]["data"]["audio"]["loop_end"] = json!(0.1);
+        let error = load(bad).unwrap_err();
+        assert!(error.contains("loop end 0.1 is out of range"), "{error}");
     }
 
     #[test]

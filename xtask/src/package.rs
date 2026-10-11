@@ -151,10 +151,10 @@ impl Platform {
 /// Signing settings, from the environment.
 #[derive(Debug, Default)]
 struct Signing {
-    /// A Developer ID identity for codesign (H4), such as
+    /// A Developer ID identity for codesign, such as
     /// `Developer ID Application: Name (TEAMID)`.
     macos_identity: Option<String>,
-    /// A command that signs the file at `%1` (H5 chooses the route).
+    /// A command that signs the file at `%1` (a maintainer chooses the route).
     windows_command: Option<String>,
 }
 
@@ -179,14 +179,14 @@ impl Signing {
                      set APPLE_ID, APPLE_PASSWORD, and APPLE_TEAM_ID, or the APPLE_API_* variables"
                 ),
                 None => eprintln!(
-                    "Signing skipped: APPLE_SIGNING_IDENTITY isn't set (a Developer ID, H4). \
+                    "Signing skipped: APPLE_SIGNING_IDENTITY isn't set (a Developer ID). \
                      The packages are unsigned."
                 ),
             },
             Platform::Windows => match &self.windows_command {
                 Some(_) => eprintln!("Signing with WINDOWS_SIGN_COMMAND"),
                 None => eprintln!(
-                    "Signing skipped: WINDOWS_SIGN_COMMAND isn't set (a Windows signing route, H5). \
+                    "Signing skipped: WINDOWS_SIGN_COMMAND isn't set (a Windows signing route). \
                      The packages are unsigned."
                 ),
             },

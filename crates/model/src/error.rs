@@ -77,6 +77,9 @@ pub enum ModelError {
         /// The note's index in the clip's note list.
         index: usize,
     },
+    /// The command changes an audio clip's settings, and this clip is a MIDI
+    /// clip.
+    NotAudioClip(ClipId),
 }
 
 impl fmt::Display for ModelError {
@@ -112,6 +115,7 @@ impl fmt::Display for ModelError {
             Self::InvalidNote { index } => {
                 write!(f, "note {index} has a key or velocity out of range")
             }
+            Self::NotAudioClip(id) => write!(f, "{id} is a MIDI clip; this needs an audio clip"),
         }
     }
 }

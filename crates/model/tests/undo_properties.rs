@@ -81,6 +81,9 @@ enum Op {
     SetClipMute(Index, bool),
     SetClipData(Index, Data),
     TrimClipStart(Index, i16),
+    /// One of an audio clip's settings (WP-1.4): its markers, loop brace,
+    /// Loop switch, gain, or fades, chosen by the byte, from two numbers.
+    SetAudio(Index, u8, f64, f64),
     InsertDevice {
         track: Index,
         index: Index,
@@ -167,7 +170,9 @@ fn op() -> impl Strategy<Value = Op> {
         1 => (i(), any::<u8>()).prop_map(|(c, n)| Op::RenameClip(c, n)),
         1 => (i(), any::<bool>()).prop_map(|(c, b)| Op::SetClipMute(c, b)),
         2 => (i(), data()).prop_map(|(c, d)| Op::SetClipData(c, d)),
-        2 => (i(), any::<i16>()).prop_map(|(c, by)| Op::TrimClipStart(c, by)),
+        2 => (i(), -16i16..64).prop_map(|(c, by)| Op::TrimClipStart(c, by)),
+        3 => (i(), any::<u8>(), value(0.0..4.0), value(0.0..4.0))
+            .prop_map(|(c, which, a, b)| Op::SetAudio(c, which, a, b)),
         3 => (i(), i(), prop::collection::vec((0u8..8, value(-100.0..100.0)), 0..4))
             .prop_map(|(track, index, params)| Op::InsertDevice { track, index, params }),
         1 => i().prop_map(Op::RemoveDevice),
@@ -249,9 +254,7 @@ fn sixteenths(n: impl Into<i64>) -> Ticks {
 fn clip_data(data: &Data, track_kind: Option<TrackKind>) -> ClipData {
     let audio = (track_kind == Some(TrackKind::Audio)) != data.swap_kind;
     if audio {
-        ClipData::Audio(AudioData {
-            media: ContentHash([data.media; 32]),
-        })
+        ClipData::Audio(AudioData::new(ContentHash([data.media; 32])))
     } else {
         ClipData::Midi(MidiData::new(data.notes.iter().map(
             |&(key, velocity, start, length)| Note {
@@ -411,6 +414,33 @@ impl Op {
                 Command::TrimClipStart {
                     clip,
                     start: start + sixteenths(*by),
+                }
+            }
+            Self::SetAudio(c, which, a, b) => {
+                let clip = at.clip(c);
+                // Past 3 seconds (or not a number), an end is the file's.
+                let end = (*b <= 3.0).then_some(*b);
+                match which % 5 {
+                    0 => Command::SetClipRegion {
+                        clip,
+                        start: *a,
+                        end,
+                    },
+                    1 => Command::SetClipLoop {
+                        clip,
+                        start: *a,
+                        end,
+                    },
+                    2 => Command::SetClipLoopEnabled {
+                        clip,
+                        enabled: *a > 1.0,
+                    },
+                    3 => Command::SetClipGain { clip, gain: *a },
+                    _ => Command::SetClipFades {
+                        clip,
+                        fade_in: *a,
+                        fade_out: *b,
+                    },
                 }
             }
             Self::InsertDevice {

@@ -47,9 +47,9 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        33,
-        "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five \
-         for the mixer, and WP-1.8b trim_clip_start"
+        38,
+        "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
+         the mixer, WP-1.4 five for audio clips, and WP-1.8b trim_clip_start"
     );
 
     for op in &ops {
@@ -272,6 +272,46 @@ fn every_command_runs_by_id() {
         (trimmed.start.0, trimmed.end().0, trimmed.offset.0),
         (quarter, bar, quarter)
     );
+    // An audio clip's settings (WP-1.4).
+    agent.run(
+        "clip.set_region",
+        json!({ "clip": loop_clip, "start": 0.5, "end": 2.5 }),
+    );
+    agent.run(
+        "clip.set_loop",
+        json!({ "clip": loop_clip, "start": 1.0, "end": 2.0 }),
+    );
+    agent.run(
+        "clip.set_loop_enabled",
+        json!({ "clip": loop_clip, "enabled": true }),
+    );
+    agent.run("clip.set_gain", json!({ "clip": loop_clip, "gain": 0.5 }));
+    agent.run(
+        "clip.set_fades",
+        json!({ "clip": loop_clip, "fade_in": 0.004, "fade_out": 0.25 }),
+    );
+    let ClipData::Audio(audio) = agent.editor.document().clip(loop_clip).unwrap().data else {
+        panic!("an audio clip");
+    };
+    assert_eq!(
+        audio,
+        AudioData {
+            start: 0.5,
+            end: Some(2.5),
+            looping: true,
+            loop_start: 1.0,
+            loop_end: Some(2.0),
+            gain: 0.5,
+            fade_in: 0.004,
+            fade_out: 0.25,
+            ..AudioData::new(ContentHash([0xab; 32]))
+        }
+    );
+    // A null end is the end of the file.
+    agent.run(
+        "clip.set_region",
+        json!({ "clip": loop_clip, "start": 0.0, "end": null }),
+    );
     agent.run("clip.delete", json!({ "clip": loop_clip }));
     assert!(agent.editor.document().clip(loop_clip).is_none());
 
@@ -487,7 +527,9 @@ fn schemas_match_what_commands_serialise() {
             Command::SetClipData {
                 clip,
                 data: ClipData::Audio(AudioData {
-                    media: ContentHash([0xab; 32]),
+                    end: Some(3.5),
+                    gain: 0.25,
+                    ..AudioData::new(ContentHash([0xab; 32])).with_edge_fades()
                 }),
             },
         ),
@@ -496,6 +538,38 @@ fn schemas_match_what_commands_serialise() {
             Command::TrimClipStart {
                 clip,
                 start: Ticks::QUARTER,
+            },
+        ),
+        (
+            "clip.set_region",
+            Command::SetClipRegion {
+                clip,
+                start: 0.125,
+                end: Some(1.5),
+            },
+        ),
+        (
+            "clip.set_loop",
+            Command::SetClipLoop {
+                clip,
+                start: 0.5,
+                end: None,
+            },
+        ),
+        (
+            "clip.set_loop_enabled",
+            Command::SetClipLoopEnabled {
+                clip,
+                enabled: true,
+            },
+        ),
+        ("clip.set_gain", Command::SetClipGain { clip, gain: 2.0 }),
+        (
+            "clip.set_fades",
+            Command::SetClipFades {
+                clip,
+                fade_in: 0.004,
+                fade_out: 1.5,
             },
         ),
         (

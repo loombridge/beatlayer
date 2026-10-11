@@ -9,7 +9,7 @@
 //! the drag began, and the host runs the frames as one transaction, so the
 //! whole drag is one undo step (arrangement-editing R13).
 //!
-//! The behaviour is in `docs/specs/arrangement-editing.md`.
+//! The behaviour is in the arrangement editing spec.
 
 use bl_core::time::Ticks;
 use bl_model::{ClipId, Document, TrackId};

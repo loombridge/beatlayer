@@ -1,6 +1,6 @@
 //! The Arrangement's context menus, as data (WP-1.8b): the menu a clip
-//! opens and the menu a time selection opens, in Live's order from
-//! `docs/ui-parity/menus.md` (C-CLIP-ARR, C-TIME), each item tied to its
+//! opens and the menu a time selection opens, in Live's order from the
+//! menu reference (C-CLIP-ARR, C-TIME), each item tied to its
 //! shortcut as the menu bar's are ([`Action::Shortcut`]), so it runs the
 //! command the keymap gives that shortcut in the Arrangement, or shows
 //! disabled until a package binds it.
@@ -120,12 +120,19 @@ mod tests {
 
     use super::*;
 
-    /// The rows of one context-menu section of menus.md, up to its "Other
-    /// states" table: each row's ID and Live's label, or `None` for a
-    /// separator.
-    fn reference(heading: &str) -> Vec<Option<(String, String)>> {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/ui-parity/menus.md");
-        let text = std::fs::read_to_string(path).unwrap();
+    /// The rows of one context-menu section of the menu reference, up to
+    /// its "Other states" table: each row's ID and Live's label, or `None`
+    /// for a separator. `None` in a checkout without the planning documents
+    /// (they aren't published yet), where the test skips.
+    fn reference(heading: &str) -> Option<Vec<Option<(String, String)>>> {
+        let docs = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs");
+        if !docs.exists() {
+            eprintln!(
+                "skipped: the UI parity reference isn't published yet, and this checkout doesn't have it"
+            );
+            return None;
+        }
+        let text = std::fs::read_to_string(docs.join("ui-parity").join("menus.md")).unwrap();
         let mut rows = Vec::new();
         let mut inside = false;
         for line in text.lines() {
@@ -146,7 +153,7 @@ mod tests {
                 rows.push(None);
             }
         }
-        rows
+        Some(rows)
     }
 
     #[test]
@@ -155,7 +162,9 @@ mod tests {
             (arrangement_clip(), "(C-CLIP-ARR)"),
             (arrangement_time(), "(C-TIME)"),
         ] {
-            let theirs = reference(heading);
+            let Some(theirs) = reference(heading) else {
+                return;
+            };
             assert!(!theirs.is_empty(), "{heading}");
             assert_eq!(menu.len(), theirs.len(), "{heading}");
             for (item, row) in menu.iter().zip(&theirs) {

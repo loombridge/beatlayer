@@ -10,8 +10,8 @@
 //! ticks or bars, beats, and sixteenths ([`Position`]).
 //!
 //! [`register`] adds their specs, which are pure data, so `cargo xtask` can
-//! check them and list them in `docs/commands.md`; `bl-shell` runs them by
-//! ID. The behaviour they follow is in `docs/specs/arrangement-editing.md`.
+//! check them and list them in the command reference; `bl-shell` runs
+//! them by ID. The behaviour they follow is in the arrangement editing spec.
 
 use std::borrow::Cow;
 

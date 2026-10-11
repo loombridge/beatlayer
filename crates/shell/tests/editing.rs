@@ -1,8 +1,8 @@
 //! The Arrangement's edits, driven headless through `Shell::run`,
 //! `Shell::invoke`, and `Shell::gesture`, as agents, keys and menus, and
 //! the mouse drive them (WP-1.8b; D17). Every edit is one undo step, and
-//! undo and redo restore the set exactly. The behaviour is in
-//! `docs/specs/arrangement-editing.md`.
+//! undo and redo restore the set exactly. The behaviour is in the
+//! arrangement editing spec.
 
 use std::path::{Path, PathBuf};
 

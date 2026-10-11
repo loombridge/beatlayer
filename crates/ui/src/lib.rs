@@ -17,6 +17,7 @@
 //! drives these from its winit loop, and tests drive them headless with an
 //! `egui::Context` and synthetic input.
 
+pub mod arrangement;
 pub mod input;
 pub mod keymap;
 pub mod layout;

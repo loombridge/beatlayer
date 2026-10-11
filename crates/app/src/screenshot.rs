@@ -14,7 +14,7 @@ use bl_shell::files::ProjectFiles;
 use bl_shell::settings::Preferences;
 use bl_shell::{Shell, commands as ids};
 use bl_ui::layout::{SETTINGS_WINDOW, TITLE_BAR};
-use bl_ui::main_window::MainWindowUi;
+use bl_ui::main_window::{MainWindowUi, UiEvent};
 use bl_ui::settings_window::SettingsUi;
 use bl_ui::theme::{Theme, fonts};
 use egui::{ColorImage, Pos2, RawInput, Rect, vec2};
@@ -38,8 +38,22 @@ pub fn run(args: &Args, path: &Path) -> Result<(), String> {
     } else {
         AudioHost::new(prefs.audio.clone())
     };
-    let mut shell = Shell::new(prefs, None, audio, Box::new(ProjectFiles::new()));
+    let mut main = MainWindowUi::new();
+    let mut shell = if args.benchmark_scene {
+        // The Arrangement benchmark scene (WP-1.8a), with its peaks.
+        let scene = bl_ui::arrangement::benchmark::scene(200, 25, 64);
+        main.arrangement_mut()
+            .set_peak_source(Box::new(scene.peaks), None);
+        bl_ui::arrangement::benchmark::shell_with(scene.editor)
+    } else {
+        Shell::new(prefs, None, audio, Box::new(ProjectFiles::new()))
+    };
     shell.start_audio();
+    if let Some(set) = &args.set {
+        shell
+            .invoke(ids::SET_OPEN, json!({ "path": set.to_string_lossy() }))
+            .map_err(|e| e.to_string())?;
+    }
     let settings = args.open_settings;
     if settings {
         let _ = shell.invoke(ids::APP_SETTINGS, json!({}));
@@ -62,7 +76,6 @@ pub fn run(args: &Args, path: &Path) -> Result<(), String> {
     ctx.set_fonts(fonts());
     let theme = Theme::builtin(shell.theme());
     theme.apply(&ctx);
-    let mut main = MainWindowUi::new();
     let mut settings_ui = SettingsUi::new();
     let mut output: Option<egui::FullOutput> = None;
     // Every frame's texture changes, in order: the first frame uploads the
@@ -79,14 +92,29 @@ pub fn run(args: &Args, path: &Path) -> Result<(), String> {
             ..Default::default()
         };
         ctx.set_pixels_per_point(SCALE);
-        let shell = &shell;
+        let shell_ref = &shell;
+        let mut events = Vec::new();
         let mut frame_output = ctx.run_ui(input, |ui| {
-            let _ = if settings {
-                settings_ui.show(ui, shell, &theme, title_bar)
+            events = if settings {
+                settings_ui.show(ui, shell_ref, &theme, title_bar)
             } else {
-                main.show(ui, shell, &theme, title_bar, None)
+                main.show(ui, shell_ref, &theme, title_bar, None)
             };
         });
+        // The lanes report their size on the first frame; commands asked
+        // for on the command line run once it's known.
+        for event in events {
+            if let UiEvent::ArrangementViewport { width, height } = event {
+                shell.set_arrangement_viewport(width, height);
+            }
+        }
+        if frame == 0 {
+            for (id, args) in &args.commands {
+                shell
+                    .invoke(id, args.clone())
+                    .map_err(|e| format!("--command {id}: {e}"))?;
+            }
+        }
         textures.append(std::mem::take(&mut frame_output.textures_delta));
         output = Some(frame_output);
     }
@@ -125,6 +153,8 @@ fn render(
     let format = wgpu::TextureFormat::Rgba8Unorm;
     let mut renderer =
         egui_wgpu::Renderer::new(&device, format, egui_wgpu::RendererOptions::default());
+    // The Arrangement View's own pipelines (WP-1.8a).
+    bl_ui::arrangement::gpu::install(&device, format, &mut renderer.callback_resources);
     for (id, deltas) in &textures.set {
         for delta in deltas {
             renderer.update_texture(&device, &queue, *id, delta);

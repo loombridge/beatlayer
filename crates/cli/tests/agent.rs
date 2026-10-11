@@ -130,6 +130,16 @@ fn render_document(document: &Document, frames: u64) -> Render {
     }
 }
 
+/// Where `set.save_as` saved the set, from `run`'s result: a new set goes
+/// into a new `<name> Project` folder (WP-1.7b).
+fn saved_path(result: &Value) -> PathBuf {
+    PathBuf::from(
+        result["results"][0]["result"]["path"]
+            .as_str()
+            .expect("the save says where the set went"),
+    )
+}
+
 /// The IDs of the default set's tracks, from the agent's overview.
 fn default_tracks(client: &mut Client<impl Transport>) -> Vec<u64> {
     let tracks = call(client, "query", json!({ "path": "tracks" }));
@@ -245,7 +255,6 @@ fn hand_built_m1_demo(hashes: &[ContentHash]) -> Editor {
 fn a_scripted_client_builds_the_m1_demo_headless_and_it_reopens_as_the_hand_built_one() {
     let dir = TempDir::new("m1-demo");
     let hashes = stems(&dir.0);
-    let set = dir.0.join("M1 Demo Project").join("M1 Demo.blset");
 
     let mut client = bl_cli_mcp(&["--autonomous"]);
     let guide = client.read_resource(bl_agent::guide::URI).unwrap();
@@ -342,14 +351,17 @@ fn a_scripted_client_builds_the_m1_demo_headless_and_it_reopens_as_the_hand_buil
         played.text
     );
 
-    // Save (external: a new file outside any project open now).
+    // Save (external: a new file outside any project open now). A new set
+    // goes into a new project folder, and the result says where.
     let saved = call(
         &mut client,
         "run",
         json!({ "commands": [{ "command": "set.save_as",
-                               "args": { "path": set.to_string_lossy() } }] }),
+                               "args": { "path": dir.0.join("M1 Demo.blset").to_string_lossy() } }] }),
     );
     assert_eq!(saved["results"][0]["result"]["name"], "M1 Demo");
+    let set = saved_path(&saved);
+    assert!(set.ends_with("M1 Demo Project/M1 Demo.blset"), "{set:?}");
     let built = call(
         &mut client,
         "query",
@@ -425,7 +437,6 @@ fn a_scripted_client_builds_the_m1_demo_headless_and_it_reopens_as_the_hand_buil
 #[test]
 fn a_golden_fixture_built_through_bl_cli_mcp_renders_bit_for_bit_as_the_hand_built_one() {
     let dir = TempDir::new("fixture");
-    let set = dir.0.join("Group and Return.blset");
     let mut client = bl_cli_mcp(&["--autonomous"]);
 
     let deletes: Vec<Value> = default_tracks(&mut client)
@@ -473,11 +484,13 @@ fn a_golden_fixture_built_through_bl_cli_mcp_renders_bit_for_bit_as_the_hand_bui
         "run",
         json!({ "label": "Build group-and-return", "commands": commands }),
     );
-    call(
+    let saved = call(
         &mut client,
         "run",
-        json!({ "commands": [{ "command": "set.save_as", "args": { "path": set.to_string_lossy() } }] }),
+        json!({ "commands": [{ "command": "set.save_as",
+                               "args": { "path": dir.0.join("Group and Return.blset").to_string_lossy() } }] }),
     );
+    let set = saved_path(&saved);
     assert!(client.into_transport().finish().unwrap().success());
 
     let fixture = golden::fixture("group-and-return").unwrap();

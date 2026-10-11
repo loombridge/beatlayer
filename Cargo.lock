@@ -840,6 +840,7 @@ name = "bl-shell-spec"
 version = "0.0.0"
 dependencies = [
  "bl-commands",
+ "bl-core",
  "bl-model",
  "schemars",
  "serde",
@@ -860,12 +861,19 @@ dependencies = [
  "bl-commands",
  "bl-core",
  "bl-engine",
+ "bl-media",
  "bl-model",
  "bl-shell",
+ "bytemuck",
  "egui",
+ "egui-wgpu",
+ "libc",
+ "png",
+ "pollster",
  "serde",
  "serde_json",
  "toml",
+ "wgpu",
 ]
 
 [[package]]

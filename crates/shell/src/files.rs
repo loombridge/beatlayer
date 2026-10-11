@@ -1,15 +1,21 @@
-//! Set files and the factory default set.
+//! Set files, project folders, and the factory default set.
 //!
 //! The shell opens and saves sets through a [`SetStore`]. The app's store is
 //! [`ProjectFiles`], which reads and writes Beatlayer's set files with
 //! `bl-project` (WP-0.7): atomic saves, the last 10 replaced versions kept
-//! in the project folder's `Backup/`, and every load checked. Tests can
-//! pass a store of their own.
+//! in the project folder's `Backup/`, and every load checked. Save Set As
+//! puts a set in a project folder as Live does ([`place_set`]: a new
+//! `<name> Project` folder, or a project folder that's already there).
+//! Tests can pass a store of their own.
 
-use std::path::{Path, PathBuf};
+use std::ffi::OsStr;
+use std::io;
+use std::path::{Component, Path, PathBuf};
 
 use bl_model::{Editor, TrackId, TrackKind, registry};
-use bl_project::{Media, Project, SetFile};
+use bl_project::{
+    Media, MediaPath, MediaRef, Project, ProjectFolder, SET_EXTENSION, SetFile, is_set,
+};
 use serde_json::json;
 
 /// Reads and writes set files, and remembers the open set's file between
@@ -28,14 +34,30 @@ pub trait SetStore {
 
     /// Writes the editor's document to `path`, replacing any file there:
     /// the open set's next revision when `path` is its file, otherwise a
-    /// new file, which becomes the open set's. Returns warnings about
-    /// things that went wrong without stopping the save.
+    /// new file, which becomes the open set's. Save Set uses it with the
+    /// set's own file. Returns warnings about things that went wrong
+    /// without stopping the save.
     ///
     /// # Errors
     ///
     /// A message saying why the set couldn't be written. Nothing at `path`
     /// changes, and the store's open set is unchanged.
     fn save(&mut self, path: &Path, editor: &Editor) -> Result<Vec<String>, String>;
+
+    /// Saves the editor's document where Save Set As puts a set the person
+    /// asked to save at `chosen` (a path from a save dialog, or an agent's),
+    /// which may be inside a new project folder rather than at `chosen`
+    /// itself. The saved file becomes the open set's. Returns the file's
+    /// path and warnings about things that went wrong without stopping the
+    /// save.
+    ///
+    /// # Errors
+    ///
+    /// A message saying why the set couldn't be written. No set file
+    /// changes, no new project folder is left behind, and the store's open
+    /// set is unchanged.
+    fn save_as(&mut self, chosen: &Path, editor: &Editor)
+    -> Result<(PathBuf, Vec<String>), String>;
 
     /// Forgets the open set's file, as a new set has none.
     fn close(&mut self);
@@ -76,7 +98,50 @@ impl SetStore for ProjectFiles {
     }
 
     fn save(&mut self, path: &Path, editor: &Editor) -> Result<Vec<String>, String> {
-        let project = Project::from_editor(editor, self.media.clone());
+        self.write(path, editor, self.media.clone())
+    }
+
+    fn save_as(
+        &mut self,
+        chosen: &Path,
+        editor: &Editor,
+    ) -> Result<(PathBuf, Vec<String>), String> {
+        let placement = place_set(chosen)?;
+        let mut media = self.media.clone();
+        let note = match &self.set {
+            Some(set) => repoint_media(
+                &mut media,
+                set.folder().root(),
+                ProjectFolder::of_set(&placement.path).root(),
+            ),
+            None => None,
+        };
+        match self.write(&placement.path, editor, media) {
+            Ok(mut warnings) => {
+                warnings.extend(note);
+                Ok((placement.path, warnings))
+            }
+            Err(error) => {
+                if let Some(folder) = &placement.new_folder {
+                    // Spec: app-shell R20. Only an empty folder can go, so
+                    // this never removes anything but what the save made.
+                    let _ = std::fs::remove_dir(folder);
+                }
+                Err(error)
+            }
+        }
+    }
+
+    fn close(&mut self) {
+        self.set = None;
+        self.media = Media::new();
+    }
+}
+
+impl ProjectFiles {
+    /// Saves to `path` with this media table, which becomes the open set's.
+    fn write(&mut self, path: &Path, editor: &Editor, media: Media) -> Result<Vec<String>, String> {
+        let project = Project::from_editor(editor, media);
         let mut set = self
             .set
             .clone()
@@ -88,13 +153,176 @@ impl SetStore for ProjectFiles {
         }
         .map_err(|error| error.to_string())?;
         self.set = Some(set);
+        self.media = project.media;
         Ok(report.warnings)
     }
+}
 
-    fn close(&mut self) {
-        self.set = None;
-        self.media = Media::new();
+/// Where Save Set As puts a set: see [`place_set`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Placement {
+    /// The set file's path.
+    pub path: PathBuf,
+    /// The project folder the save makes, if the set doesn't join one
+    /// that's there already.
+    pub new_folder: Option<PathBuf>,
+}
+
+/// The most numbered project folders tried for one name (app-shell R20).
+const MOST_PROJECT_FOLDERS: u32 = 9_999;
+
+/// Where Save Set As puts a set the person asked to save at `chosen`
+/// (app-shell R17, R18, R20). The set's name is the chosen file's name
+/// without the `.blset` extension, which a name without it gets.
+///
+/// - If the chosen folder is a project folder, one with a set file
+///   directly inside it, the set joins that project: it's saved there as
+///   `<name>.blset`, replacing any set of that name (R18).
+/// - Otherwise the save makes a project folder for the set in the chosen
+///   folder, `<name> Project`, and saves it inside as `<name>.blset`
+///   (R17). If something already has that name, the folder is
+///   `<name> Project 2`, or the next number that's free (R20).
+///
+/// Nothing on disk changes: this only looks.
+///
+/// # Errors
+///
+/// A message saying why, if `chosen` names no file, or the chosen folder
+/// or the names in it can't be read.
+pub fn place_set(chosen: &Path) -> Result<Placement, String> {
+    let file = chosen
+        .file_name()
+        .and_then(OsStr::to_str)
+        .ok_or_else(|| format!("{} doesn't name a set file", chosen.display()))?;
+    let (name, file) = if is_set(chosen) {
+        let stem = chosen.file_stem().and_then(OsStr::to_str).unwrap_or(file);
+        (stem.to_owned(), file.to_owned())
+    } else {
+        (file.to_owned(), format!("{file}.{SET_EXTENSION}"))
+    };
+    let parent = chosen.parent().unwrap_or_else(|| Path::new(""));
+    if is_project_folder(parent)? {
+        return Ok(Placement {
+            path: parent.join(file),
+            new_folder: None,
+        });
     }
+    let folder = free_project_folder(parent, &name)?;
+    Ok(Placement {
+        path: folder.join(file),
+        new_folder: Some(folder),
+    })
+}
+
+/// Whether `folder` is a project folder: a folder with a set file directly
+/// inside it (app-shell R18). A folder that isn't there isn't one.
+fn is_project_folder(folder: &Path) -> Result<bool, String> {
+    let readable = if folder.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        folder
+    };
+    if !readable.is_dir() {
+        return Ok(false);
+    }
+    ProjectFolder::new(readable)
+        .sets()
+        .map(|sets| !sets.is_empty())
+        .map_err(|error| format!("couldn't read the folder {}: {error}", readable.display()))
+}
+
+/// The first of `<name> Project`, `<name> Project 2`, and so on that
+/// nothing in `parent` is called (app-shell R20).
+fn free_project_folder(parent: &Path, name: &str) -> Result<PathBuf, String> {
+    for n in 1..=MOST_PROJECT_FOLDERS {
+        let folder = if n == 1 {
+            ProjectFolder::named(parent, name).root().to_owned()
+        } else {
+            parent.join(format!("{name} Project {n}"))
+        };
+        // A link counts as taken even if it leads nowhere.
+        match std::fs::symlink_metadata(&folder) {
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(folder),
+            Err(error) => {
+                return Err(format!(
+                    "couldn't check for the project folder {}: {error}",
+                    folder.display()
+                ));
+            }
+        }
+    }
+    Err(format!(
+        "every name from \"{name} Project\" to \"{name} Project {MOST_PROJECT_FOLDERS}\" is taken in {}",
+        parent.display()
+    ))
+}
+
+/// Re-points the media table's paths, relative to the project folder
+/// `from`, so they're relative to `to` and name the same files (app-shell
+/// R21). Returns a note for the Status Bar if any path couldn't be.
+fn repoint_media(media: &mut Media, from: &Path, to: &Path) -> Option<String> {
+    let (Ok(from), Ok(to)) = (std::path::absolute(from), std::path::absolute(to)) else {
+        return (!media.is_empty()).then(|| {
+            "the media files' paths couldn't be re-pointed to the new project folder".to_owned()
+        });
+    };
+    let (from, to) = (lexical(&from), lexical(&to));
+    if from == to {
+        return None;
+    }
+    let mut stuck = 0usize;
+    let moved: Vec<MediaRef> = media
+        .iter()
+        .map(|file| {
+            let path = file
+                .path
+                .resolve(&from)
+                .and_then(|path| MediaPath::between(&to, &lexical(&path)));
+            if let Some(path) = path {
+                MediaRef {
+                    path,
+                    ..file.clone()
+                }
+            } else {
+                stuck += 1;
+                file.clone()
+            }
+        })
+        .collect();
+    for file in moved {
+        media.insert(file);
+    }
+    match stuck {
+        0 => None,
+        1 => {
+            Some("1 media file's path couldn't be re-pointed to the new project folder".to_owned())
+        }
+        n => Some(format!(
+            "{n} media files' paths couldn't be re-pointed to the new project folder"
+        )),
+    }
+}
+
+/// `path` with `.` dropped and each `..` taking off the name before it,
+/// from the path alone, as media paths are worked out.
+fn lexical(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => match out.components().next_back() {
+                Some(Component::Normal(_)) => {
+                    out.pop();
+                }
+                // `..` above the root is the root.
+                Some(Component::RootDir | Component::Prefix(_)) => {}
+                _ => out.push(".."),
+            },
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 /// The factory default set: two MIDI tracks, two audio tracks, and two
@@ -150,5 +378,20 @@ mod tests {
         assert_eq!(names, ["1 MIDI", "2 MIDI", "3 Audio", "4 Audio"]);
         assert_eq!(doc.returns().len(), 2);
         assert!(!editor.can_undo());
+    }
+
+    #[test]
+    fn lexical_paths_drop_dots_and_take_names_off_for_dot_dots() {
+        let lexical = |path: &str| lexical(Path::new(path));
+        assert_eq!(lexical("/a/b/../c/./d"), Path::new("/a/c/d"));
+        assert_eq!(lexical("/../a"), Path::new("/a"));
+        assert_eq!(lexical("../a/.."), Path::new(".."));
+        assert_eq!(lexical("a/../../b"), Path::new("../b"));
+    }
+
+    #[test]
+    fn a_path_that_names_no_file_has_no_place() {
+        assert!(place_set(Path::new("/")).is_err());
+        assert!(place_set(Path::new("")).is_err());
     }
 }

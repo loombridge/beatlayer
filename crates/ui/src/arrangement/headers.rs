@@ -1,0 +1,480 @@
+//! The Arrangement's track headers (L-ARR-006 to 009): each track's title
+//! in its colour with the fold button and name, then the In/Out and mixer
+//! columns and the meter (arrangement-view R3, R14). The In/Out and mixer
+//! controls are drawn where Live puts them and are inert until the packages
+//! that build them: the mixer (WP-1.6, WP-1.9) and recording (WP-2.13).
+
+use bl_model::{Track, TrackId, TrackKind};
+use bl_shell::Invocation;
+use bl_shell::arrangement_commands as ids;
+use egui::accesskit::Role;
+use egui::{
+    Align2, Color32, CursorIcon, Id, Rect, Sense, Shape, Stroke, StrokeKind, Ui, WidgetInfo,
+    WidgetType, pos2, vec2,
+};
+use serde_json::json;
+
+use crate::layout::header_columns::{IN_OUT, METER, MIXER, TITLE};
+use crate::main_window::UiEvent;
+use crate::theme::Theme;
+
+/// One header to draw.
+pub struct Header<'a> {
+    /// The track.
+    pub track: &'a Track,
+    /// The header's rectangle: the whole column for this row.
+    pub rect: Rect,
+    /// What its activator shows: the track's number, counting from 1, or a
+    /// return track's letter (L-MIX-003).
+    pub activator: String,
+    /// Its colour.
+    pub colour: Color32,
+    /// Whether it's folded.
+    pub folded: bool,
+    /// Whether it's selected.
+    pub selected: bool,
+    /// Whether its title bar is selected.
+    pub title_selected: bool,
+    /// Whether it can fold (the pinned Main track can't).
+    pub foldable: bool,
+    /// Whether its height can be dragged.
+    pub resizable: bool,
+}
+
+/// The ID of a track's title, for tests and focus.
+#[must_use]
+pub fn title_id(track: TrackId) -> Id {
+    Id::new(("arrangement-title", track))
+}
+
+/// The ID of a track's fold button.
+#[must_use]
+pub fn fold_id(track: TrackId) -> Id {
+    Id::new(("arrangement-fold", track))
+}
+
+/// The ID of the split line under a track's header, dragged to resize it.
+#[must_use]
+pub fn split_id(track: TrackId) -> Id {
+    Id::new(("arrangement-split", track))
+}
+
+fn invoke(events: &mut Vec<UiEvent>, id: &str, args: serde_json::Value) {
+    events.push(UiEvent::Invoke(Invocation::new(id, args)));
+}
+
+/// An inert control: drawn and named where Live has it, disabled, and
+/// saying which package brings it.
+#[expect(clippy::too_many_arguments, reason = "one control, described in full")]
+fn inert(
+    ui: &mut Ui,
+    theme: &Theme,
+    rect: Rect,
+    salt: (&str, TrackId),
+    role: Role,
+    name: &str,
+    text: &str,
+    package: &str,
+) {
+    let id = Id::new(salt);
+    let response = ui.interact(rect, id, Sense::hover());
+    let painter = ui.painter_at(rect.expand(1.0));
+    painter.rect(
+        rect,
+        theme.sizes.corner,
+        theme.colors.control.0.gamma_multiply(0.6),
+        Stroke::new(1.0, theme.colors.separator.0),
+        StrokeKind::Inside,
+    );
+    if !text.is_empty() {
+        painter.text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            text,
+            theme.small_font(),
+            theme.colors.pending.0,
+        );
+    }
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Other, false, name));
+    ui.ctx().accesskit_node_builder(id, |node| {
+        node.set_role(role);
+        node.set_label(name.to_owned());
+        if !text.is_empty() {
+            node.set_value(text.to_owned());
+        }
+        node.set_disabled();
+        node.set_description(format!("Not built yet: arrives with {package}."));
+    });
+}
+
+/// The volume as the mixer column shows it, in dB.
+#[must_use]
+pub fn volume_text(volume: f64) -> String {
+    if volume <= 0.0 {
+        "-inf".to_owned()
+    } else {
+        format!("{:.1}", 20.0 * volume.log10())
+    }
+}
+
+/// The pan as the mixer column shows it: C, or a number and L or R.
+#[must_use]
+pub fn pan_text(pan: f64) -> String {
+    let amount = (pan.abs() * 50.0).round() as i64;
+    match amount {
+        0 => "C".to_owned(),
+        _ if pan < 0.0 => format!("{amount}L"),
+        _ => format!("{amount}R"),
+    }
+}
+
+/// Draws one track's header and adds what the person did to `events`.
+#[expect(clippy::too_many_lines, reason = "the header's columns, left to right")]
+pub fn header(
+    ui: &mut Ui,
+    theme: &Theme,
+    header: &Header<'_>,
+    every_track: &[TrackId],
+    events: &mut Vec<UiEvent>,
+) {
+    let Header {
+        track,
+        rect,
+        ref activator,
+        colour,
+        folded,
+        selected,
+        title_selected,
+        foldable,
+        resizable,
+    } = *header;
+    let id = track.id();
+    let colors = &theme.colors;
+    let left = rect.left();
+    let column = |(x0, x1): (f32, f32), top: f32, bottom: f32| {
+        Rect::from_min_max(pos2(left + x0, top), pos2(left + x1, bottom))
+    };
+    let height = rect.height();
+    let title = column(TITLE, rect.top(), rect.bottom() - 1.0);
+    let painter = ui.painter_at(rect);
+
+    // The title, filled with the track's colour.
+    let fill = if selected {
+        colour
+    } else {
+        colour.gamma_multiply(0.82)
+    };
+    painter.rect_filled(title, 0.0, fill);
+    if title_selected {
+        painter.rect_stroke(
+            title.shrink(0.5),
+            0.0,
+            Stroke::new(1.0, colors.focus.0),
+            StrokeKind::Inside,
+        );
+    }
+    painter.line_segment(
+        [rect.left_bottom(), rect.right_bottom()],
+        Stroke::new(1.0, colors.lane_line.0),
+    );
+    let name = track.name();
+    let title_response = ui.interact(title, title_id(id), Sense::click());
+    if title_response.clicked() {
+        let add = ui.input(|i| i.modifiers.shift || i.modifiers.command);
+        invoke(
+            events,
+            ids::SELECT_TRACKS,
+            json!({ "tracks": [id], "add": add, "title_bars": true }),
+        );
+    }
+    title_response
+        .widget_info(|| WidgetInfo::selected(WidgetType::SelectableLabel, true, selected, name));
+    ui.ctx().accesskit_node_builder(title_response.id, |node| {
+        node.set_role(Role::RowHeader);
+        node.set_description(format!(
+            "{} track {activator}{}",
+            kind_word(track.kind()),
+            if folded { ", folded" } else { "" }
+        ));
+    });
+
+    if height < 12.0 {
+        return;
+    }
+    let row_top = rect.top() + 1.0;
+    // The fold button, then the name.
+    let mut name_left = title.left() + 4.0;
+    if foldable {
+        let fold = Rect::from_min_size(pos2(title.left() + 3.0, row_top + 2.0), vec2(11.0, 11.0));
+        let response = ui.interact(fold, fold_id(id), Sense::click());
+        let ink = colors.clip_text.0;
+        let c = fold.center();
+        let shape = if folded {
+            Shape::convex_polygon(
+                vec![
+                    pos2(c.x - 2.5, c.y - 4.0),
+                    pos2(c.x + 3.5, c.y),
+                    pos2(c.x - 2.5, c.y + 4.0),
+                ],
+                ink,
+                Stroke::NONE,
+            )
+        } else {
+            Shape::convex_polygon(
+                vec![
+                    pos2(c.x - 4.0, c.y - 2.5),
+                    pos2(c.x + 4.0, c.y - 2.5),
+                    pos2(c.x, c.y + 3.5),
+                ],
+                ink,
+                Stroke::NONE,
+            )
+        };
+        painter.add(shape);
+        if response.clicked() {
+            let all = ui.input(|i| i.modifiers.alt);
+            let tracks: Vec<TrackId> = if all { every_track.to_vec() } else { vec![id] };
+            invoke(
+                events,
+                ids::FOLD_TRACKS,
+                json!({ "tracks": tracks, "fold": !folded }),
+            );
+        }
+        response.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, folded, "Fold"));
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_description(format!(
+                "Folds {name} to its title row; with Option (Alt), every track"
+            ));
+        });
+        name_left = fold.right() + 3.0;
+    }
+    painter.with_clip_rect(title.shrink(1.0)).text(
+        pos2(name_left, row_top + 7.5),
+        Align2::LEFT_CENTER,
+        name,
+        theme.font(),
+        colors.clip_text.0,
+    );
+
+    // The split line under the header: drag to resize (I-DRAG-018).
+    if resizable && !folded {
+        let split = Rect::from_min_max(
+            pos2(title.left(), rect.bottom() - 3.0),
+            pos2(rect.right(), rect.bottom() + 1.0),
+        );
+        let response = ui
+            .interact(split, split_id(id), Sense::drag())
+            .on_hover_cursor(CursorIcon::ResizeVertical);
+        if response.drag_started() {
+            // The height when the drag began; the drag adds to it.
+            ui.data_mut(|d| d.insert_temp(split_id(id), height));
+        }
+        if response.dragged()
+            && let Some(pointer) = response.interact_pointer_pos()
+            && let Some(press) = ui.input(|i| i.pointer.press_origin())
+        {
+            let all = ui.input(|i| i.modifiers.alt);
+            let start = ui
+                .data(|d| d.get_temp::<f32>(split_id(id)))
+                .unwrap_or(height);
+            let new_height = f64::from(start + pointer.y - press.y);
+            let tracks: Vec<TrackId> = if all { every_track.to_vec() } else { vec![id] };
+            invoke(
+                events,
+                ids::SET_TRACK_HEIGHT,
+                json!({ "tracks": tracks, "height": new_height }),
+            );
+        }
+    }
+
+    // The mixer column's first row: activator, Solo, Arm (L-ARR-009).
+    let mixer = column(MIXER, row_top, row_top + 14.0);
+    let third = mixer.width() / 3.0;
+    let cell = |i: f32| {
+        Rect::from_min_max(
+            pos2(mixer.left() + third * i + 1.0, mixer.top()),
+            pos2(mixer.left() + third * (i + 1.0) - 1.0, mixer.bottom()),
+        )
+    };
+    let has_mute = track.kind().has_mute_and_solo();
+    if has_mute {
+        inert(
+            ui,
+            theme,
+            cell(0.0),
+            ("arrangement-activator", id),
+            Role::Button,
+            "Track Activator",
+            activator,
+            "WP-1.9",
+        );
+        inert(
+            ui,
+            theme,
+            cell(1.0),
+            ("arrangement-solo", id),
+            Role::Button,
+            "Solo",
+            "S",
+            "WP-1.9",
+        );
+    }
+    if track.kind().has_arm() {
+        inert(
+            ui,
+            theme,
+            cell(2.0),
+            ("arrangement-arm", id),
+            Role::Button,
+            "Arm Recording",
+            "●",
+            "WP-2.13",
+        );
+    }
+
+    // The meter (L-ARR-006).
+    let meter = column(METER, row_top, rect.bottom() - 2.0);
+    inert(
+        ui,
+        theme,
+        meter,
+        ("arrangement-meter", id),
+        Role::Meter,
+        "Track Meter",
+        "",
+        "WP-1.9",
+    );
+
+    if height < 36.0 || folded {
+        return;
+    }
+    // Second row: volume and pan; third: the sends (L-ARR-009).
+    let row2 = column(MIXER, row_top + 16.0, row_top + 30.0);
+    let half = row2.width() / 2.0;
+    let left_half = Rect::from_min_max(row2.min, pos2(row2.left() + half - 1.0, row2.bottom()));
+    let right_half = Rect::from_min_max(pos2(row2.left() + half + 1.0, row2.top()), row2.max);
+    inert(
+        ui,
+        theme,
+        left_half,
+        ("arrangement-volume", id),
+        Role::Slider,
+        "Track Volume",
+        &volume_text(track.mixer().volume),
+        "WP-1.9",
+    );
+    inert(
+        ui,
+        theme,
+        right_half,
+        ("arrangement-pan", id),
+        Role::Slider,
+        "Track Panning",
+        &pan_text(track.mixer().pan),
+        "WP-1.9",
+    );
+    if height >= 52.0 && track.kind() != TrackKind::Main {
+        let row3 = column(MIXER, row_top + 32.0, row_top + 46.0);
+        let a = Rect::from_min_max(row3.min, pos2(row3.left() + half - 1.0, row3.bottom()));
+        let b = Rect::from_min_max(pos2(row3.left() + half + 1.0, row3.top()), row3.max);
+        inert(
+            ui,
+            theme,
+            a,
+            ("arrangement-send-a", id),
+            Role::Slider,
+            "Send A",
+            "A",
+            "WP-2.19",
+        );
+        inert(
+            ui,
+            theme,
+            b,
+            ("arrangement-send-b", id),
+            Role::Slider,
+            "Send B",
+            "B",
+            "WP-2.19",
+        );
+    }
+
+    // The In/Out column (L-ARR-008), as many rows as fit.
+    let rows: &[(&str, &str, &str)] = match track.kind() {
+        TrackKind::Audio | TrackKind::Midi => &[
+            (
+                "arrangement-input-type",
+                "Input Type",
+                if track.kind() == TrackKind::Midi {
+                    "All Ins"
+                } else {
+                    "Ext. In"
+                },
+            ),
+            (
+                "arrangement-input-channel",
+                "Input Channel",
+                if track.kind() == TrackKind::Midi {
+                    "All Channels"
+                } else {
+                    "1/2"
+                },
+            ),
+            ("arrangement-monitor", "Monitor", "In Auto Off"),
+            ("arrangement-output-type", "Output Type", "Main"),
+            ("arrangement-output-channel", "Output Channel", ""),
+        ],
+        TrackKind::Group | TrackKind::Return => {
+            &[("arrangement-output-type", "Output Type", "Main")]
+        }
+        TrackKind::Main => &[("arrangement-output-type", "Output Type", "1/2")],
+    };
+    for (i, (salt, name, text)) in rows.iter().enumerate() {
+        let top = row_top + 16.0 * i as f32;
+        if top + 14.0 > rect.bottom() - 2.0 {
+            break;
+        }
+        let cell = column(IN_OUT, top, top + 14.0);
+        let package = if *salt == "arrangement-monitor" || salt.starts_with("arrangement-input") {
+            "WP-2.13"
+        } else {
+            "WP-1.6"
+        };
+        inert(
+            ui,
+            theme,
+            cell,
+            (salt, id),
+            Role::ComboBox,
+            name,
+            text,
+            package,
+        );
+    }
+}
+
+/// The word for a track's kind, for assistive technology.
+fn kind_word(kind: TrackKind) -> &'static str {
+    match kind {
+        TrackKind::Audio => "Audio",
+        TrackKind::Midi => "MIDI",
+        TrackKind::Group => "Group",
+        TrackKind::Return => "Return",
+        TrackKind::Main => "Main",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mixer_values_read_as_live_shows_them() {
+        assert_eq!(volume_text(1.0), "0.0");
+        assert_eq!(volume_text(0.5), "-6.0");
+        assert_eq!(volume_text(0.0), "-inf");
+        assert_eq!(pan_text(0.0), "C");
+        assert_eq!(pan_text(-0.5), "25L");
+        assert_eq!(pan_text(1.0), "50R");
+    }
+}

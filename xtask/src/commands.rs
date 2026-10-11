@@ -22,7 +22,9 @@ type Register = fn(&mut Registry) -> Result<(), RegisterError>;
 /// it starts registering commands, so they're checked and listed.
 const PROVIDERS: &[(&str, Register)] = &[
     ("bl-model", bl_model::registry::register),
+    ("bl-project", bl_project::registry::register),
     ("bl-engine", bl_engine::transport::register),
+    ("bl-shell-spec", bl_shell_spec::register),
 ];
 
 /// Regenerates `docs/commands.md`, after checking the registry.
@@ -81,7 +83,7 @@ fn build(root: &Path) -> Result<(Registry, String), String> {
 }
 
 /// Every registered command, from every provider.
-fn catalogue() -> Result<Registry, String> {
+pub fn catalogue() -> Result<Registry, String> {
     let mut registry = Registry::new();
     for (provider, register) in PROVIDERS {
         register(&mut registry).map_err(|e| format!("{provider}: {e}"))?;

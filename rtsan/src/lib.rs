@@ -12,6 +12,17 @@
 //! - `tests/engine.rs`: the engine's audio-thread work: 1,000 program swaps
 //!   with node migration, parameter changes, scheduled commands, node data,
 //!   and the state for the UI, every block a real-time section.
+//! - `tests/stream.rs`: disk streaming's audio-thread work: reads, jumps
+//!   that land in the look-ahead, a preload, a cue, or nowhere ready,
+//!   crossfades, and an underrun, every block a real-time section.
+//! - `tests/transport.rs`: the transport's audio-thread work: play, stop,
+//!   continue, the insert marker, commands on exact frames, the Arrangement
+//!   loop wrapping inside a tempo ramp, a tempo map swapped in during
+//!   playback, and the beat tone (WP-1.5).
+//! - `tests/mixer.rs`: the mixer's audio-thread work: volumes, pans, and
+//!   activators gliding, solo and Solo in Place, sends before and after the
+//!   fader, a program swap when a return's Pre/Post switch moves, and the
+//!   meters published after every block (WP-1.6).
 //! - `tests/clips.rs`: clip players reading looped, faded, and overlapping
 //!   clips, new clip lists swapped in as clips are edited (the old ones
 //!   freed by the collector), locates into clips, and tempo changes that

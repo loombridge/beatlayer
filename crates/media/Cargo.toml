@@ -9,7 +9,13 @@ publish.workspace = true
 
 [dependencies]
 bl-dsp.workspace = true
+# The lock-free logger, through which the disk thread reports underruns and
+# read failures (WP-1.3).
+bl-rt.workspace = true
 blake3 = { version = "1.8.7", default-features = false, features = ["std"] }
+# The background pool for peak builds: work stealing lets one long file use
+# every core while many short files build side by side.
+rayon = "1.12.0"
 # Pinned exactly: rubato had five major releases in 2026 (architecture, "Media
 # and warping"), and a resampler change alters every converted sample.
 rubato = { version = "=5.0.1", default-features = false, features = ["fft_resampler"] }
@@ -29,8 +35,19 @@ symphonia = { version = "0.6.1", default-features = false, features = [
     "id3v1",
     "id3v2",
 ] }
+# Disk streaming's queues between the disk thread and the audio thread
+# (WP-1.3, decision D14). The same version as the engine's.
+rtrb = "0.4.0"
 
 [dev-dependencies]
+# The 64-file streaming test plays through the null device, which counts
+# dropouts and heap use on its audio thread (WP-1.3).
+bl-audio-io.workspace = true
+# A locate through the engine's transport, played by a stand-in clip player
+# (WP-1.3; the real one is WP-1.4's).
+bl-core.workspace = true
+bl-engine.workspace = true
+bl-model.workspace = true
 # Spectra for the conversion and decode measurements.
 realfft = "3.5.0"
 serde_json = "1"

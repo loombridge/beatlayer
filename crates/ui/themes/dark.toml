@@ -1,0 +1,75 @@
+# Beatlayer's dark theme: its own colours, never Ableton's (D16, clean-room
+# policy). Every colour the UI draws comes from a token here; light.toml has
+# the same tokens. Colours are #RRGGBB.
+
+name = "Dark"
+dark = true
+
+[colors]
+# Behind everything: the margins between panes.
+window = "#15181c"
+# Panes: the browser, the main view, the detail area.
+panel = "#22262c"
+# The Control Bar and Status Bar strips.
+bar = "#1b1f24"
+# A control's face.
+control = "#2f353d"
+control_hover = "#3a414b"
+control_pressed = "#46505b"
+# A switch that's on, and text on it.
+accent = "#35c2b0"
+accent_text = "#08201d"
+# The record button when armed, and errors.
+record = "#e5534b"
+error_text = "#ff8a80"
+# Text.
+text = "#e4e8ee"
+text_dim = "#9aa4b0"
+# Controls that later packages bring to life: drawn, but quieter.
+pending = "#5d6670"
+# Lines between parts of a pane.
+separator = "#0f1114"
+# The keyboard focus ring.
+focus = "#79c0ff"
+# Meters.
+meter = "#5ccf8a"
+meter_hot = "#f2c14e"
+# The Arrangement View (WP-1.8a). Track lanes, the selected tracks' lanes,
+# and the lines between tracks.
+lane = "#2a2f36"
+lane_selected = "#323944"
+lane_line = "#1d2126"
+# Grid lines: at each bar, and between.
+grid_bar = "#3c434d"
+grid_beat = "#323840"
+# The rulers and the scrub area, and their tick marks.
+ruler = "#262a30"
+ruler_tick = "#6b7580"
+# The playhead and the insert marker.
+playhead = "#f2f4f7"
+insert_marker = "#79c0ff"
+# The loop brace while the loop is on, and while it's off.
+loop_on = "#35c2b0"
+loop_off = "#59626d"
+# The time selection, drawn translucent over the lanes.
+time_selection = "#9fc8ff"
+# A clip's name, over its colour, and its waveform.
+clip_text = "#101317"
+waveform = "#14181d"
+# A deactivated clip.
+clip_muted = "#6a717a"
+# The Overview's outline round the part in view.
+overview_outline = "#e4e8ee"
+# Beatlayer's own track colours, given to new tracks in turn.
+track_palette = [
+  "#e0675a", "#e8945a", "#e6c35c", "#a8c95a", "#5fbf6e", "#4fbfa3", "#4fb0d6",
+  "#5b8ce0", "#7f74db", "#a46bd6", "#d46bb8", "#d9708a", "#9aa6b2", "#c2a382",
+]
+
+[sizes]
+# Text sizes in points.
+text = 11.0
+small_text = 10.0
+heading = 12.0
+# Corner radius of controls.
+corner = 2.0

@@ -31,6 +31,7 @@ use std::sync::OnceLock;
 
 use bl_commands::{CommandSpec, Permission, Registry};
 use bl_shell::Shell;
+use bl_shell::permission::CallPermission;
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -141,10 +142,72 @@ pub(crate) enum ToolOutcome {
 /// Classes as the person reads them, such as "destructive and external".
 pub(crate) fn class_names(classes: &[Permission]) -> String {
     let names: Vec<&str> = classes.iter().map(|class| class.id()).collect();
-    match names.as_slice() {
+    and_list(&names)
+}
+
+/// Items as a sentence lists them: "a", "a and b", "a, b and c".
+fn and_list<T: AsRef<str>>(items: &[T]) -> String {
+    match items {
         [] => String::new(),
-        [one] => (*one).to_owned(),
-        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+        [one] => one.as_ref().to_owned(),
+        [rest @ .., last] => {
+            let rest: Vec<&str> = rest.iter().map(AsRef::as_ref).collect();
+            format!("{} and {}", rest.join(", "), last.as_ref())
+        }
+    }
+}
+
+/// A line of the person's question: the command's label, the classes it
+/// asks for, its arguments, and the clips it would replace or shorten, by
+/// name (spec: agent-permissions R4).
+pub(crate) fn question_line(
+    shell: &Shell,
+    label: &str,
+    call: &CallPermission,
+    args: &Value,
+) -> String {
+    let asking: Vec<Permission> = call
+        .classes()
+        .into_iter()
+        .filter(|class| class.asks_first())
+        .collect();
+    let classes = class_names(&asking);
+    let args = describe_args(shell, args);
+    let mut line = if args.is_empty() {
+        format!("{label} ({classes})")
+    } else {
+        format!("{label} ({classes}): {args}")
+    };
+    let replaced = replaced_clips(shell, call);
+    if !replaced.is_empty() {
+        line.push_str(". ");
+        line.push_str(&replaced);
+    }
+    line
+}
+
+/// The clips a call would replace or shorten, named as the question names
+/// clips: the dry run's `replaces`, as a sentence. Empty if there are none.
+fn replaced_clips(shell: &Shell, call: &CallPermission) -> String {
+    if call.replaces.is_empty() {
+        return String::new();
+    }
+    let document = shell.editor().document();
+    let names: Vec<String> = call
+        .replaces
+        .iter()
+        .map(|clip| match document.clip(*clip) {
+            Some(found) if !found.name.is_empty() => {
+                format!("clip \u{201c}{}\u{201d}", found.name)
+            }
+            _ => format!("clip {}", clip.0),
+        })
+        .collect();
+    let names = and_list(&names);
+    if call.may {
+        format!("It may replace or shorten {names}.")
+    } else {
+        format!("It replaces or shortens {names}.")
     }
 }
 

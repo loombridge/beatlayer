@@ -407,6 +407,189 @@ fn describe_says_which_commands_rise_with_their_arguments() {
     assert!(split.get("raised_by_arguments").is_none());
 }
 
+#[test]
+fn a_confirmation_names_the_clips_a_call_would_replace_or_shorten() {
+    // Spec: agent-permissions R4. A on bars 1 and 2; B on bar 5; C on
+    // bars 6 and 7. A moved to bar 5 covers B and the start of C.
+    let mut client = app();
+    let midi = track(&mut client, "1 MIDI");
+    let a = clip(&mut client, midi, "A", 0, 2);
+    let b = clip(&mut client, midi, "B", 4, 1);
+    let c = clip(&mut client, midi, "C", 5, 2);
+    let over = json!({ "clips": [a], "to": "5.1.1" });
+    assert!(attempt(&mut client, "arrangement.move_clips", &over).asked);
+    let asked = client.transport().asked.last().unwrap().clone();
+    assert!(
+        asked.contains(
+            "Move Clips (destructive): clips (…), to \u{201c}5.1.1\u{201d}. It replaces or \
+             shortens clip \u{201c}B\u{201d} and clip \u{201c}C\u{201d}."
+        ),
+        "{asked}"
+    );
+    // The same clips the dry run lists.
+    let dry = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "arrangement.move_clips", "args": over }],
+                "dry_run": true }),
+    );
+    assert_eq!(dry["results"][0]["replaces"], json!([b, c]));
+
+    // Scheduled, it names them too.
+    let result = client
+        .call(
+            "schedule",
+            json!({ "action": "add", "at": "2.1.1", "command": "arrangement.move_clips",
+                    "args": over }),
+        )
+        .unwrap();
+    assert!(result.is_error && result.text.contains("declined"));
+    let asked = client.transport().asked.last().unwrap().clone();
+    assert!(
+        asked.starts_with("\u{201c}editor\u{201d} wants to run destructive command:"),
+        "{asked}"
+    );
+    assert!(
+        asked.contains("At 2.1.1: Move Clips (destructive): ")
+            && asked.contains(
+                "It replaces or shortens clip \u{201c}B\u{201d} and clip \u{201c}C\u{201d}."
+            ),
+        "{asked}"
+    );
+
+    // A drop may replace them: its files' lengths aren't known yet.
+    let audio = track(&mut client, "3 Audio");
+    clip(&mut client, audio, "Held", 4, 2);
+    let path = std::env::temp_dir().join("bl-agent-permissions-never-read.wav");
+    let drop = json!({ "paths": [path.to_string_lossy()], "at": 5 * BAR, "track": audio });
+    assert!(attempt(&mut client, "browser.add_to_arrangement", &drop).asked);
+    let asked = client.transport().asked.last().unwrap().clone();
+    assert!(
+        asked.contains("It may replace or shorten clip \u{201c}Held\u{201d}."),
+        "{asked}"
+    );
+
+    // A call that replaces nothing says nothing of the kind.
+    let went = attempt(&mut client, "track.delete", &json!({ "track": midi }));
+    assert!(went.asked);
+    let asked = client.transport().asked.last().unwrap().clone();
+    assert!(!asked.contains("replace"), "{asked}");
+}
+
+/// Notes for a MIDI clip: `count` of them, a beat apart.
+fn notes(count: u64) -> Value {
+    let beat = BAR / 4;
+    let notes: Vec<Value> = (0..count)
+        .map(|n| json!({ "key": 60 + n, "velocity": 100, "start": n * beat, "length": beat }))
+        .collect();
+    json!({ "midi": { "notes": notes } })
+}
+
+#[test]
+fn an_agent_s_clip_set_data_that_drops_notes_asks_first_and_one_that_adds_notes_doesn_t() {
+    // Spec: agent-permissions R11. Decided against the clip as it is.
+    let mut client = app();
+    let midi = track(&mut client, "1 MIDI");
+    let bass = clip(&mut client, midi, "Bass", 0, 1);
+    let set = |count: u64| json!({ "clip": bass, "data": notes(count) });
+
+    // From none to three: it adds notes, so it's an edit.
+    let went = attempt(&mut client, "clip.set_data", &set(3));
+    assert_eq!(
+        went,
+        Went {
+            asked: false,
+            permission: "edit".to_owned()
+        }
+    );
+    // Three to four adds; four different notes keep the count.
+    assert!(!attempt(&mut client, "clip.set_data", &set(4)).asked);
+    let moved: Vec<Value> = (0..4u64)
+        .map(|n| json!({ "key": 48 + n, "velocity": 90, "start": n * BAR / 8, "length": BAR / 8 }))
+        .collect();
+    let same_count = json!({ "clip": bass, "data": { "midi": { "notes": moved } } });
+    assert!(!attempt(&mut client, "clip.set_data", &same_count).asked);
+
+    // Four to two drops notes: destructive, and the person is asked.
+    let went = attempt(&mut client, "clip.set_data", &set(2));
+    assert_eq!(
+        went,
+        Went {
+            asked: true,
+            permission: "edit and destructive".to_owned()
+        }
+    );
+    let asked = client.transport().asked.last().unwrap().clone();
+    assert!(
+        asked.contains("wants to run destructive command:")
+            && asked.contains("Replace Clip Contents (destructive): clip \u{201c}Bass\u{201d}"),
+        "{asked}"
+    );
+    let dry = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "clip.set_data", "args": set(2) }],
+                "dry_run": true }),
+    );
+    assert_eq!(dry["results"][0]["permission"], "edit and destructive");
+    assert_eq!(
+        dry["results"][0]["fewer_notes"],
+        json!({ "clip": bass, "has": 4, "leaves": 2 })
+    );
+    // In a batch, the batch asks.
+    let batch = client
+        .call(
+            "run",
+            json!({ "commands": [
+                { "command": "clip.rename", "args": { "clip": bass, "name": "Bass 2" } },
+                { "command": "clip.set_data", "args": set(0) }] }),
+        )
+        .unwrap();
+    assert!(
+        batch.is_error && batch.text.contains("declined"),
+        "{}",
+        batch.text
+    );
+
+    // Allowed, it replaces the notes as the agent's undo step.
+    client.transport().answer = Box::new(|_| true);
+    let result = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "clip.set_data", "args": set(2) }] }),
+    );
+    assert_eq!(result["asked_first"], true);
+    let doc = client.transport().shell.editor().document().clone();
+    let Some(bl_model::ClipData::Midi(data)) = doc.clip(clip_id(bass)).map(|c| c.data.clone())
+    else {
+        panic!("Bass is a MIDI clip")
+    };
+    assert_eq!(data.notes.len(), 2);
+
+    // Tempo and time signatures keep their class.
+    for command in ["song.set_tempo", "song.set_time_signatures"] {
+        let described = call(
+            &mut client,
+            "describe_command",
+            json!({ "command": command }),
+        );
+        assert!(described.get("raised_by_arguments").is_none(), "{command}");
+        assert_eq!(described["permission"], "edit", "{command}");
+    }
+    let described = call(
+        &mut client,
+        "describe_command",
+        json!({ "command": "clip.set_data" }),
+    );
+    assert!(
+        described["raised_by_arguments"]
+            .as_str()
+            .unwrap()
+            .contains("fewer notes"),
+        "{described}"
+    );
+}
+
 /// The agent API driven as the app's host drives it, without a client:
 /// the session's messages go to `Agent::handle`, and calls that wait are
 /// resumed with `Agent::resume`.

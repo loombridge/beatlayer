@@ -8,15 +8,17 @@
 //! resizing, nudging, duplicating, or pasting clips, and dropping files from
 //! the browser, can delete or shorten clips the call doesn't name. Such a
 //! call is destructive as well as its registered class; the same call into
-//! empty space isn't. [`assess`] decides which, and the agent API asks the
-//! person first when the answer is destructive. The edit itself is the
-//! same either way: permissions only decide who must agree to it.
+//! empty space isn't. Likewise `clip.set_data` that would leave a MIDI
+//! clip fewer notes than it has deletes notes (WP-1.15c). [`assess`] decides
+//! which, and the agent API asks the person first when the answer is
+//! destructive. The edit itself is the same either way: permissions only
+//! decide who must agree to it.
 
 use std::collections::BTreeSet;
 
 use bl_commands::Permission;
 use bl_core::time::Ticks;
-use bl_model::{ClipId, Document, Editor, TrackId, TrackKind};
+use bl_model::{ClipData, ClipId, Document, Editor, TrackId, TrackKind};
 use bl_shell_spec::browser::{self as browser_ids, AddToArrangementArgs};
 use bl_shell_spec::editing as edit_ids;
 use serde_json::Value;
@@ -24,9 +26,14 @@ use serde_json::Value;
 use crate::arrangement::ArrangementView;
 use crate::arrangement::editing::{self, Clipboard};
 
+/// `clip.set_data`: replaces what a clip plays, for a MIDI clip its whole
+/// list of notes.
+pub const SET_CLIP_DATA: &str = "clip.set_data";
+
 /// The commands whose class can rise with their arguments: each is
 /// destructive as well as its registered class when it would delete or
-/// shorten clips it doesn't act on.
+/// shorten clips it doesn't act on, or, for `clip.set_data`, leave a MIDI
+/// clip fewer notes than it has.
 pub const RAISED_BY_ARGUMENTS: &[&str] = &[
     edit_ids::MOVE_CLIPS,
     edit_ids::RESIZE_CLIPS,
@@ -35,6 +42,7 @@ pub const RAISED_BY_ARGUMENTS: &[&str] = &[
     edit_ids::PASTE,
     browser_ids::ADD_TO_ARRANGEMENT,
     browser_ids::LOAD_SELECTED,
+    SET_CLIP_DATA,
 ];
 
 /// Whether `id`'s class can rise with its arguments.
@@ -56,6 +64,20 @@ pub struct CallPermission {
     /// it will: a drop from the browser, whose clips' lengths come from
     /// files that aren't read until the person allows it.
     pub may: bool,
+    /// The MIDI clip the call would leave fewer notes than it has
+    /// (`clip.set_data`), if it would.
+    pub fewer_notes: Option<FewerNotes>,
+}
+
+/// A MIDI clip a call would leave fewer notes than it has.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FewerNotes {
+    /// The clip.
+    pub clip: ClipId,
+    /// How many notes it has.
+    pub has: usize,
+    /// How many it would have.
+    pub leaves: usize,
 }
 
 impl CallPermission {
@@ -66,22 +88,30 @@ impl CallPermission {
             registered: class,
             replaces: Vec::new(),
             may: false,
+            fewer_notes: None,
         }
     }
 
-    /// Whether the call deletes or shortens other material, so it's
-    /// destructive.
+    /// Whether its arguments make the call destructive whatever its
+    /// registered class: it replaces other clips, or leaves a clip fewer
+    /// notes.
+    fn deletes_material(&self) -> bool {
+        !self.replaces.is_empty() || self.fewer_notes.is_some()
+    }
+
+    /// Whether the call deletes or shortens other material, or deletes
+    /// notes, so it's destructive.
     #[must_use]
     pub fn is_destructive(&self) -> bool {
-        self.registered == Permission::Destructive || !self.replaces.is_empty()
+        self.registered == Permission::Destructive || self.deletes_material()
     }
 
     /// Every class the call needs, least reach first: its registered class,
-    /// and destructive when it replaces other clips.
+    /// and destructive when it replaces other clips or deletes notes.
     #[must_use]
     pub fn classes(&self) -> Vec<Permission> {
         let mut classes = vec![self.registered];
-        if !self.replaces.is_empty() && !classes.contains(&Permission::Destructive) {
+        if self.deletes_material() && !classes.contains(&Permission::Destructive) {
             classes.push(Permission::Destructive);
         }
         classes.sort_unstable();
@@ -106,10 +136,10 @@ pub(crate) struct Scene<'a> {
 }
 
 /// Decides what calling `id` with `args` needs, against the document as it
-/// is. An Arrangement edit is tried in a transaction that's then cancelled,
-/// so nothing changes; a drop from the browser is judged without reading
-/// its files. A call that would fail needs only its registered class: it
-/// changes nothing.
+/// is. An Arrangement edit, or `clip.set_data`, is tried in a transaction
+/// that's then cancelled, so nothing changes; a drop from the browser is
+/// judged without reading its files. A call that would fail needs only its
+/// registered class: it changes nothing.
 pub(crate) fn assess(
     id: &str,
     args: &Value,
@@ -137,6 +167,7 @@ pub(crate) fn assess(
             });
             dropped(doc, track, scene.insert_marker, registered)
         }
+        SET_CLIP_DATA => notes_set(args, registered, scene.editor),
         _ => tried(id, args, registered, scene),
     }
 }
@@ -165,6 +196,38 @@ fn dropped(
         registered,
         replaces,
         may: true,
+        fewer_notes: None,
+    }
+}
+
+/// `clip.set_data`, tried and cancelled: destructive when it would leave a
+/// MIDI clip fewer notes than it has. Adding notes, keeping their count, or
+/// replacing an audio clip's file keeps its registered class.
+fn notes_set(args: &Value, registered: Permission, editor: &mut Editor) -> CallPermission {
+    let unchanged = CallPermission::registered(registered);
+    let Some(clip) = args
+        .get("clip")
+        .and_then(|clip| serde_json::from_value::<ClipId>(clip.clone()).ok())
+    else {
+        return unchanged;
+    };
+    let notes = |doc: &Document| match doc.clip(clip).map(|clip| &clip.data) {
+        Some(ClipData::Midi(midi)) => Some(midi.notes.len()),
+        _ => None,
+    };
+    let Some(has) = notes(editor.document()) else {
+        return unchanged;
+    };
+    editor.begin("Check a call's permission");
+    let ran = bl_model::registry::run(editor, SET_CLIP_DATA, args.clone()).is_ok();
+    let leaves = notes(editor.document());
+    editor.cancel().ok();
+    match leaves {
+        Some(leaves) if ran && leaves < has => CallPermission {
+            fewer_notes: Some(FewerNotes { clip, has, leaves }),
+            ..unchanged
+        },
+        _ => unchanged,
     }
 }
 
@@ -223,6 +286,7 @@ fn tried(id: &str, args: &Value, registered: Permission, scene: Scene<'_>) -> Ca
         registered,
         replaces,
         may: false,
+        fewer_notes: None,
     }
 }
 
@@ -236,6 +300,7 @@ mod tests {
             registered: Permission::External,
             replaces: vec![ClipId(bl_core::id::Id::new(4).unwrap())],
             may: true,
+            fewer_notes: None,
         };
         assert_eq!(
             call.classes(),
@@ -251,6 +316,19 @@ mod tests {
             ..edit
         };
         assert_eq!(moved.class(), Permission::Destructive);
+        let thinned = CallPermission {
+            fewer_notes: Some(FewerNotes {
+                clip: ClipId(bl_core::id::Id::new(4).unwrap()),
+                has: 8,
+                leaves: 3,
+            }),
+            ..CallPermission::registered(Permission::Edit)
+        };
+        assert_eq!(
+            thinned.classes(),
+            [Permission::Edit, Permission::Destructive]
+        );
+        assert!(thinned.is_destructive());
     }
 
     #[test]
@@ -258,11 +336,14 @@ mod tests {
         for id in RAISED_BY_ARGUMENTS {
             assert!(raised_by_arguments(id));
         }
+        assert!(raised_by_arguments(SET_CLIP_DATA));
         for id in [
             edit_ids::SPLIT,
             edit_ids::DELETE,
             edit_ids::COPY,
             "clip.create",
+            "song.set_tempo",
+            "song.set_time_signatures",
         ] {
             assert!(!raised_by_arguments(id), "{id}");
         }

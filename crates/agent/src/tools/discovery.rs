@@ -77,10 +77,18 @@ fn access(ctx: &Ctx<'_>, spec: &CommandSpec) -> &'static str {
 /// What raises a command's class with its arguments, for the commands
 /// whose class can rise (WP-1.15b).
 fn raised(spec: &CommandSpec) -> Option<&'static str> {
-    bl_shell::permission::raised_by_arguments(&spec.id).then_some(
+    use bl_shell::permission::{SET_CLIP_DATA, raised_by_arguments};
+    if !raised_by_arguments(&spec.id) {
+        return None;
+    }
+    Some(if spec.id == SET_CLIP_DATA {
+        "destructive as well when it would leave a MIDI clip fewer notes than it has, deleting \
+         the rest, so it then asks the person first unless you're autonomous; adding notes or \
+         keeping their count doesn't; a dry run says which"
+    } else {
         "destructive as well when it would place clips over others, deleting or shortening \
-         them, so it then asks the person first unless you're autonomous; a dry run says which",
-    )
+         them, so it then asks the person first unless you're autonomous; a dry run says which"
+    })
 }
 
 /// The first sentence of a description.

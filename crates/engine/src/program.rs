@@ -7,6 +7,7 @@ use core::ops::Range;
 use bl_core::time::{SampleRate, TempoMap};
 use bl_model::{ParamId, TrackId};
 
+use crate::mixer::{MeterReading, Route, TrackMixer};
 use crate::node::{Block, Node, NodeEvent, NodeKey, ParamValue, TransportInfo};
 
 /// A compiled song, ready to run on the audio thread: a flat array of
@@ -15,14 +16,20 @@ use crate::node::{Block, Node, NodeEvent, NodeKey, ParamValue, TransportInfo};
 ///
 /// # Tasks
 ///
-/// The unit of work is a task: one track's device chain, run in place on
-/// the track's own buffer after the buffers that feed it (a group's tracks,
-/// or Main's) are summed into it. A task can start once every task feeding
-/// it has finished, so the tasks form a dependency graph. Each task lists
-/// the tasks waiting on it and how many it waits on, which is what a pool of
-/// real-time workers needs to take ready tasks from a queue (the multicore
-/// scheduler, a later package). For now the audio thread runs them alone, in
-/// a topological order the compiler worked out.
+/// The unit of work is a task: one track, run in place on the track's own
+/// buffer. A task sums its inputs into its buffer (a group's tracks, Main's
+/// top-level tracks and returns, or a return's sends), each through a
+/// [`Route`] whose gain solo and send levels set; runs the track's device
+/// chain; and then its [`TrackMixer`] (pan, volume, the activator, the
+/// meters). A task whose track feeds a pre-fader send first keeps a copy of
+/// its chain's output for the send to read (`docs/specs/mixer.md`).
+///
+/// A task can start once every task feeding it has finished, so the tasks
+/// form a dependency graph. Each task lists the tasks waiting on it and how
+/// many it waits on, which is what a pool of real-time workers needs to take
+/// ready tasks from a queue (the multicore scheduler, a later package). For
+/// now the audio thread runs them alone, in a topological order the compiler
+/// worked out.
 ///
 /// # Migration
 ///
@@ -30,8 +37,9 @@ use crate::node::{Block, Node, NodeEvent, NodeKey, ParamValue, TransportInfo};
 /// its slot in the new program empty and lists where it was in the program
 /// before. When the audio thread swaps the new program in, it moves each
 /// surviving node across, which moves a pointer and allocates nothing, so
-/// the node keeps its state. Whatever is left in the old program goes with
-/// it to the drop thread.
+/// the node keeps its state: a device its tail, a mixer its gains and
+/// meters, a route a glide in progress. Whatever is left in the old program
+/// goes with it to the drop thread.
 pub struct EngineProgram {
     pub(crate) generation: u64,
     /// The generation whose nodes this one takes over.
@@ -43,9 +51,9 @@ pub struct EngineProgram {
     pub(crate) tasks: Vec<Task>,
     /// The order the audio thread runs the tasks in.
     pub(crate) order: Vec<u32>,
-    /// Tasks whose buffers each task sums before running its chain.
-    pub(crate) task_inputs: Vec<u32>,
-    /// Slots each task runs, in chain order.
+    /// What each task sums into its buffer before running its chain.
+    pub(crate) task_inputs: Vec<Input>,
+    /// Device slots each task runs, in chain order.
     pub(crate) task_nodes: Vec<u32>,
     /// Tasks waiting on each task. The single-threaded schedule runs `order`
     /// instead; the worker pool (a later package) will walk these.
@@ -53,22 +61,42 @@ pub struct EngineProgram {
     pub(crate) task_dependents: Vec<u32>,
     /// One buffer per task: `channels` channels of `max_frames` frames each.
     pub(crate) pool: Vec<f32>,
+    /// One buffer per task that feeds a pre-fader send, holding its chain's
+    /// output from before its mixer.
+    pub(crate) pre_pool: Vec<f32>,
     pub(crate) channels: usize,
     pub(crate) max_frames: usize,
     /// The task whose buffer is the engine's output: Main's.
     pub(crate) output: u32,
     pub(crate) tempo: TempoMap,
     pub(crate) sample_rate: SampleRate,
-    /// Each task's peak in the current block, per channel (the first two).
-    pub(crate) peaks: Vec<[f32; 2]>,
-    /// Each task's meter: peaks with a fixed release.
-    pub(crate) meters: Vec<[f32; 2]>,
+}
+
+/// What can sit in a program's slot.
+pub(crate) enum Instance {
+    /// A device's node, run in its track's chain.
+    Device(Box<dyn Node>),
+    /// A track's mixer, run after its chain.
+    Mixer(Box<TrackMixer>),
+    /// A route into a track's input: an output or a send.
+    Route(Box<Route>),
+}
+
+impl Instance {
+    /// The instance as a node, if it processes a track's buffer in place.
+    fn as_node(&mut self) -> Option<&mut (dyn Node + 'static)> {
+        match self {
+            Self::Device(node) => Some(node.as_mut()),
+            Self::Mixer(mixer) => Some(mixer.as_mut()),
+            Self::Route(_) => None,
+        }
+    }
 }
 
 /// A node in a program, or the place for one that migrates in.
 pub(crate) struct NodeSlot {
     pub(crate) key: NodeKey,
-    pub(crate) node: Option<Box<dyn Node>>,
+    pub(crate) node: Option<Instance>,
     /// Switched off: the node keeps its state and takes parameter changes,
     /// but doesn't process.
     pub(crate) bypass: bool,
@@ -94,12 +122,29 @@ impl Span {
     }
 }
 
-/// One track's chain.
+/// One input of a task: another task's signal through a route.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Input {
+    /// The slot of the route's gain.
+    pub(crate) route: u32,
+    /// The task whose signal it carries.
+    pub(crate) from: u32,
+    /// Whether it takes that task's signal from before its mixer (a
+    /// pre-fader send) rather than after.
+    pub(crate) pre: bool,
+}
+
+/// One track.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Task {
     pub(crate) track: TrackId,
     pub(crate) inputs: Span,
+    /// The device chain.
     pub(crate) nodes: Span,
+    /// The slot of the track's mixer.
+    pub(crate) mixer: u32,
+    /// The task's buffer in `pre_pool`, if a pre-fader send reads it.
+    pub(crate) pre: Option<u32>,
     pub(crate) dependents: Span,
     /// How many tasks feed this one.
     pub(crate) dependencies: u32,
@@ -123,6 +168,30 @@ impl Resolved {
     }
 }
 
+/// Puts into `scratch` the changes in `events` (sorted by slot, then frame)
+/// for `slot` that land in `from..until`, with offsets from `from`. Returns
+/// how many there are.
+fn gather(
+    events: &[Resolved],
+    slot: u32,
+    from: u32,
+    until: u32,
+    scratch: &mut Vec<NodeEvent>,
+) -> u64 {
+    scratch.clear();
+    let first = events.partition_point(|e| e.slot < slot);
+    for event in events[first..].iter().take_while(|e| e.slot == slot) {
+        if (from..until).contains(&event.offset) && scratch.len() < scratch.capacity() {
+            scratch.push(NodeEvent {
+                offset: event.offset - from,
+                param: event.param,
+                value: event.value,
+            });
+        }
+    }
+    scratch.len() as u64
+}
+
 impl EngineProgram {
     /// The program's number: each compile makes the next one.
     #[must_use]
@@ -136,7 +205,8 @@ impl EngineProgram {
         self.base
     }
 
-    /// The nodes in the program, including those that migrate in.
+    /// The nodes in the program, including those that migrate in: every
+    /// device, track mixer, output, and send.
     #[must_use]
     pub fn node_count(&self) -> usize {
         self.slots.len()
@@ -159,7 +229,7 @@ impl EngineProgram {
         self.index.iter().map(|&(key, _)| key)
     }
 
-    /// The tracks, in the order the audio thread runs their chains.
+    /// The tracks, in the order the audio thread runs them.
     pub fn track_order(&self) -> impl ExactSizeIterator<Item = TrackId> + '_ {
         self.order
             .iter()
@@ -180,11 +250,21 @@ impl EngineProgram {
             .map(|i| self.index[i].1)
     }
 
-    /// The node in `slot`, if it has one.
+    /// The node in `slot`, if it has one that processes a track's buffer.
     pub(crate) fn node_mut(&mut self, slot: u32) -> Option<&mut (dyn Node + 'static)> {
         self.slots
             .get_mut(slot as usize)
-            .and_then(|slot| slot.node.as_deref_mut())
+            .and_then(|slot| slot.node.as_mut())
+            .and_then(Instance::as_node)
+    }
+
+    /// The meters of a task's track.
+    pub(crate) fn meters(&self, task: u32) -> MeterReading {
+        let mixer = self.tasks[task as usize].mixer as usize;
+        match self.slots.get(mixer).and_then(|slot| slot.node.as_ref()) {
+            Some(Instance::Mixer(mixer)) => mixer.meters(),
+            _ => MeterReading::default(),
+        }
     }
 
     /// Moves the nodes that survive from `old` into this program. Real-time
@@ -210,8 +290,9 @@ impl EngineProgram {
 
     /// Runs every task over `frames` frames, the part of the device block
     /// that starts at `from`. `events` are the block's changes, sorted by
-    /// slot then frame; each node gets those in its part, `scratch` holding
-    /// them. Returns how many changes reached a node.
+    /// slot then frame; each node and route gets those in its part,
+    /// `scratch` holding them. Returns how many changes reached a node or a
+    /// route.
     pub(crate) fn run(
         &mut self,
         frames: usize,
@@ -221,7 +302,8 @@ impl EngineProgram {
         transport: TransportInfo,
     ) -> u64 {
         let frames = frames.min(self.max_frames);
-        let size = self.channels * self.max_frames;
+        let (channels, stride) = (self.channels, self.max_frames);
+        let size = channels * stride;
         let until = from + frames as u32;
         let mut delivered = 0;
         for position in 0..self.order.len() {
@@ -229,66 +311,101 @@ impl EngineProgram {
             let task = self.tasks[t];
             let own = t * size..(t + 1) * size;
 
-            // Sum the inputs into the task's own buffer.
-            for c in 0..self.channels {
-                let start = own.start + c * self.max_frames;
+            // Sum the inputs into the task's own buffer, each through its
+            // route.
+            for c in 0..channels {
+                let start = own.start + c * stride;
                 self.pool[start..start + frames].fill(0.0);
             }
             for &input in &self.task_inputs[task.inputs.range()] {
-                let theirs = input as usize * size..(input as usize + 1) * size;
-                let Ok([mine, theirs]) = self.pool.get_disjoint_mut([own.clone(), theirs]) else {
+                delivered += gather(events, input.route, from, until, scratch);
+                let Some(Some(Instance::Route(route))) = self
+                    .slots
+                    .get_mut(input.route as usize)
+                    .map(|slot| slot.node.as_mut())
+                else {
                     continue;
                 };
-                for c in 0..self.channels {
-                    let at = c * self.max_frames..c * self.max_frames + frames;
-                    for (sum, sample) in mine[at.clone()].iter_mut().zip(&theirs[at]) {
-                        *sum += *sample;
+                let source = input.from as usize;
+                let pre = if input.pre {
+                    self.tasks[source].pre
+                } else {
+                    None
+                };
+                match pre {
+                    Some(buffer) => {
+                        let theirs = buffer as usize * size..(buffer as usize + 1) * size;
+                        route.mix(
+                            &mut self.pool[own.clone()],
+                            &self.pre_pool[theirs],
+                            channels,
+                            stride,
+                            frames,
+                            scratch,
+                        );
+                    }
+                    None => {
+                        let theirs = source * size..(source + 1) * size;
+                        let Ok([mine, theirs]) = self.pool.get_disjoint_mut([own.clone(), theirs])
+                        else {
+                            continue;
+                        };
+                        route.mix(mine, theirs, channels, stride, frames, scratch);
                     }
                 }
             }
 
             // Run the chain in place.
             for &slot in &self.task_nodes[task.nodes.range()] {
+                delivered += gather(events, slot, from, until, scratch);
                 let NodeSlot { node, bypass, .. } = &mut self.slots[slot as usize];
-                let Some(node) = node.as_deref_mut() else {
+                let Some(node) = node.as_mut().and_then(Instance::as_node) else {
                     continue;
                 };
-                scratch.clear();
-                let first = events.partition_point(|e| e.slot < slot);
-                for event in events[first..].iter().take_while(|e| e.slot == slot) {
-                    if (from..until).contains(&event.offset) && scratch.len() < scratch.capacity() {
-                        scratch.push(NodeEvent {
-                            offset: event.offset - from,
-                            param: event.param,
-                            value: event.value,
-                        });
-                    }
-                }
-                delivered += scratch.len() as u64;
                 if *bypass {
                     node.flush(scratch);
                     continue;
                 }
-                let mut block = Block {
+                node.process(&mut Block {
                     data: &mut self.pool[own.clone()],
-                    channels: self.channels,
+                    channels,
                     frames,
-                    stride: self.max_frames,
+                    stride,
                     events: scratch.as_slice(),
                     transport,
                     sample_rate: self.sample_rate,
                     tempo: &self.tempo,
-                };
-                node.process(&mut block);
+                });
             }
 
-            // Meter the result.
-            for (c, peak) in self.peaks[t].iter_mut().enumerate().take(self.channels) {
-                let start = own.start + c * self.max_frames;
-                let block_peak = self.pool[start..start + frames]
-                    .iter()
-                    .fold(0.0f32, |p, s| p.max(s.abs()));
-                *peak = peak.max(block_peak);
+            // Keep the chain's output for pre-fader sends.
+            if let Some(buffer) = task.pre {
+                let kept = buffer as usize * size;
+                for c in 0..channels {
+                    let at = c * stride;
+                    let mine = own.start + at;
+                    self.pre_pool[kept + at..kept + at + frames]
+                        .copy_from_slice(&self.pool[mine..mine + frames]);
+                }
+            }
+
+            // The track's mixer.
+            delivered += gather(events, task.mixer, from, until, scratch);
+            if let Some(Some(Instance::Mixer(mixer))) = self
+                .slots
+                .get_mut(task.mixer as usize)
+                .map(|slot| slot.node.as_mut())
+            {
+                mixer.process(&mut Block {
+                    data: &mut self.pool[own.clone()],
+                    channels,
+                    frames,
+                    stride,
+                    events: scratch.as_slice(),
+                    transport,
+                    sample_rate: self.sample_rate,
+                    tempo: &self.tempo,
+                });
             }
         }
         delivered
@@ -298,17 +415,6 @@ impl EngineProgram {
     pub(crate) fn output(&self, c: usize, frames: usize) -> &[f32] {
         let start = self.output as usize * self.channels * self.max_frames + c * self.max_frames;
         &self.pool[start..start + frames.min(self.max_frames)]
-    }
-
-    /// Ends a block's metering: each meter takes its peak, or falls by
-    /// `release` (a factor below 1) if that's higher.
-    pub(crate) fn finish_meters(&mut self, release: f32) {
-        for (meter, peak) in self.meters.iter_mut().zip(self.peaks.iter_mut()) {
-            for c in 0..2 {
-                meter[c] = peak[c].max(meter[c] * release);
-                peak[c] = 0.0;
-            }
-        }
     }
 
     /// The order a pool of workers would finish the tasks in if each took

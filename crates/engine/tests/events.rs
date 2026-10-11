@@ -6,7 +6,7 @@ bl_rt::install_trap!();
 
 mod common;
 
-use bl_engine::nodes::fader;
+use bl_engine::mixer;
 use bl_engine::{NodeKey, ParamEvent, ParamValue, When, testing};
 use bl_model::{Command, TrackKind};
 use common::{Rig, dc, key, track};
@@ -37,7 +37,7 @@ fn a_parameter_change_lands_on_its_frame() {
 }
 
 #[test]
-fn mixer_edits_reach_the_fader_without_a_recompile() {
+fn mixer_edits_reach_the_mixer_without_a_recompile() {
     let mut rig = Rig::new(64);
     let a = track(&mut rig.editor, TrackKind::Midi, None);
     dc(&mut rig.editor, a, 1.0);
@@ -51,18 +51,21 @@ fn mixer_edits_reach_the_fader_without_a_recompile() {
     });
     assert!(!synced.program);
     assert_eq!(synced.params, 1);
-    rig.block(64);
-    // From the first frame of the next block.
-    assert!(rig.last().iter().all(|&s| s == 0.5));
+    // From the first frame of the next block, the gain glides down for
+    // 20 ms (960 frames) and rests at the new volume.
+    let out = rig.render(1024, 64);
+    assert!(out[0] < 1.0 && out[0] > 0.999, "{}", out[0]);
+    assert!(out[..960].windows(2).all(|w| w[1] < w[0]));
+    assert!(out[959..].iter().all(|&s| s == 0.5));
 
     rig.apply(Command::SetMute {
         track: a,
         mute: true,
     });
-    rig.block(64);
+    rig.render(1024, 64);
     assert!(rig.last().iter().all(|&s| s == 0.0));
 
-    // Main's fader too.
+    // Main's mixer too.
     rig.apply(Command::SetMute {
         track: a,
         mute: false,
@@ -72,7 +75,7 @@ fn mixer_edits_reach_the_fader_without_a_recompile() {
         track: main,
         volume: 0.25,
     });
-    rig.block(64);
+    rig.render(1024, 64);
     assert!(rig.last().iter().all(|&s| s == 0.125));
     assert_eq!(rig.monitor.state().swaps, 1);
 }
@@ -135,9 +138,9 @@ fn a_default_value_and_a_change_for_a_missing_node() {
         value: ParamValue::Default,
         at: When::Now,
     });
-    let gone = NodeKey::Fader(rig.editor.new_id());
+    let gone = NodeKey::Mixer(rig.editor.new_id());
     rig.sender
-        .send_param(ParamEvent::now(gone, fader::VOLUME, 0.0));
+        .send_param(ParamEvent::now(gone, mixer::track::VOLUME, 0.0));
     rig.block(64);
     assert!(
         rig.last().iter().all(|&s| s == 0.0),

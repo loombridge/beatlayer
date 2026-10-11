@@ -7,9 +7,10 @@
 //! migrations, as the song [`fixture_project`] builds. Fixtures are never
 //! rewritten once merged; a new schema version adds its own.
 //!
-//! Version 1 is the first, so no migration exists yet. `schema-0-fake.json`
-//! is an invented version 0, with a migration to version 1 defined below,
-//! to show the scaffold carries an old file through to the current model.
+//! Version 1 is the first. Version 2 (WP-1.4b) moved audio clips' offsets
+//! into their Start markers. `schema-0-fake.json` is an invented version 0,
+//! with a migration to version 1 defined below, to show the scaffold carries
+//! an old file through to the current model.
 
 use std::path::{Path, PathBuf};
 
@@ -429,11 +430,15 @@ fn fake_v0_to_v1(mut value: Value) -> Result<Value, String> {
     Ok(value)
 }
 
-static FAKE_MIGRATIONS: &[Migration] = &[Migration {
-    from: 0,
-    summary: "an invented version 0, to test the scaffold",
-    apply: fake_v0_to_v1,
-}];
+static FAKE_MIGRATIONS: &[Migration] = &[
+    Migration {
+        from: 0,
+        summary: "an invented version 0, to test the scaffold",
+        apply: fake_v0_to_v1,
+    },
+    // Then the real chain from version 1.
+    MIGRATIONS[0],
+];
 
 /// The scaffold migrates an old file: the invented version 0 fixture loads
 /// as the fixture song once its migration is in the chain.

@@ -12,12 +12,13 @@
 //! for ever, and a merged migration is never edited without the reason in the
 //! pull request.
 
-use serde_json::Value;
+use bl_core::time::{TempoMap, Ticks};
+use serde_json::{Map, Value};
 
 use crate::error::LoadError;
 
 /// The schema version this build writes, and the newest it can read.
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// The oldest schema version this build can read, through [`MIGRATIONS`].
 pub const OLDEST_SCHEMA_VERSION: u32 = SCHEMA_VERSION - MIGRATIONS.len() as u32;
@@ -28,9 +29,12 @@ const _: () = assert!(OLDEST_SCHEMA_VERSION >= 1);
 
 /// Every migration, oldest first: the one at index `i` reads version
 /// [`OLDEST_SCHEMA_VERSION`]` + i`.
-///
-/// Version 1 is the first, so there are none yet.
-pub const MIGRATIONS: &[Migration] = &[];
+pub const MIGRATIONS: &[Migration] = &[Migration {
+    from: 1,
+    summary: "an audio clip's offset into its file becomes part of its Start marker, as Live \
+              moves the marker when a clip is split or its left edge trimmed",
+    apply: audio_offsets_to_start_markers,
+}];
 
 /// One step from a schema version to the next.
 #[derive(Clone, Copy, Debug)]
@@ -46,6 +50,109 @@ pub struct Migration {
     /// It must be a pure function of its input. It needn't touch the
     /// `schema` field, which the loader sets after each step.
     pub apply: fn(Value) -> Result<Value, String>,
+}
+
+/// Version 1 to 2 (WP-1.4b): an audio clip trimmed or split in version 1
+/// kept an `offset` in ticks, how far into its contents it started, which
+/// played its file that much later than its Start marker. Version 2 moves
+/// the Start marker instead, as Live does (the audio clips spec, R16): by
+/// the time from where the contents began to the clip's start under the
+/// set's tempo map, which plays the same audio at the same moments. A MIDI
+/// clip keeps its offset.
+fn audio_offsets_to_start_markers(mut value: Value) -> Result<Value, String> {
+    let document = value
+        .get_mut("document")
+        .and_then(Value::as_object_mut)
+        .ok_or("the set has no document")?;
+    let tempo = document
+        .get("settings")
+        .and_then(|settings| settings.get("tempo"))
+        .cloned()
+        .ok_or("the document has no tempo map")?;
+    let tempo: TempoMap =
+        serde_json::from_value(tempo).map_err(|e| format!("the tempo map doesn't read: {e}"))?;
+    for list in ["tracks", "returns"] {
+        if let Some(tracks) = document.get_mut(list).and_then(Value::as_array_mut) {
+            for track in tracks {
+                fold_track(track, &tempo)?;
+            }
+        }
+    }
+    if let Some(main) = document.get_mut("main") {
+        fold_track(main, &tempo)?;
+    }
+    Ok(value)
+}
+
+/// Folds the offsets of `track`'s audio clips, and its children's, into
+/// their Start markers.
+fn fold_track(track: &mut Value, tempo: &TempoMap) -> Result<(), String> {
+    if let Some(clips) = track.get_mut("clips").and_then(Value::as_array_mut) {
+        for clip in clips.iter_mut().filter_map(Value::as_object_mut) {
+            fold_clip(clip, tempo)?;
+        }
+    }
+    if let Some(children) = track.get_mut("children").and_then(Value::as_array_mut) {
+        for child in children {
+            fold_track(child, tempo)?;
+        }
+    }
+    Ok(())
+}
+
+fn fold_clip(clip: &mut Map<String, Value>, tempo: &TempoMap) -> Result<(), String> {
+    let Some(offset) = clip.get("offset") else {
+        return Ok(());
+    };
+    let offset = offset
+        .as_i64()
+        .ok_or("a clip's offset isn't a whole number")?;
+    let start = clip
+        .get("start")
+        .and_then(Value::as_i64)
+        .ok_or("a clip's start isn't a whole number")?;
+    let Some(audio) = clip
+        .get_mut("data")
+        .and_then(|data| data.get_mut("audio"))
+        .and_then(Value::as_object_mut)
+    else {
+        return Ok(());
+    };
+    let marker = match audio.get("start") {
+        None => 0.0,
+        Some(marker) => marker
+            .as_f64()
+            .ok_or("an audio clip's Start marker isn't a number")?,
+    };
+    let contents = Ticks(start.saturating_sub(offset));
+    let mut marker =
+        marker + (tempo.ticks_to_seconds(Ticks(start)) - tempo.ticks_to_seconds(contents));
+    // A looped clip's marker wraps back inside its loop brace, as a trim
+    // does in version 2; a brace to the file's end has no known length.
+    let looping = audio.get("looping").and_then(Value::as_bool) == Some(true);
+    let loop_start = audio
+        .get("loop_start")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0);
+    if let (true, Some(loop_end)) = (looping, audio.get("loop_end").and_then(Value::as_f64)) {
+        let length = loop_end - loop_start;
+        if length > 0.0 && marker >= loop_end {
+            let into = (marker - loop_end).rem_euclid(length);
+            marker = loop_start + if into < length { into } else { 0.0 };
+        }
+    }
+    if marker == 0.0 {
+        audio.remove("start");
+    } else {
+        audio.insert(
+            "start".to_owned(),
+            serde_json::Number::from_f64(marker)
+                .map(Value::Number)
+                .ok_or("an audio clip's Start marker isn't finite")?,
+        );
+    }
+    clip.remove("offset");
+    Ok(())
 }
 
 /// Runs the migrations in `chain` from version `from` up to
@@ -99,6 +206,69 @@ mod tests {
         }
     }
 
+    // Spec: audio-clips R16
+    #[test]
+    fn audio_offsets_become_start_markers_and_midi_offsets_stay() {
+        let tick = |quarters: i64| Ticks::QUARTER.get() * quarters;
+        let audio = |offset: Option<i64>, marker: Option<f64>| {
+            let mut data = json!({ "media": "07".repeat(32) });
+            if let Some(marker) = marker {
+                data["start"] = json!(marker);
+            }
+            let mut clip = json!({ "id": 9, "name": "", "start": tick(6), "length": tick(4),
+                                   "mute": false, "data": { "audio": data } });
+            if let Some(offset) = offset {
+                clip["offset"] = json!(offset);
+            }
+            clip
+        };
+        let set = |clips: Vec<Value>| {
+            json!({ "schema": 1, "document": {
+                "settings": { "tempo": [{ "kind": "constant", "start": 0, "bpm": 120.0 }] },
+                "tracks": [{ "id": 2, "children": [{ "id": 3, "clips": clips }] }],
+                "returns": [],
+                "main": { "id": 1 },
+            } })
+        };
+        let midi = json!({ "id": 10, "name": "", "start": tick(2), "length": tick(4),
+                           "offset": tick(1), "mute": false, "data": { "midi": { "notes": [] } } });
+        let before = set(vec![
+            audio(Some(tick(2)), None),
+            audio(Some(tick(1)), Some(0.25)),
+            audio(None, Some(0.75)),
+            midi.clone(),
+        ]);
+        let after = audio_offsets_to_start_markers(before).unwrap();
+        let clips = &after["document"]["tracks"][0]["children"][0]["clips"];
+        // Two quarters at 120 BPM is a second, one is half a second.
+        assert_eq!(clips[0], audio(None, Some(1.0)));
+        assert_eq!(clips[1], audio(None, Some(0.75)));
+        assert_eq!(clips[2], audio(None, Some(0.75)));
+        assert_eq!(clips[3], midi);
+        // A looped clip's marker wraps inside its brace: three quarters (1.5
+        // seconds) in, past a brace from 0.25 to 1.25, is 0.5.
+        let mut looped = audio(Some(tick(3)), None);
+        looped["data"]["audio"]["looping"] = json!(true);
+        looped["data"]["audio"]["loop_start"] = json!(0.25);
+        looped["data"]["audio"]["loop_end"] = json!(1.25);
+        let after = audio_offsets_to_start_markers(set(vec![looped.clone()])).unwrap();
+        let mut expected = looped;
+        expected.as_object_mut().unwrap().remove("offset");
+        expected["data"]["audio"]["start"] = json!(0.5);
+        assert_eq!(
+            after["document"]["tracks"][0]["children"][0]["clips"][0],
+            expected
+        );
+        // A file the migration can't read says why.
+        assert!(audio_offsets_to_start_markers(json!({})).is_err());
+        let bad = json!({ "document": { "settings": { "tempo": "fast" } } });
+        assert!(
+            audio_offsets_to_start_markers(bad)
+                .unwrap_err()
+                .contains("tempo")
+        );
+    }
+
     #[test]
     fn current_files_need_no_migration() {
         let value = json!({"schema": SCHEMA_VERSION, "x": 1});
@@ -116,7 +286,9 @@ mod tests {
 
     #[test]
     fn each_step_sets_the_schema_and_failures_name_their_version() {
-        const STEPS: &[Migration] = &[Migration {
+        // An invented step from version 0, then steps that change nothing
+        // up to the current version.
+        let mut steps = vec![Migration {
             from: 0,
             summary: "adds a field",
             apply: |mut value| {
@@ -124,8 +296,13 @@ mod tests {
                 Ok(value)
             },
         }];
-        let migrated = run(json!({"schema": 0}), 0, STEPS).unwrap();
-        assert_eq!(migrated, json!({"schema": 1, "added": true}));
+        steps.extend((1..SCHEMA_VERSION).map(|from| Migration {
+            from,
+            summary: "changes nothing",
+            apply: Ok,
+        }));
+        let migrated = run(json!({"schema": 0}), 0, &steps).unwrap();
+        assert_eq!(migrated, json!({"schema": SCHEMA_VERSION, "added": true}));
 
         const FAILS: &[Migration] = &[Migration {
             from: 0,

@@ -409,10 +409,9 @@ mod tests {
     fn format_and_schema_come_first() {
         let json = encode_json(&song(), 1).unwrap();
         let text = String::from_utf8(json).unwrap();
-        assert!(
-            text.starts_with(r#"{"format":"beatlayer-set","schema":1,"revision":1,"#),
-            "{text}"
-        );
+        let start =
+            format!(r#"{{"format":"beatlayer-set","schema":{SCHEMA_VERSION},"revision":1,"#);
+        assert!(text.starts_with(&start), "{text}");
     }
 
     #[test]

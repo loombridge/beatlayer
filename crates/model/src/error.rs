@@ -63,6 +63,12 @@ pub enum ModelError {
     /// A clip would start before its contents begin: its offset into them
     /// would be negative.
     NegativeOffset(Ticks),
+    /// An audio clip's left edge would move so far earlier that its Start
+    /// marker would go this many seconds before the start of its file.
+    BeforeFileStart(f64),
+    /// An audio clip has an offset into its contents. Its Start marker says
+    /// where it starts playing, so its offset is always 0.
+    AudioClipOffset(Ticks),
     /// A position or length is too large to represent.
     PositionOverflow,
     /// A number is out of range or not finite.
@@ -109,6 +115,16 @@ impl fmt::Display for ModelError {
                 f,
                 "the clip would start {} ticks before its contents begin",
                 offset.get().unsigned_abs()
+            ),
+            Self::BeforeFileStart(seconds) => write!(
+                f,
+                "the clip would start {seconds} seconds before the start of its file"
+            ),
+            Self::AudioClipOffset(offset) => write!(
+                f,
+                "an audio clip's offset must be 0, not {} ticks: its Start marker says where in \
+                 its file it starts playing",
+                offset.get()
             ),
             Self::PositionOverflow => f.write_str("position is too large"),
             Self::InvalidValue { what, value } => write!(f, "{what} {value} is out of range"),

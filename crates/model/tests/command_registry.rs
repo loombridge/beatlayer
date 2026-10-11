@@ -262,7 +262,8 @@ fn every_command_runs_by_id() {
         panic!("{clip:?}");
     };
     assert_eq!(midi.notes.len(), 2);
-    // Trimming the left edge keeps the end and the contents in place.
+    // Trimming the left edge keeps the end and the contents in place: an
+    // audio clip's Start marker moves on by the time of a quarter note.
     agent.run(
         "clip.trim_start",
         json!({ "clip": loop_clip, "start": quarter }),
@@ -270,7 +271,15 @@ fn every_command_runs_by_id() {
     let trimmed = agent.editor.document().clip(loop_clip).unwrap();
     assert_eq!(
         (trimmed.start.0, trimmed.end().0, trimmed.offset.0),
-        (quarter, bar, quarter)
+        (quarter, bar, 0)
+    );
+    let ClipData::Audio(audio) = &trimmed.data else {
+        panic!("{trimmed:?}");
+    };
+    let tempo = &agent.editor.document().settings().tempo;
+    assert_eq!(
+        audio.start,
+        tempo.ticks_to_seconds(bl_core::time::Ticks(quarter))
     );
     // An audio clip's settings (WP-1.4).
     agent.run(

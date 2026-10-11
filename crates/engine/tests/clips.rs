@@ -14,9 +14,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use bl_core::time::{Bpm, Frames, SampleRate, TempoMap, Ticks};
 use bl_engine::{
-    ClipSource, EngineConfig, MediaLibrary, MediaMap, Offline, Registry, TransportCommand, When,
+    EngineConfig, MediaLibrary, MediaMap, Offline, OpenedSource, Registry, TransportCommand, When,
 };
-use bl_media::{MediaStore, SampleData, convert_sample_rate};
+use bl_media::{MediaStore, MemorySource, SampleData, convert_sample_rate};
 use bl_model::{
     AudioData, Clip, ClipData, ClipId, Command, ContentHash, Editor, TrackId, TrackKind,
 };
@@ -93,9 +93,10 @@ fn frames_at(tempo: &TempoMap, ticks: Ticks) -> usize {
     usize::try_from(tempo.ticks_to_frames(ticks, RATE).get()).unwrap()
 }
 
-// A clip split in two, or trimmed at its left edge (WP-1.8b), keeps its
-// contents where they were: its offset says how far into them it starts, so
-// the parts together play exactly what the whole clip played.
+// Spec: audio-clips R16. A clip split in two, or trimmed at its left edge
+// (WP-1.8b), keeps its contents where they were: its Start marker moves on
+// by the time its start did, as Live's does, so the parts together play
+// exactly what the whole clip played.
 #[test]
 fn a_split_clips_parts_play_on_from_where_the_whole_clip_was() {
     let tempo = TempoMap::default();
@@ -117,9 +118,11 @@ fn a_split_clips_parts_play_on_from_where_the_whole_clip_was() {
     let mut parts = Editor::new();
     let b = track(&mut parts, TrackKind::Audio, None);
     clip(&mut parts, b, start, split - start, audio);
-    let right = parts.new_id();
-    let mut piece = Clip::new(right, split, start + length - split, ClipData::Audio(audio));
-    piece.offset = split - start;
+    let whole = Clip::new(parts.new_id(), start, length, ClipData::Audio(audio));
+    let piece = Clip {
+        id: parts.new_id(),
+        ..whole.part(split, whole.end(), &tempo)
+    };
     parts
         .apply(Command::CreateClip {
             track: b,
@@ -133,6 +136,110 @@ fn a_split_clips_parts_play_on_from_where_the_whole_clip_was() {
     let first = frames_at(&tempo, split);
     let into = first - frames_at(&tempo, start) + 12_000;
     assert_eq!(left[first], at(into as i64));
+}
+
+// Spec: audio-clips R16; arrangement-editing R7, R8, R16. Under a tempo
+// ramp, at a rate whose frames don't fall on ticks, a clip split anywhere
+// or trimmed at its left edge plays, at every frame, exactly what the whole
+// clip played there, looped or not: its Start marker moved by the time its
+// start did, as Live's does.
+#[test]
+fn trimmed_and_split_clips_play_exactly_what_the_whole_clip_did() {
+    let tempo = TempoMap::from_breakpoints([
+        (Ticks::ZERO, Bpm::new(97.3).unwrap()),
+        (Ticks::WHOLE * 2, Bpm::new(141.1).unwrap()),
+    ])
+    .unwrap();
+    let rate = SampleRate::HZ_44100;
+    let mut media = MediaMap::new();
+    media.insert(hash(1), ramp(400_000, 48_000));
+    let render = |editor: &Editor| {
+        let registry = Registry::new().with_media(Arc::new(media.clone()));
+        let mut offline = Offline::new(EngineConfig::new(rate, 300), registry);
+        offline.sync(editor.document());
+        offline.sender().transport(TransportCommand::Play);
+        let mut left = Vec::new();
+        offline.render(350_000, |output| left.extend_from_slice(output.channel(0)));
+        assert_eq!(offline.heap_operations(), 0);
+        left
+    };
+    let looped = AudioData {
+        start: 0.0123,
+        looping: true,
+        loop_start: 0.5,
+        loop_end: Some(0.81),
+        ..AudioData::new(hash(1))
+    };
+    let unlooped = AudioData {
+        start: 0.0371,
+        end: Some(5.0),
+        ..AudioData::new(hash(1))
+    };
+    let start = Ticks::QUARTER + Ticks(3_141);
+    let length = Ticks::WHOLE * 2 + Ticks(2_718);
+    for (round, audio) in [looped, unlooped].into_iter().enumerate() {
+        let song = |edit: &dyn Fn(&mut Editor, TrackId, ClipId)| {
+            let mut editor = Editor::new();
+            editor
+                .apply(Command::SetTempo {
+                    tempo: tempo.clone(),
+                })
+                .unwrap();
+            let a = track(&mut editor, TrackKind::Audio, None);
+            let id = clip(&mut editor, a, start, length, audio);
+            edit(&mut editor, a, id);
+            editor
+        };
+        let expected = render(&song(&|_, _, _| {}));
+        assert!(expected.iter().any(|&s| s != 0.0));
+        for i in 1..6_i64 {
+            let at = start + Ticks(length.get() * i / 6 + 977 * i);
+            // Split at `at`: the left part keeps the start, the right part
+            // is the whole clip's part from there.
+            let split = render(&song(&|editor, a, id| {
+                let whole = editor.document().clip(id).unwrap().clone();
+                let right = Clip {
+                    id: editor.new_id(),
+                    ..whole.part(at, whole.end(), &tempo)
+                };
+                editor
+                    .apply(Command::SetClipLength {
+                        clip: id,
+                        length: at - start,
+                    })
+                    .unwrap();
+                editor
+                    .apply(Command::CreateClip {
+                        track: a,
+                        clip: right,
+                    })
+                    .unwrap();
+            }));
+            assert_eq!(split, expected, "{round}: split at {at:?}");
+            // Trimmed from the left to `at`, then the part before added
+            // back as a clip of its own.
+            let trimmed = render(&song(&|editor, a, id| {
+                let whole = editor.document().clip(id).unwrap().clone();
+                editor
+                    .apply(Command::TrimClipStart {
+                        clip: id,
+                        start: at,
+                    })
+                    .unwrap();
+                let left = Clip {
+                    id: editor.new_id(),
+                    ..whole.part(start, at, &tempo)
+                };
+                editor
+                    .apply(Command::CreateClip {
+                        track: a,
+                        clip: left,
+                    })
+                    .unwrap();
+            }));
+            assert_eq!(trimmed, expected, "{round}: trimmed to {at:?}");
+        }
+    }
 }
 
 // Spec: audio-clips R1, R2, R5
@@ -515,23 +622,15 @@ fn clip_edits_reach_the_player_without_a_program() {
     assert_eq!(rig.monitor.state().counters.data_unrouted, 0);
 }
 
-/// A source that counts its drops.
+/// Audio that counts its drops.
 struct Counted {
     data: SampleData,
     dropped: Arc<AtomicUsize>,
 }
 
-impl ClipSource for Counted {
-    fn channels(&self) -> usize {
-        self.data.channel_count()
-    }
-
-    fn frames(&self) -> u64 {
-        self.data.frames() as u64
-    }
-
-    fn read(&self, channel: usize, position: u64, out: &mut [f32]) {
-        self.data.read(channel, position, out);
+impl AsRef<SampleData> for Counted {
+    fn as_ref(&self) -> &SampleData {
+        &self.data
     }
 }
 
@@ -541,19 +640,69 @@ impl Drop for Counted {
     }
 }
 
-/// A library that makes a new [`Counted`] source each time it's asked.
+/// A library that makes a new source over new [`Counted`] audio each time
+/// it's asked.
 struct Counting(Arc<AtomicUsize>);
 
 impl MediaLibrary for Counting {
-    fn audio(&self, _: ContentHash, _: SampleRate) -> Option<Arc<dyn ClipSource>> {
-        Some(Arc::new(Counted {
+    fn open(&self, _: ContentHash, _: SampleRate, _: u64) -> Option<OpenedSource> {
+        let counted = Counted {
             data: SampleData::new(48_000, vec![vec![0.5; 4_800]]).unwrap(),
             dropped: Arc::clone(&self.0),
-        }))
+        };
+        Some(OpenedSource {
+            source: Box::new(CountedSource {
+                inner: MemorySource::new(Arc::new(counted.data.clone())),
+                _counted: counted,
+            }),
+            cues: None,
+        })
     }
 }
 
-// Spec: audio-clips R13
+/// A source in memory that holds a [`Counted`], so dropping the source
+/// counts.
+struct CountedSource {
+    inner: MemorySource,
+    _counted: Counted,
+}
+
+impl bl_media::AudioSource for CountedSource {
+    fn channels(&self) -> usize {
+        self.inner.channels()
+    }
+    fn sample_rate(&self) -> u32 {
+        self.inner.sample_rate()
+    }
+    fn frames(&self) -> Option<u64> {
+        self.inner.frames()
+    }
+    fn position(&self) -> u64 {
+        self.inner.position()
+    }
+    fn read(
+        &mut self,
+        position: u64,
+        out: &mut bl_media::PlanarMut<'_>,
+        transition: bl_media::Transition,
+    ) -> bl_media::Filled {
+        self.inner.read(position, out, transition)
+    }
+    fn seek(&mut self, position: u64) {
+        self.inner.seek(position);
+    }
+    fn stop(&mut self) {
+        self.inner.stop();
+    }
+    fn buffered(&mut self) -> u64 {
+        self.inner.buffered()
+    }
+    fn stats(&self) -> bl_media::StreamStats {
+        self.inner.stats()
+    }
+}
+
+// Spec: audio-clips R13, R18
 #[test]
 fn the_audio_thread_never_frees_a_clips_media() {
     let dropped = Arc::new(AtomicUsize::new(0));
@@ -572,26 +721,27 @@ fn the_audio_thread_never_frees_a_clips_media() {
     rig.block(64);
     assert!(rig.last().iter().all(|&s| s == 0.5));
 
-    // A new list replaces the first: the audio thread lets go of the old
-    // list, and with it the last reference to its source, inside a block
-    // that the allocation trap watches; only the collector frees it.
+    // A new list replaces the first, and the player carries the clip's
+    // source across to it: nothing is opened or let go of.
     rig.apply(Command::SetClipGain {
         clip: id,
         gain: 0.5,
     });
     rig.block(64);
     assert_eq!(rig.last()[0], 0.25);
+    rig.collector.collect();
+    assert_eq!(dropped.load(Ordering::SeqCst), 0);
+
+    // Deleting the clip lets go of its source inside a block that the
+    // allocation trap watches; only the collector frees it.
+    rig.apply(Command::DeleteClip { clip: id });
+    rig.block(64);
     assert_eq!(dropped.load(Ordering::SeqCst), 0);
     rig.collector.collect();
     assert_eq!(dropped.load(Ordering::SeqCst), 1);
-
-    // So does deleting the clip, and so does deleting the track, whose
-    // program goes with the player in it.
-    rig.apply(Command::DeleteClip { clip: id });
-    rig.block(64);
-    assert_eq!(dropped.load(Ordering::SeqCst), 1);
-    rig.collector.collect();
-    assert_eq!(dropped.load(Ordering::SeqCst), 2);
+    // So does moving a clip to another track, whose player opens one of its
+    // own, and so does deleting the track, whose program goes with the
+    // player in it.
     let id = clip(
         &mut rig.editor,
         a,
@@ -599,14 +749,24 @@ fn the_audio_thread_never_frees_a_clips_media() {
         Ticks::WHOLE,
         AudioData::new(hash(1)),
     );
+    let b = track(&mut rig.editor, TrackKind::Audio, None);
     rig.sync();
     rig.block(64);
-    rig.apply(Command::DeleteTrack { track: a });
+    rig.apply(Command::MoveClip {
+        clip: id,
+        track: b,
+        start: Ticks::ZERO,
+    });
+    rig.block(64);
+    assert!(rig.last().iter().all(|&s| s == 0.5));
+    rig.collector.collect();
+    assert_eq!(dropped.load(Ordering::SeqCst), 2);
+    rig.apply(Command::DeleteTrack { track: b });
     rig.block(64);
     rig.collector.collect();
     // The old program is gone, but the player's list goes on the next pass.
     rig.collector.collect();
-    assert_eq!(dropped.load(Ordering::SeqCst), 3, "{id:?}");
+    assert_eq!(dropped.load(Ordering::SeqCst), 3);
 }
 
 // Spec: audio-clips R14

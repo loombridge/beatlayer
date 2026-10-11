@@ -17,7 +17,7 @@
 //! commands that `bl_model::registry` registers; the engine follows the
 //! document's loop through [`Compiler::sync`](crate::Compiler::sync).
 //!
-//! The rules behind every command are in `docs/specs/transport.md`.
+//! The rules behind every command are in the transport spec.
 //!
 //! ```
 //! use bl_commands::Registry;
@@ -175,7 +175,7 @@ impl Entry {
 }
 
 /// Every transport command this crate registers. The rules behind them,
-/// and behind their bindings, are in `docs/specs/transport.md`.
+/// and behind their bindings, are in the transport spec.
 const ENTRIES: &[Entry] = &[
     Entry {
         id: "transport.play",

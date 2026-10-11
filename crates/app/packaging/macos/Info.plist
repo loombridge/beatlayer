@@ -11,7 +11,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 
-	<!-- Apple Silicon only (platform decision in docs/02-architecture.md). -->
+	<!-- Apple Silicon only (platform decision in the architecture notes). -->
 	<key>LSArchitecturePriority</key>
 	<array>
 		<string>arm64</string>

@@ -457,7 +457,7 @@ fn paint_clip(
     if USE_LAYERS.load(Ordering::Relaxed) {
         // The columns never overlap, so they can share one draw order. Without
         // a layer GPUI inserts every quad into its bounds tree to order it,
-        // which dominated the frame (see docs/spikes/ui-gpui.md).
+        // which dominated the frame (see the UI spike reports).
         let wave = Bounds::new(point(px(x0), px(wave_top)), size(px(x1 - x0), px(wave_h)));
         window.paint_layer(wave, columns);
     } else {

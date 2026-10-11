@@ -56,7 +56,7 @@ impl ParamEvent {
 }
 
 /// Starts, stops, or moves the song, or sets the Arrangement loop: the
-/// transport, as `docs/specs/transport.md` specifies it.
+/// transport, as the transport spec specifies it.
 ///
 /// The transport keeps three things: the *insert marker*, where Play
 /// starts; the *song position* (the playhead), the next frame to play,

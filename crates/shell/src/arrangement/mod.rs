@@ -6,7 +6,7 @@
 //! [`ArrangementView::run`] carries out. None of it is song state: the set
 //! never changes here, and nothing here is an undo step.
 //!
-//! The behaviour is in `docs/specs/arrangement-view.md`.
+//! The behaviour is in the arrangement view spec.
 
 pub mod grid;
 pub mod rows;

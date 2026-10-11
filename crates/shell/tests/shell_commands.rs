@@ -166,8 +166,13 @@ impl TestDir {
         Self(dir)
     }
 
+    /// `name` under the folder, its `/`-separated parts joined with the
+    /// platform's separator, so Windows spells it the way Beatlayer does.
     fn path(&self, name: &str) -> String {
-        self.0.join(name).to_string_lossy().into_owned()
+        name.split('/')
+            .fold(self.0.clone(), |path, part| path.join(part))
+            .to_string_lossy()
+            .into_owned()
     }
 }
 

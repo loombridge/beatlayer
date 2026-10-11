@@ -11,7 +11,7 @@
 //! an egui paint callback ([`gpu`]); text, the rulers, and the headers
 //! through egui.
 //!
-//! The behaviour is in `docs/specs/arrangement-view.md`.
+//! The behaviour is in the arrangement view spec.
 
 pub mod benchmark;
 pub mod gpu;

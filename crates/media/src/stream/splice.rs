@@ -7,7 +7,7 @@ use std::f64::consts::PI;
 use super::planar::PlanarMut;
 
 /// The default length of a jump's fades: 4 ms, the length of the short fade
-/// Live puts on clip edges to stop them clicking (docs/specs/disk-streaming.md).
+/// Live puts on clip edges to stop them clicking (the disk streaming spec).
 pub const DEFAULT_FADE: std::time::Duration = std::time::Duration::from_millis(4);
 
 /// The fade length in frames at a sample rate: [`DEFAULT_FADE`], at least

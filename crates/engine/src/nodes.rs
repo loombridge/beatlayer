@@ -1,10 +1,10 @@
-//! The engine's own nodes: the test tone, the beat tone, and the stand-in
-//! fader.
+//! The engine's own devices: the test tone and the beat tone. Each track's
+//! mixer is in [`crate::mixer`].
 
 use std::f64::consts::TAU;
 
 use bl_core::time::{Frames, SampleRate, TICKS_PER_QUARTER, TempoMap};
-use bl_model::{Device, Mixer, ParamId};
+use bl_model::{Device, ParamId};
 
 use crate::node::{Block, Node, NodeConfig, NodeEvent, ParamValue, segments};
 
@@ -248,94 +248,6 @@ impl Node for BeatTone {
     }
 }
 
-/// The fader's parameters, which take the track's mixer settings.
-pub mod fader {
-    use bl_model::ParamId;
-
-    /// Linear gain: 1 is unity and 0 is silence.
-    pub const VOLUME: ParamId = ParamId(0);
-    /// Stereo position from −1 to 1. Kept, not yet applied (WP-1.6).
-    pub const PAN: ParamId = ParamId(1);
-    /// Muted when not 0.
-    pub const MUTE: ParamId = ParamId(2);
-    /// Soloed when not 0. Kept, not yet applied (WP-1.6).
-    pub const SOLO: ParamId = ParamId(3);
-}
-
-/// A track's fader: a stand-in that applies volume and mute, unsmoothed,
-/// until the mixer (WP-1.6) brings pan laws, solo, and smoothing. It exists
-/// so mixer changes travel the parameter path end to end.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Fader {
-    volume: f32,
-    pan: f64,
-    mute: bool,
-    solo: bool,
-}
-
-impl Fader {
-    /// A fader set to a track's mixer.
-    #[must_use]
-    pub fn new(mixer: &Mixer) -> Self {
-        Self {
-            volume: mixer.volume as f32,
-            pan: mixer.pan,
-            mute: mixer.mute,
-            solo: mixer.solo,
-        }
-    }
-
-    /// The gain the fader applies now.
-    #[must_use]
-    pub fn gain(&self) -> f32 {
-        if self.mute { 0.0 } else { self.volume }
-    }
-
-    fn set(&mut self, param: ParamId, value: ParamValue) {
-        let defaults = Mixer::default();
-        match (param, value) {
-            (fader::VOLUME, ParamValue::Set(volume)) if volume.is_finite() => {
-                self.volume = volume.max(0.0) as f32;
-            }
-            (fader::VOLUME, _) => self.volume = defaults.volume as f32,
-            (fader::PAN, ParamValue::Set(pan)) if pan.is_finite() => {
-                self.pan = pan.clamp(-1.0, 1.0);
-            }
-            (fader::PAN, _) => self.pan = defaults.pan,
-            (fader::MUTE, ParamValue::Set(mute)) => self.mute = mute != 0.0,
-            (fader::MUTE, ParamValue::Default) => self.mute = defaults.mute,
-            (fader::SOLO, ParamValue::Set(solo)) => self.solo = solo != 0.0,
-            (fader::SOLO, ParamValue::Default) => self.solo = defaults.solo,
-            _ => {}
-        }
-    }
-}
-
-impl Node for Fader {
-    fn process(&mut self, block: &mut Block<'_>) {
-        for segment in segments(block.events(), block.frames()) {
-            for event in segment.events {
-                self.set(event.param, event.value);
-            }
-            let gain = self.gain();
-            if gain == 1.0 {
-                continue;
-            }
-            for channel in block.channels_mut() {
-                for sample in &mut channel[segment.range.clone()] {
-                    *sample *= gain;
-                }
-            }
-        }
-    }
-
-    fn flush(&mut self, events: &[NodeEvent]) {
-        for event in events {
-            self.set(event.param, event.value);
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use bl_core::time::Ticks;
@@ -517,39 +429,5 @@ mod tests {
                 tone.sample_at(&tempo, position, SampleRate::HZ_48000)
             );
         }
-    }
-
-    #[test]
-    fn the_fader_applies_volume_and_mute_from_their_frame() {
-        let mut fader = Fader::new(&Mixer::default());
-        let mut data = vec![1.0f32; 2 * 8];
-        let events = [
-            NodeEvent {
-                offset: 2,
-                param: fader::VOLUME,
-                value: ParamValue::Set(0.5),
-            },
-            NodeEvent {
-                offset: 5,
-                param: fader::MUTE,
-                value: ParamValue::Set(1.0),
-            },
-        ];
-        let mut block = Block::new(
-            &mut data,
-            2,
-            8,
-            8,
-            &events,
-            TransportInfo::default(),
-            SampleRate::HZ_48000,
-        );
-        fader.process(&mut block);
-        let expected = [1.0, 1.0, 0.5, 0.5, 0.5, 0.0, 0.0, 0.0];
-        assert_eq!(&data[..8], &expected);
-        assert_eq!(&data[8..], &expected);
-        fader.set(fader::MUTE, ParamValue::Default);
-        fader.set(fader::VOLUME, ParamValue::Default);
-        assert_eq!(fader.gain(), 1.0);
     }
 }

@@ -20,7 +20,7 @@
 //! however it's reached. [`Registry::problems`] and
 //! [`Registry::binding_problems`] fail the build's tests when a command
 //! lacks any of the above, and [`reference::markdown`] renders the
-//! reference in `docs/commands.md`.
+//! reference.
 //!
 //! This crate holds only the registry's types and checks. It depends on no
 //! other Beatlayer crate and on nothing that draws, so every crate that

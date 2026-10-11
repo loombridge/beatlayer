@@ -2,7 +2,7 @@
 //!
 //! Everything comes from one SplitMix64 stream seeded with [`SEED`], so two
 //! runs (and two toolkits) draw the same tracks, clips, and waveforms. The
-//! algorithm is written out in `docs/spikes/ui-egui.md` so the GPUI spike can
+//! algorithm is written out in the UI spike reports so the GPUI spike can
 //! check it generates the same thing.
 
 use std::f64::consts::TAU;

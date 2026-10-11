@@ -15,7 +15,7 @@
 //!   (`transport.state`), and the IDs of the transport's commands, which
 //!   `bl-engine` and `bl-model` register (WP-1.18).
 //!
-//! `cargo xtask` checks the commands, lists them in `docs/commands.md`, and
+//! `cargo xtask` checks the commands, lists them in the command reference, and
 //! builds the keymap from this crate, so none of its tasks links an audio
 //! backend (which needs ALSA and JACK headers on Linux). `bl-shell`
 //! re-exports everything here.

@@ -1,4 +1,5 @@
-//! `bl-cli`: render, inspect, convert, and benchmark projects without a UI.
+//! `bl-cli`: render, inspect, convert, and benchmark projects without a UI,
+//! and serve the agent API (`bl-cli mcp`).
 
 // Debug builds count heap use on audio threads (the real-time rules allow
 // none); `bl-cli tone`, `render`, and `golden` fail if they find any.
@@ -8,6 +9,7 @@ bl_rt::install_trap!();
 mod device_changes;
 mod devices;
 mod engine_smoke;
+mod mcp;
 mod tone;
 
 use std::process::ExitCode;
@@ -68,6 +70,14 @@ enum Command {
     /// --update, remakes the references whose renders changed: say why in
     /// the pull request.
     Golden(bl_cli::golden::GoldenArgs),
+    /// Serve the agent API (MCP) on standard input and output, with no
+    /// window.
+    ///
+    /// An agent client starts it and sends JSON-RPC messages, one per line.
+    /// Commands run on a headless shell holding the factory default set, or
+    /// the set --set names. Destructive and external commands are refused
+    /// unless --autonomous is given, because there's no one to ask.
+    Mcp(mcp::McpArgs),
 }
 
 fn main() -> ExitCode {
@@ -79,6 +89,7 @@ fn main() -> ExitCode {
         Command::DeviceChanges(args) => device_changes::run(args),
         Command::Render(args) => bl_cli::render::run(args),
         Command::Golden(args) => bl_cli::golden::run(args),
+        Command::Mcp(args) => mcp::run(args),
     };
     outcome.unwrap_or_else(|message| {
         eprintln!("error: {message}");

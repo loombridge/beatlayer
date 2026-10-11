@@ -193,6 +193,28 @@ impl Editor {
         Ok(changes)
     }
 
+    /// Replaces the whole document with another version of it, inside the
+    /// open transaction or as an undo step of its own labelled `label`, and
+    /// returns what that changed. The agent API restores a checkpoint this
+    /// way (WP-1.15), so undo brings back what the restore replaced.
+    ///
+    /// The allocator moves past the document's largest ID, so no ID in it is
+    /// handed out again. A document that's the same as the current one
+    /// records nothing.
+    pub fn replace(
+        &mut self,
+        label: impl Into<Cow<'static, str>>,
+        document: Document,
+    ) -> ChangeSet {
+        self.ids.skip_past(document.max_id());
+        let before = std::mem::replace(&mut self.document, document);
+        let changes = ChangeSet::between(&before, &self.document);
+        if self.open.is_empty() && !changes.is_empty() {
+            self.record(label.into(), before);
+        }
+        changes
+    }
+
     /// Opens a transaction. Its label names the undo step, such as "Move
     /// clips". Inside another transaction, the outer one's label is used.
     pub fn begin(&mut self, label: impl Into<Cow<'static, str>>) {
@@ -656,6 +678,39 @@ mod tests {
         assert!(!editor.in_transaction());
         assert_eq!(editor.document(), &before);
         assert_eq!(editor.undo_history().len(), steps + 1);
+    }
+
+    #[test]
+    fn replacing_the_document_is_one_undoable_step() {
+        let mut editor = Editor::new();
+        let checkpoint = editor.document().clone();
+        let track = midi_track(&mut editor);
+        let clip = clip_on(&mut editor, track);
+        let edited = editor.document().clone();
+
+        let changes = editor.replace("Restore checkpoint", checkpoint.clone());
+        assert_eq!(editor.document(), &checkpoint);
+        assert_eq!(changes.tracks.get(&track), Some(&crate::Change::Removed));
+        assert_eq!(changes.clips.get(&clip), Some(&crate::Change::Removed));
+        assert_eq!(editor.undo_history().next(), Some("Restore checkpoint"));
+        editor.undo().unwrap();
+        assert_eq!(editor.document(), &edited);
+        editor.redo().unwrap();
+        assert_eq!(editor.document(), &checkpoint);
+
+        // The same document again changes nothing and records nothing.
+        let steps = editor.undo_history().len();
+        assert!(editor.replace("Again", checkpoint).is_empty());
+        assert_eq!(editor.undo_history().len(), steps);
+
+        // A document from elsewhere moves the allocator past its IDs.
+        let mut other = Editor::new();
+        for _ in 0..10 {
+            midi_track(&mut other);
+        }
+        editor.replace("Other", other.document().clone());
+        let fresh: TrackId = editor.new_id();
+        assert!(fresh.0 > other.document().max_id());
     }
 
     #[test]

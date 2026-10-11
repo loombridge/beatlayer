@@ -8,6 +8,9 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+# The agent server (WP-1.15): the agent API over Streamable HTTP on
+# 127.0.0.1, while the person has it switched on in Settings.
+bl-agent.workspace = true
 bl-core.workspace = true
 bl-model.workspace = true
 bl-project.workspace = true

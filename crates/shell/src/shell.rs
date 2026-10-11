@@ -4,11 +4,16 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use bl_commands::{Context, NoArgs, Registry};
-use bl_model::{Editor, TrackId, TrackKind, registry as model};
+use bl_core::id::Id;
+use bl_model::{ChangeSet, Editor, TrackId, TrackKind, registry as model};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
+use crate::agent::{
+    self as agent, AgentServerState, AgentServerStatus, AgentSettings, AutonomousArgs, ClientArgs,
+    SetServerArgs,
+};
 use crate::arrangement::{ArrangementView, TransportView, ViewError, Viewport};
 use crate::audio::{AudioHost, ConfigureAudio, ToneSettings};
 use crate::commands::{
@@ -216,6 +221,7 @@ pub struct Shell {
     effects: Vec<Effect>,
     message: Option<Message>,
     revision: u64,
+    agent_status: AgentServerStatus,
     /// What the Arrangement View shows (WP-1.8a).
     arrangement: ArrangementView,
     /// A number that changes whenever the document may have changed.
@@ -279,6 +285,7 @@ impl Shell {
             effects: Vec::new(),
             message: None,
             revision: 0,
+            agent_status: AgentServerStatus::default(),
             arrangement: ArrangementView::new(),
             document_revision: 0,
         }
@@ -328,6 +335,56 @@ impl Shell {
     #[must_use]
     pub fn editor(&self) -> &Editor {
         &self.editor
+    }
+
+    /// Runs `edit` on the editor holding the document, and marks the set
+    /// changed if the document changed. The agent API (WP-1.15) edits this
+    /// way where one command at a time isn't enough: a batch of document
+    /// commands as one undo step labelled with the agent's name, a dry run
+    /// that applies a batch and cancels it, a new ID for an object a
+    /// command will create, and restoring a checkpoint. It runs document
+    /// commands with `bl_model::registry::run`, as [`Shell::run`] does.
+    ///
+    /// `edit` must leave no transaction open.
+    pub fn edit<T>(&mut self, edit: impl FnOnce(&mut Editor) -> T) -> T {
+        let before = self.editor.document().clone();
+        let result = edit(&mut self.editor);
+        debug_assert!(
+            !self.editor.in_transaction(),
+            "an edit left a transaction open"
+        );
+        if !ChangeSet::between(&before, self.editor.document()).is_empty() {
+            self.dirty = true;
+            self.document_changed();
+        }
+        self.touch();
+        result
+    }
+
+    /// A new ID for an object a command will create, such as a track's.
+    pub fn new_id<T: From<Id>>(&mut self) -> T {
+        self.editor.new_id()
+    }
+
+    /// The agent server's settings.
+    #[must_use]
+    pub fn agent_settings(&self) -> &AgentSettings {
+        &self.prefs.agent
+    }
+
+    /// What the app last said about the running agent server.
+    #[must_use]
+    pub fn agent_status(&self) -> &AgentServerStatus {
+        &self.agent_status
+    }
+
+    /// Records what the app says about the running agent server, for the
+    /// Settings window.
+    pub fn set_agent_status(&mut self, status: AgentServerStatus) {
+        if self.agent_status != status {
+            self.agent_status = status;
+            self.touch();
+        }
     }
 
     /// The audio device.
@@ -1167,6 +1224,79 @@ impl Shell {
                     volume_db: tone.volume_db,
                     frequency_hz: tone.frequency_hz,
                 }))
+            }
+            agent::AGENT_SET_SERVER => {
+                let SetServerArgs { on, port } = Self::args(id, args)?;
+                if let Some(port) = port {
+                    if port < 1024 {
+                        return Err(ShellError::InvalidArgs {
+                            command: id.to_owned(),
+                            message: format!("port {port} is below 1024"),
+                        });
+                    }
+                    self.prefs.agent.port = port;
+                }
+                if let Some(on) = on {
+                    self.prefs.agent.server = on;
+                }
+                if self.prefs.agent.server && self.prefs.agent.token.is_empty() {
+                    self.prefs.agent.token = agent::new_token().map_err(failed)?;
+                }
+                self.save_preferences();
+                Ok(to_value(&AgentServerState::from(&self.prefs.agent)))
+            }
+            agent::AGENT_APPROVE_CLIENT => {
+                let ClientArgs { client } = Self::args(id, args)?;
+                if client.trim().is_empty() {
+                    return Err(ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message: "the agent's name is empty".to_owned(),
+                    });
+                }
+                if self.prefs.agent.client(&client).is_none() {
+                    self.prefs.agent.clients.push(agent::AgentClient {
+                        name: client,
+                        autonomous: false,
+                    });
+                    self.save_preferences();
+                }
+                Ok(to_value(&AgentServerState::from(&self.prefs.agent)))
+            }
+            agent::AGENT_FORGET_CLIENT => {
+                let ClientArgs { client } = Self::args(id, args)?;
+                let before = self.prefs.agent.clients.len();
+                self.prefs.agent.clients.retain(|c| c.name != client);
+                if self.prefs.agent.clients.len() == before {
+                    return Err(unavailable(&format!(
+                        "no agent called “{client}” is allowed"
+                    )));
+                }
+                self.save_preferences();
+                Ok(to_value(&AgentServerState::from(&self.prefs.agent)))
+            }
+            agent::AGENT_SET_AUTONOMOUS => {
+                let AutonomousArgs { client, on } = Self::args(id, args)?;
+                let Some(entry) = self
+                    .prefs
+                    .agent
+                    .clients
+                    .iter_mut()
+                    .find(|c| c.name == client)
+                else {
+                    return Err(unavailable(&format!(
+                        "no agent called “{client}” is allowed; it's allowed when it first \
+                         connects"
+                    )));
+                };
+                entry.autonomous = on;
+                self.save_preferences();
+                Ok(to_value(&AgentServerState::from(&self.prefs.agent)))
+            }
+            agent::AGENT_NEW_TOKEN => {
+                Self::args::<NoArgs>(id, args)?;
+                self.prefs.agent.token = agent::new_token().map_err(failed)?;
+                self.save_preferences();
+                Ok(to_value(&AgentServerState::from(&self.prefs.agent)))
             }
             _ => Err(ShellError::UnknownCommand(id.to_owned())),
         }

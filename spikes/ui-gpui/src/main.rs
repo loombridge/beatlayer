@@ -2,7 +2,7 @@
 //!
 //! Run `cargo run --release` for the interactive scene, `-- --bench` for the
 //! scripted 30-second scenario, and `-- --idle` for the idle measurement.
-//! `docs/spikes/ui-gpui.md` describes every mode and records the results.
+//! the UI spike reports describes every mode and records the results.
 
 mod bench;
 mod browser;

@@ -1,7 +1,7 @@
 //! The layout layer: the UI parity reference's rows as rectangles
 //! (ADR-001, "Layout parity is hand-placed"; D16).
 //!
-//! Every placed element names the row of `docs/ui-parity/layout.md` it
+//! Every placed element names the row of the layout reference it
 //! implements, and its position comes from that row's measurement in Live
 //! 12.4.3 at 1600 × 1000 points. Panes and controls that keep their size in
 //! Live keep it here; the rest stretch with the window the way the rows

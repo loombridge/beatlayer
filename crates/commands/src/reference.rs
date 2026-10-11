@@ -1,4 +1,4 @@
-//! The command reference: `docs/commands.md`, generated from the registry
+//! The command reference, generated from the registry
 //! by `cargo xtask commands`.
 
 use std::collections::BTreeMap;

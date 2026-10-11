@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 /// Where a command applies: the part of the interface that has focus.
 ///
 /// These are the contexts of the UI parity reference
-/// (`docs/ui-parity/shortcuts.toml`), so a command and the shortcuts bound
+/// (the shortcut reference), so a command and the shortcuts bound
 /// to it name places the same way. `cargo xtask check` fails if this list
 /// and the reference's drift apart.
 ///

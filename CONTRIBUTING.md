@@ -6,15 +6,19 @@ Beatlayer is in early development, and the repository stays private until the pu
 
 ## Read first
 
-1. [README.md](README.md) and [AGENTS.md](AGENTS.md): what Beatlayer is, the lines no change crosses, and where things stand.
-1. [The clean-room policy](https://github.com/loombridge/beatlayer/blob/main/CONTRIBUTING.md#building-without-abletons-code): what you may and may not learn from Ableton Live. Read it before you write anything.
+1. [README.md](README.md) and [AGENTS.md](AGENTS.md): what Beatlayer is, the lines no change crosses, and how work is done.
+1. [Building without Ableton's code](#building-without-abletons-code): what you may and may not learn from Ableton Live. Read it before you write anything.
 
-## The clean room
+## Building without Ableton's code
 
-Beatlayer matches what Live does, not how Live's code does it. In short:
+Beatlayer matches what Ableton Live does, not how Live's code does it. Every contribution, from a person or an agent, keeps to these rules:
 
-- Learn only from what Live shows any user: the manual, running Live and watching it, and measuring its output from your own material.
-- Never copy Ableton's samples, presets, artwork, or manual text into the repository, and never use Ableton's trademarks as names.
+- **Learn only from what Live shows any user:** its public reference manual, release notes and product pages; running Live and watching what it does; measuring its output from your own material; and projects you made yourself in Live, for the importer. Paraphrase the manual; never copy its text.
+- **Never copy Ableton's content:** no samples, presets, wavetables, impulse responses, grooves, packs, artwork, icons, fonts, colour themes or manual text, in the repository or in Beatlayer's bundled content, and no audio Live rendered from Ableton's own content.
+- **Never use Ableton's trademarks as Beatlayer's names.** Beatlayer's devices and features have their own names. "Imports Ableton Live sets" is a statement of fact; "Ableton Live clone" isn't.
+- **Cite your sources.** A change that reproduces Live's behaviour says in its pull request what it rests on: a manual section, an observation of Live running (with its version and platform), or a measurement with its method.
+
+Placement, menus, gestures and keyboard shortcuts match Live's, which is functional parity; the look is Beatlayer's own.
 
 ## Find something to work on
 
@@ -129,9 +133,9 @@ For now, the reviewer checks sign-offs by hand. An automatic check in CI follows
 ## Open a pull request
 
 - Open it against `main`. For a work package, title it `WP-<id>: <package title>`.
-- Fill in every section of the template: the work package, what the change adds, the acceptance evidence, any deviation from the design with its reason, anything that needs the maintainer, and the clean-room declaration.
+- Fill in every section of the template: the work package, what the change adds, the acceptance evidence, any deviation from the design with its reason, anything that needs a maintainer, and the clean-room declaration.
 - Update any document whose facts your change alters, in the same pull request.
-- The maintainer reviews and merges. Don't merge your own pull request.
+- A maintainer reviews and merges. Don't merge your own pull request.
 
 ## Report a bug or ask for a feature
 

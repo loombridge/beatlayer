@@ -39,7 +39,7 @@ allow = [
     "GPL-2.0-or-later",
     "GPL-3.0-or-later",
     # Fonts only: bundled typefaces are distributed alongside the code, which
-    # OFL-1.1 permits (10 October 2026). A code crate under OFL needs review.
+    # OFL-1.1 permits. A code crate under OFL needs review.
     "OFL-1.1",
 ]
 # Deliberately absent:

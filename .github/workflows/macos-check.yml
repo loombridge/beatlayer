@@ -2,9 +2,8 @@
 # main, and on demand from the Actions tab.
 #
 # Per-change CI leaves macOS out to save minutes (a macOS minute counts as ten
-# on the Free plan; 10 October 2026). Agents run the full check on macOS
-# locally for every pull request, and this workflow confirms main on a clean
-# macOS runner. A scheduled run checks first whether any code changed in the
+# Linux minutes). Authors run the full check on macOS locally for every pull
+# request, and this workflow confirms main on a clean macOS runner. A scheduled run checks first whether any code changed in the
 # last 25 hours, and does nothing if only docs or Markdown changed.
 #
 # Every third-party action is pinned to a full commit SHA, with its version in

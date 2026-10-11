@@ -27,7 +27,7 @@
 //! register WASAPI's thread with the "Audio" task. An ASIO driver that
 //! registers its own thread with MMCSS gets registered again, with "Pro
 //! Audio"; Microsoft doesn't document what a second registration does, so
-//! the first Windows run (H6) checks it.
+//! the first run on a Windows test machine checks it.
 
 use std::cell::Cell;
 

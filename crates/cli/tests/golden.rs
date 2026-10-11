@@ -198,6 +198,39 @@ fn the_references_are_small_and_each_belongs_to_a_fixture() {
     assert_eq!(golden::stale(&dir), Ok(Vec::new()));
 }
 
+/// Every reference opens through Beatlayer's own importer and gives the
+/// samples the test reader does: a reference is a file Beatlayer wrote, and
+/// anything Beatlayer writes it must read.
+#[test]
+fn every_reference_reads_through_beatlayers_own_decoder() {
+    let dir = golden_dir();
+    for fixture in fixtures() {
+        let path = fixture.reference_path(&dir);
+        let reference = golden::read_flac(&path).expect("the test reader opens it");
+        let decoded = bl_media::decode_file(&path)
+            .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+        assert_eq!(
+            decoded.channel_count(),
+            reference.channels,
+            "{}",
+            path.display()
+        );
+        let scale = f64::from(1u32 << (reference.bits - 1));
+        for (index, sample) in reference.samples.iter().enumerate() {
+            let channel = decoded
+                .channel(index % reference.channels)
+                .expect("the channel exists");
+            let value = channel[index / reference.channels];
+            assert_eq!(
+                f64::from(value),
+                f64::from(*sample) / scale,
+                "{} sample {index}",
+                path.display()
+            );
+        }
+    }
+}
+
 /// Saves a fixture's song as a set in `dir`, with the audio files its clips
 /// play in `dir/Samples/Imported/` and listed in the set's media table.
 fn save_set(dir: &Path, name: &str) -> PathBuf {

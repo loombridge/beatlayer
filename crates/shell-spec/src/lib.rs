@@ -12,6 +12,10 @@
 //! - [`arrangement`]: the Arrangement View's view commands (WP-1.8a): zoom,
 //!   scroll, Follow, the editing grid, track heights, and the selection
 //!   the zoom commands work from.
+//! - [`editing`]: the Arrangement's editing commands (WP-1.8b): selecting,
+//!   moving, copying, resizing, splitting, deleting, and duplicating clips,
+//!   and the clipboard; [`context_menus`], the clip and time-selection
+//!   menus that reach them.
 //! - [`browser`]: the browser's commands (WP-1.10): places, browsing,
 //!   search, preview, and adding files to the Arrangement.
 //! - [`transport`]: what the Control Bar's transport section shows
@@ -28,14 +32,16 @@ pub mod arrangement;
 pub mod audio;
 pub mod browser;
 pub mod commands;
+pub mod context_menus;
+pub mod editing;
 pub mod menus;
 pub mod settings;
 pub mod transport;
 
 use bl_commands::{RegisterError, Registry};
 
-/// Adds the shell's commands, the Arrangement View's, the transport query,
-/// and the browser's to a registry.
+/// Adds the shell's commands, the Arrangement View's (its view and its
+/// editing commands), the transport query, and the browser's to a registry.
 ///
 /// # Errors
 ///
@@ -43,6 +49,7 @@ use bl_commands::{RegisterError, Registry};
 pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     commands::register(registry)?;
     arrangement::register(registry)?;
+    editing::register(registry)?;
     transport::register(registry)?;
     browser::register(registry)
 }

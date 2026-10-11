@@ -6,8 +6,11 @@
 //! [`ArrangementView::run`] carries out. None of it is song state: the set
 //! never changes here, and nothing here is an undo step.
 //!
-//! The behaviour is in the arrangement view spec.
+//! The behaviour is in the arrangement view spec. The clip selection and the
+//! edits that act on it are in [`editing`] (WP-1.8b), whose behaviour is in
+//! the arrangement editing spec.
 
+pub mod editing;
 pub mod grid;
 pub mod placing;
 pub mod rows;
@@ -15,7 +18,7 @@ pub mod rows;
 use std::collections::{BTreeMap, BTreeSet};
 
 use bl_core::time::{Ticks, TimeSignature};
-use bl_model::{Document, TrackId, TrackKind};
+use bl_model::{ClipId, Document, TrackId, TrackKind};
 use bl_shell_spec::arrangement::{
     self as ids, ArrangementState, FoldArgs, FoldGroupsArgs, FollowArgs, InsertMarkerArgs,
     ScrollArgs, SelectTimeArgs, SelectTracksArgs, SetGridArgs, ShowRangeArgs, ShowTrackArgs,
@@ -165,6 +168,8 @@ pub struct ArrangementView {
     grid: Grid,
     insert_marker: Ticks,
     selected: Vec<TrackId>,
+    /// The selected clips (WP-1.8b): see [`editing`].
+    selected_clips: Vec<ClipId>,
     title_bars: bool,
     time_selection: Option<(Ticks, Ticks)>,
     history: Vec<Saved>,
@@ -203,6 +208,7 @@ impl ArrangementView {
             grid: Grid::default(),
             insert_marker: Ticks::ZERO,
             selected: Vec::new(),
+            selected_clips: Vec::new(),
             title_bars: false,
             time_selection: None,
             history: Vec::new(),
@@ -601,10 +607,11 @@ impl ArrangementView {
         Ok(tracks)
     }
 
-    /// Drops selected and folded tracks the document no longer has, after
-    /// an edit or a new set.
+    /// Drops selected and folded tracks, and selected clips, the document
+    /// no longer has, after an edit or a new set.
     pub fn forget_missing_tracks(&mut self, doc: &Document) {
         self.selected.retain(|id| doc.track(*id).is_some());
+        self.forget_missing_clips(doc);
         self.folded.retain(|id| doc.track(*id).is_some());
         self.heights.retain(|id, _| doc.track(*id).is_some());
         self.clamp_scroll(doc);
@@ -842,6 +849,8 @@ impl ArrangementView {
                 }
                 self.insert_marker = at;
                 self.time_selection = None;
+                // Spec: arrangement-editing R2.
+                self.selected_clips.clear();
                 // Spec: arrangement-view R10.
                 self.follow_paused = false;
             }
@@ -852,6 +861,7 @@ impl ArrangementView {
                     title_bars,
                 } = parse(args)?;
                 let tracks = self.targets(doc, Some(tracks))?;
+                self.selected_clips.clear();
                 if add {
                     for track in tracks {
                         if !self.selected.contains(&track) {
@@ -879,6 +889,8 @@ impl ArrangementView {
                 self.time_selection = (end > start).then_some((start, end));
                 self.insert_marker = start;
                 self.title_bars = false;
+                // Spec: arrangement-editing R2.
+                self.selected_clips.clear();
             }
             ids::FOLD_TRACKS => {
                 let FoldArgs { tracks, fold } = parse(args)?;
@@ -959,6 +971,7 @@ impl ArrangementView {
                     .or_else(|| doc.top_level().next())
                     .ok_or_else(|| unavailable("the set has no tracks"))?;
                 self.selected = vec![first];
+                self.selected_clips.clear();
                 self.title_bars = true;
                 self.show_track(doc, first);
             }
@@ -1001,6 +1014,7 @@ impl ArrangementView {
             grid: self.grid.state(signature, horizontal.ticks_per_point),
             insert_marker: self.insert_marker,
             selected_tracks: self.selected.clone(),
+            selected_clips: self.selected_clips.clone(),
             time_selection: self
                 .time_selection
                 .map(|(start, end)| TimeRange { start, end }),

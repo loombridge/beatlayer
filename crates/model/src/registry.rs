@@ -528,10 +528,13 @@ const ENTRIES: &[Entry] = &[
         label: "Delete Clip",
         permission: Permission::Destructive,
         contexts: &[Arrangement],
-        keys: &[Key::Runs("S-EDIT-005")],
+        // The Delete key deletes the Arrangement's selection
+        // (`arrangement.delete`, WP-1.8b), which may be clips or time.
+        keys: &[],
         description: "Deletes a clip from the arrangement. Undo restores it, but because it \
             removes the person's work an agent asks first. To keep a clip but stop it playing, \
-            use `clip.set_mute`.",
+            use `clip.set_mute`. To delete the clips or the time selected in the Arrangement, \
+            use `arrangement.delete`.",
     },
     Entry {
         id: "clip.move",

@@ -12,7 +12,7 @@
 use bl_commands::Context::{Arrangement, Global, TrackHeaders};
 use bl_commands::{Binding, CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_core::time::Ticks;
-use bl_model::TrackId;
+use bl_model::{ClipId, TrackId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -328,6 +328,11 @@ pub struct ArrangementState {
     pub insert_marker: Ticks,
     /// The selected tracks, top to bottom.
     pub selected_tracks: Vec<TrackId>,
+    /// The selected clips (WP-1.8b), in the order they were selected. The
+    /// editing commands act on these when there are any, and on the time
+    /// selection otherwise.
+    #[serde(default)]
+    pub selected_clips: Vec<ClipId>,
     /// The selected span of time on the selected tracks, if any.
     pub time_selection: Option<TimeRange>,
     /// The folded tracks.

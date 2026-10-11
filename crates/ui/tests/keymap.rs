@@ -318,10 +318,11 @@ fn keys_resolve_to_commands_in_their_contexts() {
         resolve(Platform::Mac, Key::Tab, Mods::default(), &tab_focus).as_deref(),
         Some("focus.next")
     );
-    // The same keys run different commands in different places.
+    // The same keys run different commands in different places: in the
+    // Arrangement, Delete deletes the selection, clips or time (WP-1.8b).
     assert_eq!(
         resolve(Platform::Mac, Key::Delete, Mods::default(), &main).as_deref(),
-        Some("clip.delete")
+        Some("arrangement.delete")
     );
     assert_eq!(
         resolve(

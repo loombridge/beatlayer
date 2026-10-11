@@ -768,7 +768,9 @@ fn bindings_follow_the_spec() {
     );
     // Spec: command-bindings R3
     assert_eq!(bindings("track.delete"), ["S-TRACK-018"]);
-    assert_eq!(bindings("clip.delete"), ["S-EDIT-005"]);
+    // The Arrangement's Delete deletes its selection, clips or time
+    // (`arrangement.delete`, WP-1.8b), so `clip.delete` has no key.
+    assert!(bindings("clip.delete").is_empty());
     assert_eq!(bindings("device.remove"), ["S-EDIT-005"]);
     // Spec: command-bindings R4
     assert_eq!(bindings("track.rename"), ["S-TRACK-004"]);
@@ -795,7 +797,6 @@ fn bindings_follow_the_spec() {
         "edit.redo",
         "track.create",
         "track.delete",
-        "clip.delete",
         "device.remove",
         "track.rename",
         "clip.rename",

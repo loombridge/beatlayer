@@ -114,21 +114,35 @@ fn items(
             });
             continue;
         }
-        let state = item_state(item, shell, keymap, platform);
-        let mut text = state.label.clone();
-        if state.checked == Some(true) {
-            text = format!("✔ {text}");
-        }
-        let mut button = egui::Button::new(text);
-        if let Some(chord) = &state.chord {
-            button = button.shortcut_text(chord_text(chord, platform));
-        }
-        let response = ui.add_enabled(state.enabled, button);
-        if response.clicked()
-            && let Some(invocation) = state.invocation
-        {
-            events.push(UiEvent::Invoke(invocation));
-            ui.close();
-        }
+        self::item(ui, item, shell, keymap, platform, events);
+    }
+}
+
+/// Draws one menu item as a button, with its check mark and keys, that runs
+/// what [`item_state`] says and closes the menu. The menu bar and the
+/// Arrangement's context menus (WP-1.8b) draw their items with it.
+pub(crate) fn item(
+    ui: &mut Ui,
+    item: &MenuItem,
+    shell: &Shell,
+    keymap: &Keymap,
+    platform: Platform,
+    events: &mut Vec<UiEvent>,
+) {
+    let state = item_state(item, shell, keymap, platform);
+    let mut text = state.label.clone();
+    if state.checked == Some(true) {
+        text = format!("✔ {text}");
+    }
+    let mut button = egui::Button::new(text);
+    if let Some(chord) = &state.chord {
+        button = button.shortcut_text(chord_text(chord, platform));
+    }
+    let response = ui.add_enabled(state.enabled, button);
+    if response.clicked()
+        && let Some(invocation) = state.invocation
+    {
+        events.push(UiEvent::Invoke(invocation));
+        ui.close();
     }
 }

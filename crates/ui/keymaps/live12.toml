@@ -658,8 +658,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Cmd+X"]
 win = ["Ctrl+X"]
-status = "pending"
-package = "WP-1.8b"
+status = "bound"
+commands = [
+  { id = "arrangement.cut", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-EDIT-002"
@@ -670,8 +672,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Cmd+C"]
 win = ["Ctrl+C"]
-status = "pending"
-package = "WP-1.8b"
+status = "bound"
+commands = [
+  { id = "arrangement.copy", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-EDIT-003"
@@ -682,8 +686,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Cmd+V"]
 win = ["Ctrl+V"]
-status = "pending"
-package = "WP-1.8b"
+status = "bound"
+commands = [
+  { id = "arrangement.paste", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-EDIT-004"
@@ -694,8 +700,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Cmd+D"]
 win = ["Ctrl+D"]
-status = "pending"
-package = "WP-1.8b"
+status = "bound"
+commands = [
+  { id = "arrangement.duplicate", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-EDIT-005"
@@ -708,7 +716,7 @@ mac = ["Delete"]
 win = ["Delete"]
 status = "bound"
 commands = [
-  { id = "clip.delete", contexts = ["arrangement"] },
+  { id = "arrangement.delete", contexts = ["arrangement"] },
   { id = "device.remove", contexts = ["device-view"] },
 ]
 
@@ -764,8 +772,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Cmd+A"]
 win = ["Ctrl+A"]
-status = "pending"
-package = "WP-1.8b"
+status = "bound"
+commands = [
+  { id = "arrangement.select_all", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-EDIT-010"
@@ -776,8 +786,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Cmd+click"]
 win = ["Ctrl+click"]
-status = "pending"
-package = "WP-1.8b"
+status = "bound"
+commands = [
+  { id = "arrangement.select_clips", contexts = ["arrangement"], args = { mode = "toggle" } },
+]
 
 [[shortcut]]
 id = "S-EDIT-011"
@@ -788,8 +800,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Shift+click"]
 win = ["Shift+click"]
-status = "pending"
-package = "WP-1.8b"
+status = "bound"
+commands = [
+  { id = "arrangement.select_clips", contexts = ["arrangement"], args = { mode = "extend" } },
+]
 
 [[shortcut]]
 id = "S-EDIT-012"
@@ -812,8 +826,8 @@ trigger = "held"
 milestone = "M1"
 mac = ["Cmd (hold while dragging)"]
 win = ["Alt (hold while dragging)"]
-status = "pending"
-package = "WP-1.8b"
+status = "widget"
+handler = "the Arrangement View: Cmd (Alt) held while dragging clips or their edges ignores snapping, or snaps with it off (`arrangement.move_clips`, `arrangement.resize_clips`)"
 
 [[shortcut]]
 id = "S-EDIT-014"
@@ -1134,8 +1148,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Cmd+Shift+L"]
 win = ["Ctrl+Shift+L"]
-status = "pending"
-package = "WP-1.8b"
+status = "bound"
+commands = [
+  { id = "arrangement.select_loop", contexts = ["loop-brace"] },
+]
 
 [[shortcut]]
 id = "S-ZOOM-001"
@@ -1244,8 +1260,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Shift+click", "Shift+drag"]
 win = ["Shift+click", "Shift+drag"]
-status = "pending"
-package = "WP-1.8b"
+status = "bound"
+commands = [
+  { id = "arrangement.select_clips", contexts = ["arrangement"], args = { mode = "add" } },
+]
 
 [[shortcut]]
 id = "S-ZOOM-009"
@@ -1256,8 +1274,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Shift+click"]
 win = ["Shift+click"]
-status = "pending"
-package = "WP-1.8b"
+status = "bound"
+commands = [
+  { id = "arrangement.select_clips", contexts = ["arrangement"], args = { mode = "extend" } },
+]
 
 [[shortcut]]
 id = "S-ZOOM-010"
@@ -1268,8 +1288,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Cmd+click"]
 win = ["Ctrl+click"]
-status = "pending"
-package = "WP-1.8b"
+status = "bound"
+commands = [
+  { id = "arrangement.select_clips", contexts = ["arrangement"], args = { mode = "toggle" } },
+]
 
 [[shortcut]]
 id = "S-CLIPMODE-001"
@@ -1977,8 +1999,8 @@ trigger = "held"
 milestone = "M1"
 mac = ["Cmd (hold while dragging)"]
 win = ["Alt (hold while dragging)"]
-status = "pending"
-package = "WP-1.8b"
+status = "widget"
+handler = "the Arrangement View: as S-EDIT-013, Cmd (Alt) held while dragging bypasses snapping"
 
 [[shortcut]]
 id = "S-GQ-001"
@@ -2297,8 +2319,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Cmd+E"]
 win = ["Ctrl+E"]
-status = "pending"
-package = "WP-1.8b"
+status = "bound"
+commands = [
+  { id = "arrangement.split", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-ARR-002"
@@ -2331,8 +2355,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Enter then Left", "Right"]
 win = ["Enter then Left", "Right"]
-status = "pending"
-package = "WP-1.8b"
+status = "bound"
+commands = [
+  { id = "arrangement.resize_clips", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-ARR-005"
@@ -2365,8 +2391,8 @@ trigger = "held"
 milestone = "M1"
 mac = ["Shift+Option+drag the clip title bar"]
 win = ["Shift+Alt+drag the clip title bar"]
-status = "pending"
-package = "WP-1.8b"
+status = "widget"
+handler = "the Arrangement View: Shift-Option-dragging (Shift-Alt) a clip's title bar selects time inside the clip (`arrangement.select_time`)"
 
 [[shortcut]]
 id = "S-ARR-008"
@@ -2413,8 +2439,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Cmd+L"]
 win = ["Ctrl+L"]
-status = "pending"
-package = "WP-1.8b"
+status = "bound"
+commands = [
+  { id = "arrangement.loop_selection", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-ARR-012"
@@ -2437,8 +2465,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Cmd+Shift+L"]
 win = ["Ctrl+Shift+L"]
-status = "pending"
-package = "WP-1.8b"
+status = "bound"
+commands = [
+  { id = "arrangement.select_loop", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-ARR-014"
@@ -2623,8 +2653,8 @@ trigger = "press"
 milestone = "M1"
 mac = ["Left", "Right"]
 win = ["Left", "Right"]
-status = "pending"
-package = "WP-1.8b"
+status = "widget"
+handler = "the Arrangement View: Left and Right nudge the selected clips a grid step, or move the insert marker with none selected (`arrangement.nudge`)"
 
 [[shortcut]]
 id = "S-ARR-029"
@@ -3677,8 +3707,8 @@ trigger = "press"
 milestone = "M1"
 mac = ["Option+Left", "Option+Right"]
 win = ["Ctrl+Left", "Ctrl+Right"]
-status = "pending"
-package = "WP-1.8b"
+status = "widget"
+handler = "the Arrangement View: Option-Left and Option-Right (Alt) move the insert marker to the previous or next clip edge (`arrangement.set_insert_marker`)"
 
 [[shortcut]]
 id = "S-A11Y-002"
@@ -3689,8 +3719,8 @@ trigger = "press"
 milestone = "M1"
 mac = ["Shift+Left", "Shift+Right", "Shift+Up", "Shift+Down"]
 win = ["Shift+Left", "Shift+Right", "Shift+Up", "Shift+Down"]
-status = "pending"
-package = "WP-1.8b"
+status = "widget"
+handler = "the Arrangement View: Shift with Left or Right moves the time selection's end a grid step, with Up or Down takes in the track above or below (`arrangement.select_time`)"
 
 [[shortcut]]
 id = "S-A11Y-003"

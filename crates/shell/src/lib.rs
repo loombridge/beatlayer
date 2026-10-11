@@ -40,9 +40,9 @@ pub mod transport;
 
 /// The Arrangement View's command IDs and their argument and result types.
 pub use bl_shell_spec::arrangement as arrangement_commands;
+pub use bl_shell_spec::settings::ZOOM_STEPS;
 /// The transport's command IDs the shell's menus and controls run, and
 /// `transport.state`'s result.
 pub use bl_shell_spec::transport as transport_commands;
-pub use bl_shell_spec::settings::ZOOM_STEPS;
 pub use bl_shell_spec::{commands, menus, register};
 pub use shell::{Area, Effect, Invocation, MainView, Message, Shell, ShellError, WindowKind};

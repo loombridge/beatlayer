@@ -221,9 +221,12 @@ enum Held {
 }
 
 /// Restarts the engine from another thread: the hook a device supervisor
-/// uses when a stream closes and opens again (WP-1.13).
+/// uses when a stream closes and opens again (WP-1.13; `bl-audio-engine`'s
+/// `AudioEngine` is one). When a stream closes, [`Processor::park`] the
+/// processor that comes back from it and [`detach`](Self::detach); when
+/// one opens, [`restart`](Self::restart) with the [`Carry`] it handed on.
 #[derive(Clone, Debug)]
-pub(crate) struct Restarter {
+pub struct Restarter {
     requests: mpsc::Sender<Request>,
 }
 
@@ -232,7 +235,7 @@ impl Restarter {
     /// documents are kept without compiling; transport commands (with their
     /// times), scheduled commands, and cancellations wait for the next
     /// processor; and play, parameter changes, and node data are dropped.
-    pub(crate) fn detach(&self) {
+    pub fn detach(&self) {
         let _ = self.requests.send(Request::Detach);
     }
 
@@ -243,7 +246,8 @@ impl Restarter {
     /// came back), the song starts at 1.1.1 with the document's loop. The
     /// engine's [`Monitor`] moves to the new processor. `None` if the
     /// compiler thread doesn't answer within `timeout`.
-    pub(crate) fn restart(
+    #[must_use]
+    pub fn restart(
         &self,
         config: EngineConfig,
         carry: Option<Carry>,
@@ -293,7 +297,7 @@ impl std::fmt::Debug for Request {
 ///
 /// On a device, the engine restarts with a new processor whenever the
 /// device's stream closes and opens again, perhaps at another sample rate
-/// ([`AudioEngine`](crate::AudioEngine), WP-1.13). The engine then reads the
+/// (`bl-audio-engine`'s `AudioEngine`, WP-1.13). The engine then reads the
 /// new processor's state and reports, and keeps the old one's unread
 /// reports for [`reports`](Self::reports).
 pub struct Engine {
@@ -375,7 +379,12 @@ impl Engine {
     }
 
     /// A handle that restarts the engine from another thread.
-    pub(crate) fn restarter(&self) -> Restarter {
+    ///
+    /// # Panics
+    ///
+    /// Never: the request channel lives until the engine drops.
+    #[must_use]
+    pub fn restarter(&self) -> Restarter {
         Restarter {
             requests: self
                 .requests

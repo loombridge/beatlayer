@@ -16,9 +16,6 @@ bl-dsp.workspace = true
 bl-model.workspace = true
 # The lock-free logger for the audio thread.
 bl-rt.workspace = true
-# The engine on an audio device, kept going through device changes by the
-# device supervisor (WP-1.13).
-bl-audio-io.workspace = true
 # Pure-Rust maths for the test tone, so it renders alike on every platform
 # (WP-0.10). No default features, so no architecture-specific code paths.
 libm = { version = "0.2.16", default-features = false }
@@ -36,6 +33,11 @@ triple_buffer = "9.0.0"
 schemars = { version = "=1.2.2", default-features = false, features = ["std", "derive"] }
 serde = { version = "1.0.228", default-features = false, features = ["std", "derive"] }
 serde_json = "1"
+
+[dev-dependencies]
+# The stress test plays through the null device, which counts dropouts and
+# heap use on its audio thread.
+bl-audio-io.workspace = true
 
 [lints]
 workspace = true

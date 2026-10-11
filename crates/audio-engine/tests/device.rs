@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use bl_audio_engine::{AudioEngine, Cause, DeviceEvent, DeviceStatus, SupervisorOptions};
 use bl_audio_io::{
     Backend, BackendKind, DeviceId, DeviceSelector, NullBackend, NullControl, NullOptions,
     StreamRequest, StreamStats,
@@ -18,10 +19,7 @@ use bl_audio_io::{
 use bl_core::time::{SampleRate, Ticks};
 use bl_engine::nodes::{TEST_TONE, test_tone};
 use bl_engine::testing::{self, Probe};
-use bl_engine::{
-    AudioEngine, Cause, DeviceEvent, DeviceStatus, EngineConfig, LoopRegion, SupervisorOptions,
-    TransportCommand,
-};
+use bl_engine::{EngineConfig, LoopRegion, TransportCommand};
 use bl_model::{Command, Device, DeviceKind, Editor, TrackId, TrackKind};
 
 /// A track with a test tone at −60 dBFS.

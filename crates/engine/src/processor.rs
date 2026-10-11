@@ -54,29 +54,66 @@ struct LoopFrames {
 /// (WP-1.13): the engine clock, the transport (the song position and the
 /// insert marker, in beats, and the Arrangement loop), and the commands
 /// still waiting: scheduled ones for their beats, and transport commands
-/// for their frames of the clock. The next processor takes it over at its
-/// own rate, with the song stopped ([`Processor::take_over`]).
+/// for their frames of the clock. [`Processor::park`] makes it, and
+/// [`Restarter::restart`](crate::Restarter::restart) has the next
+/// processor take it over at its own rate, with the song stopped.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct Carry {
+pub struct Carry {
     /// The engine clock when the stream closed. The next processor's clock
     /// carries on from it, so a frame sent for the clock means the same
     /// frame either side of a restart.
-    pub(crate) clock: u64,
+    clock: u64,
     /// The rate the clock ran at.
-    pub(crate) sample_rate: SampleRate,
+    sample_rate: SampleRate,
     /// The song position: where playback stopped, where Continue resumes.
-    pub(crate) position: Ticks,
+    position: Ticks,
     /// The insert marker: where Play starts.
-    pub(crate) insert_marker: Ticks,
+    insert_marker: Ticks,
     /// The Arrangement loop, if it was on.
-    pub(crate) loop_region: Option<LoopRegion>,
+    loop_region: Option<LoopRegion>,
     /// Scheduled commands waiting to fire, in the order they arrived.
-    pub(crate) scheduled: Vec<ScheduledCommand>,
+    scheduled: Vec<ScheduledCommand>,
     /// Transport commands waiting for their frames, in the order they came.
     timed: Vec<Timed>,
 }
 
 impl Carry {
+    /// The engine clock when the stream closed.
+    #[must_use]
+    pub fn clock(&self) -> u64 {
+        self.clock
+    }
+
+    /// The rate the processor ran at.
+    #[must_use]
+    pub fn sample_rate(&self) -> SampleRate {
+        self.sample_rate
+    }
+
+    /// The song position, in beats: where playback stopped.
+    #[must_use]
+    pub fn position(&self) -> Ticks {
+        self.position
+    }
+
+    /// The insert marker.
+    #[must_use]
+    pub fn insert_marker(&self) -> Ticks {
+        self.insert_marker
+    }
+
+    /// The Arrangement loop, if it was on.
+    #[must_use]
+    pub fn loop_region(&self) -> Option<LoopRegion> {
+        self.loop_region
+    }
+
+    /// The scheduled commands waiting to fire, in the order they arrived.
+    #[must_use]
+    pub fn scheduled(&self) -> &[ScheduledCommand] {
+        &self.scheduled
+    }
+
     /// The frame of the next processor's clock, running at `rate`, for
     /// `frame` of this one's: as long after the restart as it was after the
     /// stream closed. A frame already past stays past, so its command runs
@@ -279,16 +316,23 @@ impl Processor {
     /// closed, and returns what the processor that takes over needs
     /// ([`carry`](Self::carry), taken before the stop). Called off the audio
     /// thread, once the stream is gone.
-    pub(crate) fn park(&mut self) -> Carry {
+    #[must_use]
+    pub fn park(&mut self) -> Carry {
         let carry = self.carry();
         // Spec: device-changes R1
         self.playing = false;
+        self.silence_meters();
+        self.publish(0.0);
+        carry
+    }
+
+    /// Lets every meter fall to silence at once, for a processor that has
+    /// stopped making sound.
+    fn silence_meters(&mut self) {
         if let Some(program) = self.program.as_mut() {
             let program = program.get_mut();
             program.meters.iter_mut().for_each(|peak| *peak = [0.0; 2]);
         }
-        self.publish(0.0);
-        carry
     }
 
     /// What the processor that takes over needs: the clock, the transport
@@ -298,7 +342,8 @@ impl Processor {
     /// (device-changes R7), and, if the song is playing, any Stop, which the
     /// restart has done already: run on the stopped song, it would send it
     /// back to 1.1.1. Allocates: call it off the audio thread.
-    pub(crate) fn carry(&self) -> Carry {
+    #[must_use]
+    pub fn carry(&self) -> Carry {
         let rate = self.config.sample_rate;
         let timed = self
             .timed

@@ -18,6 +18,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use bl_audio_engine::{AudioEngine, DeviceStatus, SupervisorOptions};
 use bl_audio_io::{
     Backend, BackendKind, DeviceId, DeviceSelector, NullBackend, NullControl, NullOptions,
     StreamRequest,
@@ -25,9 +26,7 @@ use bl_audio_io::{
 use bl_core::time::{SampleRate, Ticks};
 use bl_engine::nodes::{TEST_TONE, test_tone};
 use bl_engine::testing::{self, Probe};
-use bl_engine::{
-    AudioEngine, DeviceStatus, EngineConfig, LoopRegion, SupervisorOptions, TransportCommand, When,
-};
+use bl_engine::{EngineConfig, LoopRegion, TransportCommand, When};
 use bl_model::{Command, Device, DeviceKind, Editor, TrackKind};
 
 // Without `--cfg bl_rtsan` (`rtsan/.cargo/config.toml`), this doesn't build.

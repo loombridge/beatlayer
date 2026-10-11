@@ -560,6 +560,40 @@ fn a_fader_drag_is_relative_one_undo_step_and_shows_in_the_status_bar() {
     );
 }
 
+// Spec: mixer-view R6. Shift makes a drag about three times finer
+// (observed by hand on a pan knob: 9R with Shift where 29R without).
+#[test]
+fn shift_makes_a_drag_three_times_finer() {
+    let mut h = session();
+    let t = tracks(&h.shell);
+    let pan = control(&mut h, "3 Audio", "Track Panning");
+    drag(
+        &mut h,
+        pan.center(),
+        &[vec2(0.0, -2.0); 20],
+        Modifiers::NONE,
+        |_| (),
+    );
+    let plain = mixer(&h.shell, t[2]).pan;
+    h.shell
+        .run("mixer.set_pan", json!({ "track": t[2], "pan": 0.0 }))
+        .unwrap();
+    h.time += 1.0;
+    drag(
+        &mut h,
+        pan.center(),
+        &[vec2(0.0, -2.0); 20],
+        Modifiers::SHIFT,
+        |_| (),
+    );
+    let fine = mixer(&h.shell, t[2]).pan;
+    assert!(fine > 0.0, "{fine}");
+    assert!(
+        (plain / fine - controls::FINE as f64).abs() < 1e-6,
+        "{plain} {fine}"
+    );
+}
+
 // Spec: mixer-view R6, R8. Two selected tracks move by the same dB, with
 // the keys and with a drag (observed).
 #[test]

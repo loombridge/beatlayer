@@ -4,10 +4,11 @@
 //! selection so the window and its tests share them. The rules are in the
 //! mixer view spec (R6 to R10).
 //!
-//! The fader's range, its scale, how a drag moves it, its key steps, and
-//! how a drag moves pan were observed in Live 12.4.6 on macOS on 11 October
-//! 2026 (the mixer view spec, sources). How much finer Shift makes a drag
-//! wasn't, and is listed there to observe.
+//! The fader's range, its scale, how a drag moves it, its key steps, how a
+//! drag moves pan, and how much finer Shift makes a pan drag were observed
+//! in Live 12.4.6 on macOS on 11 October 2026 (the mixer view spec,
+//! sources). Shift with a fader drag is assumed to match pan's until it's
+//! observed.
 
 use bl_model::{Document, TrackId};
 use serde_json::json;
@@ -60,9 +61,11 @@ pub const PAN_STEPS: f64 = 50.0;
 /// 50R or 50L; up moves right).
 pub const PAN_DRAG_TRAVEL: f32 = 62.5;
 
-/// How much finer a drag is with Shift held. Not observed (the observation
-/// tools can't hold Shift through a drag): Beatlayer's until it is.
-pub const FINE: f32 = 10.0;
+/// How much finer a drag is with Shift held (observed by hand on a pan
+/// knob: about 1 cm up from C gave 9R with Shift and 29R without, one drag
+/// each, so about three times; taken as 3). A fader drag is assumed to
+/// match until it's observed.
+pub const FINE: f32 = 3.0;
 
 /// The undo step a volume drag makes, named as Live names it (tracks and
 /// undo, item 10).

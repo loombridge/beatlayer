@@ -705,6 +705,43 @@ fn keys_and_menus_act_on_the_selection() {
     );
 }
 
+#[test]
+fn loop_selection_sets_the_brace_and_select_loop_selects_it() {
+    // Spec: arrangement-editing R18 (S-ARR-011, S-ARR-013; transport R13).
+    let mut s = song(&[(2, 4, 2)]);
+    let a = s.clips[0];
+    let brace = |s: &Song| s.doc().settings().arrangement_loop;
+    // With a clip selected: the brace takes its span and the loop goes on,
+    // in one undo step.
+    s.view(ids::SELECT_CLIPS, json!({ "clips": [a] }));
+    let result = s.one_step(ids::LOOP_SELECTION, json!({}));
+    assert!(result.undo_step);
+    let looped = brace(&s);
+    assert_eq!(
+        (looped.start, looped.length, looped.enabled),
+        (Ticks(4 * BAR), Ticks(2 * BAR), true)
+    );
+    assert_eq!(
+        s.shell.editor().undo_history().next(),
+        Some("Loop selection")
+    );
+    // An agent gives the span in bars.
+    s.one_step(ids::LOOP_SELECTION, json!({ "start": "9", "end": "13" }));
+    assert_eq!(brace(&s).start, Ticks(8 * BAR));
+    assert_eq!(brace(&s).length, Ticks(4 * BAR));
+    // With nothing selected it switches the loop.
+    s.view(view_ids::SET_INSERT_MARKER, json!({ "at": 0 }));
+    s.one_step(ids::LOOP_SELECTION, json!({}));
+    assert!(!brace(&s).enabled);
+    // Select Loop: the brace's time on every track, which isn't an edit.
+    let steps = s.steps();
+    let state = s.view(ids::SELECT_LOOP, json!({}));
+    let time = state.time_selection.unwrap();
+    assert_eq!((time.start, time.end), (Ticks(8 * BAR), Ticks(12 * BAR)));
+    assert_eq!(state.selected_tracks, s.tracks);
+    assert_eq!(s.steps(), steps);
+}
+
 /// A small deterministic generator, so a long run of random edits is the
 /// same on every machine.
 struct Lcg(u64);

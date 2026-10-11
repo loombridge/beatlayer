@@ -15,7 +15,7 @@
 
 use std::borrow::Cow;
 
-use bl_commands::Context::Arrangement;
+use bl_commands::Context::{Arrangement, LoopBrace};
 use bl_commands::{Binding, CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_core::time::{Ticks, TimeSignatureMap};
 use bl_model::{ClipId, TrackId};
@@ -48,6 +48,12 @@ pub const CUT: &str = "arrangement.cut";
 pub const PASTE: &str = "arrangement.paste";
 /// `arrangement.nudge`: move the selection by one grid step (Left, Right).
 pub const NUDGE: &str = "arrangement.nudge";
+/// `arrangement.loop_selection`: set the loop brace to the selection and
+/// switch the loop on (Cmd-L).
+pub const LOOP_SELECTION: &str = "arrangement.loop_selection";
+/// `arrangement.select_loop`: select the time inside the loop brace
+/// (Cmd-Shift-L).
+pub const SELECT_LOOP: &str = "arrangement.select_loop";
 
 /// Every command [`register`] adds, so a host knows which IDs to send to
 /// `bl-shell`'s `Shell::run`.
@@ -63,6 +69,8 @@ pub const IDS: &[&str] = &[
     CUT,
     PASTE,
     NUDGE,
+    LOOP_SELECTION,
+    SELECT_LOOP,
 ];
 
 /// Whether `id` is one of the Arrangement's editing commands.
@@ -304,6 +312,20 @@ pub struct NudgeArgs {
     pub clips: Option<Vec<ClipId>>,
 }
 
+/// Arguments of `arrangement.loop_selection`. Give both or neither.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LoopSelectionArgs {
+    /// Where the loop brace starts. Left out with `end`, the selection's
+    /// start.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<Position>,
+    /// Where it ends, after `start`. Left out with `start`, the selection's
+    /// end.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<Position>,
+}
+
 /// What an edit did, and what's selected afterwards.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct EditResult {
@@ -512,6 +534,30 @@ fn specs() -> Vec<CommandSpec> {
              nothing in the set. A clip can't move before 1.1.1.",
         )
         .args::<NudgeArgs>(),
+        edit(
+            LOOP_SELECTION,
+            "Loop Selection",
+            Permission::Edit,
+            "Sets the Arrangement's loop brace to span from `start` to `end`, or the time \
+             selection (or the selected clips) when they're left out, and switches the loop on, \
+             as one undo step, as Cmd-L (Ctrl-L) does. With nothing selected and no span given, \
+             it switches the loop on or off instead. Playback that reaches the brace's end then \
+             goes on from its start.",
+        )
+        .binding("S-ARR-011")
+        .args::<LoopSelectionArgs>(),
+        CommandSpec::new(SELECT_LOOP, "Select Loop")
+            .description(
+                "Selects the time inside the Arrangement's loop brace on every track, as \
+                 Cmd-Shift-L (Ctrl-Shift-L) and clicking the brace do, so the editing commands \
+                 act on the looped material. Changes nothing in the set.",
+            )
+            .permission(Permission::Read)
+            .contexts([Arrangement, LoopBrace])
+            .binding("S-ARR-013")
+            .binding("S-LOOP-011")
+            .args::<NoArgs>()
+            .result::<ArrangementState>(),
     ]
 }
 

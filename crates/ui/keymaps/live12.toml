@@ -1146,8 +1146,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Cmd+Shift+L"]
 win = ["Ctrl+Shift+L"]
-status = "pending"
-package = "WP-1.8b"
+status = "bound"
+commands = [
+  { id = "arrangement.select_loop", contexts = ["loop-brace"] },
+]
 
 [[shortcut]]
 id = "S-ZOOM-001"
@@ -2435,8 +2437,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Cmd+L"]
 win = ["Ctrl+L"]
-status = "pending"
-package = "WP-1.8b"
+status = "bound"
+commands = [
+  { id = "arrangement.loop_selection", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-ARR-012"
@@ -2459,8 +2463,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Cmd+Shift+L"]
 win = ["Ctrl+Shift+L"]
-status = "pending"
-package = "WP-1.8b"
+status = "bound"
+commands = [
+  { id = "arrangement.select_loop", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-ARR-014"

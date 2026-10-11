@@ -407,6 +407,26 @@ fn edit_keys_act_on_the_selection_one_step_each() {
 }
 
 #[test]
+fn cmd_l_loops_the_selection_and_cmd_shift_l_selects_the_loop() {
+    // Spec: arrangement-editing R18 (S-ARR-011, S-ARR-013).
+    let mut s = set();
+    s.click(pos2(x(3.0), AUDIO_3.0), Modifiers::NONE);
+    s.key(Key::L, command());
+    let brace = s.doc().settings().arrangement_loop;
+    assert_eq!(
+        (brace.start, brace.length, brace.enabled),
+        (Ticks(2 * BAR), Ticks(4 * BAR), true)
+    );
+    assert_eq!(s.steps(), 1);
+    // Select the loop's contents from elsewhere.
+    s.click(pos2(x(20.0), AUDIO_4.1), Modifiers::NONE);
+    s.key(Key::L, command() | Modifiers::SHIFT);
+    let time = s.state().time_selection.unwrap();
+    assert_eq!((time.start, time.end), (Ticks(2 * BAR), Ticks(6 * BAR)));
+    assert_eq!(s.steps(), 1);
+}
+
+#[test]
 fn arrows_nudge_jump_to_clip_edges_and_extend() {
     // Spec: arrangement-editing R12 (S-ARR-028, S-A11Y-001, S-A11Y-002).
     let mut s = set();

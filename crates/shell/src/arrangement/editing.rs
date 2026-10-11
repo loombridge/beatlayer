@@ -22,8 +22,9 @@ use bl_model::{
 };
 use bl_shell_spec::arrangement::TimeRange;
 use bl_shell_spec::editing::{
-    self as ids, ClipboardState, Direction, Edge, EditResult, MoveClipsArgs, NudgeArgs, PasteArgs,
-    Position, ResizeClipsArgs, SelectClipsArgs, SelectMode, SplitArgs, TargetArgs,
+    self as ids, ClipboardState, Direction, Edge, EditResult, LoopSelectionArgs, MoveClipsArgs,
+    NudgeArgs, PasteArgs, Position, ResizeClipsArgs, SelectClipsArgs, SelectMode, SplitArgs,
+    TargetArgs,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -646,6 +647,7 @@ pub fn label(id: &str, args: &Value) -> &'static str {
         ids::DUPLICATE => "Duplicate",
         ids::CUT => "Cut",
         ids::PASTE => "Paste",
+        ids::LOOP_SELECTION => "Loop selection",
         _ => "Select",
     }
 }
@@ -664,7 +666,7 @@ pub fn can_run(
         || (view.time_selection.is_some() && !view.selected.is_empty());
     let given = |key: &str| args.get(key).is_some();
     match id {
-        ids::SELECT_CLIPS | ids::SELECT_ALL => true,
+        ids::SELECT_CLIPS | ids::SELECT_ALL | ids::LOOP_SELECTION | ids::SELECT_LOOP => true,
         ids::MOVE_CLIPS | ids::RESIZE_CLIPS => given("clips") || !view.selected_clips.is_empty(),
         ids::NUDGE => true,
         ids::SPLIT => {
@@ -1209,6 +1211,54 @@ pub fn run(
                 ..MoveClipsArgs::default()
             });
             run(ids::MOVE_CLIPS, args, editor, view, clipboard)
+        }
+        ids::LOOP_SELECTION => {
+            let LoopSelectionArgs { start, end } = parse(args)?;
+            let signatures = &doc.settings().time_signatures;
+            let span = match (start, end) {
+                (Some(start), Some(end)) => Some((
+                    start.resolve(signatures).map_err(invalid)?,
+                    end.resolve(signatures).map_err(invalid)?,
+                )),
+                (None, None) if !view.selected_clips.is_empty() => {
+                    span_of(doc, &view.selected_clips).map(|(start, end, _)| (start, end))
+                }
+                (None, None) => view.time_selection,
+                _ => return Err(invalid("give `start` and `end`, or neither")),
+            };
+            let (_, recorded) = match span {
+                Some((start, end)) => {
+                    if end <= start || start.is_negative() {
+                        return Err(invalid(
+                            "the loop must start at 1.1.1 or later and end after it starts",
+                        ));
+                    }
+                    transaction(editor, "Loop selection", |editor| {
+                        apply(
+                            editor,
+                            Command::SetLoop {
+                                start,
+                                length: end - start,
+                            },
+                        )?;
+                        apply(editor, Command::SetLoopEnabled { enabled: true })
+                    })?
+                }
+                None => {
+                    // Nothing selected: the shortcut switches the loop.
+                    let enabled = !doc.settings().arrangement_loop.enabled;
+                    transaction(editor, "Switch loop", |editor| {
+                        apply(editor, Command::SetLoopEnabled { enabled })
+                    })?
+                }
+            };
+            Ok(to_value(&result(doc, editor, view, recorded)))
+        }
+        ids::SELECT_LOOP => {
+            parse::<bl_commands::NoArgs>(args)?;
+            let brace = doc.settings().arrangement_loop;
+            view.select_span(lanes(doc), brace.start, brace.start + brace.length);
+            Ok(to_value(&view.state(doc)))
         }
         other => Err(invalid(format!("`{other}` isn't an editing command"))),
     }

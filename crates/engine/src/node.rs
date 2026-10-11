@@ -17,6 +17,10 @@ use rtgc::{ArcGc, LocalRtGc};
 pub enum NodeKey {
     /// A device in a track's chain.
     Device(DeviceId),
+    /// An audio track's clip player, at the head of its chain: it plays the
+    /// track's clips, which reach it as node data
+    /// ([`clips`](crate::clips)).
+    Player(TrackId),
     /// A track's mixer, after its device chain: pan, volume, the Track
     /// Activator, and the track's meters. Its parameters are
     /// [`mixer::track`](crate::mixer::track).
@@ -38,6 +42,7 @@ impl fmt::Display for NodeKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Device(device) => write!(f, "{device}"),
+            Self::Player(track) => write!(f, "the clip player of {track}"),
             Self::Mixer(track) => write!(f, "the mixer of {track}"),
             Self::Output(track) => write!(f, "the output of {track}"),
             Self::Send { track, to } => write!(f, "the send from {track} to {to}"),

@@ -17,7 +17,7 @@ use bl_cli::golden::{
     platform, read_flac,
 };
 use bl_cli::render::Summary;
-use bl_project::{Media, Project};
+use bl_project::{Media, MediaPath, MediaRef, Project};
 
 fn golden_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/golden")
@@ -198,10 +198,22 @@ fn the_references_are_small_and_each_belongs_to_a_fixture() {
     assert_eq!(golden::stale(&dir), Ok(Vec::new()));
 }
 
-/// Saves a fixture's song as a set in `dir`.
+/// Saves a fixture's song as a set in `dir`, with the audio files its clips
+/// play in `dir/Samples/Imported/` and listed in the set's media table.
 fn save_set(dir: &Path, name: &str) -> PathBuf {
     let scene = fixture(name).expect("the fixture exists").scene();
-    let project = Project::from_editor(&scene.editor, Media::new());
+    let mut media = Media::new();
+    let samples = dir.join("Samples").join("Imported");
+    fs::create_dir_all(&samples).expect("the samples folder");
+    for file in &scene.files {
+        fs::write(samples.join(&file.name), &file.bytes).expect("the audio file saves");
+        media.insert(MediaRef {
+            hash: file.hash,
+            path: MediaPath::new(format!("Samples/Imported/{}", file.name)).unwrap(),
+            size: file.bytes.len() as u64,
+        });
+    }
+    let project = Project::from_editor(&scene.editor, media);
     let path = dir.join(format!("{name}.blset"));
     fs::write(
         &path,
@@ -217,7 +229,9 @@ fn save_set(dir: &Path, name: &str) -> PathBuf {
 /// transport moves. (It does hold its Arrangement loop, which
 /// `loop-wraps` plays, and its mixer: sends, Pre/Post switches, solo, and
 /// Solo in Place, which `pan-and-sends`, `solo-in-place`, and
-/// `solo-a-return` play.)
+/// `solo-a-return` play. And its clips, whose audio files `bl-cli render`
+/// finds through the set's media table, beside the set, as in a project
+/// folder.)
 #[test]
 fn bl_cli_render_writes_what_the_harness_renders() {
     let temp = TempDir::new("render");
@@ -273,7 +287,7 @@ fn bl_cli_render_writes_what_the_harness_renders() {
         assert!(render.same_bits(&fixture.render()), "{}", fixture.name);
         rendered += 1;
     }
-    assert_eq!(rendered, 7);
+    assert_eq!(rendered, 12);
     assert!(!fs::read_dir(&temp.0).unwrap().any(|entry| {
         entry
             .unwrap()
@@ -313,6 +327,41 @@ fn bl_cli_render_writes_24_bit_samples_as_the_references_hold_them() {
     let fixture = fixture("single-tone").expect("the fixture exists");
     let reference = read_flac(&fixture.reference_path(&golden_dir())).expect("the reference reads");
     assert_eq!(samples, reference.samples);
+}
+
+/// A set with clips renders to the end of its last clip unless told
+/// otherwise; with its audio files gone, it still renders, its clips silent,
+/// and says which files are missing (the audio clips spec, R14).
+#[test]
+fn bl_cli_render_plays_clips_to_their_end_and_names_missing_files() {
+    let temp = TempDir::new("render-clips");
+    let set = save_set(&temp.0, "clip-fades");
+    let set = set.to_str().unwrap();
+    let wav = temp.0.join("clips.wav");
+    let wav = wav.to_str().unwrap();
+    let output = bl_cli(&["render", set, wav]);
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "{text}");
+    // The last clip ends on 2.3.1, three seconds in at 120 BPM.
+    assert!(
+        text.contains("3.000 s: 144000 frames at 48000 Hz"),
+        "{text}"
+    );
+    assert!(text.contains("peak:      -20.6 dBFS"), "{text}");
+
+    fs::remove_dir_all(temp.0.join("Samples")).unwrap();
+    let output = bl_cli(&["render", set, wav]);
+    let text = String::from_utf8_lossy(&output.stdout);
+    let errors = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{text}\n{errors}");
+    assert!(text.contains("peak:      -inf dBFS"), "{text}");
+    let hash = fixture("clip-fades").unwrap().scene().files[0].hash;
+    assert!(
+        errors.contains(&format!(
+            "warning: 1 audio file is missing or changed, so its clips play silence: {hash}"
+        )),
+        "{errors}"
+    );
 }
 
 #[test]

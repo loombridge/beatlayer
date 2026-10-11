@@ -27,3 +27,7 @@
 //!   activators gliding, solo and Solo in Place, sends before and after the
 //!   fader, a program swap when a return's Pre/Post switch moves, and the
 //!   meters published after every block (WP-1.6).
+//! - `tests/clips.rs`: clip players reading looped, faded, and overlapping
+//!   clips, new clip lists swapped in as clips are edited (the old ones
+//!   freed by the collector), locates into clips, and tempo changes that
+//!   swap programs (WP-1.4).

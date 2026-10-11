@@ -8,7 +8,7 @@ use imbl::Vector;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::clip::{Clip, ClipData};
+use crate::clip::{AudioData, Clip, ClipData};
 use crate::device::Device;
 use crate::document::Document;
 use crate::error::ModelError;
@@ -235,6 +235,59 @@ pub enum Command {
         /// The new data.
         data: ClipData,
     },
+    /// Moves an audio clip's Start and End markers: where in its file it
+    /// starts playing, and where it stops while its loop is off.
+    SetClipRegion {
+        /// The audio clip.
+        clip: ClipId,
+        /// The Start marker, in seconds into the file: 0 or more. While the
+        /// loop is on, it must be before the loop brace's end.
+        #[schemars(range(min = 0.0))]
+        start: f64,
+        /// The End marker, in seconds into the file, after `start`; `null`
+        /// (or nothing) for the end of the file.
+        #[serde(default)]
+        end: Option<f64>,
+    },
+    /// Moves an audio clip's loop brace, leaving its Loop switch as it is.
+    SetClipLoop {
+        /// The audio clip.
+        clip: ClipId,
+        /// Where the brace starts, in seconds into the file: 0 or more.
+        #[schemars(range(min = 0.0))]
+        start: f64,
+        /// Where it ends, in seconds into the file, after `start`; `null`
+        /// (or nothing) for the end of the file.
+        #[serde(default)]
+        end: Option<f64>,
+    },
+    /// Switches an audio clip's loop on or off, leaving its brace where it
+    /// is.
+    SetClipLoopEnabled {
+        /// The audio clip.
+        clip: ClipId,
+        /// Whether the clip repeats its loop brace.
+        enabled: bool,
+    },
+    /// Sets an audio clip's gain, as linear gain (finite, at least 0).
+    SetClipGain {
+        /// The audio clip.
+        clip: ClipId,
+        /// The gain: 1 is 0 dB, 0.5 about −6 dB, and 0 silence.
+        #[schemars(range(min = 0.0))]
+        gain: f64,
+    },
+    /// Sets the lengths of an audio clip's fade-in and fade-out.
+    SetClipFades {
+        /// The audio clip.
+        clip: ClipId,
+        /// The fade-in's length in seconds from the clip's start: 0 for none.
+        #[schemars(range(min = 0.0))]
+        fade_in: f64,
+        /// The fade-out's length in seconds up to the clip's end: 0 for none.
+        #[schemars(range(min = 0.0))]
+        fade_out: f64,
+    },
 
     /// Inserts a new device at `index` in a track's chain.
     InsertDevice {
@@ -317,6 +370,11 @@ impl Command {
             Self::RenameClip { .. } => "Rename clip",
             Self::SetClipMute { .. } => "Mute clip",
             Self::SetClipData { .. } => "Edit clip",
+            Self::SetClipRegion { .. } => "Change clip region",
+            Self::SetClipLoop { .. } => "Change clip loop",
+            Self::SetClipLoopEnabled { .. } => "Switch clip loop",
+            Self::SetClipGain { .. } => "Change clip gain",
+            Self::SetClipFades { .. } => "Change clip fades",
             Self::InsertDevice { .. } => "Insert device",
             Self::RemoveDevice { .. } => "Remove device",
             Self::MoveDevice { .. } => "Move device",
@@ -521,6 +579,28 @@ impl Document {
                 }
                 Ok(())
             }
+            Command::SetClipRegion { clip, start, end } => self.edit_audio(*clip, |audio| {
+                audio.start = *start;
+                audio.end = *end;
+            }),
+            Command::SetClipLoop { clip, start, end } => self.edit_audio(*clip, |audio| {
+                audio.loop_start = *start;
+                audio.loop_end = *end;
+            }),
+            Command::SetClipLoopEnabled { clip, enabled } => {
+                self.edit_audio(*clip, |audio| audio.looping = *enabled)
+            }
+            Command::SetClipGain { clip, gain } => {
+                self.edit_audio(*clip, |audio| audio.gain = *gain)
+            }
+            Command::SetClipFades {
+                clip,
+                fade_in,
+                fade_out,
+            } => self.edit_audio(*clip, |audio| {
+                audio.fade_in = *fade_in;
+                audio.fade_out = *fade_out;
+            }),
             Command::InsertDevice {
                 track,
                 index,
@@ -739,6 +819,24 @@ impl Document {
         Ok(())
     }
 
+    /// Changes an audio clip's data with `edit`, if the result is valid.
+    fn edit_audio(
+        &mut self,
+        id: ClipId,
+        edit: impl FnOnce(&mut AudioData),
+    ) -> Result<(), ModelError> {
+        let ClipData::Audio(current) = self.clip_ref(id)?.data else {
+            return Err(ModelError::NotAudioClip(id));
+        };
+        let mut next = current;
+        edit(&mut next);
+        check_audio(&next)?;
+        if next != current {
+            self.clip_mut(id)?.data = ClipData::Audio(next);
+        }
+        Ok(())
+    }
+
     fn insert_device(
         &mut self,
         track: TrackId,
@@ -932,17 +1030,60 @@ pub(crate) fn check_extent(start: Ticks, length: Ticks) -> Result<(), ModelError
         .ok_or(ModelError::PositionOverflow)
 }
 
-/// Checks the notes in MIDI data.
+/// Checks the notes in MIDI data, and an audio clip's markers, loop, gain,
+/// and fades.
 pub(crate) fn check_clip_data(data: &ClipData) -> Result<(), ModelError> {
-    if let ClipData::Midi(midi) = data {
-        for (index, note) in midi.notes.iter().enumerate() {
-            if note.key > 127 || !(1..=127).contains(&note.velocity) {
-                return Err(ModelError::InvalidNote { index });
+    match data {
+        ClipData::Midi(midi) => {
+            for (index, note) in midi.notes.iter().enumerate() {
+                if note.key > 127 || !(1..=127).contains(&note.velocity) {
+                    return Err(ModelError::InvalidNote { index });
+                }
+                check_extent(note.start, note.length)?;
             }
-            check_extent(note.start, note.length)?;
+            Ok(())
+        }
+        ClipData::Audio(audio) => check_audio(audio),
+    }
+}
+
+/// Checks an audio clip's data (the audio clips spec, R3 to R6): times
+/// finite and not negative, each end after its start, the Start marker
+/// before the loop's end while the loop is on, and the gain and fades
+/// finite and not negative.
+pub(crate) fn check_audio(audio: &AudioData) -> Result<(), ModelError> {
+    let at_least_zero = |value: f64| value.is_finite() && value >= 0.0;
+    let after = |end: f64, start: f64| end.is_finite() && end > start;
+    check_value("clip start", audio.start, at_least_zero(audio.start))?;
+    if let Some(end) = audio.end {
+        check_value("clip end", end, after(end, audio.start))?;
+    }
+    check_value(
+        "loop start",
+        audio.loop_start,
+        at_least_zero(audio.loop_start),
+    )?;
+    if let Some(end) = audio.loop_end {
+        check_value("loop end", end, after(end, audio.loop_start))?;
+        if audio.looping {
+            check_value(
+                "clip start (at or after the loop end)",
+                audio.start,
+                audio.start < end,
+            )?;
         }
     }
-    Ok(())
+    check_value("clip gain", audio.gain, at_least_zero(audio.gain))?;
+    check_value(
+        "fade-in length",
+        audio.fade_in,
+        at_least_zero(audio.fade_in),
+    )?;
+    check_value(
+        "fade-out length",
+        audio.fade_out,
+        at_least_zero(audio.fade_out),
+    )
 }
 
 /// Checks a device's parameter values.
@@ -1000,7 +1141,7 @@ mod tests {
     use bl_core::time::{Bpm, TempoMap, TimeSignature};
 
     use super::*;
-    use crate::clip::{AudioData, MidiData, Note};
+    use crate::clip::{EDGE_FADE_SECONDS as EDGE_FADE, MidiData, Note};
     use crate::device::{DeviceKind, PluginFormat};
     use crate::ids::ContentHash;
 
@@ -1082,9 +1223,7 @@ mod tests {
     }
 
     fn audio() -> ClipData {
-        ClipData::Audio(AudioData {
-            media: ContentHash([7; 32]),
-        })
+        ClipData::Audio(AudioData::new(ContentHash([7; 32])))
     }
 
     fn midi() -> ClipData {
@@ -1638,6 +1777,172 @@ mod tests {
         assert_eq!(
             song.reject(Command::SetClipData { clip, data }),
             ModelError::EmptyLength(Ticks::ZERO)
+        );
+    }
+
+    // Spec: audio-clips R3, R4, R5, R6, R15
+    #[test]
+    fn audio_clip_settings_change_one_at_a_time_and_are_checked() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        let clip = song.clip(track, 0);
+        let audio = |song: &Song| match song.doc.clip(clip).unwrap().data {
+            ClipData::Audio(audio) => audio,
+            ClipData::Midi(_) => unreachable!("an audio clip"),
+        };
+        // A new clip plays the whole file once, at 0 dB, with no fades.
+        assert_eq!(audio(&song), AudioData::new(ContentHash([7; 32])));
+
+        song.apply(Command::SetClipRegion {
+            clip,
+            start: 0.5,
+            end: Some(2.0),
+        })
+        .unwrap();
+        song.apply(Command::SetClipLoop {
+            clip,
+            start: 1.0,
+            end: Some(1.5),
+        })
+        .unwrap();
+        song.apply(Command::SetClipLoopEnabled {
+            clip,
+            enabled: true,
+        })
+        .unwrap();
+        song.apply(Command::SetClipGain { clip, gain: 0.5 })
+            .unwrap();
+        song.apply(Command::SetClipFades {
+            clip,
+            fade_in: 0.25,
+            fade_out: EDGE_FADE,
+        })
+        .unwrap();
+        let set = audio(&song);
+        assert_eq!(
+            (
+                set.start,
+                set.end,
+                set.looping,
+                set.loop_start,
+                set.loop_end
+            ),
+            (0.5, Some(2.0), true, 1.0, Some(1.5))
+        );
+        assert_eq!(
+            (set.gain, set.fade_in, set.fade_out),
+            (0.5, 0.25, EDGE_FADE)
+        );
+
+        // Out of range, each is refused and changes nothing.
+        for command in [
+            Command::SetClipRegion {
+                clip,
+                start: -0.1,
+                end: None,
+            },
+            Command::SetClipRegion {
+                clip,
+                start: 1.0,
+                end: Some(1.0),
+            },
+            // The Start marker must stay before the loop's end while the
+            // loop is on.
+            Command::SetClipRegion {
+                clip,
+                start: 1.5,
+                end: None,
+            },
+            Command::SetClipLoop {
+                clip,
+                start: 0.25,
+                end: Some(0.5),
+            },
+            Command::SetClipLoop {
+                clip,
+                start: f64::NAN,
+                end: None,
+            },
+            Command::SetClipGain {
+                clip,
+                gain: f64::INFINITY,
+            },
+            Command::SetClipGain { clip, gain: -0.5 },
+            Command::SetClipFades {
+                clip,
+                fade_in: -1.0,
+                fade_out: 0.0,
+            },
+            Command::SetClipFades {
+                clip,
+                fade_in: 0.0,
+                fade_out: f64::NAN,
+            },
+        ] {
+            assert!(
+                matches!(song.reject(command), ModelError::InvalidValue { .. }),
+                "{:?}",
+                audio(&song)
+            );
+        }
+        // With the loop off, the Start marker may sit past the brace.
+        song.apply(Command::SetClipLoopEnabled {
+            clip,
+            enabled: false,
+        })
+        .unwrap();
+        song.apply(Command::SetClipRegion {
+            clip,
+            start: 1.75,
+            end: None,
+        })
+        .unwrap();
+        // And then the loop can't come on.
+        assert!(matches!(
+            song.reject(Command::SetClipLoopEnabled {
+                clip,
+                enabled: true,
+            }),
+            ModelError::InvalidValue { .. }
+        ));
+
+        // A MIDI clip has none of these settings.
+        let midi_track = song.track(TrackKind::Midi, None);
+        let midi_clip = song.clip(midi_track, 0);
+        assert_eq!(
+            song.reject(Command::SetClipGain {
+                clip: midi_clip,
+                gain: 0.5,
+            }),
+            ModelError::NotAudioClip(midi_clip)
+        );
+        // Nor can whole data sneak past the checks.
+        let mut bad = AudioData::new(ContentHash([7; 32]));
+        bad.fade_in = f64::NAN;
+        assert!(matches!(
+            song.reject(Command::SetClipData {
+                clip,
+                data: ClipData::Audio(bad),
+            }),
+            ModelError::InvalidValue { .. }
+        ));
+    }
+
+    // Spec: audio-clips R7
+    #[test]
+    fn create_fades_on_clip_edges_gives_new_clips_4_ms_fades() {
+        assert_eq!(EDGE_FADE, 0.004);
+        let plain = AudioData::new(ContentHash([1; 32]));
+        assert_eq!((plain.fade_in, plain.fade_out), (0.0, 0.0));
+        let faded = plain.with_edge_fades();
+        assert_eq!((faded.fade_in, faded.fade_out), (EDGE_FADE, EDGE_FADE));
+        assert_eq!(
+            AudioData {
+                fade_in: 0.0,
+                fade_out: 0.0,
+                ..faded
+            },
+            plain
         );
     }
 

@@ -331,7 +331,7 @@ impl Processor {
     fn silence_meters(&mut self) {
         if let Some(program) = self.program.as_mut() {
             let program = program.get_mut();
-            program.meters.iter_mut().for_each(|peak| *peak = [0.0; 2]);
+            program.silence_meters();
         }
     }
 

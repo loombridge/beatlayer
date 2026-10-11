@@ -17,16 +17,30 @@ use rtgc::{ArcGc, LocalRtGc};
 pub enum NodeKey {
     /// A device in a track's chain.
     Device(DeviceId),
-    /// A track's fader, after its device chain. A stand-in that applies
-    /// volume and mute until the mixer (WP-1.6) replaces it.
-    Fader(TrackId),
+    /// A track's mixer, after its device chain: pan, volume, the Track
+    /// Activator, and the track's meters. Its parameters are
+    /// [`mixer::track`](crate::mixer::track).
+    Mixer(TrackId),
+    /// A track's output into its group or Main, which solo silences. Its
+    /// parameters are [`mixer::route`](crate::mixer::route).
+    Output(TrackId),
+    /// A track's send to a return track. Its parameters are
+    /// [`mixer::route`](crate::mixer::route).
+    Send {
+        /// The sending track.
+        track: TrackId,
+        /// The return track.
+        to: TrackId,
+    },
 }
 
 impl fmt::Display for NodeKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Device(device) => write!(f, "{device}"),
-            Self::Fader(track) => write!(f, "the fader of {track}"),
+            Self::Mixer(track) => write!(f, "the mixer of {track}"),
+            Self::Output(track) => write!(f, "the output of {track}"),
+            Self::Send { track, to } => write!(f, "the send from {track} to {to}"),
         }
     }
 }
@@ -97,8 +111,8 @@ impl fmt::Debug for NodeData {
     }
 }
 
-/// A node: a device, a fader, or anything else that processes audio in a
-/// program.
+/// A node: a device, a track's mixer, or anything else that processes audio
+/// in a program.
 ///
 /// A node is made off the audio thread, where it may allocate, and from then
 /// on runs on the audio thread, where it must follow the real-time rules in

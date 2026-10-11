@@ -80,4 +80,4 @@ pub use error::ModelError;
 pub use ids::{ClipId, ContentHash, DeviceId, ParamId, ParseContentHashError, TrackId};
 /// The persistent collections the document's public types hold.
 pub use imbl::{OrdMap, Vector};
-pub use track::{Mixer, Track, TrackKind};
+pub use track::{Mixer, SendTap, Track, TrackKind};

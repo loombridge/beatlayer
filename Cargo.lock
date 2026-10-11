@@ -884,6 +884,7 @@ dependencies = [
  "bl-engine",
  "bl-media",
  "bl-model",
+ "bl-project",
  "bl-shell",
  "bytemuck",
  "egui",

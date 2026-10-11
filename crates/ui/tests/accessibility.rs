@@ -1,0 +1,1306 @@
+//! The keyboard and screen-reader baseline for every M1 view (WP-1.14),
+//! headless: what the accessibility tree gives a screen reader for tracks,
+//! clips, and faders; where the keyboard focus goes and what the tree
+//! reports as focused as it moves; Tab, the neighbour keys, and the Navigate
+//! menu; Outline View in Focus; Display & Input's keyboard settings; and a
+//! walk of the whole command registry that fails for any command with no
+//! keyboard path that isn't listed with its reason.
+//!
+//! Spec: accessibility R1 to R9.
+
+mod common;
+
+use std::collections::BTreeMap;
+
+use bl_core::time::Ticks;
+use bl_model::{AudioData, Clip, ClipData, ClipId, Command, TrackId};
+use bl_shell::files::factory_default_set;
+use bl_shell::menus::{Action, MenuPlatform, menu_bar};
+use bl_shell::mixer_view::MixerOf;
+use bl_shell::{Area, Shell};
+use bl_ui::arrangement::benchmark;
+use bl_ui::arrangement::headers::title_id;
+use bl_ui::keymap::{Keymap, Platform, Status};
+use bl_ui::layout::{ELEMENTS, Strip};
+use bl_ui::main_window::{UiEvent, element_id, main_view_id};
+use bl_ui::menus::item_state;
+use bl_ui::mixer::{Place, column_id, fader_id, pan_id, switch_id, volume_field_id};
+use common::{Harness, Window, command};
+use egui::accesskit::{self, Role};
+use egui::{FullOutput, Id, Key, Modifiers};
+use serde_json::json;
+
+const BAR: i64 = Ticks::WHOLE.get();
+
+/// The factory set with a clip called "Kick" on 3 Audio over bars 3 to 7,
+/// drawn with Live's title bar at the reference size.
+fn set() -> (Harness, Vec<TrackId>, ClipId) {
+    let mut editor = factory_default_set();
+    let tracks: Vec<TrackId> = editor.document().top_level().collect();
+    let id: ClipId = editor.new_id();
+    let mut clip = Clip::new(
+        id,
+        Ticks(2 * BAR),
+        Ticks(4 * BAR),
+        ClipData::Audio(AudioData::new(benchmark::media_hash(0))),
+    );
+    clip.name = "Kick".to_owned();
+    editor
+        .apply(Command::CreateClip {
+            track: tracks[2],
+            clip,
+        })
+        .unwrap();
+    editor.clear_history().unwrap();
+    let mut h = Harness::with_title_bar(Window::Main);
+    h.shell = benchmark::shell_with(editor);
+    h.settle();
+    (h, tracks, id)
+}
+
+/// The accessibility tree's nodes, by ID.
+fn tree(output: &FullOutput) -> BTreeMap<accesskit::NodeId, accesskit::Node> {
+    output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .expect("an AccessKit tree update")
+        .nodes
+        .iter()
+        .cloned()
+        .collect()
+}
+
+/// The node a screen reader reads as focused: the tree's focus, or its
+/// active descendant (R2).
+fn focused(output: &FullOutput) -> Option<(accesskit::NodeId, accesskit::Node)> {
+    let update = output.platform_output.accesskit_update.as_ref()?;
+    let nodes = tree(output);
+    let focus = update.focus;
+    let node = nodes.get(&focus)?;
+    let id = node.active_descendant().unwrap_or(focus);
+    nodes.get(&id).map(|n| (id, n.clone()))
+}
+
+/// The label of what a screen reader reads as focused.
+fn focused_label(output: &FullOutput) -> String {
+    // A text field without a label is read by its placeholder.
+    focused(output)
+        .and_then(|(_, n)| n.label().or_else(|| n.placeholder()).map(str::to_owned))
+        .unwrap_or_default()
+}
+
+fn press(h: &mut Harness, key: Key, modifiers: Modifiers) -> FullOutput {
+    h.key(key, modifiers);
+    h.settle()
+}
+
+/// Option on macOS, Ctrl elsewhere: the neighbour keys' modifier
+/// (S-FOCUS-013).
+fn neighbour() -> Modifiers {
+    if cfg!(target_os = "macos") {
+        Modifiers::ALT
+    } else {
+        Modifiers::CTRL
+    }
+}
+
+fn focused_id(h: &Harness) -> Option<Id> {
+    h.ctx.memory(egui::Memory::focused)
+}
+
+fn tab_navigation_on(h: &mut Harness) {
+    if !h.shell.tab_navigation() {
+        h.shell
+            .run("focus.toggle_tab_navigation", json!({}))
+            .unwrap();
+    }
+}
+
+// Spec: accessibility R1.
+#[test]
+fn screen_readers_read_track_names_clip_names_and_fader_values() {
+    let (mut h, tracks, clip) = set();
+    let output = h.settle();
+    let nodes = tree(&output);
+    let node = |id: Id| nodes.get(&id.accesskit_id()).cloned().unwrap();
+
+    // Tracks: each header's title is a row header named for the track.
+    let names: Vec<String> = Harness::nodes(&output)
+        .into_iter()
+        .filter(|n| n.role == Role::RowHeader)
+        .map(|n| n.label)
+        .collect();
+    for name in [
+        "1 MIDI", "2 MIDI", "3 Audio", "4 Audio", "A Return", "B Return", "Main",
+    ] {
+        assert!(names.iter().any(|n| n == name), "{name} in {names:?}");
+    }
+    let title = node(title_id(tracks[2]));
+    assert_eq!(title.role(), Role::RowHeader);
+    assert_eq!(title.label(), Some("3 Audio"));
+    assert_eq!(title.description(), Some("Audio track 3"));
+
+    // Clips: a list item named for the clip, with where it plays.
+    let kick = node(bl_ui::arrangement::clip_id(clip));
+    assert_eq!(kick.role(), Role::ListItem);
+    assert_eq!(kick.label(), Some("Kick"));
+    assert_eq!(kick.value(), Some("3.1.1 to 7.1.1"));
+    assert_eq!(kick.is_selected(), Some(false));
+
+    // Faders: sliders whose value is in dB, as the Status Bar shows it.
+    let volume = node(volume_field_id(Place::Header, tracks[2]));
+    assert_eq!(volume.role(), Role::Slider);
+    assert_eq!(volume.label(), Some("Track Volume"));
+    assert_eq!(volume.value(), Some("0.0 dB"));
+    h.shell
+        .run(
+            "mixer.set_volume",
+            json!({ "track": tracks[2], "volume": 0.5 }),
+        )
+        .unwrap();
+    let nodes = tree(&h.settle());
+    let volume = &nodes[&volume_field_id(Place::Header, tracks[2]).accesskit_id()];
+    assert_eq!(volume.value(), Some("-6.0 dB"));
+    assert!((volume.numeric_value().unwrap() + 6.02).abs() < 0.01);
+    h.shell
+        .run(
+            "mixer.set_volume",
+            json!({ "track": tracks[2], "volume": 0.0 }),
+        )
+        .unwrap();
+    let nodes = tree(&h.settle());
+    let volume = &nodes[&volume_field_id(Place::Header, tracks[2]).accesskit_id()];
+    assert_eq!(volume.value(), Some("-inf dB"));
+    let pan = &nodes[&pan_id(Place::Header, tracks[2]).accesskit_id()];
+    assert_eq!(
+        (pan.label(), pan.value()),
+        (Some("Track Panning"), Some("C"))
+    );
+
+    // The Session View's mixer: a group per track, its fader in dB.
+    h.shell
+        .run("view.toggle_session_arrangement", json!({}))
+        .unwrap();
+    let nodes = tree(&h.settle());
+    let column = &nodes[&column_id(MixerOf::Session, tracks[3]).accesskit_id()];
+    assert_eq!(
+        (column.role(), column.label()),
+        (Role::Group, Some("4 Audio"))
+    );
+    let fader = &nodes[&fader_id(Place::Mixer(MixerOf::Session), tracks[3]).accesskit_id()];
+    assert_eq!(
+        (fader.role(), fader.label(), fader.value()),
+        (Role::Slider, Some("Track Volume"), Some("0.0 dB"))
+    );
+    let fader = &nodes[&fader_id(Place::Mixer(MixerOf::Session), tracks[2]).accesskit_id()];
+    assert_eq!(fader.value(), Some("-inf dB"));
+}
+
+// Spec: accessibility R2.
+#[test]
+fn the_screen_reader_follows_the_keyboard_focus() {
+    let (mut h, tracks, clip) = set();
+    // Option-2 (Alt-2): the Arrangement View has the keyboard.
+    let output = press(&mut h, Key::Num2, Modifiers::ALT);
+    assert_eq!(focused_id(&h), Some(main_view_id()));
+    let (_, pane) = focused(&output).unwrap();
+    assert_eq!(
+        (pane.role(), pane.label()),
+        (Role::Pane, Some("Arrangement View"))
+    );
+    // Down selects a track: the screen reader reads its title.
+    let output = press(&mut h, Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(h.shell.arrangement().selected_tracks(), [tracks[0]]);
+    assert_eq!(focused_label(&output), "1 MIDI");
+    press(&mut h, Key::ArrowDown, Modifiers::NONE);
+    let output = press(&mut h, Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(focused_label(&output), "3 Audio");
+    let (id, title) = focused(&output).unwrap();
+    assert_eq!(id, title_id(tracks[2]).accesskit_id());
+    assert_eq!(title.role(), Role::RowHeader);
+
+    // A selected clip: the screen reader reads the clip.
+    h.shell
+        .run("arrangement.select_clips", json!({ "clips": [clip] }))
+        .unwrap();
+    let output = h.settle();
+    let (_, kick) = focused(&output).unwrap();
+    assert_eq!(kick.label(), Some("Kick"));
+    assert_eq!(kick.is_selected(), Some(true));
+
+    // Tab into the track's controls: the focused control itself.
+    h.shell
+        .run(
+            "arrangement.select_tracks",
+            json!({ "tracks": [tracks[2]] }),
+        )
+        .unwrap();
+    tab_navigation_on(&mut h);
+    let output = press(&mut h, Key::Tab, Modifiers::NONE);
+    assert_eq!(
+        focused_id(&h),
+        Some(switch_id(
+            Place::Header,
+            bl_shell::mixer_controls::Switch::Activator,
+            tracks[2]
+        ))
+    );
+    let (_, control) = focused(&output).unwrap();
+    assert_eq!(control.label(), Some("Track Activator"));
+    assert_eq!(control.value(), Some("on"));
+
+    // Navigate ▸ Mixer: the column, named for its track.
+    let output = press(&mut h, Key::M, Modifiers::ALT | Modifiers::SHIFT);
+    assert_eq!(
+        focused_id(&h),
+        Some(column_id(MixerOf::Arrangement, tracks[2]))
+    );
+    assert_eq!(focused_label(&output), "3 Audio");
+}
+
+/// The Control Bar's and Status Bar's elements that take the keyboard.
+fn live_elements(strip: Strip) -> Vec<Id> {
+    ELEMENTS
+        .iter()
+        .filter(|p| p.strip == strip && bl_ui::main_window::is_live(p.element))
+        .map(|p| element_id(p.element))
+        .collect()
+}
+
+// Spec: accessibility R3, R5.
+#[test]
+fn tab_moves_within_the_focused_area_and_wraps_only_with_wrap_tab_navigation() {
+    let (mut h, _, _) = set();
+    tab_navigation_on(&mut h);
+    assert!(!h.shell.wrap_navigation(), "off in a new install");
+    press(&mut h, Key::Num0, Modifiers::ALT);
+    let first = focused_id(&h).unwrap();
+    assert_eq!(first, element_id(bl_ui::layout::Element::BrowserToggle));
+    let bar = live_elements(Strip::ControlBar);
+    let mut seen = vec![first];
+    for _ in 0..bar.len() + 3 {
+        press(&mut h, Key::Tab, Modifiers::NONE);
+        let now = focused_id(&h).unwrap();
+        assert!(bar.contains(&now), "Tab stays in the Control Bar: {now:?}");
+        seen.push(now);
+    }
+    // At the end it stays on the last control.
+    let last = *seen.last().unwrap();
+    assert_eq!(seen[seen.len() - 2], last, "without wrapping it stops");
+    assert_ne!(last, first);
+    assert_eq!(h.shell.focused_area(), Area::ControlBar);
+    // Wrap Tab Navigation, from the Navigate menu: on to the first again.
+    h.shell
+        .run("focus.toggle_wrap_navigation", json!({}))
+        .unwrap();
+    press(&mut h, Key::Tab, Modifiers::NONE);
+    assert_eq!(focused_id(&h), Some(first));
+    press(&mut h, Key::Tab, Modifiers::SHIFT);
+    assert_eq!(focused_id(&h), Some(last), "Shift-Tab wraps backwards");
+
+    // The browser: from the search field to the sidebar to the list, each
+    // part's keys applying as the shell moves its focus there.
+    press(&mut h, Key::F, command());
+    assert_eq!(focused_id(&h), Some(bl_ui::browser::search_id()));
+    press(&mut h, Key::Tab, Modifiers::NONE);
+    assert_eq!(focused_id(&h), Some(bl_ui::browser::sidebar_id()));
+    assert_eq!(
+        h.shell.browser_view().focus(),
+        bl_shell::browser::Part::Sidebar
+    );
+    press(&mut h, Key::Tab, Modifiers::NONE);
+    assert_eq!(focused_id(&h), Some(bl_ui::browser::list_id()));
+    assert_eq!(
+        h.shell.browser_view().focus(),
+        bl_shell::browser::Part::Content
+    );
+}
+
+// Spec: accessibility R4.
+#[test]
+fn tab_moves_through_a_track_s_controls_and_the_neighbour_keys_to_the_next_track() {
+    let (mut h, tracks, _) = set();
+    tab_navigation_on(&mut h);
+    press(&mut h, Key::Num2, Modifiers::ALT);
+    h.shell
+        .run(
+            "arrangement.select_tracks",
+            json!({ "tracks": [tracks[2]] }),
+        )
+        .unwrap();
+    h.settle();
+    use bl_shell::mixer_controls::Switch;
+    let header = |switch| switch_id(Place::Header, switch, tracks[2]);
+    let expected = [
+        header(Switch::Activator),
+        header(Switch::Solo),
+        header(Switch::Arm),
+        volume_field_id(Place::Header, tracks[2]),
+        pan_id(Place::Header, tracks[2]),
+    ];
+    for want in expected {
+        press(&mut h, Key::Tab, Modifiers::NONE);
+        assert_eq!(focused_id(&h), Some(want));
+    }
+    // The last control: Tab stays (no wrapping by default).
+    press(&mut h, Key::Tab, Modifiers::NONE);
+    assert_eq!(focused_id(&h), Some(pan_id(Place::Header, tracks[2])));
+    // Option-Tab (Ctrl-Tab): the same control on the next track, and back.
+    press(&mut h, Key::Tab, neighbour());
+    assert_eq!(focused_id(&h), Some(pan_id(Place::Header, tracks[3])));
+    press(&mut h, Key::Tab, neighbour() | Modifiers::SHIFT);
+    assert_eq!(focused_id(&h), Some(pan_id(Place::Header, tracks[2])));
+    // Esc goes back to the track's title bar.
+    press(&mut h, Key::Escape, Modifiers::NONE);
+    assert_eq!(focused_id(&h), Some(main_view_id()));
+    assert!(h.shell.arrangement().title_bars_selected());
+    assert_eq!(h.shell.arrangement().selected_tracks(), [tracks[2]]);
+
+    // From the volume field, which takes typed values, the keys move too.
+    for _ in 0..4 {
+        press(&mut h, Key::Tab, Modifiers::NONE);
+    }
+    assert_eq!(
+        focused_id(&h),
+        Some(volume_field_id(Place::Header, tracks[2]))
+    );
+    press(&mut h, Key::Tab, neighbour());
+    assert_eq!(
+        focused_id(&h),
+        Some(volume_field_id(Place::Header, tracks[3]))
+    );
+    press(&mut h, Key::Escape, Modifiers::NONE);
+    assert_eq!(focused_id(&h), Some(main_view_id()));
+}
+
+// Spec: accessibility R4.
+#[test]
+fn the_neighbour_keys_bring_a_column_out_of_view_into_it() {
+    let (mut h, _, _) = set();
+    for _ in 0..20 {
+        h.shell
+            .invoke("track.create", json!({ "kind": "audio" }))
+            .unwrap();
+    }
+    h.shell
+        .run("view.toggle_session_arrangement", json!({}))
+        .unwrap();
+    tab_navigation_on(&mut h);
+    h.settle();
+    // The audio tracks' columns, from 3 Audio on: each has pan.
+    let columns = h.shell.mixer_columns()[2..].to_vec();
+    let session = Place::Mixer(MixerOf::Session);
+    h.ctx
+        .memory_mut(|m| m.request_focus(column_id(MixerOf::Session, columns[0])));
+    h.settle();
+    // Tab moves into the column's controls; the neighbour keys along them.
+    press(&mut h, Key::Tab, Modifiers::NONE);
+    assert_eq!(focused_id(&h), Some(pan_id(session, columns[0])));
+    for want in &columns[1..16] {
+        press(&mut h, Key::Tab, neighbour());
+        h.settle();
+        assert_eq!(focused_id(&h), Some(pan_id(session, *want)));
+    }
+    let scroll = h.shell.mixer_view().of(MixerOf::Session).scroll;
+    assert!(scroll > 0.0, "the mixer scrolled the column into view");
+}
+
+/// Every rectangle drawn with the focus colour in a frame.
+fn focus_strokes(output: &FullOutput, colour: egui::Color32) -> Vec<egui::Rect> {
+    fn walk(shape: &egui::Shape, colour: egui::Color32, out: &mut Vec<egui::Rect>) {
+        match shape {
+            egui::Shape::Rect(rect) if rect.stroke.color == colour && rect.stroke.width > 0.0 => {
+                out.push(rect.rect);
+            }
+            egui::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    walk(shape, colour, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    for clipped in &output.shapes {
+        walk(&clipped.shape, colour, &mut out);
+    }
+    out
+}
+
+// Spec: accessibility R7.
+#[test]
+fn outline_view_in_focus_is_off_by_default_and_outlines_the_focused_area_when_on() {
+    let (mut h, tracks, _) = set();
+    let colour = h.theme.colors.focus.0;
+    assert!(!h.shell.outline_view_in_focus(), "off, as in Live 12.4.6");
+    tab_navigation_on(&mut h);
+    press(&mut h, Key::Num2, Modifiers::ALT);
+    h.shell
+        .run(
+            "arrangement.select_tracks",
+            json!({ "tracks": [tracks[2]] }),
+        )
+        .unwrap();
+    press(&mut h, Key::Tab, Modifiers::NONE);
+    assert!(focused_id(&h).is_some());
+    let output = h.settle();
+    assert!(
+        focus_strokes(&output, colour).is_empty(),
+        "nothing shows where the focus is"
+    );
+    h.shell
+        .run("settings.set_outline_view_in_focus", json!({ "on": true }))
+        .unwrap();
+    let output = h.settle();
+    let strokes = focus_strokes(&output, colour);
+    let drawn = |nodes: &[common::Node], role: Role, label: &str| {
+        let b = nodes
+            .iter()
+            .find(|n| n.role == role && n.label == label && n.bounds.is_some())
+            .and_then(|n| n.bounds)
+            .unwrap();
+        egui::Rect::from_min_max(
+            egui::pos2(b.x0 as f32, b.y0 as f32),
+            egui::pos2(b.x1 as f32, b.y1 as f32),
+        )
+        .shrink(1.0)
+    };
+    let around = |strokes: &[egui::Rect], area: egui::Rect| {
+        strokes
+            .iter()
+            .any(|r| (r.min - area.min).length() < 1.5 && (r.max - area.max).length() < 1.5)
+    };
+    let main = drawn(&Harness::nodes(&output), Role::Pane, "Arrangement View");
+    assert!(
+        around(&strokes, main),
+        "a border round the focused view: {strokes:?}"
+    );
+    // The Control Bar has the focus: the border goes there.
+    press(&mut h, Key::Num0, Modifiers::ALT);
+    let output = h.settle();
+    let bar = drawn(&Harness::nodes(&output), Role::Toolbar, "Control Bar");
+    assert!(around(&focus_strokes(&output, colour), bar));
+    assert!(!around(&focus_strokes(&output, colour), main));
+}
+
+fn open_settings(page: &str) -> Harness {
+    let mut h = Harness::new(Window::Settings);
+    h.shell
+        .invoke("app.settings", json!({ "page": page }))
+        .unwrap();
+    h.shell.take_effects();
+    h.settings.refresh();
+    h.settle();
+    h
+}
+
+/// Presses Tab until a screen reader would read `label` as focused, as a
+/// person moving through a window with the keyboard does. False if Tab
+/// never gets there.
+fn tab_to(h: &mut Harness, label: &str) -> bool {
+    for _ in 0..120 {
+        let output = h.settle();
+        if focused_label(&output) == label {
+            return true;
+        }
+        h.key(Key::Tab, Modifiers::NONE);
+    }
+    false
+}
+
+// Spec: accessibility R6.
+#[test]
+fn display_and_input_has_live_s_keyboard_settings_in_order() {
+    let mut h = open_settings("display-input");
+    let nodes = Harness::nodes(&h.settle());
+    let top = |label: &str| {
+        Harness::node(&nodes, label)
+            .bounds
+            .unwrap_or_else(|| panic!("{label} has bounds"))
+            .y0
+    };
+    let order = [
+        "Zoom",
+        "Outline View in Focus",
+        "Show Scroll Bars",
+        "Follow Behavior",
+        "Hide Labels",
+        "Use Tab Key to Move Focus",
+        "Wrap Tab Navigation",
+        "Move Clips With Arrow Keys",
+    ];
+    for pair in order.windows(2) {
+        assert!(
+            top(pair[0]) < top(pair[1]),
+            "{} before {}",
+            pair[0],
+            pair[1]
+        );
+    }
+    for built in [
+        "Outline View in Focus",
+        "Use Tab Key to Move Focus",
+        "Wrap Tab Navigation",
+    ] {
+        let node = Harness::node(&nodes, built);
+        assert!(!node.disabled, "{built}");
+        assert_eq!(node.role, Role::Button, "{built}");
+    }
+    for pending in [
+        "Show Scroll Bars",
+        "Follow Behavior",
+        "Hide Labels",
+        "Move Clips With Arrow Keys",
+    ] {
+        let node = Harness::node(&nodes, pending);
+        assert!(
+            node.disabled && node.description.contains("later package"),
+            "{pending}"
+        );
+    }
+    // Each switch by the keyboard: Tab to it, Enter.
+    for (label, on) in [
+        (
+            "Outline View in Focus",
+            Shell::outline_view_in_focus as fn(&Shell) -> bool,
+        ),
+        ("Use Tab Key to Move Focus", Shell::tab_navigation),
+        ("Wrap Tab Navigation", Shell::wrap_navigation),
+    ] {
+        assert!(!on(&h.shell), "{label} is off in a new install");
+        assert!(tab_to(&mut h, label), "Tab reaches {label}");
+        press(&mut h, Key::Enter, Modifiers::NONE);
+        assert!(on(&h.shell), "Enter switched {label} on");
+    }
+}
+
+fn menu_item(h: &Harness, row: &str) -> bl_ui::menus::ItemState {
+    let bar = menu_bar(MenuPlatform::current());
+    let item = bar
+        .iter()
+        .flat_map(bl_shell::menus::Menu::walk)
+        .find(|item| item.row == row)
+        .unwrap_or_else(|| panic!("{row} is in the menus"));
+    item_state(item, &h.shell, &h.keymap, Platform::current())
+}
+
+// Spec: accessibility R5, R9.
+#[test]
+fn the_navigate_and_options_menus_reach_their_commands() {
+    let (mut h, _, _) = set();
+    // Next and Previous Neighbor are disabled until Tab moves the focus,
+    // as Live shows them in a new set, and show their keys.
+    for row in ["M-NAV-014", "M-NAV-015"] {
+        let item = menu_item(&h, row);
+        assert!(!item.enabled, "{row}");
+        assert!(item.chord.is_some(), "{row} shows its keys");
+    }
+    let tab = menu_item(&h, "M-NAV-018");
+    assert_eq!(tab.checked, Some(false));
+    h.shell
+        .invoke(&tab.invocation.unwrap().id, json!({}))
+        .unwrap();
+    for (row, id) in [
+        ("M-NAV-014", "focus.previous_neighbor"),
+        ("M-NAV-015", "focus.next_neighbor"),
+    ] {
+        let item = menu_item(&h, row);
+        assert!(item.enabled, "{row}");
+        assert_eq!(item.invocation.unwrap().id, id);
+    }
+    let wrap = menu_item(&h, "M-NAV-019");
+    assert_eq!((wrap.enabled, wrap.checked), (true, Some(false)));
+    h.shell
+        .invoke(&wrap.invocation.unwrap().id, json!({}))
+        .unwrap();
+    assert_eq!(menu_item(&h, "M-NAV-019").checked, Some(true));
+    // Options ▸ Solo in Place switches the set's setting, one undo step.
+    let solo = menu_item(&h, "M-OPT-025");
+    assert_eq!((solo.enabled, solo.checked), (true, Some(true)));
+    let invocation = solo.invocation.unwrap();
+    h.shell.invoke(&invocation.id, invocation.args).unwrap();
+    assert!(!h.shell.editor().document().settings().solo_in_place);
+    assert_eq!(menu_item(&h, "M-OPT-025").checked, Some(false));
+    h.shell.invoke("edit.undo", json!({})).unwrap();
+    assert!(h.shell.editor().document().settings().solo_in_place);
+}
+
+/// How a command is reached without a pointer, when it has no key and no
+/// menu item.
+enum Path {
+    /// A control the keyboard reaches: the test opens `window`, runs
+    /// `setup`, moves the focus where a person starts (`start`), presses
+    /// Tab until the control is focused, then `key`, and checks the command
+    /// ran.
+    Control {
+        window: Window,
+        page: &'static str,
+        setup: fn(&mut Harness),
+        start: fn(&mut Harness),
+        label: &'static str,
+        key: Key,
+    },
+    /// No keyboard path of its own, with the reason (the accessibility
+    /// spec, R8, lists each).
+    Exception(Reason),
+}
+
+/// Why a command has no keyboard path of its own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Reason {
+    /// A query for agents: a person reads the same on screen.
+    Query,
+    /// An agent's form of a pointer gesture or dialog, whose keyboard path
+    /// is another command or the system's dialog, named in the text.
+    Equivalent(&'static str),
+    /// Its view comes in a later milestone; until then agents reach it.
+    LaterView(&'static str),
+    /// Live itself has no keyboard path for it.
+    Live(&'static str),
+    /// A gap in M1: what's missing, and what closes it.
+    Gap(&'static str),
+}
+
+fn nothing(_: &mut Harness) {}
+
+fn arrangement_track_3(h: &mut Harness) {
+    h.key(Key::Num2, Modifiers::ALT);
+    let track = h.shell.editor().document().top_level().nth(2).unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+}
+
+fn control_bar(h: &mut Harness) {
+    h.key(Key::Num0, Modifiers::ALT);
+}
+
+fn browser_search(h: &mut Harness) {
+    h.key(Key::F, command());
+}
+
+fn server_on(h: &mut Harness) {
+    h.shell
+        .run("agent.set_server", json!({ "on": true }))
+        .unwrap();
+}
+
+fn an_agent(h: &mut Harness) {
+    h.shell
+        .run("agent.approve_client", json!({ "client": "Tester" }))
+        .unwrap();
+}
+
+fn server_and_agent(h: &mut Harness) {
+    server_on(h);
+    an_agent(h);
+}
+
+/// Every command without a key or a menu item, and how it's reached.
+fn paths() -> BTreeMap<&'static str, Path> {
+    use Path::{Control, Exception};
+    use Reason::{Equivalent, Gap, LaterView, Live, Query};
+    let main = |setup: fn(&mut Harness), start: fn(&mut Harness), label, key| Control {
+        window: Window::Main,
+        page: "",
+        setup,
+        start,
+        label,
+        key,
+    };
+    let settings = |page, setup: fn(&mut Harness), label, key| Control {
+        window: Window::Settings,
+        page,
+        setup,
+        start: nothing,
+        label,
+        key,
+    };
+    let clip_view = LaterView("the Clip View (milestone M2)");
+    let device_view = LaterView("the Device View (milestone M2)");
+    let editing = Equivalent(
+        "the Arrangement's editing keys run it: paste, Delete, Left and Right, and Enter then \
+         Left or Right (arrangement-editing R12)",
+    );
+    BTreeMap::from([
+        // The Control Bar's transport (control-bar-transport R11).
+        (
+            "transport.play",
+            main(nothing, control_bar, "Play", Key::Enter),
+        ),
+        (
+            "transport.stop",
+            main(nothing, control_bar, "Stop", Key::Enter),
+        ),
+        (
+            "transport.set_loop_enabled",
+            main(nothing, control_bar, "Arrangement Loop", Key::Enter),
+        ),
+        // A track's switches (mixer-view R7): Enter on Solo or Arm.
+        (
+            "mixer.solo_exclusive",
+            main(nothing, arrangement_track_3, "Solo", Key::Enter),
+        ),
+        (
+            "mixer.arm_exclusive",
+            main(nothing, arrangement_track_3, "Arm Recording", Key::Enter),
+        ),
+        // Typing in the browser's search field (browser R5).
+        (
+            "browser.search",
+            main(nothing, browser_search, "Search", Key::K),
+        ),
+        // The Settings window's controls (Tab, then Enter or Up and Down).
+        (
+            "agent.set_server",
+            settings("tempo-midi", nothing, "Agent Server", Key::Enter),
+        ),
+        (
+            "agent.new_token",
+            settings("tempo-midi", server_on, "New Token", Key::Enter),
+        ),
+        (
+            "agent.set_autonomous",
+            settings("tempo-midi", an_agent, "Autonomous: Tester", Key::Enter),
+        ),
+        (
+            "agent.forget_client",
+            settings("tempo-midi", an_agent, "Forget Tester", Key::Enter),
+        ),
+        (
+            "agent.new_client_token",
+            settings(
+                "tempo-midi",
+                server_and_agent,
+                "New Token: Tester",
+                Key::Enter,
+            ),
+        ),
+        (
+            "audio.configure",
+            settings("audio", nothing, "Buffer Size", Key::ArrowDown),
+        ),
+        (
+            "audio.set_test_tone",
+            settings("audio", nothing, "Test Tone", Key::Enter),
+        ),
+        (
+            "settings.set_theme",
+            settings("theme-colors", nothing, "Theme", Key::ArrowDown),
+        ),
+        (
+            "settings.set_create_fades_on_clip_edges",
+            settings(
+                "record-warp-launch",
+                nothing,
+                "Create Fades on Clip Edges",
+                Key::Enter,
+            ),
+        ),
+        (
+            "settings.set_outline_view_in_focus",
+            settings(
+                "display-input",
+                nothing,
+                "Outline View in Focus",
+                Key::Enter,
+            ),
+        ),
+        (
+            "view.set_zoom",
+            settings("display-input", nothing, "Zoom", Key::ArrowUp),
+        ),
+        // Queries.
+        ("arrangement.state", Exception(Query)),
+        ("browser.state", Exception(Query)),
+        ("mixer_view.state", Exception(Query)),
+        ("transport.state", Exception(Query)),
+        ("audio.status", Exception(Query)),
+        ("audio.devices", Exception(Query)),
+        ("set.list_recoverable", Exception(Query)),
+        // Agents' forms of gestures and dialogs.
+        (
+            "arrangement.move_clips",
+            Exception(Equivalent(
+                "a drag; the keyboard moves clips with Left and Right \
+                 (`arrangement.nudge`), or cut and paste",
+            )),
+        ),
+        (
+            "arrangement.select_clips",
+            Exception(Equivalent(
+                "a click; the keyboard selects with Shift and the arrows \
+                 (`arrangement.select_time`) and Cmd-A (Ctrl-A)",
+            )),
+        ),
+        (
+            "arrangement.scroll",
+            Exception(Equivalent(
+                "the wheel; the view follows the tracks the keys select and the playhead \
+                 (Follow), and the zoom keys change what it shows",
+            )),
+        ),
+        (
+            "arrangement.show_range",
+            Exception(Equivalent(
+                "an agent's view move; a person zooms with Z, X, and the zoom keys",
+            )),
+        ),
+        (
+            "arrangement.show_track",
+            Exception(Equivalent(
+                "an agent's view move; the view follows the track the keys select",
+            )),
+        ),
+        (
+            "mixer_view.scroll",
+            Exception(Equivalent(
+                "the wheel; Navigate ▸ Mixer, Left and Right, and the neighbour keys bring the \
+                 focused column into view",
+            )),
+        ),
+        (
+            "browser.add_to_arrangement",
+            Exception(Equivalent(
+                "a drag; Enter adds the selected files (`browser.load_selected`)",
+            )),
+        ),
+        (
+            "browser.stop_preview",
+            Exception(Equivalent(
+                "selecting a folder, or switching Options ▸ Browser File Preview off, stops a \
+                 preview",
+            )),
+        ),
+        (
+            "set.discard_changes",
+            Exception(Equivalent(
+                "the save-changes dialog's Don't Save, the system's dialog",
+            )),
+        ),
+        (
+            "agent.approve_client",
+            Exception(Equivalent(
+                "the system dialog that asks when an agent first connects, Allow",
+            )),
+        ),
+        ("clip.create", Exception(editing)),
+        ("clip.delete", Exception(editing)),
+        ("clip.move", Exception(editing)),
+        ("clip.move_by", Exception(editing)),
+        ("clip.set_length", Exception(editing)),
+        ("clip.trim_start", Exception(editing)),
+        // Views of later milestones.
+        ("clip.set_gain", Exception(clip_view)),
+        ("clip.set_loop", Exception(clip_view)),
+        ("clip.set_loop_enabled", Exception(clip_view)),
+        ("clip.set_region", Exception(clip_view)),
+        ("clip.set_data", Exception(clip_view)),
+        ("device.insert", Exception(device_view)),
+        ("device.move", Exception(device_view)),
+        ("device.set_enabled", Exception(device_view)),
+        ("device.set_param", Exception(device_view)),
+        (
+            "mixer.set_send",
+            Exception(LaterView("the sends' knobs (WP-2.19)")),
+        ),
+        (
+            "mixer.set_send_tap",
+            Exception(LaterView("the returns' Pre/Post switches (WP-2.19)")),
+        ),
+        // Live's own exception.
+        (
+            "clip.set_fades",
+            Exception(Live(
+                "Live doesn't support editing audio clip fades with a screen reader (manual \
+                 41.4.1.3); its fade keys, Cmd-Option-F and Cmd-Option-Delete (S-ARR-008, \
+                 S-ARR-009), aren't bound yet",
+            )),
+        ),
+        // Gaps.
+        (
+            "export.audio",
+            Exception(Gap(
+                "the Export Audio/Video dialog, which waits on observing Live (export R16)",
+            )),
+        ),
+        (
+            "track.move",
+            Exception(Gap(
+                "moving tracks with Cmd and the arrows (S-TRACK-012), not bound yet",
+            )),
+        ),
+        (
+            "set.recover",
+            Exception(Gap(
+                "the recovery prompt at launch, which the app doesn't show yet (crash-recovery)",
+            )),
+        ),
+        (
+            "set.discard_recovery",
+            Exception(Gap(
+                "the recovery prompt at launch, which the app doesn't show yet (crash-recovery)",
+            )),
+        ),
+        (
+            "settings.set_continuous_save",
+            Exception(Gap(
+                "the Save Continuously switch on File & Folder, not drawn yet (crash-recovery \
+                 R11)",
+            )),
+        ),
+    ])
+}
+
+/// Every registered command, from every crate that registers them.
+fn registry() -> bl_commands::Registry {
+    let mut registry = bl_commands::Registry::new();
+    bl_model::registry::register(&mut registry).unwrap();
+    bl_project::registry::register(&mut registry).unwrap();
+    bl_engine::transport::register(&mut registry).unwrap();
+    bl_shell::register(&mut registry).unwrap();
+    registry
+}
+
+/// The commands a key runs (a bound key or key sequence), on either
+/// platform.
+fn keyed(keymap: &Keymap) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    for entry in keymap.entries() {
+        if !matches!(entry.kind.as_str(), "key" | "sequence") {
+            continue;
+        }
+        match &entry.status {
+            Status::Bound => {
+                for command in &entry.commands {
+                    out.entry(command.id.clone())
+                        .or_insert_with(|| entry.id.clone());
+                }
+            }
+            // The focused control's keys name the commands they run.
+            Status::Widget(handler) => {
+                for id in handler.split('`').skip(1).step_by(2) {
+                    out.entry(id.to_owned()).or_insert_with(|| entry.id.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// The commands a menu item runs, on either platform: directly, or through
+/// a bound shortcut.
+fn on_menus(keymap: &Keymap) -> BTreeMap<String, String> {
+    let every_context = bl_commands::Context::ALL;
+    let mut out = BTreeMap::new();
+    for platform in [MenuPlatform::Mac, MenuPlatform::Other] {
+        for menu in menu_bar(platform) {
+            for item in menu.walk().filter(|item| item.is_shown()) {
+                let ids: Vec<String> = match item.action {
+                    Action::Command(id) => vec![id.to_owned()],
+                    Action::Shortcut(shortcuts) => shortcuts
+                        .iter()
+                        .filter_map(|s| keymap.command_for(s, &every_context))
+                        .map(|c| c.id.clone())
+                        .collect(),
+                    _ => Vec::new(),
+                };
+                for id in ids {
+                    out.entry(id).or_insert_with(|| item.row.to_owned());
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Opens the window a control is in, gets there with the keyboard, and
+/// presses its key: true if the command ran.
+fn reach(command_id: &str, path: &Path) -> Result<(), String> {
+    let Path::Control {
+        window,
+        page,
+        setup,
+        start,
+        label,
+        key,
+    } = path
+    else {
+        return Ok(());
+    };
+    let mut h = match window {
+        Window::Main => {
+            let mut h = Harness::with_title_bar(Window::Main);
+            h.settle();
+            h
+        }
+        Window::Settings => open_settings(page),
+    };
+    setup(&mut h);
+    if *window == Window::Main {
+        tab_navigation_on(&mut h);
+    }
+    h.settings.refresh();
+    h.settle();
+    start(&mut h);
+    if !tab_to(&mut h, label) {
+        return Err(format!("{command_id}: Tab never reached {label:?}"));
+    }
+    h.take_events();
+    if *key == Key::K {
+        // Typing into a text field.
+        h.frame(vec![egui::Event::Text("k".to_owned())]);
+    } else {
+        h.key(*key, Modifiers::NONE);
+    }
+    h.settle();
+    let ran = h
+        .take_events()
+        .iter()
+        .any(|event| matches!(event, UiEvent::Invoke(i) if i.id == command_id));
+    if ran {
+        Ok(())
+    } else {
+        Err(format!("{command_id}: {label:?} didn't run it"))
+    }
+}
+
+// Spec: accessibility R8.
+#[test]
+fn every_m1_command_is_reachable_from_the_keyboard() {
+    let registry = registry();
+    let keymap = Keymap::live12();
+    let keyed = keyed(&keymap);
+    let menus = on_menus(&keymap);
+    let paths = paths();
+    let mut problems = Vec::new();
+    let mut table = Vec::new();
+    for spec in registry.iter() {
+        let id = spec.id.as_ref();
+        let key = keyed.get(id);
+        let menu = menus.get(id);
+        match (key, menu, paths.get(id)) {
+            (Some(shortcut), _, Some(_)) | (None, Some(shortcut), Some(Path::Exception(_))) => {
+                problems.push(format!(
+                    "{id} is listed with its own path, but {shortcut} reaches it: take it out of \
+                     the list"
+                ));
+            }
+            (Some(shortcut), _, None) => table.push((id, format!("key, {shortcut}"))),
+            (None, Some(row), None) => table.push((id, format!("menu, {row}"))),
+            (None, menu, Some(path @ Path::Control { label, .. })) => match reach(id, path) {
+                Ok(()) => table.push((
+                    id,
+                    format!(
+                        "control, {label}{}",
+                        menu.map(|row| format!("; menu, {row}")).unwrap_or_default()
+                    ),
+                )),
+                Err(problem) => problems.push(problem),
+            },
+            (None, None, Some(Path::Exception(reason))) => {
+                table.push((id, format!("{reason:?}")));
+            }
+            (None, None, None) => problems.push(format!(
+                "{id} has no key, no menu item, and no keyboard-reachable control: give it one, \
+                 or list it in `paths` with the reason (the accessibility spec, R8)"
+            )),
+        }
+    }
+    for id in paths.keys() {
+        if registry.get(id).is_none() {
+            problems.push(format!("{id} is listed but isn't a registered command"));
+        }
+    }
+    for (id, how) in &table {
+        println!("| `{id}` | {how} |");
+    }
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+    let gaps: Vec<_> = paths
+        .iter()
+        .filter(|(_, p)| matches!(p, Path::Exception(Reason::Gap(_))))
+        .map(|(id, _)| *id)
+        .collect();
+    assert_eq!(
+        gaps,
+        [
+            "export.audio",
+            "set.discard_recovery",
+            "set.recover",
+            "settings.set_continuous_save",
+            "track.move",
+        ],
+        "the M1 gaps the accessibility spec lists"
+    );
+}
+
+// Spec: accessibility R8.
+#[test]
+fn the_reachability_test_fails_for_a_command_with_no_keyboard_path() {
+    let mut registry = registry();
+    registry
+        .register(
+            bl_commands::CommandSpec::new("test.unreachable", "Unreachable")
+                .description("A command nothing reaches, to show the test fails.")
+                .permission(bl_commands::Permission::Read)
+                .context(bl_commands::Context::Global)
+                .args::<bl_commands::NoArgs>()
+                .result::<()>(),
+        )
+        .unwrap();
+    let keymap = Keymap::live12();
+    let keyed = keyed(&keymap);
+    let menus = on_menus(&keymap);
+    let paths = paths();
+    let unreachable: Vec<&str> = registry
+        .iter()
+        .map(|spec| spec.id.as_ref())
+        .filter(|id| {
+            !keyed.contains_key(*id) && !menus.contains_key(*id) && !paths.contains_key(id)
+        })
+        .collect();
+    assert_eq!(unreachable, ["test.unreachable"]);
+}
+
+// Spec: accessibility R5 (S-MENU-001 to S-MENU-004).
+#[test]
+fn alt_and_a_letter_open_the_drawn_menu_bar_s_menus() {
+    // The menu bar Beatlayer draws where there's no native one (Linux).
+    let (mut h, _, _) = set();
+    h.menu_bar = Some(menu_bar(MenuPlatform::Other));
+    h.settle();
+    let output = press(&mut h, Key::N, Modifiers::ALT);
+    assert!(egui::Popup::is_any_open(&h.ctx), "Alt-N opened Navigate");
+    // An item reads its label, then its keys.
+    assert_eq!(
+        focused_label(&output),
+        "Control Bar Alt+0",
+        "its first item"
+    );
+    // Down moves to the next item that can be chosen (Session View waits
+    // for milestone M3); Enter chooses it.
+    let output = press(&mut h, Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(focused_label(&output), "Arrangement View Alt+2");
+    h.shell.set_focused_area(Area::ControlBar);
+    h.take_events();
+    press(&mut h, Key::Enter, Modifiers::NONE);
+    assert!(
+        h.take_events()
+            .iter()
+            .any(|e| matches!(e, UiEvent::Invoke(i) if i.id == "focus.arrangement"))
+    );
+    assert_eq!(h.shell.focused_area(), Area::MainView);
+    assert!(!egui::Popup::is_any_open(&h.ctx), "choosing closed it");
+    // Esc closes a menu without choosing.
+    press(&mut h, Key::E, Modifiers::ALT);
+    assert!(egui::Popup::is_any_open(&h.ctx));
+    press(&mut h, Key::Escape, Modifiers::NONE);
+    assert!(!egui::Popup::is_any_open(&h.ctx));
+}
+
+/// The keys that open the focused item's context menu (S-CTX-002):
+/// Ctrl-Option-Shift-M on macOS, Shift-F10 elsewhere.
+fn context_menu_keys(h: &mut Harness) -> FullOutput {
+    if cfg!(target_os = "macos") {
+        press(
+            &mut *h,
+            Key::M,
+            Modifiers::CTRL | Modifiers::ALT | Modifiers::SHIFT,
+        )
+    } else {
+        press(&mut *h, Key::F10, Modifiers::SHIFT)
+    }
+}
+
+/// Presses Down until a screen reader would read `label` as focused.
+fn down_to(h: &mut Harness, label: &str) -> bool {
+    for _ in 0..40 {
+        let output = h.settle();
+        if focused_label(&output).starts_with(label) {
+            return true;
+        }
+        h.key(Key::ArrowDown, Modifiers::NONE);
+    }
+    false
+}
+
+// Spec: accessibility R8 (S-CTX-002).
+#[test]
+fn the_keys_open_the_arrangement_s_context_menus() {
+    let (mut h, _, clip) = set();
+    press(&mut h, Key::Num2, Modifiers::ALT);
+    // With a clip selected, the clip's menu, its first item focused.
+    h.shell
+        .run("arrangement.select_clips", json!({ "clips": [clip] }))
+        .unwrap();
+    let output = context_menu_keys(&mut h);
+    assert!(egui::Popup::is_any_open(&h.ctx));
+    assert!(
+        focused_label(&output).starts_with("Cut"),
+        "{}",
+        focused_label(&output)
+    );
+    assert!(
+        down_to(&mut h, "Loop Selection"),
+        "the arrow keys move through it"
+    );
+    press(&mut h, Key::Escape, Modifiers::NONE);
+    assert!(!egui::Popup::is_any_open(&h.ctx));
+    // With none, the time selection's: its grid choices set the grid.
+    h.shell
+        .run("arrangement.select_clips", json!({ "clips": [] }))
+        .unwrap();
+    h.ctx.memory_mut(|m| m.request_focus(main_view_id()));
+    h.settle();
+    context_menu_keys(&mut h);
+    assert!(egui::Popup::is_any_open(&h.ctx));
+    assert!(
+        down_to(&mut h, "Narrowest"),
+        "Down reaches the grid choices"
+    );
+    h.take_events();
+    press(&mut h, Key::Enter, Modifiers::NONE);
+    assert!(
+        h.take_events()
+            .iter()
+            .any(|e| matches!(e, UiEvent::Invoke(i) if i.id == "arrangement.set_grid"))
+    );
+}
+
+// Spec: accessibility R8 (S-CTX-002).
+#[test]
+fn the_keys_open_a_sidebar_place_s_context_menu() {
+    let dir = std::env::temp_dir().join(format!("bl-ui-a11y-{}", std::process::id()));
+    let loops = dir.join("Loops");
+    std::fs::create_dir_all(&loops).unwrap();
+    let (mut h, _, _) = set();
+    h.shell
+        .run(
+            "browser.add_folder",
+            json!({ "path": loops.to_string_lossy() }),
+        )
+        .unwrap();
+    h.shell
+        .run(
+            "browser.open_place",
+            json!({ "label": { "folder": loops.to_string_lossy() } }),
+        )
+        .unwrap();
+    h.shell
+        .run("focus.browser", json!({ "part": "sidebar" }))
+        .unwrap();
+    h.settle();
+    assert_eq!(focused_id(&h), Some(bl_ui::browser::sidebar_id()));
+    let output = context_menu_keys(&mut h);
+    assert_eq!(focused_label(&output), "Remove from Sidebar");
+    h.take_events();
+    press(&mut h, Key::Enter, Modifiers::NONE);
+    assert!(
+        h.take_events()
+            .iter()
+            .any(|e| matches!(e, UiEvent::Invoke(i) if i.id == "browser.remove_folder"))
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

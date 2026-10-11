@@ -404,6 +404,34 @@ impl ArrangementUi {
             self.menus.open(&clip_lanes, pos, events);
         }
         lanes_response.context_menu(|ui| self.menus.show(ui, shell, events));
+        // S-CTX-002: the keys open the same menu, for the selected clips or
+        // at the insert marker (the accessibility spec, R8).
+        if ui.ctx().memory(|m| m.has_focus(main_view_id())) && crate::menus::context_menu_keys(ui) {
+            let clip = self
+                .shown
+                .iter()
+                .find(|s| view.is_clip_selected(s.clip) && lanes.intersects(s.rect));
+            let at = clip.map_or_else(
+                || {
+                    let x = lanes.left() + horizontal.x(view.insert_marker()) as f32;
+                    let row = view
+                        .selected_tracks()
+                        .first()
+                        .and_then(|t| self.rows.iter().find(|r| r.track == *t))
+                        .map_or(0.0, |r| r.top - scroll_y);
+                    pos2(
+                        x.clamp(lanes.left(), lanes.right()),
+                        (lanes.top() + row + 4.0).clamp(lanes.top(), lanes.bottom()),
+                    )
+                },
+                |shown| shown.rect.intersect(lanes).left_top() + egui::vec2(4.0, 4.0),
+            );
+            self.menus.open_from_keys(clip.is_some());
+            crate::menus::open_keyboard_context_menu(ui.ctx(), lanes_id(), at);
+        }
+        crate::menus::keyboard_context_menu(&lanes_response, |ui| {
+            self.menus.show(ui, shell, events);
+        });
         self.draw_overlays(ui, view, theme, &layout, horizontal);
 
         // The rulers.

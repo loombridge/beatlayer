@@ -495,12 +495,25 @@ impl BrowserUi {
         }
         if let Label::Folder(path) = &info.label {
             // C-BROWSER-017: a folder the person added.
-            response.context_menu(|ui| {
-                if ui.button("Remove from Sidebar").clicked() {
+            let menu = |ui: &mut Ui, events: &mut Vec<UiEvent>| {
+                let response = ui.button("Remove from Sidebar");
+                crate::menus::register_item(ui.ctx(), &response);
+                crate::menus::take_focus_first(ui, &response);
+                if response.clicked() {
                     invoke(events, ids::REMOVE_FOLDER, json!({ "path": path }));
                     ui.close();
                 }
-            });
+            };
+            response.context_menu(|ui| menu(ui, events));
+            // S-CTX-002: the keys open the chosen place's menu while the
+            // sidebar has the keyboard (the accessibility spec, R8).
+            if chosen
+                && ui.memory(|m| m.has_focus(sidebar_id()))
+                && crate::menus::context_menu_keys(ui)
+            {
+                crate::menus::open_keyboard_context_menu(ui.ctx(), id, rect.left_bottom());
+            }
+            crate::menus::keyboard_context_menu(&response, |ui| menu(ui, events));
         }
         response.widget_info(|| WidgetInfo::selected(WidgetType::Other, true, chosen, &info.name));
         ui.ctx().accesskit_node_builder(id, |node| {

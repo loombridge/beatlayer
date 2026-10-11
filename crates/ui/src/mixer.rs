@@ -835,6 +835,10 @@ impl StripParts<'_> {
                     id,
                     egui::EventFilter {
                         vertical_arrows: true,
+                        // Esc goes back to the track's title bar, or drops a
+                        // typed value, rather than just dropping the focus
+                        // (the accessibility spec, R4).
+                        escape: true,
                         ..Default::default()
                     },
                 );
@@ -1085,6 +1089,8 @@ impl StripParts<'_> {
                             bl_shell::arrangement_commands::FOCUS_TITLE_BAR,
                             json!({}),
                         )));
+                    } else {
+                        ui.memory_mut(|m| m.surrender_focus(id));
                     }
                     entry = None;
                 }

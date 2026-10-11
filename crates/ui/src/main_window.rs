@@ -90,6 +90,9 @@ pub struct MainWindowUi {
     /// Whether a value was being typed into a track header's volume field
     /// when the last frame ended.
     mixer_typing: bool,
+    /// Whether a menu (the drawn menu bar's, a context menu, or the Mixer
+    /// Config Menu) was open when the last frame ended: its keys go to it.
+    menu_open: bool,
 }
 
 /// A move of the keyboard focus asked for by `focus.next`,
@@ -157,6 +160,7 @@ impl MainWindowUi {
             mixer: MixerUi::new(),
             keymap: None,
             mixer_typing: false,
+            menu_open: false,
         }
     }
 
@@ -174,10 +178,12 @@ impl MainWindowUi {
 
     /// Whether a value is being typed into a Control Bar field: while it
     /// is, key presses go to the field rather than to shortcuts, as they do
-    /// to a text field (the control bar transport spec, R10).
+    /// to a text field (the control bar transport spec, R10). The same while
+    /// a menu is open, so its arrow keys, Enter, and Esc reach it (the
+    /// accessibility spec, R5).
     #[must_use]
     pub fn is_typing(&self) -> bool {
-        self.transport.is_typing() || self.mixer_typing
+        self.transport.is_typing() || self.mixer_typing || self.menu_open
     }
 
     /// The Arrangement View, to give it a peak source or read what it drew.
@@ -230,6 +236,7 @@ impl MainWindowUi {
         let mut events = Vec::new();
         // Spec: accessibility R3, R4, R7. The keyboard's moves go by the
         // order the last frame drew.
+        crate::menus::menu_keys(ctx);
         self.order = crate::focus::take(ctx);
         crate::focus::set_outlined(ctx, shell.outline_view_in_focus());
         if let Some(step) = self.focus_move.take() {
@@ -283,6 +290,7 @@ impl MainWindowUi {
             outline_focused_area(ui, shell, theme, &layout);
         });
         self.mixer_typing = crate::mixer::is_typing(ctx);
+        self.menu_open = egui::Popup::is_any_open(ctx);
         let metering = shell
             .meters()
             .iter()
@@ -309,6 +317,10 @@ impl MainWindowUi {
         events: &mut Vec<UiEvent>,
     ) {
         use crate::focus::Neighbor;
+        if egui::Popup::is_any_open(ctx) {
+            // An open menu keeps the keyboard.
+            return;
+        }
         let focused = ctx.memory(egui::Memory::focused);
         if step.neighbor {
             let Some(from) = focused else {
@@ -485,7 +497,7 @@ impl MainWindowUi {
                 };
             }
             let response = element(ui, theme, placement, *rect, &look);
-            if response.sense.is_focusable() {
+            if is_live(*el) && response.sense.is_focusable() {
                 let area = match strip {
                     Strip::ControlBar => Area::ControlBar,
                     Strip::StatusBar => Area::StatusBar,
@@ -535,7 +547,7 @@ impl MainWindowUi {
         };
         egui::Popup::menu(response).show(|ui| {
             for item in bl_shell::menus::shown(&controls.items) {
-                crate::menus::item(ui, item, shell, keymap, platform, events);
+                let _ = crate::menus::item(ui, item, shell, keymap, platform, events);
             }
         });
     }

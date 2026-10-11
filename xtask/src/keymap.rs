@@ -173,6 +173,14 @@ const WIDGET: &[(&str, &str)] = &[
     ),
     ("S-VAL-007", "the focused value field drops a typed value"),
     ("S-VAL-008", "the focused value field sets a typed value"),
+    // WP-1.14: the context menus from the keyboard, each item running what
+    // a right-click's does.
+    (
+        "S-CTX-002",
+        "the focused view opens its selection's context menu: the Arrangement's clip or \
+         time-selection menu (its grid choices run `arrangement.set_grid`), or the chosen \
+         place's in the browser's sidebar (`browser.remove_folder`)",
+    ),
 ];
 
 /// The package that binds each M1 shortcut the shell doesn't: exact IDs

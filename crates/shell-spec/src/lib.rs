@@ -8,6 +8,7 @@
 //! - [`menus`]: the menu bar in Live's order, each item tied to the command
 //!   it runs.
 //! - [`audio`] and [`settings`]: the data those commands take and return.
+//! - [`agent`]: the agent server's settings and commands (WP-1.15).
 //! - [`arrangement`]: the Arrangement View's view commands (WP-1.8a): zoom,
 //!   scroll, Follow, the editing grid, track heights, and the selection
 //!   the zoom commands work from.
@@ -21,6 +22,7 @@
 //! backend (which needs ALSA and JACK headers on Linux). `bl-shell`
 //! re-exports everything here.
 
+pub mod agent;
 pub mod arrangement;
 pub mod audio;
 pub mod commands;

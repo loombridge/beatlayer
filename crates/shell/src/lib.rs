@@ -16,6 +16,8 @@
 //! - [`settings`]: preferences and where they're kept.
 //! - [`files`]: set files, through `bl-project`, and the factory default
 //!   set.
+//! - [`agent`]: the agent server's settings and token (WP-1.15); the app
+//!   runs the server itself, from `bl-agent`.
 //! - [`arrangement`]: what the Arrangement View shows (zoom, scroll, Follow,
 //!   the editing grid, track heights, the insert marker and selection),
 //!   changed by its view commands (WP-1.8a), and its edits: selecting,
@@ -27,6 +29,7 @@
 //! windows, native menus, and file dialogs. Nothing here depends on a UI
 //! crate, so every command and setting can be driven and tested headless.
 
+pub mod agent;
 pub mod arrangement;
 pub mod audio;
 pub mod files;

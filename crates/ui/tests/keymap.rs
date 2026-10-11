@@ -32,10 +32,19 @@ struct ReferenceFile {
     shortcut: Vec<Reference>,
 }
 
-fn reference() -> Vec<Reference> {
-    let text = std::fs::read_to_string(repo().join("docs/ui-parity/shortcuts.toml")).unwrap();
+/// The reference's shortcuts, or `None` in a checkout without the planning
+/// documents (they aren't published yet), where the test skips.
+fn reference() -> Option<Vec<Reference>> {
+    let docs = repo().join("docs");
+    if !docs.exists() {
+        eprintln!(
+            "skipped: the UI parity reference isn't published yet, and this checkout doesn't have it"
+        );
+        return None;
+    }
+    let text = std::fs::read_to_string(docs.join("ui-parity/shortcuts.toml")).unwrap();
     let file: ReferenceFile = toml::from_str(&text).unwrap();
-    file.shortcut
+    Some(file.shortcut)
 }
 
 fn registry() -> Registry {
@@ -168,7 +177,10 @@ fn problems(keymap: &Keymap, reference: &[Reference], registry: &Registry) -> Ve
 #[test]
 fn every_shortcut_is_bound_or_marked_with_the_milestone_that_binds_it() {
     let keymap = Keymap::live12();
-    let problems = problems(&keymap, &reference(), &registry());
+    let Some(reference) = reference() else {
+        return;
+    };
+    let problems = problems(&keymap, &reference, &registry());
     assert!(problems.is_empty(), "{problems:#?}");
     let bound = keymap
         .entries()
@@ -187,7 +199,10 @@ fn the_test_fails_when_a_shortcut_is_neither_bound_nor_marked() {
     );
     assert_ne!(text, bl_ui::keymap::LIVE12, "the replacement applied");
     let keymap = Keymap::parse(&text).unwrap();
-    let problems = problems(&keymap, &reference(), &registry());
+    let Some(reference) = reference() else {
+        return;
+    };
+    let problems = problems(&keymap, &reference, &registry());
     assert!(
         problems
             .iter()

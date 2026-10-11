@@ -1,6 +1,6 @@
 //! The command reference (WP-0.14, decisions D16 and D17).
 //!
-//! the command reference is generated from the command registry: every crate
+//! The command reference is generated from the command registry: every crate
 //! that implements commands registers them, and this module builds the same
 //! registry the app does, checks it (every command has a schema, a
 //! description, a permission class, contexts, and bindings that name real
@@ -56,6 +56,34 @@ pub fn check(root: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Checks only what needs no planning documents: every command has a schema,
+/// a description, a permission class, and contexts. Its bindings and the
+/// generated reference need the UI parity reference.
+pub fn check_registry() -> Result<(), String> {
+    let registry = catalogue()?;
+    let problems: Vec<String> = registry
+        .problems()
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    if !problems.is_empty() {
+        return Err(format!(
+            "the command registry has {} problem(s):\n  {}",
+            problems.len(),
+            problems.join("\n  ")
+        ));
+    }
+    eprintln!(
+        "{} commands, each with a schema, a description, and a permission class",
+        registry.len()
+    );
+    eprintln!(
+        "their bindings and the command reference: {}",
+        ui_parity::ABSENT
+    );
+    Ok(())
+}
+
 /// The registry, checked, and the reference rendered from it.
 fn build(root: &Path) -> Result<(Registry, String), String> {
     let registry = catalogue()?;
@@ -102,6 +130,10 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .expect("xtask sits in the workspace root");
+        if !ui_parity::reference_present(root) {
+            check_registry().expect("the command registry is complete");
+            return;
+        }
         check(root).expect("the command registry is complete and the command reference is in sync");
     }
 }

@@ -144,6 +144,19 @@ fn run(root: &Path, args: &[String]) -> Result<(), String> {
 /// Runs every check, reports each result, and fails if any failed.
 fn check(root: &Path) -> Result<(), String> {
     require_cargo_deny()?;
+    // Without the planning documents, the checks that read the UI parity
+    // reference skip, and the command reference checks the registry alone.
+    let reference = ui_parity::reference_present(root);
+    let skipped: &[&str] = if reference {
+        &[]
+    } else {
+        &["ui parity reference", "keymap"]
+    };
+    let partial: &[&str] = if reference {
+        &[]
+    } else {
+        &["command reference"]
+    };
     type Step<'a> = (&'a str, Box<dyn Fn() -> Result<(), String> + 'a>);
     let steps: Vec<Step<'_>> = vec![
         (
@@ -178,7 +191,16 @@ fn check(root: &Path) -> Result<(), String> {
         ),
         ("layers", Box::new(|| layers(root))),
         ("ui parity reference", Box::new(|| ui_parity::check(root))),
-        ("command reference", Box::new(|| commands::check(root))),
+        (
+            "command reference",
+            Box::new(move || {
+                if reference {
+                    commands::check(root)
+                } else {
+                    commands::check_registry()
+                }
+            }),
+        ),
         ("keymap", Box::new(|| keymap::check(root))),
         (
             "licences, advisories, bans, sources",
@@ -190,6 +212,10 @@ fn check(root: &Path) -> Result<(), String> {
     let mut failed = Vec::new();
     for (name, step) in &steps {
         eprintln!("\n==> {name}");
+        if skipped.contains(name) {
+            eprintln!("{}", ui_parity::ABSENT);
+            continue;
+        }
         if let Err(message) = step() {
             eprintln!("{message}");
             failed.push(*name);
@@ -200,10 +226,20 @@ fn check(root: &Path) -> Result<(), String> {
     for (name, _) in &steps {
         let status = if failed.contains(name) {
             "FAILED"
+        } else if skipped.contains(name) {
+            "skip"
+        } else if partial.contains(name) {
+            "part"
         } else {
             "ok"
         };
         eprintln!("{status:>6}  {name}");
+    }
+    if !reference {
+        eprintln!(
+            "\nThe UI parity reference isn't published yet, so this checkout skipped what \
+             reads it (skip, part). A maintainer's checkout runs every check."
+        );
     }
     if failed.is_empty() {
         Ok(())

@@ -1,7 +1,7 @@
 //! The shortcut map in the UI parity reference (WP-0.13, decision D16).
 //!
-//! the shortcut reference is the source of truth for Live 12's
-//! keyboard shortcuts, and the shortcut reference is generated from it.
+//! `shortcuts.toml` is the source of truth for Live 12's keyboard shortcuts,
+//! and `shortcuts.md` is generated from it.
 //! This module validates the TOML (unique IDs, known contexts and milestones,
 //! well-formed bindings, no unexplained binding conflict within a context)
 //! and renders the Markdown.
@@ -16,6 +16,18 @@ use toml::{Table, Value};
 pub const TOML_PATH: &str = "docs/ui-parity/shortcuts.toml";
 /// The generated table, relative to the workspace root.
 pub const MD_PATH: &str = "docs/ui-parity/shortcuts.md";
+
+/// What a check or test that needs the planning documents prints when it
+/// skips.
+pub const ABSENT: &str =
+    "skipped: the UI parity reference isn't published yet, and this checkout doesn't have it";
+
+/// Whether this checkout has the planning documents, which aren't published
+/// yet. Without them, the checks and tests that read the UI parity reference
+/// skip; with them, a missing reference file is an error as usual.
+pub fn reference_present(root: &Path) -> bool {
+    root.join("docs").exists()
+}
 
 const MILESTONES: &[&str] = &[
     "M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9", "M10", "Out",
@@ -1136,6 +1148,10 @@ source = "manual 42.1"
         let root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .expect("xtask sits in the workspace root");
+        if !reference_present(root) {
+            eprintln!("{ABSENT}");
+            return;
+        }
         check(root).expect("the UI parity reference is valid and in sync");
     }
 }

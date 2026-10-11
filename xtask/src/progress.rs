@@ -822,15 +822,28 @@ fn parse_improvements(text: &str, phases: &[Phase], unknown: &mut Vec<String>) -
 mod tests {
     use super::*;
 
-    fn real_docs() -> Docs {
+    /// The planning documents, or `None` in a checkout without them (they
+    /// aren't published yet), where the test skips.
+    fn real_docs() -> Option<Docs> {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
-        Docs::read(|path| std::fs::read_to_string(root.join(path)).map_err(|e| e.to_string()))
-            .expect("the planning documents are readable")
+        if !crate::ui_parity::reference_present(&root) {
+            eprintln!(
+                "skipped: the planning documents aren't published yet, and this checkout doesn't have them"
+            );
+            return None;
+        }
+        Some(
+            Docs::read(|path| std::fs::read_to_string(root.join(path)).map_err(|e| e.to_string()))
+                .expect("the planning documents are readable"),
+        )
     }
 
     #[test]
     fn the_planning_documents_parse_into_every_phase() {
-        let progress = Progress::parse(&real_docs());
+        let Some(docs) = real_docs() else {
+            return;
+        };
+        let progress = Progress::parse(&docs);
         let numbers: Vec<u32> = progress.phases.iter().map(|p| p.number).collect();
         assert_eq!(numbers, (0..=10).collect::<Vec<_>>());
         let milestones: Vec<u32> = progress.milestones.iter().map(|m| m.number).collect();
@@ -868,7 +881,10 @@ mod tests {
 
     #[test]
     fn every_work_package_the_documents_name_exists() {
-        let progress = Progress::parse(&real_docs());
+        let Some(docs) = real_docs() else {
+            return;
+        };
+        let progress = Progress::parse(&docs);
         assert!(
             progress.unknown_refs.is_empty(),
             "these name work packages the build plan doesn't have:\n{}",
@@ -878,7 +894,10 @@ mod tests {
 
     #[test]
     fn every_parity_row_has_a_milestone_or_is_out() {
-        let progress = Progress::parse(&real_docs());
+        let Some(docs) = real_docs() else {
+            return;
+        };
+        let progress = Progress::parse(&docs);
         assert!(
             progress.features.len() > 150,
             "{} rows",

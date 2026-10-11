@@ -331,6 +331,10 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .expect("xtask sits in the workspace root");
+        if !ui_parity::reference_present(root) {
+            eprintln!("{}", ui_parity::ABSENT);
+            return;
+        }
         check(root).expect("crates/ui/keymaps/live12.toml is in sync");
     }
 }

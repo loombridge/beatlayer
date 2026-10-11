@@ -13,6 +13,10 @@
 //! disk and no later than the one it was making. The parent replays the
 //! child's edits itself to know each state. Then it saves, closes, and
 //! starts the next child from what it saved.
+//!
+//! `BL_TEST_DEPTH=full` (pushes to main, manual CI runs, and the nightly run)
+//! kills twelve children and makes 400 edits in one process; `quick`, the
+//! default for local runs and pull requests, kills four and makes 100.
 
 mod common;
 
@@ -26,7 +30,7 @@ use bl_core::time::Ticks;
 use bl_model::{Clip, ClipData, ClipId, Editor, MidiData, Note, TrackId, TrackKind};
 use bl_project::autosave::Autosave;
 use bl_project::{Project, SetFile, journal, registry};
-use common::{TestDir, large_song};
+use common::{TestDir, depth, large_song};
 use serde_json::json;
 
 /// Set for the child: the recovery folder.
@@ -46,6 +50,9 @@ const FLUSH_EVERY: u64 = 5;
 /// edit and write to disk without pause, so beside them it would time the
 /// machine's load rather than the journal (on a two-core CI runner, an edit
 /// took 1.2 s at most beside them). They share this lock; it takes it whole.
+/// That covers `cargo test`, which runs a binary's tests as threads of one
+/// process; under cargo-nextest, which runs each test in a process of its
+/// own, `.config/nextest.toml` gives the timing test the machine instead.
 static ALONE: RwLock<()> = RwLock::new(());
 
 /// Lets the other tests run together, but not beside the timing test.
@@ -337,12 +344,12 @@ fn setup(label: &str) -> Setup {
 fn a_killed_session_is_offered_and_every_edit_recovered() {
     // Spec: crash-recovery R2, R3, R5
     let _shared = beside_others();
-    const ROUNDS: u64 = 12;
+    let rounds: u64 = depth(12, 4);
     let setup = setup("killed");
     let mut random = Random(0x5eed_0011);
     let mut first = 1;
     let mut offered_rounds = 0;
-    for round in 0..ROUNDS {
+    for round in 0..rounds {
         let (_, base) = SetFile::open(&setup.set).unwrap();
         let run = Run::start(&setup.recovery, &setup.set, first, false);
         // The last round closed cleanly, so the child was offered nothing.
@@ -414,11 +421,11 @@ fn a_killed_session_is_offered_and_every_edit_recovered() {
         first = edited + 2;
     }
     assert!(
-        offered_rounds >= ROUNDS / 2,
-        "only {offered_rounds} of {ROUNDS} rounds journalled an edit before the kill"
+        offered_rounds >= rounds / 2,
+        "only {offered_rounds} of {rounds} rounds journalled an edit before the kill"
     );
     println!(
-        "{ROUNDS} children killed; {offered_rounds} had journalled edits, each offered and \
+        "{rounds} children killed; {offered_rounds} had journalled edits, each offered and \
          recovered to the song after an edit no earlier than the last one on disk"
     );
 }
@@ -548,8 +555,9 @@ fn with_save_continuously_every_journalled_edit_is_saved() {
     autosave.set_continuous(true);
     autosave.begin(Some(&set)).unwrap();
     let mut editor = base.editor();
-    let states = replay(&base, 1, 400);
-    for n in 1..=400u64 {
+    let edits: u64 = depth(400, 100);
+    let states = replay(&base, 1, edits);
+    for n in 1..=edits {
         let label = edit(&mut editor, n);
         let project = Project::from_editor(&editor, base.media.clone());
         let index = usize::try_from(n).unwrap();
@@ -562,5 +570,8 @@ fn with_save_continuously_every_journalled_edit_is_saved() {
         }
     }
     autosave.close_set().unwrap();
-    assert_eq!(SetFile::open(&setup.set).unwrap().1, states[400]);
+    assert_eq!(
+        SetFile::open(&setup.set).unwrap().1,
+        states[usize::try_from(edits).unwrap()]
+    );
 }

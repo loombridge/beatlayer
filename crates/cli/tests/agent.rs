@@ -6,8 +6,8 @@
 //! - The M1 demo (the build plan's exit demo, its agent version): eight
 //!   stems arranged, a section looped through the transport, mixed, saved,
 //!   and reopened identically, and rendered as the hand-built demo renders.
-//!   Its audible null test waits on clip playback and the mixer (WP-1.4,
-//!   1.6): until they're in, its clips render silent.
+//!   The clips play the stems (WP-1.4) through the mixer (WP-1.6), so the
+//!   two renders are an audible null test.
 //! - A golden fixture rebuilt through the agent API renders bit for bit as
 //!   the hand-built fixture, which is null-tested against its reference.
 //! - Scheduled commands fire on their exact frames through the engine, and
@@ -21,15 +21,16 @@ bl_rt::install_trap!();
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use bl_agent::client::{Client, InProcess, Stdio, Transport};
 use bl_agent::{Agent, EngineMessage};
 use bl_cli::golden::{self, Render, SAMPLE_RATE};
-use bl_cli::render::{Settings, interleave, render};
+use bl_cli::render::{Cue, Settings, interleave, render_with};
 use bl_core::time::{Bpm, Frames, TempoMap, Ticks};
 use bl_engine::nodes::{BEAT_TONE, BeatTone};
-use bl_engine::{EngineConfig, Offline, Registry, Report, TransportCommand};
+use bl_engine::{EngineConfig, MediaMap, Offline, Registry, Report, TransportCommand};
 use bl_model::{
     AudioData, Clip, ClipData, Command as Edit, ContentHash, Document, Editor, TrackId, TrackKind,
 };
@@ -111,16 +112,21 @@ fn canonical(document: &Document) -> Value {
 }
 
 /// Renders a document from its start, as `bl-cli render` does.
-fn render_document(document: &Document, frames: u64) -> Render {
+fn render_document(document: &Document, media: MediaMap, frames: u64) -> Render {
     let settings = Settings {
         sample_rate: SAMPLE_RATE,
         block: golden::BLOCK,
         frames,
     };
     let mut samples = Vec::new();
-    let summary = render(document, &[], &settings, |output| {
-        interleave(output, &mut samples);
-    });
+    let summary = render_with(
+        document,
+        Arc::new(media),
+        &[],
+        &[Cue::PLAY],
+        &settings,
+        |output| interleave(output, &mut samples),
+    );
     Render {
         sample_rate: SAMPLE_RATE.hz(),
         channels: summary.channels,
@@ -186,6 +192,21 @@ const STEMS: &[(&str, f64, i64, i64, f64, f64)] = &[
 
 const BAR: i64 = 2_822_400;
 
+/// The stems in `dir` decoded, by content hash, as the app's media library
+/// serves them to the clip players (WP-1.4).
+fn stem_media(dir: &Path) -> MediaMap {
+    let mut media = MediaMap::new();
+    for (name, ..) in STEMS {
+        let path = dir.join(format!("{name}.wav"));
+        let hash = ContentHash(*bl_media::ContentHash::of_file(&path).unwrap().as_bytes());
+        let decoded = bl_media::Decoder::open(&path)
+            .and_then(bl_media::Decoder::decode_to_end)
+            .expect("the stem decodes");
+        media.insert(hash, Arc::new(decoded));
+    }
+    media
+}
+
 /// The stems' content hashes, as importing them would record.
 fn stems(dir: &Path) -> Vec<ContentHash> {
     STEMS
@@ -227,7 +248,7 @@ fn hand_built_m1_demo(hashes: &[ContentHash]) -> Editor {
             editor.new_id(),
             Ticks(BAR * (bar - 1)),
             Ticks(BAR * bars),
-            ClipData::Audio(AudioData { media: *hash }),
+            ClipData::Audio(AudioData::new(*hash)),
         );
         clip.name = (*name).to_owned();
         editor.apply(Edit::CreateClip { track, clip }).unwrap();
@@ -417,18 +438,20 @@ fn a_scripted_client_builds_the_m1_demo_headless_and_it_reopens_as_the_hand_buil
 
     // And they render alike. Sixteen bars at 124 BPM.
     let frames = (16.0 * 4.0 * 60.0 / 124.0 * 48_000.0) as u64;
-    let agent_render = render_document(&project.document, frames);
-    let hand_render = render_document(hand_built.document(), frames);
+    let agent_render = render_document(&project.document, stem_media(&dir.0), frames);
+    let hand_render = render_document(hand_built.document(), stem_media(&dir.0), frames);
     assert!(
         agent_render.problems().is_empty(),
         "{:?}",
         agent_render.problems()
     );
     assert!(agent_render.same_bits(&hand_render));
+    assert!(
+        agent_render.summary.peak_dbfs().is_finite(),
+        "the clips play their stems, so the demo isn't silent"
+    );
     eprintln!(
-        "M1 demo renders: {} frames each, bit-identical, peak {:.1} dBFS (the audible null test \
-         waits on clip playback, WP-1.4, and the mixer, WP-1.6; until then the clips render \
-         silent)",
+        "M1 demo renders: {} frames each, bit-identical, peak {:.1} dBFS",
         agent_render.frames(),
         agent_render.summary.peak_dbfs()
     );
@@ -497,7 +520,7 @@ fn a_golden_fixture_built_through_bl_cli_mcp_renders_bit_for_bit_as_the_hand_bui
     let scene = fixture.scene();
     let (project, _) = bl_project::load(&set).unwrap();
     assert_eq!(canonical(&project.document), canonical(scene.document()));
-    let built = render_document(&project.document, scene.frames);
+    let built = render_document(&project.document, MediaMap::new(), scene.frames);
     let reference = fixture.render();
     assert!(built.problems().is_empty(), "{:?}", built.problems());
     assert!(built.summary.peak > 0.0, "the fixture plays tones");

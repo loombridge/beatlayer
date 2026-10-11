@@ -1,27 +1,45 @@
 //! Transport and time: the transport's commands, and commands scheduled at
 //! a bar and beat.
 //!
+//! The transport's playback commands (`transport.play`, `transport.stop`,
+//! `transport.continue`, `transport.locate`, and the rest that
+//! `bl_engine::transport` registers, WP-1.5) act in the engine, not on the
+//! document. The agent API turns each into the engine's
+//! [`TransportCommand`] and queues it as an [`EngineMessage::Transport`];
+//! the host puts it on the engine's one queue, the queue the UI's transport
+//! commands take, in order with programs and parameter changes. So agents
+//! never touch the audio thread, and the engine acts at the start of its
+//! next block. The loop brace and its switch (`transport.set_loop`,
+//! `transport.set_loop_enabled`) belong to the set: they're document edits
+//! that run on the shell like any other, and reach the engine when the host
+//! syncs the document.
+//!
 //! Agents can't hit musical timing over a network, so they schedule
 //! instead. A scheduled command reaches the engine as a
 //! [`ScheduledCommand`] (WP-0.9): the engine runs its action on the exact
-//! frame the song reaches its position (a fader or device parameter change
-//! there and then; for any other command, nothing but the report) and
-//! reports it, and the main thread then runs the command on the document
-//! as an undo step labelled with the agent's name, so the document matches
-//! what played.
+//! frame the song reaches its position (a fader or device parameter change,
+//! or a transport stop or jump, there and then; for any other command,
+//! nothing but the report) and reports it, and the main thread then runs a
+//! document command on the document as an undo step labelled with the
+//! agent's name, so the document matches what played.
 //!
 //! The agent API doesn't own an engine. It queues what the engine must
 //! hear as [`EngineMessage`]s, which the host takes with
 //! [`Agent::take_engine_messages`](crate::Agent::take_engine_messages)
 //! and sends on, and the host hands back the engine's reports with
-//! [`Agent::on_report`](crate::Agent::on_report). Until the app plays the
-//! song through the engine (the transport, WP-1.5), nothing takes them, and
-//! scheduled commands wait.
+//! [`Agent::on_report`](crate::Agent::on_report) and its state with
+//! [`Agent::on_engine_state`](crate::Agent::on_engine_state). A host that
+//! plays the song through an engine says so with
+//! [`Agent::set_engine_attached`](crate::Agent::set_engine_attached).
+//! Without one (`bl-cli mcp` has none), the playback commands are refused,
+//! saying why, and scheduled commands wait.
 
 use bl_commands::Permission;
 use bl_core::time::Ticks;
 use bl_engine::nodes::fader;
-use bl_engine::{Action, NodeKey, ParamValue, Report, ScheduledCommand};
+use bl_engine::{
+    Action, EngineState, NodeKey, ParamValue, Report, ScheduledCommand, TransportCommand, transport,
+};
 use bl_model::registry as model;
 use bl_shell::Shell;
 use schemars::JsonSchema;
@@ -38,32 +56,66 @@ pub(crate) const SCHEDULE: &str = "schedule";
 /// (`EngineConfig::max_scheduled`).
 pub(crate) const MAX_WAITING: usize = 256;
 
-/// What the engine must hear about scheduled commands.
+/// What the engine must hear from the agent API. The host sends each on
+/// the engine's queue, in order.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum EngineMessage {
+    /// Run this transport command at the start of the next block (send it
+    /// with `Sender::transport` or `Engine::transport`, as the UI's
+    /// transport commands are sent).
+    Transport(TransportCommand),
     /// Schedule this command (send it with `Sender::schedule`).
     Schedule(ScheduledCommand),
     /// Cancel the scheduled command with this ID (`Sender::cancel`).
     Cancel(u64),
 }
 
-/// What `transport` does.
-#[derive(Clone, Copy, Debug, Deserialize, JsonSchema)]
+/// Where the engine last said the transport was.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Playhead {
+    playing: bool,
+    position: Ticks,
+    insert_marker: Ticks,
+}
+
+impl Playhead {
+    pub(crate) fn of(state: &EngineState) -> Self {
+        Self {
+            playing: state.playing,
+            position: state.position_ticks,
+            insert_marker: state.insert_marker,
+        }
+    }
+}
+
+/// What `transport` does. Each action but `status` runs the transport
+/// command of the same name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum TransportAction {
-    /// Report whether the song can play here and which transport commands
-    /// this build has.
+    /// Report whether the song plays here, where the playhead and the
+    /// insert marker are, the loop, and the transport's commands.
     Status,
-    /// Start playing (`transport.play`).
+    /// Start playing from the insert marker (`transport.play`).
     Play,
-    /// Stop (`transport.stop`).
+    /// Stop, keeping the position; while stopped, return to 1.1.1
+    /// (`transport.stop`).
     Stop,
-    /// Carry on from where it stopped (`transport.continue`).
+    /// Play on from where playback stopped (`transport.continue`).
     Continue,
-    /// Move the song position (`transport.locate`).
+    /// Move the insert marker, and while playing the playhead, to `at`
+    /// (bar.beat.sixteenth) or `args.position` in ticks
+    /// (`transport.locate`).
     Locate,
-    /// Set or switch the loop (`transport.loop`).
-    Loop,
+    /// Move the insert marker to the playhead
+    /// (`transport.insert_marker_to_playhead`).
+    InsertMarkerToPlayhead,
+    /// Move the loop brace: `args.start` and `args.length`, in ticks
+    /// (`transport.set_loop`). An undo step.
+    SetLoop,
+    /// Switch the loop on or off: `args.enabled` (`transport.set_loop_enabled`).
+    /// An undo step.
+    SetLoopEnabled,
 }
 
 impl TransportAction {
@@ -74,7 +126,9 @@ impl TransportAction {
             Self::Stop => "transport.stop",
             Self::Continue => "transport.continue",
             Self::Locate => "transport.locate",
-            Self::Loop => "transport.loop",
+            Self::InsertMarkerToPlayhead => "transport.insert_marker_to_playhead",
+            Self::SetLoop => "transport.set_loop",
+            Self::SetLoopEnabled => "transport.set_loop_enabled",
         })
     }
 }
@@ -89,6 +143,10 @@ pub(crate) struct TransportArgs {
     #[serde(default)]
     #[schemars(with = "Option<Map<String, Value>>")]
     args: Option<Value>,
+    /// For `locate`: where to, as bar.beat.sixteenth by the song's time
+    /// signatures, such as `5.1.1`, instead of `args.position` in ticks.
+    #[serde(default)]
+    at: Option<String>,
 }
 
 /// What `schedule` does.
@@ -131,9 +189,15 @@ pub(crate) fn transport_definition() -> Value {
     tool_definition::<TransportArgs>(
         TRANSPORT,
         "Transport",
-        "Plays, stops, continues, locates, and loops the song through the transport's \
-         commands, and reports with `status` whether the song plays here. To make something \
-         happen at an exact musical moment, use `schedule` rather than timing calls yourself.",
+        "Plays, stops, continues, and locates the song through the transport's commands, and \
+         moves and switches the Arrangement loop. `play` starts from the insert marker; \
+         `locate` moves it (with `at`, such as \"5.1.1\"), and jumps there while playing; \
+         `stop` stops, and a second `stop` returns to 1.1.1; `continue` plays on from where \
+         playback stopped. `set_loop` (`args.start`, `args.length` in ticks) and \
+         `set_loop_enabled` (`args.enabled`) change the set, as undo steps. `status` says \
+         whether the song plays here, where the playhead and the insert marker are, and the \
+         loop. The engine acts at the start of its next block; to make something happen at \
+         an exact musical moment, use `schedule` rather than timing calls yourself.",
         false,
     )
 }
@@ -146,8 +210,9 @@ pub(crate) fn schedule_definition() -> Value {
          `add` with `at` (bar.beat.sixteenth, such as \"9.1.1\"), `command`, and `args`; \
          `list` to see them; `cancel` with `id`. Fader and device parameter changes \
          (`mixer.set_volume`, `mixer.set_pan`, `mixer.set_mute`, `mixer.set_solo`, \
-         `device.set_param`) take effect in the audio on that sample; any other command runs \
-         as the song gets there. Each runs as an undo step labelled with your name. The \
+         `device.set_param`) take effect in the audio on that sample, and `transport.stop` \
+         and `transport.locate` stop or jump there; any other command runs as the song gets \
+         there. Each document change runs as an undo step labelled with your name. The \
          command and its arguments are checked when you schedule it, and it asks the person \
          then if it's destructive or external. A command fires once, when the song plays \
          through its position.",
@@ -155,43 +220,109 @@ pub(crate) fn schedule_definition() -> Value {
     )
 }
 
+/// `text`, a bar.beat.sixteenth position, in ticks by the song's time
+/// signatures.
+fn position(shell: &Shell, text: &str) -> Result<Ticks, String> {
+    shell
+        .editor()
+        .document()
+        .settings()
+        .time_signatures
+        .parse_position(text)
+        .map_err(|error| {
+            format!(
+                "`{text}` isn't a position in this song: {error}. Write bar.beat.sixteenth, \
+                 such as 5.1.1"
+            )
+        })
+}
+
 pub(crate) fn transport(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
     let TransportArgs {
         action,
         args: given,
+        at,
     } = step!(args(raw));
-    let available: Vec<String> = ctx
-        .shell
-        .registry()
-        .iter()
-        .filter(|spec| spec.area() == "transport")
-        .map(|spec| spec.id.to_string())
-        .collect();
     let Some(command) = action.command() else {
-        return done(json!({
-            "engine_plays_here": ctx.state.engine_attached,
-            "transport_commands": available,
-            "scheduled_waiting": ctx.state.schedule.waiting(),
-            "note": if available.is_empty() {
-                "This build has no transport commands yet: play, stop, continue, locate, and \
-                 the loop come with the transport (WP-1.5). Scheduled commands wait until the \
-                 song plays."
-            } else {
-                "Run the transport's commands through this tool or `run`."
-            },
-        }));
+        return done(status(ctx));
     };
-    if !available.iter().any(|id| id == command) {
-        return failed(format!(
-            "this build has no `{command}` command yet: play, stop, continue, locate, and the \
-             loop come with the transport (WP-1.5). Until then, `schedule` commands at bars \
-             and beats; they fire when the song plays."
-        ));
+    let mut given = given.unwrap_or_else(|| json!({}));
+    if let Some(at) = at {
+        if action != TransportAction::Locate {
+            return failed("`at` is for `locate`; give other actions their `args`");
+        }
+        if given.as_object().is_none_or(|args| !args.is_empty()) {
+            return failed("give `locate` either `at` or `args.position`, not both");
+        }
+        let ticks = match position(ctx.shell, &at) {
+            Ok(ticks) => ticks,
+            Err(message) => return failed(message),
+        };
+        given = json!({ "position": ticks.get() });
     }
     super::run::run(
         ctx,
-        json!({ "commands": [{ "command": command, "args": given.unwrap_or_else(|| json!({})) }] }),
+        json!({ "commands": [{ "command": command, "args": given }] }),
     )
+}
+
+/// What `transport`'s `status` reports.
+fn status(ctx: &Ctx<'_>) -> Value {
+    let document = ctx.shell.editor().document();
+    let settings = document.settings();
+    let signatures = &settings.time_signatures;
+    let at =
+        |ticks: Ticks| json!({ "bbs": signatures.to_bbs(ticks).to_string(), "ticks": ticks.get() });
+    let brace = settings.arrangement_loop;
+    let mut available: Vec<&str> = super::commands(ctx.shell)
+        .filter(|spec| spec.area() == "transport")
+        .map(|spec| spec.id.as_ref())
+        .collect();
+    available.sort_unstable();
+    let attached = ctx.state.engine_attached;
+    let playhead = ctx.state.playhead.filter(|_| attached);
+    json!({
+        "engine_plays_here": attached,
+        "playing": playhead.map(|p| p.playing),
+        "position": playhead.map(|p| at(p.position)),
+        "insert_marker": playhead.map(|p| at(p.insert_marker)),
+        "loop": {
+            "enabled": brace.enabled,
+            "start": at(brace.start),
+            "end": at(brace.end()),
+            "length": brace.length.get(),
+        },
+        "transport_commands": available,
+        "scheduled_waiting": ctx.state.schedule.waiting(),
+        "note": if attached {
+            "Play, stop, continue, and locate go to the engine, which acts on them at the \
+             start of its next block; `position` is where it last said the playhead was. The \
+             loop belongs to the set: `set_loop` and `set_loop_enabled` change it as undo \
+             steps. To act on an exact beat, `schedule` the command."
+        } else {
+            "Nothing plays the song here: no engine is attached to this agent server \
+             (`bl-cli mcp` runs without one), so play, stop, continue, and locate are \
+             refused. The loop belongs to the set and can be changed here. Scheduled commands \
+             wait until the song plays."
+        },
+    })
+}
+
+/// Sends one of the transport's playback commands to the engine, through
+/// the host, which puts it on the engine's queue as the UI's transport
+/// commands go: the agent never touches the audio thread.
+pub(crate) fn send_transport(ctx: &mut Ctx<'_>, id: &str, args: Value) -> Result<(), String> {
+    if !ctx.state.engine_attached {
+        return Err(format!(
+            "nothing plays the song here: no engine is attached to this agent server \
+             (`bl-cli mcp` runs without one), so `{id}` can't move the transport. The loop \
+             (`transport.set_loop`, `transport.set_loop_enabled`) belongs to the set and can \
+             be changed anywhere, and `schedule` commands wait until the song plays"
+        ));
+    }
+    let command = transport::command_from_args(id, args).map_err(|error| error.to_string())?;
+    ctx.state.outbox.push(EngineMessage::Transport(command));
+    Ok(())
 }
 
 /// One scheduled command.
@@ -214,12 +345,11 @@ enum State {
     Rejected,
 }
 
-/// The scheduled commands, and what the engine has yet to hear.
+/// The scheduled commands.
 #[derive(Debug, Default)]
 pub(crate) struct Schedule {
     entries: Vec<Entry>,
     next_id: u64,
-    outbox: Vec<EngineMessage>,
 }
 
 impl Schedule {
@@ -229,10 +359,6 @@ impl Schedule {
             .iter()
             .filter(|e| e.state == State::Waiting)
             .count()
-    }
-
-    pub(crate) fn take_messages(&mut self) -> Vec<EngineMessage> {
-        std::mem::take(&mut self.outbox)
     }
 
     fn list(&self) -> Value {
@@ -267,7 +393,8 @@ impl Schedule {
     }
 
     /// Runs the command whose scheduled ID fired, on the document, as the
-    /// agent's undo step.
+    /// agent's undo step. A transport command already ran in the engine,
+    /// on its frame.
     pub(crate) fn on_report(&mut self, shell: &mut Shell, report: Report) {
         match report {
             Report::Fired { id, position, .. } => {
@@ -295,6 +422,11 @@ impl Schedule {
 
 /// Runs a fired command.
 fn run_now(shell: &mut Shell, entry: &Entry) -> Result<(), String> {
+    if transport::handles(&entry.command) {
+        // The engine ran it on its frame, and it changes nothing in the
+        // document.
+        return Ok(());
+    }
     if is_edit(&entry.command) {
         let label = entry.label.clone();
         shell.edit(|editor| {
@@ -317,9 +449,13 @@ fn is_edit(id: &str) -> bool {
     model::handles(id) && id != model::UNDO && id != model::REDO
 }
 
-/// What the engine does on the frame: a fader or device parameter change,
-/// or only the report.
+/// What the engine does on the frame: a fader or device parameter change, a
+/// transport command, or only the report.
 fn engine_action(command: &str, args: &Value) -> Action {
+    if transport::handles(command) {
+        return transport::command_from_args(command, args.clone())
+            .map_or(Action::Notify, Action::Transport);
+    }
     let id = |key: &str| {
         args.get(key)
             .and_then(Value::as_u64)
@@ -380,8 +516,9 @@ pub(crate) fn schedule(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
             let Some(id) = id else {
                 return failed("give the `id` of the scheduled command to cancel");
             };
-            let schedule = &mut ctx.state.schedule;
-            let Some(entry) = schedule
+            let Some(entry) = ctx
+                .state
+                .schedule
                 .entries
                 .iter_mut()
                 .find(|e| e.id == id && e.state == State::Waiting)
@@ -389,31 +526,31 @@ pub(crate) fn schedule(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
                 return failed(format!("no scheduled command {id} is waiting"));
             };
             entry.state = State::Cancelled;
-            schedule.outbox.push(EngineMessage::Cancel(id));
+            ctx.state.outbox.push(EngineMessage::Cancel(id));
             done(json!({ "cancelled": id }))
         }
         ScheduleAction::Add => {
             let (Some(at), Some(command)) = (at, command) else {
                 return failed("`add` needs `at` (such as \"5.1.1\") and `command`");
             };
-            let document = ctx.shell.editor().document();
-            let signatures = &document.settings().time_signatures;
-            let ticks = match signatures.parse_position(&at) {
+            let ticks = match position(ctx.shell, &at) {
                 Ok(ticks) => ticks,
-                Err(error) => {
-                    return failed(format!(
-                        "`{at}` isn't a position in this song: {error}. Write bar.beat.sixteenth, \
-                         such as 5.1.1"
-                    ));
-                }
+                Err(message) => return failed(message),
             };
             if ticks < Ticks::ZERO {
                 return failed(format!(
                     "`{at}` is before the song starts; scheduled commands fire from 1.1.1 on"
                 ));
             }
-            let position = signatures.to_bbs(ticks).to_string();
-            let Some(spec) = ctx.shell.registry().get(&command) else {
+            let position = ctx
+                .shell
+                .editor()
+                .document()
+                .settings()
+                .time_signatures
+                .to_bbs(ticks)
+                .to_string();
+            let Some(spec) = super::command(ctx.shell, &command) else {
                 return failed(format!(
                     "no command is called `{command}`; use list_commands to find one"
                 ));
@@ -438,6 +575,14 @@ pub(crate) fn schedule(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
                 && let Err(message) = bl_commands::validate(schema, &args)
             {
                 return failed(format!("invalid arguments for `{command}`: {message}"));
+            }
+            let action = engine_action(&command, &args);
+            if let Action::Transport(TransportCommand::Play | TransportCommand::Continue) = action {
+                return failed(format!(
+                    "a scheduled command fires only while the song plays, when `{command}` \
+                     would do nothing; run it now with `transport`, or schedule \
+                     `transport.locate` to jump"
+                ));
             }
             // Try it on the song as it is now, so a mistake shows today
             // rather than when the song gets there.
@@ -472,15 +617,14 @@ pub(crate) fn schedule(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
                 label: format!("{}: {label} at {position}", ctx.session.client.label()),
                 state: State::Waiting,
             };
-            let action = engine_action(&command, &args);
-            schedule
+            schedule.entries.push(entry);
+            ctx.state
                 .outbox
                 .push(EngineMessage::Schedule(ScheduledCommand {
                     id,
                     at: ticks,
                     action,
                 }));
-            schedule.entries.push(entry);
             done(json!({
                 "id": id,
                 "at": position,
@@ -490,8 +634,8 @@ pub(crate) fn schedule(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
                 "note": if ctx.state.engine_attached {
                     "It fires when the playing song reaches that position."
                 } else {
-                    "Nothing plays the song here yet (the transport comes with WP-1.5), so it \
-                     waits until the song plays through that position."
+                    "Nothing plays the song here (no engine is attached to this agent server), \
+                     so it waits until the song plays through that position."
                 },
             }))
         }
@@ -522,5 +666,49 @@ mod tests {
             engine_action("track.rename", &json!({ "track": 4, "name": "A" })),
             Action::Notify
         );
+    }
+
+    #[test]
+    fn transport_commands_become_the_engines_transport_actions() {
+        assert_eq!(
+            engine_action("transport.stop", &json!({})),
+            Action::Transport(TransportCommand::Stop)
+        );
+        assert_eq!(
+            engine_action("transport.locate", &json!({ "position": 2_822_400 })),
+            Action::Transport(TransportCommand::Locate(Ticks(2_822_400)))
+        );
+        // The loop is the document's: the engine follows it when the
+        // document changes.
+        assert_eq!(
+            engine_action("transport.set_loop_enabled", &json!({ "enabled": true })),
+            Action::Notify
+        );
+    }
+
+    #[test]
+    fn every_transport_action_runs_a_registered_transport_command() {
+        let shell = Shell::headless();
+        for action in [
+            TransportAction::Play,
+            TransportAction::Stop,
+            TransportAction::Continue,
+            TransportAction::Locate,
+            TransportAction::InsertMarkerToPlayhead,
+            TransportAction::SetLoop,
+            TransportAction::SetLoopEnabled,
+        ] {
+            let id = action.command().unwrap();
+            let spec = super::super::command(&shell, id).unwrap_or_else(|| panic!("{id}"));
+            assert_eq!(spec.area(), "transport");
+            // The playback commands go to the engine; the loop's run on the
+            // document.
+            assert_eq!(
+                super::super::is_engine_command(&shell, id),
+                !model::handles(id),
+                "{id}"
+            );
+        }
+        assert_eq!(TransportAction::Status.command(), None);
     }
 }

@@ -1,9 +1,11 @@
 //! The agent API's tools, driven in-process by the scripted client as an
 //! agent drives them: discovery, run (batches, dry runs, IDs), query,
-//! checkpoints, permissions, and the protocol around them.
+//! the transport, checkpoints, permissions, and the protocol around them.
 
 use bl_agent::client::{Client, InProcess};
-use bl_agent::{Agent, QuestionKind, guide};
+use bl_agent::{Agent, EngineMessage, QuestionKind, guide};
+use bl_core::time::Ticks;
+use bl_engine::{Action, ScheduledCommand, TransportCommand};
 use bl_shell::Shell;
 use serde_json::{Value, json};
 
@@ -128,10 +130,27 @@ fn discovery_lists_areas_searches_and_describes_with_schemas() {
     let mut client = headless(false);
     let areas = call(&mut client, "list_commands", json!({}));
     for area in [
-        "track", "clip", "mixer", "device", "song", "set", "edit", "agent",
+        "track",
+        "clip",
+        "mixer",
+        "device",
+        "song",
+        "set",
+        "edit",
+        "agent",
+        "transport",
     ] {
         assert!(areas["areas"][area].as_u64().unwrap() > 0, "{area}");
     }
+    assert_eq!(
+        areas["commands"],
+        areas["areas"]
+            .as_object()
+            .unwrap()
+            .values()
+            .map(|n| n.as_u64().unwrap())
+            .sum::<u64>()
+    );
 
     let tracks = call(&mut client, "list_commands", json!({ "area": "track" }));
     let ids: Vec<&str> = tracks["commands"]
@@ -174,6 +193,24 @@ fn discovery_lists_areas_searches_and_describes_with_schemas() {
         )
         .contains("list_commands")
     );
+
+    // The transport's playback commands are the engine's, and listed with
+    // the loop's, which are the document's.
+    let transport = call(&mut client, "list_commands", json!({ "area": "transport" }));
+    let ids: Vec<&str> = transport["commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["command"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, TRANSPORT_COMMANDS);
+    let play = call(
+        &mut client,
+        "describe_command",
+        json!({ "command": "transport.play" }),
+    );
+    assert_eq!(play["permission"], "read");
+    assert_eq!(play["access"], "runs");
 
     // Agents may never change their own permissions.
     let autonomy = call(
@@ -671,15 +708,197 @@ fn checkpoints_save_restore_as_one_undo_step_and_ask_before_removing() {
     assert!(call_err(&mut client, "checkpoint", json!({ "action": "save" })).contains("name"));
 }
 
+/// Every transport command, the engine's and the loop's, by ID.
+const TRANSPORT_COMMANDS: [&str; 9] = [
+    "transport.continue",
+    "transport.insert_marker_to_playhead",
+    "transport.locate",
+    "transport.play",
+    "transport.play_from_insert_marker",
+    "transport.play_stop",
+    "transport.set_loop",
+    "transport.set_loop_enabled",
+    "transport.stop",
+];
+
+const BAR: i64 = 2_822_400;
+
 #[test]
-fn the_transport_says_what_this_build_has() {
+fn without_an_engine_the_transport_says_so_and_the_loop_still_changes_the_set() {
     let mut client = headless(false);
     let status = call(&mut client, "transport", json!({ "action": "status" }));
     assert_eq!(status["engine_plays_here"], false);
-    assert_eq!(status["transport_commands"], json!([]));
+    assert_eq!(status["playing"], Value::Null);
+    assert_eq!(status["position"], Value::Null);
+    assert_eq!(status["transport_commands"], json!(TRANSPORT_COMMANDS));
+    assert_eq!(
+        status["loop"],
+        json!({
+            "enabled": false,
+            "start": { "bbs": "1.1.1", "ticks": 0 },
+            "end": { "bbs": "5.1.1", "ticks": 4 * BAR },
+            "length": 4 * BAR,
+        })
+    );
+
+    // Nothing plays the song here, so playback commands are refused,
+    // through the tool or `run`, and nothing goes to an engine.
     let message = call_err(&mut client, "transport", json!({ "action": "play" }));
-    assert!(message.contains("WP-1.5"), "{message}");
-    assert!(message.contains("schedule"), "{message}");
+    assert!(message.contains("no engine is attached"), "{message}");
+    assert!(message.contains("Nothing changed"), "{message}");
+    let message = call_err(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "transport.stop" }] }),
+    );
+    assert!(message.contains("`transport.stop`"), "{message}");
+    assert!(client.transport().agent.take_engine_messages().is_empty());
+
+    // The loop belongs to the set, engine or not: each change is an undo
+    // step with the agent's name.
+    call(
+        &mut client,
+        "transport",
+        json!({ "action": "set_loop", "args": { "start": BAR, "length": 2 * BAR } }),
+    );
+    call(
+        &mut client,
+        "transport",
+        json!({ "action": "set_loop_enabled", "args": { "enabled": true } }),
+    );
+    let status = call(&mut client, "transport", json!({ "action": "status" }));
+    assert_eq!(status["loop"]["enabled"], true);
+    assert_eq!(status["loop"]["start"]["bbs"], "2.1.1");
+    assert_eq!(status["loop"]["end"]["bbs"], "4.1.1");
+    let history = call(&mut client, "query", json!({ "path": "history" }));
+    assert_eq!(
+        history["undo"]["items"],
+        json!([
+            "test-agent: Arrangement Loop On/Off",
+            "test-agent: Set Loop Brace"
+        ])
+    );
+    // A brace that can't be is refused and changes nothing.
+    let message = call_err(
+        &mut client,
+        "transport",
+        json!({ "action": "set_loop", "args": { "start": BAR, "length": 0 } }),
+    );
+    assert!(message.contains("Nothing changed"), "{message}");
+    // The loop's commands are document edits, so they batch with others.
+    let batch = call(
+        &mut client,
+        "run",
+        json!({ "label": "Loop the verse", "commands": [
+            { "command": "transport.set_loop", "args": { "start": 0, "length": BAR } },
+            { "command": "track.rename", "args": { "track": 2, "name": "Verse" } },
+        ] }),
+    );
+    assert_eq!(batch["undo_step"], "test-agent: Loop the verse");
+    assert!(client.transport().agent.take_engine_messages().is_empty());
+}
+
+#[test]
+fn with_an_engine_transport_commands_go_to_its_queue_in_order() {
+    let mut client = headless(false);
+    client.transport().agent.set_engine_attached(true);
+    let status = call(&mut client, "transport", json!({ "action": "status" }));
+    assert_eq!(status["engine_plays_here"], true);
+    // The engine hasn't said where the playhead is yet.
+    assert_eq!(status["playing"], Value::Null);
+
+    // Playback changes nothing in the set, so it's no undo step, and it
+    // runs without asking (the `read` class) even headless.
+    let played = call(&mut client, "transport", json!({ "action": "play" }));
+    assert_eq!(played["ran"], 1);
+    assert_eq!(played["undo_step"], Value::Null);
+    call(
+        &mut client,
+        "transport",
+        json!({ "action": "locate", "at": "3.2.1" }),
+    );
+    let scheduled = call(
+        &mut client,
+        "schedule",
+        json!({ "action": "add", "at": "5.1.1", "command": "transport.stop" }),
+    );
+    assert_eq!(scheduled["sample_accurate"], true);
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "transport.play_stop" }] }),
+    );
+    call(
+        &mut client,
+        "transport",
+        json!({ "action": "locate", "args": { "position": 0 } }),
+    );
+    call(&mut client, "transport", json!({ "action": "continue" }));
+    call(
+        &mut client,
+        "transport",
+        json!({ "action": "insert_marker_to_playhead" }),
+    );
+    call(&mut client, "transport", json!({ "action": "stop" }));
+    // A dry run checks and sends nothing.
+    let dry = call(
+        &mut client,
+        "run",
+        json!({ "dry_run": true, "commands": [{ "command": "transport.play" }] }),
+    );
+    assert_eq!(dry["valid"], true);
+
+    assert_eq!(
+        client.transport().agent.take_engine_messages(),
+        [
+            EngineMessage::Transport(TransportCommand::Play),
+            EngineMessage::Transport(TransportCommand::Locate(Ticks(2 * BAR + 705_600))),
+            EngineMessage::Schedule(ScheduledCommand {
+                id: 1,
+                at: Ticks(4 * BAR),
+                action: Action::Transport(TransportCommand::Stop),
+            }),
+            EngineMessage::Transport(TransportCommand::PlayStop),
+            EngineMessage::Transport(TransportCommand::Locate(Ticks::ZERO)),
+            EngineMessage::Transport(TransportCommand::Continue),
+            EngineMessage::Transport(TransportCommand::InsertMarkerToPlayhead),
+            EngineMessage::Transport(TransportCommand::Stop),
+        ]
+    );
+
+    // Mistakes show now, and send nothing.
+    for (args, expected) in [
+        (
+            json!({ "action": "play", "at": "2.1.1" }),
+            "`at` is for `locate`",
+        ),
+        (
+            json!({ "action": "locate", "at": "2.1.1", "args": { "position": 0 } }),
+            "not both",
+        ),
+        (
+            json!({ "action": "locate", "at": "2.9.1" }),
+            "isn't a position",
+        ),
+        (
+            json!({ "action": "locate", "args": { "position": "2.1.1" } }),
+            "invalid arguments",
+        ),
+        (json!({ "action": "rewind" }), "invalid arguments"),
+    ] {
+        let message = call_err(&mut client, "transport", args.clone());
+        assert!(message.contains(expected), "{args}: {message}");
+    }
+    let message = call_err(
+        &mut client,
+        "schedule",
+        json!({ "action": "add", "at": "5.1.1", "command": "transport.play" }),
+    );
+    assert!(message.contains("would do nothing"), "{message}");
+    assert!(client.transport().agent.take_engine_messages().is_empty());
+    // Nothing the transport did is in the undo history.
+    let history = call(&mut client, "query", json!({ "path": "history" }));
+    assert_eq!(history["undo"]["items"], json!([]));
 }
 
 #[test]

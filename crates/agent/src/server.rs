@@ -3,7 +3,7 @@
 
 use std::collections::BTreeMap;
 
-use bl_engine::Report;
+use bl_engine::{EngineState, Report};
 use bl_shell::Shell;
 use bl_shell::agent::AGENT_APPROVE_CLIENT;
 use serde_json::{Value, json};
@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use crate::guide;
 use crate::jsonrpc::{self, Message, code};
 use crate::permission::Mode;
-use crate::tools::{self, Ctx, EngineMessage, State, ToolOutcome};
+use crate::tools::{self, Ctx, EngineMessage, Playhead, State, ToolOutcome};
 
 /// The protocol versions this server speaks, newest first. A client asking
 /// for another gets the newest.
@@ -221,15 +221,31 @@ impl Agent {
         self.sessions.retain(|_, s| s.client.name != client);
     }
 
-    /// Says whether an engine plays the song, so scheduled commands fire.
+    /// Says whether an engine plays the song here. While one does, the
+    /// transport's playback commands go to it and scheduled commands fire;
+    /// without one, the playback commands are refused and scheduled
+    /// commands wait.
     pub fn set_engine_attached(&mut self, attached: bool) {
         self.state.engine_attached = attached;
+        if !attached {
+            self.state.playhead = None;
+        }
     }
 
-    /// What the engine must hear about scheduled commands since the last
-    /// call. The host sends them on to the engine's queue.
+    /// What the engine must hear since the last call: transport commands,
+    /// and commands scheduled and cancelled, in the order agents asked. The
+    /// host sends them on to the engine's queue, the queue the UI's
+    /// commands take, after syncing the document, so the engine has the song
+    /// as the agent left it.
     pub fn take_engine_messages(&mut self) -> Vec<EngineMessage> {
-        self.state.schedule.take_messages()
+        std::mem::take(&mut self.state.outbox)
+    }
+
+    /// Hands the agent API the engine's published state, so `transport`'s
+    /// `status` can say whether the song plays and where the playhead and
+    /// the insert marker are.
+    pub fn on_engine_state(&mut self, state: &EngineState) {
+        self.state.playhead = Some(Playhead::of(state));
     }
 
     /// Hands the agent API a report from the engine: a scheduled command

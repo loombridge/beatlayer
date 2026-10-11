@@ -18,8 +18,9 @@
 //! The tools ([`tools`](crate::tools) lists them): discovery
 //! (`list_commands`, `describe_command`), `run` (one command or a batch as
 //! one undo step labelled with the agent's name, or a dry run), `query`
-//! (by ID or readable path, with summaries), `transport` and `schedule`
-//! (commands at a bar and beat, on their exact sample), and `checkpoint`.
+//! (by ID or readable path, with summaries), `transport` (play, stop,
+//! continue, locate, and the loop), `schedule` (commands at a bar and beat,
+//! on their exact sample), and `checkpoint`.
 //!
 //! # Where commands run
 //!
@@ -27,7 +28,10 @@
 //! thread, the same shell and thread the UI's commands run on, so an
 //! agent's edit takes the person's path and never touches the audio
 //! thread. In the app the HTTP server's threads only parse requests and
-//! hand them to the main thread's event loop.
+//! hand them to the main thread's event loop. The transport's playback
+//! commands act in the engine: the agent API hands them to the host as
+//! [`EngineMessage`]s, and the host puts them on the engine's queue, as it
+//! does the UI's.
 //!
 //! # Permissions
 //!

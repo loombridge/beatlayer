@@ -27,7 +27,9 @@ pub(crate) const NAME: &str = "run";
 pub(crate) struct RunArgs {
     /// The commands to run, in order. More than one must all be document
     /// edits (commands in the `song`, `track`, `mixer`, `clip`, and `device`
-    /// areas); they run as one undo step, all or none.
+    /// areas, and the loop's `transport.set_loop` and
+    /// `transport.set_loop_enabled`); they run as one undo step, all or
+    /// none.
     #[schemars(length(min = 1))]
     commands: Vec<Step>,
     /// What the commands do together, in a few words, such as "Add a drum
@@ -171,7 +173,7 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
     // Look every command up first, so nothing runs if one is wrong.
     let mut specs: Vec<&CommandSpec> = Vec::with_capacity(commands.len());
     for (index, step) in commands.iter().enumerate() {
-        let Some(spec) = ctx.shell.registry().get(&step.command) else {
+        let Some(spec) = super::command(ctx.shell, &step.command) else {
             return failed(format!(
                 "command {} (`{}`): no command has that ID; use list_commands to find one",
                 index + 1,
@@ -185,7 +187,7 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
     {
         return failed(format!(
             "a batch can hold only document edits (the `song`, `track`, `mixer`, `clip`, and \
-             `device` areas); run `{}` in a call of its own",
+             `device` areas, and the loop); run `{}` in a call of its own",
             other.command
         ));
     }
@@ -328,7 +330,21 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
 
     // Run them.
     let outcome: Result<(Vec<Value>, Option<String>), String> =
-        if ready.len() == 1 && !is_edit(&ready[0].id) {
+        if ready.len() == 1 && super::is_engine_command(ctx.shell, &ready[0].id) {
+            // A transport command goes to the engine, through the host.
+            let step = &ready[0];
+            super::time::send_transport(ctx, &step.id, step.args.clone())
+                .map(|()| {
+                    let sent = json!({
+                        "command": step.id,
+                        "result": null,
+                        "note": "Sent to the engine, which acts on it at the start of its next \
+                                 block.",
+                    });
+                    (vec![sent], None)
+                })
+                .map_err(|error| format!("command 1 (`{}`): {error}", step.id))
+        } else if ready.len() == 1 && !is_edit(&ready[0].id) {
             let step = &ready[0];
             ctx.shell
                 .run(&step.id, step.args.clone())

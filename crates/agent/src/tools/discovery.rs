@@ -19,7 +19,8 @@ pub(crate) const DESCRIBE: &str = "describe_command";
 #[serde(deny_unknown_fields)]
 pub(crate) struct ListArgs {
     /// Only commands in this area: the part of a command's ID before the
-    /// dot, such as `track`, `clip`, `mixer`, `device`, `song`, or `set`.
+    /// dot, such as `track`, `clip`, `mixer`, `device`, `song`, `transport`,
+    /// or `set`.
     #[serde(default)]
     area: Option<String>,
     /// Only commands whose ID, label, or description holds every one of
@@ -88,14 +89,13 @@ fn summary(description: &str) -> &str {
 
 pub(crate) fn list(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
     let ListArgs { area, search } = step!(args(raw));
-    let registry = ctx.shell.registry();
     if area.is_none() && search.is_none() {
         let mut areas: BTreeMap<&str, usize> = BTreeMap::new();
-        for spec in registry {
+        for spec in super::commands(ctx.shell) {
             *areas.entry(spec.area()).or_default() += 1;
         }
         return done(json!({
-            "commands": registry.len(),
+            "commands": areas.values().sum::<usize>(),
             "areas": areas,
             "next": "Call list_commands with an `area` or `search` to list commands.",
         }));
@@ -106,8 +106,7 @@ pub(crate) fn list(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
         .split_whitespace()
         .map(str::to_lowercase)
         .collect();
-    let mut found: Vec<(usize, &CommandSpec)> = registry
-        .iter()
+    let mut found: Vec<(usize, &CommandSpec)> = super::commands(ctx.shell)
         .filter(|spec| area.as_deref().is_none_or(|area| spec.area() == area))
         .filter_map(|spec| {
             let id = spec.id.to_lowercase();
@@ -153,7 +152,7 @@ pub(crate) fn list(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
 
 pub(crate) fn describe(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
     let DescribeArgs { command } = step!(args(raw));
-    let Some(spec) = ctx.shell.registry().get(&command) else {
+    let Some(spec) = super::command(ctx.shell, &command) else {
         return failed(format!(
             "no command is called `{command}`; use list_commands to find one"
         ));

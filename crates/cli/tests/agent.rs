@@ -4,14 +4,17 @@
 //! its document and by its render.
 //!
 //! - The M1 demo (the build plan's exit demo, its agent version): eight
-//!   stems arranged and mixed, saved, and reopened identically. Its audio
-//!   null test waits on clip playback, the transport, and the mixer
-//!   (WP-1.4, 1.5, 1.6): until they're in, its clips are silent, and the
-//!   loop and export steps are reported as pending.
+//!   stems arranged, a section looped through the transport, mixed, saved,
+//!   and reopened identically, and rendered as the hand-built demo renders.
+//!   Its audible null test waits on clip playback and the mixer (WP-1.4,
+//!   1.6): until they're in, its clips render silent.
 //! - A golden fixture rebuilt through the agent API renders bit for bit as
 //!   the hand-built fixture, which is null-tested against its reference.
 //! - Scheduled commands fire on their exact frames through the engine, and
 //!   the render matches the golden fixture that schedules the same changes.
+//! - An agent plays, locates, continues, and stops the transport (WP-1.5)
+//!   headless through the engine's queue, with scheduled transport commands
+//!   among them, and every frame plays where the transport's rules put it.
 
 bl_rt::install_trap!();
 
@@ -20,12 +23,13 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use bl_agent::Agent;
 use bl_agent::client::{Client, InProcess, Stdio, Transport};
+use bl_agent::{Agent, EngineMessage};
 use bl_cli::golden::{self, Render, SAMPLE_RATE};
 use bl_cli::render::{Settings, interleave, render};
-use bl_core::time::{Bpm, TempoMap, Ticks};
-use bl_engine::{EngineConfig, Offline, Registry, TransportCommand};
+use bl_core::time::{Bpm, Frames, TempoMap, Ticks};
+use bl_engine::nodes::{BEAT_TONE, BeatTone};
+use bl_engine::{EngineConfig, Offline, Registry, Report, TransportCommand};
 use bl_model::{
     AudioData, Clip, ClipData, Command as Edit, ContentHash, Document, Editor, TrackId, TrackKind,
 };
@@ -101,6 +105,7 @@ fn canonical(document: &Document) -> Value {
     json!({
         "tempo": document.settings().tempo,
         "time_signatures": document.settings().time_signatures,
+        "loop": document.settings().arrangement_loop,
         "tracks": tracks,
     })
 }
@@ -225,6 +230,15 @@ fn hand_built_m1_demo(hashes: &[ContentHash]) -> Editor {
         editor.apply(Edit::SetPan { track, pan: *pan }).unwrap();
     }
     editor
+        .apply(Edit::SetLoop {
+            start: Ticks(BAR * 4),
+            length: Ticks(BAR * 8),
+        })
+        .unwrap();
+    editor
+        .apply(Edit::SetLoopEnabled { enabled: true })
+        .unwrap();
+    editor
 }
 
 #[test]
@@ -306,14 +320,26 @@ fn a_scripted_client_builds_the_m1_demo_headless_and_it_reopens_as_the_hand_buil
         json!({ "label": "Mix", "commands": mix }),
     );
 
-    // Loop a section: the transport (WP-1.5) isn't in yet.
-    let looped = client
-        .call("transport", json!({ "action": "loop", "args": {} }))
+    // Loop a section, bars 5 to 12, through the transport (WP-1.5). The
+    // loop belongs to the set, so it's saved with it. Playing it needs an
+    // engine, which `bl-cli mcp` doesn't run, and it says so.
+    call(
+        &mut client,
+        "transport",
+        json!({ "action": "set_loop", "args": { "start": BAR * 4, "length": BAR * 8 } }),
+    );
+    call(
+        &mut client,
+        "transport",
+        json!({ "action": "set_loop_enabled", "args": { "enabled": true } }),
+    );
+    let played = client
+        .call("transport", json!({ "action": "play" }))
         .unwrap();
     assert!(
-        looped.is_error && looped.text.contains("WP-1.5"),
+        played.is_error && played.text.contains("no engine is attached"),
         "{}",
-        looped.text
+        played.text
     );
 
     // Save (external: a new file outside any project open now).
@@ -333,6 +359,8 @@ fn a_scripted_client_builds_the_m1_demo_headless_and_it_reopens_as_the_hand_buil
     assert_eq!(
         history["undo"]["items"],
         json!([
+            "scripted-client: Arrangement Loop On/Off",
+            "scripted-client: Set Loop Brace",
             "scripted-client: Mix",
             "scripted-client: Import eight stems",
             "scripted-client: Clear the default tracks",
@@ -360,6 +388,10 @@ fn a_scripted_client_builds_the_m1_demo_headless_and_it_reopens_as_the_hand_buil
     );
     assert_eq!(vocal["start"]["bbs"], "13.1.1");
     assert_eq!(vocal["content"]["media"], hashes[7].to_string());
+    let transport = call(&mut reopened, "transport", json!({ "action": "status" }));
+    assert_eq!(transport["loop"]["enabled"], true);
+    assert_eq!(transport["loop"]["start"]["bbs"], "5.1.1");
+    assert_eq!(transport["loop"]["end"]["bbs"], "13.1.1");
     drop(reopened);
 
     // The saved set is the hand-built demo, track for track and clip for
@@ -382,8 +414,9 @@ fn a_scripted_client_builds_the_m1_demo_headless_and_it_reopens_as_the_hand_buil
     );
     assert!(agent_render.same_bits(&hand_render));
     eprintln!(
-        "M1 demo renders: {} frames each, bit-identical, peak {:.1} dBFS (audio clips play from \
-         WP-1.4; until then the render is silent and the audible null test is pending)",
+        "M1 demo renders: {} frames each, bit-identical, peak {:.1} dBFS (the audible null test \
+         waits on clip playback, WP-1.4, and the mixer, WP-1.6; until then the clips render \
+         silent)",
         agent_render.frames(),
         agent_render.summary.peak_dbfs()
     );
@@ -570,8 +603,9 @@ fn scheduled_commands_fire_on_their_exact_frames_and_render_as_the_golden_fixtur
     offline.sender().transport(TransportCommand::Play);
     for message in transport.agent.take_engine_messages() {
         match message {
-            bl_agent::EngineMessage::Schedule(command) => offline.sender().schedule(command),
-            bl_agent::EngineMessage::Cancel(id) => offline.sender().cancel(id),
+            EngineMessage::Transport(command) => offline.sender().transport(command),
+            EngineMessage::Schedule(command) => offline.sender().schedule(command),
+            EngineMessage::Cancel(id) => offline.sender().cancel(id),
         }
     }
     let mut samples = Vec::new();
@@ -634,6 +668,314 @@ fn scheduled_commands_fire_on_their_exact_frames_and_render_as_the_golden_fixtur
     let pad = document.tracks().find(|t| t.name() == "Pad").unwrap();
     assert!(pad.mixer().mute);
     assert_eq!(pad.mixer().volume, 0.25);
+}
+
+/// The app's main thread with an engine, played on this thread: after
+/// each tool call it syncs the document and puts what the agent API asked
+/// of the engine on the engine's queue, as it would the UI's commands; it
+/// plays blocks as the audio thread would; and between blocks it hands the
+/// engine's reports and state back to the agent API.
+struct EngineHost {
+    client: Client<InProcess>,
+    offline: Offline,
+    block: usize,
+    /// Frames played: the engine clock.
+    clock: u64,
+    samples: Vec<f32>,
+    /// Each transport command sent, with the clock frame it was sent at,
+    /// the start of the block it acts in.
+    sent: Vec<(u64, TransportCommand)>,
+    fired: Vec<(u64, i64)>,
+}
+
+impl EngineHost {
+    fn new(block: usize) -> Self {
+        // Not autonomous: the transport's commands are `read`, so they run
+        // without asking anyway.
+        let mut client = Client::new(InProcess::new(Agent::headless(false), Shell::headless()));
+        client.initialize("player").unwrap();
+        client.transport().agent.set_engine_attached(true);
+        Self {
+            client,
+            offline: Offline::new(EngineConfig::new(SAMPLE_RATE, block), Registry::new()),
+            block,
+            clock: 0,
+            samples: Vec::new(),
+            sent: Vec::new(),
+            fired: Vec::new(),
+        }
+    }
+
+    fn call(&mut self, tool: &str, args: Value) -> Value {
+        let result = call(&mut self.client, tool, args);
+        let transport = self.client.transport();
+        self.offline.sync(transport.shell.editor().document());
+        for message in transport.agent.take_engine_messages() {
+            match message {
+                EngineMessage::Transport(command) => {
+                    self.sent.push((self.clock, command));
+                    self.offline.sender().transport(command);
+                }
+                EngineMessage::Schedule(command) => self.offline.sender().schedule(command),
+                EngineMessage::Cancel(id) => self.offline.sender().cancel(id),
+            }
+        }
+        result
+    }
+
+    /// Plays until the engine clock reaches `clock`.
+    fn play_to(&mut self, clock: u64) {
+        while self.clock < clock {
+            let frames = (self.block as u64).min(clock - self.clock);
+            interleave(&self.offline.process(frames as usize), &mut self.samples);
+            self.clock += frames;
+            let transport = self.client.transport();
+            for report in self.offline.reports() {
+                if let Report::Fired {
+                    position, clock, ..
+                } = report
+                {
+                    self.fired.push((clock, position.get()));
+                }
+                transport.agent.on_report(&mut transport.shell, report);
+            }
+            transport.agent.on_engine_state(self.offline.state());
+            self.offline.sync(transport.shell.editor().document());
+        }
+    }
+
+    fn status(&mut self) -> Value {
+        self.call("transport", json!({ "action": "status" }))
+    }
+}
+
+/// The transport after `docs/specs/transport.md`, one frame at a time,
+/// apart from the engine's code: what each frame of the engine clock plays.
+struct TransportModel {
+    tempo: TempoMap,
+    playing: bool,
+    position: i64,
+    insert_marker: Ticks,
+    /// Scheduled transport commands: the song frame each fires on, once,
+    /// when the playing song reaches it.
+    scheduled: Vec<(i64, TransportCommand)>,
+}
+
+impl TransportModel {
+    fn frames(&self, ticks: Ticks) -> i64 {
+        self.tempo.ticks_to_frames(ticks, SAMPLE_RATE).get()
+    }
+
+    fn apply(&mut self, command: TransportCommand) {
+        match command {
+            TransportCommand::Play => {
+                self.position = self.frames(self.insert_marker);
+                self.playing = true;
+            }
+            TransportCommand::Stop if self.playing => self.playing = false,
+            TransportCommand::Stop => {
+                self.insert_marker = Ticks::ZERO;
+                self.position = 0;
+            }
+            TransportCommand::Continue => self.playing = true,
+            TransportCommand::Locate(ticks) => {
+                self.insert_marker = ticks;
+                if self.playing {
+                    self.position = self.frames(ticks);
+                }
+            }
+            other => panic!("the model has no {other:?}"),
+        }
+    }
+
+    /// The song frame this clock frame plays, if it plays one.
+    fn step(&mut self) -> Option<i64> {
+        while self.playing
+            && let Some(due) = self
+                .scheduled
+                .iter()
+                .position(|(frame, _)| *frame == self.position)
+        {
+            let (_, command) = self.scheduled.remove(due);
+            self.apply(command);
+        }
+        if !self.playing {
+            return None;
+        }
+        self.position += 1;
+        Some(self.position - 1)
+    }
+}
+
+/// An agent starts, locates, and stops the transport headless, through the
+/// engine's queue, with transport commands scheduled at bars and beats
+/// among its moves. Every frame is the beat tone at the song position the
+/// transport's rules give it, or silence, at any block size, and the
+/// scheduled ones act on their exact samples.
+#[test]
+fn an_agent_plays_locates_and_stops_the_transport_on_exact_samples() {
+    const BAR_FRAMES: i64 = 96_000; // 4/4 at 120 BPM and 48 kHz
+    let tempo = TempoMap::default();
+    let ticks_at = |frames: i64| tempo.frames_to_ticks(Frames(frames), SAMPLE_RATE).get();
+    let start = Ticks(BAR + 12_345); // off the beat: its sine doesn't start at 0
+    let mut renders = Vec::new();
+    for block in [61, 1_000, 4_096] {
+        let mut host = EngineHost::new(block);
+        host.call(
+            "run",
+            json!({ "label": "Add a beat", "commands": [
+                { "command": "track.create",
+                  "args": { "id": {"$new": "Beat"}, "kind": "midi", "name": "Beat", "index": 0 } },
+                // At its default level, −60 dBFS.
+                { "command": "device.insert",
+                  "args": { "track": {"$ref": "Beat"}, "index": 0,
+                            "device": { "id": {"$new": "tone"}, "name": "Beat Tone",
+                                        "kind": { "native": { "device_type": BEAT_TONE } },
+                                        "enabled": true, "params": [] } } },
+            ] }),
+        );
+        let status = host.status();
+        assert_eq!(status["engine_plays_here"], true);
+
+        // Set the insert marker, and play from it.
+        host.call(
+            "transport",
+            json!({ "action": "locate", "args": { "position": start.get() } }),
+        );
+        host.play_to(10_007);
+        let status = host.status();
+        assert_eq!(status["playing"], false);
+        assert_eq!(status["insert_marker"]["ticks"], start.get());
+        assert_eq!(status["position"]["bbs"], "1.1.1");
+        // At 3.1.1, jump to 5.1.1; at 5.3.1, stop.
+        for (at, command, args) in [
+            ("3.1.1", "transport.locate", json!({ "position": BAR * 4 })),
+            ("5.3.1", "transport.stop", json!({})),
+        ] {
+            let added = host.call(
+                "schedule",
+                json!({ "action": "add", "at": at, "command": command, "args": args }),
+            );
+            assert_eq!(added["sample_accurate"], true, "{at}");
+        }
+        host.call("transport", json!({ "action": "play" }));
+        host.play_to(60_000);
+        let status = host.status();
+        assert_eq!(status["playing"], true);
+        let first = tempo.ticks_to_frames(start, SAMPLE_RATE).get();
+        assert_eq!(
+            status["position"]["ticks"],
+            ticks_at(first + 60_000 - 10_007)
+        );
+
+        // Locate while playing: playback jumps back to 2.2.1. The song
+        // reaches 3.1.1 72,000 frames later and jumps to 5.1.1, and reaches
+        // 5.3.1 48,000 after that, and stops.
+        host.call("transport", json!({ "action": "locate", "at": "2.2.1" }));
+        host.play_to(190_000);
+        let status = host.status();
+        assert_eq!(status["playing"], false);
+        assert_eq!(status["position"]["bbs"], "5.3.1");
+        assert_eq!(status["insert_marker"]["bbs"], "5.1.1");
+        assert_eq!(
+            host.fired,
+            [
+                (60_000 + 72_000, BAR_FRAMES * 2),
+                (60_000 + 72_000 + 48_000, BAR_FRAMES * 4 + 48_000),
+            ],
+            "block {block}: each scheduled command fires on its exact frame"
+        );
+
+        // Continue from where it stopped, stop, and stop again to return to
+        // the start.
+        host.call("transport", json!({ "action": "continue" }));
+        host.play_to(200_000);
+        host.call("transport", json!({ "action": "stop" }));
+        host.play_to(205_000);
+        let status = host.status();
+        assert_eq!(status["playing"], false);
+        assert_eq!(
+            status["position"]["ticks"],
+            ticks_at(BAR_FRAMES * 4 + 48_000 + 10_000)
+        );
+        host.call("transport", json!({ "action": "stop" }));
+        host.play_to(210_000);
+        let status = host.status();
+        assert_eq!(status["position"]["bbs"], "1.1.1");
+        assert_eq!(status["insert_marker"]["bbs"], "1.1.1");
+        assert_eq!(
+            host.offline.heap_operations(),
+            0,
+            "the engine's blocks stay off the heap"
+        );
+
+        // The scheduled commands are spent, and the transport left no undo
+        // step: only the agent's edit is in the history.
+        let list = host.call("schedule", json!({ "action": "list" }));
+        let states: Vec<&Value> = list["scheduled"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| &e["state"])
+            .collect();
+        assert_eq!(states, [&json!("fired"), &json!("fired")]);
+        let history = host.call("query", json!({ "path": "history" }));
+        assert_eq!(history["undo"]["items"], json!(["player: Add a beat"]));
+
+        // Every frame, against the model: the agent's commands act at the
+        // start of the block after the call that sent them, and the
+        // scheduled ones on their song frames.
+        let document = host.client.transport().shell.editor().document();
+        let device = document
+            .tracks()
+            .flat_map(|track| track.devices())
+            .next()
+            .unwrap();
+        let tone = BeatTone::new(device);
+        let mut model = TransportModel {
+            tempo: tempo.clone(),
+            playing: false,
+            position: 0,
+            insert_marker: Ticks::ZERO,
+            scheduled: vec![
+                (BAR_FRAMES * 2, TransportCommand::Locate(Ticks(BAR * 4))),
+                (BAR_FRAMES * 4 + 48_000, TransportCommand::Stop),
+            ],
+        };
+        let mut sent = host.sent.clone();
+        sent.reverse();
+        let mut played = 0;
+        for frame in 0..host.clock {
+            while sent.last().is_some_and(|(at, _)| *at == frame) {
+                model.apply(sent.pop().unwrap().1);
+            }
+            let expected = model.step().map_or(0.0, |position| {
+                played += 1;
+                tone.sample_at(&model.tempo, Frames(position), SAMPLE_RATE)
+            });
+            for channel in 0..2 {
+                let sample = host.samples[frame as usize * 2 + channel];
+                assert_eq!(
+                    sample.to_bits(),
+                    expected.to_bits(),
+                    "block {block}: frame {frame}, channel {channel}: {sample} where the model \
+                     has {expected}"
+                );
+            }
+        }
+        assert!(sent.is_empty());
+        assert!(model.scheduled.is_empty(), "both scheduled commands fired");
+        // 10,007 to 60,000, 60,000 to 180,000, and 190,000 to 200,000.
+        assert_eq!(played, 49_993 + 120_000 + 10_000, "block {block}");
+        renders.push(host.samples);
+    }
+    assert!(
+        renders.windows(2).all(|pair| pair[0]
+            .iter()
+            .zip(&pair[1])
+            .all(|(a, b)| a.to_bits() == b.to_bits())),
+        "every block size plays the same samples"
+    );
 }
 
 #[test]

@@ -7,11 +7,15 @@
 //! | `describe_command` | Discovery | One command's description, permission, and schemas |
 //! | `run` | Run | One command or a batch as one undo step, or a dry run |
 //! | `query` | Query | Reads the project by ID or readable path, with summaries |
-//! | `transport` | Transport and time | The transport's commands, when the build has them |
+//! | `transport` | Transport and time | Plays, stops, continues, locates, and loops the song, and says where it is |
 //! | `schedule` | Transport and time | Runs a command at a bar and beat, on its exact sample |
 //! | `checkpoint` | Checkpoints | Saves and restores named versions of the document |
 //!
 //! The guide is a resource, not a tool (see [`crate::guide`]).
+//!
+//! The commands the tools serve are the shell's registry and the
+//! transport's playback commands, which the engine runs (see [`command`]
+//! and [`time`]).
 
 mod checkpoint;
 mod discovery;
@@ -19,7 +23,9 @@ mod query;
 mod run;
 mod time;
 
-use bl_commands::Permission;
+use std::sync::OnceLock;
+
+use bl_commands::{CommandSpec, Permission, Registry};
 use bl_shell::Shell;
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
@@ -27,7 +33,7 @@ use serde_json::{Value, json};
 
 pub(crate) use checkpoint::Checkpoints;
 pub use time::EngineMessage;
-pub(crate) use time::Schedule;
+pub(crate) use time::{Playhead, Schedule};
 
 use crate::permission::{Decision, Mode, decide};
 use crate::server::Session;
@@ -38,8 +44,53 @@ use crate::server::Session;
 pub(crate) struct State {
     pub(crate) checkpoints: Checkpoints,
     pub(crate) schedule: Schedule,
-    /// Whether an engine plays the song, so scheduled commands fire.
+    /// What the engine must hear, in the order the agents asked, until the
+    /// host takes it.
+    pub(crate) outbox: Vec<EngineMessage>,
+    /// Whether an engine plays the song, so the transport moves and
+    /// scheduled commands fire.
     pub(crate) engine_attached: bool,
+    /// Where the engine last said the transport was.
+    pub(crate) playhead: Option<Playhead>,
+}
+
+/// The transport's playback commands (WP-1.5): play, stop, continue,
+/// locate, and the rest that `bl_engine::transport` registers. They act in
+/// the engine rather than on the document, so the shell doesn't run them;
+/// the agent API sends them to the engine through the host
+/// ([`EngineMessage::Transport`]).
+fn engine_commands() -> &'static Registry {
+    static COMMANDS: OnceLock<Registry> = OnceLock::new();
+    COMMANDS.get_or_init(|| {
+        let mut registry = Registry::new();
+        bl_engine::transport::register(&mut registry)
+            .expect("the transport's command IDs are unique");
+        registry
+    })
+}
+
+/// Whether `id` is a transport command the engine runs, which the agent
+/// API sends to the engine rather than to the shell.
+pub(crate) fn is_engine_command(shell: &Shell, id: &str) -> bool {
+    !shell.registry().contains(id) && bl_engine::transport::handles(id)
+}
+
+/// The command called `id`: the shell's, or one of the transport's.
+pub(crate) fn command<'a>(shell: &'a Shell, id: &str) -> Option<&'a CommandSpec> {
+    shell
+        .registry()
+        .get(id)
+        .or_else(|| engine_commands().get(id))
+}
+
+/// Every command agents can run: the shell's, then the transport's
+/// playback commands.
+pub(crate) fn commands(shell: &Shell) -> impl Iterator<Item = &CommandSpec> {
+    shell.registry().iter().chain(
+        engine_commands()
+            .iter()
+            .filter(|spec| !shell.registry().contains(&spec.id)),
+    )
 }
 
 /// Everything a tool call works with.

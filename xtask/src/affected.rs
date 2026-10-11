@@ -68,8 +68,6 @@ pub struct Package {
     /// Its directory relative to the workspace root, with `/` separators and
     /// no trailing one.
     pub dir: String,
-    /// Whether it has a library target, which is where doctests live.
-    pub lib: bool,
 }
 
 /// The workspace's packages and the dependencies between them.
@@ -117,20 +115,10 @@ impl Workspace {
                 .components()
                 .map(|part| part.as_os_str().to_string_lossy().into_owned())
                 .collect();
-            let lib = package["targets"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .any(|target| {
-                    target["kind"].as_array().into_iter().flatten().any(|kind| {
-                        matches!(kind.as_str(), Some("lib" | "rlib" | "dylib" | "proc-macro"))
-                    })
-                });
             names.insert(id.to_owned(), name.to_owned());
             packages.push(Package {
                 name: name.to_owned(),
                 dir: dir.join("/"),
-                lib,
             });
         }
         let mut deps: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
@@ -387,7 +375,6 @@ mod tests {
         let package = |name: &str, dir: &str| Package {
             name: name.to_owned(),
             dir: dir.to_owned(),
-            lib: true,
         };
         let deps = |names: &[&str]| names.iter().map(|&n| n.to_owned()).collect();
         Workspace {

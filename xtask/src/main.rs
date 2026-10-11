@@ -289,10 +289,7 @@ fn check(root: &Path, options: &CheckOptions) -> Result<(), String> {
                 )
             }),
         ),
-        (
-            "tests",
-            Box::new(|| run_tests(root, &workspace, tested, depth)),
-        ),
+        ("tests", Box::new(|| run_tests(root, tested, depth))),
         ("layers", Box::new(|| layers(root))),
         ("ui parity reference", Box::new(|| ui_parity::check(root))),
         (
@@ -396,47 +393,41 @@ fn describe(tests: &affected::Tests, total: usize) -> String {
 
 /// Runs the tests with cargo-nextest, each in a process of its own and as
 /// many at once as there are cores, then the doctests, which nextest doesn't
-/// run, with `cargo test --doc`. `tested` names the packages, or is `None`
-/// for the whole workspace.
-fn run_tests(
-    root: &Path,
-    workspace: &affected::Workspace,
-    tested: Option<&BTreeSet<String>>,
-    depth: &str,
-) -> Result<(), String> {
+/// run, with `cargo test --doc`. `tested` names the packages whose tests run,
+/// or is `None` for every package.
+///
+/// Both always build the whole workspace, and a selection only filters what
+/// runs. Cargo unifies features across the packages it's asked to build, so
+/// building only some (`--package`) would build their dependencies with
+/// other features: code the full run never tests, and, for a change to
+/// bl-ui alone, some 65 crates (wgpu and egui among them) built a second
+/// time. Built as a whole, everything that hasn't changed is reused.
+fn run_tests(root: &Path, tested: Option<&BTreeSet<String>>, depth: &str) -> Result<(), String> {
     eprintln!("test depth: {depth} (BL_TEST_DEPTH)");
-    let mut nextest = vec!["nextest", "run", "--all-features", "--locked"];
-    let mut doctests = vec!["test", "--doc", "--all-features", "--locked"];
-    let mut libraries = 0;
-    match tested {
-        None => {
-            nextest.push("--workspace");
-            doctests.push("--workspace");
-            libraries = 1;
-        }
-        Some(tested) => {
-            // A package with no tests of its own is no failure.
-            nextest.push("--no-tests=pass");
-            for name in tested {
-                nextest.extend(["--package", name.as_str()]);
-            }
-            // Doctests live in libraries, and `cargo test --doc` refuses a
-            // binary-only package named on its own.
-            for package in &workspace.packages {
-                if package.lib && tested.contains(&package.name) {
-                    doctests.extend(["--package", package.name.as_str()]);
-                    libraries += 1;
-                }
-            }
-        }
+    let mut nextest = vec![
+        "nextest".to_owned(),
+        "run".to_owned(),
+        "--workspace".to_owned(),
+        "--all-features".to_owned(),
+        "--locked".to_owned(),
+    ];
+    if let Some(tested) = tested {
+        let filter = tested
+            .iter()
+            .map(|name| format!("package(={name})"))
+            .collect::<Vec<_>>()
+            .join(" | ");
+        // A package with no tests of its own is no failure.
+        nextest.extend(["--no-tests=pass".to_owned(), "-E".to_owned(), filter]);
     }
-    // Both run, so one run reports every failure.
+    let nextest: Vec<&str> = nextest.iter().map(String::as_str).collect();
+    // Both run, so one run reports every failure. The doctests are few and
+    // quick, so they all run.
     let tests = cargo(root, &nextest);
-    let docs = if libraries > 0 {
-        cargo(root, &doctests)
-    } else {
-        Ok(())
-    };
+    let docs = cargo(
+        root,
+        &["test", "--doc", "--workspace", "--all-features", "--locked"],
+    );
     tests.and(docs)
 }
 

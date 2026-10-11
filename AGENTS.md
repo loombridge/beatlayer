@@ -31,6 +31,8 @@ Beatlayer is an open-source digital audio workstation with the workflow of Ablet
 
 One work package per branch (`wp/<id>-<slug>`) and per pull request, with acceptance evidence pasted in the PR. `cargo xtask check` must pass on macOS locally, with its summary pasted in the PR: CI runs Linux per pull request, Windows on every merge to main, and macOS only nightly, to stay inside the Free plan's minutes (10 October 2026, for macOS; Windows moved off pull requests on 11 October 2026, when the organisation's minutes were 86% spent). A Windows failure on main is fixed forward; for a Windows-specific change, run `gh workflow run ci.yml --ref <branch>` before asking for a merge. Compile-check Windows locally with clippy for `x86_64-pc-windows-msvc`.
 
+Commits: the project's own commits are authored as `Loombridge <code@loombridge.io>`, never a person's name (11 October 2026). Set it once per checkout: `git config user.name Loombridge && git config user.email code@loombridge.io`. Outside contributors commit under their own names with the DCO.
+
 Progress: `cargo xtask dashboard` serves a page of the roadmap and the parity matrix as grids of squares, read from `origin/main`; `cargo xtask progress` prints the same as JSON. Each parity row names the work packages that build it ("Built in WP-1.8a"), and a test fails if it names one the build plan doesn't have.
 
 Local port: 4106, for the progress dashboard. Localhost (`~/code/_localhost`) starts it from `.claude/launch.json`; the app itself is native and has no dev server.

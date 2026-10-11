@@ -782,6 +782,9 @@ enum Path {
 enum Reason {
     /// A query for agents: a person reads the same on screen.
     Query,
+    /// For agents only, with no person's form and no Live feature behind
+    /// it, named in the text.
+    AgentOnly(&'static str),
     /// An agent's form of a pointer gesture or dialog, whose keyboard path
     /// is another command or the system's dialog, named in the text.
     Equivalent(&'static str),
@@ -831,7 +834,7 @@ fn server_and_agent(h: &mut Harness) {
 /// Every command without a key or a menu item, and how it's reached.
 fn paths() -> BTreeMap<&'static str, Path> {
     use Path::{Control, Exception};
-    use Reason::{Equivalent, Gap, LaterView, Live, Query};
+    use Reason::{AgentOnly, Equivalent, Gap, LaterView, Live, Query};
     let main = |setup: fn(&mut Harness), start: fn(&mut Harness), label, key| Control {
         window: Window::Main,
         page: "",
@@ -950,6 +953,20 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("audio.status", Exception(Query)),
         ("audio.devices", Exception(Query)),
         ("set.list_recoverable", Exception(Query)),
+        // Agent perception (WP-1.16): how an agent hears and sees the set,
+        // which a person does with their own ears and eyes.
+        (
+            "perception.preview",
+            Exception(AgentOnly("an agent's audio preview of a range or track")),
+        ),
+        (
+            "perception.analyze",
+            Exception(AgentOnly("an agent's analysis of the set's audio as text")),
+        ),
+        (
+            "perception.capture_view",
+            Exception(AgentOnly("an agent's capture of a view as an image")),
+        ),
         // Agents' forms of gestures and dialogs.
         (
             "arrangement.move_clips",

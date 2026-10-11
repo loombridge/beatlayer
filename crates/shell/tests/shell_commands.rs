@@ -424,12 +424,14 @@ fn view_commands_switch_the_view_and_zoom() {
     shell.run("view.full_screen", json!({})).unwrap();
     assert_eq!(shell.take_effects(), [Effect::SetFullScreen(true)]);
 
-    for expected in [1.1, 1.25, 1.5, 1.75, 2.0, 2.0] {
+    // Every 10% (interface-zoom R3; crates/shell/tests/interface_zoom.rs
+    // covers the rest).
+    for expected in [1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0, 2.0] {
         let result = shell.run("view.zoom_in", json!({})).unwrap();
-        assert_eq!(result["zoom"].as_f64().unwrap() as f32, expected);
+        assert!((result["zoom"].as_f64().unwrap() - expected).abs() < 1e-6);
     }
     shell.run("view.zoom_reset", json!({})).unwrap();
-    for expected in [0.9, 0.8, 0.75, 0.67, 0.5, 0.5] {
+    for expected in [0.9, 0.8, 0.7, 0.6, 0.5, 0.5] {
         shell.run("view.zoom_out", json!({})).unwrap();
         assert!((shell.zoom() - expected).abs() < 1e-6, "{}", shell.zoom());
     }

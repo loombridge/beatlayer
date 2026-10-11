@@ -36,6 +36,17 @@
 //! | [`DropThread`] | drop | Frees what the audio thread let go of |
 //! | [`Monitor`] | any one | Reads the playhead, meters, and CPU load the audio thread publishes |
 //! | [`Offline`] | any one | All of the above on one thread, faster than real time, with no device |
+//! | [`Restarter`] | any one | Restarts the engine with a new processor when a device's stream closes and opens again |
+//!
+//! The engine knows no audio backend. On a device, `bl-audio-engine`'s
+//! `AudioEngine` runs it on a stream that `bl-audio-io`'s supervisor keeps
+//! open (WP-1.13), through a [`Restarter`]: when the device goes away,
+//! changes sample rate, stalls, or the machine sleeps, the processor comes
+//! back from the closed stream and [parks](Processor::park), handing on a
+//! [`Carry`] of its transport, clock, and waiting commands; when the stream
+//! opens again, the engine restarts with a processor made for the stream's
+//! rate and block size, the song recompiled for it and its transport taken
+//! over, stopped where it was.
 //!
 //! An offline render needs no threads: [`Offline`] compiles, sends, and
 //! processes in turn on one thread, collecting garbage as it goes, and runs
@@ -83,7 +94,7 @@ pub mod testing;
 use bl_core::time::SampleRate;
 
 pub use compiler::{Compiler, Update};
-pub use engine::{CompileCounts, Engine, Sender, channel};
+pub use engine::{CompileCounts, Engine, Restarter, Sender, channel};
 pub use gc::{Collector, DROP_PERIOD, DropThread, GcHandle, Program};
 pub use message::{
     Action, LoopRegion, ParamEvent, Report, ScheduledCommand, TransportCommand, When,
@@ -94,7 +105,7 @@ pub use node::{
     TransportInfo, segments,
 };
 pub use offline::Offline;
-pub use processor::{Output, Processor};
+pub use processor::{Carry, Output, Processor};
 pub use program::EngineProgram;
 pub use registry::{NodeFactory, Registry};
 pub use state::{EngineCounters, EngineState, Monitor, TrackMeter};

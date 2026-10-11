@@ -5,6 +5,7 @@
 #[cfg(debug_assertions)]
 bl_rt::install_trap!();
 
+mod device_changes;
 mod devices;
 mod engine_smoke;
 mod tone;
@@ -41,6 +42,16 @@ enum Command {
     /// detected, the audio thread touches the heap (in a debug build), or
     /// the counter node loses its state in a swap.
     EngineSmoke(engine_smoke::EngineSmokeArgs),
+    /// Play a quiet tone through the engine and report what happens to the
+    /// device: unplugging, sample-rate changes, sleep and wake.
+    ///
+    /// On a real device it plays for --seconds while someone changes the
+    /// device, printing each message and recovery. With --simulate it puts
+    /// the null backend's simulated interface through each change in turn
+    /// and checks the engine recovers. Exits with status 1 if a check fails,
+    /// the device isn't running at the end, or (in a debug build) the audio
+    /// thread touches the heap.
+    DeviceChanges(device_changes::DeviceChangesArgs),
     /// Render a set to a WAV file, faster than real time, with no audio
     /// device.
     ///
@@ -65,6 +76,7 @@ fn main() -> ExitCode {
         Command::Devices(args) => devices::run(args),
         Command::Tone(args) => tone::run(args),
         Command::EngineSmoke(args) => engine_smoke::run(args),
+        Command::DeviceChanges(args) => device_changes::run(args),
         Command::Render(args) => bl_cli::render::run(args),
         Command::Golden(args) => bl_cli::golden::run(args),
     };

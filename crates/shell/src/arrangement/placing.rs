@@ -223,9 +223,7 @@ mod tests {
                         editor.new_id(),
                         Ticks(start),
                         Ticks(length),
-                        ClipData::Audio(AudioData {
-                            media: ContentHash([7; 32]),
-                        }),
+                        ClipData::Audio(AudioData::new(ContentHash([7; 32]))),
                     );
                     clip.offset = Ticks(offset);
                     if kept {

@@ -195,7 +195,7 @@ fn discovery_lists_areas_searches_and_describes_with_schemas() {
     );
 
     // The transport's playback commands are the engine's, and listed with
-    // the loop's, which are the document's.
+    // the loop's, which are the document's, and the shell's.
     let transport = call(&mut client, "list_commands", json!({ "area": "transport" }));
     let ids: Vec<&str> = transport["commands"]
         .as_array()
@@ -709,15 +709,19 @@ fn checkpoints_save_restore_as_one_undo_step_and_ask_before_removing() {
 }
 
 /// Every transport command, the engine's and the loop's, by ID.
-const TRANSPORT_COMMANDS: [&str; 9] = [
+/// The transport's commands: the engine's playback commands, the loop's
+/// (the document's), and the shell's Return to Start and state (WP-1.18).
+const TRANSPORT_COMMANDS: [&str; 11] = [
     "transport.continue",
     "transport.insert_marker_to_playhead",
     "transport.locate",
     "transport.play",
     "transport.play_from_insert_marker",
     "transport.play_stop",
+    "transport.return_to_start",
     "transport.set_loop",
     "transport.set_loop_enabled",
+    "transport.state",
     "transport.stop",
 ];
 

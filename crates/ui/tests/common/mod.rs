@@ -55,6 +55,9 @@ pub struct Harness {
     pub events: Vec<UiEvent>,
     /// Whether the window draws Live's title bar itself, as on macOS (D22).
     pub title_bar: bool,
+    /// The transport the engine had published when the last frame began,
+    /// which that frame drew (WP-1.18).
+    pub engine: bl_shell::audio::EngineTransport,
 }
 
 impl Harness {
@@ -88,6 +91,7 @@ impl Harness {
             zoom,
             events: Vec::new(),
             title_bar: false,
+            engine: bl_shell::audio::EngineTransport::default(),
         }
     }
 
@@ -122,10 +126,13 @@ impl Harness {
             events,
             ..Default::default()
         };
-        let text_focused = self.ctx.text_edit_focused();
+        // As the app does: the keys go to a value being typed as to a text
+        // field, and the frame draws what the engine last published.
+        let text_focused = self.ctx.text_edit_focused() || self.main.is_typing();
         let invocations =
             self.dispatcher
                 .take_bound_keys(&mut input, &self.keymap, &self.shell, text_focused);
+        self.engine = self.shell.poll_engine();
         if self.window == Window::Settings {
             self.settings.prepare(&mut self.shell);
         }
@@ -159,6 +166,8 @@ impl Harness {
                 UiEvent::Gesture { phase, invocation } => {
                     let _ = self.shell.gesture(*phase, invocation.as_ref());
                 }
+                UiEvent::BeginGesture(label) => self.shell.begin_gesture(label),
+                UiEvent::EndGesture => self.shell.end_gesture(),
             }
             self.events.push(event);
         }

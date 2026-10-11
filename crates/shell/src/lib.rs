@@ -24,6 +24,10 @@
 //!   moving, copying, resizing, splitting, deleting, duplicating, and the
 //!   clipboard ([`arrangement::editing`], WP-1.8b), which gestures run as
 //!   one undo step through [`Shell::gesture`].
+//! - [`transport`]: the Control Bar's transport section: what its fields
+//!   show, and the command each change runs (WP-1.18). The transport's
+//!   commands themselves are `bl-engine`'s, which [`Shell`] registers and
+//!   sends to the engine the audio host runs.
 //!
 //! The UI (`bl-ui`) draws the shell and the app (`beatlayer`) wires it to
 //! windows, native menus, and file dialogs. Nothing here depends on a UI
@@ -35,6 +39,7 @@ pub mod audio;
 pub mod files;
 pub mod settings;
 mod shell;
+pub mod transport;
 
 /// The Arrangement View's command IDs and their argument and result types.
 pub use bl_shell_spec::arrangement as arrangement_commands;
@@ -42,6 +47,9 @@ pub use bl_shell_spec::arrangement as arrangement_commands;
 /// types (WP-1.8b).
 pub use bl_shell_spec::editing as editing_commands;
 pub use bl_shell_spec::settings::ZOOM_STEPS;
+/// The transport's command IDs the shell's menus and controls run, and
+/// `transport.state`'s result.
+pub use bl_shell_spec::transport as transport_commands;
 pub use bl_shell_spec::{commands, context_menus, menus, register};
 pub use shell::{
     Area, Effect, GesturePhase, Invocation, MainView, Message, Shell, ShellError, WindowKind,

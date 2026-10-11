@@ -16,6 +16,9 @@
 //!   moving, copying, resizing, splitting, deleting, and duplicating clips,
 //!   and the clipboard; [`context_menus`], the clip and time-selection
 //!   menus that reach them.
+//! - [`transport`]: what the Control Bar's transport section shows
+//!   (`transport.state`), and the IDs of the transport's commands, which
+//!   `bl-engine` and `bl-model` register (WP-1.18).
 //!
 //! `cargo xtask` checks the commands, lists them in the command reference, and
 //! builds the keymap from this crate, so none of its tasks links an audio
@@ -30,11 +33,12 @@ pub mod context_menus;
 pub mod editing;
 pub mod menus;
 pub mod settings;
+pub mod transport;
 
 use bl_commands::{RegisterError, Registry};
 
-/// Adds the shell's commands and the Arrangement View's (its view and its
-/// editing commands) to a registry.
+/// Adds the shell's commands, the Arrangement View's (its view and its
+/// editing commands), and the transport query to a registry.
 ///
 /// # Errors
 ///
@@ -42,5 +46,6 @@ use bl_commands::{RegisterError, Registry};
 pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     commands::register(registry)?;
     arrangement::register(registry)?;
-    editing::register(registry)
+    editing::register(registry)?;
+    transport::register(registry)
 }

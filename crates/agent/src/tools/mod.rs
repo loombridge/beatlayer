@@ -69,10 +69,13 @@ fn engine_commands() -> &'static Registry {
     })
 }
 
-/// Whether `id` is a transport command the engine runs, which the agent
-/// API sends to the engine rather than to the shell.
-pub(crate) fn is_engine_command(shell: &Shell, id: &str) -> bool {
-    !shell.registry().contains(id) && bl_engine::transport::handles(id)
+/// Whether `id` is a transport command the engine runs (a playback command,
+/// not the loop, which belongs to the set), which the agent API sends to the
+/// engine its host attached rather than to the shell. The shell registers
+/// the same commands for its menus and keys (WP-1.18), so the registry
+/// can't tell them apart.
+pub(crate) fn is_engine_command(_shell: &Shell, id: &str) -> bool {
+    bl_engine::transport::handles(id) && !bl_model::registry::handles(id)
 }
 
 /// The command called `id`: the shell's, or one of the transport's.

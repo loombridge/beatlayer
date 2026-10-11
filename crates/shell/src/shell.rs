@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 
 use bl_commands::{Context, NoArgs, Registry};
 use bl_core::id::Id;
+use bl_core::time::Ticks;
+use bl_engine::transport as engine_transport;
 use bl_model::{ChangeSet, Editor, TrackId, TrackKind, registry as model};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -16,7 +18,7 @@ use crate::agent::{
 };
 use crate::arrangement::editing::{self, Clipboard, EditFailure};
 use crate::arrangement::{ArrangementView, TransportView, ViewError, Viewport};
-use crate::audio::{AudioHost, ConfigureAudio, ToneSettings};
+use crate::audio::{AudioHost, ConfigureAudio, EngineTransport, ToneSettings};
 use crate::commands::{
     self as ids, PathArgs, SaveAsArgs, SetResult, SettingsArgs, SwitchResult, TestToneArgs,
     TestToneState, ThemeArgs, ViewResult, ZoomArgs,
@@ -28,6 +30,7 @@ use crate::settings::{
 };
 use bl_shell_spec::arrangement as view_ids;
 use bl_shell_spec::editing as edit_ids;
+use bl_shell_spec::transport as transport_ids;
 
 /// The views the main window's main area shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -253,7 +256,13 @@ pub struct Shell {
     /// keeps it, and never part of a set.
     clipboard: Option<Clipboard>,
     /// A gesture that edits the set, under way (WP-1.8b).
-    gesture: Option<Gesture>,
+    edit_gesture: Option<Gesture>,
+    /// The engine's insert marker when the shell last looked, so a move of
+    /// it reaches the Arrangement View once (WP-1.18).
+    seen_insert_marker: Option<Ticks>,
+    /// Whether a person's gesture (a drag on a value) holds a transaction
+    /// open, so its document commands are one undo step.
+    gesture: bool,
 }
 
 impl fmt::Debug for Shell {
@@ -310,11 +319,16 @@ impl Shell {
         let mut registry = Registry::new();
         model::register(&mut registry).expect("the document's command IDs are unique");
         crate::register(&mut registry).expect("the shell's command IDs are unique");
+        // The transport's commands (WP-1.5), which the shell sends to the
+        // engine it plays the set through (WP-1.18).
+        engine_transport::register(&mut registry).expect("the transport's command IDs are unique");
         debug_assert!(registry.problems().is_empty(), "{:?}", registry.problems());
         audio.set_tone(prefs.tone);
+        let editor = factory_default_set();
+        audio.sync(editor.document());
         Self {
             registry,
-            editor: factory_default_set(),
+            editor,
             saved: factory_default_set(),
             set_path: None,
             dirty: false,
@@ -335,7 +349,9 @@ impl Shell {
             arrangement: ArrangementView::new(),
             document_revision: 0,
             clipboard: None,
-            gesture: None,
+            edit_gesture: None,
+            seen_insert_marker: None,
+            gesture: false,
         }
     }
 
@@ -641,11 +657,13 @@ impl Shell {
     }
 
     /// Records that the document may have changed: drops view state for
-    /// tracks that are gone.
+    /// tracks that are gone, and gives the engine the new document, so it
+    /// plays the set as it is now (its tempo, loop, and tracks).
     fn document_changed(&mut self) {
         self.document_revision = self.document_revision.wrapping_add(1);
         self.arrangement
             .forget_missing_tracks(self.editor.document());
+        self.audio.sync(self.editor.document());
     }
 
     /// What the Arrangement View shows (WP-1.8a).
@@ -667,10 +685,10 @@ impl Shell {
         }
     }
 
-    /// Takes the transport's latest state from the engine (the playhead,
-    /// whether it plays, the loop brace), for the Arrangement View to draw
-    /// and, with Follow on, to keep in view. The host calls it as the
-    /// engine's UI state changes; the transport package (WP-1.5) wires it.
+    /// Takes the transport's latest state (the playhead, whether it plays,
+    /// the loop brace), for the Arrangement View to draw and, with Follow
+    /// on, to keep in view. [`Shell::poll_engine`] calls it with the
+    /// engine's.
     pub fn set_transport(&mut self, transport: TransportView) {
         if self.arrangement.set_transport(transport) {
             self.touch();
@@ -686,7 +704,7 @@ impl Shell {
     /// Whether a gesture that edits the set is under way.
     #[must_use]
     pub fn gesture_open(&self) -> bool {
-        self.gesture.is_some()
+        self.edit_gesture.is_some()
     }
 
     /// Runs one step of a gesture that edits the set, such as dragging
@@ -710,7 +728,7 @@ impl Shell {
         invocation: Option<&Invocation>,
     ) -> Result<Value, ShellError> {
         if phase == GesturePhase::Cancel {
-            if let Some(gesture) = self.gesture.take() {
+            if let Some(gesture) = self.edit_gesture.take() {
                 self.editor.cancel().ok();
                 self.arrangement.restore_selection(&gesture.view);
                 self.document_changed();
@@ -729,7 +747,7 @@ impl Shell {
             outcome = self.gesture_step(invocation);
         }
         if phase == GesturePhase::Commit
-            && self.gesture.take().is_some()
+            && self.edit_gesture.take().is_some()
             && self.editor.commit().unwrap_or(false)
         {
             self.dirty = true;
@@ -741,9 +759,9 @@ impl Shell {
 
     fn gesture_step(&mut self, invocation: &Invocation) -> Result<Value, ShellError> {
         let label = editing::label(&invocation.id, &invocation.args);
-        match &self.gesture {
+        match &self.edit_gesture {
             None => {
-                self.gesture = Some(Gesture {
+                self.edit_gesture = Some(Gesture {
                     view: self.arrangement.clone(),
                     last: None,
                 });
@@ -764,7 +782,7 @@ impl Shell {
             &mut self.arrangement,
             &mut self.clipboard,
         );
-        let Some(gesture) = self.gesture.as_mut() else {
+        let Some(gesture) = self.edit_gesture.as_mut() else {
             return Ok(Value::Null);
         };
         match result {
@@ -784,6 +802,61 @@ impl Shell {
                 }
                 Err(edit_error(&invocation.id, failure))
             }
+        }
+    }
+
+    /// Takes what the engine last published (the playhead, whether the song
+    /// plays, the insert marker) for the Arrangement View and the Control
+    /// Bar, with the loop brace from the document. The window calls it
+    /// before drawing each frame, so what it draws lags the engine by at
+    /// most a frame and an audio block (the control bar transport spec,
+    /// R14). Returns the transport it took.
+    pub fn poll_engine(&mut self) -> EngineTransport {
+        let engine = self.audio.transport_state();
+        let brace = self.editor.document().settings().arrangement_loop;
+        self.set_transport(TransportView {
+            playing: engine.playing,
+            position: engine.position,
+            loop_start: brace.start,
+            loop_length: brace.length,
+            loop_on: brace.enabled,
+        });
+        // Spec: control-bar-transport R15. A move of the engine's insert
+        // marker (the position fields, Home, a second Stop, an agent)
+        // reaches the view once.
+        if self.seen_insert_marker != Some(engine.insert_marker) {
+            self.seen_insert_marker = Some(engine.insert_marker);
+            if self.arrangement.move_insert_marker(engine.insert_marker) {
+                self.touch();
+            }
+        }
+        engine
+    }
+
+    /// Whether the song is playing, as the shell last heard from the
+    /// engine.
+    #[must_use]
+    pub fn playing(&self) -> bool {
+        self.arrangement.transport().playing
+    }
+
+    /// Opens a gesture, such as a drag on a value field: the document
+    /// commands it runs until [`Shell::end_gesture`] are one undo step,
+    /// named `label` (such as "Change tempo"). A gesture already open
+    /// carries on.
+    pub fn begin_gesture(&mut self, label: &str) {
+        if !self.gesture {
+            self.editor.begin(label.to_owned());
+            self.gesture = true;
+        }
+    }
+
+    /// Closes the open gesture, recording its changes as one undo step.
+    pub fn end_gesture(&mut self) {
+        if self.gesture {
+            self.gesture = false;
+            let _ = self.editor.commit();
+            self.touch();
         }
     }
 
@@ -863,6 +936,10 @@ impl Shell {
                 || "Nothing to Redo".to_owned(),
                 |step| format!("Redo {step}"),
             )),
+            // The Playback menu's first item toggles with Stop (M-PLAY-001).
+            transport_ids::PLAY_STOP => {
+                Some(if self.playing() { "Stop" } else { "Play" }.to_owned())
+            }
             _ => None,
         }
     }
@@ -875,7 +952,7 @@ impl Shell {
         let Some(spec) = self.registry.get(id) else {
             return false;
         };
-        if self.gesture.is_some() {
+        if self.edit_gesture.is_some() {
             // A drag is under way; keys wait for it (Esc cancels it).
             return false;
         }
@@ -907,7 +984,7 @@ impl Shell {
             }
             _ => {}
         }
-        if ids::handles(id) {
+        if ids::handles(id) || transport_ids::handles(id) {
             return true;
         }
         if edit_ids::handles(id) {
@@ -927,6 +1004,11 @@ impl Shell {
                     &self.arrangement,
                     self.clipboard.as_ref(),
                 );
+        }
+        if engine_transport::handles(id) {
+            // The transport plays only while an engine runs on a device.
+            return self.audio.engine_running()
+                && engine_transport::command_from_args(id, Self::object(args.clone())).is_ok();
         }
         if view_ids::handles(id) {
             let args = if args.is_null() {
@@ -1082,7 +1164,7 @@ impl Shell {
     /// is unchanged when a command fails, except that a device that refuses
     /// new audio settings goes back to the previous ones.
     pub fn run(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
-        if self.gesture.is_some()
+        if self.edit_gesture.is_some()
             && (model::handles(id)
                 || edit_ids::handles(id)
                 || id.starts_with("set.")
@@ -1122,6 +1204,29 @@ impl Shell {
             self.touch();
             return Ok(to_value(&changes));
         }
+        if engine_transport::handles(id) {
+            // Spec: control-bar-transport R12, R13. Menus, keys, the Control
+            // Bar, and agents all reach the engine's transport here.
+            let command =
+                engine_transport::command_from_args(id, Self::object(args)).map_err(|error| {
+                    ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message: error.to_string(),
+                    }
+                })?;
+            self.audio
+                .send_transport(command)
+                .map_err(|reason| ShellError::Unavailable {
+                    command: id.to_owned(),
+                    reason,
+                })?;
+            return Ok(Value::Null);
+        }
+        if transport_ids::handles(id) {
+            Self::args::<NoArgs>(id, args)?;
+            let engine = self.poll_engine();
+            return Ok(to_value(&crate::transport::state(self, engine)));
+        }
         if view_ids::handles(id) {
             let result = self
                 .arrangement
@@ -1140,6 +1245,13 @@ impl Shell {
                 // A query changes nothing a window shows.
                 self.touch();
             }
+            if result.is_ok() && matches!(id, view_ids::SET_INSERT_MARKER | view_ids::SELECT_TIME) {
+                // Spec: control-bar-transport R15. A click or a time
+                // selection in the Arrangement moves the engine's insert
+                // marker, where Play starts, and playback carries on.
+                let at = self.arrangement.insert_marker();
+                self.audio.set_insert_marker(at);
+            }
             return result.map(|state| to_value(&state));
         }
         if !ids::handles(id) {
@@ -1150,8 +1262,13 @@ impl Shell {
         result
     }
 
+    /// Arguments as a JSON object: `null` is no arguments.
+    fn object(args: Value) -> Value {
+        if args.is_null() { json!({}) } else { args }
+    }
+
     fn args<T: DeserializeOwned>(id: &str, args: Value) -> Result<T, ShellError> {
-        let args = if args.is_null() { json!({}) } else { args };
+        let args = Self::object(args);
         serde_json::from_value(args).map_err(|error| ShellError::InvalidArgs {
             command: id.to_owned(),
             message: error.to_string(),
@@ -1201,6 +1318,7 @@ impl Shell {
                 self.main_view = MainView::Arrangement;
                 self.message = None;
                 self.arrangement.reset();
+                self.new_set_transport();
                 self.document_changed();
                 Ok(self.set_result())
             }
@@ -1219,6 +1337,7 @@ impl Shell {
                 self.dirty = false;
                 self.message = None;
                 self.arrangement.reset();
+                self.new_set_transport();
                 self.document_changed();
                 Ok(self.set_result())
             }
@@ -1246,6 +1365,7 @@ impl Shell {
                 Self::args::<NoArgs>(id, args)?;
                 if self.dirty {
                     self.editor = snapshot(&self.saved);
+                    self.gesture = false;
                     self.dirty = false;
                     self.document_changed();
                 }
@@ -1509,6 +1629,14 @@ impl Shell {
             }
             _ => Err(ShellError::UnknownCommand(id.to_owned())),
         }
+    }
+
+    /// A new or opened set starts stopped at 1.1.1
+    /// (the control bar transport spec, R16), with no gesture open
+    /// on the editor it replaced.
+    fn new_set_transport(&mut self) {
+        self.gesture = false;
+        self.audio.reset_transport();
     }
 
     /// Records a save to `path`: it's the set's file, the set is clean, and

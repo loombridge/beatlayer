@@ -86,9 +86,7 @@ fn set_with(clips: &[(usize, f64, f64)], peaks: Option<MemoryPeaks>) -> Set {
                     id,
                     ticks(*start),
                     ticks(*bars),
-                    ClipData::Audio(AudioData {
-                        media: benchmark::media_hash(0),
-                    }),
+                    ClipData::Audio(AudioData::new(benchmark::media_hash(0))),
                 ),
             })
             .unwrap();

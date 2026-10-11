@@ -700,9 +700,7 @@ mod tests {
                         editor.new_id(),
                         Ticks(bar * random.below(512) as i64),
                         Ticks(bar * (random.below(8) as i64 + 1)),
-                        ClipData::Audio(AudioData {
-                            media: media_hash(1),
-                        }),
+                        ClipData::Audio(AudioData::new(media_hash(1))),
                     ),
                 },
             };

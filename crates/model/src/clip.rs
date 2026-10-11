@@ -1,13 +1,15 @@
 //! Arrangement clips and their data.
 //!
-//! The clip data types are stubs: enough to place clips, refer to media, and
-//! hold notes. WP-1.4 fills in audio clips (region, loop, gain, fades) and
-//! WP-2.1 MIDI clips (velocity, probability, and the rest).
+//! An audio clip's data is its file, its Start and End markers, its loop,
+//! its gain, and its edge fades (WP-1.4, the audio clips spec). MIDI
+//! clip data is still a stub, enough to hold notes, until WP-2.1 adds
+//! velocity, probability, and the rest.
 //!
 //! A clip shows a window onto its contents: its contents begin
 //! [`Clip::offset`] before the clip starts, so splitting a clip or trimming
 //! its left edge (WP-1.8b) changes what the clip shows without changing
-//! where anything plays.
+//! where anything plays. An audio clip's offset adds to its Start marker:
+//! the clip's start plays the file that far past the marker.
 
 use bl_core::time::Ticks;
 use imbl::Vector;
@@ -32,7 +34,7 @@ pub struct Clip {
     /// clip's start doesn't play. 0 (or left out) plays the contents from
     /// their beginning. Never negative. Splitting a clip or trimming its
     /// left edge changes it, so each part plays what it played before.
-    #[serde(default, skip_serializing_if = "is_zero")]
+    #[serde(default, skip_serializing_if = "is_zero_ticks")]
     pub offset: Ticks,
     /// Whether the clip is switched off, so it stays in place but doesn't
     /// play.
@@ -63,7 +65,7 @@ impl Clip {
     }
 
     /// Where the clip's contents begin in the arrangement: its start less
-    /// its offset. An audio clip's media plays from its first frame at this
+    /// its offset. An audio clip plays its file from its Start marker at this
     /// position, at its own speed; a MIDI clip's notes are placed from it.
     #[must_use]
     pub fn content_start(&self) -> Ticks {
@@ -76,7 +78,7 @@ impl Clip {
     clippy::trivially_copy_pass_by_ref,
     reason = "serde's skip_serializing_if passes a reference"
 )]
-fn is_zero(ticks: &Ticks) -> bool {
+fn is_zero_ticks(ticks: &Ticks) -> bool {
     *ticks == Ticks::ZERO
 }
 
@@ -99,17 +101,121 @@ impl ClipData {
     }
 }
 
-/// An audio clip's data (a stub until WP-1.4).
+/// The length of the fades Create Fades on Clip Edges gives the edges of a
+/// new audio clip, and the length a deleted fade goes back to while that
+/// setting is on: 4 ms (the audio clips spec, R7).
+pub const EDGE_FADE_SECONDS: f64 = 0.004;
+
+/// An audio clip's data: the file it plays and how it plays it
+/// (the audio clips spec).
 ///
-/// The samples stay in the media store; the clip holds only their hash.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+/// The samples stay in the media store; the clip names them by content hash.
+/// Until warping (Phase 4), a clip plays unwarped, at its file's own speed,
+/// so its markers and loop brace are positions in the file in seconds, as
+/// Live shows them for an unwarped clip. A clip starts playing at its Start
+/// marker. With the loop off, it plays to its End marker or its own end in
+/// the Arrangement, whichever comes first; with the loop on, it plays into
+/// the loop brace and repeats it until the clip ends.
+///
+/// Every field but `media` has a default, a new clip's, and is saved only
+/// when it differs from it, so a set saved before WP-1.4, whose audio clips
+/// hold only `media`, loads unchanged and plays each file whole.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[schemars(
-    description = "An audio clip's data. The samples stay in the media store; the clip names \
-                   them by content hash."
+    description = "An audio clip's data: the audio file it plays, named by content hash, and \
+                   how it plays it. Times are seconds into the file. Every field but `media` \
+                   is optional: a new clip plays the whole file once, at 0 dB, with no fades."
 )]
 pub struct AudioData {
-    /// The media file the clip plays.
+    /// The media file the clip plays, by content hash.
     pub media: ContentHash,
+    /// The Start marker: where in the file, in seconds, the clip starts
+    /// playing. 0 or more; 0 unless given.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    #[schemars(range(min = 0.0))]
+    pub start: f64,
+    /// The End marker: where in the file, in seconds, a clip whose loop is
+    /// off stops playing, after the Start marker; `null` (or nothing) for
+    /// the end of the file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<f64>,
+    /// The Loop switch: whether the clip repeats its loop brace. Off unless
+    /// given.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub looping: bool,
+    /// Where the loop brace starts in the file, in seconds. 0 or more; 0
+    /// unless given.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    #[schemars(range(min = 0.0))]
+    pub loop_start: f64,
+    /// Where the loop brace ends in the file, in seconds, after its start;
+    /// `null` (or nothing) for the end of the file. While the loop is on,
+    /// the Start marker must be before it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loop_end: Option<f64>,
+    /// The clip's gain, as a linear gain: 1 (0 dB) unless given, 0.5 about
+    /// −6 dB, and 0 silence (−∞ dB). Finite and 0 or more.
+    #[serde(default = "unity", skip_serializing_if = "is_unity")]
+    #[schemars(range(min = 0.0))]
+    pub gain: f64,
+    /// The fade-in's length in seconds, from the clip's start in the
+    /// Arrangement: 0 (no fade) unless given.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    #[schemars(range(min = 0.0))]
+    pub fade_in: f64,
+    /// The fade-out's length in seconds, up to the clip's end in the
+    /// Arrangement: 0 (no fade) unless given.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    #[schemars(range(min = 0.0))]
+    pub fade_out: f64,
+}
+
+impl AudioData {
+    /// A new clip of the whole file `media`: from the file's start to its
+    /// end, the loop off with its brace on the whole file, at 0 dB, with no
+    /// fades.
+    #[must_use]
+    pub fn new(media: ContentHash) -> Self {
+        Self {
+            media,
+            start: 0.0,
+            end: None,
+            looping: false,
+            loop_start: 0.0,
+            loop_end: None,
+            gain: 1.0,
+            fade_in: 0.0,
+            fade_out: 0.0,
+        }
+    }
+
+    /// The same data with [`EDGE_FADE_SECONDS`] fades at both edges: what a
+    /// new clip gets while Create Fades on Clip Edges is on
+    /// (the audio clips spec, R7).
+    #[must_use]
+    pub fn with_edge_fades(self) -> Self {
+        Self {
+            fade_in: EDGE_FADE_SECONDS,
+            fade_out: EDGE_FADE_SECONDS,
+            ..self
+        }
+    }
+}
+
+fn is_zero(value: &f64) -> bool {
+    *value == 0.0
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+fn unity() -> f64 {
+    1.0
+}
+
+fn is_unity(value: &f64) -> bool {
+    *value == 1.0
 }
 
 /// A MIDI clip's data (a stub until WP-2.1).

@@ -60,9 +60,7 @@ fn song(clips: &[(usize, i64, i64)]) -> Song {
             id,
             Ticks(start * BAR),
             Ticks(bars * BAR),
-            ClipData::Audio(AudioData {
-                media: ContentHash([index as u8; 32]),
-            }),
+            ClipData::Audio(AudioData::new(ContentHash([index as u8; 32]))),
         );
         clip.name = format!("Clip {index}");
         editor

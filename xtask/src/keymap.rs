@@ -108,6 +108,34 @@ const WIDGET: &[(&str, &str)] = &[
         "the Arrangement View: Shift-Option-dragging (Shift-Alt) a clip's title bar selects \
          time inside the clip (`arrangement.select_time`)",
     ),
+    // The value fields (WP-1.18): the Control Bar's transport section today,
+    // each change running the field's registered command
+    // (docs/specs/control-bar-transport.md).
+    (
+        "S-VAL-001",
+        "the focused value field steps its value (the Control Bar's position, loop, tempo, \
+         and time-signature fields run `transport.locate`, `transport.set_loop`, \
+         `song.set_tempo`, `song.set_time_signatures`)",
+    ),
+    (
+        "S-VAL-002",
+        "the focused value field steps its value in fine steps",
+    ),
+    (
+        "S-VAL-003",
+        "the value field being dragged steps in fine steps",
+    ),
+    (
+        "S-VAL-004",
+        "the focused value field returns to its default",
+    ),
+    ("S-VAL-005", "the focused value field takes a typed value"),
+    (
+        "S-VAL-006",
+        "the focused bar-beat-sixteenth field moves on to its next field",
+    ),
+    ("S-VAL-007", "the focused value field drops a typed value"),
+    ("S-VAL-008", "the focused value field sets a typed value"),
 ];
 
 /// The package that binds each M1 shortcut the shell doesn't: exact IDs
@@ -150,9 +178,11 @@ const OWNERS: &[(&str, &str)] = &[
     ("S-A11Y-015", "WP-1.10"),
     ("S-A11Y-016", "WP-1.10"),
     ("S-A11Y-017", "WP-1.10"),
+    // Playing a time selection needs WP-1.8b's selections (transport.md).
+    ("S-TRANS-003", "WP-1.8b"),
+    ("S-TRANS-004", "WP-1.8b"),
     // Prefixes.
     ("S-EDIT-", "WP-1.8b"),
-    ("S-VAL-", "WP-1.5"),
     ("S-LOOP-", "WP-1.8b"),
     ("S-ZOOM-", "WP-1.8b"),
     ("S-GRID-", "WP-1.8a"),

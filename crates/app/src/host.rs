@@ -47,6 +47,12 @@ use crate::Args;
 /// How often the CPU meter reads the engine's load.
 const CPU_METER_PERIOD: Duration = Duration::from_millis(500);
 
+/// How long after a command the loop keeps looking at the engine's
+/// transport between frames, so a start or stop shows as soon as the engine
+/// has made it (WP-1.18), and how often it looks meanwhile.
+const TRANSPORT_WATCH: Duration = Duration::from_millis(400);
+const TRANSPORT_WATCH_PERIOD: Duration = Duration::from_millis(4);
+
 /// Whether Beatlayer's windows draw Live's compact title bar themselves
 /// (D22): on macOS, where layout.md measured Live's. Windows and Linux keep
 /// the system's title bar, since nothing has been observed there yet.
@@ -203,6 +209,8 @@ struct Host {
     native_menu: Option<crate::native_menu::NativeMenu>,
     shown_revision: Option<u64>,
     next_cpu_sample: Instant,
+    /// Until when the loop looks at the transport between frames.
+    watch_transport_until: Option<Instant>,
     quitting: bool,
     agent: Agent,
     /// The agent server while it runs, with the settings it started with.
@@ -294,6 +302,7 @@ pub fn run(args: Args) -> Result<(), String> {
         native_menu: None,
         shown_revision: None,
         next_cpu_sample: Instant::now() + CPU_METER_PERIOD,
+        watch_transport_until: None,
         quitting: false,
         agent: Agent::for_app(),
         agent_server: None,
@@ -544,7 +553,10 @@ impl Host {
             .viewports
             .insert(ViewportId::ROOT, surface.info.clone());
 
-        let text_focused = surface.ctx.text_edit_focused();
+        // A value being typed into the Control Bar takes the keys as a
+        // text field does (control-bar-transport R10).
+        let text_focused = surface.ctx.text_edit_focused()
+            || (kind == WindowKind::Main && self.main_ui.is_typing());
         let keys = match kind {
             WindowKind::Main => &mut self.main_keys,
             WindowKind::Settings => &mut self.settings_keys,
@@ -552,6 +564,10 @@ impl Host {
         let invocations = keys.take_bound_keys(&mut input, &self.keymap, &self.shell, text_focused);
         if kind == WindowKind::Settings {
             self.settings_ui.prepare(&mut self.shell);
+        } else {
+            // The frame draws the playhead the engine last published
+            // (control-bar-transport R14).
+            self.shell.poll_engine();
         }
 
         let drawn = (kind == WindowKind::Main && self.drawn_menus()).then_some(DrawnMenuBar {
@@ -627,6 +643,8 @@ impl Host {
                     // nothing to report.
                     let _ = self.shell.gesture(phase, invocation.as_ref());
                 }
+                UiEvent::BeginGesture(label) => self.shell.begin_gesture(label),
+                UiEvent::EndGesture => self.shell.end_gesture(),
             }
         }
         self.after_commands(event_loop);
@@ -635,6 +653,8 @@ impl Host {
     fn invoke(&mut self, invocation: &Invocation) {
         // Errors show in the Status Bar; the shell has put them there.
         let _ = self.shell.invoke(&invocation.id, invocation.args.clone());
+        // The engine acts at its next block: look until it has.
+        self.watch_transport_until = Some(Instant::now() + TRANSPORT_WATCH);
     }
 
     /// Carries out what commands asked for and brings the windows and menus
@@ -1116,6 +1136,22 @@ impl ApplicationHandler<UserEvent> for Host {
             .audio()
             .is_running()
             .then_some(self.next_cpu_sample);
+        if let Some(until) = self.watch_transport_until {
+            if now < until {
+                // A start, stop, or jump shows at once: a change the
+                // engine has made refreshes the window and the menus, and
+                // while the song plays the window redraws every frame.
+                let revision = self.shell.revision();
+                self.shell.poll_engine();
+                if self.shell.revision() != revision {
+                    self.after_commands(event_loop);
+                }
+                let next = now + TRANSPORT_WATCH_PERIOD;
+                wake = Some(wake.map_or(next, |w| w.min(next)));
+            } else {
+                self.watch_transport_until = None;
+            }
+        }
         for surface in [&mut self.main, &mut self.settings].into_iter().flatten() {
             match surface.repaint_at {
                 Some(at) if at <= now => {

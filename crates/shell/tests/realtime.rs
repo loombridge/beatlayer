@@ -58,6 +58,102 @@ fn the_callback_stays_off_the_heap_with_the_tone_off_on_and_changing() {
     assert!(peak > 0.0, "the tone played in the last block");
 }
 
+#[test]
+fn the_callback_plays_the_engine_off_the_heap_through_the_transport() {
+    // Spec: control-bar-transport R13. The engine's processor arrives
+    // through the callback's ring, then plays a beat tone (at -60 dBFS;
+    // nothing reaches a device here) while the transport plays, stops,
+    // jumps, loops, and changes tempo between blocks.
+    use bl_core::time::{Bpm, SampleRate, TempoMap, Ticks};
+    use bl_engine::nodes::{BEAT_TONE, beat_tone};
+    use bl_engine::{Collector, Compiler, EngineConfig, LoopRegion, Registry, TransportCommand};
+    use bl_model::{Command, Device, DeviceKind, Editor, TrackKind};
+
+    let config = EngineConfig::new(SampleRate::HZ_48000, 128);
+    let mut collector = Collector::new();
+    let mut compiler = Compiler::new(config, Registry::new(), collector.handle());
+    let (mut sender, processor, mut monitor) = bl_engine::channel(&config);
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Midi,
+            name: String::new(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let mut device = Device::new(
+        editor.new_id(),
+        "",
+        DeviceKind::Native {
+            device_type: BEAT_TONE.to_owned(),
+        },
+    );
+    device.params.insert(beat_tone::LEVEL, -60.0);
+    editor
+        .apply(Command::InsertDevice {
+            track,
+            index: 0,
+            device,
+        })
+        .unwrap();
+    sender.send_update(compiler.sync(editor.document()));
+
+    let (mut handoff, incoming) = rtrb::RingBuffer::new(1);
+    let shared = Arc::new(EngineShared::default());
+    let mut callback = EngineCallback::with_engine(Arc::clone(&shared), incoming);
+    assert!(handoff.push(processor).is_ok());
+    let mut data = vec![0.0f32; 2 * 512];
+    let input = AudioBuffer::empty(512);
+    let ctx = context(512);
+    let commands = [
+        TransportCommand::Play,
+        TransportCommand::Locate(Ticks::WHOLE * 3),
+        TransportCommand::SetInsertMarker(Ticks::WHOLE),
+        TransportCommand::SetLoop(Some(LoopRegion {
+            start: Ticks::ZERO,
+            end: Ticks::QUARTER,
+        })),
+        TransportCommand::Stop,
+        TransportCommand::Continue,
+        TransportCommand::PlayStop,
+        TransportCommand::PlayStop,
+        TransportCommand::InsertMarkerToPlayhead,
+    ];
+    let mut peak = 0.0f32;
+    for (round, command) in commands.into_iter().cycle().take(36).enumerate() {
+        // Off the audio thread: the UI's commands and an edit's program.
+        sender.transport(command);
+        if round % 9 == 4 {
+            let bpm = Bpm::new(90.0 + round as f64).unwrap();
+            editor
+                .apply(Command::SetTempo {
+                    tempo: TempoMap::constant(bpm),
+                })
+                .unwrap();
+            sender.send_update(compiler.sync(editor.document()));
+        }
+        // On it: the blocks, which may not touch the heap.
+        bl_rt::rt_test!({
+            for _ in 0..8 {
+                let mut output = AudioBufferMut::new(&mut data, 2, 512, 512);
+                callback.process(&ctx, &input, &mut output);
+            }
+        });
+        peak = data.iter().fold(peak, |p, s| p.max(s.abs()));
+        collector.collect();
+    }
+    let state = monitor.state();
+    assert!(state.program.is_some(), "the engine played");
+    assert!(state.swaps >= 4, "programs swapped in during playback");
+    assert!(
+        peak > 0.0 && peak <= 0.001 + 1e-6,
+        "the beat tone at -60 dBFS: {peak}"
+    );
+}
+
 /// Waits until the stream has run at least `blocks` blocks.
 fn wait_for_blocks(shell: &Shell, blocks: u64) -> bl_audio_io::StreamStats {
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -105,5 +201,33 @@ fn a_null_stream_runs_the_callback_without_touching_the_heap() {
     shell
         .run("audio.set_test_tone", json!({ "on": false }))
         .unwrap();
+
+    // The engine on the stream, through the transport and edits while it
+    // plays (WP-1.18): still no heap use in any block.
+    shell.run("transport.play", json!({})).unwrap();
+    let before = stats.blocks;
+    let tempo = bl_core::time::TempoMap::constant(bl_core::time::Bpm::new(97.0).unwrap());
+    for (id, args) in [
+        (
+            "transport.set_loop",
+            json!({ "start": 0, "length": 705_600 }),
+        ),
+        ("transport.set_loop_enabled", json!({ "enabled": true })),
+        ("song.set_tempo", json!({ "tempo": tempo })),
+        ("transport.locate", json!({ "position": 2_822_400 })),
+        ("track.create", json!({ "kind": "midi" })),
+        ("transport.stop", json!({})),
+        ("transport.continue", json!({})),
+    ] {
+        shell
+            .invoke(id, args)
+            .unwrap_or_else(|e| panic!("{id}: {e}"));
+        let stats = wait_for_blocks(&shell, shell.audio().stats().unwrap().blocks + 4);
+        assert_eq!(stats.heap_operations, 0, "{id}: {stats:?}");
+    }
+    let stats = wait_for_blocks(&shell, before + 60);
+    assert!(stats.blocks >= before + 60, "{stats:?}");
+    assert_eq!(stats.heap_operations, 0, "{stats:?}");
+    assert!(shell.poll_engine().playing);
     shell.audio_mut().stop();
 }

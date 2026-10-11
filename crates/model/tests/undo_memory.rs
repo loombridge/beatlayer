@@ -195,9 +195,7 @@ fn build_project() -> Project {
             for c in 0..CLIPS_PER_TRACK {
                 let id = editor.new_id();
                 let data = if kind == TrackKind::Audio {
-                    ClipData::Audio(AudioData {
-                        media: ContentHash([u8::try_from(t).unwrap(); 32]),
-                    })
+                    ClipData::Audio(AudioData::new(ContentHash([u8::try_from(t).unwrap(); 32])))
                 } else {
                     project.midi_clips.push(id);
                     ClipData::Midi(notes(100))

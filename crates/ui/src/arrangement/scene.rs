@@ -4,8 +4,10 @@
 //!
 //! Only what's on screen is built. The rows on screen are found by binary
 //! search over their tops, and each track's clips are kept sorted by start
-//! in a [`ClipIndex`] rebuilt only when the document changes, so a frame
-//! touches the visible clips and nothing else. The instance lists live in
+//! in a [`ClipIndex`], which re-sorts only the tracks an edit changed, so a
+//! frame touches the visible clips and what changed, and nothing else (a
+//! drag that moves a few clips doesn't re-sort the set). The instance lists
+//! live in
 //! the block shared with the GPU callback and keep their capacity, so a
 //! steady frame allocates nothing here.
 
@@ -13,7 +15,7 @@ use std::collections::{HashMap, HashSet};
 
 use bl_core::time::{TempoMap, Ticks};
 use bl_media::Peaks;
-use bl_model::{ClipData, ClipId, ContentHash, Document, TrackId};
+use bl_model::{ClipData, ClipId, ContentHash, Document, Track, TrackId};
 use bl_shell::arrangement::Horizontal;
 use bl_shell::arrangement::grid::{self, Step};
 use bl_shell::arrangement::rows::{Row, rows_between};
@@ -64,48 +66,72 @@ impl TrackClips {
     }
 }
 
-/// Every track's clips, sorted for the view, rebuilt when the document
-/// changes.
+impl TrackClips {
+    /// A track's clips, sorted by start.
+    fn of(track: &Track) -> Self {
+        let mut clips: Vec<ClipSpan> = track
+            .clips()
+            .map(|clip| ClipSpan {
+                start: clip.start.get(),
+                end: clip.end().get(),
+                origin: clip.content_start().get(),
+                id: clip.id,
+                muted: clip.mute,
+                media: match &clip.data {
+                    ClipData::Audio(audio) => Some(audio.media),
+                    ClipData::Midi(_) => None,
+                },
+            })
+            .collect();
+        clips.sort_by_key(|clip| (clip.start, clip.end));
+        let longest = clips.iter().map(|c| c.end - c.start).max().unwrap_or(0);
+        Self { clips, longest }
+    }
+}
+
+/// Every track's clips, sorted for the view, brought up to date when the
+/// document changes.
+///
+/// The document shares every track an edit didn't touch with the version
+/// before it, so a track that is the same node in both needs nothing done:
+/// an update re-sorts only the tracks that changed. A drag (WP-1.8b), which
+/// changes the set on every frame, costs what it moves rather than the size
+/// of the set.
 #[derive(Clone, Debug, Default)]
 pub struct ClipIndex {
     revision: Option<u64>,
+    /// The version of the document the index holds.
+    doc: Option<Document>,
     tracks: HashMap<TrackId, TrackClips>,
     total: usize,
 }
 
 impl ClipIndex {
-    /// Rebuilds the index if the document's revision isn't the one it was
-    /// built from. Returns whether it did.
+    /// Brings the index up to date if the document's revision isn't the one
+    /// it was built from. Returns whether it did.
     pub fn update(&mut self, doc: &Document, revision: u64) -> bool {
         if self.revision == Some(revision) {
             return false;
         }
         self.revision = Some(revision);
-        self.tracks.clear();
+        let old = self.doc.replace(doc.clone());
+        self.tracks.retain(|id, _| doc.track(*id).is_some());
         self.total = 0;
         for track in doc.tracks() {
-            if track.clips().len() == 0 {
-                continue;
+            let id = track.id();
+            // The same node in both versions: the same clips.
+            let same = old
+                .as_ref()
+                .and_then(|old| old.track(id))
+                .is_some_and(|before| std::ptr::eq(before, track));
+            if !same {
+                if track.clips().len() == 0 {
+                    self.tracks.remove(&id);
+                } else {
+                    self.tracks.insert(id, TrackClips::of(track));
+                }
             }
-            let mut clips: Vec<ClipSpan> = track
-                .clips()
-                .map(|clip| ClipSpan {
-                    start: clip.start.get(),
-                    end: clip.end().get(),
-                    origin: clip.content_start().get(),
-                    id: clip.id,
-                    muted: clip.mute,
-                    media: match &clip.data {
-                        ClipData::Audio(audio) => Some(audio.media),
-                        ClipData::Midi(_) => None,
-                    },
-                })
-                .collect();
-            clips.sort_by_key(|clip| (clip.start, clip.end));
-            let longest = clips.iter().map(|c| c.end - c.start).max().unwrap_or(0);
-            self.total += clips.len();
-            self.tracks
-                .insert(track.id(), TrackClips { clips, longest });
+            self.total += self.tracks.get(&id).map_or(0, |t| t.clips.len());
         }
         true
     }
@@ -586,5 +612,111 @@ pub fn build_overview(
                 }),
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bl_core::time::Ticks;
+    use bl_model::{AudioData, Clip, Command, TrackKind};
+
+    use super::super::benchmark::{Random, media_hash, scene};
+    use super::*;
+
+    /// Each track's clips as the view reads them, and how many there are.
+    fn contents(index: &ClipIndex) -> (Vec<(TrackId, Vec<ClipSpan>, i64)>, usize) {
+        let mut tracks: Vec<_> = index
+            .tracks
+            .iter()
+            .map(|(track, clips)| (*track, clips.clips.clone(), clips.longest))
+            .collect();
+        tracks.sort_by_key(|(track, _, _)| *track);
+        (tracks, index.total())
+    }
+
+    /// The index built from nothing.
+    fn rebuilt(doc: &Document) -> ClipIndex {
+        let mut index = ClipIndex::default();
+        index.update(doc, 0);
+        index
+    }
+
+    #[test]
+    fn re_sorting_only_changed_tracks_matches_a_rebuild() {
+        // WP-1.8b: an update re-sorts only the tracks an edit changed; the
+        // index must hold what building it from nothing would.
+        let set = scene(6, 30, 2);
+        let mut editor = set.editor;
+        let mut tracks = set.tracks;
+        let mut random = Random::new(7);
+        let mut index = ClipIndex::default();
+        let mut revision = 0;
+        index.update(editor.document(), revision);
+        let bar = Ticks::WHOLE.get();
+        let below = |random: &mut Random, n: usize| random.below(n as u64) as usize;
+        for step in 0..400 {
+            let clips: Vec<ClipId> = editor.document().clip_ids().collect();
+            let command = match random.below(8) {
+                // Many clips at once, as dragging a big selection does.
+                0 => Command::MoveClips {
+                    clips: clips
+                        .iter()
+                        .copied()
+                        .filter(|_| random.below(3) == 0)
+                        .collect(),
+                    by: Ticks(bar * (random.below(5) as i64 + 1)),
+                },
+                1 | 2 => Command::MoveClip {
+                    clip: clips[below(&mut random, clips.len())],
+                    track: tracks[below(&mut random, tracks.len())],
+                    start: Ticks(bar * random.below(512) as i64),
+                },
+                3 => Command::SetClipLength {
+                    clip: clips[below(&mut random, clips.len())],
+                    length: Ticks(bar * (random.below(16) as i64 + 1)),
+                },
+                4 => Command::SetClipMute {
+                    clip: clips[below(&mut random, clips.len())],
+                    mute: random.below(2) == 0,
+                },
+                5 => Command::DeleteClip {
+                    clip: clips[below(&mut random, clips.len())],
+                },
+                6 => {
+                    // A new, empty track: the track list changes.
+                    let id: TrackId = editor.new_id();
+                    tracks.push(id);
+                    Command::CreateTrack {
+                        id,
+                        kind: TrackKind::Audio,
+                        name: format!("New {step}"),
+                        parent: None,
+                        index: 0,
+                    }
+                }
+                _ => Command::CreateClip {
+                    track: tracks[below(&mut random, tracks.len())],
+                    clip: Clip::new(
+                        editor.new_id(),
+                        Ticks(bar * random.below(512) as i64),
+                        Ticks(bar * (random.below(8) as i64 + 1)),
+                        ClipData::Audio(AudioData {
+                            media: media_hash(1),
+                        }),
+                    ),
+                },
+            };
+            if editor.apply(command).is_err() {
+                continue;
+            }
+            revision += 1;
+            assert!(index.update(editor.document(), revision));
+            assert_eq!(
+                contents(&index),
+                contents(&rebuilt(editor.document())),
+                "step {step}"
+            );
+        }
+        assert!(!index.update(editor.document(), revision));
     }
 }

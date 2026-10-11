@@ -1,8 +1,9 @@
 //! The agent server's section of the Settings window (WP-1.15), headless:
 //! on the Tempo & MIDI page (L-SET-014, laid out as L-SET-003), off until
 //! the person switches it on, with the address, the token, and each
-//! allowed agent's autonomous switch, every control reachable by a screen
-//! reader and each change a registered command.
+//! allowed agent's autonomous switch and own token (WP-1.15c), every
+//! control reachable by a screen reader and each change a registered
+//! command.
 
 mod common;
 
@@ -60,7 +61,7 @@ fn the_agent_server_is_off_until_switched_on_and_then_shows_where_to_connect() {
     h.settle();
     assert!(h.shell.agent_settings().server);
     let token = h.shell.agent_settings().token.clone();
-    assert_eq!(token.len(), 64);
+    assert_eq!(token.expose().len(), 64);
     assert!(h.events.iter().any(|e| matches!(
         e,
         bl_ui::main_window::UiEvent::Invoke(i) if i.id == "agent.set_server"
@@ -121,6 +122,99 @@ fn each_allowed_agent_has_an_autonomous_switch_and_can_be_forgotten() {
     assert!(h.shell.agent_settings().client("claude-code").is_none());
     let nodes = Harness::nodes(&h.frame(vec![]));
     assert!(!nodes.iter().any(|n| n.label == "Autonomous: claude-code"));
+}
+
+/// Every piece of text the frame painted.
+fn painted(output: &egui::FullOutput) -> String {
+    fn walk(shape: &egui::Shape, out: &mut String) {
+        match shape {
+            egui::Shape::Text(text) => {
+                out.push_str(text.galley.text());
+                out.push('\n');
+            }
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| walk(s, out)),
+            _ => {}
+        }
+    }
+    let mut out = String::new();
+    for clipped in &output.shapes {
+        walk(&clipped.shape, &mut out);
+    }
+    out
+}
+
+#[test]
+fn each_allowed_agent_s_token_shows_in_its_row_and_new_token_replaces_it() {
+    // Spec: agent-permissions R12, R13.
+    let mut h = open_tempo_midi();
+    h.shell
+        .run("agent.set_server", json!({ "on": true }))
+        .unwrap();
+    for name in ["claude-code", "goose"] {
+        h.shell
+            .run("agent.approve_client", json!({ "client": name }))
+            .unwrap();
+    }
+    let output = h.settle();
+    let nodes = Harness::nodes(&output);
+    let server = h.shell.agent_settings().token.clone();
+    let own = |h: &Harness, name: &str| {
+        h.shell
+            .agent_settings()
+            .client(name)
+            .unwrap()
+            .token
+            .expose()
+            .to_owned()
+    };
+    let token = own(&h, "claude-code");
+    let field = Harness::node(&nodes, "Token: claude-code");
+    assert_eq!(
+        field.value, token,
+        "the agent's token can be read and copied"
+    );
+    assert_ne!(field.value, server.expose());
+    assert_eq!(
+        Harness::node(&nodes, "Token: goose").value,
+        own(&h, "goose")
+    );
+    assert_eq!(
+        Harness::node(&nodes, "New Token: claude-code").role,
+        Role::Button
+    );
+    // It's laid out under the agent's name, after its switch.
+    let top = |label: &str| Harness::node(&nodes, label).bounds.unwrap().y0;
+    assert!(top("Autonomous: claude-code") < top("Token: claude-code"));
+    assert!(top("Token: claude-code") < top("Autonomous: goose"));
+
+    // The note says who is asked.
+    let text = painted(&output);
+    assert!(
+        text.contains("An agent you allow gets its own token and isn't asked again."),
+        "{text}"
+    );
+    assert!(
+        text.contains("Clients using the server's token are asked each time."),
+        "{text}"
+    );
+    assert!(!text.contains("Each agent is asked about once"), "{text}");
+
+    // New Token runs `agent.new_client_token` for that agent only.
+    let goose = own(&h, "goose");
+    h.events.clear();
+    press(&mut h, "New Token: claude-code");
+    assert!(h.events.iter().any(|e| matches!(
+        e,
+        bl_ui::main_window::UiEvent::Invoke(i)
+            if i.id == "agent.new_client_token" && i.args == json!({ "client": "claude-code" })
+    )));
+    let new = own(&h, "claude-code");
+    assert_ne!(new, token);
+    assert_eq!(new.len(), 64);
+    assert_eq!(own(&h, "goose"), goose);
+    assert_eq!(h.shell.agent_settings().token, server);
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    assert_eq!(Harness::node(&nodes, "Token: claude-code").value, new);
 }
 
 /// The UI's CPU time per frame for this view, against a scene like

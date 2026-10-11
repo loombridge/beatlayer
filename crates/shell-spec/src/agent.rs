@@ -59,30 +59,34 @@ pub const ENDPOINT_PATH: &str = "/mcp";
 /// A token: a secret kept in the preferences that never shows in a debug
 /// print, a log, or a command's result. It's compared in constant time
 /// where requests are checked (the agent API's HTTP server).
+///
+/// Its text is reached only through [`Secret::expose`], so every place that
+/// reveals a token names it: the preferences' file, the HTTP server's
+/// check, and the Settings window's token fields, where the person sees
+/// the server's token and each allowed agent's (WP-1.15c).
 #[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct Secret(String);
 
 impl Secret {
     /// The token's text, to put in the preferences' file, show to the
-    /// person, or check a request against.
+    /// person in the Settings window, or check a request against. Never put
+    /// it in a command's result, a log, or a debug print.
     #[must_use]
     pub fn expose(&self) -> &str {
         &self.0
+    }
+
+    /// Whether there's no token yet.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
     }
 }
 
 impl From<String> for Secret {
     fn from(text: String) -> Self {
         Self(text)
-    }
-}
-
-impl std::ops::Deref for Secret {
-    type Target = str;
-
-    fn deref(&self) -> &str {
-        &self.0
     }
 }
 
@@ -412,6 +416,26 @@ mod tests {
         let read: AgentSettings = serde_json::from_str(&saved).unwrap();
         assert_eq!(read, settings);
         assert_eq!(read.clients[0].token, "b".repeat(64));
+        // The Settings window shows a token through `expose`, the only way
+        // to its text: `Secret` isn't `Display`, and doesn't deref to its
+        // text, so it can't slip into a `format!` or a `&str` unnamed. Each
+        // `check` below only compiles while that holds (two impls would
+        // make it ambiguous).
+        trait NotDisplay<A> {
+            fn check() {}
+        }
+        impl<T: ?Sized> NotDisplay<()> for T {}
+        struct IsDisplay;
+        impl<T: ?Sized + std::fmt::Display> NotDisplay<IsDisplay> for T {}
+        <Secret as NotDisplay<_>>::check();
+        trait NotText<A> {
+            fn check() {}
+        }
+        impl<T: ?Sized> NotText<()> for T {}
+        struct IsText;
+        impl<T: ?Sized + std::ops::Deref<Target = str>> NotText<IsText> for T {}
+        <Secret as NotText<_>>::check();
+        assert_eq!(settings.clients[0].token.expose(), "b".repeat(64));
         // Preferences from before agents had tokens still read.
         let old: AgentSettings =
             serde_json::from_str(r#"{"clients":[{"name":"x","autonomous":true}]}"#).unwrap();

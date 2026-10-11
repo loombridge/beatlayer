@@ -601,7 +601,9 @@ const ENTRIES: &[Entry] = &[
             notes. Use it to write or change a MIDI clip's notes, sending every note the clip \
             should hold; for one setting of an audio clip, the `clip.set_region`, \
             `clip.set_loop`, `clip.set_gain`, and `clip.set_fades` commands are simpler. The \
-            data must match the clip's track: audio on audio tracks, MIDI on MIDI tracks.",
+            data must match the clip's track: audio on audio tracks, MIDI on MIDI tracks. \
+            Sending fewer notes than a MIDI clip has deletes notes, which is destructive, so an \
+            agent asks first; adding notes or keeping their count isn't.",
     },
     Entry {
         id: "clip.set_region",

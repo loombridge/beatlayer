@@ -94,6 +94,14 @@ pub fn run(args: &Args, path: &Path) -> Result<(), String> {
     let _ = shell.audio_mut().sample_cpu_load();
     for frame in 0..4 {
         settings_ui.prepare(&mut shell);
+        if frame == 1 && !args.commands.is_empty() {
+            // Let a command that starts or moves the transport take effect
+            // and play a moment, so the capture shows it.
+            std::thread::sleep(std::time::Duration::from_millis(400));
+        }
+        // Each frame draws the playhead the engine last published, as the
+        // window does.
+        shell.poll_engine();
         // Each layout point is `zoom` points of the window, and each of
         // those SCALE pixels.
         if (shell.zoom() - zoom).abs() > 1e-6 {
@@ -123,8 +131,14 @@ pub fn run(args: &Args, path: &Path) -> Result<(), String> {
         // The lanes report their size on the first frame; commands asked
         // for on the command line run once it's known.
         for event in events {
-            if let UiEvent::ArrangementViewport { width, height } = event {
-                shell.set_arrangement_viewport(width, height);
+            match event {
+                UiEvent::ArrangementViewport { width, height } => {
+                    shell.set_arrangement_viewport(width, height);
+                }
+                UiEvent::Invoke(_)
+                | UiEvent::FocusArea(_)
+                | UiEvent::BeginGesture(_)
+                | UiEvent::EndGesture => {}
             }
         }
         if frame == 0 {

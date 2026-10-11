@@ -191,6 +191,49 @@ fn the_insert_marker_moves_to_the_playhead() {
     plays_from(&out, 32_000..33_000, 30_000);
 }
 
+#[test]
+fn the_insert_marker_moves_alone_and_playback_carries_on() {
+    // A click in the Arrangement (WP-1.18): the insert marker moves, the
+    // playhead doesn't, while playing and while stopped.
+    let mut rig = rig(256, None);
+    let tempo = TempoMap::default();
+    for (frame, command) in [
+        (0, TransportCommand::Play),
+        // Spec: control-bar-transport R15
+        (4_000, TransportCommand::SetInsertMarker(BAR * 2)),
+        (5_000, TransportCommand::SetInsertMarker(-BEAT)),
+        (6_000, TransportCommand::SetInsertMarker(BAR * 3)),
+        (7_000, TransportCommand::Stop),
+        (8_000, TransportCommand::SetInsertMarker(BAR)),
+        (9_000, TransportCommand::Continue),
+        (10_000, TransportCommand::Stop),
+        (11_000, TransportCommand::Play),
+    ] {
+        rig.sender.transport_at(command, When::Frame(frame));
+    }
+    let out = rig.render(12_000, 256);
+    plays_from(&out, 0..7_000, 0);
+    stopped(&out, 7_000..9_000);
+    // Continue resumes where playback stopped, not at the moved marker.
+    plays_from(&out, 9_000..10_000, 7_000);
+    // Play starts from the marker.
+    plays_from(&out, 11_000..12_000, frames(&tempo, BAR));
+    assert_eq!(rig.monitor.state().insert_marker, BAR);
+    // A marker before 1.1.1 is taken as 1.1.1.
+    let mut rig = rig_with_marker(-BEAT);
+    assert_eq!(rig.monitor.state().insert_marker, Ticks::ZERO);
+    rig.sender.transport(TransportCommand::Play);
+    let out = rig.render(100, 100);
+    plays_from(&out, 0..100, 0);
+}
+
+fn rig_with_marker(at: Ticks) -> Rig {
+    let mut rig = rig(256, None);
+    rig.sender.transport(TransportCommand::SetInsertMarker(at));
+    rig.render(256, 256);
+    rig
+}
+
 /// The frame of the engine clock `clock` plays this song position, for a
 /// song that plays from frame 0 into a loop from `start` to `end` frames.
 fn looped(clock: i64, start: i64, end: i64) -> i64 {
@@ -514,7 +557,13 @@ fn every_transport_command_runs_by_id() {
         "transport.set_loop_enabled",
         json!({ "enabled": true }),
     );
-    run(&mut rig, "transport.locate", json!({ "position": 0 }));
+    run(
+        &mut rig,
+        "transport.locate",
+        json!({ "position": BAR.get() }),
+    );
+    // Spec: transport R8; control-bar-transport R3
+    run(&mut rig, "transport.return_to_start", json!({}));
     let out = rig.render(48_000, 256);
     for (clock, &sample) in out.iter().enumerate() {
         assert_eq!(sample, (clock % 24_000) as f32);
@@ -564,6 +613,9 @@ fn the_bindings_follow_the_spec() {
     for id in [
         "transport.play",
         "transport.stop",
+        // Return Play Position to 1.1.1 shows no key (M-PLAY-004); Home
+        // runs `transport.locate` at 1.1.1.
+        "transport.return_to_start",
         "transport.set_loop",
         "transport.set_loop_enabled",
     ] {

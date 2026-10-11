@@ -387,6 +387,10 @@ impl Processor {
                     .frames_to_ticks(self.position, self.config.sample_rate);
                 self.insert_marker = ticks.max(Ticks::ZERO);
             }
+            // Spec: control-bar-transport R15
+            TransportCommand::SetInsertMarker(ticks) => {
+                self.insert_marker = ticks.max(Ticks::ZERO);
+            }
             TransportCommand::SetLoop(region) => {
                 self.loop_region = region;
                 self.update_loop_frames();

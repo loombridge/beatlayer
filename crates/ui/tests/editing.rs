@@ -16,6 +16,7 @@ use bl_shell::files::factory_default_set;
 use bl_ui::arrangement::benchmark;
 use bl_ui::arrangement::gpu::{Slot, lock};
 use bl_ui::arrangement::peaks::MemoryPeaks;
+use bl_ui::keymap::Platform;
 use common::{Harness, Window, command};
 use egui::accesskit::Role;
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, pos2};
@@ -208,13 +209,28 @@ impl Set {
         self.h.settle();
     }
 
-    /// Checks the newest step undoes to exactly `before` and redoes.
+    /// Presses a shortcut's first key chord on this platform, as the keymap
+    /// binds it.
+    fn shortcut(&mut self, shortcut: &str) {
+        let platform = Platform::current();
+        let chord = self
+            .h
+            .keymap
+            .chord_for_shortcut(shortcut, platform)
+            .unwrap_or_else(|| panic!("{shortcut} has a key chord"))
+            .clone();
+        self.key(chord.key, chord.mods.to_egui(platform));
+    }
+
+    /// Checks the newest step undoes to exactly `before` and redoes, with
+    /// the platform's Undo and Redo keys (Cmd-Shift-Z on macOS, Ctrl-Y on
+    /// Windows and Linux).
     fn undoes_to(&mut self, before: &Document) {
         let after = self.doc().clone();
-        self.key(Key::Z, command());
-        assert_eq!(self.doc(), before, "Cmd-Z restores the set exactly");
-        self.key(Key::Z, command() | Modifiers::SHIFT);
-        assert_eq!(*self.doc(), after, "Cmd-Shift-Z redoes it");
+        self.shortcut("S-EDIT-006");
+        assert_eq!(self.doc(), before, "Undo restores the set exactly");
+        self.shortcut("S-EDIT-007");
+        assert_eq!(*self.doc(), after, "Redo redoes it");
     }
 }
 
@@ -497,7 +513,12 @@ fn selected_clips_are_drawn_and_announced() {
     assert!(rects(&s) > plain, "a selected clip draws its highlight");
     let output = s.h.settle();
     let nodes = Harness::nodes(&output);
-    let clips: Vec<_> = nodes.iter().filter(|n| n.role == Role::ListItem).collect();
+    // The browser's items are list items too (WP-1.10): count the clips.
+    let browser = Harness::node(&nodes, "Browser").id;
+    let clips: Vec<_> = nodes
+        .iter()
+        .filter(|n| n.role == Role::ListItem && !Harness::descends_from(&nodes, n.id, browser))
+        .collect();
     assert_eq!(clips.len(), 2);
     let selected: Vec<_> = clips.iter().filter(|n| n.selected == Some(true)).collect();
     assert_eq!(selected.len(), 1);

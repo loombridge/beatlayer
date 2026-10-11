@@ -515,9 +515,12 @@ const ENTRIES: &[Entry] = &[
         keys: &[],
         description: "Puts a new clip on an audio or MIDI track's arrangement lane, at \
             `clip.start` for `clip.length` ticks (705,600 to the quarter note). An audio clip \
-            names its audio file by content hash; a MIDI clip carries its notes, placed from \
-            the clip's start. Audio clips go only on audio tracks and MIDI clips only on MIDI \
-            tracks. `clip.id` must be a new ID the project has issued for it.",
+            names its audio file by content hash and plays it unwarped, at the file's own \
+            speed, from the moment the song reaches the clip; its optional settings (Start \
+            and End markers, loop, gain, fades) default to playing the whole file once at 0 \
+            dB with no fades. A MIDI clip carries its notes, placed from the clip's start. \
+            Audio clips go only on audio tracks and MIDI clips only on MIDI tracks. `clip.id` \
+            must be a new ID the project has issued for it.",
     },
     Entry {
         id: "clip.delete",
@@ -591,9 +594,80 @@ const ENTRIES: &[Entry] = &[
         contexts: &[ClipView],
         keys: &[],
         description: "Replaces what a clip plays: for an audio clip, the audio file it names \
-            by content hash; for a MIDI clip, its whole list of notes. Use it to write or \
-            change a MIDI clip's notes, sending every note the clip should hold. The data must \
-            match the clip's track: audio on audio tracks, MIDI on MIDI tracks.",
+            by content hash with all its settings at once; for a MIDI clip, its whole list of \
+            notes. Use it to write or change a MIDI clip's notes, sending every note the clip \
+            should hold; for one setting of an audio clip, the `clip.set_region`, \
+            `clip.set_loop`, `clip.set_gain`, and `clip.set_fades` commands are simpler. The \
+            data must match the clip's track: audio on audio tracks, MIDI on MIDI tracks.",
+    },
+    Entry {
+        id: "clip.set_region",
+        action: Action::Apply("set_clip_region"),
+        label: "Set Clip Start and End",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Moves an audio clip's Start and End markers, in seconds into its audio \
+            file: the clip starts playing its file at `start` when the song reaches the clip, \
+            and, while its loop is off, plays until `end` (`null` for the end of the file) or \
+            the clip's own end in the arrangement, whichever comes first, then is silent. \
+            Clips play unwarped, at the file's own speed. While the loop is on, `start` must \
+            be before the loop's end. Use `clip.set_length` to change how long the clip lasts \
+            in the arrangement.",
+    },
+    Entry {
+        id: "clip.set_loop",
+        action: Action::Apply("set_clip_loop"),
+        label: "Set Clip Loop",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Moves an audio clip's loop brace, in seconds into its audio file \
+            (`end` `null` for the end of the file), as the Clip View's loop Position and \
+            Length fields do. It doesn't switch the loop on or off: use \
+            `clip.set_loop_enabled`. While the loop is on, the clip plays from its Start \
+            marker into the brace, then repeats the brace until the clip ends in the \
+            arrangement; make the clip longer with `clip.set_length` to hear more repeats. A \
+            new clip's brace is the whole file.",
+    },
+    Entry {
+        id: "clip.set_loop_enabled",
+        action: Action::Apply("set_clip_loop_enabled"),
+        label: "Clip Loop On/Off",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Switches an audio clip's Loop switch on or off, leaving its loop brace \
+            where it is. On, the clip repeats its brace (`clip.set_loop`) for as long as it \
+            lasts in the arrangement; off, it plays from its Start marker to its End marker \
+            once. The Start marker must be before the brace's end to switch it on.",
+    },
+    Entry {
+        id: "clip.set_gain",
+        action: Action::Apply("set_clip_gain"),
+        label: "Set Clip Gain",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Sets an audio clip's gain as a linear gain: 1 is 0 dB (where every clip \
+            starts), 0.5 is about -6 dB (10^(dB/20) converts decibels), 2 is about +6 dB, \
+            and 0 is silence (-inf dB). Use it to balance one clip against others on its \
+            track; to change the whole track, use `mixer.set_volume`. The value must be \
+            finite and at least 0.",
+    },
+    Entry {
+        id: "clip.set_fades",
+        action: Action::Apply("set_clip_fades"),
+        label: "Set Clip Fades",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Sets the lengths, in seconds, of an audio clip's fade-in, from silence \
+            at the clip's start in the arrangement, and its fade-out, to silence at its end; \
+            0 is no fade. Each fade is a straight line in amplitude. Short fades stop a clip \
+            that starts or ends mid-waveform from clicking: 0.004 (4 ms) is the length that \
+            Create Fades on Clip Edges gives new clips. Lengths must be finite and at least \
+            0.",
     },
     Entry {
         id: "device.insert",

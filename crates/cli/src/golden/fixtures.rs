@@ -1,28 +1,37 @@
 //! The golden fixtures: songs built in code, through the model's commands.
 //!
-//! Until clips play (WP-1.4), the engine's sound sources are test tones, so
-//! each fixture is test tones through tracks, groups, returns, and their
-//! mixers, with commands scheduled at musical positions. The transport's
-//! fixtures (WP-1.5) use the beat tone, which sounds only while the song
-//! plays and whose every sample follows the song position in ticks, so a
-//! render shows the frame each start, stop, and loop lands on. The mixer's
-//! fixtures (WP-1.6) pan, send, solo, and move faders. Tones play at −24 dBFS
-//! or so, louder than the tones' default of −60, so that a level error
-//! shows above the cross-platform threshold. These renders are files for
-//! tests, never played on a device.
+//! The first fixtures' sound sources are test tones, through tracks, groups,
+//! returns, and their mixers, with commands scheduled at musical positions.
+//! The transport's fixtures (WP-1.5) use the beat tone, which sounds only
+//! while the song plays and whose every sample follows the song position in
+//! ticks, so a render shows the frame each start, stop, and loop lands on.
+//! The mixer's fixtures (WP-1.6) pan, send, solo, and move faders. The clip
+//! fixtures (WP-1.4) play audio files made here, as 32-bit float WAV files
+//! in memory: sine chirps, whose pitch moves all the time, so a render
+//! shows exactly which frame of a file each frame of the song played, made
+//! with `libm`'s pure-Rust sine, so they're the same to the bit on every
+//! platform. One file is at 44.1 kHz, so it plays through sample-rate
+//! conversion. Tones and files play at −24 dBFS or so, louder than the
+//! tones' default of −60, so that a level error shows above the
+//! cross-platform threshold. These renders are files for tests, never
+//! played on a device.
 //!
 //! Changing a fixture changes its render: remake its reference with
 //! `cargo xtask golden --update` and say why in the pull request.
 
+use std::io::Cursor;
+use std::sync::Arc;
+
 use bl_core::time::{Bpm, TempoMap, Ticks, TimeSignature, TimeSignatureChange, TimeSignatureMap};
 use bl_engine::mixer::{gain_from_db, track as mixer};
 use bl_engine::nodes::{BEAT_TONE, TEST_TONE, beat_tone, test_tone};
-use bl_engine::{Action, NodeKey, ParamValue, ScheduledCommand, TransportCommand};
+use bl_engine::{Action, MediaMap, NodeKey, ParamValue, ScheduledCommand, TransportCommand};
 use bl_model::{
-    Command, Device, DeviceId, DeviceKind, Editor, ParamId, SendTap, TrackId, TrackKind,
+    AudioData, Clip, ClipData, ClipId, Command, ContentHash, Device, DeviceId, DeviceKind, Editor,
+    ParamId, SendTap, TrackId, TrackKind,
 };
 
-use super::{Fixture, SAMPLE_RATE, Scene};
+use super::{Fixture, MediaFile, SAMPLE_RATE, Scene};
 use crate::render::Cue;
 
 pub(super) const FIXTURES: &[Fixture] = &[
@@ -102,11 +111,45 @@ pub(super) const FIXTURES: &[Fixture] = &[
                 to its value over 20 ms, so the render has no zipper noise or clicks.",
         build: fader_move,
     },
+    Fixture {
+        name: "clip-mid-bar",
+        about: "Audio clips starting mid-bar, on frames no block starts on: one plays a stretch \
+                from the middle of its file, between its Start and End markers, and one is cut \
+                off by its own end mid-file.",
+        build: clip_mid_bar,
+    },
+    Fixture {
+        name: "looped-clip",
+        about: "A looped audio clip at -6 dB: it plays from its Start marker into its loop \
+                brace and repeats the brace nine times, each wrap on its exact frame.",
+        build: looped_clip,
+    },
+    Fixture {
+        name: "overlapping-clips",
+        about: "Clips overlapping on two audio tracks, one a mono file at 44.1 kHz that plays \
+                through sample-rate conversion, on a track panned right at -6 dB.",
+        build: overlapping_clips,
+    },
+    Fixture {
+        name: "clip-fades",
+        about: "Clip edges with fades off (hard edges mid-waveform), with Create Fades on Clip \
+                Edges' 4 ms fades, and with long fades on a clip above 0 dB.",
+        build: clip_fades,
+    },
+    Fixture {
+        name: "clip-tempo-change",
+        about: "An unwarped clip across a tempo ramp from 120 to 90 BPM, whose audio runs on \
+                unbroken while its end lands where the tempo map puts it, and a looped clip \
+                placed after the ramp.",
+        build: clip_tempo_change,
+    },
 ];
 
 /// A song under construction.
 struct Song {
     editor: Editor,
+    files: Vec<MediaFile>,
+    media: MediaMap,
     schedule: Vec<ScheduledCommand>,
     cues: Vec<Cue>,
 }
@@ -115,9 +158,86 @@ impl Song {
     fn new() -> Self {
         Self {
             editor: Editor::new(),
+            files: Vec::new(),
+            media: MediaMap::new(),
             schedule: Vec::new(),
             cues: Vec::new(),
         }
+    }
+
+    /// Makes an audio file of `channels` at `rate` as a 32-bit float WAV
+    /// file, and returns the content hash clips name it by. The engine gets
+    /// it as the media store would give it: decoded from the file's bytes.
+    fn file(&mut self, name: &str, rate: u32, channels: &[Vec<f32>]) -> ContentHash {
+        let spec = hound::WavSpec {
+            channels: u16::try_from(channels.len()).expect("a few channels"),
+            sample_rate: rate,
+            bits_per_sample: 32,
+            sample_format: hound::SampleFormat::Float,
+        };
+        let mut cursor = Cursor::new(Vec::new());
+        let mut writer = hound::WavWriter::new(&mut cursor, spec).expect("the WAV header writes");
+        for frame in 0..channels[0].len() {
+            for channel in channels {
+                writer
+                    .write_sample(channel[frame])
+                    .expect("the WAV file writes");
+            }
+        }
+        writer.finalize().expect("the WAV file finishes");
+        let bytes = cursor.into_inner();
+        let hash = ContentHash(*bl_media::ContentHash::of_bytes(&bytes).as_bytes());
+        let decoded = bl_media::Decoder::from_reader(Cursor::new(bytes.clone()), Some("wav"))
+            .and_then(bl_media::Decoder::decode_to_end)
+            .expect("the WAV file decodes");
+        self.media.insert(hash, Arc::new(decoded));
+        self.files.push(MediaFile {
+            name: name.to_owned(),
+            hash,
+            bytes,
+        });
+        hash
+    }
+
+    /// A stereo file at 48 kHz, 4.5 seconds long: a chirp up from 220 to
+    /// 1,320 Hz on the left at -24 dBFS, and down from 990 to 330 Hz on the
+    /// right, 2.5 dB quieter.
+    fn chirp(&mut self) -> ContentHash {
+        let frames = 216_000;
+        let left = chirp(frames, 48_000, 220.0, 1_320.0, 0.0625);
+        let right = chirp(frames, 48_000, 990.0, 330.0, 0.046_875);
+        self.file("chirp.wav", 48_000, &[left, right])
+    }
+
+    /// A mono file at 44.1 kHz, 3 seconds long: a chirp up from 165 to
+    /// 247.5 Hz at -24 dBFS.
+    fn drone(&mut self) -> ContentHash {
+        let mono = chirp(132_300, 44_100, 165.0, 247.5, 0.0625);
+        self.file("drone.wav", 44_100, &[mono])
+    }
+
+    /// Puts an audio clip on `track` at `at` for `length`.
+    fn audio_clip(&mut self, track: TrackId, at: Ticks, length: Ticks, audio: AudioData) -> ClipId {
+        let id = self.editor.new_id();
+        self.apply(Command::CreateClip {
+            track,
+            clip: Clip::new(id, at, length, ClipData::Audio(audio)),
+        });
+        id
+    }
+
+    /// How long the song plays to the end of its last clip, and a quarter of
+    /// a second more, rounded up to a quarter of a second.
+    fn to_last_clip(&self) -> f64 {
+        let document = self.editor.document();
+        let end = document
+            .tracks()
+            .flat_map(bl_model::Track::clips)
+            .map(bl_model::Clip::end)
+            .max()
+            .expect("the song has clips");
+        let seconds = document.settings().tempo.ticks_to_seconds(end) + 0.25;
+        (seconds * 4.0).ceil() / 4.0
     }
 
     /// Adds a beat tone at the end of a track's chain.
@@ -260,6 +380,8 @@ impl Song {
     fn finish(self, seconds: f64) -> Scene {
         Scene {
             editor: self.editor,
+            files: self.files,
+            media: self.media,
             schedule: self.schedule,
             cues: if self.cues.is_empty() {
                 vec![Cue::PLAY]
@@ -273,6 +395,23 @@ impl Song {
 
 fn bpm(bpm: f64) -> Bpm {
     Bpm::new(bpm).expect("a fixture's tempos are valid")
+}
+
+/// A sine at `level` whose frequency moves in a straight line from `from` to
+/// `to` hertz over `frames` frames at `rate`. Its sine is `libm`'s, so it's
+/// the same to the bit on every platform.
+fn chirp(frames: usize, rate: u32, from: f64, to: f64, level: f64) -> Vec<f32> {
+    let mut phase = 0.0f64;
+    let mut samples = Vec::with_capacity(frames);
+    for i in 0..frames {
+        samples.push((libm::sin(phase * std::f64::consts::TAU) * level) as f32);
+        let hz = from + (to - from) * i as f64 / frames as f64;
+        phase += hz / f64::from(rate);
+        if phase >= 1.0 {
+            phase -= 1.0;
+        }
+    }
+    samples
 }
 
 fn single_tone() -> Scene {
@@ -560,4 +699,134 @@ fn fader_move() -> Scene {
         song.schedule(at, key, mixer::PAN, pan);
     }
     song.finish(3.25)
+}
+
+/// Spec: audio-clips R1, R3. Clips start on 1.2.3 (frame 36,000) and 2.3.2
+/// (frame 150,000), neither on a block's first frame.
+fn clip_mid_bar() -> Scene {
+    let mut song = Song::new();
+    let chirp = song.chirp();
+    let track = song.track(TrackKind::Audio, "Clips", None);
+    // From 0.5 to 1.75 seconds into the file: 2.5 beats at 120 BPM, as long
+    // as the clip.
+    let middle = AudioData {
+        start: 0.5,
+        end: Some(1.75),
+        ..AudioData::new(chirp)
+    };
+    let at = song.at("1.2.3");
+    song.audio_clip(track, at, Ticks::QUARTER * 5 / 2, middle);
+    // From two seconds in, cut off a beat later, mid-file.
+    let late = AudioData {
+        start: 2.0,
+        ..AudioData::new(chirp)
+    };
+    let at = song.at("2.3.2");
+    song.audio_clip(track, at, Ticks::QUARTER, late);
+    song.finish(4.0)
+}
+
+/// Spec: audio-clips R4, R5. From 1.1.3, the clip plays 0.25 seconds of
+/// pre-roll from its Start marker, then its 0.3-second brace over and over
+/// until it ends, three seconds later.
+fn looped_clip() -> Scene {
+    let mut song = Song::new();
+    let chirp = song.chirp();
+    let track = song.track(TrackKind::Audio, "Loop", None);
+    let looped = AudioData {
+        start: 0.25,
+        looping: true,
+        loop_start: 0.5,
+        loop_end: Some(0.8),
+        gain: 0.5,
+        ..AudioData::new(chirp)
+    };
+    let at = song.at("1.1.3");
+    song.audio_clip(track, at, Ticks::QUARTER * 6, looped);
+    song.finish(3.5)
+}
+
+/// Spec: audio-clips R2, R9, and the mixer under them. The drone is mono at
+/// 44.1 kHz: it plays on both channels, converted to 48 kHz.
+fn overlapping_clips() -> Scene {
+    let mut song = Song::new();
+    let chirp = song.chirp();
+    let drone = song.drone();
+    let first = song.track(TrackKind::Audio, "Chirp", None);
+    song.audio_clip(
+        first,
+        Ticks::ZERO,
+        Ticks::QUARTER * 5,
+        AudioData::new(chirp),
+    );
+    let second = song.track(TrackKind::Audio, "Drone", None);
+    song.volume(second, gain_from_db(-6.0));
+    song.pan(second, 0.5);
+    let late = AudioData {
+        start: 0.1,
+        ..AudioData::new(drone)
+    };
+    let at = song.at("1.3.1");
+    song.audio_clip(second, at, Ticks::QUARTER * 5, late);
+    let seconds = song.to_last_clip();
+    song.finish(seconds)
+}
+
+/// Spec: audio-clips R5, R6, R7. Each clip starts and ends mid-waveform.
+fn clip_fades() -> Scene {
+    let mut song = Song::new();
+    let chirp = song.chirp();
+    let track = song.track(TrackKind::Audio, "Fades", None);
+    let hard = AudioData {
+        start: 0.3,
+        ..AudioData::new(chirp)
+    };
+    let at = song.at("1.1.2");
+    song.audio_clip(track, at, Ticks::QUARTER, hard);
+    let edges = AudioData {
+        start: 1.0,
+        ..AudioData::new(chirp).with_edge_fades()
+    };
+    let at = song.at("1.3.1");
+    song.audio_clip(track, at, Ticks::QUARTER, edges);
+    let long = AudioData {
+        start: 1.5,
+        gain: 1.5,
+        fade_in: 0.25,
+        fade_out: 0.5,
+        ..AudioData::new(chirp)
+    };
+    let at = song.at("2.1.1");
+    song.audio_clip(track, at, Ticks::QUARTER * 2, long);
+    let seconds = song.to_last_clip();
+    song.finish(seconds)
+}
+
+/// Spec: audio-clips R2, R4. 120 BPM for two beats, then a ramp to 90 BPM
+/// over two beats, then 90 BPM.
+fn clip_tempo_change() -> Scene {
+    let mut song = Song::new();
+    let tempo = TempoMap::from_breakpoints([
+        (Ticks::ZERO, bpm(120.0)),
+        (Ticks::QUARTER * 2, bpm(120.0)),
+        (Ticks::QUARTER * 4, bpm(90.0)),
+    ])
+    .expect("the tempo map is valid");
+    song.apply(Command::SetTempo { tempo });
+    let chirp = song.chirp();
+    let across = song.track(TrackKind::Audio, "Across", None);
+    let at = song.at("1.2.1");
+    song.audio_clip(across, at, Ticks::QUARTER * 3, AudioData::new(chirp));
+    let after = song.track(TrackKind::Audio, "After", None);
+    let looped = AudioData {
+        start: 2.0,
+        looping: true,
+        loop_start: 2.0,
+        loop_end: Some(2.25),
+        ..AudioData::new(chirp).with_edge_fades()
+    };
+    let at = song.at("2.1.1");
+    song.audio_clip(after, at, Ticks::QUARTER * 2, looped);
+    let seconds = song.to_last_clip();
+    song.finish(seconds)
 }

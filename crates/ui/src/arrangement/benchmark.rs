@@ -170,9 +170,7 @@ pub fn scene(tracks: usize, clips_per_track: usize, media: usize) -> BenchmarkSc
                 clip_id,
                 Ticks::WHOLE * bar,
                 Ticks::WHOLE * *length,
-                ClipData::Audio(AudioData {
-                    media: media_hash(media_index),
-                }),
+                ClipData::Audio(AudioData::new(media_hash(media_index))),
             );
             clip.name = CLIP_WORDS[random.below(16) as usize].to_owned();
             editor

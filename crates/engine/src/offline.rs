@@ -1,6 +1,6 @@
 //! Offline rendering: the engine without a device and without threads.
 
-use bl_model::{DeviceId, Document};
+use bl_model::{ContentHash, DeviceId, Document};
 
 use crate::EngineConfig;
 use crate::compiler::Compiler;
@@ -51,10 +51,12 @@ pub struct Offline {
     collector: Collector,
     reports: Vec<Report>,
     heap_operations: u64,
+    missing: Vec<ContentHash>,
 }
 
 impl Offline {
-    /// An engine with `config` that makes device nodes with `registry`.
+    /// An engine with `config` that makes device nodes, and finds clips'
+    /// audio, with `registry`.
     #[must_use]
     pub fn new(config: EngineConfig, registry: Registry) -> Self {
         let collector = Collector::new();
@@ -68,6 +70,7 @@ impl Offline {
             collector,
             reports: Vec::new(),
             heap_operations: 0,
+            missing: Vec::new(),
         }
     }
 
@@ -82,11 +85,22 @@ impl Offline {
     /// structure changed, parameter changes if only values did. They take
     /// effect at the start of the next block. Returns the devices no factory
     /// makes a node for, whose tracks' audio passes through where they'd be.
+    /// Media that clips name and the registry's media library can't supply
+    /// is kept for [`Offline::missing_media`].
     pub fn sync(&mut self, document: &Document) -> Vec<DeviceId> {
         let mut update = self.compiler.sync(document);
         let unhosted = std::mem::take(&mut update.unhosted);
+        self.missing = std::mem::take(&mut update.missing);
         self.sender.send_update(update);
         unhosted
+    }
+
+    /// The media that clips sent to the engine by the last
+    /// [`sync`](Self::sync) name and the registry's media library couldn't
+    /// supply. Those clips play silence.
+    #[must_use]
+    pub fn missing_media(&self) -> &[ContentHash] {
+        &self.missing
     }
 
     /// The queue to the processor, for transport commands, scheduled

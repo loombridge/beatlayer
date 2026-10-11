@@ -72,9 +72,7 @@ fn shell_with_clips(clips: &[(i64, i64)]) -> (Shell, Vec<ClipId>) {
                     id,
                     Ticks(start * BAR),
                     Ticks(bars * BAR),
-                    ClipData::Audio(AudioData {
-                        media: ContentHash([7; 32]),
-                    }),
+                    ClipData::Audio(AudioData::new(ContentHash([7; 32]))),
                 ),
             })
             .unwrap();

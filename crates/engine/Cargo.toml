@@ -12,6 +12,9 @@ publish.workspace = true
 bl-commands.workspace = true
 bl-core = { workspace = true, features = ["serde", "schemars"] }
 bl-dsp.workspace = true
+# Clips play decoded media: the media store hands the engine `SampleData`
+# at the engine's rate (WP-1.4; the architecture, "Media and warping").
+bl-media.workspace = true
 # The compiler reads documents (WP-0.9).
 bl-model.workspace = true
 # The lock-free logger for the audio thread.

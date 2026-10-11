@@ -44,7 +44,7 @@
 //! peaks under it, which equals rounding the window's own extremes.
 //!
 //! The format, its rules, and its tests are written up in the waveform peaks
-//! spec, `docs/specs/waveform-peaks.md`.
+//! spec, the waveform peaks spec.
 //!
 //! Everything here runs on worker threads: building decodes and allocates,
 //! and the cache reads and writes files.

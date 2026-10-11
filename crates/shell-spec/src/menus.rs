@@ -1,5 +1,5 @@
 //! The menu bar, as data: every menu, item, and separator of
-//! `docs/ui-parity/menus.md` in Live's order (D16), each item tied to the
+//! the menu reference in Live's order (D16), each item tied to the
 //! command it runs.
 //!
 //! An item reaches its command in one of two ways: directly
@@ -791,10 +791,17 @@ mod tests {
     type Reference = Option<(String, String)>;
 
     /// Each menu-bar section of menus.md, by heading, with its rows and
-    /// separators in order.
-    fn reference_menus() -> Vec<(String, Vec<Reference>)> {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/ui-parity/menus.md");
-        let text = std::fs::read_to_string(path).unwrap();
+    /// separators in order; `None` in a checkout without the planning
+    /// documents (they aren't published yet), where the test skips.
+    fn reference_menus() -> Option<Vec<(String, Vec<Reference>)>> {
+        let docs = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs");
+        if !docs.exists() {
+            eprintln!(
+                "skipped: the UI parity reference isn't published yet, and this checkout doesn't have it"
+            );
+            return None;
+        }
+        let text = std::fs::read_to_string(docs.join("ui-parity/menus.md")).unwrap();
         let mut menus: Vec<(String, Vec<Reference>)> = Vec::new();
         for line in text.lines() {
             if let Some(heading) = line.strip_prefix("## ") {
@@ -816,12 +823,14 @@ mod tests {
             }
         }
         menus.retain(|(_, rows)| !rows.is_empty());
-        menus
+        Some(menus)
     }
 
     #[test]
     fn every_menu_row_and_separator_is_in_the_model_in_order() {
-        let reference = reference_menus();
+        let Some(reference) = reference_menus() else {
+            return;
+        };
         let bar = menu_bar(MenuPlatform::Mac);
         assert_eq!(bar.len(), reference.len(), "nine menus");
         assert!(
@@ -853,7 +862,10 @@ mod tests {
         // D21: Beatlayer's name where Live names its own product; items for
         // Ableton's services and other products left out; everything else
         // in Live's words.
-        let reference: Vec<(String, String)> = reference_menus()
+        let Some(menus) = reference_menus() else {
+            return;
+        };
+        let reference: Vec<(String, String)> = menus
             .into_iter()
             .flat_map(|(_, rows)| rows)
             .flatten()

@@ -1,6 +1,6 @@
 //! Audio device backends per platform behind one full-duplex trait.
 //!
-//! Beatlayer owns this trait (decision D9 in `docs/02-architecture.md`), so a
+//! Beatlayer owns this trait (decision D9 in the architecture notes), so a
 //! backend can change underneath without touching the engine. The pieces:
 //!
 //! - [`Backend`]: one audio API on this machine (Core Audio, WASAPI, ASIO,

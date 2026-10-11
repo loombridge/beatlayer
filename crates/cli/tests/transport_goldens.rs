@@ -1,6 +1,6 @@
 //! WP-1.5's acceptance: in the transport's golden fixtures, every sample is
 //! where the transport puts it. A model of the transport, written here
-//! from `docs/specs/transport.md` and run one frame at a time apart from
+//! from the transport spec and run one frame at a time apart from
 //! the engine's code, says which song position each frame of the render
 //! plays, or that it's stopped; each frame of the render must then be the
 //! beat tone's sample at that position, to the bit, or silence. So a start

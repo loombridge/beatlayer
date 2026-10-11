@@ -15,7 +15,7 @@ use bl_media::{Decoder, SampleData, convert_sample_rate};
 use super::Waker;
 
 /// The longest preview decoded into memory, in seconds: longer files preview
-/// their start, until disk streaming (WP-1.3).
+/// their start, until previews stream from disk with WP-1.3's streamer.
 pub const MAX_PREVIEW_SECONDS: u64 = 600;
 
 /// Decoded audio as the preview voice reads it.

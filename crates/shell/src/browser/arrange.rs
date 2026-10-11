@@ -1,16 +1,21 @@
 //! Adding audio files to the Arrangement, as dropping them from the browser
-//! does (spec: browser R13, R14, R15).
+//! does (spec: browser R13, R14, R15). A clip placed over part of another
+//! replaces that part, as the Arrangement's edits do
+//! ([`crate::arrangement::placing`]), so a track never plays two clips at
+//! once.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use bl_core::time::Ticks;
 use bl_media::MediaStore;
 use bl_model::{
-    AudioData, Clip, ClipData, Command, ContentHash, Document, Editor, TrackId, TrackKind,
+    AudioData, Clip, ClipData, ClipId, Command, ContentHash, Document, Editor, TrackId, TrackKind,
 };
 use bl_shell_spec::browser::{AddResult, AddToArrangementArgs, PlacedClip};
 
 use super::listing::stem;
+use crate::arrangement::placing;
 
 /// The undo step a drop makes. Live's name for it isn't observed yet
 /// (browser, "To observe in Live").
@@ -101,7 +106,8 @@ fn place_below(doc: &Document, track: Option<TrackId>, n: usize) -> (Option<Trac
 
 /// Puts `args.paths` into the Arrangement as one undo step, as
 /// `browser.add_to_arrangement` describes, starting at the insert marker
-/// unless `args.at` says. Every file is read before anything changes, so a
+/// unless `args.at` says. Each clip replaces what it covers of the clips
+/// already on its track. Every file is read before anything changes, so a
 /// file that can't be read changes nothing. Returns what was placed and the
 /// files, for the set's media table.
 ///
@@ -154,6 +160,8 @@ pub fn add_files(
         let mut current = args.track;
         let mut made = 0;
         let mut at = start;
+        // The clips this drop placed, which a later one never clears.
+        let mut placed: BTreeSet<ClipId> = BTreeSet::new();
         for (index, file) in files.iter().enumerate() {
             let new_track = if args.spread {
                 index > 0 || args.track.is_none()
@@ -189,6 +197,8 @@ pub fn add_files(
                 }),
             );
             clip.name.clone_from(&file.name);
+            placing::clear(editor, track, at, at.saturating_add(length), &placed)?;
+            placed.insert(id);
             editor.apply(Command::CreateClip { track, clip })?;
             result.clips.push(PlacedClip {
                 clip: id,

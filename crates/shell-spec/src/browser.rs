@@ -3,10 +3,10 @@
 //! Arrangement.
 //!
 //! [`register`] adds their specs, which are pure data, so `cargo xtask` can
-//! check them and list them in `docs/commands.md`; `bl-shell` runs them by
-//! ID. Commands that read folders or files outside the project, or play
+//! check them and list them in the command reference; `bl-shell` runs them
+//! by ID. Commands that read folders or files outside the project, or play
 //! through the audio device, are in the external class, so an agent asks the
-//! person first. The behaviour they follow is in `docs/specs/browser.md`.
+//! person first. The behaviour they follow is in the browser spec.
 
 use bl_commands::Context::{Arrangement, Browser, BrowserSearch, BrowserSidebar, Global};
 use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};
@@ -645,7 +645,8 @@ fn specs() -> Vec<CommandSpec> {
                 "Loads the browser's selected audio files into the Arrangement, as Enter or a \
                  double-click does: onto the selected track at the insert marker if it's an \
                  audio track, otherwise onto a new audio track below the last one, one after \
-                 another, as one undo step. Reads the files, outside the project.",
+                 another, as one undo step. A clip placed over part of another replaces that \
+                 part. Reads the files, outside the project.",
             )
             .permission(Permission::External)
             .context(Browser)
@@ -659,9 +660,10 @@ fn specs() -> Vec<CommandSpec> {
                  marker), one after another; or, with no `track`, onto a new audio track below \
                  the last track (the drop area), named after the first file. With `spread`, each \
                  file goes on a track of its own, new tracks below the target. Each clip is named \
-                 after its file and lasts as long as the file plays at the song's tempo. One undo \
-                 step. Reads the files, outside the project, and registers them so the set keeps \
-                 them.",
+                 after its file and lasts as long as the file plays at the song's tempo. A clip \
+                 placed over part of another replaces that part: the other is shortened, split \
+                 around it, or removed, so a track never plays two clips at once. One undo step. \
+                 Reads the files, outside the project, and registers them so the set keeps them.",
             )
             .permission(Permission::External)
             .contexts([Arrangement, Browser])

@@ -1,7 +1,7 @@
 //! The browser, driven headless through `Shell::run` and `Shell::invoke`, as
 //! agents, menus, and keys drive it (WP-1.10; D17): places, listing, search,
 //! the index, preview through the null device, and adding files to the
-//! Arrangement. The behaviour is in `docs/specs/browser.md`.
+//! Arrangement. The behaviour is in the browser spec.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -758,6 +758,104 @@ fn dropping_on_an_audio_track_places_a_clip_snapped() {
         1
     );
     assert_eq!(shell.editor().undo_history().len(), 1);
+}
+
+// Spec: browser R13. A drop over part of a clip replaces that part, as the
+// Arrangement's edits do: the clip is split around it, shortened, or has
+// its start trimmed (playing on from where it was), all in the drop's one
+// undo step.
+#[test]
+fn a_drop_replaces_what_it_covers_in_one_step() {
+    let scratch = Scratch::new("drop-over");
+    let (mut shell, root) = shell_with_library(&scratch);
+    let track = audio_tracks(&shell)[0];
+    let lane = |shell: &Shell| {
+        let mut clips: Vec<(i64, i64, i64)> = shell
+            .editor()
+            .document()
+            .track(track)
+            .unwrap()
+            .clips()
+            .map(|c| (c.start.get(), c.end().get(), c.offset.get()))
+            .collect();
+        clips.sort_unstable();
+        clips
+    };
+    let (looped, pad) = (
+        text(&root.join("Loop 120.wav")),
+        text(&root.join("Samples/Pads/Warm Pad.wav")),
+    );
+    // A four-bar clip from the one-bar loop.
+    let placed: AddResult = run(
+        &mut shell,
+        ids::ADD_TO_ARRANGEMENT,
+        json!({ "paths": [looped], "track": track, "at": 0 }),
+    );
+    let long = placed.clips[0].clip;
+    shell
+        .run(
+            "clip.set_length",
+            json!({ "clip": long, "length": 4 * BAR }),
+        )
+        .unwrap();
+    let before = shell.editor().document().clone();
+    let steps = shell.editor().undo_history().len();
+
+    // The half-bar pad inside it splits it around the pad.
+    let _: AddResult = run(
+        &mut shell,
+        ids::ADD_TO_ARRANGEMENT,
+        json!({ "paths": [pad], "track": track, "at": BAR }),
+    );
+    assert_eq!(
+        lane(&shell),
+        [
+            (0, BAR, 0),
+            (BAR, 3 * BAR / 2, 0),
+            (3 * BAR / 2, 4 * BAR, 3 * BAR / 2),
+        ]
+    );
+    assert_eq!(shell.editor().undo_history().len(), steps + 1, "one step");
+    shell.run("edit.undo", json!({})).unwrap();
+    assert_eq!(
+        *shell.editor().document(),
+        before,
+        "undo restores it exactly"
+    );
+    shell.run("edit.redo", json!({})).unwrap();
+
+    // The loop over the pad's end and the second part's start: the pad is
+    // shortened, and the part starts later, playing on from where it was.
+    let _: AddResult = run(
+        &mut shell,
+        ids::ADD_TO_ARRANGEMENT,
+        json!({ "paths": [looped], "track": track, "at": 5 * BAR / 4 }),
+    );
+    assert_eq!(
+        lane(&shell),
+        [
+            (0, BAR, 0),
+            (BAR, 5 * BAR / 4, 0),
+            (5 * BAR / 4, 9 * BAR / 4, 0),
+            (9 * BAR / 4, 4 * BAR, 9 * BAR / 4),
+        ]
+    );
+    // One that covers a clip whole removes it (the pad), and trims the
+    // start of the one it covers part of.
+    let _: AddResult = run(
+        &mut shell,
+        ids::ADD_TO_ARRANGEMENT,
+        json!({ "paths": [looped], "track": track, "at": BAR }),
+    );
+    assert_eq!(
+        lane(&shell),
+        [
+            (0, BAR, 0),
+            (BAR, 2 * BAR, 0),
+            (2 * BAR, 9 * BAR / 4, 3 * BAR / 4),
+            (9 * BAR / 4, 4 * BAR, 9 * BAR / 4),
+        ]
+    );
 }
 
 // Spec: browser R13.

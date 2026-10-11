@@ -33,6 +33,8 @@ bl-control = { path = "crates/control" }
 bl-link = { path = "crates/link" }
 bl-interop = { path = "crates/interop" }
 bl-ui = { path = "crates/ui" }
+bl-shell = { path = "crates/shell" }
+bl-shell-spec = { path = "crates/shell-spec" }
 
 [workspace.lints.rust]
 rust_2018_idioms = { level = "warn", priority = -1 }
@@ -47,3 +49,49 @@ dbg_macro = "warn"
 todo = "warn"
 undocumented_unsafe_blocks = "warn"
 unimplemented = "warn"
+
+# Decoding and sample-rate conversion run optimised in debug and test builds
+# too, so those builds stream audio from disk in real time (WP-1.3).
+# Unoptimised, they take about 2 ms to decode and convert a 4,096-frame
+# block, which can't keep 64 streams fed. bl-media is on the list because
+# the converter's sample adapters are compiled where they're used, there.
+[profile.dev.package.bl-media]
+opt-level = 3
+[profile.dev.package.symphonia]
+opt-level = 3
+[profile.dev.package.symphonia-core]
+opt-level = 3
+[profile.dev.package.symphonia-common]
+opt-level = 3
+[profile.dev.package.symphonia-metadata]
+opt-level = 3
+[profile.dev.package.symphonia-format-riff]
+opt-level = 3
+[profile.dev.package.symphonia-format-ogg]
+opt-level = 3
+[profile.dev.package.symphonia-format-isomp4]
+opt-level = 3
+[profile.dev.package.symphonia-codec-pcm]
+opt-level = 3
+[profile.dev.package.symphonia-codec-adpcm]
+opt-level = 3
+[profile.dev.package.symphonia-codec-alac]
+opt-level = 3
+[profile.dev.package.symphonia-codec-aac]
+opt-level = 3
+[profile.dev.package.symphonia-codec-vorbis]
+opt-level = 3
+[profile.dev.package.symphonia-bundle-flac]
+opt-level = 3
+[profile.dev.package.symphonia-bundle-mp3]
+opt-level = 3
+[profile.dev.package.rubato]
+opt-level = 3
+[profile.dev.package.audioadapter]
+opt-level = 3
+[profile.dev.package.audioadapter-buffers]
+opt-level = 3
+[profile.dev.package.realfft]
+opt-level = 3
+[profile.dev.package.rustfft]
+opt-level = 3

@@ -294,6 +294,34 @@ const ENTRIES: &[Entry] = &[
             and beats, not where clips sit in ticks.",
     },
     Entry {
+        id: "transport.set_loop",
+        action: Action::Apply("set_loop"),
+        label: "Set Loop Brace",
+        permission: Permission::Edit,
+        contexts: &[Global, Arrangement],
+        keys: &[],
+        description: "Moves the Arrangement loop brace to start at `start` and run for `length` \
+            ticks (705,600 to the quarter note; a 4/4 bar is 2,822,400), as the Control Bar's \
+            Loop Start and Loop Length fields do. It doesn't switch the loop on or off: use \
+            `transport.set_loop_enabled` for that. While the loop is on, playback that reaches \
+            the brace's end jumps back to its start; playback that starts at or after the end \
+            plays on. The start must be 0 (1.1.1) or later and the length more than 0. The \
+            brace is saved with the set, and undo moves it back.",
+    },
+    Entry {
+        id: "transport.set_loop_enabled",
+        action: Action::Apply("set_loop_enabled"),
+        label: "Arrangement Loop On/Off",
+        permission: Permission::Edit,
+        contexts: &[Global, Arrangement],
+        keys: &[],
+        description: "Switches the Arrangement loop on or off, as the Control Bar's Loop switch \
+            does, leaving the brace where it is. With it on, playback that reaches the brace's \
+            end jumps back to its start, on the exact sample, until it's switched off or \
+            playback stops. Use `transport.set_loop` to move the brace first. The switch is \
+            saved with the set, and undo switches it back.",
+    },
+    Entry {
         id: "track.create",
         action: Action::Apply("create_track"),
         label: "Insert Track",
@@ -315,13 +343,14 @@ const ENTRIES: &[Entry] = &[
         id: "track.delete",
         action: Action::Apply("delete_track"),
         label: "Delete Track",
-        permission: Permission::Edit,
+        permission: Permission::Destructive,
         contexts: &[TrackHeaders],
         keys: &[Key::Runs("S-TRACK-018")],
         description: "Deletes a track with its clips and devices. Deleting a group track also \
             deletes every track inside it. Use it to remove a track the song no longer needs; \
             to silence a track and keep it, use `mixer.set_mute`. Undo restores everything it \
-            deleted. The Main track can't be deleted.",
+            deleted, but because it removes the person's work an agent asks first. The Main \
+            track can't be deleted.",
     },
     Entry {
         id: "track.move",
@@ -420,11 +449,12 @@ const ENTRIES: &[Entry] = &[
         id: "clip.delete",
         action: Action::Apply("delete_clip"),
         label: "Delete Clip",
-        permission: Permission::Edit,
+        permission: Permission::Destructive,
         contexts: &[Arrangement],
         keys: &[Key::Runs("S-EDIT-005")],
-        description: "Deletes a clip from the arrangement. Undo restores it. To keep a clip \
-            but stop it playing, use `clip.set_mute`.",
+        description: "Deletes a clip from the arrangement. Undo restores it, but because it \
+            removes the person's work an agent asks first. To keep a clip but stop it playing, \
+            use `clip.set_mute`.",
     },
     Entry {
         id: "clip.move",
@@ -508,11 +538,12 @@ const ENTRIES: &[Entry] = &[
         id: "device.remove",
         action: Action::Apply("remove_device"),
         label: "Delete Device",
-        permission: Permission::Edit,
+        permission: Permission::Destructive,
         contexts: &[DeviceView],
         keys: &[Key::Runs("S-EDIT-005")],
         description: "Deletes a device from its track's chain, with its settings. Undo \
-            restores it. To bypass a device but keep it, use `device.set_enabled`.",
+            restores it, but because it removes the person's work an agent asks first. To \
+            bypass a device but keep it, use `device.set_enabled`.",
     },
     Entry {
         id: "device.move",

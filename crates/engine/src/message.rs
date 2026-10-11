@@ -6,7 +6,7 @@ use bl_model::ParamId;
 use crate::gc::Program;
 use crate::node::{NodeData, NodeKey, ParamValue};
 
-/// When a parameter change takes effect.
+/// When a parameter change or a transport command takes effect.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum When {
     /// At the start of the next block the audio thread runs.
@@ -55,16 +55,48 @@ impl ParamEvent {
     }
 }
 
-/// Starts, stops, or moves the song. The skeleton of the transport; the
-/// whole of it (loop, follow, tempo-map following) is WP-1.5.
+/// Starts, stops, or moves the song, or sets the Arrangement loop: the
+/// transport, as `docs/specs/transport.md` specifies it.
+///
+/// The transport keeps three things: the *insert marker*, where Play
+/// starts; the *song position* (the playhead), the next frame to play,
+/// which stays where playback stopped so Continue can resume there; and the
+/// loop, if it's on. Every command takes effect on a frame: the start of
+/// the next block, or the frame it's sent for
+/// ([`Sender::transport_at`](crate::Sender::transport_at)).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TransportCommand {
-    /// Starts playing from the song position.
+    /// Plays from the insert marker. While playing, starts again from it.
     Play,
-    /// Stops, keeping the song position.
+    /// While playing, stops, keeping the song position for
+    /// [`Continue`](Self::Continue). While stopped, returns the insert
+    /// marker and the song position to 1.1.1 (tick 0), as a second press of
+    /// Stop does.
     Stop,
-    /// Moves the song position.
+    /// Plays on from the song position: where playback last stopped. Does
+    /// nothing while playing.
+    Continue,
+    /// Stops while playing (never returning to 1.1.1), and plays from the
+    /// insert marker while stopped: the space bar.
+    PlayStop,
+    /// Moves the insert marker. While playing, playback jumps there too;
+    /// while stopped, the song position stays where playback stopped. A
+    /// position before 1.1.1 is taken as 1.1.1.
     Locate(Ticks),
+    /// Moves the insert marker to the song position.
+    InsertMarkerToPlayhead,
+    /// Sets the Arrangement loop, or switches it off with `None`.
+    SetLoop(Option<LoopRegion>),
+}
+
+/// The part of the song the Arrangement loop repeats: playback that reaches
+/// `end` jumps back to `start`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct LoopRegion {
+    /// Where the loop starts.
+    pub start: Ticks,
+    /// Where it ends: the first position it doesn't play.
+    pub end: Ticks,
 }
 
 /// What a scheduled command does when the song reaches its position.
@@ -79,9 +111,10 @@ pub enum Action {
         /// The new value.
         value: ParamValue,
     },
-    /// Stops or moves the song on that frame. ([`TransportCommand::Play`]
-    /// does nothing here: a scheduled command only fires while the song
-    /// plays.)
+    /// Runs a transport command on that frame. A scheduled command fires
+    /// only while the song plays, so [`TransportCommand::Play`] and
+    /// [`TransportCommand::Continue`] do nothing here, and
+    /// [`TransportCommand::Stop`] and [`TransportCommand::PlayStop`] stop.
     Transport(TransportCommand),
     /// Nothing in the engine. The report tells the main thread it's time, for
     /// a command whose effect is on the document (D17).
@@ -132,7 +165,7 @@ pub(crate) enum Message {
     Program(Program),
     Param(ParamEvent),
     Data { key: NodeKey, data: NodeData },
-    Transport(TransportCommand),
+    Transport(TransportCommand, When),
     Schedule(ScheduledCommand),
     Cancel(u64),
 }

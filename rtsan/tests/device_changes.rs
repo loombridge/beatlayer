@@ -1,7 +1,10 @@
 //! The engine on a device through device changes (WP-1.13), under
 //! RealtimeSanitizer: a song plays on the null backend's simulated
-//! interface, paced in real time, while the interface is unplugged and
-//! plugged back in, changes its sample rate, stalls, and sleeps and wakes.
+//! interface, paced in real time, round the Arrangement loop, while the
+//! interface is unplugged and plugged back in, changes its sample rate,
+//! stalls, and sleeps and wakes. A locate and a loop change for a frame of
+//! the engine clock, sent while it's unplugged, land on the new stream's
+//! audio thread.
 //! Every block on each stream's real-time thread, the hand-off of the
 //! engine's callback and its first blocks included, is a real-time section;
 //! RTSan stops the process at the first allocation, free, lock, or blocking
@@ -19,10 +22,12 @@ use bl_audio_io::{
     Backend, BackendKind, DeviceId, DeviceSelector, NullBackend, NullControl, NullOptions,
     StreamRequest,
 };
-use bl_core::time::SampleRate;
+use bl_core::time::{SampleRate, Ticks};
 use bl_engine::nodes::{TEST_TONE, test_tone};
 use bl_engine::testing::{self, Probe};
-use bl_engine::{AudioEngine, DeviceStatus, EngineConfig, SupervisorOptions};
+use bl_engine::{
+    AudioEngine, DeviceStatus, EngineConfig, LoopRegion, SupervisorOptions, TransportCommand, When,
+};
 use bl_model::{Command, Device, DeviceKind, Editor, TrackKind};
 
 // Without `--cfg bl_rtsan` (`rtsan/.cargo/config.toml`), this doesn't build.
@@ -57,6 +62,16 @@ fn song() -> Editor {
             index: 0,
             device,
         })
+        .unwrap();
+    // A loop of a beat from beat 2, so the song wraps every half second.
+    editor
+        .apply(Command::SetLoop {
+            start: Ticks::QUARTER,
+            length: Ticks::QUARTER,
+        })
+        .unwrap();
+    editor
+        .apply(Command::SetLoopEnabled { enabled: true })
         .unwrap();
     editor
 }
@@ -126,12 +141,33 @@ fn device_changes_pass_under_rtsan() {
 
     control.unplug("usb");
     interrupted(&audio);
+    // Held while unplugged: a locate, and a loop of a beat from beat 9 for
+    // 50 ms after the stream closed.
+    let clock = audio.state().clock;
+    audio.engine().locate(Ticks::from_quarters(8));
+    audio.engine().transport_at(
+        TransportCommand::SetLoop(Some(LoopRegion {
+            start: Ticks::from_quarters(8),
+            end: Ticks::from_quarters(9),
+        })),
+        When::Frame(clock + 2_400),
+    );
     control.replug("usb");
     audio.engine().play();
     plays_at(&mut audio, 48_000, 9_600);
+    let state = audio.state();
+    assert_eq!(state.insert_marker, Ticks::from_quarters(8));
+    assert_eq!(
+        state.loop_region.map(|region| region.start),
+        Some(Ticks::from_quarters(8))
+    );
 
     control.set_sample_rate("usb", 44_100);
     plays_at(&mut audio, 44_100, 8_820);
+    // On round the carried loop at the new rate, for more than one turn.
+    audio.engine().transport(TransportCommand::Continue);
+    plays_at(&mut audio, 44_100, 26_460);
+    assert!(audio.state().playing);
 
     control.stall();
     thread::sleep(Duration::from_millis(400));

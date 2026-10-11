@@ -9,16 +9,15 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use bl_core::time::Ticks;
 use bl_model::Document;
 use rtrb::{Producer, PushError, RingBuffer};
 
 use crate::EngineConfig;
 use crate::compiler::{Compiler, Update};
 use crate::gc::{Collector, DROP_PERIOD, DropThread, GcHandle};
-use crate::message::{Message, ParamEvent, Report, ScheduledCommand, TransportCommand};
+use crate::message::{Message, ParamEvent, Report, ScheduledCommand, TransportCommand, When};
 use crate::node::{NodeData, NodeKey};
-use crate::processor::{Carry, Processor};
+use crate::processor::{Carry, Processor, starts_playback};
 use crate::registry::Registry;
 use crate::state::{EngineState, Monitor};
 
@@ -61,10 +60,14 @@ pub struct Sender {
 }
 
 impl Sender {
-    /// Sends a compiler update: its program, then its parameter changes.
+    /// Sends a compiler update: its program, then its transport commands (the
+    /// Arrangement loop), then its parameter changes.
     pub fn send_update(&mut self, update: Update) {
         if let Some(program) = update.program {
             self.push(Message::Program(program));
+        }
+        for command in update.transport {
+            self.push(Message::Transport(command, When::Now));
         }
         for event in update.params {
             self.push(Message::Param(event));
@@ -86,7 +89,19 @@ impl Sender {
     /// Sends a transport command, which takes effect at the start of the
     /// next block.
     pub fn transport(&mut self, command: TransportCommand) {
-        self.push(Message::Transport(command));
+        self.transport_at(command, When::Now);
+    }
+
+    /// Sends a transport command that takes effect on a frame of the engine
+    /// clock ([`When::Frame`]), splitting the block it falls in, so a start
+    /// lands on its exact sample whatever the block size. A frame already
+    /// past takes effect at the start of the next block. Commands for the
+    /// same frame take effect in the order they were sent. As many as
+    /// [`EngineConfig::max_scheduled`](crate::EngineConfig::max_scheduled)
+    /// can wait for their frames; the engine drops and counts any more
+    /// ([`EngineCounters::transport_overflowed`](crate::EngineCounters::transport_overflowed)).
+    pub fn transport_at(&mut self, command: TransportCommand, at: When) {
+        self.push(Message::Transport(command, at));
     }
 
     /// Schedules a command at a musical position.
@@ -167,7 +182,7 @@ enum Request {
     Sync(Box<Document>),
     Param(ParamEvent),
     Data(NodeKey, NodeData),
-    Transport(TransportCommand),
+    Transport(TransportCommand, When),
     Schedule(ScheduledCommand),
     Cancel(u64),
     Flush(mpsc::Sender<()>),
@@ -183,19 +198,26 @@ enum Request {
 /// new processor goes.
 struct Restart {
     config: EngineConfig,
-    carry: Carry,
+    carry: Option<Carry>,
     reply: mpsc::Sender<Processor>,
 }
 
-/// What reaches the compiler thread while no processor runs, for the next.
-#[derive(Debug, Default)]
-struct Detached {
-    /// The latest locate.
-    locate: Option<Ticks>,
-    /// Commands scheduled meanwhile.
-    scheduled: Vec<ScheduledCommand>,
-    /// Commands cancelled meanwhile, which may be among the carried ones.
-    cancelled: Vec<u64>,
+/// What reaches the compiler thread while no processor runs, held for the
+/// next in the order it came: the song is stopped meanwhile, so these act
+/// as they would on a stopped transport once it starts.
+type Detached = Vec<Held>;
+
+/// A request held while no processor runs.
+#[derive(Debug)]
+enum Held {
+    /// A transport command for when it was sent: a locate, a stop, a loop
+    /// change from a request or from a document, at once or on its frame of
+    /// the clock. Nothing that starts the song is held.
+    Transport(TransportCommand, When),
+    /// A command scheduled meanwhile.
+    Schedule(ScheduledCommand),
+    /// A cancellation, perhaps of a carried command.
+    Cancel(u64),
 }
 
 /// Restarts the engine from another thread: the hook a device supervisor
@@ -207,21 +229,24 @@ pub(crate) struct Restarter {
 
 impl Restarter {
     /// Tells the compiler thread no processor runs: until the next restart,
-    /// documents are kept without compiling, a locate and scheduled commands
-    /// wait, and play, parameter changes, and node data are dropped.
+    /// documents are kept without compiling; transport commands (with their
+    /// times), scheduled commands, and cancellations wait for the next
+    /// processor; and play, parameter changes, and node data are dropped.
     pub(crate) fn detach(&self) {
         let _ = self.requests.send(Request::Detach);
     }
 
     /// A new processor for `config`, with the latest document compiled for
-    /// it, the song at `carry`'s position (stopped), and its scheduled
-    /// commands waiting. The engine's [`Monitor`] moves to the new
-    /// processor. `None` if the compiler thread doesn't answer within
-    /// `timeout`.
+    /// it, the transport and the commands `carry` hands on taken over at
+    /// its rate, the song stopped, and then what was sent while detached.
+    /// With no `carry` (the device's first stream, or a processor that never
+    /// came back), the song starts at 1.1.1 with the document's loop. The
+    /// engine's [`Monitor`] moves to the new processor. `None` if the
+    /// compiler thread doesn't answer within `timeout`.
     pub(crate) fn restart(
         &self,
         config: EngineConfig,
-        carry: Carry,
+        carry: Option<Carry>,
         timeout: Duration,
     ) -> Option<Processor> {
         let (reply, processor) = mpsc::channel();
@@ -243,7 +268,7 @@ impl std::fmt::Debug for Request {
             Self::Sync(_) => "Sync",
             Self::Param(_) => "Param",
             Self::Data(..) => "Data",
-            Self::Transport(_) => "Transport",
+            Self::Transport(..) => "Transport",
             Self::Schedule(_) => "Schedule",
             Self::Cancel(_) => "Cancel",
             Self::Flush(_) => "Flush",
@@ -397,19 +422,33 @@ impl Engine {
         self.gc.data(value)
     }
 
-    /// Starts the song.
+    /// Plays from the insert marker ([`TransportCommand::Play`]).
     pub fn play(&self) {
-        self.request(Request::Transport(TransportCommand::Play));
+        self.transport(TransportCommand::Play);
     }
 
-    /// Stops the song.
+    /// Stops the song, or returns it to 1.1.1 if it's stopped
+    /// ([`TransportCommand::Stop`]).
     pub fn stop(&self) {
-        self.request(Request::Transport(TransportCommand::Stop));
+        self.transport(TransportCommand::Stop);
     }
 
-    /// Moves the song position.
+    /// Moves the insert marker, and the playhead if the song is playing
+    /// ([`TransportCommand::Locate`]).
     pub fn locate(&self, at: bl_core::time::Ticks) {
-        self.request(Request::Transport(TransportCommand::Locate(at)));
+        self.transport(TransportCommand::Locate(at));
+    }
+
+    /// Sends a transport command, which takes effect at the start of the
+    /// audio thread's next block.
+    pub fn transport(&self, command: TransportCommand) {
+        self.transport_at(command, When::Now);
+    }
+
+    /// Sends a transport command for a frame of the engine clock (see
+    /// [`Sender::transport_at`]).
+    pub fn transport_at(&self, command: TransportCommand, at: When) {
+        self.request(Request::Transport(command, at));
     }
 
     /// Schedules a command at a musical position (D17).
@@ -507,7 +546,7 @@ fn compile_loop(
 ) {
     let mut batch = Vec::new();
     let mut flushes: Vec<mpsc::Sender<()>> = Vec::new();
-    let mut detached = Detached::default();
+    let mut detached = Detached::new();
     loop {
         // While messages wait for room, look again every millisecond.
         let first = if sender.as_ref().is_some_and(|s| s.backlog() > 0) {
@@ -536,7 +575,11 @@ fn compile_loop(
                         continue;
                     }
                     let Some(sender) = sender.as_mut() else {
-                        compiler.remember(&document);
+                        // A loop edit still reaches the next processor, after
+                        // the loop it carries over.
+                        if let Some(command) = compiler.remember(&document) {
+                            detached.push(Held::Transport(command, When::Now));
+                        }
                         counts.deferred.fetch_add(1, Relaxed);
                         continue;
                     };
@@ -559,33 +602,31 @@ fn compile_loop(
                         sender.send_data(key, data);
                     }
                 }
-                Request::Transport(command) => match sender.as_mut() {
-                    Some(sender) => sender.transport(command),
-                    // Starting the song while no device plays it would
-                    // start it the moment one comes back; a locate waits.
+                Request::Transport(command, at) => match sender.as_mut() {
+                    Some(sender) => sender.transport_at(command, at),
+                    // Spec: device-changes R7. Starting the song while no
+                    // device plays it would start it the moment one comes
+                    // back; everything else waits, with its time.
                     None => {
-                        if let TransportCommand::Locate(at) = command {
-                            detached.locate = Some(at);
+                        if !starts_playback(command) {
+                            detached.push(Held::Transport(command, at));
                         }
                     }
                 },
                 Request::Schedule(command) => match sender.as_mut() {
                     Some(sender) => sender.schedule(command),
-                    None => detached.scheduled.push(command),
+                    None => detached.push(Held::Schedule(command)),
                 },
                 Request::Cancel(id) => match sender.as_mut() {
                     Some(sender) => sender.cancel(id),
-                    None => {
-                        detached.scheduled.retain(|command| command.id != id);
-                        detached.cancelled.push(id);
-                    }
+                    None => detached.push(Held::Cancel(id)),
                 },
                 Request::Flush(ack) => flushes.push(ack),
                 Request::Detach => {
                     // Frees the queue to the processor that stopped, and
-                    // anything still waiting for room in it.
+                    // anything still waiting for room in it. What's held
+                    // already (a second detach) stays held.
                     sender = None;
-                    detached = Detached::default();
                 }
                 Request::Restart(restart) => {
                     let Restart {
@@ -620,13 +661,17 @@ fn compile_loop(
     }
 }
 
-/// Makes a processor for `config` and readies it: the latest document
-/// compiled anew, the song located at the carried position (or a locate
-/// sent while detached), stopped, and the scheduled commands waiting.
+/// Makes a processor for `config` and readies it, in order: the latest
+/// document compiled anew for it; the transport and the commands `carry`
+/// hands on, taken over at the new rate with the song stopped
+/// (device-changes R7); then what was sent while detached, in the order it
+/// came, as on a stopped transport. A transport command held for a frame
+/// of the old clock lands as long after the restart as it was after the
+/// stream closed.
 fn restart_with(
     compiler: &mut Compiler,
     config: EngineConfig,
-    carry: Carry,
+    carry: Option<Carry>,
     detached: Detached,
     counts: &Counts,
 ) -> (Sender, Processor, Monitor) {
@@ -636,19 +681,37 @@ fn restart_with(
         counts.programs.fetch_add(1, Relaxed);
     }
     sender.send_update(update);
-    sender.transport(TransportCommand::Locate(
-        detached.locate.unwrap_or(carry.position),
-    ));
-    let carried = carry
-        .scheduled
-        .into_iter()
-        .filter(|command| !detached.cancelled.contains(&command.id));
-    for command in carried.chain(detached.scheduled) {
-        sender.schedule(command);
-    }
     // The processor isn't on a device yet, so this thread can drain its
-    // queue: it starts with its program, position, and commands in place,
-    // and its state shows them.
+    // queue: the program is in place before the carried positions fall on
+    // its frames, and the processor starts with everything in place, its
+    // state showing it.
+    deliver(&mut sender, &mut processor);
+    if let Some(carry) = &carry {
+        processor.take_over(carry);
+    }
+    for held in detached {
+        match held {
+            Held::Transport(command, at) => {
+                let at = match (at, &carry) {
+                    (When::Frame(frame), Some(carry)) => {
+                        When::Frame(carry.frame_at(frame, config.sample_rate))
+                    }
+                    _ => at,
+                };
+                sender.transport_at(command, at);
+            }
+            Held::Schedule(command) => sender.schedule(command),
+            Held::Cancel(id) => sender.cancel(id),
+        }
+    }
+    deliver(&mut sender, &mut processor);
+    counts.restarts.fetch_add(1, Relaxed);
+    (sender, processor, monitor)
+}
+
+/// Moves everything `sender` holds into `processor`, which isn't on a
+/// device yet.
+fn deliver(sender: &mut Sender, processor: &mut Processor) {
     loop {
         let sent = sender.flush();
         processor.prime();
@@ -656,6 +719,4 @@ fn restart_with(
             break;
         }
     }
-    counts.restarts.fetch_add(1, Relaxed);
-    (sender, processor, monitor)
 }

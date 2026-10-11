@@ -2,7 +2,7 @@
 
 use std::time::Instant;
 
-use bl_core::time::{Frames, TempoMap, Ticks};
+use bl_core::time::{Frames, SampleRate, TempoMap, Ticks};
 use bl_model::ParamId;
 use bl_rt::log::{Level, Writer};
 use bl_rt::rt_log;
@@ -11,7 +11,7 @@ use rtrb::{Consumer, Producer};
 use crate::EngineConfig;
 use crate::gc::Program;
 use crate::message::{
-    Action, Message, ParamEvent, Report, ScheduledCommand, TransportCommand, When,
+    Action, LoopRegion, Message, ParamEvent, Report, ScheduledCommand, TransportCommand, When,
 };
 use crate::node::{NodeData, NodeEvent, NodeKey, ParamValue, TransportInfo};
 use crate::program::{EngineProgram, Resolved};
@@ -35,15 +35,69 @@ struct Scheduled {
     frame: Frames,
 }
 
+/// A transport command waiting for its frame of the engine clock.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Timed {
+    frame: u64,
+    command: TransportCommand,
+}
+
+/// The Arrangement loop in song frames, under the running program's tempo
+/// map. Only a loop at least one frame long is kept.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct LoopFrames {
+    start: Frames,
+    end: Frames,
+}
+
 /// What one processor hands the next when the engine restarts on a device
-/// (WP-1.13): where the song was, in beats, and the scheduled commands that
-/// hadn't fired.
-#[derive(Clone, Debug, Default, PartialEq)]
+/// (WP-1.13): the engine clock, the transport (the song position and the
+/// insert marker, in beats, and the Arrangement loop), and the commands
+/// still waiting: scheduled ones for their beats, and transport commands
+/// for their frames of the clock. The next processor takes it over at its
+/// own rate, with the song stopped ([`Processor::take_over`]).
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Carry {
-    /// The song position.
+    /// The engine clock when the stream closed. The next processor's clock
+    /// carries on from it, so a frame sent for the clock means the same
+    /// frame either side of a restart.
+    pub(crate) clock: u64,
+    /// The rate the clock ran at.
+    pub(crate) sample_rate: SampleRate,
+    /// The song position: where playback stopped, where Continue resumes.
     pub(crate) position: Ticks,
+    /// The insert marker: where Play starts.
+    pub(crate) insert_marker: Ticks,
+    /// The Arrangement loop, if it was on.
+    pub(crate) loop_region: Option<LoopRegion>,
     /// Scheduled commands waiting to fire, in the order they arrived.
     pub(crate) scheduled: Vec<ScheduledCommand>,
+    /// Transport commands waiting for their frames, in the order they came.
+    timed: Vec<Timed>,
+}
+
+impl Carry {
+    /// The frame of the next processor's clock, running at `rate`, for
+    /// `frame` of this one's: as long after the restart as it was after the
+    /// stream closed. A frame already past stays past, so its command runs
+    /// as soon as the next processor starts.
+    pub(crate) fn frame_at(&self, frame: u64, rate: SampleRate) -> u64 {
+        if frame <= self.clock {
+            return frame;
+        }
+        let ahead = (frame - self.clock) as f64 * rate.as_f64() / self.sample_rate.as_f64();
+        // A float-to-integer cast saturates.
+        self.clock.saturating_add(ahead.round() as u64)
+    }
+}
+
+/// Whether a transport command starts the song from where it's stopped,
+/// which nothing does by itself across a restart (device-changes R7).
+pub(crate) fn starts_playback(command: TransportCommand) -> bool {
+    matches!(
+        command,
+        TransportCommand::Play | TransportCommand::Continue | TransportCommand::PlayStop
+    )
 }
 
 /// The engine on the audio thread: it runs the current program once per
@@ -58,9 +112,21 @@ pub(crate) struct Carry {
 ///    on the spot, their surviving nodes moved across from the one before),
 ///    parameter changes, node data, transport commands, and scheduled
 ///    commands;
-/// 2. runs the program over the block, split where a scheduled command
-///    fires so the command lands on its exact frame;
+/// 2. runs the program over the block, split wherever the transport acts
+///    (a transport command's frame, a scheduled command's song position,
+///    the loop's end) so each lands on its exact frame, and every part
+///    plays one unbroken stretch of the song;
 /// 3. publishes the playhead, meters, and CPU load for the UI.
+///
+/// # The transport
+///
+/// The processor owns the transport (`docs/specs/transport.md`): whether
+/// the song plays, the song position (the next frame to play), the insert
+/// marker (where Play starts), and the Arrangement loop. Positions in ticks
+/// fall on frames through the running program's tempo map; when a new
+/// program changes the map, the playhead keeps its beat and the loop its
+/// bars. With the loop on, playback that reaches the loop's end goes on
+/// from its start on the very next frame.
 ///
 /// What it drops (old programs, removed nodes, replaced data) is freed on
 /// the drop thread.
@@ -79,6 +145,14 @@ pub struct Processor {
     clock: u64,
     playing: bool,
     position: Frames,
+    /// Where Play starts.
+    insert_marker: Ticks,
+    /// The Arrangement loop, if it's on.
+    loop_region: Option<LoopRegion>,
+    /// `loop_region` in frames, if it's at least a frame long.
+    loop_frames: Option<LoopFrames>,
+    /// Transport commands waiting for their frames, in the order they came.
+    timed: Vec<Timed>,
     pending: Vec<Pending>,
     /// This block's parameter changes, sorted by slot, frame, and arrival.
     resolved: Vec<Resolved>,
@@ -110,6 +184,10 @@ impl Processor {
             clock: 0,
             playing: false,
             position: Frames::ZERO,
+            insert_marker: Ticks::ZERO,
+            loop_region: None,
+            loop_frames: None,
+            timed: Vec::with_capacity(config.max_scheduled),
             pending: Vec::with_capacity(config.max_pending_events),
             resolved: Vec::with_capacity(config.max_pending_events),
             scratch: Vec::with_capacity(config.max_pending_events),
@@ -147,6 +225,18 @@ impl Processor {
         self.position
     }
 
+    /// Where Play starts.
+    #[must_use]
+    pub fn insert_marker(&self) -> Ticks {
+        self.insert_marker
+    }
+
+    /// The Arrangement loop, if it's on.
+    #[must_use]
+    pub fn loop_region(&self) -> Option<LoopRegion> {
+        self.loop_region
+    }
+
     /// The running program.
     #[must_use]
     pub fn program(&self) -> Option<&EngineProgram> {
@@ -163,8 +253,9 @@ impl Processor {
         self.resolve_due(frames);
         let mut done = 0;
         while done < frames {
+            self.apply_due_transport(done);
             self.fire_due(done);
-            let length = self.until_next_command(frames - done);
+            let length = self.until_next_event(done, frames - done);
             self.render(done, length);
             done += length;
         }
@@ -183,28 +274,75 @@ impl Processor {
         self.publish(0.0);
     }
 
-    /// Stops the transport and publishes a state with it stopped, silent
-    /// meters, and no load, for a processor whose stream has closed. Called
-    /// off the audio thread, once the stream is gone.
-    pub(crate) fn park(&mut self) {
+    /// Stops the transport where it is and publishes a state with it
+    /// stopped, silent meters, and no load, for a processor whose stream has
+    /// closed, and returns what the processor that takes over needs
+    /// ([`carry`](Self::carry), taken before the stop). Called off the audio
+    /// thread, once the stream is gone.
+    pub(crate) fn park(&mut self) -> Carry {
+        let carry = self.carry();
+        // Spec: device-changes R1
         self.playing = false;
         if let Some(program) = self.program.as_mut() {
             let program = program.get_mut();
             program.meters.iter_mut().for_each(|peak| *peak = [0.0; 2]);
         }
         self.publish(0.0);
+        carry
     }
 
-    /// The song position in beats and the scheduled commands waiting to
-    /// fire, for the processor that takes over. Allocates: call it off the
-    /// audio thread.
+    /// What the processor that takes over needs: the clock, the transport
+    /// in beats, the scheduled commands waiting to fire, and the transport
+    /// commands waiting for their frames. Of those, it leaves out any that
+    /// would start the song, which nothing does by itself after a restart
+    /// (device-changes R7), and, if the song is playing, any Stop, which the
+    /// restart has done already: run on the stopped song, it would send it
+    /// back to 1.1.1. Allocates: call it off the audio thread.
     pub(crate) fn carry(&self) -> Carry {
+        let rate = self.config.sample_rate;
+        let timed = self
+            .timed
+            .iter()
+            .filter(|entry| {
+                !starts_playback(entry.command)
+                    && !(self.playing && entry.command == TransportCommand::Stop)
+            })
+            .copied()
+            .collect();
         Carry {
-            position: self
-                .tempo()
-                .frames_to_ticks(self.position, self.config.sample_rate),
+            clock: self.clock,
+            sample_rate: rate,
+            position: self.tempo().frames_to_ticks(self.position, rate),
+            insert_marker: self.insert_marker,
+            loop_region: self.loop_region,
             scheduled: self.scheduled.iter().map(|entry| entry.command).collect(),
+            timed,
         }
+    }
+
+    /// Takes over from the processor before this one (WP-1.13): carries on
+    /// its clock, puts the song position and the insert marker on the same
+    /// beats at this processor's rate, plays the same loop, and waits for
+    /// the same commands, each transport command as long after the restart
+    /// as it was after the stream closed. The song is stopped
+    /// (device-changes R7), so Continue resumes where it was. Called off the
+    /// audio thread, before the first block, once the program is in place,
+    /// so positions fall on frames through its tempo map.
+    pub(crate) fn take_over(&mut self, carry: &Carry) {
+        let rate = self.config.sample_rate;
+        self.clock = carry.clock;
+        self.playing = false;
+        self.position = self.frames_at(carry.position);
+        self.insert_marker = carry.insert_marker;
+        self.loop_region = carry.loop_region;
+        self.update_loop_frames();
+        for &command in &carry.scheduled {
+            self.schedule(command);
+        }
+        for entry in &carry.timed {
+            self.queue_transport(entry.command, carry.frame_at(entry.frame, rate));
+        }
+        self.publish(0.0);
     }
 
     /// The last block's output.
@@ -230,7 +368,10 @@ impl Processor {
                 Message::Program(program) => self.swap(program),
                 Message::Param(event) => self.queue_param(event),
                 Message::Data { key, data } => self.deliver(key, data),
-                Message::Transport(command) => self.transport(command),
+                Message::Transport(command, When::Now) => self.transport(command),
+                Message::Transport(command, When::Frame(frame)) => {
+                    self.queue_transport(command, frame);
+                }
                 Message::Schedule(command) => self.schedule(command),
                 Message::Cancel(id) => self.scheduled.retain(|s| s.command.id != id),
             }
@@ -276,6 +417,8 @@ impl Processor {
         // frees it.
         drop(self.program.replace(program));
         self.swaps += 1;
+        // The loop keeps its bars under the new tempo map.
+        self.update_loop_frames();
     }
 
     fn mismatch(&mut self, program: &EngineProgram, running: Option<u64>) {
@@ -331,12 +474,95 @@ impl Processor {
             .map_or(&self.fallback_tempo, |program| &program.get().tempo)
     }
 
+    fn frames_at(&self, ticks: Ticks) -> Frames {
+        self.tempo().ticks_to_frames(ticks, self.config.sample_rate)
+    }
+
+    /// Runs a transport command now, at the playhead
+    /// (`docs/specs/transport.md`).
     fn transport(&mut self, command: TransportCommand) {
         match command {
-            TransportCommand::Play => self.playing = true,
-            TransportCommand::Stop => self.playing = false,
+            // Spec: transport R1, R11
+            TransportCommand::Play => self.play_from_insert_marker(),
+            // Spec: transport R3, R4
+            TransportCommand::Stop => {
+                if self.playing {
+                    self.playing = false;
+                } else {
+                    self.insert_marker = Ticks::ZERO;
+                    self.position = Frames::ZERO;
+                }
+            }
+            // Spec: transport R6
+            TransportCommand::Continue => self.playing = true,
+            // Spec: transport R5
+            TransportCommand::PlayStop => {
+                if self.playing {
+                    self.playing = false;
+                } else {
+                    self.play_from_insert_marker();
+                }
+            }
+            // Spec: transport R7, R12
             TransportCommand::Locate(ticks) => {
-                self.position = self.tempo().ticks_to_frames(ticks, self.config.sample_rate);
+                self.insert_marker = ticks.max(Ticks::ZERO);
+                if self.playing {
+                    self.position = self.frames_at(self.insert_marker);
+                }
+            }
+            // Spec: transport R9
+            TransportCommand::InsertMarkerToPlayhead => {
+                let ticks = self
+                    .tempo()
+                    .frames_to_ticks(self.position, self.config.sample_rate);
+                self.insert_marker = ticks.max(Ticks::ZERO);
+            }
+            TransportCommand::SetLoop(region) => {
+                self.loop_region = region;
+                self.update_loop_frames();
+            }
+        }
+    }
+
+    fn play_from_insert_marker(&mut self) {
+        self.position = self.frames_at(self.insert_marker);
+        self.playing = true;
+    }
+
+    /// Works out the loop's frames from its ticks, under the running tempo
+    /// map. A loop shorter than a frame isn't played.
+    fn update_loop_frames(&mut self) {
+        self.loop_frames = self.loop_region.and_then(|region| {
+            let start = self.frames_at(region.start.max(Ticks::ZERO));
+            let end = self.frames_at(region.end);
+            (end > start).then_some(LoopFrames { start, end })
+        });
+    }
+
+    /// Holds a transport command for a frame of the engine clock, or runs it
+    /// now if that frame has come.
+    fn queue_transport(&mut self, command: TransportCommand, frame: u64) {
+        if frame <= self.clock {
+            self.transport(command);
+        } else if self.timed.len() < self.timed.capacity() {
+            self.timed.push(Timed { frame, command });
+        } else {
+            self.counters.transport_overflowed += 1;
+        }
+    }
+
+    /// Runs the transport commands due by `offset` frames into the block,
+    /// in the order they came.
+    fn apply_due_transport(&mut self, offset: usize) {
+        let now = self.clock + offset as u64;
+        let mut i = 0;
+        while i < self.timed.len() {
+            if self.timed[i].frame <= now {
+                // `remove` keeps the rest in the order they came.
+                let due = self.timed.remove(i);
+                self.transport(due.command);
+            } else {
+                i += 1;
             }
         }
     }
@@ -418,6 +644,9 @@ impl Processor {
                 self.route(key, param, value, offset as u32, self.seq);
                 self.resolved.sort_unstable_by_key(Resolved::sort_key);
             }
+            // A scheduled command fires only while the song plays, where
+            // these would start it again or do nothing.
+            Action::Transport(TransportCommand::Play | TransportCommand::Continue) => {}
             Action::Transport(transport) => self.transport(transport),
             Action::Notify => {}
         }
@@ -429,24 +658,43 @@ impl Processor {
         });
     }
 
-    /// How many of the next `remaining` frames to run before a scheduled
-    /// command fires: at least 1.
-    fn until_next_command(&self, remaining: usize) -> usize {
-        if !self.playing {
-            return remaining;
-        }
-        self.scheduled
+    /// How many of the `remaining` frames from `offset` in the block to run
+    /// before the transport next acts: a transport command's frame comes, a
+    /// scheduled command fires, or the playhead reaches the loop's end. At
+    /// least 1.
+    fn until_next_event(&self, offset: usize, remaining: usize) -> usize {
+        let now = self.clock + offset as u64;
+        let timed = self
+            .timed
             .iter()
-            .filter_map(|entry| {
-                let ahead = entry.frame.saturating_sub(self.position).get();
-                (ahead > 0 && ahead < remaining as i64).then_some(ahead as usize)
-            })
+            .map(|entry| entry.frame.saturating_sub(now));
+        let mut next = timed
+            .filter(|&ahead| ahead > 0 && ahead < remaining as u64)
             .min()
-            .unwrap_or(remaining)
+            .map_or(remaining, |ahead| ahead as usize);
+        if !self.playing {
+            return next;
+        }
+        let mut song = |frame: Frames| {
+            let ahead = frame.saturating_sub(self.position).get();
+            if ahead > 0 && ahead < next as i64 {
+                next = ahead as usize;
+            }
+        };
+        for entry in &self.scheduled {
+            song(entry.frame);
+        }
+        // Spec: transport R13
+        if let Some(region) = self.loop_frames {
+            song(region.end);
+        }
+        next
     }
 
     /// Runs the program over `length` frames from `offset` in the block, and
-    /// moves the playhead on if the song is playing.
+    /// moves the playhead on if the song is playing. Playback that reaches
+    /// the loop's end goes on from its start: the parts of a block end
+    /// there, so the next part starts at the loop's start.
     fn render(&mut self, offset: usize, length: usize) {
         let stride = self.config.max_frames;
         let transport = TransportInfo {
@@ -477,7 +725,19 @@ impl Processor {
             }
         }
         if self.playing {
+            let before = self.position;
             self.position += Frames(length as i64);
+            // Spec: transport R13, R14
+            if let Some(region) = self.loop_frames
+                && before < region.end
+                && self.position >= region.end
+            {
+                debug_assert_eq!(
+                    self.position, region.end,
+                    "a block part crossed the loop's end"
+                );
+                self.position = region.start;
+            }
         }
     }
 
@@ -509,6 +769,8 @@ impl Processor {
         state.playing = self.playing;
         state.position = self.position;
         state.position_ticks = position_ticks;
+        state.insert_marker = self.insert_marker;
+        state.loop_region = self.loop_region;
         state.program = self.program.as_ref().map(|p| p.get().generation);
         state.swaps = self.swaps;
         state.cpu_load = cpu_load;
@@ -540,6 +802,8 @@ impl std::fmt::Debug for Processor {
             .field("clock", &self.clock)
             .field("playing", &self.playing)
             .field("position", &self.position)
+            .field("insert_marker", &self.insert_marker)
+            .field("loop_region", &self.loop_region)
             .field("program", &self.program)
             .finish_non_exhaustive()
     }

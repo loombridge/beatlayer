@@ -18,7 +18,10 @@ use bl_audio_io::{
 use bl_core::time::{SampleRate, Ticks};
 use bl_engine::nodes::{TEST_TONE, test_tone};
 use bl_engine::testing::{self, Probe};
-use bl_engine::{AudioEngine, Cause, DeviceEvent, DeviceStatus, EngineConfig, SupervisorOptions};
+use bl_engine::{
+    AudioEngine, Cause, DeviceEvent, DeviceStatus, EngineConfig, LoopRegion, SupervisorOptions,
+    TransportCommand,
+};
 use bl_model::{Command, Device, DeviceKind, Editor, TrackId, TrackKind};
 
 /// A track with a test tone at −60 dBFS.
@@ -290,6 +293,116 @@ fn sleep_and_wake_stop_and_restart_the_engine() {
         }
     ));
     clean(interruption.stream_stats, &audio);
+}
+
+/// Waits until the song plays inside `region` and has wrapped at its end
+/// at least once while watched.
+fn loops_in(audio: &mut AudioEngine, region: LoopRegion) {
+    let mut last = None;
+    wait(audio, "playback round the loop", |audio| {
+        let state = audio.state();
+        if !state.playing || state.loop_region != Some(region) {
+            last = None;
+            return false;
+        }
+        let at = state.position_ticks;
+        assert!(
+            at < region.end,
+            "playback inside the loop stays before its end: {at:?}"
+        );
+        let wrapped = last.is_some_and(|last| at < last && at >= region.start);
+        last = Some(at);
+        wrapped
+    });
+}
+
+/// Checks that the song came back stopped, in `region`, at `rate`.
+fn back_in_the_loop(audio: &mut AudioEngine, region: LoopRegion, rate: SampleRate) {
+    let state = audio.state();
+    assert_eq!(state.sample_rate, rate);
+    assert!(!state.playing, "a recovery never plays by itself");
+    assert_eq!(state.loop_region, Some(region), "the loop survives");
+    assert!(
+        (region.start..region.end).contains(&state.position_ticks),
+        "the playhead is where it stopped, in the loop: {:?}",
+        state.position_ticks
+    );
+}
+
+// Spec: device-changes R2, R3, R7; transport R13, R15
+#[test]
+fn device_changes_during_looped_playback_keep_the_loop_and_the_playhead() {
+    let Rig {
+        mut audio,
+        control,
+        mut editor,
+        ..
+    } = rig();
+    // The set's loop, a beat from beat 2, played from the start.
+    editor
+        .apply(Command::SetLoop {
+            start: Ticks::QUARTER,
+            length: Ticks::QUARTER,
+        })
+        .unwrap();
+    editor
+        .apply(Command::SetLoopEnabled { enabled: true })
+        .unwrap();
+    audio.engine().sync(editor.document());
+    audio.engine().play();
+    let region = LoopRegion {
+        start: Ticks::QUARTER,
+        end: Ticks::from_quarters(2),
+    };
+    loops_in(&mut audio, region);
+
+    // Unplugged and plugged back in.
+    control.unplug("usb");
+    wait(&mut audio, "the interruption", |audio| {
+        matches!(audio.device(), DeviceStatus::Interrupted(_))
+    });
+    let stopped_at = audio.state().position_ticks;
+    // A locate while it's unplugged moves the insert marker once it's back.
+    audio.engine().locate(Ticks::from_quarters(8));
+    assert!(audio.engine().flush(Duration::from_secs(1)));
+    control.replug("usb");
+    running(&mut audio, 48_000);
+    wait(&mut audio, "the engine back at 48 kHz", |audio| {
+        audio.state().insert_marker == Ticks::from_quarters(8)
+    });
+    back_in_the_loop(&mut audio, region, SampleRate::HZ_48000);
+    assert!(
+        (audio.state().position_ticks.get() - stopped_at.get()).abs() <= 30,
+        "where it stopped, to the frame"
+    );
+    audio.engine().transport(TransportCommand::Continue);
+    loops_in(&mut audio, region);
+
+    // The device's rate changes mid-loop.
+    control.set_sample_rate("usb", 44_100);
+    running(&mut audio, 44_100);
+    wait(&mut audio, "the engine at 44.1 kHz", |audio| {
+        audio.state().sample_rate == SampleRate::HZ_44100
+    });
+    back_in_the_loop(&mut audio, region, SampleRate::HZ_44100);
+    assert_eq!(audio.state().insert_marker, Ticks::from_quarters(8));
+    audio.engine().transport(TransportCommand::Continue);
+    loops_in(&mut audio, region);
+    assert_eq!(audio.engine().counts().restarts, 3);
+    // No heap use on the audio thread, in either stream that stopped or
+    // the one running now.
+    let interruptions: Vec<_> = audio
+        .events()
+        .into_iter()
+        .filter_map(|event| match event {
+            DeviceEvent::Interrupted(interruption) => Some(interruption),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(interruptions.len(), 2);
+    for interruption in interruptions {
+        clean(interruption.stream_stats, &audio);
+    }
 }
 
 #[test]

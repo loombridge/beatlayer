@@ -9,9 +9,9 @@ use bl_commands::{Registry, args_schema, tagged_variant, validate};
 use bl_core::time::{Bpm, TempoMap, Ticks, TimeSignature, TimeSignatureMap};
 use bl_model::registry::{self, RunError};
 use bl_model::{
-    AudioData, Change, ChangeSet, Clip, ClipData, ClipId, Command, ContentHash, Device, DeviceId,
-    DeviceKind, EditError, Editor, MidiData, ModelError, Note, ParamId, PluginFormat, TrackId,
-    TrackKind,
+    ArrangementLoop, AudioData, Change, ChangeSet, Clip, ClipData, ClipId, Command, ContentHash,
+    Device, DeviceId, DeviceKind, EditError, Editor, MidiData, ModelError, Note, ParamId,
+    PluginFormat, TrackId, TrackKind,
 };
 use serde_json::{Value, json};
 
@@ -45,7 +45,11 @@ fn every_document_command_is_registered() {
         .iter()
         .map(|variant| variant["properties"]["op"]["const"].as_str().unwrap())
         .collect();
-    assert_eq!(ops.len(), 25, "WP-0.6 defined 25 commands");
+    assert_eq!(
+        ops.len(),
+        27,
+        "WP-0.6 defined 25 commands, and WP-1.5 the two for the Arrangement loop"
+    );
 
     for op in &ops {
         let variant = tagged_variant(&enum_schema, "op", op).unwrap();
@@ -171,7 +175,21 @@ fn every_command_runs_by_id() {
         "song.set_time_signatures",
         json!({ "time_signatures": [{ "at": 0, "signature": { "numerator": 7, "denominator": 8 } }] }),
     );
+    let changes = agent.run(
+        "transport.set_loop",
+        json!({ "start": bar * 2, "length": bar }),
+    );
+    assert!(changes.settings);
+    agent.run("transport.set_loop_enabled", json!({ "enabled": true }));
     let settings = agent.editor.document().settings();
+    assert_eq!(
+        settings.arrangement_loop,
+        ArrangementLoop {
+            start: Ticks(bar * 2),
+            length: Ticks(bar),
+            enabled: true,
+        }
+    );
     assert_eq!(settings.tempo.bpm_at(Ticks::ZERO), Bpm::new(90.0).unwrap());
     assert_eq!(
         settings.time_signatures.signature_at(Ticks::ZERO),
@@ -323,6 +341,17 @@ fn schemas_match_what_commands_serialise() {
             Command::SetTimeSignatures {
                 time_signatures: TimeSignatureMap::constant(TimeSignature::new(3, 4).unwrap()),
             },
+        ),
+        (
+            "transport.set_loop",
+            Command::SetLoop {
+                start: Ticks::QUARTER * 3,
+                length: Ticks::WHOLE * 2,
+            },
+        ),
+        (
+            "transport.set_loop_enabled",
+            Command::SetLoopEnabled { enabled: true },
         ),
         (
             "track.create",
@@ -494,7 +523,7 @@ fn bad_requests_change_nothing() {
 
     type Expected<'a> = &'a dyn Fn(RunError) -> bool;
     let invalid = |error: RunError| matches!(error, RunError::InvalidArgs { .. });
-    let cases: [(&str, Value, Expected<'_>); 9] = [
+    let cases: [(&str, Value, Expected<'_>); 11] = [
         ("track.explode", json!({}), &|e| {
             e == RunError::UnknownCommand("track.explode".to_owned())
         }),
@@ -524,6 +553,27 @@ fn bad_requests_change_nothing() {
             "track.create",
             json!({ "id": 999, "kind": "audio", "name": "Stolen", "index": 0 }),
             &|e| matches!(e, RunError::Edit(EditError::IdNotIssued(_))),
+        ),
+        // Spec: transport R17
+        (
+            "transport.set_loop",
+            json!({ "start": -1, "length": 705_600 }),
+            &|e| {
+                matches!(
+                    e,
+                    RunError::Edit(EditError::Command(ModelError::NegativePosition(_)))
+                )
+            },
+        ),
+        (
+            "transport.set_loop",
+            json!({ "start": 0, "length": 0 }),
+            &|e| {
+                matches!(
+                    e,
+                    RunError::Edit(EditError::Command(ModelError::EmptyLength(_)))
+                )
+            },
         ),
     ];
     for (id, args, expected) in cases {

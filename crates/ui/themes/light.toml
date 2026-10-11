@@ -1,0 +1,29 @@
+# Beatlayer's light theme: the same tokens as dark.toml.
+
+name = "Light"
+dark = false
+
+[colors]
+window = "#c9ced5"
+panel = "#eef0f3"
+bar = "#dde1e6"
+control = "#d2d7de"
+control_hover = "#c3c9d1"
+control_pressed = "#b3bac4"
+accent = "#11877a"
+accent_text = "#f2fffd"
+record = "#c9302c"
+error_text = "#b3261e"
+text = "#1c2026"
+text_dim = "#55606c"
+pending = "#9aa3ad"
+separator = "#b4bac2"
+focus = "#1f6feb"
+meter = "#1e9e55"
+meter_hot = "#c58a00"
+
+[sizes]
+text = 11.0
+small_text = 10.0
+heading = 12.0
+corner = 2.0

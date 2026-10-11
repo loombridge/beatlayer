@@ -8,7 +8,9 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-bl-core.workspace = true
+# The transport's commands in the command registry (WP-1.5, D17).
+bl-commands.workspace = true
+bl-core = { workspace = true, features = ["serde", "schemars"] }
 bl-dsp.workspace = true
 # The compiler reads documents (WP-0.9).
 bl-model.workspace = true
@@ -28,6 +30,12 @@ rtrb = "0.4.0"
 rtgc = { version = "0.4.0", default-features = false, features = ["std", "local_collector"] }
 # Engine state for the UI: playhead, meters, CPU load (decision D14).
 triple_buffer = "9.0.0"
+# The transport commands' argument schemas and JSON arguments (WP-1.5).
+# schemars is pinned to bl-commands' version: the command reference
+# (docs/commands.md) is generated from these schemas.
+schemars = { version = "=1.2.2", default-features = false, features = ["std", "derive"] }
+serde = { version = "1.0.228", default-features = false, features = ["std", "derive"] }
+serde_json = "1"
 
 [lints]
 workspace = true

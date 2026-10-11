@@ -1,7 +1,7 @@
 //! The mixer: each track's pan, volume, and activator; the routes that carry
 //! tracks into their groups, Main, and the returns; solo; and the meters
 //! (WP-1.6). The rules, and the Live sources behind them, are in
-//! `docs/specs/mixer.md`.
+//! the mixer spec.
 //!
 //! A track's signal runs through its task in the program (see
 //! [`EngineProgram`](crate::EngineProgram)):
@@ -32,16 +32,16 @@ use bl_model::{Document, Mixer, ParamId, TrackId, TrackKind};
 use crate::node::{Block, Node, NodeConfig, NodeEvent, ParamValue, segments};
 
 /// How long a mixer gain takes to reach a new value: 20 ms, along a straight
-/// line from the gain it had (`docs/specs/mixer.md`, R18).
+/// line from the gain it had (the mixer spec, R18).
 pub const SMOOTHING_SECONDS: f64 = 0.02;
 
 /// How fast a peak meter falls after a peak, in decibels per second: 20 dB
 /// in 1.7 seconds, as a broadcast peak programme meter falls back
-/// (`docs/specs/mixer.md`, R19).
+/// (the mixer spec, R19).
 pub const METER_RELEASE_DB_PER_SECOND: f64 = 20.0 / 1.7;
 
 /// The time constant of the RMS meters' average of the squared signal: 300
-/// ms (`docs/specs/mixer.md`, R19).
+/// ms (the mixer spec, R19).
 pub const RMS_SECONDS: f64 = 0.3;
 
 /// A track mixer's parameters ([`NodeKey::Mixer`](crate::NodeKey::Mixer)),
@@ -277,6 +277,12 @@ impl Meters {
         self.square[channel] = square;
     }
 
+    /// Drops every reading to silence at once.
+    fn silence(&mut self) {
+        self.peak = [0.0; 2];
+        self.square = [0.0; 2];
+    }
+
     fn reading(&self) -> MeterReading {
         let peak = |c: usize| self.peak[c] as f32;
         let rms = |c: usize| self.square[c].max(0.0).sqrt() as f32;
@@ -348,6 +354,12 @@ impl TrackMixer {
     #[must_use]
     pub fn gains(&self) -> [f64; 2] {
         [self.gains[0].value(), self.gains[1].value()]
+    }
+
+    /// Drops the track's meters to silence at once, for a processor that
+    /// has stopped making sound. Real-time safe.
+    pub(crate) fn silence_meters(&mut self) {
+        self.meters.silence();
     }
 
     /// The track's meters.
@@ -509,7 +521,7 @@ impl Route {
 }
 
 /// Who solo silences, for a document's solo switches and its Solo in Place
-/// setting (`docs/specs/mixer.md`, R10 to R14).
+/// setting (the mixer spec, R10 to R14).
 ///
 /// While no track is soloed, solo silences nothing. Otherwise the *solo
 /// path* is every soloed track, every group that holds one (at any depth),

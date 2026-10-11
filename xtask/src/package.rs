@@ -32,7 +32,7 @@ const OUT_DIR: &str = "packages";
 const PROJECT_UTI: &str = "io.loombridge.beatlayer.project";
 const PROJECT_EXTENSION: &str = "blset";
 
-/// The only architecture the macOS app runs on (docs/02-architecture.md).
+/// The only architecture the macOS app runs on.
 const MACOS_ARCH: &str = "arm64";
 
 /// A tool that would otherwise be downloaded while packaging, pinned to a

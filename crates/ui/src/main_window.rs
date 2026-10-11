@@ -14,7 +14,7 @@ use egui::{
 use serde_json::json;
 
 use crate::arrangement::ArrangementUi;
-use crate::layout::{ELEMENTS, Element, Kind, ShellLayout, Strip, TITLE_BAR};
+use crate::layout::{ELEMENTS, Element, Kind, ShellLayout, Strip, title_bar_height};
 use crate::theme::Theme;
 use crate::widgets::{Look, element};
 
@@ -388,13 +388,19 @@ impl MainWindowUi {
 }
 
 /// Draws Live's compact title bar across the top of a window (L-WIN-002,
-/// D22): [`TITLE_BAR`] points tall, the title centred. The system's window
-/// buttons sit over its left end, and the system's title bar view over all
-/// of it handles dragging and double-clicks, so this only paints. The
-/// title reaches assistive technology as the window's own title.
+/// D22): [`crate::layout::TITLE_BAR`] points tall, the title centred. The
+/// system's window buttons sit over its left end, and the system's title bar
+/// view over all of it handles dragging and double-clicks, so this only
+/// paints. The title reaches assistive technology as the window's own title.
+///
+/// At every interface zoom it stays that many window points tall, with its
+/// title at its 100% size, since the system's buttons in it don't scale
+/// (interface-zoom R9).
 pub fn draw_title_bar(root: &mut Ui, theme: &Theme, title: &str) {
+    let zoom = root.ctx().zoom_factor();
+    let font = theme.font();
     egui::Panel::top("title-bar")
-        .exact_size(TITLE_BAR)
+        .exact_size(title_bar_height(zoom))
         .resizable(false)
         .show_separator_line(false)
         .frame(Frame::NONE.fill(theme.colors.bar.0))
@@ -404,12 +410,12 @@ pub fn draw_title_bar(root: &mut Ui, theme: &Theme, title: &str) {
                 rect.center(),
                 Align2::CENTER_CENTER,
                 title,
-                theme.font(),
+                egui::FontId::new(font.size / zoom, font.family),
                 theme.colors.text_dim.0,
             );
             ui.painter().line_segment(
                 [rect.left_bottom(), rect.right_bottom()],
-                Stroke::new(1.0, theme.colors.separator.0),
+                Stroke::new(1.0 / zoom, theme.colors.separator.0),
             );
         });
 }
@@ -432,6 +438,14 @@ fn region(ui: &mut Ui, salt: &str, rect: Rect, role: Role, name: &str) -> Id {
     ui.ctx().accesskit_node_builder(id, |node| {
         node.set_role(role);
         node.set_label(name.to_owned());
+        // Its place, so a screen reader can show where the region is (and
+        // the zoom tests can find it).
+        node.set_bounds(egui::accesskit::Rect {
+            x0: rect.min.x.into(),
+            y0: rect.min.y.into(),
+            x1: rect.max.x.into(),
+            y1: rect.max.y.into(),
+        });
     });
     id
 }

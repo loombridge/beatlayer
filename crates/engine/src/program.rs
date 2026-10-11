@@ -22,7 +22,7 @@ use crate::node::{Block, Node, NodeEvent, NodeKey, ParamValue, TransportInfo};
 /// [`Route`] whose gain solo and send levels set; runs the track's device
 /// chain; and then its [`TrackMixer`] (pan, volume, the activator, the
 /// meters). A task whose track feeds a pre-fader send first keeps a copy of
-/// its chain's output for the send to read (`docs/specs/mixer.md`).
+/// its chain's output for the send to read (the mixer spec).
 ///
 /// A task can start once every task feeding it has finished, so the tasks
 /// form a dependency graph. Each task lists the tasks waiting on it and how
@@ -256,6 +256,16 @@ impl EngineProgram {
             .get_mut(slot as usize)
             .and_then(|slot| slot.node.as_mut())
             .and_then(Instance::as_node)
+    }
+
+    /// Drops every track's meters to silence at once. Real-time safe: it
+    /// only writes to the mixers already in the program.
+    pub(crate) fn silence_meters(&mut self) {
+        for slot in &mut self.slots {
+            if let Some(Instance::Mixer(mixer)) = slot.node.as_mut() {
+                mixer.silence_meters();
+            }
+        }
     }
 
     /// The meters of a task's track.

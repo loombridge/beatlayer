@@ -23,9 +23,9 @@ Tasks:
                  reference, the command reference, the keymap, deny, the deny
                  self-test, and private terms
   layers         Check the crate layering rules
-  ui-parity      Validate docs/ui-parity/shortcuts.toml and regenerate shortcuts.md
+  ui-parity      Validate the shortcut reference and regenerate its Markdown form
                  (with --check, fail instead of writing if shortcuts.md is out of date)
-  commands       Check the command registry and regenerate docs/commands.md
+  commands       Check the command registry and regenerate the command reference
                  (with --check, fail instead of writing if commands.md is out of date)
   keymap         Regenerate crates/ui/keymaps/live12.toml from shortcuts.toml and the
                  command registry (with --check, fail instead if it's out of date)
@@ -148,6 +148,19 @@ fn run(root: &Path, args: &[String]) -> Result<(), String> {
 /// Runs every check, reports each result, and fails if any failed.
 fn check(root: &Path) -> Result<(), String> {
     require_cargo_deny()?;
+    // Without the planning documents, the checks that read the UI parity
+    // reference skip, and the command reference checks the registry alone.
+    let reference = ui_parity::reference_present(root);
+    let skipped: &[&str] = if reference {
+        &[]
+    } else {
+        &["ui parity reference", "keymap"]
+    };
+    let partial: &[&str] = if reference {
+        &[]
+    } else {
+        &["command reference"]
+    };
     type Step<'a> = (&'a str, Box<dyn Fn() -> Result<(), String> + 'a>);
     let steps: Vec<Step<'_>> = vec![
         (
@@ -182,7 +195,16 @@ fn check(root: &Path) -> Result<(), String> {
         ),
         ("layers", Box::new(|| layers(root))),
         ("ui parity reference", Box::new(|| ui_parity::check(root))),
-        ("command reference", Box::new(|| commands::check(root))),
+        (
+            "command reference",
+            Box::new(move || {
+                if reference {
+                    commands::check(root)
+                } else {
+                    commands::check_registry()
+                }
+            }),
+        ),
         ("keymap", Box::new(|| keymap::check(root))),
         (
             "licences, advisories, bans, sources",
@@ -195,6 +217,10 @@ fn check(root: &Path) -> Result<(), String> {
     let mut failed = Vec::new();
     for (name, step) in &steps {
         eprintln!("\n==> {name}");
+        if skipped.contains(name) {
+            eprintln!("{}", ui_parity::ABSENT);
+            continue;
+        }
         if let Err(message) = step() {
             eprintln!("{message}");
             failed.push(*name);
@@ -205,10 +231,20 @@ fn check(root: &Path) -> Result<(), String> {
     for (name, _) in &steps {
         let status = if failed.contains(name) {
             "FAILED"
+        } else if skipped.contains(name) {
+            "skip"
+        } else if partial.contains(name) {
+            "part"
         } else {
             "ok"
         };
         eprintln!("{status:>6}  {name}");
+    }
+    if !reference {
+        eprintln!(
+            "\nThe UI parity reference isn't published yet, so this checkout skipped what \
+             reads it (skip, part). A maintainer's checkout runs every check."
+        );
     }
     if failed.is_empty() {
         Ok(())
@@ -217,7 +253,7 @@ fn check(root: &Path) -> Result<(), String> {
     }
 }
 
-/// Enforces the layering in docs/02-architecture.md:
+/// Enforces the layering in the architecture notes:
 ///
 /// 1. Only the application crate depends on `bl-ui`.
 /// 2. Headless crates never reach a windowing, GPU, or UI-toolkit crate.
@@ -256,7 +292,7 @@ fn layers(root: &Path) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!(
-            "layering rules broken (see docs/02-architecture.md):\n  {}",
+            "layering rules broken:\n  {}",
             violations.join("\n  ")
         ))
     }

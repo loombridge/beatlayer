@@ -1,13 +1,16 @@
 //! The Settings window (L-SET-001 to L-SET-003): the page chooser at the
-//! left, and the page at the right. The Audio page (L-SET-012) and the
-//! theme choice (L-SET-011) are built; the other pages are in the chooser
-//! and say which package builds them.
+//! left, and the page at the right. The Audio page (L-SET-012), the theme
+//! choice (L-SET-011), and the interface zoom (L-SET-010, WP-1.17) are
+//! built; the other pages are in the chooser and say which package builds
+//! them.
 
 use bl_shell::audio::{
     AudioDevices, AudioStatus, DeviceListing, TONE_MAX_DBFS, TONE_MAX_HZ, TONE_MIN_DBFS,
     TONE_MIN_HZ,
 };
-use bl_shell::settings::{SettingsPage, ThemeChoice};
+use bl_shell::settings::{
+    SettingsPage, ThemeChoice, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, zoom_step,
+};
 use bl_shell::{Invocation, Shell, commands as ids};
 use egui::accesskit::Role;
 use egui::{Align2, CentralPanel, Frame, Id, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
@@ -96,6 +99,9 @@ impl SettingsUi {
             let mut rows = Rows::new(&layout, theme);
             match page {
                 SettingsPage::Audio => self.audio_page(ui, shell, theme, &mut rows, &mut events),
+                SettingsPage::DisplayInput => {
+                    display_page(ui, shell, theme, &mut rows, &mut events);
+                }
                 SettingsPage::ThemeColors => theme_page(ui, shell, theme, &mut rows, &mut events),
                 other => rows.note(
                     ui,
@@ -390,6 +396,46 @@ impl SettingsUi {
             rows.note(ui, &format!("The device reported a problem: {error}"));
         }
     }
+}
+
+/// Display & Input (L-SET-010): its Display section, Language then Zoom.
+/// The zoom box steps through the zoom's steps by mouse, keyboard, or
+/// assistive technology, and the main window follows straight away; this
+/// window follows when the mouse button is released (interface-zoom R4).
+fn display_page(
+    ui: &mut Ui,
+    shell: &Shell,
+    theme: &Theme,
+    rows: &mut Rows<'_>,
+    events: &mut Vec<UiEvent>,
+) {
+    rows.heading(ui, "Display");
+    // Beatlayer speaks only English until its translations (M9).
+    rows.text_row(ui, "Language", "English");
+    let percent = shell.zoom_percent();
+    let rect = rows.row(ui, "Zoom", SettingsLayout::NUMBER);
+    if let Some(next) = number_box(
+        ui,
+        theme,
+        "zoom",
+        "Zoom",
+        rect,
+        f64::from(percent),
+        (f64::from(ZOOM_MIN_PERCENT), f64::from(ZOOM_MAX_PERCENT)),
+        &|value, steps| f64::from(zoom_step(value as u16, steps)),
+        &format!("{percent} %"),
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            ids::VIEW_SET_ZOOM,
+            json!({ "percent": next as u16 }),
+        )));
+    }
+    rows.note(
+        ui,
+        "The zoom scales every window; View > Zoom and its keys change it too. The Display \
+         Options, Navigation and Keyboard, Mouse and Pen Input, and Application Options settings \
+         come with later packages.",
+    );
 }
 
 fn theme_page(

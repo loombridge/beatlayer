@@ -2,14 +2,12 @@
 
 Thank you for helping build Beatlayer. This page explains how a change gets from your machine into `main`: what to read first, how work is organised, the checks every change passes, and the certificate you give with each commit.
 
-Beatlayer is in Phase 0 of its [build plan](docs/03-build-plan.md), and the repository stays private until the public alpha. Everyone who takes part follows the [code of conduct](CODE_OF_CONDUCT.md).
+Beatlayer is in early development, and the repository stays private until the public alpha. Everyone who takes part follows the [code of conduct](CODE_OF_CONDUCT.md).
 
 ## Read first
 
 1. [README.md](README.md) and [AGENTS.md](AGENTS.md): what Beatlayer is, the lines no change crosses, and how work is done.
 1. [Building without Ableton's code](#building-without-abletons-code): what you may and may not learn from Ableton Live. Read it before you write anything.
-1. [The architecture](docs/02-architecture.md), at least the sections your change touches.
-1. [The build plan](docs/03-build-plan.md), and in it "How an agent uses this plan". That procedure is how every work package is done, by a person or an agent.
 
 ## Building without Ableton's code
 
@@ -18,19 +16,19 @@ Beatlayer matches what Ableton Live does, not how Live's code does it. Every con
 - **Learn only from what Live shows any user:** its public reference manual, release notes and product pages; running Live and watching what it does; measuring its output from your own material; and projects you made yourself in Live, for the importer. Paraphrase the manual; never copy its text.
 - **Never copy Ableton's content:** no samples, presets, wavetables, impulse responses, grooves, packs, artwork, icons, fonts, colour themes or manual text, in the repository or in Beatlayer's bundled content, and no audio Live rendered from Ableton's own content.
 - **Never use Ableton's trademarks as Beatlayer's names.** Beatlayer's devices and features have their own names. "Imports Ableton Live sets" is a statement of fact; "Ableton Live clone" isn't.
-- **Cite your sources.** A change that reproduces Live's behaviour starts with a behaviour spec in `docs/specs/`, citing a manual section, an observation of Live running (with its version and platform), or a measurement with its method.
+- **Cite your sources.** A change that reproduces Live's behaviour says in its pull request what it rests on: a manual section, an observation of Live running (with its version and platform), or a measurement with its method.
 
 Placement, menus, gestures and keyboard shortcuts match Live's, which is functional parity; the look is Beatlayer's own.
 
 ## Find something to work on
 
-- **Work packages.** Most work is a package in the build plan. Take the first package in the status table whose status is `todo` and whose dependencies are `done`, or the one a maintainer gives you. Each package has its own branch, `wp/<id>-<slug>` (for example `wp/0.12-contributor-docs`), and its own pull request.
-- **Bugs and features.** Open an issue first, with the bug report or feature request template. A feature request names the row of the [parity matrix](docs/04-parity-matrix.md) it relates to.
+- **Work packages.** Most work is a package from the build plan, which a maintainer gives you. Each package has its own branch, `wp/<id>-<slug>`, and its own pull request.
+- **Bugs and features.** Open an issue first, with the bug report or feature request template. A feature request says which Live feature it relates to.
 - **Small fixes**, such as a typo or a broken link, can go straight to a pull request.
 
 ## Make the change
 
-1. If your change reproduces Live behaviour, write its behaviour spec first. [docs/specs/README.md](docs/specs/README.md) explains how, and [the template](docs/specs/TEMPLATE.md) gives the shape.
+1. If your change reproduces Live behaviour, write its behaviour spec first: what Live does, the source you learned it from (a manual section, an observation of Live running with its version and platform, or a measurement with its method), and the rules Beatlayer follows as a result.
 1. Build to the acceptance criteria. Each criterion is a test or a command whose output you paste into the pull request.
 1. Give every feature a headless test path, through `bl-cli` or a unit test. A feature that can only be tested by clicking isn't done.
 1. Keep to the rules in [AGENTS.md](AGENTS.md): no allocation, lock, or blocking call on an audio thread; engine, model, and device crates never depend on a UI crate; no dependency that `cargo deny` rejects; no plug-in binaries, Ableton files, or third-party audio in the repository.
@@ -126,7 +124,7 @@ A commit with nothing on the indented line under it isn't signed off.
 
 If an AI coding agent wrote some or all of your change, you're still the person certifying it. Review the change, then sign it off yourself. The agent records its part with a `Co-Authored-By` trailer, and never adds a `Signed-off-by` line, in your name or its own, because only a person can give the certificate.
 
-The maintainers' own work is the exception. Commits that the maintainers' agents make in work packages from the build plan, authored as `Loombridge <code@loombridge.io>`, are the maintainers' contributions and carry no sign-off. The DCO check applies to everyone else.
+Commits made by the project itself, authored as Loombridge, carry no sign-off.
 
 ### Checking sign-offs
 
@@ -141,7 +139,7 @@ For now, the reviewer checks sign-offs by hand. An automatic check in CI follows
 
 ## Report a bug or ask for a feature
 
-Use the issue templates. A bug report asks for the steps, your platform, and your audio setup. A feature request asks which row of the parity matrix it relates to. Describe Live's behaviour in your own words; don't paste Ableton's text, and don't attach Ableton's samples, presets, or audio rendered from them.
+Use the issue templates. A bug report asks for the steps, your platform, and your audio setup. A feature request asks which Live feature it relates to. Describe Live's behaviour in your own words; don't paste Ableton's text, and don't attach Ableton's samples, presets, or audio rendered from them.
 
 ## Write in the house style
 
@@ -149,4 +147,4 @@ Write prose, including documents, code comments, commit messages, and pull reque
 
 ## Licence
 
-Beatlayer is licensed under GPL-3.0-or-later ([LICENSE](LICENSE)), and you contribute under the same licence. The licence and the DCO are decision D3 in [the architecture](docs/02-architecture.md#decisions-log).
+Beatlayer is licensed under GPL-3.0-or-later ([LICENSE](LICENSE)), and you contribute under the same licence, certifying each commit with the Developer Certificate of Origin.

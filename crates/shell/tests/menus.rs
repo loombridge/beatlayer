@@ -1,7 +1,7 @@
 //! The menu bar against the command registry: every item reaches a
 //! registered command or is marked pending, and items enable with what can
 //! run now (D16, D17). Its rows, separators, and labels are checked against
-//! `docs/ui-parity/menus.md` in `bl-shell-spec`.
+//! the menu reference in `bl-shell-spec`.
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -15,12 +15,27 @@ fn repo() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
+/// A file of the UI parity reference, or `None` in a checkout without the
+/// planning documents (they aren't published yet), where the test skips.
+fn ui_parity(file: &str) -> Option<String> {
+    let docs = repo().join("docs");
+    if !docs.exists() {
+        eprintln!(
+            "skipped: the UI parity reference isn't published yet, and this checkout doesn't have it"
+        );
+        return None;
+    }
+    Some(std::fs::read_to_string(docs.join("ui-parity").join(file)).unwrap())
+}
+
 #[test]
 fn every_item_reaches_a_command_or_is_pending() {
     let mut registry = Registry::new();
     bl_model::registry::register(&mut registry).unwrap();
     commands::register(&mut registry).unwrap();
-    let shortcuts = std::fs::read_to_string(repo().join("docs/ui-parity/shortcuts.toml")).unwrap();
+    let Some(shortcuts) = ui_parity("shortcuts.toml") else {
+        return;
+    };
     for platform in [MenuPlatform::Mac, MenuPlatform::Other] {
         for menu in menu_bar(platform) {
             for item in menu.walk() {
@@ -62,6 +77,8 @@ fn every_shell_command_is_on_a_menu_or_a_control() {
         commands::SETTINGS_NEXT_PAGE,
         commands::SETTINGS_PREVIOUS_PAGE,
         commands::SETTINGS_SET_THEME,
+        // The Display & Input page's Zoom (interface-zoom R4).
+        commands::VIEW_SET_ZOOM,
         commands::AUDIO_DEVICES,
         commands::AUDIO_STATUS,
         commands::AUDIO_CONFIGURE,

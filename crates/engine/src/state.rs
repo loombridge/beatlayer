@@ -1,6 +1,6 @@
 //! What the engine tells the UI: playhead, meters, CPU load, and reports.
 
-use bl_core::time::{Frames, Ticks};
+use bl_core::time::{Frames, SampleRate, Ticks};
 use bl_model::TrackId;
 use rtrb::Consumer;
 
@@ -10,7 +10,7 @@ use crate::mixer::{METER_RELEASE_DB_PER_SECOND, RMS_SECONDS};
 
 /// One track's meters: its peak and RMS levels per channel, as linear
 /// amplitude, measured after its mixer (pan, volume, and the Track
-/// Activator) and before solo (`docs/specs/mixer.md`, R19). A peak shows at
+/// Activator) and before solo (the mixer spec, R19). A peak shows at
 /// once and falls at [`METER_RELEASE_DB_PER_SECOND`], so a reader that looks
 /// less often than the engine publishes still sees every peak; the RMS level
 /// is an average of the squared signal over about [`RMS_SECONDS`].
@@ -63,7 +63,14 @@ pub struct EngineCounters {
 /// insert marker and loop brace from the fields beside it.
 #[derive(Debug, PartialEq)]
 pub struct EngineState {
-    /// Frames processed since the engine started: the engine clock.
+    /// The sample rate the engine runs at. It changes when the engine
+    /// restarts on a device at another rate (WP-1.13).
+    pub sample_rate: SampleRate,
+    /// Frames processed since the engine started: the engine clock. It
+    /// stands still while no device runs the engine and carries on when it
+    /// restarts on one, at whatever rate that runs, so it never runs
+    /// backwards and a frame sent for it ([`When::Frame`](crate::When::Frame))
+    /// means the same frame either side of a restart.
     pub clock: u64,
     /// Whether the song is playing.
     pub playing: bool,
@@ -94,9 +101,11 @@ pub struct EngineState {
 }
 
 impl EngineState {
-    /// A state before the first block, with room for `tracks` meters.
-    pub(crate) fn with_capacity(tracks: usize) -> Self {
+    /// A state before the first block at `sample_rate`, with room for
+    /// `tracks` meters.
+    pub(crate) fn with_capacity(tracks: usize, sample_rate: SampleRate) -> Self {
         Self {
+            sample_rate,
             clock: 0,
             playing: false,
             position: Frames::ZERO,
@@ -139,6 +148,7 @@ impl Clone for EngineState {
         let mut meters = Vec::with_capacity(self.meters.capacity());
         meters.extend_from_slice(&self.meters);
         Self {
+            sample_rate: self.sample_rate,
             clock: self.clock,
             playing: self.playing,
             position: self.position,

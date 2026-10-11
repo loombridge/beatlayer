@@ -1,4 +1,4 @@
-//! WP-1.6's acceptance: the mixer (`docs/specs/mixer.md`).
+//! WP-1.6's acceptance: the mixer (the mixer spec).
 //!
 //! - Gain accuracy: a fader at −6.02 dB halves the amplitude to within 0.1%,
 //!   and every fader level is the gain it names; a fader at 0 is silence.

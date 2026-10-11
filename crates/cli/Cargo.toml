@@ -14,6 +14,8 @@ asio = ["bl-audio-io/asio"]
 [dependencies]
 bl-project.workspace = true
 bl-engine.workspace = true
+# `bl-cli device-changes`: the engine on a device through device changes.
+bl-audio-engine.workspace = true
 bl-devices.workspace = true
 bl-audio-io.workspace = true
 bl-core.workspace = true

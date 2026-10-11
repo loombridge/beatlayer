@@ -2,7 +2,7 @@
 //! to check that every binding names a real shortcut in a fitting context,
 //! and to show each binding's keys.
 //!
-//! The registry doesn't read `docs/ui-parity/shortcuts.toml` itself. The
+//! The registry doesn't read the shortcut reference itself. The
 //! caller parses it (`cargo xtask` does) and fills a [`ShortcutTable`], so
 //! this crate stays free of file formats and paths.
 
@@ -224,7 +224,7 @@ mod tests {
                 command("track.delete", &[Context::Arrangement], &["S-TRACK-018"]),
             ]),
             [
-                "clip.delete: binds S-NOPE-001, which isn't in docs/ui-parity/shortcuts.toml",
+                "clip.delete: binds S-NOPE-001, which isn't in the shortcut reference",
                 "track.delete: binds S-TRACK-018, whose context `track-headers` isn't global or \
                  one of the command's contexts",
                 "S-EDIT-005 runs both clip.delete and clip.remove in `arrangement`",

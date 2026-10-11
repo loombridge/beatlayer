@@ -26,7 +26,7 @@ pub struct Settings {
     pub arrangement_loop: ArrangementLoop,
     /// Solo in Place: whether soloing an audio, MIDI, or group track keeps
     /// the return tracks audible, so the soloed track is heard with its
-    /// sends (`docs/specs/mixer.md`). On in a new set. A set saved before
+    /// sends (the mixer spec). On in a new set. A set saved before
     /// WP-1.6 has none and loads with it on; a set with it on doesn't write
     /// it, so the saved form of such a set is unchanged.
     #[serde(default = "on", skip_serializing_if = "is_on")]
@@ -57,7 +57,7 @@ fn is_on(value: &bool) -> bool {
 
 /// The Arrangement loop: where the loop brace sits, and whether the Loop
 /// switch is on. With it on, playback that reaches the brace's end jumps
-/// back to its start (`docs/specs/transport.md`).
+/// back to its start (the transport spec).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ArrangementLoop {
     /// Where the brace starts: 0 (1.1.1) or later.

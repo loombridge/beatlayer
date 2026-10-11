@@ -8,7 +8,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-# Pinned: the command reference (docs/commands.md) is generated from these
+# Pinned: the command reference is generated from these
 # schemas, so an upgrade is a deliberate change that regenerates it.
 schemars = { version = "=1.2.2", default-features = false, features = ["std", "derive"] }
 serde = { version = "1.0.228", default-features = false, features = ["std", "derive"] }

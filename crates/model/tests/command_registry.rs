@@ -714,7 +714,7 @@ fn bad_requests_change_nothing() {
     );
 }
 
-/// The default bindings follow `docs/specs/command-bindings.md`.
+/// The default bindings follow the command bindings spec.
 #[test]
 fn bindings_follow_the_spec() {
     let commands = document_registry();

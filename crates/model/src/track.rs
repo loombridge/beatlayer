@@ -13,7 +13,7 @@ use crate::shared::Shared;
 
 /// The kind of a track, fixed when the track is created.
 ///
-/// The rules for each kind are in `docs/specs/tracks-and-undo.md`.
+/// The rules for each kind are in the tracks and undo spec.
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
 )]
@@ -83,7 +83,7 @@ impl fmt::Display for TrackKind {
 }
 
 /// Where a return track's sends take their signal from the tracks that send
-/// to it: the return's Pre/Post switch (`docs/specs/mixer.md`).
+/// to it: the return's Pre/Post switch (the mixer spec).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[schemars(
@@ -108,7 +108,7 @@ impl SendTap {
 }
 
 /// A track's mixer settings: its volume, pan, and switches. Its sends are
-/// [`Track::sends`]. The rules are in `docs/specs/mixer.md`.
+/// [`Track::sends`]. The rules are in the mixer spec.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Mixer {
     /// Linear gain: 1.0 is unity (0 dB) and 0.0 is silence (−∞ dB). Finite

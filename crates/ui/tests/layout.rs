@@ -7,11 +7,17 @@ use std::path::PathBuf;
 use bl_ui::layout::{ELEMENTS, Element, REFERENCE, ShellLayout, Strip, TITLE_BAR};
 use egui::vec2;
 
-fn layout_md() -> String {
-    std::fs::read_to_string(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/ui-parity/layout.md"),
-    )
-    .unwrap()
+/// layout.md, or `None` in a checkout without the planning documents (they
+/// aren't published yet), where the test skips.
+fn layout_md() -> Option<String> {
+    let docs = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs");
+    if !docs.exists() {
+        eprintln!(
+            "skipped: the UI parity reference isn't published yet, and this checkout doesn't have it"
+        );
+        return None;
+    }
+    Some(std::fs::read_to_string(docs.join("ui-parity/layout.md")).unwrap())
 }
 
 /// The content-area y of a y measured in Live's window.
@@ -164,7 +170,9 @@ fn groups_stretch_with_the_window_and_controls_keep_their_size() {
 
 #[test]
 fn every_cited_row_exists_and_every_control_bar_row_is_placed() {
-    let text = layout_md();
+    let Some(text) = layout_md() else {
+        return;
+    };
     for placement in ELEMENTS {
         assert!(
             text.contains(&format!("| {} |", placement.row)),

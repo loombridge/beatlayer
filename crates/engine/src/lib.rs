@@ -10,23 +10,23 @@
 //! the next block boundary, moving every node that survived the edit across
 //! from the old program, so a reverb's tail or a plug-in instance carries on.
 //! The old program, with the nodes that didn't survive, goes to the drop
-//! thread to be freed. The design is in `docs/02-architecture.md`, "The
+//! thread to be freed. The design is in the architecture notes, "The
 //! engine" (decisions D5 and D14).
 //!
 //! Most edits never compile: [`Compiler::sync`] turns mixer and parameter
 //! edits into [`ParamEvent`]s, which reach their nodes on an exact frame.
 //! The [`mixer`] glides every gain to its new value, so a fader move never
-//! clicks, and works out who solo silences (`docs/specs/mixer.md`).
+//! clicks, and works out who solo silences (the mixer spec).
 //! Node data is a message of its own ([`Sender::send_data`]): each audio
 //! track's [`clips`] reach its clip player that way, placed through the
 //! tempo map with their audio from the registry's [`MediaLibrary`], so clip
-//! edits never compile either (`docs/specs/audio-clips.md`). A
+//! edits never compile either (the audio clips spec). A
 //! [`ScheduledCommand`] runs at a musical position on its exact frame,
 //! which is how an agent plays in time (D17).
 //!
 //! The [`Processor`] owns the transport: play, stop, continue, the insert
 //! marker, and the Arrangement loop, each a [`TransportCommand`] that acts
-//! on an exact frame (`docs/specs/transport.md`). The [`transport`] module
+//! on an exact frame (the transport spec). The [`transport`] module
 //! registers them as commands people and agents run by ID.
 //!
 //! The pieces, and the threads they live on:

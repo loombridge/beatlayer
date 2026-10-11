@@ -1,6 +1,6 @@
 //! The benchmark scene's data, generated deterministically from a fixed seed.
 //!
-//! The generator is specified in `docs/spikes/ui-gpui.md` ("The scene's data")
+//! The generator is specified in the UI spike reports ("The scene's data")
 //! so another spike can reproduce it. Nothing here depends on GPUI.
 
 use std::ops::Range;

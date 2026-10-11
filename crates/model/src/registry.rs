@@ -265,7 +265,7 @@ impl Entry {
 const MIXER: &[Context] = &[TrackHeaders, Session, Arrangement];
 
 /// Every command this crate registers. The rules behind the bindings are in
-/// `docs/specs/command-bindings.md`.
+/// the command bindings spec.
 const ENTRIES: &[Entry] = &[
     Entry {
         id: "song.set_tempo",

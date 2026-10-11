@@ -1,6 +1,6 @@
 //! The command reference (WP-0.14, decisions D16 and D17).
 //!
-//! `docs/commands.md` is generated from the command registry: every crate
+//! The command reference is generated from the command registry: every crate
 //! that implements commands registers them, and this module builds the same
 //! registry the app does, checks it (every command has a schema, a
 //! description, a permission class, contexts, and bindings that name real
@@ -27,7 +27,7 @@ const PROVIDERS: &[(&str, Register)] = &[
     ("bl-shell-spec", bl_shell_spec::register),
 ];
 
-/// Regenerates `docs/commands.md`, after checking the registry.
+/// Regenerates the command reference, after checking the registry.
 pub fn generate(root: &Path) -> Result<(), String> {
     let (registry, rendered) = build(root)?;
     std::fs::write(root.join(MD_PATH), rendered)
@@ -36,7 +36,7 @@ pub fn generate(root: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Fails if the registry has a problem or `docs/commands.md` is out of
+/// Fails if the registry has a problem or the command reference is out of
 /// date.
 pub fn check(root: &Path) -> Result<(), String> {
     let (registry, expected) = build(root)?;
@@ -50,8 +50,36 @@ pub fn check(root: &Path) -> Result<(), String> {
     }
     eprintln!(
         "{} commands, each with a schema, a description, and a permission class; their \
-         bindings match docs/ui-parity/shortcuts.toml, and {MD_PATH} is in sync",
+         bindings match the shortcut reference, and the command reference is in sync",
         registry.len()
+    );
+    Ok(())
+}
+
+/// Checks only what needs no planning documents: every command has a schema,
+/// a description, a permission class, and contexts. Its bindings and the
+/// generated reference need the UI parity reference.
+pub fn check_registry() -> Result<(), String> {
+    let registry = catalogue()?;
+    let problems: Vec<String> = registry
+        .problems()
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    if !problems.is_empty() {
+        return Err(format!(
+            "the command registry has {} problem(s):\n  {}",
+            problems.len(),
+            problems.join("\n  ")
+        ));
+    }
+    eprintln!(
+        "{} commands, each with a schema, a description, and a permission class",
+        registry.len()
+    );
+    eprintln!(
+        "their bindings and the command reference: {}",
+        ui_parity::ABSENT
     );
     Ok(())
 }
@@ -102,6 +130,10 @@ mod tests {
         let root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .expect("xtask sits in the workspace root");
-        check(root).expect("the command registry is complete and docs/commands.md is in sync");
+        if !ui_parity::reference_present(root) {
+            check_registry().expect("the command registry is complete");
+            return;
+        }
+        check(root).expect("the command registry is complete and the command reference is in sync");
     }
 }

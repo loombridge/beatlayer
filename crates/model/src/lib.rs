@@ -53,9 +53,9 @@
 //! Every command, and undo and redo, is also in the command registry
 //! (`bl-commands`), so people and agents can run it by ID with JSON
 //! arguments: see [`registry`]. The command reference is
-//! `docs/commands.md`.
+//! the command reference.
 //!
-//! The rules taken from Live are in `docs/specs/tracks-and-undo.md`.
+//! The rules taken from Live are in the tracks and undo spec.
 
 mod changes;
 mod clip;

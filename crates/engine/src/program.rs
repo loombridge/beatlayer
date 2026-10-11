@@ -22,7 +22,7 @@ use crate::node::{Block, Node, NodeEvent, NodeKey, ParamValue, TransportInfo};
 /// [`Route`] whose gain solo and send levels set; runs the track's device
 /// chain; and then its [`TrackMixer`] (pan, volume, the activator, the
 /// meters). A task whose track feeds a pre-fader send first keeps a copy of
-/// its chain's output for the send to read (`docs/specs/mixer.md`).
+/// its chain's output for the send to read (the mixer spec).
 ///
 /// A task can start once every task feeding it has finished, so the tasks
 /// form a dependency graph. Each task lists the tasks waiting on it and how

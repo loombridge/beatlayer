@@ -61,10 +61,10 @@ pub struct Viewport {
 }
 
 /// The transport as the Arrangement View draws it: the playhead and the loop
-/// brace. The engine's UI state fills it in (`bl_engine::EngineState`'s
-/// `playing` and `position_ticks`); the loop comes with the transport
-/// package (WP-1.5) and until then is Live's default for a new set, bars 1
-/// to 5, off.
+/// brace. `Shell::poll_engine` fills it in before each frame: the playhead
+/// from the engine's UI state (`bl_engine::EngineState`'s `playing` and
+/// `position_ticks`), and the brace from the document's loop (WP-1.18). The
+/// default is a new set's: stopped at 1.1.1, the brace on bars 1 to 5, off.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TransportView {
     /// Whether the song is playing.
@@ -275,6 +275,15 @@ impl ArrangementView {
             }
         }
         changed
+    }
+
+    /// Moves the insert marker to where the transport put it (a position
+    /// field, Home, a second Stop, an agent; WP-1.18), keeping the
+    /// selection and Follow as they are. Returns whether it moved.
+    pub fn move_insert_marker(&mut self, at: Ticks) -> bool {
+        let moved = self.insert_marker != at;
+        self.insert_marker = at;
+        moved
     }
 
     /// The horizontal view in effect: with Optimize Width on, the whole

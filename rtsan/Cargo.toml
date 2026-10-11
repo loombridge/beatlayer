@@ -32,6 +32,10 @@ bl-core = { path = "../crates/core" }
 bl-engine = { path = "../crates/engine" }
 bl-media = { path = "../crates/media" }
 bl-model = { path = "../crates/model" }
+# The app's audio callback, which runs the engine (WP-1.18), and the ring
+# that hands it the engine's processor.
+bl-shell = { path = "../crates/shell" }
+rtrb = "0.4.0"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.190"

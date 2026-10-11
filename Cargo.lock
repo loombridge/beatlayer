@@ -807,10 +807,12 @@ dependencies = [
  "bl-audio-io",
  "bl-commands",
  "bl-core",
+ "bl-engine",
  "bl-model",
  "bl-project",
  "bl-rt",
  "bl-shell-spec",
+ "rtrb",
  "serde",
  "serde_json",
 ]

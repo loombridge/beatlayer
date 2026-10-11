@@ -1,6 +1,6 @@
 [package]
 name = "bl-shell"
-description = "The app shell's headless half: the shell's state and commands at work (files, views, settings), the audio host, and preferences."
+description = "The app shell's headless half: the shell's state and commands at work (files, views, settings, the transport), the audio host running the engine, and preferences."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,11 +11,17 @@ publish.workspace = true
 bl-audio-io.workspace = true
 bl-commands.workspace = true
 bl-core.workspace = true
+# The engine the app plays the set through, and the transport's commands
+# (WP-1.18). It depends on no UI crate.
+bl-engine.workspace = true
 bl-model.workspace = true
 bl-project.workspace = true
 bl-shell-spec.workspace = true
 serde = { version = "1.0.228", default-features = false, features = ["std", "derive"] }
 serde_json = "1"
+# Hands the engine's processor to the audio thread once the stream has
+# opened at its rate: the version bl-engine uses.
+rtrb = "0.4.0"
 
 [dev-dependencies]
 # The allocation trap, so tests can show the audio callback stays off the

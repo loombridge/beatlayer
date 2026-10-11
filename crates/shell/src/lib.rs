@@ -19,6 +19,10 @@
 //! - [`arrangement`]: what the Arrangement View shows (zoom, scroll, Follow,
 //!   the editing grid, track heights, the insert marker and selection),
 //!   changed by its view commands (WP-1.8a).
+//! - [`transport`]: the Control Bar's transport section: what its fields
+//!   show, and the command each change runs (WP-1.18). The transport's
+//!   commands themselves are `bl-engine`'s, which [`Shell`] registers and
+//!   sends to the engine the audio host runs.
 //!
 //! The UI (`bl-ui`) draws the shell and the app (`beatlayer`) wires it to
 //! windows, native menus, and file dialogs. Nothing here depends on a UI
@@ -29,9 +33,13 @@ pub mod audio;
 pub mod files;
 pub mod settings;
 mod shell;
+pub mod transport;
 
 /// The Arrangement View's command IDs and their argument and result types.
 pub use bl_shell_spec::arrangement as arrangement_commands;
+/// The transport's command IDs the shell's menus and controls run, and
+/// `transport.state`'s result.
+pub use bl_shell_spec::transport as transport_commands;
 pub use bl_shell_spec::{commands, menus, register};
 pub use shell::{
     Area, Effect, Invocation, MainView, Message, Shell, ShellError, WindowKind, ZOOM_STEPS,

@@ -4,16 +4,40 @@
 # asks for it. Alongside, it runs the real-time tests under RealtimeSanitizer
 # on Linux (x64).
 #
-# macOS stays out of per-change CI: every author runs the full check on macOS
+# macOS stays out of per-change CI: every author runs the check on macOS
 # locally and pastes the evidence in the pull request, and macos-check.yml
-# runs it on main every night that code changed. The workflow also:
+# runs the full check on main every night that code changed.
 #
-# - builds nothing for changes that touch only Markdown, the licence, or the
-#   issue templates. On pushes to main the path filter skips the run; on pull
-#   requests the `changes` job decides instead, and the required checks
-#   (`check (Windows x64)`, `check (Linux x64)`, and `RealtimeSanitizer (Linux
-#   x64)`, which branch protection on main requires) still report, passing
-#   without running a step, so a prose-only pull request can merge;
+# Tests run under cargo-nextest, each in a process of its own, as many at
+# once as the runner has cores. How much they test depends on the event:
+#
+# - On a pull request, only the packages the pull request changes, and every
+#   package that depends on them, run their tests (`cargo xtask check
+#   --affected` against the base branch; xtask/src/affected.rs has the rules).
+#   A change to anything every package shares (Cargo.toml or Cargo.lock, the
+#   toolchain, Cargo's or the tools' configuration, xtask, .github/, the
+#   shared fixtures in tests/ or assets/, or any file outside a package) still
+#   tests everything. Every other step (format, clippy, layers, deny, and the
+#   rest) stays workspace-wide. The property, stress, and kill tests run at
+#   BL_TEST_DEPTH=quick: every property, with fewer cases.
+# - On a push to main and a manual run, every package's tests run, at
+#   BL_TEST_DEPTH=full, as they do in the nightly macOS check.
+#
+# That's the safety net: if a pull request's selection misses a package it
+# should have tested, or a quick run misses a case a full one finds, the push
+# that merges it runs everything at full depth, so the miss shows up within
+# one run of merging.
+#
+# The workflow also:
+#
+# - builds nothing for changes that touch only prose: Markdown outside the
+#   crates (a crate can compile its Markdown in, as bl-agent does its
+#   guide), the licence, or the issue templates. On pushes to main the path
+#   filter skips the run; on pull requests the `changes` job decides instead,
+#   and the required checks (`check (Windows x64)`, `check (Linux x64)`, and
+#   `RealtimeSanitizer (Linux x64)`, which branch protection on main
+#   requires) still report, passing without running a step, so a prose-only
+#   pull request can merge;
 # - cancels a run when a newer commit supersedes it;
 # - restores the dependency cache on every run, but saves it only from main,
 #   so pull requests share main's cache instead of filling the 10 GB quota;
@@ -35,13 +59,16 @@ on:
     branches: [main]
   push:
     branches: [main]
-    # The filter includes everything, then excludes prose. The last matching
-    # pattern wins. Keep it in step with the patterns in the `changes` job.
+    # The filter includes everything, then excludes prose, then takes back
+    # the packages' Markdown. The last matching pattern wins. Keep it in step
+    # with the patterns in the `changes` job.
     paths:
       - "**"
       - "!**.md"
       - "!LICENSE"
       - "!.github/ISSUE_TEMPLATE/**"
+      - "crates/**"
+      - "xtask/**"
   workflow_dispatch:
     inputs:
       macos:
@@ -88,9 +115,13 @@ jobs:
             files=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --jq '.[].filename')
             while IFS= read -r file; do
               case "$file" in
-                *.md | LICENSE | .github/ISSUE_TEMPLATE/*) ;;
-                *) code=true; echo "Builds because of $file"; break ;;
+                # A package's Markdown can be compiled in.
+                crates/* | xtask/*) ;;
+                *.md | LICENSE | .github/ISSUE_TEMPLATE/*) continue ;;
               esac
+              code=true
+              echo "Builds because of $file"
+              break
             done <<< "$files"
           fi
           [ "$code" = true ] || echo "Only prose changed: the checks pass without building"
@@ -117,11 +148,14 @@ jobs:
         if: needs.changes.outputs.code == 'true'
         run: git config --global core.autocrlf false
 
+      # A pull request's check compares it with the merge base of its base
+      # branch, so it needs the history; other runs need only the commit.
       - name: Check out
         if: needs.changes.outputs.code == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: ${{ github.event_name == 'pull_request' && 0 || 1 }}
 
       # cpal's `asio` feature pulls in asio-sys, whose build script downloads
       # Steinberg's ASIO SDK when CPAL_ASIO_DIR is unset. ASIO goes through
@@ -150,17 +184,30 @@ jobs:
           cache-bin: false
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install cargo-deny
+      # cargo-nextest's version is pinned in xtask/src/main.rs and
+      # .config/nextest.toml too; keep the three in step.
+      - name: Install cargo-deny and cargo-nextest
         if: needs.changes.outputs.code == 'true'
         uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
         with:
-          tool: cargo-deny@0.20.2
+          tool: cargo-deny@0.20.2,cargo-nextest@0.9.146
           # A prebuilt, checksummed binary or nothing: never compile it here.
           fallback: none
 
+      # See the note at the top: a pull request tests what it changes, at
+      # quick depth; everything else tests everything, at full depth.
       - name: cargo xtask check
         if: needs.changes.outputs.code == 'true'
-        run: cargo xtask check
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          BL_TEST_DEPTH: ${{ github.event_name == 'pull_request' && 'quick' || 'full' }}
+          NEXTEST_PROFILE: ci
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            cargo xtask check --affected --base "origin/$BASE_REF"
+          else
+            cargo xtask check
+          fi
 
   rtsan:
     name: RealtimeSanitizer (Linux x64)

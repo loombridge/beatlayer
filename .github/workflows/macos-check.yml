@@ -2,9 +2,11 @@
 # main, and on demand from the Actions tab.
 #
 # Per-change CI leaves macOS out to save minutes (a macOS minute counts as ten
-# Linux minutes). Authors run the full check on macOS locally for every pull
-# request, and this workflow confirms main on a clean macOS runner. A scheduled run checks first whether any code changed in the
-# last 25 hours, and does nothing if only docs or Markdown changed.
+# Linux minutes). Authors run the check on macOS locally for every pull
+# request, and this workflow confirms main on a clean macOS runner, testing
+# every package at full depth (BL_TEST_DEPTH=full). A scheduled run checks
+# first whether any code changed in the last 25 hours, and does nothing if
+# only docs or Markdown outside the packages changed.
 #
 # Every third-party action is pinned to a full commit SHA, with its version in
 # a comment. Update the SHA and the comment together.
@@ -53,6 +55,10 @@ jobs:
             exit 0
           fi
           changed=$(git log --since="25 hours ago" --format=%H -- . ':(exclude)docs' ':(exclude)*.md' ':(exclude)**/*.md' | head -1)
+          # A package's Markdown can be compiled in, as bl-agent's guide is.
+          if [ -z "$changed" ]; then
+            changed=$(git log --since="25 hours ago" --format=%H -- 'crates/*.md' 'xtask/*.md' | head -1)
+          fi
           if [ -n "$changed" ]; then
             echo "Code changed since yesterday's run; checking."
             echo "run=true" >> "$GITHUB_OUTPUT"
@@ -84,12 +90,17 @@ jobs:
         with:
           cache-bin: false
 
-      - name: Install cargo-deny
+      # cargo-nextest's version is pinned in xtask/src/main.rs and
+      # .config/nextest.toml too; keep the three in step.
+      - name: Install cargo-deny and cargo-nextest
         uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
         with:
-          tool: cargo-deny@0.20.2
+          tool: cargo-deny@0.20.2,cargo-nextest@0.9.146
           # A prebuilt, checksummed binary or nothing: never compile it here.
           fallback: none
 
       - name: cargo xtask check
+        env:
+          BL_TEST_DEPTH: full
+          NEXTEST_PROFILE: ci
         run: cargo xtask check

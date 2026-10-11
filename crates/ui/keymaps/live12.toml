@@ -413,8 +413,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Option+Tab"]
 win = ["Ctrl+Tab"]
-status = "pending"
-package = "WP-1.14"
+status = "bound"
+commands = [
+  { id = "focus.next_neighbor", contexts = ["tab-focus"] },
+]
 
 [[shortcut]]
 id = "S-FOCUS-014"
@@ -425,8 +427,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Option+Shift+Tab"]
 win = ["Ctrl+Shift+Tab"]
-status = "pending"
-package = "WP-1.14"
+status = "bound"
+commands = [
+  { id = "focus.previous_neighbor", contexts = ["tab-focus"] },
+]
 
 [[shortcut]]
 id = "S-FILE-001"

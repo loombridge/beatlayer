@@ -19,9 +19,10 @@
 use crate::browser::{ADD_FOLDER as BROWSER_ADD_FOLDER, SET_PREVIEW as BROWSER_PREVIEW};
 use crate::commands::{
     APP_ABOUT, APP_HIDE, APP_QUIT, APP_SETTINGS, AUDIO_TOGGLE_ENGINE, FOCUS_ARRANGEMENT,
-    FOCUS_CONTROL_BAR, FOCUS_NEXT, FOCUS_PREVIOUS, FOCUS_TOGGLE_TAB_NAVIGATION, SET_NEW, SET_OPEN,
-    SET_SAVE, SET_SAVE_AS, VIEW_FULL_SCREEN, VIEW_TOGGLE_BROWSER, VIEW_TOGGLE_SESSION_ARRANGEMENT,
-    VIEW_ZOOM_IN, VIEW_ZOOM_OUT, VIEW_ZOOM_RESET, WINDOW_CLOSE,
+    FOCUS_CONTROL_BAR, FOCUS_NEXT, FOCUS_PREVIOUS, FOCUS_TOGGLE_TAB_NAVIGATION,
+    FOCUS_TOGGLE_WRAP_NAVIGATION, SET_NEW, SET_OPEN, SET_SAVE, SET_SAVE_AS, VIEW_FULL_SCREEN,
+    VIEW_TOGGLE_BROWSER, VIEW_TOGGLE_SESSION_ARRANGEMENT, VIEW_ZOOM_IN, VIEW_ZOOM_OUT,
+    VIEW_ZOOM_RESET, WINDOW_CLOSE,
 };
 use crate::mixer_view::{
     FOCUS as MIXER_FOCUS, IN_OUT as MIXER_IN_OUT, RETURN_TRACKS as MIXER_RETURN_TRACKS,
@@ -597,7 +598,11 @@ const NAVIGATE: &[Row] = &[
         "Use Tab Key to Move Focus",
         Cmd(FOCUS_TOGGLE_TAB_NAVIGATION),
     ),
-    ("M-NAV-019", "Wrap Keyboard Navigation", Pending(None)),
+    (
+        "M-NAV-019",
+        "Wrap Keyboard Navigation",
+        Cmd(FOCUS_TOGGLE_WRAP_NAVIGATION),
+    ),
 ];
 
 const OPTIONS: &[Row] = &[
@@ -679,7 +684,8 @@ const OPTIONS: &[Row] = &[
     SEPARATOR,
     ("M-OPT-023", "Solo Switches", Pending(None)),
     ("M-OPT-024", "Cue Switches", Pending(None)),
-    ("M-OPT-025", "Solo in Place", Pending(None)),
+    // `bl-model`'s switch, which the shell turns to the other state.
+    ("M-OPT-025", "Solo in Place", Cmd("mixer.set_solo_in_place")),
     SEPARATOR,
     ("M-OPT-026", "Lock Envelopes", Pending(None)),
     ("M-OPT-027", "MIDI Arrangement Overdub", Pending(None)),

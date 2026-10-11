@@ -43,7 +43,8 @@ impl KeyDispatcher {
 
     /// Takes the key presses the keymap binds out of `input` and returns
     /// what they run. `text_focused` says a text field has the keyboard, so
-    /// only `text-field` shortcuts apply.
+    /// only `text-field` shortcuts apply, and `tab-focus` ones while Tab
+    /// moves the focus.
     pub fn take_bound_keys(
         &mut self,
         input: &mut RawInput,
@@ -53,7 +54,14 @@ impl KeyDispatcher {
     ) -> Vec<Invocation> {
         let now = input.time.unwrap_or_default();
         let contexts = if text_focused {
-            vec![Context::TextField]
+            // While Tab moves the focus, it does from a field too: from the
+            // browser's search field, or a header's volume field (the
+            // accessibility spec, R3).
+            let mut contexts = vec![Context::TextField];
+            if shell.tab_navigation() {
+                contexts.push(Context::TabFocus);
+            }
+            contexts
         } else {
             shell.active_contexts()
         };

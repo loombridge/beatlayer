@@ -65,6 +65,12 @@ pub fn lanes_id() -> Id {
     Id::new("arrangement-lanes")
 }
 
+/// The ID of a clip's node in the accessibility tree.
+#[must_use]
+pub fn clip_id(clip: bl_model::ClipId) -> Id {
+    Id::new(("arrangement-clip", clip))
+}
+
 /// The ID of the beat-time ruler.
 #[must_use]
 pub fn beat_ruler_id() -> Id {
@@ -164,6 +170,8 @@ pub struct ArrangementUi {
     /// Where the last frame put the Arrangement's mixer, while it shows
     /// (WP-1.9).
     mixer: Option<Rect>,
+    /// The clips this frame put in the accessibility tree (WP-1.14).
+    described: Vec<bl_model::ClipId>,
 }
 
 impl std::fmt::Debug for ArrangementUi {
@@ -206,6 +214,7 @@ impl ArrangementUi {
             menus: ContextMenus::new(),
             playhead: None,
             mixer: None,
+            described: Vec::new(),
         }
     }
 
@@ -1039,6 +1048,17 @@ impl ArrangementUi {
         }
     }
 
+    /// The selected clip this frame put in the accessibility tree, which
+    /// the view reports as its active descendant, so a screen reader reads
+    /// the clip the keys select (the accessibility spec, R2).
+    #[must_use]
+    pub fn selected_clip_node(&self, view: &ArrangementView) -> Option<Id> {
+        self.described
+            .iter()
+            .find(|clip| view.is_clip_selected(**clip))
+            .map(|clip| clip_id(*clip))
+    }
+
     fn header_controls(
         &self,
         ui: &mut Ui,
@@ -1140,7 +1160,7 @@ impl ArrangementUi {
     /// The view's own accessible node, a pane named as the main view is, and
     /// the clips on screen as items in it.
     fn accessibility(
-        &self,
+        &mut self,
         ui: &mut Ui,
         view: &ArrangementView,
         doc: &Document,
@@ -1153,6 +1173,7 @@ impl ArrangementUi {
                 node.set_label("Track Lanes".to_owned());
             })
             .is_some();
+        self.described.clear();
         if !enabled {
             return;
         }
@@ -1168,7 +1189,8 @@ impl ArrangementUi {
             let Some(clip) = doc.clip(shown.clip) else {
                 continue;
             };
-            let id = Id::new(("arrangement-clip", shown.clip));
+            let id = clip_id(shown.clip);
+            self.described.push(shown.clip);
             let rect = shown.rect.intersect(lanes);
             let _ = ui.interact(rect, id, Sense::hover());
             let signatures = &doc.settings().time_signatures;

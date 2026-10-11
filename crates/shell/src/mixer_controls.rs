@@ -181,14 +181,13 @@ pub fn volume_text(gain: f64) -> String {
     }
 }
 
-/// Volume as a screen reader reads it: `0.0 dB`, `minus infinity dB`.
+/// Volume as a screen reader reads it: the value as the Status Bar shows it
+/// while the fader moves, `0.0 dB`, `-6.0 dB`, `-inf dB` (the
+/// accessibility spec, R1; what Live's own accessibility tree reads is to
+/// observe).
 #[must_use]
 pub fn volume_spoken(gain: f64) -> String {
-    if gain <= 0.0 {
-        "minus infinity dB".to_owned()
-    } else {
-        format!("{} dB", volume_text(gain))
-    }
+    format!("{} dB", volume_text(gain))
 }
 
 /// What the Status Bar shows while a fader is dragged (observed:
@@ -533,7 +532,7 @@ mod tests {
         assert_eq!(volume_text(0.0), "-inf");
         assert_eq!(volume_text(0.999_99), "0.0");
         assert_eq!(volume_readout(db_gain(-21.0)), "Track Volume: -21.0 dB");
-        assert_eq!(volume_spoken(0.0), "minus infinity dB");
+        assert_eq!(volume_spoken(0.0), "-inf dB");
         assert_eq!(pan_text(0.0), "C");
         assert_eq!(pan_text(-0.5), "25L");
         assert_eq!(pan_text(1.0), "50R");

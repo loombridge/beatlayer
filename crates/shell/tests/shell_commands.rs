@@ -463,7 +463,10 @@ fn focus_commands_move_the_focus_and_set_the_contexts() {
     shell.run("focus.next", json!({})).unwrap();
     assert_eq!(
         shell.take_effects(),
-        [Effect::MoveFocus { backwards: false }]
+        [Effect::MoveFocus {
+            backwards: false,
+            neighbor: false
+        }]
     );
 
     shell

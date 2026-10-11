@@ -179,6 +179,18 @@ pub fn header(
     );
     let name = track.name();
     let title_response = ui.interact(title, title_id(id), Sense::click());
+    // The title marks the track as drawn for the keyboard's neighbour moves
+    // (the accessibility spec, R4); Tab doesn't stop on it.
+    crate::focus::register(
+        ui.ctx(),
+        title_response.id,
+        bl_shell::Area::MainView,
+        Some(crate::focus::TrackControl {
+            place: Place::Header,
+            track: id,
+            slot: crate::focus::Slot::Title,
+        }),
+    );
     if title_response.clicked() {
         let add = ui.input(|i| i.modifiers.shift || i.modifiers.command);
         invoke(

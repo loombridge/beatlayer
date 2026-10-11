@@ -245,7 +245,7 @@ fn every_strip_has_its_controls_where_live_has_them() {
     // The top-left field is the peak level readout, not the volume.
     assert_eq!(get("Peak Level"), (8.0, 13.0, 42.0, 24.0));
     let peak = inside(&nodes, "3 Audio", "Peak Level").unwrap();
-    assert_eq!(peak.value, "minus infinity dB");
+    assert_eq!(peak.value, "-inf dB");
     // Pan centred at (25, 46), about 25 points across.
     let (l, t, r, b) = get("Track Panning");
     assert_eq!(((l + r) / 2.0, (t + b) / 2.0), (25.0, 46.0));

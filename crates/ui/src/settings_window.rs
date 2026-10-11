@@ -1,7 +1,9 @@
 //! The Settings window (L-SET-001 to L-SET-003): the page chooser at the
 //! left, and the page at the right. The Audio page (L-SET-012), the theme
 //! choice (L-SET-011), the interface zoom (L-SET-010, WP-1.17), and Create
-//! Fades on Clip Edges (L-SET-018, WP-1.4b) are built; the other pages are
+//! Fades on Clip Edges (L-SET-018, WP-1.4b), and Display & Input's
+//! keyboard settings (Outline View in Focus, Use Tab Key to Move Focus,
+//! Wrap Tab Navigation; WP-1.14) are built; the other pages are
 //! in the chooser and say which package builds them. The Tempo & MIDI page (L-SET-014) has the agent server's section
 //! (WP-1.15), which Live doesn't have: it sits with the control surfaces,
 //! the other way programs drive the app.
@@ -56,7 +58,7 @@ impl SettingsUi {
     /// Carries out an effect that moves the keyboard focus in this window
     /// (Tab and Shift-Tab, S-SET-001 and S-SET-002).
     pub fn apply_effect(&mut self, effect: &bl_shell::Effect) {
-        if let bl_shell::Effect::MoveFocus { backwards } = effect {
+        if let bl_shell::Effect::MoveFocus { backwards, .. } = effect {
             self.move_focus = Some(crate::main_window::direction(*backwards));
         }
     }
@@ -443,13 +445,69 @@ fn display_page(
             json!({ "percent": next as u16 }),
         )));
     }
+    // Spec: accessibility R6, R7 (L-SET-010): the Display Options and
+    // Navigation and Keyboard sections, with the keyboard's settings built
+    // and the others in their places, pending.
+    rows.heading(ui, "Display Options");
+    let rect = rows.row(ui, "Outline View in Focus", SettingsLayout::SWITCH);
+    if let Some(on) = switch(
+        ui,
+        theme,
+        "outline-view-in-focus",
+        "Outline View in Focus",
+        rect,
+        shell.outline_view_in_focus(),
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            ids::SETTINGS_SET_OUTLINE_VIEW_IN_FOCUS,
+            json!({ "on": on }),
+        )));
+    }
+    for row in &DISPLAY_OPTIONS {
+        rows.pending(ui, row);
+    }
+    rows.heading(ui, "Navigation and Keyboard");
+    for (label, salt, on, command) in [
+        (
+            "Use Tab Key to Move Focus",
+            "use-tab-key",
+            shell.tab_navigation(),
+            ids::FOCUS_TOGGLE_TAB_NAVIGATION,
+        ),
+        (
+            "Wrap Tab Navigation",
+            "wrap-tab-navigation",
+            shell.wrap_navigation(),
+            ids::FOCUS_TOGGLE_WRAP_NAVIGATION,
+        ),
+    ] {
+        let rect = rows.row(ui, label, SettingsLayout::SWITCH);
+        if let Some(next) = switch(ui, theme, salt, label, rect, on)
+            && next != on
+        {
+            events.push(UiEvent::Invoke(Invocation::new(command, json!({}))));
+        }
+    }
+    for row in &NAVIGATION {
+        rows.pending(ui, row);
+    }
     rows.note(
         ui,
-        "The zoom scales every window; View > Zoom and its keys change it too. The Display \
-         Options, Navigation and Keyboard, Mouse and Pen Input, and Application Options settings \
-         come with later packages.",
+        "The zoom scales every window; View > Zoom and its keys change it too. The Mouse and \
+         Pen Input and Application Options settings come with later packages.",
     );
 }
+
+/// Display Options after Outline View in Focus (L-SET-010), which later
+/// packages build.
+const DISPLAY_OPTIONS: [Pending; 3] = [
+    switch_row("Show Scroll Bars", "a later package"),
+    chooser_row("Follow Behavior", "a later package"),
+    switch_row("Hide Labels", "a later package"),
+];
+
+/// Navigation and Keyboard after the Tab settings (L-SET-010).
+const NAVIGATION: [Pending; 1] = [switch_row("Move Clips With Arrow Keys", "a later package")];
 
 /// A row of a Settings page whose setting no package has built yet: its
 /// label, and its control's place drawn quiet, which can't be used and

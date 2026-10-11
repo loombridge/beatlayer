@@ -16,6 +16,10 @@
 //!   Stop, the Loop switch, and the tempo, time-signature, position, and
 //!   loop fields, each running a registered command.
 //!
+//! - [`focus`]: keyboard focus in the main window (WP-1.14): the order Tab
+//!   and the neighbour keys move through, and whether the focus is
+//!   outlined.
+//!
 //! - [`mixer`]: the Mixer view (WP-1.9): the Session View's columns and
 //!   mixer, the Arrangement's mixer, and the strip controls the
 //!   Arrangement's track headers share, each running a registered command.
@@ -27,6 +31,7 @@
 pub mod arrangement;
 pub mod browser;
 pub mod control_bar;
+pub mod focus;
 pub mod input;
 pub mod keymap;
 pub mod layout;

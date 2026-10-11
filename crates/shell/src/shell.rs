@@ -90,6 +90,10 @@ pub enum Area {
     StatusBar,
 }
 
+/// `mixer.set_solo_in_place`, which Options ▸ Solo in Place runs as a
+/// switch (M-OPT-025).
+const SOLO_IN_PLACE: &str = "mixer.set_solo_in_place";
+
 /// A command and its arguments, kept to run later (after a dialog).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Invocation {
@@ -147,10 +151,15 @@ pub enum Effect {
     SetFullScreen(bool),
     /// Move the keyboard focus to an area of the main window.
     FocusArea(Area),
-    /// Move the keyboard focus to the next or previous control.
+    /// Move the keyboard focus to the next or previous control, or to the
+    /// same control on the next or previous track.
     MoveFocus {
         /// Whether it moves backwards.
         backwards: bool,
+        /// Whether it moves to the same control on a neighbouring track
+        /// (Navigate ▸ Next Neighbor and Previous Neighbor) rather than to
+        /// the next control.
+        neighbor: bool,
     },
     /// Ask for a folder, then add it to the browser's Places with
     /// `browser.add_folder` (WP-1.10).
@@ -642,6 +651,20 @@ impl Shell {
     #[must_use]
     pub fn tab_navigation(&self) -> bool {
         self.prefs.tab_navigation
+    }
+
+    /// Whether Tab and Shift-Tab wrap round at the ends of the focused area
+    /// (Wrap Tab Navigation; the accessibility spec, R5).
+    #[must_use]
+    pub fn wrap_navigation(&self) -> bool {
+        self.prefs.wrap_navigation
+    }
+
+    /// Whether a border is drawn round the focused area (Outline View in
+    /// Focus; the accessibility spec, R7).
+    #[must_use]
+    pub fn outline_view_in_focus(&self) -> bool {
+        self.prefs.outline_view_in_focus
     }
 
     /// The window with the keyboard focus.
@@ -1226,6 +1249,8 @@ impl Shell {
             ids::VIEW_FULL_SCREEN => Some(self.full_screen),
             ids::VIEW_TOGGLE_BROWSER => Some(self.browser),
             ids::FOCUS_TOGGLE_TAB_NAVIGATION => Some(self.prefs.tab_navigation),
+            ids::FOCUS_TOGGLE_WRAP_NAVIGATION => Some(self.prefs.wrap_navigation),
+            SOLO_IN_PLACE => Some(self.editor.document().settings().solo_in_place),
             ids::AUDIO_TOGGLE_ENGINE => Some(self.audio.engine_on()),
             browser_ids::SET_PREVIEW => Some(self.browser_view.preview_on()),
             _ if mixer_ids::handles(id) => self.mixer.switch_state(id, self.front_mixer()),
@@ -1412,6 +1437,12 @@ impl Shell {
             fields.entry("name").or_insert_with(|| json!(name));
             fields.entry("index").or_insert_with(|| json!(index));
         }
+        if id == SOLO_IN_PLACE && !fields.contains_key("enabled") {
+            // Spec: accessibility R9. Options ▸ Solo in Place switches the
+            // setting to the other state.
+            let on = self.editor.document().settings().solo_in_place;
+            fields.insert("enabled".to_owned(), json!(!on));
+        }
         if let Some(switch) = Switch::of_command(id)
             && !fields.contains_key("track")
         {
@@ -1542,6 +1573,10 @@ impl Shell {
                 let switch = Switch::of_command(id).expect("just checked");
                 self.toggle_tracks(id, switch, args)
             }
+            SOLO_IN_PLACE if !has("enabled") => {
+                let args = self.filled_args(id, args)?;
+                self.run(id, args)
+            }
             "track.create" if !has("id") => {
                 let mut args = self.filled_args(id, args)?;
                 let new: TrackId = self.editor.new_id();
@@ -1665,6 +1700,13 @@ impl Shell {
             if id != view_ids::STATE {
                 // A query changes nothing a window shows.
                 self.touch();
+            }
+            if result.is_ok() && id == view_ids::FOCUS_TITLE_BAR {
+                // Spec: accessibility R4. Esc from a track's control gives
+                // the keyboard back to the Arrangement, at the title bar.
+                self.focused_window = WindowKind::Main;
+                self.focused_area = Area::MainView;
+                self.effects.push(Effect::FocusArea(Area::MainView));
             }
             if result.is_ok() && matches!(id, view_ids::SET_INSERT_MARKER | view_ids::SELECT_TIME) {
                 // Spec: control-bar-transport R15. A click or a time
@@ -1939,8 +1981,35 @@ impl Shell {
                 Self::args::<NoArgs>(id, args)?;
                 self.effects.push(Effect::MoveFocus {
                     backwards: id == ids::FOCUS_PREVIOUS,
+                    neighbor: false,
                 });
                 Ok(Value::Null)
+            }
+            // Spec: accessibility R4.
+            ids::FOCUS_NEXT_NEIGHBOR | ids::FOCUS_PREVIOUS_NEIGHBOR => {
+                Self::args::<NoArgs>(id, args)?;
+                self.effects.push(Effect::MoveFocus {
+                    backwards: id == ids::FOCUS_PREVIOUS_NEIGHBOR,
+                    neighbor: true,
+                });
+                Ok(Value::Null)
+            }
+            // Spec: accessibility R5.
+            ids::FOCUS_TOGGLE_WRAP_NAVIGATION => {
+                Self::args::<NoArgs>(id, args)?;
+                self.prefs.wrap_navigation = !self.prefs.wrap_navigation;
+                self.save_preferences();
+                Ok(to_value(&SwitchResult {
+                    on: self.prefs.wrap_navigation,
+                }))
+            }
+            // Spec: accessibility R7.
+            ids::SETTINGS_SET_OUTLINE_VIEW_IN_FOCUS => {
+                let SwitchArgs { on } = Self::args(id, args)?;
+                self.prefs.outline_view_in_focus = on;
+                self.save_preferences();
+                self.touch();
+                Ok(to_value(&SwitchResult { on }))
             }
             ids::FOCUS_TOGGLE_TAB_NAVIGATION => {
                 Self::args::<NoArgs>(id, args)?;

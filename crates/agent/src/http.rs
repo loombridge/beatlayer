@@ -11,11 +11,17 @@
 //!   is refused (DNS-rebinding protection).
 //! - It must carry no `Origin` header: browsers send one, agent clients
 //!   don't, so requests from web pages are refused.
-//! - It must carry the server's token as a bearer token.
+//! - It must carry a token as a bearer token: an allowed agent's own token,
+//!   which makes its requests that agent's, or the server's token, with
+//!   which a client is asked about each time it connects (WP-1.15b). Tokens
+//!   are compared in constant time, every one of them for every request.
 //!
 //! A request that passes goes to the main thread as a [`Job`], through the
 //! same event loop as the UI's events, so commands run where the person's
-//! do. The connection's thread waits for the answer, however long the
+//! do, with the credential it carried; every request on a session must
+//! carry the credential the session started with. A tool call that comes
+//! while the person's gesture is under way waits ([`Served::Parked`]) and
+//! is answered after the drop ([`resume`]). The connection's thread waits for the answer, however long the
 //! person takes to confirm. The server answers each POST with one JSON
 //! response (MCP allows that instead of an event stream), refuses GET with
 //! 405 because it starts no streams of its own, and ends a session on
@@ -28,12 +34,14 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
+use std::sync::RwLock;
+
 use bl_shell::Shell;
-use bl_shell::agent::ENDPOINT_PATH;
+use bl_shell::agent::{AgentSettings, ENDPOINT_PATH};
 use serde_json::Value;
 
 use crate::jsonrpc::{self, code};
-use crate::server::{Agent, Outcome, PROTOCOL_VERSIONS, Question};
+use crate::server::{Agent, Credential, Outcome, PROTOCOL_VERSIONS, Question};
 
 /// The most connections served at once. More are refused with 503.
 pub const MAX_CONNECTIONS: usize = 32;
@@ -45,18 +53,31 @@ pub const MAX_BODY: usize = 8 * 1024 * 1024;
 pub const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// What the server needs to start.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct HttpConfig {
     /// The port on `127.0.0.1`; 0 picks a free one.
     pub port: u16,
-    /// The bearer token every request must carry.
+    /// The server's token, the bearer token a client connects with before
+    /// it has its own. Allowed agents' own tokens are given with
+    /// [`HttpServer::set_agent_tokens`].
     pub token: String,
+}
+
+impl std::fmt::Debug for HttpConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Never the token.
+        f.debug_struct("HttpConfig")
+            .field("port", &self.port)
+            .finish_non_exhaustive()
+    }
 }
 
 /// A request for the main thread.
 #[derive(Debug)]
 pub struct Job {
     request: JobRequest,
+    /// The credential the request carried.
+    caller: Credential,
     reply: mpsc::Sender<HttpReply>,
 }
 
@@ -87,6 +108,81 @@ pub enum Served {
     /// It waits for the person: show [`Pending::question`], then call
     /// [`Pending::finish`] with the answer.
     Waiting(Pending),
+    /// It waits for the person's gesture (a drag) to end: keep it, and
+    /// once the gesture has ended, [`resume`] answers it.
+    Parked(Parked),
+}
+
+/// A tool call waiting for the person's gesture to end.
+#[derive(Debug)]
+pub struct Parked {
+    ticket: u64,
+    reply: mpsc::Sender<HttpReply>,
+    session: String,
+}
+
+impl Parked {
+    /// What [`Agent::resume`] gives its outcome with.
+    #[must_use]
+    pub fn ticket(&self) -> u64 {
+        self.ticket
+    }
+}
+
+/// Once the person's gesture has ended, answers the next call that waited
+/// for it, from `parked`: [`Served::Done`] if it's answered, or
+/// [`Served::Waiting`] if it asks the person first. Call it again until it
+/// gives `None`, which it does while the gesture goes on or nothing waits.
+pub fn resume(agent: &mut Agent, shell: &mut Shell, parked: &mut Vec<Parked>) -> Option<Served> {
+    let (ticket, outcome) = agent.resume(shell)?;
+    let Some(index) = parked.iter().position(|p| p.ticket == ticket) else {
+        // Its connection has gone; the call ran all the same.
+        return Some(Served::Done);
+    };
+    let Parked { reply, session, .. } = parked.remove(index);
+    Some(deliver(outcome, reply, session, false, agent))
+}
+
+/// Sends a handled message's reply, or keeps it waiting for the person.
+fn deliver(
+    outcome: Outcome,
+    reply: mpsc::Sender<HttpReply>,
+    session: String,
+    initialize: bool,
+    agent: &mut Agent,
+) -> Served {
+    let send = |status, session: Option<String>, body: Option<Value>| {
+        let _ = reply.send(HttpReply {
+            status,
+            session,
+            body,
+        });
+    };
+    match outcome {
+        Outcome::Reply(None) => {
+            send(202, None, None);
+            Served::Done
+        }
+        Outcome::Reply(Some(body)) => {
+            let ok = body.get("error").is_none();
+            if initialize && !ok {
+                agent.close_session(&session);
+            }
+            send(200, (initialize && ok).then_some(session), Some(body));
+            Served::Done
+        }
+        Outcome::Ask(question) => Served::Waiting(Pending {
+            question,
+            reply,
+            session,
+            initialize,
+        }),
+        Outcome::Wait(ticket) => Served::Parked(Parked {
+            ticket,
+            reply,
+            session,
+        }),
+    }
 }
 
 /// A job waiting for the person's answer.
@@ -121,7 +217,11 @@ impl Pending {
 /// Runs one job on the main thread: hands its message to the agent API and
 /// sends the reply, or returns it to wait for the person.
 pub fn serve(agent: &mut Agent, shell: &mut Shell, job: Job) -> Served {
-    let Job { request, reply } = job;
+    let Job {
+        request,
+        caller,
+        reply,
+    } = job;
     let send = |status, session: Option<String>, body: Option<Value>| {
         let _ = reply.send(HttpReply {
             status,
@@ -131,7 +231,7 @@ pub fn serve(agent: &mut Agent, shell: &mut Shell, job: Job) -> Served {
     };
     match request {
         JobRequest::Delete { session } => {
-            if agent.has_session(&session) {
+            if agent.session_credential(&session) == Some(&caller) {
                 agent.close_session(&session);
                 send(204, None, None);
             } else {
@@ -142,9 +242,11 @@ pub fn serve(agent: &mut Agent, shell: &mut Shell, job: Job) -> Served {
         JobRequest::Message { session, message } => {
             let initialize = jsonrpc::is_request(&message)
                 && message.get("method").and_then(Value::as_str) == Some("initialize");
+            // Spec: agent-permissions R7. A session is its credential's: a
+            // request carrying another token can't use it.
             let session = match (session, initialize) {
-                (_, true) => agent.open_session(None),
-                (Some(id), false) if agent.has_session(&id) => id,
+                (_, true) => agent.open_session_as(None, caller),
+                (Some(id), false) if agent.session_credential(&id) == Some(&caller) => id,
                 (Some(_), false) => {
                     send(
                         404,
@@ -166,26 +268,8 @@ pub fn serve(agent: &mut Agent, shell: &mut Shell, job: Job) -> Served {
                     return Served::Done;
                 }
             };
-            match agent.handle(shell, &session, message) {
-                Outcome::Reply(None) => {
-                    send(202, None, None);
-                    Served::Done
-                }
-                Outcome::Reply(Some(body)) => {
-                    let ok = body.get("error").is_none();
-                    if initialize && !ok {
-                        agent.close_session(&session);
-                    }
-                    send(200, (initialize && ok).then_some(session), Some(body));
-                    Served::Done
-                }
-                Outcome::Ask(question) => Served::Waiting(Pending {
-                    question,
-                    reply,
-                    session,
-                    initialize,
-                }),
-            }
+            let outcome = agent.handle(shell, &session, message);
+            deliver(outcome, reply, session, initialize, agent)
         }
     }
 }
@@ -197,6 +281,8 @@ fn error_body(message: &str) -> Value {
 /// What every connection thread shares.
 struct Shared {
     token: String,
+    /// Each allowed agent's name and own token.
+    agents: RwLock<Vec<(String, String)>>,
     port: u16,
     jobs: Mutex<mpsc::Sender<Job>>,
     wake: Arc<dyn Fn() + Send + Sync>,
@@ -242,6 +328,7 @@ impl HttpServer {
         let (sender, jobs) = mpsc::channel();
         let shared = Arc::new(Shared {
             token: config.token.clone(),
+            agents: RwLock::new(Vec::new()),
             port: addr.port(),
             jobs: Mutex::new(sender),
             wake,
@@ -259,6 +346,24 @@ impl HttpServer {
             jobs,
             acceptor: Some(acceptor),
         })
+    }
+
+    /// Gives the server the allowed agents' own tokens, so a request that
+    /// carries one is that agent's (WP-1.15b). The host calls it whenever
+    /// the settings may have changed: an agent allowed or forgotten, or its
+    /// token replaced.
+    pub fn set_agent_tokens(&self, settings: &AgentSettings) {
+        let agents: Vec<(String, String)> = settings
+            .clients
+            .iter()
+            .filter(|client| !client.token.is_empty())
+            .map(|client| (client.name.clone(), client.token.expose().to_owned()))
+            .collect();
+        if let Ok(mut current) = self.shared.agents.write()
+            && *current != agents
+        {
+            *current = agents;
+        }
     }
 
     /// The address it listens on.
@@ -614,6 +719,24 @@ fn read_chunked(reader: &mut impl BufRead) -> Result<Vec<u8>, ReadError> {
     }
 }
 
+/// Who a bearer token says sent a request: the server's token, or an
+/// allowed agent's own. Every token is compared, in constant time, whichever
+/// matches, so how long it takes says nothing about which one did.
+fn credential(shared: &Shared, presented: &str) -> Option<Credential> {
+    let mut found = None;
+    if same(presented, &shared.token) {
+        found = Some(Credential::Server);
+    }
+    if let Ok(agents) = shared.agents.read() {
+        for (name, token) in agents.iter() {
+            if same(presented, token) {
+                found = Some(Credential::Agent(name.clone()));
+            }
+        }
+    }
+    found
+}
+
 /// Whether two strings are equal, taking the same time wherever they differ.
 fn same(a: &str, b: &str) -> bool {
     a.len() == b.len()
@@ -655,13 +778,12 @@ fn respond(shared: &Shared, request: Request) -> Response {
     if path != ENDPOINT_PATH {
         return Response::error(404, "the agent API is at /mcp", false);
     }
-    let authorised = request
+    let caller = request
         .header("authorization")
         .and_then(|value| value.split_once(' '))
-        .is_some_and(|(scheme, token)| {
-            scheme.eq_ignore_ascii_case("bearer") && same(token.trim(), &shared.token)
-        });
-    if !authorised {
+        .filter(|(scheme, _)| scheme.eq_ignore_ascii_case("bearer"))
+        .and_then(|(_, token)| credential(shared, token.trim()));
+    let Some(caller) = caller else {
         return Response::error(
             401,
             "the request needs the agent server's token as a bearer token (Settings, Tempo & \
@@ -669,7 +791,7 @@ fn respond(shared: &Shared, request: Request) -> Response {
             false,
         )
         .with("WWW-Authenticate", "Bearer realm=\"beatlayer\"");
-    }
+    };
     if let Some(version) = request.header("mcp-protocol-version")
         && !PROTOCOL_VERSIONS.contains(&version)
     {
@@ -729,6 +851,7 @@ fn respond(shared: &Shared, request: Request) -> Response {
     let sent = shared.jobs.lock().ok().is_some_and(|jobs| {
         jobs.send(Job {
             request: job,
+            caller,
             reply,
         })
         .is_ok()

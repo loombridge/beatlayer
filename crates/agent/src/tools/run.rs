@@ -13,11 +13,14 @@ use bl_commands::{CommandSpec, Permission};
 use bl_core::id::Id;
 use bl_model::ChangeSet;
 use bl_model::registry::{self as model, REDO, UNDO};
+use bl_shell::permission::{CallPermission, raised_by_arguments};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
-use super::{Ctx, ToolOutcome, args, describe_args, done, failed, step, tool_definition};
+use super::{
+    Ctx, ToolOutcome, args, class_names, describe_args, done, failed, step, tool_definition,
+};
 
 pub(crate) const NAME: &str = "run";
 
@@ -141,7 +144,8 @@ fn replace(
 struct Ready {
     id: String,
     args: Value,
-    permission: Permission,
+    /// What this call needs, decided from its arguments.
+    call: CallPermission,
 }
 
 /// The name of a batch's undo step when the agent gave none.
@@ -194,12 +198,6 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
     let label = label
         .filter(|label| !label.trim().is_empty())
         .unwrap_or_else(|| default_label(&specs));
-    let class = specs
-        .iter()
-        .filter_map(|spec| spec.permission)
-        .max()
-        .unwrap_or(Permission::External);
-    let ids: Vec<String> = specs.iter().map(|spec| spec.id.to_string()).collect();
     let schemas: Vec<Option<bl_commands::schemars::Schema>> =
         specs.iter().map(|spec| spec.args.clone()).collect();
     let permissions: Vec<Permission> = specs
@@ -207,36 +205,6 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
         .map(|spec| spec.permission.unwrap_or(Permission::External))
         .collect();
     let labels: Vec<String> = specs.iter().map(|spec| spec.label.to_string()).collect();
-
-    // Who decides: the person may need to be asked, or it may be refused.
-    let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
-    let decision = crate::permission::decide(
-        ctx.mode,
-        ctx.shell,
-        &ctx.session.client.name,
-        class,
-        &id_refs,
-    );
-    if !dry_run {
-        let shell = &*ctx.shell;
-        step!(ctx.permit(class, &id_refs, || {
-            let lines: Vec<String> = commands
-                .iter()
-                .zip(&labels)
-                .zip(&permissions)
-                .filter(|(_, permission)| permission.asks_first())
-                .map(|((step, label), permission)| {
-                    let args = describe_args(shell, &step.args);
-                    if args.is_empty() {
-                        format!("{label} ({permission})")
-                    } else {
-                        format!("{label} ({permission}): {args}")
-                    }
-                })
-                .collect();
-            lines.join("\n")
-        }));
-    }
 
     // Issue IDs and check every command's arguments against its schema.
     let mut names = ctx.session.refs.clone();
@@ -261,10 +229,17 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
                 step.command
             ));
         }
+        // Spec: agent-permissions R1 to R3. Each call's class is decided
+        // from its arguments against the set as it is now.
+        let call = if raised_by_arguments(&step.command) {
+            ctx.shell.call_permission(&step.command, &args)
+        } else {
+            CallPermission::registered(permissions[index])
+        };
         ready.push(Ready {
             id: step.command,
             args,
-            permission: permissions[index],
+            call,
         });
     }
     let new_ids: BTreeMap<&String, &u64> = names
@@ -272,6 +247,44 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
         .filter(|(name, _)| !ctx.session.refs.contains_key(*name))
         .collect();
     let new_ids = json!(new_ids);
+
+    // Who decides: the person may need to be asked, or it may be refused.
+    let mut classes: Vec<Permission> = ready.iter().flat_map(|step| step.call.classes()).collect();
+    classes.sort_unstable();
+    classes.dedup();
+    let class = classes
+        .iter()
+        .copied()
+        .max()
+        .unwrap_or(Permission::External);
+    let ids: Vec<&str> = ready.iter().map(|step| step.id.as_str()).collect();
+    let decision = ctx.decide(class, &ids);
+    if !dry_run {
+        let shell = &*ctx.shell;
+        step!(ctx.permit(&classes, &ids, || {
+            let lines: Vec<String> = ready
+                .iter()
+                .zip(&labels)
+                .filter(|(step, _)| step.call.class().asks_first())
+                .map(|(step, label)| {
+                    let asking: Vec<Permission> = step
+                        .call
+                        .classes()
+                        .into_iter()
+                        .filter(|class| class.asks_first())
+                        .collect();
+                    let args = describe_args(shell, &step.args);
+                    let classes = class_names(&asking);
+                    if args.is_empty() {
+                        format!("{label} ({classes})")
+                    } else {
+                        format!("{label} ({classes}): {args}")
+                    }
+                })
+                .collect();
+            lines.join("\n")
+        }));
+    }
 
     if dry_run {
         let would = match &decision {
@@ -307,11 +320,29 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
             Ok(ready
                 .iter()
                 .map(|step| {
-                    json!({
+                    let mut checked = json!({
                         "command": step.id,
                         "note": "Its arguments fit its schema. It isn't a document edit, so it \
                                  wasn't tried.",
-                    })
+                    });
+                    if raised_by_arguments(&step.id) {
+                        checked["permission"] = json!(class_names(&step.call.classes()));
+                        checked["replaces"] = json!(step.call.replaces);
+                        if step.call.may && !step.call.replaces.is_empty() {
+                            checked["note"] = json!(
+                                "Its arguments fit its schema. It wasn't tried. It may replace \
+                                 part of the clips in `replaces`: how much depends on its files' \
+                                 lengths, which are read only when it runs."
+                            );
+                        } else {
+                            checked["note"] = json!(
+                                "Its arguments fit its schema, and it was tried on the song as \
+                                 it is and undone. `replaces` lists the clips it would delete or \
+                                 shorten by placing clips over them."
+                            );
+                        }
+                    }
+                    checked
                 })
                 .collect())
         };
@@ -320,6 +351,7 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
             "valid": results.is_ok(),
             "error": results.as_ref().err(),
             "would": would,
+            "permission": class_names(&classes),
             "refused_because": refused,
             "results": results.unwrap_or_default(),
             "ids": new_ids,
@@ -345,10 +377,26 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
                 })
                 .map_err(|error| format!("command 1 (`{}`): {error}", step.id))
         } else if ready.len() == 1 && !is_edit(&ready[0].id) {
+            // Spec: agent-permissions R6. An edit the shell runs (the
+            // Arrangement's, a drop from the browser) is an undo step
+            // labelled with the agent's name too.
             let step = &ready[0];
+            let step_label = ctx.step_label(&label);
+            let before = ctx.shell.editor().document().clone();
             ctx.shell
-                .run(&step.id, step.args.clone())
-                .map(|result| (vec![json!({ "command": step.id, "result": result })], None))
+                .run_labelled(step_label.clone(), &step.id, step.args.clone())
+                .map(|result| {
+                    // An undo step only if this call recorded one: a
+                    // command that replaces the set (a new or opened one)
+                    // records none.
+                    let editor = ctx.shell.editor();
+                    let recorded = !ChangeSet::between(&before, editor.document()).is_empty()
+                        && editor.undo_history().next() == Some(step_label.as_str());
+                    (
+                        vec![json!({ "command": step.id, "result": result })],
+                        recorded.then_some(step_label),
+                    )
+                })
                 .map_err(|error| format!("command 1 (`{}`): {error}", step.id))
         } else {
             let step_label = ctx.step_label(&label);
@@ -374,7 +422,7 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
     match outcome {
         Ok((results, undo_step)) => {
             ctx.session.refs = names;
-            let asked = ready.iter().any(|step| step.permission.asks_first());
+            let asked = ready.iter().any(|step| step.call.class().asks_first());
             done(json!({
                 "ran": results.len(),
                 "undo_step": undo_step,

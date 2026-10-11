@@ -156,3 +156,166 @@ fn an_edit_marks_the_set_changed_only_if_the_document_changed() {
         ["Agent: two tracks"]
     );
 }
+
+#[test]
+fn each_allowed_agent_gets_a_token_of_its_own_that_can_be_replaced() {
+    // Spec: agent-permissions R7, R9.
+    let dir = std::env::temp_dir().join(format!("bl-shell-agent-tokens-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let mut shell = shell_saving_to(&dir);
+    shell
+        .run("agent.set_server", json!({ "on": true }))
+        .unwrap();
+    for name in ["claude-code", "goose"] {
+        let state = shell
+            .run("agent.approve_client", json!({ "client": name }))
+            .unwrap();
+        assert!(
+            !state.to_string().contains("token"),
+            "results never carry a token: {state}"
+        );
+    }
+    let settings = shell.agent_settings().clone();
+    let tokens: Vec<String> = settings
+        .clients
+        .iter()
+        .map(|c| c.token.expose().to_owned())
+        .collect();
+    assert!(tokens.iter().all(|t| t.len() == 64));
+    assert_ne!(tokens[0], tokens[1]);
+    assert!(tokens.iter().all(|t| *t != settings.token));
+    assert!(
+        !format!("{settings:?}").contains(&tokens[0]),
+        "debug prints never show a token"
+    );
+
+    // Replacing one changes only that agent's.
+    shell
+        .run("agent.new_client_token", json!({ "client": "goose" }))
+        .unwrap();
+    assert_eq!(shell.agent_settings().clients[0].token, tokens[0]);
+    assert_ne!(shell.agent_settings().clients[1].token, tokens[1]);
+    assert!(matches!(
+        shell.run("agent.new_client_token", json!({ "client": "nobody" })),
+        Err(ShellError::Unavailable { .. })
+    ));
+    // Allowing an agent again keeps its token.
+    shell
+        .run("agent.approve_client", json!({ "client": "claude-code" }))
+        .unwrap();
+    assert_eq!(shell.agent_settings().clients[0].token, tokens[0]);
+
+    // The next start reads them back.
+    let again = shell_saving_to(&dir);
+    assert_eq!(again.agent_settings(), shell.agent_settings());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn agents_allowed_before_agents_had_tokens_get_one_and_keep_it() {
+    let dir = std::env::temp_dir().join(format!("bl-shell-agent-old-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join(bl_shell::settings::PREFERENCES_FILE),
+        r#"{ "agent": { "server": true, "token": "x", "clients": [
+              { "name": "claude-code", "autonomous": true } ] } }"#,
+    )
+    .unwrap();
+    let shell = shell_saving_to(&dir);
+    let token = shell.agent_settings().clients[0].token.clone();
+    assert_eq!(token.len(), 64);
+    assert!(shell.agent_settings().is_autonomous("claude-code"));
+    let again = shell_saving_to(&dir);
+    assert_eq!(again.agent_settings().clients[0].token, token);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_labelled_run_is_one_undo_step_with_that_label() {
+    // Spec: agent-permissions R6. The Arrangement's edits and the browser's
+    // drops, which the shell runs, can be named for the agent that ran them.
+    let mut shell = Shell::headless();
+    let track = shell.editor().document().top_level().next().unwrap();
+    let id: bl_model::ClipId = shell.new_id();
+    shell
+        .run_labelled(
+            "editor: Create Clip",
+            "clip.create",
+            json!({ "track": track, "clip": { "id": id, "name": "A", "start": 0,
+                    "length": 705_600, "mute": false, "data": { "midi": { "notes": [] } } } }),
+        )
+        .unwrap();
+    shell
+        .run_labelled(
+            "editor: Move Clips",
+            "arrangement.move_clips",
+            json!({ "clips": [id], "by": 705_600 }),
+        )
+        .unwrap();
+    // Selecting changes nothing in the set and records nothing.
+    shell
+        .run_labelled(
+            "editor: Select",
+            "arrangement.select_clips",
+            json!({ "clips": [id] }),
+        )
+        .unwrap();
+    // A failure records nothing and leaves the set as it was.
+    assert!(
+        shell
+            .run_labelled(
+                "editor: Move Clips",
+                "arrangement.move_clips",
+                json!({ "clips": [id], "by": -2_822_400 }),
+            )
+            .is_err()
+    );
+    assert_eq!(
+        shell.editor().undo_history().collect::<Vec<_>>(),
+        ["editor: Move Clips", "editor: Create Clip"]
+    );
+    assert!(shell.is_dirty());
+}
+
+#[test]
+fn loading_the_browser_s_files_is_destructive_where_a_clip_is_in_the_way() {
+    // Spec: agent-permissions R3. Enter loads onto the selected audio track
+    // at the insert marker.
+    use bl_commands::Permission;
+    let mut shell = Shell::headless();
+    let audio = shell
+        .editor()
+        .document()
+        .tracks()
+        .find(|t| t.kind() == bl_model::TrackKind::Audio)
+        .unwrap()
+        .id();
+    let id: bl_model::ClipId = shell.new_id();
+    shell
+        .run(
+            "clip.create",
+            json!({ "track": audio, "clip": { "id": id, "name": "Held", "start": 2_822_400,
+                    "length": 2_822_400, "mute": false,
+                    "data": { "audio": { "media": "11".repeat(32) } } } }),
+        )
+        .unwrap();
+    shell
+        .run("arrangement.select_tracks", json!({ "tracks": [audio] }))
+        .unwrap();
+    let at = |shell: &mut Shell, ticks: i64| {
+        shell
+            .run("arrangement.set_insert_marker", json!({ "at": ticks }))
+            .unwrap();
+        shell.call_permission("browser.load_selected", &json!({}))
+    };
+    let over = at(&mut shell, 0);
+    assert_eq!(
+        over.classes(),
+        [Permission::Destructive, Permission::External]
+    );
+    assert_eq!(over.replaces, [id]);
+    assert!(over.may);
+    let after = at(&mut shell, 3 * 2_822_400);
+    assert_eq!(after.classes(), [Permission::External]);
+}

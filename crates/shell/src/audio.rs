@@ -42,7 +42,8 @@ use bl_engine::preview::{
     PreviewControl, PreviewSamples, PreviewShared, PreviewStatus, PreviewVoice, preview_channel,
 };
 use bl_engine::{
-    Collector, DROP_PERIOD, DropThread, Engine, EngineConfig, Processor, Registry, TransportCommand,
+    Collector, DROP_PERIOD, DropThread, Engine, EngineConfig, Processor, Registry, Report,
+    ScheduledCommand, TransportCommand,
 };
 use bl_model::Document;
 pub use bl_shell_spec::audio::{
@@ -289,6 +290,11 @@ pub struct AudioHost {
     preview: Option<PreviewControl>,
     /// Frees what the audio thread lets go of, such as finished previews.
     drop_thread: Option<DropThread>,
+    /// How many engines have started, so a host can tell a new one, which
+    /// holds none of the commands scheduled on the last (WP-1.15b).
+    engines: u64,
+    /// Reports from engines that have closed, not yet taken.
+    held_reports: Vec<Report>,
 }
 
 impl std::fmt::Debug for AudioHost {
@@ -355,6 +361,8 @@ impl AudioHost {
             preview_shared: Arc::new(PreviewShared::default()),
             preview: None,
             drop_thread: None,
+            engines: 0,
+            held_reports: Vec::new(),
         }
     }
 
@@ -425,6 +433,9 @@ impl AudioHost {
     fn close(&mut self) {
         let _ = self.transport_state();
         self.memory.playing = false;
+        if let Some(engine) = self.engine.as_mut() {
+            self.held_reports.extend(engine.reports());
+        }
         // The processor goes with the stream's callback; then the engine's
         // threads stop, and its drop thread frees the last program.
         self.stream = None;
@@ -456,11 +467,56 @@ impl AudioHost {
     /// Why nothing can play, while no engine runs: the audio engine is off,
     /// or no device is open.
     pub fn send_transport(&mut self, command: TransportCommand) -> Result<(), String> {
+        self.running_engine()?.transport(command);
+        Ok(())
+    }
+
+    /// Schedules a command at a musical position on the engine's queue,
+    /// the queue the transport's commands take, so they arrive in the order
+    /// they were sent (the agent API's scheduled commands, WP-1.15b).
+    /// The engine runs its action on the exact frame the song reaches it,
+    /// and reports it ([`AudioHost::take_reports`]).
+    ///
+    /// # Errors
+    ///
+    /// Why nothing can play, while no engine runs, as
+    /// [`AudioHost::send_transport`] says.
+    pub fn schedule(&mut self, command: ScheduledCommand) -> Result<(), String> {
+        self.running_engine()?.schedule(command);
+        Ok(())
+    }
+
+    /// Cancels a scheduled command that hasn't fired.
+    ///
+    /// # Errors
+    ///
+    /// Why nothing can play, while no engine runs.
+    pub fn cancel(&mut self, id: u64) -> Result<(), String> {
+        self.running_engine()?.cancel(id);
+        Ok(())
+    }
+
+    /// The engine's reports since the last call, the closed engines' first:
+    /// scheduled commands that fired, each with its frame, or that it had no
+    /// room for.
+    pub fn take_reports(&mut self) -> Vec<Report> {
+        let mut reports = std::mem::take(&mut self.held_reports);
+        if let Some(engine) = self.engine.as_mut() {
+            reports.extend(engine.reports());
+        }
+        reports
+    }
+
+    /// How many engines have started: each time a device opens, a new
+    /// engine starts with none of the last one's scheduled commands.
+    #[must_use]
+    pub fn engine_generation(&self) -> u64 {
+        self.engines
+    }
+
+    fn running_engine(&self) -> Result<&Engine, String> {
         match &self.engine {
-            Some(engine) if self.stream.is_some() => {
-                engine.transport(command);
-                Ok(())
-            }
+            Some(engine) if self.stream.is_some() => Ok(engine),
             _ if !self.engine_on => Err(
                 "the audio engine is off; switch it on with `audio.toggle_engine` first".to_owned(),
             ),
@@ -714,6 +770,7 @@ impl AudioHost {
         }
         self.stream = Some(stream);
         self.engine = Some(engine);
+        self.engines += 1;
         self.preview = Some(preview);
         self.last_sample = (
             self.shared.busy_ns.load(Relaxed),

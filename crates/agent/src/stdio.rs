@@ -68,6 +68,16 @@ pub fn serve(
             Ok(message) => match agent.handle(shell, STDIO_SESSION, message) {
                 Outcome::Reply(reply) => reply,
                 Outcome::Ask(question) => agent.resolve(shell, question.id, false),
+                // Headless, no person's gesture is ever under way, so
+                // nothing waits for one to end; run it now if anything did.
+                Outcome::Wait(ticket) => agent
+                    .resume(shell)
+                    .filter(|(resumed, _)| *resumed == ticket)
+                    .and_then(|(_, outcome)| match outcome {
+                        Outcome::Reply(reply) => reply,
+                        Outcome::Ask(question) => agent.resolve(shell, question.id, false),
+                        Outcome::Wait(_) => None,
+                    }),
             },
         };
         if let Some(reply) = reply {

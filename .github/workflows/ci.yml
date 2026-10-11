@@ -17,8 +17,12 @@
 # request, and macos-check.yml runs it on main every night that code changed.
 # The workflow also keeps the bill down by:
 #
-# - skipping changes that touch only Markdown, docs/, or the licence, except
-#   the generated docs that `cargo xtask check` keeps in sync;
+# - building nothing for changes that touch only Markdown, the licence, or the
+#   issue templates. On pushes to main the path filter skips the run; on pull
+#   requests the `changes` job decides instead, and the two required checks
+#   (`check (Linux x64)` and `RealtimeSanitizer (Linux x64)`, which branch
+#   protection on main requires) still report, passing without running a step,
+#   so a prose-only pull request can merge;
 # - cancelling a run when a newer commit supersedes it;
 # - restoring the dependency cache on every run, but saving it only from main,
 #   so pull requests share main's cache instead of filling the 10 GB quota;
@@ -34,31 +38,19 @@
 name: CI
 
 on:
-  # GitHub allows exceptions only in `paths`, not `paths-ignore`, so the
-  # filter includes everything, excludes prose, then brings back the generated
-  # docs that `cargo xtask check` keeps in sync with their sources. The last
-  # matching pattern wins.
+  # No path filter: a pull request must always report the required checks.
+  # The `changes` job skips the work for prose-only changes instead.
   pull_request:
     branches: [main]
-    paths:
-      - "**"
-      - "!**.md"
-      - "!docs/**"
-      - "!LICENSE"
-      - "!.github/ISSUE_TEMPLATE/**"
-      - "docs/ui-parity/**"
-      - "docs/commands.md"
   push:
     branches: [main]
-    # Keep in step with the list above.
+    # The filter includes everything, then excludes prose. The last matching
+    # pattern wins. Keep it in step with the patterns in the `changes` job.
     paths:
       - "**"
       - "!**.md"
-      - "!docs/**"
       - "!LICENSE"
       - "!.github/ISSUE_TEMPLATE/**"
-      - "docs/ui-parity/**"
-      - "docs/commands.md"
   workflow_dispatch:
     inputs:
       macos:
@@ -82,8 +74,40 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  # Whether a pull request touches anything besides prose. Pushes and manual
+  # runs always build (pushes to main are filtered by path above).
+  changes:
+    name: changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - name: Look for changes besides prose
+        id: diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          code=true
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            code=false
+            files=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --jq '.[].filename')
+            while IFS= read -r file; do
+              case "$file" in
+                *.md | LICENSE | .github/ISSUE_TEMPLATE/*) ;;
+                *) code=true; echo "Builds because of $file"; break ;;
+              esac
+            done <<< "$files"
+          fi
+          [ "$code" = true ] || echo "Only prose changed: the checks pass without building"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
   check:
     name: check (${{ matrix.name }})
+    needs: changes
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -99,9 +123,11 @@ jobs:
       # rustfmt.toml asks for Unix line endings, and the Windows runner's Git
       # would otherwise check files out with CRLF, failing `cargo fmt --check`.
       - name: Keep LF line endings
+        if: needs.changes.outputs.code == 'true'
         run: git config --global core.autocrlf false
 
       - name: Check out
+        if: needs.changes.outputs.code == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -114,6 +140,7 @@ jobs:
       # runtime itself instead (WP-0.4). Add any other crate whose build
       # script downloads an SDK or binaries to the pattern.
       - name: Refuse dependencies that download at build time
+        if: needs.changes.outputs.code == 'true'
         run: |
           if grep -En '^name = "(asio-sys|rtsan-standalone-sys)"$' Cargo.lock; then
             echo "::error file=Cargo.lock::A dependency's build script downloads code at build time. ASIO goes through azo (decision D9), not cpal's asio feature; RealtimeSanitizer is linked by rtsan/build.rs, not rtsan-standalone."
@@ -122,15 +149,18 @@ jobs:
           echo "No build-time downloaders in Cargo.lock"
 
       - name: Prepare the runner
+        if: needs.changes.outputs.code == 'true'
         uses: ./.github/actions/prepare
 
       - name: Restore the dependency cache
+        if: needs.changes.outputs.code == 'true'
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: false
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-deny
+        if: needs.changes.outputs.code == 'true'
         uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
         with:
           tool: cargo-deny@0.20.2
@@ -138,10 +168,12 @@ jobs:
           fallback: none
 
       - name: cargo xtask check
+        if: needs.changes.outputs.code == 'true'
         run: cargo xtask check
 
   rtsan:
     name: RealtimeSanitizer (Linux x64)
+    needs: changes
     # Linux only: a macOS minute counts as ten on the Free plan, and the same
     # tests run on macOS with `cargo xtask rtsan` and Homebrew's llvm.
     runs-on: ubuntu-24.04
@@ -151,11 +183,13 @@ jobs:
         shell: bash
     steps:
       - name: Check out
+        if: needs.changes.outputs.code == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Prepare the runner
+        if: needs.changes.outputs.code == 'true'
         uses: ./.github/actions/prepare
 
       # Ubuntu 24.04's own LLVM is 18, which predates RealtimeSanitizer (LLVM
@@ -166,6 +200,7 @@ jobs:
       # and the harness's build script fails rather than fetch a runtime if
       # RTSAN_LIB_PATH is missing.
       - name: Install LLVM 20's RealtimeSanitizer runtime
+        if: needs.changes.outputs.code == 'true'
         run: |
           curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
             --output llvm-snapshot.gpg.key https://apt.llvm.org/llvm-snapshot.gpg.key
@@ -193,9 +228,11 @@ jobs:
       # The harness builds with the main workspace's lockfile; `cargo xtask
       # rtsan` copies it too, but the cache step reads the harness first.
       - name: Give the harness the main lockfile
+        if: needs.changes.outputs.code == 'true'
         run: cp Cargo.lock rtsan/Cargo.lock
 
       - name: Restore the dependency cache
+        if: needs.changes.outputs.code == 'true'
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: |
@@ -207,4 +244,5 @@ jobs:
       # --nocapture puts the sanitizer's reports from the deliberate
       # violations in the log, as evidence that it's watching.
       - name: cargo xtask rtsan
+        if: needs.changes.outputs.code == 'true'
         run: cargo xtask rtsan -- --nocapture

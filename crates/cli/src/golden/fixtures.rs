@@ -1,11 +1,12 @@
 //! The golden fixtures: songs built in code, through the model's commands.
 //!
 //! Until clips play (WP-1.4), the engine's sound sources are test tones, so
-//! each fixture is test tones through tracks, groups, returns, and faders,
-//! with commands scheduled at musical positions. The transport's fixtures
-//! (WP-1.5) use the beat tone, which sounds only while the song plays and
-//! whose every sample follows the song position in ticks, so a render shows
-//! the frame each start, stop, and loop lands on. Tones play at −24 dBFS
+//! each fixture is test tones through tracks, groups, returns, and their
+//! mixers, with commands scheduled at musical positions. The transport's
+//! fixtures (WP-1.5) use the beat tone, which sounds only while the song
+//! plays and whose every sample follows the song position in ticks, so a
+//! render shows the frame each start, stop, and loop lands on. The mixer's
+//! fixtures (WP-1.6) pan, send, solo, and move faders. Tones play at −24 dBFS
 //! or so, louder than the tones' default of −60, so that a level error
 //! shows above the cross-platform threshold. These renders are files for
 //! tests, never played on a device.
@@ -14,9 +15,12 @@
 //! `cargo xtask golden --update` and say why in the pull request.
 
 use bl_core::time::{Bpm, TempoMap, Ticks, TimeSignature, TimeSignatureChange, TimeSignatureMap};
-use bl_engine::nodes::{BEAT_TONE, TEST_TONE, beat_tone, fader, test_tone};
+use bl_engine::mixer::{gain_from_db, track as mixer};
+use bl_engine::nodes::{BEAT_TONE, TEST_TONE, beat_tone, test_tone};
 use bl_engine::{Action, NodeKey, ParamValue, ScheduledCommand, TransportCommand};
-use bl_model::{Command, Device, DeviceId, DeviceKind, Editor, ParamId, TrackId, TrackKind};
+use bl_model::{
+    Command, Device, DeviceId, DeviceKind, Editor, ParamId, SendTap, TrackId, TrackKind,
+};
 
 use super::{Fixture, SAMPLE_RATE, Scene};
 use crate::render::Cue;
@@ -69,6 +73,34 @@ pub(super) const FIXTURES: &[Fixture] = &[
         about: "A loop inside a tempo ramp from 90 to 150 BPM that runs on past the loop's \
                 end: each pass speeds up, and the wrap lands where the tempo map puts the end.",
         build: tempo_ramp_loop,
+    },
+    Fixture {
+        name: "pan-and-sends",
+        about: "The mixer: tones panned across the field by the constant-power law, a group \
+                with its own volume and pan, a post-fader return and a pre-fader one, a \
+                deactivated track heard only through its pre-fader send, and Main's volume and \
+                pan.",
+        build: pan_and_sends,
+    },
+    Fixture {
+        name: "solo-in-place",
+        about: "A track inside a group soloed with Solo in Place on: it plays through its \
+                group and its send to the return, and the other tracks and their sends are \
+                silent.",
+        build: solo_in_place,
+    },
+    Fixture {
+        name: "solo-a-return",
+        about: "A return track soloed, with Solo in Place off: it plays every send it gets, \
+                and no track is heard directly.",
+        build: solo_a_return,
+    },
+    Fixture {
+        name: "fader-move",
+        about: "A fader drag from 0 dB to -20 dB and back in 1 dB steps every 1/32 beat, a \
+                mute and an unmute, and a pan sweep from left to right in steps, each gliding \
+                to its value over 20 ms, so the render has no zipper noise or clicks.",
+        build: fader_move,
     },
 ];
 
@@ -184,6 +216,18 @@ impl Song {
 
     fn mute(&mut self, track: TrackId) {
         self.apply(Command::SetMute { track, mute: true });
+    }
+
+    fn pan(&mut self, track: TrackId, pan: f64) {
+        self.apply(Command::SetPan { track, pan });
+    }
+
+    fn send(&mut self, track: TrackId, to: TrackId, level: f64) {
+        self.apply(Command::SetSend { track, to, level });
+    }
+
+    fn solo(&mut self, track: TrackId) {
+        self.apply(Command::SetSolo { track, solo: true });
     }
 
     /// A position given as bar, beat, and sixteenth (`"2.3.1"`), by the
@@ -326,19 +370,19 @@ fn scheduled_commands() -> Scene {
     let pad = song.track(TrackKind::Midi, "Pad", None);
     song.tone(pad, 220.0, -30.0);
 
-    let lead_fader = NodeKey::Fader(lead);
-    let pad_fader = NodeKey::Fader(pad);
+    let lead_mixer = NodeKey::Mixer(lead);
+    let pad_mixer = NodeKey::Mixer(pad);
     let tone = NodeKey::Device(tone);
     let commands = [
-        ("1.3.1", lead_fader, fader::MUTE, 1.0),
-        ("1.4.1", lead_fader, fader::MUTE, 0.0),
-        ("1.4.3", pad_fader, fader::VOLUME, 0.5),
+        ("1.3.1", lead_mixer, mixer::MUTE, 1.0),
+        ("1.4.1", lead_mixer, mixer::MUTE, 0.0),
+        ("1.4.3", pad_mixer, mixer::VOLUME, 0.5),
         ("2.1.1", tone, test_tone::FREQUENCY, 660.0),
-        ("2.4.1", pad_fader, fader::VOLUME, 0.25),
+        ("2.4.1", pad_mixer, mixer::VOLUME, 0.25),
         ("2.5.2", tone, test_tone::LEVEL, -36.0),
         ("3.1.1", tone, test_tone::FREQUENCY, 495.0),
-        ("3.3.2", lead_fader, fader::VOLUME, 0.5),
-        ("3.7.2", pad_fader, fader::MUTE, 1.0),
+        ("3.3.2", lead_mixer, mixer::VOLUME, 0.5),
+        ("3.7.2", pad_mixer, mixer::MUTE, 1.0),
     ];
     for (position, key, param, value) in commands {
         let at = song.at(position);
@@ -404,4 +448,116 @@ fn tempo_ramp_loop() -> Scene {
     song.cue(0, TransportCommand::Locate(bar_2));
     song.cue(0, TransportCommand::Play);
     song.finish(4.5)
+}
+
+/// Spec: mixer R1 to R9.
+fn pan_and_sends() -> Scene {
+    let mut song = Song::new();
+    let post = song.track(TrackKind::Return, "Post", None);
+    song.volume(post, 0.5);
+    let pre = song.track(TrackKind::Return, "Pre", None);
+    song.apply(Command::SetSendTap {
+        track: pre,
+        tap: SendTap::Pre,
+    });
+    song.pan(pre, 0.6);
+
+    // Hard left: +3 dB on the left, nothing on the right.
+    let left = song.track(TrackKind::Midi, "Left", None);
+    song.tone(left, 220.0, -24.0);
+    song.pan(left, -1.0);
+    song.send(left, post, 0.5);
+    // Half right at -6 dB; its pre-fader send ignores both.
+    let right = song.track(TrackKind::Midi, "Half right", None);
+    song.tone(right, 330.0, -24.0);
+    song.pan(right, 0.5);
+    song.volume(right, gain_from_db(-6.0));
+    song.send(right, pre, 0.25);
+    // A group with its own volume and pan, holding a panned track.
+    let bus = song.track(TrackKind::Group, "Bus", None);
+    song.volume(bus, 0.8);
+    song.pan(bus, -0.3);
+    let inner = song.track(TrackKind::Midi, "Inner", Some(bus));
+    song.tone(inner, 440.0, -30.0);
+    song.pan(inner, 0.25);
+    song.send(inner, post, 1.0);
+    song.send(bus, post, 0.3);
+    // Deactivated: silent on Main and through its post-fader send, heard
+    // through its pre-fader send.
+    let off = song.track(TrackKind::Audio, "Deactivated", None);
+    song.tone(off, 550.0, -24.0);
+    song.mute(off);
+    song.send(off, pre, 0.7);
+    song.send(off, post, 1.0);
+
+    song.main_volume(0.9);
+    let main = song.editor.document().main_id();
+    song.pan(main, 0.1);
+    song.finish(2.0)
+}
+
+/// A group of two tracks and a track beside it, each a tone sent to a
+/// return panned to the right: (kick, hat, bass, return).
+fn drums_and_bass(song: &mut Song) -> [TrackId; 4] {
+    let verb = song.track(TrackKind::Return, "Verb", None);
+    song.pan(verb, 0.8);
+    song.volume(verb, 0.5);
+    let drums = song.track(TrackKind::Group, "Drums", None);
+    let kick = song.track(TrackKind::Audio, "Kick", Some(drums));
+    song.tone(kick, 110.0, -24.0);
+    song.send(kick, verb, 1.0);
+    let hat = song.track(TrackKind::Audio, "Hat", Some(drums));
+    song.tone(hat, 880.0, -30.0);
+    song.send(hat, verb, 0.5);
+    let bass = song.track(TrackKind::Midi, "Bass", None);
+    song.tone(bass, 165.0, -24.0);
+    song.send(bass, verb, 1.0);
+    [kick, hat, bass, verb]
+}
+
+/// Spec: mixer R10, R11.
+fn solo_in_place() -> Scene {
+    let mut song = Song::new();
+    let [kick, ..] = drums_and_bass(&mut song);
+    song.solo(kick);
+    song.finish(2.0)
+}
+
+/// Spec: mixer R11, R12.
+fn solo_a_return() -> Scene {
+    let mut song = Song::new();
+    let [.., verb] = drums_and_bass(&mut song);
+    song.apply(Command::SetSoloInPlace { enabled: false });
+    song.solo(verb);
+    song.finish(2.0)
+}
+
+/// Spec: mixer R18. Every move is a parameter change on its exact frame, as
+/// a UI drag sends them; the steps are 1/32 beat (15.625 ms at 120 BPM)
+/// apart, closer than the 20 ms a change takes, so glides run into each
+/// other as they do under a hand on a fader.
+fn fader_move() -> Scene {
+    let mut song = Song::new();
+    let lead = song.track(TrackKind::Midi, "Lead", None);
+    song.tone(lead, 440.0, -12.0);
+    let key = NodeKey::Mixer(lead);
+    let step = Ticks::QUARTER / 32;
+    // From beat 1.5: down 1 dB a step to -20 dB, then back up to 0 dB.
+    let drag_from = Ticks::QUARTER + Ticks::QUARTER / 2;
+    for n in 1..=40i32 {
+        let db = -f64::from(20 - (n - 20).abs());
+        let at = drag_from + step * i64::from(n);
+        song.schedule(at, key, mixer::VOLUME, gain_from_db(db));
+    }
+    // A mute on beat 4 and an unmute half a beat later.
+    song.schedule(Ticks::QUARTER * 3, key, mixer::MUTE, 1.0);
+    let unmute = Ticks::QUARTER * 3 + Ticks::QUARTER / 2;
+    song.schedule(unmute, key, mixer::MUTE, 0.0);
+    // From beat 5: across from left to right in 32 steps.
+    for n in 0..=32i32 {
+        let pan = -1.0 + f64::from(n) / 16.0;
+        let at = Ticks::QUARTER * 4 + step * i64::from(n);
+        song.schedule(at, key, mixer::PAN, pan);
+    }
+    song.finish(3.25)
 }

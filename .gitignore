@@ -6,3 +6,6 @@
 # The RealtimeSanitizer harness builds with a copy of the main Cargo.lock,
 # which `cargo xtask rtsan` makes.
 /rtsan/Cargo.lock
+
+# Keys never belong in the repository.
+*.pem

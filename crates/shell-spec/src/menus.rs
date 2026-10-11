@@ -1,5 +1,5 @@
 //! The menu bar, as data: every menu, item, and separator of
-//! `docs/ui-parity/menus.md` in Live's order (D16), each item tied to the
+//! the menu reference in Live's order (D16), each item tied to the
 //! command it runs.
 //!
 //! An item reaches its command in one of two ways: directly

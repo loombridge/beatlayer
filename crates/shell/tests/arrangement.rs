@@ -1,6 +1,6 @@
 //! The Arrangement View's view commands, driven headless through
 //! `Shell::run` and `Shell::invoke`, as agents, menus, and keys drive them
-//! (WP-1.8a; D17). The behaviour is in `docs/specs/arrangement-view.md`.
+//! (WP-1.8a; D17). The behaviour is in the arrangement view spec.
 
 use bl_commands::{Context, Permission};
 use bl_core::time::Ticks;

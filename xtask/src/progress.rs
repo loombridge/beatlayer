@@ -1,13 +1,13 @@
 //! The progress model behind `cargo xtask progress` and `cargo xtask
 //! dashboard`, read from the planning documents:
 //!
-//! - the milestones from docs/01-roadmap.md;
-//! - the phases and their work packages from docs/03-build-plan.md, with each
+//! - the milestones from the roadmap;
+//! - the phases and their work packages from the build plan, with each
 //!   package's status from its status table;
-//! - every Live feature from docs/04-parity-matrix.md, split into one part per
+//! - every Live feature from the parity matrix, split into one part per
 //!   milestone it names, with each part's status taken from the work packages
 //!   its row names ("Built in WP-1.8a, WP-1.8b");
-//! - the improvements over Live from docs/05-improvements.md.
+//! - the improvements over Live.
 //!
 //! The tests at the bottom read the real documents, so `cargo xtask check`
 //! fails when a row names a work package the build plan doesn't have.

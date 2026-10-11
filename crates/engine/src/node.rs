@@ -116,7 +116,7 @@ impl fmt::Debug for NodeData {
 ///
 /// A node is made off the audio thread, where it may allocate, and from then
 /// on runs on the audio thread, where it must follow the real-time rules in
-/// `docs/02-architecture.md`: no allocation, no locks, no blocking calls, and
+/// the architecture notes: no allocation, no locks, no blocking calls, and
 /// bounded work in every method. The engine drops nodes only on the drop
 /// thread.
 pub trait Node: Send + 'static {

@@ -10,7 +10,7 @@ use crate::mixer::{METER_RELEASE_DB_PER_SECOND, RMS_SECONDS};
 
 /// One track's meters: its peak and RMS levels per channel, as linear
 /// amplitude, measured after its mixer (pan, volume, and the Track
-/// Activator) and before solo (`docs/specs/mixer.md`, R19). A peak shows at
+/// Activator) and before solo (the mixer spec, R19). A peak shows at
 /// once and falls at [`METER_RELEASE_DB_PER_SECOND`], so a reader that looks
 /// less often than the engine publishes still sees every peak; the RMS level
 /// is an average of the squared signal over about [`RMS_SECONDS`].

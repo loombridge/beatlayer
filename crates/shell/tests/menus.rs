@@ -1,7 +1,7 @@
 //! The menu bar against the command registry: every item reaches a
 //! registered command or is marked pending, and items enable with what can
 //! run now (D16, D17). Its rows, separators, and labels are checked against
-//! `docs/ui-parity/menus.md` in `bl-shell-spec`.
+//! the menu reference in `bl-shell-spec`.
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;

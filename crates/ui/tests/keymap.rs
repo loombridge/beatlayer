@@ -15,7 +15,7 @@ fn repo() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-/// A shortcut from docs/ui-parity/shortcuts.toml.
+/// A shortcut from the shortcut reference.
 #[derive(Debug, serde::Deserialize)]
 struct Reference {
     id: String,

@@ -1,7 +1,7 @@
 //! The shortcut map in the UI parity reference (WP-0.13, decision D16).
 //!
-//! `docs/ui-parity/shortcuts.toml` is the source of truth for Live 12's
-//! keyboard shortcuts, and `docs/ui-parity/shortcuts.md` is generated from it.
+//! the shortcut reference is the source of truth for Live 12's
+//! keyboard shortcuts, and the shortcut reference is generated from it.
 //! This module validates the TOML (unique IDs, known contexts and milestones,
 //! well-formed bindings, no unexplained binding conflict within a context)
 //! and renders the Markdown.
@@ -147,7 +147,10 @@ fn load(root: &Path) -> Result<Map, String> {
 }
 
 fn report(errors: &[String]) -> String {
-    format!("docs/ui-parity has problems:\n  {}", errors.join("\n  "))
+    format!(
+        "the UI parity reference has problems:\n  {}",
+        errors.join("\n  ")
+    )
 }
 
 /// The hand-written pages of the reference, whose row IDs are checked.
@@ -1133,6 +1136,6 @@ source = "manual 42.1"
         let root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .expect("xtask sits in the workspace root");
-        check(root).expect("docs/ui-parity is valid and in sync");
+        check(root).expect("the UI parity reference is valid and in sync");
     }
 }

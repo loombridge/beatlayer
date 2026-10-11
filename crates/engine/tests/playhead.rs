@@ -5,7 +5,7 @@
 //! playhead the engine played: right for its clock, through a start on an
 //! exact frame and a loop that wraps, with its frames and ticks agreeing.
 //! Every block runs under the allocation trap. The spec is
-//! `docs/specs/transport.md`, rule R20.
+//! the transport spec, rule R20.
 //!
 //! `cargo test -p bl-engine --test playhead -- --nocapture` prints what the
 //! UI thread saw.

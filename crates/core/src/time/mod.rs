@@ -25,7 +25,7 @@
 //! # Ok::<(), bl_core::time::TimeError>(())
 //! ```
 //!
-//! The rules taken from Live are in `docs/specs/musical-time.md`.
+//! The rules taken from Live are in the musical time spec.
 
 mod bbs;
 mod error;

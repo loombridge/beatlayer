@@ -22,9 +22,9 @@ Tasks:
                  reference, the command reference, the keymap, deny, and the deny
                  self-test
   layers         Check the crate layering rules
-  ui-parity      Validate docs/ui-parity/shortcuts.toml and regenerate shortcuts.md
+  ui-parity      Validate the shortcut reference and regenerate its Markdown form
                  (with --check, fail instead of writing if shortcuts.md is out of date)
-  commands       Check the command registry and regenerate docs/commands.md
+  commands       Check the command registry and regenerate the command reference
                  (with --check, fail instead of writing if commands.md is out of date)
   keymap         Regenerate crates/ui/keymaps/live12.toml from shortcuts.toml and the
                  command registry (with --check, fail instead if it's out of date)
@@ -212,7 +212,7 @@ fn check(root: &Path) -> Result<(), String> {
     }
 }
 
-/// Enforces the layering in docs/02-architecture.md:
+/// Enforces the layering in the architecture notes:
 ///
 /// 1. Only the application crate depends on `bl-ui`.
 /// 2. Headless crates never reach a windowing, GPU, or UI-toolkit crate.
@@ -251,7 +251,7 @@ fn layers(root: &Path) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!(
-            "layering rules broken (see docs/02-architecture.md):\n  {}",
+            "layering rules broken:\n  {}",
             violations.join("\n  ")
         ))
     }

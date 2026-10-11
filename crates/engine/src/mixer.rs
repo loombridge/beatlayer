@@ -1,7 +1,7 @@
 //! The mixer: each track's pan, volume, and activator; the routes that carry
 //! tracks into their groups, Main, and the returns; solo; and the meters
 //! (WP-1.6). The rules, and the Live sources behind them, are in
-//! `docs/specs/mixer.md`.
+//! the mixer spec.
 //!
 //! A track's signal runs through its task in the program (see
 //! [`EngineProgram`](crate::EngineProgram)):
@@ -32,16 +32,16 @@ use bl_model::{Document, Mixer, ParamId, TrackId, TrackKind};
 use crate::node::{Block, Node, NodeConfig, NodeEvent, ParamValue, segments};
 
 /// How long a mixer gain takes to reach a new value: 20 ms, along a straight
-/// line from the gain it had (`docs/specs/mixer.md`, R18).
+/// line from the gain it had (the mixer spec, R18).
 pub const SMOOTHING_SECONDS: f64 = 0.02;
 
 /// How fast a peak meter falls after a peak, in decibels per second: 20 dB
 /// in 1.7 seconds, as a broadcast peak programme meter falls back
-/// (`docs/specs/mixer.md`, R19).
+/// (the mixer spec, R19).
 pub const METER_RELEASE_DB_PER_SECOND: f64 = 20.0 / 1.7;
 
 /// The time constant of the RMS meters' average of the squared signal: 300
-/// ms (`docs/specs/mixer.md`, R19).
+/// ms (the mixer spec, R19).
 pub const RMS_SECONDS: f64 = 0.3;
 
 /// A track mixer's parameters ([`NodeKey::Mixer`](crate::NodeKey::Mixer)),
@@ -509,7 +509,7 @@ impl Route {
 }
 
 /// Who solo silences, for a document's solo switches and its Solo in Place
-/// setting (`docs/specs/mixer.md`, R10 to R14).
+/// setting (the mixer spec, R10 to R14).
 ///
 /// While no track is soloed, solo silences nothing. Otherwise the *solo
 /// path* is every soloed track, every group that holds one (at any depth),

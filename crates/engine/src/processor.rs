@@ -15,7 +15,7 @@ use crate::message::{
 };
 use crate::node::{NodeData, NodeEvent, NodeKey, ParamValue, TransportInfo};
 use crate::program::{EngineProgram, Resolved};
-use crate::state::{EngineCounters, EngineState, METER_RELEASE_DB_PER_SECOND, TrackMeter};
+use crate::state::{EngineCounters, EngineState, TrackMeter};
 
 /// A parameter change waiting for its frame.
 #[derive(Clone, Copy, Debug)]
@@ -153,7 +153,7 @@ pub(crate) fn starts_playback(command: TransportCommand) -> bool {
 ///    (a transport command's frame, a scheduled command's song position,
 ///    the loop's end) so each lands on its exact frame, and every part
 ///    plays one unbroken stretch of the song;
-/// 3. publishes the playhead, meters, and CPU load for the UI.
+/// 3. publishes the playhead, every track's meters, and CPU load for the UI.
 ///
 /// # The transport
 ///
@@ -786,14 +786,10 @@ impl Processor {
         }
     }
 
-    /// Ends the block: meters, CPU load, and the state for the UI.
+    /// Ends the block: CPU load, and the state for the UI.
     fn finish(&mut self, began: Instant, frames: usize) {
         let rate = self.config.sample_rate.as_f64();
         let lasts = frames as f64 / rate;
-        let release = 10f64.powf(-METER_RELEASE_DB_PER_SECOND * lasts / 20.0) as f32;
-        if let Some(program) = self.program.as_mut() {
-            program.get_mut().finish_meters(release);
-        }
         let cpu_load = if lasts > 0.0 {
             (began.elapsed().as_secs_f64() / lasts) as f32
         } else {
@@ -826,9 +822,11 @@ impl Processor {
         if let Some(program) = &self.program {
             let program = program.get();
             for &task in &program.order {
+                let reading = program.meters(task);
                 let meter = TrackMeter {
                     track: program.tasks[task as usize].track,
-                    peak: program.meters[task as usize],
+                    peak: reading.peak,
+                    rms: reading.rms,
                 };
                 if state.meters.len() < state.meters.capacity() {
                     state.meters.push(meter);

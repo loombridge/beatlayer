@@ -5,21 +5,23 @@ use bl_model::TrackId;
 use rtrb::Consumer;
 
 use crate::message::{LoopRegion, Report};
+#[cfg(doc)]
+use crate::mixer::{METER_RELEASE_DB_PER_SECOND, RMS_SECONDS};
 
-/// How fast a meter falls after a peak, in decibels per second. A
-/// placeholder until the mixer (WP-1.6) sets the meters' ballistics.
-pub const METER_RELEASE_DB_PER_SECOND: f64 = 24.0;
-
-/// One track's meter: its peak level per channel, as linear amplitude,
-/// after its fader. A peak shows at once and falls at
-/// [`METER_RELEASE_DB_PER_SECOND`], so a reader that looks less often than
-/// the engine publishes still sees every peak.
+/// One track's meters: its peak and RMS levels per channel, as linear
+/// amplitude, measured after its mixer (pan, volume, and the Track
+/// Activator) and before solo (`docs/specs/mixer.md`, R19). A peak shows at
+/// once and falls at [`METER_RELEASE_DB_PER_SECOND`], so a reader that looks
+/// less often than the engine publishes still sees every peak; the RMS level
+/// is an average of the squared signal over about [`RMS_SECONDS`].
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TrackMeter {
     /// The track.
     pub track: TrackId,
-    /// The first two channels: left and right.
+    /// The peak level of the first two channels: left and right.
     pub peak: [f32; 2],
+    /// The RMS level of the first two channels.
+    pub rms: [f32; 2],
 }
 
 /// Counters the audio thread keeps, since the engine started.
@@ -120,13 +122,22 @@ impl EngineState {
         }
     }
 
-    /// One track's meter.
+    /// One track's peak meter, left and right.
     #[must_use]
     pub fn meter(&self, track: TrackId) -> Option<[f32; 2]> {
-        self.meters
-            .iter()
-            .find(|meter| meter.track == track)
-            .map(|meter| meter.peak)
+        self.track_meter(track).map(|meter| meter.peak)
+    }
+
+    /// One track's RMS meter, left and right.
+    #[must_use]
+    pub fn rms(&self, track: TrackId) -> Option<[f32; 2]> {
+        self.track_meter(track).map(|meter| meter.rms)
+    }
+
+    /// One track's meters.
+    #[must_use]
+    pub fn track_meter(&self, track: TrackId) -> Option<&TrackMeter> {
+        self.meters.iter().find(|meter| meter.track == track)
     }
 }
 

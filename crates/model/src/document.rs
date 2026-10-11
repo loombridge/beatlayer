@@ -12,7 +12,7 @@ use crate::shared::Shared;
 use crate::track::{Track, TrackKind};
 
 /// Song-wide settings.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Settings {
     /// The tempo map. The default is 120 BPM throughout.
     pub tempo: TempoMap,
@@ -24,6 +24,35 @@ pub struct Settings {
     /// unchanged.
     #[serde(default, skip_serializing_if = "ArrangementLoop::is_default")]
     pub arrangement_loop: ArrangementLoop,
+    /// Solo in Place: whether soloing an audio, MIDI, or group track keeps
+    /// the return tracks audible, so the soloed track is heard with its
+    /// sends (`docs/specs/mixer.md`). On in a new set. A set saved before
+    /// WP-1.6 has none and loads with it on; a set with it on doesn't write
+    /// it, so the saved form of such a set is unchanged.
+    #[serde(default = "on", skip_serializing_if = "is_on")]
+    pub solo_in_place: bool,
+}
+
+impl Default for Settings {
+    /// 120 BPM and 4/4 throughout, the default loop brace with the loop off,
+    /// and Solo in Place on.
+    fn default() -> Self {
+        Self {
+            tempo: TempoMap::default(),
+            time_signatures: TimeSignatureMap::default(),
+            arrangement_loop: ArrangementLoop::default(),
+            solo_in_place: true,
+        }
+    }
+}
+
+fn on() -> bool {
+    true
+}
+
+/// For serde's `skip_serializing_if`, which passes a reference.
+fn is_on(value: &bool) -> bool {
+    *value
 }
 
 /// The Arrangement loop: where the loop brace sits, and whether the Loop
@@ -403,6 +432,64 @@ mod tests {
     fn documents_cross_threads() {
         fn assert_send_sync<T: Send + Sync>() {}
         assert_send_sync::<Document>();
+    }
+
+    // Spec: mixer R7, R8, R16
+    #[test]
+    fn the_mixer_is_saved_only_where_it_differs_from_a_new_set() {
+        let (main, t) = track_ids(3);
+        let mut doc = Document::new(main);
+        doc.apply(&create(t[0], TrackKind::Return, None, 0))
+            .unwrap();
+        doc.apply(&create(t[1], TrackKind::Audio, None, 0)).unwrap();
+        doc.apply(&create(t[2], TrackKind::Group, None, 1)).unwrap();
+        assert!(doc.settings().solo_in_place, "on in a new set");
+        let saved = serde_json::to_value(&doc).unwrap();
+        assert!(saved["settings"].get("solo_in_place").is_none());
+        assert!(saved["returns"][0]["mixer"].get("tap").is_none());
+        assert!(saved["tracks"][0].get("sends").is_none());
+
+        doc.apply(&Command::SetSoloInPlace { enabled: false })
+            .unwrap();
+        doc.apply(&Command::SetSendTap {
+            track: t[0],
+            tap: crate::SendTap::Pre,
+        })
+        .unwrap();
+        doc.apply(&Command::SetSend {
+            track: t[1],
+            to: t[0],
+            level: 0.5,
+        })
+        .unwrap();
+        let saved = serde_json::to_value(&doc).unwrap();
+        assert_eq!(saved["settings"]["solo_in_place"], serde_json::json!(false));
+        assert_eq!(
+            saved["returns"][0]["mixer"]["tap"],
+            serde_json::json!("pre")
+        );
+        assert_eq!(
+            saved["tracks"][0]["sends"],
+            serde_json::json!([[t[0].0.get(), 0.5]])
+        );
+        let loaded: Document = serde_json::from_value(saved.clone()).unwrap();
+        assert_eq!(loaded, doc);
+        loaded.check_invariants().unwrap();
+
+        // A send to a track that isn't a return, or louder than 0 dB, doesn't
+        // load.
+        for (field, value) in [
+            ("sends", serde_json::json!([[t[2].0.get(), 0.5]])),
+            ("sends", serde_json::json!([[t[0].0.get(), 1.5]])),
+            ("sends", serde_json::json!([[t[0].0.get(), 0.0]])),
+        ] {
+            let mut broken = saved.clone();
+            broken["tracks"][0][field] = value;
+            assert!(serde_json::from_value::<Document>(broken).is_err());
+        }
+        let mut broken = saved;
+        broken["tracks"][0]["mixer"]["tap"] = serde_json::json!("pre");
+        assert!(serde_json::from_value::<Document>(broken).is_err());
     }
 
     // Spec: transport R18

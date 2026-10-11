@@ -3,8 +3,9 @@
 //!
 //! The engine never reads the document while it plays. A [`Compiler`] turns
 //! a document snapshot into an [`EngineProgram`] off the audio thread: a
-//! flat array of [`Node`]s, the tasks that run them (one per track's chain),
-//! their buffers, and the order to run them in. The program travels to the
+//! flat array of [`Node`]s, the tasks that run them (one per track: its
+//! inputs, its device chain, and its [`mixer`]), their buffers, and the order
+//! to run them in. The program travels to the
 //! audio thread on a lock-free queue, and the [`Processor`] swaps it in at
 //! the next block boundary, moving every node that survived the edit across
 //! from the old program, so a reverb's tail or a plug-in instance carries on.
@@ -14,6 +15,8 @@
 //!
 //! Most edits never compile: [`Compiler::sync`] turns mixer and parameter
 //! edits into [`ParamEvent`]s, which reach their nodes on an exact frame.
+//! The [`mixer`] glides every gain to its new value, so a fader move never
+//! clicks, and works out who solo silences (`docs/specs/mixer.md`).
 //! Node data, such as a clip's notes, is a message of its own
 //! ([`Sender::send_data`]). A [`ScheduledCommand`] runs at a musical
 //! position on its exact frame, which is how an agent plays in time (D17).
@@ -75,6 +78,7 @@ mod compiler;
 mod engine;
 mod gc;
 mod message;
+pub mod mixer;
 mod node;
 pub mod nodes;
 mod offline;
@@ -95,6 +99,7 @@ pub use gc::{Collector, DROP_PERIOD, DropThread, GcHandle, Program};
 pub use message::{
     Action, LoopRegion, ParamEvent, Report, ScheduledCommand, TransportCommand, When,
 };
+pub use mixer::METER_RELEASE_DB_PER_SECOND;
 pub use node::{
     Block, Node, NodeConfig, NodeData, NodeEvent, NodeKey, ParamValue, Segment, Segments,
     TransportInfo, segments,
@@ -103,7 +108,7 @@ pub use offline::Offline;
 pub use processor::{Carry, Output, Processor};
 pub use program::EngineProgram;
 pub use registry::{NodeFactory, Registry};
-pub use state::{EngineCounters, EngineState, METER_RELEASE_DB_PER_SECOND, Monitor, TrackMeter};
+pub use state::{EngineCounters, EngineState, Monitor, TrackMeter};
 
 /// An engine's fixed sizes, chosen when it's made. The audio thread works
 /// within them and allocates nothing, so each is a ceiling: what goes over

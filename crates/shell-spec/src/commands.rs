@@ -45,6 +45,8 @@ pub const VIEW_ZOOM_IN: &str = "view.zoom_in";
 pub const VIEW_ZOOM_OUT: &str = "view.zoom_out";
 /// `view.zoom_reset`: reset the interface zoom.
 pub const VIEW_ZOOM_RESET: &str = "view.zoom_reset";
+/// `view.set_zoom`: set the interface zoom to a percentage.
+pub const VIEW_SET_ZOOM: &str = "view.set_zoom";
 /// `focus.control_bar`: move the keyboard focus to the Control Bar.
 pub const FOCUS_CONTROL_BAR: &str = "focus.control_bar";
 /// `focus.arrangement`: move the keyboard focus to the Arrangement View.
@@ -91,6 +93,7 @@ pub const IDS: &[&str] = &[
     VIEW_ZOOM_IN,
     VIEW_ZOOM_OUT,
     VIEW_ZOOM_RESET,
+    VIEW_SET_ZOOM,
     FOCUS_CONTROL_BAR,
     FOCUS_ARRANGEMENT,
     FOCUS_NEXT,
@@ -149,6 +152,16 @@ pub struct SettingsArgs {
 pub struct ThemeArgs {
     /// The theme.
     pub theme: ThemeChoice,
+}
+
+/// Arguments of `view.set_zoom`: the Display & Input page's Zoom.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ZoomArgs {
+    /// The interface zoom as a whole percentage, from 50 to 200; 100 is
+    /// the size layout.md measures Live at.
+    #[schemars(range(min = 50, max = 200))]
+    pub percent: u16,
 }
 
 /// Arguments of `audio.set_test_tone`: what to change. Fields left out
@@ -385,31 +398,56 @@ fn specs() -> Vec<CommandSpec> {
         .binding("S-VIEW-003")
         .args::<NoArgs>()
         .result::<ViewResult>(),
+        // The interface zoom (WP-1.17; spec interface-zoom R5): edit-class
+        // preferences, since each writes the preferences file and is
+        // trivially changed back (D17's permission classes).
         CommandSpec::new(VIEW_ZOOM_IN, "Zoom In")
             .description(
-                "Makes the whole interface larger by one step, up to 200%. Changes nothing in \
-                 the set.",
+                "Makes the whole interface larger by one step of 10%, up to 200%: every \
+                 window's panes, controls, and text scale together and keep their places. \
+                 From a zoom between steps it goes to the next step up. The zoom is kept for \
+                 the next start. Changes nothing in the set and isn't an undo step.",
             )
-            .permission(Permission::Read)
+            .permission(Permission::Edit)
             .context(Global)
             .binding("S-ZOOM-001")
             .args::<NoArgs>()
             .result::<ViewResult>(),
         CommandSpec::new(VIEW_ZOOM_OUT, "Zoom Out")
             .description(
-                "Makes the whole interface smaller by one step, down to 50%. Changes nothing \
-                 in the set.",
+                "Makes the whole interface smaller by one step of 10%, down to 50%: every \
+                 window's panes, controls, and text scale together and keep their places. \
+                 From a zoom between steps it goes to the next step down. The zoom is kept for \
+                 the next start. Changes nothing in the set and isn't an undo step.",
             )
-            .permission(Permission::Read)
+            .permission(Permission::Edit)
             .context(Global)
             .binding("S-ZOOM-002")
             .args::<NoArgs>()
             .result::<ViewResult>(),
         CommandSpec::new(VIEW_ZOOM_RESET, "Reset Zoom to 100%")
-            .description("Returns the interface zoom to 100%. Changes nothing in the set.")
-            .permission(Permission::Read)
+            .description(
+                "Returns the interface zoom to 100%, the size Live's layout is measured at. \
+                 The zoom is kept for the next start. Changes nothing in the set and isn't an \
+                 undo step.",
+            )
+            .permission(Permission::Edit)
             .context(Global)
             .args::<NoArgs>()
+            .result::<ViewResult>(),
+        CommandSpec::new(VIEW_SET_ZOOM, "Zoom")
+            .description(
+                "Sets the interface zoom to `percent`, a whole percentage from 50 to 200, as \
+                 the Zoom setting on the Settings window's Display & Input page does: every \
+                 window's panes, controls, and text scale together and keep their places, and \
+                 the main window grows if it's smaller than its minimum size at that zoom (as \
+                 far as the screen allows). The result's `zoom` is the new zoom as a factor, \
+                 1.5 for 150%. The zoom is kept for the next start. Changes nothing in the set \
+                 and isn't an undo step.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, Settings])
+            .args::<ZoomArgs>()
             .result::<ViewResult>(),
         CommandSpec::new(FOCUS_CONTROL_BAR, "Control Bar")
             .description(

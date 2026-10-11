@@ -624,12 +624,15 @@ checksum = "3ded4057c258ba199e2d26386d3af3780957ecaee6c4ef4041c6b4b8b97c0b06"
 name = "bl-agent"
 version = "0.0.0"
 dependencies = [
+ "bl-analysis",
  "bl-commands",
  "bl-core",
  "bl-engine",
+ "bl-media",
  "bl-model",
  "bl-shell",
  "getrandom 0.3.4",
+ "hound",
  "schemars",
  "serde",
  "serde_json",
@@ -641,6 +644,7 @@ version = "0.0.0"
 dependencies = [
  "bl-dsp",
  "bl-media",
+ "realfft",
 ]
 
 [[package]]
@@ -841,6 +845,7 @@ dependencies = [
 name = "bl-shell"
 version = "0.0.0"
 dependencies = [
+ "bl-analysis",
  "bl-audio-io",
  "bl-commands",
  "bl-core",

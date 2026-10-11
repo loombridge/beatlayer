@@ -15,6 +15,9 @@ Every action a person can take in Beatlayer is a command in a registry, with an 
 | `transport` | Play, stop, continue, and locate the song, move and switch the loop, and check whether the song plays here and where the playhead is. |
 | `schedule` | Run a command when the song reaches a bar and beat, on the exact sample. |
 | `checkpoint` | Save the song under a name, try something, and restore it if you don't like the result. |
+| `preview` | Hear the song: render a range of it, the whole mix or one track, as a short WAV file. |
+| `analyze` | Measure what you'd hear as numbers: loudness, peaks, an octave-band spectrum, tempo, key, and transients. |
+| `capture_view` | See what the person sees: one of the app's views as a PNG image, while the app runs. |
 
 ## The song
 
@@ -64,6 +67,24 @@ The **loop** belongs to the set: `set_loop` moves its brace (`start` and `length
 
 The engine acts on a transport command at the start of its next block, a few milliseconds after your call. In the app, the song plays through the app's audio engine while its audio device runs, and your transport commands share one queue with the person's, in the order they come. Headless (`bl-cli mcp`), or while the app's audio engine is off, nothing plays the song, so play, stop, continue, and locate are refused, and `status` says so; the loop can still be set, and scheduled commands wait.
 
+## Hearing and seeing the song
+
+You can't hear the speakers or see the screen, so three tools perceive for you. They only read: they change nothing in the set and never ask the person.
+
+- **`preview`** renders a range offline and returns it as audio: an `audio` content block, or, for clients of protocol 2024-11-05, an embedded resource. The range is `start` and `length` if you give them, otherwise the Arrangement's time selection, otherwise the whole set, and a preview stops after **30 seconds**. `track` previews one track as it sounds soloed; leave it out for the whole mix. The render doesn't stop or disturb playback. 16-bit stereo at 48 kHz is about 190 KB a second, so pass a lower `sample_rate` (such as 22050) when you only need a rough listen. The result's `id` names the preview, and its `uri` (`beatlayer://preview/<id>.wav`) reads it again as a resource; the last 4 are kept.
+- **`analyze`** measures a preview (`preview`: its ID) or a range it renders itself (up to ten minutes), and returns numbers with units and a short `summary`:
+  - loudness as EBU R 128 reports it: integrated, momentary and short-term maximum in LUFS, loudness range in LU, and true peak in dBTP;
+  - sample peak, RMS, and crest factor in dB (a full-scale sine's RMS is −3.01 dBFS);
+  - the level in each octave band from 31.5 Hz to 16 kHz;
+  - the tempo in BPM, with a confidence from 0 to 1: an estimate from the audio, not the set's tempo, and one far from 120 BPM may read as half or double;
+  - the key, with how well it fits and the runner-up, often the relative major or minor;
+  - when transients start, in seconds and as bar.beat.sixteenth.
+
+  `measure` picks what to measure, such as `["loudness"]`; it's faster.
+- **`capture_view`** returns a view as a PNG image: `window`, `arrangement`, `session`, `mixer`, `browser`, `detail` (the Clip or Device View), or `settings`. The view must be on screen; if it isn't, the error names the command that shows it, which you can run, or capture `window` instead. Images are scaled to fit `max_size` pixels (1568 unless you say). Headless (`bl-cli mcp`) there's no window, and the tool says so.
+
+Listen before and after a change, and compare the numbers: for example, `preview` the chorus, turn the bass down, and `analyze` both previews.
+
 ## Good practice
 
 - **Look before you edit.** Start with `query` for an overview, and `describe_command` for any command you haven't used.
@@ -103,4 +124,4 @@ If a call that waited for the person times out on your side, `query` the project
 
 ## What's in this build
 
-Beatlayer is being built in milestones. In this build, audio clips are placed in the arrangement but don't play yet, the transport plays only where an engine is attached, and parameters are named by number. `list_commands` always shows what this build can do.
+Beatlayer is being built in milestones. In this build, audio clips play from the Arrangement, the transport plays only where an engine is attached (previews render without one), and parameters are named by number. `list_commands` always shows what this build can do.

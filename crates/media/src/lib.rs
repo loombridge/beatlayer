@@ -42,7 +42,7 @@ mod store;
 pub mod stream;
 
 pub use decode::{Codec, Container, Decoder, MediaInfo, decode_file, probe};
-pub use encode::{AudioWriter, BitDepth, Dither, EncodeSpec, FileType, Quantiser};
+pub use encode::{AudioWriter, BitDepth, Dither, EncodeSpec, FileType, Quantiser, wav_bytes};
 pub use error::MediaError;
 pub use hash::{ContentHash, ParseContentHashError};
 pub use peaks::{PeakCache, PeakCacheOptions, PeakEvent, PeakStatus, Peaks};

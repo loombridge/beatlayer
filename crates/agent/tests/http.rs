@@ -168,7 +168,7 @@ fn an_agent_client_connects_is_allowed_once_and_edits_the_project() {
         },
     );
     assert_eq!(init["serverInfo"]["name"], "beatlayer");
-    assert_eq!(tools, 7);
+    assert_eq!(tools, 10);
     assert_eq!(result["undo_step"], "claude-code: Add drums");
     assert_eq!(app.track_names()[0], "Drums");
     assert_eq!(

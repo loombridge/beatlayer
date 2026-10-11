@@ -438,6 +438,9 @@ pub struct ToolResult {
     pub text: String,
     /// Its structured result, when the server sent one.
     pub structured: Option<Value>,
+    /// Every content block, the text's included: audio and images come
+    /// after it (WP-1.16).
+    pub content: Vec<Value>,
 }
 
 impl ToolResult {
@@ -448,6 +451,26 @@ impl ToolResult {
             .clone()
             .or_else(|| serde_json::from_str(&self.text).ok())
             .unwrap_or_else(|| Value::String(self.text.clone()))
+    }
+
+    /// The first block of audio or an image (`type` `audio` or `image`,
+    /// or an embedded resource's blob) with this media type, decoded: its
+    /// bytes.
+    #[must_use]
+    pub fn attachment(&self, mime_type: &str) -> Option<Vec<u8>> {
+        self.content.iter().find_map(|block| {
+            let (data, mime) = match block["type"].as_str()? {
+                "audio" | "image" => (block["data"].as_str()?, block["mimeType"].as_str()?),
+                "resource" => (
+                    block["resource"]["blob"].as_str()?,
+                    block["resource"]["mimeType"].as_str()?,
+                ),
+                _ => return None,
+            };
+            (mime == mime_type)
+                .then(|| crate::base64::decode(data))
+                .flatten()
+        })
     }
 
     /// The result, or the tool's error message.
@@ -497,10 +520,20 @@ impl<T: Transport> Client<T> {
     ///
     /// The server's error, such as the person refusing the client.
     pub fn initialize(&mut self, name: &str) -> Result<Value, String> {
+        self.initialize_with(name, PROTOCOL_VERSIONS[0])
+    }
+
+    /// Initialises the session as [`Client::initialize`] does, asking for
+    /// protocol version `protocol`, such as `2024-11-05`.
+    ///
+    /// # Errors
+    ///
+    /// The server's error, such as the person refusing the client.
+    pub fn initialize_with(&mut self, name: &str, protocol: &str) -> Result<Value, String> {
         let result = self.request(
             "initialize",
             json!({
-                "protocolVersion": PROTOCOL_VERSIONS[0],
+                "protocolVersion": protocol,
                 "capabilities": {},
                 "clientInfo": { "name": name, "version": "1.0.0" },
             }),
@@ -566,7 +599,27 @@ impl<T: Transport> Client<T> {
                 .unwrap_or_default()
                 .to_owned(),
             structured: result.get("structuredContent").cloned(),
+            content: result["content"].as_array().cloned().unwrap_or_default(),
         })
+    }
+
+    /// Reads a binary resource, such as an audio preview: its media type
+    /// and bytes.
+    ///
+    /// # Errors
+    ///
+    /// As for [`Client::request`], or if it has no binary contents.
+    pub fn read_blob(&mut self, uri: &str) -> Result<(String, Vec<u8>), String> {
+        let result = self.request("resources/read", json!({ "uri": uri }))?;
+        let contents = &result["contents"][0];
+        let blob = contents["blob"]
+            .as_str()
+            .and_then(crate::base64::decode)
+            .ok_or_else(|| "the resource has no binary contents".to_owned())?;
+        Ok((
+            contents["mimeType"].as_str().unwrap_or_default().to_owned(),
+            blob,
+        ))
     }
 
     /// Reads a resource's text.

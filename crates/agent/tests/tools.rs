@@ -81,7 +81,10 @@ fn the_server_says_what_it_is_and_offers_a_few_tools_and_the_guide() {
             "query",
             "transport",
             "schedule",
-            "checkpoint"
+            "checkpoint",
+            "preview",
+            "analyze",
+            "capture_view"
         ]
     );
 

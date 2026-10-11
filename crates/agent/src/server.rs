@@ -8,10 +8,12 @@ use bl_shell::Shell;
 use bl_shell::agent::AGENT_APPROVE_CLIENT;
 use serde_json::{Value, json};
 
+use bl_shell::perception_commands::{self as perception, CaptureResult, View};
+
 use crate::guide;
 use crate::jsonrpc::{self, Message, code};
 use crate::permission::Mode;
-use crate::tools::{self, Ctx, EngineMessage, Playhead, State, ToolOutcome};
+use crate::tools::{self, Ctx, EngineMessage, Media, Playhead, State, ToolOutcome};
 
 /// The protocol versions this server speaks, newest first. A client asking
 /// for another gets the newest.
@@ -19,6 +21,45 @@ pub const PROTOCOL_VERSIONS: &[&str] = &["2025-11-25", "2025-06-18", "2025-03-26
 
 /// The first version whose tool results carry `structuredContent`.
 const STRUCTURED_FROM: &str = "2025-06-18";
+
+/// The first version with `audio` content blocks. Before it, audio goes in
+/// an embedded resource.
+const AUDIO_FROM: &str = "2025-03-26";
+
+/// A view capture the host is asked for (WP-1.16): the app's window draws
+/// the view, the host reads the frame back, and hands the image to
+/// [`Agent::finish_capture`] with the ticket.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CaptureRequest {
+    /// What [`Agent::finish_capture`] answers it with.
+    pub ticket: u64,
+    /// The view.
+    pub view: View,
+    /// The image's longest side, in pixels: a larger capture is scaled
+    /// down to fit.
+    pub max_size: u32,
+}
+
+/// A view captured as a PNG image.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Captured {
+    /// The PNG file.
+    pub png: Vec<u8>,
+    /// Its width in pixels.
+    pub width: u32,
+    /// Its height in pixels.
+    pub height: u32,
+    /// Image pixels to each of the window's points.
+    pub pixels_per_point: f64,
+}
+
+/// A capture tool call waiting for the host.
+#[derive(Clone, Debug)]
+struct PendingCapture {
+    session: String,
+    request: Value,
+    view: View,
+}
 
 /// The session ID `bl-cli mcp`'s one stdio session has.
 pub const STDIO_SESSION: &str = "stdio";
@@ -219,6 +260,15 @@ pub struct Agent {
     /// The engine the host last attached ([`Agent::sync_engine`]), by its
     /// generation, so a new one gets the commands still scheduled.
     engine_generation: Option<u64>,
+    /// Whether a window runs that can capture views (WP-1.16).
+    view_capture: bool,
+    /// Captures the host hasn't taken yet.
+    capture_requests: Vec<CaptureRequest>,
+    /// Capture calls waiting for the host, by ticket.
+    capturing: BTreeMap<u64, PendingCapture>,
+    /// Capture calls the host has answered, waiting to be handed back by
+    /// [`Agent::resume`].
+    captured: VecDeque<(u64, Outcome)>,
 }
 
 impl Agent {
@@ -247,7 +297,84 @@ impl Agent {
             held: VecDeque::new(),
             next_ticket: 0,
             engine_generation: None,
+            view_capture: false,
+            capture_requests: Vec::new(),
+            capturing: BTreeMap::new(),
+            captured: VecDeque::new(),
         }
+    }
+
+    /// Says whether a window runs that can capture views (WP-1.16): the
+    /// app's host says so once its main window is open. Without one, as in
+    /// `bl-cli mcp`, `capture_view` fails, saying why; calls waiting for a
+    /// capture when the window goes fail too.
+    pub fn set_view_capture(&mut self, available: bool) {
+        self.view_capture = available;
+        if !available {
+            let tickets: Vec<u64> = self.capturing.keys().copied().collect();
+            for ticket in tickets {
+                self.finish_capture(
+                    ticket,
+                    Err("the window closed before the view was captured".to_owned()),
+                );
+            }
+            self.capture_requests.clear();
+        }
+    }
+
+    /// Whether a window runs that can capture views.
+    #[must_use]
+    pub fn view_capture(&self) -> bool {
+        self.view_capture
+    }
+
+    /// The view captures agents asked for since the last call, oldest
+    /// first. Their calls wait ([`Outcome::Wait`]) until the host answers
+    /// each with [`Agent::finish_capture`].
+    pub fn take_capture_requests(&mut self) -> Vec<CaptureRequest> {
+        std::mem::take(&mut self.capture_requests)
+    }
+
+    /// Answers a capture request with the image, or why there's none. The
+    /// waiting call's reply comes from [`Agent::resume`], with the ticket.
+    pub fn finish_capture(&mut self, ticket: u64, result: Result<Captured, String>) {
+        let Some(PendingCapture {
+            session,
+            request,
+            view,
+        }) = self.capturing.remove(&ticket)
+        else {
+            return;
+        };
+        let protocol = self.sessions.get(&session).and_then(|s| s.protocol.clone());
+        let structured = protocol.as_deref().is_none_or(|v| v >= STRUCTURED_FROM);
+        let body = match result {
+            Ok(image) => {
+                let summary = CaptureResult {
+                    view,
+                    width: image.width,
+                    height: image.height,
+                    mime_type: "image/png".to_owned(),
+                    bytes: image.png.len() as u64,
+                    pixels_per_point: (image.pixels_per_point * 1_000.0).round() / 1_000.0,
+                };
+                tool_result(
+                    Ok(serde_json::to_value(&summary).unwrap_or_default()),
+                    structured,
+                    &[Media {
+                        mime_type: "image/png",
+                        bytes: image.png,
+                        uri: None,
+                    }],
+                    protocol.as_deref(),
+                )
+            }
+            Err(message) => tool_result(Err(message), structured, &[], protocol.as_deref()),
+        };
+        self.captured.push_back((
+            ticket,
+            Outcome::Reply(Some(jsonrpc::response(request, body))),
+        ));
     }
 
     /// Where the agent API runs.
@@ -403,10 +530,11 @@ impl Agent {
     }
 
     /// Whether tool calls or engine reports wait for the person's gesture
-    /// to end.
+    /// to end, or view captures the host has answered wait to be handed
+    /// back.
     #[must_use]
     pub fn holds_calls(&self) -> bool {
-        !self.held.is_empty()
+        !self.held.is_empty() || !self.captured.is_empty()
     }
 
     /// Once the person's gesture has ended, runs what waited for it in the
@@ -414,8 +542,12 @@ impl Agent {
     /// their edits, and the next call that waited runs and gives its outcome
     /// with the ticket its [`Outcome::Wait`] had. Call it again until it
     /// gives `None`. While the gesture goes on, or a call it ran waits for
-    /// the person's answer, it gives `None`.
+    /// the person's answer, it gives `None`. View captures the host has
+    /// answered ([`Agent::finish_capture`]) come first, gesture or not.
     pub fn resume(&mut self, shell: &mut Shell) -> Option<(u64, Outcome)> {
+        if let Some(answered) = self.captured.pop_front() {
+            return Some(answered);
+        }
         loop {
             if shell.gesture_under_way()
                 || self
@@ -501,13 +633,47 @@ impl Agent {
                 Outcome::Wait(ticket)
             }
             "tools/call" => self.call(shell, session, id, params, false),
-            "resources/list" => reply(id, json!({ "resources": [guide::listing()] })),
-            "resources/templates/list" => reply(id, json!({ "resourceTemplates": [] })),
+            "resources/list" => {
+                let mut resources = vec![guide::listing()];
+                resources.extend(shell.previews().ids().map(preview_listing));
+                reply(id, json!({ "resources": resources }))
+            }
+            "resources/templates/list" => reply(
+                id,
+                json!({ "resourceTemplates": [{
+                    "uriTemplate": format!("{}{{id}}.wav", perception::PREVIEW_URI),
+                    "name": "preview",
+                    "title": "Audio preview",
+                    "description": "An audio preview the `preview` tool made, by its ID, as a \
+                                    WAV file. The last 4 are kept.",
+                    "mimeType": "audio/wav",
+                }] }),
+            ),
             "resources/read" => {
                 let uri = params
                     .get("uri")
                     .and_then(Value::as_str)
                     .unwrap_or_default();
+                if let Some(preview) = perception::preview_of_uri(uri) {
+                    let wav = shell
+                        .previews()
+                        .get(preview)
+                        .ok_or_else(|| format!("preview {preview} isn't kept: the last 4 are"))
+                        .and_then(bl_shell::perception::Preview::wav);
+                    return match wav {
+                        Ok(bytes) => reply(
+                            id,
+                            json!({ "contents": [{
+                                "uri": uri,
+                                "mimeType": "audio/wav",
+                                "blob": crate::base64::encode(&bytes),
+                            }] }),
+                        ),
+                        Err(message) => {
+                            Outcome::Reply(Some(jsonrpc::error_response(id, -32_002, message)))
+                        }
+                    };
+                }
                 match guide::read(uri) {
                     Some(contents) => reply(id, json!({ "contents": [contents] })),
                     None => Outcome::Reply(Some(jsonrpc::error_response(
@@ -636,10 +802,8 @@ impl Agent {
                 "the session is over",
             )));
         };
-        let structured = open
-            .protocol
-            .as_deref()
-            .is_none_or(|v| v >= STRUCTURED_FROM);
+        let protocol = open.protocol.clone();
+        let structured = protocol.as_deref().is_none_or(|v| v >= STRUCTURED_FROM);
         let mut ctx = Ctx {
             mode: self.mode,
             shell,
@@ -654,7 +818,48 @@ impl Agent {
                 code::INVALID_PARAMS,
                 message,
             ))),
-            Ok(ToolOutcome::Done(result)) => reply(id, tool_result(result, structured)),
+            Ok(ToolOutcome::Done(result)) => reply(
+                id,
+                tool_result(result, structured, &[], protocol.as_deref()),
+            ),
+            Ok(ToolOutcome::WithMedia(result, media)) => reply(
+                id,
+                tool_result(Ok(result), structured, &media, protocol.as_deref()),
+            ),
+            // Spec: agent-perception R9. Only a window can capture a view.
+            Ok(ToolOutcome::Capture { .. }) if !self.view_capture => reply(
+                id,
+                tool_result(
+                    Err(
+                        "View captures need Beatlayer's window, and none is open here: \
+                         `bl-cli mcp` runs headless. Run the Beatlayer app and connect to its \
+                         agent server (Settings, Tempo & MIDI, Agents) to capture views; \
+                         `preview` and `analyze` work here."
+                            .to_owned(),
+                    ),
+                    structured,
+                    &[],
+                    protocol.as_deref(),
+                ),
+            ),
+            Ok(ToolOutcome::Capture { view, max_size }) => {
+                self.next_ticket += 1;
+                let ticket = self.next_ticket;
+                self.capturing.insert(
+                    ticket,
+                    PendingCapture {
+                        session: session.to_owned(),
+                        request: id,
+                        view,
+                    },
+                );
+                self.capture_requests.push(CaptureRequest {
+                    ticket,
+                    view,
+                    max_size,
+                });
+                Outcome::Wait(ticket)
+            }
             Ok(ToolOutcome::Ask {
                 class,
                 classes,
@@ -774,6 +979,8 @@ impl Agent {
                                  changed. Ask them before trying it again."
                             )),
                             structured,
+                            &[],
+                            None,
                         ),
                     )
                 }
@@ -786,14 +993,54 @@ fn reply(id: Value, result: Value) -> Outcome {
     Outcome::Reply(Some(jsonrpc::response(id, result)))
 }
 
+/// A preview as `resources/list` lists it.
+fn preview_listing(id: u64) -> Value {
+    json!({
+        "uri": perception::preview_uri(id),
+        "name": format!("preview-{id}"),
+        "title": format!("Audio preview {id}"),
+        "mimeType": "audio/wav",
+    })
+}
+
+/// Audio or an image as a content block for a client of `protocol`:
+/// `image` blocks in every version; `audio` blocks from 2025-03-26, and an
+/// embedded resource before it.
+fn media_block(media: &Media, protocol: Option<&str>) -> Value {
+    let data = crate::base64::encode(&media.bytes);
+    if media.is_audio() && protocol.is_some_and(|v| v < AUDIO_FROM) {
+        return json!({
+            "type": "resource",
+            "resource": {
+                "uri": media.uri.clone().unwrap_or_else(|| "beatlayer://audio".to_owned()),
+                "mimeType": media.mime_type,
+                "blob": data,
+            },
+        });
+    }
+    json!({
+        "type": if media.is_audio() { "audio" } else { "image" },
+        "data": data,
+        "mimeType": media.mime_type,
+    })
+}
+
 /// A tool's result as MCP carries it: the JSON as text for every client,
-/// and as structured content for clients that read it.
-fn tool_result(result: Result<Value, String>, structured: bool) -> Value {
+/// and as structured content for clients that read it, then any audio or
+/// images, as blocks a client of `protocol` reads.
+fn tool_result(
+    result: Result<Value, String>,
+    structured: bool,
+    media: &[Media],
+    protocol: Option<&str>,
+) -> Value {
     match result {
         Ok(value) => {
             let text = serde_json::to_string_pretty(&value).unwrap_or_default();
+            let mut content = vec![json!({ "type": "text", "text": text })];
+            content.extend(media.iter().map(|m| media_block(m, protocol)));
             let mut result = json!({
-                "content": [{ "type": "text", "text": text }],
+                "content": content,
                 "isError": false,
             });
             if structured && value.is_object() {

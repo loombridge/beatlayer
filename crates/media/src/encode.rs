@@ -16,6 +16,9 @@
 //! Every writer patches its header when it finishes, so a file isn't
 //! complete until [`AudioWriter::finish`] returns. Writing it under a
 //! temporary name and moving it into place afterwards is the caller's job.
+//!
+//! [`wav_bytes`] writes a short WAV file into memory instead, with the same
+//! quantiser, for the agent API's audio previews (WP-1.16).
 
 use std::fs::File;
 use std::io::{BufWriter, Seek, SeekFrom, Write};
@@ -377,6 +380,74 @@ impl AudioWriter {
         }
         Ok(self.frames)
     }
+}
+
+/// A whole WAV file in memory: interleaved `samples` in frames of
+/// `channels`, at `sample_rate`, as `bit_depth` (16 or 24 bits rounded as
+/// [`Quantiser`] rounds, with `dither` from [`DITHER_SEED`]; 32 bits as
+/// IEEE floating point). The same samples make the same bytes every time.
+///
+/// # Errors
+///
+/// [`MediaError::Encode`] if `samples` isn't whole frames, or the rate or
+/// channel count is out of range.
+pub fn wav_bytes(
+    samples: &[f32],
+    channels: u16,
+    sample_rate: u32,
+    bit_depth: BitDepth,
+    dither: Dither,
+) -> Result<Vec<u8>, MediaError> {
+    let failed = |what: String| MediaError::Encode(format!("an in-memory WAV file: {what}"));
+    if !(1..=8).contains(&channels) {
+        return Err(failed(format!(
+            "{channels} channels; 1 to 8 can be written"
+        )));
+    }
+    if !(1_000..=768_000).contains(&sample_rate) {
+        return Err(failed(format!("a sample rate of {sample_rate} Hz")));
+    }
+    if !samples.len().is_multiple_of(usize::from(channels)) {
+        return Err(failed(format!(
+            "{} samples aren't whole frames of {channels} channels",
+            samples.len()
+        )));
+    }
+    let spec = hound::WavSpec {
+        channels,
+        sample_rate,
+        bits_per_sample: bit_depth.bits() as u16,
+        sample_format: if bit_depth.is_integer() {
+            hound::SampleFormat::Int
+        } else {
+            hound::SampleFormat::Float
+        },
+    };
+    let mut bytes = std::io::Cursor::new(Vec::with_capacity(
+        44 + samples.len() * bit_depth.bits() as usize / 8,
+    ));
+    {
+        let mut wav = hound::WavWriter::new(&mut bytes, spec).map_err(|e| failed(e.to_string()))?;
+        if bit_depth.is_integer() {
+            let mut quantiser = Quantiser::new(bit_depth.bits(), dither, DITHER_SEED);
+            for &sample in samples {
+                let step = quantiser.quantise(sample);
+                let written = if bit_depth == BitDepth::Int16 {
+                    wav.write_sample(step as i16)
+                } else {
+                    wav.write_sample(step)
+                };
+                written.map_err(|e| failed(e.to_string()))?;
+            }
+        } else {
+            for &sample in samples {
+                wav.write_sample(sample)
+                    .map_err(|e| failed(e.to_string()))?;
+            }
+        }
+        wav.finalize().map_err(|e| failed(e.to_string()))?;
+    }
+    Ok(bytes.into_inner())
 }
 
 /// A sample rate as the 80-bit IEEE extended number AIFF's `COMM` chunk
@@ -813,5 +884,37 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn a_wav_in_memory_reads_back_as_written() {
+        // WP-1.16: the agent API's previews.
+        let samples: Vec<f32> = (0..2_000)
+            .map(|n| ((n as f32) * 0.01).sin() * 0.5)
+            .collect();
+        for depth in [BitDepth::Int16, BitDepth::Int24, BitDepth::Float32] {
+            let bytes = wav_bytes(&samples, 2, 48_000, depth, Dither::None).unwrap();
+            let mut reader = hound::WavReader::new(std::io::Cursor::new(&bytes)).unwrap();
+            assert_eq!(reader.spec().channels, 2);
+            assert_eq!(reader.spec().sample_rate, 48_000);
+            assert_eq!(reader.len() as usize, samples.len());
+            let scale = 2f32.powi(depth.bits() as i32 - 1);
+            let read: Vec<f32> = if depth.is_integer() {
+                reader
+                    .samples::<i32>()
+                    .map(|s| s.unwrap() as f32 / scale)
+                    .collect()
+            } else {
+                reader.samples::<f32>().map(Result::unwrap).collect()
+            };
+            for (a, b) in read.iter().zip(&samples) {
+                assert!((a - b).abs() <= 1.0 / scale, "{depth:?}");
+            }
+        }
+        assert_eq!(
+            wav_bytes(&samples, 2, 48_000, BitDepth::Int16, Dither::Triangular).unwrap(),
+            wav_bytes(&samples, 2, 48_000, BitDepth::Int16, Dither::Triangular).unwrap()
+        );
+        assert!(wav_bytes(&samples[..3], 2, 48_000, BitDepth::Int16, Dither::None).is_err());
     }
 }

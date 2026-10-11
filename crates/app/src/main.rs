@@ -2,6 +2,7 @@
 //! native menus, file dialogs, and preferences, wired to the headless shell
 //! (`bl-shell`) and drawn by `bl-ui` (WP-1.7).
 
+mod capture;
 mod host;
 #[cfg(any(target_os = "macos", windows))]
 mod native_menu;

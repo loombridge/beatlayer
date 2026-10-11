@@ -1,0 +1,49 @@
+# Beatlayer's light theme: the same tokens as dark.toml.
+
+name = "Light"
+dark = false
+
+[colors]
+window = "#c9ced5"
+panel = "#eef0f3"
+bar = "#dde1e6"
+control = "#d2d7de"
+control_hover = "#c3c9d1"
+control_pressed = "#b3bac4"
+accent = "#11877a"
+accent_text = "#f2fffd"
+record = "#c9302c"
+error_text = "#b3261e"
+text = "#1c2026"
+text_dim = "#55606c"
+pending = "#9aa3ad"
+separator = "#b4bac2"
+focus = "#1f6feb"
+meter = "#1e9e55"
+meter_hot = "#c58a00"
+lane = "#e2e5e9"
+lane_selected = "#d6dce4"
+lane_line = "#c3c8cf"
+grid_bar = "#c0c6ce"
+grid_beat = "#d2d6dc"
+ruler = "#e8ebee"
+ruler_tick = "#7b8590"
+playhead = "#1c2026"
+insert_marker = "#1f6feb"
+loop_on = "#11877a"
+loop_off = "#9aa3ad"
+time_selection = "#1f6feb"
+clip_text = "#14181d"
+waveform = "#1c2026"
+clip_muted = "#a9afb7"
+overview_outline = "#1c2026"
+track_palette = [
+  "#d4584b", "#dd8446", "#d6af3c", "#93b642", "#47a95a", "#35a68b", "#3699c2",
+  "#4676cc", "#6a5fc9", "#9156c4", "#c056a3", "#c85c77", "#88939e", "#ad8e6c",
+]
+
+[sizes]
+text = 11.0
+small_text = 10.0
+heading = 12.0
+corner = 2.0

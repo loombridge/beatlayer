@@ -1,0 +1,775 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Beatlayer progress</title>
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<style>
+/* Beatlayer's own theme tokens (crates/ui/themes), so the page looks like the app. */
+:root {
+  color-scheme: light;
+  --bg: #dde1e6;
+  --panel: #eef0f3;
+  --panel-2: #e4e7eb;
+  --line: #c3c9d1;
+  --text: #1c2026;
+  --dim: #55606c;
+  --accent: #11877a;
+  --focus: #1f6feb;
+  --done: #1e9e55;
+  --review: #1f6feb;
+  --progress: #c58a00;
+  --todo: #c3c9d1;
+  --gap: #c9302c;
+  --planned: #9aa3ad;
+  --shadow: 0 8px 28px rgba(20, 26, 34, .18);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #15181c;
+    --panel: #22262c;
+    --panel-2: #1b1f24;
+    --line: #353c45;
+    --text: #e4e8ee;
+    --dim: #9aa4b0;
+    --accent: #35c2b0;
+    --focus: #79c0ff;
+    --done: #5ccf8a;
+    --review: #79c0ff;
+    --progress: #f2c14e;
+    --todo: #3a414b;
+    --gap: #e5534b;
+    --planned: #5d6670;
+    --shadow: 0 10px 32px rgba(0, 0, 0, .5);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #15181c;
+  --panel: #22262c;
+  --panel-2: #1b1f24;
+  --line: #353c45;
+  --text: #e4e8ee;
+  --dim: #9aa4b0;
+  --accent: #35c2b0;
+  --focus: #79c0ff;
+  --done: #5ccf8a;
+  --review: #79c0ff;
+  --progress: #f2c14e;
+  --todo: #3a414b;
+  --gap: #e5534b;
+  --planned: #5d6670;
+  --shadow: 0 10px 32px rgba(0, 0, 0, .5);
+}
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+button { font: inherit; color: inherit; }
+a { color: var(--accent); }
+h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.01em; }
+
+.wrap { max-width: 1180px; margin: 0 auto; padding: 0 16px; }
+
+/* Top bar */
+.top { background: var(--panel-2); border-bottom: 1px solid var(--line); }
+.top .wrap { display: flex; align-items: center; gap: 12px 16px; min-height: 60px; padding-top: 10px; padding-bottom: 10px; flex-wrap: wrap; }
+.brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.brand svg { flex: none; }
+.brand h1 { font-size: 17px; }
+.brand p { margin: 0; color: var(--dim); font-size: 12.5px; }
+.source { flex: 1 1 260px; min-width: 0; color: var(--dim); font-size: 12.5px; text-align: right; }
+.source .line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.source code { font: 12px ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--text); }
+.source .warn { color: var(--gap); }
+.actions { display: flex; gap: 6px; }
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 32px; padding: 0 12px; border-radius: 6px;
+  background: var(--panel); border: 1px solid var(--line); cursor: pointer; font-size: 13px;
+}
+.btn:hover { border-color: var(--dim); }
+.btn[aria-busy="true"] { opacity: .6; cursor: progress; }
+.btn.icon { width: 32px; padding: 0; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+main { padding: 20px 0 48px; }
+section { margin-top: 28px; }
+section:first-child { margin-top: 0; }
+.section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; }
+.section-head h2 { font-size: 18px; }
+.hint { margin: 4px 0 12px; color: var(--dim); font-size: 13px; }
+
+/* Summary */
+.summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.stat { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; min-width: 0; }
+.stat .label { color: var(--dim); font-size: 12.5px; }
+.stat .big { font-size: 28px; font-weight: 650; line-height: 1.15; margin-top: 2px; }
+.stat .big small { font-size: 14px; font-weight: 500; color: var(--dim); margin-left: 6px; }
+.stat .sub { color: var(--dim); font-size: 12.5px; margin-top: 2px; }
+.stack { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--todo); margin-top: 10px; }
+.stack span { display: block; height: 100%; }
+
+/* Legend and controls */
+.toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px 16px; flex-wrap: wrap; margin-top: 18px; padding: 10px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12.5px; color: var(--dim); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.toggle { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--dim); cursor: pointer; }
+.toggle input { accent-color: var(--accent); width: 15px; height: 15px; margin: 0; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; background: var(--panel); }
+.seg button { border: 0; background: none; padding: 5px 12px; font-size: 13px; cursor: pointer; color: var(--dim); min-height: 30px; }
+.seg button[aria-pressed="true"] { background: var(--panel-2); color: var(--text); box-shadow: inset 0 -2px 0 var(--accent); }
+
+/* Rows of squares */
+.rows { display: grid; gap: 8px; }
+.row {
+  display: grid; grid-template-columns: minmax(220px, 300px) 1fr; gap: 8px 18px; align-items: start;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px;
+}
+.row.current { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+.row-title { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.row-title h3 { font-size: 14.5px; }
+.row-title button.h { all: unset; cursor: pointer; font-size: 14.5px; font-weight: 600; border-radius: 3px; }
+.row-title button.h:hover { text-decoration: underline; text-underline-offset: 3px; }
+.row-title button.h:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.tag { font-size: 11.5px; font-weight: 600; color: var(--dim); text-transform: uppercase; letter-spacing: .04em; }
+.pill { font-size: 11px; font-weight: 600; color: var(--dim); border: 1px solid var(--line); border-radius: 999px; padding: 0 7px; white-space: nowrap; }
+.now { font-size: 11px; font-weight: 700; color: var(--accent); border: 1px solid var(--accent); border-radius: 999px; padding: 0 7px; }
+.row-meta { color: var(--dim); font-size: 12.5px; margin-top: 2px; }
+.row-meta b { color: var(--text); font-weight: 600; }
+.row-count { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: 12.5px; color: var(--dim); }
+.row-count > span { min-width: 0; }
+.row-count b { color: var(--text); font-weight: 600; }
+.meter { flex: 0 0 56px; height: 5px; border-radius: 3px; background: var(--todo); overflow: hidden; }
+.meter span { display: block; height: 100%; background: var(--done); }
+
+.grid { display: flex; flex-wrap: wrap; gap: 4px; padding-top: 2px; min-width: 0; }
+.sq {
+  --s: 15px;
+  width: var(--s); height: var(--s); padding: 0; border-radius: 3px; cursor: pointer;
+  border: 1.5px solid transparent; background: var(--todo);
+  transition: transform .08s ease;
+}
+.sq:hover { transform: scale(1.25); }
+.sq.sel { outline: 2px solid var(--text); outline-offset: 1px; }
+.sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; flex: none; border: 1.5px solid transparent; }
+.s-done { background: var(--done); }
+.s-review { background: var(--review); }
+.s-progress { background: var(--progress); }
+.s-todo { background: var(--todo); }
+.s-gap { background: transparent; border: 1.5px dashed var(--gap); }
+.s-planned { background: transparent; border-color: var(--planned); }
+.s-out { background: repeating-linear-gradient(135deg, var(--planned) 0 1.5px, transparent 1.5px 4px); border-color: var(--planned); opacity: .7; }
+@media (pointer: coarse) { .sq { --s: 18px; } .grid { gap: 5px; } }
+
+/* Tooltip and detail panel */
+#tip {
+  position: fixed; z-index: 20; max-width: min(340px, calc(100vw - 24px)); pointer-events: none;
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 8px;
+  padding: 8px 10px; font-size: 12.5px; box-shadow: var(--shadow);
+}
+#tip b { display: block; font-weight: 600; margin-bottom: 2px; overflow-wrap: anywhere; }
+#tip .st { display: inline-flex; align-items: center; gap: 6px; color: var(--dim); }
+#detail {
+  position: fixed; z-index: 30; right: 16px; bottom: 16px; width: min(400px, calc(100vw - 32px));
+  max-height: min(70vh, 640px); overflow: auto;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow);
+  padding: 14px 16px 16px;
+}
+#detail .close { position: sticky; top: 0; float: right; margin: -4px -6px 0 8px; }
+#detail h3 { font-size: 15.5px; overflow-wrap: anywhere; }
+#detail .kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 10px 0 0; font-size: 13px; }
+#detail .kv dt { color: var(--dim); }
+#detail .kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+#detail ul { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 6px; }
+#detail li { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; }
+#detail li .sw { margin-top: 3px; }
+#detail p { margin: 10px 0 0; font-size: 13px; color: var(--dim); overflow-wrap: anywhere; }
+#detail h4 { margin: 14px 0 0; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--dim); }
+.chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; }
+.banner { margin-bottom: 16px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--gap); color: var(--text); background: var(--panel); }
+.empty { color: var(--dim); font-size: 13px; }
+
+@media (max-width: 720px) {
+  .row { grid-template-columns: 1fr; }
+  .source { text-align: left; flex-basis: 100%; order: 3; }
+  .stat .big { font-size: 24px; }
+  #detail { left: 0; right: 0; bottom: 0; width: 100%; max-height: 72vh; border-radius: 14px 14px 0 0; border-bottom: 0; }
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <div class="brand">
+      <svg width="30" height="30" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="var(--panel)"/><g fill="var(--done)"><rect x="5" y="5" width="6" height="6" rx="1.5"/><rect x="13" y="5" width="6" height="6" rx="1.5"/><rect x="21" y="5" width="6" height="6" rx="1.5"/><rect x="5" y="13" width="6" height="6" rx="1.5"/></g><rect x="13" y="13" width="6" height="6" rx="1.5" fill="var(--progress)"/><g fill="var(--todo)"><rect x="21" y="13" width="6" height="6" rx="1.5"/><rect x="5" y="21" width="6" height="6" rx="1.5"/><rect x="13" y="21" width="6" height="6" rx="1.5"/><rect x="21" y="21" width="6" height="6" rx="1.5"/></g></svg>
+      <div>
+        <h1>Beatlayer progress</h1>
+        <p>The roadmap and parity with Ableton Live 12</p>
+      </div>
+    </div>
+    <div class="source" id="source" aria-live="polite"></div>
+    <div class="actions">
+      <button class="btn" id="refresh" type="button" title="Fetch main and reload">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>
+        Refresh
+      </button>
+      <button class="btn icon" id="theme" type="button" aria-label="Switch between light and dark">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <div id="banner"></div>
+  <section class="summary" id="summary" aria-label="Summary"><p class="empty">Loading progress…</p></section>
+
+  <div class="toolbar">
+    <div class="legend" id="legend" aria-label="Legend"></div>
+    <label class="toggle"><input type="checkbox" id="sorted" checked> Group squares by status</label>
+  </div>
+
+  <section aria-labelledby="roadmap-h">
+    <div class="section-head"><h2 id="roadmap-h">Roadmap</h2></div>
+    <p class="hint">One square per work package in the build plan. Phases 3 to 10 aren't broken into packages yet, so they show the plan's estimate.</p>
+    <div class="rows" id="phases"></div>
+  </section>
+
+  <section aria-labelledby="parity-h">
+    <div class="section-head">
+      <h2 id="parity-h">Parity with Live 12</h2>
+      <div class="seg" role="group" aria-label="Group features">
+        <button type="button" data-view="milestone" aria-pressed="true">By milestone</button>
+        <button type="button" data-view="area" aria-pressed="false">By area</button>
+      </div>
+    </div>
+    <p class="hint">One square per Live feature for each milestone that delivers part of it, from the parity matrix. A feature's status comes from the work packages that build it.</p>
+    <div class="rows" id="features"></div>
+  </section>
+
+  <section aria-labelledby="beyond-h">
+    <div class="section-head"><h2 id="beyond-h">Beyond Live</h2></div>
+    <p class="hint">The improvements over Live, from docs/05-improvements.md.</p>
+    <div class="rows" id="improvements"></div>
+  </section>
+</main>
+
+<div id="tip" role="tooltip" hidden></div>
+<aside id="detail" aria-label="Details" hidden></aside>
+
+<script>
+"use strict";
+
+const ORDER = ["done", "review", "in progress", "todo", "unassigned", "planned", "out"];
+const LABEL = {
+  "done": "Done",
+  "review": "In review",
+  "in progress": "In progress",
+  "todo": "To do",
+  "unassigned": "No package yet",
+  "planned": "Planned",
+  "out": "Out of scope",
+};
+const CLS = {
+  "done": "s-done", "review": "s-review", "in progress": "s-progress", "todo": "s-todo",
+  "unassigned": "s-gap", "planned": "s-planned", "out": "s-out",
+};
+const COLOUR = {
+  "done": "var(--done)", "review": "var(--review)", "in progress": "var(--progress)",
+  "todo": "var(--todo)", "unassigned": "var(--gap)", "planned": "var(--planned)", "out": "var(--planned)",
+};
+
+const state = { data: null, view: "milestone", sorted: true, items: new Map(), selected: null };
+
+function store(key, value) {
+  try { if (value === undefined) return localStorage.getItem(key); localStorage.setItem(key, value); } catch (e) { return null; }
+  return null;
+}
+
+function el(tag, attrs, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v === null || v === undefined || v === false) continue;
+    if (k === "class") node.className = v;
+    else if (k === "style") node.style.cssText = v;
+    else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
+    else node.setAttribute(k, v === true ? "" : v);
+  }
+  for (const child of children.flat()) {
+    if (child === null || child === undefined || child === false) continue;
+    node.append(child instanceof Node ? child : document.createTextNode(String(child)));
+  }
+  return node;
+}
+
+function swatch(status) { return el("span", { class: "sw " + CLS[status], "aria-hidden": "true" }); }
+
+function ago(seconds) {
+  if (!seconds) return "never";
+  const d = Math.max(0, Math.round(Date.now() / 1000 - seconds));
+  if (d < 60) return "just now";
+  if (d < 3600) return Math.round(d / 60) + " min ago";
+  if (d < 86400) return Math.round(d / 3600) + " h ago";
+  return Math.round(d / 86400) + " d ago";
+}
+
+function plural(n, one, many) { return n + " " + (n === 1 ? one : (many || one + "s")); }
+
+function count(statuses) {
+  const c = {};
+  for (const s of statuses) c[s] = (c[s] || 0) + 1;
+  return c;
+}
+
+function stackBar(counts, total) {
+  const bar = el("div", { class: "stack", role: "img", "aria-label": ORDER.filter(s => counts[s]).map(s => counts[s] + " " + LABEL[s].toLowerCase()).join(", ") });
+  for (const s of ORDER) {
+    if (!counts[s] || s === "todo" || s === "out") continue;
+    const style = "width:" + (100 * counts[s] / total) + "%;background:" + COLOUR[s] +
+      (s === "unassigned" || s === "planned" ? ";opacity:.45" : "");
+    bar.append(el("span", { style }));
+  }
+  return bar;
+}
+
+/* Squares */
+
+function square(key, status, label, item) {
+  state.items.set(key, item);
+  return el("button", {
+    type: "button", class: "sq " + CLS[status] + (state.selected === key ? " sel" : ""),
+    "data-k": key, "aria-label": label + ": " + LABEL[status],
+  });
+}
+
+function sortSquares(entries) {
+  if (!state.sorted) return entries;
+  return entries
+    .map((e, i) => ({ e, i }))
+    .sort((a, b) => ORDER.indexOf(a.e.status) - ORDER.indexOf(b.e.status) || a.i - b.i)
+    .map(x => x.e);
+}
+
+function rowCount(statuses, total, noun, lead) {
+  const c = count(statuses);
+  const done = c["done"] || 0;
+  const parts = [done + " of " + total + " done"];
+  const active = (c["review"] || 0) + (c["in progress"] || 0);
+  if (active) parts.push(active + " underway");
+  return el("div", { class: "row-count" },
+    el("div", { class: "meter", "aria-hidden": "true" }, el("span", { style: "width:" + (total ? 100 * done / total : 0) + "%" })),
+    el("span", { title: done + " of " + total + " " + noun + " done" }, parts.join(" · ")));
+}
+
+function releasePill(release) {
+  const name = releaseName(release);
+  return name ? el("span", { class: "pill" }, name) : null;
+}
+
+/* Rendering */
+
+function render() {
+  const data = state.data;
+  if (!data) return;
+  state.items.clear();
+  renderSource(data);
+  renderSummary(data);
+  renderLegend();
+  renderPhases(data);
+  renderFeatures(data);
+  renderImprovements(data);
+  if (state.selected && state.items.has(state.selected)) showDetail(state.selected);
+  else closeDetail();
+}
+
+function renderSource(data) {
+  const s = data.source || {};
+  const box = document.getElementById("source");
+  box.replaceChildren(...[
+    el("div", { class: "line" }, "Reading ", el("code", {}, s.ref || "?"), " at ", el("code", {}, s.commit || "?"),
+      s.uncommitted ? " with uncommitted changes" : "", ", committed " + ago(s.committed)),
+    el("div", { class: "line", title: s.subject || "" }, s.subject || ""),
+    s.fetch_error
+      ? el("div", { class: "line warn", title: s.fetch_error }, "Couldn't fetch main: " + s.fetch_error)
+      : (s.ref && s.ref.startsWith("origin/") ? el("div", { class: "line" }, "Fetched " + ago(s.fetched) + "; refreshes every minute") : null),
+  ].filter(Boolean));
+}
+
+function renderSummary(data) {
+  const box = document.getElementById("summary");
+  const parity = data.totals.parity;
+  const pc = parity.by_status;
+  const pDone = pc["done"] || 0;
+  const pkg = data.totals.packages;
+  const kc = pkg.by_status;
+  const kDone = kc["done"] || 0;
+  const current = data.phases.find(p => p.packages.length && p.packages.some(x => x.status !== "done"));
+  const outCount = pc["out"] || 0;
+
+  const cards = [
+    el("div", { class: "stat" },
+      el("div", { class: "label" }, "Parity with Live 12"),
+      el("div", { class: "big" }, Math.round(100 * pDone / Math.max(1, parity.total)) + "%",
+        el("small", {}, pDone + " of " + parity.total + " done")),
+      el("div", { class: "sub" }, [
+        (pc["review"] || 0) + (pc["in progress"] || 0) + " underway",
+        (pc["unassigned"] || 0) + " with no package yet",
+        outCount + " out of scope",
+      ].join(" · ")),
+      stackBar(pc, parity.total)),
+    el("div", { class: "stat" },
+      el("div", { class: "label" }, "Work packages to 1.0"),
+      el("div", { class: "big" }, Math.round(100 * kDone / Math.max(1, pkg.total)) + "%",
+        el("small", {}, kDone + " of about " + pkg.total + " done")),
+      el("div", { class: "sub" }, [
+        (kc["review"] || 0) + " in review", (kc["in progress"] || 0) + " in progress",
+        (kc["planned"] || 0) + " estimated in later phases",
+      ].join(" · ")),
+      stackBar(kc, pkg.total)),
+  ];
+  if (current) {
+    const c = count(current.packages.map(p => p.status));
+    const total = current.packages.length;
+    cards.push(el("div", { class: "stat" },
+      el("div", { class: "label" }, "Now: Phase " + current.number + (current.milestone ? ", M" + current.milestone.number + " " + releaseText(current.milestone.release) : "")),
+      el("div", { class: "big" }, current.title),
+      el("div", { class: "sub" }, ORDER.filter(s => c[s]).map(s => c[s] + " " + LABEL[s].toLowerCase()).join(" · ")),
+      stackBar(c, total)));
+  }
+  box.replaceChildren(...cards);
+}
+
+function releaseName(release) {
+  if (!release || release === "none") return "";
+  return /^[0-9]/.test(release) ? "release " + release : release;
+}
+
+function releaseText(release) {
+  const name = releaseName(release);
+  return name ? "(" + name + ")" : "";
+}
+
+function renderLegend() {
+  const box = document.getElementById("legend");
+  box.replaceChildren(...ORDER.map(s => el("span", {}, swatch(s), LABEL[s])));
+}
+
+function renderPhases(data) {
+  const box = document.getElementById("phases");
+  const current = data.phases.find(p => p.packages.length && p.packages.some(x => x.status !== "done"));
+  box.replaceChildren(...data.phases.map(phase => {
+    const m = phase.milestone;
+    let entries;
+    if (phase.packages.length) {
+      entries = phase.packages.map(p => ({
+        key: "wp:" + p.id, status: p.status, label: "WP-" + p.id + " " + p.title,
+        item: { kind: "package", package: p, phase },
+      }));
+    } else {
+      entries = Array.from({ length: phase.estimate || 0 }, (_, i) => ({
+        key: "est:" + phase.number + ":" + i, status: "planned", label: "Phase " + phase.number + ", estimated package " + (i + 1),
+        item: { kind: "estimate", phase, index: i },
+      }));
+    }
+    const statuses = entries.map(e => e.status);
+    const isCurrent = phase === current;
+    const key = "phase:" + phase.number;
+    state.items.set(key, { kind: "phase", phase });
+    return el("article", { class: "row" + (isCurrent ? " current" : "") },
+      el("div", {},
+        el("div", { class: "row-title" },
+          el("span", { class: "tag" }, "Phase " + phase.number),
+          el("h3", {}, el("button", { class: "h", type: "button", "data-phase": key, "aria-label": "Phase " + phase.number + ", " + phase.title + ": details" }, phase.title)),
+          m ? releasePill(m.release) : null,
+          isCurrent ? el("span", { class: "now" }, "Now") : null),
+        rowCount(statuses, entries.length, phase.packages.length ? "packages" : "estimated packages")),
+      el("div", { class: "grid" }, sortSquares(entries).map(e => square(e.key, e.status, e.label, e.item))));
+  }));
+}
+
+function featureParts(data) {
+  const out = [];
+  data.features.forEach((f, fi) => f.parts.forEach((p, pi) => out.push({ feature: f, part: p, key: "f:" + fi + ":" + pi })));
+  return out;
+}
+
+function partLabel(f, p) {
+  return f.name + (p.label ? " (" + p.label + ")" : "") + (p.milestone !== null ? ", M" + p.milestone : "");
+}
+
+function renderFeatures(data) {
+  const box = document.getElementById("features");
+  const parts = featureParts(data);
+  const groups = new Map();
+  const milestoneName = n => (data.milestones.find(m => m.number === n) || {}).name || "";
+  if (state.view === "milestone") {
+    for (const m of data.milestones) groups.set("M" + m.number, { title: m.name, tag: "M" + m.number, meta: releaseName(m.release), list: [] });
+    groups.set("out", { title: "Out of scope for 1.0", tag: "Out", meta: "", list: [] });
+    for (const x of parts) {
+      const k = x.part.milestone === null ? "out" : "M" + x.part.milestone;
+      if (!groups.has(k)) groups.set(k, { title: "", tag: k, meta: "", list: [] });
+      groups.get(k).list.push(x);
+    }
+  } else {
+    for (const x of parts) {
+      const k = x.feature.area;
+      if (!groups.has(k)) groups.set(k, { title: k, tag: "", meta: "", list: [] });
+      groups.get(k).list.push(x);
+    }
+  }
+  const current = data.phases.find(p => p.packages.length && p.packages.some(x => x.status !== "done"));
+  const rows = [];
+  for (const [k, g] of groups) {
+    if (!g.list.length) continue;
+    const counted = g.list.filter(x => x.part.status !== "out");
+    const isCurrent = state.view === "milestone" && current && k === "M" + current.number;
+    const entries = g.list.map(x => ({ key: x.key, status: x.part.status, label: partLabel(x.feature, x.part), item: { kind: "feature", feature: x.feature, part: x.part } }));
+    rows.push(el("article", { class: "row" + (isCurrent ? " current" : "") },
+      el("div", {},
+        el("div", { class: "row-title" }, g.tag ? el("span", { class: "tag" }, g.tag) : null, el("h3", {}, g.title || milestoneName(Number(k.slice(1)))), g.meta ? el("span", { class: "pill" }, g.meta) : null, isCurrent ? el("span", { class: "now" }, "Now") : null),
+        k === "out" && state.view === "milestone"
+          ? el("div", { class: "row-count" }, plural(g.list.length, "feature") + " left out, each with its reason")
+          : rowCount(counted.map(x => x.part.status), counted.length, "features")),
+      el("div", { class: "grid" }, sortSquares(entries).map(e => square(e.key, e.status, e.label, e.item)))));
+  }
+  box.replaceChildren(...rows);
+}
+
+function renderImprovements(data) {
+  const box = document.getElementById("improvements");
+  const list = data.improvements;
+  if (!list.length) { box.replaceChildren(el("p", { class: "empty" }, "No improvements listed.")); return; }
+  const entries = list.map(i => ({ key: "imp:" + i.id, status: i.status, label: i.id + " " + i.title, item: { kind: "improvement", improvement: i } }));
+  box.replaceChildren(el("article", { class: "row" },
+    el("div", {},
+      el("div", { class: "row-title" }, el("span", { class: "tag" }, "IMP"), el("h3", {}, "Improvements")),
+      rowCount(entries.map(e => e.status), entries.length, "improvements")),
+    el("div", { class: "grid" }, sortSquares(entries).map(e => square(e.key, e.status, e.label, e.item)))));
+}
+
+/* Tooltip */
+
+const tip = document.getElementById("tip");
+
+function packageById(id) {
+  for (const phase of state.data.phases) for (const p of phase.packages) if (p.id === id) return p;
+  // "2.18" names 2.18a and 2.18b.
+  return null;
+}
+
+function tipContent(item) {
+  switch (item.kind) {
+    case "package": return ["WP-" + item.package.id + " " + item.package.title, item.package.status, item.package.pr ? "#" + item.package.pr.number : ""];
+    case "estimate": return ["Phase " + item.phase.number + ": " + item.phase.title, "planned", "About " + item.phase.estimate + " packages, not broken down yet"];
+    case "feature": return [partLabel(item.feature, item.part), item.part.status, item.part.packages.length ? item.part.packages.map(p => "WP-" + p).join(", ") : ""];
+    case "improvement": return [item.improvement.id + " " + item.improvement.title, item.improvement.status, item.improvement.built_in];
+  }
+  return ["", "todo", ""];
+}
+
+function showTip(target) {
+  const item = state.items.get(target.dataset.k);
+  if (!item) return;
+  const [title, status, extra] = tipContent(item);
+  tip.replaceChildren(el("b", {}, title), el("span", { class: "st" }, swatch(status), LABEL[status], extra ? " · " + extra : ""));
+  tip.hidden = false;
+  const r = target.getBoundingClientRect();
+  const t = tip.getBoundingClientRect();
+  let x = r.left + r.width / 2 - t.width / 2;
+  x = Math.max(12, Math.min(x, window.innerWidth - t.width - 12));
+  let y = r.top - t.height - 8;
+  if (y < 8) y = r.bottom + 8;
+  tip.style.left = x + "px";
+  tip.style.top = y + "px";
+}
+
+function hideTip() { tip.hidden = true; }
+
+/* Detail panel */
+
+const detail = document.getElementById("detail");
+
+function prLink(pr) {
+  return pr ? el("a", { href: pr.url, target: "_blank", rel: "noopener noreferrer" }, "#" + pr.number) : null;
+}
+
+function packageList(ids) {
+  if (!ids.length) return el("p", {}, "No work package names this yet.");
+  return el("ul", {}, ids.flatMap(id => {
+    const exact = packageById(id);
+    const found = exact ? [exact] : state.data.phases.flatMap(ph => ph.packages).filter(p => p.id.startsWith(id) && /^[a-z]+$/.test(p.id.slice(id.length)));
+    if (!found.length) return [el("li", {}, swatch("unassigned"), "WP-" + id + " isn't in the build plan")];
+    return found.map(p => el("li", {}, swatch(p.status),
+      el("span", {}, el("b", {}, "WP-" + p.id), " " + p.title + " · " + LABEL[p.status].toLowerCase(), p.pr ? " · " : "", prLink(p.pr))));
+  }));
+}
+
+function showDetail(key) {
+  const item = state.items.get(key);
+  if (!item) return closeDetail();
+  state.selected = key;
+  document.querySelectorAll(".sq.sel").forEach(n => n.classList.remove("sel"));
+  const sq = document.querySelector('.sq[data-k="' + CSS.escape(key) + '"]');
+  if (sq) sq.classList.add("sel");
+  const close = el("button", { class: "btn icon close", type: "button", "aria-label": "Close details", onclick: closeDetail }, "×");
+  let body = [];
+  if (item.kind === "package") {
+    const p = item.package;
+    body = [
+      el("h3", {}, "WP-" + p.id),
+      el("p", { style: "color:var(--text);margin-top:4px" }, p.title),
+      el("dl", { class: "kv" },
+        el("dt", {}, "Status"), el("dd", {}, el("span", { class: "chip" }, swatch(p.status), LABEL[p.status])),
+        el("dt", {}, "Phase"), el("dd", {}, item.phase.number + ", " + item.phase.title),
+        p.size ? [el("dt", {}, "Size"), el("dd", {}, p.size)] : null,
+        p.date ? [el("dt", {}, "Date"), el("dd", {}, p.date)] : null,
+        p.pr ? [el("dt", {}, "Pull request"), el("dd", {}, prLink(p.pr))] : null),
+      p.note && p.note !== p.title ? el("p", {}, p.note) : null,
+    ];
+  } else if (item.kind === "phase" || item.kind === "estimate") {
+    const ph = item.phase;
+    if (ph.packages.length) {
+      const c = count(ph.packages.map(p => p.status));
+      body = [
+        el("h3", {}, "Phase " + ph.number + ": " + ph.title),
+        el("dl", { class: "kv" },
+          ph.milestone ? [el("dt", {}, "Milestone"), el("dd", {}, "M" + ph.milestone.number + " " + ph.milestone.name + (releaseName(ph.milestone.release) ? ", " + releaseName(ph.milestone.release) : ""))] : null,
+          el("dt", {}, "Packages"), el("dd", {}, ORDER.filter(s => c[s]).map(s => c[s] + " " + LABEL[s].toLowerCase()).join(", "))),
+        ph.goal ? el("p", {}, ph.goal) : null,
+        ph.milestone ? [el("h4", {}, "For users"), el("p", {}, ph.milestone.promise)] : null,
+        ph.milestone ? [el("h4", {}, "Exit demo"), el("p", {}, ph.milestone.exit)] : null,
+      ];
+      detail.replaceChildren(el("button", { class: "btn icon close", type: "button", "aria-label": "Close details", onclick: closeDetail }, "×"), ...body.flat().filter(Boolean));
+      detail.hidden = false;
+      return;
+    }
+    body = [
+      el("h3", {}, "Phase " + ph.number + ": " + ph.title),
+      el("dl", { class: "kv" },
+        el("dt", {}, "Status"), el("dd", {}, el("span", { class: "chip" }, swatch("planned"), "Planned")),
+        ph.milestone ? [el("dt", {}, "Milestone"), el("dd", {}, "M" + ph.milestone.number + " " + ph.milestone.name + (releaseName(ph.milestone.release) ? ", " + releaseName(ph.milestone.release) : ""))] : null,
+        el("dt", {}, "Packages"), el("dd", {}, "About " + ph.estimate + ", broken down when the phase starts")),
+      ph.milestone ? el("p", {}, ph.milestone.promise) : null,
+      ph.epics ? [el("h4", {}, "Epics"), el("p", {}, ph.epics)] : null,
+      ph.milestone ? [el("h4", {}, "Exit demo"), el("p", {}, ph.milestone.exit)] : null,
+    ];
+  } else if (item.kind === "feature") {
+    const f = item.feature, p = item.part;
+    body = [
+      el("h3", {}, f.name),
+      el("dl", { class: "kv" },
+        el("dt", {}, "Status"), el("dd", {}, el("span", { class: "chip" }, swatch(p.status), LABEL[p.status])),
+        el("dt", {}, "Area"), el("dd", {}, f.area),
+        el("dt", {}, "Milestone"), el("dd", {}, p.milestone === null ? "Out of scope for 1.0" : "M" + p.milestone + (p.label ? " (" + p.label + ")" : "")),
+        f.beatlayer_only ? [el("dt", {}, "Origin"), el("dd", {}, "Beatlayer only; Live doesn't have it")] : null),
+      p.status !== "out" ? [el("h4", {}, "Built in"), packageList(p.packages)] : null,
+      f.parts.length > 1 ? [el("h4", {}, "Every part"), el("ul", {}, f.parts.map(q => el("li", {}, swatch(q.status), "M" + q.milestone + (q.label ? " (" + q.label + ")" : "") + " · " + LABEL[q.status].toLowerCase())))] : null,
+      notesWithoutPackages(f.notes) ? [el("h4", {}, "Notes"), el("p", {}, notesWithoutPackages(f.notes))] : null,
+    ];
+  } else if (item.kind === "improvement") {
+    const i = item.improvement;
+    body = [
+      el("h3", {}, i.id),
+      el("p", { style: "color:var(--text);margin-top:4px" }, i.title),
+      el("dl", { class: "kv" },
+        el("dt", {}, "Status"), el("dd", {}, el("span", { class: "chip" }, swatch(i.status), LABEL[i.status])),
+        el("dt", {}, "Built in"), el("dd", {}, i.built_in),
+        el("dt", {}, "Decision"), el("dd", {}, i.decision)),
+      i.packages.length ? [el("h4", {}, "Packages"), packageList(i.packages)] : null,
+    ];
+  }
+  detail.replaceChildren(close, ...body.flat().filter(Boolean));
+  detail.hidden = false;
+}
+
+function notesWithoutPackages(notes) {
+  return (notes || "").replace(/\.?\s*Built in WP-[^]*$/, "").trim();
+}
+
+function closeDetail() {
+  state.selected = null;
+  detail.hidden = true;
+  document.querySelectorAll(".sq.sel").forEach(n => n.classList.remove("sel"));
+}
+
+/* Events */
+
+document.addEventListener("pointerover", e => { const t = e.target.closest(".sq"); if (t && e.pointerType === "mouse") showTip(t); });
+document.addEventListener("pointerout", e => { if (e.target.closest(".sq")) hideTip(); });
+document.addEventListener("focusin", e => { const t = e.target.closest(".sq"); if (t) showTip(t); else hideTip(); });
+document.addEventListener("focusout", e => { if (e.target.closest(".sq")) hideTip(); });
+document.addEventListener("click", e => {
+  const t = e.target.closest(".sq");
+  if (t) { hideTip(); showDetail(t.dataset.k); return; }
+  const h = e.target.closest("[data-phase]");
+  if (h) showDetail(h.dataset.phase);
+});
+document.addEventListener("keydown", e => { if (e.key === "Escape" && !detail.hidden) closeDetail(); });
+window.addEventListener("scroll", hideTip, { passive: true });
+
+document.querySelectorAll(".seg button").forEach(b => b.addEventListener("click", () => {
+  state.view = b.dataset.view;
+  store("beatlayer.view", state.view);
+  document.querySelectorAll(".seg button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+  closeDetail();
+  render();
+}));
+
+const sorted = document.getElementById("sorted");
+sorted.addEventListener("change", () => { state.sorted = sorted.checked; store("beatlayer.sorted", String(state.sorted)); render(); });
+
+document.getElementById("theme").addEventListener("click", () => {
+  const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+  const now = document.documentElement.dataset.theme || (dark ? "dark" : "light");
+  const next = now === "dark" ? "light" : "dark";
+  document.documentElement.dataset.theme = next;
+  store("beatlayer.theme", next);
+});
+
+const refresh = document.getElementById("refresh");
+refresh.addEventListener("click", () => load(true));
+
+async function load(fetchMain) {
+  refresh.setAttribute("aria-busy", "true");
+  const banner = document.getElementById("banner");
+  try {
+    const response = await fetch("/api/progress" + (fetchMain ? "?fetch=1" : ""), { cache: "no-store" });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || response.statusText);
+    state.data = data;
+    banner.replaceChildren(data.unknown_refs && data.unknown_refs.length
+      ? el("div", { class: "banner" }, "These name work packages the build plan doesn't have: " + data.unknown_refs.join("; "))
+      : "");
+    render();
+  } catch (error) {
+    banner.replaceChildren(el("div", { class: "banner" }, "Couldn't load the progress data: " + error.message));
+  } finally {
+    refresh.removeAttribute("aria-busy");
+  }
+}
+
+(function init() {
+  const theme = store("beatlayer.theme");
+  if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
+  const view = store("beatlayer.view");
+  if (view === "milestone" || view === "area") {
+    state.view = view;
+    document.querySelectorAll(".seg button").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.view === view)));
+  }
+  if (store("beatlayer.sorted") === "false") { state.sorted = false; sorted.checked = false; }
+  load(false);
+  setInterval(() => { if (!document.hidden) load(false); }, 60000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) load(false); });
+})();
+</script>
+</body>
+</html>

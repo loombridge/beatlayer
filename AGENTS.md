@@ -29,7 +29,11 @@ Beatlayer is an open-source digital audio workstation with the workflow of Ablet
 
 ## How work is done
 
-One work package per branch (`wp/<id>-<slug>`) and per pull request, with acceptance evidence pasted in the PR. `cargo xtask check` must pass on macOS locally, with its summary pasted in the PR: CI runs Windows and Linux per change, and macOS only nightly (10 October 2026, to stay inside the Free plan's minutes).
+One work package per branch (`wp/<id>-<slug>`) and per pull request, with acceptance evidence pasted in the PR. `cargo xtask check` must pass on macOS locally, with its summary pasted in the PR: CI runs Linux per pull request, Windows on every merge to main, and macOS only nightly, to stay inside the Free plan's minutes (10 October 2026, for macOS; Windows moved off pull requests on 11 October 2026, when the organisation's minutes were 86% spent). A Windows failure on main is fixed forward; for a Windows-specific change, run `gh workflow run ci.yml --ref <branch>` before asking for a merge. Compile-check Windows locally with clippy for `x86_64-pc-windows-msvc`.
+
+Progress: `cargo xtask dashboard` serves a page of the roadmap and the parity matrix as grids of squares, read from `origin/main`; `cargo xtask progress` prints the same as JSON. Each parity row names the work packages that build it ("Built in WP-1.8a"), and a test fails if it names one the build plan doesn't have.
+
+Local port: 4106, for the progress dashboard. Localhost (`~/code/_localhost`) starts it from `.claude/launch.json`; the app itself is native and has no dev server.
 
 Merging: on 10 October 2026 the maintainer delegated merging to the orchestrating agent, to keep building phase after phase. That agent merges a pull request when `cargo xtask check` and CI pass, the integration review finds no blocker, and the acceptance evidence is complete. A criterion that's pending only on hardware or on the maintainer's judgement doesn't block a merge; it stays listed under the human tasks. Decisions marked for the maintainer in the build plan (such as H8, the UI framework) still go to the maintainer.
 

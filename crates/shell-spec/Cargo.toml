@@ -1,0 +1,27 @@
+[package]
+name = "bl-shell-spec"
+description = "The app shell's commands and menu bar as data: command specs with their argument and result types, and the menu bar in Live's order."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# Data only: no audio, no files, no UI. `xtask` reads the shell's commands
+# and menus through this crate, so its tasks never link an audio host.
+[dependencies]
+bl-commands.workspace = true
+# Positions and track IDs in the Arrangement View's commands (WP-1.8a); both
+# are data crates, so `xtask` still links no audio host.
+bl-core = { workspace = true, features = ["serde", "schemars"] }
+bl-model.workspace = true
+# Pinned to bl-commands' version: the command reference (docs/commands.md) is
+# generated from these schemas.
+schemars = { version = "=1.2.2", default-features = false, features = ["std", "derive"] }
+serde = { version = "1.0.228", default-features = false, features = ["std", "derive"] }
+
+[dev-dependencies]
+serde_json = "1"
+
+[lints]
+workspace = true

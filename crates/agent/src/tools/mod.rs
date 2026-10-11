@@ -10,6 +10,9 @@
 //! | `transport` | Transport and time | Plays, stops, continues, locates, and loops the song, and says where it is |
 //! | `schedule` | Transport and time | Runs a command at a bar and beat, on its exact sample |
 //! | `checkpoint` | Checkpoints | Saves and restores named versions of the document |
+//! | `preview` | Perception | Renders a range or a track as audio the client can play |
+//! | `analyze` | Perception | Measures a preview or a range: loudness, levels, spectrum, tempo, key, transients |
+//! | `capture_view` | Perception | Captures one of the app's views as an image, while the app runs |
 //!
 //! The guide is a resource, not a tool (see [`crate::guide`]).
 //!
@@ -19,6 +22,7 @@
 
 mod checkpoint;
 mod discovery;
+mod perception;
 mod query;
 mod run;
 mod time;
@@ -32,6 +36,7 @@ use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
 pub(crate) use checkpoint::Checkpoints;
+pub(crate) use perception::Media;
 pub use time::EngineMessage;
 pub(crate) use time::{Playhead, Schedule};
 
@@ -111,6 +116,17 @@ pub(crate) struct Ctx<'a> {
 pub(crate) enum ToolOutcome {
     /// It finished: its result, or why it failed (which the agent reads).
     Done(Result<Value, String>),
+    /// It finished with a result and something for the model to hear or
+    /// see beside it: audio or an image (WP-1.16).
+    WithMedia(Value, Vec<Media>),
+    /// It needs the app's window to capture a view, which the host does
+    /// on the main thread's next frame (WP-1.16).
+    Capture {
+        /// The view.
+        view: bl_shell::perception_commands::View,
+        /// The image's longest side, in pixels.
+        max_size: u32,
+    },
     /// It needs the person's confirmation first.
     Ask {
         /// The most far-reaching class among what it would run.
@@ -223,6 +239,9 @@ pub(crate) fn list() -> Vec<Value> {
         time::transport_definition(),
         time::schedule_definition(),
         checkpoint::definition(),
+        perception::preview_definition(),
+        perception::analyze_definition(),
+        perception::capture_definition(),
     ]
 }
 
@@ -241,6 +260,9 @@ pub(crate) fn call(ctx: &mut Ctx<'_>, name: &str, args: Value) -> Result<ToolOut
         time::TRANSPORT => time::transport(ctx, args),
         time::SCHEDULE => time::schedule(ctx, args),
         checkpoint::NAME => checkpoint::checkpoint(ctx, args),
+        perception::PREVIEW => perception::preview(ctx, args),
+        perception::ANALYZE => perception::analyze(ctx, args),
+        perception::CAPTURE => perception::capture(ctx, args),
         other => return Err(format!("no tool is called `{other}`")),
     })
 }

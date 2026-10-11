@@ -33,6 +33,9 @@
 //!   Session and Arrangement Views (shown, scrolled, which sections),
 //!   changed by the `mixer_view.*` commands, and what a strip's controls
 //!   show and the `mixer.*` commands each change runs (WP-1.9).
+//! - [`perception`]: audio previews of a range or a track, rendered
+//!   through the export's offline render, and their analysis, which the
+//!   `perception.*` commands run for the agent API (WP-1.16).
 //! - [`permission`]: a call's permission class decided from its arguments,
 //!   for the agent API: placing clips over others is destructive
 //!   (WP-1.15b).
@@ -53,6 +56,7 @@ pub mod export;
 pub mod files;
 pub mod mixer_controls;
 pub mod mixer_view;
+pub mod perception;
 pub mod permission;
 pub mod settings;
 mod shell;
@@ -70,6 +74,9 @@ pub use bl_shell_spec::export as export_commands;
 /// The Mixer view's command IDs and their argument and result types
 /// (WP-1.9).
 pub use bl_shell_spec::mixer_view as mixer_view_commands;
+/// The perception commands' IDs and their argument and result types
+/// (WP-1.16).
+pub use bl_shell_spec::perception as perception_commands;
 pub use bl_shell_spec::settings::ZOOM_STEPS;
 /// The transport's command IDs the shell's menus and controls run, and
 /// `transport.state`'s result.

@@ -8,6 +8,8 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+# Measures the agent API's previews (WP-1.16).
+bl-analysis.workspace = true
 bl-audio-io.workspace = true
 bl-commands.workspace = true
 # IDs for objects a command will create, which the agent API hands out.

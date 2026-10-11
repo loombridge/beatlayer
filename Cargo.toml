@@ -59,6 +59,11 @@ unimplemented = "warn"
 # the converter's sample adapters are compiled where they're used, there.
 [profile.dev.package.bl-media]
 opt-level = 3
+# Analysis (WP-1.16) too: the agent API's tests measure minutes of audio,
+# and its true-peak interpolator and FFTs are a hundred times slower
+# unoptimised.
+[profile.dev.package.bl-analysis]
+opt-level = 3
 [profile.dev.package.symphonia]
 opt-level = 3
 [profile.dev.package.symphonia-core]

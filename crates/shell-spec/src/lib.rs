@@ -25,6 +25,8 @@
 //!   (`transport.state`), and the IDs of the transport's commands, which
 //!   `bl-engine` and `bl-model` register (WP-1.18).
 //! - [`export`]: exporting audio (`export.audio`, WP-1.12).
+//! - [`perception`]: how agents hear and see the set (`perception.*`,
+//!   WP-1.16): audio previews, analysis, and view captures.
 //!
 //! `cargo xtask` checks the commands, lists them in the command reference, and
 //! builds the keymap from this crate, so none of its tasks links an audio
@@ -41,6 +43,7 @@ pub mod editing;
 pub mod export;
 pub mod menus;
 pub mod mixer_view;
+pub mod perception;
 pub mod settings;
 pub mod transport;
 
@@ -48,7 +51,7 @@ use bl_commands::{RegisterError, Registry};
 
 /// Adds the shell's commands, the Arrangement View's (its view and its
 /// editing commands), the transport query, the Mixer view's, the browser's,
-/// and the export command to a registry.
+/// the export command, and the perception commands to a registry.
 ///
 /// # Errors
 ///
@@ -60,5 +63,6 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     transport::register(registry)?;
     mixer_view::register(registry)?;
     browser::register(registry)?;
-    export::register(registry)
+    export::register(registry)?;
+    perception::register(registry)
 }

@@ -84,6 +84,9 @@ pub struct MainWindowUi {
     /// Whether a value was being typed into a track header's volume field
     /// when the last frame ended.
     mixer_typing: bool,
+    /// Where the last frame put the panes, in points, for view captures
+    /// (WP-1.16).
+    drawn: Option<ShellLayout>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -125,7 +128,16 @@ impl MainWindowUi {
             mixer: MixerUi::new(),
             keymap: None,
             mixer_typing: false,
+            drawn: None,
         }
+    }
+
+    /// Where the last frame put the panes, in points from the window's
+    /// top-left corner: the agent API's view captures crop to them
+    /// (WP-1.16). `None` before the first frame.
+    #[must_use]
+    pub fn drawn_layout(&self) -> Option<&ShellLayout> {
+        self.drawn.as_ref()
     }
 
     /// The mixers, to read what they drew.
@@ -235,6 +247,7 @@ impl MainWindowUi {
                 "No devices on this track. The Device View arrives with WP-2.4.",
             );
             self.status_bar(ui, shell, theme, &layout, &mut events);
+            self.drawn = Some(layout);
         });
         self.mixer_typing = crate::mixer::is_typing(ctx);
         let metering = shell

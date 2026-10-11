@@ -16,7 +16,8 @@ pub const INSTRUCTIONS: &str = "Beatlayer is a digital audio workstation with th
     clips, devices, IDs, ticks, and permissions. Find commands with list_commands and \
     describe_command, read the project with query, and change it with run, which makes each \
     call one undo step the person can undo. Use checkpoint before experiments and schedule \
-    for anything that must land on a beat.";
+    for anything that must land on a beat. Hear the song with preview and analyze, and see \
+    the app with capture_view.";
 
 /// The guide's entry in `resources/list`.
 #[must_use]

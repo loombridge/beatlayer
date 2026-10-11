@@ -636,10 +636,14 @@ mod tests {
 
     impl TempDir {
         fn new(name: &str) -> Self {
+            // A number, not the time's debug form, which has characters a
+            // Windows path can't hold.
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |since| since.as_nanos());
             let path = std::env::temp_dir().join(format!(
-                "bl-media-encode-{name}-{}-{:?}",
-                std::process::id(),
-                std::time::SystemTime::now()
+                "bl-media-encode-{name}-{}-{nanos}",
+                std::process::id()
             ));
             std::fs::create_dir_all(&path).unwrap();
             Self(path)

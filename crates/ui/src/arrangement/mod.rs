@@ -1181,6 +1181,11 @@ impl ArrangementUi {
             if response.clicked() {
                 invoke(events, command, json!({}));
             }
+            // Optimize Height is the last stop of the Arrangement's Tab
+            // order (observed in Live 12.4.6; the accessibility spec, R4).
+            if id == optimize_height_id() {
+                crate::focus::register(ui.ctx(), id, bl_shell::Area::MainView, None);
+            }
             response.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, on, name));
         }
     }
@@ -1263,16 +1268,21 @@ impl ArrangementUi {
         let focused = shell.focused_area() == bl_shell::Area::MainView
             && shell.focused_window() == bl_shell::WindowKind::Main
             && !ui.ctx().text_edit_focused()
-            && ui
-                .ctx()
-                .memory(|m| m.focused().is_none_or(|id| id == main_view_id()));
+            && ui.ctx().memory(|m| {
+                // The view, or a track's title bar in its Tab order, has
+                // the keyboard: the arrows move the selection.
+                m.focused().is_none_or(|id| {
+                    id == main_view_id()
+                        || self.rows.iter().any(|r| headers::title_id(r.track) == id)
+                })
+            });
         if !focused {
             return;
         }
-        if ui.ctx().memory(|m| m.has_focus(main_view_id())) {
+        if let Some(focused) = ui.ctx().memory(egui::Memory::focused) {
             ui.ctx().memory_mut(|m| {
                 m.set_focus_lock_filter(
-                    main_view_id(),
+                    focused,
                     EventFilter {
                         horizontal_arrows: true,
                         vertical_arrows: true,

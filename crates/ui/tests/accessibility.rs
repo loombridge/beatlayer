@@ -173,10 +173,7 @@ fn screen_readers_read_track_names_clip_names_and_fader_values() {
     let volume = &nodes[&volume_field_id(Place::Header, tracks[2]).accesskit_id()];
     assert_eq!(volume.value(), Some("-inf dB"));
     let pan = &nodes[&pan_id(Place::Header, tracks[2]).accesskit_id()];
-    assert_eq!(
-        (pan.label(), pan.value()),
-        (Some("Track Panning"), Some("C"))
-    );
+    assert_eq!((pan.label(), pan.value()), (Some("Track Pan"), Some("C")));
 
     // The Session View's mixer: a group per track, its fader in dB.
     h.shell
@@ -229,7 +226,8 @@ fn the_screen_reader_follows_the_keyboard_focus() {
     assert_eq!(kick.label(), Some("Kick"));
     assert_eq!(kick.is_selected(), Some(true));
 
-    // Tab into the track's controls: the focused control itself.
+    // Tab: the selected track's title bar, then its controls, each read
+    // as the focused control itself.
     h.shell
         .run(
             "arrangement.select_tracks",
@@ -238,14 +236,9 @@ fn the_screen_reader_follows_the_keyboard_focus() {
         .unwrap();
     tab_navigation_on(&mut h);
     let output = press(&mut h, Key::Tab, Modifiers::NONE);
-    assert_eq!(
-        focused_id(&h),
-        Some(switch_id(
-            Place::Header,
-            bl_shell::mixer_controls::Switch::Activator,
-            tracks[2]
-        ))
-    );
+    assert_eq!(focused_id(&h), Some(title_id(tracks[2])));
+    assert_eq!(focused_label(&output), "3 Audio");
+    let output = press(&mut h, Key::Tab, Modifiers::NONE);
     let (_, control) = focused(&output).unwrap();
     assert_eq!(control.label(), Some("Track Activator"));
     assert_eq!(control.value(), Some("on"));
@@ -270,14 +263,27 @@ fn live_elements(strip: Strip) -> Vec<Id> {
 
 // Spec: accessibility R3, R5.
 #[test]
-fn tab_moves_within_the_focused_area_and_wraps_only_with_wrap_tab_navigation() {
+fn tab_moves_within_the_focused_area_and_wraps_with_wrap_tab_navigation() {
     let (mut h, _, _) = set();
     tab_navigation_on(&mut h);
-    assert!(!h.shell.wrap_navigation(), "off in a new install");
+    assert!(
+        h.shell.wrap_navigation(),
+        "on in a new install, as in Live 12.4.6"
+    );
     press(&mut h, Key::Num0, Modifiers::ALT);
     let first = focused_id(&h).unwrap();
     assert_eq!(first, element_id(bl_ui::layout::Element::BrowserToggle));
     let bar = live_elements(Strip::ControlBar);
+    // Shift-Tab from the first goes round to the last, Tab back to the first.
+    press(&mut h, Key::Tab, Modifiers::SHIFT);
+    let last = focused_id(&h).unwrap();
+    assert!(bar.contains(&last) && last != first);
+    press(&mut h, Key::Tab, Modifiers::NONE);
+    assert_eq!(focused_id(&h), Some(first));
+    // Without wrapping, Tab stays in the Control Bar and stops at its end.
+    h.shell
+        .run("focus.toggle_wrap_navigation", json!({}))
+        .unwrap();
     let mut seen = vec![first];
     for _ in 0..bar.len() + 3 {
         press(&mut h, Key::Tab, Modifiers::NONE);
@@ -285,19 +291,9 @@ fn tab_moves_within_the_focused_area_and_wraps_only_with_wrap_tab_navigation() {
         assert!(bar.contains(&now), "Tab stays in the Control Bar: {now:?}");
         seen.push(now);
     }
-    // At the end it stays on the last control.
-    let last = *seen.last().unwrap();
-    assert_eq!(seen[seen.len() - 2], last, "without wrapping it stops");
-    assert_ne!(last, first);
+    assert_eq!(*seen.last().unwrap(), last, "without wrapping it stops");
+    assert_eq!(seen[seen.len() - 2], last);
     assert_eq!(h.shell.focused_area(), Area::ControlBar);
-    // Wrap Tab Navigation, from the Navigate menu: on to the first again.
-    h.shell
-        .run("focus.toggle_wrap_navigation", json!({}))
-        .unwrap();
-    press(&mut h, Key::Tab, Modifiers::NONE);
-    assert_eq!(focused_id(&h), Some(first));
-    press(&mut h, Key::Tab, Modifiers::SHIFT);
-    assert_eq!(focused_id(&h), Some(last), "Shift-Tab wraps backwards");
 
     // The browser: from the search field to the sidebar to the list, each
     // part's keys applying as the shell moves its focus there.
@@ -319,7 +315,7 @@ fn tab_moves_within_the_focused_area_and_wraps_only_with_wrap_tab_navigation() {
 
 // Spec: accessibility R4.
 #[test]
-fn tab_moves_through_a_track_s_controls_and_the_neighbour_keys_to_the_next_track() {
+fn tab_runs_through_the_arrangement_and_the_neighbour_keys_to_the_next_track() {
     let (mut h, tracks, _) = set();
     tab_navigation_on(&mut h);
     press(&mut h, Key::Num2, Modifiers::ALT);
@@ -332,23 +328,46 @@ fn tab_moves_through_a_track_s_controls_and_the_neighbour_keys_to_the_next_track
     h.settle();
     use bl_shell::mixer_controls::Switch;
     let header = |switch| switch_id(Place::Header, switch, tracks[2]);
+    // Live's order (12.4.6), without the controls Beatlayer doesn't have
+    // yet: the selected track's header, then Optimize Height.
     let expected = [
+        title_id(tracks[2]),
         header(Switch::Activator),
         header(Switch::Solo),
         header(Switch::Arm),
         volume_field_id(Place::Header, tracks[2]),
         pan_id(Place::Header, tracks[2]),
+        bl_ui::arrangement::optimize_height_id(),
     ];
     for want in expected {
         press(&mut h, Key::Tab, Modifiers::NONE);
         assert_eq!(focused_id(&h), Some(want));
     }
-    // The last control: Tab stays (no wrapping by default).
+    // Wrap Tab Navigation is on: round to the title bar.
     press(&mut h, Key::Tab, Modifiers::NONE);
+    assert_eq!(focused_id(&h), Some(title_id(tracks[2])));
+    press(&mut h, Key::Tab, Modifiers::SHIFT);
+    assert_eq!(
+        focused_id(&h),
+        Some(bl_ui::arrangement::optimize_height_id())
+    );
+    // Off, it stays at the end.
+    h.shell
+        .run("focus.toggle_wrap_navigation", json!({}))
+        .unwrap();
+    press(&mut h, Key::Tab, Modifiers::NONE);
+    assert_eq!(
+        focused_id(&h),
+        Some(bl_ui::arrangement::optimize_height_id())
+    );
+    press(&mut h, Key::Tab, Modifiers::SHIFT);
     assert_eq!(focused_id(&h), Some(pan_id(Place::Header, tracks[2])));
-    // Option-Tab (Ctrl-Tab): the same control on the next track, and back.
+    // Option-Tab (Ctrl-Tab): the same control on the next track, and back,
+    // leaving the selection as it was.
     press(&mut h, Key::Tab, neighbour());
     assert_eq!(focused_id(&h), Some(pan_id(Place::Header, tracks[3])));
+    assert_eq!(h.shell.arrangement().selected_tracks(), [tracks[2]]);
+    assert_eq!(h.shell.focused_track(), Some(tracks[3]));
     press(&mut h, Key::Tab, neighbour() | Modifiers::SHIFT);
     assert_eq!(focused_id(&h), Some(pan_id(Place::Header, tracks[2])));
     // Esc goes back to the track's title bar.
@@ -358,7 +377,7 @@ fn tab_moves_through_a_track_s_controls_and_the_neighbour_keys_to_the_next_track
     assert_eq!(h.shell.arrangement().selected_tracks(), [tracks[2]]);
 
     // From the volume field, which takes typed values, the keys move too.
-    for _ in 0..4 {
+    for _ in 0..5 {
         press(&mut h, Key::Tab, Modifiers::NONE);
     }
     assert_eq!(
@@ -372,6 +391,73 @@ fn tab_moves_through_a_track_s_controls_and_the_neighbour_keys_to_the_next_track
     );
     press(&mut h, Key::Escape, Modifiers::NONE);
     assert_eq!(focused_id(&h), Some(main_view_id()));
+}
+
+fn peak_id(place: Place, track: TrackId) -> Id {
+    Id::new(("mixer-peak", place, track))
+}
+
+// Spec: accessibility R4.
+#[test]
+fn tab_goes_round_a_session_strip_in_live_s_order() {
+    let (mut h, tracks, _) = set();
+    h.shell
+        .run("view.toggle_session_arrangement", json!({}))
+        .unwrap();
+    tab_navigation_on(&mut h);
+    h.shell
+        .run(
+            "arrangement.select_tracks",
+            json!({ "tracks": [tracks[2]] }),
+        )
+        .unwrap();
+    h.ctx.memory_mut(|m| m.request_focus(main_view_id()));
+    h.settle();
+    use bl_shell::mixer_controls::Switch;
+    let session = Place::Mixer(MixerOf::Session);
+    let strip = |switch| switch_id(session, switch, tracks[2]);
+    // The first Tab goes past the title bar (Live's went to Clip Stop,
+    // which comes with the clip slots in M3), then the strip in Live's
+    // order without the In/Out choosers and sends Beatlayer doesn't have
+    // yet.
+    let expected = [
+        peak_id(session, tracks[2]),
+        pan_id(session, tracks[2]),
+        strip(Switch::Activator),
+        strip(Switch::Solo),
+        strip(Switch::Arm),
+        fader_id(session, tracks[2]),
+        column_id(MixerOf::Session, tracks[2]),
+        peak_id(session, tracks[2]),
+    ];
+    for want in expected {
+        press(&mut h, Key::Tab, Modifiers::NONE);
+        assert_eq!(focused_id(&h), Some(want));
+    }
+    // Without wrapping, Tab stays on Track Volume; Esc goes to the title
+    // bar, which the column stands for.
+    h.shell
+        .run("focus.toggle_wrap_navigation", json!({}))
+        .unwrap();
+    for _ in 0..8 {
+        press(&mut h, Key::Tab, Modifiers::NONE);
+    }
+    assert_eq!(focused_id(&h), Some(fader_id(session, tracks[2])));
+    press(&mut h, Key::Escape, Modifiers::NONE);
+    assert_eq!(focused_id(&h), Some(column_id(MixerOf::Session, tracks[2])));
+    // A MIDI track without an instrument: its title bar and its switches.
+    h.ctx
+        .memory_mut(|m| m.request_focus(column_id(MixerOf::Session, tracks[0])));
+    h.settle();
+    let midi = |switch| switch_id(session, switch, tracks[0]);
+    for want in [
+        midi(Switch::Activator),
+        midi(Switch::Solo),
+        midi(Switch::Arm),
+    ] {
+        press(&mut h, Key::Tab, Modifiers::NONE);
+        assert_eq!(focused_id(&h), Some(want));
+    }
 }
 
 // Spec: accessibility R4.
@@ -388,19 +474,18 @@ fn the_neighbour_keys_bring_a_column_out_of_view_into_it() {
         .unwrap();
     tab_navigation_on(&mut h);
     h.settle();
-    // The audio tracks' columns, from 3 Audio on: each has pan.
+    // The audio tracks' columns, from 3 Audio on.
     let columns = h.shell.mixer_columns()[2..].to_vec();
     let session = Place::Mixer(MixerOf::Session);
     h.ctx
         .memory_mut(|m| m.request_focus(column_id(MixerOf::Session, columns[0])));
     h.settle();
-    // Tab moves into the column's controls; the neighbour keys along them.
     press(&mut h, Key::Tab, Modifiers::NONE);
-    assert_eq!(focused_id(&h), Some(pan_id(session, columns[0])));
+    assert_eq!(focused_id(&h), Some(peak_id(session, columns[0])));
     for want in &columns[1..16] {
         press(&mut h, Key::Tab, neighbour());
         h.settle();
-        assert_eq!(focused_id(&h), Some(pan_id(session, *want)));
+        assert_eq!(focused_id(&h), Some(peak_id(session, *want)));
     }
     let scroll = h.shell.mixer_view().of(MixerOf::Session).scroll;
     assert!(scroll > 0.0, "the mixer scrolled the column into view");
@@ -430,10 +515,10 @@ fn focus_strokes(output: &FullOutput, colour: egui::Color32) -> Vec<egui::Rect> 
 
 // Spec: accessibility R7.
 #[test]
-fn outline_view_in_focus_is_off_by_default_and_outlines_the_focused_area_when_on() {
+fn outline_view_in_focus_outlines_the_focused_area_and_control_until_switched_off() {
     let (mut h, tracks, _) = set();
     let colour = h.theme.colors.focus.0;
-    assert!(!h.shell.outline_view_in_focus(), "off, as in Live 12.4.6");
+    assert!(h.shell.outline_view_in_focus(), "on, as in Live 12.4.6");
     tab_navigation_on(&mut h);
     press(&mut h, Key::Num2, Modifiers::ALT);
     h.shell
@@ -443,15 +528,7 @@ fn outline_view_in_focus_is_off_by_default_and_outlines_the_focused_area_when_on
         )
         .unwrap();
     press(&mut h, Key::Tab, Modifiers::NONE);
-    assert!(focused_id(&h).is_some());
-    let output = h.settle();
-    assert!(
-        focus_strokes(&output, colour).is_empty(),
-        "nothing shows where the focus is"
-    );
-    h.shell
-        .run("settings.set_outline_view_in_focus", json!({ "on": true }))
-        .unwrap();
+    press(&mut h, Key::Tab, Modifiers::NONE);
     let output = h.settle();
     let strokes = focus_strokes(&output, colour);
     let drawn = |nodes: &[common::Node], role: Role, label: &str| {
@@ -464,24 +541,56 @@ fn outline_view_in_focus_is_off_by_default_and_outlines_the_focused_area_when_on
             egui::pos2(b.x0 as f32, b.y0 as f32),
             egui::pos2(b.x1 as f32, b.y1 as f32),
         )
-        .shrink(1.0)
     };
     let around = |strokes: &[egui::Rect], area: egui::Rect| {
         strokes
             .iter()
             .any(|r| (r.min - area.min).length() < 1.5 && (r.max - area.max).length() < 1.5)
     };
-    let main = drawn(&Harness::nodes(&output), Role::Pane, "Arrangement View");
+    let nodes = Harness::nodes(&output);
+    let main = drawn(&nodes, Role::Pane, "Arrangement View").shrink(1.0);
     assert!(
         around(&strokes, main),
         "a border round the focused view: {strokes:?}"
     );
+    let activator = nodes
+        .iter()
+        .find(|n| {
+            n.id == switch_id(
+                Place::Header,
+                bl_shell::mixer_controls::Switch::Activator,
+                tracks[2],
+            )
+            .accesskit_id()
+        })
+        .and_then(|n| n.bounds)
+        .unwrap();
+    let activator = egui::Rect::from_min_max(
+        egui::pos2(activator.x0 as f32, activator.y0 as f32),
+        egui::pos2(activator.x1 as f32, activator.y1 as f32),
+    );
+    assert!(
+        strokes
+            .iter()
+            .any(|r| r.contains_rect(activator) && r.width() < activator.width() + 6.0),
+        "an outline round the focused control"
+    );
     // The Control Bar has the focus: the border goes there.
     press(&mut h, Key::Num0, Modifiers::ALT);
     let output = h.settle();
-    let bar = drawn(&Harness::nodes(&output), Role::Toolbar, "Control Bar");
+    let bar = drawn(&Harness::nodes(&output), Role::Toolbar, "Control Bar").shrink(1.0);
     assert!(around(&focus_strokes(&output, colour), bar));
     assert!(!around(&focus_strokes(&output, colour), main));
+    // Switched off, nothing shows where the focus is.
+    h.shell
+        .run("settings.set_outline_view_in_focus", json!({ "on": false }))
+        .unwrap();
+    let output = h.settle();
+    assert!(focused_id(&h).is_some());
+    assert!(
+        focus_strokes(&output, colour).is_empty(),
+        "nothing shows where the focus is"
+    );
 }
 
 fn open_settings(page: &str) -> Harness {
@@ -547,31 +656,35 @@ fn display_and_input_has_live_s_keyboard_settings_in_order() {
         assert!(!node.disabled, "{built}");
         assert_eq!(node.role, Role::Button, "{built}");
     }
-    for pending in [
-        "Show Scroll Bars",
-        "Follow Behavior",
-        "Hide Labels",
-        "Move Clips With Arrow Keys",
+    // The rows later packages build show the values Live 12.4.6 showed.
+    for (pending, value) in [
+        ("Show Scroll Bars", "Follow System"),
+        ("Follow Behavior", "Scroll"),
+        ("Hide Labels", "Show"),
+        ("Move Clips With Arrow Keys", "On"),
     ] {
         let node = Harness::node(&nodes, pending);
         assert!(
             node.disabled && node.description.contains("later package"),
             "{pending}"
         );
+        assert_eq!(node.value, value, "{pending}");
     }
-    // Each switch by the keyboard: Tab to it, Enter.
-    for (label, on) in [
+    // Each switch by the keyboard: Tab to it, Enter. Live's new-install
+    // values: Outline View in Focus on, Use Tab Key off, Wrap Tab on.
+    for (label, on, was) in [
         (
             "Outline View in Focus",
             Shell::outline_view_in_focus as fn(&Shell) -> bool,
+            true,
         ),
-        ("Use Tab Key to Move Focus", Shell::tab_navigation),
-        ("Wrap Tab Navigation", Shell::wrap_navigation),
+        ("Use Tab Key to Move Focus", Shell::tab_navigation, false),
+        ("Wrap Tab Navigation", Shell::wrap_navigation, true),
     ] {
-        assert!(!on(&h.shell), "{label} is off in a new install");
+        assert_eq!(on(&h.shell), was, "{label} in a new install");
         assert!(tab_to(&mut h, label), "Tab reaches {label}");
         press(&mut h, Key::Enter, Modifiers::NONE);
-        assert!(on(&h.shell), "Enter switched {label} on");
+        assert_eq!(on(&h.shell), !was, "Enter switched {label}");
     }
 }
 
@@ -585,36 +698,54 @@ fn menu_item(h: &Harness, row: &str) -> bl_ui::menus::ItemState {
     item_state(item, &h.shell, &h.keymap, Platform::current())
 }
 
-// Spec: accessibility R5, R9.
+// Spec: accessibility R4, R5, R9.
 #[test]
 fn the_navigate_and_options_menus_reach_their_commands() {
-    let (mut h, _, _) = set();
-    // Next and Previous Neighbor are disabled until Tab moves the focus,
-    // as Live shows them in a new set, and show their keys.
+    let (mut h, tracks, _) = set();
+    // Next and Previous Neighbor follow whether there's a neighbour, not
+    // the Tab setting (observed in Live 12.4.6), and show their keys.
+    assert!(!h.shell.tab_navigation());
     for row in ["M-NAV-014", "M-NAV-015"] {
         let item = menu_item(&h, row);
-        assert!(!item.enabled, "{row}");
+        assert!(!item.enabled, "{row}: no track selected or focused");
         assert!(item.chord.is_some(), "{row} shows its keys");
     }
-    let tab = menu_item(&h, "M-NAV-018");
-    assert_eq!(tab.checked, Some(false));
     h.shell
-        .invoke(&tab.invocation.unwrap().id, json!({}))
+        .run(
+            "arrangement.select_tracks",
+            json!({ "tracks": [tracks[0]] }),
+        )
         .unwrap();
-    for (row, id) in [
-        ("M-NAV-014", "focus.previous_neighbor"),
-        ("M-NAV-015", "focus.next_neighbor"),
-    ] {
-        let item = menu_item(&h, row);
-        assert!(item.enabled, "{row}");
-        assert_eq!(item.invocation.unwrap().id, id);
+    let previous = menu_item(&h, "M-NAV-014");
+    let next = menu_item(&h, "M-NAV-015");
+    assert!(!previous.enabled, "track 1 has no previous neighbour");
+    assert!(next.enabled);
+    assert_eq!(next.invocation.as_ref().unwrap().id, "focus.next_neighbor");
+    // Chosen with the Arrangement focused, Next Neighbor moves the focus to
+    // the next track and leaves the selection.
+    press(&mut h, Key::Num2, Modifiers::ALT);
+    h.shell
+        .run(
+            "arrangement.select_tracks",
+            json!({ "tracks": [tracks[0]] }),
+        )
+        .unwrap();
+    h.shell.invoke("focus.next_neighbor", json!({})).unwrap();
+    let effects = h.shell.take_effects();
+    for effect in &effects {
+        h.main.apply_effect(&h.ctx, effect);
     }
+    h.settle();
+    assert_eq!(focused_id(&h), Some(title_id(tracks[1])));
+    assert_eq!(h.shell.arrangement().selected_tracks(), [tracks[0]]);
+    assert!(menu_item(&h, "M-NAV-014").enabled, "now track 2's");
+
     let wrap = menu_item(&h, "M-NAV-019");
-    assert_eq!((wrap.enabled, wrap.checked), (true, Some(false)));
+    assert_eq!((wrap.enabled, wrap.checked), (true, Some(true)));
     h.shell
         .invoke(&wrap.invocation.unwrap().id, json!({}))
         .unwrap();
-    assert_eq!(menu_item(&h, "M-NAV-019").checked, Some(true));
+    assert_eq!(menu_item(&h, "M-NAV-019").checked, Some(false));
     // Options ▸ Solo in Place switches the set's setting, one undo step.
     let solo = menu_item(&h, "M-OPT-025");
     assert_eq!((solo.enabled, solo.checked), (true, Some(true)));
@@ -749,7 +880,7 @@ fn paths() -> BTreeMap<&'static str, Path> {
         // Typing in the browser's search field (browser R5).
         (
             "browser.search",
-            main(nothing, browser_search, "Search", Key::K),
+            main(nothing, browser_search, "Search Field", Key::K),
         ),
         // The Settings window's controls (Tab, then Enter or Up and Down).
         (

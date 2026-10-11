@@ -499,15 +499,19 @@ fn display_page(
 }
 
 /// Display Options after Outline View in Focus (L-SET-010), which later
-/// packages build.
+/// packages build, with the controls and values observed in Live 12.4.6:
+/// Show Scroll Bars a chooser, Follow Behavior and Hide Labels buttons that
+/// show their value.
 const DISPLAY_OPTIONS: [Pending; 3] = [
-    switch_row("Show Scroll Bars", "a later package"),
-    chooser_row("Follow Behavior", "a later package"),
-    switch_row("Hide Labels", "a later package"),
+    chooser_row("Show Scroll Bars", "a later package").showing("Follow System"),
+    switch_row("Follow Behavior", "a later package").showing("Scroll"),
+    switch_row("Hide Labels", "a later package").showing("Show"),
 ];
 
-/// Navigation and Keyboard after the Tab settings (L-SET-010).
-const NAVIGATION: [Pending; 1] = [switch_row("Move Clips With Arrow Keys", "a later package")];
+/// Navigation and Keyboard after the Tab settings (L-SET-010): Move Clips
+/// With Arrow Keys, On in Live 12.4.6.
+const NAVIGATION: [Pending; 1] =
+    [switch_row("Move Clips With Arrow Keys", "a later package").showing("On")];
 
 /// A row of a Settings page whose setting no package has built yet: its
 /// label, and its control's place drawn quiet, which can't be used and
@@ -517,6 +521,16 @@ struct Pending {
     /// The controls on the row: each one's name and width.
     controls: &'static [(&'static str, f32)],
     package: &'static str,
+    /// The value Live shows in a new install, where it's observed, drawn
+    /// in the quiet control and read by assistive technology.
+    value: &'static str,
+}
+
+impl Pending {
+    /// The same row, showing the value Live shows in a new install.
+    const fn showing(self, value: &'static str) -> Self {
+        Self { value, ..self }
+    }
 }
 
 /// A pending row with a chooser.
@@ -525,6 +539,7 @@ const fn chooser_row(label: &'static str, package: &'static str) -> Pending {
         label,
         controls: &[("", SettingsLayout::CHOOSER)],
         package,
+        value: "",
     }
 }
 
@@ -534,6 +549,7 @@ const fn switch_row(label: &'static str, package: &'static str) -> Pending {
         label,
         controls: &[("", SettingsLayout::SWITCH)],
         package,
+        value: "",
     }
 }
 
@@ -550,6 +566,7 @@ const RECORD: [Pending; 7] = [
             ("Exclusive Solo", SettingsLayout::SWITCH),
         ],
         package: "WP-2.13",
+        value: "",
     },
     chooser_row("Clip Update Rate", "WP-2.13"),
     chooser_row("Record Session automation in", "M3"),
@@ -946,9 +963,21 @@ impl<'a> Rows<'a> {
                 self.theme.sizes.corner,
                 c.control.0.gamma_multiply(0.55),
             );
+            if !row.value.is_empty() {
+                ui.painter().text(
+                    rect.center(),
+                    Align2::CENTER_CENTER,
+                    row.value,
+                    self.theme.font(),
+                    c.pending.0,
+                );
+            }
             response
                 .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, false, name));
             ui.ctx().accesskit_node_builder(response.id, |node| {
+                if !row.value.is_empty() {
+                    node.set_value(row.value.to_owned());
+                }
                 node.set_description(format!("Not built yet: arrives with {}.", row.package));
                 node.remove_action(egui::accesskit::Action::Click);
                 node.remove_action(egui::accesskit::Action::Focus);

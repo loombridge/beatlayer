@@ -539,11 +539,13 @@ fn specs() -> Vec<CommandSpec> {
             .description(
                 "Moves the keyboard focus from a track's control to the same control on the \
                  next track, such as from one track's volume to the next track's volume, in \
-                 the mixers and the Arrangement's track headers. Option-Tab (Ctrl-Tab) does \
-                 this while Use Tab Key to Move Focus is on. Changes nothing in the set.",
+                 the mixers and the Arrangement's track headers, without changing the \
+                 selected track. Navigate > Next Neighbor runs it whenever there's a next \
+                 track; Option-Tab (Ctrl-Tab) does while Use Tab Key to Move Focus is on. \
+                 Changes nothing in the set.",
             )
             .permission(Permission::Read)
-            .context(TabFocus)
+            .contexts([Global, TabFocus])
             .binding("S-FOCUS-013")
             .args::<NoArgs>()
             .result::<()>(),
@@ -554,16 +556,16 @@ fn specs() -> Vec<CommandSpec> {
                  set.",
             )
             .permission(Permission::Read)
-            .context(TabFocus)
+            .contexts([Global, TabFocus])
             .binding("S-FOCUS-014")
             .args::<NoArgs>()
             .result::<()>(),
         CommandSpec::new(FOCUS_TOGGLE_WRAP_NAVIGATION, "Wrap Keyboard Navigation")
             .description(
-                "Switches whether Tab and Shift-Tab wrap round at the ends of the focused area: \
-                 from its last control to its first, and from its first to its last. While \
-                 it's off, they stop at the ends. The Settings window calls it Wrap Tab \
-                 Navigation. Changes nothing in the set.",
+                "Switches whether Tab and Shift-Tab wrap round at the ends of the focused area \
+                 or track: from its last control to its first, and from its first to its last. \
+                 It's on in a new install, as Live's is; while it's off, they stop at the ends. \
+                 The Settings window calls it Wrap Tab Navigation. Changes nothing in the set.",
             )
             .permission(Permission::Read)
             .context(Global)
@@ -621,10 +623,11 @@ fn specs() -> Vec<CommandSpec> {
         CommandSpec::new(SETTINGS_SET_OUTLINE_VIEW_IN_FOCUS, "Outline View in Focus")
             .description(
                 "Switches Outline View in Focus, on the Settings window's Display & Input page: \
-             while it's on, a border is drawn round the part of the main window that has the \
-             keyboard focus. It's off in a new install, as Live's is, and then nothing shows \
-             where the focus is. The setting is kept for the next start, and isn't part of the \
-             set or an undo step. The result's `on` is the setting afterwards.",
+             while it's on, as it is in a new install (as Live's is), a border is drawn round \
+             the part of the main window that has the keyboard focus and an outline round the \
+             focused control; while it's off, nothing shows where the focus is. The setting is \
+             kept for the next start, and isn't part of the set or an undo step. The result's \
+             `on` is the setting afterwards.",
             )
             .permission(Permission::Edit)
             .context(Settings)

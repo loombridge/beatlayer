@@ -69,11 +69,18 @@ fn rect_of(node: &Node) -> Rect {
 
 /// The node labelled `label` inside the group labelled `group` (a mixer
 /// column, named for its track), or inside the mixer labelled `mixer`.
+/// A group (a column or a mixer) comes first where a control shares its
+/// name, as each send shares its return track's (observed in Live 12.4.6).
 fn inside<'a>(nodes: &'a [Node], within: &str, label: &str) -> Option<&'a Node> {
-    let parent = nodes.iter().find(|n| n.label == within)?.id;
-    nodes
-        .iter()
-        .find(|n| n.label == label && Harness::descends_from(nodes, n.id, parent))
+    let named = |name: &str| {
+        let mut matching: Vec<&'a Node> = nodes.iter().filter(|n| n.label == name).collect();
+        matching.sort_by_key(|n| n.role != Role::Group);
+        matching
+    };
+    let parent = named(within).first()?.id;
+    named(label)
+        .into_iter()
+        .find(|n| Harness::descends_from(nodes, n.id, parent))
 }
 
 fn tree(h: &mut Harness) -> Vec<Node> {
@@ -225,7 +232,7 @@ fn the_session_mixer_sits_where_live_puts_it() {
     let main = column("Main");
     assert_eq!((main.left(), main.right()), (1487.0, 1591.0));
     // The sends' 56 points over the strip, In/Out's 115 over them.
-    let send = rect_of(inside(&nodes, "3 Audio", "Send A").unwrap());
+    let send = rect_of(inside(&nodes, "3 Audio", "A Return").unwrap());
     assert!(send.top() >= STRIP_TOP - 56.0 && send.bottom() <= STRIP_TOP);
     let input = rect_of(inside(&nodes, "3 Audio", "Input Type").unwrap());
     assert!(input.top() >= STRIP_TOP - 171.0 && input.bottom() <= STRIP_TOP - 56.0);
@@ -247,7 +254,7 @@ fn every_strip_has_its_controls_where_live_has_them() {
     let peak = inside(&nodes, "3 Audio", "Peak Level").unwrap();
     assert_eq!(peak.value, "-inf dB");
     // Pan centred at (25, 46), about 25 points across.
-    let (l, t, r, b) = get("Track Panning");
+    let (l, t, r, b) = get("Track Pan");
     assert_eq!(((l + r) / 2.0, (t + b) / 2.0), (25.0, 46.0));
     assert!((r - l - 25.0).abs() <= 1.0);
     // The activator, Solo, and Arm in a column at the left.
@@ -288,7 +295,7 @@ fn every_strip_has_its_controls_where_live_has_them() {
     // no volume or pan.
     assert!(inside(&nodes, "1 MIDI", "MIDI Meter").is_some());
     assert!(inside(&nodes, "1 MIDI", "Track Volume").is_none());
-    assert!(inside(&nodes, "1 MIDI", "Track Panning").is_none());
+    assert!(inside(&nodes, "1 MIDI", "Track Pan").is_none());
     assert!(inside(&nodes, "1 MIDI", "Arm Recording").is_some());
     // A return shows its letter and has no Arm; Main has no activator or
     // Solo of its own, but the cue volume and the Solo/Cue button.
@@ -363,7 +370,7 @@ fn hiding_sections_and_the_mixer_gives_the_slots_their_height() {
     assert!(inside(&nodes, "3 Audio", "Input Type").is_none());
     h.shell.run(ids::RETURN_TRACKS, json!({})).unwrap();
     let nodes = tree(&mut h);
-    assert!(inside(&nodes, "Session Mixer", "A Return").is_none());
+    assert!(inside(&nodes, "Session Mixer", "A Return").is_none_or(|n| n.role != Role::Group));
     h.shell.run(ids::TOGGLE, json!({})).unwrap();
     let nodes = tree(&mut h);
     assert!(nodes.iter().all(|n| n.label != "Session Mixer"));
@@ -544,7 +551,7 @@ fn a_fader_drag_is_relative_one_undo_step_and_shows_in_the_status_bar() {
     );
     // Pan: 0.8 steps a point, up to the right (observed): 40 points less
     // egui's drag threshold.
-    let pan = control(&mut h, "3 Audio", "Track Panning");
+    let pan = control(&mut h, "3 Audio", "Track Pan");
     drag(
         &mut h,
         pan.center(),
@@ -566,7 +573,7 @@ fn a_fader_drag_is_relative_one_undo_step_and_shows_in_the_status_bar() {
 fn shift_makes_a_drag_three_times_finer() {
     let mut h = session();
     let t = tracks(&h.shell);
-    let pan = control(&mut h, "3 Audio", "Track Panning");
+    let pan = control(&mut h, "3 Audio", "Track Pan");
     drag(
         &mut h,
         pan.center(),
@@ -661,7 +668,7 @@ fn double_click_delete_keys_and_the_triangle() {
     click(&mut h, fader.center(), Modifiers::NONE);
     key(&mut h, Key::Delete, Modifiers::NONE);
     assert_eq!(mixer(&h.shell, t[3]).volume, 1.0);
-    let pan = control(&mut h, "3 Audio", "Track Panning");
+    let pan = control(&mut h, "3 Audio", "Track Pan");
     double_click(&mut h, pan.center());
     assert_eq!(mixer(&h.shell, t[2]).pan, 0.0);
     let triangle = control(&mut h, "4 Audio", "Reset Panning");
@@ -1035,10 +1042,16 @@ fn every_mixer_control_reaches_assistive_technology() {
                 .any(|n| n.label == column && n.role == Role::Group),
             "{column}"
         );
+        // Live's tree calls Main's pan Main Pan (observed in Live 12.4.6).
+        let pan = if column == "Main" {
+            "Main Pan"
+        } else {
+            "Track Pan"
+        };
         for (label, role) in [
             ("Peak Level", Role::Label),
             ("Track Volume", Role::Slider),
-            ("Track Panning", Role::Slider),
+            (pan, Role::Slider),
             ("Track Meter", Role::Meter),
         ] {
             let node = inside(&nodes, column, label).unwrap_or_else(|| panic!("{column}: {label}"));
@@ -1051,13 +1064,10 @@ fn every_mixer_control_reaches_assistive_technology() {
     }
     let volume = inside(&nodes, "3 Audio", "Track Volume").unwrap();
     assert_eq!(volume.value, "0.0 dB");
-    assert_eq!(
-        inside(&nodes, "3 Audio", "Track Panning").unwrap().value,
-        "C"
-    );
+    assert_eq!(inside(&nodes, "3 Audio", "Track Pan").unwrap().value, "C");
     let solo = inside(&nodes, "3 Audio", "Solo").unwrap();
     assert_eq!((solo.role, solo.value.as_str()), (Role::Button, "off"));
-    let send = inside(&nodes, "3 Audio", "Send A").unwrap();
+    let send = inside(&nodes, "3 Audio", "A Return").unwrap();
     assert!(send.disabled && send.description.contains("WP-2.19"));
     let monitor = inside(&nodes, "3 Audio", "Monitor").unwrap();
     assert!(monitor.disabled && monitor.description.contains("WP-2.13"));
@@ -1118,10 +1128,7 @@ fn every_mixer_control_is_reachable_from_the_agent_api() {
         inside(&nodes, "3 Audio", "Track Volume").unwrap().value,
         "-6.0 dB"
     );
-    assert_eq!(
-        inside(&nodes, "3 Audio", "Track Panning").unwrap().value,
-        "50L"
-    );
+    assert_eq!(inside(&nodes, "3 Audio", "Track Pan").unwrap().value, "50L");
     assert_eq!(inside(&nodes, "2 MIDI", "Solo").unwrap().value, "on");
     assert_eq!(
         inside(&nodes, "4 Audio", "Arm Recording").unwrap().value,

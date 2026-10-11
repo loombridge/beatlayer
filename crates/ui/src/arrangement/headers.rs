@@ -340,13 +340,22 @@ pub fn header(
         let row3 = column(MIXER, row_top + 32.0, row_top + 46.0);
         let a = Rect::from_min_max(row3.min, pos2(row3.left() + half - 1.0, row3.bottom()));
         let b = Rect::from_min_max(pos2(row3.left() + half + 1.0, row3.top()), row3.max);
+        // Named by their return tracks, as Live's tree names sends
+        // ("A-Reverb"; observed in Live 12.4.6).
+        let doc = shell.editor().document();
+        let returns: Vec<String> = doc
+            .returns()
+            .filter_map(|r| doc.track(r).map(|t| t.name().to_owned()))
+            .collect();
+        let send_a = returns.first().map_or("Send A", String::as_str);
+        let send_b = returns.get(1).map_or("Send B", String::as_str);
         inert(
             ui,
             theme,
             a,
             ("arrangement-send-a", id),
             Role::Slider,
-            "Send A",
+            send_a,
             "A",
             "WP-2.19",
         );
@@ -356,7 +365,7 @@ pub fn header(
             b,
             ("arrangement-send-b", id),
             Role::Slider,
-            "Send B",
+            send_b,
             "B",
             "WP-2.19",
         );

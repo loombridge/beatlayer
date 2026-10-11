@@ -288,6 +288,11 @@ impl BrowserUi {
         // Tab's order in the browser (the accessibility spec, R3;
         // I-FOCUS-007): the search field, the sidebar, then the list.
         crate::focus::register(ui.ctx(), response.id, bl_shell::Area::Browser, None);
+        // Live's Info View calls it the Search Field (observed in Live
+        // 12.4.6; the accessibility spec, R1).
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_label("Search Field".to_owned())
+        });
         if response.gained_focus() && view.focus() != Part::Search {
             invoke(events, ids::FOCUS_BROWSER, json!({ "part": "search" }));
         }

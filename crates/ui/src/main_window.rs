@@ -54,6 +54,9 @@ pub enum UiEvent {
     BeginGesture(&'static str),
     /// The drag ended ([`Shell::end_gesture`]).
     EndGesture,
+    /// The keyboard focus is on this track's control, or on no track's,
+    /// for [`Shell::set_focused_track`] (WP-1.14).
+    FocusTrack(Option<bl_model::TrackId>),
 }
 
 /// The main window's UI state between frames.
@@ -291,6 +294,17 @@ impl MainWindowUi {
         });
         self.mixer_typing = crate::mixer::is_typing(ctx);
         self.menu_open = egui::Popup::is_any_open(ctx);
+        // The track whose control has the focus, for the neighbour items'
+        // state (the accessibility spec, R4).
+        let order = crate::focus::drawn(ctx);
+        let track = ctx
+            .memory(egui::Memory::focused)
+            .and_then(|id| order.find(id))
+            .and_then(|entry| entry.control)
+            .map(|control| control.track);
+        if track != shell.focused_track() {
+            events.push(UiEvent::FocusTrack(track));
+        }
         let metering = shell
             .meters()
             .iter()
@@ -322,12 +336,39 @@ impl MainWindowUi {
             return;
         }
         let focused = ctx.memory(egui::Memory::focused);
+        let tracks = track_order(shell);
+        let selected = shell
+            .arrangement()
+            .selected_tracks()
+            .iter()
+            .find(|t| tracks.contains(t))
+            .copied();
+        let place = match shell.main_view() {
+            MainView::Arrangement => crate::mixer::Place::Header,
+            MainView::Session => crate::mixer::Place::Mixer(bl_shell::mixer_view::MixerOf::Session),
+        };
         if step.neighbor {
-            let Some(from) = focused else {
+            // From a track's control, or from the view at the selected
+            // track's title bar (Next Neighbor is enabled whenever there's a
+            // neighbour, observed in Live 12.4.6).
+            let current = focused
+                .and_then(|id| self.order.find(id))
+                .and_then(|entry| entry.control)
+                .or_else(|| {
+                    let track = selected.or(tracks.first().copied())?;
+                    Some(crate::focus::TrackControl {
+                        place,
+                        track,
+                        slot: match place {
+                            crate::mixer::Place::Header => crate::focus::Slot::Title,
+                            crate::mixer::Place::Mixer(_) => crate::focus::Slot::Column,
+                        },
+                    })
+                });
+            let Some(current) = current else {
                 return;
             };
-            let tracks = track_order(shell);
-            match self.order.neighbor(from, &tracks, step.backwards) {
+            match self.order.neighbor(current, &tracks, step.backwards) {
                 Some(Neighbor::Focus(id)) => focus_on(ctx, id, events),
                 Some(Neighbor::Reveal(target)) => {
                     self.reveal(target.place, target.track, events);
@@ -339,25 +380,10 @@ impl MainWindowUi {
         }
         let in_view = focused == Some(main_view_id())
             || (focused.is_none() && shell.focused_area() == Area::MainView);
-        if in_view {
-            // From the view, Tab goes into the selected track's controls (or
-            // the first track's): the headers' in the Arrangement, the
-            // mixer's in the Session View.
-            let place = match shell.main_view() {
-                MainView::Arrangement => crate::mixer::Place::Header,
-                MainView::Session => {
-                    crate::mixer::Place::Mixer(bl_shell::mixer_view::MixerOf::Session)
-                }
-            };
-            let tracks = track_order(shell);
-            let Some(track) = shell
-                .arrangement()
-                .selected_tracks()
-                .iter()
-                .find(|t| tracks.contains(t))
-                .or(tracks.first())
-                .copied()
-            else {
+        if in_view && shell.main_view() == MainView::Session {
+            // From the Session View, Tab goes into the selected track's strip
+            // (the first track's), after its title bar.
+            let Some(track) = selected.or(tracks.first().copied()) else {
                 return;
             };
             match self.order.enter_track(place, track, step.backwards) {
@@ -377,9 +403,12 @@ impl MainWindowUi {
             }
             return;
         }
+        // The Arrangement runs through the view with the selected track's
+        // header in it (the first track's with none selected).
         if let Some(id) = self.order.tab(
-            focused,
+            focused.filter(|id| *id != main_view_id()),
             shell.focused_area(),
+            selected.or(tracks.first().copied()),
             step.backwards,
             shell.wrap_navigation(),
         ) {
@@ -624,7 +653,6 @@ impl MainWindowUi {
             ),
         };
         let response = ui.interact(rect, main_view_id(), Sense::click());
-        crate::focus::register(ui.ctx(), response.id, Area::MainView, None);
         let pressed_here = ui.input(|i| {
             i.pointer.any_pressed() && i.pointer.press_origin().is_some_and(|p| rect.contains(p))
         });
@@ -724,11 +752,7 @@ fn focus_on(ctx: &Context, id: Id, events: &mut Vec<UiEvent>) {
 /// mixer's columns (the Arrangement's track order), then the returns and
 /// Main.
 fn track_order(shell: &Shell) -> Vec<bl_model::TrackId> {
-    let doc = shell.editor().document();
-    let mut tracks = shell.mixer_columns();
-    tracks.extend(doc.returns());
-    tracks.push(doc.main_id());
-    tracks
+    shell.neighbor_order()
 }
 
 /// Draws a border round the area with the keyboard focus while Outline View

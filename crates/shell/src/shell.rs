@@ -270,6 +270,8 @@ pub struct Shell {
     settings_open: bool,
     focused_window: WindowKind,
     focused_area: Area,
+    /// The track whose control has the keyboard focus (WP-1.14).
+    focused_track: Option<TrackId>,
     effects: Vec<Effect>,
     message: Option<Message>,
     revision: u64,
@@ -386,6 +388,7 @@ impl Shell {
             full_screen: false,
             focused_window: WindowKind::Main,
             focused_area: Area::MainView,
+            focused_track: None,
             effects: Vec::new(),
             message: None,
             revision: 0,
@@ -657,14 +660,62 @@ impl Shell {
     /// (Wrap Tab Navigation; the accessibility spec, R5).
     #[must_use]
     pub fn wrap_navigation(&self) -> bool {
-        self.prefs.wrap_navigation
+        self.prefs.wrap_navigation.0
     }
 
     /// Whether a border is drawn round the focused area (Outline View in
     /// Focus; the accessibility spec, R7).
     #[must_use]
     pub fn outline_view_in_focus(&self) -> bool {
-        self.prefs.outline_view_in_focus
+        self.prefs.outline_view_in_focus.0
+    }
+
+    /// The track whose control has the keyboard focus, as the window last
+    /// reported it, for the neighbour commands (the accessibility spec,
+    /// R4).
+    #[must_use]
+    pub fn focused_track(&self) -> Option<TrackId> {
+        self.focused_track
+    }
+
+    /// Records the track whose control has the keyboard focus, or none.
+    pub fn set_focused_track(&mut self, track: Option<TrackId>) {
+        if self.focused_track != track {
+            self.focused_track = track;
+            self.touch();
+        }
+    }
+
+    /// The tracks in the order the neighbour commands move through them:
+    /// the mixer's columns, then the returns and Main.
+    #[must_use]
+    pub fn neighbor_order(&self) -> Vec<TrackId> {
+        let doc = self.editor.document();
+        let mut tracks = self.mixer_columns();
+        tracks.extend(doc.returns());
+        tracks.push(doc.main_id());
+        tracks
+    }
+
+    /// Whether the track with the focus (or the selected track) has a
+    /// neighbour that way: Navigate's Next Neighbor and Previous Neighbor
+    /// are enabled by it, whatever the Tab setting (observed in Live
+    /// 12.4.6; the accessibility spec, R4).
+    fn has_neighbor(&self, backwards: bool) -> bool {
+        let order = self.neighbor_order();
+        let Some(track) = self
+            .focused_track
+            .or_else(|| self.arrangement.selected_tracks().first().copied())
+        else {
+            return false;
+        };
+        order.iter().position(|t| *t == track).is_some_and(|at| {
+            if backwards {
+                at > 0
+            } else {
+                at + 1 < order.len()
+            }
+        })
     }
 
     /// The window with the keyboard focus.
@@ -1249,7 +1300,7 @@ impl Shell {
             ids::VIEW_FULL_SCREEN => Some(self.full_screen),
             ids::VIEW_TOGGLE_BROWSER => Some(self.browser),
             ids::FOCUS_TOGGLE_TAB_NAVIGATION => Some(self.prefs.tab_navigation),
-            ids::FOCUS_TOGGLE_WRAP_NAVIGATION => Some(self.prefs.wrap_navigation),
+            ids::FOCUS_TOGGLE_WRAP_NAVIGATION => Some(self.prefs.wrap_navigation.0),
             SOLO_IN_PLACE => Some(self.editor.document().settings().solo_in_place),
             ids::AUDIO_TOGGLE_ENGINE => Some(self.audio.engine_on()),
             browser_ids::SET_PREVIEW => Some(self.browser_view.preview_on()),
@@ -1309,6 +1360,8 @@ impl Shell {
             ids::APP_HIDE => return cfg!(target_os = "macos"),
             ids::SET_OPEN | ids::SET_SAVE | ids::SET_SAVE_AS | ids::APP_SETTINGS => return true,
             ids::SET_DISCARD_CHANGES => return self.dirty,
+            ids::FOCUS_NEXT_NEIGHBOR => return self.has_neighbor(false),
+            ids::FOCUS_PREVIOUS_NEIGHBOR => return self.has_neighbor(true),
             // Zoom In and Zoom Out stop at the zoom's ends (interface-zoom
             // R3).
             ids::VIEW_ZOOM_IN => return self.zoom_percent() < ZOOM_MAX_PERCENT,
@@ -1997,16 +2050,16 @@ impl Shell {
             // Spec: accessibility R5.
             ids::FOCUS_TOGGLE_WRAP_NAVIGATION => {
                 Self::args::<NoArgs>(id, args)?;
-                self.prefs.wrap_navigation = !self.prefs.wrap_navigation;
+                self.prefs.wrap_navigation = OnByDefault(!self.prefs.wrap_navigation.0);
                 self.save_preferences();
                 Ok(to_value(&SwitchResult {
-                    on: self.prefs.wrap_navigation,
+                    on: self.prefs.wrap_navigation.0,
                 }))
             }
             // Spec: accessibility R7.
             ids::SETTINGS_SET_OUTLINE_VIEW_IN_FOCUS => {
                 let SwitchArgs { on } = Self::args(id, args)?;
-                self.prefs.outline_view_in_focus = on;
+                self.prefs.outline_view_in_focus = OnByDefault(on);
                 self.save_preferences();
                 self.touch();
                 Ok(to_value(&SwitchResult { on }))

@@ -335,7 +335,11 @@ impl MixerUi {
                 in_out_section(&mut column_ui, theme, column, span, t.kind());
             }
             if let Some(span) = layout.sends {
-                sends_section(&mut column_ui, theme, column, span, returns.len());
+                let names: Vec<&str> = returns
+                    .iter()
+                    .filter_map(|r| doc.track(*r).map(bl_model::Track::name))
+                    .collect();
+                sends_section(&mut column_ui, theme, column, span, &names);
             }
             if let Some(span) = layout.strip {
                 let strip = StripLayout::compute(column.rect, span);
@@ -622,14 +626,23 @@ fn in_out_section(ui: &mut Ui, theme: &Theme, column: &Column, span: (f32, f32),
 }
 
 /// The Sends section: a knob per return, disabled until WP-2.19 (R5).
-fn sends_section(ui: &mut Ui, theme: &Theme, column: &Column, span: (f32, f32), returns: usize) {
+/// Each send is named by its return track, as Live's accessibility tree
+/// names them ("A-Reverb"; observed in Live 12.4.6).
+fn sends_section(ui: &mut Ui, theme: &Theme, column: &Column, span: (f32, f32), returns: &[&str]) {
+    let names = returns;
+    let returns = names.len();
     for index in 0..returns {
         let rect = send_knob(column.rect, span, index, returns);
         let letter = char::from(b'A' + (index % 26) as u8).to_string();
         let (name, text) = if column.kind == ColumnKind::Main {
             (format!("Return {letter} Pre/Post"), "Post".to_owned())
         } else {
-            (format!("Send {letter}"), letter.clone())
+            (
+                names
+                    .get(index)
+                    .map_or_else(|| format!("Send {letter}"), |n| (*n).to_owned()),
+                letter.clone(),
+            )
         };
         pending(
             ui,
@@ -765,6 +778,39 @@ impl StripParts<'_> {
 
     fn doc(&self) -> &Document {
         self.shell.editor().document()
+    }
+
+    /// Esc from a Session strip's control goes to the track's title bar,
+    /// which the column stands for (observed in Live 12.4.6; the
+    /// accessibility spec, R4). In the Arrangement, Esc is
+    /// `arrangement.focus_title_bar`'s key.
+    fn escape_to_title(&self, ui: &Ui, response: &Response) {
+        let Place::Mixer(of) = self.place else {
+            return;
+        };
+        if !response.has_focus() {
+            return;
+        }
+        // Keep the focus through Esc, to move it rather than drop it. The
+        // value controls set their own filter, which keeps it too.
+        let value = [
+            fader_id(self.place, self.track),
+            pan_id(self.place, self.track),
+        ];
+        if !value.contains(&response.id) {
+            ui.memory_mut(|m| {
+                m.set_focus_lock_filter(
+                    response.id,
+                    egui::EventFilter {
+                        escape: true,
+                        ..Default::default()
+                    },
+                );
+            });
+        }
+        if ui.input(|i| i.key_pressed(Key::Escape)) {
+            ui.memory_mut(|m| m.request_focus(column_id(of, self.track)));
+        }
     }
 
     /// Puts a control in the keyboard's order (the accessibility spec, R3
@@ -1133,6 +1179,7 @@ impl StripParts<'_> {
             Sense::click_and_drag(),
         );
         self.register(ui, response.id, crate::focus::Slot::Volume);
+        self.escape_to_title(ui, &response);
         self.value_drag(ui, &response, Control::Volume, events);
         self.value_keys(ui, &response, Control::Volume, events);
         let c = &self.theme.colors;
@@ -1175,6 +1222,7 @@ impl StripParts<'_> {
             Sense::click_and_drag(),
         );
         self.register(ui, response.id, crate::focus::Slot::Pan);
+        self.escape_to_title(ui, &response);
         self.value_drag(ui, &response, Control::Pan, events);
         self.value_keys(ui, &response, Control::Pan, events);
         let c = &self.theme.colors;
@@ -1199,14 +1247,14 @@ impl StripParts<'_> {
             painter.line_segment([centre, tip], Stroke::new(2.0, c.text.0));
         }
         focus_ring(&painter, self.theme, rect, &response);
-        self.describe_value(
-            ui,
-            &response,
-            "Track Panning",
-            pan_text(pan),
-            pan,
-            (-1.0, 1.0),
-        );
+        // Live's tree calls it Track Pan, and Main's Main Pan (observed in
+        // Live 12.4.6; the accessibility spec, R1).
+        let name = if track.kind() == TrackKind::Main {
+            "Main Pan"
+        } else {
+            "Track Pan"
+        };
+        self.describe_value(ui, &response, name, pan_text(pan), pan, (-1.0, 1.0));
         if let Some(triangle) = triangle {
             // Spec: mixer-view R6 (I-CLICK-020): the triangle resets pan.
             let id = Id::new(("mixer-pan-reset", self.place, self.track));
@@ -1254,6 +1302,7 @@ impl StripParts<'_> {
                 Switch::Arm => crate::focus::Slot::Arm,
             },
         );
+        self.escape_to_title(ui, &response);
         let pressed =
             response.clicked() || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter)));
         if pressed {
@@ -1319,7 +1368,16 @@ impl StripParts<'_> {
         let (peak, _) = self.levels();
         let loudest = f64::from(peak[0].max(peak[1]));
         let id = Id::new(("mixer-peak", self.place, self.track));
-        let response = ui.interact(rect, id, Sense::hover());
+        // In the strip's Tab order (observed in Live 12.4.6).
+        let response = ui.interact(rect, id, Sense::focusable_noninteractive());
+        self.register(ui, id, crate::focus::Slot::Peak);
+        self.escape_to_title(ui, &response);
+        focus_ring(
+            &ui.painter_at(rect.expand(3.0)),
+            self.theme,
+            rect,
+            &response,
+        );
         let c = &self.theme.colors;
         let painter = ui.painter_at(rect.expand(1.0));
         painter.rect_filled(rect, self.theme.sizes.corner, c.window.0);

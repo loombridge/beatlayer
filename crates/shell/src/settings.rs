@@ -27,14 +27,15 @@ pub struct Preferences {
     /// Whether Tab moves the keyboard focus in the main window.
     pub tab_navigation: bool,
     /// Wrap Tab Navigation (Navigate ▸ Wrap Keyboard Navigation): Tab and
-    /// Shift-Tab wrap round at the ends of the focused area (WP-1.14; the
-    /// accessibility spec, R5). Off in a new install until Live's default
-    /// is observed.
-    pub wrap_navigation: bool,
+    /// Shift-Tab wrap round at the ends of the focused area or track
+    /// (WP-1.14; the accessibility spec, R5). On in a new install, as
+    /// observed in Live 12.4.6.
+    pub wrap_navigation: OnByDefault,
     /// Outline View in Focus (Display & Input, L-SET-010): a border round
-    /// the focused area. Off in a new install, as observed in Live 12.4.6
-    /// (WP-1.14; the accessibility spec, R7).
-    pub outline_view_in_focus: bool,
+    /// the focused area and an outline round the focused control. On in a
+    /// new install, as observed in Live 12.4.6 (WP-1.14; the accessibility
+    /// spec, R7).
+    pub outline_view_in_focus: OnByDefault,
     /// The interface zoom, where 1 is 100%, or none for 100% (WP-1.17).
     /// Read through `Shell::zoom`, which keeps it within 50% to 200%.
     pub zoom: Option<f32>,

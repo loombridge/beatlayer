@@ -4,22 +4,28 @@
 //! Neighbor, and whether the focus is outlined.
 //!
 //! Each frame, every control a person can reach with the keyboard adds
-//! itself to the frame's [`Order`] with [`register`], in the order it's
-//! drawn, saying which area of the window it's in and, for a track's
-//! control, which track and which control it is. The main window reads the
-//! last frame's order to carry out a focus move (`focus.next`,
-//! `focus.previous`, `focus.next_neighbor`, `focus.previous_neighbor`):
+//! itself to the frame's [`Order`] with [`register`], saying which area of
+//! the window it's in and, for a track's control, which track and which
+//! control it is. The main window reads the last frame's order to carry out
+//! a focus move (`focus.next`, `focus.previous`, `focus.next_neighbor`,
+//! `focus.previous_neighbor`), in the orders observed in Live 12.4.6:
 //!
-//! - Outside the tracks (the Control Bar, the browser, the Status Bar), Tab
-//!   moves between the area's controls (I-FOCUS-004).
-//! - In the main view, Tab moves between one track's controls, in the
-//!   headers or in a mixer, as Live moves through a track's mixer controls
-//!   (manual 41.4.1.2, 41.4.1.3); from the view itself it goes into the
-//!   selected track's.
+//! - Outside the main view (the Control Bar, the browser, the Status Bar),
+//!   Tab moves between the area's controls in the order they're drawn.
+//! - In the Arrangement, Tab runs through the view: the selected track's
+//!   header (title, activator, Solo, Arm, volume, pan), then the controls
+//!   at the view's bottom right (Optimize Height). Live has locator and
+//!   automation buttons before the header, and the In/Out choosers, sends,
+//!   and waveform zoom in it, which Beatlayer doesn't have yet.
+//! - In a mixer, Tab stays in one track's strip: the column (standing for
+//!   its title bar), the peak level, pan, the activator, Solo, Arm, and
+//!   volume. From the Session View itself it goes into the selected
+//!   track's strip after its title bar.
 //! - At either end, Tab and Shift-Tab wrap round while Wrap Tab Navigation
-//!   is on, and otherwise stay where they are.
+//!   is on (as it is in a new install), and otherwise stay where they are.
 //! - A neighbour move goes to the same control on the next or previous
-//!   track that has it, bringing the track into view if it isn't.
+//!   track that has it, bringing the track into view if it isn't, and
+//!   leaves the selection as it was.
 
 use bl_model::TrackId;
 use bl_shell::Area;
@@ -30,12 +36,13 @@ use crate::mixer::Place;
 /// Which of a track's controls a control is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Slot {
-    /// The track's title in the Arrangement's headers. It isn't in the Tab
-    /// order (Esc and the arrow keys reach title bars), but marks the track
-    /// as drawn.
+    /// The track's title in the Arrangement's headers.
     Title,
-    /// A mixer's column, which Navigate ▸ Mixer focuses.
+    /// A mixer's column, which Navigate ▸ Mixer focuses and which stands for
+    /// the track's title bar in the strip's Tab order.
     Column,
+    /// The peak level readout.
+    Peak,
     /// The activator.
     Activator,
     /// Solo.
@@ -165,45 +172,84 @@ impl Order {
         })
     }
 
-    /// The controls Tab moves between with `entry` focused: the area's
-    /// controls outside the tracks, or one track's in one place.
-    fn scope(&self, area: Area, track: Option<(Place, TrackId)>) -> Vec<Id> {
+    /// A track's controls in `place`, in Tab's order (observed in Live
+    /// 12.4.6).
+    fn track_controls(&self, place: Place, track: TrackId) -> Vec<Id> {
+        let mut controls: Vec<(u8, Id)> = self
+            .entries
+            .iter()
+            .filter_map(|entry| {
+                let c = entry.control?;
+                (c.place == place && c.track == track).then(|| (c.slot.rank(place), entry.id))
+            })
+            .collect();
+        controls.sort_by_key(|(rank, _)| *rank);
+        controls.into_iter().map(|(_, id)| id).collect()
+    }
+
+    /// The Arrangement's Tab order: `track`'s header, then the view's other
+    /// controls.
+    fn arrangement(&self, track: Option<TrackId>) -> Vec<Id> {
+        let mut scope =
+            track.map_or_else(Vec::new, |track| self.track_controls(Place::Header, track));
+        scope.extend(
+            self.entries
+                .iter()
+                .filter(|entry| entry.area == Area::MainView && entry.control.is_none())
+                .map(|entry| entry.id),
+        );
+        scope
+    }
+
+    /// An area's controls outside the tracks, in the order drawn.
+    fn area(&self, area: Area) -> Vec<Id> {
         self.entries
             .iter()
-            .filter(|entry| match (track, entry.control) {
-                (None, None) => entry.area == area,
-                (Some((place, track)), Some(c)) => {
-                    c.place == place && c.track == track && c.slot != Slot::Title
-                }
-                _ => false,
-            })
+            .filter(|entry| entry.area == area && entry.control.is_none())
             .map(|entry| entry.id)
             .collect()
     }
 
-    /// Where Tab (or Shift-Tab, `backwards`) moves the focus from `from`,
-    /// within its area or its track (R3, R4). With nothing focused it goes
+    /// Where Tab (or Shift-Tab, `backwards`) moves the focus from `from`
+    /// (R3 to R5): within its area, through the Arrangement with `track`'s
+    /// header in it, or round a mixer strip. With nothing focused it goes
     /// to the first (or last) control of `area`; at an end it wraps round
     /// if `wrap`, and otherwise stays. `None` when there's nowhere to go.
     #[must_use]
-    pub fn tab(&self, from: Option<Id>, area: Area, backwards: bool, wrap: bool) -> Option<Id> {
+    pub fn tab(
+        &self,
+        from: Option<Id>,
+        area: Area,
+        track: Option<TrackId>,
+        backwards: bool,
+        wrap: bool,
+    ) -> Option<Id> {
         let current = from.and_then(|id| self.find(id));
         let scope = match current {
-            Some(entry) => self.scope(entry.area, entry.control.map(|c| (c.place, c.track))),
-            None => self.scope(area, None),
+            Some(Entry {
+                control: Some(c), ..
+            }) => match c.place {
+                Place::Mixer(_) => self.track_controls(c.place, c.track),
+                Place::Header => self.arrangement(Some(c.track)),
+            },
+            Some(entry) if entry.area == Area::MainView => self.arrangement(track),
+            Some(entry) => self.area(entry.area),
+            None if area == Area::MainView => self.arrangement(track),
+            None => self.area(area),
         };
         Self::step(&scope, from, backwards, wrap)
     }
 
-    /// The first (or, `backwards`, the last) of a track's controls in
-    /// `place`, for Tab from the main view into the track (R4).
+    /// Where Tab from the Session View goes in a track's strip: the first
+    /// control after its title bar (or, `backwards`, the last), as the first
+    /// Tab in Live's Session View goes past the title bar (R4).
     #[must_use]
     pub fn enter_track(&self, place: Place, track: TrackId, backwards: bool) -> Option<Id> {
-        let scope = self.scope(Area::MainView, Some((place, track)));
+        let scope = self.track_controls(place, track);
         if backwards {
             scope.last().copied()
         } else {
-            scope.first().copied()
+            scope.get(1).or(scope.first()).copied()
         }
     }
 
@@ -224,12 +270,16 @@ impl Order {
         next.map(|i| scope[i])
     }
 
-    /// Where a neighbour move from `from` goes: the same control on the
+    /// Where a neighbour move from `current` goes: the same control on the
     /// next (or previous) track in `tracks` that has it, skipping drawn
     /// tracks without it and stopping at the ends (R4).
     #[must_use]
-    pub fn neighbor(&self, from: Id, tracks: &[TrackId], backwards: bool) -> Option<Neighbor> {
-        let current = self.find(from)?.control?;
+    pub fn neighbor(
+        &self,
+        current: TrackControl,
+        tracks: &[TrackId],
+        backwards: bool,
+    ) -> Option<Neighbor> {
         let at = tracks.iter().position(|t| *t == current.track)?;
         let others: Box<dyn Iterator<Item = &TrackId>> = if backwards {
             Box::new(tracks[..at].iter().rev())
@@ -249,6 +299,36 @@ impl Order {
             }
         }
         None
+    }
+}
+
+impl Slot {
+    /// Where the control comes in its track's Tab order in `place`
+    /// (observed in Live 12.4.6): an Arrangement header's title, activator,
+    /// Solo, Arm, volume, and pan; a mixer strip's title bar (the column),
+    /// peak level, pan, activator, Solo, Arm, and volume.
+    #[must_use]
+    pub const fn rank(self, place: Place) -> u8 {
+        match place {
+            Place::Header => match self {
+                Self::Title | Self::Column => 0,
+                Self::Activator => 1,
+                Self::Solo => 2,
+                Self::Arm => 3,
+                Self::Volume => 4,
+                Self::Pan => 5,
+                Self::Peak => 6,
+            },
+            Place::Mixer(_) => match self {
+                Self::Title | Self::Column => 0,
+                Self::Peak => 1,
+                Self::Pan => 2,
+                Self::Activator => 3,
+                Self::Solo => 4,
+                Self::Arm => 5,
+                Self::Volume => 6,
+            },
+        }
     }
 }
 
@@ -273,25 +353,65 @@ mod tests {
         push("a", Area::ControlBar, None);
         push("b", Area::ControlBar, None);
         push("c", Area::ControlBar, None);
-        push("pane", Area::MainView, None);
-        let place = Place::Mixer(MixerOf::Session);
+        let mixer = Place::Mixer(MixerOf::Session);
+        // Drawn in the strip's own order, not Tab's.
         for (n, slots) in [
-            (1, &[Slot::Column, Slot::Volume, Slot::Solo][..]),
-            (2, &[Slot::Column, Slot::Solo][..]),
-            (3, &[Slot::Column, Slot::Volume, Slot::Solo][..]),
+            (
+                1,
+                &[
+                    Slot::Column,
+                    Slot::Peak,
+                    Slot::Pan,
+                    Slot::Volume,
+                    Slot::Activator,
+                    Slot::Solo,
+                ][..],
+            ),
+            (2, &[Slot::Column, Slot::Activator, Slot::Solo][..]),
+            (
+                3,
+                &[
+                    Slot::Column,
+                    Slot::Peak,
+                    Slot::Pan,
+                    Slot::Volume,
+                    Slot::Activator,
+                    Slot::Solo,
+                ][..],
+            ),
         ] {
             for slot in slots {
                 push(
-                    &format!("{n}{slot:?}"),
+                    &format!("m{n}{slot:?}"),
                     Area::MainView,
                     Some(TrackControl {
-                        place,
+                        place: mixer,
                         track: track(n),
                         slot: *slot,
                     }),
                 );
             }
         }
+        for n in 1..=2 {
+            for slot in [
+                Slot::Title,
+                Slot::Activator,
+                Slot::Solo,
+                Slot::Volume,
+                Slot::Pan,
+            ] {
+                push(
+                    &format!("h{n}{slot:?}"),
+                    Area::MainView,
+                    Some(TrackControl {
+                        place: Place::Header,
+                        track: track(n),
+                        slot,
+                    }),
+                );
+            }
+        }
+        push("optimize", Area::MainView, None);
         order
     }
 
@@ -300,51 +420,68 @@ mod tests {
     fn tab_stays_in_its_area_and_wraps_only_when_asked() {
         let order = order();
         let id = Id::new;
+        let tab = |from, backwards, wrap| order.tab(from, Area::ControlBar, None, backwards, wrap);
+        assert_eq!(tab(Some(id("a")), false, false), Some(id("b")));
+        assert_eq!(tab(Some(id("c")), false, false), None);
+        assert_eq!(tab(Some(id("c")), false, true), Some(id("a")));
+        assert_eq!(tab(Some(id("a")), true, true), Some(id("c")));
+        assert_eq!(tab(None, false, false), Some(id("a")));
+        assert_eq!(tab(None, true, false), Some(id("c")));
+    }
+
+    // Spec: accessibility R4.
+    #[test]
+    fn tab_goes_round_a_mixer_strip_in_live_s_order() {
+        let order = order();
+        let id = Id::new;
+        let tab =
+            |from: &'static str, wrap| order.tab(Some(id(from)), Area::MainView, None, false, wrap);
+        assert_eq!(tab("m1Column", false), Some(id("m1Peak")));
+        assert_eq!(tab("m1Pan", false), Some(id("m1Activator")));
+        assert_eq!(tab("m1Solo", false), Some(id("m1Volume")));
+        assert_eq!(tab("m1Volume", false), None, "the strip's last control");
         assert_eq!(
-            order.tab(Some(id("a")), Area::ControlBar, false, false),
-            Some(id("b"))
+            tab("m1Volume", true),
+            Some(id("m1Column")),
+            "round to the title bar"
+        );
+        let mixer = Place::Mixer(MixerOf::Session);
+        assert_eq!(
+            order.enter_track(mixer, track(1), false),
+            Some(id("m1Peak"))
         );
         assert_eq!(
-            order.tab(Some(id("c")), Area::ControlBar, false, false),
-            None
+            order.enter_track(mixer, track(2), false),
+            Some(id("m2Activator"))
         );
         assert_eq!(
-            order.tab(Some(id("c")), Area::ControlBar, false, true),
-            Some(id("a"))
-        );
-        assert_eq!(
-            order.tab(Some(id("a")), Area::ControlBar, true, true),
-            Some(id("c"))
-        );
-        assert_eq!(
-            order.tab(None, Area::ControlBar, false, false),
-            Some(id("a"))
-        );
-        assert_eq!(
-            order.tab(None, Area::ControlBar, true, false),
-            Some(id("c"))
+            order.enter_track(mixer, track(1), true),
+            Some(id("m1Volume"))
         );
     }
 
     // Spec: accessibility R4.
     #[test]
-    fn tab_moves_through_one_track_s_controls() {
+    fn tab_runs_through_the_arrangement_with_the_selected_track_s_header() {
         let order = order();
         let id = Id::new;
-        assert_eq!(
-            order.tab(Some(id("1Volume")), Area::MainView, false, false),
-            Some(id("1Solo"))
-        );
-        assert_eq!(
-            order.tab(Some(id("1Solo")), Area::MainView, false, true),
-            Some(id("1Column"))
-        );
-        let place = Place::Mixer(MixerOf::Session);
-        assert_eq!(
-            order.enter_track(place, track(2), false),
-            Some(id("2Column"))
-        );
-        assert_eq!(order.enter_track(place, track(2), true), Some(id("2Solo")));
+        let tab = |from: Option<&'static str>, backwards, wrap| {
+            order.tab(
+                from.map(id),
+                Area::MainView,
+                Some(track(2)),
+                backwards,
+                wrap,
+            )
+        };
+        assert_eq!(tab(None, false, false), Some(id("h2Title")));
+        assert_eq!(tab(Some("h2Title"), false, false), Some(id("h2Activator")));
+        assert_eq!(tab(Some("h2Pan"), false, false), Some(id("optimize")));
+        assert_eq!(tab(Some("optimize"), false, false), None);
+        assert_eq!(tab(Some("optimize"), false, true), Some(id("h2Title")));
+        // From another track's header (after a neighbour move), its header.
+        assert_eq!(tab(Some("h1Volume"), false, false), Some(id("h1Pan")));
+        assert_eq!(tab(Some("h1Title"), true, true), Some(id("optimize")));
     }
 
     // Spec: accessibility R4.
@@ -353,23 +490,24 @@ mod tests {
         let order = order();
         let id = Id::new;
         let tracks: Vec<TrackId> = (1..=4).map(track).collect();
+        let mixer = Place::Mixer(MixerOf::Session);
+        let at = |n, slot| TrackControl {
+            place: mixer,
+            track: track(n),
+            slot,
+        };
         assert_eq!(
-            order.neighbor(id("1Volume"), &tracks, false),
-            Some(Neighbor::Focus(id("3Volume")))
+            order.neighbor(at(1, Slot::Volume), &tracks, false),
+            Some(Neighbor::Focus(id("m3Volume")))
         );
         assert_eq!(
-            order.neighbor(id("3Volume"), &tracks, true),
-            Some(Neighbor::Focus(id("1Volume")))
+            order.neighbor(at(3, Slot::Volume), &tracks, true),
+            Some(Neighbor::Focus(id("m1Volume")))
         );
         assert_eq!(
-            order.neighbor(id("3Solo"), &tracks, false),
-            Some(Neighbor::Reveal(TrackControl {
-                place: Place::Mixer(MixerOf::Session),
-                track: track(4),
-                slot: Slot::Solo,
-            }))
+            order.neighbor(at(3, Slot::Solo), &tracks, false),
+            Some(Neighbor::Reveal(at(4, Slot::Solo)))
         );
-        assert_eq!(order.neighbor(id("1Solo"), &tracks, true), None);
-        assert_eq!(order.neighbor(id("a"), &tracks, false), None);
+        assert_eq!(order.neighbor(at(1, Slot::Solo), &tracks, true), None);
     }
 }

@@ -172,6 +172,7 @@ impl Harness {
                     let _ = self.shell.invoke(&invocation.id, invocation.args.clone());
                 }
                 UiEvent::FocusArea(area) => self.shell.set_focused_area(*area),
+                UiEvent::FocusTrack(track) => self.shell.set_focused_track(*track),
                 UiEvent::ArrangementViewport { width, height } => {
                     self.shell.set_arrangement_viewport(*width, *height);
                 }

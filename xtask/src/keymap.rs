@@ -75,6 +75,41 @@ const WIDGET: &[(&str, &str)] = &[
         "the Arrangement View: Up and Down select the track above or below \
          (`arrangement.select_tracks`)",
     ),
+    // The browser reads its arrow keys itself for the same reason (WP-1.10).
+    (
+        "S-BRW-001",
+        "the browser's list: Up and Down select the item above or below (`browser.select`), \
+         previewing it while Preview is on",
+    ),
+    (
+        "S-BRW-003",
+        "the browser's list: Right opens the selected folder and Left closes it \
+         (`browser.open_folder`); Left inside a folder selects the folder",
+    ),
+    (
+        "S-BRW-005",
+        "the browser's list: Shift-Enter, and Right on a file, preview the selected file \
+         (`browser.preview`)",
+    ),
+    (
+        "S-BRW-007",
+        "the browser's search field: Down and Enter move to the first result \
+         (`focus.browser`, `browser.select`)",
+    ),
+    (
+        "S-A11Y-015",
+        "the browser's list: Shift-Up and Shift-Down extend the selection (`browser.select`)",
+    ),
+    (
+        "S-A11Y-016",
+        "the browser's sidebar: Up and Down choose the label above or below \
+         (`browser.open_place`)",
+    ),
+    (
+        "S-A11Y-017",
+        "the browser: Right moves from the sidebar to the list, and Left at the list's top \
+         level back (`focus.browser`)",
+    ),
     // WP-1.8b: keys with two directions, and modifiers a drag reads as it
     // goes, each running a registered command.
     (
@@ -110,7 +145,7 @@ const WIDGET: &[(&str, &str)] = &[
     ),
     // The value fields (WP-1.18): the Control Bar's transport section today,
     // each change running the field's registered command
-    // (docs/specs/control-bar-transport.md).
+    // (the control bar transport spec).
     (
         "S-VAL-001",
         "the focused value field steps its value (the Control Bar's position, loop, tempo, \
@@ -145,7 +180,6 @@ const OWNERS: &[(&str, &str)] = &[
     ("S-VIEW-011", "WP-1.8a"),
     ("S-VIEW-012", "WP-1.9"),
     ("S-VIEW-014", "WP-1.9"),
-    ("S-FOCUS-006", "WP-1.10"),
     ("S-FOCUS-013", "WP-1.14"),
     ("S-FOCUS-014", "WP-1.14"),
     ("S-FILE-007", "WP-1.12"),
@@ -175,9 +209,6 @@ const OWNERS: &[(&str, &str)] = &[
     ("S-TRACK-009", "WP-1.8a"),
     ("S-TRACK-010", "WP-1.8a"),
     ("S-A11Y-003", "WP-1.8a"),
-    ("S-A11Y-015", "WP-1.10"),
-    ("S-A11Y-016", "WP-1.10"),
-    ("S-A11Y-017", "WP-1.10"),
     // Playing a time selection needs WP-1.8b's selections (transport.md).
     ("S-TRANS-003", "WP-1.8b"),
     ("S-TRANS-004", "WP-1.8b"),
@@ -189,7 +220,6 @@ const OWNERS: &[(&str, &str)] = &[
     ("S-ARR-", "WP-1.8b"),
     ("S-TRACK-", "WP-1.8b"),
     ("S-TRANS-", "WP-1.5"),
-    ("S-BRW-", "WP-1.10"),
     ("S-CTX-", "WP-1.8b"),
     ("S-A11Y-", "WP-1.8b"),
 ];
@@ -384,7 +414,7 @@ mod tests {
     fn owners_resolve_exact_ids_before_prefixes() {
         assert_eq!(owner("S-ARR-030"), Some("WP-1.8a"));
         assert_eq!(owner("S-ARR-001"), Some("WP-1.8b"));
-        assert_eq!(owner("S-BRW-007"), Some("WP-1.10"));
+        assert_eq!(owner("S-TRANS-001"), Some("WP-1.5"));
         assert_eq!(owner("S-NOPE-001"), None);
         assert!(OWNERS.iter().all(|(_, package)| *package != "WP-1.7"));
     }

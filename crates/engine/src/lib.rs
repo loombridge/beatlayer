@@ -40,6 +40,7 @@
 //! | [`Monitor`] | any one | Reads the playhead, meters, and CPU load the audio thread publishes |
 //! | [`Offline`] | any one | All of the above on one thread, faster than real time, with no device |
 //! | [`Restarter`] | any one | Restarts the engine with a new processor when a device's stream closes and opens again |
+//! | [`preview::PreviewVoice`] | audio | The browser's preview, a voice of its own beside the song (WP-1.10) |
 //!
 //! The engine knows no audio backend. On a device, `bl-audio-engine`'s
 //! `AudioEngine` runs it on a stream that `bl-audio-io`'s supervisor keeps
@@ -86,6 +87,7 @@ pub mod mixer;
 mod node;
 pub mod nodes;
 mod offline;
+pub mod preview;
 mod processor;
 mod program;
 mod registry;

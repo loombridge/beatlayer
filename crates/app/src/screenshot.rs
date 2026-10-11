@@ -51,6 +51,17 @@ pub fn run(args: &Args, path: &Path) -> Result<(), String> {
         Shell::new(prefs, None, audio, Box::new(ProjectFiles::new()))
     };
     shell.start_audio();
+    if !args.benchmark_scene {
+        // The browser's User Library: the folder `--user-library` names, or
+        // where it would be, without making it (a capture changes nothing
+        // on disk).
+        shell.set_user_library(
+            args.user_library
+                .clone()
+                .or_else(|| prefs_library(args))
+                .or_else(bl_shell::browser::places::default_user_library),
+        );
+    }
     if let Some(set) = &args.set {
         shell
             .invoke(ids::SET_OPEN, json!({ "path": set.to_string_lossy() }))
@@ -92,6 +103,13 @@ pub fn run(args: &Args, path: &Path) -> Result<(), String> {
     // Let the audio meter take a reading, and fonts and layout settle.
     std::thread::sleep(std::time::Duration::from_millis(600));
     let _ = shell.audio_mut().sample_cpu_load();
+    // The browser's index and any preview finish in the background.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while shell.browser_view().index_state().indexing && std::time::Instant::now() < deadline {
+        shell.poll();
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    shell.poll();
     for frame in 0..4 {
         settings_ui.prepare(&mut shell);
         if frame == 1 && !args.commands.is_empty() {
@@ -148,7 +166,15 @@ pub fn run(args: &Args, path: &Path) -> Result<(), String> {
                     .invoke(id, args.clone())
                     .map_err(|e| format!("--command {id}: {e}"))?;
             }
+            // A preview the commands started is decoded in the background.
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while shell.browser_preview().loading.is_some() && std::time::Instant::now() < deadline
+            {
+                shell.poll();
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
         }
+        shell.poll();
         textures.append(std::mem::take(&mut frame_output.textures_delta));
         output = Some(frame_output);
     }
@@ -166,6 +192,14 @@ pub fn run(args: &Args, path: &Path) -> Result<(), String> {
     );
     shell.audio_mut().stop();
     Ok(())
+}
+
+/// The User Library the preferences name, if any.
+fn prefs_library(args: &Args) -> Option<std::path::PathBuf> {
+    args.config_dir
+        .as_deref()
+        .and_then(|dir| Preferences::load(dir).ok())
+        .and_then(|prefs| prefs.browser.user_library)
 }
 
 /// Renders egui's output into an image on the GPU, without a surface.

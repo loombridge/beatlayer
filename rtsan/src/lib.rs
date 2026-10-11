@@ -31,3 +31,5 @@
 //!   clips, new clip lists swapped in as clips are edited (the old ones
 //!   freed by the collector), locates into clips, and tempo changes that
 //!   swap programs (WP-1.4).
+//! - `tests/preview.rs`: the browser's preview voice playing, replacing,
+//!   fading out, and letting go of 100 previews (WP-1.10).

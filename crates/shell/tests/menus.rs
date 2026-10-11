@@ -32,6 +32,7 @@ fn ui_parity(file: &str) -> Option<String> {
 fn every_item_reaches_a_command_or_is_pending() {
     let mut registry = Registry::new();
     bl_model::registry::register(&mut registry).unwrap();
+    // The shell's commands, the Arrangement View's, and the browser's.
     bl_shell::register(&mut registry).unwrap();
     // The transport's commands, which the Playback menu runs (WP-1.18).
     bl_engine::transport::register(&mut registry).unwrap();

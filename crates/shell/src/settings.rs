@@ -36,6 +36,8 @@ pub struct Preferences {
     /// The agent server: whether it runs, its port and token, and the
     /// agents allowed to connect (WP-1.15).
     pub agent: AgentSettings,
+    /// The browser's places and preview (WP-1.10).
+    pub browser: crate::browser::BrowserPrefs,
 }
 
 /// The file name of the preferences, inside the config directory.

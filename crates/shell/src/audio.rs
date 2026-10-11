@@ -18,7 +18,8 @@
 //! R16). The stream's callback ([`EngineCallback`]) runs the engine's
 //! processor, plays the Settings window's test tone in its place while the
 //! tone is on, at the Tone Volume and Tone Frequency the person set (D23),
-//! and measures how long it all takes, which the CPU meter shows. It runs
+//! adds the browser's preview voice (`bl_engine::preview`, WP-1.10), and
+//! measures how long it all takes, which the CPU meter shows. It runs
 //! on the audio thread, so it follows the real-time rules: no allocation,
 //! no lock, no blocking call (`tests/realtime.rs` checks it under the
 //! allocation trap, and `rtsan/tests/shell.rs` under RealtimeSanitizer).
@@ -37,7 +38,12 @@ use bl_audio_io::{
     StreamRequest, StreamStats,
 };
 use bl_core::time::{SampleRate, Ticks};
-use bl_engine::{Engine, EngineConfig, Processor, Registry, TransportCommand};
+use bl_engine::preview::{
+    PreviewControl, PreviewSamples, PreviewShared, PreviewStatus, PreviewVoice, preview_channel,
+};
+use bl_engine::{
+    Collector, DROP_PERIOD, DropThread, Engine, EngineConfig, Processor, Registry, TransportCommand,
+};
 use bl_model::Document;
 pub use bl_shell_spec::audio::{
     AudioDevices, AudioSettings, AudioStatus, ConfigureAudio, DeviceListing, DeviceRef, DriverInfo,
@@ -138,6 +144,8 @@ pub struct EngineCallback {
     /// The engine, once it has arrived. Until then, and without one, the
     /// output stays silent.
     processor: Option<Processor>,
+    /// The browser's preview voice, mixed in after the tone (WP-1.10).
+    preview: Option<PreviewVoice>,
 }
 
 impl EngineCallback {
@@ -150,6 +158,7 @@ impl EngineCallback {
             phase: 0.0,
             incoming: None,
             processor: None,
+            preview: None,
         }
     }
 
@@ -162,6 +171,14 @@ impl EngineCallback {
             incoming: Some(incoming),
             ..Self::new(shared)
         }
+    }
+
+    /// The same, playing the browser's previews through `preview` too
+    /// (WP-1.10).
+    #[must_use]
+    pub fn with_preview(mut self, preview: PreviewVoice) -> Self {
+        self.preview = Some(preview);
+        self
     }
 }
 
@@ -210,6 +227,9 @@ impl AudioCallback for EngineCallback {
                     channel.copy_from_slice(first);
                 }
             }
+        }
+        if let Some(preview) = &mut self.preview {
+            preview.render(ctx.frames, output.iter_mut());
         }
         let busy = u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX);
         let audio = ctx.frames as u64 * 1_000_000_000 / u64::from(ctx.sample_rate.max(1));
@@ -263,6 +283,12 @@ pub struct AudioHost {
     /// The counters at the last CPU sample, and the load measured then.
     last_sample: (u64, u64),
     cpu_load: Option<f32>,
+    /// The browser's preview (WP-1.10): the volume and progress, kept
+    /// across streams, and the open stream's control.
+    preview_shared: Arc<PreviewShared>,
+    preview: Option<PreviewControl>,
+    /// Frees what the audio thread lets go of, such as finished previews.
+    drop_thread: Option<DropThread>,
 }
 
 impl std::fmt::Debug for AudioHost {
@@ -326,6 +352,9 @@ impl AudioHost {
             error: None,
             last_sample: (0, 0),
             cpu_load: None,
+            preview_shared: Arc::new(PreviewShared::default()),
+            preview: None,
+            drop_thread: None,
         }
     }
 
@@ -399,6 +428,7 @@ impl AudioHost {
         // The processor goes with the stream's callback; then the engine's
         // threads stop, and its drop thread frees the last program.
         self.stream = None;
+        self.preview = None;
         self.engine = None;
     }
 
@@ -654,11 +684,22 @@ impl AudioHost {
             sample_rate: self.settings.sample_rate,
             buffer_size: self.settings.buffer_size,
         };
+        if self.drop_thread.is_none() {
+            let thread = Collector::new()
+                .spawn(DROP_PERIOD)
+                .map_err(|e| format!("couldn't start the audio drop thread: {e}"))?;
+            self.drop_thread = Some(thread);
+        }
+        let gc = self
+            .drop_thread
+            .as_ref()
+            .map(DropThread::handle)
+            .ok_or("the audio drop thread isn't running")?;
+        let (preview, voice) = preview_channel(gc, Arc::clone(&self.preview_shared));
         let (handoff, incoming) = RingBuffer::new(1);
-        let callback = Box::new(EngineCallback::with_engine(
-            Arc::clone(&self.shared),
-            incoming,
-        ));
+        let callback = Box::new(
+            EngineCallback::with_engine(Arc::clone(&self.shared), incoming).with_preview(voice),
+        );
         let mut stream = self
             .backend()?
             .open_stream(&request, callback)
@@ -673,6 +714,7 @@ impl AudioHost {
         }
         self.stream = Some(stream);
         self.engine = Some(engine);
+        self.preview = Some(preview);
         self.last_sample = (
             self.shared.busy_ns.load(Relaxed),
             self.shared.audio_ns.load(Relaxed),
@@ -734,6 +776,48 @@ impl AudioHost {
             self.last_sample = (busy, audio);
         }
         self.cpu_load
+    }
+
+    /// The sample rate the open stream runs at, which previews are
+    /// converted to.
+    #[must_use]
+    pub fn sample_rate(&self) -> Option<u32> {
+        self.stream.as_ref().map(|stream| stream.info().sample_rate)
+    }
+
+    /// Plays a browser preview through the open stream, replacing the one
+    /// playing (WP-1.10). The audio must be at [`AudioHost::sample_rate`].
+    /// Returns the preview's generation, which [`AudioHost::preview_status`]
+    /// reports while it plays.
+    ///
+    /// # Errors
+    ///
+    /// A message if no stream is open or the preview can't start.
+    pub fn play_preview(&mut self, samples: Box<dyn PreviewSamples>) -> Result<u64, String> {
+        let preview = self
+            .preview
+            .as_mut()
+            .ok_or("the audio device isn't running")?;
+        preview.play(samples).map_err(|e| e.to_string())
+    }
+
+    /// Stops the browser's preview, fading it out.
+    pub fn stop_preview(&self) {
+        if let Some(preview) = &self.preview {
+            preview.stop();
+        }
+    }
+
+    /// Sets the preview volume, a linear gain from 0 (silence) to +6 dB,
+    /// kept for later streams too.
+    pub fn set_preview_gain(&self, gain: f32) {
+        self.preview_shared.set_gain(gain);
+    }
+
+    /// What the preview voice plays, as the audio thread last said.
+    #[must_use]
+    pub fn preview_status(&self) -> PreviewStatus {
+        bl_engine::preview::status(&self.preview_shared)
     }
 
     /// What the device runs at now.

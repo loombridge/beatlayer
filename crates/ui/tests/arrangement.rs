@@ -520,7 +520,12 @@ fn every_part_reaches_assistive_technology() {
     // Six tracks and Main.
     assert_eq!(headers.len(), 7, "{headers:?}");
     assert!(headers.contains(&"Main"));
-    let clips: Vec<_> = nodes.iter().filter(|n| n.role == Role::ListItem).collect();
+    // The browser's items are list items too (WP-1.10).
+    let browser = Harness::node(&nodes, "Browser").id;
+    let clips: Vec<_> = nodes
+        .iter()
+        .filter(|n| n.role == Role::ListItem && !Harness::descends_from(&nodes, n.id, browser))
+        .collect();
     assert!(!clips.is_empty());
     assert!(
         clips

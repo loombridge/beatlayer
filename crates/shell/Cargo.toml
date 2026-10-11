@@ -13,8 +13,13 @@ bl-commands.workspace = true
 # IDs for objects a command will create, which the agent API hands out.
 bl-core.workspace = true
 # The engine the app plays the set through, and the transport's commands
-# (WP-1.18). It depends on no UI crate.
+# (WP-1.18), and the browser's preview voice on the audio thread with the
+# drop thread that frees what it lets go of (WP-1.10). It depends on no UI
+# crate.
 bl-engine.workspace = true
+# The browser decodes previews and registers the files it adds to the set
+# in the media store (WP-1.10).
+bl-media.workspace = true
 bl-model.workspace = true
 bl-project.workspace = true
 bl-shell-spec.workspace = true

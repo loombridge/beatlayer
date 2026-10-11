@@ -21,6 +21,7 @@
 //! `egui::Context` and synthetic input.
 
 pub mod arrangement;
+pub mod browser;
 pub mod control_bar;
 pub mod input;
 pub mod keymap;

@@ -30,6 +30,8 @@ Options:
                          window opens
       --benchmark-scene  Show the Arrangement benchmark scene (200 tracks,
                          5,000 clips with waveforms) instead of a new set
+      --user-library DIR Use DIR as the browser's User Library (made if it's
+                         missing) instead of the preference or the default
       --command ID[=JSON]
                          Run a command at start-up, such as
                          arrangement.optimize_height or
@@ -48,6 +50,7 @@ pub struct Args {
     pub set: Option<PathBuf>,
     pub benchmark_scene: bool,
     pub commands: Vec<(String, serde_json::Value)>,
+    pub user_library: Option<PathBuf>,
 }
 
 enum Parsed {
@@ -89,6 +92,10 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, String> {
                 parsed.screenshot = Some(it.next().ok_or("--screenshot takes a file")?.into());
             }
             "--benchmark-scene" => parsed.benchmark_scene = true,
+            "--user-library" => {
+                parsed.user_library =
+                    Some(it.next().ok_or("--user-library takes a folder")?.into());
+            }
             "--command" => {
                 let text = it.next().ok_or("--command takes a command ID")?;
                 let (id, args) = match text.split_once('=') {

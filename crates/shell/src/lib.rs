@@ -24,6 +24,8 @@
 //!   moving, copying, resizing, splitting, deleting, duplicating, and the
 //!   clipboard ([`arrangement::editing`], WP-1.8b), which gestures run as
 //!   one undo step through [`Shell::gesture`].
+//! - [`browser`]: the browser (places, browsing, search, preview, adding
+//!   files to the Arrangement), changed by its commands (WP-1.10).
 //! - [`transport`]: the Control Bar's transport section: what its fields
 //!   show, and the command each change runs (WP-1.18). The transport's
 //!   commands themselves are `bl-engine`'s, which [`Shell`] registers and
@@ -36,6 +38,7 @@
 pub mod agent;
 pub mod arrangement;
 pub mod audio;
+pub mod browser;
 pub mod files;
 pub mod settings;
 mod shell;
@@ -43,6 +46,8 @@ pub mod transport;
 
 /// The Arrangement View's command IDs and their argument and result types.
 pub use bl_shell_spec::arrangement as arrangement_commands;
+/// The browser's command IDs and their argument and result types.
+pub use bl_shell_spec::browser as browser_commands;
 /// The Arrangement's editing command IDs and their argument and result
 /// types (WP-1.8b).
 pub use bl_shell_spec::editing as editing_commands;

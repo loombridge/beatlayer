@@ -58,6 +58,97 @@ fn the_callback_stays_off_the_heap_with_the_tone_off_on_and_changing() {
     assert!(peak > 0.0, "the tone played in the last block");
 }
 
+// Spec: browser R12. The callback with the preview voice: starting,
+// playing, replacing, and stopping previews, block by block under the trap.
+#[test]
+fn the_callback_plays_previews_without_touching_the_heap() {
+    use bl_engine::preview::{PreviewBuffer, PreviewShared, preview_channel};
+
+    let collector = bl_engine::Collector::new();
+    let (mut control, voice) =
+        preview_channel(collector.handle(), Arc::new(PreviewShared::default()));
+    let shared = Arc::new(EngineShared::default());
+    let mut engine = EngineCallback::new(Arc::clone(&shared)).with_preview(voice);
+    let mut data = vec![0.0f32; 2 * 256];
+    let input = AudioBuffer::empty(256);
+    let ctx = context(256);
+    let buffers: Vec<_> = (0..8)
+        .map(|i| PreviewBuffer::new(vec![vec![0.001 * (i + 1) as f32; 2_000]; 2]).unwrap())
+        .collect();
+    let mut peak = 0.0f32;
+    for (i, buffer) in buffers.into_iter().enumerate() {
+        // Wrapping the audio for the collector allocates, on this thread.
+        control.play(Box::new(buffer)).unwrap();
+        bl_rt::rt_test!({
+            for block in 0..12 {
+                if i % 3 == 2 && block == 4 {
+                    control.stop();
+                }
+                data.fill(0.0);
+                let mut output = AudioBufferMut::new(&mut data, 2, 256, 256);
+                engine.process(&ctx, &input, &mut output);
+                peak = data.iter().fold(peak, |peak, s| peak.max(s.abs()));
+            }
+        });
+    }
+    assert!(peak > 0.0, "the previews played");
+    assert!(control.status().playing.is_none(), "each ended or stopped");
+}
+
+// Spec: browser R12. A preview through the null device's stream, whose
+// statistics count heap operations inside every audio block.
+#[test]
+fn a_preview_through_the_null_stream_stays_off_the_heap() {
+    let dir = std::env::temp_dir().join(format!("bl-shell-rt-preview-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("tone.wav");
+    let frames = 24_000u32;
+    let mut bytes = Vec::new();
+    for chunk in [
+        &b"RIFF"[..],
+        &(36 + frames * 2).to_le_bytes(),
+        b"WAVEfmt ",
+        &16u32.to_le_bytes(),
+        &1u16.to_le_bytes(),
+        &1u16.to_le_bytes(),
+        &48_000u32.to_le_bytes(),
+        &96_000u32.to_le_bytes(),
+        &2u16.to_le_bytes(),
+        &16u16.to_le_bytes(),
+        b"data",
+        &(frames * 2).to_le_bytes(),
+    ] {
+        bytes.extend_from_slice(chunk);
+    }
+    for i in 0..frames {
+        bytes.extend_from_slice(&((i % 64) as i16 * 4).to_le_bytes());
+    }
+    std::fs::write(&file, bytes).unwrap();
+
+    let mut shell = Shell::headless();
+    shell.start_audio();
+    // The null device makes no sound; the volume is low anyway.
+    shell
+        .run("browser.set_preview", json!({ "volume": 0.001 }))
+        .unwrap();
+    for _ in 0..3 {
+        shell
+            .run("browser.preview", json!({ "path": file.to_string_lossy() }))
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while shell.browser_preview().position_seconds <= 0.0 {
+            shell.poll();
+            assert!(Instant::now() < deadline, "the preview never played");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+    shell.run("browser.stop_preview", json!({})).unwrap();
+    let stats = wait_for_blocks(&shell, 40);
+    assert_eq!(stats.heap_operations, 0, "{stats:?}");
+    shell.audio_mut().stop();
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn the_callback_plays_the_engine_off_the_heap_through_the_transport() {
     // Spec: control-bar-transport R13. The engine's processor arrives

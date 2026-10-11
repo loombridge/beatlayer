@@ -1,11 +1,11 @@
 //! The agent guide: Beatlayer's concepts, IDs, and good practice, for the
-//! agent. It's `docs/agent-guide.md`, served as the MCP resource
+//! agent. It's `crates/agent/guide.md`, served as the MCP resource
 //! [`URI`], and the server's `instructions` point to it.
 
 use serde_json::{Value, json};
 
-/// The guide's text: `docs/agent-guide.md`.
-pub const TEXT: &str = include_str!("../../../docs/agent-guide.md");
+/// The guide's text: `crates/agent/guide.md`.
+pub const TEXT: &str = include_str!("../guide.md");
 
 /// Where the guide is served.
 pub const URI: &str = "beatlayer://guide";

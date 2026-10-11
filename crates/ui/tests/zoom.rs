@@ -592,11 +592,17 @@ fn dragging_the_zoom_rescales_the_settings_window_on_release() {
 
 #[test]
 fn every_row_the_zoom_tests_check_is_a_layout_md_row() {
-    // The rows above are layout.md's: each ID is defined there.
-    let layout_md = std::fs::read_to_string(
-        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/ui-parity/layout.md"),
-    )
-    .unwrap();
+    // The rows above are layout.md's: each ID is defined there. The UI
+    // parity reference isn't published yet, so a checkout without the
+    // planning documents skips this.
+    let docs = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs");
+    if !docs.exists() {
+        eprintln!(
+            "skipped: the UI parity reference isn't published yet, and this checkout doesn't have it"
+        );
+        return;
+    }
+    let layout_md = std::fs::read_to_string(docs.join("ui-parity/layout.md")).unwrap();
     let settings = SettingsLayout::compute(SETTINGS_WINDOW).rows(SettingsPage::ALL.len());
     for row in main_window_rows(REFERENCE, true).iter().chain(&settings) {
         assert!(

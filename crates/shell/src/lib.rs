@@ -33,6 +33,9 @@
 //!   Session and Arrangement Views (shown, scrolled, which sections),
 //!   changed by the `mixer_view.*` commands, and what a strip's controls
 //!   show and the `mixer.*` commands each change runs (WP-1.9).
+//! - [`permission`]: a call's permission class decided from its arguments,
+//!   for the agent API: placing clips over others is destructive
+//!   (WP-1.15b).
 //! - [`transport`]: the Control Bar's transport section: what its fields
 //!   show, and the command each change runs (WP-1.18). The transport's
 //!   commands themselves are `bl-engine`'s, which [`Shell`] registers and
@@ -50,6 +53,7 @@ pub mod export;
 pub mod files;
 pub mod mixer_controls;
 pub mod mixer_view;
+pub mod permission;
 pub mod settings;
 mod shell;
 pub mod transport;

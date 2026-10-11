@@ -38,6 +38,23 @@ pub struct Preferences {
     pub agent: AgentSettings,
     /// The browser's places and preview (WP-1.10).
     pub browser: crate::browser::BrowserPrefs,
+    /// Create Fades on Clip Edges (Record, Warp & Launch, L-SET-018): new
+    /// audio clips get 4 ms fades at their edges (WP-1.4b; the audio clips
+    /// spec, R7 and R22). On by default, as observed in Live 12.4.6, and on
+    /// for preferences saved before the setting existed.
+    pub create_fades_on_clip_edges: OnByDefault,
+}
+
+/// A switch that's on unless the preferences say otherwise, read and
+/// written as a plain `true` or `false`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct OnByDefault(pub bool);
+
+impl Default for OnByDefault {
+    fn default() -> Self {
+        Self(true)
+    }
 }
 
 /// The file name of the preferences, inside the config directory.
@@ -127,10 +144,24 @@ mod tests {
         };
         prefs.audio.buffer_size = Some(128);
         prefs.tone.volume_db = -48.0;
+        prefs.create_fades_on_clip_edges = OnByDefault(false);
         prefs.save(&dir).unwrap();
         assert_eq!(Preferences::load(&dir).unwrap(), prefs);
         std::fs::write(dir.join(PREFERENCES_FILE), "not json").unwrap();
         assert!(Preferences::load(&dir).is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn create_fades_on_clip_edges_is_on_unless_saved_off() {
+        // Spec: audio-clips R22. Live's default, observed in Live 12.4.6.
+        assert!(Preferences::default().create_fades_on_clip_edges.0);
+        let older: Preferences = serde_json::from_str(r#"{"tab_navigation": true}"#).unwrap();
+        assert!(older.create_fades_on_clip_edges.0);
+        let off: Preferences =
+            serde_json::from_str(r#"{"create_fades_on_clip_edges": false}"#).unwrap();
+        assert!(!off.create_fades_on_clip_edges.0);
+        let saved = serde_json::to_value(&off).unwrap();
+        assert_eq!(saved["create_fades_on_clip_edges"], false);
     }
 }

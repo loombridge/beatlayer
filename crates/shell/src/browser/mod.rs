@@ -141,6 +141,9 @@ pub struct Context<'a> {
     pub insert_marker: Ticks,
     /// The Arrangement's first selected track, where loaded files go.
     pub selected_track: Option<TrackId>,
+    /// Whether Create Fades on Clip Edges is on, so new clips get 4 ms fades
+    /// (the audio clips spec, R7).
+    pub edge_fades: bool,
 }
 
 /// What [`BrowserView::poll`] found.
@@ -1081,11 +1084,17 @@ impl BrowserView {
         ctx: Context<'_>,
         outcome: &mut Outcome,
     ) -> Result<(), BrowserError> {
-        let (result, media) = arrange::add_files(ctx.editor, ctx.media, ctx.insert_marker, args)
-            .map_err(|error| match error {
-                AddError::InvalidArgs(message) => BrowserError::InvalidArgs(message),
-                AddError::Failed(message) => BrowserError::Failed(message),
-            })?;
+        let (result, media) = arrange::add_files(
+            ctx.editor,
+            ctx.media,
+            ctx.insert_marker,
+            ctx.edge_fades,
+            args,
+        )
+        .map_err(|error| match error {
+            AddError::InvalidArgs(message) => BrowserError::InvalidArgs(message),
+            AddError::Failed(message) => BrowserError::Failed(message),
+        })?;
         outcome.value = to_value(&result);
         outcome.media = media;
         outcome.document_changed = true;

@@ -1,8 +1,8 @@
 //! The Settings window (L-SET-001 to L-SET-003): the page chooser at the
 //! left, and the page at the right. The Audio page (L-SET-012), the theme
-//! choice (L-SET-011), and the interface zoom (L-SET-010, WP-1.17) are
-//! built; the other pages are in the chooser and say which package builds
-//! them. The Tempo & MIDI page (L-SET-014) has the agent server's section
+//! choice (L-SET-011), the interface zoom (L-SET-010, WP-1.17), and Create
+//! Fades on Clip Edges (L-SET-018, WP-1.4b) are built; the other pages are
+//! in the chooser and say which package builds them. The Tempo & MIDI page (L-SET-014) has the agent server's section
 //! (WP-1.15), which Live doesn't have: it sits with the control surfaces,
 //! the other way programs drive the app.
 
@@ -105,6 +105,9 @@ impl SettingsUi {
                     display_page(ui, shell, theme, &mut rows, &mut events);
                 }
                 SettingsPage::ThemeColors => theme_page(ui, shell, theme, &mut rows, &mut events),
+                SettingsPage::RecordWarpLaunch => {
+                    record_warp_launch_page(ui, shell, theme, &mut rows, &mut events);
+                }
                 SettingsPage::TempoMidi => {
                     agents_section(ui, shell, theme, &mut rows, &mut events);
                     rows.note(
@@ -448,6 +451,116 @@ fn display_page(
     );
 }
 
+/// A row of a Settings page whose setting no package has built yet: its
+/// label, and its control's place drawn quiet, which can't be used and
+/// tells assistive technology which package brings it.
+struct Pending {
+    label: &'static str,
+    /// The controls on the row: each one's name and width.
+    controls: &'static [(&'static str, f32)],
+    package: &'static str,
+}
+
+/// A pending row with a chooser.
+const fn chooser_row(label: &'static str, package: &'static str) -> Pending {
+    Pending {
+        label,
+        controls: &[("", SettingsLayout::CHOOSER)],
+        package,
+    }
+}
+
+/// A pending row with an On/Off switch.
+const fn switch_row(label: &'static str, package: &'static str) -> Pending {
+    Pending {
+        label,
+        controls: &[("", SettingsLayout::SWITCH)],
+        package,
+    }
+}
+
+/// The Record section of Record, Warp & Launch, as observed in Live 12.4.6:
+/// none of it is built.
+const RECORD: [Pending; 7] = [
+    chooser_row("File Type", "WP-2.13"),
+    chooser_row("Bit Depth", "WP-2.13"),
+    chooser_row("Count-In", "WP-2.15"),
+    Pending {
+        label: "Exclusive",
+        controls: &[
+            ("Exclusive Arm", SettingsLayout::SWITCH),
+            ("Exclusive Solo", SettingsLayout::SWITCH),
+        ],
+        package: "WP-2.13",
+    },
+    chooser_row("Clip Update Rate", "WP-2.13"),
+    chooser_row("Record Session automation in", "M3"),
+    switch_row("Start Transport With Record", "WP-2.13"),
+];
+
+/// The Warp/Fades rows before Create Fades on Clip Edges, which come with
+/// warping.
+const WARP: [Pending; 3] = [
+    chooser_row("Loop/Warp Short Samples", "M4"),
+    switch_row("Auto-Warp Long Samples", "M4"),
+    chooser_row("Default Warp Mode", "M4"),
+];
+
+/// The Launch section, which comes with the Session View.
+const LAUNCH: [Pending; 5] = [
+    chooser_row("Default Launch Mode", "M3"),
+    chooser_row("Default Launch Quantization", "M3"),
+    switch_row("Select on Launch", "M3"),
+    switch_row("Select Next Scene on Launch", "M3"),
+    switch_row("Start Recording on Scene Launch", "M3"),
+];
+
+/// The Tap Tempo section.
+const TAP_TEMPO: [Pending; 1] = [switch_row("Start Transport With Tap Tempo", "M2")];
+
+/// Record, Warp & Launch (L-SET-018, as observed in Live 12.4.6): the
+/// Record, Warp/Fades, Launch, and Tap Tempo sections in Live's order, with
+/// Create Fades on Clip Edges, the fourth row of Warp/Fades, the only
+/// setting built (WP-1.4b). The other rows keep their places, pending.
+fn record_warp_launch_page(
+    ui: &mut Ui,
+    shell: &Shell,
+    theme: &Theme,
+    rows: &mut Rows<'_>,
+    events: &mut Vec<UiEvent>,
+) {
+    rows.heading(ui, "Record");
+    for row in &RECORD {
+        rows.pending(ui, row);
+    }
+    rows.heading(ui, "Warp/Fades");
+    for row in &WARP {
+        rows.pending(ui, row);
+    }
+    let rect = rows.row(ui, "Create Fades on Clip Edges", SettingsLayout::SWITCH);
+    if let Some(on) = switch(
+        ui,
+        theme,
+        "create-fades-on-clip-edges",
+        "Create Fades on Clip Edges",
+        rect,
+        shell.create_fades_on_clip_edges(),
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            ids::SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES,
+            json!({ "on": on }),
+        )));
+    }
+    rows.heading(ui, "Launch");
+    for row in &LAUNCH {
+        rows.pending(ui, row);
+    }
+    rows.heading(ui, "Tap Tempo");
+    for row in &TAP_TEMPO {
+        rows.pending(ui, row);
+    }
+}
+
 fn theme_page(
     ui: &mut Ui,
     shell: &Shell,
@@ -743,6 +856,42 @@ impl<'a> Rows<'a> {
             node.set_label(label.to_owned());
             node.set_value(value.to_owned());
         });
+        self.y += SettingsLayout::OPTION_ROW;
+    }
+
+    /// A row whose setting isn't built yet ([`Pending`]).
+    fn pending(&mut self, ui: &mut Ui, row: &Pending) {
+        self.label(ui, row.label);
+        let mut x = self.layout.control_x;
+        let c = &self.theme.colors;
+        for (index, &(name, width)) in row.controls.iter().enumerate() {
+            let name = if name.is_empty() { row.label } else { name };
+            let rect = Rect::from_min_size(pos2(x, self.y), vec2(width, 18.0));
+            let response = ui
+                .interact(
+                    rect,
+                    Id::new(("settings-pending", row.label, index)),
+                    Sense::hover(),
+                )
+                .on_hover_text(format!(
+                    "{name}. Not built yet: arrives with {}.",
+                    row.package
+                ));
+            ui.painter().rect_filled(
+                rect,
+                self.theme.sizes.corner,
+                c.control.0.gamma_multiply(0.55),
+            );
+            response
+                .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, false, name));
+            ui.ctx().accesskit_node_builder(response.id, |node| {
+                node.set_description(format!("Not built yet: arrives with {}.", row.package));
+                node.remove_action(egui::accesskit::Action::Click);
+                node.remove_action(egui::accesskit::Action::Focus);
+            });
+            // Side by side, as Live's Exclusive Arm and Solo are.
+            x += width + 4.0;
+        }
         self.y += SettingsLayout::OPTION_ROW;
     }
 

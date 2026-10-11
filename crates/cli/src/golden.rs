@@ -345,7 +345,15 @@ pub fn write_flac(path: &Path, render: &Render) -> Result<(), String> {
         BITS as usize,
         render.sample_rate as usize,
     );
-    let stream = flacenc::encode_with_fixed_block_size(&config, source, config.block_size)
+    let mut stream = flacenc::encode_with_fixed_block_size(&config, source, config.block_size)
+        .map_err(|error| format!("can't encode {}: {error:?}", path.display()))?;
+    // A fixed-blocksize stream's minimum block size leaves out the short
+    // last block; the encoder counts it, which makes the stream look
+    // variable-blocksize to decoders that check, as Beatlayer's importer
+    // (symphonia) does.
+    stream
+        .stream_info_mut()
+        .set_block_sizes(config.block_size, config.block_size)
         .map_err(|error| format!("can't encode {}: {error:?}", path.display()))?;
     let mut sink = flacenc::bitsink::ByteSink::new();
     stream

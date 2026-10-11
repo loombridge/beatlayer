@@ -42,8 +42,10 @@ use bl_engine::preview::{
     PreviewControl, PreviewSamples, PreviewShared, PreviewStatus, PreviewVoice, preview_channel,
 };
 use bl_engine::{
-    Collector, DROP_PERIOD, DropThread, Engine, EngineConfig, Processor, Registry, TransportCommand,
+    Collector, DROP_PERIOD, DropThread, Engine, EngineConfig, MediaLibrary, MediaStreams,
+    Processor, Registry, Report, ScheduledCommand, TransportCommand,
 };
+use bl_media::{MediaStore, StreamerStats};
 use bl_model::Document;
 pub use bl_shell_spec::audio::{
     AudioDevices, AudioSettings, AudioStatus, ConfigureAudio, DeviceListing, DeviceRef, DriverInfo,
@@ -289,6 +291,15 @@ pub struct AudioHost {
     preview: Option<PreviewControl>,
     /// Frees what the audio thread lets go of, such as finished previews.
     drop_thread: Option<DropThread>,
+    /// The set's media, which the engine's clips stream from (WP-1.4b).
+    media: Option<Arc<MediaStore>>,
+    /// The running engine's streams, for their figures.
+    streams: Option<Arc<MediaStreams>>,
+    /// How many engines have started, so a host can tell a new one, which
+    /// holds none of the commands scheduled on the last (WP-1.15b).
+    engines: u64,
+    /// Reports from engines that have closed, not yet taken.
+    held_reports: Vec<Report>,
 }
 
 impl std::fmt::Debug for AudioHost {
@@ -355,7 +366,29 @@ impl AudioHost {
             preview_shared: Arc::new(PreviewShared::default()),
             preview: None,
             drop_thread: None,
+            media: None,
+            streams: None,
+            engines: 0,
+            held_reports: Vec::new(),
         }
+    }
+
+    /// Plays clips' audio from `media`, streaming long files from disk, from
+    /// the next engine that starts (the audio clips spec, R16). Until then,
+    /// and without it, clips play silence.
+    pub fn set_media(&mut self, media: Arc<MediaStore>) {
+        self.media = Some(media);
+    }
+
+    /// The running engine's disk streaming figures: open streams, underruns
+    /// (what the disk overload indicator shows), and how busy the disk
+    /// thread is. `None` while no engine runs.
+    #[must_use]
+    pub fn disk_stats(&self) -> Option<StreamerStats> {
+        self.engine
+            .as_ref()
+            .and(self.streams.as_ref())
+            .map(|streams| streams.stats())
     }
 
     /// The settings in force.
@@ -425,6 +458,9 @@ impl AudioHost {
     fn close(&mut self) {
         let _ = self.transport_state();
         self.memory.playing = false;
+        if let Some(engine) = self.engine.as_mut() {
+            self.held_reports.extend(engine.reports());
+        }
         // The processor goes with the stream's callback; then the engine's
         // threads stop, and its drop thread frees the last program.
         self.stream = None;
@@ -456,11 +492,56 @@ impl AudioHost {
     /// Why nothing can play, while no engine runs: the audio engine is off,
     /// or no device is open.
     pub fn send_transport(&mut self, command: TransportCommand) -> Result<(), String> {
+        self.running_engine()?.transport(command);
+        Ok(())
+    }
+
+    /// Schedules a command at a musical position on the engine's queue,
+    /// the queue the transport's commands take, so they arrive in the order
+    /// they were sent (the agent API's scheduled commands, WP-1.15b).
+    /// The engine runs its action on the exact frame the song reaches it,
+    /// and reports it ([`AudioHost::take_reports`]).
+    ///
+    /// # Errors
+    ///
+    /// Why nothing can play, while no engine runs, as
+    /// [`AudioHost::send_transport`] says.
+    pub fn schedule(&mut self, command: ScheduledCommand) -> Result<(), String> {
+        self.running_engine()?.schedule(command);
+        Ok(())
+    }
+
+    /// Cancels a scheduled command that hasn't fired.
+    ///
+    /// # Errors
+    ///
+    /// Why nothing can play, while no engine runs.
+    pub fn cancel(&mut self, id: u64) -> Result<(), String> {
+        self.running_engine()?.cancel(id);
+        Ok(())
+    }
+
+    /// The engine's reports since the last call, the closed engines' first:
+    /// scheduled commands that fired, each with its frame, or that it had no
+    /// room for.
+    pub fn take_reports(&mut self) -> Vec<Report> {
+        let mut reports = std::mem::take(&mut self.held_reports);
+        if let Some(engine) = self.engine.as_mut() {
+            reports.extend(engine.reports());
+        }
+        reports
+    }
+
+    /// How many engines have started: each time a device opens, a new
+    /// engine starts with none of the last one's scheduled commands.
+    #[must_use]
+    pub fn engine_generation(&self) -> u64 {
+        self.engines
+    }
+
+    fn running_engine(&self) -> Result<&Engine, String> {
         match &self.engine {
-            Some(engine) if self.stream.is_some() => {
-                engine.transport(command);
-                Ok(())
-            }
+            Some(engine) if self.stream.is_some() => Ok(engine),
             _ if !self.engine_on => Err(
                 "the audio engine is off; switch it on with `audio.toggle_engine` first".to_owned(),
             ),
@@ -727,6 +808,7 @@ impl AudioHost {
         }
         self.stream = Some(stream);
         self.engine = Some(engine);
+        self.engines += 1;
         self.preview = Some(preview);
         self.last_sample = (
             self.shared.busy_ns.load(Relaxed),
@@ -740,7 +822,7 @@ impl AudioHost {
     /// set and the transport where the last engine left it (stopped), and
     /// hands its processor to the stream's callback through `handoff`.
     fn start_engine(
-        &self,
+        &mut self,
         info: &StreamInfo,
         mut handoff: Producer<Processor>,
     ) -> Result<Engine, String> {
@@ -748,7 +830,15 @@ impl AudioHost {
             .ok_or_else(|| "the device runs at 0 Hz".to_owned())?;
         let max_frames = (info.max_block_frames as usize).max(1);
         let config = EngineConfig::new(rate, max_frames);
-        let (engine, processor) = Engine::start(config, Registry::new())
+        let mut registry = Registry::new();
+        if let Some(media) = &self.media {
+            let streams = MediaStreams::new(Arc::clone(media))
+                .map_err(|e| format!("couldn't start the disk thread: {e}"))?;
+            let streams = Arc::new(streams);
+            registry.set_media(Arc::clone(&streams) as Arc<dyn MediaLibrary>);
+            self.streams = Some(streams);
+        }
+        let (engine, processor) = Engine::start(config, registry)
             .map_err(|e| format!("couldn't start the engine's threads: {e}"))?;
         if let Some(document) = &self.document {
             engine.sync(document);

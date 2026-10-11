@@ -16,6 +16,7 @@ use crate::mixer::{self, Route, Solo, TrackMixer, route};
 use crate::node::{NodeData, NodeKey, ParamValue};
 use crate::program::{EngineProgram, Input, Instance, Migration, NodeSlot, Span, Task};
 use crate::registry::Registry;
+use crate::sources::{ClipSources, Loaded, Loader};
 
 /// What the audio thread needs after an edit: a new program if the edit
 /// changed the song's structure, and parameter changes for nodes that keep
@@ -43,7 +44,9 @@ pub struct Update {
     pub unhosted: Vec<DeviceId>,
     /// Media that clips in the tracks sent here name and the registry's
     /// media library can't supply: missing, changed, or not audio. Those
-    /// clips play silence (the audio clips spec, R14).
+    /// clips play silence (the audio clips spec, R14). With a loader thread
+    /// (an engine on a device), media is found missing when the loader
+    /// tries it, so it's reported by a later update.
     pub missing: Vec<ContentHash>,
 }
 
@@ -103,6 +106,13 @@ struct Placed {
 /// Each program lists the nodes it takes over from the program compiled
 /// before it, so programs must reach the audio thread in the order they
 /// were compiled, none skipped.
+///
+/// Each clip's source comes from the registry's media library, which may
+/// read and decode files. A compiler opens sources itself, which suits an
+/// offline render on its own thread, until it's given a loader thread
+/// ([`Compiler::load_off_thread`]), as an engine on a device does: then a
+/// clip joins its track's list when its source is open, and the update the
+/// loader's answer brings ([`Compiler::loaded`]) sends it.
 pub struct Compiler {
     config: EngineConfig,
     registry: Registry,
@@ -110,6 +120,7 @@ pub struct Compiler {
     generation: u64,
     synced: Option<Document>,
     layout: BTreeMap<NodeKey, Placed>,
+    sources: ClipSources,
 }
 
 impl Compiler {
@@ -124,7 +135,52 @@ impl Compiler {
             generation: 0,
             synced: None,
             layout: BTreeMap::new(),
+            sources: ClipSources::default(),
         }
+    }
+
+    /// Opens clips' sources on a thread of its own from now on, rather than
+    /// on the compiler's: each answer goes to `deliver`, to come back
+    /// through [`Compiler::loaded`] on the compiler's thread. Without a
+    /// media library there's nothing to open, and no thread starts.
+    ///
+    /// # Errors
+    ///
+    /// If the thread can't start.
+    pub(crate) fn load_off_thread(
+        &mut self,
+        deliver: impl Fn(Loaded) + Send + 'static,
+    ) -> std::io::Result<()> {
+        if let Some(media) = self.registry.shared_media() {
+            self.sources.set_loader(Loader::start(media, deliver)?);
+        }
+        Ok(())
+    }
+
+    /// What the audio thread needs now that the loader has answered: the
+    /// clips of the track whose clip's source is open, or the media it
+    /// couldn't open. Nothing if the answer is stale, or no document has
+    /// been synced.
+    pub(crate) fn loaded(&mut self, loaded: Loaded) -> Update {
+        let mut update = Update::default();
+        match self.sources.loaded(loaded) {
+            Some(Ok(clip)) => {
+                let document = self.synced.take();
+                match document.as_ref().and_then(|d| d.clip_track(clip)) {
+                    Some(track) => {
+                        if let Some(document) = &document {
+                            self.send_clips(document, track, &mut update);
+                        }
+                    }
+                    // The clip went while its source opened.
+                    None => self.sources.retain(|_| true, |c| c != clip),
+                }
+                self.synced = document;
+            }
+            Some(Err(media)) => update.missing.push(media),
+            None => {}
+        }
+        update
     }
 
     /// The last program's generation, or 0 before the first.
@@ -163,6 +219,7 @@ impl Compiler {
                 update
                     .transport
                     .push(TransportCommand::SetLoop(loop_region(document)));
+                self.sources.cue_loop(self.loop_start_frame(document));
             }
             for track in tracks {
                 self.send_clips(document, track, &mut update);
@@ -185,19 +242,22 @@ impl Compiler {
     }
 
     /// Sends `track`'s clip player its clips, if it's an audio track: a
-    /// list, placed under `document`'s tempo map, with each clip's audio from
-    /// the media library. An empty list clears the player's.
-    fn send_clips(&self, document: &Document, track: TrackId, update: &mut Update) {
+    /// list, placed under `document`'s tempo map, with each clip's source.
+    /// An empty list clears the player's.
+    fn send_clips(&mut self, document: &Document, track: TrackId, update: &mut Update) {
         let Some(track) = document
             .track(track)
             .filter(|track| track.kind() == TrackKind::Audio)
         else {
             return;
         };
+        let loop_start = self.loop_start_frame(document);
         let built = ClipList::build(
             track,
             &document.settings().tempo,
             self.config.sample_rate,
+            loop_start,
+            &mut self.sources,
             self.registry.media(),
         );
         update.missing.extend(built.missing);
@@ -206,6 +266,18 @@ impl Compiler {
         update
             .data
             .push((NodeKey::Player(track.id()), self.gc.data(built.list)));
+    }
+
+    /// The song frame where `document`'s Arrangement loop starts, if it's
+    /// on: where a wrap lands, which clips' sources preload.
+    fn loop_start_frame(&self, document: &Document) -> Option<i64> {
+        loop_region(document).map(|region| {
+            document
+                .settings()
+                .tempo
+                .ticks_to_frames(region.start, self.config.sample_rate)
+                .get()
+        })
     }
 
     fn compile_with(&mut self, document: &Document, resend: &Resend) -> Update {
@@ -285,6 +357,12 @@ impl Compiler {
             unhosted: build.unhosted,
             ..Update::default()
         };
+        // Players that went hold no sources now, nor do new ones yet; open
+        // sources of clips that went are closed.
+        self.sources.retain(
+            |track| document.track(track).is_some() && !build.new_players.contains(&track),
+            |clip| document.clip_track(clip).is_some(),
+        );
         // A new player gets its track's clips if it has any; a player that
         // migrated keeps its own unless they changed, or the tempo map
         // moved them.
@@ -347,6 +425,7 @@ impl Compiler {
         self.generation = 0;
         self.synced = None;
         self.layout.clear();
+        self.sources.reset();
     }
 
     /// Adds a track and, first, the tracks that feed it. Returns its task.
@@ -512,6 +591,7 @@ impl std::fmt::Debug for Compiler {
         f.debug_struct("Compiler")
             .field("generation", &self.generation)
             .field("nodes", &self.layout.len())
+            .field("sources", &self.sources)
             .finish_non_exhaustive()
     }
 }
@@ -1190,5 +1270,71 @@ mod tests {
         assert_eq!(clips_in(&update, other), Some(1));
         // MIDI tracks have no clip player yet (WP-2.1).
         assert_eq!(update.data.len(), 2);
+    }
+
+    // Spec: audio-clips R18, R19
+    #[test]
+    fn with_a_loader_a_clip_joins_its_list_once_its_source_is_open() {
+        use std::sync::{Arc, mpsc};
+        use std::time::Duration;
+
+        use bl_core::time::Ticks;
+        use bl_model::{AudioData, Clip, ClipData, ContentHash};
+
+        let mut f = Fixture::new();
+        let audio = track(&mut f.editor, TrackKind::Audio, None);
+        let mut media = crate::MediaMap::new();
+        let file = bl_media::SampleData::new(48_000, vec![vec![0.5; 480]]).unwrap();
+        media.insert(ContentHash([1; 32]), Arc::new(file));
+        f.compiler.registry.set_media(Arc::new(media));
+        let (answers, loader) = mpsc::channel();
+        f.compiler
+            .load_off_thread(move |loaded| {
+                let _ = answers.send(loaded);
+            })
+            .unwrap();
+        f.sync();
+        let new_clip = |f: &mut Fixture, media: u8| {
+            let id = f.editor.new_id();
+            let data = ClipData::Audio(AudioData::new(ContentHash([media; 32])));
+            let update = f.apply(Command::CreateClip {
+                track: audio,
+                clip: Clip::new(id, Ticks::ZERO, Ticks::WHOLE, data),
+            });
+            (id, update)
+        };
+        let wait = || loader.recv_timeout(Duration::from_secs(5)).unwrap();
+
+        // The compiler doesn't open the file: the clip waits for the loader,
+        // and joins its track's list with the loader's answer.
+        let (id, update) = new_clip(&mut f, 1);
+        assert_eq!(clips_in(&update, audio), Some(0));
+        let update = f.compiler.loaded(wait());
+        assert_eq!(clips_in(&update, audio), Some(1));
+        assert!(update.program.is_none());
+
+        // An edit keeps the clip's source: nothing more is opened.
+        let update = f.apply(Command::SetClipGain {
+            clip: id,
+            gain: 0.5,
+        });
+        assert_eq!(clips_in(&update, audio), Some(1));
+        assert!(loader.recv_timeout(Duration::from_millis(50)).is_err());
+
+        // Media that isn't there is reported when the loader says so.
+        let (_, update) = new_clip(&mut f, 2);
+        assert_eq!(clips_in(&update, audio), Some(1));
+        assert!(update.missing.is_empty());
+        let update = f.compiler.loaded(wait());
+        assert!(update.data.is_empty());
+        assert_eq!(update.missing, vec![ContentHash([2; 32])]);
+
+        // An answer for a clip that's gone, or from before a reset, is let go.
+        let (gone, _) = new_clip(&mut f, 1);
+        f.apply(Command::DeleteClip { clip: gone });
+        assert!(f.compiler.loaded(wait()).is_empty());
+        let (_, _) = new_clip(&mut f, 1);
+        f.compiler.reset();
+        assert!(f.compiler.loaded(wait()).is_empty());
     }
 }

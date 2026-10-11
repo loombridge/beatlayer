@@ -791,7 +791,12 @@ fn a_drop_replaces_what_it_covers_in_one_step() {
             .track(track)
             .unwrap()
             .clips()
-            .map(|c| (c.start.get(), c.end().get(), c.offset.get()))
+            .map(|c| {
+                // Where its contents begin: an audio clip's Start marker
+                // moves as it's trimmed.
+                let origin = c.origin(&shell.editor().document().settings().tempo);
+                (c.start.get(), c.end().get(), (c.start - origin).get())
+            })
             .collect();
         clips.sort_unstable();
         clips

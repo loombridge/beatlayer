@@ -6,24 +6,20 @@
 //! duplicating) and the browser's drops (WP-1.10) both clear the span they
 //! place into with [`clear`] or [`clear_spans`], inside their own
 //! transaction, so each stays one undo step. A clip that loses its start
-//! keeps playing what it played: its offset into its contents grows by what
-//! it lost.
+//! keeps playing what it played: an audio clip's Start marker moves on by
+//! the time it lost, as Live's does, and a MIDI clip's offset into its
+//! contents grows by the ticks it lost.
 
 use std::collections::BTreeSet;
 
-use bl_core::time::Ticks;
+use bl_core::time::{TempoMap, Ticks};
 use bl_model::{Clip, ClipId, Command, EditError, Editor, ModelError, TrackId};
 
 /// A clip's part from `from` to `to`, which must lie inside it, playing what
-/// it played there.
+/// it played there under `tempo` ([`Clip::part`]).
 #[must_use]
-pub fn piece(clip: &Clip, from: Ticks, to: Ticks) -> Clip {
-    Clip {
-        start: from,
-        length: to - from,
-        offset: clip.offset + (from - clip.start),
-        ..clip.clone()
-    }
+pub fn piece(clip: &Clip, from: Ticks, to: Ticks, tempo: &TempoMap) -> Clip {
+    clip.part(from, to, tempo)
 }
 
 /// Splits `clip` at `at`, strictly inside it: the clip keeps the part before
@@ -38,10 +34,11 @@ pub fn split_off(editor: &mut Editor, clip: ClipId, at: Ticks) -> Result<ClipId,
     let missing = || EditError::Command(ModelError::NoSuchClip(clip));
     let track = doc.clip_track(clip).ok_or_else(missing)?;
     let original = doc.clip(clip).ok_or_else(missing)?.clone();
+    let tempo = doc.settings().tempo.clone();
     let id: ClipId = editor.new_id();
     let right = Clip {
         id,
-        ..piece(&original, at, original.end())
+        ..piece(&original, at, original.end(), &tempo)
     };
     editor.apply(Command::SetClipLength {
         clip,
@@ -161,7 +158,7 @@ pub fn clear_spans(
 
 #[cfg(test)]
 mod tests {
-    use bl_model::{AudioData, ClipData, ContentHash, TrackKind};
+    use bl_model::{ClipData, MidiData, TrackKind};
 
     use super::*;
 
@@ -211,8 +208,8 @@ mod tests {
                 editor
                     .apply(Command::CreateTrack {
                         id: track,
-                        kind: TrackKind::Audio,
-                        name: "Audio".to_owned(),
+                        kind: TrackKind::Midi,
+                        name: "MIDI".to_owned(),
                         parent: None,
                         index: 0,
                     })
@@ -223,7 +220,9 @@ mod tests {
                         editor.new_id(),
                         Ticks(start),
                         Ticks(length),
-                        ClipData::Audio(AudioData::new(ContentHash([7; 32]))),
+                        // MIDI, whose parts keep an offset: an audio
+                        // clip's Start marker moves instead.
+                        ClipData::Midi(MidiData::default()),
                     );
                     clip.offset = Ticks(offset);
                     if kept {

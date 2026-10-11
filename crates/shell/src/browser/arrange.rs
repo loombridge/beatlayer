@@ -119,6 +119,7 @@ pub fn add_files(
     editor: &mut Editor,
     media: &MediaStore,
     insert_marker: Ticks,
+    edge_fades: bool,
     args: &AddToArrangementArgs,
 ) -> Result<(AddResult, Vec<MediaFile>), AddError> {
     if args.paths.is_empty() {
@@ -188,12 +189,15 @@ pub fn add_files(
             let track = current.expect("a track is chosen or made above");
             let length = length_at(editor.document(), at, file.seconds);
             let id = editor.new_id();
-            let mut clip = Clip::new(
-                id,
-                at,
-                length,
-                ClipData::Audio(AudioData::new(file.media.hash)),
-            );
+            // Spec: audio-clips R7. With Create Fades on Clip Edges on, a
+            // new clip's edges fade over 4 ms.
+            let audio = AudioData::new(file.media.hash);
+            let audio = if edge_fades {
+                audio.with_edge_fades()
+            } else {
+                audio
+            };
+            let mut clip = Clip::new(id, at, length, ClipData::Audio(audio));
             clip.name.clone_from(&file.name);
             placing::clear(editor, track, at, at.saturating_add(length), &placed)?;
             placed.insert(id);

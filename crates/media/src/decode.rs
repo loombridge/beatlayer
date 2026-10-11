@@ -173,6 +173,10 @@ impl Decoder {
             });
         }
 
+        let reader: Box<dyn ReadSeek> = match fixed_block_size_quirk(&mut reader)? {
+            Some(block_size) => Box::new(FlacBlockSizeFix::new(reader, block_size)),
+            None => Box::new(reader),
+        };
         let source = Box::new(SeekableSource::new(reader)?);
         let stream = SymphoniaStream::open(source, extension, trim)?;
         Ok(Self {
@@ -304,6 +308,103 @@ pub fn decode_file(path: impl AsRef<Path>) -> Result<SampleData, MediaError> {
 /// A readable, seekable, sendable byte source.
 pub(crate) trait ReadSeek: Read + Seek + Send {}
 impl<T: Read + Seek + Send> ReadSeek for T {}
+
+/// Where a FLAC file's stream header keeps the minimum block size: after
+/// the `fLaC` marker and the STREAMINFO block's own four-byte header.
+const FLAC_MIN_BLOCK_OFFSET: u64 = 8;
+
+/// The block size of a FLAC stream whose frames all have one fixed block
+/// size but whose stream header gives a smaller minimum, or `None` for any
+/// other file. Some encoders (flacenc's whole-stream encoder among them)
+/// count a fixed-blocksize stream's short last block in the minimum, which
+/// the format leaves out; symphonia then takes the stream for a
+/// variable-blocksize one and refuses every frame, though other decoders
+/// read it. Leaves the reader at its start.
+fn fixed_block_size_quirk(reader: &mut (impl Read + Seek)) -> io::Result<Option<u16>> {
+    let found = find_fixed_block_size_quirk(reader);
+    reader.seek(SeekFrom::Start(0))?;
+    found
+}
+
+fn find_fixed_block_size_quirk(reader: &mut (impl Read + Seek)) -> io::Result<Option<u16>> {
+    // `fLaC`, the STREAMINFO block's header, and its 34 bytes.
+    let mut head = [0; 42];
+    reader.seek(SeekFrom::Start(0))?;
+    if read_up_to(reader, &mut head)? < head.len() || &head[0..4] != b"fLaC" || head[4] & 0x7f != 0
+    {
+        return Ok(None);
+    }
+    let min = u16::from_be_bytes([head[8], head[9]]);
+    let max = u16::from_be_bytes([head[10], head[11]]);
+    if min >= max {
+        return Ok(None);
+    }
+    // Past the metadata blocks to the first frame.
+    let mut last = head[4] & 0x80 != 0;
+    let mut offset = 42;
+    while !last {
+        let mut block = [0; 4];
+        reader.seek(SeekFrom::Start(offset))?;
+        if read_up_to(reader, &mut block)? < block.len() {
+            return Ok(None);
+        }
+        last = block[0] & 0x80 != 0;
+        offset += 4 + u64::from(u32::from_be_bytes([0, block[1], block[2], block[3]]));
+    }
+    let mut frame = [0; 2];
+    reader.seek(SeekFrom::Start(offset))?;
+    if read_up_to(reader, &mut frame)? < frame.len() {
+        return Ok(None);
+    }
+    // A frame starts with the 14-bit sync code, a reserved 0 bit, and the
+    // blocking strategy bit, 0 for a fixed block size: `0xFFF8` in all.
+    let fixed = frame == [0xff, 0xf8];
+    Ok(fixed.then_some(max))
+}
+
+/// Reads a FLAC file with [`fixed_block_size_quirk`] as if its stream
+/// header gave the right minimum block size, the stream's fixed one. The
+/// file itself isn't changed.
+struct FlacBlockSizeFix<R> {
+    inner: R,
+    position: u64,
+    /// The minimum block size's two bytes as they should read.
+    min_block: [u8; 2],
+}
+
+impl<R> FlacBlockSizeFix<R> {
+    fn new(inner: R, block_size: u16) -> Self {
+        Self {
+            inner,
+            position: 0,
+            min_block: block_size.to_be_bytes(),
+        }
+    }
+}
+
+impl<R: Read> Read for FlacBlockSizeFix<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        let start = self.position;
+        let end = start + n as u64;
+        for (byte, at) in self.min_block.iter().zip(FLAC_MIN_BLOCK_OFFSET..) {
+            if (start..end).contains(&at)
+                && let Ok(index) = usize::try_from(at - start)
+            {
+                buf[index] = *byte;
+            }
+        }
+        self.position = end;
+        Ok(n)
+    }
+}
+
+impl<R: Seek> Seek for FlacBlockSizeFix<R> {
+    fn seek(&mut self, to: SeekFrom) -> io::Result<u64> {
+        self.position = self.inner.seek(to)?;
+        Ok(self.position)
+    }
+}
 
 /// Adapts any `Read + Seek` to symphonia's `MediaSource`.
 ///
@@ -724,4 +825,63 @@ fn read_up_to(reader: &mut impl Read, buf: &mut [u8]) -> io::Result<usize> {
         }
     }
     Ok(filled)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Cursor;
+
+    use super::*;
+
+    /// `fLaC`, a last STREAMINFO block with `min` and `max` block sizes,
+    /// and a frame header's first two bytes.
+    fn flac_head(min: u16, max: u16, frame: [u8; 2]) -> Vec<u8> {
+        let mut bytes = b"fLaC".to_vec();
+        bytes.extend([0x80, 0, 0, 34]);
+        let mut info = [0; 34];
+        info[0..2].copy_from_slice(&min.to_be_bytes());
+        info[2..4].copy_from_slice(&max.to_be_bytes());
+        bytes.extend(info);
+        bytes.extend(frame);
+        bytes
+    }
+
+    const FIXED: [u8; 2] = [0xff, 0xf8];
+    const VARIABLE: [u8; 2] = [0xff, 0xf9];
+
+    #[test]
+    fn only_a_fixed_blocksize_stream_with_a_smaller_minimum_is_the_quirk() {
+        let quirk = |bytes: Vec<u8>| fixed_block_size_quirk(&mut Cursor::new(bytes)).unwrap();
+        assert_eq!(quirk(flac_head(1792, 4096, FIXED)), Some(4096));
+        assert_eq!(quirk(flac_head(4096, 4096, FIXED)), None);
+        assert_eq!(quirk(flac_head(1792, 4096, VARIABLE)), None);
+        assert_eq!(quirk(b"RIFF\0\0\0\0WAVEfmt ".to_vec()), None);
+        assert_eq!(quirk(b"fLaC".to_vec()), None);
+    }
+
+    #[test]
+    fn the_fix_reads_the_fixed_minimum_however_the_reads_fall() {
+        let bytes = flac_head(1792, 4096, FIXED);
+        let mut expected = bytes.clone();
+        expected[8..10].copy_from_slice(&4096u16.to_be_bytes());
+        for chunk in [1, 3, 9, bytes.len()] {
+            let mut fix = FlacBlockSizeFix::new(Cursor::new(bytes.clone()), 4096);
+            let mut read: Vec<u8> = Vec::new();
+            let mut buf = vec![0; chunk];
+            loop {
+                let n = fix.read(&mut buf).unwrap();
+                if n == 0 {
+                    break;
+                }
+                read.extend(&buf[..n]);
+            }
+            assert_eq!(read, expected, "reads of {chunk}");
+        }
+        // After a seek past the field, nothing else changes.
+        let mut fix = FlacBlockSizeFix::new(Cursor::new(bytes.clone()), 4096);
+        fix.seek(SeekFrom::Start(10)).unwrap();
+        let mut rest = Vec::new();
+        fix.read_to_end(&mut rest).unwrap();
+        assert_eq!(rest, bytes[10..]);
+    }
 }

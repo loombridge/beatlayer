@@ -1,0 +1,626 @@
+//! Agent permissions per call (WP-1.15b), headless through the agent API:
+//! an edit that would delete or shorten clips it doesn't act on (moving,
+//! copying, resizing, nudging, duplicating, or pasting clips over others,
+//! or dropping files on them) asks first as destructive, decided from its
+//! arguments against the set as it is, while the same edit into empty space
+//! doesn't; an agent's calls wait for the person's gesture to end and land
+//! after it, each its own undo step; and the rights that let an agent skip
+//! asking go with its own token. The rules are in the agent permissions
+//! spec.
+
+use bl_agent::client::{Client, InProcess};
+use bl_agent::{Agent, Credential, Outcome, QuestionKind};
+use bl_commands::Permission;
+use bl_shell::{GesturePhase, Invocation, Shell};
+use serde_json::{Value, json};
+
+/// A bar of 4/4, in ticks.
+const BAR: u64 = 2_822_400;
+
+/// The app's agent API on a headless shell: the person allows the agent
+/// called `editor` to connect, which gives it its own approval, and
+/// declines everything else unless a test says otherwise.
+fn app() -> Client<InProcess> {
+    let mut client = Client::new(InProcess::new(Agent::for_app(), Shell::headless()));
+    client.transport().answer = Box::new(|q| matches!(q.kind, QuestionKind::Connect { .. }));
+    client.initialize("editor").unwrap();
+    client
+}
+
+fn call(client: &mut Client<InProcess>, tool: &str, args: Value) -> Value {
+    client
+        .call(tool, args)
+        .unwrap()
+        .ok()
+        .unwrap_or_else(|e| panic!("{tool}: {e}"))
+}
+
+fn track(client: &mut Client<InProcess>, name: &str) -> u64 {
+    call(
+        client,
+        "query",
+        json!({ "path": format!("track \"{name}\"") }),
+    )["id"]
+        .as_u64()
+        .unwrap()
+}
+
+/// Puts a clip called `name` on `track` (MIDI or audio, as the track is)
+/// from `bar` (from 0) for `bars`, and returns its ID.
+fn clip(client: &mut Client<InProcess>, track: u64, name: &str, bar: u64, bars: u64) -> u64 {
+    let audio = call(client, "query", json!({ "id": track }))["kind"] == "audio";
+    let data = if audio {
+        json!({ "audio": { "media": "11".repeat(32) } })
+    } else {
+        json!({ "midi": { "notes": [] } })
+    };
+    let result = call(
+        client,
+        "run",
+        json!({ "commands": [{ "command": "clip.create", "args": {
+            "track": track,
+            "clip": { "id": { "$new": name }, "name": name, "start": bar * BAR,
+                      "length": bars * BAR, "mute": false, "data": data } } }] }),
+    );
+    result["ids"][name].as_u64().unwrap()
+}
+
+fn exists(client: &mut Client<InProcess>, clip: u64) -> bool {
+    client
+        .call("query", json!({ "id": clip }))
+        .unwrap()
+        .ok()
+        .is_ok()
+}
+
+/// How an edit went: whether it asked the person (who declined), and the
+/// classes a dry run gave it first.
+#[derive(Debug, PartialEq)]
+struct Went {
+    asked: bool,
+    permission: String,
+}
+
+/// Dry-runs `command`, then runs it with the person declining any
+/// question; checks that a declined call changed nothing.
+fn attempt(client: &mut Client<InProcess>, command: &str, args: &Value) -> Went {
+    let dry = call(
+        client,
+        "run",
+        json!({ "commands": [{ "command": command, "args": args }], "dry_run": true }),
+    );
+    let asked_before = client.transport().asked.len();
+    let before = client.transport().shell.editor().document().clone();
+    let result = client
+        .call(
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }] }),
+        )
+        .unwrap();
+    let asked = client.transport().asked.len() > asked_before;
+    if asked {
+        assert!(
+            result.is_error && result.text.contains("declined"),
+            "{result:?}"
+        );
+        assert_eq!(
+            *client.transport().shell.editor().document(),
+            before,
+            "{command}: a declined call changes nothing"
+        );
+        assert_eq!(dry["would"], "ask the person first", "{dry}");
+    } else {
+        assert!(!result.is_error, "{command}: {}", result.text);
+        assert_eq!(dry["would"], "run", "{dry}");
+    }
+    Went {
+        asked,
+        permission: dry["permission"].as_str().unwrap_or_default().to_owned(),
+    }
+}
+
+/// A set with clip A at bar 1 on the first MIDI track and clip B at bar
+/// `b` (from 0), each a bar long.
+fn two_clips(b: u64) -> (Client<InProcess>, u64, u64, u64) {
+    let mut client = app();
+    let midi = track(&mut client, "1 MIDI");
+    let a = clip(&mut client, midi, "A", 0, 1);
+    let b = clip(&mut client, midi, "B", b, 1);
+    (client, midi, a, b)
+}
+
+#[test]
+fn an_agent_s_clip_move_over_another_clip_asks_and_one_into_empty_space_doesn_t() {
+    // Spec: agent-permissions R1, R2.
+    let (mut client, _, a, b) = two_clips(4);
+    let over = json!({ "clips": [a], "to": "5.1.1" });
+    let went = attempt(&mut client, "arrangement.move_clips", &over);
+    assert_eq!(
+        went,
+        Went {
+            asked: true,
+            permission: "edit and destructive".to_owned()
+        }
+    );
+    let asked = client.transport().asked.last().unwrap().clone();
+    assert!(
+        asked.contains("wants to run destructive command:"),
+        "{asked}"
+    );
+    assert!(asked.contains("Move Clips (destructive): clips"), "{asked}");
+    // The dry run names what it would cover.
+    let dry = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "arrangement.move_clips", "args": over }],
+                "dry_run": true }),
+    );
+    assert_eq!(dry["results"][0]["replaces"], json!([b]));
+
+    // Into empty space it's an edit: it runs without asking.
+    let empty = json!({ "clips": [a], "to": "3.1.1" });
+    let went = attempt(&mut client, "arrangement.move_clips", &empty);
+    assert!(!went.asked);
+    assert_eq!(went.permission, "edit");
+
+    // Allowed, the move over B replaces it, as the person's own move does,
+    // as the agent's undo step.
+    client.transport().answer = Box::new(|_| true);
+    let result = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "arrangement.move_clips", "args": over }] }),
+    );
+    assert_eq!(result["asked_first"], true);
+    assert_eq!(result["undo_step"], "editor: Move Clips");
+    assert!(!exists(&mut client, b));
+    assert!(exists(&mut client, a));
+}
+
+#[test]
+fn every_edit_that_places_clips_over_others_is_destructive_decided_from_its_arguments() {
+    // Spec: agent-permissions R1, R2. Each case: the edit over B, then the
+    // same edit where nothing is in its way.
+    type Case = (&'static str, u64, fn(u64, u64) -> Value, u64);
+    let cases: [Case; 6] = [
+        // Copying A onto B.
+        (
+            "arrangement.move_clips",
+            4,
+            |a, _| json!({ "clips": [a], "to": "5.1.1", "copy": true }),
+            8,
+        ),
+        // Lengthening A over B.
+        (
+            "arrangement.resize_clips",
+            2,
+            |a, _| json!({ "clips": [a], "edge": "end", "by": 2 * BAR }),
+            8,
+        ),
+        // Nudging A into B, right beside it.
+        (
+            "arrangement.nudge",
+            1,
+            |a, _| json!({ "clips": [a], "direction": "right" }),
+            8,
+        ),
+        // Duplicating A right after itself, where B is.
+        (
+            "arrangement.duplicate",
+            1,
+            |a, _| json!({ "clips": [a] }),
+            8,
+        ),
+        // Moving B back over A: A is replaced, and B, which it acts on,
+        // isn't counted.
+        (
+            "arrangement.move_clips",
+            4,
+            |_, b| json!({ "clips": [b], "by": -((4 * BAR) as i64) }),
+            8,
+        ),
+        // Resizing A's start later only shortens A itself.
+        (
+            "arrangement.resize_clips",
+            8,
+            |a, _| json!({ "clips": [a], "edge": "start", "by": BAR / 4 }),
+            8,
+        ),
+    ];
+    for (index, (command, b_bar, args, empty_bar)) in cases.into_iter().enumerate() {
+        let (mut client, _, a, b) = two_clips(b_bar);
+        let went = attempt(&mut client, command, &args(a, b));
+        let shortens_itself = index == 5;
+        assert_eq!(
+            went.asked, !shortens_itself,
+            "case {index} ({command}) over B: {went:?}"
+        );
+        if !shortens_itself {
+            assert!(went.permission.contains("destructive"), "{went:?}");
+        }
+        // The same edit with B out of the way.
+        let (mut client, _, a, b) = two_clips(empty_bar);
+        let went = attempt(&mut client, command, &args(a, b));
+        assert!(!went.asked, "case {index} ({command}) into empty space");
+        assert_eq!(went.permission, "edit", "case {index}");
+    }
+}
+
+#[test]
+fn pasting_over_clips_asks_and_into_empty_space_doesn_t() {
+    // Spec: agent-permissions R1, R2.
+    let (mut client, midi, a, _) = two_clips(4);
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "arrangement.copy", "args": { "clips": [a] } }] }),
+    );
+    let over = json!({ "at": "5.1.1", "track": midi });
+    assert!(attempt(&mut client, "arrangement.paste", &over).asked);
+    let empty = json!({ "at": "9.1.1", "track": midi });
+    assert!(!attempt(&mut client, "arrangement.paste", &empty).asked);
+}
+
+#[test]
+fn a_drop_from_the_browser_over_clips_is_destructive_as_well_as_external() {
+    // Spec: agent-permissions R3. Its files aren't read before the person
+    // allows it, so a drop is destructive when a clip on its track ends
+    // after where it lands.
+    let mut client = app();
+    let audio = track(&mut client, "3 Audio");
+    let held = clip(&mut client, audio, "Held", 4, 2);
+    let path = std::env::temp_dir().join("bl-agent-permissions-never-read.wav");
+    let drop = |at: u64, track: Option<u64>| {
+        let mut args = json!({ "paths": [path.to_string_lossy()], "at": at * BAR });
+        if let Some(track) = track {
+            args["track"] = json!(track);
+        }
+        args
+    };
+    let went = attempt(
+        &mut client,
+        "browser.add_to_arrangement",
+        &drop(5, Some(audio)),
+    );
+    assert_eq!(
+        went,
+        Went {
+            asked: true,
+            permission: "destructive and external".to_owned()
+        }
+    );
+    let asked = client.transport().asked.last().unwrap().clone();
+    assert!(
+        asked.contains("wants to run destructive and external command:"),
+        "{asked}"
+    );
+    assert!(
+        asked.contains("Add Files to Arrangement (destructive and external)"),
+        "{asked}"
+    );
+    let dry = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "browser.add_to_arrangement",
+                               "args": drop(5, Some(audio)) }], "dry_run": true }),
+    );
+    assert_eq!(dry["results"][0]["replaces"], json!([held]));
+
+    // After every clip on the track, or on a new track, it's external only.
+    for args in [drop(6, Some(audio)), drop(0, None)] {
+        let went = attempt(&mut client, "browser.add_to_arrangement", &args);
+        assert!(went.asked, "external still asks");
+        assert_eq!(went.permission, "external", "{args}");
+    }
+}
+
+#[test]
+fn an_autonomous_agent_s_move_over_clips_runs_without_asking() {
+    // Spec: agent-permissions R2, R8.
+    let (mut client, _, a, b) = two_clips(4);
+    client
+        .transport()
+        .shell
+        .run(
+            "agent.set_autonomous",
+            json!({ "client": "editor", "on": true }),
+        )
+        .unwrap();
+    let asked = client.transport().asked.len();
+    let result = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "arrangement.move_clips",
+                               "args": { "clips": [a], "to": "5.1.1" } }] }),
+    );
+    assert_eq!(client.transport().asked.len(), asked);
+    assert_eq!(result["undo_step"], "editor: Move Clips");
+    assert!(!exists(&mut client, b));
+}
+
+#[test]
+fn headless_a_move_over_clips_is_refused_without_autonomous() {
+    // Spec: agent-permissions R2. `bl-cli mcp` has no person to ask.
+    for autonomous in [false, true] {
+        let mut client = Client::new(InProcess::new(
+            Agent::headless(autonomous),
+            Shell::headless(),
+        ));
+        client.initialize("script").unwrap();
+        let midi = track(&mut client, "1 MIDI");
+        let a = clip(&mut client, midi, "A", 0, 1);
+        let b = clip(&mut client, midi, "B", 4, 1);
+        let result = client
+            .call(
+                "run",
+                json!({ "commands": [{ "command": "arrangement.move_clips",
+                                       "args": { "clips": [a], "to": "5.1.1" } }] }),
+            )
+            .unwrap();
+        assert_eq!(result.is_error, !autonomous, "{}", result.text);
+        if !autonomous {
+            assert!(result.text.contains("--autonomous"), "{}", result.text);
+        }
+        assert_eq!(exists(&mut client, b), !autonomous);
+    }
+}
+
+#[test]
+fn a_scheduled_move_over_clips_asks_when_it_s_scheduled() {
+    // Spec: agent-permissions R1.
+    let (mut client, _, a, _) = two_clips(4);
+    let result = client
+        .call(
+            "schedule",
+            json!({ "action": "add", "at": "2.1.1", "command": "arrangement.move_clips",
+                    "args": { "clips": [a], "to": "5.1.1" } }),
+        )
+        .unwrap();
+    assert!(result.is_error && result.text.contains("declined"));
+    let asked = client.transport().asked.last().unwrap().clone();
+    assert!(
+        asked.contains("At 2.1.1: Move Clips (destructive)"),
+        "{asked}"
+    );
+}
+
+#[test]
+fn describe_says_which_commands_rise_with_their_arguments() {
+    let mut client = app();
+    let move_clips = call(
+        &mut client,
+        "describe_command",
+        json!({ "command": "arrangement.move_clips" }),
+    );
+    assert!(
+        move_clips["raised_by_arguments"]
+            .as_str()
+            .unwrap()
+            .contains("destructive"),
+        "{move_clips}"
+    );
+    let split = call(
+        &mut client,
+        "describe_command",
+        json!({ "command": "arrangement.split" }),
+    );
+    assert!(split.get("raised_by_arguments").is_none());
+}
+
+/// The agent API driven as the app's host drives it, without a client:
+/// the session's messages go to `Agent::handle`, and calls that wait are
+/// resumed with `Agent::resume`.
+struct Host {
+    agent: Agent,
+    shell: Shell,
+    session: String,
+    next: u64,
+}
+
+impl Host {
+    fn new() -> Self {
+        let mut agent = Agent::for_app();
+        let session = agent.open_session_as(None, Credential::Server);
+        let mut host = Self {
+            agent,
+            shell: Shell::headless(),
+            session,
+            next: 0,
+        };
+        let outcome = host.send(
+            "initialize",
+            json!({ "protocolVersion": "2025-11-25", "capabilities": {},
+                    "clientInfo": { "name": "editor" } }),
+        );
+        let Outcome::Ask(question) = outcome else {
+            panic!("{outcome:?}")
+        };
+        host.agent
+            .resolve(&mut host.shell, question.id, true)
+            .unwrap();
+        host
+    }
+
+    fn send(&mut self, method: &str, params: Value) -> Outcome {
+        self.next += 1;
+        let message = json!({ "jsonrpc": "2.0", "id": self.next, "method": method,
+                              "params": params });
+        self.agent.handle(&mut self.shell, &self.session, message)
+    }
+
+    fn tool(&mut self, tool: &str, args: Value) -> Outcome {
+        self.send("tools/call", json!({ "name": tool, "arguments": args }))
+    }
+
+    fn history(&self) -> Vec<String> {
+        self.shell
+            .editor()
+            .undo_history()
+            .map(str::to_owned)
+            .collect()
+    }
+}
+
+fn result(outcome: Outcome) -> Value {
+    let Outcome::Reply(Some(reply)) = outcome else {
+        panic!("{outcome:?}")
+    };
+    reply["result"]["structuredContent"].clone()
+}
+
+#[test]
+fn agent_edits_wait_for_a_value_drag_and_land_after_it_in_order() {
+    // Spec: agent-permissions R5, R6. A drag on a value (a volume fader)
+    // holds a transaction open; agents' edits, and their reads, wait for it
+    // and then run in the order they came, each its own undo step.
+    let mut host = Host::new();
+    let steps = host.history().len();
+    host.shell.begin_gesture("Change volume");
+    host.shell
+        .run("mixer.set_volume", json!({ "track": 4, "volume": 0.5 }))
+        .unwrap();
+    let rename = |name: &str| {
+        json!({ "commands": [{ "command": "track.rename", "args": { "track": 3, "name": name } }],
+                "label": format!("Call it {name}") })
+    };
+    let first = host.tool("run", rename("Keys"));
+    let second = host.tool("run", rename("Bass"));
+    let read = host.tool("query", json!({ "id": 3 }));
+    let (Outcome::Wait(first), Outcome::Wait(second), Outcome::Wait(read)) = (first, second, read)
+    else {
+        panic!("every call waits while the drag goes on")
+    };
+    assert!(host.agent.resume(&mut host.shell).is_none());
+    host.shell
+        .run("mixer.set_volume", json!({ "track": 4, "volume": 0.25 }))
+        .unwrap();
+    host.shell.end_gesture();
+
+    let mut done = Vec::new();
+    while let Some((ticket, outcome)) = host.agent.resume(&mut host.shell) {
+        done.push((ticket, result(outcome)));
+    }
+    assert_eq!(
+        done.iter().map(|(t, _)| *t).collect::<Vec<_>>(),
+        [first, second, read]
+    );
+    assert_eq!(done[0].1["undo_step"], "editor: Call it Keys");
+    assert_eq!(done[1].1["undo_step"], "editor: Call it Bass");
+    // The read came after both edits, so it sees them.
+    assert_eq!(done[2].1["name"], "Bass");
+    let history = host.history();
+    assert_eq!(history.len(), steps + 3);
+    assert_eq!(
+        history[..3],
+        [
+            "editor: Call it Bass",
+            "editor: Call it Keys",
+            "Change volume"
+        ]
+    );
+    // Nothing waits now: the next call runs straight away.
+    assert!(matches!(
+        host.tool("query", json!({})),
+        Outcome::Reply(Some(_))
+    ));
+}
+
+#[test]
+fn a_call_sent_mid_drag_that_asks_first_asks_after_the_drop() {
+    // Spec: agent-permissions R1, R5. Its class is decided against the set
+    // as the drop left it: the drag moved B into A's way.
+    let mut host = Host::new();
+    let midi: Vec<_> = host.shell.editor().document().top_level().collect();
+    let clip = |host: &mut Host, name: &str, bar: u64| {
+        let outcome = host.tool(
+            "run",
+            json!({ "commands": [{ "command": "clip.create", "args": {
+                "track": midi[0].0.get(),
+                "clip": { "id": { "$new": name }, "name": name, "start": bar * BAR,
+                          "length": BAR, "mute": false, "data": { "midi": { "notes": [] } } } } }] }),
+        );
+        result(outcome)["ids"][name].as_u64().unwrap()
+    };
+    let a = clip(&mut host, "A", 0);
+    let b = clip(&mut host, "B", 8);
+    let drag = |by: u64| {
+        Invocation::new(
+            "arrangement.move_clips",
+            json!({ "clips": [b], "by": -((by * BAR) as i64) }),
+        )
+    };
+    host.shell
+        .gesture(GesturePhase::Update, Some(&drag(2)))
+        .unwrap();
+    // Sent while B is out of A's way, at bar 7.
+    let moved = host.tool(
+        "run",
+        json!({ "commands": [{ "command": "arrangement.move_clips",
+                               "args": { "clips": [a], "to": "5.1.1" } }] }),
+    );
+    let Outcome::Wait(ticket) = moved else {
+        panic!("{moved:?}")
+    };
+    // Dropped at bar 5, where A is going.
+    host.shell
+        .gesture(GesturePhase::Commit, Some(&drag(4)))
+        .unwrap();
+    let Some((resumed, Outcome::Ask(question))) = host.agent.resume(&mut host.shell) else {
+        panic!("the move asks after the drop")
+    };
+    assert_eq!(resumed, ticket);
+    let QuestionKind::Confirm { classes, .. } = &question.kind else {
+        panic!("{question:?}")
+    };
+    assert_eq!(classes, &[Permission::Destructive]);
+    // Nothing else runs until the person answers.
+    assert!(host.agent.resume(&mut host.shell).is_none());
+    host.agent.resolve(&mut host.shell, question.id, false);
+    assert!(host.shell.editor().document().clip(clip_id(b)).is_some());
+}
+
+fn clip_id(id: u64) -> bl_model::ClipId {
+    bl_model::ClipId(bl_core::id::Id::new(id).unwrap())
+}
+
+#[test]
+fn agent_server_commands_stay_the_person_s_own() {
+    // Spec: agent-permissions R9. Whatever token it carries, an agent can't
+    // change its own rights or anyone's token.
+    let mut client = Client::new(InProcess::with_credential(
+        Agent::for_app(),
+        Shell::headless(),
+        Credential::Agent("editor".to_owned()),
+    ));
+    client
+        .transport()
+        .shell
+        .run("agent.approve_client", json!({ "client": "editor" }))
+        .unwrap();
+    client.initialize("editor").unwrap();
+    for (command, args) in [
+        (
+            "agent.set_autonomous",
+            json!({ "client": "editor", "on": true }),
+        ),
+        ("agent.new_client_token", json!({ "client": "editor" })),
+        ("agent.new_token", json!({})),
+        ("agent.approve_client", json!({ "client": "other" })),
+    ] {
+        let result = client
+            .call(
+                "run",
+                json!({ "commands": [{ "command": command, "args": args }] }),
+            )
+            .unwrap();
+        assert!(result.is_error, "{command}");
+        assert!(result.text.contains("only a person"), "{}", result.text);
+    }
+    assert!(
+        !client
+            .transport()
+            .shell
+            .agent_settings()
+            .is_autonomous("editor")
+    );
+}

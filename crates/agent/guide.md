@@ -62,7 +62,7 @@ Tempos are quarter notes per minute. A new set plays at 120 BPM in 4/4.
 
 The **loop** belongs to the set: `set_loop` moves its brace (`start` and `length` in ticks) and `set_loop_enabled` switches it on or off, each an undo step. While it's on, playback that reaches the brace's end jumps back to its start.
 
-The engine acts on a transport command at the start of its next block, a few milliseconds after your call. Headless (`bl-cli mcp`), no engine plays the song, so play, stop, continue, and locate are refused, and `status` says so; the loop can still be set.
+The engine acts on a transport command at the start of its next block, a few milliseconds after your call. In the app, the song plays through the app's audio engine while its audio device runs, and your transport commands share one queue with the person's, in the order they come. Headless (`bl-cli mcp`), or while the app's audio engine is off, nothing plays the song, so play, stop, continue, and locate are refused, and `status` says so; the loop can still be set, and scheduled commands wait.
 
 ## Good practice
 
@@ -81,10 +81,16 @@ Each command has a permission class:
 |---|---|---|
 | read | Changes nothing | Runs |
 | edit | An undoable change to the project, or a preference easily changed back | Runs |
-| destructive | Removes content (deleting tracks, clips, devices), or loses work undo can't restore (discarding changes, overwriting files, quitting) | The person is asked first, and your call waits for the answer |
+| destructive | Removes content (deleting tracks, clips, devices, or placing clips over others), or loses work undo can't restore (discarding changes, overwriting files, quitting) | The person is asked first, and your call waits for the answer |
 | external | Reaches outside the project: files elsewhere, devices, the network, other applications | The person is asked first, and your call waits for the answer |
 
+Some commands' class depends on their arguments. In the Arrangement a clip placed over part of another replaces the part it covers, as in Live, so moving, resizing, nudging, duplicating, or pasting clips, or adding files from the browser, onto time where other clips are is destructive as well as its own class, and asks first; the same command into empty space doesn't. `describe_command` marks these commands (`raised_by_arguments`), and a `dry_run` says which class a call has (`permission`), whether it would ask, and which clips it would replace (`replaces`). A call's class is decided when it runs, against the song as it is then.
+
 The person can turn on autonomous mode for you in Beatlayer's Settings window, and then destructive and external commands run without asking. If the person declines, nothing changes: don't retry without asking them. Headless (`bl-cli mcp`), there's no one to ask, so these commands are refused unless it was started with `--autonomous`.
+
+**Your rights go with your token.** When the person first allows you, Beatlayer makes you a token of your own. Your client sends it as its bearer token, and then you're never asked about again and you're autonomous if the person switched that on, whatever name your client gives. A client that sends the agent server's token instead is asked about each time it connects, and is never autonomous, even with an allowed agent's name.
+
+**The person comes first.** While the person is dragging something in Beatlayer (clips, or a value such as a fader), your calls wait until they let go, then run in the order they came, each its own undo step. So does a scheduled command that fires mid-drag: the sound changes on its sample, and the set follows after the drop.
 
 The agent server's own settings (`agent.*`: switching it on, allowing agents, autonomous mode, the token) change what agents may do, so only a person can change them.
 

@@ -19,8 +19,11 @@
 //! clicks, and works out who solo silences (the mixer spec).
 //! Node data is a message of its own ([`Sender::send_data`]): each audio
 //! track's [`clips`] reach its clip player that way, placed through the
-//! tempo map with their audio from the registry's [`MediaLibrary`], so clip
-//! edits never compile either (the audio clips spec). A
+//! tempo map, so clip edits never compile either (the audio clips spec).
+//! Each clip reads its audio through a source of its own from the
+//! registry's [`MediaLibrary`]: [`MediaStreams`] streams long files from
+//! disk. A running engine opens sources on a loader thread, so loading a
+//! long file never holds up the compiler thread, or Play and Stop behind it. A
 //! [`ScheduledCommand`] runs at a musical position on its exact frame,
 //! which is how an agent plays in time (D17).
 //!
@@ -35,6 +38,7 @@
 //! |---|---|---|
 //! | [`Engine`] | main | Starts the threads below, takes documents and commands, shows the state |
 //! | [`Compiler`] and [`Sender`] | compiler | Document → program and parameter changes; the queue's one sender |
+//! | The loader | loader | Opens clips' sources, which reads and decodes files, for the compiler |
 //! | [`Processor`] | audio | Runs the program each block |
 //! | [`DropThread`] | drop | Frees what the audio thread let go of |
 //! | [`Monitor`] | any one | Reads the playhead, meters, and CPU load the audio thread publishes |
@@ -91,6 +95,7 @@ pub mod preview;
 mod processor;
 mod program;
 mod registry;
+mod sources;
 mod state;
 pub mod transport;
 
@@ -99,7 +104,7 @@ pub mod testing;
 
 use bl_core::time::SampleRate;
 
-pub use clips::{ClipPlayer, ClipSource, MediaLibrary, MediaMap};
+pub use clips::{ClipPlayer, MediaLibrary, MediaMap, MediaStreams, OpenedSource, SourceCues};
 pub use compiler::{Compiler, Update};
 pub use engine::{CompileCounts, Engine, Restarter, Sender, channel};
 pub use gc::{Collector, DROP_PERIOD, DropThread, GcHandle, Program};

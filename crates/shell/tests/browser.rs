@@ -75,10 +75,22 @@ fn wav(path: &Path, frames: u32) {
 fn library(scratch: &Scratch) -> PathBuf {
     let root = scratch.path("User Library");
     create_user_library(&root).unwrap();
-    wav(&root.join("Samples/Drums/Kick 10.wav"), 4_800);
-    wav(&root.join("Samples/Drums/Kick 2.wav"), 4_800);
-    wav(&root.join("Samples/Drums/Snare.aif.wav"), 4_800);
-    wav(&root.join("Samples/Pads/Warm Pad.wav"), 48_000);
+    wav(
+        &root.join("Samples").join("Drums").join("Kick 10.wav"),
+        4_800,
+    );
+    wav(
+        &root.join("Samples").join("Drums").join("Kick 2.wav"),
+        4_800,
+    );
+    wav(
+        &root.join("Samples").join("Drums").join("Snare.aif.wav"),
+        4_800,
+    );
+    wav(
+        &root.join("Samples").join("Pads").join("Warm Pad.wav"),
+        48_000,
+    );
     wav(&root.join("Loop 120.wav"), 96_000);
     std::fs::write(root.join("Song.blset"), b"not really a set").unwrap();
     std::fs::write(root.join("notes.txt"), b"left out").unwrap();
@@ -200,10 +212,10 @@ fn the_user_library_is_made_once_with_live_s_folders() {
         assert!(root.join(folder).is_dir(), "{folder}");
     }
     std::fs::remove_dir(root.join("Defaults")).unwrap();
-    wav(&root.join("Samples/mine.wav"), 10);
+    wav(&root.join("Samples").join("mine.wav"), 10);
     assert!(!create_user_library(&root).unwrap(), "left alone after");
     assert!(!root.join("Defaults").exists(), "nothing is put back");
-    assert!(root.join("Samples/mine.wav").is_file());
+    assert!(root.join("Samples").join("mine.wav").is_file());
 
     let mut shell = Shell::headless();
     shell.set_user_library(Some(root.clone()));
@@ -249,7 +261,10 @@ fn current_project_follows_the_set_file() {
         .to_path_buf();
     assert_eq!(project, scratch.path("Song Project"));
     assert_eq!(shell.browser_view().project(), Some(project.as_path()));
-    wav(&project.join("Samples/Imported/Vox.wav"), 100);
+    wav(
+        &project.join("Samples").join("Imported").join("Vox.wav"),
+        100,
+    );
     let state: BrowserState = run(
         &mut shell,
         ids::OPEN_PLACE,
@@ -359,7 +374,7 @@ fn folders_list_what_beatlayer_opens_folders_first() {
     );
     assert_eq!(state.rows[5].kind, ItemKind::Audio);
     assert_eq!(state.rows[6].kind, ItemKind::Set);
-    let drums = root.join("Samples/Drums");
+    let drums = root.join("Samples").join("Drums");
     run::<BrowserState>(
         &mut shell,
         ids::OPEN_FOLDER,
@@ -595,7 +610,7 @@ fn selecting_a_file_previews_it_while_the_switch_is_on() {
     shell.start_audio();
     assert!(shell.audio().is_running(), "the null device runs");
     assert!(preview(&mut shell).on, "on in a new install");
-    let pad = root.join("Samples/Pads/Warm Pad.wav");
+    let pad = root.join("Samples").join("Pads").join("Warm Pad.wav");
     let before = shell.editor().document().clone();
 
     run::<BrowserState>(&mut shell, ids::SELECT, json!({ "paths": [text(&pad)] }));
@@ -622,7 +637,7 @@ fn selecting_a_file_previews_it_while_the_switch_is_on() {
     let state: PreviewState = run(&mut shell, ids::SET_PREVIEW, json!({}));
     assert!(!state.on);
     assert_eq!(shell.switch_state(ids::SET_PREVIEW), Some(false));
-    let kick = root.join("Samples/Drums/Kick 2.wav");
+    let kick = root.join("Samples").join("Drums").join("Kick 2.wav");
     run::<BrowserState>(&mut shell, ids::SELECT, json!({ "paths": [text(&kick)] }));
     assert_eq!(preview(&mut shell).loading, None);
     shell.set_focused_area(Area::Browser);
@@ -783,7 +798,7 @@ fn a_drop_replaces_what_it_covers_in_one_step() {
     };
     let (looped, pad) = (
         text(&root.join("Loop 120.wav")),
-        text(&root.join("Samples/Pads/Warm Pad.wav")),
+        text(&root.join("Samples").join("Pads").join("Warm Pad.wav")),
     );
     // A four-bar clip from the one-bar loop.
     let placed: AddResult = run(
@@ -865,7 +880,7 @@ fn several_files_go_in_sequence_or_spread() {
     let (mut shell, root) = shell_with_library(&scratch);
     let files = [
         root.join("Loop 120.wav"),
-        root.join("Samples/Pads/Warm Pad.wav"),
+        root.join("Samples").join("Pads").join("Warm Pad.wav"),
     ]
     .map(|p| text(&p));
     let track = audio_tracks(&shell)[1];
@@ -996,7 +1011,7 @@ fn enter_loads_onto_the_selected_track_or_a_new_one() {
 fn added_media_is_saved_and_registered_again() {
     let scratch = Scratch::new("media");
     let (mut shell, root) = shell_with_library(&scratch);
-    let pad = root.join("Samples/Pads/Warm Pad.wav");
+    let pad = root.join("Samples").join("Pads").join("Warm Pad.wav");
     let result: AddResult = run(
         &mut shell,
         ids::ADD_TO_ARRANGEMENT,

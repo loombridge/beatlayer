@@ -80,8 +80,8 @@ fn wav(path: &Path, frames: u32) {
 fn harness(scratch: &Scratch) -> (Harness, PathBuf) {
     let root = scratch.0.join("User Library");
     create_user_library(&root).unwrap();
-    wav(&root.join("Samples/Drums/Kick.wav"), 4_800);
-    wav(&root.join("Samples/Drums/Snare.wav"), 4_800);
+    wav(&root.join("Samples").join("Drums").join("Kick.wav"), 4_800);
+    wav(&root.join("Samples").join("Drums").join("Snare.wav"), 4_800);
     wav(&root.join("Loop.wav"), 96_000);
     let mut h = Harness::with_title_bar(Window::Main);
     h.shell.set_user_library(Some(root.clone()));
@@ -588,7 +588,7 @@ fn dragging_onto_a_track_places_a_clip_at_the_drop() {
     h.shell
         .run(
             ids::OPEN_FOLDER,
-            json!({ "path": root.join("Samples/Drums").to_string_lossy() }),
+            json!({ "path": root.join("Samples").join("Drums").to_string_lossy() }),
         )
         .unwrap();
     h.settle();
@@ -612,7 +612,7 @@ fn dragging_onto_a_track_places_a_clip_at_the_drop() {
 fn only_visible_rows_are_built() {
     let scratch = Scratch::new("many");
     let (mut h, root) = harness(&scratch);
-    let many = root.join("Samples/Many");
+    let many = root.join("Samples").join("Many");
     std::fs::create_dir_all(&many).unwrap();
     for i in 0..2_000 {
         std::fs::write(many.join(format!("Hit {i}.wav")), b"").unwrap();

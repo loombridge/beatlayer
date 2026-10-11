@@ -16,6 +16,10 @@
 //!   Stop, the Loop switch, and the tempo, time-signature, position, and
 //!   loop fields, each running a registered command.
 //!
+//! - [`mixer`]: the Mixer view (WP-1.9): the Session View's columns and
+//!   mixer, the Arrangement's mixer, and the strip controls the
+//!   Arrangement's track headers share, each running a registered command.
+//!
 //! Nothing here owns a window or an event loop: the app (`beatlayer`)
 //! drives these from its winit loop, and tests drive them headless with an
 //! `egui::Context` and synthetic input.
@@ -28,6 +32,7 @@ pub mod keymap;
 pub mod layout;
 pub mod main_window;
 pub mod menus;
+pub mod mixer;
 pub mod settings_window;
 pub mod theme;
 pub mod widgets;

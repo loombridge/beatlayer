@@ -152,8 +152,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Cmd+Option+I"]
 win = ["Ctrl+Alt+I"]
-status = "pending"
-package = "WP-1.9"
+status = "bound"
+commands = [
+  { id = "mixer_view.in_out", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-VIEW-013"
@@ -164,7 +166,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["Cmd+Option+S"]
 win = ["Ctrl+Alt+S"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "mixer_view.sends", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-VIEW-014"
@@ -175,8 +180,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Cmd+Option+M"]
 win = ["Ctrl+Alt+M"]
-status = "pending"
-package = "WP-1.9"
+status = "bound"
+commands = [
+  { id = "mixer_view.toggle", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-VIEW-015"
@@ -872,7 +879,7 @@ milestone = "M1"
 mac = ["Down", "Up"]
 win = ["Down", "Up"]
 status = "widget"
-handler = "the focused value field steps its value (the Control Bar's position, loop, tempo, and time-signature fields run `transport.locate`, `transport.set_loop`, `song.set_tempo`, `song.set_time_signatures`)"
+handler = "the focused value field steps its value (the Control Bar's position, loop, tempo, and time-signature fields run `transport.locate`, `transport.set_loop`, `song.set_tempo`, `song.set_time_signatures`; the mixers' and the track headers' volume and pan run `mixer.set_volume` and `mixer.set_pan`)"
 
 [[shortcut]]
 id = "S-VAL-002"
@@ -908,7 +915,7 @@ milestone = "M1"
 mac = ["Delete"]
 win = ["Delete"]
 status = "widget"
-handler = "the focused value field returns to its default"
+handler = "the focused value field returns to its default (a mixer's volume to 0 dB, its pan to the centre)"
 
 [[shortcut]]
 id = "S-VAL-005"
@@ -2746,8 +2753,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Option+Shift+M"]
 win = ["Alt+Shift+M"]
-status = "pending"
-package = "WP-1.9"
+status = "bound"
+commands = [
+  { id = "mixer_view.focus", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-COMP-001"
@@ -2980,7 +2989,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["Cmd+Option+R"]
 win = ["Ctrl+Alt+R"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "mixer_view.return_tracks", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-TRACK-012"

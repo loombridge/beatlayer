@@ -23,6 +23,10 @@ use crate::commands::{
     SET_SAVE, SET_SAVE_AS, VIEW_FULL_SCREEN, VIEW_TOGGLE_BROWSER, VIEW_TOGGLE_SESSION_ARRANGEMENT,
     VIEW_ZOOM_IN, VIEW_ZOOM_OUT, VIEW_ZOOM_RESET, WINDOW_CLOSE,
 };
+use crate::mixer_view::{
+    FOCUS as MIXER_FOCUS, IN_OUT as MIXER_IN_OUT, RETURN_TRACKS as MIXER_RETURN_TRACKS,
+    SENDS as MIXER_SENDS, TOGGLE as MIXER_TOGGLE, VOLUME as MIXER_VOLUME,
+};
 
 /// The platform a menu bar is for: macOS has an application menu; Windows
 /// and Linux put Settings in Options, Quit in File, and About in Help.
@@ -520,19 +524,22 @@ const VIEW: &[Row] = &[
         ),
     ),
     SEPARATOR,
-    ("M-VIEW-031", "Mixer", Key(&["S-VIEW-014"])),
+    ("M-VIEW-031", "Mixer", Cmd(MIXER_TOGGLE)),
     ("M-VIEW-032", "Mixer Controls", Submenu),
-    ("M-VIEW-032a", "In/Out", Key(&["S-VIEW-012"])),
-    ("M-VIEW-032b", "Sends", Key(&["S-VIEW-013"])),
-    ("M-VIEW-032c", "Volume", Pending(None)),
+    ("M-VIEW-032a", "In/Out", Cmd(MIXER_IN_OUT)),
+    ("M-VIEW-032b", "Sends", Cmd(MIXER_SENDS)),
+    ("M-VIEW-032c", "Volume", Cmd(MIXER_VOLUME)),
+    ("M-VIEW-032-sep1", "", Action::Separator),
     ("M-VIEW-032d", "Track Options", Pending(None)),
     ("M-VIEW-032e", "Crossfader", Pending(None)),
     ("M-VIEW-032f", "Performance Impact", Pending(None)),
-    ("M-VIEW-032g", "Return Tracks", Key(&["S-TRACK-011"])),
+    ("M-VIEW-032-sep2", "", Action::Separator),
+    ("M-VIEW-032g", "Return Tracks", Cmd(MIXER_RETURN_TRACKS)),
     ("M-VIEW-033", "Arrangement Track Controls", Submenu),
     ("M-VIEW-033a", "In/Out", Pending(None)),
     ("M-VIEW-033b", "Volume", Pending(None)),
     ("M-VIEW-033c", "Track Options", Pending(None)),
+    ("M-VIEW-033-sep1", "", Action::Separator),
     ("M-VIEW-033d", "Return Tracks", Pending(None)),
     SEPARATOR,
     ("M-VIEW-034", "Overview", Key(&["S-VIEW-011"])),
@@ -574,7 +581,7 @@ const NAVIGATE: &[Row] = &[
     ("M-NAV-008", "Learn View", Key(&["S-FOCUS-008"])),
     ("M-NAV-009", "Tuning", Pending(None)),
     SEPARATOR,
-    ("M-NAV-010", "Mixer", Key(&["S-ARR-035"])),
+    ("M-NAV-010", "Mixer", Cmd(MIXER_FOCUS)),
     ("M-NAV-011", "Clip Panels", Key(&["S-FOCUS-010"])),
     SEPARATOR,
     ("M-NAV-012", "Previous", Cmd(FOCUS_PREVIOUS)),
@@ -863,7 +870,7 @@ mod tests {
             );
             separators += ours.iter().filter(|row| **row == "—").count();
         }
-        assert_eq!(separators, 62, "README: 62 separators in the menu bar");
+        assert_eq!(separators, 65, "README: 65 separators in the menu bar");
     }
 
     #[test]

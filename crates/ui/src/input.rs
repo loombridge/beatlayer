@@ -89,7 +89,13 @@ impl KeyDispatcher {
             let Some(hit) = keymap.resolve(self.platform, *key, mods, &contexts) else {
                 return true;
             };
-            let args = Value::Object(hit.command.args.clone());
+            let mut fields = hit.command.args.clone();
+            // F1 to F8 switch the track their number names (the mixer view
+            // spec, R9): the shell turns the number into the track.
+            if let (Some(index), Some(_)) = (hit.index, hit.command.toggles.as_ref()) {
+                fields.insert(bl_shell::KEY_TRACK_NUMBER.to_owned(), Value::from(index));
+            }
+            let args = Value::Object(fields);
             if !shell.can_invoke(&hit.command.id, &args) {
                 return true;
             }

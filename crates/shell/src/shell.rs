@@ -27,6 +27,8 @@ use crate::commands::{
     TestToneArgs, TestToneState, ThemeArgs, ViewResult, ZoomArgs,
 };
 use crate::files::{ProjectFiles, SetStore, factory_default_set};
+use crate::mixer_controls::{self, Switch};
+use crate::mixer_view::{MixerOf, MixerView, MixerViewError};
 use crate::permission::CallPermission;
 use crate::settings::{
     OnByDefault, Preferences, SettingsPage, ThemeChoice, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT,
@@ -36,7 +38,13 @@ use bl_shell_spec::arrangement as view_ids;
 use bl_shell_spec::browser as browser_ids;
 use bl_shell_spec::editing as edit_ids;
 use bl_shell_spec::export as export_ids;
+use bl_shell_spec::mixer_view as mixer_ids;
 use bl_shell_spec::transport as transport_ids;
+
+/// The argument a key in a range (F1 to F8) adds to a toggling mixer
+/// command for the track it numbers, counting the mixer's columns from 1;
+/// [`Shell::invoke`] turns it into the track.
+pub const KEY_TRACK_NUMBER: &str = "track_number";
 
 /// The views the main window's main area shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -277,6 +285,12 @@ pub struct Shell {
     /// Whether a person's gesture (a drag on a value) holds a transaction
     /// open, so its document commands are one undo step.
     gesture: bool,
+    /// What the mixers show (WP-1.9).
+    mixer: MixerView,
+    /// The meters the engine last published, one per track (WP-1.9).
+    meters: Vec<bl_engine::TrackMeter>,
+    /// Whether the meters were the engine's when last polled.
+    metering: bool,
 }
 
 impl fmt::Debug for Shell {
@@ -373,6 +387,9 @@ impl Shell {
             edit_gesture: None,
             seen_insert_marker: None,
             gesture: false,
+            mixer: MixerView::new(),
+            meters: Vec::new(),
+            metering: false,
         };
         shell.give_agents_tokens();
         shell
@@ -710,6 +727,8 @@ impl Shell {
         self.document_revision = self.document_revision.wrapping_add(1);
         self.arrangement
             .forget_missing_tracks(self.editor.document());
+        self.mixer
+            .clamp_scroll(self.editor.document(), &self.arrangement);
         self.audio.sync(self.editor.document());
     }
 
@@ -717,6 +736,49 @@ impl Shell {
     #[must_use]
     pub fn arrangement(&self) -> &ArrangementView {
         &self.arrangement
+    }
+
+    /// What the mixers show (WP-1.9).
+    #[must_use]
+    pub fn mixer_view(&self) -> &MixerView {
+        &self.mixer
+    }
+
+    /// The mixer of the view in front.
+    #[must_use]
+    pub fn front_mixer(&self) -> MixerOf {
+        match self.main_view {
+            MainView::Arrangement => MixerOf::Arrangement,
+            MainView::Session => MixerOf::Session,
+        }
+    }
+
+    /// The tracks with a column in the mixers, left to right (the mixer
+    /// view spec, R1).
+    #[must_use]
+    pub fn mixer_columns(&self) -> Vec<TrackId> {
+        crate::mixer_view::columns(self.editor.document(), &self.arrangement)
+    }
+
+    /// The meters the engine last published, as [`Shell::poll_engine`] took
+    /// them: one per track, in the order the tracks run.
+    #[must_use]
+    pub fn meters(&self) -> &[bl_engine::TrackMeter] {
+        &self.meters
+    }
+
+    /// One track's meter, if the engine published one.
+    #[must_use]
+    pub fn meter(&self, track: TrackId) -> Option<&bl_engine::TrackMeter> {
+        self.meters.iter().find(|meter| meter.track == track)
+    }
+
+    /// Sets the meters the windows draw, as [`Shell::poll_engine`] does with
+    /// the engine's: for benchmarks and tests with no engine running (while
+    /// one runs, the next poll takes its meters instead).
+    pub fn set_meters(&mut self, meters: &[bl_engine::TrackMeter]) {
+        self.meters.clear();
+        self.meters.extend_from_slice(meters);
     }
 
     /// Records the size of the Arrangement's scrolling lanes, as the main
@@ -1049,6 +1111,16 @@ impl Shell {
     /// R14). Returns the transport it took.
     pub fn poll_engine(&mut self) -> EngineTransport {
         let engine = self.audio.transport_state();
+        // Spec: mixer-view R10. The meters the strips and headers draw: the
+        // engine's while one runs, and none once it stops. Without an
+        // engine, meters set with `set_meters` stay.
+        let running = self.audio.engine_running();
+        if running || self.metering {
+            self.metering = running;
+            // Not a revision: the window redraws while a meter shows a
+            // level, and nothing else depends on them.
+            self.audio.meters_into(&mut self.meters);
+        }
         let brace = self.editor.document().settings().arrangement_loop;
         self.set_transport(TransportView {
             playing: engine.playing,
@@ -1156,8 +1228,17 @@ impl Shell {
             ids::FOCUS_TOGGLE_TAB_NAVIGATION => Some(self.prefs.tab_navigation),
             ids::AUDIO_TOGGLE_ENGINE => Some(self.audio.engine_on()),
             browser_ids::SET_PREVIEW => Some(self.browser_view.preview_on()),
+            _ if mixer_ids::handles(id) => self.mixer.switch_state(id, self.front_mixer()),
             _ => self.arrangement.switch_state(id),
         }
+    }
+
+    /// Whether a submenu opens now: Arrangement Track Controls is disabled
+    /// while the Session View is in front (observed in Live 12.4.6; the
+    /// mixer view spec, R12).
+    #[must_use]
+    pub fn can_open_submenu(&self, row: &str) -> bool {
+        !(row == "M-VIEW-033" && self.main_view == MainView::Session)
     }
 
     /// The label a menu shows for a command now: Undo and Redo name the step
@@ -1275,6 +1356,17 @@ impl Shell {
                 .is_some_and(|schema| bl_commands::validate(schema, &args).is_ok())
                 && self.arrangement.can_run(id, &args, self.editor.document());
         }
+        if mixer_ids::handles(id) {
+            let args = if args.is_null() {
+                json!({})
+            } else {
+                args.clone()
+            };
+            return spec
+                .args
+                .as_ref()
+                .is_some_and(|schema| bl_commands::validate(schema, &args).is_ok());
+        }
         let Ok(args) = self.filled_args(id, args.clone()) else {
             return false;
         };
@@ -1320,7 +1412,75 @@ impl Shell {
             fields.entry("name").or_insert_with(|| json!(name));
             fields.entry("index").or_insert_with(|| json!(index));
         }
+        if let Some(switch) = Switch::of_command(id)
+            && !fields.contains_key("track")
+        {
+            // Spec: mixer-view R9. A title-bar key, or F1 to F8, names no
+            // track: it acts on the selected tracks, or the numbered one,
+            // toggling the first one's switch.
+            let tracks = self.key_tracks(&mut fields);
+            let invocations = mixer_controls::toggled(self.editor.document(), switch, &tracks);
+            let first = invocations.first().ok_or_else(|| ShellError::Unavailable {
+                command: id.to_owned(),
+                reason: "no selected track has this switch".to_owned(),
+            })?;
+            return Ok(first.args.clone());
+        }
         Ok(Value::Object(fields))
+    }
+
+    /// The tracks a toggling mixer key acts on: the track numbered by
+    /// `track_number` (F1 to F8, counting the mixer's columns from 1), which
+    /// it takes out of `fields`, or the selected tracks.
+    fn key_tracks(&self, fields: &mut serde_json::Map<String, Value>) -> Vec<TrackId> {
+        match fields.remove(KEY_TRACK_NUMBER).and_then(|n| n.as_u64()) {
+            Some(number) => self
+                .mixer_columns()
+                .get((number as usize).wrapping_sub(1))
+                .copied()
+                .into_iter()
+                .collect(),
+            None => self.arrangement.selected_tracks().to_vec(),
+        }
+    }
+
+    /// Runs a toggling mixer key (S, 0, C, F1 to F8) on every track it acts
+    /// on, as one undo step (the mixer view spec, R9).
+    fn toggle_tracks(
+        &mut self,
+        id: &str,
+        switch: Switch,
+        args: Value,
+    ) -> Result<Value, ShellError> {
+        let Value::Object(mut fields) = args else {
+            return Err(ShellError::InvalidArgs {
+                command: id.to_owned(),
+                message: "the arguments must be a JSON object".to_owned(),
+            });
+        };
+        let tracks = self.key_tracks(&mut fields);
+        let invocations = mixer_controls::toggled(self.editor.document(), switch, &tracks);
+        if invocations.is_empty() {
+            return Err(ShellError::Unavailable {
+                command: id.to_owned(),
+                reason: "no selected track has this switch".to_owned(),
+            });
+        }
+        let opened = !self.gesture;
+        if opened {
+            self.begin_gesture(switch.gesture());
+        }
+        let mut result = Ok(Value::Null);
+        for invocation in invocations {
+            result = self.run(&invocation.id, invocation.args);
+            if result.is_err() {
+                break;
+            }
+        }
+        if opened {
+            self.end_gesture();
+        }
+        result
     }
 
     /// Runs a command as a person asked for it, from a menu, a key, or a
@@ -1377,6 +1537,10 @@ impl Shell {
             browser_ids::ADD_FOLDER if !has("path") => {
                 self.effects.push(Effect::PickFolder);
                 Ok(Value::Null)
+            }
+            _ if !has("track") && Switch::of_command(id).is_some() => {
+                let switch = Switch::of_command(id).expect("just checked");
+                self.toggle_tracks(id, switch, args)
             }
             "track.create" if !has("id") => {
                 let mut args = self.filled_args(id, args)?;
@@ -1511,6 +1675,28 @@ impl Shell {
             }
             return result.map(|state| to_value(&state));
         }
+        if mixer_ids::handles(id) {
+            let front = self.front_mixer();
+            let result = self
+                .mixer
+                .run(id, args, front, self.editor.document(), &self.arrangement)
+                .map_err(
+                    |MixerViewError::InvalidArgs(message)| ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message,
+                    },
+                );
+            if result.is_ok() && id == mixer_ids::FOCUS {
+                // Spec: mixer-view R13.
+                self.focused_window = WindowKind::Main;
+                self.focused_area = Area::MainView;
+                self.effects.push(Effect::FocusArea(Area::MainView));
+            }
+            if id != mixer_ids::STATE {
+                self.touch();
+            }
+            return result.map(|state| to_value(&state));
+        }
         if browser_ids::handles(id) {
             return self.run_browser(id, args);
         }
@@ -1597,6 +1783,7 @@ impl Shell {
                 self.main_view = MainView::Arrangement;
                 self.message = None;
                 self.arrangement.reset();
+                self.mixer.reset();
                 self.new_set_transport();
                 self.document_changed();
                 self.set_file_changed();
@@ -1617,6 +1804,7 @@ impl Shell {
                 self.dirty = false;
                 self.message = None;
                 self.arrangement.reset();
+                self.mixer.reset();
                 // The set's files go into the media store, so its clips'
                 // waveforms build (browser R15) and the engine finds their
                 // audio when the set reaches it.

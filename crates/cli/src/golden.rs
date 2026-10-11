@@ -36,6 +36,10 @@
 
 mod fixtures;
 
+/// The fader drag the Mixer view's test records (WP-1.9), as the frames and
+/// volumes the `fader-gesture` fixture plays.
+pub use fixtures::{FADER_GESTURE, fader_gesture_frames};
+
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;

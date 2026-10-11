@@ -607,6 +607,19 @@ impl AudioHost {
         self.memory
     }
 
+    /// Copies the meters the engine last published into `out`, one per
+    /// track (the mixer spec, R19), reusing its capacity. Empty while no
+    /// engine runs or before its first block.
+    pub fn meters_into(&mut self, out: &mut Vec<bl_engine::TrackMeter>) {
+        out.clear();
+        if let Some(engine) = self.engine.as_mut() {
+            let state = engine.state();
+            if state.program.is_some() {
+                out.extend_from_slice(&state.meters);
+            }
+        }
+    }
+
     /// Switches the engine on or off: off closes the device, on reopens it
     /// with the current settings.
     ///

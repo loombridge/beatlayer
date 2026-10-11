@@ -1,12 +1,17 @@
 //! The Arrangement's track headers (L-ARR-006 to 009): each track's title
 //! in its colour with the fold button and name, then the In/Out and mixer
-//! columns and the meter (arrangement-view R3, R14). The In/Out and mixer
-//! controls are drawn where Live puts them and are inert until the packages
-//! that build them: the mixer (WP-1.6, WP-1.9) and recording (WP-2.13).
+//! columns and the meter (arrangement-view R3, R14). The mixer column's
+//! activator, Solo, Arm, volume, and pan, and the meter, are the Mixer
+//! view's controls (WP-1.9; the mixer view spec, R4), so they work as a
+//! strip's do. The In/Out column and the sends are drawn where Live puts
+//! them and are inert until the packages that build them: recording
+//! (WP-2.13) and routing (WP-2.19).
 
 use bl_model::{Track, TrackId, TrackKind};
 use bl_shell::Invocation;
+use bl_shell::Shell;
 use bl_shell::arrangement_commands as ids;
+use bl_shell::mixer_controls::Switch;
 use egui::accesskit::Role;
 use egui::{
     Align2, Color32, CursorIcon, Id, Rect, Sense, Shape, Stroke, StrokeKind, Ui, WidgetInfo,
@@ -16,10 +21,13 @@ use serde_json::json;
 
 use crate::layout::header_columns::{IN_OUT, METER, MIXER, TITLE};
 use crate::main_window::UiEvent;
+use crate::mixer::{Place, StripParts};
 use crate::theme::Theme;
 
 /// One header to draw.
 pub struct Header<'a> {
+    /// The shell, whose mixer commands the mixer column runs.
+    pub shell: &'a Shell,
     /// The track.
     pub track: &'a Track,
     /// The header's rectangle: the whole column for this row.
@@ -110,22 +118,13 @@ fn inert(
 /// The volume as the mixer column shows it, in dB.
 #[must_use]
 pub fn volume_text(volume: f64) -> String {
-    if volume <= 0.0 {
-        "-inf".to_owned()
-    } else {
-        format!("{:.1}", 20.0 * volume.log10())
-    }
+    bl_shell::mixer_controls::volume_text(volume)
 }
 
 /// The pan as the mixer column shows it: C, or a number and L or R.
 #[must_use]
 pub fn pan_text(pan: f64) -> String {
-    let amount = (pan.abs() * 50.0).round() as i64;
-    match amount {
-        0 => "C".to_owned(),
-        _ if pan < 0.0 => format!("{amount}L"),
-        _ => format!("{amount}R"),
-    }
+    bl_shell::mixer_controls::pan_text(pan)
 }
 
 /// Draws one track's header and adds what the person did to `events`.
@@ -138,6 +137,7 @@ pub fn header(
     events: &mut Vec<UiEvent>,
 ) {
     let Header {
+        shell,
         track,
         rect,
         ref activator,
@@ -287,7 +287,15 @@ pub fn header(
         }
     }
 
-    // The mixer column's first row: activator, Solo, Arm (L-ARR-009).
+    // The mixer column's first row: activator, Solo, Arm (L-ARR-009), live
+    // since WP-1.9.
+    let parts = StripParts {
+        shell,
+        theme,
+        place: Place::Header,
+        track: id,
+        activator,
+    };
     let mixer = column(MIXER, row_top, row_top + 14.0);
     let third = mixer.width() / 3.0;
     let cell = |i: f32| {
@@ -296,54 +304,15 @@ pub fn header(
             pos2(mixer.left() + third * (i + 1.0) - 1.0, mixer.bottom()),
         )
     };
-    let has_mute = track.kind().has_mute_and_solo();
-    if has_mute {
-        inert(
-            ui,
-            theme,
-            cell(0.0),
-            ("arrangement-activator", id),
-            Role::Button,
-            "Track Activator",
-            activator,
-            "WP-1.9",
-        );
-        inert(
-            ui,
-            theme,
-            cell(1.0),
-            ("arrangement-solo", id),
-            Role::Button,
-            "Solo",
-            "S",
-            "WP-1.9",
-        );
-    }
-    if track.kind().has_arm() {
-        inert(
-            ui,
-            theme,
-            cell(2.0),
-            ("arrangement-arm", id),
-            Role::Button,
-            "Arm Recording",
-            "●",
-            "WP-2.13",
-        );
+    for (i, switch) in [Switch::Activator, Switch::Solo, Switch::Arm]
+        .into_iter()
+        .enumerate()
+    {
+        parts.switch(ui, switch, cell(i as f32), events);
     }
 
     // The meter (L-ARR-006).
-    let meter = column(METER, row_top, rect.bottom() - 2.0);
-    inert(
-        ui,
-        theme,
-        meter,
-        ("arrangement-meter", id),
-        Role::Meter,
-        "Track Meter",
-        "",
-        "WP-1.9",
-    );
+    parts.meter(ui, column(METER, row_top, rect.bottom() - 2.0));
 
     if height < 36.0 || folded {
         return;
@@ -353,26 +322,8 @@ pub fn header(
     let half = row2.width() / 2.0;
     let left_half = Rect::from_min_max(row2.min, pos2(row2.left() + half - 1.0, row2.bottom()));
     let right_half = Rect::from_min_max(pos2(row2.left() + half + 1.0, row2.top()), row2.max);
-    inert(
-        ui,
-        theme,
-        left_half,
-        ("arrangement-volume", id),
-        Role::Slider,
-        "Track Volume",
-        &volume_text(track.mixer().volume),
-        "WP-1.9",
-    );
-    inert(
-        ui,
-        theme,
-        right_half,
-        ("arrangement-pan", id),
-        Role::Slider,
-        "Track Panning",
-        &pan_text(track.mixer().pan),
-        "WP-1.9",
-    );
+    parts.volume_field(ui, left_half, events);
+    parts.pan(ui, right_half, None, events);
     if height >= 52.0 && track.kind() != TrackKind::Main {
         let row3 = column(MIXER, row_top + 32.0, row_top + 46.0);
         let a = Rect::from_min_max(row3.min, pos2(row3.left() + half - 1.0, row3.bottom()));

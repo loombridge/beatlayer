@@ -25,6 +25,14 @@
       "bits": 24,
       "render_hash": "fnv1a64:6dfe12718a75e409"
     },
+    "fader-gesture": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 96000,
+      "bits": 24,
+      "render_hash": "fnv1a64:08a25736a5628be5"
+    },
     "fader-move": {
       "made_on": "macos-aarch64",
       "sample_rate": 48000,

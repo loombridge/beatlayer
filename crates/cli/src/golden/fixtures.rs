@@ -105,6 +105,14 @@ pub(super) const FIXTURES: &[Fixture] = &[
         build: solo_a_return,
     },
     Fixture {
+        name: "fader-gesture",
+        about: "A fader dragged with the mouse in the Session mixer (WP-1.9): the volumes the \
+                window's drag set on a 440 Hz tone, one 60 Hz frame apart, recorded in \
+                tests/fixtures/ui/fader-gesture.json by bl-ui's mixer test, each gliding to its \
+                value over 20 ms, so the render has no zipper noise.",
+        build: fader_gesture,
+    },
+    Fixture {
         name: "fader-move",
         about: "A fader drag from 0 dB to -20 dB and back in 1 dB steps every 1/32 beat, a \
                 mute and an unmute, and a pan sweep from left to right in steps, each gliding \
@@ -699,6 +707,50 @@ fn fader_move() -> Scene {
         song.schedule(at, key, mixer::PAN, pan);
     }
     song.finish(3.25)
+}
+
+/// The fader drag bl-ui's mixer test makes through the window and the
+/// shell (`fader_gesture` in `crates/ui/tests/mixer.rs`): the track's volume
+/// after each 60 Hz frame of the drag.
+pub const FADER_GESTURE: &str = include_str!("../../../../tests/fixtures/ui/fader-gesture.json");
+
+/// The frames a [`FADER_GESTURE`] volume lands on: one 60 Hz frame apart,
+/// from half a second in.
+#[must_use]
+pub fn fader_gesture_frames() -> Vec<(u64, f64)> {
+    let gesture: serde_json::Value =
+        serde_json::from_str(FADER_GESTURE).expect("the recorded gesture is JSON");
+    let rate = gesture["frame_rate"].as_u64().expect("a frame rate");
+    let per_frame = u64::from(SAMPLE_RATE.hz()) / rate;
+    gesture["volumes"]
+        .as_array()
+        .expect("the volumes")
+        .iter()
+        .enumerate()
+        .map(|(i, volume)| {
+            (
+                u64::from(SAMPLE_RATE.hz()) / 2 + per_frame * i as u64,
+                volume.as_f64().expect("a volume"),
+            )
+        })
+        .collect()
+}
+
+/// Spec: mixer-view R18. The recorded drag's volumes, each as the
+/// `mixer.set_volume` it was, scheduled as the engine's volume change on its
+/// frame.
+fn fader_gesture() -> Scene {
+    let mut song = Song::new();
+    let lead = song.track(TrackKind::Midi, "Lead", None);
+    song.tone(lead, 440.0, -12.0);
+    let key = NodeKey::Mixer(lead);
+    let tempo = song.editor.document().settings().tempo.clone();
+    for (frame, volume) in fader_gesture_frames() {
+        let at = tempo
+            .seconds_to_ticks(SAMPLE_RATE.frames_to_seconds(bl_core::time::Frames(frame as i64)));
+        song.schedule(at, key, mixer::VOLUME, volume);
+    }
+    song.finish(2.0)
 }
 
 /// Spec: audio-clips R1, R3. Clips start on 1.2.3 (frame 36,000) and 2.3.2

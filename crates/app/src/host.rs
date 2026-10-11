@@ -26,7 +26,7 @@ use bl_shell::settings::{Preferences, ThemeChoice, default_config_dir};
 use bl_shell::{Effect, Invocation, Shell, WindowKind, commands as ids};
 use bl_ui::input::KeyDispatcher;
 use bl_ui::keymap::{Keymap, Platform};
-use bl_ui::layout::{MINIMUM, SETTINGS_WINDOW, TITLE_BAR};
+use bl_ui::layout::{TITLE_BAR, apply_zoom, fit_main_window, follow_zoom, settings_window};
 use bl_ui::main_window::{DrawnMenuBar, MainWindowUi, UiEvent};
 use bl_ui::settings_window::SettingsUi;
 use bl_ui::theme::{Theme, fonts};
@@ -67,6 +67,55 @@ fn content_height(height: f32) -> f32 {
 /// Live shows none (L-WIN-002).
 fn draws_title_bar(window: &Window) -> bool {
     DRAWN_TITLE_BAR && window.fullscreen().is_none()
+}
+
+/// The largest inner size, in points, a window opens at on a screen of
+/// `screen` points: room is left for the menu bar, the Dock, or the taskbar.
+fn screen_limit(screen: LogicalSize<f32>) -> egui::Vec2 {
+    egui::vec2(screen.width * 0.95, screen.height * 0.9)
+}
+
+/// The screen limit of the screen a window is on.
+fn window_screen_limit(window: &Window) -> Option<egui::Vec2> {
+    let monitor = window
+        .current_monitor()
+        .or_else(|| window.primary_monitor())?;
+    Some(screen_limit(
+        monitor.size().to_logical::<f32>(monitor.scale_factor()),
+    ))
+}
+
+/// A size brought within a screen limit, if there is one.
+fn within(size: egui::Vec2, limit: Option<egui::Vec2>) -> egui::Vec2 {
+    limit.map_or(size, |limit| size.min(limit))
+}
+
+/// Gives the main window its smallest size at `zoom`, and grows it to that
+/// if it's smaller, as far as its screen allows (interface-zoom R7). A
+/// screen too small for the zoom's minimum gets a window as big as it
+/// allows, showing the layout's minimum from its top-left corner.
+fn resize_main_window(window: &Window, zoom: f32) {
+    let inner = window.inner_size().to_logical::<f32>(window.scale_factor());
+    let inner = egui::vec2(inner.width, inner.height);
+    let (minimum, wanted) =
+        fit_main_window(inner, zoom, DRAWN_TITLE_BAR, window_screen_limit(window));
+    window.set_min_inner_size(Some(LogicalSize::new(minimum.x, minimum.y)));
+    if window.fullscreen().is_some() {
+        return;
+    }
+    if (wanted - inner).length() > 0.5 {
+        let _ = window.request_inner_size(LogicalSize::new(wanted.x, wanted.y));
+    }
+}
+
+/// Sizes the Settings window for `zoom`: Live's 562 × 617 points at 100%,
+/// its content scaled, within its screen (interface-zoom R8).
+fn fit_settings_window(window: &Window, zoom: f32) {
+    let size = within(
+        settings_window(zoom, DRAWN_TITLE_BAR),
+        window_screen_limit(window),
+    );
+    let _ = window.request_inner_size(LogicalSize::new(size.x, size.y));
 }
 
 /// Window attributes with the system's title bar made way for Beatlayer's
@@ -130,6 +179,9 @@ struct Surface {
     painter: Painter,
     info: ViewportInfo,
     repaint_at: Option<Instant>,
+    /// The interface zoom the window draws at: the shell's, except while
+    /// the Settings window waits for a mouse button to be released.
+    zoom: f32,
 }
 
 struct Host {
@@ -137,7 +189,6 @@ struct Host {
     shell: Shell,
     theme_choice: ThemeChoice,
     theme: Theme,
-    zoom: f32,
     keymap: Keymap,
     platform: Platform,
     menus: Vec<Menu>,
@@ -225,7 +276,6 @@ pub fn run(args: Args) -> Result<(), String> {
     let platform = Platform::current();
     let menus = menu_bar(MenuPlatform::current());
     let mut host = Host {
-        zoom: shell.zoom(),
         args,
         shell,
         theme_choice,
@@ -315,7 +365,8 @@ impl Host {
         let ctx = egui::Context::default();
         ctx.set_fonts(fonts());
         self.theme.apply(&ctx);
-        ctx.set_zoom_factor(self.zoom);
+        let zoom = self.shell.zoom();
+        apply_zoom(&ctx, zoom);
         let mut state = egui_winit::State::new(
             ctx.clone(),
             ViewportId::ROOT,
@@ -362,6 +413,7 @@ impl Host {
             painter,
             info,
             repaint_at: None,
+            zoom,
         })
     }
 
@@ -374,19 +426,22 @@ impl Host {
             (None, Some((w, h))) => (None, (w, h)),
             (None, None) => (Some((1600.0, 1000.0)), (1600.0, content_height(1000.0))),
         };
-        let (mut width, mut height) = inner;
-        if let Some(monitor) = event_loop.primary_monitor() {
-            let size = monitor.size().to_logical::<f32>(monitor.scale_factor());
-            width = width.min(size.width * 0.95);
-            height = height.min(size.height * 0.9);
-        }
+        // No smaller than its minimum at the interface zoom, as far as the
+        // screen allows (interface-zoom R7).
+        let limit = event_loop
+            .primary_monitor()
+            .map(|monitor| screen_limit(monitor.size().to_logical(monitor.scale_factor())));
+        let (minimum, size) = fit_main_window(
+            within(egui::vec2(inner.0, inner.1), limit),
+            self.shell.zoom(),
+            DRAWN_TITLE_BAR,
+            limit,
+        );
+        let (width, height) = (size.x, size.y);
         let attributes = Window::default_attributes()
             .with_title(self.shell.set_name())
             .with_inner_size(LogicalSize::new(width, height))
-            .with_min_inner_size(LogicalSize::new(
-                MINIMUM.x,
-                MINIMUM.y + if DRAWN_TITLE_BAR { TITLE_BAR } else { 0.0 },
-            ));
+            .with_min_inner_size(LogicalSize::new(minimum.x, minimum.y));
         let surface = self.create_surface(event_loop, with_title_bar(attributes), None)?;
         if let Some(render) = surface.painter.render_state() {
             // The Arrangement View's own pipelines (WP-1.8a).
@@ -410,7 +465,7 @@ impl Host {
                     outer_size.width, outer_size.height, inner_size.width, inner_size.height
                 );
             }
-            let wanted = (h - decoration).min(height);
+            let wanted = (h - decoration).min(height).max(minimum.y);
             if decoration > 0.0 && (inner_size.height - wanted).abs() > 0.5 {
                 let _ = surface
                     .window
@@ -437,12 +492,15 @@ impl Host {
             settings.window.focus_window();
             return;
         }
+        // Live's size at 100%, its content scaled by the interface zoom
+        // (interface-zoom R8), within the screen.
+        let limit = event_loop
+            .primary_monitor()
+            .map(|monitor| screen_limit(monitor.size().to_logical(monitor.scale_factor())));
+        let size = within(settings_window(self.shell.zoom(), DRAWN_TITLE_BAR), limit);
         let attributes = Window::default_attributes()
             .with_title("Settings")
-            .with_inner_size(LogicalSize::new(
-                SETTINGS_WINDOW.x,
-                content_height(SETTINGS_WINDOW.y),
-            ))
+            .with_inner_size(LogicalSize::new(size.x, size.y))
             .with_resizable(false);
         match self.create_surface(event_loop, with_title_bar(attributes), self.main.as_ref()) {
             Ok(surface) => {
@@ -585,13 +643,32 @@ impl Host {
                 self.effect(effect, event_loop);
             }
         }
-        if self.shell.theme() != self.theme_choice || (self.shell.zoom() - self.zoom).abs() > 1e-6 {
+        if self.shell.theme() != self.theme_choice {
             self.theme_choice = self.shell.theme();
             self.theme = Theme::builtin(self.theme_choice);
-            self.zoom = self.shell.zoom();
             for surface in [&self.main, &self.settings].into_iter().flatten() {
                 self.theme.apply(&surface.ctx);
-                surface.ctx.set_zoom_factor(self.zoom);
+            }
+        }
+        // The interface zoom (interface-zoom R1, R4, R7, R8): the main
+        // window follows at once and keeps its size unless that's under its
+        // minimum at the new zoom; the Settings window follows once no mouse
+        // button is down in it, and takes its size at the new zoom.
+        let zoom = self.shell.zoom();
+        if let Some(main) = &mut self.main
+            && (main.zoom - zoom).abs() > 1e-6
+        {
+            apply_zoom(&main.ctx, zoom);
+            main.zoom = zoom;
+            resize_main_window(&main.window, zoom);
+            main.window.request_redraw();
+        }
+        if let Some(settings) = &mut self.settings {
+            let applied = follow_zoom(&settings.ctx, settings.zoom, zoom);
+            if (applied - settings.zoom).abs() > 1e-6 {
+                settings.zoom = applied;
+                fit_settings_window(&settings.window, applied);
+                settings.window.request_redraw();
             }
         }
         self.sync_agent_server();

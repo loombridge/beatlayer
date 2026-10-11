@@ -1,0 +1,30 @@
+[package]
+name = "bl-audio-engine"
+description = "The engine on an audio device, kept going through unplugging, sample-rate changes, stalls, and sleep."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# A crate of its own so that bl-engine links no audio backend: xtask builds
+# the engine for the transport's commands, and must never reach cpal (the
+# layering check, `cargo xtask layers`).
+[dependencies]
+# The device supervisor that keeps a stream open through device changes
+# (WP-1.13), and the stream's callback.
+bl-audio-io.workspace = true
+bl-core.workspace = true
+# The engine, restarted with a new processor on each stream.
+bl-engine.workspace = true
+# Hands the processor back from a closed stream's callback, moving one
+# pointer (decision D14).
+rtrb = "0.4.0"
+
+[dev-dependencies]
+bl-model.workspace = true
+# The allocation trap for the callback's real-time test.
+bl-rt.workspace = true
+
+[lints]
+workspace = true

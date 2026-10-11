@@ -77,6 +77,8 @@ fn every_shell_command_is_on_a_menu_or_a_control() {
         commands::SETTINGS_NEXT_PAGE,
         commands::SETTINGS_PREVIOUS_PAGE,
         commands::SETTINGS_SET_THEME,
+        // The Display & Input page's Zoom (interface-zoom R4).
+        commands::VIEW_SET_ZOOM,
         commands::AUDIO_DEVICES,
         commands::AUDIO_STATUS,
         commands::AUDIO_CONFIGURE,

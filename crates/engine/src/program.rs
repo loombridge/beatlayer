@@ -258,6 +258,16 @@ impl EngineProgram {
             .and_then(Instance::as_node)
     }
 
+    /// Drops every track's meters to silence at once. Real-time safe: it
+    /// only writes to the mixers already in the program.
+    pub(crate) fn silence_meters(&mut self) {
+        for slot in &mut self.slots {
+            if let Some(Instance::Mixer(mixer)) = slot.node.as_mut() {
+                mixer.silence_meters();
+            }
+        }
+    }
+
     /// The meters of a task's track.
     pub(crate) fn meters(&self, task: u32) -> MeterReading {
         let mixer = self.tasks[task as usize].mixer as usize;

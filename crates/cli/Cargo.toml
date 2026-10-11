@@ -17,6 +17,8 @@ bl-agent.workspace = true
 bl-shell.workspace = true
 bl-project.workspace = true
 bl-engine.workspace = true
+# `bl-cli device-changes`: the engine on a device through device changes.
+bl-audio-engine.workspace = true
 bl-devices.workspace = true
 bl-audio-io.workspace = true
 bl-core.workspace = true

@@ -277,6 +277,12 @@ impl Meters {
         self.square[channel] = square;
     }
 
+    /// Drops every reading to silence at once.
+    fn silence(&mut self) {
+        self.peak = [0.0; 2];
+        self.square = [0.0; 2];
+    }
+
     fn reading(&self) -> MeterReading {
         let peak = |c: usize| self.peak[c] as f32;
         let rms = |c: usize| self.square[c].max(0.0).sqrt() as f32;
@@ -348,6 +354,12 @@ impl TrackMixer {
     #[must_use]
     pub fn gains(&self) -> [f64; 2] {
         [self.gains[0].value(), self.gains[1].value()]
+    }
+
+    /// Drops the track's meters to silence at once, for a processor that
+    /// has stopped making sound. Real-time safe.
+    pub(crate) fn silence_meters(&mut self) {
+        self.meters.silence();
     }
 
     /// The track's meters.

@@ -556,9 +556,12 @@ pub fn number_box(
             - i.num_accesskit_action_requests(id, accesskit::Action::Decrement) as i32
     });
     if response.dragged() {
+        // Read outside `data_mut`: the drag reads the input, which the data's
+        // write lock would deadlock against.
+        let delta = response.drag_delta().y;
         let whole = ui.data_mut(|d| {
             let pending = d.get_temp_mut_or(id, 0.0f32);
-            *pending -= response.drag_delta().y;
+            *pending -= delta;
             let whole = (*pending / DRAG_PER_STEP).trunc();
             *pending -= whole * DRAG_PER_STEP;
             whole

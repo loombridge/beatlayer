@@ -28,6 +28,7 @@ publish = false
 [dependencies]
 bl-rt = { path = "../crates/rt" }
 bl-audio-io = { path = "../crates/audio-io" }
+bl-audio-engine = { path = "../crates/audio-engine" }
 bl-core = { path = "../crates/core" }
 bl-engine = { path = "../crates/engine" }
 bl-media = { path = "../crates/media" }

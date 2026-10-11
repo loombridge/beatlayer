@@ -21,12 +21,19 @@ pub struct Look {
     pub value: Option<String>,
     /// A numeric value, for value fields and meters.
     pub number: Option<f64>,
+    /// More for assistive technology to read, such as the whole position a
+    /// bar field is part of.
+    pub description: Option<String>,
+    /// Whether a value is being typed into the element, which it draws as
+    /// an entry.
+    pub entry: bool,
 }
 
 /// Draws an element of the Control Bar or Status Bar at `rect` and returns
 /// its response. A pending element (one a later package brings to life) is
 /// drawn quieter, can't be clicked or focused, and tells assistive
-/// technology which package brings it.
+/// technology which package brings it. A live value field also takes drags
+/// (I-DRAG-022), and a screen reader's increment and decrement.
 pub fn element(
     ui: &mut Ui,
     theme: &Theme,
@@ -35,10 +42,11 @@ pub fn element(
     look: &Look,
 ) -> Response {
     let live = placement.pending.is_none();
-    let sense = if live && placement.kind != Kind::Indicator {
-        Sense::click()
-    } else {
-        Sense::hover()
+    let sense = match placement.kind {
+        _ if !live => Sense::hover(),
+        Kind::Indicator => Sense::hover(),
+        Kind::Value => Sense::click_and_drag(),
+        _ => Sense::click(),
     };
     let id = Id::new(("element", placement.element));
     let response = ui.interact(rect, id, sense);
@@ -70,7 +78,7 @@ fn paint(
         && placement.element != Element::Message;
     let face = if look.on && live {
         c.accent.0
-    } else if response.is_pointer_button_down_on() {
+    } else if look.entry || response.is_pointer_button_down_on() {
         c.control_pressed.0
     } else if response.hovered() && live {
         c.control_hover.0
@@ -339,6 +347,13 @@ fn describe(ui: &Ui, placement: &Placement, look: &Look, response: &Response) {
         }
         if let Some(number) = look.number {
             node.set_numeric_value(number);
+        }
+        if live && placement.kind == Kind::Value {
+            node.add_action(accesskit::Action::Increment);
+            node.add_action(accesskit::Action::Decrement);
+        }
+        if let Some(description) = &look.description {
+            node.set_description(description.clone());
         }
         if let Some(package) = placement.pending {
             node.set_description(format!("Not built yet: arrives with {package}."));

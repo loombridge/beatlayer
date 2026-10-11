@@ -1,6 +1,6 @@
 //! The Mixer view's commands and its controls' commands, driven headless
 //! through `Shell::run` and `Shell::invoke`, as agents, menus, keys, and the
-//! window's controls drive them (WP-1.9; D17). The behaviour is in the
+//! window's controls drive them (WP-1.9). The behaviour is in the
 //! mixer view spec.
 
 use bl_commands::Permission;
@@ -61,7 +61,7 @@ fn a_new_set_shows_the_session_mixer_and_hides_the_arrangement_s() {
     assert!(shown.session.shown);
     assert!(!shown.arrangement.shown);
     assert!(shown.in_out && shown.sends && shown.volume && shown.return_tracks);
-    // The Arrangement is in front in a new set (D20): the Mixer item is
+    // The Arrangement is in front in a new set: the Mixer item is
     // unticked there, and ticked in the Session View.
     assert_eq!(shell.switch_state(ids::TOGGLE), Some(false));
     shell

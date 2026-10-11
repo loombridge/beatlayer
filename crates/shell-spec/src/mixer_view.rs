@@ -1,7 +1,6 @@
-//! The Mixer view's view commands in the command registry (WP-1.9;
-//! decisions D16 and D17): showing and hiding the mixer in the Session and
-//! Arrangement Views and its sections, scrolling its columns, and moving the
-//! keyboard focus to it.
+//! The Mixer view's view commands in the command registry (WP-1.9):
+//! showing and hiding the mixer in the Session and Arrangement Views and
+//! its sections, scrolling its columns, and moving the keyboard focus to it.
 //!
 //! These change only what the window shows, never the set, so every one is
 //! in the read class. The mixer's values (volume, pan, the activator, Solo,

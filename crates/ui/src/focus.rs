@@ -14,9 +14,11 @@
 //!   Tab moves between the area's controls in the order they're drawn.
 //! - In the Arrangement, Tab runs through the view: the selected track's
 //!   header (title, activator, Solo, Arm, volume, pan), then the controls
-//!   at the view's bottom right (Optimize Height). Live has locator and
-//!   automation buttons before the header, and the In/Out choosers, sends,
-//!   and waveform zoom in it, which Beatlayer doesn't have yet.
+//!   at the view's bottom right (Optimize Height, Optimize Width). Live has
+//!   locator and automation buttons before the header, the In/Out choosers
+//!   and sends in it, the waveform zoom before Optimize Height, and the
+//!   loop brace's two ends and the drop area after Optimize Width, which
+//!   Beatlayer doesn't have as controls yet.
 //! - In a mixer, Tab stays in one track's strip: the column (standing for
 //!   its title bar), the peak level, pan, the activator, Solo, Arm, and
 //!   volume. From the Session View itself it goes into the selected

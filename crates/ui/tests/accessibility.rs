@@ -329,7 +329,7 @@ fn tab_runs_through_the_arrangement_and_the_neighbour_keys_to_the_next_track() {
     use bl_shell::mixer_controls::Switch;
     let header = |switch| switch_id(Place::Header, switch, tracks[2]);
     // Live's order (12.4.6), without the controls Beatlayer doesn't have
-    // yet: the selected track's header, then Optimize Height.
+    // yet: the selected track's header, then Optimize Height and Width.
     let expected = [
         title_id(tracks[2]),
         header(Switch::Activator),
@@ -338,6 +338,7 @@ fn tab_runs_through_the_arrangement_and_the_neighbour_keys_to_the_next_track() {
         volume_field_id(Place::Header, tracks[2]),
         pan_id(Place::Header, tracks[2]),
         bl_ui::arrangement::optimize_height_id(),
+        bl_ui::arrangement::optimize_width_id(),
     ];
     for want in expected {
         press(&mut h, Key::Tab, Modifiers::NONE);
@@ -349,7 +350,7 @@ fn tab_runs_through_the_arrangement_and_the_neighbour_keys_to_the_next_track() {
     press(&mut h, Key::Tab, Modifiers::SHIFT);
     assert_eq!(
         focused_id(&h),
-        Some(bl_ui::arrangement::optimize_height_id())
+        Some(bl_ui::arrangement::optimize_width_id())
     );
     // Off, it stays at the end.
     h.shell
@@ -358,8 +359,9 @@ fn tab_runs_through_the_arrangement_and_the_neighbour_keys_to_the_next_track() {
     press(&mut h, Key::Tab, Modifiers::NONE);
     assert_eq!(
         focused_id(&h),
-        Some(bl_ui::arrangement::optimize_height_id())
+        Some(bl_ui::arrangement::optimize_width_id())
     );
+    press(&mut h, Key::Tab, Modifiers::SHIFT);
     press(&mut h, Key::Tab, Modifiers::SHIFT);
     assert_eq!(focused_id(&h), Some(pan_id(Place::Header, tracks[2])));
     // Option-Tab (Ctrl-Tab): the same control on the next track, and back,

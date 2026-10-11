@@ -1181,11 +1181,10 @@ impl ArrangementUi {
             if response.clicked() {
                 invoke(events, command, json!({}));
             }
-            // Optimize Height is the last stop of the Arrangement's Tab
-            // order (observed in Live 12.4.6; the accessibility spec, R4).
-            if id == optimize_height_id() {
-                crate::focus::register(ui.ctx(), id, bl_shell::Area::MainView, None);
-            }
+            // Optimize Height and Width come after the selected track's
+            // header in the Arrangement's Tab order (observed in Live
+            // 12.4.6; the accessibility spec, R4).
+            crate::focus::register(ui.ctx(), id, bl_shell::Area::MainView, None);
             response.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, on, name));
         }
     }

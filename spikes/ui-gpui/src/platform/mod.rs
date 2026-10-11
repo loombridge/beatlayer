@@ -32,7 +32,7 @@ pub fn cpu_times() -> (f64, f64) {
 }
 
 /// Windows would use `GetThreadTimes` and `GetProcessTimes`; the Windows run
-/// is pending (H6), so the bench reports CPU time as unavailable there.
+/// is pending (no test machines yet), so the bench reports CPU time as unavailable there.
 #[cfg(not(unix))]
 pub fn cpu_times() -> (f64, f64) {
     (f64::NAN, f64::NAN)

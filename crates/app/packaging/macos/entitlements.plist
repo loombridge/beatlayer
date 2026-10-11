@@ -2,7 +2,7 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
   Entitlements for the hardened runtime, applied when the app is signed with a
-  Developer ID (H4). An unsigned build doesn't carry them.
+  Developer ID. An unsigned build doesn't carry them.
 -->
 <plist version="1.0">
 <dict>

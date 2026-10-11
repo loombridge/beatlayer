@@ -5,17 +5,17 @@
 # `--version` to check it; on Windows the MSI is also installed, run, and
 # removed. Each package is uploaded on its own and kept for seven days.
 #
-# A macOS minute counts as ten against the Free plan's allowance, so packaging
+# A macOS minute counts as ten Linux minutes, so packaging
 # runs here rather than on every pull request, and a scheduled run first checks
 # whether any code changed since the last successful nightly, building nothing
 # if only docs or Markdown changed. A manual run always builds, on any branch.
 #
 # Signing runs only when its secrets exist, and is skipped otherwise:
 # `cargo xtask package` treats an empty variable as unset and says what it
-# skipped. macOS needs a Developer ID (H4): APPLE_CERTIFICATE (the .p12 in
+# skipped. macOS needs a Developer ID: APPLE_CERTIFICATE (the .p12 in
 # base64), APPLE_CERTIFICATE_PASSWORD, and APPLE_SIGNING_IDENTITY; with
 # APPLE_ID, APPLE_PASSWORD (an app-specific password), and APPLE_TEAM_ID it
-# also notarises. Windows needs a signing route (H5): WINDOWS_SIGN_COMMAND, a
+# also notarises. Windows needs a signing route: WINDOWS_SIGN_COMMAND, a
 # command that signs the file at %1, plus whatever credentials that route
 # reads, added to the Package step's environment.
 #

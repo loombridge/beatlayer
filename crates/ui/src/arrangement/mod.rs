@@ -145,6 +145,9 @@ pub struct ArrangementUi {
     overview_key: Option<OverviewKey>,
     drag: Option<Drag>,
     reported_viewport: Option<(f32, f32)>,
+    /// The playhead the last frame drew: its position and its x, if it was
+    /// in view (WP-1.18).
+    playhead: Option<(Ticks, f32)>,
 }
 
 impl std::fmt::Debug for ArrangementUi {
@@ -183,7 +186,16 @@ impl ArrangementUi {
             overview_key: None,
             drag: None,
             reported_viewport: None,
+            playhead: None,
         }
+    }
+
+    /// The playhead the last frame drew: the position it showed, and its x
+    /// in the window, or `None` if it was out of view. It's the engine's, as
+    /// the shell last took it (the control bar transport spec, R14).
+    #[must_use]
+    pub fn drawn_playhead(&self) -> Option<(Ticks, f32)> {
+        self.playhead
     }
 
     /// Takes waveform peaks from `source`, such as the app's
@@ -362,6 +374,8 @@ impl ArrangementUi {
         // The playhead, over the rulers and the lanes.
         let transport = view.transport();
         let x = lanes.left() + horizontal.x(transport.position) as f32;
+        self.playhead =
+            (x >= lanes.left() && x <= lanes.right()).then_some((transport.position, x));
         if x >= lanes.left() && x <= lanes.right() {
             let top = layout.beat_ruler.top();
             rulers::marker(
@@ -750,14 +764,17 @@ impl ArrangementUi {
         let scrub = ui.interact(layout.scrub, scrub_id(), Sense::click());
         if scrub.clicked() {
             // Clicking the scrub area resumes Follow. Starting playback from
-            // the click (I-CLICK-012) comes with the transport (WP-1.5).
+            // the click (I-CLICK-012) jumps by the global launch
+            // quantisation, which comes with the Quantization Menu (M3;
+            // control-bar-transport, "Open questions").
             invoke(events, ids::FOLLOW, json!({ "paused": false }));
         }
         scrub.widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, "Scrub Area"));
         ui.ctx().accesskit_node_builder(scrub.id, |node| {
             node.set_role(Role::Group);
             node.set_description(
-                "Click to play from here (with the transport, WP-1.5); the locators sit here."
+                "Playing from a click here comes with the global launch quantisation (M3); the \
+                 locators sit here."
                     .to_owned(),
             );
         });

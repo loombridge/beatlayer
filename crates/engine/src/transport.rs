@@ -245,6 +245,19 @@ const ENTRIES: &[Entry] = &[
             is taken as 0. It changes nothing in the project.",
     },
     Entry {
+        id: "transport.return_to_start",
+        action: Action::Run(TransportCommand::Locate(Ticks::ZERO)),
+        label: "Return Play Position to 1.1.1",
+        contexts: &[Global],
+        keys: &[],
+        description: "Moves the insert marker, where playback starts, back to the start of the \
+            arrangement (1.1.1), as the Playback menu's Return Play Position to 1.1.1 does. \
+            While the song plays, playback jumps there at once; while it's stopped, \
+            `transport.continue` still resumes where playback stopped. The same as \
+            `transport.locate` at position 0, which the Home key runs. It changes nothing in \
+            the project.",
+    },
+    Entry {
         id: "transport.insert_marker_to_playhead",
         action: Action::Run(TransportCommand::InsertMarkerToPlayhead),
         label: "Move Insert Marker To Playhead",

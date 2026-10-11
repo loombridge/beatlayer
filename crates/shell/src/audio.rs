@@ -1,6 +1,6 @@
-//! The audio host: the device the app plays through, the settings that
-//! choose it, the test tone, and the CPU meter (L-SET-012, L-CTRL-023,
-//! L-CTRL-024).
+//! The audio host: the device the app plays through, the engine that plays
+//! the set on it, the settings that choose the device, the test tone, and
+//! the CPU meter (L-SET-012, L-CTRL-023, L-CTRL-024).
 //!
 //! [`AudioHost`] owns one stream from `bl-audio-io`. Changing a setting
 //! ([`AudioHost::configure`]) closes the stream and opens a new one with the
@@ -8,12 +8,20 @@
 //! applies without restarting the app. If the device refuses, the previous
 //! settings are reopened and the error is reported.
 //!
-//! The stream's callback ([`EngineCallback`]) is a stand-in until the app
-//! runs the engine: it plays silence, or the Settings window's test tone at
-//! the Tone Volume and Tone Frequency the person set (D23), and measures how
-//! long it takes, which the CPU meter shows. It runs on the audio thread, so
-//! it follows the real-time rules: no allocation, no lock, no blocking call
-//! (`tests/realtime.rs` checks it under the allocation trap).
+//! Each stream plays a `bl-engine` [`Engine`] made for the rate it runs at
+//! (WP-1.18): the host keeps the newest document ([`AudioHost::sync`]) for
+//! its compiler, sends it the transport's commands
+//! ([`AudioHost::send_transport`]), and reads back the playhead it
+//! publishes ([`AudioHost::transport_state`]). When the stream closes, the
+//! engine goes with it, and the next one starts with the same document and
+//! the song where it was, stopped (the control bar transport spec,
+//! R16). The stream's callback ([`EngineCallback`]) runs the engine's
+//! processor, plays the Settings window's test tone in its place while the
+//! tone is on, at the Tone Volume and Tone Frequency the person set (D23),
+//! and measures how long it all takes, which the CPU meter shows. It runs
+//! on the audio thread, so it follows the real-time rules: no allocation,
+//! no lock, no blocking call (`tests/realtime.rs` checks it under the
+//! allocation trap, and `rtsan/tests/shell.rs` under RealtimeSanitizer).
 //!
 //! The settings and reports themselves are data in `bl-shell-spec`,
 //! re-exported here.
@@ -21,18 +29,22 @@
 use std::f64::consts::TAU;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering::Relaxed};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use bl_audio_io::{
     AudioBuffer, AudioBufferMut, AudioCallback, Backend, BackendKind, BufferSizes, DeviceId,
-    DeviceInfo, DeviceSelector, Error, PortRequest, ProcessContext, Stream, StreamRequest,
-    StreamStats,
+    DeviceInfo, DeviceSelector, Error, PortRequest, ProcessContext, Stream, StreamInfo,
+    StreamRequest, StreamStats,
 };
+use bl_core::time::{SampleRate, Ticks};
+use bl_engine::{Engine, EngineConfig, Processor, Registry, TransportCommand};
+use bl_model::Document;
 pub use bl_shell_spec::audio::{
     AudioDevices, AudioSettings, AudioStatus, ConfigureAudio, DeviceListing, DeviceRef, DriverInfo,
     TONE_DEFAULT_DBFS, TONE_DEFAULT_HZ, TONE_MAX_DBFS, TONE_MAX_HZ, TONE_MIN_DBFS, TONE_MIN_HZ,
     ToneSettings,
 };
+use rtrb::{Consumer, Producer, RingBuffer};
 
 /// A device as `audio.devices` lists it.
 fn listing(info: &DeviceInfo) -> DeviceListing {
@@ -113,20 +125,43 @@ impl EngineShared {
     }
 }
 
-/// The stand-in engine on the audio thread: silence, or the test tone,
-/// timed for the CPU meter. It allocates nothing, takes no lock, and makes
-/// no system call besides reading the clock.
+/// The audio thread's work: the engine's processor, once it arrives, and
+/// the test tone in its place while the tone is on, timed for the CPU
+/// meter. It allocates nothing, takes no lock, and makes no system call
+/// besides reading the clock.
 pub struct EngineCallback {
     shared: Arc<EngineShared>,
     phase: f64,
+    /// Where the engine's processor arrives, once the stream has opened at
+    /// the rate the engine is made for.
+    incoming: Option<Consumer<Processor>>,
+    /// The engine, once it has arrived. Until then, and without one, the
+    /// output stays silent.
+    processor: Option<Processor>,
 }
 
 impl EngineCallback {
-    /// A callback reading the tone settings from `shared` and adding its
-    /// timings there.
+    /// A callback without an engine, reading the tone settings from
+    /// `shared` and adding its timings there: silence, or the test tone.
     #[must_use]
     pub fn new(shared: Arc<EngineShared>) -> Self {
-        Self { shared, phase: 0.0 }
+        Self {
+            shared,
+            phase: 0.0,
+            incoming: None,
+            processor: None,
+        }
+    }
+
+    /// A callback that plays the engine whose processor arrives through
+    /// `incoming` (it takes it at the start of the first block it finds it
+    /// there), with the test tone in its place while the tone is on.
+    #[must_use]
+    pub fn with_engine(shared: Arc<EngineShared>, incoming: Consumer<Processor>) -> Self {
+        Self {
+            incoming: Some(incoming),
+            ..Self::new(shared)
+        }
     }
 }
 
@@ -138,6 +173,26 @@ impl AudioCallback for EngineCallback {
         output: &mut AudioBufferMut<'_>,
     ) {
         let started = Instant::now();
+        if self.processor.is_none()
+            && let Some(incoming) = self.incoming.as_mut()
+        {
+            self.processor = incoming.pop().ok();
+        }
+        if let Some(processor) = self.processor.as_mut() {
+            // The engine runs in blocks of at most its own size, and plays
+            // its channels (stereo) on the device's first ones; a device
+            // with more leaves the rest silent.
+            let channels = output.channels();
+            let mut done = 0;
+            while done < ctx.frames {
+                let frames = (ctx.frames - done).min(processor.config().max_frames);
+                let block = processor.process(frames);
+                for c in 0..channels.min(block.channels()) {
+                    output.channel_mut(c)[done..done + frames].copy_from_slice(block.channel(c));
+                }
+                done += frames;
+            }
+        }
         if self.shared.tone.load(Relaxed) {
             let amplitude = f32::from_bits(self.shared.tone_amplitude.load(Relaxed));
             let hz = f64::from(f32::from_bits(self.shared.tone_hz.load(Relaxed)));
@@ -163,7 +218,30 @@ impl AudioCallback for EngineCallback {
     }
 }
 
-/// The audio device the app plays through, and the settings that choose it.
+/// How long opening a device waits for the engine's compiler to put the
+/// set and the transport on the audio thread's queue, so the first block
+/// takes them all at once.
+const ENGINE_START_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// The transport as the engine last published it: what the Control Bar's
+/// transport section and the Arrangement show. While no engine runs, it's
+/// the transport as the last one left it, stopped.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct EngineTransport {
+    /// Whether an engine runs on an open device, so the transport can play.
+    pub running: bool,
+    /// Whether the song plays.
+    pub playing: bool,
+    /// The playhead, in ticks: where the song plays, or where it stopped.
+    pub position: Ticks,
+    /// The insert marker, where Play starts.
+    pub insert_marker: Ticks,
+    /// Frames the running engine has processed (its clock); 0 without one.
+    pub clock: u64,
+}
+
+/// The audio device the app plays through, the engine that plays the set
+/// on it, and the settings that choose the device.
 pub struct AudioHost {
     available: Vec<BackendKind>,
     factory: BackendFactory,
@@ -172,6 +250,14 @@ pub struct AudioHost {
     engine_on: bool,
     backend: Option<(BackendKind, Box<dyn Backend>)>,
     stream: Option<Box<dyn Stream>>,
+    /// The engine playing through `stream`. Declared after it, so the
+    /// stream, and the processor in its callback, goes first.
+    engine: Option<Engine>,
+    /// The set the engine plays: the newest document synced.
+    document: Option<Document>,
+    /// The transport as the engine last showed it, to restore when the next
+    /// engine starts.
+    memory: EngineTransport,
     shared: Arc<EngineShared>,
     error: Option<String>,
     /// The counters at the last CPU sample, and the load measured then.
@@ -185,6 +271,7 @@ impl std::fmt::Debug for AudioHost {
             .field("settings", &self.settings)
             .field("engine_on", &self.engine_on)
             .field("open", &self.stream.is_some())
+            .field("transport", &self.memory)
             .field("error", &self.error)
             .finish_non_exhaustive()
     }
@@ -232,6 +319,9 @@ impl AudioHost {
             engine_on: true,
             backend: None,
             stream: None,
+            engine: None,
+            document: None,
+            memory: EngineTransport::default(),
             shared: Arc::new(EngineShared::default()),
             error: None,
             last_sample: (0, 0),
@@ -295,10 +385,115 @@ impl AudioHost {
         result
     }
 
-    /// Closes the device.
+    /// Closes the device, and with it the engine.
     pub fn stop(&mut self) {
-        self.stream = None;
+        self.close();
         self.cpu_load = None;
+    }
+
+    /// Closes the stream, then its engine, remembering where the transport
+    /// was for the next engine.
+    fn close(&mut self) {
+        let _ = self.transport_state();
+        self.memory.playing = false;
+        // The processor goes with the stream's callback; then the engine's
+        // threads stop, and its drop thread frees the last program.
+        self.stream = None;
+        self.engine = None;
+    }
+
+    /// Whether an engine runs on an open device, so the transport can play.
+    #[must_use]
+    pub fn engine_running(&self) -> bool {
+        self.stream.is_some() && self.engine.is_some()
+    }
+
+    /// Gives the engine the newest document: its compiler brings the
+    /// running program up to date (tracks, devices, the tempo map, the
+    /// loop). The host keeps it for the next engine too.
+    pub fn sync(&mut self, document: &Document) {
+        self.document = Some(document.clone());
+        if let Some(engine) = &self.engine {
+            engine.sync(document);
+        }
+    }
+
+    /// Sends a transport command, which the engine runs at the start of its
+    /// next block.
+    ///
+    /// # Errors
+    ///
+    /// Why nothing can play, while no engine runs: the audio engine is off,
+    /// or no device is open.
+    pub fn send_transport(&mut self, command: TransportCommand) -> Result<(), String> {
+        match &self.engine {
+            Some(engine) if self.stream.is_some() => {
+                engine.transport(command);
+                Ok(())
+            }
+            _ if !self.engine_on => Err(
+                "the audio engine is off; switch it on with `audio.toggle_engine` first".to_owned(),
+            ),
+            _ => Err(format!(
+                "no audio device is open{}; choose one in the Audio settings",
+                self.error
+                    .as_deref()
+                    .map(|error| format!(" ({error})"))
+                    .unwrap_or_default()
+            )),
+        }
+    }
+
+    /// Moves the insert marker without moving the playhead
+    /// ([`TransportCommand::SetInsertMarker`]), as a click in the
+    /// Arrangement does. Without an engine, the next one starts with it.
+    pub fn set_insert_marker(&mut self, at: Ticks) {
+        let at = at.max(Ticks::ZERO);
+        self.memory.insert_marker = at;
+        let _ = self.send_transport(TransportCommand::SetInsertMarker(at));
+    }
+
+    /// Stops the song and returns it to 1.1.1, as a new or opened set
+    /// starts: Stop, then Stop again.
+    pub fn reset_transport(&mut self) {
+        self.memory = EngineTransport::default();
+        let _ = self.send_transport(TransportCommand::Stop);
+        let _ = self.send_transport(TransportCommand::Stop);
+    }
+
+    /// The transport as the engine last published it, all from the same
+    /// block: whether the song plays, the playhead, and the insert marker.
+    /// Reading takes no lock. Before a new engine's first block, and while
+    /// none runs, it's the transport as the last engine left it, stopped.
+    pub fn transport_state(&mut self) -> EngineTransport {
+        let running = self.stream.is_some();
+        let Some(engine) = self.engine.as_mut() else {
+            return EngineTransport {
+                running: false,
+                playing: false,
+                clock: 0,
+                ..self.memory
+            };
+        };
+        let state = engine.state();
+        if state.program.is_none() {
+            // The first block hasn't run: the set and the restored
+            // transport are still on their way to it.
+            return EngineTransport {
+                running,
+                playing: false,
+                clock: state.clock,
+                ..self.memory
+            };
+        }
+        self.memory = EngineTransport {
+            running,
+            playing: state.playing,
+            position: state.position_ticks,
+            insert_marker: state.insert_marker,
+            clock: state.clock,
+        };
+        self.memory
     }
 
     /// Switches the engine on or off: off closes the device, on reopens it
@@ -367,7 +562,7 @@ impl AudioHost {
             return Ok(());
         }
         let previous = std::mem::replace(&mut self.settings, next);
-        self.stream = None;
+        self.close();
         match self.open() {
             Ok(()) => {
                 self.error = None;
@@ -443,7 +638,7 @@ impl AudioHost {
     }
 
     fn open(&mut self) -> Result<(), String> {
-        self.stream = None;
+        self.close();
         let request = StreamRequest {
             output: Some(PortRequest {
                 device: selector(self.settings.output_device.as_deref())?,
@@ -459,19 +654,66 @@ impl AudioHost {
             sample_rate: self.settings.sample_rate,
             buffer_size: self.settings.buffer_size,
         };
-        let callback = Box::new(EngineCallback::new(Arc::clone(&self.shared)));
+        let (handoff, incoming) = RingBuffer::new(1);
+        let callback = Box::new(EngineCallback::with_engine(
+            Arc::clone(&self.shared),
+            incoming,
+        ));
         let mut stream = self
             .backend()?
             .open_stream(&request, callback)
             .map_err(|e| e.to_string())?;
-        stream.start().map_err(|e| e.to_string())?;
+        // The engine is made for the rate the device runs at.
+        let engine = self.start_engine(stream.info(), handoff)?;
+        if let Err(error) = stream.start() {
+            // The processor goes with the stream, before the engine.
+            drop(stream);
+            drop(engine);
+            return Err(error.to_string());
+        }
         self.stream = Some(stream);
+        self.engine = Some(engine);
         self.last_sample = (
             self.shared.busy_ns.load(Relaxed),
             self.shared.audio_ns.load(Relaxed),
         );
         self.cpu_load = Some(0.0);
         Ok(())
+    }
+
+    /// Starts an engine for a stream that runs as `info` says, gives it the
+    /// set and the transport where the last engine left it (stopped), and
+    /// hands its processor to the stream's callback through `handoff`.
+    fn start_engine(
+        &self,
+        info: &StreamInfo,
+        mut handoff: Producer<Processor>,
+    ) -> Result<Engine, String> {
+        let rate = SampleRate::new(info.sample_rate)
+            .ok_or_else(|| "the device runs at 0 Hz".to_owned())?;
+        let max_frames = (info.max_block_frames as usize).max(1);
+        let config = EngineConfig::new(rate, max_frames);
+        let (engine, processor) = Engine::start(config, Registry::new())
+            .map_err(|e| format!("couldn't start the engine's threads: {e}"))?;
+        if let Some(document) = &self.document {
+            engine.sync(document);
+        }
+        // Spec: control-bar-transport R16. Where the song was, stopped: a
+        // Continue, a locate, and a Stop put the playhead back, then the
+        // insert marker goes back; the processor's first block takes them
+        // all, before anything plays.
+        let memory = self.memory;
+        if memory.position > Ticks::ZERO {
+            engine.transport(TransportCommand::Continue);
+            engine.transport(TransportCommand::Locate(memory.position));
+            engine.transport(TransportCommand::Stop);
+        }
+        engine.transport(TransportCommand::SetInsertMarker(memory.insert_marker));
+        let _ = engine.flush(ENGINE_START_TIMEOUT);
+        handoff
+            .push(processor)
+            .map_err(|_| "couldn't hand the engine to the audio device".to_owned())?;
+        Ok(engine)
     }
 
     /// Measures the CPU load since the last call: the share of the audio

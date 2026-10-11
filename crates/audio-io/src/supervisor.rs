@@ -6,7 +6,7 @@
 //! [`DeviceStatus`] and a [`DeviceEvent`]), and opens the stream again when
 //! the device can run: straight away after a rate change, when the device is
 //! back after an unplug, and on waking after a sleep. The rules are in
-//! `docs/specs/device-changes.md`.
+//! the device changes spec.
 //!
 //! What it watches:
 //!
@@ -351,7 +351,7 @@ enum Command {
 }
 
 /// Keeps one audio stream running through device changes, on a thread of
-/// its own (WP-1.13; the rules are in `docs/specs/device-changes.md`).
+/// its own (WP-1.13; the rules are in the device changes spec).
 ///
 /// When the device goes away, its sample rate changes, the stream stops
 /// calling back, or the machine sleeps, it closes the stream, says so (its

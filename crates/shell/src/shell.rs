@@ -4,13 +4,20 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use bl_commands::{Context, NoArgs, Registry};
-use bl_model::{Editor, TrackId, TrackKind, registry as model};
+use bl_core::id::Id;
+use bl_core::time::Ticks;
+use bl_engine::transport as engine_transport;
+use bl_model::{ChangeSet, Editor, TrackId, TrackKind, registry as model};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
+use crate::agent::{
+    self as agent, AgentServerState, AgentServerStatus, AgentSettings, AutonomousArgs, ClientArgs,
+    SetServerArgs,
+};
 use crate::arrangement::{ArrangementView, TransportView, ViewError, Viewport};
-use crate::audio::{AudioHost, ConfigureAudio, ToneSettings};
+use crate::audio::{AudioHost, ConfigureAudio, EngineTransport, ToneSettings};
 use crate::commands::{
     self as ids, PathArgs, SaveAsArgs, SetResult, SettingsArgs, SwitchResult, TestToneArgs,
     TestToneState, ThemeArgs, ViewResult, ZoomArgs,
@@ -21,6 +28,7 @@ use crate::settings::{
     zoom_percent, zoom_step,
 };
 use bl_shell_spec::arrangement as view_ids;
+use bl_shell_spec::transport as transport_ids;
 
 /// The views the main window's main area shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -216,10 +224,17 @@ pub struct Shell {
     effects: Vec<Effect>,
     message: Option<Message>,
     revision: u64,
+    agent_status: AgentServerStatus,
     /// What the Arrangement View shows (WP-1.8a).
     arrangement: ArrangementView,
     /// A number that changes whenever the document may have changed.
     document_revision: u64,
+    /// The engine's insert marker when the shell last looked, so a move of
+    /// it reaches the Arrangement View once (WP-1.18).
+    seen_insert_marker: Option<Ticks>,
+    /// Whether a person's gesture (a drag on a value) holds a transaction
+    /// open, so its document commands are one undo step.
+    gesture: bool,
 }
 
 impl fmt::Debug for Shell {
@@ -258,11 +273,16 @@ impl Shell {
         let mut registry = Registry::new();
         model::register(&mut registry).expect("the document's command IDs are unique");
         crate::register(&mut registry).expect("the shell's command IDs are unique");
+        // The transport's commands (WP-1.5), which the shell sends to the
+        // engine it plays the set through (WP-1.18).
+        engine_transport::register(&mut registry).expect("the transport's command IDs are unique");
         debug_assert!(registry.problems().is_empty(), "{:?}", registry.problems());
         audio.set_tone(prefs.tone);
+        let editor = factory_default_set();
+        audio.sync(editor.document());
         Self {
             registry,
-            editor: factory_default_set(),
+            editor,
             saved: factory_default_set(),
             set_path: None,
             dirty: false,
@@ -279,8 +299,11 @@ impl Shell {
             effects: Vec::new(),
             message: None,
             revision: 0,
+            agent_status: AgentServerStatus::default(),
             arrangement: ArrangementView::new(),
             document_revision: 0,
+            seen_insert_marker: None,
+            gesture: false,
         }
     }
 
@@ -328,6 +351,56 @@ impl Shell {
     #[must_use]
     pub fn editor(&self) -> &Editor {
         &self.editor
+    }
+
+    /// Runs `edit` on the editor holding the document, and marks the set
+    /// changed if the document changed. The agent API (WP-1.15) edits this
+    /// way where one command at a time isn't enough: a batch of document
+    /// commands as one undo step labelled with the agent's name, a dry run
+    /// that applies a batch and cancels it, a new ID for an object a
+    /// command will create, and restoring a checkpoint. It runs document
+    /// commands with `bl_model::registry::run`, as [`Shell::run`] does.
+    ///
+    /// `edit` must leave no transaction open.
+    pub fn edit<T>(&mut self, edit: impl FnOnce(&mut Editor) -> T) -> T {
+        let before = self.editor.document().clone();
+        let result = edit(&mut self.editor);
+        debug_assert!(
+            !self.editor.in_transaction(),
+            "an edit left a transaction open"
+        );
+        if !ChangeSet::between(&before, self.editor.document()).is_empty() {
+            self.dirty = true;
+            self.document_changed();
+        }
+        self.touch();
+        result
+    }
+
+    /// A new ID for an object a command will create, such as a track's.
+    pub fn new_id<T: From<Id>>(&mut self) -> T {
+        self.editor.new_id()
+    }
+
+    /// The agent server's settings.
+    #[must_use]
+    pub fn agent_settings(&self) -> &AgentSettings {
+        &self.prefs.agent
+    }
+
+    /// What the app last said about the running agent server.
+    #[must_use]
+    pub fn agent_status(&self) -> &AgentServerStatus {
+        &self.agent_status
+    }
+
+    /// Records what the app says about the running agent server, for the
+    /// Settings window.
+    pub fn set_agent_status(&mut self, status: AgentServerStatus) {
+        if self.agent_status != status {
+            self.agent_status = status;
+            self.touch();
+        }
     }
 
     /// The audio device.
@@ -536,11 +609,13 @@ impl Shell {
     }
 
     /// Records that the document may have changed: drops view state for
-    /// tracks that are gone.
+    /// tracks that are gone, and gives the engine the new document, so it
+    /// plays the set as it is now (its tempo, loop, and tracks).
     fn document_changed(&mut self) {
         self.document_revision = self.document_revision.wrapping_add(1);
         self.arrangement
             .forget_missing_tracks(self.editor.document());
+        self.audio.sync(self.editor.document());
     }
 
     /// What the Arrangement View shows (WP-1.8a).
@@ -562,12 +637,67 @@ impl Shell {
         }
     }
 
-    /// Takes the transport's latest state from the engine (the playhead,
-    /// whether it plays, the loop brace), for the Arrangement View to draw
-    /// and, with Follow on, to keep in view. The host calls it as the
-    /// engine's UI state changes; the transport package (WP-1.5) wires it.
+    /// Takes the transport's latest state (the playhead, whether it plays,
+    /// the loop brace), for the Arrangement View to draw and, with Follow
+    /// on, to keep in view. [`Shell::poll_engine`] calls it with the
+    /// engine's.
     pub fn set_transport(&mut self, transport: TransportView) {
         if self.arrangement.set_transport(transport) {
+            self.touch();
+        }
+    }
+
+    /// Takes what the engine last published (the playhead, whether the song
+    /// plays, the insert marker) for the Arrangement View and the Control
+    /// Bar, with the loop brace from the document. The window calls it
+    /// before drawing each frame, so what it draws lags the engine by at
+    /// most a frame and an audio block (the control bar transport spec,
+    /// R14). Returns the transport it took.
+    pub fn poll_engine(&mut self) -> EngineTransport {
+        let engine = self.audio.transport_state();
+        let brace = self.editor.document().settings().arrangement_loop;
+        self.set_transport(TransportView {
+            playing: engine.playing,
+            position: engine.position,
+            loop_start: brace.start,
+            loop_length: brace.length,
+            loop_on: brace.enabled,
+        });
+        // Spec: control-bar-transport R15. A move of the engine's insert
+        // marker (the position fields, Home, a second Stop, an agent)
+        // reaches the view once.
+        if self.seen_insert_marker != Some(engine.insert_marker) {
+            self.seen_insert_marker = Some(engine.insert_marker);
+            if self.arrangement.move_insert_marker(engine.insert_marker) {
+                self.touch();
+            }
+        }
+        engine
+    }
+
+    /// Whether the song is playing, as the shell last heard from the
+    /// engine.
+    #[must_use]
+    pub fn playing(&self) -> bool {
+        self.arrangement.transport().playing
+    }
+
+    /// Opens a gesture, such as a drag on a value field: the document
+    /// commands it runs until [`Shell::end_gesture`] are one undo step,
+    /// named `label` (such as "Change tempo"). A gesture already open
+    /// carries on.
+    pub fn begin_gesture(&mut self, label: &str) {
+        if !self.gesture {
+            self.editor.begin(label.to_owned());
+            self.gesture = true;
+        }
+    }
+
+    /// Closes the open gesture, recording its changes as one undo step.
+    pub fn end_gesture(&mut self) {
+        if self.gesture {
+            self.gesture = false;
+            let _ = self.editor.commit();
             self.touch();
         }
     }
@@ -648,6 +778,10 @@ impl Shell {
                 || "Nothing to Redo".to_owned(),
                 |step| format!("Redo {step}"),
             )),
+            // The Playback menu's first item toggles with Stop (M-PLAY-001).
+            transport_ids::PLAY_STOP => {
+                Some(if self.playing() { "Stop" } else { "Play" }.to_owned())
+            }
             _ => None,
         }
     }
@@ -688,8 +822,13 @@ impl Shell {
             }
             _ => {}
         }
-        if ids::handles(id) {
+        if ids::handles(id) || transport_ids::handles(id) {
             return true;
+        }
+        if engine_transport::handles(id) {
+            // The transport plays only while an engine runs on a device.
+            return self.audio.engine_running()
+                && engine_transport::command_from_args(id, Self::object(args.clone())).is_ok();
         }
         if view_ids::handles(id) {
             let args = if args.is_null() {
@@ -856,6 +995,29 @@ impl Shell {
             self.touch();
             return Ok(to_value(&changes));
         }
+        if engine_transport::handles(id) {
+            // Spec: control-bar-transport R12, R13. Menus, keys, the Control
+            // Bar, and agents all reach the engine's transport here.
+            let command =
+                engine_transport::command_from_args(id, Self::object(args)).map_err(|error| {
+                    ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message: error.to_string(),
+                    }
+                })?;
+            self.audio
+                .send_transport(command)
+                .map_err(|reason| ShellError::Unavailable {
+                    command: id.to_owned(),
+                    reason,
+                })?;
+            return Ok(Value::Null);
+        }
+        if transport_ids::handles(id) {
+            Self::args::<NoArgs>(id, args)?;
+            let engine = self.poll_engine();
+            return Ok(to_value(&crate::transport::state(self, engine)));
+        }
         if view_ids::handles(id) {
             let result = self
                 .arrangement
@@ -874,6 +1036,13 @@ impl Shell {
                 // A query changes nothing a window shows.
                 self.touch();
             }
+            if result.is_ok() && matches!(id, view_ids::SET_INSERT_MARKER | view_ids::SELECT_TIME) {
+                // Spec: control-bar-transport R15. A click or a time
+                // selection in the Arrangement moves the engine's insert
+                // marker, where Play starts, and playback carries on.
+                let at = self.arrangement.insert_marker();
+                self.audio.set_insert_marker(at);
+            }
             return result.map(|state| to_value(&state));
         }
         if !ids::handles(id) {
@@ -884,8 +1053,13 @@ impl Shell {
         result
     }
 
+    /// Arguments as a JSON object: `null` is no arguments.
+    fn object(args: Value) -> Value {
+        if args.is_null() { json!({}) } else { args }
+    }
+
     fn args<T: DeserializeOwned>(id: &str, args: Value) -> Result<T, ShellError> {
-        let args = if args.is_null() { json!({}) } else { args };
+        let args = Self::object(args);
         serde_json::from_value(args).map_err(|error| ShellError::InvalidArgs {
             command: id.to_owned(),
             message: error.to_string(),
@@ -935,6 +1109,7 @@ impl Shell {
                 self.main_view = MainView::Arrangement;
                 self.message = None;
                 self.arrangement.reset();
+                self.new_set_transport();
                 self.document_changed();
                 Ok(self.set_result())
             }
@@ -953,6 +1128,7 @@ impl Shell {
                 self.dirty = false;
                 self.message = None;
                 self.arrangement.reset();
+                self.new_set_transport();
                 self.document_changed();
                 Ok(self.set_result())
             }
@@ -980,6 +1156,7 @@ impl Shell {
                 Self::args::<NoArgs>(id, args)?;
                 if self.dirty {
                     self.editor = snapshot(&self.saved);
+                    self.gesture = false;
                     self.dirty = false;
                     self.document_changed();
                 }
@@ -1168,8 +1345,89 @@ impl Shell {
                     frequency_hz: tone.frequency_hz,
                 }))
             }
+            agent::AGENT_SET_SERVER => {
+                let SetServerArgs { on, port } = Self::args(id, args)?;
+                if let Some(port) = port {
+                    if port < 1024 {
+                        return Err(ShellError::InvalidArgs {
+                            command: id.to_owned(),
+                            message: format!("port {port} is below 1024"),
+                        });
+                    }
+                    self.prefs.agent.port = port;
+                }
+                if let Some(on) = on {
+                    self.prefs.agent.server = on;
+                }
+                if self.prefs.agent.server && self.prefs.agent.token.is_empty() {
+                    self.prefs.agent.token = agent::new_token().map_err(failed)?;
+                }
+                self.save_preferences();
+                Ok(to_value(&AgentServerState::from(&self.prefs.agent)))
+            }
+            agent::AGENT_APPROVE_CLIENT => {
+                let ClientArgs { client } = Self::args(id, args)?;
+                if client.trim().is_empty() {
+                    return Err(ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message: "the agent's name is empty".to_owned(),
+                    });
+                }
+                if self.prefs.agent.client(&client).is_none() {
+                    self.prefs.agent.clients.push(agent::AgentClient {
+                        name: client,
+                        autonomous: false,
+                    });
+                    self.save_preferences();
+                }
+                Ok(to_value(&AgentServerState::from(&self.prefs.agent)))
+            }
+            agent::AGENT_FORGET_CLIENT => {
+                let ClientArgs { client } = Self::args(id, args)?;
+                let before = self.prefs.agent.clients.len();
+                self.prefs.agent.clients.retain(|c| c.name != client);
+                if self.prefs.agent.clients.len() == before {
+                    return Err(unavailable(&format!(
+                        "no agent called “{client}” is allowed"
+                    )));
+                }
+                self.save_preferences();
+                Ok(to_value(&AgentServerState::from(&self.prefs.agent)))
+            }
+            agent::AGENT_SET_AUTONOMOUS => {
+                let AutonomousArgs { client, on } = Self::args(id, args)?;
+                let Some(entry) = self
+                    .prefs
+                    .agent
+                    .clients
+                    .iter_mut()
+                    .find(|c| c.name == client)
+                else {
+                    return Err(unavailable(&format!(
+                        "no agent called “{client}” is allowed; it's allowed when it first \
+                         connects"
+                    )));
+                };
+                entry.autonomous = on;
+                self.save_preferences();
+                Ok(to_value(&AgentServerState::from(&self.prefs.agent)))
+            }
+            agent::AGENT_NEW_TOKEN => {
+                Self::args::<NoArgs>(id, args)?;
+                self.prefs.agent.token = agent::new_token().map_err(failed)?;
+                self.save_preferences();
+                Ok(to_value(&AgentServerState::from(&self.prefs.agent)))
+            }
             _ => Err(ShellError::UnknownCommand(id.to_owned())),
         }
+    }
+
+    /// A new or opened set starts stopped at 1.1.1
+    /// (the control bar transport spec, R16), with no gesture open
+    /// on the editor it replaced.
+    fn new_set_transport(&mut self) {
+        self.gesture = false;
+        self.audio.reset_transport();
     }
 
     /// Records a save to `path`: it's the set's file, the set is clean, and

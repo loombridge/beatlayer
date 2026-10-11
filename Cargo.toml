@@ -36,6 +36,7 @@ bl-interop = { path = "crates/interop" }
 bl-ui = { path = "crates/ui" }
 bl-shell = { path = "crates/shell" }
 bl-shell-spec = { path = "crates/shell-spec" }
+bl-agent = { path = "crates/agent" }
 
 [workspace.lints.rust]
 rust_2018_idioms = { level = "warn", priority = -1 }

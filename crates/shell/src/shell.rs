@@ -36,6 +36,7 @@ use crate::settings::{
 use bl_shell_spec::arrangement as view_ids;
 use bl_shell_spec::browser as browser_ids;
 use bl_shell_spec::editing as edit_ids;
+use bl_shell_spec::export as export_ids;
 use bl_shell_spec::mixer_view as mixer_ids;
 use bl_shell_spec::transport as transport_ids;
 
@@ -1586,6 +1587,25 @@ impl Shell {
         }
         if browser_ids::handles(id) {
             return self.run_browser(id, args);
+        }
+        if export_ids::handles(id) {
+            // Spec: export R15. The set, its media, the Arrangement's time
+            // selection, and the engine's rate; the export changes none.
+            let engine_rate = self
+                .audio
+                .sample_rate()
+                .or(self.audio.settings().sample_rate)
+                .unwrap_or(crate::export::DEFAULT_ENGINE_RATE);
+            let args = Self::args(id, args)?;
+            let media: Arc<dyn bl_engine::MediaLibrary> = self.media.clone();
+            return crate::export::run_command(
+                self.editor.document(),
+                media,
+                self.arrangement.time_selection(),
+                engine_rate,
+                &args,
+            )
+            .map(|result| to_value(&result));
         }
         if !ids::handles(id) {
             return Err(ShellError::UnknownCommand(id.to_owned()));

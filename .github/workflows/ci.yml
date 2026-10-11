@@ -1,32 +1,23 @@
-# Runs `cargo xtask check` on Linux (x64) for every pull request, on Windows
-# (x64) and Linux for every push to main, and on Windows and Linux when started
-# by hand (`gh workflow run ci.yml --ref <branch>`), with macOS (arm64) too if
-# the run asks for it. Alongside, it runs the real-time tests under
-# RealtimeSanitizer on Linux (x64).
+# Runs `cargo xtask check` on Windows (x64) and Linux (x64) for every pull
+# request and every push to main, and when started by hand
+# (`gh workflow run ci.yml --ref <branch>`), with macOS (arm64) too if the run
+# asks for it. Alongside, it runs the real-time tests under RealtimeSanitizer
+# on Linux (x64).
 #
-# Windows left per-change CI on 11 October 2026: the organisation's Free-plan
-# minutes, shared with its other private repositories, were 86% spent by the
-# 11th, and a Windows minute costs 1.7 Linux minutes. A Windows failure now
-# shows on main, and is fixed forward; start a run by hand on a branch whose
-# change is Windows-specific.
+# macOS stays out of per-change CI: every author runs the full check on macOS
+# locally and pastes the evidence in the pull request, and macos-check.yml
+# runs it on main every night that code changed. The workflow also:
 #
-# The repository is private on GitHub's Free plan, so hosted-runner minutes are
-# limited, and a macOS minute counts as ten and a Windows minute as two. The maintainer
-# decided on 10 October 2026 to leave macOS out of per-change CI: every agent
-# runs the full check on macOS locally and pastes the evidence in its pull
-# request, and macos-check.yml runs it on main every night that code changed.
-# The workflow also keeps the bill down by:
-#
-# - building nothing for changes that touch only Markdown, the licence, or the
+# - builds nothing for changes that touch only Markdown, the licence, or the
 #   issue templates. On pushes to main the path filter skips the run; on pull
-#   requests the `changes` job decides instead, and the two required checks
-#   (`check (Linux x64)` and `RealtimeSanitizer (Linux x64)`, which branch
-#   protection on main requires) still report, passing without running a step,
-#   so a prose-only pull request can merge;
-# - cancelling a run when a newer commit supersedes it;
-# - restoring the dependency cache on every run, but saving it only from main,
+#   requests the `changes` job decides instead, and the required checks
+#   (`check (Windows x64)`, `check (Linux x64)`, and `RealtimeSanitizer (Linux
+#   x64)`, which branch protection on main requires) still report, passing
+#   without running a step, so a prose-only pull request can merge;
+# - cancels a run when a newer commit supersedes it;
+# - restores the dependency cache on every run, but saves it only from main,
 #   so pull requests share main's cache instead of filling the 10 GB quota;
-# - timing out a hung job after 30 minutes rather than the default six hours.
+# - times out a hung job after 30 minutes rather than the default six hours.
 #
 # A failure on one platform doesn't cancel the others (fail-fast is off). Most
 # authors can only test macOS locally, so one run should report every
@@ -113,9 +104,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Linux for pull requests; Windows too on main and by hand; macOS only
-        # when a manual run asks. See the note at the top.
-        include: ${{ fromJSON(github.event_name == 'pull_request' && '[{"name":"Linux x64","os":"ubuntu-24.04"}]' || (inputs.macos && '[{"name":"macOS arm64","os":"macos-15"},{"name":"Windows x64","os":"windows-2025"},{"name":"Linux x64","os":"ubuntu-24.04"}]' || '[{"name":"Windows x64","os":"windows-2025"},{"name":"Linux x64","os":"ubuntu-24.04"}]')) }}
+        # Windows and Linux on every run; macOS too only when a manual run
+        # asks. See the note at the top.
+        include: ${{ fromJSON(inputs.macos && '[{"name":"macOS arm64","os":"macos-15"},{"name":"Windows x64","os":"windows-2025"},{"name":"Linux x64","os":"ubuntu-24.04"}]' || '[{"name":"Windows x64","os":"windows-2025"},{"name":"Linux x64","os":"ubuntu-24.04"}]') }}
     defaults:
       run:
         shell: bash

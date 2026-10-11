@@ -9,6 +9,7 @@ bl_rt::install_trap!();
 mod device_changes;
 mod devices;
 mod engine_smoke;
+mod export;
 mod mcp;
 mod tone;
 
@@ -62,6 +63,16 @@ enum Command {
     /// status 1 if a sample isn't finite or (in a debug build) the engine
     /// touches the heap inside a block.
     Render(bl_cli::render::RenderArgs),
+    /// Export a set's Main output to a WAV, AIFF, or FLAC file, faster
+    /// than real time, with no audio device.
+    ///
+    /// Runs `export.audio`, the command agents run, on a headless shell:
+    /// the range (the whole set unless --start, --bars, or --length say
+    /// otherwise) plays straight through the same engine code a device
+    /// runs, then is converted, normalised, dithered, and encoded as asked.
+    /// The file appears only when it's complete; an existing one is
+    /// replaced only with --replace.
+    Export(export::ExportArgs),
     /// Render the golden fixtures and null-test them against their
     /// references in tests/golden.
     ///
@@ -88,6 +99,7 @@ fn main() -> ExitCode {
         Command::EngineSmoke(args) => engine_smoke::run(args),
         Command::DeviceChanges(args) => device_changes::run(args),
         Command::Render(args) => bl_cli::render::run(args),
+        Command::Export(args) => export::run(args),
         Command::Golden(args) => bl_cli::golden::run(args),
         Command::Mcp(args) => mcp::run(args),
     };

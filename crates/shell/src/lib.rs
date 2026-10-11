@@ -26,6 +26,9 @@
 //!   one undo step through [`Shell::gesture`].
 //! - [`browser`]: the browser (places, browsing, search, preview, adding
 //!   files to the Arrangement), changed by its commands (WP-1.10).
+//! - [`export`]: exporting audio (WP-1.12): a range rendered offline
+//!   through the engine and written to a WAV, AIFF, or FLAC file, which
+//!   `export.audio` runs.
 //! - [`mixer_view`] and [`mixer_controls`]: what the mixers show in the
 //!   Session and Arrangement Views (shown, scrolled, which sections),
 //!   changed by the `mixer_view.*` commands, and what a strip's controls
@@ -43,6 +46,7 @@ pub mod agent;
 pub mod arrangement;
 pub mod audio;
 pub mod browser;
+pub mod export;
 pub mod files;
 pub mod mixer_controls;
 pub mod mixer_view;
@@ -57,6 +61,8 @@ pub use bl_shell_spec::browser as browser_commands;
 /// The Arrangement's editing command IDs and their argument and result
 /// types (WP-1.8b).
 pub use bl_shell_spec::editing as editing_commands;
+/// The export command's ID and its argument and result types (WP-1.12).
+pub use bl_shell_spec::export as export_commands;
 /// The Mixer view's command IDs and their argument and result types
 /// (WP-1.9).
 pub use bl_shell_spec::mixer_view as mixer_view_commands;

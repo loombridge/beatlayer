@@ -1,6 +1,6 @@
 //! The engine restarting with a new processor, as a device supervisor
 //! restarts it when a stream closes and opens again (WP-1.13,
-//! `docs/specs/device-changes.md`): by hand here, with no device, through
+//! the device changes spec): by hand here, with no device, through
 //! the engine's `Restarter`. `bl-audio-engine`'s tests do the same on the
 //! null device. Blocks that check the transport run as real-time sections
 //! under the allocation trap.

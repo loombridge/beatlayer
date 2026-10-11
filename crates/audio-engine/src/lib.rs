@@ -17,7 +17,7 @@
 //! for the rate and block size the stream runs at, the newest document
 //! compiled anew for it, and the song where it was, stopped, on the same
 //! beats and in the same loop at the new rate. The rules are in
-//! `docs/specs/device-changes.md`.
+//! the device changes spec.
 //!
 //! It's a crate of its own so that `bl-engine` stays free of audio
 //! backends: `xtask` links the engine for the transport's commands, and
@@ -47,7 +47,7 @@ const RESTART_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// The engine running on an audio device, through unplugging, sample-rate
 /// changes, stalls, and sleep (WP-1.13; the rules are in
-/// `docs/specs/device-changes.md`).
+/// the device changes spec).
 ///
 /// A `bl-audio-io` [`Supervisor`] keeps the stream open. When it closes the
 /// stream, the engine stops cleanly: the processor comes back from the

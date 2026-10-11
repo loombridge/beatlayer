@@ -762,7 +762,7 @@ impl EngineHost {
     }
 }
 
-/// The transport after `docs/specs/transport.md`, one frame at a time,
+/// The transport after the transport spec, one frame at a time,
 /// apart from the engine's code: what each frame of the engine clock plays.
 struct TransportModel {
     tempo: TempoMap,

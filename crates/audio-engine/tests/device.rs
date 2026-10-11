@@ -1,7 +1,7 @@
 //! The engine on a device through device changes (WP-1.13): a song plays on
 //! the null backend's simulated USB interface, which is unplugged and
 //! plugged back in, changes sample rate, and sleeps and wakes, as
-//! `docs/specs/device-changes.md` lays out. Every block runs on the null
+//! the device changes spec lays out. Every block runs on the null
 //! device's real-time thread under the allocation trap, and each stream's
 //! heap use is checked.
 

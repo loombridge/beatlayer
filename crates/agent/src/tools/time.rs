@@ -17,9 +17,9 @@
 //! Agents can't hit musical timing over a network, so they schedule
 //! instead. A scheduled command reaches the engine as a
 //! [`ScheduledCommand`] (WP-0.9): the engine runs its action on the exact
-//! frame the song reaches its position (a fader or device parameter change,
-//! or a transport stop or jump, there and then; for any other command,
-//! nothing but the report) and reports it, and the main thread then runs a
+//! frame the song reaches its position (a track's volume, pan, or mute, a
+//! device parameter, or a transport stop or jump, there and then; for any
+//! other command, solo among them, nothing but the report) and reports it, and the main thread then runs a
 //! document command on the document as an undo step labelled with the
 //! agent's name, so the document matches what played.
 //!
@@ -36,9 +36,9 @@
 
 use bl_commands::Permission;
 use bl_core::time::Ticks;
-use bl_engine::nodes::fader;
 use bl_engine::{
-    Action, EngineState, NodeKey, ParamValue, Report, ScheduledCommand, TransportCommand, transport,
+    Action, EngineState, NodeKey, ParamValue, Report, ScheduledCommand, TransportCommand, mixer,
+    transport,
 };
 use bl_model::registry as model;
 use bl_shell::Shell;
@@ -208,11 +208,11 @@ pub(crate) fn schedule_definition() -> Value {
         "Schedule commands",
         "Runs a command when the playing song reaches a bar and beat, on the exact sample: \
          `add` with `at` (bar.beat.sixteenth, such as \"9.1.1\"), `command`, and `args`; \
-         `list` to see them; `cancel` with `id`. Fader and device parameter changes \
-         (`mixer.set_volume`, `mixer.set_pan`, `mixer.set_mute`, `mixer.set_solo`, \
-         `device.set_param`) take effect in the audio on that sample, and `transport.stop` \
-         and `transport.locate` stop or jump there; any other command runs as the song gets \
-         there. Each document change runs as an undo step labelled with your name. The \
+         `list` to see them; `cancel` with `id`. Volume, pan, mute, and device parameter \
+         changes (`mixer.set_volume`, `mixer.set_pan`, `mixer.set_mute`, `device.set_param`) \
+         take effect in the audio on that sample, and `transport.stop` and `transport.locate` \
+         stop or jump there; any other command, `mixer.set_solo` among them, runs as the song \
+         gets there. Each document change runs as an undo step labelled with your name. The \
          command and its arguments are checked when you schedule it, and it asks the person \
          then if it's destructive or external. A command fires once, when the song plays \
          through its position.",
@@ -449,8 +449,11 @@ fn is_edit(id: &str) -> bool {
     model::handles(id) && id != model::UNDO && id != model::REDO
 }
 
-/// What the engine does on the frame: a fader or device parameter change, a
-/// transport command, or only the report.
+/// What the engine does on the frame: a track mixer or device parameter
+/// change, a transport command, or only the report. Solo isn't one parameter
+/// (it decides which routes every track is heard through), so a scheduled
+/// solo is only reported, and the main thread applies it as the song gets
+/// there.
 fn engine_action(command: &str, args: &Value) -> Action {
     if transport::handles(command) {
         return transport::command_from_args(command, args.clone())
@@ -467,19 +470,18 @@ fn engine_action(command: &str, args: &Value) -> Action {
             .and_then(Value::as_bool)
             .map(|on| if on { 1.0 } else { 0.0 })
     };
-    let fader = |param, value: Option<f64>| match (id("track"), value) {
+    let track_mixer = |param, value: Option<f64>| match (id("track"), value) {
         (Some(track), Some(value)) => Action::Param {
-            key: NodeKey::Fader(bl_model::TrackId(track)),
+            key: NodeKey::Mixer(bl_model::TrackId(track)),
             param,
             value: ParamValue::Set(value),
         },
         _ => Action::Notify,
     };
     match command {
-        "mixer.set_volume" => fader(fader::VOLUME, number("volume")),
-        "mixer.set_pan" => fader(fader::PAN, number("pan")),
-        "mixer.set_mute" => fader(fader::MUTE, switch("mute")),
-        "mixer.set_solo" => fader(fader::SOLO, switch("solo")),
+        "mixer.set_volume" => track_mixer(mixer::track::VOLUME, number("volume")),
+        "mixer.set_pan" => track_mixer(mixer::track::PAN, number("pan")),
+        "mixer.set_mute" => track_mixer(mixer::track::MUTE, switch("mute")),
         "device.set_param" => match (
             id("device"),
             args.get("param")
@@ -647,13 +649,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn fader_and_device_changes_become_engine_actions() {
+    fn mixer_and_device_changes_become_engine_actions() {
         let action = engine_action("mixer.set_mute", &json!({ "track": 4, "mute": true }));
         assert_eq!(
             action,
             Action::Param {
-                key: NodeKey::Fader(bl_model::TrackId(bl_core::id::Id::new(4).unwrap())),
-                param: fader::MUTE,
+                key: NodeKey::Mixer(bl_model::TrackId(bl_core::id::Id::new(4).unwrap())),
+                param: mixer::track::MUTE,
                 value: ParamValue::Set(1.0),
             }
         );
@@ -664,6 +666,10 @@ mod tests {
         assert!(matches!(action, Action::Param { value: ParamValue::Set(v), .. } if v == -36.0));
         assert_eq!(
             engine_action("track.rename", &json!({ "track": 4, "name": "A" })),
+            Action::Notify
+        );
+        assert_eq!(
+            engine_action("mixer.set_solo", &json!({ "track": 4, "solo": true })),
             Action::Notify
         );
     }

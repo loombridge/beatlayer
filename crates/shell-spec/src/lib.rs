@@ -21,6 +21,7 @@
 //! - [`transport`]: what the Control Bar's transport section shows
 //!   (`transport.state`), and the IDs of the transport's commands, which
 //!   `bl-engine` and `bl-model` register (WP-1.18).
+//! - [`export`]: exporting audio (`export.audio`, WP-1.12).
 //!
 //! `cargo xtask` checks the commands, lists them in the command reference, and
 //! builds the keymap from this crate, so none of its tasks links an audio
@@ -34,6 +35,7 @@ pub mod browser;
 pub mod commands;
 pub mod context_menus;
 pub mod editing;
+pub mod export;
 pub mod menus;
 pub mod settings;
 pub mod transport;
@@ -41,7 +43,8 @@ pub mod transport;
 use bl_commands::{RegisterError, Registry};
 
 /// Adds the shell's commands, the Arrangement View's (its view and its
-/// editing commands), the transport query, and the browser's to a registry.
+/// editing commands), the transport query, the browser's, and the export
+/// command to a registry.
 ///
 /// # Errors
 ///
@@ -51,5 +54,6 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     arrangement::register(registry)?;
     editing::register(registry)?;
     transport::register(registry)?;
-    browser::register(registry)
+    browser::register(registry)?;
+    export::register(registry)
 }

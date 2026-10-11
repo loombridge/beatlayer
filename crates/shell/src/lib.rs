@@ -26,6 +26,9 @@
 //!   one undo step through [`Shell::gesture`].
 //! - [`browser`]: the browser (places, browsing, search, preview, adding
 //!   files to the Arrangement), changed by its commands (WP-1.10).
+//! - [`export`]: exporting audio (WP-1.12): a range rendered offline
+//!   through the engine and written to a WAV, AIFF, or FLAC file, which
+//!   `export.audio` runs.
 //! - [`transport`]: the Control Bar's transport section: what its fields
 //!   show, and the command each change runs (WP-1.18). The transport's
 //!   commands themselves are `bl-engine`'s, which [`Shell`] registers and
@@ -39,6 +42,7 @@ pub mod agent;
 pub mod arrangement;
 pub mod audio;
 pub mod browser;
+pub mod export;
 pub mod files;
 pub mod settings;
 mod shell;
@@ -51,6 +55,8 @@ pub use bl_shell_spec::browser as browser_commands;
 /// The Arrangement's editing command IDs and their argument and result
 /// types (WP-1.8b).
 pub use bl_shell_spec::editing as editing_commands;
+/// The export command's ID and its argument and result types (WP-1.12).
+pub use bl_shell_spec::export as export_commands;
 pub use bl_shell_spec::settings::ZOOM_STEPS;
 /// The transport's command IDs the shell's menus and controls run, and
 /// `transport.state`'s result.

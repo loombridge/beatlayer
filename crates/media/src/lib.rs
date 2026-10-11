@@ -1,6 +1,5 @@
-//! Media for Beatlayer: decoding, sample-rate conversion, content hashing,
-//! the media store, peak files, and disk streaming. Encoding (WP-1.12)
-//! builds on this crate.
+//! Media for Beatlayer: decoding, encoding, sample-rate conversion, content
+//! hashing, the media store, peak files, and disk streaming.
 //!
 //! - [`Decoder`] reads WAV (including Broadcast Wave), RF64 and BW64 over
 //!   4 GB, AIFF and AIFF-C, FLAC, MP3, Ogg Vorbis, and MPEG-4 with AAC or
@@ -9,6 +8,9 @@
 //!   the decoding, except for RF64 and BW64, which this crate parses itself.
 //!   Encoder delay and padding are trimmed, so a decoded file has the length
 //!   and timing of what was encoded.
+//! - [`AudioWriter`] writes WAV, AIFF, and FLAC at 16, 24, or 32 bits, a
+//!   block at a time, with a [`Quantiser`] that dithers and rounds below 32
+//!   bits (WP-1.12, the export spec). See [`encode`].
 //! - [`RateConverter`] and [`convert_sample_rate`] convert between sample
 //!   rates with aliasing below -100 dB in the passband, through rubato.
 //! - [`ContentHash`] names media by the BLAKE3 hash of the file's bytes.
@@ -28,6 +30,7 @@
 //! an [`AudioSource`], whose reads are real-time safe.
 
 mod decode;
+pub mod encode;
 mod error;
 mod hash;
 mod mp4;
@@ -39,6 +42,7 @@ mod store;
 pub mod stream;
 
 pub use decode::{Codec, Container, Decoder, MediaInfo, decode_file, probe};
+pub use encode::{AudioWriter, BitDepth, Dither, EncodeSpec, FileType, Quantiser};
 pub use error::MediaError;
 pub use hash::{ContentHash, ParseContentHashError};
 pub use peaks::{PeakCache, PeakCacheOptions, PeakEvent, PeakStatus, Peaks};

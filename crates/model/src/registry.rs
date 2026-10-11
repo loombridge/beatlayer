@@ -528,10 +528,13 @@ const ENTRIES: &[Entry] = &[
         label: "Delete Clip",
         permission: Permission::Destructive,
         contexts: &[Arrangement],
-        keys: &[Key::Runs("S-EDIT-005")],
+        // The Delete key deletes the Arrangement's selection
+        // (`arrangement.delete`, WP-1.8b), which may be clips or time.
+        keys: &[],
         description: "Deletes a clip from the arrangement. Undo restores it, but because it \
             removes the person's work an agent asks first. To keep a clip but stop it playing, \
-            use `clip.set_mute`.",
+            use `clip.set_mute`. To delete the clips or the time selected in the Arrangement, \
+            use `arrangement.delete`.",
     },
     Entry {
         id: "clip.move",
@@ -668,6 +671,20 @@ const ENTRIES: &[Entry] = &[
             that starts or ends mid-waveform from clicking: 0.004 (4 ms) is the length that \
             Create Fades on Clip Edges gives new clips. Lengths must be finite and at least \
             0.",
+    },
+    Entry {
+        id: "clip.trim_start",
+        action: Action::Apply("trim_clip_start"),
+        label: "Trim Clip Start",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Moves a clip's left edge to `start`, keeping its end and keeping its \
+            contents where they play, as dragging the clip's left edge does: a later `start` \
+            hides the beginning of the clip, an earlier one shows more of it. The clip can't \
+            start before its contents begin (its offset stays at 0 or more), before 0, or at or \
+            after its end. To move a clip with its contents, use `clip.move`; to change where \
+            it ends, use `clip.set_length`.",
     },
     Entry {
         id: "device.insert",

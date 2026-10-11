@@ -168,10 +168,10 @@ impl Menu {
 
 use Action::{Command as Cmd, Omitted, Pending, Shortcut as Key, Submenu, System};
 
-type Row = (&'static str, &'static str, Action);
+pub(crate) type Row = (&'static str, &'static str, Action);
 
 /// A separator row.
-const SEPARATOR: Row = ("", "", Action::Separator);
+pub(crate) const SEPARATOR: Row = ("", "", Action::Separator);
 
 const APP: &[Row] = &[
     ("M-APP-001", "About Beatlayer", Cmd(APP_ABOUT)),
@@ -714,7 +714,7 @@ const HELP: &[Row] = &[
 ];
 
 /// Builds items from rows, nesting each submenu's rows under it.
-fn items(rows: &[Row]) -> Vec<MenuItem> {
+pub(crate) fn items(rows: &[Row]) -> Vec<MenuItem> {
     let mut out: Vec<MenuItem> = Vec::new();
     for &(row, label, action) in rows {
         let item = MenuItem {

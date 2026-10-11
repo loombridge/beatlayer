@@ -16,6 +16,7 @@ use crate::agent::{
     self as agent, AgentServerState, AgentServerStatus, AgentSettings, AutonomousArgs, ClientArgs,
     SetServerArgs,
 };
+use crate::arrangement::editing::{self, Clipboard, EditFailure};
 use crate::arrangement::{ArrangementView, TransportView, ViewError, Viewport};
 use crate::audio::{AudioHost, ConfigureAudio, EngineTransport, ToneSettings};
 use crate::commands::{
@@ -28,6 +29,7 @@ use crate::settings::{
     zoom_percent, zoom_step,
 };
 use bl_shell_spec::arrangement as view_ids;
+use bl_shell_spec::editing as edit_ids;
 use bl_shell_spec::transport as transport_ids;
 
 /// The views the main window's main area shows.
@@ -138,6 +140,27 @@ pub enum Effect {
     },
 }
 
+/// Where a gesture that edits the set is (WP-1.8b): see [`Shell::gesture`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum GesturePhase {
+    /// The gesture goes on: run its command from where the gesture began,
+    /// opening the gesture's transaction on the first update.
+    Update,
+    /// The gesture ends: run its command a last time, if one is given, and
+    /// commit, recording one undo step if the set changed.
+    Commit,
+    /// The gesture is abandoned (Esc): the set goes back to where it began.
+    Cancel,
+}
+
+/// A gesture under way: what the selection was when it began, and the last
+/// command that ran, to fall back on when a frame's command is refused.
+#[derive(Debug)]
+struct Gesture {
+    view: ArrangementView,
+    last: Option<Invocation>,
+}
+
 /// A line for the Status Bar's message area (L-STAT-002).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Message {
@@ -229,6 +252,11 @@ pub struct Shell {
     arrangement: ArrangementView,
     /// A number that changes whenever the document may have changed.
     document_revision: u64,
+    /// The Arrangement's clipboard (WP-1.8b), kept across sets as Live
+    /// keeps it, and never part of a set.
+    clipboard: Option<Clipboard>,
+    /// A gesture that edits the set, under way (WP-1.8b).
+    edit_gesture: Option<Gesture>,
     /// The engine's insert marker when the shell last looked, so a move of
     /// it reaches the Arrangement View once (WP-1.18).
     seen_insert_marker: Option<Ticks>,
@@ -245,6 +273,24 @@ impl fmt::Debug for Shell {
             .field("main_view", &self.main_view)
             .field("audio", &self.audio)
             .finish_non_exhaustive()
+    }
+}
+
+/// The shell's error for an edit that didn't happen.
+fn edit_error(id: &str, failure: EditFailure) -> ShellError {
+    match failure {
+        EditFailure::InvalidArgs(message) => ShellError::InvalidArgs {
+            command: id.to_owned(),
+            message,
+        },
+        EditFailure::Unavailable(reason) => ShellError::Unavailable {
+            command: id.to_owned(),
+            reason,
+        },
+        EditFailure::Refused(message) => ShellError::Failed {
+            command: id.to_owned(),
+            message,
+        },
     }
 }
 
@@ -302,6 +348,8 @@ impl Shell {
             agent_status: AgentServerStatus::default(),
             arrangement: ArrangementView::new(),
             document_revision: 0,
+            clipboard: None,
+            edit_gesture: None,
             seen_insert_marker: None,
             gesture: false,
         }
@@ -647,6 +695,116 @@ impl Shell {
         }
     }
 
+    /// The Arrangement's clipboard, if anything has been copied.
+    #[must_use]
+    pub fn clipboard(&self) -> Option<&Clipboard> {
+        self.clipboard.as_ref()
+    }
+
+    /// Whether a gesture that edits the set is under way.
+    #[must_use]
+    pub fn gesture_open(&self) -> bool {
+        self.edit_gesture.is_some()
+    }
+
+    /// Runs one step of a gesture that edits the set, such as dragging
+    /// clips (WP-1.8b; arrangement-editing R13). A gesture is one undo
+    /// step however many frames it lasts: its first update opens a
+    /// transaction, each update runs `invocation`, an editing command with
+    /// arguments measured from where the gesture began, on the set as it
+    /// was then, and the commit closes the transaction. The set follows the
+    /// gesture as it goes, so the view and the engine show it. A frame
+    /// whose command is refused (a clip pushed before 1.1.1) keeps the last
+    /// one that worked. Cancelling puts the set and the selection back.
+    ///
+    /// # Errors
+    ///
+    /// [`ShellError`] if the command isn't an editing command, or the
+    /// frame's command was refused; the gesture stays open either way
+    /// until it's committed or cancelled.
+    pub fn gesture(
+        &mut self,
+        phase: GesturePhase,
+        invocation: Option<&Invocation>,
+    ) -> Result<Value, ShellError> {
+        if phase == GesturePhase::Cancel {
+            if let Some(gesture) = self.edit_gesture.take() {
+                self.editor.cancel().ok();
+                self.arrangement.restore_selection(&gesture.view);
+                self.document_changed();
+                self.touch();
+            }
+            return Ok(Value::Null);
+        }
+        let mut outcome = Ok(Value::Null);
+        if let Some(invocation) = invocation {
+            if !edit_ids::handles(&invocation.id) {
+                return Err(ShellError::Unavailable {
+                    command: invocation.id.clone(),
+                    reason: "only the Arrangement's editing commands run as gestures".to_owned(),
+                });
+            }
+            outcome = self.gesture_step(invocation);
+        }
+        if phase == GesturePhase::Commit
+            && self.edit_gesture.take().is_some()
+            && self.editor.commit().unwrap_or(false)
+        {
+            self.dirty = true;
+        }
+        self.document_changed();
+        self.touch();
+        outcome
+    }
+
+    fn gesture_step(&mut self, invocation: &Invocation) -> Result<Value, ShellError> {
+        let label = editing::label(&invocation.id, &invocation.args);
+        match &self.edit_gesture {
+            None => {
+                self.edit_gesture = Some(Gesture {
+                    view: self.arrangement.clone(),
+                    last: None,
+                });
+            }
+            Some(gesture) => {
+                // Back to where the gesture began, then the whole gesture
+                // again.
+                self.editor.cancel().ok();
+                let view = gesture.view.clone();
+                self.arrangement.restore_selection(&view);
+            }
+        }
+        self.editor.begin(label);
+        let result = editing::run(
+            &invocation.id,
+            invocation.args.clone(),
+            &mut self.editor,
+            &mut self.arrangement,
+            &mut self.clipboard,
+        );
+        let Some(gesture) = self.edit_gesture.as_mut() else {
+            return Ok(Value::Null);
+        };
+        match result {
+            Ok(value) => {
+                gesture.last = Some(invocation.clone());
+                Ok(value)
+            }
+            Err(failure) => {
+                if let Some(last) = gesture.last.clone() {
+                    let _ = editing::run(
+                        &last.id,
+                        last.args,
+                        &mut self.editor,
+                        &mut self.arrangement,
+                        &mut self.clipboard,
+                    );
+                }
+                Err(edit_error(&invocation.id, failure))
+            }
+        }
+    }
+
     /// Takes what the engine last published (the playhead, whether the song
     /// plays, the insert marker) for the Arrangement View and the Control
     /// Bar, with the loop brace from the document. The window calls it
@@ -770,11 +928,11 @@ impl Shell {
     #[must_use]
     pub fn dynamic_label(&self, id: &str) -> Option<String> {
         match id {
-            model::UNDO => Some(self.editor.undo_history().last().map_or_else(
+            model::UNDO => Some(self.editor.undo_history().next().map_or_else(
                 || "Nothing to Undo".to_owned(),
                 |step| format!("Undo {step}"),
             )),
-            model::REDO => Some(self.editor.redo_history().last().map_or_else(
+            model::REDO => Some(self.editor.redo_history().next().map_or_else(
                 || "Nothing to Redo".to_owned(),
                 |step| format!("Redo {step}"),
             )),
@@ -794,6 +952,10 @@ impl Shell {
         let Some(spec) = self.registry.get(id) else {
             return false;
         };
+        if self.edit_gesture.is_some() {
+            // A drag is under way; keys wait for it (Esc cancels it).
+            return false;
+        }
         let active = self.active_contexts();
         if !spec.contexts.iter().any(|context| active.contains(context)) {
             return false;
@@ -824,6 +986,24 @@ impl Shell {
         }
         if ids::handles(id) || transport_ids::handles(id) {
             return true;
+        }
+        if edit_ids::handles(id) {
+            let args = if args.is_null() {
+                json!({})
+            } else {
+                args.clone()
+            };
+            return spec
+                .args
+                .as_ref()
+                .is_some_and(|schema| bl_commands::validate(schema, &args).is_ok())
+                && editing::can_run(
+                    id,
+                    &args,
+                    self.editor.document(),
+                    &self.arrangement,
+                    self.clipboard.as_ref(),
+                );
         }
         if engine_transport::handles(id) {
             // The transport plays only while an engine runs on a device.
@@ -984,6 +1164,35 @@ impl Shell {
     /// is unchanged when a command fails, except that a device that refuses
     /// new audio settings goes back to the previous ones.
     pub fn run(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        if self.edit_gesture.is_some()
+            && (model::handles(id)
+                || edit_ids::handles(id)
+                || id.starts_with("set.")
+                || id == ids::APP_QUIT)
+        {
+            return Err(ShellError::Unavailable {
+                command: id.to_owned(),
+                reason: "a drag that edits the set is under way; it ends when it's released"
+                    .to_owned(),
+            });
+        }
+        if edit_ids::handles(id) {
+            let before = self.editor.document().clone();
+            let result = editing::run(
+                id,
+                args,
+                &mut self.editor,
+                &mut self.arrangement,
+                &mut self.clipboard,
+            )
+            .map_err(|failure| edit_error(id, failure));
+            if *self.editor.document() != before {
+                self.dirty = true;
+                self.document_changed();
+            }
+            self.touch();
+            return result;
+        }
         if model::handles(id) {
             let changes =
                 model::run(&mut self.editor, id, args).map_err(|error| ShellError::Failed {

@@ -138,7 +138,8 @@ pub fn run(args: &Args, path: &Path) -> Result<(), String> {
                 UiEvent::Invoke(_)
                 | UiEvent::FocusArea(_)
                 | UiEvent::BeginGesture(_)
-                | UiEvent::EndGesture => {}
+                | UiEvent::EndGesture
+                | UiEvent::Gesture { .. } => {}
             }
         }
         if frame == 0 {

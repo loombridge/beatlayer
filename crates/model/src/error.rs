@@ -60,6 +60,9 @@ pub enum ModelError {
     NegativePosition(Ticks),
     /// A clip or note length isn't positive.
     EmptyLength(Ticks),
+    /// A clip would start before its contents begin: its offset into them
+    /// would be negative.
+    NegativeOffset(Ticks),
     /// A position or length is too large to represent.
     PositionOverflow,
     /// A number is out of range or not finite.
@@ -102,6 +105,11 @@ impl fmt::Display for ModelError {
             }
             Self::NegativePosition(at) => write!(f, "position {at} is before zero"),
             Self::EmptyLength(length) => write!(f, "length {length} isn't positive"),
+            Self::NegativeOffset(offset) => write!(
+                f,
+                "the clip would start {} ticks before its contents begin",
+                offset.get().unsigned_abs()
+            ),
             Self::PositionOverflow => f.write_str("position is too large"),
             Self::InvalidValue { what, value } => write!(f, "{what} {value} is out of range"),
             Self::InvalidNote { index } => {

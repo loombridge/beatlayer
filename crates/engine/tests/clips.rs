@@ -93,6 +93,48 @@ fn frames_at(tempo: &TempoMap, ticks: Ticks) -> usize {
     usize::try_from(tempo.ticks_to_frames(ticks, RATE).get()).unwrap()
 }
 
+// A clip split in two, or trimmed at its left edge (WP-1.8b), keeps its
+// contents where they were: its offset says how far into them it starts, so
+// the parts together play exactly what the whole clip played.
+#[test]
+fn a_split_clips_parts_play_on_from_where_the_whole_clip_was() {
+    let tempo = TempoMap::default();
+    let start = Ticks::QUARTER + Ticks(12_345);
+    let length = Ticks::WHOLE;
+    let split = start + Ticks::QUARTER + Ticks(999);
+    let mut media = MediaMap::new();
+    media.insert(hash(1), ramp(96_000, 48_000));
+    let audio = AudioData {
+        start: 0.25,
+        ..AudioData::new(hash(1))
+    };
+
+    let mut whole = Editor::new();
+    let a = track(&mut whole, TrackKind::Audio, None);
+    clip(&mut whole, a, start, length, audio);
+    let expected = play(&whole, &media, 96_000, 512, &[]);
+
+    let mut parts = Editor::new();
+    let b = track(&mut parts, TrackKind::Audio, None);
+    clip(&mut parts, b, start, split - start, audio);
+    let right = parts.new_id();
+    let mut piece = Clip::new(right, split, start + length - split, ClipData::Audio(audio));
+    piece.offset = split - start;
+    parts
+        .apply(Command::CreateClip {
+            track: b,
+            clip: piece,
+        })
+        .unwrap();
+    let [left, _] = play(&parts, &media, 96_000, 512, &[]);
+    assert_eq!(left, expected[0]);
+    // The right part on its own plays from the split, a quarter and a bit
+    // past the Start marker.
+    let first = frames_at(&tempo, split);
+    let into = first - frames_at(&tempo, start) + 12_000;
+    assert_eq!(left[first], at(into as i64));
+}
+
 // Spec: audio-clips R1, R2, R5
 #[test]
 fn a_clip_plays_its_file_from_the_frame_its_start_falls_on_to_the_frame_its_end_does() {

@@ -235,6 +235,15 @@ pub enum Command {
         /// The new data.
         data: ClipData,
     },
+    /// Moves a clip's left edge to `start`, keeping its end and where its
+    /// contents play: the clip shows more or less of its contents. Its
+    /// contents can't start after it.
+    TrimClipStart {
+        /// The clip.
+        clip: ClipId,
+        /// Where its left edge goes, before its end.
+        start: Ticks,
+    },
     /// Moves an audio clip's Start and End markers: where in its file it
     /// starts playing, and where it stops while its loop is off.
     SetClipRegion {
@@ -370,6 +379,7 @@ impl Command {
             Self::RenameClip { .. } => "Rename clip",
             Self::SetClipMute { .. } => "Mute clip",
             Self::SetClipData { .. } => "Edit clip",
+            Self::TrimClipStart { .. } => "Resize clip",
             Self::SetClipRegion { .. } => "Change clip region",
             Self::SetClipLoop { .. } => "Change clip loop",
             Self::SetClipLoopEnabled { .. } => "Switch clip loop",
@@ -579,6 +589,7 @@ impl Document {
                 }
                 Ok(())
             }
+            Command::TrimClipStart { clip, start } => self.trim_clip_start(*clip, *start),
             Command::SetClipRegion { clip, start, end } => self.edit_audio(*clip, |audio| {
                 audio.start = *start;
                 audio.end = *end;
@@ -769,6 +780,7 @@ impl Document {
         self.check_fresh(clip.id.0)?;
         check_clip_fits(self.track_ref(track)?, &clip.data)?;
         check_extent(clip.start, clip.length)?;
+        check_offset(clip.offset)?;
         check_clip_data(&clip.data)?;
         self.track_mut(track)?
             .clips
@@ -815,6 +827,25 @@ impl Document {
             for (id, start) in moves {
                 self.clip_mut(id)?.start = start;
             }
+        }
+        Ok(())
+    }
+
+    fn trim_clip_start(&mut self, id: ClipId, start: Ticks) -> Result<(), ModelError> {
+        let clip = self.clip_ref(id)?;
+        let end = clip.end();
+        let offset = start
+            .checked_sub(clip.start)
+            .and_then(|by| by.checked_add(clip.offset))
+            .ok_or(ModelError::PositionOverflow)?;
+        let length = end.checked_sub(start).ok_or(ModelError::PositionOverflow)?;
+        check_extent(start, length)?;
+        check_offset(offset)?;
+        if clip.start != start {
+            let clip = self.clip_mut(id)?;
+            clip.start = start;
+            clip.length = length;
+            clip.offset = offset;
         }
         Ok(())
     }
@@ -1028,6 +1059,15 @@ pub(crate) fn check_extent(start: Ticks, length: Ticks) -> Result<(), ModelError
         .checked_add(length)
         .map(|_| ())
         .ok_or(ModelError::PositionOverflow)
+}
+
+/// Checks a clip's offset into its contents.
+pub(crate) fn check_offset(offset: Ticks) -> Result<(), ModelError> {
+    if offset.is_negative() {
+        Err(ModelError::NegativeOffset(offset))
+    } else {
+        Ok(())
+    }
 }
 
 /// Checks the notes in MIDI data, and an audio clip's markers, loop, gain,
@@ -2009,6 +2049,58 @@ mod tests {
         .unwrap();
         assert_eq!(song.doc.clip(early).unwrap().start, Ticks::QUARTER);
         assert_eq!(song.doc.clip(late).unwrap().start, Ticks::QUARTER * 9);
+    }
+
+    #[test]
+    fn trimming_a_clip_start_keeps_its_contents_in_place() {
+        // Spec: arrangement-editing R7, R16.
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        let clip = song.clip(track, 4);
+        let content = song.doc.clip(clip).unwrap().content_start();
+        assert_eq!(content, Ticks::WHOLE);
+
+        // Later: the clip shows less, its end and contents stay put.
+        song.apply(Command::TrimClipStart {
+            clip,
+            start: Ticks::QUARTER * 6,
+        })
+        .unwrap();
+        let trimmed = song.doc.clip(clip).unwrap();
+        assert_eq!(trimmed.start, Ticks::QUARTER * 6);
+        assert_eq!(trimmed.end(), Ticks::WHOLE * 2);
+        assert_eq!(trimmed.offset, Ticks::QUARTER * 2);
+        assert_eq!(trimmed.content_start(), content);
+
+        // Earlier again, back to where its contents begin, but no further.
+        song.apply(Command::TrimClipStart {
+            clip,
+            start: Ticks::WHOLE,
+        })
+        .unwrap();
+        assert_eq!(song.doc.clip(clip).unwrap().offset, Ticks::ZERO);
+        assert_eq!(
+            song.reject(Command::TrimClipStart {
+                clip,
+                start: Ticks::QUARTER * 3,
+            }),
+            ModelError::NegativeOffset(-Ticks::QUARTER)
+        );
+        // Not at or past its end.
+        assert_eq!(
+            song.reject(Command::TrimClipStart {
+                clip,
+                start: Ticks::WHOLE * 2,
+            }),
+            ModelError::EmptyLength(Ticks::ZERO)
+        );
+        // A new clip can't start before its contents either.
+        let mut early = Clip::new(song.fresh(), Ticks::ZERO, Ticks::WHOLE, audio());
+        early.offset = -Ticks::QUARTER;
+        assert_eq!(
+            song.reject(Command::CreateClip { track, clip: early }),
+            ModelError::NegativeOffset(-Ticks::QUARTER)
+        );
     }
 
     #[test]

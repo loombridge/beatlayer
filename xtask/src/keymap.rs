@@ -75,6 +75,39 @@ const WIDGET: &[(&str, &str)] = &[
         "the Arrangement View: Up and Down select the track above or below \
          (`arrangement.select_tracks`)",
     ),
+    // WP-1.8b: keys with two directions, and modifiers a drag reads as it
+    // goes, each running a registered command.
+    (
+        "S-ARR-028",
+        "the Arrangement View: Left and Right nudge the selected clips a grid step, or move \
+         the insert marker with none selected (`arrangement.nudge`)",
+    ),
+    (
+        "S-A11Y-001",
+        "the Arrangement View: Option-Left and Option-Right (Alt) move the insert marker to \
+         the previous or next clip edge (`arrangement.set_insert_marker`)",
+    ),
+    (
+        "S-A11Y-002",
+        "the Arrangement View: Shift with Left or Right moves the time selection's end a grid \
+         step, with Up or Down takes in the track above or below \
+         (`arrangement.select_time`)",
+    ),
+    (
+        "S-EDIT-013",
+        "the Arrangement View: Cmd (Alt) held while dragging clips or their edges ignores \
+         snapping, or snaps with it off (`arrangement.move_clips`, \
+         `arrangement.resize_clips`)",
+    ),
+    (
+        "S-GRID-007",
+        "the Arrangement View: as S-EDIT-013, Cmd (Alt) held while dragging bypasses snapping",
+    ),
+    (
+        "S-ARR-007",
+        "the Arrangement View: Shift-Option-dragging (Shift-Alt) a clip's title bar selects \
+         time inside the clip (`arrangement.select_time`)",
+    ),
     // The value fields (WP-1.18): the Control Bar's transport section today,
     // each change running the field's registered command
     // (docs/specs/control-bar-transport.md).

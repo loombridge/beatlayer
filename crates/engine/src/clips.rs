@@ -156,7 +156,8 @@ pub(crate) struct PlacedClip {
     /// The song frame of its end, which it doesn't.
     end: i64,
     source: Arc<dyn ClipSource>,
-    /// The file frame at the clip's start: its Start marker.
+    /// The file frame at the clip's start: its Start marker, and as far
+    /// past it as the clip starts into its contents.
     region_start: u64,
     /// With the loop off, the file frame it stops at: its End marker.
     region_end: u64,
@@ -248,6 +249,12 @@ impl ClipList {
             }
             let start = tempo.ticks_to_frames(clip.start, rate).get();
             let end = tempo.ticks_to_frames(clip.end(), rate).get();
+            // A split or trimmed clip (WP-1.8b) starts into its contents,
+            // which begin at its offset before it: one file frame to each
+            // song frame from there, so each part plays on from where the
+            // whole clip was.
+            let into = tempo.ticks_to_frames(clip.content_start(), rate).get();
+            let skipped = u64::try_from(start - into).unwrap_or(0);
             if end <= start {
                 continue;
             }
@@ -262,7 +269,7 @@ impl ClipList {
             clips.push(PlacedClip {
                 start,
                 end,
-                region_start: frames(audio.start),
+                region_start: frames(audio.start).saturating_add(skipped),
                 region_end: audio.end.map_or(length, frames),
                 looping: audio.looping,
                 loop_start: frames(audio.loop_start),

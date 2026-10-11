@@ -637,6 +637,12 @@ impl Host {
                 UiEvent::ArrangementViewport { width, height } => {
                     self.shell.set_arrangement_viewport(width, height);
                 }
+                UiEvent::Gesture { phase, invocation } => {
+                    // A drag's frame that's refused (a clip pushed before
+                    // 1.1.1) keeps the last one that worked; there's
+                    // nothing to report.
+                    let _ = self.shell.gesture(phase, invocation.as_ref());
+                }
                 UiEvent::BeginGesture(label) => self.shell.begin_gesture(label),
                 UiEvent::EndGesture => self.shell.end_gesture(),
             }

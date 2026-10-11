@@ -29,6 +29,8 @@ pub struct Node {
     pub value: String,
     pub description: String,
     pub disabled: bool,
+    /// Whether it's selected, for items that can be (WP-1.8b).
+    pub selected: Option<bool>,
     pub numeric: Option<f64>,
     pub children: Vec<accesskit::NodeId>,
     pub bounds: Option<accesskit::Rect>,
@@ -161,6 +163,9 @@ impl Harness {
                 UiEvent::ArrangementViewport { width, height } => {
                     self.shell.set_arrangement_viewport(*width, *height);
                 }
+                UiEvent::Gesture { phase, invocation } => {
+                    let _ = self.shell.gesture(*phase, invocation.as_ref());
+                }
                 UiEvent::BeginGesture(label) => self.shell.begin_gesture(label),
                 UiEvent::EndGesture => self.shell.end_gesture(),
             }
@@ -205,6 +210,7 @@ impl Harness {
                 value: node.value().unwrap_or_default().to_owned(),
                 description: node.description().unwrap_or_default().to_owned(),
                 disabled: node.is_disabled(),
+                selected: node.is_selected(),
                 numeric: node.numeric_value(),
                 bounds: node.bounds(),
                 children: node.children().to_vec(),

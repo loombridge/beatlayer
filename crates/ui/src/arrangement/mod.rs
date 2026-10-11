@@ -11,9 +11,13 @@
 //! an egui paint callback ([`gpu`]); text, the rulers, and the headers
 //! through egui.
 //!
-//! The behaviour is in the arrangement view spec.
+//! The behaviour is in the arrangement view spec. Editing clips by mouse and
+//! keyboard is in [`editing`] (WP-1.8b), whose behaviour is in the
+//! arrangement editing spec.
 
 pub mod benchmark;
+pub mod context_menu;
+pub mod editing;
 pub mod gpu;
 pub mod headers;
 pub mod peaks;
@@ -37,6 +41,8 @@ use egui::{
 };
 use serde_json::{Value, json};
 
+use self::context_menu::ContextMenus;
+use self::editing::{ClipGestures, EditKeys, Lanes};
 use self::gpu::{ArrangementCallback, Shared, SharedFrame, Slot, lock};
 use self::headers::Header;
 use self::peaks::{PeakLibrary, PeakSource};
@@ -128,6 +134,9 @@ enum Drag {
     Ruler { anchor: Ticks, overview: bool },
     /// In the time ruler: sideways scrolls.
     TimeRuler,
+    /// Moving, copying, or resizing clips (WP-1.8b), which [`editing`]
+    /// follows.
+    Clips,
 }
 
 /// The Arrangement View's state between frames: caches and gestures, never
@@ -145,6 +154,10 @@ pub struct ArrangementUi {
     overview_key: Option<OverviewKey>,
     drag: Option<Drag>,
     reported_viewport: Option<(f32, f32)>,
+    /// Editing gestures under way (WP-1.8b).
+    clips: ClipGestures,
+    /// The clip and time-selection context menus (WP-1.8b).
+    menus: ContextMenus,
     /// The playhead the last frame drew: its position and its x, if it was
     /// in view (WP-1.18).
     playhead: Option<(Ticks, f32)>,
@@ -186,6 +199,8 @@ impl ArrangementUi {
             overview_key: None,
             drag: None,
             reported_viewport: None,
+            clips: ClipGestures::default(),
+            menus: ContextMenus::new(),
             playhead: None,
         }
     }
@@ -292,6 +307,7 @@ impl ArrangementUi {
                         pixels_per_point: ppp,
                         theme,
                         selected: view.selected_tracks(),
+                        selected_clips: view.selected_clips(),
                         grid_step: view.grid_step(doc),
                     },
                     &self.index,
@@ -336,7 +352,23 @@ impl ArrangementUi {
                 },
             ));
         self.draw_labels(ui, doc, theme, lanes);
-        self.lanes_input(ui, view, doc, &layout, horizontal, events);
+        let lanes_response = self.lanes_input(ui, view, doc, &layout, horizontal, events);
+        // WP-1.8b: right-clicking a clip or the lanes opens their menu.
+        if lanes_response.secondary_clicked()
+            && let Some(pos) = lanes_response.interact_pointer_pos()
+        {
+            let clip_lanes = Lanes {
+                view,
+                doc,
+                rect: lanes,
+                horizontal,
+                shown: &self.shown,
+                rows: &self.rows,
+                scroll_y,
+            };
+            self.menus.open(&clip_lanes, pos, events);
+        }
+        lanes_response.context_menu(|ui| self.menus.show(ui, shell, events));
         self.draw_overlays(ui, view, theme, &layout, horizontal);
 
         // The rulers.
@@ -392,8 +424,8 @@ impl ArrangementUi {
         self.header_controls(ui, view, theme, &layout, events);
         // Over the pinned rows' lanes, in the lanes' lower right corner.
         self.grid_indicator(ui, view, doc, theme, layout.grid_indicator);
-        self.accessibility(ui, doc, &layout);
-        self.keys(ui, shell, view, events);
+        self.accessibility(ui, view, doc, &layout);
+        self.keys(ui, shell, view, layout.lanes, events);
 
         if transport.playing {
             // The playhead moves.
@@ -435,7 +467,7 @@ impl ArrangementUi {
         layout: &ArrangementLayout,
         horizontal: Horizontal,
         events: &mut Vec<UiEvent>,
-    ) {
+    ) -> egui::Response {
         let lanes = layout.lanes;
         let scroll_y = view.scroll_y() as f32;
         let response = ui.interact(lanes, lanes_id(), Sense::click_and_drag());
@@ -446,11 +478,31 @@ impl ArrangementUi {
         } else {
             modifiers.ctrl && modifiers.alt
         };
+        let keys = EditKeys::from(modifiers);
+        let clip_lanes = Lanes {
+            view,
+            doc,
+            rect: lanes,
+            horizontal,
+            shown: &self.shown,
+            rows: &self.rows,
+            scroll_y,
+        };
         if response.drag_started()
             && let Some(press) = ui.input(|i| i.pointer.press_origin())
         {
             self.drag = Some(if pan_keys {
                 Drag::Pan
+            } else if self.clips.begin(&clip_lanes, press, keys, events) {
+                // WP-1.8b: a clip's title bar or edge.
+                Drag::Clips
+            } else if keys.extend {
+                // Shift-drag extends the time selection (I-DRAG-010).
+                let (at, row) = editing::extend_from(&clip_lanes, view.snap(doc, at(press)));
+                Drag::Select {
+                    at,
+                    row: row.or_else(|| self.row_at(lanes, scroll_y, press)),
+                }
             } else {
                 Drag::Select {
                     at: view.snap(doc, at(press)),
@@ -458,8 +510,16 @@ impl ArrangementUi {
                 }
             });
         }
+        let pointer = response
+            .interact_pointer_pos()
+            .or_else(|| ui.input(|i| i.pointer.interact_pos()));
         if response.dragged() {
             match self.drag {
+                Some(Drag::Clips) => {
+                    if let Some(pos) = pointer {
+                        self.clips.update(&clip_lanes, pos, keys, events);
+                    }
+                }
                 Some(Drag::Pan) => {
                     // S-ZOOM-007, S-ARR-024: the content follows the pointer.
                     let delta = response.drag_delta();
@@ -489,11 +549,26 @@ impl ArrangementUi {
                 _ => {}
             }
         }
-        if response.drag_stopped() {
+        // Esc abandons a clip drag; egui ends the drag on it too.
+        if self.drag == Some(Drag::Clips) && ui.input(|i| i.key_pressed(Key::Escape)) {
+            self.clips.cancel(events);
             self.drag = None;
+        }
+        if response.drag_stopped() {
+            if self.drag == Some(Drag::Clips) {
+                self.clips.end(&clip_lanes, pointer, keys, events);
+            }
+            self.drag = None;
+        }
+        if let Some(hover) = response.hover_pos()
+            && !pan_keys
+            && let Some(icon) = self.clips.cursor(&clip_lanes, hover, keys)
+        {
+            ui.ctx().set_cursor_icon(icon);
         }
         if response.clicked()
             && let Some(pos) = response.interact_pointer_pos()
+            && !self.clips.click(&clip_lanes, pos, keys, events)
         {
             // I-CLICK-011: the insert marker, and the track under it.
             let track = self
@@ -545,6 +620,7 @@ impl ArrangementUi {
         if pan_keys && response.hovered() {
             ui.ctx().set_cursor_icon(CursorIcon::Grab);
         }
+        response
     }
 
     fn draw_overlays(
@@ -569,8 +645,11 @@ impl ArrangementUi {
                     (top, top + row.height)
                 })
         };
-        // The time selection, over the selected tracks.
-        if let Some((start, end)) = view.time_selection() {
+        // The time selection, over the selected tracks; selected clips show
+        // their own highlight instead (WP-1.8b).
+        if let Some((start, end)) = view.time_selection()
+            && view.selected_clips().is_empty()
+        {
             let (x0, x1) = (x_of(start), x_of(end));
             for (top, bottom) in rows_of_selection() {
                 painter.rect_filled(
@@ -579,7 +658,7 @@ impl ArrangementUi {
                     theme.colors.time_selection.0.gamma_multiply(0.28),
                 );
             }
-        } else {
+        } else if view.time_selection().is_none() {
             // The insert marker, across the selected tracks.
             let x = x_of(view.insert_marker());
             if x >= lanes.left() && x <= lanes.right() {
@@ -1031,7 +1110,13 @@ impl ArrangementUi {
 
     /// The view's own accessible node, a pane named as the main view is, and
     /// the clips on screen as items in it.
-    fn accessibility(&self, ui: &mut Ui, doc: &Document, layout: &ArrangementLayout) {
+    fn accessibility(
+        &self,
+        ui: &mut Ui,
+        view: &ArrangementView,
+        doc: &Document,
+        layout: &ArrangementLayout,
+    ) {
         let enabled = ui
             .ctx()
             .accesskit_node_builder(lanes_id(), |node| {
@@ -1070,6 +1155,8 @@ impl ArrangementUi {
                     &clip.name
                 };
                 node.set_label(name.to_owned());
+                // Spec: arrangement-editing R15.
+                node.set_selected(view.is_clip_selected(clip.id));
                 node.set_value(format!(
                     "{} to {}{}",
                     signatures.to_bbs(clip.start),
@@ -1086,7 +1173,14 @@ impl ArrangementUi {
     /// Right fold and unfold the selected title bars (S-ARR-020), and
     /// Option-+ and Option-− (Alt on Windows) make the selected tracks taller
     /// and shorter (S-ARR-022).
-    fn keys(&self, ui: &mut Ui, shell: &Shell, view: &ArrangementView, events: &mut Vec<UiEvent>) {
+    fn keys(
+        &mut self,
+        ui: &mut Ui,
+        shell: &Shell,
+        view: &ArrangementView,
+        lanes: Rect,
+        events: &mut Vec<UiEvent>,
+    ) {
         let focused = shell.focused_area() == bl_shell::Area::MainView
             && shell.focused_window() == bl_shell::WindowKind::Main
             && !ui.ctx().text_edit_focused()
@@ -1160,6 +1254,22 @@ impl ArrangementUi {
             let delta = if taller { HEIGHT_STEP } else { -HEIGHT_STEP };
             invoke(events, ids::SET_TRACK_HEIGHT, json!({ "delta": delta }));
         }
+        // WP-1.8b: nudging, clip edges, extending the selection, and
+        // resizing from the keyboard.
+        let doc = shell.editor().document();
+        let clip_lanes = Lanes {
+            view,
+            doc,
+            rect: lanes,
+            horizontal: view.horizontal(doc),
+            shown: &self.shown,
+            rows: &self.rows,
+            scroll_y: view.scroll_y() as f32,
+        };
+        ui.input(|input| {
+            self.clips
+                .keys(&clip_lanes, input, view.title_bars_selected(), events);
+        });
     }
 }
 

@@ -5,7 +5,7 @@
 
 use std::time::Duration;
 
-use bl_shell::{Area, Effect, Invocation, MainView, Shell, commands as ids};
+use bl_shell::{Area, Effect, GesturePhase, Invocation, MainView, Shell, commands as ids};
 use egui::accesskit::Role;
 use egui::{
     Align2, CentralPanel, Context, Frame, Id, Rect, Sense, Stroke, StrokeKind, Ui, UiBuilder,
@@ -33,6 +33,16 @@ pub enum UiEvent {
         width: f32,
         /// From under the rulers to the pinned return tracks.
         height: f32,
+    },
+    /// A step of a gesture that edits the set, such as dragging clips
+    /// (WP-1.8b), for the host to pass to [`Shell::gesture`], which runs
+    /// the whole gesture as one undo step.
+    Gesture {
+        /// Whether the gesture goes on, ends, or is abandoned.
+        phase: GesturePhase,
+        /// The editing command for this step, measured from where the
+        /// gesture began.
+        invocation: Option<Invocation>,
     },
     /// A drag on a value began: the document commands it runs until
     /// [`UiEvent::EndGesture`] are one undo step with this name, as

@@ -80,6 +80,7 @@ enum Op {
     RenameClip(Index, u8),
     SetClipMute(Index, bool),
     SetClipData(Index, Data),
+    TrimClipStart(Index, i16),
     /// One of an audio clip's settings (WP-1.4): its markers, loop brace,
     /// Loop switch, gain, or fades, chosen by the byte, from two numbers.
     SetAudio(Index, u8, f64, f64),
@@ -169,6 +170,7 @@ fn op() -> impl Strategy<Value = Op> {
         1 => (i(), any::<u8>()).prop_map(|(c, n)| Op::RenameClip(c, n)),
         1 => (i(), any::<bool>()).prop_map(|(c, b)| Op::SetClipMute(c, b)),
         2 => (i(), data()).prop_map(|(c, d)| Op::SetClipData(c, d)),
+        2 => (i(), -16i16..64).prop_map(|(c, by)| Op::TrimClipStart(c, by)),
         3 => (i(), any::<u8>(), value(0.0..4.0), value(0.0..4.0))
             .prop_map(|(c, which, a, b)| Op::SetAudio(c, which, a, b)),
         3 => (i(), i(), prop::collection::vec((0u8..8, value(-100.0..100.0)), 0..4))
@@ -403,6 +405,15 @@ impl Op {
                 Command::SetClipData {
                     clip,
                     data: clip_data(data, track_kind),
+                }
+            }
+            Self::TrimClipStart(c, by) => {
+                // Mostly inside the clip, sometimes past either end.
+                let clip = at.clip(c);
+                let start = doc.clip(clip).map_or(Ticks::ZERO, |clip| clip.start);
+                Command::TrimClipStart {
+                    clip,
+                    start: start + sixteenths(*by),
                 }
             }
             Self::SetAudio(c, which, a, b) => {

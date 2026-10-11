@@ -628,18 +628,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "bl-audio-engine"
+version = "0.0.0"
+dependencies = [
+ "bl-audio-io",
+ "bl-core",
+ "bl-engine",
+ "bl-model",
+ "bl-rt",
+ "rtrb",
+]
+
+[[package]]
 name = "bl-audio-io"
 version = "0.0.0"
 dependencies = [
  "azo",
  "bl-rt",
  "cpal",
+ "rtrb",
 ]
 
 [[package]]
 name = "bl-cli"
 version = "0.0.0"
 dependencies = [
+ "bl-audio-engine",
  "bl-audio-io",
  "bl-core",
  "bl-devices",

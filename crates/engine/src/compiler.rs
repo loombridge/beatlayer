@@ -302,6 +302,45 @@ impl Compiler {
         update
     }
 
+    /// Keeps `document` as the latest without compiling it, for an engine
+    /// with no device running it: [`reconfigure`](Self::reconfigure)
+    /// compiles it when one runs again. Only for that case: the next
+    /// [`sync`](Self::sync) compares with it as if its program had been
+    /// sent. Returns the [`TransportCommand::SetLoop`] a sync would have
+    /// sent if `document` changed the Arrangement loop: the program
+    /// compiled at the restart sets the loop too, but the processor that
+    /// takes over carries the loop it played, so a loop edit made meanwhile
+    /// must reach it after that.
+    #[must_use]
+    pub fn remember(&mut self, document: &Document) -> Option<TransportCommand> {
+        let changed = self.synced.as_ref().is_none_or(|old| {
+            old.settings().arrangement_loop != document.settings().arrangement_loop
+        });
+        self.synced = Some(document.clone());
+        changed.then(|| TransportCommand::SetLoop(loop_region(document)))
+    }
+
+    /// Switches to `config` (a device's new sample rate or block size) and
+    /// compiles the latest document anew for it, with every node made
+    /// afresh at the new settings and none taken over: the program for a
+    /// processor starting without one (WP-1.13). Empty if no document has
+    /// been synced yet.
+    pub fn reconfigure(&mut self, config: EngineConfig) -> Update {
+        let document = self.synced.take();
+        self.config = config;
+        self.reset();
+        match document {
+            Some(document) => self.compile(&document),
+            None => Update::default(),
+        }
+    }
+
+    /// The settings programs are compiled for.
+    #[must_use]
+    pub fn config(&self) -> &EngineConfig {
+        &self.config
+    }
+
     /// Forgets the last program, so the next compile makes every node anew
     /// and takes none over: for an audio thread that starts without one.
     pub fn reset(&mut self) {

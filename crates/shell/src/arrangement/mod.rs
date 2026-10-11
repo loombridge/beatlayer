@@ -12,6 +12,7 @@
 
 pub mod editing;
 pub mod grid;
+pub mod placing;
 pub mod rows;
 
 use std::collections::{BTreeMap, BTreeSet};

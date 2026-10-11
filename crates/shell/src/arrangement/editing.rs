@@ -4,17 +4,16 @@
 //! Every edit runs as one transaction of the document's own commands, so it
 //! is one undo step, and a track never ends up playing two clips at once:
 //! whatever an edit places over a clip replaces the part it covers
-//! ([`clear`]). The selection and the clipboard aren't in the document, so
+//! ([`super::placing`]). The selection and the clipboard aren't in the document, so
 //! selecting and copying are never undo steps.
 //!
 //! People reach these through keys, menus, and gestures, which leave the
 //! targets to the selection; agents and tests give clips, tracks, and
 //! positions explicitly. A drag runs the same command again on each frame
 //! from where the drag began, inside one transaction (see
-//! `Shell::gesture`). The behaviour is in
-//! `docs/specs/arrangement-editing.md`.
+//! `Shell::gesture`). The behaviour is in the arrangement editing spec.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use bl_core::time::Ticks;
 use bl_model::{
@@ -29,6 +28,7 @@ use bl_shell_spec::editing::{
 use serde::Serialize;
 use serde_json::Value;
 
+use super::placing::{clear, clear_spans, piece, split_off};
 use super::{ArrangementView, parse};
 
 /// Why an edit didn't happen. The document is as it was.
@@ -149,90 +149,20 @@ fn apply(editor: &mut Editor, command: Command) -> Result<(), EditFailure> {
     Ok(())
 }
 
-/// A clip's part from `from` to `to`, which must lie inside it, playing what
-/// it played there.
-fn piece(clip: &Clip, from: Ticks, to: Ticks) -> Clip {
-    Clip {
-        start: from,
-        length: to - from,
-        offset: clip.offset + (from - clip.start),
-        ..clip.clone()
-    }
-}
-
-/// Splits `clip` at `at`, strictly inside it: the clip keeps the part before
-/// and a new clip, which is returned, takes the part after, each playing
-/// what it played before.
-fn split_off(editor: &mut Editor, clip: ClipId, at: Ticks) -> Result<ClipId, EditFailure> {
-    let doc = editor.document();
-    let track = doc
-        .clip_track(clip)
-        .ok_or_else(|| refused(format!("no clip has the ID {}", clip.0)))?;
-    let original = doc
-        .clip(clip)
-        .ok_or_else(|| refused(format!("no clip has the ID {}", clip.0)))?
-        .clone();
-    let id: ClipId = editor.new_id();
-    let right = Clip {
-        id,
-        ..piece(&original, at, original.end())
-    };
-    apply(
-        editor,
-        Command::SetClipLength {
-            clip,
-            length: at - original.start,
-        },
-    )?;
-    apply(editor, Command::CreateClip { track, clip: right })?;
-    Ok(id)
-}
-
-/// Clears `start..end` on `track` for something placed there: clips inside
-/// it are deleted, clips crossing an edge shortened from that edge, and a
-/// clip spanning it split around it, so the clips left play nothing in the
-/// span. Clips in `keep` are left alone.
-fn clear(
+/// Clears where moved clips landed, leaving the moved clips alone: each
+/// destination track is looked through once, however many clips land on it.
+fn clear_moved(
     editor: &mut Editor,
-    track: TrackId,
-    start: Ticks,
-    end: Ticks,
-    keep: &BTreeSet<ClipId>,
+    clips: &[ClipId],
+    moves: &[(ClipId, TrackId, Ticks, Ticks)],
 ) -> Result<(), EditFailure> {
-    if end <= start {
-        return Ok(());
+    let keep: BTreeSet<ClipId> = clips.iter().copied().collect();
+    let mut spans: BTreeMap<TrackId, Vec<(Ticks, Ticks)>> = BTreeMap::new();
+    for (_, track, start, end) in moves {
+        spans.entry(*track).or_default().push((*start, *end));
     }
-    let Some(lane) = editor.document().track(track) else {
-        return Ok(());
-    };
-    let covered: Vec<(ClipId, Ticks, Ticks)> = lane
-        .clips()
-        .filter(|c| c.start < end && c.end() > start && !keep.contains(&c.id))
-        .map(|c| (c.id, c.start, c.end()))
-        .collect();
-    for (clip, from, to) in covered {
-        if from >= start && to <= end {
-            apply(editor, Command::DeleteClip { clip })?;
-        } else if from < start && to > end {
-            split_off(editor, clip, end)?;
-            apply(
-                editor,
-                Command::SetClipLength {
-                    clip,
-                    length: start - from,
-                },
-            )?;
-        } else if from < start {
-            apply(
-                editor,
-                Command::SetClipLength {
-                    clip,
-                    length: start - from,
-                },
-            )?;
-        } else {
-            apply(editor, Command::TrimClipStart { clip, start: end })?;
-        }
+    for (track, spans) in spans {
+        clear_spans(editor, track, &spans, &keep)?;
     }
     Ok(())
 }
@@ -895,10 +825,7 @@ pub fn run(
                             },
                         )?;
                     }
-                    let keep: BTreeSet<ClipId> = clips.iter().copied().collect();
-                    for (_, track, start, end) in &moves {
-                        clear(editor, *track, *start, *end, &keep)?;
-                    }
+                    clear_moved(editor, &clips, &moves)?;
                     Ok(clips.clone())
                 } else {
                     for (clip, track, start, _) in &moves {
@@ -911,10 +838,7 @@ pub fn run(
                             },
                         )?;
                     }
-                    let keep: BTreeSet<ClipId> = clips.iter().copied().collect();
-                    for (_, track, start, end) in &moves {
-                        clear(editor, *track, *start, *end, &keep)?;
-                    }
+                    clear_moved(editor, &clips, &moves)?;
                     Ok(clips.clone())
                 }
             })?;
@@ -1266,18 +1190,32 @@ pub fn run(
 
 /// The earliest of the clips, the topmost of those that start together.
 fn earliest(doc: &Document, lanes: &[TrackId], clips: &[ClipId]) -> ClipId {
-    let start = |c: &ClipId| doc.clip(*c).map_or(Ticks::MAX, |c| c.start);
-    let first = clips.iter().map(start).min().unwrap_or(Ticks::MAX);
-    clips
-        .iter()
-        .copied()
-        .filter(|c| start(c) == first)
-        .min_by_key(|c| {
-            doc.clip_track(*c)
-                .and_then(|t| lane_index(lanes, t))
-                .unwrap_or(usize::MAX)
-        })
-        .unwrap_or(clips[0])
+    // One pass: the earliest start, and among clips starting then, the
+    // highest lane, looked up only for those.
+    let lane = |c: ClipId| {
+        doc.clip_track(c)
+            .and_then(|t| lane_index(lanes, t))
+            .unwrap_or(usize::MAX)
+    };
+    let mut best: Option<(Ticks, ClipId, Option<usize>)> = None;
+    for &clip in clips {
+        let start = doc.clip(clip).map_or(Ticks::MAX, |c| c.start);
+        best = match best {
+            None => Some((start, clip, None)),
+            Some((first, _, _)) if start < first => Some((start, clip, None)),
+            Some((first, holder, holder_lane)) if start == first => {
+                let holder_lane = holder_lane.unwrap_or_else(|| lane(holder));
+                let this = lane(clip);
+                Some(if this < holder_lane {
+                    (start, clip, Some(this))
+                } else {
+                    (first, holder, Some(holder_lane))
+                })
+            }
+            keep => keep,
+        };
+    }
+    best.map_or(clips[0], |(_, clip, _)| clip)
 }
 
 /// Every clip on the tracks.

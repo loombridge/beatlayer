@@ -11,7 +11,7 @@
 //! - [`arrange`]: putting files into the Arrangement.
 //! - [`drop`]: where a drag from the browser lands in the Arrangement.
 //!
-//! The behaviour is in `docs/specs/browser.md`.
+//! The behaviour is in the browser spec.
 
 pub mod arrange;
 pub mod drop;

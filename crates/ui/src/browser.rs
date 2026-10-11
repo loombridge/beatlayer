@@ -10,7 +10,7 @@
 //! list builds only the rows on screen, so a library of 100,000 files draws
 //! as quickly as a short one.
 //!
-//! The behaviour is in `docs/specs/browser.md`.
+//! The behaviour is in the browser spec.
 
 use std::path::Path;
 

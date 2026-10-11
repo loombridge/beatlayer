@@ -13,7 +13,7 @@
 //! | [`stdio`] | The stdio transport, which `bl-cli mcp` serves headless |
 //! | [`http`] | The Streamable HTTP transport, which the app serves on `127.0.0.1` |
 //! | [`client`] | A scripted MCP client over either, for scripts and tests |
-//! | [`guide`] | The agent guide, `docs/agent-guide.md`, served as a resource |
+//! | [`guide`] | The agent guide, `crates/agent/guide.md`, served as a resource |
 //!
 //! The tools ([`tools`](crate::tools) lists them): discovery
 //! (`list_commands`, `describe_command`), `run` (one command or a batch as

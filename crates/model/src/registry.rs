@@ -596,6 +596,20 @@ const ENTRIES: &[Entry] = &[
             match the clip's track: audio on audio tracks, MIDI on MIDI tracks.",
     },
     Entry {
+        id: "clip.trim_start",
+        action: Action::Apply("trim_clip_start"),
+        label: "Trim Clip Start",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Moves a clip's left edge to `start`, keeping its end and keeping its \
+            contents where they play, as dragging the clip's left edge does: a later `start` \
+            hides the beginning of the clip, an earlier one shows more of it. The clip can't \
+            start before its contents begin (its offset stays at 0 or more), before 0, or at or \
+            after its end. To move a clip with its contents, use `clip.move`; to change where \
+            it ends, use `clip.set_length`.",
+    },
+    Entry {
         id: "device.insert",
         action: Action::Apply("insert_device"),
         label: "Insert Device",

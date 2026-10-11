@@ -80,6 +80,7 @@ enum Op {
     RenameClip(Index, u8),
     SetClipMute(Index, bool),
     SetClipData(Index, Data),
+    TrimClipStart(Index, i16),
     InsertDevice {
         track: Index,
         index: Index,
@@ -166,6 +167,7 @@ fn op() -> impl Strategy<Value = Op> {
         1 => (i(), any::<u8>()).prop_map(|(c, n)| Op::RenameClip(c, n)),
         1 => (i(), any::<bool>()).prop_map(|(c, b)| Op::SetClipMute(c, b)),
         2 => (i(), data()).prop_map(|(c, d)| Op::SetClipData(c, d)),
+        2 => (i(), any::<i16>()).prop_map(|(c, by)| Op::TrimClipStart(c, by)),
         3 => (i(), i(), prop::collection::vec((0u8..8, value(-100.0..100.0)), 0..4))
             .prop_map(|(track, index, params)| Op::InsertDevice { track, index, params }),
         1 => i().prop_map(Op::RemoveDevice),
@@ -400,6 +402,15 @@ impl Op {
                 Command::SetClipData {
                     clip,
                     data: clip_data(data, track_kind),
+                }
+            }
+            Self::TrimClipStart(c, by) => {
+                // Mostly inside the clip, sometimes past either end.
+                let clip = at.clip(c);
+                let start = doc.clip(clip).map_or(Ticks::ZERO, |clip| clip.start);
+                Command::TrimClipStart {
+                    clip,
+                    start: start + sixteenths(*by),
                 }
             }
             Self::InsertDevice {

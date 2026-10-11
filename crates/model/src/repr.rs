@@ -12,7 +12,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::clip::Clip;
 use crate::command::{
-    check_clip_data, check_clip_fits, check_device, check_extent, check_mixer, check_send_level,
+    check_clip_data, check_clip_fits, check_device, check_extent, check_mixer, check_offset,
+    check_send_level,
 };
 use crate::device::Device;
 use crate::document::{Document, Index, Settings};
@@ -190,6 +191,7 @@ impl Loader {
             self.claim(clip.id.0)?;
             check_clip_fits(&track, &clip.data)?;
             check_extent(clip.start, clip.length)?;
+            check_offset(clip.offset)?;
             check_clip_data(&clip.data)?;
             self.index.clip_track.insert(clip.id, id);
             track.clips.insert(clip.id, Shared::new(clip));

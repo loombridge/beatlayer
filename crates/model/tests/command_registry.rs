@@ -47,9 +47,9 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        32,
-        "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, and WP-1.6 five \
-         for the mixer"
+        33,
+        "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five \
+         for the mixer, and WP-1.8b trim_clip_start"
     );
 
     for op in &ops {
@@ -262,6 +262,16 @@ fn every_command_runs_by_id() {
         panic!("{clip:?}");
     };
     assert_eq!(midi.notes.len(), 2);
+    // Trimming the left edge keeps the end and the contents in place.
+    agent.run(
+        "clip.trim_start",
+        json!({ "clip": loop_clip, "start": quarter }),
+    );
+    let trimmed = agent.editor.document().clip(loop_clip).unwrap();
+    assert_eq!(
+        (trimmed.start.0, trimmed.end().0, trimmed.offset.0),
+        (quarter, bar, quarter)
+    );
     agent.run("clip.delete", json!({ "clip": loop_clip }));
     assert!(agent.editor.document().clip(loop_clip).is_none());
 
@@ -479,6 +489,13 @@ fn schemas_match_what_commands_serialise() {
                 data: ClipData::Audio(AudioData {
                     media: ContentHash([0xab; 32]),
                 }),
+            },
+        ),
+        (
+            "clip.trim_start",
+            Command::TrimClipStart {
+                clip,
+                start: Ticks::QUARTER,
             },
         ),
         (

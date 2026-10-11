@@ -9,6 +9,7 @@
 //! The behaviour is in the arrangement view spec.
 
 pub mod grid;
+pub mod placing;
 pub mod rows;
 
 use std::collections::{BTreeMap, BTreeSet};

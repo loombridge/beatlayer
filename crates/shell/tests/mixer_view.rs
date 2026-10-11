@@ -268,7 +268,9 @@ fn a_change_on_a_selected_track_changes_every_selected_track() {
     // track by the same dB (observed), the unselected track not at all.
     let db = |track| controls::gain_db(mixer(&shell, track).volume);
     let moved_db = db(t[1]);
-    let expected = controls::gain_db(controls::drag_gain(controls::drag_points(1.0) + 9.0));
+    let expected = controls::gain_db(controls::fader_gain(
+        controls::fader_position(1.0) - 9.0 / controls::FADER_TRAVEL_POINTS,
+    ));
     assert!((moved_db - expected).abs() < 1e-9);
     assert!((db(t[0]) - (controls::gain_db(0.5) + moved_db)).abs() < 1e-9);
     assert_eq!(mixer(&shell, t[2]).volume, 1.0);

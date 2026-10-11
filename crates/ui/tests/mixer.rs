@@ -482,8 +482,8 @@ fn a_fader_drag_is_relative_one_undo_step_and_shows_in_the_status_bar() {
     );
     // Up past the top: it stops at +6 dB.
     assert!((controls::gain_db(*volumes.last().unwrap()) - 6.0).abs() < 1e-9);
-    // Down: about 40 points cover the whole range, and the Status Bar
-    // shows the volume while dragging.
+    // Down: the handle follows the pointer a point per point along the
+    // fader's scale, and the Status Bar shows the volume while dragging.
     let held = Event::ModifiersChanged(Modifiers::NONE);
     h.frame(vec![held.clone(), Event::PointerMoved(at)]);
     h.frame(vec![Event::PointerButton {
@@ -513,15 +513,23 @@ fn a_fader_drag_is_relative_one_undo_step_and_shows_in_the_status_bar() {
         shown.iter().all(|r| r.starts_with("Track Volume: ")),
         "{readouts:?}"
     );
-    for _ in 0..40 {
+    // A further 30 points down moves the handle 30 points down the scale.
+    let before = controls::fader_position(mixer(&h.shell, t[2]).volume);
+    for _ in 0..20 {
         y += 1.5;
         h.frame(vec![Event::PointerMoved(pos2(at.x, y))]);
     }
-    assert_eq!(
-        mixer(&h.shell, t[2]).volume,
-        0.0,
-        "−∞ within about 40 points"
+    let after = controls::fader_position(mixer(&h.shell, t[2]).volume);
+    assert!(
+        ((before - after) * controls::FADER_TRAVEL_POINTS - 30.0).abs() < 1e-6,
+        "{before} {after}"
     );
+    // On past the bottom: −∞, and it stays there.
+    for _ in 0..80 {
+        y += 1.5;
+        h.frame(vec![Event::PointerMoved(pos2(at.x, y))]);
+    }
+    assert_eq!(mixer(&h.shell, t[2]).volume, 0.0, "−∞ at the bottom");
     h.frame(vec![Event::PointerButton {
         pos: pos2(at.x, y),
         button: PointerButton::Primary,
@@ -534,7 +542,8 @@ fn a_fader_drag_is_relative_one_undo_step_and_shows_in_the_status_bar() {
             .value
             .starts_with("Track Volume")
     );
-    // Pan: its whole range per 200 points (not observed).
+    // Pan: 0.8 steps a point, up to the right (observed): 40 points less
+    // egui's drag threshold.
     let pan = control(&mut h, "3 Audio", "Track Panning");
     drag(
         &mut h,
@@ -544,7 +553,7 @@ fn a_fader_drag_is_relative_one_undo_step_and_shows_in_the_status_bar() {
         |_| (),
     );
     let p = mixer(&h.shell, t[2]).pan;
-    assert!(p > 0.2 && p <= 0.4 + 1e-9, "{p}");
+    assert!(p > 0.5 && p <= 0.64 + 1e-9, "{p}");
     assert_eq!(
         h.shell.editor().undo_history().next(),
         Some(controls::PAN_GESTURE)

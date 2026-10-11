@@ -1053,8 +1053,8 @@ impl StripParts<'_> {
         entry
     }
 
-    /// The fader (R6): a relative drag moves the volume along the observed
-    /// drag scale; the handle sits on the meter's scale.
+    /// The fader (R6): a relative drag moves the handle a point per point
+    /// of drag along the meter's scale, which the handle sits on.
     pub fn fader(&self, ui: &mut Ui, rect: Rect, events: &mut Vec<UiEvent>) {
         let Some(track) = self.doc().track(self.track) else {
             return;

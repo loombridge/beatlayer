@@ -632,8 +632,8 @@ dependencies = [
  "bl-media",
  "bl-model",
  "bl-shell",
- "getrandom 0.3.4",
  "hound",
+ "lspk-agent",
  "schemars",
  "serde",
  "serde_json",
@@ -2320,9 +2320,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
+name = "lspk-agent"
+version = "0.0.0"
+source = "git+https://github.com/loombridge/plugin-kit?rev=4c88d0752ea4d00142870ac9371b8adc550eecd3#4c88d0752ea4d00142870ac9371b8adc550eecd3"
+dependencies = [
+ "getrandom 0.3.4",
+ "lspk-commands",
+ "schemars",
+ "serde_json",
+]
+
+[[package]]
 name = "lspk-commands"
 version = "0.0.0"
-source = "git+https://github.com/loombridge/plugin-kit?rev=b5161366e97fe213cb765bb8e40b09dfa69eec5b#b5161366e97fe213cb765bb8e40b09dfa69eec5b"
+source = "git+https://github.com/loombridge/plugin-kit?rev=4c88d0752ea4d00142870ac9371b8adc550eecd3#4c88d0752ea4d00142870ac9371b8adc550eecd3"
 dependencies = [
  "schemars",
  "serde",
@@ -2332,7 +2343,7 @@ dependencies = [
 [[package]]
 name = "lspk-params"
 version = "0.0.0"
-source = "git+https://github.com/loombridge/plugin-kit?rev=b5161366e97fe213cb765bb8e40b09dfa69eec5b#b5161366e97fe213cb765bb8e40b09dfa69eec5b"
+source = "git+https://github.com/loombridge/plugin-kit?rev=4c88d0752ea4d00142870ac9371b8adc550eecd3#4c88d0752ea4d00142870ac9371b8adc550eecd3"
 dependencies = [
  "schemars",
  "serde",
@@ -2341,7 +2352,7 @@ dependencies = [
 [[package]]
 name = "lspk-rt"
 version = "0.0.0"
-source = "git+https://github.com/loombridge/plugin-kit?rev=b5161366e97fe213cb765bb8e40b09dfa69eec5b#b5161366e97fe213cb765bb8e40b09dfa69eec5b"
+source = "git+https://github.com/loombridge/plugin-kit?rev=4c88d0752ea4d00142870ac9371b8adc550eecd3#4c88d0752ea4d00142870ac9371b8adc550eecd3"
 dependencies = [
  "libc",
  "rtrb",

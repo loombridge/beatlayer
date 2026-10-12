@@ -7,6 +7,11 @@
 //! exists for an agent by construction (the architecture's "Agent
 //! control").
 //!
+//! The protocol is the plug-in kit's: `lspk-agent` speaks JSON-RPC and MCP,
+//! serves stdio and Streamable HTTP, checks tokens, hosts, and origins,
+//! keeps sessions, asks the person, and holds calls that wait. This crate
+//! gives it Beatlayer's tools, guide, settings, and engine.
+//!
 //! | Piece | What it is |
 //! |---|---|
 //! | [`Agent`] | The server's state on the main thread: sessions, the MCP methods, the tools, and calls waiting for the person |
@@ -97,18 +102,17 @@
 //! # Ok::<(), String>(())
 //! ```
 
-pub mod base64;
 pub mod client;
 pub mod guide;
 pub mod http;
-pub mod jsonrpc;
 pub mod permission;
 mod server;
 pub mod stdio;
 mod tools;
 
-pub use server::{
-    Agent, CaptureRequest, Captured, ClientInfo, Credential, Outcome, PROTOCOL_VERSIONS, Question,
-    QuestionKind, STDIO_SESSION, Session,
+pub use lspk_agent::{
+    ClientInfo, Credential, Outcome, PROTOCOL_VERSIONS, Question, QuestionKind, STDIO_SESSION,
+    Session, base64, jsonrpc,
 };
+pub use server::{Agent, CaptureRequest, Captured};
 pub use tools::EngineMessage;

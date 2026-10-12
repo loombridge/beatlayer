@@ -20,30 +20,14 @@ use bl_shell::perception_commands::{
 };
 use serde_json::Value;
 
+use lspk_agent::Media;
+
 use super::{Ctx, ToolOutcome, args, done, failed, step, tool_definition};
+use crate::server::Capture;
 
 pub(crate) const PREVIEW: &str = "preview";
 pub(crate) const ANALYZE: &str = "analyze";
 pub(crate) const CAPTURE: &str = "capture_view";
-
-/// Something a tool returns for the model beside its JSON: audio or an
-/// image.
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct Media {
-    /// Its media type, such as `audio/wav` or `image/png`.
-    pub(crate) mime_type: &'static str,
-    /// The file.
-    pub(crate) bytes: Vec<u8>,
-    /// The resource it can also be read at, if any.
-    pub(crate) uri: Option<String>,
-}
-
-impl Media {
-    /// Whether it's audio rather than an image.
-    pub(crate) fn is_audio(&self) -> bool {
-        self.mime_type.starts_with("audio/")
-    }
-}
 
 pub(crate) fn preview_definition() -> Value {
     tool_definition::<PreviewArgs>(
@@ -142,8 +126,8 @@ pub(crate) fn capture(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
             "a `max_size` of {max_size} pixels; give {smallest} to {largest}"
         ));
     }
-    ToolOutcome::Capture {
+    ToolOutcome::Defer(Capture {
         view: parsed.view,
         max_size,
-    }
+    })
 }

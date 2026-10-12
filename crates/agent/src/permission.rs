@@ -15,34 +15,26 @@
 //! mode belongs to its own token: only a session that carries it, or that
 //! the person allowed when it first connected, has the agent's rights
 //! ([`crate::Session::agent`]).
+//!
+//! The decision itself is the plug-in kit's (`lspk_agent::permission`);
+//! this module gives it Beatlayer's rules and words.
 
 use bl_commands::Permission;
 use bl_shell::Shell;
 
-/// Where the agent API runs, which decides who answers when a command asks
-/// first.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Mode {
-    /// `bl-cli mcp`: no window and no person to ask.
-    Headless {
-        /// Whether `--autonomous` was given, so destructive and external
-        /// commands run without asking.
-        autonomous: bool,
-    },
-    /// The running app: the person answers, and autonomous mode is set per
-    /// agent in the Settings window.
-    App,
-}
+/// Where the agent API runs (`bl-cli mcp` headless, or the running app),
+/// and what to do with a command: the plug-in kit's, from `lspk-agent`.
+pub use lspk_agent::permission::{Decision, Mode};
 
-/// What to do with a command an agent asked to run.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Decision {
-    /// Run it.
-    Run,
-    /// Ask the person first.
-    Ask,
-    /// Refuse it, saying why.
-    Refuse(String),
+/// Beatlayer's rules and words for the kit's decision: the agent server's
+/// own commands are the person's alone, changed in the Settings window, and
+/// the headless server is `bl-cli mcp`.
+fn rules() -> lspk_agent::permission::Rules<'static> {
+    lspk_agent::permission::Rules {
+        person_only: &bl_shell::agent::handles,
+        settings: "Beatlayer's Settings window (Tempo & MIDI, Agents)",
+        headless: "bl-cli mcp",
+    }
 }
 
 /// Decides whether an agent may run commands whose most far-reaching
@@ -55,35 +47,13 @@ pub(crate) fn decide(
     class: Permission,
     commands: &[&str],
 ) -> Decision {
-    if let Some(id) = commands.iter().find(|id| bl_shell::agent::handles(id)) {
-        return Decision::Refuse(format!(
-            "`{id}` changes what agents may do, so only a person can run it, in Beatlayer's \
-             Settings window (Tempo & MIDI, Agents)."
-        ));
-    }
-    if !class.asks_first() {
-        return Decision::Run;
-    }
-    match mode {
-        Mode::Headless { autonomous: true } => Decision::Run,
-        Mode::Headless { autonomous: false } => {
-            let named = commands
-                .iter()
-                .map(|id| format!("`{id}`"))
-                .collect::<Vec<_>>()
-                .join(", ");
-            Decision::Refuse(format!(
-                "{named} {} {class}, and `bl-cli mcp` has no person to ask. Start it with \
-                 `--autonomous` to let agents run destructive and external commands without \
-                 asking.",
-                if commands.len() == 1 { "is" } else { "include" }
-            ))
-        }
-        Mode::App if agent.is_some_and(|agent| shell.agent_settings().is_autonomous(agent)) => {
-            Decision::Run
-        }
-        Mode::App => Decision::Ask,
-    }
+    lspk_agent::permission::decide(
+        mode,
+        &rules(),
+        || agent.is_some_and(|agent| shell.agent_settings().is_autonomous(agent)),
+        class,
+        commands,
+    )
 }
 
 #[cfg(test)]

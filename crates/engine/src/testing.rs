@@ -12,11 +12,14 @@
 //! | [`DATA`] | adds the `f32` it was last sent as [`NodeData`] | none |
 //! | [`GAIN`] | multiplies every sample by its gain (WP-2.4) | the gain, 1 by default |
 //! | [`THROUGH`] | passes its input through untouched (WP-2.4) | none |
+//! | [`KEY`] | multiplies its input by what its detector hears, while its sidechain is on (WP-2.19b) | none |
 //!
 //! [`GAIN`] and [`THROUGH`] are offered as device types ([`gain_type`],
 //! [`through_type`]), audio effects named "Test Gain" and "Test
 //! Pass-Through", so tests of the device chain and the Device View have
 //! devices to insert; Beatlayer ships no device of its own until WP-2.5.
+//! [`KEY`] is offered too ([`key_type`], "Test Sidechain"), an audio
+//! effect with a sidechain input, for the sidechain's tests.
 //!
 //! All of them count themselves in a shared [`Probe`] when they're made and
 //! dropped, so a test can tell a node that kept running from one made anew.
@@ -43,6 +46,8 @@ pub const DATA: &str = "test.data";
 pub const GAIN: &str = "test.gain";
 /// The pass-through node's device type.
 pub const THROUGH: &str = "test.through";
+/// The sidechain probe's device type.
+pub const KEY: &str = "test.key";
 /// The DC node's value.
 pub const VALUE: ParamId = ParamId(0);
 /// The gain node's gain, linear.
@@ -59,6 +64,13 @@ pub fn gain_type() -> DeviceType {
 #[must_use]
 pub fn through_type() -> DeviceType {
     DeviceType::native(THROUGH, "Test Pass-Through", DeviceRole::AudioEffect)
+}
+
+/// The sidechain probe as a device type: an audio effect named "Test
+/// Sidechain", with a sidechain input.
+#[must_use]
+pub fn key_type() -> DeviceType {
+    DeviceType::native(KEY, "Test Sidechain", DeviceRole::AudioEffect).with_sidechain()
 }
 
 /// What the test nodes report, shared with the test.
@@ -109,6 +121,12 @@ pub fn registry(probe: &Arc<Probe>) -> Registry {
     let p = Arc::clone(probe);
     registry.add_device(through_type(), move |_, _| {
         Box::new(Through {
+            _tracked: Tracked::new(&p),
+        })
+    });
+    let p = Arc::clone(probe);
+    registry.add_device(key_type(), move |_, _| {
+        Box::new(Key {
             _tracked: Tracked::new(&p),
         })
     });
@@ -333,4 +351,27 @@ struct Through {
 
 impl Node for Through {
     fn process(&mut self, _block: &mut Block<'_>) {}
+}
+
+/// Multiplies its input by what its detector hears while its sidechain is
+/// on, as a gate keyed by its sidechain; passes its input through while
+/// it's off.
+#[derive(Debug)]
+struct Key {
+    _tracked: Tracked,
+}
+
+impl Node for Key {
+    fn process(&mut self, block: &mut Block<'_>) {
+        let Some(heard) = block.sidechain else {
+            return;
+        };
+        let (frames, stride) = (block.frames, block.stride);
+        for c in 0..block.channels {
+            let at = c * stride..c * stride + frames;
+            for (sample, key) in block.data[at.clone()].iter_mut().zip(&heard[at]) {
+                *sample *= key;
+            }
+        }
+    }
 }

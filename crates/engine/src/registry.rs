@@ -9,7 +9,9 @@
 //! in place, takes parameter changes at their frames, takes them without
 //! processing while the device is switched off ([`Node::flush`]), and
 //! reports its latency ([`Node::latency`], for delay compensation in
-//! WP-2.11). A device's state is its parameter values, which the document
+//! WP-2.11). A device type may declare a sidechain input
+//! ([`DeviceType::with_sidechain`]); its node then reads what its detector
+//! hears from [`Block::sidechain`](crate::Block::sidechain). A device's state is its parameter values, which the document
 //! holds and presets save; a plug-in's own state arrives with WP-2.6.
 
 use std::sync::Arc;
@@ -46,6 +48,10 @@ pub struct DeviceType {
     pub name: String,
     /// Where it goes in a chain.
     pub role: DeviceRole,
+    /// Whether its devices have a sidechain input (WP-2.19b): other
+    /// tracks can route into it, and its node reads what its detector
+    /// hears with [`Block::sidechain`](crate::Block::sidechain).
+    pub sidechain: bool,
 }
 
 impl DeviceType {
@@ -58,13 +64,27 @@ impl DeviceType {
             },
             name: name.to_owned(),
             role,
+            sidechain: false,
         }
     }
 
-    /// A new, switched-on device of this type with default parameters.
+    /// The same device type, declaring a sidechain input.
+    #[must_use]
+    pub fn with_sidechain(mut self) -> Self {
+        self.sidechain = true;
+        self
+    }
+
+    /// A new, switched-on device of this type with default parameters, and
+    /// a new sidechain input if the type declares one.
     #[must_use]
     pub fn device(&self, id: DeviceId) -> Device {
-        Device::new(id, self.name.clone(), self.kind.clone()).with_role(self.role)
+        let device = Device::new(id, self.name.clone(), self.kind.clone()).with_role(self.role);
+        if self.sidechain {
+            device.with_sidechain()
+        } else {
+            device
+        }
     }
 }
 

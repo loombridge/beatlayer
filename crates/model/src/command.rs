@@ -403,6 +403,47 @@ pub enum Command {
         /// The value, in the parameter's own units.
         value: f64,
     },
+    /// Sets where a device's sidechain listens: its sidechain section's
+    /// Source, with its channel. The device must have a sidechain input.
+    SetSidechainInput {
+        /// The device.
+        device: DeviceId,
+        /// `none` (No Input), or `track` with an audio, group, or return
+        /// track or Main (the device's own track too) and a `tap`.
+        input: Input,
+    },
+    /// Switches a device's sidechain on or off (its External switch):
+    /// whether its detector listens to the sidechain rather than its own
+    /// input.
+    SetSidechainEnabled {
+        /// The device.
+        device: DeviceId,
+        /// Whether the sidechain is on.
+        enabled: bool,
+    },
+    /// Sets a device's sidechain gain, as linear gain (finite, at least 0).
+    SetSidechainGain {
+        /// The device.
+        device: DeviceId,
+        /// The gain: 1 is 0 dB.
+        gain: f64,
+    },
+    /// Sets how much of a device's detector signal is its sidechain, from
+    /// 0 (its own input) to 1 (the sidechain alone).
+    SetSidechainMix {
+        /// The device.
+        device: DeviceId,
+        /// The mix, from 0 to 1.
+        mix: f64,
+    },
+    /// Switches a device's Sidechain Listen: whether its output is what
+    /// its detector hears.
+    SetSidechainListen {
+        /// The device.
+        device: DeviceId,
+        /// Whether to listen.
+        listen: bool,
+    },
 }
 
 impl Command {
@@ -455,6 +496,13 @@ impl Command {
             Self::SetDeviceState { .. } => "Load Preset",
             Self::SetDeviceEnabled { .. } => "Change \"Device On\"",
             Self::SetDeviceParam { .. } => "Change parameter",
+            // WP-2.19b, as Live 12.4.6 names them (observed); Listen's is to
+            // observe.
+            Self::SetSidechainInput { .. } => "Change \"Routing\"",
+            Self::SetSidechainEnabled { .. } => "Change \"Sidechain On\"",
+            Self::SetSidechainGain { .. } => "Change \"SC Gain\"",
+            Self::SetSidechainMix { .. } => "Change \"Mix\"",
+            Self::SetSidechainListen { .. } => "Change \"Sidechain Listen\"",
         }
     }
 
@@ -758,7 +806,43 @@ impl Document {
                 }
                 Ok(())
             }
+            Command::SetSidechainInput { device, input } => {
+                self.edit_sidechain(*device, |s| s.input = *input)?;
+                self.check_routing(self.device_owner(*device)?)
+            }
+            Command::SetSidechainEnabled { device, enabled } => {
+                self.edit_sidechain(*device, |s| s.enabled = *enabled)
+            }
+            Command::SetSidechainGain { device, gain } => {
+                check_value("sidechain gain", *gain, gain.is_finite() && *gain >= 0.0)?;
+                self.edit_sidechain(*device, |s| s.gain = *gain)
+            }
+            Command::SetSidechainMix { device, mix } => {
+                check_value("sidechain mix", *mix, (0.0..=1.0).contains(mix))?;
+                self.edit_sidechain(*device, |s| s.mix = *mix)
+            }
+            Command::SetSidechainListen { device, listen } => {
+                self.edit_sidechain(*device, |s| s.listen = *listen)
+            }
         }
+    }
+
+    /// Changes a device's sidechain settings with `edit`, if it has a
+    /// sidechain input.
+    fn edit_sidechain(
+        &mut self,
+        id: DeviceId,
+        edit: impl FnOnce(&mut crate::device::Sidechain),
+    ) -> Result<(), ModelError> {
+        let mut sidechain = self
+            .device_ref(id)?
+            .sidechain
+            .ok_or(ModelError::NoSidechain(id))?;
+        edit(&mut sidechain);
+        if Some(sidechain) != self.device_ref(id)?.sidechain {
+            self.device_mut(id)?.sidechain = Some(sidechain);
+        }
+        Ok(())
     }
 
     fn create_track(
@@ -1014,7 +1098,8 @@ impl Document {
         let chain = &mut self.track_mut(track)?.devices;
         insert_at(chain, index, Shared::new(device.clone()))?;
         self.index.device_track.insert(device.id, track);
-        check_chain(self.track_ref(track)?)
+        check_chain(self.track_ref(track)?)?;
+        self.check_routing(track)
     }
 
     fn move_device(
@@ -1287,6 +1372,15 @@ pub(crate) fn check_clip(clip: &Clip) -> Result<(), ModelError> {
 pub(crate) fn check_device(device: &Device) -> Result<(), ModelError> {
     for value in device.params.values() {
         check_value("parameter value", *value, value.is_finite())?;
+    }
+    if let Some(sidechain) = &device.sidechain {
+        let gain = sidechain.gain;
+        check_value("sidechain gain", gain, gain.is_finite() && gain >= 0.0)?;
+        check_value(
+            "sidechain mix",
+            sidechain.mix,
+            (0.0..=1.0).contains(&sidechain.mix),
+        )?;
     }
     Ok(())
 }

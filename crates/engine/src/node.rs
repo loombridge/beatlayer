@@ -40,6 +40,13 @@ pub enum NodeKey {
     /// Resampling (the routing spec). Its parameters are
     /// [`mixer::route`](crate::mixer::route).
     Input(TrackId),
+    /// The track a device's sidechain takes as its Source (WP-2.19b). Its
+    /// parameters are [`mixer::route`](crate::mixer::route).
+    SidechainInput(DeviceId),
+    /// A device's sidechain settings: External, SC Gain, Mix, and Listen,
+    /// which make what the device's detector hears. Its parameters are
+    /// [`sidechain`](crate::sidechain).
+    Sidechain(DeviceId),
 }
 
 impl fmt::Display for NodeKey {
@@ -51,6 +58,8 @@ impl fmt::Display for NodeKey {
             Self::Output(track) => write!(f, "the output of {track}"),
             Self::Send { track, to } => write!(f, "the send from {track} to {to}"),
             Self::Input(track) => write!(f, "the input of {track}"),
+            Self::SidechainInput(device) => write!(f, "the sidechain input of {device}"),
+            Self::Sidechain(device) => write!(f, "the sidechain of {device}"),
         }
     }
 }
@@ -171,6 +180,9 @@ pub struct Block<'a> {
     pub(crate) transport: TransportInfo,
     pub(crate) sample_rate: SampleRate,
     pub(crate) tempo: &'a TempoMap,
+    /// What the device's detector hears from its sidechain input, planar
+    /// with the block's channels and stride, while its sidechain is on.
+    pub(crate) sidechain: Option<&'a [f32]>,
 }
 
 /// The tempo map of a block made outside a program: 120 BPM throughout.
@@ -217,6 +229,26 @@ impl<'a> Block<'a> {
             transport,
             sample_rate,
             tempo: &DEFAULT_TEMPO,
+            sidechain: None,
+        }
+    }
+
+    /// The same block with a sidechain signal: planar, with the block's
+    /// channels and stride. For tests of nodes outside a program.
+    ///
+    /// # Panics
+    ///
+    /// If `sidechain` is too short.
+    #[must_use]
+    pub fn with_sidechain(self, sidechain: &'a [f32]) -> Self {
+        assert!(
+            self.channels == 0
+                || sidechain.len() >= (self.channels - 1) * self.stride + self.frames,
+            "the sidechain is shorter than the block"
+        );
+        Self {
+            sidechain: Some(sidechain),
+            ..self
         }
     }
 
@@ -270,6 +302,24 @@ impl<'a> Block<'a> {
         assert!(index < self.channels, "channel {index} out of range");
         let start = index * self.stride;
         &self.data[start..start + self.frames]
+    }
+
+    /// What the device's detector should hear on one channel, if the
+    /// device has a sidechain input and its sidechain is switched on
+    /// (WP-2.19b): the sidechain's signal after its gain, mixed with the
+    /// device's own input by its mix. `None` while the sidechain is off, or
+    /// for a device without one: the detector hears the block's own audio.
+    /// A device that declares a sidechain input
+    /// ([`DeviceType::sidechain`](crate::DeviceType::sidechain)) reads it
+    /// here; its output is still the block's audio, processed.
+    ///
+    /// # Panics
+    ///
+    /// If `index` isn't less than [`channels`](Self::channels).
+    pub fn sidechain(&self, index: usize) -> Option<&[f32]> {
+        assert!(index < self.channels, "channel {index} out of range");
+        let start = index * self.stride;
+        self.sidechain.map(|data| &data[start..start + self.frames])
     }
 
     /// One channel's samples, writable.

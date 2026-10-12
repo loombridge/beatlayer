@@ -17,7 +17,7 @@ use bl_shell_spec::arrangement as view_ids;
 use bl_shell_spec::devices::{
     self as ids, AddDeviceArgs, DeviceAdded, DeviceArgs, DeviceFrame, DeviceViewState,
     FoldDeviceArgs, HotSwap, HotSwapArgs, LoadPresetArgs, PasteDeviceArgs, PresetResult,
-    SavePresetArgs, SelectDeviceArgs,
+    SavePresetArgs, SelectDeviceArgs, ShowSidechainArgs, SidechainSection,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -33,6 +33,8 @@ pub struct DeviceView {
     folded: BTreeSet<DeviceId>,
     clipboard: Option<Device>,
     hot_swap: Option<DeviceId>,
+    /// Devices whose sidechain section is shown (WP-2.19b).
+    sidechains_shown: BTreeSet<DeviceId>,
 }
 
 /// Why a device command didn't run.
@@ -152,6 +154,13 @@ impl DeviceView {
         self.selected = self.selected.filter(exists);
         self.hot_swap = self.hot_swap.filter(exists);
         self.folded.retain(exists);
+        self.sidechains_shown.retain(exists);
+    }
+
+    /// Whether a device's sidechain section is shown.
+    #[must_use]
+    pub fn is_sidechain_shown(&self, device: DeviceId) -> bool {
+        self.sidechains_shown.contains(&device)
     }
 
     /// What the Device View shows for `track`.
@@ -172,6 +181,23 @@ impl DeviceView {
                         folded: self.folded.contains(&d.id),
                         selected: self.selected == Some(d.id),
                         hot_swap: self.hot_swap == Some(d.id),
+                        sidechain: d.sidechain.map(|sidechain| {
+                            let (source, tap) = match sidechain.input {
+                                bl_model::Input::Track { track, tap } => {
+                                    (crate::routing::track_label(doc, track), Some(tap))
+                                }
+                                _ => ("No Input".to_owned(), None),
+                            };
+                            SidechainSection {
+                                shown: self.sidechains_shown.contains(&d.id),
+                                enabled: sidechain.enabled,
+                                source,
+                                tap,
+                                mix: sidechain.mix,
+                                gain: sidechain.gain,
+                                listen: sidechain.listen,
+                            }
+                        }),
                     })
                     .collect()
             })
@@ -213,6 +239,9 @@ impl DeviceView {
             ids::CUT | ids::COPY | ids::SAVE_PRESET | ids::SAVE_DEFAULT_PRESET | ids::FOLD => {
                 has_target()
             }
+            ids::SHOW_SIDECHAIN => self
+                .target(doc, named)
+                .is_ok_and(|device| doc.device(device).is_some_and(|d| d.sidechain.is_some())),
             ids::DUPLICATE => self.target(doc, named).is_ok_and(|device| {
                 doc.device(device)
                     .is_some_and(|d| d.role != DeviceRole::Instrument)
@@ -288,6 +317,25 @@ impl DeviceView {
                 outcome.document_changed = true;
                 outcome.value = to_value(&added);
                 return Ok(outcome);
+            }
+            ids::SHOW_SIDECHAIN => {
+                let ShowSidechainArgs { device, shown } = parse(args)?;
+                let device = self.target(editor.document(), device)?;
+                if editor
+                    .document()
+                    .device(device)
+                    .is_none_or(|d| d.sidechain.is_none())
+                {
+                    return Err(DeviceError::Unavailable(format!(
+                        "{device} has no sidechain input"
+                    )));
+                }
+                let shown = shown.unwrap_or(!self.sidechains_shown.contains(&device));
+                if shown {
+                    self.sidechains_shown.insert(device);
+                } else {
+                    self.sidechains_shown.remove(&device);
+                }
             }
             ids::CUT => {
                 let DeviceArgs { device } = parse(args)?;
@@ -444,8 +492,11 @@ impl DeviceView {
         // track that can't hold it goes on a new MIDI track at the end.
         let new_track = !role.fits(kind);
         let id: DeviceId = editor.new_id();
-        let device =
+        let mut device =
             Device::new(id, args.device.name.clone(), args.device.kind.clone()).with_role(role);
+        if args.device.sidechain {
+            device = device.with_sidechain();
+        }
         let default = user_library
             .map(|library| preset::default_preset_path(library, &device))
             .filter(|path| path.is_file())

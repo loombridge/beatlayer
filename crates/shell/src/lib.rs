@@ -43,6 +43,8 @@
 //! - [`permission`]: a call's permission class decided from its arguments,
 //!   for the agent API: placing clips over others is destructive
 //!   (WP-1.15b).
+//! - [`tracks`]: Duplicate Track Without Clips (WP-2.19b, IMP-12), which
+//!   `track.duplicate_without_clips` runs.
 //! - [`transport`]: the Control Bar's transport section: what its fields
 //!   show, and the command each change runs (WP-1.18). The transport's
 //!   commands themselves are `bl-engine`'s, which [`Shell`] registers and
@@ -66,6 +68,7 @@ pub mod permission;
 pub mod routing;
 pub mod settings;
 mod shell;
+pub mod tracks;
 pub mod transport;
 
 /// The Arrangement View's command IDs and their argument and result types.
@@ -87,6 +90,9 @@ pub use bl_shell_spec::mixer_view as mixer_view_commands;
 /// (WP-1.16).
 pub use bl_shell_spec::perception as perception_commands;
 pub use bl_shell_spec::settings::ZOOM_STEPS;
+/// The shell's track command IDs and their argument and result types
+/// (WP-2.19b).
+pub use bl_shell_spec::tracks as track_commands;
 /// The transport's command IDs the shell's menus and controls run, and
 /// `transport.state`'s result.
 pub use bl_shell_spec::transport as transport_commands;

@@ -17,10 +17,15 @@
 //! - A track that hears a return track, because it takes one as its input
 //!   or a return's output reaches it, has silent sends: a return can't
 //!   hear itself.
+//! - Sidechains come last (WP-2.19b): each device's sidechain Source, in
+//!   display order. One whose source the device's track already feeds, by
+//!   any route, carries nothing. A device listening to its own track
+//!   before its devices (Pre FX) hears it, as the signal is there before
+//!   the chain runs; after them it would hear itself, and carries nothing.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use bl_model::{Document, Input, SendTap, Tap, TrackId, TrackKind};
+use bl_model::{DeviceId, Document, Input, SendTap, Tap, TrackId, TrackKind};
 
 /// How a signal travels from one track into another.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -32,6 +37,19 @@ pub enum Via {
     Send,
     /// The destination's own input (Audio From), Resampling included.
     Input,
+    /// A device's sidechain Source, on the destination track (WP-2.19b).
+    Sidechain(DeviceId),
+}
+
+impl Via {
+    /// The device whose sidechain the route feeds, if it feeds one.
+    #[must_use]
+    pub fn sidechain(self) -> Option<DeviceId> {
+        match self {
+            Self::Sidechain(device) => Some(device),
+            _ => None,
+        }
+    }
 }
 
 /// One route in the graph.
@@ -212,7 +230,52 @@ impl Graph {
                 _ => {}
             }
         }
+        graph.add_sidechains(document, &order);
         graph
+    }
+
+    /// Adds the routes into devices' sidechains, after every other route,
+    /// leaving out each that would close a loop.
+    fn add_sidechains(&mut self, document: &Document, order: &[TrackId]) {
+        let mut wanted = Vec::new();
+        for &id in order {
+            let Some(track) = document.track(id) else {
+                continue;
+            };
+            for device in track.devices() {
+                if let Some(Input::Track { track: from, tap }) = device.sidechain.map(|s| s.input) {
+                    wanted.push(Edge {
+                        from,
+                        to: id,
+                        via: Via::Sidechain(device.id),
+                        tap,
+                        monitored: false,
+                    });
+                }
+            }
+        }
+        if wanted.is_empty() {
+            return;
+        }
+        let mut all: BTreeMap<TrackId, Vec<TrackId>> = BTreeMap::new();
+        for edge in &self.edges {
+            all.entry(edge.from).or_default().push(edge.to);
+        }
+        for edge in wanted {
+            if edge.from == edge.to {
+                // Its own track before its devices is there already.
+                if edge.tap == Tap::PreFx {
+                    self.edges.push(edge);
+                } else {
+                    self.broken.push((edge.from, edge.to));
+                }
+            } else if reaches(&all, edge.to, edge.from) {
+                self.broken.push((edge.from, edge.to));
+            } else {
+                all.entry(edge.from).or_default().push(edge.to);
+                self.edges.push(edge);
+            }
+        }
     }
 
     /// The tracks whose output reaches `track`'s own input or mix, through

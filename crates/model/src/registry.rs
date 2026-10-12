@@ -849,6 +849,69 @@ const ENTRIES: &[Entry] = &[
             defaults.",
     },
     Entry {
+        id: "device.set_sidechain_input",
+        action: Action::Apply("set_sidechain_input"),
+        label: "Set Sidechain Input",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sets where a device's sidechain listens, as the Source chooser in its \
+            sidechain section does: `none` (No Input, a new device's), or `track` with another \
+            audio, group, or return track, Main, or the device's own track, and a `tap`: \
+            `pre_fx`, `post_fx` (what choosing a track in the window picks), or `post_mixer`. \
+            Only devices that declare a sidechain input have one. The source track still \
+            plays as before; the device only listens to it. The detector hears it only while \
+            External is on (`device.set_sidechain_enabled`). To make a kick duck a bass, set \
+            the bass compressor's source to the kick's track and switch External on.",
+    },
+    Entry {
+        id: "device.set_sidechain_enabled",
+        action: Action::Apply("set_sidechain_enabled"),
+        label: "External Sidechain On/Off",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Switches a device's sidechain on or off, as the External switch in its \
+            sidechain section does. On, the device's detector (a compressor's level detector, \
+            say) listens to its sidechain input instead of the track's own signal; its \
+            output is still the track's signal, processed. Off, as on a new device, it \
+            listens to its own input.",
+    },
+    Entry {
+        id: "device.set_sidechain_gain",
+        action: Action::Apply("set_sidechain_gain"),
+        label: "Set SC Gain",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sets the gain a device's sidechain signal gets before its detector \
+            hears it, as linear gain: 1 is 0 dB (a new device's), 2 about +6 dB, 0 silence. \
+            Raise it when the sidechain source is too quiet to trigger the device.",
+    },
+    Entry {
+        id: "device.set_sidechain_mix",
+        action: Action::Apply("set_sidechain_mix"),
+        label: "Set Sidechain Mix",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sets how much of what a device's detector hears is its sidechain, from \
+            0 (only the track's own signal) to 1 (only the sidechain, a new device's). \
+            Values between blend the two.",
+    },
+    Entry {
+        id: "device.set_sidechain_listen",
+        action: Action::Apply("set_sidechain_listen"),
+        label: "Sidechain Listen",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Switches a device's Sidechain Listen: on, the device's output is what \
+            its detector hears (the sidechain, after its gain and mix) instead of the \
+            processed track, so you can check what triggers it. Switch it off to hear the \
+            track again.",
+    },
+    Entry {
         id: UNDO,
         action: Action::Undo,
         label: "Undo",

@@ -63,7 +63,7 @@ impl TrackKind {
     /// Whether tracks of this kind have a send to each return track: audio,
     /// MIDI, and group tracks do. (Live gives return tracks sends too,
     /// switched off until the user enables them; Beatlayer adds those with
-    /// WP-2.19b, with the track context menu's Enable Send.)
+    /// the track context menu, whose Enable Send turns them on.)
     #[must_use]
     pub const fn has_sends(self) -> bool {
         matches!(self, Self::Audio | Self::Midi | Self::Group)

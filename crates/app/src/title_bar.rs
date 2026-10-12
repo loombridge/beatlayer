@@ -9,14 +9,58 @@
 //! double-clicking zooms it (or minimises it, by the person's setting), and
 //! the close, minimise, and full-screen buttons work as in any window. This
 //! module shrinks that view from the system's height (32 points on macOS 26)
-//! to Live's 23 and centres the buttons in it, so clicks below it reach the
-//! Control Bar. AppKit lays the title bar out again when the window resizes
-//! or leaves full screen, so the host calls [`fit`] after each resize.
+//! to Live's 23, so clicks below it reach the Control Bar, and gives the
+//! buttons Live's size and placement (see [`BUTTONS`]). AppKit lays the
+//! title bar out again when the window resizes or leaves full screen, so the
+//! host calls [`fit`] after each resize.
+//!
+//! Live's buttons are the classic 12-point ones, because Live is built
+//! against an older SDK; macOS 26 gives a window built against its own SDK
+//! 14-point buttons whatever its toolbar style (none, unified, compact,
+//! expanded, and preference all give 14). So [`fit`] keeps AppKit's own
+//! buttons and scales them: each gets a 12-point frame over AppKit's
+//! 14-point bounds, so the system draws them at 12/14 of their size and
+//! they keep their hover glyphs, clicks, Option-click and full-screen
+//! menus, and dimming in an inactive window.
 
 use bl_ui::layout::TITLE_BAR;
 use objc2_app_kit::{NSView, NSWindow, NSWindowButton};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use winit::window::Window;
+
+/// Live 12's window buttons on macOS, in points from the window's top-left
+/// corner: each button's diameter, the distance from one button's centre to
+/// the next, and the close button's centre (measured from Live 12.4.6 on
+/// macOS 26).
+pub const BUTTONS: Buttons = Buttons {
+    diameter: 12.0,
+    spacing: 20.0,
+    first_centre: (14.5, 14.0),
+};
+
+/// The size and placement of the window buttons (see [`BUTTONS`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Buttons {
+    /// Each button's diameter.
+    pub diameter: f64,
+    /// From one button's centre to the next.
+    pub spacing: f64,
+    /// The close button's centre, x and y from the window's top-left.
+    pub first_centre: (f64, f64),
+}
+
+impl Buttons {
+    /// The frame origin, in a title bar view `strip` points tall whose y
+    /// runs up from its bottom edge (AppKit's), of the `index`th button
+    /// (close 0, minimise 1, full screen 2).
+    pub fn origin(&self, index: usize, strip: f64) -> (f64, f64) {
+        let radius = self.diameter / 2.0;
+        let (x, y) = self.first_centre;
+        #[expect(clippy::cast_precision_loss, reason = "index is 0 to 2")]
+        let x = x + self.spacing * index as f64 - radius;
+        (x, strip - (y + radius))
+    }
+}
 
 /// The window's AppKit window, from its content view.
 fn ns_window(window: &Window) -> Option<objc2::rc::Retained<NSWindow>> {
@@ -32,9 +76,11 @@ fn ns_window(window: &Window) -> Option<objc2::rc::Retained<NSWindow>> {
 }
 
 /// Fits the system's title bar to Live's 23 points: the strip that drags
-/// and zooms the window, with the window buttons centred in it. Does
-/// nothing in full screen, where the system shows its own title bar on
-/// demand and Live shows none (L-WIN-002).
+/// and zooms the window, with the window buttons sized and placed as
+/// [`BUTTONS`] says (8 to 20 points down, inside the strip, so it neither
+/// clips them nor misses their clicks). Does nothing in full screen, where
+/// the system shows its own title bar on demand and Live shows none
+/// (L-WIN-002).
 pub fn fit(window: &Window) {
     if window.fullscreen().is_some() {
         return;
@@ -65,17 +111,31 @@ pub fn fit(window: &Window) {
     inner.origin.y = 0.0;
     inner.size.height = height;
     title_view.setFrame(inner);
-    for kind in [
+    for (index, kind) in [
         NSWindowButton::CloseButton,
         NSWindowButton::MiniaturizeButton,
         NSWindowButton::ZoomButton,
-    ] {
-        if let Some(button) = ns_window.standardWindowButton(kind) {
-            let size = button.frame().size;
-            let mut origin = button.frame().origin;
-            origin.y = ((height - size.height) / 2.0).round();
-            button.setFrameOrigin(origin);
-        }
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let Some(button) = ns_window.standardWindowButton(kind) else {
+            continue;
+        };
+        // The system's size for the button, which it draws in. Its frame
+        // and bounds may already be this function's from an earlier call.
+        let Some(cell) = button.cell() else {
+            continue;
+        };
+        let drawn = cell.cellSize();
+        let (x, y) = BUTTONS.origin(index, height);
+        let mut frame = button.frame();
+        frame.origin.x = x;
+        frame.origin.y = y;
+        frame.size.width = BUTTONS.diameter;
+        frame.size.height = BUTTONS.diameter;
+        button.setFrame(frame);
+        button.setBoundsSize(drawn);
     }
 }
 
@@ -112,11 +172,15 @@ pub fn describe(window: &Window) -> String {
             let frame = button.frame();
             let top = f64::from(TITLE_BAR) - frame.origin.y - frame.size.height;
             out.push(format!(
-                "{name} x {:.0} to {:.0}, y {:.0} to {:.0}",
+                "{name} x {} to {}, y {} to {} (centre {}, {}; drawn {} in {})",
                 frame.origin.x,
                 frame.origin.x + frame.size.width,
                 top,
-                top + frame.size.height
+                top + frame.size.height,
+                frame.origin.x + frame.size.width / 2.0,
+                top + frame.size.height / 2.0,
+                frame.size.width,
+                button.bounds().size.width,
             ));
         }
     }
@@ -148,4 +212,25 @@ pub fn describe(window: &Window) -> String {
         }
     }
     out.join("; ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn buttons_sit_where_live_puts_them() {
+        let strip = f64::from(TITLE_BAR);
+        assert_eq!(BUTTONS.origin(0, strip), (8.5, 3.0));
+        assert_eq!(BUTTONS.origin(1, strip), (28.5, 3.0));
+        assert_eq!(BUTTONS.origin(2, strip), (48.5, 3.0));
+        // Centres from the window's top-left: 14.5, 34.5, 54.5 across, 14
+        // down, all inside the 23-point strip.
+        for (index, centre) in [14.5, 34.5, 54.5].into_iter().enumerate() {
+            let (x, y) = BUTTONS.origin(index, strip);
+            assert_eq!(x + BUTTONS.diameter / 2.0, centre);
+            assert_eq!(strip - y - BUTTONS.diameter / 2.0, 14.0);
+            assert!(y >= 0.0 && y + BUTTONS.diameter <= strip);
+        }
+    }
 }

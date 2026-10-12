@@ -77,7 +77,7 @@ button { font: inherit; color: inherit; }
 a { color: var(--accent); }
 h1, h2, h3 { margin: 0; font-weight: 600; letter-spacing: -0.01em; }
 
-.wrap { max-width: 1180px; margin: 0 auto; padding: 0 16px; }
+.wrap { max-width: 1440px; margin: 0 auto; padding: 0 16px; }
 
 /* Top bar */
 .top { background: var(--panel-2); border-bottom: 1px solid var(--line); }
@@ -128,18 +128,19 @@ section:first-child { margin-top: 0; }
 .seg button { border: 0; background: none; padding: 5px 12px; font-size: 13px; cursor: pointer; color: var(--dim); min-height: 30px; }
 .seg button[aria-pressed="true"] { background: var(--panel-2); color: var(--text); box-shadow: inset 0 -2px 0 var(--accent); }
 
-/* Rows of squares */
-.rows { display: grid; gap: 8px; }
+/* Cards of squares, several across on a wide window and one on a phone */
+.rows { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 188px), 1fr)); gap: 8px; }
 .row {
-  display: grid; grid-template-columns: minmax(220px, 300px) 1fr; gap: 8px 18px; align-items: start;
-  background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px;
+  display: flex; flex-direction: column; gap: 8px; min-width: 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px 12px;
 }
-.row.current { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
-.row-title { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
-.row-title h3 { font-size: 14.5px; }
-.row-title button.h { all: unset; cursor: pointer; font-size: 14.5px; font-weight: 600; border-radius: 3px; }
-.row-title button.h:hover { text-decoration: underline; text-underline-offset: 3px; }
-.row-title button.h:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.row.current { border-color: var(--accent); box-shadow: inset 0 3px 0 var(--accent); }
+.rows + .rows, .summary + .rows { margin-top: 12px; }
+.row-title { display: flex; align-items: center; gap: 6px 8px; flex-wrap: wrap; min-height: 18px; }
+.row h3 { font-size: 14.5px; line-height: 1.3; margin-top: 3px; }
+.row button.h { all: unset; cursor: pointer; font-size: 14.5px; font-weight: 600; border-radius: 3px; }
+.row button.h:hover { text-decoration: underline; text-underline-offset: 3px; }
+.row button.h:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .tag { font-size: 11.5px; font-weight: 600; color: var(--dim); text-transform: uppercase; letter-spacing: .04em; }
 .pill { font-size: 11px; font-weight: 600; color: var(--dim); border: 1px solid var(--line); border-radius: 999px; padding: 0 7px; white-space: nowrap; }
 .now { font-size: 11px; font-weight: 700; color: var(--accent); border: 1px solid var(--accent); border-radius: 999px; padding: 0 7px; }
@@ -148,12 +149,11 @@ section:first-child { margin-top: 0; }
 .row-count { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: 12.5px; color: var(--dim); }
 .row-count > span { min-width: 0; }
 .row-count b { color: var(--text); font-weight: 600; }
-.meter { flex: 0 0 56px; height: 5px; border-radius: 3px; background: var(--todo); overflow: hidden; }
+.meter { flex: 0 0 44px; height: 5px; border-radius: 3px; background: var(--todo); overflow: hidden; }
 .meter span { display: block; height: 100%; background: var(--done); }
 
-.grid { display: flex; flex-wrap: wrap; gap: 4px; padding-top: 2px; min-width: 0; }
+.grid { --s: 15px; display: grid; grid-template-columns: repeat(6, var(--s)); gap: 4px; }
 .sq {
-  --s: 15px;
   width: var(--s); height: var(--s); padding: 0; border-radius: 3px; cursor: pointer;
   border: 1.5px solid transparent; background: var(--todo);
   transition: transform .08s ease;
@@ -168,7 +168,7 @@ section:first-child { margin-top: 0; }
 .s-gap { background: transparent; border: 1.5px dashed var(--gap); }
 .s-planned { background: transparent; border-color: var(--planned); }
 .s-out { background: repeating-linear-gradient(135deg, var(--planned) 0 1.5px, transparent 1.5px 4px); border-color: var(--planned); opacity: .7; }
-@media (pointer: coarse) { .sq { --s: 18px; } .grid { gap: 5px; } }
+@media (pointer: coarse) { .grid { --s: 24px; gap: 6px; } }
 
 /* Tooltip and detail panel */
 #tip {
@@ -199,7 +199,6 @@ section:first-child { margin-top: 0; }
 .empty { color: var(--dim); font-size: 13px; }
 
 @media (max-width: 720px) {
-  .row { grid-template-columns: 1fr; }
   .source { text-align: left; flex-basis: 100%; order: 3; }
   .stat .big { font-size: 24px; }
   #detail { left: 0; right: 0; bottom: 0; width: 100%; max-height: 72vh; border-radius: 14px 14px 0 0; border-bottom: 0; }
@@ -242,6 +241,13 @@ section:first-child { margin-top: 0; }
     <div class="section-head"><h2 id="roadmap-h">Roadmap</h2></div>
     <p class="hint">One square per work package in the build plan. Phases 3 to 10 aren't broken into packages yet, so they show the plan's estimate.</p>
     <div class="rows" id="phases"></div>
+  </section>
+
+  <section aria-labelledby="reagent-h" id="reagent" hidden>
+    <div class="section-head"><h2 id="reagent-h">Reagent</h2></div>
+    <p class="hint">The open-source synthesiser and the plug-in kit it shares with Beatlayer. One square per package in Reagent's plan; phases not broken into packages yet show the plan's estimate.</p>
+    <div class="summary" id="reagent-summary"></div>
+    <div class="rows" id="reagent-phases"></div>
   </section>
 
   <section aria-labelledby="parity-h">
@@ -385,6 +391,7 @@ function render() {
   renderSummary(data);
   renderLegend();
   renderPhases(data);
+  renderReagent(data);
   renderFeatures(data);
   renderImprovements(data);
   if (state.selected && state.items.has(state.selected)) showDetail(state.selected);
@@ -409,10 +416,7 @@ function renderSummary(data) {
   const parity = data.totals.parity;
   const pc = parity.by_status;
   const pDone = pc["done"] || 0;
-  const pkg = data.totals.packages;
-  const kc = pkg.by_status;
-  const kDone = kc["done"] || 0;
-  const current = data.phases.find(p => p.packages.length && p.packages.some(x => x.status !== "done"));
+  const current = currentPhase(data.phases);
   const outCount = pc["out"] || 0;
 
   const cards = [
@@ -426,26 +430,55 @@ function renderSummary(data) {
         outCount + " out of scope",
       ].join(" · ")),
       stackBar(pc, parity.total)),
-    el("div", { class: "stat" },
-      el("div", { class: "label" }, "Work packages to 1.0"),
-      el("div", { class: "big" }, Math.round(100 * kDone / Math.max(1, pkg.total)) + "%",
-        el("small", {}, kDone + " of about " + pkg.total + " done")),
-      el("div", { class: "sub" }, [
-        (kc["review"] || 0) + " in review", (kc["in progress"] || 0) + " in progress",
-        (kc["planned"] || 0) + " estimated in later phases",
-      ].join(" · ")),
-      stackBar(kc, pkg.total)),
+    packagesCard("Work packages to 1.0", data.totals.packages),
   ];
-  if (current) {
-    const c = count(current.packages.map(p => p.status));
-    const total = current.packages.length;
-    cards.push(el("div", { class: "stat" },
-      el("div", { class: "label" }, "Now: Phase " + current.number + (current.milestone ? ", M" + current.milestone.number + " " + releaseText(current.milestone.release) : "")),
-      el("div", { class: "big" }, current.title),
-      el("div", { class: "sub" }, ORDER.filter(s => c[s]).map(s => c[s] + " " + LABEL[s].toLowerCase()).join(" · ")),
-      stackBar(c, total)));
-  }
+  if (current) cards.push(nowCard(current));
   box.replaceChildren(...cards);
+}
+
+function packagesCard(label, pkg) {
+  const kc = pkg.by_status;
+  const kDone = kc["done"] || 0;
+  return el("div", { class: "stat" },
+    el("div", { class: "label" }, label),
+    el("div", { class: "big" }, Math.round(100 * kDone / Math.max(1, pkg.total)) + "%",
+      el("small", {}, kDone + " of about " + pkg.total + " done")),
+    el("div", { class: "sub" }, [
+      (kc["review"] || 0) + " in review", (kc["in progress"] || 0) + " in progress",
+      (kc["planned"] || 0) + " estimated in later phases",
+    ].join(" · ")),
+    stackBar(kc, pkg.total));
+}
+
+function nowCard(phase) {
+  const c = count(phase.packages.map(p => p.status));
+  const m = phase.milestone;
+  return el("div", { class: "stat" },
+    el("div", { class: "label" }, "Now: " + phaseName(phase) + (m ? ", M" + m.number + " " + releaseText(m.release) : "")),
+    el("div", { class: "big" }, phase.title),
+    el("div", { class: "sub" }, ORDER.filter(s => c[s]).map(s => c[s] + " " + LABEL[s].toLowerCase()).join(" · ")),
+    stackBar(c, phase.packages.length));
+}
+
+/* The phase being built: the first with packages that aren't all done. */
+function currentPhase(phases) {
+  return phases.find(p => p.packages.length && p.packages.some(x => x.status !== "done"));
+}
+
+/* Beatlayer's phases are numbered ("Phase 2"); Reagent's carry their own ID ("R0"). */
+function phaseName(phase) { return phase.reagent ? phase.number : "Phase " + phase.number; }
+function packageName(p, phase) { return phase.reagent ? p.id : "WP-" + p.id; }
+
+function renderReagent(data) {
+  const section = document.getElementById("reagent");
+  const reagent = data.reagent;
+  section.hidden = !reagent;
+  if (!reagent) return;
+  const current = currentPhase(reagent.phases);
+  document.getElementById("reagent-summary").replaceChildren(
+    packagesCard("Reagent packages", reagent.totals.packages),
+    current ? nowCard(current) : "");
+  document.getElementById("reagent-phases").replaceChildren(...phaseCards(reagent.phases, "r"));
 }
 
 function releaseName(release) {
@@ -464,36 +497,40 @@ function renderLegend() {
 }
 
 function renderPhases(data) {
-  const box = document.getElementById("phases");
-  const current = data.phases.find(p => p.packages.length && p.packages.some(x => x.status !== "done"));
-  box.replaceChildren(...data.phases.map(phase => {
+  document.getElementById("phases").replaceChildren(...phaseCards(data.phases, ""));
+}
+
+/* One card per phase; `prefix` keeps Reagent's keys apart from Beatlayer's. */
+function phaseCards(phases, prefix) {
+  const current = currentPhase(phases);
+  return phases.map(phase => {
     const m = phase.milestone;
     let entries;
     if (phase.packages.length) {
       entries = phase.packages.map(p => ({
-        key: "wp:" + p.id, status: p.status, label: "WP-" + p.id + " " + p.title,
+        key: prefix + "wp:" + p.id, status: p.status, label: packageName(p, phase) + " " + p.title,
         item: { kind: "package", package: p, phase },
       }));
     } else {
       entries = Array.from({ length: phase.estimate || 0 }, (_, i) => ({
-        key: "est:" + phase.number + ":" + i, status: "planned", label: "Phase " + phase.number + ", estimated package " + (i + 1),
+        key: prefix + "est:" + phase.number + ":" + i, status: "planned", label: phaseName(phase) + ", estimated package " + (i + 1),
         item: { kind: "estimate", phase, index: i },
       }));
     }
     const statuses = entries.map(e => e.status);
     const isCurrent = phase === current;
-    const key = "phase:" + phase.number;
+    const key = prefix + "phase:" + phase.number;
     state.items.set(key, { kind: "phase", phase });
     return el("article", { class: "row" + (isCurrent ? " current" : "") },
       el("div", {},
         el("div", { class: "row-title" },
-          el("span", { class: "tag" }, "Phase " + phase.number),
-          el("h3", {}, el("button", { class: "h", type: "button", "data-phase": key, "aria-label": "Phase " + phase.number + ", " + phase.title + ": details" }, phase.title)),
+          el("span", { class: "tag" }, phaseName(phase)),
           m ? releasePill(m.release) : null,
           isCurrent ? el("span", { class: "now" }, "Now") : null),
+        el("h3", {}, el("button", { class: "h", type: "button", "data-phase": key, "aria-label": phaseName(phase) + ", " + phase.title + ": details" }, phase.title)),
         rowCount(statuses, entries.length, phase.packages.length ? "packages" : "estimated packages")),
       el("div", { class: "grid" }, sortSquares(entries).map(e => square(e.key, e.status, e.label, e.item))));
-  }));
+  });
 }
 
 function featureParts(data) {
@@ -526,7 +563,7 @@ function renderFeatures(data) {
       groups.get(k).list.push(x);
     }
   }
-  const current = data.phases.find(p => p.packages.length && p.packages.some(x => x.status !== "done"));
+  const current = currentPhase(data.phases);
   const rows = [];
   for (const [k, g] of groups) {
     if (!g.list.length) continue;
@@ -535,7 +572,8 @@ function renderFeatures(data) {
     const entries = g.list.map(x => ({ key: x.key, status: x.part.status, label: partLabel(x.feature, x.part), item: { kind: "feature", feature: x.feature, part: x.part } }));
     rows.push(el("article", { class: "row" + (isCurrent ? " current" : "") },
       el("div", {},
-        el("div", { class: "row-title" }, g.tag ? el("span", { class: "tag" }, g.tag) : null, el("h3", {}, g.title || milestoneName(Number(k.slice(1)))), g.meta ? el("span", { class: "pill" }, g.meta) : null, isCurrent ? el("span", { class: "now" }, "Now") : null),
+        g.tag ? el("div", { class: "row-title" }, el("span", { class: "tag" }, g.tag), g.meta ? el("span", { class: "pill" }, g.meta) : null, isCurrent ? el("span", { class: "now" }, "Now") : null) : null,
+        el("h3", {}, g.title || milestoneName(Number(k.slice(1)))),
         k === "out" && state.view === "milestone"
           ? el("div", { class: "row-count" }, plural(g.list.length, "feature") + " left out, each with its reason")
           : rowCount(counted.map(x => x.part.status), counted.length, "features")),
@@ -551,7 +589,8 @@ function renderImprovements(data) {
   const entries = list.map(i => ({ key: "imp:" + i.id, status: i.status, label: i.id + " " + i.title, item: { kind: "improvement", improvement: i } }));
   box.replaceChildren(el("article", { class: "row" },
     el("div", {},
-      el("div", { class: "row-title" }, el("span", { class: "tag" }, "IMP"), el("h3", {}, "Improvements")),
+      el("div", { class: "row-title" }, el("span", { class: "tag" }, "IMP")),
+      el("h3", {}, "Improvements"),
       rowCount(entries.map(e => e.status), entries.length, "improvements")),
     el("div", { class: "grid" }, sortSquares(entries).map(e => square(e.key, e.status, e.label, e.item)))));
 }
@@ -568,8 +607,8 @@ function packageById(id) {
 
 function tipContent(item) {
   switch (item.kind) {
-    case "package": return ["WP-" + item.package.id + " " + item.package.title, item.package.status, item.package.pr ? "#" + item.package.pr.number : ""];
-    case "estimate": return ["Phase " + item.phase.number + ": " + item.phase.title, "planned", "About " + item.phase.estimate + " packages, not broken down yet"];
+    case "package": return [packageName(item.package, item.phase) + " " + item.package.title, item.package.status, pullRequests(item.package).map(l => l.label).join(", ")];
+    case "estimate": return [phaseName(item.phase) + ": " + item.phase.title, "planned", "About " + item.phase.estimate + " packages, not broken down yet"];
     case "feature": return [partLabel(item.feature, item.part), item.part.status, item.part.packages.length ? item.part.packages.map(p => "WP-" + p).join(", ") : ""];
     case "improvement": return [item.improvement.id + " " + item.improvement.title, item.improvement.status, item.improvement.built_in];
   }
@@ -602,6 +641,16 @@ function prLink(pr) {
   return pr ? el("a", { href: pr.url, target: "_blank", rel: "noopener noreferrer" }, "#" + pr.number) : null;
 }
 
+/* A package's pull requests: Beatlayer's one, or Reagent's several across repositories. */
+function pullRequests(p) {
+  if (p.prs) return p.prs;
+  return p.pr ? [{ label: "#" + p.pr.number, url: p.pr.url }] : [];
+}
+
+function prLinks(p) {
+  return pullRequests(p).flatMap((l, i) => [i ? ", " : "", el("a", { href: l.url, target: "_blank", rel: "noopener noreferrer" }, l.label)]);
+}
+
 function packageList(ids) {
   if (!ids.length) return el("p", {}, "No work package names this yet.");
   return el("ul", {}, ids.flatMap(id => {
@@ -624,43 +673,36 @@ function showDetail(key) {
   let body = [];
   if (item.kind === "package") {
     const p = item.package;
+    const prs = pullRequests(p);
     body = [
-      el("h3", {}, "WP-" + p.id),
+      el("h3", {}, packageName(p, item.phase)),
       el("p", { style: "color:var(--text);margin-top:4px" }, p.title),
       el("dl", { class: "kv" },
         el("dt", {}, "Status"), el("dd", {}, el("span", { class: "chip" }, swatch(p.status), LABEL[p.status])),
-        el("dt", {}, "Phase"), el("dd", {}, item.phase.number + ", " + item.phase.title),
+        el("dt", {}, "Phase"), el("dd", {}, (item.phase.reagent ? item.phase.number + " " : item.phase.number + ", ") + item.phase.title),
         p.size ? [el("dt", {}, "Size"), el("dd", {}, p.size)] : null,
+        p.depends ? [el("dt", {}, "Depends on"), el("dd", {}, p.depends)] : null,
         p.date ? [el("dt", {}, "Date"), el("dd", {}, p.date)] : null,
-        p.pr ? [el("dt", {}, "Pull request"), el("dd", {}, prLink(p.pr))] : null),
+        prs.length ? [el("dt", {}, prs.length > 1 ? "Pull requests" : "Pull request"), el("dd", {}, prLinks(p))] : null),
       p.note && p.note !== p.title ? el("p", {}, p.note) : null,
     ];
   } else if (item.kind === "phase" || item.kind === "estimate") {
     const ph = item.phase;
-    if (ph.packages.length) {
-      const c = count(ph.packages.map(p => p.status));
-      body = [
-        el("h3", {}, "Phase " + ph.number + ": " + ph.title),
-        el("dl", { class: "kv" },
-          ph.milestone ? [el("dt", {}, "Milestone"), el("dd", {}, "M" + ph.milestone.number + " " + ph.milestone.name + (releaseName(ph.milestone.release) ? ", " + releaseName(ph.milestone.release) : ""))] : null,
-          el("dt", {}, "Packages"), el("dd", {}, ORDER.filter(s => c[s]).map(s => c[s] + " " + LABEL[s].toLowerCase()).join(", "))),
-        ph.goal ? el("p", {}, ph.goal) : null,
-        ph.milestone ? [el("h4", {}, "For users"), el("p", {}, ph.milestone.promise)] : null,
-        ph.milestone ? [el("h4", {}, "Exit demo"), el("p", {}, ph.milestone.exit)] : null,
-      ];
-      detail.replaceChildren(el("button", { class: "btn icon close", type: "button", "aria-label": "Close details", onclick: closeDetail }, "×"), ...body.flat().filter(Boolean));
-      detail.hidden = false;
-      return;
-    }
+    const m = ph.milestone;
+    const c = count(ph.packages.map(p => p.status));
+    const exit = m ? m.exit : ph.exit;
     body = [
-      el("h3", {}, "Phase " + ph.number + ": " + ph.title),
+      el("h3", {}, phaseName(ph) + ": " + ph.title),
       el("dl", { class: "kv" },
-        el("dt", {}, "Status"), el("dd", {}, el("span", { class: "chip" }, swatch("planned"), "Planned")),
-        ph.milestone ? [el("dt", {}, "Milestone"), el("dd", {}, "M" + ph.milestone.number + " " + ph.milestone.name + (releaseName(ph.milestone.release) ? ", " + releaseName(ph.milestone.release) : ""))] : null,
-        el("dt", {}, "Packages"), el("dd", {}, "About " + ph.estimate + ", broken down when the phase starts")),
-      ph.milestone ? el("p", {}, ph.milestone.promise) : null,
+        ph.packages.length ? null : [el("dt", {}, "Status"), el("dd", {}, el("span", { class: "chip" }, swatch("planned"), "Planned"))],
+        m ? [el("dt", {}, "Milestone"), el("dd", {}, "M" + m.number + " " + m.name + (releaseName(m.release) ? ", " + releaseName(m.release) : ""))] : null,
+        el("dt", {}, "Packages"), el("dd", {}, ph.packages.length
+          ? ORDER.filter(s => c[s]).map(s => c[s] + " " + LABEL[s].toLowerCase()).join(", ")
+          : "About " + ph.estimate + ", broken down later")),
+      ph.goal ? (ph.reagent ? [el("h4", {}, "At its end"), el("p", {}, ph.goal)] : el("p", {}, ph.goal)) : null,
+      m ? [el("h4", {}, "For users"), el("p", {}, m.promise)] : null,
       ph.epics ? [el("h4", {}, "Epics"), el("p", {}, ph.epics)] : null,
-      ph.milestone ? [el("h4", {}, "Exit demo"), el("p", {}, ph.milestone.exit)] : null,
+      exit ? [el("h4", {}, "Exit demo"), el("p", {}, exit)] : null,
     ];
   } else if (item.kind === "feature") {
     const f = item.feature, p = item.part;
@@ -745,10 +787,14 @@ async function load(fetchMain) {
     const response = await fetch("/api/progress" + (fetchMain ? "?fetch=1" : ""), { cache: "no-store" });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || response.statusText);
+    if (data.reagent) data.reagent.phases.forEach(p => { p.reagent = true; });
     state.data = data;
-    banner.replaceChildren(data.unknown_refs && data.unknown_refs.length
-      ? el("div", { class: "banner" }, "These name work packages the build plan doesn't have: " + data.unknown_refs.join("; "))
-      : "");
+    const problems = (data.reagent && data.reagent.problems) || [];
+    banner.replaceChildren(
+      data.unknown_refs && data.unknown_refs.length
+        ? el("div", { class: "banner" }, "These name work packages the build plan doesn't have: " + data.unknown_refs.join("; "))
+        : "",
+      problems.length ? el("div", { class: "banner" }, "Reagent's status table doesn't match its plan: " + problems.join("; ")) : "");
     render();
   } catch (error) {
     banner.replaceChildren(el("div", { class: "banner" }, "Couldn't load the progress data: " + error.message));

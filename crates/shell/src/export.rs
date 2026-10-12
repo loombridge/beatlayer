@@ -343,8 +343,8 @@ pub struct Rendered {
 
 /// Renders a range of `document` offline, with its clips' audio from
 /// `media` and its plug-in devices' plug-ins borrowed from `plugins` (the
-/// offline plug-in renders spec), through the engine code that plays the
-/// set on a device
+/// offline plug-in renders spec; a set without a CLAP device borrows
+/// nothing), through the engine code that plays the set on a device
 /// ([`Offline`]): the song plays from the range's start, as Play does from
 /// an insert marker there, with the Arrangement loop off, as fast as the
 /// computer allows, on the calling thread. It hands `sink` the frames in
@@ -419,8 +419,11 @@ pub fn render(
     // Spec: offline-plugin-renders R1. The plug-ins the engine plays, lent
     // to the render. The loan is made before the render's engine, so the
     // engine, and its nodes holding the plug-ins, go first, however the
-    // render ends, and the loan then gives every plug-in back (R4).
+    // render ends, and the loan then gives every plug-in back (R4). A set
+    // without a CLAP device borrows nothing: its render never touches the
+    // host or the engine playing.
     let loan = plugins
+        .filter(|_| crate::plugins::has_clap(document))
         .map(ClapHost::lend)
         .transpose()
         .map_err(|error| ExportError::Failed(error.to_string()))?;

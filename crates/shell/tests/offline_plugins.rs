@@ -315,6 +315,49 @@ fn a_render_at_another_rate_and_block_reactivates_the_plugin_and_gives_it_back()
     assert_eq!(shell.plugins().save_state(device).unwrap(), state);
 }
 
+// Spec: offline-plugin-renders R1
+#[test]
+fn a_set_without_a_plugin_renders_without_borrowing_from_the_host() {
+    // Its render takes nothing from the host, so the engine playing it is
+    // left alone: it renders even while the host's plug-ins are out on
+    // another loan, and exactly as it does with no host at all.
+    let scratch = Scratch::new("no-plugin");
+    let mut shell = Shell::headless();
+    shell.start_audio();
+    let file = scratch.path("Ramp.wav");
+    wav(&file);
+    shell
+        .run(
+            browser_commands::ADD_TO_ARRANGEMENT,
+            json!({ "paths": [file.to_string_lossy()], "at": 0 }),
+        )
+        .unwrap();
+    let document = shell.editor().document().clone();
+    let without = render(
+        &document,
+        media(&shell),
+        None,
+        &spec(48_000, 256),
+        &mut |_| {},
+    )
+    .unwrap()
+    .0;
+    assert!(without.iter().any(|s| *s != 0.0));
+
+    let plugins = shell.plugins();
+    let other = plugins.lend().unwrap();
+    let (with, _) = render(
+        &document,
+        media(&shell),
+        Some(plugins),
+        &spec(48_000, 256),
+        &mut |_| {},
+    )
+    .unwrap();
+    drop(other);
+    assert_eq!(bits(&with), bits(&without));
+}
+
 // Spec: offline-plugin-renders R6
 #[test]
 fn a_plugin_that_fails_mid_export_goes_silent_and_the_export_completes() {

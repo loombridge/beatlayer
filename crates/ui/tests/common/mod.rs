@@ -174,7 +174,7 @@ impl Harness {
                         .into_iter()
                         .find(|w| w.device == device)
                     {
-                        device_window.show_window(ui, shell, theme, &floating, &mut events);
+                        device_window.show_window(ui, shell, theme, &floating, 0.0, &mut events);
                     }
                     events
                 }

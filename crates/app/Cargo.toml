@@ -72,6 +72,14 @@ serde_json = "1"
 
 # Native menus on macOS and Windows; Linux draws its menu bar with egui,
 # because muda's Linux menus need GTK windows.
+# A floating device's window as a tool window (WP-2.5b): the version winit
+# already uses, so nothing new enters the build.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.52", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
 [target.'cfg(any(target_os = "macos", windows))'.dependencies]
 muda = { version = "=0.21.2", default-features = false }
 raw-window-handle = "0.6"

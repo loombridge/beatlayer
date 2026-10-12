@@ -185,6 +185,98 @@ fn fit_title_bar(window: &Window) {
     let _ = window;
 }
 
+/// The height, in points, of the title bar a floating device's window
+/// draws itself: a utility window's short title bar on macOS (WP-2.5b), and
+/// none elsewhere, where the system draws a tool window's.
+#[cfg(target_os = "macos")]
+const DEVICE_TITLE_STRIP: f32 = crate::title_bar::UTILITY_TITLE_BAR;
+#[cfg(not(target_os = "macos"))]
+const DEVICE_TITLE_STRIP: f32 = 0.0;
+
+/// Fits a floating device's window's title bar after it opens or resizes
+/// (macOS; nothing elsewhere).
+fn fit_device_title_bar(window: &Window) {
+    #[cfg(target_os = "macos")]
+    crate::title_bar::fit_utility(window);
+    #[cfg(not(target_os = "macos"))]
+    let _ = window;
+}
+
+/// Window attributes for a floating device's window: a utility (tool)
+/// window, as Live's plug-in windows are (observed in Live 12.4.6). On
+/// macOS its content runs under a transparent, untitled title bar that
+/// [`fit_device_title_bar`] makes short; on Windows it's owned by the main
+/// window `owner`, so it stays above it and out of the taskbar (the tool
+/// window style is set once it exists: [`make_tool_window`]); on X11 it's
+/// a utility window, which window managers keep above its app's windows.
+fn device_window_attributes(
+    attributes: WindowAttributes,
+    owner: Option<&Window>,
+) -> WindowAttributes {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = owner;
+        with_title_bar(attributes)
+    }
+    #[cfg(windows)]
+    {
+        use raw_window_handle::{HasWindowHandle as _, RawWindowHandle};
+        use winit::platform::windows::WindowAttributesExtWindows as _;
+        let hwnd = owner.and_then(|w| match w.window_handle().ok()?.as_raw() {
+            RawWindowHandle::Win32(handle) => Some(handle.hwnd.get()),
+            _ => None,
+        });
+        let attributes = attributes.with_skip_taskbar(true);
+        match hwnd {
+            Some(hwnd) => attributes.with_owner_window(hwnd),
+            None => attributes,
+        }
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
+    {
+        use winit::platform::x11::{WindowAttributesExtX11 as _, WindowType};
+        let _ = owner;
+        attributes.with_x11_window_type(vec![WindowType::Utility])
+    }
+}
+
+/// Gives a floating device's window Windows' tool window style: a short
+/// title bar with only a close button (Windows only; nothing elsewhere).
+fn make_tool_window(window: &Window) {
+    #[cfg(windows)]
+    {
+        use raw_window_handle::{HasWindowHandle as _, RawWindowHandle};
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            GWL_EXSTYLE, GetWindowLongPtrW, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE,
+            SWP_NOSIZE, SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos, WS_EX_TOOLWINDOW,
+        };
+        let Some(hwnd) = window.window_handle().ok().and_then(|h| match h.as_raw() {
+            RawWindowHandle::Win32(handle) => {
+                Some(handle.hwnd.get() as windows_sys::Win32::Foundation::HWND)
+            }
+            _ => None,
+        }) else {
+            return;
+        };
+        // SAFETY: the handle is the live window's, used on its own thread.
+        unsafe {
+            let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style | WS_EX_TOOLWINDOW as isize);
+            SetWindowPos(
+                hwnd,
+                0,
+                0,
+                0,
+                0,
+                0,
+                SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = window;
+}
+
 /// Events sent into the loop from other threads.
 #[derive(Debug)]
 pub enum UserEvent {
@@ -684,7 +776,12 @@ impl Host {
         }
         let zoom = self.shell.zoom();
         for (index, floating) in wanted.iter().enumerate() {
-            let least = LogicalSize::new(floating.min_width * zoom, floating.min_height * zoom);
+            // The window holds its own title bar, if it draws one, above
+            // the device.
+            let least = LogicalSize::new(
+                floating.min_width * zoom,
+                floating.min_height * zoom + DEVICE_TITLE_STRIP,
+            );
             // A side nothing grows along stays at the docked size (IMP-14).
             let most = LogicalSize::new(
                 if floating.grows_across {
@@ -712,7 +809,7 @@ impl Host {
             let (position, size) = match floating.frame {
                 Some(frame) => (
                     LogicalPosition::new(frame.x as f32, frame.y as f32),
-                    LogicalSize::new(frame.width as f32, frame.height as f32),
+                    LogicalSize::new(frame.width as f32, frame.height as f32 + DEVICE_TITLE_STRIP),
                 ),
                 None => {
                     // A new window opens beside the main window's top-left
@@ -743,28 +840,15 @@ impl Host {
                 .with_max_inner_size(most)
                 .with_resizable(floating.grows_across || floating.grows_down)
                 .with_visible(floating.shown);
-            #[cfg(windows)]
-            let attributes = {
-                use raw_window_handle::{HasWindowHandle as _, RawWindowHandle};
-                use winit::platform::windows::WindowAttributesExtWindows as _;
-                // An owned window stays above its owner, as Live's plug-in
-                // windows stay above its main window.
-                let owner = self.main.as_ref().and_then(|m| {
-                    match m.window.window_handle().ok()?.as_raw() {
-                        RawWindowHandle::Win32(handle) => Some(handle.hwnd.get()),
-                        _ => None,
-                    }
-                });
-                match owner {
-                    Some(hwnd) => attributes.with_owner_window(hwnd),
-                    None => attributes,
-                }
-            };
+            let attributes =
+                device_window_attributes(attributes, self.main.as_ref().map(|m| &*m.window));
             match self.create_surface(event_loop, attributes, self.main.as_ref()) {
                 Ok(surface) => {
                     if !floating.shown {
                         surface.window.set_visible(false);
                     }
+                    make_tool_window(&surface.window);
+                    fit_device_title_bar(&surface.window);
                     #[cfg(target_os = "macos")]
                     crate::title_bar::float_above_main(&surface.window);
                     if floating.frame.is_none() {
@@ -787,11 +871,13 @@ impl Host {
         };
         let position = position.to_logical::<f64>(scale);
         let size = window.inner_size().to_logical::<f64>(scale);
+        // The frame is the device's contents, below the title bar the
+        // window draws itself.
         let frame = bl_model::WindowFrame {
             x: position.x,
             y: position.y,
             width: size.width,
-            height: size.height,
+            height: size.height - f64::from(DEVICE_TITLE_STRIP),
         };
         let _ = self.shell.run(
             bl_shell::device_commands::SET_WINDOW,
@@ -855,6 +941,7 @@ impl Host {
                 .find(|w| w.device == device),
             _ => None,
         };
+        let zoom = surface.zoom;
         let mut ui_events = Vec::new();
         let output = surface.ctx.run_ui(input, |ui| {
             ui_events = match kind {
@@ -865,7 +952,8 @@ impl Host {
                     if let (Some(device_ui), Some(floating)) =
                         (device_ui.as_deref_mut(), floating.as_ref())
                     {
-                        device_ui.show_window(ui, shell, theme, floating, &mut events);
+                        let strip = DEVICE_TITLE_STRIP / zoom;
+                        device_ui.show_window(ui, shell, theme, floating, strip, &mut events);
                     }
                     events
                 }
@@ -1529,7 +1617,11 @@ impl ApplicationHandler<UserEvent> for Host {
             ) {
                 // AppKit lays its title bar out again on a resize and on
                 // leaving full screen.
-                fit_title_bar(&surface.window);
+                if matches!(kind, WindowKind::Device(_)) {
+                    fit_device_title_bar(&surface.window);
+                } else {
+                    fit_title_bar(&surface.window);
+                }
             }
             response.repaint
         };

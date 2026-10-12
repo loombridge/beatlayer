@@ -226,17 +226,35 @@ impl DeviceViewUi {
     /// Draws a floating device's window (WP-2.5b): the device's frame at
     /// the window's size, its title bar with a Dock button at the right
     /// end, and its body below, where only its display cells take the
-    /// extra room (IMP-14).
+    /// extra room (IMP-14). Where the window draws its own utility title
+    /// bar (macOS), `title_strip` is its height in layout points, and the
+    /// window's title is drawn centred in it; the system's close button
+    /// sits at its left.
     pub fn show_window(
         &mut self,
         ui: &mut Ui,
         shell: &Shell,
         theme: &Theme,
         window: &FloatingWindow,
+        title_strip: f32,
         events: &mut Vec<UiEvent>,
     ) {
-        let rect = ui.max_rect();
-        ui.painter().rect_filled(rect, 0.0, theme.colors.panel.0);
+        let whole = ui.max_rect();
+        let c = &theme.colors;
+        ui.painter().rect_filled(whole, 0.0, c.panel.0);
+        let mut rect = whole;
+        if title_strip > 0.0 {
+            let strip = Rect::from_min_size(whole.min, vec2(whole.width(), title_strip));
+            ui.painter().rect_filled(strip, 0.0, c.window.0);
+            ui.painter().text(
+                strip.center(),
+                Align2::CENTER_CENTER,
+                &window.title,
+                theme.small_font(),
+                c.text_dim.0,
+            );
+            rect.min.y = strip.bottom();
+        }
         self.device(ui, shell, theme, &window.view, rect, true, events);
     }
 

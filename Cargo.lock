@@ -570,6 +570,7 @@ dependencies = [
  "rfd",
  "serde_json",
  "wgpu",
+ "windows-sys 0.52.0",
  "winit",
 ]
 

@@ -14,7 +14,8 @@ pub const AUDIO_EXTENSIONS: &[&str] = &[
     "m4a", "aac",
 ];
 
-/// What a file is, by its name: an audio file, a Beatlayer set, or neither
+/// What a file is, by its name: an audio file, a Beatlayer set, a device
+/// preset, or none of these
 /// (`None`), which the browser leaves out.
 #[must_use]
 pub fn file_kind(name: &str) -> Option<ItemKind> {
@@ -24,6 +25,8 @@ pub fn file_kind(name: &str) -> Option<ItemKind> {
         Some(ItemKind::Audio)
     } else if extension == bl_project::SET_EXTENSION {
         Some(ItemKind::Set)
+    } else if extension == bl_project::preset::PRESET_EXTENSION {
+        Some(ItemKind::Preset)
     } else {
         None
     }
@@ -161,6 +164,7 @@ mod tests {
         assert_eq!(file_kind("Kick.WAV"), Some(ItemKind::Audio));
         assert_eq!(file_kind("pad.aif"), Some(ItemKind::Audio));
         assert_eq!(file_kind("Song.blset"), Some(ItemKind::Set));
+        assert_eq!(file_kind("Warm.blpreset"), Some(ItemKind::Preset));
         assert_eq!(file_kind("notes.txt"), None);
         assert_eq!(file_kind("README"), None);
         assert!(is_hidden(".DS_Store"));

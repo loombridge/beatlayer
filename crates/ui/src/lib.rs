@@ -24,6 +24,10 @@
 //!   mixer, the Arrangement's mixer, and the strip controls the
 //!   Arrangement's track headers share, each running a registered command.
 //!
+//! - [`device_view`]: the Device View (WP-2.4): the selected track's
+//!   device chain in frames with Live's title bar, folding, the device
+//!   context menu, dragging devices, and hot-swapping's bar in the browser.
+//!
 //! Nothing here owns a window or an event loop: the app (`beatlayer`)
 //! drives these from its winit loop, and tests drive them headless with an
 //! `egui::Context` and synthetic input.
@@ -31,6 +35,7 @@
 pub mod arrangement;
 pub mod browser;
 pub mod control_bar;
+pub mod device_view;
 pub mod focus;
 pub mod in_out;
 pub mod input;

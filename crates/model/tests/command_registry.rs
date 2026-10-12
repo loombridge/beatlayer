@@ -47,10 +47,10 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        42,
+        44,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
-         the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, and WP-2.19 four for \
-         routing"
+         the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
+         routing, and WP-2.4 two for devices"
     );
 
     for op in &ops {
@@ -393,6 +393,19 @@ fn every_command_runs_by_id() {
     );
     agent.run("device.rename", json!({ "device": eq, "name": "Tone" }));
     agent.run(
+        "device.set_show_preset_name",
+        json!({ "device": eq, "shown": false }),
+    );
+    assert_eq!(agent.editor.document().device(eq).unwrap().title(), "EQ");
+    agent.run(
+        "device.set_show_preset_name",
+        json!({ "device": eq, "shown": true }),
+    );
+    agent.run(
+        "device.set_state",
+        json!({ "device": eq, "params": [[1, 0.25]], "name": "Tone" }),
+    );
+    agent.run(
         "device.set_enabled",
         json!({ "device": eq, "enabled": false }),
     );
@@ -404,6 +417,7 @@ fn every_command_runs_by_id() {
     assert_eq!(agent.editor.document().device_track(eq), Some(reverb));
     assert_eq!((device.name.as_str(), device.enabled), ("Tone", false));
     assert_eq!(device.params.get(&ParamId(3)), Some(&-12.5));
+    assert_eq!(device.params.get(&ParamId(1)), Some(&0.25));
     agent.run("device.remove", json!({ "device": synth }));
     assert!(agent.editor.document().device(synth).is_none());
 
@@ -679,6 +693,21 @@ fn schemas_match_what_commands_serialise() {
             Command::RenameDevice {
                 device,
                 name: "Pad".to_owned(),
+            },
+        ),
+        (
+            "device.set_show_preset_name",
+            Command::SetShowPresetName {
+                device,
+                shown: false,
+            },
+        ),
+        (
+            "device.set_state",
+            Command::SetDeviceState {
+                device,
+                params: [(ParamId(4), 0.5)].into_iter().collect(),
+                name: "Warm Pad".to_owned(),
             },
         ),
         (

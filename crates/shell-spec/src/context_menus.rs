@@ -1,6 +1,7 @@
-//! The Arrangement's context menus, as data (WP-1.8b): the menu a clip
-//! opens and the menu a time selection opens, in Live's order from the
-//! menu reference (C-CLIP-ARR, C-TIME), each item tied to its
+//! The context menus, as data: the menu a clip opens and the menu a time
+//! selection opens in the Arrangement (WP-1.8b), and the menu a device's
+//! title bar and Show Options button open (WP-2.4), in Live's order from
+//! the menu reference (C-CLIP-ARR, C-TIME, C-DEVICE), each item tied to its
 //! shortcut as the menu bar's are ([`Action::Shortcut`]), so it runs the
 //! command the keymap gives that shortcut in the Arrangement, or shows
 //! disabled until a package binds it.
@@ -10,6 +11,7 @@
 //! out a choice for each setting.
 
 use crate::arrangement::SET_GRID;
+use crate::devices::SAVE_DEFAULT_PRESET;
 use crate::menus::{Action, MenuItem, Row, SEPARATOR, items};
 
 use Action::{Command as Cmd, Pending, Shortcut as Key};
@@ -102,6 +104,57 @@ const TIME: &[Row] = &[
     ("C-TIME-017", "Triplet Grid", Key(&["S-GRID-004"])),
 ];
 
+const DEVICE: &[Row] = &[
+    ("C-DEVICE-001", "Cut", Key(&["S-EDIT-001"])),
+    ("C-DEVICE-002", "Copy", Key(&["S-EDIT-002"])),
+    ("C-DEVICE-003", "Duplicate", Key(&["S-EDIT-004"])),
+    SEPARATOR,
+    ("C-DEVICE-004", "Rename", Key(&["S-EDIT-008"])),
+    ("C-DEVICE-005", "Edit Info Text", Pending(None)),
+    SEPARATOR,
+    ("C-DEVICE-006", "Delete", Key(&["S-EDIT-005"])),
+    ("C-DEVICE-007", "Group", Pending(Some("S-DEV-001"))),
+    ("C-DEVICE-008", "Fold", Key(&["S-DEV-014"])),
+    (
+        "C-DEVICE-009",
+        "Show Preset Name",
+        Cmd("device.set_show_preset_name"),
+    ),
+    SEPARATOR,
+    (
+        "C-DEVICE-010",
+        "Compare: Switch to B",
+        Pending(Some("S-DEV-011")),
+    ),
+    ("C-DEVICE-011", "Compare: Copy A to B", Pending(None)),
+    SEPARATOR,
+    (
+        "C-DEVICE-012",
+        "Save as Default Preset",
+        Cmd(SAVE_DEFAULT_PRESET),
+    ),
+];
+
+/// The menu a device's title bar opens, by a right-click or its Show
+/// Options button (C-DEVICE). A device's own items, which Live lists after
+/// these, arrive with the devices (WP-2.5 onwards).
+#[must_use]
+pub fn device() -> Vec<MenuItem> {
+    items(DEVICE)
+}
+
+/// The package or milestone that builds a context-menu item shown disabled
+/// for now, for the item to name.
+#[must_use]
+pub fn pending_package(row: &str) -> Option<&'static str> {
+    match row {
+        "C-DEVICE-005" | "C-CLIP-ARR-008" => Some("WP-2.24 (the Info View)"),
+        "C-DEVICE-007" => Some("milestone M5 (racks)"),
+        "C-DEVICE-010" | "C-DEVICE-011" => Some("milestone M5 (A/B compare)"),
+        _ => None,
+    }
+}
+
 /// The menu a clip in the Arrangement opens (C-CLIP-ARR).
 #[must_use]
 pub fn arrangement_clip() -> Vec<MenuItem> {
@@ -157,10 +210,20 @@ mod tests {
     }
 
     #[test]
+    fn the_device_menus_pending_items_name_their_package() {
+        for item in device() {
+            if matches!(item.action, Pending(_)) {
+                assert!(pending_package(item.row).is_some(), "{}", item.row);
+            }
+        }
+    }
+
+    #[test]
     fn the_menus_follow_lives_rows_and_separators_in_order() {
         for (menu, heading) in [
             (arrangement_clip(), "(C-CLIP-ARR)"),
             (arrangement_time(), "(C-TIME)"),
+            (device(), "(C-DEVICE)"),
         ] {
             let Some(theirs) = reference(heading) else {
                 return;
@@ -174,7 +237,13 @@ mod tests {
                         assert_eq!(item.row, id);
                         // The grid rows are rows of choices, named for
                         // their kind.
-                        let label = label.split(':').next().unwrap();
+                        let grid = ADAPTIVE_GRID_ROWS.contains(&id.as_str())
+                            || FIXED_GRID_ROWS.contains(&id.as_str());
+                        let label = if grid {
+                            label.split(':').next().unwrap()
+                        } else {
+                            label
+                        };
                         let label = label.trim_end_matches(" choices");
                         assert_eq!(item.label, label, "{id}");
                     }

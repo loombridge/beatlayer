@@ -21,6 +21,10 @@
 //! - [`mixer_view`]: the Mixer view's view commands (WP-1.9): showing and
 //!   hiding the mixer and its sections in both views, scrolling it, and
 //!   moving the focus to it.
+//! - [`devices`]: the Device View's commands (WP-2.4): what it shows,
+//!   selecting and folding devices, adding them, the device clipboard,
+//!   presets, and hot-swapping; [`context_menus`] holds the device title
+//!   bar's menu.
 //! - [`transport`]: what the Control Bar's transport section shows
 //!   (`transport.state`), and the IDs of the transport's commands, which
 //!   `bl-engine` and `bl-model` register (WP-1.18).
@@ -39,6 +43,7 @@ pub mod audio;
 pub mod browser;
 pub mod commands;
 pub mod context_menus;
+pub mod devices;
 pub mod editing;
 pub mod export;
 pub mod menus;
@@ -64,5 +69,6 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     mixer_view::register(registry)?;
     browser::register(registry)?;
     export::register(registry)?;
+    devices::register(registry)?;
     perception::register(registry)
 }

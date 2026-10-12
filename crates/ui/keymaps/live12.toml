@@ -672,6 +672,7 @@ win = ["Ctrl+X"]
 status = "bound"
 commands = [
   { id = "arrangement.cut", contexts = ["arrangement"] },
+  { id = "device.cut", contexts = ["device-view"] },
 ]
 
 [[shortcut]]
@@ -686,6 +687,7 @@ win = ["Ctrl+C"]
 status = "bound"
 commands = [
   { id = "arrangement.copy", contexts = ["arrangement"] },
+  { id = "device.copy", contexts = ["device-view"] },
 ]
 
 [[shortcut]]
@@ -700,6 +702,7 @@ win = ["Ctrl+V"]
 status = "bound"
 commands = [
   { id = "arrangement.paste", contexts = ["arrangement"] },
+  { id = "device.paste", contexts = ["device-view"] },
 ]
 
 [[shortcut]]
@@ -714,6 +717,7 @@ win = ["Ctrl+D"]
 status = "bound"
 commands = [
   { id = "arrangement.duplicate", contexts = ["arrangement"] },
+  { id = "device.duplicate", contexts = ["device-view"] },
 ]
 
 [[shortcut]]
@@ -4184,7 +4188,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["Minus"]
 win = ["Minus"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "device.fold", contexts = ["device-view"] },
+]
 
 [[shortcut]]
 id = "S-SES-024"

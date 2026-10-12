@@ -120,7 +120,7 @@ pub use node::{
 pub use offline::Offline;
 pub use processor::{Carry, Output, Processor};
 pub use program::EngineProgram;
-pub use registry::{NodeFactory, Registry};
+pub use registry::{DeviceType, NodeFactory, Registry};
 pub use state::{EngineCounters, EngineState, Monitor, TrackMeter};
 
 /// An engine's fixed sizes, chosen when it's made. The audio thread works

@@ -1,9 +1,20 @@
 //! Where the compiler gets a node for each device, and the audio for each
-//! clip.
+//! clip; and the device interface that native devices (WP-2.5) and plug-in
+//! hosts (WP-2.6 to 2.8) implement.
+//!
+//! A source of devices is a [`NodeFactory`]: it lists the device types it
+//! offers ([`DeviceType`]: what a device is, its name, and its role in a
+//! chain), and makes a [`Node`] for a device of one of them, set to the
+//! device's parameter values. The node does the rest: it processes blocks
+//! in place, takes parameter changes at their frames, takes them without
+//! processing while the device is switched off ([`Node::flush`]), and
+//! reports its latency ([`Node::latency`], for delay compensation in
+//! WP-2.11). A device's state is its parameter values, which the document
+//! holds and presets save; a plug-in's own state arrives with WP-2.6.
 
 use std::sync::Arc;
 
-use bl_model::{Device, DeviceKind};
+use bl_model::{Device, DeviceId, DeviceKind, DeviceRole};
 
 use crate::clips::MediaLibrary;
 use crate::node::{Node, NodeConfig};
@@ -16,11 +27,51 @@ pub trait NodeFactory: Send + Sync {
     /// A new node for `device`, set to the device's parameter values, or
     /// `None` if this factory doesn't make that kind of device.
     fn create(&self, device: &Device, config: &NodeConfig) -> Option<Box<dyn Node>>;
+
+    /// The device types this factory offers, for the browser to list and
+    /// the shell to insert. The default offers none: a factory that only
+    /// makes nodes for devices already in a set.
+    fn device_types(&self) -> Vec<DeviceType> {
+        Vec::new()
+    }
+}
+
+/// A kind of device a factory offers: what the browser lists and a new
+/// device in a chain starts from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DeviceType {
+    /// What it is: a native device's type ID, or a plug-in's format and ID.
+    pub kind: DeviceKind,
+    /// Its own name, such as `Utility`, which a new device's title shows.
+    pub name: String,
+    /// Where it goes in a chain.
+    pub role: DeviceRole,
+}
+
+impl DeviceType {
+    /// A native device type.
+    #[must_use]
+    pub fn native(device_type: &str, name: &str, role: DeviceRole) -> Self {
+        Self {
+            kind: DeviceKind::Native {
+                device_type: device_type.to_owned(),
+            },
+            name: name.to_owned(),
+            role,
+        }
+    }
+
+    /// A new, switched-on device of this type with default parameters.
+    #[must_use]
+    pub fn device(&self, id: DeviceId) -> Device {
+        Device::new(id, self.name.clone(), self.kind.clone()).with_role(self.role)
+    }
 }
 
 /// A factory for one native device type, from a function.
 struct Native<F> {
     device_type: String,
+    offered: Option<DeviceType>,
     make: F,
 }
 
@@ -35,6 +86,10 @@ where
             }
             _ => None,
         }
+    }
+
+    fn device_types(&self) -> Vec<DeviceType> {
+        self.offered.iter().cloned().collect()
     }
 }
 
@@ -86,8 +141,43 @@ impl Registry {
     {
         self.add(Native {
             device_type: device_type.to_owned(),
+            offered: None,
             make,
         });
+    }
+
+    /// Adds a native device type that the browser offers, made by `make`.
+    ///
+    /// # Panics
+    ///
+    /// If `device_type` isn't a native device type.
+    pub fn add_device<F>(&mut self, device_type: DeviceType, make: F)
+    where
+        F: Fn(&Device, &NodeConfig) -> Box<dyn Node> + Send + Sync + 'static,
+    {
+        let DeviceKind::Native { device_type: id } = &device_type.kind else {
+            panic!("add_device takes native device types");
+        };
+        self.add(Native {
+            device_type: id.clone(),
+            offered: Some(device_type),
+            make,
+        });
+    }
+
+    /// Every device type the factories offer, in the order they were added.
+    #[must_use]
+    pub fn device_types(&self) -> Vec<DeviceType> {
+        self.factories
+            .iter()
+            .flat_map(|factory| factory.device_types())
+            .collect()
+    }
+
+    /// The offered device type of `kind`, if a factory offers one.
+    #[must_use]
+    pub fn device_type(&self, kind: &DeviceKind) -> Option<DeviceType> {
+        self.device_types().into_iter().find(|t| t.kind == *kind)
     }
 
     /// Sets where clips' audio comes from: the project's media, streamed

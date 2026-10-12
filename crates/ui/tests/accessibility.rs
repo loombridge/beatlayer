@@ -864,6 +864,35 @@ fn session_main(h: &mut Harness) {
     h.settle();
 }
 
+/// A Test Gain on audio track 3, the selected track, with no device
+/// selected (WP-2.4).
+fn a_device(h: &mut Harness) {
+    let track = h.shell.editor().document().top_level().nth(2).unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let t = bl_engine::testing::gain_type();
+    h.shell
+        .run(
+            "device.add",
+            json!({ "device": { "kind": t.kind, "name": t.name, "role": t.role } }),
+        )
+        .unwrap();
+    h.shell
+        .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
+/// The keyboard in the Device View, as a click there leaves it.
+fn device_view(h: &mut Harness) {
+    h.shell.set_focused_area(bl_shell::Area::Detail);
+    h.ctx.memory_mut(|m| {
+        if let Some(id) = m.focused() {
+            m.surrender_focus(id);
+        }
+    });
+}
+
 fn control_bar(h: &mut Harness) {
     h.key(Key::Num0, Modifiers::ALT);
 }
@@ -910,7 +939,11 @@ fn paths() -> BTreeMap<&'static str, Path> {
         key,
     };
     let clip_view = LaterView("the Clip View (milestone M2)");
-    let device_view = LaterView("the Device View (milestone M2)");
+    let device_params = LaterView("devices' parameter controls (WP-2.5)");
+    let device_menu = Equivalent(
+        "the device's context menu, from its Show Options button (Enter, then the arrows), as \
+         in Live",
+    );
     let editing = Equivalent(
         "the Arrangement's editing keys run it: paste, Delete, Left and Right, and Enter then \
          Left or Right (arrangement-editing R12)",
@@ -1103,10 +1136,56 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("clip.set_loop_enabled", Exception(clip_view)),
         ("clip.set_region", Exception(clip_view)),
         ("clip.set_data", Exception(clip_view)),
-        ("device.insert", Exception(device_view)),
-        ("device.move", Exception(device_view)),
-        ("device.set_enabled", Exception(device_view)),
-        ("device.set_param", Exception(device_view)),
+        // The Device View (WP-2.4): Enter on a title bar's controls.
+        (
+            "device.select",
+            main(a_device, device_view, "Test Gain", Key::Enter),
+        ),
+        (
+            "device.set_enabled",
+            main(a_device, device_view, "Device Activator", Key::Enter),
+        ),
+        (
+            "device.hot_swap",
+            main(a_device, device_view, "Hot-Swap Presets", Key::Enter),
+        ),
+        (
+            "device.save_preset",
+            main(a_device, device_view, "Save Preset", Key::Enter),
+        ),
+        ("device.set_show_preset_name", Exception(device_menu)),
+        ("device.save_default_preset", Exception(device_menu)),
+        (
+            "device.load_preset",
+            Exception(Equivalent(
+                "Enter on a preset in the browser while hot-swapping (`browser.load_selected`)",
+            )),
+        ),
+        (
+            "device.set_state",
+            Exception(Equivalent("loading a preset (`device.load_preset`)")),
+        ),
+        (
+            "device.move",
+            Exception(Equivalent(
+                "Cmd-X on the selected device, then Cmd-V before another (`device.cut`, \
+                 `device.paste`)",
+            )),
+        ),
+        (
+            "device.add",
+            Exception(LaterView(
+                "the browser's device labels, once Beatlayer has devices (WP-2.5)",
+            )),
+        ),
+        (
+            "device.insert",
+            Exception(Equivalent(
+                "adding a device as a person does (`device.add`)",
+            )),
+        ),
+        ("device.set_param", Exception(device_params)),
+        ("device_view.state", Exception(Query)),
         // A send knob and the In/Out choosers (the routing spec): Up and
         // Down on them.
         (

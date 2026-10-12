@@ -87,6 +87,8 @@ pub struct MainWindowUi {
     transport: TransportFields,
     /// The mixers (WP-1.9).
     mixer: MixerUi,
+    /// The Device View (WP-2.4).
+    devices: crate::device_view::DeviceViewUi,
     /// The keymap the Mixer Config Menu shows its items' keys from, read
     /// when it first opens.
     keymap: Option<crate::keymap::Keymap>,
@@ -99,6 +101,8 @@ pub struct MainWindowUi {
     /// Where the last frame put the panes, in points, for view captures
     /// (WP-1.16).
     drawn: Option<ShellLayout>,
+    /// The titles the last frame's Device View showed, for Rename.
+    device_titles: Vec<(bl_model::DeviceId, String)>,
 }
 
 /// A move of the keyboard focus asked for by `focus.next`,
@@ -164,10 +168,12 @@ impl MainWindowUi {
             browser: BrowserUi::new(),
             transport: TransportFields::new(),
             mixer: MixerUi::new(),
+            devices: crate::device_view::DeviceViewUi::new(),
             keymap: None,
             mixer_typing: false,
             menu_open: false,
             drawn: None,
+            device_titles: Vec::new(),
         }
     }
 
@@ -177,6 +183,16 @@ impl MainWindowUi {
     #[must_use]
     pub fn drawn_layout(&self) -> Option<&ShellLayout> {
         self.drawn.as_ref()
+    }
+
+    /// The title a device's title bar shows, for renaming it; empty for a
+    /// device the set no longer has.
+    fn device_title(&self, device: bl_model::DeviceId) -> String {
+        self.device_titles
+            .iter()
+            .find(|(id, _)| *id == device)
+            .map(|(_, title)| title.clone())
+            .unwrap_or_default()
     }
 
     /// The mixers, to read what they drew.
@@ -198,7 +214,10 @@ impl MainWindowUi {
     /// accessibility spec, R5).
     #[must_use]
     pub fn is_typing(&self) -> bool {
-        self.transport.is_typing() || self.mixer_typing || self.menu_open
+        self.transport.is_typing()
+            || self.mixer_typing
+            || self.menu_open
+            || self.devices.is_typing()
     }
 
     /// The Arrangement View, to give it a peak source or read what it drew.
@@ -219,6 +238,12 @@ impl MainWindowUi {
                 self.focus_request = Some(FocusRequest::Element(self.last_control));
             }
             Effect::FocusArea(Area::MainView) => self.focus_request = Some(FocusRequest::MainView),
+            Effect::RenameDevice(device) => {
+                // Spec: device-chains R10. Rename types the name in the
+                // title bar.
+                let title = self.device_title(*device);
+                self.devices.start_rename(*device, &title);
+            }
             Effect::MoveFocus {
                 backwards,
                 neighbor,
@@ -284,6 +309,10 @@ impl MainWindowUi {
             self.track_area_clicks(ctx, &layout, &mut events);
             self.control_bar(ui, shell, theme, &layout, &mut events);
             if let Some(browser) = layout.browser {
+                // Spec: device-chains R19. Hot-swapping's bar tops the
+                // browser.
+                let browser =
+                    crate::device_view::hot_swap_bar(ui, shell, theme, browser, &mut events);
                 self.browser.show(ui, shell, theme, browser, &mut events);
             }
             self.main_view(ui, shell, theme, layout.main_view, &mut events);
@@ -292,15 +321,14 @@ impl MainWindowUi {
             self.browser
                 .drop_overlay(ui, shell, theme, layout.main_view, &mut events);
             self.info_view(ui, theme, layout.info_view);
-            placeholder(
-                ui,
-                theme,
-                "region-device-view",
-                layout.device_view,
-                Role::Group,
-                "Device View",
-                "No devices on this track. The Device View arrives with WP-2.4.",
-            );
+            self.devices
+                .show(ui, shell, theme, layout.device_view, &mut events);
+            self.device_titles = shell
+                .device_view_state()
+                .devices
+                .into_iter()
+                .map(|d| (d.id, d.title))
+                .collect();
             self.status_bar(ui, shell, theme, &layout, &mut events);
             outline_focused_area(ui, shell, theme, &layout);
             self.drawn = Some(layout);
@@ -853,40 +881,6 @@ fn region(ui: &mut Ui, salt: &str, rect: Rect, role: Role, name: &str) -> Id {
         });
     });
     id
-}
-
-fn draw_pane(ui: &Ui, theme: &Theme, rect: Rect, name: &str, note: &str) {
-    let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 0.0, theme.colors.panel.0);
-    painter.text(
-        rect.center() - egui::vec2(0.0, 10.0),
-        Align2::CENTER_CENTER,
-        name,
-        egui::FontId::proportional(theme.sizes.heading),
-        theme.colors.text_dim.0,
-    );
-    painter.text(
-        rect.center() + egui::vec2(0.0, 10.0),
-        Align2::CENTER_CENTER,
-        note,
-        theme.small_font(),
-        theme.colors.pending.0,
-    );
-}
-
-fn placeholder(
-    ui: &mut Ui,
-    theme: &Theme,
-    salt: &str,
-    rect: Rect,
-    role: Role,
-    name: &str,
-    note: &str,
-) {
-    let id = region(ui, salt, rect, role, name);
-    ui.ctx()
-        .accesskit_node_builder(id, |node| node.set_description(note.to_owned()));
-    draw_pane(ui, theme, rect, name, note);
 }
 
 /// What an element shows, from the shell's state.

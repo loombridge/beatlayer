@@ -9,7 +9,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::clip::{AudioData, Clip, ClipData};
-use crate::device::Device;
+use crate::device::{Device, DeviceRole};
 use crate::document::Document;
 use crate::error::ModelError;
 use crate::ids::{ClipId, DeviceId, ParamId, TrackId};
@@ -329,7 +329,9 @@ pub enum Command {
         fade_out: f64,
     },
 
-    /// Inserts a new device at `index` in a track's chain.
+    /// Inserts a new device at `index` in a track's chain, keeping the
+    /// chain in order: MIDI effects, then the instrument, then audio
+    /// effects.
     InsertDevice {
         /// The track.
         track: TrackId,
@@ -345,7 +347,7 @@ pub enum Command {
     },
     /// Moves a device to `index` in a track's chain, on the same or another
     /// track. `index` counts positions after the device is taken out of its
-    /// current place.
+    /// current place. The chain must stay in order.
     MoveDevice {
         /// The device.
         device: DeviceId,
@@ -354,11 +356,35 @@ pub enum Command {
         /// Where it goes in that chain.
         index: usize,
     },
-    /// Renames a device.
+    /// Renames a device: the name its title bar shows while Show Preset
+    /// Name is on. An empty name gives it back its own name.
     RenameDevice {
         /// The device.
         device: DeviceId,
         /// The new name.
+        name: String,
+    },
+    /// Switches a device's Show Preset Name: its title bar shows its
+    /// preset's or given name (on) or its own name (off).
+    SetShowPresetName {
+        /// The device.
+        device: DeviceId,
+        /// Whether the preset's or given name shows.
+        shown: bool,
+    },
+    /// Replaces a device's state, as loading a preset does: every
+    /// parameter value (those not listed go back to their defaults) and the
+    /// name its title bar shows.
+    SetDeviceState {
+        /// The device.
+        device: DeviceId,
+        /// The parameter values, as `[parameter, value]` pairs, each
+        /// finite and each parameter once.
+        #[serde(with = "crate::device::param_pairs")]
+        #[schemars(with = "Vec<(ParamId, f64)>")]
+        params: imbl::OrdMap<ParamId, f64>,
+        /// The name the title bar shows while Show Preset Name is on, such
+        /// as the preset's; empty for the device's own name.
         name: String,
     },
     /// Switches a device on or off.
@@ -420,11 +446,14 @@ impl Command {
             Self::SetClipLoopEnabled { .. } => "Switch clip loop",
             Self::SetClipGain { .. } => "Change clip gain",
             Self::SetClipFades { .. } => "Change clip fades",
-            Self::InsertDevice { .. } => "Insert device",
-            Self::RemoveDevice { .. } => "Remove device",
-            Self::MoveDevice { .. } => "Move device",
-            Self::RenameDevice { .. } => "Rename device",
-            Self::SetDeviceEnabled { .. } => "Switch device",
+            // Spec: device-chains R14. Live 12.4.6's names, where observed.
+            Self::InsertDevice { .. } => "Insert Device",
+            Self::RemoveDevice { .. } => "Delete Device(s)",
+            Self::MoveDevice { .. } => "Move Device",
+            Self::RenameDevice { .. } => "Change \"Device Name\"",
+            Self::SetShowPresetName { .. } => "Toggle Show Preset Name",
+            Self::SetDeviceState { .. } => "Load Preset",
+            Self::SetDeviceEnabled { .. } => "Change \"Device On\"",
             Self::SetDeviceParam { .. } => "Change parameter",
         }
     }
@@ -685,8 +714,30 @@ impl Document {
                 index,
             } => self.move_device(*device, *track, *index),
             Command::RenameDevice { device, name } => {
-                if self.device_ref(*device)?.name != *name {
-                    self.device_mut(*device)?.name.clone_from(name);
+                let mut renamed = self.device_ref(*device)?.clone();
+                renamed.set_name(name);
+                if renamed != *self.device_ref(*device)? {
+                    *self.device_mut(*device)? = renamed;
+                }
+                Ok(())
+            }
+            Command::SetShowPresetName { device, shown } => {
+                if self.device_ref(*device)?.show_preset_name != *shown {
+                    self.device_mut(*device)?.show_preset_name = *shown;
+                }
+                Ok(())
+            }
+            Command::SetDeviceState {
+                device,
+                params,
+                name,
+            } => {
+                let mut loaded = self.device_ref(*device)?.clone();
+                loaded.params = params.clone();
+                loaded.set_name(name);
+                check_device(&loaded)?;
+                if loaded != *self.device_ref(*device)? {
+                    *self.device_mut(*device)? = loaded;
                 }
                 Ok(())
             }
@@ -963,7 +1014,7 @@ impl Document {
         let chain = &mut self.track_mut(track)?.devices;
         insert_at(chain, index, Shared::new(device.clone()))?;
         self.index.device_track.insert(device.id, track);
-        Ok(())
+        check_chain(self.track_ref(track)?)
     }
 
     fn move_device(
@@ -984,7 +1035,7 @@ impl Document {
         let device = self.track_mut(owner)?.devices.remove(old_position);
         insert_at(&mut self.track_mut(track)?.devices, index, device)?;
         self.index.device_track.insert(id, track);
-        Ok(())
+        check_chain(self.track_ref(track)?)
     }
 
     // Lookups that fail with the error a command reports.
@@ -1240,6 +1291,29 @@ pub(crate) fn check_device(device: &Device) -> Result<(), ModelError> {
     Ok(())
 }
 
+/// Checks a chain against Live's rules (the device chains spec, R2 and R3):
+/// MIDI effects and instruments only on MIDI tracks, MIDI effects first,
+/// then at most one instrument, then audio effects.
+pub(crate) fn check_chain(track: &Track) -> Result<(), ModelError> {
+    let mut last = None;
+    for device in track.devices() {
+        if !device.role.fits(track.kind) {
+            return Err(ModelError::DeviceDoesNotFit {
+                track: track.id,
+                kind: track.kind,
+                role: device.role,
+            });
+        }
+        let repeated_instrument =
+            device.role == DeviceRole::Instrument && last == Some(DeviceRole::Instrument);
+        if last.is_some_and(|last| device.role < last) || repeated_instrument {
+            return Err(ModelError::DeviceOrder { track: track.id });
+        }
+        last = Some(device.role);
+    }
+    Ok(())
+}
+
 /// Checks mixer values against the track's kind.
 pub(crate) fn check_mixer(track: &Track) -> Result<(), ModelError> {
     let mixer = &track.mixer;
@@ -1288,7 +1362,7 @@ mod tests {
 
     use super::*;
     use crate::clip::{EDGE_FADE_SECONDS as EDGE_FADE, MidiData, Note};
-    use crate::device::{DeviceKind, PluginFormat};
+    use crate::device::{DeviceKind, DeviceRole, PluginFormat};
     use crate::ids::ContentHash;
 
     /// A document and the allocator for its IDs.
@@ -2510,6 +2584,160 @@ mod tests {
             song.reject(Command::RemoveDevice { device: b }),
             ModelError::NoSuchDevice(b)
         );
+    }
+
+    /// A device with a role, for the ordering tests.
+    fn with_role(song: &mut Song, role: DeviceRole) -> Device {
+        Device::new(
+            song.fresh(),
+            role.label(),
+            DeviceKind::Native {
+                device_type: format!("test.{role:?}"),
+            },
+        )
+        .with_role(role)
+    }
+
+    // Spec: device-chains R2, R3
+    #[test]
+    fn chains_keep_lives_order() {
+        let mut song = Song::new();
+        let midi = song.track(TrackKind::Midi, None);
+        let audio = song.track(TrackKind::Audio, None);
+        let insert = |track, index, device: &Device| Command::InsertDevice {
+            track,
+            index,
+            device: device.clone(),
+        };
+        let fx = with_role(&mut song, DeviceRole::AudioEffect);
+        let synth = with_role(&mut song, DeviceRole::Instrument);
+        let arp = with_role(&mut song, DeviceRole::MidiEffect);
+        song.apply(insert(midi, 0, &fx)).unwrap();
+        // An instrument can't go after an audio effect, a MIDI effect not
+        // after the instrument.
+        assert_eq!(
+            song.reject(insert(midi, 1, &synth)),
+            ModelError::DeviceOrder { track: midi }
+        );
+        song.apply(insert(midi, 0, &synth)).unwrap();
+        assert_eq!(
+            song.reject(insert(midi, 1, &arp)),
+            ModelError::DeviceOrder { track: midi }
+        );
+        song.apply(insert(midi, 0, &arp)).unwrap();
+        // One instrument per chain.
+        let second = with_role(&mut song, DeviceRole::Instrument);
+        assert_eq!(
+            song.reject(insert(midi, 2, &second)),
+            ModelError::DeviceOrder { track: midi }
+        );
+        // Only MIDI tracks hold MIDI effects and instruments.
+        for device in [&second, &with_role(&mut song, DeviceRole::MidiEffect)] {
+            assert!(matches!(
+                song.reject(insert(audio, 0, device)),
+                ModelError::DeviceDoesNotFit { .. }
+            ));
+        }
+        // Moves keep the order too.
+        assert_eq!(
+            song.reject(Command::MoveDevice {
+                device: fx.id,
+                track: midi,
+                index: 0,
+            }),
+            ModelError::DeviceOrder { track: midi }
+        );
+        assert!(matches!(
+            song.reject(Command::MoveDevice {
+                device: synth.id,
+                track: audio,
+                index: 0,
+            }),
+            ModelError::DeviceDoesNotFit { .. }
+        ));
+        song.apply(Command::MoveDevice {
+            device: fx.id,
+            track: audio,
+            index: 0,
+        })
+        .unwrap();
+        let roles: Vec<_> = song
+            .doc
+            .track(midi)
+            .unwrap()
+            .devices()
+            .map(|d| d.role)
+            .collect();
+        assert_eq!(roles, [DeviceRole::MidiEffect, DeviceRole::Instrument]);
+    }
+
+    // Spec: device-chains R10
+    #[test]
+    fn renaming_and_show_preset_name() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        let device = song.device(track);
+        let title = |song: &Song| song.doc.device(device).unwrap().title().to_owned();
+        assert_eq!(title(&song), "Utility");
+        song.apply(Command::RenameDevice {
+            device,
+            name: "Trim".to_owned(),
+        })
+        .unwrap();
+        assert_eq!(title(&song), "Trim");
+        assert_eq!(song.doc.device(device).unwrap().own_name(), "Utility");
+        song.apply(Command::SetShowPresetName {
+            device,
+            shown: false,
+        })
+        .unwrap();
+        assert_eq!(title(&song), "Utility");
+        song.apply(Command::SetShowPresetName {
+            device,
+            shown: true,
+        })
+        .unwrap();
+        // An empty name gives the device its own name back.
+        song.apply(Command::RenameDevice {
+            device,
+            name: String::new(),
+        })
+        .unwrap();
+        assert_eq!(title(&song), "Utility");
+        assert!(song.doc.device(device).unwrap().own_name.is_empty());
+    }
+
+    // Spec: device-chains R16
+    #[test]
+    fn device_state_replaces_every_value() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        let device = song.device(track);
+        song.apply(Command::SetDeviceParam {
+            device,
+            param: ParamId(1),
+            value: 3.0,
+        })
+        .unwrap();
+        let params: imbl::OrdMap<ParamId, f64> = [(ParamId(2), 0.5)].into_iter().collect();
+        song.apply(Command::SetDeviceState {
+            device,
+            params: params.clone(),
+            name: "Warm".to_owned(),
+        })
+        .unwrap();
+        let loaded = song.doc.device(device).unwrap();
+        assert_eq!(loaded.params, params);
+        assert_eq!((loaded.title(), loaded.own_name()), ("Warm", "Utility"));
+        let bad: imbl::OrdMap<ParamId, f64> = [(ParamId(2), f64::NAN)].into_iter().collect();
+        assert!(matches!(
+            song.reject(Command::SetDeviceState {
+                device,
+                params: bad,
+                name: String::new(),
+            }),
+            ModelError::InvalidValue { .. }
+        ));
     }
 
     #[test]

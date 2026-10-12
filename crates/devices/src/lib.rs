@@ -14,14 +14,21 @@
 //! [`Oversampler`](bl_dsp::Oversampler) runs a nonlinear stage at a
 //! multiple of the rate.
 //!
+//! Plug-ins built on the plug-in kit run as native devices too, compiled
+//! in: [`kit`] adapts them, and a [`KitHost`] on the main thread keeps
+//! their instances and runs their commands.
+//!
 //! Beatlayer ships no native device yet: [`register`] adds none, and
 //! [`testing`] has the devices the framework's tests use. The first ship
-//! with WP-2.16 to 2.18.
+//! with WP-2.16 to 2.18. The kit's two example plug-ins join the device
+//! list with the `kit-examples` feature, off by default.
 
 mod framework;
+pub mod kit;
 pub mod testing;
 
 pub use framework::{Audio, NativeDevice, NativeNode, ParamBank, add};
+pub use kit::{KitFactory, KitHost};
 
 use bl_engine::{DeviceType, Registry};
 

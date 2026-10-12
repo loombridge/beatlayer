@@ -7,18 +7,37 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+# The plug-in kit's example plug-ins, Example Gain and Example Sine, as native
+# devices: they prove the kit adapter. Off by default, so nothing user-facing
+# ships.
+kit-examples = ["dep:lspk-example-gain", "dep:lspk-example-sine"]
+
 [dependencies]
+bl-commands.workspace = true
 bl-core.workspace = true
 bl-dsp.workspace = true
 bl-engine.workspace = true
 # Devices' parameter descriptors and layouts are the document's types
 # (WP-2.5), so the shell, the UI, and presets read them too.
 bl-model.workspace = true
+# Plug-ins built on the plug-in kit, compiled in (`kit`): the `Plugin` trait,
+# without its formats.
+lspk-plugin.workspace = true
+lspk-example-gain = { workspace = true, optional = true }
+lspk-example-sine = { workspace = true, optional = true }
+# A kit device's processor reaches its node through a one-slot queue: the
+# version bl-engine uses.
+rtrb = "0.4.0"
+serde_json = "1"
 
 [dev-dependencies]
 # Every block in the tests runs as a real-time section under the
 # allocation trap.
 bl-rt.workspace = true
+# The kit adapter's tests run the kit's example plug-ins.
+lspk-example-gain.workspace = true
+lspk-example-sine.workspace = true
 
 [lints]
 workspace = true

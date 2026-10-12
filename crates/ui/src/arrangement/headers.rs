@@ -3,9 +3,8 @@
 //! columns and the meter (arrangement-view R3, R14). The mixer column's
 //! activator, Solo, Arm, volume, and pan, and the meter, are the Mixer
 //! view's controls (WP-1.9; the mixer view spec, R4), so they work as a
-//! strip's do. The In/Out column and the sends are drawn where Live puts
-//! them and are inert until the packages that build them: recording
-//! (WP-2.13) and routing (WP-2.19).
+//! strip's do. The In/Out column's choosers and Monitor switch and the
+//! sends are the mixer's too (WP-2.19; the routing spec).
 
 use bl_model::{Track, TrackId, TrackKind};
 use bl_shell::Invocation;
@@ -69,50 +68,6 @@ pub fn split_id(track: TrackId) -> Id {
 
 fn invoke(events: &mut Vec<UiEvent>, id: &str, args: serde_json::Value) {
     events.push(UiEvent::Invoke(Invocation::new(id, args)));
-}
-
-/// An inert control: drawn and named where Live has it, disabled, and
-/// saying which package brings it.
-#[expect(clippy::too_many_arguments, reason = "one control, described in full")]
-fn inert(
-    ui: &mut Ui,
-    theme: &Theme,
-    rect: Rect,
-    salt: (&str, TrackId),
-    role: Role,
-    name: &str,
-    text: &str,
-    package: &str,
-) {
-    let id = Id::new(salt);
-    let response = ui.interact(rect, id, Sense::hover());
-    let painter = ui.painter_at(rect.expand(1.0));
-    painter.rect(
-        rect,
-        theme.sizes.corner,
-        theme.colors.control.0.gamma_multiply(0.6),
-        Stroke::new(1.0, theme.colors.separator.0),
-        StrokeKind::Inside,
-    );
-    if !text.is_empty() {
-        painter.text(
-            rect.center(),
-            Align2::CENTER_CENTER,
-            text,
-            theme.small_font(),
-            theme.colors.pending.0,
-        );
-    }
-    response.widget_info(|| WidgetInfo::labeled(WidgetType::Other, false, name));
-    ui.ctx().accesskit_node_builder(id, |node| {
-        node.set_role(role);
-        node.set_label(name.to_owned());
-        if !text.is_empty() {
-            node.set_value(text.to_owned());
-        }
-        node.set_disabled();
-        node.set_description(format!("Not built yet: arrives with {package}."));
-    });
 }
 
 /// The volume as the mixer column shows it, in dB.
@@ -336,91 +291,44 @@ pub fn header(
     let right_half = Rect::from_min_max(pos2(row2.left() + half + 1.0, row2.top()), row2.max);
     parts.volume_field(ui, left_half, events);
     parts.pan(ui, right_half, None, events);
-    if height >= 52.0 && track.kind() != TrackKind::Main {
+    let midi_only = track.kind() == TrackKind::Midi && track.devices().len() == 0;
+    if height >= 52.0 && track.kind().has_sends() && !midi_only {
+        // The sends, one per return, side by side (L-ARR-009; with more
+        // returns than fit, the first that do).
         let row3 = column(MIXER, row_top + 32.0, row_top + 46.0);
-        let a = Rect::from_min_max(row3.min, pos2(row3.left() + half - 1.0, row3.bottom()));
-        let b = Rect::from_min_max(pos2(row3.left() + half + 1.0, row3.top()), row3.max);
-        // Named by their return tracks, as Live's tree names sends
-        // ("A-Reverb"; observed in Live 12.4.6).
         let doc = shell.editor().document();
-        let returns: Vec<String> = doc
-            .returns()
-            .filter_map(|r| doc.track(r).map(|t| t.name().to_owned()))
-            .collect();
-        let send_a = returns.first().map_or("Send A", String::as_str);
-        let send_b = returns.get(1).map_or("Send B", String::as_str);
-        inert(
-            ui,
-            theme,
-            a,
-            ("arrangement-send-a", id),
-            Role::Slider,
-            send_a,
-            "A",
-            "WP-2.19",
-        );
-        inert(
-            ui,
-            theme,
-            b,
-            ("arrangement-send-b", id),
-            Role::Slider,
-            send_b,
-            "B",
-            "WP-2.19",
-        );
+        let returns: Vec<TrackId> = doc.returns().collect();
+        let width = (row3.width() / returns.len().max(2) as f32).max(14.0);
+        for (index, &to) in returns.iter().enumerate() {
+            let left = row3.left() + width * index as f32;
+            if left + width > row3.right() + 0.5 {
+                break;
+            }
+            let cell = Rect::from_min_max(
+                pos2(left + 1.0, row3.top()),
+                pos2(left + width - 1.0, row3.bottom()),
+            );
+            parts.send(ui, cell, to, index, events);
+        }
     }
 
     // The In/Out column (L-ARR-008), as many rows as fit.
-    let rows: &[(&str, &str, &str)] = match track.kind() {
-        TrackKind::Audio | TrackKind::Midi => &[
-            (
-                "arrangement-input-type",
-                "Input Type",
-                if track.kind() == TrackKind::Midi {
-                    "All Ins"
-                } else {
-                    "Ext. In"
-                },
-            ),
-            (
-                "arrangement-input-channel",
-                "Input Channel",
-                if track.kind() == TrackKind::Midi {
-                    "All Channels"
-                } else {
-                    "1/2"
-                },
-            ),
-            ("arrangement-monitor", "Monitor", "In Auto Off"),
-            ("arrangement-output-type", "Output Type", "Main"),
-            ("arrangement-output-channel", "Output Channel", ""),
-        ],
-        TrackKind::Group | TrackKind::Return => {
-            &[("arrangement-output-type", "Output Type", "Main")]
-        }
-        TrackKind::Main => &[("arrangement-output-type", "Output Type", "1/2")],
-    };
-    for (i, (salt, name, text)) in rows.iter().enumerate() {
-        let top = row_top + 16.0 * i as f32;
-        if top + 14.0 > rect.bottom() - 2.0 {
-            break;
-        }
-        let cell = column(IN_OUT, top, top + 14.0);
-        let package = if *salt == "arrangement-monitor" || salt.starts_with("arrangement-input") {
-            "WP-2.13"
-        } else {
-            "WP-1.6"
-        };
-        inert(
-            ui,
+    if let Some(section) = bl_shell::routing::in_out(shell.editor().document(), id) {
+        let in_out = crate::in_out::InOutParts {
             theme,
-            cell,
-            (salt, id),
-            Role::ComboBox,
-            name,
-            text,
-            package,
+            place: Place::Header,
+            track: id,
+        };
+        let bottom = rect.bottom() - 2.0;
+        in_out.draw(
+            ui,
+            &section,
+            false,
+            |i| {
+                let top = row_top + 16.0 * i as f32;
+                (top + 14.0 <= bottom).then(|| column(IN_OUT, top, top + 14.0))
+            },
+            events,
         );
     }
 }

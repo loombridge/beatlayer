@@ -58,6 +58,7 @@ pub mod mixer_controls;
 pub mod mixer_view;
 pub mod perception;
 pub mod permission;
+pub mod routing;
 pub mod settings;
 mod shell;
 pub mod transport;

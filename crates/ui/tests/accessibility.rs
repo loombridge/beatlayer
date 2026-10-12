@@ -20,11 +20,13 @@ use bl_shell::mixer_view::MixerOf;
 use bl_shell::{Area, Shell};
 use bl_ui::arrangement::benchmark;
 use bl_ui::arrangement::headers::title_id;
+use bl_ui::focus::Slot;
+use bl_ui::in_out::control_id;
 use bl_ui::keymap::{Keymap, Platform, Status};
 use bl_ui::layout::{ELEMENTS, Strip};
 use bl_ui::main_window::{UiEvent, element_id, main_view_id};
 use bl_ui::menus::item_state;
-use bl_ui::mixer::{Place, column_id, fader_id, pan_id, switch_id, volume_field_id};
+use bl_ui::mixer::{Place, column_id, fader_id, pan_id, send_id, switch_id, volume_field_id};
 use common::{Harness, Window, command};
 use egui::accesskit::{self, Role};
 use egui::{FullOutput, Id, Key, Modifiers};
@@ -240,6 +242,13 @@ fn the_screen_reader_follows_the_keyboard_focus() {
     assert_eq!(focused_label(&output), "3 Audio");
     let output = press(&mut h, Key::Tab, Modifiers::NONE);
     let (_, control) = focused(&output).unwrap();
+    assert_eq!(control.label(), Some("Input Type"));
+    assert_eq!(control.value(), Some("Ext. In"));
+    for _ in 0..5 {
+        press(&mut h, Key::Tab, Modifiers::NONE);
+    }
+    let output = h.settle();
+    let (_, control) = focused(&output).unwrap();
     assert_eq!(control.label(), Some("Track Activator"));
     assert_eq!(control.value(), Some("on"));
 
@@ -328,15 +337,25 @@ fn tab_runs_through_the_arrangement_and_the_neighbour_keys_to_the_next_track() {
     h.settle();
     use bl_shell::mixer_controls::Switch;
     let header = |switch| switch_id(Place::Header, switch, tracks[2]);
+    let in_out = |slot| control_id(Place::Header, tracks[2], slot, 0);
+    let returns: Vec<TrackId> = h.shell.editor().document().returns().collect();
     // Live's order (12.4.6), without the controls Beatlayer doesn't have
-    // yet: the selected track's header, then Optimize Height and Width.
+    // yet: the selected track's header (its In/Out choosers, its mixer
+    // column, its sends), then Optimize Height and Width.
     let expected = [
         title_id(tracks[2]),
+        in_out(Slot::InputType),
+        in_out(Slot::InputChannel),
+        in_out(Slot::Monitoring),
+        in_out(Slot::OutputType),
+        in_out(Slot::OutputChannel),
         header(Switch::Activator),
         header(Switch::Solo),
         header(Switch::Arm),
         volume_field_id(Place::Header, tracks[2]),
         pan_id(Place::Header, tracks[2]),
+        send_id(Place::Header, tracks[2], returns[0]),
+        send_id(Place::Header, tracks[2], returns[1]),
         bl_ui::arrangement::optimize_height_id(),
         bl_ui::arrangement::optimize_width_id(),
     ];
@@ -361,8 +380,9 @@ fn tab_runs_through_the_arrangement_and_the_neighbour_keys_to_the_next_track() {
         focused_id(&h),
         Some(bl_ui::arrangement::optimize_width_id())
     );
-    press(&mut h, Key::Tab, Modifiers::SHIFT);
-    press(&mut h, Key::Tab, Modifiers::SHIFT);
+    for _ in 0..4 {
+        press(&mut h, Key::Tab, Modifiers::SHIFT);
+    }
     assert_eq!(focused_id(&h), Some(pan_id(Place::Header, tracks[2])));
     // Option-Tab (Ctrl-Tab): the same control on the next track, and back,
     // leaving the selection as it was.
@@ -379,7 +399,7 @@ fn tab_runs_through_the_arrangement_and_the_neighbour_keys_to_the_next_track() {
     assert_eq!(h.shell.arrangement().selected_tracks(), [tracks[2]]);
 
     // From the volume field, which takes typed values, the keys move too.
-    for _ in 0..5 {
+    for _ in 0..10 {
         press(&mut h, Key::Tab, Modifiers::NONE);
     }
     assert_eq!(
@@ -418,11 +438,19 @@ fn tab_goes_round_a_session_strip_in_live_s_order() {
     use bl_shell::mixer_controls::Switch;
     let session = Place::Mixer(MixerOf::Session);
     let strip = |switch| switch_id(session, switch, tracks[2]);
+    let in_out = |track, slot| control_id(session, track, slot, 0);
+    let returns: Vec<TrackId> = h.shell.editor().document().returns().collect();
     // The first Tab goes past the title bar (Live's went to Clip Stop,
     // which comes with the clip slots in M3), then the strip in Live's
-    // order without the In/Out choosers and sends Beatlayer doesn't have
-    // yet.
+    // order: the In/Out choosers, the sends, and the mixer.
     let expected = [
+        in_out(tracks[2], Slot::InputType),
+        in_out(tracks[2], Slot::InputChannel),
+        in_out(tracks[2], Slot::Monitoring),
+        in_out(tracks[2], Slot::OutputType),
+        in_out(tracks[2], Slot::OutputChannel),
+        send_id(session, tracks[2], returns[0]),
+        send_id(session, tracks[2], returns[1]),
         peak_id(session, tracks[2]),
         pan_id(session, tracks[2]),
         strip(Switch::Activator),
@@ -430,7 +458,7 @@ fn tab_goes_round_a_session_strip_in_live_s_order() {
         strip(Switch::Arm),
         fader_id(session, tracks[2]),
         column_id(MixerOf::Session, tracks[2]),
-        peak_id(session, tracks[2]),
+        in_out(tracks[2], Slot::InputType),
     ];
     for want in expected {
         press(&mut h, Key::Tab, Modifiers::NONE);
@@ -441,18 +469,24 @@ fn tab_goes_round_a_session_strip_in_live_s_order() {
     h.shell
         .run("focus.toggle_wrap_navigation", json!({}))
         .unwrap();
-    for _ in 0..8 {
+    for _ in 0..16 {
         press(&mut h, Key::Tab, Modifiers::NONE);
     }
     assert_eq!(focused_id(&h), Some(fader_id(session, tracks[2])));
     press(&mut h, Key::Escape, Modifiers::NONE);
     assert_eq!(focused_id(&h), Some(column_id(MixerOf::Session, tracks[2])));
-    // A MIDI track without an instrument: its title bar and its switches.
+    // A MIDI track without an instrument: its title bar, its In/Out
+    // choosers, and its switches.
     h.ctx
         .memory_mut(|m| m.request_focus(column_id(MixerOf::Session, tracks[0])));
     h.settle();
     let midi = |switch| switch_id(session, switch, tracks[0]);
     for want in [
+        in_out(tracks[0], Slot::InputType),
+        in_out(tracks[0], Slot::InputChannel),
+        in_out(tracks[0], Slot::Monitoring),
+        in_out(tracks[0], Slot::OutputType),
+        in_out(tracks[0], Slot::OutputChannel),
         midi(Switch::Activator),
         midi(Switch::Solo),
         midi(Switch::Arm),
@@ -482,12 +516,13 @@ fn the_neighbour_keys_bring_a_column_out_of_view_into_it() {
     h.ctx
         .memory_mut(|m| m.request_focus(column_id(MixerOf::Session, columns[0])));
     h.settle();
+    let input = |track| control_id(session, track, Slot::InputType, 0);
     press(&mut h, Key::Tab, Modifiers::NONE);
-    assert_eq!(focused_id(&h), Some(peak_id(session, columns[0])));
+    assert_eq!(focused_id(&h), Some(input(columns[0])));
     for want in &columns[1..16] {
         press(&mut h, Key::Tab, neighbour());
         h.settle();
-        assert_eq!(focused_id(&h), Some(peak_id(session, *want)));
+        assert_eq!(focused_id(&h), Some(input(*want)));
     }
     let scroll = h.shell.mixer_view().of(MixerOf::Session).scroll;
     assert!(scroll > 0.0, "the mixer scrolled the column into view");
@@ -529,8 +564,10 @@ fn outline_view_in_focus_outlines_the_focused_area_and_control_until_switched_of
             json!({ "tracks": [tracks[2]] }),
         )
         .unwrap();
-    press(&mut h, Key::Tab, Modifiers::NONE);
-    press(&mut h, Key::Tab, Modifiers::NONE);
+    // The title bar, the five In/Out controls, then the activator.
+    for _ in 0..7 {
+        press(&mut h, Key::Tab, Modifiers::NONE);
+    }
     let output = h.settle();
     let strokes = focus_strokes(&output, colour);
     let drawn = |nodes: &[common::Node], role: Role, label: &str| {
@@ -808,6 +845,25 @@ fn arrangement_track_3(h: &mut Harness) {
         .unwrap();
 }
 
+fn arrangement_track_1(h: &mut Harness) {
+    h.key(Key::Num2, Modifiers::ALT);
+    let track = h.shell.editor().document().top_level().next().unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+}
+
+fn session_main(h: &mut Harness) {
+    h.shell
+        .run("view.toggle_session_arrangement", json!({}))
+        .unwrap();
+    h.settle();
+    let main = h.shell.editor().document().main_id();
+    h.ctx
+        .memory_mut(|m| m.request_focus(column_id(MixerOf::Session, main)));
+    h.settle();
+}
+
 fn control_bar(h: &mut Harness) {
     h.key(Key::Num0, Modifiers::ALT);
 }
@@ -1051,13 +1107,33 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("device.move", Exception(device_view)),
         ("device.set_enabled", Exception(device_view)),
         ("device.set_param", Exception(device_view)),
+        // A send knob and the In/Out choosers (the routing spec): Up and
+        // Down on them.
         (
             "mixer.set_send",
-            Exception(LaterView("the sends' knobs (WP-2.19)")),
+            main(nothing, arrangement_track_3, "A-Return", Key::ArrowUp),
         ),
         (
+            "routing.set_input",
+            main(nothing, arrangement_track_3, "Input Type", Key::ArrowDown),
+        ),
+        (
+            "routing.set_output",
+            main(nothing, arrangement_track_3, "Output Type", Key::ArrowDown),
+        ),
+        (
+            "routing.set_midi_output",
+            main(nothing, arrangement_track_1, "Output Type", Key::ArrowUp),
+        ),
+        // Left and Right on the Monitor switch.
+        (
+            "routing.set_monitor",
+            main(nothing, arrangement_track_3, "Monitoring", Key::ArrowRight),
+        ),
+        // A return's Pre/Post switch, in Main's column: Enter switches it.
+        (
             "mixer.set_send_tap",
-            Exception(LaterView("the returns' Pre/Post switches (WP-2.19)")),
+            main(nothing, session_main, "Return A Pre/Post", Key::Enter),
         ),
         // Live's own exception.
         (

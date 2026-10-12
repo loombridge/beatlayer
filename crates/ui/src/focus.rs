@@ -55,6 +55,18 @@ pub enum Slot {
     Volume,
     /// Pan.
     Pan,
+    /// The input type chooser (Audio From or MIDI From).
+    InputType,
+    /// The input channel chooser.
+    InputChannel,
+    /// The Monitor switch's buttons.
+    Monitoring,
+    /// The output type chooser (Audio To or MIDI To).
+    OutputType,
+    /// The output channel chooser.
+    OutputChannel,
+    /// The send to the return track with this index.
+    Send(usize),
 }
 
 /// A track's control: where it is, whose it is, and which it is.
@@ -177,7 +189,7 @@ impl Order {
     /// A track's controls in `place`, in Tab's order (observed in Live
     /// 12.4.6).
     fn track_controls(&self, place: Place, track: TrackId) -> Vec<Id> {
-        let mut controls: Vec<(u8, Id)> = self
+        let mut controls: Vec<(usize, Id)> = self
             .entries
             .iter()
             .filter_map(|entry| {
@@ -306,29 +318,45 @@ impl Order {
 
 impl Slot {
     /// Where the control comes in its track's Tab order in `place`
-    /// (observed in Live 12.4.6): an Arrangement header's title, activator,
-    /// Solo, Arm, volume, and pan; a mixer strip's title bar (the column),
-    /// peak level, pan, activator, Solo, Arm, and volume.
+    /// (observed in Live 12.4.6): an Arrangement header's title, In/Out
+    /// choosers, activator, Solo, Arm, volume, pan, and sends; a mixer
+    /// strip's title bar (the column), In/Out choosers, sends, peak level,
+    /// pan, activator, Solo, Arm, and volume.
     #[must_use]
-    pub const fn rank(self, place: Place) -> u8 {
+    pub const fn rank(self, place: Place) -> usize {
+        const SENDS: usize = 100;
+        const AFTER_SENDS: usize = usize::MAX / 2;
+        let in_out = match self {
+            Self::InputType => Some(1),
+            Self::InputChannel => Some(2),
+            Self::Monitoring => Some(3),
+            Self::OutputType => Some(4),
+            Self::OutputChannel => Some(5),
+            _ => None,
+        };
+        if let Some(rank) = in_out {
+            return rank;
+        }
         match place {
             Place::Header => match self {
-                Self::Title | Self::Column => 0,
-                Self::Activator => 1,
-                Self::Solo => 2,
-                Self::Arm => 3,
-                Self::Volume => 4,
-                Self::Pan => 5,
-                Self::Peak => 6,
+                Self::Activator => 6,
+                Self::Solo => 7,
+                Self::Arm => 8,
+                Self::Volume => 9,
+                Self::Pan => 10,
+                Self::Send(index) => SENDS + index,
+                Self::Peak => AFTER_SENDS,
+                _ => 0,
             },
             Place::Mixer(_) => match self {
-                Self::Title | Self::Column => 0,
-                Self::Peak => 1,
-                Self::Pan => 2,
-                Self::Activator => 3,
-                Self::Solo => 4,
-                Self::Arm => 5,
-                Self::Volume => 6,
+                Self::Send(index) => SENDS + index,
+                Self::Peak => AFTER_SENDS + 1,
+                Self::Pan => AFTER_SENDS + 2,
+                Self::Activator => AFTER_SENDS + 3,
+                Self::Solo => AFTER_SENDS + 4,
+                Self::Arm => AFTER_SENDS + 5,
+                Self::Volume => AFTER_SENDS + 6,
+                _ => 0,
             },
         }
     }

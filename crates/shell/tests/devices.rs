@@ -430,6 +430,7 @@ fn agents_reach_every_device_command() {
             "device.fold",
             json!({ "device": added.device, "folded": true }),
         ),
+        ("device.parameters", json!({ "device": added.device })),
         ("device.copy", json!({ "device": added.device })),
         ("device.paste", json!({ "track": audio })),
         ("device.duplicate", json!({ "device": added.device })),

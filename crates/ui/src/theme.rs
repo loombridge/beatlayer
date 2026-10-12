@@ -80,6 +80,10 @@ pub struct Colours {
     pub waveform: Colour,
     pub clip_muted: Colour,
     pub overview_outline: Colour,
+    pub display: Colour,
+    pub display_line: Colour,
+    pub value_fill: Colour,
+    pub inactive: Colour,
     /// Track and clip colours, assigned to new tracks in turn.
     pub track_palette: Vec<Colour>,
 }

@@ -13,7 +13,9 @@
 
 use bl_commands::Context::{Browser, DeviceView, Global};
 use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};
-use bl_model::{DeviceId, DeviceKind, DeviceRole, TrackId, TrackKind};
+use bl_model::{
+    DeviceDescription, DeviceId, DeviceKind, DeviceRole, ParamDescriptor, TrackId, TrackKind,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -42,6 +44,8 @@ pub const SAVE_DEFAULT_PRESET: &str = "device.save_default_preset";
 pub const LOAD_PRESET: &str = "device.load_preset";
 /// `device.hot_swap`: start or end hot-swapping a device's presets.
 pub const HOT_SWAP: &str = "device.hot_swap";
+/// `device.parameters`: a device's parameters, described, with their values.
+pub const PARAMETERS: &str = "device.parameters";
 
 /// Every command [`register`] adds, so a host knows which IDs to send to
 /// `bl-shell`'s `Shell::run`.
@@ -58,6 +62,7 @@ pub const IDS: &[&str] = &[
     SAVE_DEFAULT_PRESET,
     LOAD_PRESET,
     HOT_SWAP,
+    PARAMETERS,
 ];
 
 /// The document's device commands that act on the selected device when
@@ -82,9 +87,71 @@ pub const TITLE_BAR_HEIGHT: f32 = 16.0;
 /// The gap between devices in a chain at 100%, in points (observed).
 pub const DEVICE_GAP: f32 = 7.0;
 
-/// An unfolded device's width at 100%, in points, until devices give their
-/// own (WP-2.5): Live's are each device's own.
+/// The width at 100%, in points, of an unfolded device whose type doesn't
+/// describe its layout (the test devices of WP-2.4): a described device is
+/// its layout's docked width ([`frame_width`]).
 pub const DEFAULT_DEVICE_WIDTH: f32 = 120.0;
+
+/// How wide a device's frame is at 100%, in points: a title bar's height
+/// when folded, its layout's docked width when its type describes one, and
+/// [`DEFAULT_DEVICE_WIDTH`] otherwise.
+#[must_use]
+pub fn frame_width(frame: &DeviceFrame) -> f32 {
+    if frame.folded {
+        TITLE_BAR_HEIGHT
+    } else {
+        frame.panel.as_ref().map_or(DEFAULT_DEVICE_WIDTH, |panel| {
+            panel.description.layout.docked_size().width
+        })
+    }
+}
+
+/// What the generic UI needs to draw a device (WP-2.5): its type's
+/// description and its parameters' values now.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct DevicePanel {
+    /// Its parameters' descriptors and its layout.
+    pub description: DeviceDescription,
+    /// Each parameter's value now, in the description's order, in the
+    /// parameter's own units.
+    pub values: Vec<f64>,
+}
+
+impl DevicePanel {
+    /// The value of the parameter at `index` in the description.
+    #[must_use]
+    pub fn value(&self, index: usize) -> f64 {
+        self.values.get(index).copied().unwrap_or_else(|| {
+            self.description
+                .params
+                .get(index)
+                .map_or(0.0, |p| p.default)
+        })
+    }
+}
+
+/// One of a device's parameters as `device.parameters` reports it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ParameterState {
+    /// What it is: its number, name, kind and range, default, and whether
+    /// it can be automated.
+    #[serde(flatten)]
+    pub descriptor: ParamDescriptor,
+    /// Its value now, in its own units: what `device.set_param` takes.
+    pub value: f64,
+    /// How the value reads, as its control shows it, such as `-6.0 dB`.
+    pub text: String,
+}
+
+/// What `device.parameters` returns.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct DeviceParameters {
+    /// The device.
+    pub device: DeviceId,
+    /// Its parameters, in the order its type lists them; empty if its type
+    /// doesn't describe them.
+    pub params: Vec<ParameterState>,
+}
 
 /// One device as the Device View shows it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -110,6 +177,10 @@ pub struct DeviceFrame {
     pub selected: bool,
     /// Whether it's the device being hot-swapped.
     pub hot_swap: bool,
+    /// Its parameters and layout, for the generic UI; left out for a
+    /// device whose type doesn't describe them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub panel: Option<DevicePanel>,
 }
 
 /// What `device_view.state` returns.
@@ -294,8 +365,9 @@ fn specs() -> Vec<CommandSpec> {
                 "Reports what the Device View shows: the selected track and its devices in \
                  signal order, each with its title, its own name, its kind and role, whether \
                  it's on, folded, selected, or being hot-swapped; the selected device; \
-                 hot-swapping; and whether there's a device to paste. Device parameters are in \
-                 the set; read them with the query tool. Changes nothing.",
+                 hot-swapping; and whether there's a device to paste. A native device also \
+                 lists its parameters' descriptors, its layout, and its values (`panel`); \
+                 `device.parameters` reports any device's. Changes nothing.",
             )
             .permission(Permission::Read)
             .context(Global)
@@ -432,6 +504,21 @@ fn specs() -> Vec<CommandSpec> {
             .context(DeviceView)
             .args::<HotSwapArgs>()
             .result::<DeviceViewState>(),
+        CommandSpec::new(PARAMETERS, "Device Parameters")
+            .description(
+                "Reports a device's parameters, in the order its type lists them: each one's \
+                 number (what `device.set_param` takes), name, what it does, its kind (a \
+                 continuous value with its range, unit, and taper; a gain, whose value is a \
+                 linear factor from 0, which is -inf dB, up to its top; a switch; a choice with \
+                 its names; or a whole number), its default, whether it can be automated (every \
+                 parameter can), its value now, and how that value reads. Empty for a device \
+                 whose type doesn't describe its parameters, such as a plug-in until WP-2.6. \
+                 Changes nothing.",
+            )
+            .permission(Permission::Read)
+            .context(DeviceView)
+            .args::<DeviceArgs>()
+            .result::<DeviceParameters>(),
     ]
 }
 

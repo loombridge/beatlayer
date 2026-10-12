@@ -60,6 +60,12 @@ waveform = "#14181d"
 clip_muted = "#6a717a"
 # The Overview's outline round the part in view.
 overview_outline = "#e4e8ee"
+# Device panels (WP-2.5): a display cell's background and its curve, a lit
+# number box's fill, and a switched-off device's highlights.
+display = "#07080a"
+display_line = "#e4e8ee"
+value_fill = "#4a86e8"
+inactive = "#6a717a"
 # Beatlayer's own track colours, given to new tracks in turn.
 track_palette = [
   "#e0675a", "#e8945a", "#e6c35c", "#a8c95a", "#5fbf6e", "#4fbfa3", "#4fb0d6",

@@ -110,6 +110,12 @@ pub fn take_readout(ctx: &egui::Context) -> Option<String> {
     ctx.data_mut(|d| d.remove_temp::<String>(readout_id()))
 }
 
+/// Puts `text` in the Status Bar for this frame instead of its message, as
+/// while a device's control is dragged (WP-2.5).
+pub(crate) fn show_readout(ctx: &egui::Context, text: String) {
+    ctx.data_mut(|d| d.insert_temp(readout_id(), text));
+}
+
 /// Whether a track header's volume field has the keyboard, so a value can
 /// be typed into it: the keys then go to the field, as to a text field, not
 /// to shortcuts (so Minus starts a negative value rather than zooming). Esc,

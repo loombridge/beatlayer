@@ -52,11 +52,17 @@ pub enum UiEvent {
     /// [`UiEvent::EndGesture`] are one undo step with this name, as
     /// [`Shell::begin_gesture`] makes them.
     BeginGesture(&'static str),
+    /// The same, for a step whose name is made as it begins, such as a
+    /// device parameter's `Change "Gain"` (WP-2.5).
+    BeginNamedGesture(String),
     /// The drag ended ([`Shell::end_gesture`]).
     EndGesture,
     /// The keyboard focus is on this track's control, or on no track's,
     /// for [`Shell::set_focused_track`] (WP-1.14).
     FocusTrack(Option<bl_model::TrackId>),
+    /// A device's value control gained (true) or lost (false) the keyboard
+    /// focus, for [`Shell::set_value_focused`] (WP-2.5).
+    FocusValue(bool),
 }
 
 /// The main window's UI state between frames.

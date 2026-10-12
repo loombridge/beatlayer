@@ -11,13 +11,17 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use bl_model::{Command, Device, DeviceId, DeviceRole, Document, Editor, TrackId, TrackKind};
+use bl_engine::DeviceType;
+use bl_model::{
+    Command, Device, DeviceDescription, DeviceId, DeviceKind, DeviceRole, Document, Editor,
+    TrackId, TrackKind,
+};
 use bl_project::preset::{self, Preset};
 use bl_shell_spec::arrangement as view_ids;
 use bl_shell_spec::devices::{
-    self as ids, AddDeviceArgs, DeviceAdded, DeviceArgs, DeviceFrame, DeviceViewState,
-    FoldDeviceArgs, HotSwap, HotSwapArgs, LoadPresetArgs, PasteDeviceArgs, PresetResult,
-    SavePresetArgs, SelectDeviceArgs,
+    self as ids, AddDeviceArgs, DeviceAdded, DeviceArgs, DeviceFrame, DevicePanel,
+    DeviceParameters, DeviceViewState, FoldDeviceArgs, HotSwap, HotSwapArgs, LoadPresetArgs,
+    ParameterState, PasteDeviceArgs, PresetResult, SavePresetArgs, SelectDeviceArgs,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -26,13 +30,15 @@ use serde_json::{Value, json};
 use crate::arrangement::ArrangementView;
 
 /// What the Device View shows besides the set: the selected device, the
-/// folded devices, the clipboard, and hot-swapping.
+/// folded devices, the clipboard, and hot-swapping; and the device types
+/// the host offers, whose descriptions the generic UI draws (WP-2.5).
 #[derive(Clone, Debug, Default)]
 pub struct DeviceView {
     selected: Option<DeviceId>,
     folded: BTreeSet<DeviceId>,
     clipboard: Option<Device>,
     hot_swap: Option<DeviceId>,
+    types: Vec<DeviceType>,
 }
 
 /// Why a device command didn't run.
@@ -146,6 +152,73 @@ impl DeviceView {
         self.clipboard.is_some()
     }
 
+    /// Sets the device types the host's engine makes, with their
+    /// descriptions (WP-2.5).
+    pub fn set_device_types(&mut self, types: Vec<DeviceType>) {
+        self.types = types;
+    }
+
+    /// The description of devices of `kind`, if their type has one.
+    #[must_use]
+    pub fn description(&self, kind: &DeviceKind) -> Option<&DeviceDescription> {
+        self.types
+            .iter()
+            .find(|t| t.kind == *kind)
+            .map(|t| &t.description)
+            .filter(|d| !d.params.is_empty())
+    }
+
+    /// What the generic UI draws for `device`, if its type is described.
+    fn panel(&self, device: &Device) -> Option<DevicePanel> {
+        let description = self.description(&device.kind)?;
+        Some(DevicePanel {
+            values: description
+                .params
+                .iter()
+                .map(|p| description.value(&device.params, p.id).unwrap_or(p.default))
+                .collect(),
+            description: description.clone(),
+        })
+    }
+
+    /// `device`'s parameters as `device.parameters` reports them.
+    fn parameters(&self, device: &Device) -> DeviceParameters {
+        let params = self
+            .description(&device.kind)
+            .map(|description| {
+                description
+                    .params
+                    .iter()
+                    .map(|p| {
+                        let value = description.value(&device.params, p.id).unwrap_or(p.default);
+                        ParameterState {
+                            descriptor: p.clone(),
+                            value,
+                            text: p.format(value),
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        DeviceParameters {
+            device: device.id,
+            params,
+        }
+    }
+
+    /// `params` as a device of `kind` takes them: clamped to its parameters'
+    /// ranges, unknown ones left out, if its type is described.
+    fn sanitize(
+        &self,
+        kind: &DeviceKind,
+        params: bl_model::OrdMap<bl_model::ParamId, f64>,
+    ) -> bl_model::OrdMap<bl_model::ParamId, f64> {
+        match self.description(kind) {
+            Some(description) => description.sanitize(&params),
+            None => params,
+        }
+    }
+
     /// Forgets devices the set no longer has.
     pub fn forget_missing(&mut self, doc: &Document) {
         let exists = |d: &DeviceId| doc.device(*d).is_some();
@@ -172,6 +245,7 @@ impl DeviceView {
                         folded: self.folded.contains(&d.id),
                         selected: self.selected == Some(d.id),
                         hot_swap: self.hot_swap == Some(d.id),
+                        panel: self.panel(d),
                     })
                     .collect()
             })
@@ -224,6 +298,7 @@ impl DeviceView {
                     .is_some_and(|t| device.role.fits(t.kind()))
             }),
             ids::LOAD_PRESET => has_target() && args.get("path").is_some(),
+            ids::PARAMETERS => has_target(),
             _ => true,
         }
     }
@@ -386,11 +461,18 @@ impl DeviceView {
                 outcome.value = to_value(&preset_result(device, &path));
                 return Ok(outcome);
             }
+            ids::PARAMETERS => {
+                let DeviceArgs { device } = parse(args)?;
+                let device = self.target(editor.document(), device)?;
+                let current = editor.document().device(device).expect("the target exists");
+                outcome.value = to_value(&self.parameters(current));
+                return Ok(outcome);
+            }
             ids::LOAD_PRESET => {
                 let LoadPresetArgs { device, path } = parse(args)?;
                 let device = self.target(editor.document(), device)?;
                 let path = preset_path(&path)?;
-                load_preset(editor, device, &path)?;
+                load_preset(self, editor, device, &path)?;
                 outcome.document_changed = true;
                 outcome.value = to_value(&preset_result(device, &path));
                 return Ok(outcome);
@@ -485,7 +567,7 @@ impl DeviceView {
             if let Some((path, preset)) = &default {
                 editor.apply(Command::SetDeviceState {
                     device: id,
-                    params: preset.params.clone(),
+                    params: self.sanitize(&args.device.kind, preset.params.clone()),
                     name: preset::preset_name(path),
                 })?;
             }
@@ -549,8 +631,16 @@ fn select_track(
 }
 
 /// Loads a preset file into a device as one undo step (`device.load_preset`,
-/// and hot-swapping).
-fn load_preset(editor: &mut Editor, device: DeviceId, path: &Path) -> Result<(), DeviceError> {
+/// and hot-swapping). A described device takes its values clamped to its
+/// parameters' ranges, without values for parameters it doesn't have (a
+/// preset from another version of the device, say: the device framework
+/// spec, R7).
+fn load_preset(
+    view: &DeviceView,
+    editor: &mut Editor,
+    device: DeviceId,
+    path: &Path,
+) -> Result<(), DeviceError> {
     let loaded = Preset::load(path).map_err(|e| DeviceError::Failed(e.to_string()))?;
     let current = editor
         .document()
@@ -562,7 +652,7 @@ fn load_preset(editor: &mut Editor, device: DeviceId, path: &Path) -> Result<(),
     editor
         .apply(Command::SetDeviceState {
             device,
-            params: loaded.params,
+            params: view.sanitize(&loaded.kind, loaded.params),
             name: preset::preset_name(path),
         })
         .map(|_| ())
@@ -626,6 +716,6 @@ pub fn load_hot_swapped(
     let device = view
         .hot_swap
         .ok_or_else(|| DeviceError::Unavailable("no device is being hot-swapped".to_owned()))?;
-    load_preset(editor, device, path)?;
+    load_preset(view, editor, device, path)?;
     Ok(preset_result(device, path))
 }

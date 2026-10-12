@@ -10,8 +10,8 @@ use bl_core::time::{Bpm, TempoMap, Ticks, TimeSignature, TimeSignatureMap};
 use bl_model::registry::{self, RunError};
 use bl_model::{
     ArrangementLoop, AudioData, Change, ChangeSet, Clip, ClipData, ClipId, Command, ContentHash,
-    Device, DeviceId, DeviceKind, EditError, Editor, MidiData, ModelError, Note, ParamId,
-    PluginFormat, SendTap, TrackId, TrackKind,
+    Device, DeviceId, DeviceKind, EditError, Editor, Input, MidiData, ModelError, Monitor, Note,
+    Output, ParamId, PluginFormat, SendTap, Tap, TrackId, TrackKind,
 };
 use serde_json::{Value, json};
 
@@ -47,9 +47,10 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        38,
+        42,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
-         the mixer, WP-1.4 five for audio clips, and WP-1.8b trim_clip_start"
+         the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, and WP-2.19 four for \
+         routing"
     );
 
     for op in &ops {
@@ -182,6 +183,51 @@ fn every_command_runs_by_id() {
     assert_eq!(document.track(group).unwrap().send(reverb), 0.5);
     assert_eq!(document.track(reverb).unwrap().mixer().tap, SendTap::Pre);
     assert!(!document.settings().solo_in_place);
+
+    // Routing.
+    let keys: TrackId = agent.new_id();
+    agent.run(
+        "track.create",
+        json!({ "id": keys, "kind": "midi", "name": "Keys", "index": 0 }),
+    );
+    agent.run(
+        "routing.set_input",
+        json!({ "track": drums, "input": { "type": "track", "track": reverb, "tap": "post_fx" } }),
+    );
+    agent.run(
+        "routing.set_monitor",
+        json!({ "track": drums, "monitor": "in" }),
+    );
+    agent.run(
+        "routing.set_output",
+        json!({ "track": group, "output": { "type": "sends_only" } }),
+    );
+    agent.run(
+        "routing.set_midi_output",
+        json!({ "track": keys, "to": bass }),
+    );
+    let document = agent.editor.document();
+    let routing = *document.track(drums).unwrap().routing();
+    assert_eq!(
+        routing.input,
+        Input::Track {
+            track: reverb,
+            tap: Tap::PostFx
+        }
+    );
+    assert_eq!(routing.monitor, Monitor::In);
+    assert_eq!(
+        document.track(group).unwrap().routing().output,
+        Output::SendsOnly
+    );
+    assert_eq!(
+        document.track(keys).unwrap().routing().midi_output,
+        Some(bass)
+    );
+    assert_eq!(
+        agent.editor.undo_history().next(),
+        Some("Change \"Routing\"")
+    );
 
     // Song settings.
     let changes = agent.run(
@@ -487,6 +533,36 @@ fn schemas_match_what_commands_serialise() {
         (
             "mixer.set_solo_in_place",
             Command::SetSoloInPlace { enabled: false },
+        ),
+        (
+            "routing.set_input",
+            Command::SetInput {
+                track,
+                input: Input::Track {
+                    track: TrackId(fresh()),
+                    tap: Tap::PreFx,
+                },
+            },
+        ),
+        (
+            "routing.set_monitor",
+            Command::SetMonitor {
+                track,
+                monitor: Monitor::Off,
+            },
+        ),
+        (
+            "routing.set_output",
+            Command::SetOutput {
+                track,
+                output: Output::Track {
+                    track: TrackId(fresh()),
+                },
+            },
+        ),
+        (
+            "routing.set_midi_output",
+            Command::SetMidiOutput { track, to: None },
         ),
         (
             "clip.create",

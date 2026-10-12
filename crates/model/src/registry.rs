@@ -507,6 +507,62 @@ const ENTRIES: &[Entry] = &[
             setting is saved with the set.",
     },
     Entry {
+        id: "routing.set_input",
+        action: Action::Apply("set_input"),
+        label: "Set Input",
+        permission: Permission::Edit,
+        contexts: &[Session, Arrangement],
+        keys: &[],
+        description: "Sets where an audio or MIDI track takes its input from, as the In/Out \
+            section's Audio From or MIDI From chooser and its channel do. An audio track can \
+            take `external` (Ext. In, the audio interface; silent until audio input is built), \
+            `resampling` (the Main output, for recording the mix; the track's own output and \
+            sends are then silent so it can't feed back), `none`, or `track` with another \
+            audio track, a group, a return track, or Main and a `tap`: `pre_fx` (before its devices), \
+            `post_fx` (after its devices, before its mixer), or `post_mixer` (its output, the \
+            default). A MIDI track can take `all_ins`, `computer_keyboard`, `none`, or another \
+            MIDI track (MIDI reaches tracks once MIDI playback is built). The input is heard \
+            only while the track monitors it (`routing.set_monitor`). A routing may make a \
+            loop, as in Live; the engine plays the routing that closes it as silence.",
+    },
+    Entry {
+        id: "routing.set_monitor",
+        action: Action::Apply("set_monitor"),
+        label: "Set Monitor",
+        permission: Permission::Edit,
+        contexts: &[Session, Arrangement],
+        keys: &[],
+        description: "Sets an audio or MIDI track's Monitor switch: `in` always plays the \
+            track's input through its devices and silences its clips, `auto` plays the input \
+            while the track is armed, and `off` never plays it. A new track is `auto`. Use `in` to hear another track routed into this one.",
+    },
+    Entry {
+        id: "routing.set_output",
+        action: Action::Apply("set_output"),
+        label: "Set Output",
+        permission: Permission::Edit,
+        contexts: &[Session, Arrangement],
+        keys: &[],
+        description: "Sets where a track's audio goes, as the In/Out section's Audio To chooser \
+            does: `default` (Main, or the group the track is in), `main` (Main, even from \
+            inside a group), `track` with another audio track (its input, heard while that \
+            track monitors it) or the track's own group, `sends_only` (only through its sends \
+            to the return tracks), or `external` (Ext. Out, which carries nothing until audio \
+            outputs are built). Audio, group, and return tracks take any of these. A routing \
+            may make a loop, as in Live; the engine then plays the routing that closes the \
+            loop as silence.",
+    },
+    Entry {
+        id: "routing.set_midi_output",
+        action: Action::Apply("set_midi_output"),
+        label: "Set MIDI Output",
+        permission: Permission::Edit,
+        contexts: &[Session, Arrangement],
+        keys: &[],
+        description: "Sets where a MIDI track's MIDI goes, as its MIDI To chooser does: \
+            another MIDI track (its Track In), or `null` for No Output (a new MIDI track's).",
+    },
+    Entry {
         id: "clip.create",
         action: Action::Apply("create_clip"),
         label: "Create Clip",

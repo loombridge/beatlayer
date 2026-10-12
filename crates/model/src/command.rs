@@ -1184,6 +1184,20 @@ impl Document {
         self.device(id).ok_or(ModelError::NoSuchDevice(id))
     }
 
+    /// Sets a plug-in device's saved state (WP-2.6), outside the command
+    /// system: [`Editor::amend_plugin_state`](crate::Editor::amend_plugin_state)
+    /// calls it.
+    pub(crate) fn set_plugin_state(
+        &mut self,
+        id: DeviceId,
+        state: Option<crate::PluginState>,
+    ) -> Result<(), ModelError> {
+        if self.device_ref(id)?.plugin != state {
+            self.device_mut(id)?.plugin = state;
+        }
+        Ok(())
+    }
+
     fn device_mut(&mut self, id: DeviceId) -> Result<&mut Device, ModelError> {
         let owner = self.device_owner(id)?;
         let chain = &mut self.track_mut(owner)?.devices;

@@ -43,6 +43,11 @@
 //! - [`permission`]: a call's permission class decided from its arguments,
 //!   for the agent API: placing clips over others is destructive
 //!   (WP-1.15b).
+//! - [`plugins`]: plug-in devices (WP-2.6): the `plugin.*` commands'
+//!   reports, plug-ins' state taken into the set before a save or a copy,
+//!   and the changes plug-ins make themselves as undo steps. The CLAP host
+//!   itself is `bl-plugin-host`'s; [`Shell::poll`] runs its main-thread
+//!   work.
 //! - [`tracks`]: Duplicate Track Without Clips (WP-2.19b, IMP-12), which
 //!   `track.duplicate_without_clips` runs.
 //! - [`transport`]: the Control Bar's transport section: what its fields
@@ -65,6 +70,7 @@ pub mod mixer_controls;
 pub mod mixer_view;
 pub mod perception;
 pub mod permission;
+pub mod plugins;
 pub mod routing;
 pub mod settings;
 mod shell;
@@ -89,6 +95,8 @@ pub use bl_shell_spec::mixer_view as mixer_view_commands;
 /// The perception commands' IDs and their argument and result types
 /// (WP-1.16).
 pub use bl_shell_spec::perception as perception_commands;
+/// The plug-in command IDs and their argument and result types (WP-2.6).
+pub use bl_shell_spec::plugins as plugin_commands;
 pub use bl_shell_spec::settings::ZOOM_STEPS;
 /// The shell's track command IDs and their argument and result types
 /// (WP-2.19b).

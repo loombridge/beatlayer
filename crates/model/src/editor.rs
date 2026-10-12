@@ -193,6 +193,24 @@ impl Editor {
         Ok(changes)
     }
 
+    /// Records a plug-in device's own state in the document (WP-2.6)
+    /// without an undo step: the running plug-in already has it, so it's a
+    /// note for the set file, made when the set is saved or the device
+    /// copied. Undoing an earlier step may bring back an older note, which
+    /// the running plug-in ignores; the next save takes its state again.
+    ///
+    /// # Errors
+    ///
+    /// [`EditError::Command`] if there's no such device.
+    pub fn amend_plugin_state(
+        &mut self,
+        device: crate::DeviceId,
+        state: Option<crate::PluginState>,
+    ) -> Result<(), EditError> {
+        self.document.set_plugin_state(device, state)?;
+        Ok(())
+    }
+
     /// Replaces the whole document with another version of it, inside the
     /// open transaction or as an undo step of its own labelled `label`, and
     /// returns what that changed. The agent API restores a checkpoint this

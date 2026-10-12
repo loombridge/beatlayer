@@ -26,6 +26,9 @@ bl-engine.workspace = true
 # in the media store (WP-1.10).
 bl-media.workspace = true
 bl-model.workspace = true
+# CLAP plug-ins as devices (WP-2.6): the host, whose factory goes into each
+# engine's registry and whose main-thread work runs in the shell's poll.
+bl-plugin-host.workspace = true
 bl-project.workspace = true
 bl-shell-spec.workspace = true
 # The agent server's token (WP-1.15): the operating system's secure random
@@ -39,6 +42,8 @@ serde_json = "1"
 rtrb = "0.4.0"
 
 [dev-dependencies]
+# The test plug-in, built from source, which the plug-in tests load.
+bl-test-clap = { path = "../test-clap" }
 # The allocation trap, so tests can show the audio callback stays off the
 # heap (the real-time rules).
 bl-rt.workspace = true

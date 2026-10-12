@@ -115,8 +115,8 @@ pub use message::{
 };
 pub use mixer::METER_RELEASE_DB_PER_SECOND;
 pub use node::{
-    Block, Node, NodeConfig, NodeData, NodeEvent, NodeKey, ParamValue, Segment, Segments,
-    TransportInfo, segments,
+    Block, Node, NodeConfig, NodeData, NodeEvent, NodeKey, NoteBuffer, NoteEvent, NoteKind,
+    ParamValue, Segment, Segments, TransportInfo, segments,
 };
 pub use offline::Offline;
 pub use processor::{Carry, Output, Processor};

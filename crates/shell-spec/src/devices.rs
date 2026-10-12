@@ -700,8 +700,8 @@ fn specs() -> Vec<CommandSpec> {
                  linear factor from 0, which is -inf dB, up to its top; a switch; a choice with \
                  its names; or a whole number), its default, whether it can be automated (every \
                  parameter can), its value now, and how that value reads. Empty for a device \
-                 whose type doesn't describe its parameters, such as a plug-in until WP-2.6. \
-                 Changes nothing.",
+                 whose type doesn't describe its parameters, such as a plug-in that couldn't \
+                 be loaded. Changes nothing.",
             )
             .permission(Permission::Read)
             .context(DeviceView)

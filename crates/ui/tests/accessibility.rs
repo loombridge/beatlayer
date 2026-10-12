@@ -967,7 +967,10 @@ fn paths() -> BTreeMap<&'static str, Path> {
         key,
     };
     let clip_view = LaterView("the Clip View (milestone M2)");
-    let device_params = LaterView("devices' parameter controls (WP-2.5)");
+    let device_params = Equivalent(
+        "a described device's parameter controls in the Device View: Tab to one, then Up and \
+         Down step it and Delete sets its default (the device framework spec, R17)",
+    );
     let device_menu = Equivalent(
         "the device's context menu, from its Show Options button (Enter, then the arrows), as \
          in Live",
@@ -1255,6 +1258,7 @@ fn paths() -> BTreeMap<&'static str, Path> {
             main(a_sidechained_device, device_view, "SC Gain", Key::ArrowDown),
         ),
         ("device_view.state", Exception(Query)),
+        ("device.parameters", Exception(Query)),
         // A send knob and the In/Out choosers (the routing spec): Up and
         // Down on them.
         (

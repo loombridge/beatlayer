@@ -33,6 +33,8 @@ serde_json = "1"
 toml = { version = "1", default-features = false, features = ["std", "parse", "serde"] }
 
 [dev-dependencies]
+# The device framework's test devices, for the generic UI's tests (WP-2.5).
+bl-devices.workspace = true
 # Every registered command, for the keyboard-reachability test (WP-1.14),
 # which walks the whole registry the command reference lists.
 bl-project.workspace = true

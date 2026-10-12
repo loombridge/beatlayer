@@ -168,6 +168,10 @@ const WIDGET: &[(&str, &str)] = &[
     ),
     ("S-VAL-005", "the focused value field takes a typed value"),
     (
+        "S-DEV-006",
+        "the focused device control returns to its parameter's default",
+    ),
+    (
         "S-VAL-006",
         "the focused bar-beat-sixteenth field moves on to its next field",
     ),

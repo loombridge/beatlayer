@@ -729,6 +729,7 @@ impl Host {
                 UiEvent::Invoke(invocation) => self.invoke(&invocation),
                 UiEvent::FocusArea(area) => self.shell.set_focused_area(area),
                 UiEvent::FocusTrack(track) => self.shell.set_focused_track(track),
+                UiEvent::FocusValue(focused) => self.shell.set_value_focused(focused),
                 UiEvent::ArrangementViewport { width, height } => {
                     self.shell.set_arrangement_viewport(width, height);
                 }
@@ -739,6 +740,7 @@ impl Host {
                     let _ = self.shell.gesture(phase, invocation.as_ref());
                 }
                 UiEvent::BeginGesture(label) => self.shell.begin_gesture(label),
+                UiEvent::BeginNamedGesture(label) => self.shell.begin_gesture(&label),
                 UiEvent::EndGesture => self.shell.end_gesture(),
             }
         }

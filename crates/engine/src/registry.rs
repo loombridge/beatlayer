@@ -16,7 +16,7 @@
 
 use std::sync::Arc;
 
-use bl_model::{Device, DeviceId, DeviceKind, DeviceRole};
+use bl_model::{Device, DeviceDescription, DeviceId, DeviceKind, DeviceRole};
 
 use crate::clips::MediaLibrary;
 use crate::node::{Node, NodeConfig};
@@ -48,6 +48,10 @@ pub struct DeviceType {
     pub name: String,
     /// Where it goes in a chain.
     pub role: DeviceRole,
+    /// Its parameters' descriptors and its layout (WP-2.5), which the
+    /// generic UI draws, presets are checked against, and agents read.
+    /// Empty for a type that doesn't describe its parameters.
+    pub description: DeviceDescription,
     /// Whether its devices have a sidechain input (WP-2.19b): other
     /// tracks can route into it, and its node reads what its detector
     /// hears with [`Block::sidechain`](crate::Block::sidechain).
@@ -64,8 +68,16 @@ impl DeviceType {
             },
             name: name.to_owned(),
             role,
+            description: DeviceDescription::default(),
             sidechain: false,
         }
+    }
+
+    /// The same type, with its parameters described.
+    #[must_use]
+    pub fn with_description(mut self, description: DeviceDescription) -> Self {
+        self.description = description;
+        self
     }
 
     /// The same device type, declaring a sidechain input.
@@ -214,8 +226,11 @@ impl Registry {
         self
     }
 
-    /// A node for `device` from the first factory that makes one.
-    pub(crate) fn create(&self, device: &Device, config: &NodeConfig) -> Option<Box<dyn Node>> {
+    /// A node for `device` from the first factory that makes one, as the
+    /// compiler makes it: off the audio thread. Tests of devices use it to
+    /// run one on its own.
+    #[must_use]
+    pub fn create(&self, device: &Device, config: &NodeConfig) -> Option<Box<dyn Node>> {
         self.factories
             .iter()
             .find_map(|factory| factory.create(device, config))

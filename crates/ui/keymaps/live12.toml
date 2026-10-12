@@ -603,7 +603,8 @@ trigger = "press"
 milestone = "M2"
 mac = ["Delete"]
 win = ["Delete"]
-status = "pending"
+status = "widget"
+handler = "the focused device control returns to its parameter's default"
 
 [[shortcut]]
 id = "S-DEV-007"

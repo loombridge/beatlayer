@@ -279,6 +279,9 @@ pub struct Shell {
     focused_area: Area,
     /// The track whose control has the keyboard focus (WP-1.14).
     focused_track: Option<TrackId>,
+    /// Whether a device's value control (a knob or a number box) has the
+    /// keyboard, so its keys go to it (WP-2.5).
+    value_focused: bool,
     effects: Vec<Effect>,
     message: Option<Message>,
     revision: u64,
@@ -419,6 +422,7 @@ impl Shell {
             focused_window: WindowKind::Main,
             focused_area: Area::MainView,
             focused_track: None,
+            value_focused: false,
             effects: Vec::new(),
             message: None,
             revision: 0,
@@ -433,7 +437,12 @@ impl Shell {
             meters: Vec::new(),
             metering: false,
             previews: crate::perception::Previews::default(),
-            devices: DeviceView::new(),
+            devices: {
+                // Beatlayer's native devices (WP-2.5; none ship yet).
+                let mut devices = DeviceView::new();
+                devices.set_device_types(bl_devices::device_types());
+                devices
+            },
         };
         shell.give_agents_tokens();
         shell
@@ -775,6 +784,19 @@ impl Shell {
     pub fn set_focused_area(&mut self, area: Area) {
         if self.focused_area != area {
             self.focused_area = area;
+            // A device's value control lives in the detail area.
+            self.value_focused &= area == Area::Detail;
+            self.touch();
+        }
+    }
+
+    /// Records whether a device's value control has the keyboard: while it
+    /// does, the Device View's keys give way to the control's own (Delete
+    /// sets its default, as S-DEV-006 does in Live), and global ones still
+    /// work.
+    pub fn set_value_focused(&mut self, focused: bool) {
+        if self.value_focused != focused {
+            self.value_focused = focused;
             self.touch();
         }
     }
@@ -844,6 +866,14 @@ impl Shell {
     #[must_use]
     pub fn devices(&self) -> &DeviceView {
         &self.devices
+    }
+
+    /// Sets the device types the host's engine offers, with their
+    /// parameters' descriptions, which the Device View's generic UI draws,
+    /// `device.parameters` reports, and loading a preset checks values
+    /// against (WP-2.5).
+    pub fn set_device_types(&mut self, types: Vec<bl_engine::DeviceType>) {
+        self.devices.set_device_types(types);
     }
 
     /// What the Device View shows: the selected track's chain (WP-2.4).
@@ -1407,6 +1437,7 @@ impl Shell {
                         MainView::Session => contexts.push(Context::Session),
                     },
                     Area::Browser => contexts.push(self.browser_view.focus().context()),
+                    Area::Detail if self.value_focused => contexts.push(Context::ValueField),
                     Area::Detail => contexts.push(Context::DeviceView),
                     Area::ControlBar | Area::StatusBar => {}
                 }

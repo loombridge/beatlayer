@@ -25,10 +25,10 @@ use bl_audio_io::{
 use bl_rt::WorkgroupJoin;
 use bl_rt::{AudioThreadSetup, Promotion, RtThreadConfig, ThreadReport};
 
-// Without `--cfg bl_rtsan` (`rtsan/.cargo/config.toml`), this doesn't build.
+// Without `--cfg lspk_rtsan` (`rtsan/.cargo/config.toml`), this doesn't build.
 const _: () = assert!(
     bl_rt::sanitize::ACTIVE,
-    "bl-rt wasn't built with --cfg bl_rtsan; run `cargo xtask rtsan`"
+    "lspk-rt (through bl-rt) wasn't built with --cfg lspk_rtsan; run `cargo xtask rtsan`"
 );
 
 /// What a raw thread is given, and what it hands back.

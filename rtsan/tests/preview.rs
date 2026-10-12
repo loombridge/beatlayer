@@ -12,10 +12,10 @@ use std::sync::Arc;
 use bl_engine::Collector;
 use bl_engine::preview::{PreviewBuffer, PreviewShared, preview_channel};
 
-// Without `--cfg bl_rtsan` (`rtsan/.cargo/config.toml`), this doesn't build.
+// Without `--cfg lspk_rtsan` (`rtsan/.cargo/config.toml`), this doesn't build.
 const _: () = assert!(
     bl_rt::sanitize::ACTIVE,
-    "bl-rt wasn't built with --cfg bl_rtsan; run `cargo xtask rtsan`"
+    "lspk-rt (through bl-rt) wasn't built with --cfg lspk_rtsan; run `cargo xtask rtsan`"
 );
 
 #[test]

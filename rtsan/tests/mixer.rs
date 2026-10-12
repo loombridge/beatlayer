@@ -15,10 +15,10 @@ use bl_engine::nodes::{TEST_TONE, test_tone};
 use bl_engine::{Collector, Compiler, EngineConfig, Registry, TransportCommand, channel};
 use bl_model::{Command, Device, DeviceKind, Editor, SendTap, TrackId, TrackKind};
 
-// Without `--cfg bl_rtsan` (`rtsan/.cargo/config.toml`), this doesn't build.
+// Without `--cfg lspk_rtsan` (`rtsan/.cargo/config.toml`), this doesn't build.
 const _: () = assert!(
     bl_rt::sanitize::ACTIVE,
-    "bl-rt wasn't built with --cfg bl_rtsan; run `cargo xtask rtsan`"
+    "lspk-rt (through bl-rt) wasn't built with --cfg lspk_rtsan; run `cargo xtask rtsan`"
 );
 
 fn track(editor: &mut Editor, kind: TrackKind, parent: Option<TrackId>) -> TrackId {

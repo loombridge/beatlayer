@@ -846,10 +846,7 @@ dependencies = [
 name = "bl-rt"
 version = "0.0.0"
 dependencies = [
- "libc",
- "rtrb",
- "triple_buffer",
- "windows",
+ "lspk-rt",
 ]
 
 [[package]]
@@ -2319,6 +2316,16 @@ name = "log"
 version = "0.4.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
+
+[[package]]
+name = "lspk-rt"
+version = "0.0.0"
+source = "git+https://github.com/loombridge/plugin-kit?rev=f8332511e598cea2a0947778b1f007db4c42db2f#f8332511e598cea2a0947778b1f007db4c42db2f"
+dependencies = [
+ "libc",
+ "rtrb",
+ "windows",
+]
 
 [[package]]
 name = "mach2"

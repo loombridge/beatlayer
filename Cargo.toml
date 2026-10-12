@@ -37,12 +37,15 @@ bl-ui = { path = "crates/ui" }
 bl-shell = { path = "crates/shell" }
 bl-shell-spec = { path = "crates/shell-spec" }
 bl-agent = { path = "crates/agent" }
+# The plug-in kit, by git revision until its API settles: a merge commit on
+# its main branch, so the revision stays reachable.
+lspk-rt = { git = "https://github.com/loombridge/plugin-kit", rev = "f8332511e598cea2a0947778b1f007db4c42db2f" }
 
 [workspace.lints.rust]
 rust_2018_idioms = { level = "warn", priority = -1 }
 unsafe_op_in_unsafe_fn = "deny"
-# `bl_rtsan` is set only by the RealtimeSanitizer harness in `rtsan/`.
-unexpected_cfgs = { level = "warn", check-cfg = ["cfg(bl_rtsan)"] }
+# `lspk_rtsan` is set only by the RealtimeSanitizer harness in `rtsan/`.
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(lspk_rtsan)"] }
 unused_must_use = "deny"
 
 [workspace.lints.clippy]

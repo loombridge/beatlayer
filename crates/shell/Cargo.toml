@@ -14,6 +14,9 @@ bl-audio-io.workspace = true
 bl-commands.workspace = true
 # IDs for objects a command will create, which the agent API hands out.
 bl-core.workspace = true
+# Beatlayer's native devices, for the engines it runs and the Device View
+# (WP-2.5).
+bl-devices.workspace = true
 # The engine the app plays the set through, and the transport's commands
 # (WP-1.18), and the browser's preview voice on the audio thread with the
 # drop thread that frees what it lets go of (WP-1.10). It depends on no UI

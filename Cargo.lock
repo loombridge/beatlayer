@@ -726,8 +726,11 @@ dependencies = [
 name = "bl-devices"
 version = "0.0.0"
 dependencies = [
+ "bl-core",
  "bl-dsp",
  "bl-engine",
+ "bl-model",
+ "bl-rt",
 ]
 
 [[package]]
@@ -849,6 +852,7 @@ dependencies = [
  "bl-audio-io",
  "bl-commands",
  "bl-core",
+ "bl-devices",
  "bl-engine",
  "bl-media",
  "bl-model",
@@ -886,6 +890,7 @@ version = "0.0.0"
 dependencies = [
  "bl-commands",
  "bl-core",
+ "bl-devices",
  "bl-engine",
  "bl-media",
  "bl-model",

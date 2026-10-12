@@ -162,7 +162,9 @@ pub fn render_with(
     mut sink: impl FnMut(&Output<'_>),
 ) -> Summary {
     let config = EngineConfig::new(settings.sample_rate, settings.block);
-    let mut offline = Offline::new(config, Registry::new().with_media(media));
+    let mut registry = Registry::new();
+    bl_devices::register(&mut registry);
+    let mut offline = Offline::new(config, registry.with_media(media));
     let unhosted = offline.sync(document);
     let missing_media = offline.missing_media().to_vec();
     for cue in cues {

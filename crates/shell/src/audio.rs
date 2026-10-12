@@ -831,6 +831,7 @@ impl AudioHost {
         let max_frames = (info.max_block_frames as usize).max(1);
         let config = EngineConfig::new(rate, max_frames);
         let mut registry = Registry::new();
+        bl_devices::register(&mut registry);
         if let Some(media) = &self.media {
             let streams = MediaStreams::new(Arc::clone(media))
                 .map_err(|e| format!("couldn't start the disk thread: {e}"))?;

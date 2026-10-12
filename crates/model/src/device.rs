@@ -3,7 +3,8 @@
 //! A device is a native instrument or effect, or a plug-in, in a track's
 //! chain: its kind, its role (MIDI effect, instrument, or audio effect),
 //! its names, its activator, and the parameter values the user has set.
-//! WP-2.5 adds the parameter descriptors that give each value its range.
+//! Each kind of device describes its parameters ([`crate::param`], WP-2.5),
+//! which give each value its range.
 
 use imbl::OrdMap;
 use schemars::JsonSchema;

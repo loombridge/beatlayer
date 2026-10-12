@@ -1,0 +1,587 @@
+//! The In/Out section (WP-2.19; the routing spec): what each of a track's
+//! choosers lists, in Live's order, which entry is chosen, and the
+//! registered command each entry runs, worked out from the set so the
+//! window, its tests, and an agent's view of the mixer share them.
+//!
+//! The lists, their order, and their defaults were observed in Live 12.4.6
+//! on macOS on 12 October 2026 (the routing spec, sources). Entries for
+//! what other packages bring (the audio interface's channels, MIDI ports,
+//! the computer keyboard) are listed where Live lists them, disabled, and
+//! name the package.
+
+use bl_model::{Document, Input, Monitor, Output, Tap, TrackId, TrackKind};
+use bl_shell_spec::commands::APP_SETTINGS;
+use serde_json::{Value, json};
+
+use crate::Invocation;
+
+/// The package that brings the audio interface's inputs and outputs.
+pub const DUPLEX_AUDIO: &str = "WP-2.13";
+
+/// The package that brings MIDI ports and the computer MIDI keyboard.
+pub const MIDI_IO: &str = "WP-2.2";
+
+/// One line of a chooser's list.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Entry {
+    /// A choice.
+    Choice {
+        /// What it reads.
+        label: String,
+        /// The command choosing it runs, or `None` if it's disabled.
+        run: Option<Invocation>,
+        /// Whether it's the chosen one.
+        chosen: bool,
+        /// The package that brings it, if it's disabled until then.
+        pending: Option<&'static str>,
+    },
+    /// A separator line.
+    Separator,
+}
+
+impl Entry {
+    fn choice(label: impl Into<String>, run: Invocation, chosen: bool) -> Self {
+        Self::Choice {
+            label: label.into(),
+            run: Some(run),
+            chosen,
+            pending: None,
+        }
+    }
+
+    fn pending(label: impl Into<String>, chosen: bool, package: &'static str) -> Self {
+        Self::Choice {
+            label: label.into(),
+            run: None,
+            chosen,
+            pending: Some(package),
+        }
+    }
+
+    /// What it reads, if it's a choice.
+    #[must_use]
+    pub fn label(&self) -> Option<&str> {
+        match self {
+            Self::Choice { label, .. } => Some(label),
+            Self::Separator => None,
+        }
+    }
+}
+
+/// A chooser in the In/Out section: its accessible name, what it shows,
+/// and its list.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Chooser {
+    /// Its name for assistive technology, as Live's Info View names it.
+    pub name: &'static str,
+    /// What it shows: the chosen entry's label, or the channel's.
+    pub text: String,
+    /// Its list, separators included; empty for a chooser with nothing to
+    /// choose.
+    pub entries: Vec<Entry>,
+    /// The package that brings it, if the whole chooser is disabled until
+    /// then.
+    pub pending: Option<&'static str>,
+}
+
+impl Chooser {
+    /// Whether it can be opened.
+    #[must_use]
+    pub fn enabled(&self) -> bool {
+        self.pending.is_none()
+            && self
+                .entries
+                .iter()
+                .any(|e| matches!(e, Entry::Choice { run: Some(_), .. }))
+    }
+
+    /// The labels of its list, a separator as `─`.
+    #[must_use]
+    pub fn labels(&self) -> Vec<&str> {
+        self.entries
+            .iter()
+            .map(|entry| entry.label().unwrap_or("─"))
+            .collect()
+    }
+
+    /// The command the entry labelled `label` runs.
+    #[must_use]
+    pub fn run_for(&self, label: &str) -> Option<&Invocation> {
+        self.entries.iter().find_map(|entry| match entry {
+            Entry::Choice {
+                label: l,
+                run: Some(run),
+                ..
+            } if l == label => Some(run),
+            _ => None,
+        })
+    }
+}
+
+/// A track's Monitor switch: In, Auto, and Off, one of them chosen.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MonitorSwitch {
+    /// The chosen state.
+    pub chosen: Monitor,
+    /// The command each button runs: In, Auto, Off.
+    pub runs: [(Monitor, Invocation); 3],
+}
+
+/// One track's In/Out section, top to bottom.
+#[derive(Clone, Debug, PartialEq)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "made for a drawn column and dropped in the same frame, never stored"
+)]
+pub enum InOut {
+    /// An audio or MIDI track: its input type and channel, Monitor, and
+    /// its output type and channel. A MIDI track's are MIDI From and MIDI
+    /// To.
+    Clips {
+        /// Audio From or MIDI From.
+        input: Chooser,
+        /// Its channel.
+        input_channel: Chooser,
+        /// Monitor.
+        monitor: MonitorSwitch,
+        /// Audio To or MIDI To.
+        output: Chooser,
+        /// Its channel.
+        output_channel: Chooser,
+    },
+    /// A group or a return: Audio To and its channel.
+    Output {
+        /// Audio To.
+        output: Chooser,
+        /// Its channel.
+        output_channel: Chooser,
+    },
+    /// Main: Cue Out and Main Out, which list the audio interface's
+    /// outputs.
+    Main {
+        /// Cue Out.
+        cue: Chooser,
+        /// Main Out.
+        main: Chooser,
+    },
+}
+
+/// What a track is called in another track's chooser: its number and name
+/// for an audio, MIDI, or group track (`4-Audio` for `4 Audio`), its letter
+/// and name for a return (`A-Reverb` for `A Reverb`), and `Main`
+/// (observed). A name's own leading number or letter, which new tracks'
+/// names carry, isn't repeated.
+#[must_use]
+pub fn track_label(doc: &Document, track: TrackId) -> String {
+    let Some(t) = doc.track(track) else {
+        return String::new();
+    };
+    match t.kind() {
+        TrackKind::Main => "Main".to_owned(),
+        TrackKind::Return => {
+            let index = doc.returns().position(|r| r == track).unwrap_or(0);
+            let letter = return_letter(index);
+            let name = t
+                .name()
+                .strip_prefix(letter.as_str())
+                .and_then(|rest| rest.strip_prefix(' '))
+                .unwrap_or(t.name());
+            format!("{letter}-{name}")
+        }
+        _ => {
+            let number = doc
+                .track_order()
+                .into_iter()
+                .filter(|&id| doc.track(id).is_some_and(|t| t.kind().can_be_grouped()))
+                .position(|id| id == track)
+                .map_or(0, |i| i + 1);
+            let name = t
+                .name()
+                .split_once(' ')
+                .filter(|(n, _)| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
+                .map_or(t.name(), |(_, rest)| rest);
+            format!("{number}-{name}")
+        }
+    }
+}
+
+/// A return track's letter: A to Z, then AA, AB, and on, as there's no
+/// limit on return tracks (IMP-01).
+#[must_use]
+pub fn return_letter(index: usize) -> String {
+    let mut letters = Vec::new();
+    let mut n = index + 1;
+    while n > 0 {
+        n -= 1;
+        letters.push(char::from(b'A' + (n % 26) as u8));
+        n /= 26;
+    }
+    letters.iter().rev().collect()
+}
+
+fn set_input(track: TrackId, input: Value) -> Invocation {
+    Invocation::new(
+        "routing.set_input",
+        json!({ "track": track, "input": input }),
+    )
+}
+
+fn set_output(track: TrackId, output: Value) -> Invocation {
+    Invocation::new(
+        "routing.set_output",
+        json!({ "track": track, "output": output }),
+    )
+}
+
+fn configure(page: &str) -> Entry {
+    Entry::choice(
+        "Configure…",
+        Invocation::new(APP_SETTINGS, json!({ "page": page })),
+        false,
+    )
+}
+
+const fn tap_label(tap: Tap) -> &'static str {
+    match tap {
+        Tap::PreFx => "Pre FX",
+        Tap::PostFx => "Post FX",
+        Tap::PostMixer => "Post Mixer",
+    }
+}
+
+/// `track`'s In/Out section, or `None` if there's no such track.
+#[must_use]
+pub fn in_out(doc: &Document, track: TrackId) -> Option<InOut> {
+    let t = doc.track(track)?;
+    Some(match t.kind() {
+        TrackKind::Audio => InOut::Clips {
+            input: audio_from(doc, track),
+            input_channel: input_channel(track, t.routing().input, false),
+            monitor: monitor(track, t.routing().monitor),
+            output: audio_to(doc, track),
+            output_channel: output_channel(t.routing().output),
+        },
+        TrackKind::Midi => InOut::Clips {
+            input: midi_from(doc, track),
+            input_channel: input_channel(track, t.routing().input, true),
+            monitor: monitor(track, t.routing().monitor),
+            output: midi_to(doc, track),
+            output_channel: Chooser {
+                name: "Output Channel",
+                text: if t.routing().midi_output.is_some() {
+                    "Track In".to_owned()
+                } else {
+                    String::new()
+                },
+                entries: match t.routing().midi_output {
+                    Some(_) => vec![Entry::Choice {
+                        label: "Track In".to_owned(),
+                        run: None,
+                        chosen: true,
+                        pending: None,
+                    }],
+                    None => Vec::new(),
+                },
+                pending: None,
+            },
+        },
+        TrackKind::Group | TrackKind::Return => InOut::Output {
+            output: audio_to(doc, track),
+            output_channel: output_channel(t.routing().output),
+        },
+        TrackKind::Main => InOut::Main {
+            cue: interface_outputs("Cue Output"),
+            main: interface_outputs("Main Output"),
+        },
+    })
+}
+
+/// Cue Out or Main Out: with no audio interface outputs in Beatlayer yet,
+/// only Configure… (observed with no device), disabled until duplex audio.
+fn interface_outputs(name: &'static str) -> Chooser {
+    Chooser {
+        name,
+        text: "1/2".to_owned(),
+        entries: vec![Entry::pending("Configure…", false, DUPLEX_AUDIO)],
+        pending: Some(DUPLEX_AUDIO),
+    }
+}
+
+/// Audio From (observed): Ext. In · Configure… ─ Resampling ─ the group,
+/// audio, and return tracks and Main, in display order, without the track
+/// itself ─ No Input.
+fn audio_from(doc: &Document, track: TrackId) -> Chooser {
+    let input = doc.track(track).map(|t| t.routing().input);
+    let current_from = match input {
+        Some(Input::Track { track, .. }) => Some(track),
+        _ => None,
+    };
+    let mut entries = vec![
+        Entry::choice(
+            "Ext. In",
+            set_input(track, json!({ "type": "external" })),
+            input == Some(Input::External),
+        ),
+        configure("audio"),
+        Entry::Separator,
+        Entry::choice(
+            "Resampling",
+            set_input(track, json!({ "type": "resampling" })),
+            input == Some(Input::Resampling),
+        ),
+        Entry::Separator,
+    ];
+    for id in doc.track_order() {
+        let Some(source) = doc.track(id) else {
+            continue;
+        };
+        let listed = matches!(
+            source.kind(),
+            TrackKind::Audio | TrackKind::Group | TrackKind::Return | TrackKind::Main
+        );
+        if id == track || !listed {
+            continue;
+        }
+        entries.push(Entry::choice(
+            track_label(doc, id),
+            set_input(track, json!({ "type": "track", "track": id })),
+            current_from == Some(id),
+        ));
+    }
+    entries.push(Entry::Separator);
+    entries.push(Entry::choice(
+        "No Input",
+        set_input(track, json!({ "type": "none" })),
+        input == Some(Input::None),
+    ));
+    chooser("Input Type", entries)
+}
+
+/// MIDI From (observed): All Ins · Computer Keyboard · Configure… ─ the
+/// other MIDI tracks ─ No Input. All Ins and the computer keyboard come
+/// with MIDI input (WP-2.2).
+fn midi_from(doc: &Document, track: TrackId) -> Chooser {
+    let input = doc.track(track).map(|t| t.routing().input);
+    let current_from = match input {
+        Some(Input::Track { track, .. }) => Some(track),
+        _ => None,
+    };
+    let mut entries = vec![
+        Entry::pending("All Ins", input == Some(Input::AllIns), MIDI_IO),
+        Entry::pending(
+            "Computer Keyboard",
+            input == Some(Input::ComputerKeyboard),
+            MIDI_IO,
+        ),
+        configure("tempo-midi"),
+        Entry::Separator,
+    ];
+    for id in doc.track_order() {
+        if id != track && doc.track(id).map(bl_model::Track::kind) == Some(TrackKind::Midi) {
+            entries.push(Entry::choice(
+                track_label(doc, id),
+                set_input(track, json!({ "type": "track", "track": id })),
+                current_from == Some(id),
+            ));
+        }
+    }
+    entries.push(Entry::Separator);
+    entries.push(Entry::choice(
+        "No Input",
+        set_input(track, json!({ "type": "none" })),
+        input == Some(Input::None),
+    ));
+    chooser("Input Type", entries)
+}
+
+/// The input channel: Pre FX · Post FX · Post Mixer with a track chosen
+/// (observed, Post Mixer the default); the interface's inputs with Ext. In
+/// (WP-2.13); All Channels with a MIDI port (WP-2.2); nothing otherwise.
+fn input_channel(track: TrackId, input: Input, midi: bool) -> Chooser {
+    match input {
+        Input::Track { track: from, tap } => Chooser {
+            name: "Input Channel",
+            text: tap_label(tap).to_owned(),
+            entries: [Tap::PreFx, Tap::PostFx, Tap::PostMixer]
+                .into_iter()
+                .map(|t| {
+                    let tap_name = match t {
+                        Tap::PreFx => "pre_fx",
+                        Tap::PostFx => "post_fx",
+                        Tap::PostMixer => "post_mixer",
+                    };
+                    Entry::choice(
+                        tap_label(t),
+                        set_input(
+                            track,
+                            json!({ "type": "track", "track": from, "tap": tap_name }),
+                        ),
+                        t == tap,
+                    )
+                })
+                .collect(),
+            pending: None,
+        },
+        Input::External => Chooser {
+            name: "Input Channel",
+            text: "1/2".to_owned(),
+            entries: Vec::new(),
+            pending: Some(DUPLEX_AUDIO),
+        },
+        Input::AllIns | Input::ComputerKeyboard if midi => Chooser {
+            name: "Input Channel",
+            text: "All Channels".to_owned(),
+            entries: Vec::new(),
+            pending: Some(MIDI_IO),
+        },
+        _ => Chooser {
+            name: "Input Channel",
+            text: String::new(),
+            entries: Vec::new(),
+            pending: None,
+        },
+    }
+}
+
+fn monitor(track: TrackId, chosen: Monitor) -> MonitorSwitch {
+    let run = |state: &str| {
+        Invocation::new(
+            "routing.set_monitor",
+            json!({ "track": track, "monitor": state }),
+        )
+    };
+    MonitorSwitch {
+        chosen,
+        runs: [
+            (Monitor::In, run("in")),
+            (Monitor::Auto, run("auto")),
+            (Monitor::Off, run("off")),
+        ],
+    }
+}
+
+/// Audio To (observed): Ext. Out · Configure… ─ Main, the track's group,
+/// and the audio tracks in display order, without the track itself ─
+/// Sends Only. A group's list puts a separator after Main. Ext. Out comes
+/// with duplex audio (WP-2.13).
+fn audio_to(doc: &Document, track: TrackId) -> Chooser {
+    let Some(t) = doc.track(track) else {
+        return chooser("Output Type", Vec::new());
+    };
+    let goes_to = doc.output_of(track);
+    let output = t.routing().output;
+    let main = doc.main_id();
+    let mut entries = vec![
+        Entry::pending("Ext. Out", output == Output::External, DUPLEX_AUDIO),
+        configure("audio"),
+        Entry::Separator,
+        Entry::choice(
+            "Main",
+            set_output(track, json!({ "type": "main" })),
+            goes_to == Some(main) && output != Output::SendsOnly,
+        ),
+    ];
+    if t.kind() == TrackKind::Group {
+        entries.push(Entry::Separator);
+    }
+    if let Some(group) = doc.parent(track) {
+        entries.push(Entry::choice(
+            track_label(doc, group),
+            set_output(track, json!({ "type": "track", "track": group })),
+            goes_to == Some(group),
+        ));
+    }
+    for id in doc.track_order() {
+        if id != track && doc.track(id).map(bl_model::Track::kind) == Some(TrackKind::Audio) {
+            entries.push(Entry::choice(
+                track_label(doc, id),
+                set_output(track, json!({ "type": "track", "track": id })),
+                goes_to == Some(id),
+            ));
+        }
+    }
+    entries.push(Entry::Separator);
+    entries.push(Entry::choice(
+        "Sends Only",
+        set_output(track, json!({ "type": "sends_only" })),
+        output == Output::SendsOnly,
+    ));
+    chooser("Output Type", entries)
+}
+
+/// MIDI To (observed): Configure… ─ the other MIDI tracks ─ No Output.
+fn midi_to(doc: &Document, track: TrackId) -> Chooser {
+    let to = doc.track(track).and_then(|t| t.routing().midi_output);
+    let set = |value: Value| {
+        Invocation::new(
+            "routing.set_midi_output",
+            json!({ "track": track, "to": value }),
+        )
+    };
+    let mut entries = vec![configure("tempo-midi"), Entry::Separator];
+    for id in doc.track_order() {
+        if id != track && doc.track(id).map(bl_model::Track::kind) == Some(TrackKind::Midi) {
+            entries.push(Entry::choice(
+                track_label(doc, id),
+                set(json!(id)),
+                to == Some(id),
+            ));
+        }
+    }
+    entries.push(Entry::Separator);
+    entries.push(Entry::choice("No Output", set(Value::Null), to.is_none()));
+    chooser("Output Type", entries)
+}
+
+/// The output channel: Track In with a track chosen (observed, while the
+/// track has no devices; its devices' sidechain inputs come with WP-2.19b),
+/// the interface's outputs with Ext. Out (WP-2.13), nothing otherwise. A
+/// group as the output has no channel.
+fn output_channel(output: Output) -> Chooser {
+    match output {
+        Output::Track { .. } => Chooser {
+            name: "Output Channel",
+            text: "Track In".to_owned(),
+            entries: vec![Entry::Choice {
+                label: "Track In".to_owned(),
+                run: None,
+                chosen: true,
+                pending: None,
+            }],
+            pending: None,
+        },
+        Output::External => Chooser {
+            name: "Output Channel",
+            text: "1/2".to_owned(),
+            entries: Vec::new(),
+            pending: Some(DUPLEX_AUDIO),
+        },
+        _ => Chooser {
+            name: "Output Channel",
+            text: String::new(),
+            entries: Vec::new(),
+            pending: None,
+        },
+    }
+}
+
+/// A chooser showing its chosen entry.
+fn chooser(name: &'static str, entries: Vec<Entry>) -> Chooser {
+    let text = entries
+        .iter()
+        .find_map(|entry| match entry {
+            Entry::Choice {
+                label,
+                chosen: true,
+                ..
+            } => Some(label.clone()),
+            _ => None,
+        })
+        .unwrap_or_default();
+    Chooser {
+        name,
+        text,
+        entries,
+        pending: None,
+    }
+}

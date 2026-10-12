@@ -74,6 +74,18 @@ pub const VOLUME_GESTURE: &str = "Change \"Track Volume\"";
 /// The undo step a pan drag makes.
 pub const PAN_GESTURE: &str = "Change \"Track Panning\"";
 
+/// The undo step a send drag makes. (Live's name for it isn't observed.)
+pub const SEND_GESTURE: &str = "Change \"Send\"";
+
+/// The lowest finite send level, in dB: below it a send is at −∞. Live's
+/// send knob's range isn't observed; Beatlayer's runs from −∞ to 0 dB
+/// (the mixer spec, R7), its finite part down to the fader's lowest.
+pub const SEND_LOWEST_DB: f64 = LOWEST_DB;
+
+/// Points of vertical drag that turn a send from −∞ to 0 dB: the pan
+/// knob's travel, as Live's send knob's isn't observed.
+pub const SEND_DRAG_TRAVEL: f32 = PAN_DRAG_TRAVEL;
+
 /// A gain in dB, from a linear gain (−∞ for 0).
 #[must_use]
 pub fn gain_db(gain: f64) -> f64 {
@@ -240,6 +252,39 @@ pub fn shift_volume(gain: f64, delta: f64) -> f64 {
     volume_gain(gain_db(gain) + delta)
 }
 
+/// Where a send's knob points, from 0 (−∞) to 1 (0 dB): straight in dB
+/// from the lowest finite level.
+#[must_use]
+pub fn send_position(level: f64) -> f64 {
+    if level <= 0.0 {
+        return 0.0;
+    }
+    ((gain_db(level) - SEND_LOWEST_DB) / -SEND_LOWEST_DB).clamp(0.0, 1.0)
+}
+
+/// The send level a knob position gives, the inverse of
+/// [`send_position`]: 0 (−∞) at the bottom.
+#[must_use]
+pub fn send_level(position: f64) -> f64 {
+    if position <= 0.0 {
+        return 0.0;
+    }
+    db_gain((SEND_LOWEST_DB * (1.0 - position.min(1.0)) * 100.0).round() / 100.0)
+}
+
+/// A send level `steps` dB away (tenths with `fine`), within −∞ to 0 dB,
+/// stepping as volume does at the bottom.
+#[must_use]
+pub fn step_send(level: f64, steps: i32, fine: bool) -> f64 {
+    step_volume(level, steps, fine).min(1.0)
+}
+
+/// A send level as the mixer reads it: dB to one decimal, or `-inf`.
+#[must_use]
+pub fn send_text(level: f64) -> String {
+    volume_text(level)
+}
+
 /// A pan `steps` steps of 50 to a side away, within −1 to 1.
 #[must_use]
 pub fn step_pan(pan: f64, steps: i32) -> f64 {
@@ -261,16 +306,28 @@ pub enum Control {
     Volume,
     /// The pan knob.
     Pan,
+    /// The send knob to this return track.
+    Send(TrackId),
 }
 
 impl Control {
     /// The control's value on a track: the volume's gain, or the pan.
     #[must_use]
     pub fn value(self, doc: &Document, track: TrackId) -> Option<f64> {
-        let mixer = doc.track(track)?.mixer();
+        let t = doc.track(track)?;
+        let mixer = t.mixer();
         Some(match self {
             Self::Volume => mixer.volume,
             Self::Pan => mixer.pan,
+            Self::Send(to) => {
+                let has = t.kind().has_sends()
+                    && doc.track(to).map(bl_model::Track::kind)
+                        == Some(bl_model::TrackKind::Return);
+                if !has {
+                    return None;
+                }
+                t.send(to)
+            }
         })
     }
 
@@ -286,6 +343,10 @@ impl Control {
                 "mixer.set_pan",
                 json!({ "track": track, "pan": value.clamp(-1.0, 1.0) }),
             ),
+            Self::Send(to) => Invocation::new(
+                "mixer.set_send",
+                json!({ "track": track, "to": to, "level": value.clamp(0.0, 1.0) }),
+            ),
         }
     }
 
@@ -297,6 +358,7 @@ impl Control {
         match self {
             Self::Volume => 1.0,
             Self::Pan => PAN_DRAG_TRAVEL,
+            Self::Send(_) => SEND_DRAG_TRAVEL,
         }
     }
 
@@ -306,15 +368,28 @@ impl Control {
         match self {
             Self::Volume => VOLUME_GESTURE,
             Self::Pan => PAN_GESTURE,
+            Self::Send(_) => SEND_GESTURE,
         }
     }
 
-    /// Its default: 0 dB (a double-click's reset, observed), or the centre.
+    /// Its default: 0 dB (a double-click's reset, observed), the centre,
+    /// or a send's −∞, where every send starts.
     #[must_use]
     pub fn default_value(self) -> f64 {
         match self {
             Self::Volume => 1.0,
-            Self::Pan => 0.0,
+            Self::Pan | Self::Send(_) => 0.0,
+        }
+    }
+
+    /// `value` stepped by `steps` as Up and Down step it (tenths of a dB
+    /// with `fine` for the dB controls).
+    #[must_use]
+    pub fn step(self, value: f64, steps: i32, fine: bool) -> f64 {
+        match self {
+            Self::Volume => step_volume(value, steps, fine),
+            Self::Pan => step_pan(value, steps),
+            Self::Send(_) => step_send(value, steps, fine),
         }
     }
 }
@@ -432,8 +507,9 @@ pub fn targets(
 /// when the change began, the changed track first) by `delta`, which a drag
 /// has moved since it began: for volume, points of drag up, which move the
 /// first track's handle as far along [`FADER_SCALE`] and every other track
-/// by the same dB; for pan, the same amount on each (R6, R8). Every value
-/// stays within range.
+/// by the same dB; for pan, the same amount on each; for a send, knob
+/// travel (0 to 1) on the first and the same dB on the others (R6, R8).
+/// Every value stays within range.
 #[must_use]
 pub fn moved(control: Control, starts: &[(TrackId, f64)], delta: f64) -> Vec<Invocation> {
     let Some(&(_, first)) = starts.first() else {
@@ -466,6 +542,28 @@ pub fn moved(control: Control, starts: &[(TrackId, f64)], delta: f64) -> Vec<Inv
             .iter()
             .map(|(track, start)| control.set(*track, (start + delta).clamp(-1.0, 1.0)))
             .collect(),
+        Control::Send(_) => {
+            let now = send_level(send_position(first) + delta);
+            let shift = if now <= 0.0 {
+                f64::NEG_INFINITY
+            } else {
+                gain_db(now) - gain_db(first).max(SEND_LOWEST_DB)
+            };
+            starts
+                .iter()
+                .enumerate()
+                .map(|(i, (track, start))| {
+                    let value = if i == 0 {
+                        now
+                    } else if shift == f64::NEG_INFINITY || *start <= 0.0 {
+                        0.0
+                    } else {
+                        db_gain(gain_db(*start) + shift).min(1.0)
+                    };
+                    control.set(*track, value)
+                })
+                .collect()
+        }
     }
 }
 

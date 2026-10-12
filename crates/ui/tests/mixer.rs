@@ -232,7 +232,7 @@ fn the_session_mixer_sits_where_live_puts_it() {
     let main = column("Main");
     assert_eq!((main.left(), main.right()), (1487.0, 1591.0));
     // The sends' 56 points over the strip, In/Out's 115 over them.
-    let send = rect_of(inside(&nodes, "3 Audio", "A Return").unwrap());
+    let send = rect_of(inside(&nodes, "3 Audio", "A-Return").unwrap());
     assert!(send.top() >= STRIP_TOP - 56.0 && send.bottom() <= STRIP_TOP);
     let input = rect_of(inside(&nodes, "3 Audio", "Input Type").unwrap());
     assert!(input.top() >= STRIP_TOP - 171.0 && input.bottom() <= STRIP_TOP - 56.0);
@@ -283,7 +283,7 @@ fn every_strip_has_its_controls_where_live_has_them() {
     let rows: Vec<f32> = [
         "Input Type",
         "Input Channel",
-        "Monitor",
+        "Monitoring",
         "Output Type",
         "Output Channel",
     ]
@@ -309,11 +309,10 @@ fn every_strip_has_its_controls_where_live_has_them() {
     assert!(cue.disabled && cue.description.contains("Phase 3"));
     assert!(inside(&nodes, "Main", "Solo/Cue Mode").unwrap().disabled);
     assert!(inside(&nodes, "Main", "Track Volume").is_some());
-    assert!(
-        inside(&nodes, "Main", "Return A Pre/Post")
-            .unwrap()
-            .disabled
-    );
+    // Each return's Pre/Post switch, on Main's column, Post in a new set
+    // (observed).
+    let pre_post = inside(&nodes, "Main", "Return A Pre/Post").unwrap();
+    assert!(!pre_post.disabled && pre_post.value == "Post");
 }
 
 // Spec: mixer-view R3, R5. A group's strip has the activator and Solo but
@@ -1067,10 +1066,16 @@ fn every_mixer_control_reaches_assistive_technology() {
     assert_eq!(inside(&nodes, "3 Audio", "Track Pan").unwrap().value, "C");
     let solo = inside(&nodes, "3 Audio", "Solo").unwrap();
     assert_eq!((solo.role, solo.value.as_str()), (Role::Button, "off"));
-    let send = inside(&nodes, "3 Audio", "A Return").unwrap();
-    assert!(send.disabled && send.description.contains("WP-2.19"));
-    let monitor = inside(&nodes, "3 Audio", "Monitor").unwrap();
-    assert!(monitor.disabled && monitor.description.contains("WP-2.13"));
+    // The sends and the In/Out section work since WP-2.19; the audio
+    // interface's channels wait for WP-2.13.
+    let send = inside(&nodes, "3 Audio", "A-Return").unwrap();
+    assert!(!send.disabled && send.value == "-inf dB");
+    let monitor = inside(&nodes, "3 Audio", "Monitoring").unwrap();
+    assert!(!monitor.disabled && monitor.value == "Auto");
+    let input = inside(&nodes, "3 Audio", "Input Type").unwrap();
+    assert!(!input.disabled && input.value == "Ext. In");
+    let channel = inside(&nodes, "3 Audio", "Input Channel").unwrap();
+    assert!(channel.disabled && channel.description.contains("WP-2.13"));
     // A screen reader's increment and decrement step the fader.
     let t = tracks(&h.shell);
     h.accesskit(
@@ -1321,4 +1326,145 @@ fn a_fader_drag_runs_the_recorded_gesture() {
         stored["volumes"], recorded["volumes"],
         "the drag no longer makes the recorded gesture; rewrite it (see this test's comment)"
     );
+}
+
+// Spec: routing R16, R17. The In/Out choosers open on a click and run the
+// chosen entry's routing command; the Monitor switch takes a click on its
+// state.
+#[test]
+fn the_in_out_choosers_and_monitor_route_the_track() {
+    let mut h = session();
+    let t = tracks(&h.shell);
+    let routing = |h: &Harness| *h.shell.editor().document().track(t[2]).unwrap().routing();
+    // Audio From: open the list, choose 4-Audio.
+    let input = control(&mut h, "3 Audio", "Input Type");
+    h.click(input.center());
+    let output = h.settle();
+    let entry = Harness::nodes(&output)
+        .into_iter()
+        .find(|n| n.label == "4-Audio" && n.bounds.is_some())
+        .expect("the list shows the other audio track");
+    let before = h.shell.editor().undo_history().len();
+    h.click(rect_of(&entry).center());
+    h.settle();
+    assert_eq!(
+        routing(&h).input,
+        bl_model::Input::Track {
+            track: t[3],
+            tap: bl_model::Tap::PostMixer
+        }
+    );
+    assert_eq!(h.shell.editor().undo_history().len(), before + 1);
+    assert_eq!(
+        h.shell.editor().undo_history().next(),
+        Some("Change \"Routing\"")
+    );
+    // Monitor: a click on In.
+    let monitor = control(&mut h, "3 Audio", "Monitoring");
+    h.click(pos2(monitor.left() + 3.0, monitor.center().y));
+    h.settle();
+    assert_eq!(routing(&h).monitor, bl_model::Monitor::In);
+    // With the focus on it, Right moves it to Auto.
+    h.key(Key::ArrowRight, Modifiers::NONE);
+    h.settle();
+    assert_eq!(routing(&h).monitor, bl_model::Monitor::Auto);
+    // Audio To: Up and Down on the focused chooser step through the list.
+    let output_type = control(&mut h, "3 Audio", "Output Type");
+    h.click(output_type.center());
+    h.key(Key::Escape, Modifiers::NONE);
+    h.settle();
+    h.ctx.memory_mut(|m| {
+        m.request_focus(bl_ui::in_out::control_id(
+            Place::Mixer(MixerOf::Session),
+            t[2],
+            bl_ui::focus::Slot::OutputType,
+            0,
+        ));
+    });
+    h.settle();
+    h.key(Key::ArrowDown, Modifiers::NONE);
+    h.settle();
+    assert_eq!(routing(&h).output, bl_model::Output::Track { track: t[3] });
+    let nodes = tree(&mut h);
+    assert_eq!(
+        inside(&nodes, "3 Audio", "Output Channel").unwrap().value,
+        "Track In"
+    );
+}
+
+// Spec: routing R18. A send knob drags from −∞ to 0 dB as one undo step;
+// a double-click puts it back to −∞.
+#[test]
+fn a_send_knob_drags_as_one_undo_step() {
+    let mut h = session();
+    let t = tracks(&h.shell);
+    let ret = h.shell.editor().document().returns().next().unwrap();
+    let send = |h: &Harness| h.shell.editor().document().track(t[2]).unwrap().send(ret);
+    let knob = control(&mut h, "3 Audio", "A-Return");
+    let before = h.shell.editor().undo_history().len();
+    let levels = drag(
+        &mut h,
+        knob.center(),
+        &[vec2(0.0, -2.0); 40],
+        Modifiers::NONE,
+        send,
+    );
+    assert_eq!(levels[0], 0.0, "a press doesn't move it");
+    assert_eq!(*levels.last().unwrap(), 1.0, "it stops at 0 dB");
+    assert!(levels.windows(2).all(|w| w[0] <= w[1]));
+    assert_eq!(h.shell.editor().undo_history().len(), before + 1);
+    assert_eq!(
+        h.shell.editor().undo_history().next(),
+        Some(controls::SEND_GESTURE)
+    );
+    let nodes = tree(&mut h);
+    assert_eq!(
+        inside(&nodes, "3 Audio", "A-Return").unwrap().value,
+        "0.0 dB"
+    );
+    // Up and Down step a dB.
+    h.key(Key::ArrowDown, Modifiers::NONE);
+    h.settle();
+    assert!((controls::gain_db(send(&h)) + 1.0).abs() < 1e-9);
+    // A double-click: back to -inf.
+    let at = knob.center();
+    for _ in 0..2 {
+        h.click(at);
+    }
+    h.frame(vec![Event::PointerButton {
+        pos: at,
+        button: PointerButton::Primary,
+        pressed: true,
+        modifiers: Modifiers::NONE,
+    }]);
+    h.frame(vec![Event::PointerButton {
+        pos: at,
+        button: PointerButton::Primary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    }]);
+    h.settle();
+    assert_eq!(send(&h), 0.0);
+    // Control::Send names the knob's command, as an agent runs it.
+    assert_eq!(Control::Send(ret).set(t[2], 0.5).id, "mixer.set_send");
+}
+
+// Spec: routing R19. A return's Pre/Post switch, on Main's column.
+#[test]
+fn a_returns_pre_post_switch_on_mains_column_switches_it() {
+    let mut h = session();
+    let ret = h.shell.editor().document().returns().next().unwrap();
+    let switch = control(&mut h, "Main", "Return A Pre/Post");
+    h.click(switch.center());
+    h.settle();
+    let tap = |h: &Harness| h.shell.editor().document().track(ret).unwrap().mixer().tap;
+    assert_eq!(tap(&h), bl_model::SendTap::Pre);
+    let nodes = tree(&mut h);
+    assert_eq!(
+        inside(&nodes, "Main", "Return A Pre/Post").unwrap().value,
+        "Pre"
+    );
+    h.click(switch.center());
+    h.settle();
+    assert_eq!(tap(&h), bl_model::SendTap::Post);
 }

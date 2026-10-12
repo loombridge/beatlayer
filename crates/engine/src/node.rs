@@ -36,6 +36,10 @@ pub enum NodeKey {
         /// The return track.
         to: TrackId,
     },
+    /// A track's own input taken from another track, or from Main for
+    /// Resampling (the routing spec). Its parameters are
+    /// [`mixer::route`](crate::mixer::route).
+    Input(TrackId),
 }
 
 impl fmt::Display for NodeKey {
@@ -46,6 +50,7 @@ impl fmt::Display for NodeKey {
             Self::Mixer(track) => write!(f, "the mixer of {track}"),
             Self::Output(track) => write!(f, "the output of {track}"),
             Self::Send { track, to } => write!(f, "the send from {track} to {to}"),
+            Self::Input(track) => write!(f, "the input of {track}"),
         }
     }
 }

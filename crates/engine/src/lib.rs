@@ -95,6 +95,7 @@ pub mod preview;
 mod processor;
 mod program;
 mod registry;
+pub mod routing;
 mod sources;
 mod state;
 pub mod transport;

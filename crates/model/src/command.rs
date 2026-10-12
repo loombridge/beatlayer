@@ -14,7 +14,7 @@ use crate::document::Document;
 use crate::error::ModelError;
 use crate::ids::{ClipId, DeviceId, ParamId, TrackId};
 use crate::shared::Shared;
-use crate::track::{Mixer, SendTap, Track, TrackKind};
+use crate::track::{Input, Mixer, Monitor, Output, SendTap, Track, TrackKind};
 
 /// One edit to a document.
 ///
@@ -176,6 +176,35 @@ pub enum Command {
     SetSoloInPlace {
         /// Whether soloing a track keeps the return tracks audible.
         enabled: bool,
+    },
+    /// Sets where an audio or MIDI track takes its input from: Audio From
+    /// or MIDI From, with its channel.
+    SetInput {
+        /// The track.
+        track: TrackId,
+        /// The input.
+        input: Input,
+    },
+    /// Sets an audio or MIDI track's Monitor switch.
+    SetMonitor {
+        /// The track.
+        track: TrackId,
+        /// `in`, `auto`, or `off`.
+        monitor: Monitor,
+    },
+    /// Sets where a track's audio goes: Audio To.
+    SetOutput {
+        /// The track.
+        track: TrackId,
+        /// The output.
+        output: Output,
+    },
+    /// Sets where a MIDI track's MIDI goes: MIDI To.
+    SetMidiOutput {
+        /// The MIDI track.
+        track: TrackId,
+        /// Another MIDI track, or `null` (or nothing) for No Output.
+        to: Option<TrackId>,
     },
 
     /// Puts a new clip on an audio or MIDI track. Its data must match the
@@ -373,6 +402,10 @@ impl Command {
             Self::SetSend { .. } => "Change send",
             Self::SetSendTap { .. } => "Switch Pre/Post",
             Self::SetSoloInPlace { .. } => "Switch Solo in Place",
+            Self::SetInput { .. } | Self::SetOutput { .. } | Self::SetMidiOutput { .. } => {
+                "Change \"Routing\""
+            }
+            Self::SetMonitor { .. } => "Change monitoring",
             Self::CreateClip { .. } => "Create clip",
             Self::DeleteClip { .. } => "Delete clip",
             Self::MoveClip { .. } => "Move clip",
@@ -553,6 +586,24 @@ impl Document {
                 self.settings.solo_in_place = *enabled;
                 Ok(())
             }
+            Command::SetInput { track, input } => {
+                self.edit_routing(*track, |routing| routing.input = *input)
+            }
+            Command::SetMonitor { track, monitor } => {
+                check_kind(
+                    self.track_ref(*track)?,
+                    TrackKind::holds_clips,
+                    AUDIO_OR_MIDI,
+                )?;
+                self.edit_routing(*track, |routing| routing.monitor = *monitor)
+            }
+            Command::SetOutput { track, output } => {
+                let output = self.normal_output(*track, *output);
+                self.edit_routing(*track, |routing| routing.output = output)
+            }
+            Command::SetMidiOutput { track, to } => {
+                self.edit_routing(*track, |routing| routing.midi_output = *to)
+            }
             Command::CreateClip { track, clip } => self.create_clip(*track, clip),
             Command::DeleteClip { clip } => {
                 let owner = self.clip_owner(*clip)?;
@@ -699,7 +750,9 @@ impl Document {
         list.remove(position);
 
         let mut doomed = vec![id];
+        let mut gone = BTreeSet::new();
         while let Some(id) = doomed.pop() {
+            gone.insert(id);
             let track = self.tracks.remove(&id).ok_or(ModelError::NoSuchTrack(id))?;
             self.index.parent.remove(&id);
             for clip in track.clips.keys() {
@@ -710,6 +763,7 @@ impl Document {
             }
             doomed.extend(track.children.iter().copied());
         }
+        self.forget_routes_to(&gone);
         if kind == TrackKind::Return {
             // Every send to the return goes with it.
             let senders: Vec<TrackId> = self
@@ -723,6 +777,21 @@ impl Document {
             }
         }
         Ok(())
+    }
+
+    /// Changes a track's routing and checks it.
+    fn edit_routing(
+        &mut self,
+        id: TrackId,
+        edit: impl FnOnce(&mut crate::track::Routing),
+    ) -> Result<(), ModelError> {
+        let mut routing = self.track_ref(id)?.routing;
+        edit(&mut routing);
+        if routing == self.track_ref(id)?.routing {
+            return Ok(());
+        }
+        self.track_mut(id)?.routing = routing;
+        self.check_routing(id)
     }
 
     /// Turns a mixer switch (solo or arm) on for `track` and off on every
@@ -775,6 +844,10 @@ impl Document {
             Some(parent) => self.index.parent.insert(id, parent),
             None => self.index.parent.remove(&id),
         };
+        if kind != TrackKind::Return {
+            self.settle_output(id, old_parent);
+            self.check_routing(id)?;
+        }
         Ok(())
     }
 

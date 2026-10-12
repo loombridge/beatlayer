@@ -67,6 +67,7 @@ mod error;
 mod ids;
 pub mod registry;
 mod repr;
+mod routing;
 mod shared;
 mod track;
 
@@ -80,4 +81,4 @@ pub use error::ModelError;
 pub use ids::{ClipId, ContentHash, DeviceId, ParamId, ParseContentHashError, TrackId};
 /// The persistent collections the document's public types hold.
 pub use imbl::{OrdMap, Vector};
-pub use track::{Mixer, SendTap, Track, TrackKind};
+pub use track::{Input, Mixer, Monitor, Output, Routing, SendTap, Tap, Track, TrackKind};

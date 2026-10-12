@@ -462,7 +462,7 @@ fn group_and_return() -> Scene {
     song.tone(c, 523.25, -24.0);
     let beside = song.track(TrackKind::Midi, "Beside", None);
     song.tone(beside, 196.0, -30.0);
-    // Returns have no sends yet (WP-2.19), so this one has a tone of its own.
+    // Returns have no sends yet (WP-2.19b), so this one has a tone of its own.
     let ret = song.track(TrackKind::Return, "Return", None);
     song.tone(ret, 660.0, -30.0);
     song.volume(ret, 0.5);

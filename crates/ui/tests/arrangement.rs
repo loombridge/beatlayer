@@ -545,16 +545,22 @@ fn every_part_reaches_assistive_technology() {
     assert!(!follow.disabled);
     assert_eq!(follow.value, "on");
     // The headers' mixer controls work since WP-1.9 (the mixer view spec,
-    // R4); the sends wait for WP-2.19.
+    // R4), and the sends and In/Out choosers since WP-2.19.
     let solo = nodes.iter().find(|n| n.label == "Solo").unwrap();
     assert!(!solo.disabled);
-    // A send is named by its return track (observed in Live 12.4.6), or by
-    // its letter where the set has no return for it.
-    let send = nodes
+    // Nothing waits for WP-2.19 any more (a MIDI track without an
+    // instrument shows no sends, and the audio tracks' headers here are
+    // too short for theirs).
+    assert!(
+        !nodes
+            .iter()
+            .any(|n| n.description.contains("WP-2.19") && !n.description.contains("WP-2.19b"))
+    );
+    let input = nodes
         .iter()
-        .find(|n| n.role == Role::Slider && n.description.contains("WP-2.19"))
+        .find(|n| n.role == Role::ComboBox && n.label == "Input Type")
         .unwrap();
-    assert!(send.disabled && send.description.contains("WP-2.19"));
+    assert!(!input.disabled);
     let locator = Harness::node(&nodes, "Set Locator");
     assert!(locator.disabled && locator.description.contains("M6"));
     for name in [

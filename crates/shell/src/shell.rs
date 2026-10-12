@@ -1478,7 +1478,7 @@ impl Shell {
             let doc = self.editor.document();
             let (index, name) = if kind == TrackKind::Return {
                 let index = doc.returns().len();
-                let letter = char::from(b'A' + (index % 26) as u8);
+                let letter = crate::routing::return_letter(index);
                 (index, format!("{letter} Return"))
             } else {
                 let index = doc.top_level().len();

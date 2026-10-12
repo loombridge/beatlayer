@@ -71,6 +71,12 @@ pub fn switch_id(place: Place, switch: Switch, track: TrackId) -> Id {
     Id::new(("mixer-switch", place, switch, track))
 }
 
+/// The ID of a send knob.
+#[must_use]
+pub fn send_id(place: Place, track: TrackId, to: TrackId) -> Id {
+    Id::new(("mixer-send", place, track, to))
+}
+
 /// The ID of a meter.
 #[must_use]
 pub fn meter_id(place: Place, track: TrackId) -> Id {
@@ -331,15 +337,31 @@ impl MixerUi {
                 title_colour(theme, track, t.kind()),
             );
             let label = activator_label(column);
-            if let Some(span) = layout.in_out {
-                in_out_section(&mut column_ui, theme, column, span, t.kind());
+            if let Some(span) = layout.in_out
+                && let Some(section) = bl_shell::routing::in_out(doc, track)
+            {
+                let parts = crate::in_out::InOutParts {
+                    theme,
+                    place,
+                    track,
+                };
+                parts.draw(
+                    &mut column_ui,
+                    &section,
+                    true,
+                    |i| Some(in_out_row(column.rect, span, i)),
+                    events,
+                );
             }
             if let Some(span) = layout.sends {
-                let names: Vec<&str> = returns
-                    .iter()
-                    .filter_map(|r| doc.track(*r).map(bl_model::Track::name))
-                    .collect();
-                sends_section(&mut column_ui, theme, column, span, &names);
+                let parts = StripParts {
+                    shell,
+                    theme,
+                    place,
+                    track,
+                    activator: &label,
+                };
+                parts.sends_section(&mut column_ui, column, span, &returns, events);
             }
             if let Some(span) = layout.strip {
                 let strip = StripLayout::compute(column.rect, span);
@@ -555,118 +577,6 @@ fn midi_only(doc: &Document, track: TrackId) -> bool {
         .is_some_and(|t| t.kind() == TrackKind::Midi && t.devices().len() == 0)
 }
 
-/// The In/Out section's rows, drawn and disabled until routing and
-/// recording (R5).
-fn in_out_section(ui: &mut Ui, theme: &Theme, column: &Column, span: (f32, f32), kind: TrackKind) {
-    let rows: &[(&str, &str, &str)] = match column.kind {
-        ColumnKind::Track if matches!(kind, TrackKind::Audio | TrackKind::Midi) => &[
-            ("From", "", ""),
-            (
-                "Input Type",
-                if kind == TrackKind::Midi {
-                    "All Ins"
-                } else {
-                    "Ext. In"
-                },
-                "WP-2.13",
-            ),
-            (
-                "Input Channel",
-                if kind == TrackKind::Midi {
-                    "All Channels"
-                } else {
-                    "1/2"
-                },
-                "WP-2.13",
-            ),
-            ("Monitor", "In Auto Off", "WP-2.13"),
-            ("To", "", ""),
-            ("Output Type", "Main", "WP-2.19"),
-            ("Output Channel", "", "WP-2.19"),
-        ],
-        // A group's and a return's In/Out show only Audio To (observed).
-        ColumnKind::Track | ColumnKind::Return => {
-            &[("Audio To", "", ""), ("Output Type", "Main", "WP-2.19")]
-        }
-        ColumnKind::Main => &[
-            ("Cue Out", "", ""),
-            ("Cue Output", "1/2", "Phase 3"),
-            ("Main Out", "", ""),
-            ("Main Output", "1/2", "WP-2.19"),
-        ],
-    };
-    for (i, (name, text, package)) in rows.iter().enumerate() {
-        let rect = in_out_row(column.rect, span, i);
-        if package.is_empty() {
-            ui.painter_at(rect).text(
-                rect.left_center(),
-                Align2::LEFT_CENTER,
-                *name,
-                theme.small_font(),
-                theme.colors.text_dim.0,
-            );
-        } else {
-            pending(
-                ui,
-                theme,
-                rect,
-                Id::new((
-                    "mixer-in-out",
-                    column.rect.left().to_bits(),
-                    i,
-                    span.0.to_bits(),
-                )),
-                Role::ComboBox,
-                name,
-                text,
-                package,
-            );
-        }
-    }
-}
-
-/// The Sends section: a knob per return, disabled until WP-2.19 (R5).
-/// Each send is named by its return track, as Live's accessibility tree
-/// names them ("A-Reverb"; observed in Live 12.4.6).
-fn sends_section(ui: &mut Ui, theme: &Theme, column: &Column, span: (f32, f32), returns: &[&str]) {
-    let names = returns;
-    let returns = names.len();
-    for index in 0..returns {
-        let rect = send_knob(column.rect, span, index, returns);
-        let letter = char::from(b'A' + (index % 26) as u8).to_string();
-        let (name, text) = if column.kind == ColumnKind::Main {
-            (format!("Return {letter} Pre/Post"), "Post".to_owned())
-        } else {
-            (
-                names
-                    .get(index)
-                    .map_or_else(|| format!("Send {letter}"), |n| (*n).to_owned()),
-                letter.clone(),
-            )
-        };
-        pending(
-            ui,
-            theme,
-            rect,
-            Id::new((
-                "mixer-send",
-                column.rect.left().to_bits(),
-                index,
-                span.0.to_bits(),
-            )),
-            Role::Slider,
-            &name,
-            &text,
-            "WP-2.19",
-        );
-        if column.kind == ColumnKind::Return {
-            // A return's own sends are dimmed (L-MIX-002).
-            ui.painter_at(rect)
-                .rect_filled(rect, 0.0, theme.colors.panel.0.gamma_multiply(0.5));
-        }
-    }
-}
-
 /// A control another package brings: drawn and named where Live has it,
 /// disabled, and saying which package brings it.
 #[expect(clippy::too_many_arguments, reason = "one control, described in full")]
@@ -725,6 +635,168 @@ pub struct StripParts<'a> {
 }
 
 impl StripParts<'_> {
+    /// The Sends section (R5; the routing spec): a knob per return, in two
+    /// staggered rows. A return's own sends are dimmed until WP-2.19b
+    /// enables them; Main's column holds each return's Pre/Post switch.
+    fn sends_section(
+        &self,
+        ui: &mut Ui,
+        column: &Column,
+        span: (f32, f32),
+        returns: &[TrackId],
+        events: &mut Vec<UiEvent>,
+    ) {
+        let doc = self.doc();
+        for (index, &to) in returns.iter().enumerate() {
+            let rect = send_knob(column.rect, span, index, returns.len());
+            match column.kind {
+                ColumnKind::Main => self.pre_post(ui, rect, to, index, events),
+                ColumnKind::Return => {
+                    let letter = bl_shell::routing::return_letter(index);
+                    let name = doc
+                        .track(to)
+                        .map_or_else(String::new, |t| t.name().to_owned());
+                    pending(
+                        ui,
+                        self.theme,
+                        rect,
+                        Id::new(("mixer-return-send", self.place, self.track, index)),
+                        Role::Slider,
+                        &name,
+                        &letter,
+                        "WP-2.19b",
+                    );
+                    // A return's own sends are dimmed (L-MIX-002).
+                    ui.painter_at(rect).rect_filled(
+                        rect,
+                        0.0,
+                        self.theme.colors.panel.0.gamma_multiply(0.5),
+                    );
+                }
+                // A MIDI track without an instrument has no sends to
+                // show (observed: none in its Tab order).
+                ColumnKind::Track if midi_only(doc, self.track) => {}
+                ColumnKind::Track => self.send(ui, rect, to, index, events),
+            }
+        }
+    }
+
+    /// A send knob (R5; the routing spec): drags, keys, and a double-click
+    /// as the other value controls, from −∞ to 0 dB.
+    pub fn send(
+        &self,
+        ui: &mut Ui,
+        rect: Rect,
+        to: TrackId,
+        index: usize,
+        events: &mut Vec<UiEvent>,
+    ) {
+        let doc = self.doc();
+        let control = Control::Send(to);
+        let Some(level) = control.value(doc, self.track) else {
+            return;
+        };
+        let response = ui.interact(
+            rect,
+            send_id(self.place, self.track, to),
+            Sense::click_and_drag(),
+        );
+        self.register(ui, response.id, crate::focus::Slot::Send(index));
+        self.escape_to_title(ui, &response);
+        self.value_drag(ui, &response, control, events);
+        self.value_keys(ui, &response, control, events);
+        let c = &self.theme.colors;
+        let painter = ui.painter_at(rect.expand(2.0));
+        let letter = bl_shell::routing::return_letter(index);
+        if self.place == Place::Header {
+            painter.rect_filled(rect, self.theme.sizes.corner, c.control.0);
+            painter.text(
+                rect.center(),
+                Align2::CENTER_CENTER,
+                &letter,
+                self.theme.small_font(),
+                c.text.0,
+            );
+        } else {
+            // A knob: a ring, an arc for the level, and the return's letter.
+            let centre = rect.center();
+            let radius = (rect.height().min(rect.width()) * 0.5 - 1.0).max(2.0);
+            painter.circle_stroke(centre, radius, Stroke::new(1.0, c.separator.0));
+            let position = controls::send_position(level) as f32;
+            let sweep = std::f32::consts::FRAC_PI_4 * 3.0;
+            let angle = -sweep + 2.0 * sweep * position;
+            let tip = centre + vec2(angle.sin(), -angle.cos()) * radius;
+            painter.line_segment([centre, tip], Stroke::new(2.0, c.text.0));
+            painter.text(
+                pos2(centre.x, rect.bottom()),
+                Align2::CENTER_BOTTOM,
+                &letter,
+                self.theme.small_font(),
+                c.text_dim.0,
+            );
+        }
+        focus_ring(&painter, self.theme, rect, &response);
+        // Named by its return track, as Live's tree names sends
+        // ("A-Reverb"; observed in Live 12.4.6).
+        let name = bl_shell::routing::track_label(doc, to);
+        self.describe_value(
+            ui,
+            &response,
+            &name,
+            format!("{} dB", controls::send_text(level)),
+            level,
+            (0.0, 1.0),
+        );
+    }
+
+    /// A return's Pre/Post switch, on Main's column (L-MIX-002): a click
+    /// switches it.
+    fn pre_post(
+        &self,
+        ui: &mut Ui,
+        rect: Rect,
+        to: TrackId,
+        index: usize,
+        events: &mut Vec<UiEvent>,
+    ) {
+        let Some(tap) = self.doc().track(to).map(|t| t.mixer().tap) else {
+            return;
+        };
+        let pre = tap == bl_model::SendTap::Pre;
+        let id = Id::new(("mixer-pre-post", self.place, to));
+        let response = ui.interact(rect, id, Sense::click());
+        // In Main's Tab order where a track's sends are (where Live puts it
+        // isn't observed).
+        self.register(ui, id, crate::focus::Slot::Send(index));
+        let c = &self.theme.colors;
+        let painter = ui.painter_at(rect.expand(2.0));
+        painter.rect_filled(
+            rect,
+            self.theme.sizes.corner,
+            if pre { c.accent.0 } else { c.control.0 },
+        );
+        painter.text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            if pre { "Pre" } else { "Post" },
+            self.theme.small_font(),
+            if pre { c.accent_text.0 } else { c.text.0 },
+        );
+        focus_ring(&painter, self.theme, rect, &response);
+        if response.clicked() {
+            events.push(UiEvent::Invoke(Invocation::new(
+                "mixer.set_send_tap",
+                json!({ "track": to, "tap": if pre { "post" } else { "pre" } }),
+            )));
+        }
+        let letter = bl_shell::routing::return_letter(index);
+        let name = format!("Return {letter} Pre/Post");
+        response.widget_info(|| WidgetInfo::selected(WidgetType::Button, true, pre, &name));
+        ui.ctx().accesskit_node_builder(id, |node| {
+            node.set_value(if pre { "Pre" } else { "Post" }.to_owned());
+        });
+    }
+
     /// A whole strip (R3), where Live has each control: the peak level
     /// readout, pan, the activator, Solo, and Arm in a column, the fader,
     /// the meter, and its scale. A MIDI track without an instrument shows a
@@ -926,13 +998,8 @@ impl StripParts<'_> {
                 .starts(control)
                 .iter()
                 .filter_map(|(t, _)| {
-                    let mixer = doc.track(*t)?.mixer();
-                    Some(match control {
-                        Control::Volume => {
-                            control.set(*t, controls::step_volume(mixer.volume, steps, fine))
-                        }
-                        Control::Pan => control.set(*t, controls::step_pan(mixer.pan, steps)),
-                    })
+                    let value = control.value(doc, *t)?;
+                    Some(control.set(*t, control.step(value, steps, fine)))
                 })
                 .collect();
             Self::run_all(events, control.gesture(), invocations);

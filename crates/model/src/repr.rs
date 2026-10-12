@@ -19,7 +19,7 @@ use crate::document::{Document, Index, Settings};
 use crate::error::ModelError;
 use crate::ids::TrackId;
 use crate::shared::Shared;
-use crate::track::{Mixer, Track, TrackKind};
+use crate::track::{Mixer, Routing, Track, TrackKind};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct DocumentRepr {
@@ -39,6 +39,10 @@ struct TrackRepr {
     /// Sets saved before WP-1.6 have none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     sends: Vec<(TrackId, f64)>,
+    /// The In/Out settings, saved only where they differ from a new
+    /// track's of its kind. Sets saved before WP-2.19 have none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    routing: Option<Routing>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     devices: Vec<Device>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -77,6 +81,7 @@ impl TrackRepr {
             name: track.name.clone(),
             mixer: track.mixer,
             sends: track.sends().collect(),
+            routing: (track.routing != Routing::new(track.kind)).then_some(track.routing),
             devices: track.devices().cloned().collect(),
             clips: track.clips().cloned().collect(),
             children: track
@@ -117,14 +122,20 @@ impl TryFrom<DocumentRepr> for Document {
             .into_iter()
             .map(|track| loader.add_grouped(track, None))
             .collect::<Result<Vector<_>, _>>()?;
-        Ok(Self {
+        let document = Self {
             settings: repr.settings,
             main,
             top,
             returns,
             tracks: loader.tracks,
             index: loader.index,
-        })
+        };
+        // Routing names tracks anywhere in the tree, so it's checked once
+        // every track is in.
+        for id in document.track_order() {
+            document.check_routing(id)?;
+        }
+        Ok(document)
     }
 }
 
@@ -161,6 +172,9 @@ impl Loader {
         }
         let mut track = Track::new(id, repr.kind, repr.name);
         track.mixer = repr.mixer;
+        if let Some(routing) = repr.routing {
+            track.routing = routing;
+        }
         check_mixer(&track)?;
         if !repr.sends.is_empty() && !repr.kind.has_sends() {
             return Err(wrong_kind_of(

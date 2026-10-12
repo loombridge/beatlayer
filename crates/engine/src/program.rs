@@ -5,7 +5,7 @@ use core::fmt;
 use core::ops::Range;
 
 use bl_core::time::{SampleRate, TempoMap};
-use bl_model::{ParamId, TrackId};
+use bl_model::{ParamId, Tap, TrackId};
 
 use crate::mixer::{MeterReading, Route, TrackMixer};
 use crate::node::{Block, Node, NodeEvent, NodeKey, ParamValue, TransportInfo};
@@ -17,12 +17,15 @@ use crate::node::{Block, Node, NodeEvent, NodeKey, ParamValue, TransportInfo};
 /// # Tasks
 ///
 /// The unit of work is a task: one track, run in place on the track's own
-/// buffer. A task sums its inputs into its buffer (a group's tracks, Main's
-/// top-level tracks and returns, or a return's sends), each through a
-/// [`Route`] whose gain solo and send levels set; runs the track's device
-/// chain; and then its [`TrackMixer`] (pan, volume, the activator, the
-/// meters). A task whose track feeds a pre-fader send first keeps a copy of
-/// its chain's output for the send to read (the mixer spec).
+/// buffer. A task plays its track's clips, if it has a clip player; sums
+/// its inputs into its buffer (a group's tracks, Main's top-level tracks
+/// and returns, a return's sends, and the tracks routed into its input),
+/// each through a [`Route`] whose gain solo, send levels, and monitoring
+/// set; runs the track's device chain; and then its [`TrackMixer`] (pan,
+/// volume, the activator, the meters). A task whose signal another task
+/// takes before its devices or before its mixer (a pre-fader send, or an
+/// input's Pre FX or Post FX) keeps a copy there for it to read (the mixer
+/// and routing specs).
 ///
 /// A task can start once every task feeding it has finished, so the tasks
 /// form a dependency graph. Each task lists the tasks waiting on it and how
@@ -61,9 +64,9 @@ pub struct EngineProgram {
     pub(crate) task_dependents: Vec<u32>,
     /// One buffer per task: `channels` channels of `max_frames` frames each.
     pub(crate) pool: Vec<f32>,
-    /// One buffer per task that feeds a pre-fader send, holding its chain's
-    /// output from before its mixer.
-    pub(crate) pre_pool: Vec<f32>,
+    /// The copies tasks keep of their signal before their devices or
+    /// before their mixer, for routes that tap there: one buffer each.
+    pub(crate) tap_pool: Vec<f32>,
     pub(crate) channels: usize,
     pub(crate) max_frames: usize,
     /// The task whose buffer is the engine's output: Main's.
@@ -129,9 +132,8 @@ pub(crate) struct Input {
     pub(crate) route: u32,
     /// The task whose signal it carries.
     pub(crate) from: u32,
-    /// Whether it takes that task's signal from before its mixer (a
-    /// pre-fader send) rather than after.
-    pub(crate) pre: bool,
+    /// Where in that task the signal is taken.
+    pub(crate) tap: Tap,
 }
 
 /// One track.
@@ -139,12 +141,18 @@ pub(crate) struct Input {
 pub(crate) struct Task {
     pub(crate) track: TrackId,
     pub(crate) inputs: Span,
+    /// The slot of the track's clip player, which runs first.
+    pub(crate) player: Option<u32>,
     /// The device chain.
     pub(crate) nodes: Span,
     /// The slot of the track's mixer.
     pub(crate) mixer: u32,
-    /// The task's buffer in `pre_pool`, if a pre-fader send reads it.
-    pub(crate) pre: Option<u32>,
+    /// The task's buffer in `tap_pool` for its signal before its devices,
+    /// if a route reads it.
+    pub(crate) pre_fx: Option<u32>,
+    /// The task's buffer in `tap_pool` for its signal after its devices and
+    /// before its mixer, if a route reads it.
+    pub(crate) post_fx: Option<u32>,
     pub(crate) dependents: Span,
     /// How many tasks feed this one.
     pub(crate) dependencies: u32,
@@ -320,13 +328,34 @@ impl EngineProgram {
             let t = self.order[position] as usize;
             let task = self.tasks[t];
             let own = t * size..(t + 1) * size;
-
-            // Sum the inputs into the task's own buffer, each through its
-            // route.
             for c in 0..channels {
                 let start = own.start + c * stride;
                 self.pool[start..start + frames].fill(0.0);
             }
+
+            // The clips first, alone in the buffer, so the player's gate
+            // (Monitor In silences them) scales only them.
+            if let Some(slot) = task.player {
+                delivered += gather(events, slot, from, until, scratch);
+                if let Some(node) = self.slots[slot as usize]
+                    .node
+                    .as_mut()
+                    .and_then(Instance::as_node)
+                {
+                    node.process(&mut Block {
+                        data: &mut self.pool[own.clone()],
+                        channels,
+                        frames,
+                        stride,
+                        events: scratch.as_slice(),
+                        transport,
+                        sample_rate: self.sample_rate,
+                        tempo: &self.tempo,
+                    });
+                }
+            }
+
+            // Add the inputs, each through its route.
             for &input in &self.task_inputs[task.inputs.range()] {
                 delivered += gather(events, input.route, from, until, scratch);
                 let Some(Some(Instance::Route(route))) = self
@@ -337,24 +366,13 @@ impl EngineProgram {
                     continue;
                 };
                 let source = input.from as usize;
-                let pre = if input.pre {
-                    self.tasks[source].pre
-                } else {
-                    None
+                let kept = match input.tap {
+                    Tap::PreFx => self.tasks[source].pre_fx,
+                    Tap::PostFx => self.tasks[source].post_fx,
+                    Tap::PostMixer => None,
                 };
-                match pre {
-                    Some(buffer) => {
-                        let theirs = buffer as usize * size..(buffer as usize + 1) * size;
-                        route.mix(
-                            &mut self.pool[own.clone()],
-                            &self.pre_pool[theirs],
-                            channels,
-                            stride,
-                            frames,
-                            scratch,
-                        );
-                    }
-                    None => {
+                match (input.tap, kept) {
+                    (Tap::PostMixer, _) => {
                         let theirs = source * size..(source + 1) * size;
                         let Ok([mine, theirs]) = self.pool.get_disjoint_mut([own.clone(), theirs])
                         else {
@@ -362,7 +380,24 @@ impl EngineProgram {
                         };
                         route.mix(mine, theirs, channels, stride, frames, scratch);
                     }
+                    (_, Some(buffer)) => {
+                        let theirs = buffer as usize * size..(buffer as usize + 1) * size;
+                        route.mix(
+                            &mut self.pool[own.clone()],
+                            &self.tap_pool[theirs],
+                            channels,
+                            stride,
+                            frames,
+                            scratch,
+                        );
+                    }
+                    (_, None) => {}
                 }
+            }
+
+            // Keep the signal before the devices for routes that tap it.
+            if let Some(buffer) = task.pre_fx {
+                self.keep(buffer, own.start, frames);
             }
 
             // Run the chain in place.
@@ -388,15 +423,10 @@ impl EngineProgram {
                 });
             }
 
-            // Keep the chain's output for pre-fader sends.
-            if let Some(buffer) = task.pre {
-                let kept = buffer as usize * size;
-                for c in 0..channels {
-                    let at = c * stride;
-                    let mine = own.start + at;
-                    self.pre_pool[kept + at..kept + at + frames]
-                        .copy_from_slice(&self.pool[mine..mine + frames]);
-                }
+            // Keep the chain's output for pre-fader sends and Post FX
+            // inputs.
+            if let Some(buffer) = task.post_fx {
+                self.keep(buffer, own.start, frames);
             }
 
             // The track's mixer.
@@ -419,6 +449,18 @@ impl EngineProgram {
             }
         }
         delivered
+    }
+
+    /// Copies `frames` frames of the task buffer at `own` into the tap
+    /// buffer `buffer`.
+    fn keep(&mut self, buffer: u32, own: usize, frames: usize) {
+        let size = self.channels * self.max_frames;
+        let kept = buffer as usize * size;
+        for c in 0..self.channels {
+            let at = c * self.max_frames;
+            self.tap_pool[kept + at..kept + at + frames]
+                .copy_from_slice(&self.pool[own + at..own + at + frames]);
+        }
     }
 
     /// The output's channel `c` from the last run, `frames` long.

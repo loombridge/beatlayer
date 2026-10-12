@@ -63,7 +63,7 @@ impl TrackKind {
     /// Whether tracks of this kind have a send to each return track: audio,
     /// MIDI, and group tracks do. (Live gives return tracks sends too,
     /// switched off until the user enables them; Beatlayer adds those with
-    /// WP-2.19.)
+    /// WP-2.19b, with the track context menu's Enable Send.)
     #[must_use]
     pub const fn has_sends(self) -> bool {
         matches!(self, Self::Audio | Self::Midi | Self::Group)
@@ -104,6 +104,183 @@ impl SendTap {
     #[must_use]
     pub fn is_post(&self) -> bool {
         *self == Self::Post
+    }
+}
+
+/// Where a track takes its input from: the In/Out section's input type
+/// chooser, Audio From on an audio track and MIDI From on a MIDI track, with
+/// its channel (the routing spec).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[schemars(
+    description = "Where a track takes its input from. Audio tracks: `external` (Ext. In, the \
+                   audio interface's inputs; a new audio track's), `resampling` (the Main \
+                   output), `track` (another audio track, a return, or Main, tapped at `tap`), \
+                   or `none` (No Input). MIDI tracks: `all_ins` (every MIDI input; a new MIDI \
+                   track's), `computer_keyboard`, `track` (another MIDI track), or `none`."
+)]
+pub enum Input {
+    /// No Input.
+    None,
+    /// Ext. In: the audio interface's inputs. Audio tracks only; it carries
+    /// silence until duplex audio (WP-2.13).
+    External,
+    /// All Ins: every MIDI input port, merged. MIDI tracks only; MIDI input
+    /// arrives with WP-2.2.
+    AllIns,
+    /// The computer MIDI keyboard. MIDI tracks only (WP-2.2).
+    ComputerKeyboard,
+    /// Resampling: the Main output. Audio tracks only.
+    Resampling,
+    /// Another track's signal.
+    Track {
+        /// The track: for an audio track, another audio track, a return
+        /// track, or Main; for a MIDI track, another MIDI track.
+        track: TrackId,
+        /// Where in that track the signal is taken: Post Mixer if it's left
+        /// out.
+        #[serde(default, skip_serializing_if = "Tap::is_post_mixer")]
+        tap: Tap,
+    },
+}
+
+/// Where a track's signal is taken when another track takes it as its
+/// input: the input channel chooser's Pre FX, Post FX, and Post Mixer.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+#[schemars(
+    description = "Where a track's signal is taken: `pre_fx` before its devices, `post_fx` \
+                   after its devices and before its mixer, or `post_mixer` (the default) after \
+                   its pan, volume, and activator."
+)]
+pub enum Tap {
+    /// Before the track's devices and mixer.
+    PreFx,
+    /// After the track's devices, before its mixer.
+    PostFx,
+    /// After the track's mixer: its output. The default.
+    #[default]
+    PostMixer,
+}
+
+impl Tap {
+    /// Whether this is [`Tap::PostMixer`], the default.
+    #[must_use]
+    pub fn is_post_mixer(&self) -> bool {
+        *self == Self::PostMixer
+    }
+}
+
+/// A track's Monitor switch: whether its input is heard.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[schemars(
+    description = "Whether a track's input is heard: `in` always (its clips are silent), \
+                   `auto` while the track is armed, or `off` never."
+)]
+pub enum Monitor {
+    /// The input is always heard, and the track's clips are silent.
+    In,
+    /// The input is heard while the track is armed.
+    Auto,
+    /// The input is never heard.
+    Off,
+}
+
+/// Where a track's audio goes: the In/Out section's Audio To chooser (the
+/// routing spec).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[schemars(
+    description = "Where a track's audio goes: `default` (Main, or the group the track is \
+                   in), `main` (Main, even from inside a group), `track` (another audio \
+                   track's input, or the group the track is in), `sends_only` (only through \
+                   its sends), or `external` (Ext. Out)."
+)]
+pub enum Output {
+    /// Main, or the group the track is in: where a new track's audio goes.
+    #[default]
+    Default,
+    /// Main, even from a track inside a group.
+    Main,
+    /// Ext. Out: the audio interface's outputs. It carries nothing until
+    /// external outputs arrive (WP-2.13).
+    External,
+    /// Nowhere but the track's sends.
+    SendsOnly,
+    /// Another track: an audio track's input (Track In), or the group the
+    /// track is in.
+    Track {
+        /// The track.
+        track: TrackId,
+    },
+}
+
+impl Output {
+    /// Whether this is [`Output::Default`].
+    #[must_use]
+    pub fn is_default(&self) -> bool {
+        *self == Self::Default
+    }
+}
+
+/// A track's In/Out settings: its input and its channel, Monitor, and its
+/// output (the routing spec).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Routing {
+    /// Audio From or MIDI From, with its channel.
+    pub input: Input,
+    /// The Monitor switch.
+    pub monitor: Monitor,
+    /// Audio To.
+    #[serde(default, skip_serializing_if = "Output::is_default")]
+    pub output: Output,
+    /// MIDI To, on a MIDI track: another MIDI track, or none (No Output,
+    /// a new MIDI track's).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub midi_output: Option<TrackId>,
+}
+
+impl Routing {
+    /// A new track's routing: an audio track takes Ext. In, a MIDI track
+    /// All Ins, both with Monitor Auto, and both go to Main (or
+    /// their group); MIDI To is No Output. Other kinds take no input.
+    #[must_use]
+    pub const fn new(kind: TrackKind) -> Self {
+        let (input, monitor) = match kind {
+            TrackKind::Audio => (Input::External, Monitor::Auto),
+            TrackKind::Midi => (Input::AllIns, Monitor::Auto),
+            _ => (Input::None, Monitor::Off),
+        };
+        Self {
+            input,
+            monitor,
+            output: Output::Default,
+            midi_output: None,
+        }
+    }
+
+    /// Whether the input is heard, given the Arm switch.
+    #[must_use]
+    pub const fn monitoring(&self, armed: bool) -> bool {
+        match self.monitor {
+            Monitor::In => true,
+            Monitor::Auto => armed,
+            Monitor::Off => false,
+        }
     }
 }
 
@@ -159,6 +336,7 @@ pub struct Track {
     /// The level of each send that isn't at −∞ dB, by return track: a linear
     /// gain above 0 and at most 1. A send that isn't listed sends nothing.
     pub(crate) sends: OrdMap<TrackId, f64>,
+    pub(crate) routing: Routing,
     pub(crate) devices: Vector<Shared<Device>>,
     pub(crate) clips: OrdMap<ClipId, Shared<Clip>>,
     pub(crate) children: Vector<TrackId>,
@@ -172,6 +350,7 @@ impl Track {
             name,
             mixer: Mixer::default(),
             sends: OrdMap::new(),
+            routing: Routing::new(kind),
             devices: Vector::new(),
             clips: OrdMap::new(),
             children: Vector::new(),
@@ -218,6 +397,12 @@ impl Track {
         self.sends.get(&to).copied().unwrap_or(0.0)
     }
 
+    /// The track's In/Out settings.
+    #[must_use]
+    pub fn routing(&self) -> &Routing {
+        &self.routing
+    }
+
     /// The devices in the track's chain, in signal order.
     pub fn devices(&self) -> impl ExactSizeIterator<Item = &Device> + DoubleEndedIterator {
         self.devices.iter().map(|device| &**device)
@@ -241,12 +426,13 @@ impl Track {
     }
 
     /// Whether the track's own settings differ from another version's:
-    /// its name, mixer, sends, children, or the order of its device chain,
+    /// its name, mixer, sends, routing, children, or the order of its device chain,
     /// but not the clips or devices themselves.
     pub(crate) fn own_settings_differ(&self, other: &Self) -> bool {
         self.kind != other.kind
             || self.name != other.name
             || self.mixer != other.mixer
+            || self.routing != other.routing
             || !(self.sends.ptr_eq(&other.sends) || self.sends == other.sends)
             || !(self.children.ptr_eq(&other.children) || self.children == other.children)
             || !(self.devices.ptr_eq(&other.devices)

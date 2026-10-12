@@ -27,9 +27,10 @@ use std::collections::BTreeSet;
 use std::f64::consts::{FRAC_PI_4, SQRT_2};
 
 use bl_core::time::SampleRate;
-use bl_model::{Document, Mixer, ParamId, TrackId, TrackKind};
+use bl_model::{Document, Mixer, ParamId, Tap, TrackId, TrackKind};
 
 use crate::node::{Block, Node, NodeConfig, NodeEvent, ParamValue, segments};
+use crate::routing::{Edge, Graph, Via};
 
 /// How long a mixer gain takes to reach a new value: 20 ms, along a straight
 /// line from the gain it had (the mixer spec, R18).
@@ -68,6 +69,9 @@ pub mod route {
     /// Silenced by solo when not 0: another track is soloed and this route
     /// isn't part of what's heard (see [`Solo`](super::Solo)).
     pub const SOLO_MUTE: ParamId = ParamId(1);
+    /// Closed when not 0: the route feeds a track's input, and the track
+    /// isn't monitoring it (the routing spec).
+    pub const CLOSED: ParamId = ParamId(2);
 }
 
 /// The gains of Live's constant-power pan law for `pan` from −1 (left) to 1
@@ -116,7 +120,7 @@ pub fn db_from_gain(gain: f64) -> f64 {
 }
 
 /// Frames a gain takes to reach a new value at `rate`.
-fn smoothing_frames(rate: SampleRate) -> u32 {
+pub(crate) fn smoothing_frames(rate: SampleRate) -> u32 {
     (SMOOTHING_SECONDS * rate.as_f64()).round().max(1.0) as u32
 }
 
@@ -193,7 +197,7 @@ impl Ramp {
 }
 
 /// Scales `samples` in place by the gain, frame by frame.
-fn scale(samples: &mut [f32], ramp: &mut Ramp) {
+pub(crate) fn scale(samples: &mut [f32], ramp: &mut Ramp) {
     let (moving, still) = samples.split_at_mut(ramp.moving(samples.len()));
     for sample in moving {
         *sample *= ramp.next() as f32;
@@ -429,15 +433,18 @@ impl Node for TrackMixer {
     }
 }
 
-/// A route into a track's input: another track's output into its group or
-/// Main, or a send into a return. It adds the other track's signal, scaled
-/// by its gain, and takes the [`route`] parameters: the gain is the level
-/// (a send's; an output's is 1) unless solo silences the route, and it
-/// glides to every new value ([`SMOOTHING_SECONDS`]).
+/// A route into a track: another track's output into its group, Main, or
+/// another track's input; a send into a return; or a track's own input
+/// (the routing spec). It adds the other track's signal, scaled by its
+/// gain, and takes the [`route`] parameters: the gain is the level (a
+/// send's; any other route's is 1) unless solo silences the route or the
+/// track it feeds isn't monitoring it, and it glides to every new value
+/// ([`SMOOTHING_SECONDS`]).
 #[derive(Debug, Clone)]
 pub struct Route {
     level: f64,
     solo_mute: bool,
+    closed: bool,
     gain: Ramp,
     smoothing: u32,
 }
@@ -449,12 +456,22 @@ impl Route {
         let mut route = Self {
             level: 0.0,
             solo_mute,
+            closed: false,
             gain: Ramp::at(0.0),
             smoothing: smoothing_frames(config.sample_rate),
         };
         route.set(route::LEVEL, ParamValue::Set(level));
         route.gain = Ramp::at(route.target());
         route
+    }
+
+    /// The same route, closed or open by its track's monitoring, resting
+    /// there.
+    #[must_use]
+    pub fn closed(mut self, closed: bool) -> Self {
+        self.closed = closed;
+        self.gain = Ramp::at(self.target());
+        self
     }
 
     /// The gain now.
@@ -471,7 +488,11 @@ impl Route {
     }
 
     fn target(&self) -> f64 {
-        if self.solo_mute { 0.0 } else { self.level }
+        if self.solo_mute || self.closed {
+            0.0
+        } else {
+            self.level
+        }
     }
 
     fn set(&mut self, param: ParamId, value: ParamValue) {
@@ -482,6 +503,8 @@ impl Route {
             (route::LEVEL, _) => self.level = 1.0,
             (route::SOLO_MUTE, ParamValue::Set(mute)) => self.solo_mute = mute != 0.0,
             (route::SOLO_MUTE, ParamValue::Default) => self.solo_mute = false,
+            (route::CLOSED, ParamValue::Set(closed)) => self.closed = closed != 0.0,
+            (route::CLOSED, ParamValue::Default) => self.closed = false,
             _ => {}
         }
     }
@@ -520,13 +543,14 @@ impl Route {
     }
 }
 
-/// Who solo silences, for a document's solo switches and its Solo in Place
-/// setting (the mixer spec, R10 to R14).
+/// Who solo silences, for a document's solo switches, its routing, and its
+/// Solo in Place setting (the mixer spec, R10 to R14; the routing spec).
 ///
 /// While no track is soloed, solo silences nothing. Otherwise the *solo
-/// path* is every soloed track, every group that holds one (at any depth),
-/// and every track inside a soloed group: the tracks that feed a soloed
-/// track or that it feeds. Then:
+/// path* is every soloed track; every track a soloed track's output
+/// reaches, through groups and other tracks' inputs, short of Main; and
+/// every track whose output reaches a soloed track that way (a soloed
+/// group's tracks, and tracks routed into a soloed track). Then:
 ///
 /// - an audio, MIDI, or group track outside the path is silent: its output
 ///   and its sends;
@@ -534,6 +558,9 @@ impl Route {
 ///   and no return is soloed;
 /// - a send from a track outside the path still feeds a soloed return, so a
 ///   soloed return hears everything sent to it;
+/// - a track's input taken from another track before its mixer (Pre FX or
+///   Post FX) is never silenced, and one taken after it (Post Mixer) is
+///   silenced with the other track's output;
 /// - Main is always heard.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Solo {
@@ -551,9 +578,17 @@ impl Solo {
     /// Works out who solo silences in `document`.
     #[must_use]
     pub fn of(document: &Document) -> Self {
+        Self::with(document, &Graph::of(document))
+    }
+
+    /// Works out who solo silences in `document`, whose routing makes
+    /// `graph`.
+    #[must_use]
+    pub fn with(document: &Document, graph: &Graph) -> Self {
         let returns: BTreeSet<TrackId> = document.returns().collect();
+        let main = document.main_id();
         let mut solo = Self {
-            main: document.main_id(),
+            main,
             soloed: BTreeSet::new(),
             path: BTreeSet::new(),
             holding: BTreeSet::new(),
@@ -571,18 +606,28 @@ impl Solo {
             if track.kind() == TrackKind::Return {
                 solo.return_soloed = true;
             }
+            // Where its output goes, short of Main.
+            let mut at = graph.output_target(id);
+            while let Some(to) = at.filter(|&to| to != main) {
+                if !solo.path.insert(to) {
+                    break;
+                }
+                at = graph.output_target(to);
+            }
+            // What feeds it through outputs.
+            let mut feeding: Vec<TrackId> = graph.output_sources(id).collect();
+            while let Some(from) = feeding.pop() {
+                if solo.path.insert(from) {
+                    feeding.extend(graph.output_sources(from));
+                }
+            }
+        }
+        // Groups shown half lit hold a soloed track at any depth.
+        for &id in &solo.soloed {
             let mut parent = document.parent(id);
             while let Some(group) = parent {
-                solo.path.insert(group);
                 solo.holding.insert(group);
                 parent = document.parent(group);
-            }
-            let mut inside: Vec<TrackId> = track.children().collect();
-            while let Some(child) = inside.pop() {
-                solo.path.insert(child);
-                if let Some(child) = document.track(child) {
-                    inside.extend(child.children());
-                }
             }
         }
         solo
@@ -607,7 +652,7 @@ impl Solo {
         self.holding.contains(&track)
     }
 
-    /// Whether solo silences `track`'s output to its group or Main.
+    /// Whether solo silences `track`'s output.
     #[must_use]
     pub fn output_muted(&self, track: TrackId) -> bool {
         if !self.is_active() || track == self.main || self.path.contains(&track) {
@@ -625,19 +670,31 @@ impl Solo {
         self.is_active() && !self.path.contains(&track) && !self.soloed.contains(&to)
     }
 
+    /// Whether solo silences a route of `graph`.
+    #[must_use]
+    pub fn edge_muted(&self, edge: &Edge) -> bool {
+        match edge.via {
+            Via::Output => self.output_muted(edge.from),
+            Via::Send => self.send_muted(edge.from, edge.to),
+            Via::Input => edge.tap == Tap::PostMixer && self.output_muted(edge.from),
+        }
+    }
+
     /// Whether `track` would be heard on Main with every gain above 0: its
-    /// own output and, for tracks in groups, each group's output up to Main.
-    /// A track that's silent here can still be heard through its sends.
+    /// own output and, for tracks routed into groups or other tracks, each
+    /// one's output up to Main. A track that's silent here can still be
+    /// heard through its sends.
     #[must_use]
     pub fn heard_directly(&self, document: &Document, track: TrackId) -> bool {
         let mut at = Some(track);
-        while let Some(id) = at {
-            if self.output_muted(id) {
+        let mut seen = BTreeSet::new();
+        while let Some(id) = at.filter(|&id| id != self.main) {
+            if self.output_muted(id) || !seen.insert(id) {
                 return false;
             }
-            at = document.parent(id);
+            at = document.output_of(id);
         }
-        true
+        at.is_some()
     }
 }
 

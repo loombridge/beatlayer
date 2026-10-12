@@ -35,7 +35,8 @@ use bl_media::stream::{AudioSource, MemorySource, PlanarMut, Source, StreamConfi
 use bl_media::{MediaStore, SampleData, StreamId, Streamer, StreamerStats, convert_sample_rate};
 use bl_model::{AudioData, Clip, ClipData, ClipId, ContentHash, Track};
 
-use crate::node::{Block, Node, NodeConfig, NodeData};
+use crate::mixer::{Ramp, scale, smoothing_frames};
+use crate::node::{Block, Node, NodeConfig, NodeData, NodeEvent, ParamValue, segments};
 use crate::sources::{Bank, ClipSources, Handoff, Supply};
 
 /// A clip's source, as a [`MediaLibrary`] opens it.
@@ -533,6 +534,20 @@ pub struct ClipPlayer {
     /// The song position the sources were made ready to play from while
     /// the song was stopped.
     readied: Option<i64>,
+    /// Whether the clips are heard: not while the track's Monitor is In
+    /// (the routing spec). The gain glides to each change.
+    audible: bool,
+    gate: Ramp,
+    smoothing: u32,
+}
+
+/// A clip player's parameters.
+pub mod player {
+    use bl_model::ParamId;
+
+    /// Whether the track's clips are heard: silent when 0, as while the
+    /// track's Monitor is In.
+    pub const AUDIBLE: ParamId = ParamId(0);
 }
 
 impl ClipPlayer {
@@ -546,6 +561,54 @@ impl ClipPlayer {
             max_frames: config.max_frames,
             sounding: false,
             readied: None,
+            audible: true,
+            gate: Ramp::at(1.0),
+            smoothing: smoothing_frames(config.sample_rate),
+        }
+    }
+
+    /// The same player, its clips heard or not, resting there.
+    #[must_use]
+    pub fn audible(mut self, audible: bool) -> Self {
+        self.audible = audible;
+        self.gate = Ramp::at(if audible { 1.0 } else { 0.0 });
+        self
+    }
+
+    /// Takes the gate's parameter changes, gliding toward the new state.
+    fn set(&mut self, events: &[NodeEvent]) {
+        for event in events {
+            if event.param == player::AUDIBLE {
+                self.audible = match event.value {
+                    ParamValue::Set(value) => value != 0.0,
+                    ParamValue::Default => true,
+                };
+            }
+        }
+        if !events.is_empty() {
+            let target = if self.audible { 1.0 } else { 0.0 };
+            self.gate.toward(target, self.smoothing);
+        }
+    }
+
+    /// Scales what the clips put into the block by the gate, which glides
+    /// to each change from its frame. The player runs first in its track,
+    /// so the block holds only the clips.
+    fn apply_gate(&mut self, block: &mut Block<'_>) {
+        let events: &[NodeEvent] = block.events;
+        if events.is_empty() && self.gate.is_settled() && self.gate.value() == 1.0 {
+            return;
+        }
+        let channels = block.channels();
+        for segment in segments(events, block.frames()) {
+            self.set(segment.events);
+            let mut after = self.gate;
+            for c in 0..channels {
+                let mut ramp = self.gate;
+                scale(&mut block.channel_mut(c)[segment.range.clone()], &mut ramp);
+                after = ramp;
+            }
+            self.gate = after;
         }
     }
 
@@ -645,6 +708,10 @@ impl Node for ClipPlayer {
         let transport = block.transport();
         // Spec: audio-clips R1
         if !transport.playing {
+            // Nothing sounds, so the gate lands at once.
+            let events: &[NodeEvent] = block.events;
+            self.set(events);
+            self.gate = Ramp::at(if self.audible { 1.0 } else { 0.0 });
             if self.sounding {
                 self.stop();
             }
@@ -664,6 +731,7 @@ impl Node for ClipPlayer {
             clips.as_ref().and_then(|d| d.downcast_ref::<ClipList>()),
             bank.as_mut(),
         ) else {
+            self.apply_gate(block);
             return;
         };
         let from = transport.position.get();
@@ -693,6 +761,11 @@ impl Node for ClipPlayer {
                 *max_frames,
             );
         }
+        self.apply_gate(block);
+    }
+
+    fn flush(&mut self, events: &[NodeEvent]) {
+        self.set(events);
     }
 
     fn receive_data(&mut self, data: NodeData) {

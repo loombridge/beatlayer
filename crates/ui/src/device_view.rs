@@ -17,7 +17,7 @@ use std::f32::consts::FRAC_PI_2;
 use bl_model::{DeviceId, DeviceRole, TrackId};
 use bl_shell::context_menus;
 use bl_shell::device_commands::{
-    self as ids, DEVICE_GAP, DeviceFrame, DeviceViewState, TITLE_BAR_HEIGHT, frame_width,
+    self as ids, DEVICE_GAP, DeviceFrame, DeviceViewState, TITLE_BAR_HEIGHT,
 };
 use bl_shell::menus::{MenuItem, shown};
 use bl_shell::{Area, Invocation, Shell};
@@ -87,9 +87,10 @@ pub fn control_id(device: DeviceId, control: &str) -> Id {
 
 /// Where each device's frame sits in a Device View at `rect` scrolled by
 /// `scroll` points: left to right from the view's left edge, `DEVICE_GAP`
-/// apart, each its own width ([`frame_width`]: its layout's docked width,
-/// or a title bar wide folded), and as tall as the view less the gap above
-/// and below.
+/// apart, each its frame's width ([`ids::frame_width`]: a described
+/// device's layout's docked width, its sidechain strip and section, or a
+/// title bar wide folded), and as tall as the view less the gap above and
+/// below.
 #[must_use]
 pub fn frames(state: &DeviceViewState, rect: Rect, scroll: f32) -> Vec<(DeviceId, Rect)> {
     let mut x = rect.left() + DEVICE_GAP - scroll;
@@ -98,7 +99,7 @@ pub fn frames(state: &DeviceViewState, rect: Rect, scroll: f32) -> Vec<(DeviceId
         .devices
         .iter()
         .map(|device| {
-            let width = frame_width(device);
+            let width = ids::frame_width(device);
             let frame = Rect::from_min_max(pos2(x, top), pos2(x + width, bottom));
             x += width + DEVICE_GAP;
             (device.id, frame)
@@ -170,7 +171,7 @@ impl DeviceViewUi {
         let content = state
             .devices
             .iter()
-            .fold(DEVICE_GAP, |w, d| w + frame_width(d) + DEVICE_GAP);
+            .fold(DEVICE_GAP, |w, d| w + ids::frame_width(d) + DEVICE_GAP);
         if background.hovered() || ui.rect_contains_pointer(rect) {
             let delta = ui.input(|i| i.smooth_scroll_delta);
             self.scroll -= if delta.x == 0.0 { delta.y } else { delta.x };
@@ -246,7 +247,9 @@ impl DeviceViewUi {
                 // Spec: device-framework R15. A described device's body is
                 // its generic panel, at its layout's docked size.
                 if let Some(panel) = frame.panel.as_ref().filter(|_| !frame.folded) {
-                    let body = crate::device_panel::body_rect(rect, TITLE_BAR_HEIGHT);
+                    // Right of the sidechain strip and section (WP-2.19b).
+                    let mut body = crate::device_panel::body_rect(rect, TITLE_BAR_HEIGHT);
+                    body.min.x += ids::sidechain_width(frame);
                     crate::device_panel::show(ui, theme, frame, panel, body, events);
                 }
                 self.title(ui, shell, theme, frame, controls.title, text_colour, events);
@@ -256,6 +259,9 @@ impl DeviceViewUi {
                 let options =
                     self.round_button(ui, theme, frame, "options", controls.options, events);
                 egui::Popup::menu(&options).show(|ui| self.menu(ui, shell, events));
+                if let (Some(section), false) = (&frame.sidechain, frame.folded) {
+                    crate::sidechain::draw(ui, shell, theme, frame.id, section, rect, events);
+                }
             },
         );
     }

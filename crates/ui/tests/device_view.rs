@@ -365,3 +365,108 @@ fn hot_swap_shows_the_browsers_bar() {
     )));
     let _ = control_id(a, "hot_swap");
 }
+
+fn sidechained() -> Value {
+    let t = testing::key_type();
+    json!({ "kind": t.kind, "name": t.name, "role": t.role, "sidechain": t.sidechain })
+}
+
+fn section(h: &Harness, device: DeviceId) -> bl_shell::device_commands::SidechainSection {
+    h.shell
+        .device_view_state()
+        .devices
+        .into_iter()
+        .find(|d| d.id == device)
+        .and_then(|d| d.sidechain)
+        .unwrap()
+}
+
+// Spec: routing R29, R30, R31 (a device's sidechain strip and section)
+#[test]
+fn the_sidechain_strip_shows_the_section_and_its_controls_set_the_sidechain() {
+    use bl_ui::sidechain::{rows, strip_buttons};
+    let mut h = harness();
+    let plain = add(&mut h, gain());
+    let key = add(&mut h, sidechained());
+    // A device with a sidechain input is wider by its strip; one without
+    // has none.
+    let (fp, fk) = (frame_of(&mut h, plain), frame_of(&mut h, key));
+    assert_eq!(
+        fk.width() - fp.width(),
+        bl_shell::device_commands::SIDECHAIN_STRIP_WIDTH
+    );
+    let nodes = Harness::nodes(&h.settle());
+    assert_eq!(Harness::node(&nodes, "Show/Hide Sidechain").value, "off");
+    assert_eq!(Harness::node(&nodes, "Sidechain Listen").value, "off");
+
+    // The toggle shows the section, which changes only the view.
+    let steps = h.shell.editor().undo_history().len();
+    h.click(strip_buttons(fk)[0].center());
+    h.settle();
+    assert!(section(&h, key).shown);
+    assert_eq!(h.shell.editor().undo_history().len(), steps);
+    let fk = frame_of(&mut h, key);
+    assert_eq!(
+        fk.width() - fp.width(),
+        bl_shell::device_commands::SIDECHAIN_STRIP_WIDTH
+            + bl_shell::device_commands::SIDECHAIN_SECTION_WIDTH
+    );
+    let nodes = Harness::nodes(&h.settle());
+    for (name, value) in [
+        ("External", "off"),
+        ("Sidechain Source", "No Input"),
+        ("Mix", "100 %"),
+        ("SC Gain", "0.00 dB"),
+    ] {
+        assert_eq!(Harness::node(&nodes, name).value, value, "{name}");
+    }
+
+    // External, then a source from the chooser's list.
+    let [external, _, source, _, mix, _] = rows(fk);
+    h.click(external.center());
+    h.settle();
+    assert!(section(&h, key).enabled);
+    assert_eq!(last_step(&h), "Change \"Sidechain On\"");
+    h.click(source.center());
+    let nodes = Harness::nodes(&h.settle());
+    let entry = nodes
+        .iter()
+        .find(|n| n.label == "3-Audio" && n.bounds.is_some_and(|b| b.y0 as f32 > source.top()))
+        .expect("the list is open");
+    let b = entry.bounds.unwrap();
+    h.click(pos2(
+        ((b.x0 + b.x1) / 2.0) as f32,
+        ((b.y0 + b.y1) / 2.0) as f32,
+    ));
+    h.settle();
+    assert_eq!(section(&h, key).source, "3-Audio");
+    assert_eq!(last_step(&h), "Change \"Routing\"");
+
+    // A drag on Mix is one undo step; a double-click sets it back.
+    let steps = h.shell.editor().undo_history().len();
+    let from = mix.center();
+    h.frame(vec![Event::PointerMoved(from)]);
+    h.frame(vec![press(from, true, PointerButton::Primary)]);
+    for step in 1..=5 {
+        h.frame(vec![Event::PointerMoved(
+            from + egui::vec2(0.0, 5.0 * step as f32),
+        )]);
+    }
+    h.frame(vec![press(
+        from + egui::vec2(0.0, 25.0),
+        false,
+        PointerButton::Primary,
+    )]);
+    h.settle();
+    let mix_now = section(&h, key).mix;
+    assert!(mix_now < 1.0 && mix_now > 0.7, "{mix_now}");
+    assert_eq!(h.shell.editor().undo_history().len(), steps + 1);
+    assert_eq!(last_step(&h), "Change \"Mix\"");
+    double_click(&mut h, mix.center());
+    assert_eq!(section(&h, key).mix, 1.0);
+
+    // Listen, from the strip.
+    h.click(strip_buttons(fk)[1].center());
+    h.settle();
+    assert!(section(&h, key).listen);
+}

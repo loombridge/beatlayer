@@ -21,6 +21,8 @@ pub enum ModelError {
     NoSuchClip(ClipId),
     /// No device has this ID.
     NoSuchDevice(DeviceId),
+    /// The device has no sidechain input to set.
+    NoSidechain(DeviceId),
     /// Another object in the document already has this ID.
     IdInUse(Id),
     /// The same ID appears twice where each must be different.
@@ -120,6 +122,7 @@ impl fmt::Display for ModelError {
             Self::NoSuchTrack(id) => write!(f, "no {id}"),
             Self::NoSuchClip(id) => write!(f, "no {id}"),
             Self::NoSuchDevice(id) => write!(f, "no {id}"),
+            Self::NoSidechain(id) => write!(f, "{id} has no sidechain input"),
             Self::IdInUse(id) => write!(f, "ID {id} is already in use"),
             Self::DuplicateId(id) => write!(f, "ID {id} appears more than once"),
             Self::WrongTrackKind { track, kind, needs } => {

@@ -164,7 +164,13 @@ fn discovery_lists_areas_searches_and_describes_with_schemas() {
         .collect();
     assert_eq!(
         ids,
-        ["track.create", "track.delete", "track.move", "track.rename"]
+        [
+            "track.create",
+            "track.delete",
+            "track.duplicate_without_clips",
+            "track.move",
+            "track.rename"
+        ]
     );
     let delete = &tracks["commands"][1];
     assert_eq!(delete["permission"], "destructive");

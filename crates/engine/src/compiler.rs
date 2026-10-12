@@ -14,9 +14,12 @@ use crate::gc::{GcHandle, Program};
 use crate::message::{LoopRegion, ParamEvent, TransportCommand};
 use crate::mixer::{self, Route, Solo, TrackMixer, route};
 use crate::node::{NodeData, NodeKey, ParamValue};
-use crate::program::{EngineProgram, Input, Instance, Migration, NodeSlot, Span, Task};
+use crate::program::{
+    DeviceSidechain, EngineProgram, Input, Instance, Migration, NodeSlot, Span, Task,
+};
 use crate::registry::Registry;
 use crate::routing::{Edge, Graph, Via};
+use crate::sidechain::{self, SidechainKey};
 use crate::sources::{ClipSources, Loaded, Loader};
 
 /// What the audio thread needs after an edit: a new program if the edit
@@ -69,6 +72,7 @@ enum Identity {
     Player,
     Mixer,
     Route,
+    Sidechain,
 }
 
 /// Which clip players a compile sends their clips to, besides the new ones
@@ -295,6 +299,7 @@ impl Compiler {
 
         // Each track's inputs, in the order the graph lists them.
         let mut inputs: BTreeMap<TrackId, Vec<Input>> = BTreeMap::new();
+        let mut sidechain_inputs: BTreeMap<DeviceId, Vec<Input>> = BTreeMap::new();
         let mut taps: BTreeSet<(TrackId, Tap)> = BTreeSet::new();
         for edge in &graph.edges {
             let (Some(&from), Some(to)) = (task_of.get(&edge.from), document.track(edge.to)) else {
@@ -304,11 +309,15 @@ impl Compiler {
             if edge.tap != Tap::PostMixer {
                 taps.insert((edge.from, edge.tap));
             }
-            inputs.entry(edge.to).or_default().push(Input {
+            let input = Input {
                 route,
                 from,
                 tap: edge.tap,
-            });
+            };
+            match edge.via.sidechain() {
+                Some(device) => sidechain_inputs.entry(device).or_default().push(input),
+                None => inputs.entry(edge.to).or_default().push(input),
+            }
         }
 
         // A task per track, in display order.
@@ -320,6 +329,7 @@ impl Compiler {
                 &mut build,
                 track,
                 inputs.remove(&id).unwrap_or_default(),
+                &mut sidechain_inputs,
                 clips_audible(track),
             );
         }
@@ -344,7 +354,7 @@ impl Compiler {
         let base = (self.generation > 0).then_some(self.generation);
         let tasks = build.tasks.len();
         let size = self.config.channels * self.config.max_frames;
-        let (order, dependents) = run_order(&build.tasks, &build.inputs);
+        let (order, dependents) = run_order(&build);
         let program = EngineProgram {
             generation,
             base,
@@ -356,6 +366,9 @@ impl Compiler {
             tasks: with_dependents(build.tasks, &dependents),
             task_inputs: build.inputs,
             task_nodes: build.nodes,
+            sidechain_pool: vec![0.0; build.sidechains.len() * size],
+            sidechains: build.sidechains,
+            sidechain_inputs: build.sidechain_inputs,
             pool: vec![0.0; tasks * size],
             tap_pool: vec![0.0; kept as usize * size],
             channels: self.config.channels,
@@ -460,7 +473,7 @@ impl Compiler {
         let key = route_key(edge);
         let level = match edge.via {
             Via::Send => document.track(edge.from).map_or(0.0, |t| t.send(edge.to)),
-            Via::Output | Via::Input => 1.0,
+            _ => 1.0,
         };
         let muted = solo.edge_muted(edge);
         let closed = edge.monitored && !to.routing().monitoring(to.mixer().arm);
@@ -478,9 +491,18 @@ impl Compiler {
         })
     }
 
-    /// Adds the task for one track, fed by `inputs`, its clips heard or not.
-    fn add_task(&self, build: &mut Build, track: &Track, inputs: Vec<Input>, audible: bool) {
-        let dependencies = inputs.len() as u32;
+    /// Adds the task for one track, fed by `inputs` and, into its devices'
+    /// sidechains, by what `sidechain_inputs` holds for them; its clips
+    /// heard or not.
+    fn add_task(
+        &self,
+        build: &mut Build,
+        track: &Track,
+        inputs: Vec<Input>,
+        sidechain_inputs: &mut BTreeMap<DeviceId, Vec<Input>>,
+        audible: bool,
+    ) {
+        let mut dependencies = inputs.len() as u32;
         let input_start = build.inputs.len() as u32;
         build.inputs.extend(inputs);
         let inputs = Span {
@@ -505,6 +527,7 @@ impl Compiler {
             })
         });
         let node_start = build.nodes.len() as u32;
+        let sidechain_start = build.sidechains.len() as u32;
         for device in track.devices() {
             let key = NodeKey::Device(device.id);
             let identity = Identity::Device(device.kind.clone());
@@ -520,10 +543,20 @@ impl Compiler {
             };
             let slot = claim(build, key, identity, !device.enabled, node);
             build.nodes.push(slot);
+            if let Some(settings) = &device.sidechain {
+                let sources = sidechain_inputs.remove(&device.id).unwrap_or_default();
+                let own = build.tasks.len() as u32;
+                dependencies += sources.iter().filter(|s| s.from != own).count() as u32;
+                self.add_sidechain(build, device.id, settings, slot, sources);
+            }
         }
         let nodes = Span {
             start: node_start,
             end: build.nodes.len() as u32,
+        };
+        let sidechains = Span {
+            start: sidechain_start,
+            end: build.sidechains.len() as u32,
         };
         let mixer = self.place(build, NodeKey::Mixer(track.id()), Identity::Mixer, || {
             Instance::Mixer(Box::new(TrackMixer::new(track.mixer(), &config)))
@@ -533,11 +566,47 @@ impl Compiler {
             inputs,
             player,
             nodes,
+            sidechains,
             mixer,
             pre_fx: None,
             post_fx: None,
             dependents: Span::default(),
             dependencies,
+        });
+    }
+
+    /// Adds the sidechain of the device in `slot`: its settings, made or
+    /// migrated and told them now, its buffer, and its sources.
+    fn add_sidechain(
+        &self,
+        build: &mut Build,
+        device: DeviceId,
+        settings: &bl_model::Sidechain,
+        slot: u32,
+        sources: Vec<Input>,
+    ) {
+        let config = self.config.node_config();
+        let key = NodeKey::Sidechain(device);
+        if self.previous(key, &Identity::Sidechain).is_some() {
+            build.restate.extend(
+                sidechain_settings(settings)
+                    .map(|(param, value)| ParamEvent::now(key, param, value)),
+            );
+        }
+        let key = self.place(build, key, Identity::Sidechain, || {
+            Instance::Sidechain(Box::new(SidechainKey::new(settings, &config)))
+        });
+        let start = build.sidechain_inputs.len() as u32;
+        build.sidechain_inputs.extend(sources);
+        let buffer = build.sidechains.len() as u32;
+        build.sidechains.push(DeviceSidechain {
+            device: slot,
+            key,
+            buffer,
+            inputs: Span {
+                start,
+                end: build.sidechain_inputs.len() as u32,
+            },
         });
     }
 
@@ -608,6 +677,8 @@ struct Build {
     tasks: Vec<Task>,
     inputs: Vec<Input>,
     nodes: Vec<u32>,
+    sidechains: Vec<DeviceSidechain>,
+    sidechain_inputs: Vec<Input>,
     unhosted: Vec<DeviceId>,
     /// Tracks whose clip player is new in this program.
     new_players: BTreeSet<TrackId>,
@@ -625,7 +696,19 @@ fn route_key(edge: &Edge) -> NodeKey {
             to: edge.to,
         },
         Via::Input => NodeKey::Input(edge.to),
+        Via::Sidechain(device) => NodeKey::SidechainInput(device),
     }
+}
+
+/// A sidechain's settings as its [`SidechainKey`]'s parameters.
+fn sidechain_settings(settings: &bl_model::Sidechain) -> impl Iterator<Item = (ParamId, f64)> {
+    [
+        (sidechain::ENABLED, switch(settings.enabled)),
+        (sidechain::GAIN, settings.gain),
+        (sidechain::MIX, settings.mix),
+        (sidechain::LISTEN, switch(settings.listen)),
+    ]
+    .into_iter()
 }
 
 /// Whether an audio track's clips are heard: not while its Monitor is In
@@ -637,11 +720,18 @@ fn clips_audible(track: &Track) -> bool {
 /// The order to run the tasks in, each after every task that feeds it and
 /// otherwise in display order (Kahn's algorithm, taking the first ready
 /// task each time), and the tasks waiting on each task.
-fn run_order(tasks: &[Task], inputs: &[Input]) -> (Vec<u32>, Vec<Vec<u32>>) {
+fn run_order(build: &Build) -> (Vec<u32>, Vec<Vec<u32>>) {
+    let tasks = &build.tasks;
     let mut dependents: Vec<Vec<u32>> = vec![Vec::new(); tasks.len()];
     let mut waiting: Vec<u32> = vec![0; tasks.len()];
     for (t, task) in tasks.iter().enumerate() {
-        for input in &inputs[task.inputs.range()] {
+        let sidechains = build.sidechains[task.sidechains.range()]
+            .iter()
+            .flat_map(|s| &build.sidechain_inputs[s.inputs.range()]);
+        // A device listening to its own track before its devices waits on
+        // nothing.
+        let sidechains = sidechains.filter(|input| input.from as usize != t);
+        for input in build.inputs[task.inputs.range()].iter().chain(sidechains) {
             dependents[input.from as usize].push(t as u32);
             waiting[t] += 1;
         }
@@ -729,8 +819,20 @@ fn needs_program(
     for (&id, &change) in &changes.devices {
         match (change, old.device(id), new.device(id)) {
             (Change::Modified, Some(before), Some(after)) => {
-                if before.kind != after.kind || before.enabled != after.enabled {
+                let (was, is) = (before.sidechain, after.sidechain);
+                if before.kind != after.kind
+                    || before.enabled != after.enabled
+                    || was.map(|s| s.input) != is.map(|s| s.input)
+                {
                     recompile = true;
+                }
+                if let (Some(was), Some(is)) = (was, is) {
+                    let then: Vec<_> = sidechain_settings(&was).collect();
+                    for (param, value) in sidechain_settings(&is) {
+                        if !then.contains(&(param, value)) {
+                            params.push(ParamEvent::now(NodeKey::Sidechain(id), param, value));
+                        }
+                    }
                 }
                 param_events(NodeKey::Device(id), &before.params, &after.params, params);
             }

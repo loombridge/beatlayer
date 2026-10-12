@@ -42,6 +42,7 @@ use bl_shell_spec::editing as edit_ids;
 use bl_shell_spec::export as export_ids;
 use bl_shell_spec::mixer_view as mixer_ids;
 use bl_shell_spec::perception as perception_ids;
+use bl_shell_spec::tracks as track_ids;
 use bl_shell_spec::transport as transport_ids;
 
 /// The argument a key in a range (F1 to F8) adds to a toggling mixer
@@ -922,6 +923,34 @@ impl Shell {
         Ok(outcome.value)
     }
 
+    /// Runs a track command that needs the shell: Duplicate Track Without
+    /// Clips (WP-2.19b, IMP-12), on the tracks named or the selected ones,
+    /// whose copies become the selection.
+    fn run_tracks(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        let track_ids::DuplicateTracksArgs { tracks } = Self::args(id, args)?;
+        let tracks = tracks.unwrap_or_else(|| self.arrangement.selected_tracks().to_vec());
+        let copies = crate::tracks::duplicate_without_clips(
+            &mut self.editor,
+            &tracks,
+            track_ids::DUPLICATE_WITHOUT_CLIPS_STEP,
+        )
+        .map_err(|reason| ShellError::Unavailable {
+            command: id.to_owned(),
+            reason,
+        })?;
+        self.arrangement
+            .run(
+                view_ids::SELECT_TRACKS,
+                json!({ "tracks": copies }),
+                self.editor.document(),
+            )
+            .ok();
+        self.dirty = true;
+        self.document_changed();
+        self.touch();
+        Ok(to_value(&track_ids::TracksDuplicated { tracks: copies }))
+    }
+
     /// The browser's selection, if it's one preset file and a device is
     /// being hot-swapped: what Enter or a double-click loads into it.
     fn hot_swap_preset(&self) -> Option<PathBuf> {
@@ -1160,6 +1189,7 @@ impl Shell {
             && (model::handles(id)
                 || edit_ids::handles(id)
                 || device_ids::handles(id)
+                || track_ids::handles(id)
                 || matches!(
                     id,
                     browser_ids::ADD_TO_ARRANGEMENT | browser_ids::LOAD_SELECTED
@@ -1533,6 +1563,14 @@ impl Shell {
                     devices::shown_track(&self.arrangement, doc),
                 );
         }
+        if track_ids::handles(id) {
+            // Spec: routing R28. The selected tracks, or those named.
+            let named: Option<Vec<TrackId>> = args
+                .get("tracks")
+                .and_then(|v| serde_json::from_value(v.clone()).ok());
+            let tracks = named.unwrap_or_else(|| self.arrangement.selected_tracks().to_vec());
+            return !crate::tracks::duplicated(self.editor.document(), &tracks).is_empty();
+        }
         if id == "device.rename" && args.get("name").is_none() {
             // A person names the device in its title bar.
             return self.devices.selected().is_some();
@@ -1868,6 +1906,7 @@ impl Shell {
             && (model::handles(id)
                 || edit_ids::handles(id)
                 || device_ids::handles(id)
+                || track_ids::handles(id)
                 || id.starts_with("set.")
                 || id == ids::APP_QUIT)
         {
@@ -1999,6 +2038,9 @@ impl Shell {
         }
         if device_ids::handles(id) {
             return self.run_devices(id, args);
+        }
+        if track_ids::handles(id) {
+            return self.run_tracks(id, args);
         }
         if browser_ids::handles(id) {
             return self.run_browser(id, args);

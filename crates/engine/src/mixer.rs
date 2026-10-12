@@ -178,7 +178,7 @@ impl Ramp {
 
     /// The gain for the next frame.
     #[inline]
-    fn next(&mut self) -> f64 {
+    pub(crate) fn next(&mut self) -> f64 {
         if self.left > 0 {
             self.left -= 1;
             self.value = if self.left == 0 {
@@ -561,6 +561,7 @@ impl Route {
 /// - a track's input taken from another track before its mixer (Pre FX or
 ///   Post FX) is never silenced, and one taken after it (Post Mixer) is
 ///   silenced with the other track's output;
+/// - a route into a device's sidechain is never silenced;
 /// - Main is always heard.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Solo {
@@ -677,6 +678,10 @@ impl Solo {
             Via::Output => self.output_muted(edge.from),
             Via::Send => self.send_muted(edge.from, edge.to),
             Via::Input => edge.tap == Tap::PostMixer && self.output_muted(edge.from),
+            // A device's sidechain hears its sources whatever is soloed, so
+            // a soloed track still ducks as it does in the mix (to observe
+            // in Live; the routing spec).
+            Via::Sidechain(_) => false,
         }
     }
 

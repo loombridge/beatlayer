@@ -96,6 +96,7 @@ mod processor;
 mod program;
 mod registry;
 pub mod routing;
+pub mod sidechain;
 mod sources;
 mod state;
 pub mod transport;

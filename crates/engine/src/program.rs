@@ -9,6 +9,7 @@ use bl_model::{ParamId, Tap, TrackId};
 
 use crate::mixer::{MeterReading, Route, TrackMixer};
 use crate::node::{Block, Node, NodeEvent, NodeKey, ParamValue, TransportInfo};
+use crate::sidechain::SidechainKey;
 
 /// A compiled song, ready to run on the audio thread: a flat array of
 /// nodes, the tasks that run them, the buffers they work in, and the order
@@ -58,6 +59,13 @@ pub struct EngineProgram {
     pub(crate) task_inputs: Vec<Input>,
     /// Device slots each task runs, in chain order.
     pub(crate) task_nodes: Vec<u32>,
+    /// The sidechains of the devices each task runs (WP-2.19b).
+    pub(crate) sidechains: Vec<DeviceSidechain>,
+    /// What each sidechain sums into its buffer.
+    pub(crate) sidechain_inputs: Vec<Input>,
+    /// One buffer per sidechain, holding what its device's detector
+    /// hears.
+    pub(crate) sidechain_pool: Vec<f32>,
     /// Tasks waiting on each task. The single-threaded schedule runs `order`
     /// instead; the worker pool (a later package) will walk these.
     #[cfg_attr(not(test), allow(dead_code))]
@@ -81,8 +89,11 @@ pub(crate) enum Instance {
     Device(Box<dyn Node>),
     /// A track's mixer, run after its chain.
     Mixer(Box<TrackMixer>),
-    /// A route into a track's input: an output or a send.
+    /// A route into a track's input: an output or a send; or into a
+    /// device's sidechain.
     Route(Box<Route>),
+    /// A device's sidechain settings, which make what its detector hears.
+    Sidechain(Box<SidechainKey>),
 }
 
 impl Instance {
@@ -91,7 +102,7 @@ impl Instance {
         match self {
             Self::Device(node) => Some(node.as_mut()),
             Self::Mixer(mixer) => Some(mixer.as_mut()),
-            Self::Route(_) => None,
+            Self::Route(_) | Self::Sidechain(_) => None,
         }
     }
 }
@@ -136,6 +147,19 @@ pub(crate) struct Input {
     pub(crate) tap: Tap,
 }
 
+/// A device's sidechain in a task's chain.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct DeviceSidechain {
+    /// The device's slot.
+    pub(crate) device: u32,
+    /// The slot of its [`SidechainKey`].
+    pub(crate) key: u32,
+    /// Its buffer in `sidechain_pool`.
+    pub(crate) buffer: u32,
+    /// Its sources, in `sidechain_inputs`.
+    pub(crate) inputs: Span,
+}
+
 /// One track.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Task {
@@ -145,6 +169,8 @@ pub(crate) struct Task {
     pub(crate) player: Option<u32>,
     /// The device chain.
     pub(crate) nodes: Span,
+    /// The sidechains of its devices, in `sidechains`.
+    pub(crate) sidechains: Span,
     /// The slot of the track's mixer.
     pub(crate) mixer: u32,
     /// The task's buffer in `tap_pool` for its signal before its devices,
@@ -351,6 +377,7 @@ impl EngineProgram {
                         transport,
                         sample_rate: self.sample_rate,
                         tempo: &self.tempo,
+                        sidechain: None,
                     });
                 }
             }
@@ -400,14 +427,52 @@ impl EngineProgram {
                 self.keep(buffer, own.start, frames);
             }
 
+            // Sum each sidechain's sources into its buffer.
+            for s in task.sidechains.range() {
+                delivered += self.sum_sidechain(s, frames, from, until, events, scratch);
+            }
+
             // Run the chain in place.
             for &slot in &self.task_nodes[task.nodes.range()] {
+                let sidechain = self.sidechains[task.sidechains.range()]
+                    .iter()
+                    .find(|s| s.device == slot)
+                    .copied();
+                let bypass = self.slots[slot as usize].bypass;
+                // What the detector hears, made before the device runs.
+                let mut heard = None;
+                if let Some(sidechain) = sidechain {
+                    delivered += gather(events, sidechain.key, from, until, scratch);
+                    let at =
+                        sidechain.buffer as usize * size..(sidechain.buffer as usize + 1) * size;
+                    if let Some(Some(Instance::Sidechain(key))) = self
+                        .slots
+                        .get_mut(sidechain.key as usize)
+                        .map(|slot| slot.node.as_mut())
+                    {
+                        if bypass {
+                            key.flush(scratch);
+                        } else {
+                            key.make(
+                                &mut self.sidechain_pool[at.clone()],
+                                &self.pool[own.clone()],
+                                channels,
+                                stride,
+                                frames,
+                                scratch,
+                            );
+                            if key.enabled() {
+                                heard = Some((at, key.listening()));
+                            }
+                        }
+                    }
+                }
                 delivered += gather(events, slot, from, until, scratch);
-                let NodeSlot { node, bypass, .. } = &mut self.slots[slot as usize];
+                let NodeSlot { node, .. } = &mut self.slots[slot as usize];
                 let Some(node) = node.as_mut().and_then(Instance::as_node) else {
                     continue;
                 };
-                if *bypass {
+                if bypass {
                     node.flush(scratch);
                     continue;
                 }
@@ -420,7 +485,18 @@ impl EngineProgram {
                     transport,
                     sample_rate: self.sample_rate,
                     tempo: &self.tempo,
+                    sidechain: heard
+                        .as_ref()
+                        .map(|(at, _)| &self.sidechain_pool[at.clone()]),
                 });
+                // Sidechain Listen: the device's output is what it heard.
+                if let Some((at, true)) = heard {
+                    for c in 0..channels {
+                        let (to, from) = (own.start + c * stride, at.start + c * stride);
+                        self.pool[to..to + frames]
+                            .copy_from_slice(&self.sidechain_pool[from..from + frames]);
+                    }
+                }
             }
 
             // Keep the chain's output for pre-fader sends and Post FX
@@ -445,7 +521,58 @@ impl EngineProgram {
                     transport,
                     sample_rate: self.sample_rate,
                     tempo: &self.tempo,
+                    sidechain: None,
                 });
+            }
+        }
+        delivered
+    }
+
+    /// Sums sidechain `s`'s sources into its buffer, each through its
+    /// route, over `frames` frames. Returns how many changes reached a
+    /// route.
+    fn sum_sidechain(
+        &mut self,
+        s: usize,
+        frames: usize,
+        from: u32,
+        until: u32,
+        events: &[Resolved],
+        scratch: &mut Vec<NodeEvent>,
+    ) -> u64 {
+        let (channels, stride) = (self.channels, self.max_frames);
+        let size = channels * stride;
+        let sidechain = self.sidechains[s];
+        let at = sidechain.buffer as usize * size..(sidechain.buffer as usize + 1) * size;
+        for c in 0..channels {
+            let start = at.start + c * stride;
+            self.sidechain_pool[start..start + frames].fill(0.0);
+        }
+        let mut delivered = 0;
+        for &input in &self.sidechain_inputs[sidechain.inputs.range()] {
+            delivered += gather(events, input.route, from, until, scratch);
+            let Some(Some(Instance::Route(route))) = self
+                .slots
+                .get_mut(input.route as usize)
+                .map(|slot| slot.node.as_mut())
+            else {
+                continue;
+            };
+            let source = &self.tasks[input.from as usize];
+            let theirs = match input.tap {
+                Tap::PreFx => source.pre_fx.map(|b| (&self.tap_pool, b as usize)),
+                Tap::PostFx => source.post_fx.map(|b| (&self.tap_pool, b as usize)),
+                Tap::PostMixer => Some((&self.pool, input.from as usize)),
+            };
+            if let Some((pool, buffer)) = theirs {
+                route.mix(
+                    &mut self.sidechain_pool[at.clone()],
+                    &pool[buffer * size..(buffer + 1) * size],
+                    channels,
+                    stride,
+                    frames,
+                    scratch,
+                );
             }
         }
         delivered

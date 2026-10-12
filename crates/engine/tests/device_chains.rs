@@ -185,13 +185,26 @@ fn factories_offer_device_types_with_their_roles() {
     let probe = std::sync::Arc::new(testing::Probe::default());
     let registry = testing::registry(&probe);
     let types = registry.device_types();
-    assert_eq!(types, vec![testing::gain_type(), testing::through_type()]);
+    assert_eq!(
+        types,
+        vec![
+            testing::gain_type(),
+            testing::through_type(),
+            testing::key_type()
+        ]
+    );
+    // A type that declares a sidechain input makes devices that have one
+    // (WP-2.19b).
+    let key = testing::key_type().device(bl_model::DeviceId(bl_core::id::Id::new(8).unwrap()));
+    assert_eq!(key.sidechain, Some(bl_model::Sidechain::default()));
+    assert!(!testing::gain_type().sidechain);
     let gain = registry.device_type(&testing::gain_type().kind).unwrap();
     let device = gain.device(bl_model::DeviceId(bl_core::id::Id::new(9).unwrap()));
     assert_eq!(
         (device.name.as_str(), device.role),
         ("Test Gain", DeviceRole::AudioEffect)
     );
+    assert_eq!(device.sidechain, None);
     // The engine's own registry offers no device: Beatlayer ships none
     // until WP-2.5.
     assert!(Registry::new().device_types().is_empty());

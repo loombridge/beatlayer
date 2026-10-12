@@ -44,6 +44,11 @@ impl Document {
             }
             self.check_target(track, to, |kind| kind == TrackKind::Midi)?;
         }
+        for device in track.devices() {
+            if let Some(sidechain) = &device.sidechain {
+                check_sidechain_input(self, track, sidechain.input)?;
+            }
+        }
         Ok(())
     }
 
@@ -65,17 +70,30 @@ impl Document {
 
     /// Puts every routing that names `gone` out of use, for a track that's
     /// deleted, as Live does (observed): outputs to it become Sends Only,
-    /// inputs from it No Input, and MIDI outputs to it No Output.
+    /// inputs from it No Input, MIDI outputs to it No Output, and devices'
+    /// sidechain sources No Input, their External switch left as it was
+    /// (WP-2.19b).
     pub(crate) fn forget_routes_to(&mut self, gone: &BTreeSet<TrackId>) {
         let touched: Vec<TrackId> = self
             .tracks
             .iter()
-            .filter(|(_, t)| names_any(&t.routing, gone))
+            .filter(|(_, t)| {
+                names_any(&t.routing, gone) || t.devices().any(|d| listens_to(d, gone))
+            })
             .map(|(&id, _)| id)
             .collect();
         for id in touched {
             if let Some(track) = self.tracks.get_mut(&id) {
-                let routing = &mut crate::shared::Shared::make_mut(track).routing;
+                let track = crate::shared::Shared::make_mut(track);
+                for device in track.devices.iter_mut() {
+                    if listens_to(device, gone) {
+                        let device = crate::shared::Shared::make_mut(device);
+                        if let Some(sidechain) = &mut device.sidechain {
+                            sidechain.input = Input::None;
+                        }
+                    }
+                }
+                let routing = &mut track.routing;
                 if let Output::Track { track } = routing.output
                     && gone.contains(&track)
                 {
@@ -124,6 +142,13 @@ impl Document {
             other => other,
         }
     }
+}
+
+/// Whether a device's sidechain takes its source from a track in `gone`.
+fn listens_to(device: &crate::Device, gone: &BTreeSet<TrackId>) -> bool {
+    device
+        .sidechain
+        .is_some_and(|s| matches!(s.input, Input::Track { track, .. } if gone.contains(&track)))
 }
 
 fn names_any(routing: &Routing, gone: &BTreeSet<TrackId>) -> bool {
@@ -192,6 +217,31 @@ fn check_output(doc: &Document, track: &Track) -> Result<(), ModelError> {
         }
         (TrackKind::Main, _) => Err(ModelError::MainTrack),
         _ => Err(wrong_kind(track, "an audio, group, or return track")),
+    }
+}
+
+/// A sidechain's Source: No Input, or an audio, group, or return track or
+/// Main, the device's own track included (observed). Ext. In isn't listed
+/// in Live without an audio device, and is refused until it's observed with
+/// one.
+fn check_sidechain_input(doc: &Document, track: &Track, input: Input) -> Result<(), ModelError> {
+    match input {
+        Input::None => Ok(()),
+        Input::Track { track: from, .. } => {
+            let source = doc.track(from).ok_or(ModelError::NoSuchTrack(from))?;
+            if matches!(
+                source.kind,
+                TrackKind::Audio | TrackKind::Group | TrackKind::Return | TrackKind::Main
+            ) {
+                Ok(())
+            } else {
+                Err(ModelError::CannotRoute {
+                    track: track.id,
+                    to: from,
+                })
+            }
+        }
+        _ => Err(wrong_kind(track, "a device's sidechain to take a track")),
     }
 }
 
@@ -494,5 +544,159 @@ mod tests {
         let loaded: Document = serde_json::from_str(&serde_json::to_string(doc).unwrap()).unwrap();
         assert_eq!(&loaded, doc);
         assert_eq!(loaded.track(a).unwrap().send(returns[49]), 1.0);
+    }
+
+    fn sidechained(editor: &mut Editor, track: TrackId) -> crate::DeviceId {
+        let id = editor.new_id();
+        let kind = crate::DeviceKind::Native {
+            device_type: "test.key".to_owned(),
+        };
+        editor
+            .apply(Command::InsertDevice {
+                track,
+                index: 0,
+                device: crate::Device::new(id, "Key", kind).with_sidechain(),
+            })
+            .unwrap();
+        id
+    }
+
+    // Spec: routing R22, R23, R25
+    #[test]
+    fn sidechains_take_tracks_and_forget_deleted_ones() {
+        let mut editor = Editor::new();
+        let a = add(&mut editor, TrackKind::Audio, None);
+        let c = add(&mut editor, TrackKind::Audio, None);
+        let g = add(&mut editor, TrackKind::Group, None);
+        let m = add(&mut editor, TrackKind::Midi, None);
+        let r = add(&mut editor, TrackKind::Return, None);
+        let main = editor.document().main_id();
+        let key = sidechained(&mut editor, a);
+        let plain = editor.new_id();
+        editor
+            .apply(Command::InsertDevice {
+                track: c,
+                index: 0,
+                device: crate::Device::new(
+                    plain,
+                    "Plain",
+                    crate::DeviceKind::Native {
+                        device_type: "test.plain".to_owned(),
+                    },
+                ),
+            })
+            .unwrap();
+
+        // A new device's sidechain: External off, No Input, Mix 100 %, SC
+        // Gain 0 dB, and nothing of it saved.
+        let new = editor.document().device(key).unwrap().sidechain.unwrap();
+        assert_eq!(
+            (new.enabled, new.input, new.gain, new.mix, new.listen),
+            (false, Input::None, 1.0, 1.0, false)
+        );
+        let saved = serde_json::to_value(editor.document()).unwrap();
+        assert_eq!(
+            saved["tracks"][0]["devices"][0]["sidechain"],
+            serde_json::json!({})
+        );
+        assert!(saved["tracks"][1]["devices"][0].get("sidechain").is_none());
+
+        // Source: another track, the device's own, a group, a return, or
+        // Main; not a MIDI track, Ext. In, or Resampling.
+        let set = |editor: &mut Editor, input| {
+            editor.apply(Command::SetSidechainInput { device: key, input })
+        };
+        for track in [c, a, g, r, main] {
+            set(
+                &mut editor,
+                Input::Track {
+                    track,
+                    tap: Tap::PostFx,
+                },
+            )
+            .unwrap();
+        }
+        for bad in [
+            Input::Track {
+                track: m,
+                tap: Tap::PreFx,
+            },
+            Input::External,
+            Input::Resampling,
+        ] {
+            assert!(set(&mut editor, bad).is_err());
+        }
+        assert!(matches!(
+            editor.apply(Command::SetSidechainInput {
+                device: plain,
+                input: Input::None
+            }),
+            Err(crate::EditError::Command(ModelError::NoSidechain(_)))
+        ));
+        for bad in [
+            Command::SetSidechainGain {
+                device: key,
+                gain: -1.0,
+            },
+            Command::SetSidechainGain {
+                device: key,
+                gain: f64::NAN,
+            },
+            Command::SetSidechainMix {
+                device: key,
+                mix: 1.5,
+            },
+        ] {
+            assert!(editor.apply(bad).is_err());
+        }
+        set(
+            &mut editor,
+            Input::Track {
+                track: c,
+                tap: Tap::PostFx,
+            },
+        )
+        .unwrap();
+        for command in [
+            Command::SetSidechainEnabled {
+                device: key,
+                enabled: true,
+            },
+            Command::SetSidechainGain {
+                device: key,
+                gain: 2.0,
+            },
+            Command::SetSidechainMix {
+                device: key,
+                mix: 0.5,
+            },
+            Command::SetSidechainListen {
+                device: key,
+                listen: true,
+            },
+        ] {
+            editor.apply(command).unwrap();
+        }
+        let loaded: Document =
+            serde_json::from_value(serde_json::to_value(editor.document()).unwrap()).unwrap();
+        assert_eq!(&loaded, editor.document());
+        editor.document().check_invariants().unwrap();
+
+        // Deleting the source leaves No Input, External still on; undo
+        // brings both back.
+        let before = editor.document().clone();
+        editor.apply(Command::DeleteTrack { track: c }).unwrap();
+        let sidechain = editor.document().device(key).unwrap().sidechain.unwrap();
+        assert_eq!(sidechain.input, Input::None);
+        assert!(sidechain.enabled);
+        editor.document().check_invariants().unwrap();
+        editor.undo().unwrap();
+        assert_eq!(editor.document(), &before);
+
+        // A saved sidechain that names a MIDI track doesn't load.
+        let mut broken = serde_json::to_value(&before).unwrap();
+        broken["tracks"][0]["devices"][0]["sidechain"]["input"] =
+            serde_json::json!({ "type": "track", "track": m });
+        assert!(serde_json::from_value::<Document>(broken).is_err());
     }
 }

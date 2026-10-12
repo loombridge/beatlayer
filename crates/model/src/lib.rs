@@ -76,7 +76,7 @@ mod track;
 pub use changes::{Change, ChangeSet};
 pub use clip::{AudioData, Clip, ClipData, EDGE_FADE_SECONDS, MidiData, Note};
 pub use command::Command;
-pub use device::{Device, DeviceKind, DeviceRole, PluginFormat};
+pub use device::{Device, DeviceKind, DeviceRole, PluginFormat, Sidechain};
 pub use device_layout::DeviceLayout;
 pub use document::{ArrangementLoop, Document, Settings};
 pub use editor::{EditError, Editor};

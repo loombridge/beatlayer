@@ -10,6 +10,8 @@ publish.workspace = true
 [dependencies]
 bl-commands.workspace = true
 bl-core = { workspace = true, features = ["serde", "schemars"] }
+# Parameter descriptors, re-exported from `param` (the plug-in kit).
+lspk-params.workspace = true
 imbl = { version = "7.0.2", features = ["serde"] }
 # Pinned to bl-commands' version: the command reference is
 # generated from these schemas.

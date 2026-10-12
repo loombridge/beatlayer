@@ -8,6 +8,8 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+# Parameter smoothing (`smooth`), re-exported from the plug-in kit.
+lspk-params.workspace = true
 
 [lints]
 workspace = true

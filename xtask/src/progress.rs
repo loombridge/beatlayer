@@ -7,21 +7,28 @@
 //! - every Live feature from the parity matrix, split into one part per
 //!   milestone it names, with each part's status taken from the work packages
 //!   its row names ("Built in WP-1.8a, WP-1.8b");
-//! - the improvements over Live.
+//! - the improvements over Live;
+//! - Reagent's plan, when the checkout has it ([`reagent`]).
 //!
 //! The tests at the bottom read the real documents, so `cargo xtask check`
 //! fails when a row names a work package the build plan doesn't have.
+
+mod reagent;
 
 use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
 
-/// The four planning documents, as text.
+use reagent::Reagent;
+
+/// The planning documents, as text.
 pub struct Docs {
     pub roadmap: String,
     pub plan: String,
     pub parity: String,
     pub improvements: String,
+    /// Reagent's plan, absent where the checkout doesn't have it.
+    pub reagent: Option<String>,
 }
 
 /// The paths of the planning documents, relative to the repository root.
@@ -33,13 +40,19 @@ pub const PATHS: [&str; 4] = [
 ];
 
 impl Docs {
-    /// Reads the documents with `read`, which takes a path from [`PATHS`].
-    pub fn read(mut read: impl FnMut(&str) -> Result<String, String>) -> Result<Self, String> {
+    /// Reads the documents with `read`, which takes a path from [`PATHS`] or
+    /// Reagent's plan and gives `None` for a file that doesn't exist. Only
+    /// Reagent's plan may be missing.
+    pub fn read(
+        mut read: impl FnMut(&str) -> Result<Option<String>, String>,
+    ) -> Result<Self, String> {
+        let mut required = |path: &str| read(path)?.ok_or_else(|| format!("{path} doesn't exist"));
         Ok(Self {
-            roadmap: read(PATHS[0])?,
-            plan: read(PATHS[1])?,
-            parity: read(PATHS[2])?,
-            improvements: read(PATHS[3])?,
+            roadmap: required(PATHS[0])?,
+            plan: required(PATHS[1])?,
+            parity: required(PATHS[2])?,
+            improvements: required(PATHS[3])?,
+            reagent: read(reagent::PATH)?,
         })
     }
 }
@@ -203,6 +216,7 @@ pub struct Progress {
     improvements: Vec<Improvement>,
     /// `WP-` references that match no package, with where they were found.
     unknown_refs: Vec<String>,
+    reagent: Option<Reagent>,
 }
 
 impl Progress {
@@ -218,6 +232,7 @@ impl Progress {
             features,
             improvements,
             unknown_refs,
+            reagent: docs.reagent.as_deref().map(Reagent::parse),
         }
     }
 
@@ -322,6 +337,7 @@ impl Progress {
                 },
             },
             "unknown_refs": self.unknown_refs,
+            "reagent": self.reagent.as_ref().map(Reagent::to_json),
         })
     }
 }
@@ -833,8 +849,12 @@ mod tests {
             return None;
         }
         Some(
-            Docs::read(|path| std::fs::read_to_string(root.join(path)).map_err(|e| e.to_string()))
-                .expect("the planning documents are readable"),
+            Docs::read(|path| {
+                std::fs::read_to_string(root.join(path))
+                    .map(Some)
+                    .map_err(|e| e.to_string())
+            })
+            .expect("the planning documents are readable"),
         )
     }
 
@@ -911,6 +931,16 @@ mod tests {
             );
         }
         assert!(progress.improvements.len() >= 12);
+    }
+
+    #[test]
+    fn only_reagents_plan_may_be_missing() {
+        let docs = Docs::read(|path| Ok((path != reagent::PATH).then(String::new)))
+            .expect("Reagent's plan may be missing");
+        assert!(docs.reagent.is_none());
+        assert!(Progress::parse(&docs).to_json()["reagent"].is_null());
+        let missing = Docs::read(|path| Ok((path != PATHS[1]).then(String::new)));
+        assert!(missing.is_err(), "the build plan may not be missing");
     }
 
     #[test]

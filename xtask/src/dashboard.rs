@@ -211,7 +211,12 @@ impl Server {
         let (docs, source) = match &self.source {
             Source::Worktree => {
                 let docs = Docs::read(|path| {
-                    std::fs::read_to_string(self.root.join(path))
+                    let file = self.root.join(path);
+                    if !file.exists() {
+                        return Ok(None);
+                    }
+                    std::fs::read_to_string(file)
+                        .map(Some)
                         .map_err(|e| format!("couldn't read {path}: {e}"))
                 })?;
                 let dirty = !git(&self.root, &["status", "--porcelain", "--", "docs"])
@@ -224,8 +229,13 @@ impl Server {
                 (docs, source)
             }
             Source::Ref(name) => {
-                let docs =
-                    Docs::read(|path| git(&self.root, &["show", &format!("{name}:{path}")]))?;
+                let docs = Docs::read(|path| {
+                    let object = format!("{name}:{path}");
+                    if git(&self.root, &["cat-file", "-e", &object]).is_err() {
+                        return Ok(None);
+                    }
+                    git(&self.root, &["show", &object]).map(Some)
+                })?;
                 let mut source = self.commit(name)?;
                 let fetch = self.fetch.lock().unwrap_or_else(|e| e.into_inner());
                 source["fetched"] = json!(fetch.at.map(unix_seconds));

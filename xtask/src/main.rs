@@ -47,8 +47,8 @@ Tasks:
                  in tests/golden/ (`cargo test` does too). With --update, remake the
                  references whose renders changed; say why in the pull request. Fixture
                  names after the options pick some; the default is all.
-  progress       Print the roadmap's and the parity matrix's progress as JSON, read from
-                 origin/main (with --worktree, from the files on disk)
+  progress       Print the progress of the roadmap, the parity matrix and Reagent's plan
+                 as JSON, read from origin/main (with --worktree, from the files on disk)
   dashboard      Serve the progress page on http://localhost:4106 (or PORT, or --port N),
                  reading origin/main and fetching it every two minutes (--worktree reads
                  the files on disk). Localhost starts it from .claude/launch.json

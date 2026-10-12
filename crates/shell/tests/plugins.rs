@@ -71,7 +71,7 @@ fn a_plugin_loads_runs_and_keeps_its_state_with_the_set() {
         (loaded.plugin.as_str(), loaded.name.as_str()),
         (PLUGIN_ID, PLUGIN_NAME)
     );
-    assert_eq!(shell.editor().undo_history().last(), Some("Insert Device"));
+    assert_eq!(shell.editor().undo_history().next(), Some("Insert Device"));
     let device = loaded.device;
 
     // The Device View describes it, and agents read its parameters.
@@ -169,4 +169,76 @@ fn a_file_that_isnt_a_plugin_is_refused() {
     );
     assert!(refused.is_err());
     assert_eq!(shell.editor().undo_history().len(), before);
+}
+
+// Spec: clap-hosting R6
+#[test]
+fn a_change_a_plugin_makes_itself_is_one_undo_step() {
+    use bl_engine::{Block, NodeConfig, NoteBuffer, NoteEvent, NoteKind, TransportInfo};
+
+    let mut shell = Shell::headless();
+    let track = audio_track(&shell);
+    let loaded: PluginLoaded = serde_json::from_value(
+        shell
+            .run(
+                ids::LOAD,
+                json!({ "path": bl_test_clap::bundle(), "track": track }),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    // Run the plug-in's node here, as the engine would, and play it a
+    // note: it sets its own Last Note, in a gesture, as its editor would.
+    let device = shell
+        .editor()
+        .document()
+        .device(loaded.device)
+        .unwrap()
+        .clone();
+    let config = NodeConfig {
+        sample_rate: bl_core::time::SampleRate::HZ_48000,
+        max_frames: 64,
+        channels: 2,
+    };
+    let mut node = bl_engine::NodeFactory::create(&shell.plugins().factory(), &device, &config)
+        .expect("a node");
+    let mut data = vec![0.0f32; 128];
+    let mut out = NoteBuffer::with_capacity(8);
+    let notes = [NoteEvent {
+        offset: 3,
+        kind: NoteKind::On,
+        channel: 0,
+        key: 67,
+        velocity: 1.0,
+        note_id: None,
+    }];
+    let mut block = Block::new(
+        &mut data,
+        2,
+        64,
+        64,
+        &[],
+        TransportInfo::default(),
+        bl_core::time::SampleRate::HZ_48000,
+    )
+    .with_notes(&notes, &mut out);
+    node.process(&mut block);
+
+    let steps = shell.editor().undo_history().len();
+    assert!(shell.poll());
+    assert_eq!(
+        shell
+            .editor()
+            .document()
+            .device(loaded.device)
+            .unwrap()
+            .params
+            .get(&ParamId(bl_test_clap::LAST_NOTE)),
+        Some(&67.0)
+    );
+    assert_eq!(shell.editor().undo_history().len(), steps + 1);
+    assert_eq!(
+        shell.editor().undo_history().next(),
+        Some("Change \"Last Note\"")
+    );
 }

@@ -1011,18 +1011,19 @@ impl Shell {
                     message: e.to_string(),
                 };
                 if shown.unwrap_or(!open) {
+                    // Spec: clap-hosting R13. Titled "<device>/<track>", as
+                    // Live titles a plug-in's window.
                     let doc = self.editor.document();
                     let title = doc
                         .device_track(device)
-                        .and_then(|t| doc.track(t))
-                        .map(|t| t.name().to_owned())
+                        .map(|t| crate::routing::track_label(doc, t))
                         .unwrap_or_default();
                     let name = doc
                         .device(device)
                         .map(|d| d.title().to_owned())
                         .unwrap_or_default();
                     self.plugins
-                        .open_editor(device, &format!("{title}/{name}"))
+                        .open_editor(device, &format!("{name}/{title}"))
                         .map_err(failed)?;
                 } else {
                     self.plugins.close_editor(device).map_err(failed)?;

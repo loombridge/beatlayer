@@ -312,7 +312,7 @@ fn the_editor_opens_and_closes_in_its_own_window() {
     let (host, _node) = running(&[]);
     let id = device(1, &[]).id;
     assert!(host.status(id).unwrap().has_editor);
-    host.open_editor(id, "1-Audio/Test Gain Echo")
+    host.open_editor(id, "Test Gain Echo/1-Audio")
         .expect("it opens");
     assert!(host.status(id).unwrap().editor_open);
     host.open_editor(id, "again")

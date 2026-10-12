@@ -6,6 +6,12 @@
 //! the shell ([`Shell::invoke`]); what only the platform can do comes back
 //! as effects, which the host carries out here.
 //!
+//! Each floating device (WP-2.5b, IMP-14) has a window of its own, which
+//! the host opens, closes, shows, and hides to match the shell's
+//! `device.windows` after every command: it stays above the main window,
+//! as Live's plug-in windows do; moving or resizing it records its frame
+//! (`device.set_window`, no undo step); and closing it docks the device.
+//!
 //! While the person has the agent server switched on (Settings, Tempo &
 //! MIDI), the host runs it (`bl-agent`, WP-1.15): its threads hand each
 //! request to this event loop, which runs it on the same shell, and asks
@@ -19,6 +25,7 @@
 //! agent's view capture (WP-1.16) is read back from the window's next frame
 //! and encoded off this thread ([`crate::capture`]).
 
+use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
@@ -32,6 +39,7 @@ use bl_shell::menus::{Menu, MenuPlatform, menu_bar};
 use bl_shell::perception_commands::View;
 use bl_shell::settings::{Preferences, ThemeChoice, default_config_dir};
 use bl_shell::{Effect, Invocation, Shell, WindowKind, commands as ids};
+use bl_ui::device_view::DeviceViewUi;
 use bl_ui::input::KeyDispatcher;
 use bl_ui::keymap::{Keymap, Platform};
 use bl_ui::layout::{TITLE_BAR, apply_zoom, fit_main_window, follow_zoom, settings_window};
@@ -45,7 +53,7 @@ use egui_wgpu::{
 };
 use serde_json::json;
 use winit::application::ApplicationHandler;
-use winit::dpi::LogicalSize;
+use winit::dpi::{LogicalPosition, LogicalSize};
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::window::{Fullscreen, Window, WindowAttributes, WindowId};
@@ -227,6 +235,12 @@ struct Host {
     proxy: EventLoopProxy<UserEvent>,
     main: Option<Surface>,
     settings: Option<Surface>,
+    /// Floating devices' windows (WP-2.5b), each with what it draws.
+    devices: BTreeMap<bl_model::DeviceId, (Option<Surface>, DeviceViewUi)>,
+    /// Always `None`: what [`Host::surface`] gives for a device window
+    /// that isn't open.
+    no_surface: Option<Surface>,
+    device_keys: KeyDispatcher,
     main_ui: MainWindowUi,
     settings_ui: SettingsUi,
     main_keys: KeyDispatcher,
@@ -354,6 +368,9 @@ pub fn run(args: Args) -> Result<(), String> {
         proxy,
         main: None,
         settings: None,
+        devices: BTreeMap::new(),
+        no_surface: None,
+        device_keys: KeyDispatcher::new(platform),
         main_ui,
         settings_ui: SettingsUi::new(),
         main_keys: KeyDispatcher::new(platform),
@@ -617,6 +634,13 @@ impl Host {
         match kind {
             WindowKind::Main => &mut self.main,
             WindowKind::Settings => &mut self.settings,
+            WindowKind::Device(device) => match self.devices.get_mut(&device) {
+                Some((surface, _)) => surface,
+                None => {
+                    self.no_surface = None;
+                    &mut self.no_surface
+                }
+            },
         }
     }
 
@@ -626,8 +650,153 @@ impl Host {
         } else if self.settings.as_ref().is_some_and(|s| s.window.id() == id) {
             Some(WindowKind::Settings)
         } else {
-            None
+            self.devices
+                .iter()
+                .find(|(_, (s, _))| s.as_ref().is_some_and(|s| s.window.id() == id))
+                .map(|(device, _)| WindowKind::Device(*device))
         }
+    }
+
+    /// Every open window's surface.
+    fn surfaces(&self) -> impl Iterator<Item = &Surface> {
+        [&self.main, &self.settings]
+            .into_iter()
+            .flatten()
+            .chain(self.devices.values().filter_map(|(s, _)| s.as_ref()))
+    }
+
+    /// Opens, closes, shows, hides, and titles floating devices' windows to
+    /// match the shell's (WP-2.5b).
+    fn sync_device_windows(&mut self, event_loop: &ActiveEventLoop) {
+        let wanted = self.shell.floating_windows().windows;
+        let gone: Vec<_> = self
+            .devices
+            .keys()
+            .filter(|d| !wanted.iter().any(|w| w.device == **d))
+            .copied()
+            .collect();
+        for device in gone {
+            // Docked or deleted: its window closes.
+            self.devices.remove(&device);
+            if self.shell.focused_window() == WindowKind::Device(device) {
+                self.shell.set_focused_window(WindowKind::Main);
+            }
+        }
+        let zoom = self.shell.zoom();
+        for (index, floating) in wanted.iter().enumerate() {
+            let least = LogicalSize::new(floating.min_width * zoom, floating.min_height * zoom);
+            // A side nothing grows along stays at the docked size (IMP-14).
+            let most = LogicalSize::new(
+                if floating.grows_across {
+                    f32::from(u16::MAX)
+                } else {
+                    least.width
+                },
+                if floating.grows_down {
+                    f32::from(u16::MAX)
+                } else {
+                    least.height
+                },
+            );
+            if let Some((Some(surface), _)) = self.devices.get(&floating.device) {
+                let window = &surface.window;
+                window.set_title(&floating.title);
+                window.set_min_inner_size(Some(least));
+                window.set_max_inner_size(Some(most));
+                window.set_visible(floating.shown);
+                continue;
+            }
+            if self.devices.contains_key(&floating.device) {
+                continue;
+            }
+            let (position, size) = match floating.frame {
+                Some(frame) => (
+                    LogicalPosition::new(frame.x as f32, frame.y as f32),
+                    LogicalSize::new(frame.width as f32, frame.height as f32),
+                ),
+                None => {
+                    // A new window opens beside the main window's top-left
+                    // corner, each a step further down and across.
+                    let origin = self
+                        .main
+                        .as_ref()
+                        .and_then(|m| {
+                            m.window
+                                .outer_position()
+                                .ok()
+                                .map(|p| p.to_logical::<f32>(m.window.scale_factor()))
+                        })
+                        .unwrap_or(LogicalPosition::new(0.0, 0.0));
+                    #[expect(clippy::cast_precision_loss, reason = "a handful of windows")]
+                    let step = 24.0 * (index % 10) as f32;
+                    (
+                        LogicalPosition::new(origin.x + 120.0 + step, origin.y + 120.0 + step),
+                        least,
+                    )
+                }
+            };
+            let attributes = Window::default_attributes()
+                .with_title(floating.title.clone())
+                .with_position(position)
+                .with_inner_size(size)
+                .with_min_inner_size(least)
+                .with_max_inner_size(most)
+                .with_resizable(floating.grows_across || floating.grows_down)
+                .with_visible(floating.shown);
+            #[cfg(windows)]
+            let attributes = {
+                use raw_window_handle::{HasWindowHandle as _, RawWindowHandle};
+                use winit::platform::windows::WindowAttributesExtWindows as _;
+                // An owned window stays above its owner, as Live's plug-in
+                // windows stay above its main window.
+                let owner = self.main.as_ref().and_then(|m| {
+                    match m.window.window_handle().ok()?.as_raw() {
+                        RawWindowHandle::Win32(handle) => Some(handle.hwnd.get()),
+                        _ => None,
+                    }
+                });
+                match owner {
+                    Some(hwnd) => attributes.with_owner_window(hwnd),
+                    None => attributes,
+                }
+            };
+            match self.create_surface(event_loop, attributes, self.main.as_ref()) {
+                Ok(surface) => {
+                    if !floating.shown {
+                        surface.window.set_visible(false);
+                    }
+                    #[cfg(target_os = "macos")]
+                    crate::title_bar::float_above_main(&surface.window);
+                    if floating.frame.is_none() {
+                        self.record_device_frame(floating.device, &surface.window);
+                    }
+                    self.devices
+                        .insert(floating.device, (Some(surface), DeviceViewUi::new()));
+                }
+                Err(error) => self.shell.set_message(error, true),
+            }
+        }
+    }
+
+    /// Records where a floating device's window sits, for the set to save
+    /// (`device.set_window`: no undo step).
+    fn record_device_frame(&mut self, device: bl_model::DeviceId, window: &Window) {
+        let scale = window.scale_factor();
+        let Ok(position) = window.outer_position() else {
+            return;
+        };
+        let position = position.to_logical::<f64>(scale);
+        let size = window.inner_size().to_logical::<f64>(scale);
+        let frame = bl_model::WindowFrame {
+            x: position.x,
+            y: position.y,
+            width: size.width,
+            height: size.height,
+        };
+        let _ = self.shell.run(
+            bl_shell::device_commands::SET_WINDOW,
+            json!({ "device": device, "frame": frame }),
+        );
     }
 
     fn redraw(&mut self, kind: WindowKind, event_loop: &ActiveEventLoop) {
@@ -652,6 +821,7 @@ impl Host {
         let keys = match kind {
             WindowKind::Main => &mut self.main_keys,
             WindowKind::Settings => &mut self.settings_keys,
+            WindowKind::Device(_) => &mut self.device_keys,
         };
         let invocations = keys.take_bound_keys(&mut input, &self.keymap, &self.shell, text_focused);
         if kind == WindowKind::Settings {
@@ -667,16 +837,38 @@ impl Host {
             keymap: &self.keymap,
             platform: self.platform,
         });
-        let title_bar = draws_title_bar(&surface.window);
+        // A floating device's window keeps the system's title bar.
+        let title_bar = !matches!(kind, WindowKind::Device(_)) && draws_title_bar(&surface.window);
         let shell = &self.shell;
         let theme = &self.theme;
         let main_ui = &mut self.main_ui;
         let settings_ui = &mut self.settings_ui;
+        let mut device_ui = match kind {
+            WindowKind::Device(device) => self.devices.get_mut(&device).map(|(_, ui)| ui),
+            _ => None,
+        };
+        let floating = match kind {
+            WindowKind::Device(device) => shell
+                .floating_windows()
+                .windows
+                .into_iter()
+                .find(|w| w.device == device),
+            _ => None,
+        };
         let mut ui_events = Vec::new();
         let output = surface.ctx.run_ui(input, |ui| {
             ui_events = match kind {
                 WindowKind::Main => main_ui.show(ui, shell, theme, title_bar, drawn),
                 WindowKind::Settings => settings_ui.show(ui, shell, theme, title_bar),
+                WindowKind::Device(_) => {
+                    let mut events = Vec::new();
+                    if let (Some(device_ui), Some(floating)) =
+                        (device_ui.as_deref_mut(), floating.as_ref())
+                    {
+                        device_ui.show_window(ui, shell, theme, floating, &mut events);
+                    }
+                    events
+                }
             };
         });
 
@@ -769,7 +961,7 @@ impl Host {
         if self.shell.theme() != self.theme_choice {
             self.theme_choice = self.shell.theme();
             self.theme = Theme::builtin(self.theme_choice);
-            for surface in [&self.main, &self.settings].into_iter().flatten() {
+            for surface in self.surfaces() {
                 self.theme.apply(&surface.ctx);
             }
         }
@@ -786,6 +978,19 @@ impl Host {
             resize_main_window(&main.window, zoom);
             main.window.request_redraw();
         }
+        let mut rezoomed = false;
+        for surface in self.devices.values_mut().filter_map(|(s, _)| s.as_mut()) {
+            if (surface.zoom - zoom).abs() > 1e-6 {
+                apply_zoom(&surface.ctx, zoom);
+                surface.zoom = zoom;
+                surface.window.request_redraw();
+                rezoomed = true;
+            }
+        }
+        if rezoomed {
+            // Their smallest sizes follow the zoom.
+            self.sync_device_windows(event_loop);
+        }
         if let Some(settings) = &mut self.settings {
             let applied = follow_zoom(&settings.ctx, settings.zoom, zoom);
             if (applied - settings.zoom).abs() > 1e-6 {
@@ -799,12 +1004,13 @@ impl Host {
         self.resume_agents();
         self.agent.sync_engine(&mut self.shell);
         if self.shown_revision != Some(self.shell.revision()) {
+            self.sync_device_windows(event_loop);
             self.shown_revision = Some(self.shell.revision());
             #[cfg(any(target_os = "macos", windows))]
             if let Some(menu) = &self.native_menu {
                 menu.refresh(&self.shell, &self.keymap, self.platform);
             }
-            for surface in [&self.main, &self.settings].into_iter().flatten() {
+            for surface in self.surfaces() {
                 surface.window.request_redraw();
             }
             if let Some(main) = &self.main {
@@ -941,6 +1147,7 @@ impl Host {
                         settings.window.request_redraw();
                     }
                 }
+                WindowKind::Device(_) => {}
             },
         }
     }
@@ -1072,6 +1279,9 @@ impl Host {
                         let surface = match window {
                             WindowKind::Main => self.main.as_ref(),
                             WindowKind::Settings => self.settings.as_ref(),
+                            WindowKind::Device(device) => {
+                                self.devices.get(&device).and_then(|(s, _)| s.as_ref())
+                            }
                         }
                         .ok_or("that window isn't open")?;
                         if surface.window.is_minimized() == Some(true) {
@@ -1328,8 +1538,26 @@ impl ApplicationHandler<UserEvent> for Host {
                 match kind {
                     WindowKind::Main => self.invoke(&Invocation::new(ids::APP_QUIT, json!({}))),
                     WindowKind::Settings => self.shell.close_settings(),
+                    // Closing a floating device's window docks the device
+                    // (IMP-14): one undo step.
+                    WindowKind::Device(device) => self.invoke(&Invocation::new(
+                        bl_shell::device_commands::SET_FLOATING,
+                        json!({ "device": device, "floating": false }),
+                    )),
                 }
                 self.after_commands(event_loop);
+            }
+            WindowEvent::Moved(_) | WindowEvent::Resized(_)
+                if matches!(kind, WindowKind::Device(_)) =>
+            {
+                if let WindowKind::Device(device) = kind
+                    && let Some((Some(surface), _)) = self.devices.get(&device)
+                {
+                    let window = Arc::clone(&surface.window);
+                    if window.is_visible() != Some(false) {
+                        self.record_device_frame(device, &window);
+                    }
+                }
             }
             WindowEvent::Focused(true) => {
                 self.shell.set_focused_window(kind);
@@ -1456,6 +1684,9 @@ impl ApplicationHandler<UserEvent> for Host {
                 let surface = match capture.window {
                     WindowKind::Main => self.main.as_ref(),
                     WindowKind::Settings => self.settings.as_ref(),
+                    WindowKind::Device(device) => {
+                        self.devices.get(&device).and_then(|(s, _)| s.as_ref())
+                    }
                 };
                 if let Some(surface) = surface {
                     surface.window.request_redraw();
@@ -1482,7 +1713,12 @@ impl ApplicationHandler<UserEvent> for Host {
                 self.watch_transport_until = None;
             }
         }
-        for surface in [&mut self.main, &mut self.settings].into_iter().flatten() {
+        let devices = self.devices.values_mut().filter_map(|(s, _)| s.as_mut());
+        for surface in [&mut self.main, &mut self.settings]
+            .into_iter()
+            .flatten()
+            .chain(devices)
+        {
             match surface.repaint_at {
                 Some(at) if at <= now => {
                     surface.repaint_at = None;

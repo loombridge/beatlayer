@@ -338,6 +338,7 @@ impl Recipe {
             document,
             ids,
             media,
+            windows: bl_model::DeviceWindows::new(),
         }
     }
 

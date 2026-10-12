@@ -4,7 +4,8 @@
 //!
 //! The document's own device commands (`device.insert`, `device.remove`,
 //! `device.move`, `device.rename`, `device.set_enabled`,
-//! `device.set_show_preset_name`, `device.set_state`, `device.set_param`)
+//! `device.set_show_preset_name`, `device.set_state`, `device.set_param`,
+//! `device.set_floating`)
 //! are `bl-model`'s. Those here run on the shell, which knows the selection,
 //! the clipboard, the User Library, and the browser. A command whose
 //! `device` is left out acts on the device selected in the Device View, as
@@ -13,8 +14,10 @@
 
 use bl_commands::Context::{Browser, DeviceView, Global};
 use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};
+use bl_model::device_layout::BODY_HEIGHT;
 use bl_model::{
     DeviceDescription, DeviceId, DeviceKind, DeviceRole, ParamDescriptor, Tap, TrackId, TrackKind,
+    WindowFrame,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -50,6 +53,14 @@ pub const PARAMETERS: &str = "device.parameters";
 /// (WP-2.19b).
 pub const SHOW_SIDECHAIN: &str = "device.show_sidechain";
 
+/// `device.windows`: the floating devices' windows (WP-2.5b).
+pub const WINDOWS: &str = "device.windows";
+/// `device.set_window`: where a floating device's window sits.
+pub const SET_WINDOW: &str = "device.set_window";
+/// `device.set_floating`: the document's command that floats or docks a
+/// device (`bl-model`'s).
+pub const SET_FLOATING: &str = "device.set_floating";
+
 /// Every command [`register`] adds, so a host knows which IDs to send to
 /// `bl-shell`'s `Shell::run`.
 pub const IDS: &[&str] = &[
@@ -67,6 +78,8 @@ pub const IDS: &[&str] = &[
     HOT_SWAP,
     PARAMETERS,
     SHOW_SIDECHAIN,
+    WINDOWS,
+    SET_WINDOW,
 ];
 
 /// The document's device commands that act on the selected device when
@@ -76,6 +89,7 @@ pub const ON_SELECTED: &[&str] = &[
     "device.rename",
     "device.set_enabled",
     "device.set_show_preset_name",
+    SET_FLOATING,
 ];
 
 /// Whether `id` is one of the Device View's commands.
@@ -130,15 +144,51 @@ pub fn sidechain_width(frame: &DeviceFrame) -> f32 {
     })
 }
 
-/// How wide a device's frame is at 100%: a title bar wide when folded;
+/// How wide a device's frame is at 100%: a title bar wide when folded or
+/// floating (a floating device's place in the chain is a strip, WP-2.5b);
 /// otherwise its body's width ([`body_width`]), with its sidechain strip
 /// and, while shown, its sidechain section to the left (WP-2.19b).
 #[must_use]
 pub fn frame_width(frame: &DeviceFrame) -> f32 {
-    if frame.folded {
+    if frame.folded || frame.floating {
         return TITLE_BAR_HEIGHT;
     }
+    docked_width(frame)
+}
+
+/// How wide a device is at 100% unfolded and docked: its body's width with
+/// its sidechain strip and, while shown, its sidechain section.
+#[must_use]
+pub fn docked_width(frame: &DeviceFrame) -> f32 {
     body_width(frame) + sidechain_width(frame)
+}
+
+/// How tall a device's body is at 100% at its docked size: its layout's
+/// docked height, or a device body's 158 points without one.
+#[must_use]
+pub fn body_height(frame: &DeviceFrame) -> f32 {
+    frame.panel.as_ref().map_or(BODY_HEIGHT, |panel| {
+        panel.description.layout.docked_size().height
+    })
+}
+
+/// The smallest a floating device's window shows at 100%, in points: the
+/// device at its docked size under its title bar (IMP-14: the docked size
+/// is the minimum).
+#[must_use]
+pub fn window_min_size(frame: &DeviceFrame) -> (f32, f32) {
+    (docked_width(frame), TITLE_BAR_HEIGHT + body_height(frame))
+}
+
+/// Whether a floating device's window grows across and down: only if its
+/// layout has a display cell that does (IMP-14). A device that doesn't
+/// grow floats at its docked size.
+#[must_use]
+pub fn window_grows(frame: &DeviceFrame) -> (bool, bool) {
+    frame
+        .panel
+        .as_ref()
+        .map_or((false, false), |panel| panel.description.layout.grows())
 }
 
 /// What the generic UI needs to draw a device (WP-2.5): its type's
@@ -208,6 +258,10 @@ pub struct DeviceFrame {
     pub show_preset_name: bool,
     /// Whether it's folded to its title bar.
     pub folded: bool,
+    /// Whether it floats in a window of its own, its place in the chain a
+    /// strip (WP-2.5b).
+    #[serde(default)]
+    pub floating: bool,
     /// Whether it's the selected device.
     pub selected: bool,
     /// Whether it's the device being hot-swapped.
@@ -241,6 +295,57 @@ pub struct SidechainSection {
     pub gain: f64,
     /// Sidechain Listen.
     pub listen: bool,
+}
+
+/// A floating device's window, as `device.windows` reports it (WP-2.5b).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct FloatingWindow {
+    /// The device.
+    pub device: DeviceId,
+    /// Its track.
+    pub track: TrackId,
+    /// The window's title: the device's title, then its track's label, as
+    /// Live titles a plug-in's window (`Utility/3-Audio`; observed in Live
+    /// 12.4.6 with a plug-in, `AUDelay/4-Audio`).
+    pub title: String,
+    /// Where the window sits and how big it is, once it has been placed;
+    /// `null` until then, and the app places it.
+    pub frame: Option<WindowFrame>,
+    /// The smallest size its contents take at 100%, in points: the device
+    /// at its docked size under its title bar.
+    pub min_width: f32,
+    /// See `min_width`.
+    pub min_height: f32,
+    /// Whether the window can grow across: only a device with a display
+    /// cell that grows can.
+    pub grows_across: bool,
+    /// Whether the window can grow down.
+    pub grows_down: bool,
+    /// The device, as its window draws it.
+    pub view: DeviceFrame,
+    /// Whether the window shows: always, unless Auto-Hide Plug-In Windows
+    /// is on (as it is in a new install) and another track is selected,
+    /// when it hides until its track is selected again. A hidden window's
+    /// device still floats.
+    pub shown: bool,
+}
+
+/// What `device.windows` returns.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct FloatingWindows {
+    /// Every floating device's window, on any track, in the order of the
+    /// tracks and their chains.
+    pub windows: Vec<FloatingWindow>,
+}
+
+/// Arguments of `device.set_window`.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetWindowArgs {
+    /// The floating device.
+    pub device: DeviceId,
+    /// Where its window sits and how big its contents are, in points.
+    pub frame: WindowFrame,
 }
 
 /// What `device_view.state` returns.
@@ -615,6 +720,31 @@ fn specs() -> Vec<CommandSpec> {
             .context(DeviceView)
             .args::<ShowSidechainArgs>()
             .result::<DeviceViewState>(),
+        CommandSpec::new(WINDOWS, "Floating Device Windows")
+            .description(
+                "Reports every floating device's window (IMP-14), on any track: the device and \
+                 its track, the window's title, where it sits and how big it is (`frame`, in \
+                 points, `null` until the app has placed it), its smallest size (the device's \
+                 docked size under its title bar), whether it can grow (only a device with a \
+                 display that grows can), and the device as its window draws it. \
+                 `device.set_floating` floats and docks devices. Changes nothing.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .args::<NoArgs>()
+            .result::<FloatingWindows>(),
+        CommandSpec::new(SET_WINDOW, "Move Device Window")
+            .description(
+                "Moves or resizes a floating device's window, as dragging it does: `frame` is \
+                 its outer top-left corner and the size of its contents, in points. A size is \
+                 kept within the window's smallest (the device's docked size) and, for a device \
+                 that doesn't grow, held at it. The frame is saved with the set but isn't an \
+                 undo step, so undo never moves a window instead of undoing an edit.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .args::<SetWindowArgs>()
+            .result::<FloatingWindows>(),
     ]
 }
 

@@ -387,6 +387,14 @@ pub enum Command {
         /// as the preset's; empty for the device's own name.
         name: String,
     },
+    /// Floats a device in a window of its own, or docks it back in the
+    /// Device View (IMP-14, WP-2.5b). Only native devices float.
+    SetDeviceFloating {
+        /// The device.
+        device: DeviceId,
+        /// Float (true) or dock (false).
+        floating: bool,
+    },
     /// Switches a device on or off.
     SetDeviceEnabled {
         /// The device.
@@ -495,6 +503,11 @@ impl Command {
             Self::SetShowPresetName { .. } => "Toggle Show Preset Name",
             Self::SetDeviceState { .. } => "Load Preset",
             Self::SetDeviceEnabled { .. } => "Change \"Device On\"",
+            // IMP-14: Beatlayer's own, so Live has no name for them.
+            Self::SetDeviceFloating { floating: true, .. } => "Float Device",
+            Self::SetDeviceFloating {
+                floating: false, ..
+            } => "Dock Device",
             Self::SetDeviceParam { .. } => "Change parameter",
             // WP-2.19b, as Live 12.4.6 names them (observed); Listen's is to
             // observe.
@@ -786,6 +799,16 @@ impl Document {
                 check_device(&loaded)?;
                 if loaded != *self.device_ref(*device)? {
                     *self.device_mut(*device)? = loaded;
+                }
+                Ok(())
+            }
+            Command::SetDeviceFloating { device, floating } => {
+                let current = self.device_ref(*device)?;
+                if *floating && !current.can_float() {
+                    return Err(ModelError::CannotFloat(*device));
+                }
+                if current.floating != *floating {
+                    self.device_mut(*device)?.floating = *floating;
                 }
                 Ok(())
             }
@@ -1370,6 +1393,9 @@ pub(crate) fn check_clip(clip: &Clip) -> Result<(), ModelError> {
 
 /// Checks a device's parameter values.
 pub(crate) fn check_device(device: &Device) -> Result<(), ModelError> {
+    if device.floating && !device.can_float() {
+        return Err(ModelError::CannotFloat(device.id));
+    }
     for value in device.params.values() {
         check_value("parameter value", *value, value.is_finite())?;
     }
@@ -2799,6 +2825,70 @@ mod tests {
         .unwrap();
         assert_eq!(title(&song), "Utility");
         assert!(song.doc.device(device).unwrap().own_name.is_empty());
+    }
+
+    // Spec: device-chains R26
+    #[test]
+    fn floating_and_docking_are_undo_steps_and_plug_ins_dont_float() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        let device = song.device(track);
+        let plugin = DeviceId(song.ids.allocate());
+        song.apply(Command::InsertDevice {
+            track,
+            index: 1,
+            device: Device::new(
+                plugin,
+                "Reverb",
+                DeviceKind::Plugin {
+                    format: crate::PluginFormat::Clap,
+                    plugin_id: "org.example.reverb".to_owned(),
+                },
+            ),
+        })
+        .unwrap();
+        let mut editor =
+            crate::Editor::from_document(song.doc.clone(), bl_core::id::IdAllocator::new());
+        let floating = |editor: &crate::Editor| editor.document().device(device).unwrap().floating;
+        assert!(!floating(&editor));
+        editor
+            .apply(Command::SetDeviceFloating {
+                device,
+                floating: true,
+            })
+            .unwrap();
+        assert!(floating(&editor));
+        editor
+            .apply(Command::SetDeviceFloating {
+                device,
+                floating: false,
+            })
+            .unwrap();
+        assert!(!floating(&editor));
+        assert_eq!(
+            editor.undo_history().collect::<Vec<_>>(),
+            ["Dock Device", "Float Device"]
+        );
+        editor.undo().unwrap();
+        assert!(floating(&editor));
+        editor.undo().unwrap();
+        assert!(!floating(&editor));
+        // Docking a docked device changes nothing, so it's no step.
+        editor
+            .apply(Command::SetDeviceFloating {
+                device,
+                floating: false,
+            })
+            .unwrap();
+        assert!(!editor.can_undo());
+        // Plug-ins open their own editor windows (IMP-14).
+        assert_eq!(
+            song.reject(Command::SetDeviceFloating {
+                device: plugin,
+                floating: true,
+            }),
+            ModelError::CannotFloat(plugin)
+        );
     }
 
     // Spec: device-chains R16

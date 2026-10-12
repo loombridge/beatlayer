@@ -53,6 +53,11 @@ pub struct Preferences {
     /// spec, R7 and R22). On by default, as observed in Live 12.4.6, and on
     /// for preferences saved before the setting existed.
     pub create_fades_on_clip_edges: OnByDefault,
+    /// Auto-Hide Plug-In Windows (Plug-Ins, Plug-In Windows, L-SET-017):
+    /// a floating device's window hides while another track is selected
+    /// and comes back with its track (WP-2.5b), as Live's plug-in windows
+    /// do. On by default, as observed in Live 12.4.6.
+    pub auto_hide_plug_in_windows: OnByDefault,
 }
 
 /// A switch that's on unless the preferences say otherwise, read and
@@ -160,6 +165,17 @@ mod tests {
         std::fs::write(dir.join(PREFERENCES_FILE), "not json").unwrap();
         assert!(Preferences::load(&dir).is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn auto_hide_plug_in_windows_is_on_unless_saved_off() {
+        // Spec: device-chains R31. Live's default, observed in Live 12.4.6.
+        assert!(Preferences::default().auto_hide_plug_in_windows.0);
+        let older: Preferences = serde_json::from_str(r#"{"tab_navigation": true}"#).unwrap();
+        assert!(older.auto_hide_plug_in_windows.0);
+        let off: Preferences =
+            serde_json::from_str(r#"{"auto_hide_plug_in_windows": false}"#).unwrap();
+        assert!(!off.auto_hide_plug_in_windows.0);
     }
 
     #[test]

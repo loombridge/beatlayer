@@ -838,6 +838,24 @@ const ENTRIES: &[Entry] = &[
             track with and without it; it keeps its settings and its state.",
     },
     Entry {
+        id: "device.set_floating",
+        action: Action::Apply("set_device_floating"),
+        label: "Float",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[Key::Runs("S-DEV-015")],
+        description: "Floats a native device in a window of its own (`floating`: true), or \
+            docks it back in the Device View (false), as the device's context menu item Float, \
+            its window's Dock button, and closing its window do. While it floats, its place in \
+            the chain shows as a narrow strip, so the signal order stays readable, and its \
+            window can be made larger: only its displays grow, its controls keeping their size \
+            and place. Floating and docking are one undo step each (Float Device, Dock Device); \
+            whether a device floats is saved with the set. Moving or resizing the window is \
+            `device.set_window`, which isn't an undo step. Plug-ins open their own editor \
+            windows instead, so they can't float. It changes nothing in the sound. From the \
+            keyboard (Option-F on macOS) and the menu it switches the selected device.",
+    },
+    Entry {
         id: "device.set_param",
         action: Action::Apply("set_device_param"),
         label: "Set Device Parameter",

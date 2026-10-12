@@ -214,6 +214,17 @@ pub fn describe(window: &Window) -> String {
     out.join("; ")
 }
 
+/// Keeps a floating device's window above Beatlayer's main window, as Live
+/// keeps a plug-in's (WP-2.5b; observed in Live 12.4.6): the window sits at
+/// AppKit's floating level, and hides while Beatlayer isn't the active app,
+/// so it never covers other apps' windows.
+pub fn float_above_main(window: &Window) {
+    window.set_window_level(winit::window::WindowLevel::AlwaysOnTop);
+    if let Some(ns) = ns_window(window) {
+        ns.setHidesOnDeactivate(true);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

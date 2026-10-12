@@ -1055,6 +1055,10 @@ fn paths() -> BTreeMap<&'static str, Path> {
             ),
         ),
         (
+            "settings.set_auto_hide_plug_in_windows",
+            settings("plug-ins", nothing, "Auto-Hide Plug-In Windows", Key::Enter),
+        ),
+        (
             "settings.set_outline_view_in_focus",
             settings(
                 "display-input",
@@ -1259,6 +1263,16 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ),
         ("device_view.state", Exception(Query)),
         ("device.parameters", Exception(Query)),
+        // Floating device windows (WP-2.5b): Float and Dock are
+        // `device.set_floating`, on a key and in the device's menu.
+        ("device.windows", Exception(Query)),
+        (
+            "device.set_window",
+            Exception(Equivalent(
+                "moving or resizing a floating device's window, which the system's window \
+                 keys and commands do",
+            )),
+        ),
         // A send knob and the In/Out choosers (the routing spec): Up and
         // Down on them.
         (
@@ -1415,6 +1429,7 @@ fn reach(command_id: &str, path: &Path) -> Result<(), String> {
             h
         }
         Window::Settings => open_settings(page),
+        Window::Device(_) => unreachable!("no keyboard path starts in a device's window"),
     };
     setup(&mut h);
     if *window == Window::Main {

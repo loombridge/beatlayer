@@ -13,7 +13,7 @@ use std::ffi::OsStr;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
-use bl_model::{ContentHash, Editor, TrackId, TrackKind, registry};
+use bl_model::{ContentHash, DeviceWindows, Editor, TrackId, TrackKind, registry};
 use bl_project::{
     Media, MediaPath, MediaRef, Project, ProjectFolder, SET_EXTENSION, SetFile, is_set,
 };
@@ -75,6 +75,18 @@ pub trait SetStore {
     fn media_files(&self) -> Vec<(ContentHash, PathBuf, u64)> {
         Vec::new()
     }
+
+    /// Gives the store where floating devices' windows sit (WP-2.5b), for
+    /// the next save to write beside the document. A store that keeps no
+    /// window frames ignores it.
+    fn set_windows(&mut self, windows: DeviceWindows) {
+        let _ = windows;
+    }
+
+    /// Where the open set's floating devices' windows sit, as it was saved.
+    fn windows(&self) -> DeviceWindows {
+        DeviceWindows::new()
+    }
 }
 
 /// Beatlayer's set files, through `bl-project`. It keeps the open set's
@@ -87,6 +99,9 @@ pub struct ProjectFiles {
     /// Files added since the set was opened (WP-1.10), by their paths on
     /// disk, for the next save's media table.
     added: BTreeMap<ContentHash, (PathBuf, u64)>,
+    /// Floating devices' window frames (WP-2.5b): the open set's, then the
+    /// shell's for the next save.
+    windows: DeviceWindows,
 }
 
 impl ProjectFiles {
@@ -111,6 +126,7 @@ impl SetStore for ProjectFiles {
         let opened = set.path().to_owned();
         self.set = Some(set);
         self.media = project.media;
+        self.windows = project.windows;
         self.added.clear();
         Ok((editor, opened))
     }
@@ -153,7 +169,16 @@ impl SetStore for ProjectFiles {
     fn close(&mut self) {
         self.set = None;
         self.media = Media::new();
+        self.windows = DeviceWindows::new();
         self.added.clear();
+    }
+
+    fn set_windows(&mut self, windows: DeviceWindows) {
+        self.windows = windows;
+    }
+
+    fn windows(&self) -> DeviceWindows {
+        self.windows.clone()
     }
 
     fn add_media(&mut self, hash: ContentHash, path: &Path, size: u64) {
@@ -191,7 +216,7 @@ impl ProjectFiles {
         mut media: Media,
     ) -> Result<Vec<String>, String> {
         let warnings = self.add_media_to(&mut media, path);
-        let project = Project::from_editor(editor, media);
+        let project = Project::from_editor(editor, media).with_windows(&self.windows);
         let mut set = self
             .set
             .clone()

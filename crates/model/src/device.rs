@@ -53,7 +53,51 @@ pub struct Device {
     /// of the saved set for a device without one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sidechain: Option<Sidechain>,
+    /// Whether the device floats in a window of its own rather than
+    /// showing in the Device View (IMP-14, WP-2.5b), where its place in the
+    /// chain shows as a strip. Only native devices float. Left out of the
+    /// saved set while docked. Where its window sits isn't part of the
+    /// document: moving or resizing a window isn't an undo step
+    /// ([`WindowFrame`]).
+    #[serde(default, skip_serializing_if = "is_off")]
+    pub floating: bool,
 }
+
+/// Where a floating device's window sits and how big it is (IMP-14,
+/// WP-2.5b), in points on the screen: the top-left corner of its outer
+/// frame, and the size of what it shows inside. It's saved with the set
+/// beside the document, so moving or resizing a window is never an undo
+/// step.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WindowFrame {
+    /// The left edge of the window's outer frame, in points from the left
+    /// of the main screen.
+    pub x: f64,
+    /// The top of the window's outer frame, in points from the top of the
+    /// main screen.
+    pub y: f64,
+    /// The width of the window's contents, in points.
+    pub width: f64,
+    /// The height of the window's contents, in points.
+    pub height: f64,
+}
+
+impl WindowFrame {
+    /// Whether every number is finite and the size is above 0.
+    #[must_use]
+    pub fn is_valid(&self) -> bool {
+        [self.x, self.y, self.width, self.height]
+            .iter()
+            .all(|v| v.is_finite())
+            && self.width > 0.0
+            && self.height > 0.0
+    }
+}
+
+/// Each floating device's window frame, as a set saves them beside its
+/// document (WP-2.5b).
+pub type DeviceWindows = std::collections::BTreeMap<DeviceId, WindowFrame>;
 
 /// A device's sidechain input and the settings of its sidechain section
 /// (the routing spec, WP-2.19b): External, Source with its channel, Mix,
@@ -161,7 +205,15 @@ impl Device {
             show_preset_name: true,
             params: OrdMap::new(),
             sidechain: None,
+            floating: false,
         }
+    }
+
+    /// Whether the device can float in a window of its own: native devices
+    /// can; plug-ins open their own editor windows, as in Live (IMP-14).
+    #[must_use]
+    pub fn can_float(&self) -> bool {
+        matches!(self.kind, DeviceKind::Native { .. })
     }
 
     /// The same device with a sidechain input, as a new device has.

@@ -78,6 +78,9 @@ pub const SETTINGS_SET_THEME: &str = "settings.set_theme";
 /// `settings.set_create_fades_on_clip_edges`: switch Create Fades on Clip
 /// Edges.
 pub const SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES: &str = "settings.set_create_fades_on_clip_edges";
+/// `settings.set_auto_hide_plug_in_windows`: switch Auto-Hide Plug-In
+/// Windows (WP-2.5b).
+pub const SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS: &str = "settings.set_auto_hide_plug_in_windows";
 /// `audio.devices`: list drivers and devices.
 pub const AUDIO_DEVICES: &str = "audio.devices";
 /// `audio.status`: what the audio device runs at.
@@ -122,6 +125,7 @@ pub const IDS: &[&str] = &[
     SETTINGS_PREVIOUS_PAGE,
     SETTINGS_SET_THEME,
     SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES,
+    SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS,
     SETTINGS_SET_OUTLINE_VIEW_IN_FOCUS,
     AUDIO_DEVICES,
     AUDIO_STATUS,
@@ -613,6 +617,25 @@ fn specs() -> Vec<CommandSpec> {
              clip that starts or ends mid-waveform doesn't click; clips already in the set keep \
              their fades, which `clip.set_fades` changes. The setting is kept for the next \
              start, and isn't part of the set or an undo step. The result's `on` is the setting \
+             afterwards.",
+        )
+        .permission(Permission::Edit)
+        .context(Settings)
+        .args::<SwitchArgs>()
+        .result::<SwitchResult>(),
+        // Plug-Ins, Plug-In Windows (L-SET-017; WP-2.5b).
+        CommandSpec::new(
+            SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS,
+            "Auto-Hide Plug-In Windows",
+        )
+        .description(
+            "Switches Auto-Hide Plug-In Windows, on the Settings window's Plug-Ins page; it's on \
+             in a new install, as Live's is. While it's on, a floating device's window hides \
+             while another track is selected and comes back when its own track is selected \
+             again, as Live's plug-in windows do. A hidden window's device still floats: \
+             hiding isn't docking, isn't an undo step, and the set saves the device as \
+             floating. `device.windows` says which windows show. The setting is kept for the \
+             next start, and isn't part of the set. The result's `on` is the setting \
              afterwards.",
         )
         .permission(Permission::Edit)

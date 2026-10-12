@@ -3,7 +3,8 @@
 //! choice (L-SET-011), the interface zoom (L-SET-010, WP-1.17), and Create
 //! Fades on Clip Edges (L-SET-018, WP-1.4b), and Display & Input's
 //! keyboard settings (Outline View in Focus, Use Tab Key to Move Focus,
-//! Wrap Tab Navigation; WP-1.14) are built; the other pages are
+//! Wrap Tab Navigation; WP-1.14), and Plug-Ins' Auto-Hide Plug-In Windows
+//! (L-SET-017, WP-2.5b) are built; the other pages are
 //! in the chooser and say which package builds them. The Tempo & MIDI page (L-SET-014) has the agent server's section
 //! (WP-1.15), which Live doesn't have: it sits with the control surfaces,
 //! the other way programs drive the app.
@@ -110,6 +111,7 @@ impl SettingsUi {
                 SettingsPage::RecordWarpLaunch => {
                     record_warp_launch_page(ui, shell, theme, &mut rows, &mut events);
                 }
+                SettingsPage::PlugIns => plug_ins_page(ui, shell, theme, &mut rows, &mut events),
                 SettingsPage::TempoMidi => {
                     agents_section(ui, shell, theme, &mut rows, &mut events);
                     rows.note(
@@ -634,6 +636,61 @@ fn record_warp_launch_page(
     for row in &TAP_TEMPO {
         rows.pending(ui, row);
     }
+}
+
+/// Plug-Ins' Plug-In Sources section (L-SET-017): the plug-in hosts build
+/// it. Live's VST2 rows are left out, as Beatlayer doesn't host VST2 (the
+/// parity matrix: Out).
+const PLUG_IN_SOURCES: [Pending; 4] = [
+    Pending {
+        label: "Plug-In Sources",
+        controls: &[("Rescan", SettingsLayout::CHOOSER)],
+        package: "WP-2.6",
+        value: "Rescan",
+    },
+    switch_row("Use Audio Units v2", "WP-2.8"),
+    switch_row("Use Audio Units v3", "WP-2.8"),
+    switch_row("VST3 Plug-In System Folders", "WP-2.7"),
+];
+
+/// Plug-Ins (L-SET-017): Plug-In Sources, pending until the plug-in hosts,
+/// then Plug-In Windows, whose Auto-Hide Plug-In Windows is built
+/// (WP-2.5b): floating devices' windows follow it as Live's plug-in windows
+/// do. Multiple and Auto-Open keep their places, pending.
+fn plug_ins_page(
+    ui: &mut Ui,
+    shell: &Shell,
+    theme: &Theme,
+    rows: &mut Rows<'_>,
+    events: &mut Vec<UiEvent>,
+) {
+    rows.heading(ui, "Plug-In Sources");
+    for row in &PLUG_IN_SOURCES {
+        rows.pending(ui, row);
+    }
+    rows.heading(ui, "Plug-In Windows");
+    rows.pending(
+        ui,
+        &switch_row("Multiple Plug-In Windows", "WP-2.6").showing("On"),
+    );
+    let rect = rows.row(ui, "Auto-Hide Plug-In Windows", SettingsLayout::SWITCH);
+    if let Some(on) = switch(
+        ui,
+        theme,
+        "auto-hide-plug-in-windows",
+        "Auto-Hide Plug-In Windows",
+        rect,
+        shell.auto_hide_plug_in_windows(),
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            ids::SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS,
+            json!({ "on": on }),
+        )));
+    }
+    rows.pending(
+        ui,
+        &switch_row("Auto-Open Plug-In Windows", "WP-2.6").showing("On"),
+    );
 }
 
 fn theme_page(

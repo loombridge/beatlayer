@@ -637,7 +637,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["Cmd+Option+P"]
 win = ["Ctrl+Alt+P"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "view.toggle_plug_in_windows", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-DEV-010"
@@ -4192,6 +4195,20 @@ win = ["Minus"]
 status = "bound"
 commands = [
   { id = "device.fold", contexts = ["device-view"] },
+]
+
+[[shortcut]]
+id = "S-DEV-015"
+action = "Float the selected device in its own window, or dock it"
+context = "device-view"
+kind = "key"
+trigger = "press"
+milestone = "M2"
+mac = ["Option+F"]
+win = ["Ctrl+Alt+F"]
+status = "bound"
+commands = [
+  { id = "device.set_floating", contexts = ["device-view"] },
 ]
 
 [[shortcut]]

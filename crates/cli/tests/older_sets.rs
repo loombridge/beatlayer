@@ -93,6 +93,7 @@ fn a_version_1_set_with_split_audio_clips_loads_and_plays_as_it_did() {
         document: editor.document().clone(),
         ids: IdAllocator::new(),
         media: Media::default(),
+        windows: bl_model::DeviceWindows::new(),
     };
     let mut saved: Value = serde_json::from_slice(&encode_json(&project, 1).unwrap()).unwrap();
     saved["schema"] = json!(1);

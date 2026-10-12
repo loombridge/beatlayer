@@ -23,6 +23,9 @@ pub enum ModelError {
     NoSuchDevice(DeviceId),
     /// The device has no sidechain input to set.
     NoSidechain(DeviceId),
+    /// The device is a plug-in, which opens its own editor window rather
+    /// than floating (IMP-14).
+    CannotFloat(DeviceId),
     /// Another object in the document already has this ID.
     IdInUse(Id),
     /// The same ID appears twice where each must be different.
@@ -123,6 +126,10 @@ impl fmt::Display for ModelError {
             Self::NoSuchClip(id) => write!(f, "no {id}"),
             Self::NoSuchDevice(id) => write!(f, "no {id}"),
             Self::NoSidechain(id) => write!(f, "{id} has no sidechain input"),
+            Self::CannotFloat(id) => write!(
+                f,
+                "{id} is a plug-in, which opens its own editor window; only native devices float"
+            ),
             Self::IdInUse(id) => write!(f, "ID {id} is already in use"),
             Self::DuplicateId(id) => write!(f, "ID {id} appears more than once"),
             Self::WrongTrackKind { track, kind, needs } => {

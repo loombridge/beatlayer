@@ -9,9 +9,14 @@
 //!      "saved_by": "Beatlayer 0.1.0",
 //!      "ids": 412,               the next object ID to hand out
 //!      "media": [ { "hash": "…", "path": "Samples/Imported/Kick.wav", "size": 88244 } ],
+//!      "windows": { "12": { "x": 80, "y": 120, "width": 320, "height": 174 } },
 //!      "document": { … }         the song, as bl-model serialises it
 //!    }
 //! ```
+//!
+//! `windows` holds where each floating device's window sits (WP-2.5b), and
+//! is left out when no device floats. It sits beside the document rather
+//! than in it, so moving a window is never an undo step.
 //!
 //! `format` and `schema` come first and keep their names in every version,
 //! so a reader can tell what a file is and which migrations it needs before
@@ -26,7 +31,7 @@
 use std::io::Read;
 
 use bl_core::id::IdAllocator;
-use bl_model::{Document, Editor};
+use bl_model::{DeviceWindows, Document, Editor};
 use ruzstd::decoding::StreamingDecoder;
 use ruzstd::encoding::{CompressionLevel, compress_to_vec};
 use serde::{Deserialize, Serialize};
@@ -55,6 +60,9 @@ pub struct Project {
     pub ids: IdAllocator,
     /// Where the media files the clips use are.
     pub media: Media,
+    /// Where each floating device's window sits (WP-2.5b): saved with the
+    /// set, but not part of the document, so it's no undo step.
+    pub windows: DeviceWindows,
 }
 
 impl Project {
@@ -72,7 +80,20 @@ impl Project {
             document: editor.document().clone(),
             ids: editor.ids(),
             media,
+            windows: DeviceWindows::new(),
         }
+    }
+
+    /// The same project with these window frames, keeping only those of
+    /// devices its document has.
+    #[must_use]
+    pub fn with_windows(mut self, windows: &DeviceWindows) -> Self {
+        self.windows = windows
+            .iter()
+            .filter(|(device, frame)| self.document.device(**device).is_some() && frame.is_valid())
+            .map(|(device, frame)| (*device, *frame))
+            .collect();
+        self
     }
 
     /// An editor for the song, with an empty undo history.
@@ -137,6 +158,8 @@ struct Saving<'a> {
     saved_by: &'static str,
     ids: IdAllocator,
     media: &'a Media,
+    #[serde(skip_serializing_if = "DeviceWindows::is_empty")]
+    windows: &'a DeviceWindows,
     document: &'a Document,
 }
 
@@ -149,6 +172,7 @@ impl<'a> Saving<'a> {
             saved_by: SAVED_BY,
             ids: project.ids,
             media: &project.media,
+            windows: &project.windows,
             document: &project.document,
         }
     }
@@ -167,6 +191,8 @@ struct Saved {
     saved_by: String,
     ids: IdAllocator,
     media: Media,
+    #[serde(default)]
+    windows: DeviceWindows,
     document: Document,
 }
 
@@ -266,6 +292,7 @@ pub fn decode_json(json: &[u8], options: &LoadOptions) -> Result<(Project, SetIn
         saved_by,
         mut ids,
         media,
+        windows,
         document,
         ..
     } = saved;
@@ -281,11 +308,15 @@ pub fn decode_json(json: &[u8], options: &LoadOptions) -> Result<(Project, SetIn
     if ids.peek().get() == u64::MAX {
         return Err(LoadError::invalid("the set's object IDs are exhausted"));
     }
+    // A frame that's damaged, or for a device that isn't there, is
+    // dropped: the window opens where the app puts a new one.
     let project = Project {
         document,
         ids,
         media,
-    };
+        windows: DeviceWindows::new(),
+    }
+    .with_windows(&windows);
     let info = SetInfo {
         revision,
         saved_by,
@@ -403,6 +434,59 @@ mod tests {
         );
         // The output depends only on the input.
         assert_eq!(encode(&project, 3).unwrap(), bytes);
+    }
+
+    // Spec: device-chains R29
+    #[test]
+    fn floating_windows_are_saved_beside_the_document() {
+        let mut editor = song().editor();
+        let track = editor.document().top_level().next().unwrap();
+        let device: bl_model::DeviceId = editor.new_id();
+        editor
+            .apply(Command::InsertDevice {
+                track,
+                index: 0,
+                device: bl_model::Device::new(
+                    device,
+                    "Utility",
+                    bl_model::DeviceKind::Native {
+                        device_type: "beatlayer.utility".to_owned(),
+                    },
+                ),
+            })
+            .unwrap();
+        editor
+            .apply(Command::SetDeviceFloating {
+                device,
+                floating: true,
+            })
+            .unwrap();
+        let frame = bl_model::WindowFrame {
+            x: 80.0,
+            y: 120.5,
+            width: 320.0,
+            height: 174.0,
+        };
+        let gone = bl_model::DeviceId(Id::new(9_999).unwrap());
+        let windows = DeviceWindows::from([(device, frame), (gone, frame)]);
+        let project = Project::from_editor(&editor, Media::new()).with_windows(&windows);
+        // Only the frames of devices the set has are kept.
+        assert_eq!(project.windows, DeviceWindows::from([(device, frame)]));
+        let value = json_of(&project, 1);
+        assert_eq!(
+            value["windows"][device.0.get().to_string()],
+            json!({ "x": 80.0, "y": 120.5, "width": 320.0, "height": 174.0 })
+        );
+        let (loaded, _) = load_json(&value).unwrap();
+        assert_eq!(loaded, project);
+        assert!(loaded.document.device(device).unwrap().floating);
+        // No floating windows, no `windows`: older sets read the same.
+        assert!(json_of(&song(), 1).get("windows").is_none());
+        // A damaged frame, or one for a device that isn't there, is dropped.
+        let mut damaged = value.clone();
+        damaged["windows"][device.0.get().to_string()]["width"] = json!(-1.0);
+        damaged["windows"]["9999"] = json!({ "x": 0, "y": 0, "width": 10, "height": 10 });
+        assert!(load_json(&damaged).unwrap().0.windows.is_empty());
     }
 
     #[test]

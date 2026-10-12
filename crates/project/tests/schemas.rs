@@ -235,6 +235,7 @@ fn fixture_project() -> Project {
         document: editor.document().clone(),
         ids,
         media,
+        windows: bl_model::DeviceWindows::new(),
     }
 }
 

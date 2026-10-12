@@ -9,6 +9,12 @@
 //! A folded device is a strip a title bar wide with the title bar on its
 //! side. Show Options and a right-click open the device's context menu
 //! (C-DEVICE). An empty chain says "Drop an Instrument or Sample Here".
+//!
+//! A floating device (WP-2.5b, IMP-14) keeps its place in the chain as a
+//! strip like a folded device's, outlined in the accent, so the signal
+//! order stays readable; its window draws the same frame at the window's
+//! size, with a Dock button at the title bar's right end
+//! ([`DeviceViewUi::show_window`]).
 //! Every action runs a registered command (`device.*`), so the keyboard,
 //! a screen reader, and an agent reach the same ones.
 
@@ -17,7 +23,7 @@ use std::f32::consts::FRAC_PI_2;
 use bl_model::{DeviceId, DeviceRole, TrackId};
 use bl_shell::context_menus;
 use bl_shell::device_commands::{
-    self as ids, DEVICE_GAP, DeviceFrame, DeviceViewState, TITLE_BAR_HEIGHT,
+    self as ids, DEVICE_GAP, DeviceFrame, DeviceViewState, FloatingWindow, TITLE_BAR_HEIGHT,
 };
 use bl_shell::menus::{MenuItem, shown};
 use bl_shell::{Area, Invocation, Shell};
@@ -76,6 +82,21 @@ impl Default for DeviceViewUi {
 #[must_use]
 pub fn frame_id(device: DeviceId) -> Id {
     Id::new(("device-frame", device))
+}
+
+/// The ID of a floating device's frame in its window (WP-2.5b).
+#[must_use]
+pub fn window_frame_id(device: DeviceId) -> Id {
+    Id::new(("device-window", device))
+}
+
+/// Where a floating device's Dock button sits in its window at `rect`.
+#[must_use]
+pub fn dock_rect(rect: Rect) -> Rect {
+    window_layout(rect)
+        .1
+        .dock
+        .expect("a window has a Dock button")
 }
 
 /// The ID of one of a device's title-bar controls: `activator`, `title`,
@@ -195,14 +216,51 @@ impl DeviceViewUi {
                 ui.set_clip_rect(rect);
                 for (frame, (id, at)) in state.devices.iter().zip(&placed) {
                     debug_assert_eq!(frame.id, *id);
-                    self.device(ui, shell, theme, frame, *at, events);
+                    self.device(ui, shell, theme, frame, *at, false, events);
                 }
             },
         );
         self.drop_target(ui, shell, theme, &state, &placed, rect, events);
     }
 
-    /// One device's frame.
+    /// Draws a floating device's window (WP-2.5b): the device's frame at
+    /// the window's size, its title bar with a Dock button at the right
+    /// end, and its body below, where only its display cells take the
+    /// extra room (IMP-14). Where the window draws its own utility title
+    /// bar (macOS), `title_strip` is its height in layout points, and the
+    /// window's title is drawn centred in it; the system's close button
+    /// sits at its left.
+    pub fn show_window(
+        &mut self,
+        ui: &mut Ui,
+        shell: &Shell,
+        theme: &Theme,
+        window: &FloatingWindow,
+        title_strip: f32,
+        events: &mut Vec<UiEvent>,
+    ) {
+        let whole = ui.max_rect();
+        let c = &theme.colors;
+        ui.painter().rect_filled(whole, 0.0, c.panel.0);
+        let mut rect = whole;
+        if title_strip > 0.0 {
+            let strip = Rect::from_min_size(whole.min, vec2(whole.width(), title_strip));
+            ui.painter().rect_filled(strip, 0.0, c.window.0);
+            ui.painter().text(
+                strip.center(),
+                Align2::CENTER_CENTER,
+                &window.title,
+                theme.small_font(),
+                c.text_dim.0,
+            );
+            rect.min.y = strip.bottom();
+        }
+        self.device(ui, shell, theme, &window.view, rect, true, events);
+    }
+
+    /// One device's frame: in the chain, or filling its floating window
+    /// (`window`).
+    #[expect(clippy::too_many_arguments, reason = "the frame's inputs")]
     fn device(
         &mut self,
         ui: &mut Ui,
@@ -210,10 +268,17 @@ impl DeviceViewUi {
         theme: &Theme,
         frame: &DeviceFrame,
         rect: Rect,
+        window: bool,
         events: &mut Vec<UiEvent>,
     ) {
         let c = &theme.colors;
-        let id = frame_id(frame.id);
+        // A floating device's place in the chain is a strip (IMP-14).
+        let strip = !window && (frame.folded || frame.floating);
+        let id = if window {
+            window_frame_id(frame.id)
+        } else {
+            frame_id(frame.id)
+        };
         let _ = ui.interact(rect, id, Sense::hover());
         ui.ctx().accesskit_node_builder(id, |node| {
             node.set_role(Role::Group);
@@ -222,7 +287,15 @@ impl DeviceViewUi {
                 "{}, {}{}",
                 frame.role.label(),
                 if frame.enabled { "on" } else { "off" },
-                if frame.folded { ", folded" } else { "" }
+                if window {
+                    ""
+                } else if frame.floating {
+                    ", floating"
+                } else if frame.folded {
+                    ", folded"
+                } else {
+                    ""
+                }
             ));
         });
         let painter = ui.painter_at(rect);
@@ -234,32 +307,54 @@ impl DeviceViewUi {
             c.control.0
         };
         let text_colour = if frame.selected { c.window.0 } else { c.text.0 };
-        let (bar, controls) = if frame.folded {
+        let (bar, controls) = if strip {
             folded_layout(rect)
+        } else if window {
+            window_layout(rect)
         } else {
             unfolded_layout(rect)
         };
         painter.rect_filled(bar, theme.sizes.corner, bar_colour);
+        if frame.floating && !window {
+            // Drawn as floating: outlined in the accent.
+            painter.rect_stroke(
+                rect.shrink(0.5),
+                theme.sizes.corner,
+                Stroke::new(1.0, c.accent.0),
+                StrokeKind::Inside,
+            );
+        }
 
         ui.scope_builder(
             UiBuilder::new().max_rect(rect).accessibility_parent(id),
             |ui| {
                 // Spec: device-framework R15. A described device's body is
                 // its generic panel, at its layout's docked size.
-                if let Some(panel) = frame.panel.as_ref().filter(|_| !frame.folded) {
+                if let Some(panel) = frame.panel.as_ref().filter(|_| !strip) {
                     // Right of the sidechain strip and section (WP-2.19b).
                     let mut body = crate::device_panel::body_rect(rect, TITLE_BAR_HEIGHT);
                     body.min.x += ids::sidechain_width(frame);
                     crate::device_panel::show(ui, theme, frame, panel, body, events);
                 }
-                self.title(ui, shell, theme, frame, controls.title, text_colour, events);
+                self.title(
+                    ui,
+                    shell,
+                    theme,
+                    frame,
+                    (controls.title, strip, window),
+                    text_colour,
+                    events,
+                );
                 self.activator(ui, theme, frame, controls.activator, events);
                 self.round_button(ui, theme, frame, "hot_swap", controls.hot_swap, events);
                 self.round_button(ui, theme, frame, "save", controls.save, events);
                 let options =
                     self.round_button(ui, theme, frame, "options", controls.options, events);
                 egui::Popup::menu(&options).show(|ui| self.menu(ui, shell, events));
-                if let (Some(section), false) = (&frame.sidechain, frame.folded) {
+                if let Some(dock) = controls.dock {
+                    self.round_button(ui, theme, frame, "dock", dock, events);
+                }
+                if let (Some(section), false) = (&frame.sidechain, strip) {
                     crate::sidechain::draw(ui, shell, theme, frame.id, section, rect, events);
                 }
             },
@@ -275,11 +370,15 @@ impl DeviceViewUi {
         shell: &Shell,
         theme: &Theme,
         frame: &DeviceFrame,
-        rect: Rect,
+        (rect, strip, window): (Rect, bool, bool),
         colour: Color32,
         events: &mut Vec<UiEvent>,
     ) {
-        let id = control_id(frame.id, "title");
+        let id = if window {
+            control_id(frame.id, "window-title")
+        } else {
+            control_id(frame.id, "title")
+        };
         if let Some(renaming) = self.renaming.as_mut().filter(|r| r.device == frame.id) {
             let edit = ui.put(
                 rect,
@@ -309,7 +408,7 @@ impl DeviceViewUi {
         let response = ui.interact(rect, id, Sense::click_and_drag());
         crate::focus::register(ui.ctx(), id, Area::Detail, None);
         let painter = ui.painter_at(rect);
-        if frame.folded {
+        if strip {
             // The name reads upwards on a folded device (observed).
             let galley = painter.layout_no_wrap(frame.title.clone(), theme.small_font(), colour);
             let at = pos2(
@@ -328,8 +427,11 @@ impl DeviceViewUi {
         }
         let select = || json!({ "device": frame.id });
         if response.double_clicked() {
-            // Spec: device-chains R11. A double-click folds and unfolds.
-            invoke(events, ids::FOLD, json!({ "device": frame.id }));
+            // Spec: device-chains R11. A double-click folds and unfolds; a
+            // floating device's strip and window don't fold.
+            if !window && !frame.floating {
+                invoke(events, ids::FOLD, json!({ "device": frame.id }));
+            }
         } else if (response.clicked()
             || response.secondary_clicked()
             || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter))))
@@ -338,7 +440,7 @@ impl DeviceViewUi {
             invoke(events, ids::SELECT, select());
         }
         response.context_menu(|ui| self.menu(ui, shell, events));
-        if response.drag_started() {
+        if response.drag_started() && !window {
             DragAndDrop::set_payload(ui.ctx(), DeviceDrag { device: frame.id });
             if !frame.selected {
                 invoke(events, ids::SELECT, select());
@@ -353,9 +455,16 @@ impl DeviceViewUi {
             node.set_label(frame.title.clone());
             node.set_selected(frame.selected);
             node.set_description(
-                "Device Title Bar: click to select the device, double-click to fold it, drag to \
-                 move it"
-                    .to_owned(),
+                if window {
+                    "Device Title Bar"
+                } else if frame.floating {
+                    "Device Title Bar: the device floats in its own window; click to select it, \
+                     drag to move it"
+                } else {
+                    "Device Title Bar: click to select the device, double-click to fold it, drag \
+                     to move it"
+                }
+                .to_owned(),
             );
         });
     }
@@ -426,12 +535,19 @@ impl DeviceViewUi {
         let (name, on) = match which {
             "hot_swap" => ("Hot-Swap Presets", frame.hot_swap),
             "save" => ("Save Preset", false),
+            "dock" => ("Dock", false),
             _ => ("Show Options", false),
         };
         if pressed {
             match which {
                 "hot_swap" => invoke(events, ids::HOT_SWAP, json!({ "device": frame.id })),
                 "save" => invoke(events, ids::SAVE_PRESET, json!({ "device": frame.id })),
+                // Spec: device-chains R27. One undo step, Dock Device.
+                "dock" => invoke(
+                    events,
+                    ids::SET_FLOATING,
+                    json!({ "device": frame.id, "floating": false }),
+                ),
                 _ => {
                     if !frame.selected {
                         invoke(events, ids::SELECT, json!({ "device": frame.id }));
@@ -476,6 +592,16 @@ impl DeviceViewUi {
                     StrokeKind::Inside,
                 );
             }
+            "dock" => {
+                // A window going down into its place.
+                let tray =
+                    Rect::from_center_size(centre + vec2(0.0, r * 0.25), vec2(r * 1.1, r * 0.6));
+                painter.rect_stroke(tray, 0.5, stroke, StrokeKind::Inside);
+                painter.line_segment(
+                    [centre + vec2(0.0, -r * 0.75), centre + vec2(0.0, r * 0.1)],
+                    stroke,
+                );
+            }
             _ => {
                 // Three dots.
                 for dx in [-0.45f32, 0.0, 0.45] {
@@ -490,6 +616,9 @@ impl DeviceViewUi {
             node.set_label(name.to_owned());
             if which == "hot_swap" {
                 node.set_value(if on { "on" } else { "off" }.to_owned());
+            }
+            if which == "dock" {
+                node.set_description("Docks the device back in its chain".to_owned());
             }
         });
         response
@@ -629,6 +758,8 @@ struct Controls {
     hot_swap: Rect,
     save: Rect,
     options: Rect,
+    /// A floating window's Dock button, at the right end.
+    dock: Option<Rect>,
 }
 
 /// The size of a title bar's round buttons.
@@ -657,8 +788,24 @@ fn unfolded_layout(rect: Rect) -> (Rect, Controls) {
             hot_swap,
             save,
             options,
+            dock: None,
         },
     )
+}
+
+/// A floating window's frame: the unfolded title bar along its top, with
+/// the Dock button at its right end, after Show Options.
+fn window_layout(rect: Rect) -> (Rect, Controls) {
+    let step = BUTTON + 3.0;
+    let mut narrower = rect;
+    narrower.max.x -= step;
+    let (_, mut controls) = unfolded_layout(narrower);
+    let bar = Rect::from_min_size(rect.min, vec2(rect.width(), TITLE_BAR_HEIGHT));
+    controls.dock = Some(Rect::from_center_size(
+        pos2(bar.right() - 2.0 - BUTTON / 2.0, bar.center().y),
+        vec2(BUTTON, BUTTON),
+    ));
+    (bar, controls)
 }
 
 /// A folded frame: the title bar turned on its side, the activator at the
@@ -683,6 +830,7 @@ fn folded_layout(rect: Rect) -> (Rect, Controls) {
             hot_swap,
             save,
             options,
+            dock: None,
         },
     )
 }

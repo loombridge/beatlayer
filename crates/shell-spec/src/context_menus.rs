@@ -11,7 +11,7 @@
 //! out a choice for each setting.
 
 use crate::arrangement::SET_GRID;
-use crate::devices::SAVE_DEFAULT_PRESET;
+use crate::devices::{SAVE_DEFAULT_PRESET, SET_FLOATING};
 use crate::menus::{Action, MenuItem, Row, SEPARATOR, items};
 
 use Action::{Command as Cmd, Pending, Shortcut as Key};
@@ -104,6 +104,18 @@ const TIME: &[Row] = &[
     ("C-TIME-017", "Triplet Grid", Key(&["S-GRID-004"])),
 ];
 
+/// The row of Beatlayer's own Float (IMP-14, WP-2.5b), after Fold: an
+/// improvement, so not a row of menus.md, which records Live's menus. It's
+/// ticked while the selected device floats, and choosing it again docks it.
+pub const IMP_14: &str = "IMP-14";
+
+/// Whether a context menu's row is one of Live's, in menus.md, rather than
+/// one of Beatlayer's improvements.
+#[must_use]
+pub fn is_lives(row: &str) -> bool {
+    row.is_empty() || row.starts_with("C-")
+}
+
 const DEVICE: &[Row] = &[
     ("C-DEVICE-001", "Cut", Key(&["S-EDIT-001"])),
     ("C-DEVICE-002", "Copy", Key(&["S-EDIT-002"])),
@@ -115,6 +127,7 @@ const DEVICE: &[Row] = &[
     ("C-DEVICE-006", "Delete", Key(&["S-EDIT-005"])),
     ("C-DEVICE-007", "Group", Pending(Some("S-DEV-001"))),
     ("C-DEVICE-008", "Fold", Key(&["S-DEV-014"])),
+    (IMP_14, "Float", Cmd(SET_FLOATING)),
     (
         "C-DEVICE-009",
         "Show Preset Name",
@@ -229,6 +242,7 @@ mod tests {
                 return;
             };
             assert!(!theirs.is_empty(), "{heading}");
+            let menu: Vec<_> = menu.into_iter().filter(|i| is_lives(i.row)).collect();
             assert_eq!(menu.len(), theirs.len(), "{heading}");
             for (item, row) in menu.iter().zip(&theirs) {
                 match row {

@@ -79,6 +79,8 @@ pub enum WindowKind {
     Main,
     /// The Settings window.
     Settings,
+    /// A floating device's window (WP-2.5b, IMP-14).
+    Device(bl_model::DeviceId),
 }
 
 /// An area of the main window that can hold the keyboard focus.
@@ -319,6 +321,9 @@ pub struct Shell {
     /// The Device View's selection, folded devices, clipboard, and
     /// hot-swapping (WP-2.4).
     devices: DeviceView,
+    /// Whether View ▸ Plug-In Windows shows the floating devices' windows
+    /// (WP-2.5b): view state, never part of the set.
+    plug_in_windows: bool,
     /// The native device types the engine offers, which the plug-ins'
     /// join in the Device View (WP-2.6).
     native_types: Vec<bl_engine::DeviceType>,
@@ -447,6 +452,7 @@ impl Shell {
             meters: Vec::new(),
             metering: false,
             previews: crate::perception::Previews::default(),
+            plug_in_windows: true,
             devices: {
                 // Beatlayer's native devices (WP-2.5; none ship yet).
                 let mut devices = DeviceView::new();
@@ -787,6 +793,13 @@ impl Shell {
     pub fn set_focused_window(&mut self, window: WindowKind) {
         if self.focused_window != window {
             self.focused_window = window;
+            if let WindowKind::Device(device) = window
+                && self.editor.document().device(device).is_some()
+            {
+                // A floating device's window in front selects its device,
+                // so keys act on it.
+                self.devices.select_only(device);
+            }
             self.touch();
         }
     }
@@ -1049,6 +1062,35 @@ impl Shell {
             .state(doc, devices::shown_track(&self.arrangement, doc))
     }
 
+    /// Every floating device's window, on any track (WP-2.5b), for the
+    /// app to open, close, and place.
+    #[must_use]
+    pub fn floating_windows(&self) -> device_ids::FloatingWindows {
+        let doc = self.editor.document();
+        self.devices.floating_windows(
+            doc,
+            devices::shown_track(&self.arrangement, doc),
+            self.prefs.auto_hide_plug_in_windows.0,
+            self.plug_in_windows,
+        )
+    }
+
+    /// Whether any device floats, on any track.
+    fn any_floating(&self) -> bool {
+        let doc = self.editor.document();
+        doc.track_order()
+            .into_iter()
+            .filter_map(|t| doc.track(t))
+            .any(|t| t.devices().any(|d| d.floating))
+    }
+
+    /// Whether Auto-Hide Plug-In Windows is on: a floating device's window
+    /// hides while another track is selected (WP-2.5b).
+    #[must_use]
+    pub fn auto_hide_plug_in_windows(&self) -> bool {
+        self.prefs.auto_hide_plug_in_windows.0
+    }
+
     /// Runs a Device View command and carries out what it asks of the rest
     /// of the shell.
     fn run_devices(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
@@ -1061,6 +1103,8 @@ impl Shell {
             crate::plugins::capture_states(&self.plugins, &mut self.editor);
         }
         let user_library = self.browser_view.user_library().map(Path::to_path_buf);
+        let zoom = self.zoom();
+        let auto_hide = self.prefs.auto_hide_plug_in_windows.0;
         let result = self.devices.run(
             id,
             args,
@@ -1068,6 +1112,9 @@ impl Shell {
                 editor: &mut self.editor,
                 arrangement: &mut self.arrangement,
                 user_library: user_library.as_deref(),
+                zoom,
+                auto_hide,
+                windows_shown: self.plug_in_windows,
             },
         );
         let outcome = result.map_err(|error| device_error(id, error))?;
@@ -1607,6 +1654,10 @@ impl Shell {
     pub fn active_contexts(&self) -> Vec<Context> {
         match self.focused_window {
             WindowKind::Settings => vec![Context::Settings, Context::Dialog, Context::Global],
+            // A floating device's window: its device is selected, so the
+            // Device View's keys act on it (Float's among them), and the
+            // global ones work.
+            WindowKind::Device(_) => vec![Context::DeviceView, Context::Global],
             WindowKind::Main => {
                 let mut contexts = Vec::with_capacity(3);
                 match self.focused_area {
@@ -1642,6 +1693,7 @@ impl Shell {
         match id {
             ids::VIEW_FULL_SCREEN => Some(self.full_screen),
             ids::VIEW_TOGGLE_BROWSER => Some(self.browser),
+            ids::VIEW_TOGGLE_PLUG_IN_WINDOWS => Some(self.plug_in_windows),
             ids::FOCUS_TOGGLE_TAB_NAVIGATION => Some(self.prefs.tab_navigation),
             ids::FOCUS_TOGGLE_WRAP_NAVIGATION => Some(self.prefs.wrap_navigation.0),
             SOLO_IN_PLACE => Some(self.editor.document().settings().solo_in_place),
@@ -1652,6 +1704,12 @@ impl Shell {
                 .selected()
                 .and_then(|d| self.editor.document().device(d))
                 .map(|d| d.show_preset_name),
+            // IMP-14: Float is ticked while the selected device floats.
+            device_ids::SET_FLOATING => self
+                .devices
+                .selected()
+                .and_then(|d| self.editor.document().device(d))
+                .map(|d| d.floating),
             _ if mixer_ids::handles(id) => self.mixer.switch_state(id, self.front_mixer()),
             _ => self.arrangement.switch_state(id),
         }
@@ -1723,8 +1781,19 @@ impl Shell {
             }
             // The frontmost window must be a secondary one: with only the
             // main window open, Close Window is disabled (M-FILE-004).
+            // Live's Plug-In Windows is disabled with none open (M-VIEW-028).
+            ids::VIEW_TOGGLE_PLUG_IN_WINDOWS => return self.any_floating(),
             ids::WINDOW_CLOSE => {
-                return self.settings_open && self.focused_window == WindowKind::Settings;
+                return match self.focused_window {
+                    WindowKind::Settings => self.settings_open,
+                    // Closing a floating device's window docks it.
+                    WindowKind::Device(device) => self
+                        .editor
+                        .document()
+                        .device(device)
+                        .is_some_and(|d| d.floating),
+                    WindowKind::Main => false,
+                };
             }
             _ => {}
         }
@@ -1759,6 +1828,20 @@ impl Shell {
         if id == "device.rename" && args.get("name").is_none() {
             // A person names the device in its title bar.
             return self.devices.selected().is_some();
+        }
+        if id == device_ids::SET_FLOATING {
+            // IMP-14: only native devices float; plug-ins open their own
+            // editor windows.
+            let named = args
+                .get("device")
+                .and_then(|v| serde_json::from_value(v.clone()).ok());
+            let floats = named
+                .or(self.devices.selected())
+                .and_then(|d| self.editor.document().device(d))
+                .is_some_and(bl_model::Device::can_float);
+            if !floats {
+                return false;
+            }
         }
         if browser_ids::handles(id) {
             // A person adding a folder picks it in a dialog.
@@ -1882,6 +1965,10 @@ impl Shell {
             if id == "device.set_show_preset_name" && !fields.contains_key("shown") {
                 let on = current.is_some_and(|d| d.show_preset_name);
                 fields.insert("shown".to_owned(), json!(!on));
+            }
+            if id == device_ids::SET_FLOATING && !fields.contains_key("floating") {
+                let on = current.is_some_and(|d| d.floating);
+                fields.insert("floating".to_owned(), json!(!on));
             }
             if id == "device.set_enabled" && !fields.contains_key("enabled") {
                 let on = current.is_some_and(|d| d.enabled);
@@ -2123,11 +2210,16 @@ impl Shell {
             return self.run_plugins(id, args);
         }
         if model::handles(id) {
+            let args_floating = args.get("floating") == Some(&Value::Bool(true));
             let changes =
                 model::run(&mut self.editor, id, args).map_err(|error| ShellError::Failed {
                     command: id.to_owned(),
                     message: error.to_string(),
                 })?;
+            if id == device_ids::SET_FLOATING && args_floating {
+                // A device floated shows the windows again (R33).
+                self.plug_in_windows = true;
+            }
             self.dirty = true;
             self.document_changed();
             self.touch();
@@ -2359,6 +2451,7 @@ impl Shell {
                 self.editor = factory_default_set();
                 self.saved = factory_default_set();
                 self.store.close();
+                self.devices.set_windows(bl_model::DeviceWindows::new());
                 self.set_path = None;
                 self.dirty = false;
                 self.main_view = MainView::Arrangement;
@@ -2379,6 +2472,9 @@ impl Shell {
                     ));
                 }
                 let (editor, opened) = self.store.open(Path::new(&path)).map_err(failed)?;
+                // Spec: device-chains R29. Floating windows reopen where
+                // they were saved.
+                self.devices.set_windows(self.store.windows());
                 self.saved = snapshot(&editor);
                 self.set_replaced();
                 self.editor = editor;
@@ -2405,6 +2501,7 @@ impl Shell {
                     unavailable("the set has never been saved; use `set.save_as` to give it a file")
                 })?;
                 crate::plugins::capture_states(&self.plugins, &mut self.editor);
+                self.store.set_windows(self.devices.windows().clone());
                 let warnings = self.store.save(&path, &self.editor).map_err(failed)?;
                 self.saved_as(path, &warnings);
                 Ok(self.set_result())
@@ -2414,6 +2511,7 @@ impl Shell {
                 // project folder the set goes; the result says where.
                 let SaveAsArgs { path } = Self::args(id, args)?;
                 crate::plugins::capture_states(&self.plugins, &mut self.editor);
+                self.store.set_windows(self.devices.windows().clone());
                 let (path, warnings) = self
                     .store
                     .save_as(Path::new(&path), &self.editor)
@@ -2461,6 +2559,15 @@ impl Shell {
             }
             ids::WINDOW_CLOSE => {
                 Self::args::<NoArgs>(id, args)?;
+                if let WindowKind::Device(device) = self.focused_window {
+                    // Spec: device-chains R27. Closing a floating device's
+                    // window docks the device: one undo step.
+                    self.focused_window = WindowKind::Main;
+                    return self.run(
+                        device_ids::SET_FLOATING,
+                        json!({ "device": device, "floating": false }),
+                    );
+                }
                 if !self.settings_open {
                     return Err(unavailable("no secondary window is open"));
                 }
@@ -2472,6 +2579,17 @@ impl Shell {
                 self.full_screen = !self.full_screen;
                 self.effects.push(Effect::SetFullScreen(self.full_screen));
                 Ok(self.view_result())
+            }
+            ids::VIEW_TOGGLE_PLUG_IN_WINDOWS => {
+                // Spec: device-chains R33. It hides and shows windows only.
+                let ids::TogglePlugInWindowsArgs { shown } = Self::args(id, args)?;
+                if !self.any_floating() {
+                    return Err(unavailable("no device floats"));
+                }
+                self.plug_in_windows = shown.unwrap_or(!self.plug_in_windows);
+                Ok(to_value(&SwitchResult {
+                    on: self.plug_in_windows,
+                }))
             }
             ids::VIEW_TOGGLE_BROWSER => {
                 Self::args::<NoArgs>(id, args)?;
@@ -2581,6 +2699,12 @@ impl Shell {
             ids::SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES => {
                 let SwitchArgs { on } = Self::args(id, args)?;
                 self.prefs.create_fades_on_clip_edges = OnByDefault(on);
+                self.save_preferences();
+                Ok(to_value(&SwitchResult { on }))
+            }
+            ids::SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS => {
+                let SwitchArgs { on } = Self::args(id, args)?;
+                self.prefs.auto_hide_plug_in_windows = OnByDefault(on);
                 self.save_preferences();
                 Ok(to_value(&SwitchResult { on }))
             }

@@ -82,13 +82,45 @@ fn ns_window(window: &Window) -> Option<objc2::rc::Retained<NSWindow>> {
 /// the system shows its own title bar on demand and Live shows none
 /// (L-WIN-002).
 pub fn fit(window: &Window) {
+    fit_strip(window, TITLE_BAR, &BUTTONS, true);
+}
+
+/// The height of a floating device's title bar, in points: a utility
+/// window's short title bar, as Live's plug-in windows have (observed in
+/// Live 12.4.6; its exact height is to measure).
+pub const UTILITY_TITLE_BAR: f32 = 16.0;
+
+/// A floating device's close button, the only window button a utility
+/// window shows: smaller than a main window's, centred in the short title
+/// bar.
+pub const UTILITY_BUTTONS: Buttons = Buttons {
+    diameter: 10.0,
+    spacing: 0.0,
+    first_centre: (9.0, 8.0),
+};
+
+/// Gives a floating device's window a utility window's short title bar
+/// (WP-2.5b), as Live's plug-in windows have: [`UTILITY_TITLE_BAR`] tall,
+/// with only a small close button, which docks the device. AppKit gives
+/// that look only to panels, which winit doesn't make, so the window is
+/// made like the main window (its content under a transparent, untitled
+/// title bar) and its title bar view is fitted here, the title drawn by
+/// the window itself. Call it again after each resize.
+pub fn fit_utility(window: &Window) {
+    fit_strip(window, UTILITY_TITLE_BAR, &UTILITY_BUTTONS, false);
+}
+
+/// Fits the system's title bar view to a strip `height` points tall, with
+/// its buttons placed by `buttons`; without `all_buttons`, only the close
+/// button shows.
+fn fit_strip(window: &Window, height: f32, buttons: &Buttons, all_buttons: bool) {
     if window.fullscreen().is_some() {
         return;
     }
     let Some(ns_window) = ns_window(window) else {
         return;
     };
-    let height = f64::from(TITLE_BAR);
+    let height = f64::from(height);
     let Some(close) = ns_window.standardWindowButton(NSWindowButton::CloseButton) else {
         return;
     };
@@ -122,18 +154,22 @@ pub fn fit(window: &Window) {
         let Some(button) = ns_window.standardWindowButton(kind) else {
             continue;
         };
+        if !all_buttons && index > 0 {
+            button.setHidden(true);
+            continue;
+        }
         // The system's size for the button, which it draws in. Its frame
         // and bounds may already be this function's from an earlier call.
         let Some(cell) = button.cell() else {
             continue;
         };
         let drawn = cell.cellSize();
-        let (x, y) = BUTTONS.origin(index, height);
+        let (x, y) = buttons.origin(index, height);
         let mut frame = button.frame();
         frame.origin.x = x;
         frame.origin.y = y;
-        frame.size.width = BUTTONS.diameter;
-        frame.size.height = BUTTONS.diameter;
+        frame.size.width = buttons.diameter;
+        frame.size.height = buttons.diameter;
         button.setFrame(frame);
         button.setBoundsSize(drawn);
     }
@@ -212,6 +248,17 @@ pub fn describe(window: &Window) -> String {
         }
     }
     out.join("; ")
+}
+
+/// Keeps a floating device's window above Beatlayer's main window, as Live
+/// keeps a plug-in's (WP-2.5b; observed in Live 12.4.6): the window sits at
+/// AppKit's floating level, and hides while Beatlayer isn't the active app,
+/// so it never covers other apps' windows.
+pub fn float_above_main(window: &Window) {
+    window.set_window_level(winit::window::WindowLevel::AlwaysOnTop);
+    if let Some(ns) = ns_window(window) {
+        ns.setHidesOnDeactivate(true);
+    }
 }
 
 #[cfg(test)]

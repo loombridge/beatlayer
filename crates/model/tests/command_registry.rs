@@ -47,10 +47,11 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        49,
+        50,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
-         routing, WP-2.4 two for devices, and WP-2.19b five for sidechains"
+         routing, WP-2.4 two for devices, WP-2.19b five for sidechains, and WP-2.5b \
+         set_device_floating"
     );
 
     for op in &ops {
@@ -400,6 +401,15 @@ fn every_command_runs_by_id() {
     agent.run(
         "device.set_show_preset_name",
         json!({ "device": eq, "shown": true }),
+    );
+    agent.run(
+        "device.set_floating",
+        json!({ "device": eq, "floating": true }),
+    );
+    assert!(agent.editor.document().device(eq).unwrap().floating);
+    agent.run(
+        "device.set_floating",
+        json!({ "device": eq, "floating": false }),
     );
     agent.run(
         "device.set_state",
@@ -755,6 +765,13 @@ fn schemas_match_what_commands_serialise() {
             },
         ),
         (
+            "device.set_floating",
+            Command::SetDeviceFloating {
+                device,
+                floating: true,
+            },
+        ),
+        (
             "device.set_state",
             Command::SetDeviceState {
                 device,
@@ -1003,6 +1020,8 @@ fn bindings_follow_the_spec() {
         "mixer.set_solo",
         "mixer.set_arm",
         "clip.set_mute",
+        // Beatlayer's own key, Option-F on macOS (IMP-14, S-DEV-015).
+        "device.set_floating",
     ]
     .into_iter()
     .collect();

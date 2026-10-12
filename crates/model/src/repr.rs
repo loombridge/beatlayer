@@ -346,7 +346,7 @@ mod tests {
         // written, so sets from before WP-2.4 read the same.
         let value = serde_json::to_value(&doc).unwrap();
         let saved = &value["tracks"][0]["children"][0]["devices"][0];
-        for field in ["role", "own_name", "show_preset_name"] {
+        for field in ["role", "own_name", "show_preset_name", "floating"] {
             assert!(saved.get(field).is_none(), "{field}");
         }
         doc.apply(&Command::RenameDevice {
@@ -364,6 +364,18 @@ mod tests {
         assert_eq!(saved["name"], json!("Trim"));
         assert_eq!(saved["own_name"], json!("Utility"));
         assert_eq!(saved["show_preset_name"], json!(false));
+        assert_eq!(load(value).unwrap(), doc);
+
+        // A floating device is saved floating (WP-2.5b); a docked one
+        // doesn't write it.
+        doc.apply(&Command::SetDeviceFloating {
+            device,
+            floating: true,
+        })
+        .unwrap();
+        let value = serde_json::to_value(&doc).unwrap();
+        let saved = &value["tracks"][0]["children"][0]["devices"][0];
+        assert_eq!(saved["floating"], json!(true));
         assert_eq!(load(value).unwrap(), doc);
 
         // A chain out of Live's order doesn't load.

@@ -1,7 +1,9 @@
 //! The Device View's state and commands (WP-2.4; the device chains spec):
 //! which device is selected, which are folded, the device clipboard, and
 //! hot-swapping, and the `device.*` commands that run on the shell (adding
-//! a device as a person does, cut, copy, paste, duplicate, and presets).
+//! a device as a person does, cut, copy, paste, duplicate, and presets);
+//! and where floating devices' windows sit (WP-2.5b, IMP-14), which is
+//! saved with the set but never an undo step.
 //!
 //! None of this is part of the set: selection, folding, the clipboard, and
 //! hot-swapping are the view's, so they're never undo steps. The edits the
@@ -13,16 +15,16 @@ use std::path::{Path, PathBuf};
 
 use bl_engine::DeviceType;
 use bl_model::{
-    Command, Device, DeviceDescription, DeviceId, DeviceKind, DeviceRole, Document, Editor,
-    TrackId, TrackKind,
+    Command, Device, DeviceDescription, DeviceId, DeviceKind, DeviceRole, DeviceWindows, Document,
+    Editor, TrackId, TrackKind,
 };
 use bl_project::preset::{self, Preset};
 use bl_shell_spec::arrangement as view_ids;
 use bl_shell_spec::devices::{
     self as ids, AddDeviceArgs, DeviceAdded, DeviceArgs, DeviceFrame, DevicePanel,
-    DeviceParameters, DeviceViewState, FoldDeviceArgs, HotSwap, HotSwapArgs, LoadPresetArgs,
-    ParameterState, PasteDeviceArgs, PresetResult, SavePresetArgs, SelectDeviceArgs,
-    ShowSidechainArgs, SidechainSection,
+    DeviceParameters, DeviceViewState, FloatingWindow, FloatingWindows, FoldDeviceArgs, HotSwap,
+    HotSwapArgs, LoadPresetArgs, ParameterState, PasteDeviceArgs, PresetResult, SavePresetArgs,
+    SelectDeviceArgs, SetWindowArgs, ShowSidechainArgs, SidechainSection,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -42,6 +44,11 @@ pub struct DeviceView {
     /// Devices whose sidechain section is shown (WP-2.19b).
     sidechains_shown: BTreeSet<DeviceId>,
     types: Vec<DeviceType>,
+    /// Where floating devices' windows sit (WP-2.5b). A frame outlives
+    /// its device's docking and deletion, so undoing either puts the
+    /// window back where it was; a save keeps only those of devices the
+    /// set has.
+    windows: DeviceWindows,
 }
 
 /// Why a device command didn't run.
@@ -78,6 +85,13 @@ pub struct Context<'a> {
     pub arrangement: &'a mut ArrangementView,
     /// The User Library, where presets go.
     pub user_library: Option<&'a Path>,
+    /// The interface zoom, as a factor: a floating window's smallest size
+    /// in points on the screen is its size at 100% times this.
+    pub zoom: f32,
+    /// Whether Auto-Hide Plug-In Windows is on.
+    pub auto_hide: bool,
+    /// Whether View ▸ Plug-In Windows shows the windows.
+    pub windows_shown: bool,
 }
 
 fn parse<T: DeserializeOwned>(args: Value) -> Result<T, DeviceError> {
@@ -135,6 +149,12 @@ impl DeviceView {
     #[must_use]
     pub fn selected(&self) -> Option<DeviceId> {
         self.selected
+    }
+
+    /// Selects `device` without changing which track the Device View
+    /// shows, as bringing its floating window to the front does (WP-2.5b).
+    pub fn select_only(&mut self, device: DeviceId) {
+        self.selected = Some(device);
     }
 
     /// Whether a device is folded.
@@ -242,40 +262,7 @@ impl DeviceView {
     pub fn state(&self, doc: &Document, track: Option<TrackId>) -> DeviceViewState {
         let shown = track.and_then(|id| doc.track(id));
         let devices: Vec<DeviceFrame> = shown
-            .map(|t| {
-                t.devices()
-                    .map(|d| DeviceFrame {
-                        id: d.id,
-                        title: d.title().to_owned(),
-                        name: d.own_name().to_owned(),
-                        kind: d.kind.clone(),
-                        role: d.role,
-                        enabled: d.enabled,
-                        show_preset_name: d.show_preset_name,
-                        folded: self.folded.contains(&d.id),
-                        selected: self.selected == Some(d.id),
-                        hot_swap: self.hot_swap == Some(d.id),
-                        panel: self.panel(d),
-                        sidechain: d.sidechain.map(|sidechain| {
-                            let (source, tap) = match sidechain.input {
-                                bl_model::Input::Track { track, tap } => {
-                                    (crate::routing::track_label(doc, track), Some(tap))
-                                }
-                                _ => ("No Input".to_owned(), None),
-                            };
-                            SidechainSection {
-                                shown: self.sidechains_shown.contains(&d.id),
-                                enabled: sidechain.enabled,
-                                source,
-                                tap,
-                                mix: sidechain.mix,
-                                gain: sidechain.gain,
-                                listen: sidechain.listen,
-                            }
-                        }),
-                    })
-                    .collect()
-            })
+            .map(|t| t.devices().map(|d| self.frame(doc, d)).collect())
             .unwrap_or_default();
         DeviceViewState {
             track: shown.map(bl_model::Track::id),
@@ -289,6 +276,94 @@ impl DeviceView {
                 })
             }),
             can_paste: self.clipboard.is_some(),
+        }
+    }
+
+    /// Where floating devices' windows sit, for the next save.
+    #[must_use]
+    pub fn windows(&self) -> &DeviceWindows {
+        &self.windows
+    }
+
+    /// Takes the window frames an opened set saved, or none for a new set.
+    pub fn set_windows(&mut self, windows: DeviceWindows) {
+        self.windows = windows;
+    }
+
+    /// Every floating device's window, on any track, in the order of the
+    /// tracks and their chains (`device.windows`). None shows while
+    /// `all_shown` is off (View ▸ Plug-In Windows); with `auto_hide` on,
+    /// only the windows of `shown`'s devices show (Auto-Hide Plug-In
+    /// Windows; the device chains spec, R31 and R33).
+    #[must_use]
+    pub fn floating_windows(
+        &self,
+        doc: &Document,
+        shown: Option<TrackId>,
+        auto_hide: bool,
+        all_shown: bool,
+    ) -> FloatingWindows {
+        let windows = doc
+            .track_order()
+            .into_iter()
+            .filter_map(|id| doc.track(id))
+            .flat_map(|track| track.devices().map(move |d| (track.id(), d)))
+            .filter(|(_, d)| d.floating)
+            .map(|(track, d)| {
+                let mut view = self.frame(doc, d);
+                // The window shows the device whole, whatever its strip.
+                view.folded = false;
+                let (min_width, min_height) = ids::window_min_size(&view);
+                let (grows_across, grows_down) = ids::window_grows(&view);
+                FloatingWindow {
+                    device: d.id,
+                    track,
+                    title: format!("{}/{}", d.title(), crate::routing::track_label(doc, track)),
+                    frame: self.windows.get(&d.id).copied(),
+                    min_width,
+                    min_height,
+                    grows_across,
+                    grows_down,
+                    view,
+                    shown: all_shown && (!auto_hide || shown == Some(track)),
+                }
+            })
+            .collect();
+        FloatingWindows { windows }
+    }
+
+    /// One device as the Device View, or its floating window, shows it.
+    fn frame(&self, doc: &Document, d: &Device) -> DeviceFrame {
+        DeviceFrame {
+            id: d.id,
+            title: d.title().to_owned(),
+            name: d.own_name().to_owned(),
+            kind: d.kind.clone(),
+            role: d.role,
+            enabled: d.enabled,
+            show_preset_name: d.show_preset_name,
+            folded: self.folded.contains(&d.id),
+            floating: d.floating,
+            selected: self.selected == Some(d.id),
+            hot_swap: self.hot_swap == Some(d.id),
+            panel: self.panel(d),
+            sidechain: d.sidechain.map(|sidechain| {
+                let (source, tap) = match sidechain.input {
+                    bl_model::Input::Track { track, tap } => {
+                        (crate::routing::track_label(doc, track), Some(tap))
+                    }
+                    _ => ("No Input".to_owned(), None),
+                };
+                SidechainSection {
+                    shown: self.sidechains_shown.contains(&d.id),
+                    enabled: sidechain.enabled,
+                    source,
+                    tap,
+                    mix: sidechain.mix,
+                    gain: sidechain.gain,
+                    listen: sidechain.listen,
+                }
+            }),
         }
     }
 
@@ -329,6 +404,9 @@ impl DeviceView {
             }),
             ids::LOAD_PRESET => has_target() && args.get("path").is_some(),
             ids::PARAMETERS => has_target(),
+            ids::SET_WINDOW => named
+                .and_then(|device| doc.device(device))
+                .is_some_and(|d| d.floating),
             _ => true,
         }
     }
@@ -344,8 +422,14 @@ impl DeviceView {
             editor,
             arrangement,
             user_library,
+            zoom,
+            auto_hide,
+            windows_shown,
         } = ctx;
         let track = shown_track(arrangement, editor.document());
+        let windows = |view: &Self, editor: &Editor| {
+            view.floating_windows(editor.document(), track, auto_hide, windows_shown)
+        };
         let state = |view: &Self, editor: &Editor, arrangement: &ArrangementView| {
             to_value(&view.state(
                 editor.document(),
@@ -355,6 +439,46 @@ impl DeviceView {
         match id {
             ids::STATE => {
                 parse::<bl_commands::NoArgs>(args)?;
+            }
+            ids::WINDOWS => {
+                parse::<bl_commands::NoArgs>(args)?;
+                outcome.value = to_value(&windows(self, editor));
+                return Ok(outcome);
+            }
+            ids::SET_WINDOW => {
+                let SetWindowArgs { device, mut frame } = parse(args)?;
+                if !frame.is_valid() {
+                    return Err(DeviceError::InvalidArgs(
+                        "a window's position and size must be finite, and its size above 0"
+                            .to_owned(),
+                    ));
+                }
+                let open = windows(self, editor);
+                let window = open
+                    .windows
+                    .iter()
+                    .find(|w| w.device == device)
+                    .ok_or_else(|| DeviceError::Unavailable(format!("{device} isn't floating")))?;
+                // IMP-14: the docked size is the smallest, and a device
+                // without a display that grows stays at it.
+                let zoom = f64::from(zoom);
+                let (least_w, least_h) = (
+                    f64::from(window.min_width) * zoom,
+                    f64::from(window.min_height) * zoom,
+                );
+                frame.width = if window.grows_across {
+                    frame.width.max(least_w)
+                } else {
+                    least_w
+                };
+                frame.height = if window.grows_down {
+                    frame.height.max(least_h)
+                } else {
+                    least_h
+                };
+                self.windows.insert(device, frame);
+                outcome.value = to_value(&windows(self, editor));
+                return Ok(outcome);
             }
             ids::SELECT => {
                 let SelectDeviceArgs { device } = parse(args)?;
@@ -651,6 +775,9 @@ impl DeviceView {
         let id: DeviceId = editor.new_id();
         let mut copy = device.clone();
         copy.id = id;
+        // A copy goes in the chain, docked, whether or not the original
+        // floats (WP-2.5b).
+        copy.floating = false;
         editor
             .transact(label, |editor| {
                 editor.apply(Command::InsertDevice {

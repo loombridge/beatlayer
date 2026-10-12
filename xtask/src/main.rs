@@ -546,7 +546,7 @@ fn deny_selftest(root: &Path) -> Result<(), String> {
 /// instructions if there's none. The harness has no lockfile of its own: the
 /// task copies the main workspace's, so the harness builds exactly the
 /// versions the main workspace locked and `cargo deny` checked, and checks
-/// that afterwards. It builds in `target/rtsan`, with `--cfg bl_rtsan` from
+/// that afterwards. It builds in `target/rtsan`, with `--cfg lspk_rtsan` from
 /// `rtsan/.cargo/config.toml`, so the main target directory isn't rebuilt.
 fn rtsan(root: &Path, test_args: &[String]) -> Result<(), String> {
     let runtime = rtsan_runtime()?;
@@ -565,7 +565,7 @@ fn rtsan(root: &Path, test_args: &[String]) -> Result<(), String> {
             .args(args)
             .env("RTSAN_LIB_PATH", &runtime)
             .env("CARGO_TARGET_DIR", root.join("target").join("rtsan"))
-            // RUSTFLAGS would replace the harness's `--cfg bl_rtsan`.
+            // RUSTFLAGS would replace the harness's `--cfg lspk_rtsan`.
             .env_remove("RUSTFLAGS")
             .env_remove("CARGO_ENCODED_RUSTFLAGS")
             .current_dir(&harness);

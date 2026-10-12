@@ -1,8 +1,9 @@
-# Every crate in this harness's build, bl-rt included, is compiled with
-# RealtimeSanitizer's entry points switched on (see crates/rt/src/sanitize.rs),
-# in a target directory of its own so the main build is never invalidated.
+# Every crate in this harness's build, the plug-in kit's lspk-rt (behind
+# bl-rt) included, is compiled with RealtimeSanitizer's entry points switched
+# on (see lspk-rt's `sanitize` module), in a target directory of its own so
+# the main build is never invalidated.
 # Cargo reads this file when it runs in `rtsan/`, which `cargo xtask rtsan`
 # does. A RUSTFLAGS variable would replace these flags, so the task clears it.
 [build]
-rustflags = ["--cfg", "bl_rtsan"]
+rustflags = ["--cfg", "lspk_rtsan"]
 target-dir = "../target/rtsan"

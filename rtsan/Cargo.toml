@@ -7,8 +7,9 @@
 #   (`rtsan-standalone-sys`) fetch or build LLVM in their build scripts, which
 #   the build plan forbids, so this harness uses none: `build.rs` links a
 #   runtime already installed on the machine, named by RTSAN_LIB_PATH.
-# - `.cargo/config.toml` builds every crate with `--cfg bl_rtsan`, which turns
-#   on bl-rt's calls into the runtime, in a target directory of its own.
+# - `.cargo/config.toml` builds every crate with `--cfg lspk_rtsan`, which turns
+#   on lspk-rt's calls into the runtime (bl-rt re-exports it), in a target
+#   directory of its own.
 #
 # Run it with `cargo xtask rtsan`, which finds an installed runtime, copies the
 # main workspace's Cargo.lock here so both build the same versions, and runs
@@ -46,7 +47,7 @@ libc = "0.2.190"
 rust_2018_idioms = { level = "warn", priority = -1 }
 unsafe_op_in_unsafe_fn = "deny"
 unused_must_use = "deny"
-unexpected_cfgs = { level = "warn", check-cfg = ["cfg(bl_rtsan)"] }
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(lspk_rtsan)"] }
 
 [lints.clippy]
 all = { level = "warn", priority = -1 }

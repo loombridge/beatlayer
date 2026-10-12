@@ -60,4 +60,5 @@ highlight = "all"
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-allow-git = []
+# The plug-in kit (MIT OR Apache-2.0), until its crates are on crates.io.
+allow-git = ["https://github.com/loombridge/plugin-kit"]

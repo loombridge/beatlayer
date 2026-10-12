@@ -66,9 +66,23 @@ fn a_plugin_loads_by_path_with_its_parameters() {
         ]
     );
     assert!(params.iter().all(|p| p.automatable));
-    assert!(matches!(params[0].kind, ParamKind::Continuous { min: 0.0, max: 2.0, .. }));
+    assert!(matches!(
+        params[0].kind,
+        ParamKind::Continuous {
+            min: 0.0,
+            max: 2.0,
+            ..
+        }
+    ));
     assert_eq!(params[0].default, 1.0);
-    assert!(matches!(params[1].kind, ParamKind::Integer { min: 0, max: 4096, .. }));
+    assert!(matches!(
+        params[1].kind,
+        ParamKind::Integer {
+            min: 0,
+            max: 4096,
+            ..
+        }
+    ));
     assert!(found.description.check().is_ok());
     assert_eq!(host.factory().device_types(), vec![found.clone()]);
 
@@ -109,7 +123,11 @@ fn a_node_passes_its_input_through_until_its_plugin_arrives() {
     assert!(before.channels[0].iter().all(|s| *s == 1.0));
     assert!(host.idle());
     let after = run(node.as_mut(), &[1.0; FRAMES], &[], &[]);
-    assert!(after.channels[0].iter().all(|s| *s == 0.25), "{:?}", after.channels[0]);
+    assert!(
+        after.channels[0].iter().all(|s| *s == 0.25),
+        "{:?}",
+        after.channels[0]
+    );
 }
 
 // Spec: clap-hosting R4
@@ -157,7 +175,11 @@ fn a_switched_off_plugin_takes_changes_through_flush() {
     run(node.as_mut(), &[1.0; FRAMES], &[], &[]);
     node.flush(&[set(0, GAIN, 0.75)]);
     let status = host.status(device(1, &[]).id).unwrap();
-    assert!(status.values.contains(&(ParamId(GAIN), 0.75)), "{:?}", status.values);
+    assert!(
+        status.values.contains(&(ParamId(GAIN), 0.75)),
+        "{:?}",
+        status.values
+    );
     let out = run(node.as_mut(), &[1.0; FRAMES], &[], &[]);
     assert!(out.channels[0].iter().all(|s| *s == 0.75));
 }
@@ -183,7 +205,11 @@ fn state_saves_and_loads_into_a_new_instance() {
     restored.plugin = Some(saved.clone());
     let mut node = reopened.factory().create(&restored, &config()).unwrap();
     let status = reopened.status(restored.id).unwrap();
-    assert!(status.values.contains(&(ParamId(GAIN), 1.5)), "{:?}", status.values);
+    assert!(
+        status.values.contains(&(ParamId(GAIN), 1.5)),
+        "{:?}",
+        status.values
+    );
     assert!(status.values.contains(&(ParamId(LAST_NOTE), 64.0)));
     let out = run(node.as_mut(), &[1.0; FRAMES], &[], &[]);
     assert!(out.channels[0].iter().all(|s| *s == 1.5));
@@ -203,10 +229,18 @@ fn a_latency_change_restarts_the_plugin_and_is_reported() {
     assert_eq!(node.latency(), 0);
     // The plug-in asks for a restart; the main thread asks for its
     // processor back, deactivates it, and activates it again.
-    run(node.as_mut(), &[1.0; FRAMES], &[set(0, LATENCY, 256.0)], &[]);
+    run(
+        node.as_mut(),
+        &[1.0; FRAMES],
+        &[set(0, LATENCY, 256.0)],
+        &[],
+    );
     host.idle();
     let between = run(node.as_mut(), &[1.0; FRAMES], &[], &[]);
-    assert!(between.channels[0].iter().all(|s| *s == 1.0), "passes through meanwhile");
+    assert!(
+        between.channels[0].iter().all(|s| *s == 1.0),
+        "passes through meanwhile"
+    );
     host.idle();
     assert_eq!(node.latency(), 256);
     assert_eq!(host.status(device(1, &[]).id).unwrap().latency, 256);
@@ -266,7 +300,10 @@ fn a_plugin_that_cant_be_found_leaves_its_device_passing_audio_through() {
     assert!(out.channels.iter().flatten().all(|s| *s == 1.0));
     let status = host.status(lost.id).unwrap();
     assert!(status.failure.is_some());
-    assert!(matches!(host.save_state(lost.id), Err(ClapError::NoInstance(_))));
+    assert!(matches!(
+        host.save_state(lost.id),
+        Err(ClapError::NoInstance(_))
+    ));
 }
 
 // Spec: clap-hosting R13
@@ -275,9 +312,11 @@ fn the_editor_opens_and_closes_in_its_own_window() {
     let (host, _node) = running(&[]);
     let id = device(1, &[]).id;
     assert!(host.status(id).unwrap().has_editor);
-    host.open_editor(id, "1-Audio/Test Gain Echo").expect("it opens");
+    host.open_editor(id, "1-Audio/Test Gain Echo")
+        .expect("it opens");
     assert!(host.status(id).unwrap().editor_open);
-    host.open_editor(id, "again").expect("opening it twice is fine");
+    host.open_editor(id, "again")
+        .expect("opening it twice is fine");
     host.close_editor(id).unwrap();
     assert!(!host.status(id).unwrap().editor_open);
 }

@@ -10,6 +10,13 @@
 //! | [`TRANSPORT`] | adds 1 to every sample while the song plays | none |
 //! | [`POSITION`] | adds each frame's song position while the song plays, and −1 while it's stopped | none |
 //! | [`DATA`] | adds the `f32` it was last sent as [`NodeData`] | none |
+//! | [`GAIN`] | multiplies every sample by its gain (WP-2.4) | the gain, 1 by default |
+//! | [`THROUGH`] | passes its input through untouched (WP-2.4) | none |
+//!
+//! [`GAIN`] and [`THROUGH`] are offered as device types ([`gain_type`],
+//! [`through_type`]), audio effects named "Test Gain" and "Test
+//! Pass-Through", so tests of the device chain and the Device View have
+//! devices to insert; Beatlayer ships no device of its own until WP-2.5.
 //!
 //! All of them count themselves in a shared [`Probe`] when they're made and
 //! dropped, so a test can tell a node that kept running from one made anew.
@@ -17,10 +24,10 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 
-use bl_model::{Device, ParamId};
+use bl_model::{Device, DeviceRole, ParamId};
 
 use crate::node::{Block, Node, NodeData, NodeEvent, ParamValue, segments};
-use crate::registry::Registry;
+use crate::registry::{DeviceType, Registry};
 
 /// The DC node's device type.
 pub const DC: &str = "test.dc";
@@ -32,8 +39,27 @@ pub const TRANSPORT: &str = "test.transport";
 pub const POSITION: &str = "test.position";
 /// The data probe's device type.
 pub const DATA: &str = "test.data";
+/// The gain node's device type.
+pub const GAIN: &str = "test.gain";
+/// The pass-through node's device type.
+pub const THROUGH: &str = "test.through";
 /// The DC node's value.
 pub const VALUE: ParamId = ParamId(0);
+/// The gain node's gain, linear.
+pub const GAIN_PARAM: ParamId = ParamId(0);
+
+/// The test gain as a device type: an audio effect named "Test Gain".
+#[must_use]
+pub fn gain_type() -> DeviceType {
+    DeviceType::native(GAIN, "Test Gain", DeviceRole::AudioEffect)
+}
+
+/// The pass-through as a device type: an audio effect named "Test
+/// Pass-Through".
+#[must_use]
+pub fn through_type() -> DeviceType {
+    DeviceType::native(THROUGH, "Test Pass-Through", DeviceRole::AudioEffect)
+}
 
 /// What the test nodes report, shared with the test.
 #[derive(Debug, Default)]
@@ -73,6 +99,16 @@ pub fn registry(probe: &Arc<Probe>) -> Registry {
     registry.add_native(DATA, move |_, _| {
         Box::new(DataProbe {
             data: None,
+            _tracked: Tracked::new(&p),
+        })
+    });
+    let p = Arc::clone(probe);
+    registry.add_device(gain_type(), move |device, _| {
+        Box::new(Gain::new(device, &p))
+    });
+    let p = Arc::clone(probe);
+    registry.add_device(through_type(), move |_, _| {
+        Box::new(Through {
             _tracked: Tracked::new(&p),
         })
     });
@@ -241,4 +277,60 @@ impl Node for DataProbe {
         // frees it.
         self.data = Some(data);
     }
+}
+
+/// Multiplies every sample by its gain.
+#[derive(Debug)]
+struct Gain {
+    gain: f32,
+    _tracked: Tracked,
+}
+
+impl Gain {
+    fn new(device: &Device, probe: &Arc<Probe>) -> Self {
+        Self {
+            gain: device.params.get(&GAIN_PARAM).copied().unwrap_or(1.0) as f32,
+            _tracked: Tracked::new(probe),
+        }
+    }
+
+    fn set(&mut self, event: &NodeEvent) {
+        if event.param == GAIN_PARAM {
+            self.gain = match event.value {
+                ParamValue::Set(value) => value as f32,
+                ParamValue::Default => 1.0,
+            };
+        }
+    }
+}
+
+impl Node for Gain {
+    fn process(&mut self, block: &mut Block<'_>) {
+        for segment in segments(block.events(), block.frames()) {
+            for event in segment.events {
+                self.set(event);
+            }
+            for channel in block.channels_mut() {
+                for sample in &mut channel[segment.range.clone()] {
+                    *sample *= self.gain;
+                }
+            }
+        }
+    }
+
+    fn flush(&mut self, events: &[NodeEvent]) {
+        for event in events {
+            self.set(event);
+        }
+    }
+}
+
+/// Passes its input through.
+#[derive(Debug)]
+struct Through {
+    _tracked: Tracked,
+}
+
+impl Node for Through {
+    fn process(&mut self, _block: &mut Block<'_>) {}
 }

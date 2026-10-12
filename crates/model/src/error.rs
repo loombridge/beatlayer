@@ -5,6 +5,7 @@ use core::fmt;
 use bl_core::id::Id;
 use bl_core::time::Ticks;
 
+use crate::device::DeviceRole;
 use crate::ids::{ClipId, DeviceId, TrackId};
 use crate::track::TrackKind;
 
@@ -94,6 +95,23 @@ pub enum ModelError {
         /// The track it would route from or to.
         to: TrackId,
     },
+    /// A track can't hold a device with this role: MIDI effects and
+    /// instruments go only on MIDI tracks.
+    DeviceDoesNotFit {
+        /// The track.
+        track: TrackId,
+        /// Its kind.
+        kind: TrackKind,
+        /// The device's role.
+        role: DeviceRole,
+    },
+    /// A chain's devices would be out of Live's order (MIDI effects, then
+    /// the instrument, then audio effects), or it would hold a second
+    /// instrument.
+    DeviceOrder {
+        /// The track whose chain it is.
+        track: TrackId,
+    },
 }
 
 impl fmt::Display for ModelError {
@@ -144,6 +162,22 @@ impl fmt::Display for ModelError {
                 f,
                 "{track} can't take its input from or send its output to {to}: its choosers \
                  don't list it"
+            ),
+            Self::DeviceDoesNotFit { track, kind, role } => write!(
+                f,
+                "{track} is a {kind} track, which can't hold a{} {}; only MIDI tracks hold \
+                 MIDI effects and instruments",
+                if *role == DeviceRole::AudioEffect || *role == DeviceRole::Instrument {
+                    "n"
+                } else {
+                    ""
+                },
+                role.label().to_lowercase().replace("midi", "MIDI")
+            ),
+            Self::DeviceOrder { track } => write!(
+                f,
+                "{track}'s chain must hold its MIDI effects first, then at most one instrument, \
+                 then its audio effects"
             ),
         }
     }

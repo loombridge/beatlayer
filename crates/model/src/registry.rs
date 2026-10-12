@@ -755,9 +755,14 @@ const ENTRIES: &[Entry] = &[
         keys: &[],
         description: "Inserts a device into a track's device chain at `index`, where 0 is \
             first in the signal flow. The device is a native Beatlayer device named by its \
-            type ID, or a plug-in named by its format and plug-in ID, with any parameter \
-            values to set. Every kind of track has a chain. `device.id` must be a new ID the \
-            project has issued for it.",
+            type ID, or a plug-in named by its format and plug-in ID, with its `name` (the \
+            device's own, such as the title bar shows), its `role` (`midi_effect`, \
+            `instrument`, or `audio_effect`, the default), and any parameter values to set. A \
+            chain keeps Live's order: MIDI effects first, then at most one instrument, then \
+            audio effects, and only MIDI tracks hold MIDI effects and instruments; an index \
+            that breaks the order is refused. `device.id` must be a new ID the project has \
+            issued for it. To add a device as a person does, after the selected device and \
+            with its default preset, use `device.add`.",
     },
     Entry {
         id: "device.remove",
@@ -768,7 +773,8 @@ const ENTRIES: &[Entry] = &[
         keys: &[Key::Runs("S-EDIT-005")],
         description: "Deletes a device from its track's chain, with its settings. Undo \
             restores it, but because it removes the person's work an agent asks first. To \
-            bypass a device but keep it, use `device.set_enabled`.",
+            bypass a device but keep it, use `device.set_enabled`. From the keyboard it \
+            deletes the device selected in the Device View.",
     },
     Entry {
         id: "device.move",
@@ -779,7 +785,9 @@ const ENTRIES: &[Entry] = &[
         keys: &[],
         description: "Moves a device to `index` in a track's chain, on the same track or \
             another, with its settings. The index counts positions after the device is taken \
-            out of its current place.",
+            out of its current place. The chain must stay in Live's order (MIDI effects, the \
+            instrument, then audio effects), so an audio effect can't go before an \
+            instrument, and MIDI effects and instruments only go on MIDI tracks.",
     },
     Entry {
         id: "device.rename",
@@ -788,7 +796,35 @@ const ENTRIES: &[Entry] = &[
         permission: Permission::Edit,
         contexts: &[DeviceView],
         keys: &[Key::Runs("S-EDIT-008")],
-        description: "Renames a device. It changes only the name in the device's title bar.",
+        description: "Renames a device: the name its title bar shows while Show Preset Name \
+            is on (`device.set_show_preset_name`). An empty name gives the device back its \
+            own name, such as `Auto Filter`. It changes nothing in the sound.",
+    },
+    Entry {
+        id: "device.set_show_preset_name",
+        action: Action::Apply("set_show_preset_name"),
+        label: "Show Preset Name",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Switches a device's Show Preset Name, the context menu item: on (as \
+            every new device is), the title bar shows the name of the preset last loaded or \
+            saved, or the name Rename gave it; off, the device's own name. It changes nothing \
+            in the sound.",
+    },
+    Entry {
+        id: "device.set_state",
+        action: Action::Apply("set_device_state"),
+        label: "Set Device State",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Replaces a device's whole state at once, as loading a preset does: \
+            `params` lists every parameter value to set, as `[parameter, value]` pairs (any \
+            parameter not listed goes back to its default), and `name` is what its title bar \
+            shows while Show Preset Name is on (empty for the device's own name). One undo \
+            step. To load a preset file, use `device.load_preset`; to change one parameter, \
+            `device.set_param`.",
     },
     Entry {
         id: "device.set_enabled",
@@ -797,8 +833,9 @@ const ENTRIES: &[Entry] = &[
         permission: Permission::Edit,
         contexts: &[DeviceView],
         keys: &[],
-        description: "Switches a device on or off. A device that's off passes its input \
-            through unchanged, so you can hear the track with and without it.",
+        description: "Switches a device on or off, as its Device Activator in the title bar \
+            does. A device that's off passes its input through unchanged, so you can hear the \
+            track with and without it; it keeps its settings and its state.",
     },
     Entry {
         id: "device.set_param",

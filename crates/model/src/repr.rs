@@ -12,7 +12,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::clip::Clip;
 use crate::command::{
-    check_clip, check_clip_fits, check_device, check_extent, check_mixer, check_send_level,
+    check_chain, check_clip, check_clip_fits, check_device, check_extent, check_mixer,
+    check_send_level,
 };
 use crate::device::Device;
 use crate::document::{Document, Index, Settings};
@@ -200,6 +201,7 @@ impl Loader {
             self.index.device_track.insert(device.id, id);
             track.devices.push_back(Shared::new(device));
         }
+        check_chain(&track)?;
         for clip in repr.clips {
             self.claim(clip.id.0)?;
             check_clip_fits(&track, &clip.data)?;
@@ -333,6 +335,41 @@ mod tests {
             value["settings"],
             serde_json::to_value(Settings::default()).unwrap()
         );
+    }
+
+    // Spec: device-chains R1
+    #[test]
+    fn device_chains_save_and_load_with_their_roles_and_names() {
+        let (mut doc, [_, audio, _]) = song();
+        let device = doc.track(audio).unwrap().devices().next().unwrap().id;
+        // A new audio effect's role, own name, and Show Preset Name aren't
+        // written, so sets from before WP-2.4 read the same.
+        let value = serde_json::to_value(&doc).unwrap();
+        let saved = &value["tracks"][0]["children"][0]["devices"][0];
+        for field in ["role", "own_name", "show_preset_name"] {
+            assert!(saved.get(field).is_none(), "{field}");
+        }
+        doc.apply(&Command::RenameDevice {
+            device,
+            name: "Trim".to_owned(),
+        })
+        .unwrap();
+        doc.apply(&Command::SetShowPresetName {
+            device,
+            shown: false,
+        })
+        .unwrap();
+        let value = serde_json::to_value(&doc).unwrap();
+        let saved = &value["tracks"][0]["children"][0]["devices"][0];
+        assert_eq!(saved["name"], json!("Trim"));
+        assert_eq!(saved["own_name"], json!("Utility"));
+        assert_eq!(saved["show_preset_name"], json!(false));
+        assert_eq!(load(value).unwrap(), doc);
+
+        // A chain out of Live's order doesn't load.
+        let mut value = serde_json::to_value(&doc).unwrap();
+        value["tracks"][0]["children"][0]["devices"][0]["role"] = json!("instrument");
+        assert!(load(value).unwrap_err().contains("instrument"));
     }
 
     // Spec: audio-clips R15

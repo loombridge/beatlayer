@@ -39,9 +39,10 @@ bl-shell-spec = { path = "crates/shell-spec" }
 bl-agent = { path = "crates/agent" }
 # The plug-in kit, by git revision until its API settles: a merge commit on
 # its main branch, so the revision stays reachable.
-lspk-rt = { git = "https://github.com/loombridge/plugin-kit", rev = "b5161366e97fe213cb765bb8e40b09dfa69eec5b" }
-lspk-params = { git = "https://github.com/loombridge/plugin-kit", rev = "b5161366e97fe213cb765bb8e40b09dfa69eec5b" }
-lspk-commands = { git = "https://github.com/loombridge/plugin-kit", rev = "b5161366e97fe213cb765bb8e40b09dfa69eec5b" }
+lspk-rt = { git = "https://github.com/loombridge/plugin-kit", rev = "4c88d0752ea4d00142870ac9371b8adc550eecd3" }
+lspk-params = { git = "https://github.com/loombridge/plugin-kit", rev = "4c88d0752ea4d00142870ac9371b8adc550eecd3" }
+lspk-commands = { git = "https://github.com/loombridge/plugin-kit", rev = "4c88d0752ea4d00142870ac9371b8adc550eecd3" }
+lspk-agent = { git = "https://github.com/loombridge/plugin-kit", rev = "4c88d0752ea4d00142870ac9371b8adc550eecd3" }
 
 [workspace.lints.rust]
 rust_2018_idioms = { level = "warn", priority = -1 }

@@ -32,17 +32,19 @@ use std::sync::OnceLock;
 use bl_commands::{CommandSpec, Permission, Registry};
 use bl_shell::Shell;
 use bl_shell::permission::CallPermission;
-use schemars::JsonSchema;
+use lspk_agent::Session;
+use lspk_agent::permission::and_list;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
 pub(crate) use checkpoint::Checkpoints;
-pub(crate) use perception::Media;
+pub(crate) use lspk_agent::permission::class_names;
+pub(crate) use lspk_agent::tool_definition;
 pub use time::EngineMessage;
 pub(crate) use time::{Playhead, Schedule};
 
 use crate::permission::{Decision, Mode, decide};
-use crate::server::Session;
+use crate::server::Capture;
 
 /// What the tools share across sessions: checkpoints and scheduled
 /// commands belong to the project, not to one agent.
@@ -112,50 +114,10 @@ pub(crate) struct Ctx<'a> {
     pub(crate) confirmed: bool,
 }
 
-/// How a tool call ended.
-#[derive(Debug)]
-pub(crate) enum ToolOutcome {
-    /// It finished: its result, or why it failed (which the agent reads).
-    Done(Result<Value, String>),
-    /// It finished with a result and something for the model to hear or
-    /// see beside it: audio or an image (WP-1.16).
-    WithMedia(Value, Vec<Media>),
-    /// It needs the app's window to capture a view, which the host does
-    /// on the main thread's next frame (WP-1.16).
-    Capture {
-        /// The view.
-        view: bl_shell::perception_commands::View,
-        /// The image's longest side, in pixels.
-        max_size: u32,
-    },
-    /// It needs the person's confirmation first.
-    Ask {
-        /// The most far-reaching class among what it would run.
-        class: Permission,
-        /// Every class among them that asks first, least reach first.
-        classes: Vec<Permission>,
-        /// What it would do, for the person to read.
-        summary: String,
-    },
-}
-
-/// Classes as the person reads them, such as "destructive and external".
-pub(crate) fn class_names(classes: &[Permission]) -> String {
-    let names: Vec<&str> = classes.iter().map(|class| class.id()).collect();
-    and_list(&names)
-}
-
-/// Items as a sentence lists them: "a", "a and b", "a, b and c".
-fn and_list<T: AsRef<str>>(items: &[T]) -> String {
-    match items {
-        [] => String::new(),
-        [one] => one.as_ref().to_owned(),
-        [rest @ .., last] => {
-            let rest: Vec<&str> = rest.iter().map(AsRef::as_ref).collect();
-            format!("{} and {}", rest.join(", "), last.as_ref())
-        }
-    }
-}
+/// How a tool call ended: the kit's outcome, where a call that waits for
+/// the host is a view capture (WP-1.16), which the app's window draws on
+/// the main thread's next frame.
+pub(crate) type ToolOutcome = lspk_agent::ToolOutcome<Capture>;
 
 /// A line of the person's question: the command's label, the classes it
 /// asks for, its arguments, and the clips it would replace or shorten, by
@@ -220,25 +182,12 @@ impl Ctx<'_> {
         commands: &[&str],
         summary: impl FnOnce() -> String,
     ) -> Result<(), ToolOutcome> {
-        let class = classes
-            .iter()
-            .copied()
-            .max()
-            .unwrap_or(Permission::External);
-        match self.decide(class, commands) {
-            Decision::Run => Ok(()),
-            Decision::Ask if self.confirmed => Ok(()),
-            Decision::Ask => Err(ToolOutcome::Ask {
-                class,
-                classes: classes
-                    .iter()
-                    .copied()
-                    .filter(|class| class.asks_first())
-                    .collect(),
-                summary: summary(),
-            }),
-            Decision::Refuse(message) => Err(ToolOutcome::Done(Err(message))),
-        }
+        lspk_agent::permission::permit(
+            classes,
+            self.confirmed,
+            |class| self.decide(class, commands),
+            summary,
+        )
     }
 
     /// Whether the agent may go ahead with commands whose most far-reaching
@@ -262,34 +211,6 @@ impl Ctx<'_> {
     pub(crate) fn step_label(&self, what: &str) -> String {
         format!("{}: {what}", self.agent())
     }
-}
-
-/// A tool's definition, as `tools/list` gives it.
-fn tool_definition<T: JsonSchema>(
-    name: &str,
-    title: &str,
-    description: &str,
-    read_only: bool,
-) -> Value {
-    let mut schema = bl_commands::args_schema::<T>().to_value();
-    if let Some(object) = schema.as_object_mut() {
-        // The tool's description says what the arguments are for.
-        object.remove("title");
-        object.remove("description");
-    }
-    json!({
-        "name": name,
-        "title": title,
-        "description": description,
-        "inputSchema": schema,
-        "annotations": {
-            "title": title,
-            "readOnlyHint": read_only,
-            "destructiveHint": !read_only,
-            "idempotentHint": read_only,
-            "openWorldHint": false,
-        },
-    })
 }
 
 /// Every tool's definition, for `tools/list`.

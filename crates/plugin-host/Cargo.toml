@@ -8,7 +8,30 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+bl-core.workspace = true
 bl-engine.workspace = true
+bl-model.workspace = true
+# CLAP hosting (WP-2.6), pinned because its API can still change (the
+# architecture, "Plug-in hosting").
+clack-host = "=0.2.0"
+clack-extensions = { version = "=0.2.0", features = [
+    "clack-host",
+    "audio-ports",
+    "gui",
+    "latency",
+    "log",
+    "params",
+    "state",
+] }
+# A node's queues to the main thread: the version bl-engine uses.
+rtrb = "0.4.0"
+
+[dev-dependencies]
+# The test plug-in, built from source; its cdylib is what the tests load.
+bl-test-clap = { path = "../test-clap" }
+# Every block in the tests runs as a real-time section under the
+# allocation trap.
+bl-rt.workspace = true
 
 [lints]
 workspace = true

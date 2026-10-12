@@ -1259,6 +1259,18 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ),
         ("device_view.state", Exception(Query)),
         ("device.parameters", Exception(Query)),
+        // Plug-ins (WP-2.6): loaded by path until the browser lists them
+        // (WP-2.9); the window's button is the plug-in device panel's
+        // (WP-2.10).
+        ("plugin.info", Exception(Query)),
+        (
+            "plugin.load",
+            Exception(LaterView("the browser's plug-ins (WP-2.9)")),
+        ),
+        (
+            "plugin.show_window",
+            Exception(LaterView("the plug-in device panel (WP-2.10)")),
+        ),
         // A send knob and the In/Out choosers (the routing spec): Up and
         // Down on them.
         (

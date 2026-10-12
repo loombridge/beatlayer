@@ -1,0 +1,28 @@
+[package]
+name = "bl-test-clap"
+description = "A CLAP plug-in for the plug-in host's tests (WP-2.6): a gain that echoes notes, built from source. Never shipped."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+# The cdylib is the plug-in the tests load by path; the rlib lets a test
+# crate depend on this one, so Cargo builds the cdylib beside its tests.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+clack-plugin = "=0.2.0"
+clack-extensions = { version = "=0.2.0", features = [
+    "clack-plugin",
+    "audio-ports",
+    "gui",
+    "latency",
+    "note-ports",
+    "params",
+    "state",
+] }
+
+[lints]
+workspace = true

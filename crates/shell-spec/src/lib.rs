@@ -50,6 +50,7 @@ pub mod export;
 pub mod menus;
 pub mod mixer_view;
 pub mod perception;
+pub mod plugins;
 pub mod settings;
 pub mod tracks;
 pub mod transport;
@@ -73,5 +74,6 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     export::register(registry)?;
     devices::register(registry)?;
     tracks::register(registry)?;
+    plugins::register(registry)?;
     perception::register(registry)
 }

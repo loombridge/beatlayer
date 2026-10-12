@@ -35,6 +35,7 @@ use crate::settings::{
     OnByDefault, Preferences, SettingsPage, ThemeChoice, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT,
     zoom_factor, zoom_percent, zoom_step,
 };
+use bl_plugin_host::clap::ClapHost;
 use bl_shell_spec::arrangement as view_ids;
 use bl_shell_spec::browser as browser_ids;
 use bl_shell_spec::devices as device_ids;
@@ -42,6 +43,7 @@ use bl_shell_spec::editing as edit_ids;
 use bl_shell_spec::export as export_ids;
 use bl_shell_spec::mixer_view as mixer_ids;
 use bl_shell_spec::perception as perception_ids;
+use bl_shell_spec::plugins as plugin_ids;
 use bl_shell_spec::tracks as track_ids;
 use bl_shell_spec::transport as transport_ids;
 
@@ -317,6 +319,11 @@ pub struct Shell {
     /// The Device View's selection, folded devices, clipboard, and
     /// hot-swapping (WP-2.4).
     devices: DeviceView,
+    /// The native device types the engine offers, which the plug-ins'
+    /// join in the Device View (WP-2.6).
+    native_types: Vec<bl_engine::DeviceType>,
+    /// The CLAP host: plug-in devices' instances, on this thread (WP-2.6).
+    plugins: ClapHost,
 }
 
 impl fmt::Debug for Shell {
@@ -402,6 +409,9 @@ impl Shell {
         // The engine's clips stream from the set's media (WP-1.4b).
         let media = Arc::new(MediaStore::new());
         audio.set_media(Arc::clone(&media));
+        // CLAP plug-ins (WP-2.6): this thread is their main thread.
+        let plugins = ClapHost::new();
+        audio.set_plugins(plugins.clone());
         audio.sync(editor.document());
         let mut shell = Self {
             browser_view,
@@ -443,6 +453,8 @@ impl Shell {
                 devices.set_device_types(bl_devices::device_types());
                 devices
             },
+            native_types: bl_devices::device_types(),
+            plugins,
         };
         shell.give_agents_tokens();
         shell
@@ -873,7 +885,160 @@ impl Shell {
     /// `device.parameters` reports, and loading a preset checks values
     /// against (WP-2.5).
     pub fn set_device_types(&mut self, types: Vec<bl_engine::DeviceType>) {
+        self.native_types = types;
+        self.refresh_device_types();
+    }
+
+    /// Gives the Device View the native types and the plug-ins loaded.
+    fn refresh_device_types(&mut self) {
+        let mut types = self.native_types.clone();
+        types.extend(self.plugins.types().into_iter().map(|t| t.device_type));
         self.devices.set_device_types(types);
+    }
+
+    /// The CLAP host, whose plug-ins are the set's plug-in devices
+    /// (WP-2.6).
+    #[must_use]
+    pub fn plugins(&self) -> &ClapHost {
+        &self.plugins
+    }
+
+    /// Lets go of the plug-ins of the set being replaced (WP-2.6): the new
+    /// set's plug-in devices load their plug-ins from their saved state.
+    fn set_replaced(&mut self) {
+        self.plugins.clear();
+    }
+
+    /// Runs a plug-in command (WP-2.6).
+    fn run_plugins(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        let unavailable = |reason: String| ShellError::Unavailable {
+            command: id.to_owned(),
+            reason,
+        };
+        let target = |shell: &Self, device: Option<bl_model::DeviceId>| {
+            let device = device
+                .or(shell.devices.selected())
+                .ok_or_else(|| unavailable("select a plug-in device first".to_owned()))?;
+            if crate::plugins::is_clap(shell.editor.document(), device) {
+                Ok(device)
+            } else {
+                Err(ShellError::InvalidArgs {
+                    command: id.to_owned(),
+                    message: format!("{device} isn't a CLAP plug-in device"),
+                })
+            }
+        };
+        let info = |shell: &Self, device| {
+            crate::plugins::info(&shell.plugins, device)
+                .map(|info| to_value(&info))
+                .ok_or_else(|| unavailable(format!("{device}'s plug-in hasn't started yet")))
+        };
+        match id {
+            plugin_ids::LOAD => {
+                let plugin_ids::LoadPluginArgs {
+                    path,
+                    plugin,
+                    track,
+                    index,
+                } = Self::args(id, args)?;
+                let found =
+                    self.plugins
+                        .load(Path::new(&path))
+                        .map_err(|e| ShellError::Failed {
+                            command: id.to_owned(),
+                            message: e.to_string(),
+                        })?;
+                let chosen = match &plugin {
+                    Some(wanted) => found.iter().find(|t| {
+                        matches!(&t.device_type.kind,
+                            bl_model::DeviceKind::Plugin { plugin_id, .. } if plugin_id == wanted)
+                    }),
+                    None => found.first(),
+                }
+                .ok_or_else(|| ShellError::InvalidArgs {
+                    command: id.to_owned(),
+                    message: format!("{path} has no plug-in {}", plugin.unwrap_or_default()),
+                })?
+                .clone();
+                self.refresh_device_types();
+                let device_type = chosen.device_type;
+                let added: device_ids::DeviceAdded = serde_json::from_value(self.run_devices(
+                    device_ids::ADD,
+                    to_value(&device_ids::AddDeviceArgs {
+                        device: device_ids::NewDevice {
+                            kind: device_type.kind.clone(),
+                            name: device_type.name.clone(),
+                            role: device_type.role,
+                            sidechain: false,
+                        },
+                        track,
+                        index,
+                    }),
+                )?)
+                .map_err(|e| ShellError::Failed {
+                    command: id.to_owned(),
+                    message: e.to_string(),
+                })?;
+                // Spec: clap-hosting R8. The set knows where the plug-in
+                // came from from the start.
+                let _ = self.editor.amend_plugin_state(
+                    added.device,
+                    Some(bl_model::PluginState {
+                        path: chosen.path.to_string_lossy().into_owned(),
+                        data: Vec::new(),
+                    }),
+                );
+                let plugin_id = match &device_type.kind {
+                    bl_model::DeviceKind::Plugin { plugin_id, .. } => plugin_id.clone(),
+                    bl_model::DeviceKind::Native { device_type } => device_type.clone(),
+                };
+                Ok(to_value(&plugin_ids::PluginLoaded {
+                    device: added.device,
+                    track: added.track,
+                    new_track: added.new_track,
+                    plugin: plugin_id,
+                    name: device_type.name,
+                }))
+            }
+            plugin_ids::SHOW_WINDOW => {
+                let plugin_ids::ShowWindowArgs { device, shown } = Self::args(id, args)?;
+                let device = target(self, device)?;
+                self.plugins.idle();
+                let open = crate::plugins::info(&self.plugins, device)
+                    .is_some_and(|info| info.window_open);
+                let failed = |e: bl_plugin_host::clap::ClapError| ShellError::Failed {
+                    command: id.to_owned(),
+                    message: e.to_string(),
+                };
+                if shown.unwrap_or(!open) {
+                    // Spec: clap-hosting R13. Titled "<device>/<track>", as
+                    // Live titles a plug-in's window.
+                    let doc = self.editor.document();
+                    let title = doc
+                        .device_track(device)
+                        .map(|t| crate::routing::track_label(doc, t))
+                        .unwrap_or_default();
+                    let name = doc
+                        .device(device)
+                        .map(|d| d.title().to_owned())
+                        .unwrap_or_default();
+                    self.plugins
+                        .open_editor(device, &format!("{name}/{title}"))
+                        .map_err(failed)?;
+                } else {
+                    self.plugins.close_editor(device).map_err(failed)?;
+                }
+                self.touch();
+                info(self, device)
+            }
+            plugin_ids::INFO => {
+                let plugin_ids::PluginInfoArgs { device } = Self::args(id, args)?;
+                let device = target(self, device)?;
+                self.plugins.idle();
+                info(self, device)
+            }
+            _ => Err(ShellError::UnknownCommand(id.to_owned())),
+        }
     }
 
     /// What the Device View shows: the selected track's chain (WP-2.4).
@@ -887,6 +1052,14 @@ impl Shell {
     /// Runs a Device View command and carries out what it asks of the rest
     /// of the shell.
     fn run_devices(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        if matches!(
+            id,
+            device_ids::CUT | device_ids::COPY | device_ids::DUPLICATE
+        ) {
+            // Spec: clap-hosting R8. A copy of a plug-in device starts
+            // from its plug-in's state now.
+            crate::plugins::capture_states(&self.plugins, &mut self.editor);
+        }
         let user_library = self.browser_view.user_library().map(Path::to_path_buf);
         let result = self.devices.run(
             id,
@@ -1075,10 +1248,22 @@ impl Shell {
         if let Some(error) = polled.error {
             self.set_message(error, true);
         }
-        if polled.changed {
+        let mut changed = polled.changed;
+        // Plug-ins' main-thread work (WP-2.6), and the changes they made
+        // themselves.
+        if self.plugins.idle() {
+            self.refresh_device_types();
+            changed = true;
+        }
+        if crate::plugins::apply_param_changes(&self.plugins, &mut self.editor, &self.devices) {
+            self.dirty = true;
+            self.document_changed();
+            changed = true;
+        }
+        if changed {
             self.touch();
         }
-        polled.changed
+        changed
     }
 
     /// Tells the browser the set's file changed, so Current Project follows
@@ -1907,6 +2092,7 @@ impl Shell {
                 || edit_ids::handles(id)
                 || device_ids::handles(id)
                 || track_ids::handles(id)
+                || id == plugin_ids::LOAD
                 || id.starts_with("set.")
                 || id == ids::APP_QUIT)
         {
@@ -1932,6 +2118,9 @@ impl Shell {
             }
             self.touch();
             return result;
+        }
+        if plugin_ids::handles(id) {
+            return self.run_plugins(id, args);
         }
         if model::handles(id) {
             let changes =
@@ -2166,6 +2355,7 @@ impl Shell {
         match id {
             ids::SET_NEW => {
                 Self::args::<NoArgs>(id, args)?;
+                self.set_replaced();
                 self.editor = factory_default_set();
                 self.saved = factory_default_set();
                 self.store.close();
@@ -2190,6 +2380,7 @@ impl Shell {
                 }
                 let (editor, opened) = self.store.open(Path::new(&path)).map_err(failed)?;
                 self.saved = snapshot(&editor);
+                self.set_replaced();
                 self.editor = editor;
                 self.set_path = Some(opened);
                 self.dirty = false;
@@ -2213,6 +2404,7 @@ impl Shell {
                 let path = self.set_path.clone().ok_or_else(|| {
                     unavailable("the set has never been saved; use `set.save_as` to give it a file")
                 })?;
+                crate::plugins::capture_states(&self.plugins, &mut self.editor);
                 let warnings = self.store.save(&path, &self.editor).map_err(failed)?;
                 self.saved_as(path, &warnings);
                 Ok(self.set_result())
@@ -2221,6 +2413,7 @@ impl Shell {
                 // Spec: app-shell R17 to R21. The store decides where in a
                 // project folder the set goes; the result says where.
                 let SaveAsArgs { path } = Self::args(id, args)?;
+                crate::plugins::capture_states(&self.plugins, &mut self.editor);
                 let (path, warnings) = self
                     .store
                     .save_as(Path::new(&path), &self.editor)
@@ -2231,6 +2424,7 @@ impl Shell {
             ids::SET_DISCARD_CHANGES => {
                 Self::args::<NoArgs>(id, args)?;
                 if self.dirty {
+                    self.set_replaced();
                     self.editor = snapshot(&self.saved);
                     self.gesture = false;
                     self.dirty = false;

@@ -300,6 +300,9 @@ pub struct AudioHost {
     engines: u64,
     /// Reports from engines that have closed, not yet taken.
     held_reports: Vec<Report>,
+    /// The CLAP host whose factory makes each engine's plug-in nodes
+    /// (WP-2.6).
+    plugins: Option<bl_plugin_host::clap::ClapHost>,
 }
 
 impl std::fmt::Debug for AudioHost {
@@ -370,6 +373,7 @@ impl AudioHost {
             streams: None,
             engines: 0,
             held_reports: Vec::new(),
+            plugins: None,
         }
     }
 
@@ -378,6 +382,11 @@ impl AudioHost {
     /// and without it, clips play silence.
     pub fn set_media(&mut self, media: Arc<MediaStore>) {
         self.media = Some(media);
+    }
+
+    /// Gives every engine from now on the CLAP host's plug-ins (WP-2.6).
+    pub fn set_plugins(&mut self, plugins: bl_plugin_host::clap::ClapHost) {
+        self.plugins = Some(plugins);
     }
 
     /// The running engine's disk streaming figures: open streams, underruns
@@ -832,6 +841,9 @@ impl AudioHost {
         let config = EngineConfig::new(rate, max_frames);
         let mut registry = Registry::new();
         bl_devices::register(&mut registry);
+        if let Some(plugins) = &self.plugins {
+            registry.add(plugins.factory());
+        }
         if let Some(media) = &self.media {
             let streams = MediaStreams::new(Arc::clone(media))
                 .map_err(|e| format!("couldn't start the disk thread: {e}"))?;

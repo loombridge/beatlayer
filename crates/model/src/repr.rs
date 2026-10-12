@@ -372,6 +372,36 @@ mod tests {
         assert!(load(value).unwrap_err().contains("instrument"));
     }
 
+    // Spec: clap-hosting R8
+    #[test]
+    fn a_plugins_state_saves_as_base64_and_loads_back() {
+        let (mut doc, [_, audio, _]) = song();
+        let device = doc.track(audio).unwrap().devices().next().unwrap().id;
+        let value = serde_json::to_value(&doc).unwrap();
+        assert!(
+            value["tracks"][0]["children"][0]["devices"][0]
+                .get("plugin")
+                .is_none(),
+            "a native device saves no plug-in state"
+        );
+        let state = crate::PluginState {
+            path: "/Library/Audio/Plug-Ins/CLAP/Gain.clap".to_owned(),
+            data: (0..=255).collect(),
+        };
+        doc.set_plugin_state(device, Some(state.clone())).unwrap();
+        let value = serde_json::to_value(&doc).unwrap();
+        let saved = &value["tracks"][0]["children"][0]["devices"][0]["plugin"];
+        assert_eq!(saved["path"], json!(state.path));
+        assert_eq!(
+            saved["data"],
+            json!(crate::base64::encode(&state.data)),
+            "base64"
+        );
+        let loaded = load(value).unwrap();
+        assert_eq!(loaded.device(device).unwrap().plugin, Some(state));
+        assert_eq!(loaded, doc);
+    }
+
     // Spec: audio-clips R15
     #[test]
     fn audio_clip_settings_are_saved_only_where_they_differ_from_a_new_clips() {

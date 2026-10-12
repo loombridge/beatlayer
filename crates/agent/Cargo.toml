@@ -29,6 +29,14 @@ serde_json = "1"
 bl-analysis.workspace = true
 bl-media.workspace = true
 hound = "3.5.1"
+# The kit's plug-ins through both routes: the kit's examples compiled in as native
+# devices, and Example Gain hosted as a CLAP plug-in with the agent interface
+# its own build exports, built into the test binary.
+bl-devices = { workspace = true, features = ["kit-examples"] }
+bl-plugin-host.workspace = true
+lspk-example-gain.workspace = true
+lspk-plugin = { workspace = true, features = ["clap"] }
+lspk-plugin-agent.workspace = true
 
 [lints]
 workspace = true

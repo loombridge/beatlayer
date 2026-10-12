@@ -7,7 +7,9 @@ use core::ops::Range;
 use bl_core::time::SampleRate;
 use bl_dsp::LinearSmoother;
 use bl_dsp::smooth::DEFAULT_SMOOTHING_SECONDS;
-use bl_engine::{Block, DeviceType, Node, NodeConfig, NodeEvent, ParamValue, Registry, segments};
+use bl_engine::{
+    Block, DeviceType, Node, NodeConfig, NodeEvent, NoteEvent, ParamValue, Registry, segments,
+};
 use bl_model::{Device, DeviceDescription, DeviceKind, ParamDescriptor, ParamId};
 
 /// A native device: what it does to audio, given its parameters.
@@ -22,6 +24,14 @@ pub trait NativeDevice: Send + 'static {
     /// by frame ([`ParamBank::ramp`]).
     fn process(&mut self, audio: &mut Audio<'_, '_>, params: &ParamBank);
 
+    /// Takes parameter changes while the device is switched off and
+    /// doesn't process; `params` already holds them. A device that keeps
+    /// its own copy of its values (a kit plug-in's processor) applies them
+    /// here. The default does nothing.
+    fn flush(&mut self, events: &[NodeEvent], params: &ParamBank) {
+        let _ = (events, params);
+    }
+
     /// How many frames it delays its input by, for delay compensation
     /// (WP-2.11).
     fn latency(&self) -> u32 {
@@ -33,9 +43,41 @@ pub trait NativeDevice: Send + 'static {
 pub struct Audio<'b, 'a> {
     block: &'b mut Block<'a>,
     range: Range<usize>,
+    changes: &'a [NodeEvent],
+    last: bool,
 }
 
-impl Audio<'_, '_> {
+impl<'a> Audio<'_, 'a> {
+    /// The parameter changes that land on the stretch's first frame, which
+    /// the [`ParamBank`] has already taken: for a device that applies
+    /// changes itself, as a kit plug-in's processor does.
+    #[must_use]
+    pub fn changes(&self) -> &'a [NodeEvent] {
+        self.changes
+    }
+
+    /// The notes the device plays in the stretch, in order, each with its
+    /// offset from the stretch's first frame.
+    pub fn notes(&self) -> impl Iterator<Item = NoteEvent> + 'a {
+        let (start, end, last) = (self.range.start, self.range.end, self.last);
+        self.block.notes().iter().filter_map(move |note| {
+            let at = note.offset as usize;
+            (at >= start && (at < end || last)).then(|| NoteEvent {
+                offset: u32::try_from(at.min(end.saturating_sub(1)).max(start) - start)
+                    .unwrap_or(0),
+                ..*note
+            })
+        })
+    }
+
+    /// Every channel's samples in the stretch, in order.
+    pub fn channels_mut(&mut self) -> impl Iterator<Item = &mut [f32]> {
+        let range = self.range.clone();
+        self.block
+            .channels_mut()
+            .map(move |channel| &mut channel[range.clone()])
+    }
+
     /// Frames in the stretch.
     #[must_use]
     pub fn frames(&self) -> usize {
@@ -250,14 +292,18 @@ impl<D: NativeDevice> NativeNode<D> {
 
 impl<D: NativeDevice> Node for NativeNode<D> {
     fn process(&mut self, block: &mut Block<'_>) {
-        for segment in segments(block.events(), block.frames()) {
+        let frames = block.frames();
+        for segment in segments(block.events(), frames) {
             for event in segment.events {
                 self.params.apply(event);
             }
             self.params.advance(segment.range.len());
+            let last = segment.range.end >= frames;
             let mut audio = Audio {
                 block,
                 range: segment.range,
+                changes: segment.events,
+                last,
             };
             self.device.process(&mut audio, &self.params);
         }
@@ -267,6 +313,7 @@ impl<D: NativeDevice> Node for NativeNode<D> {
         for event in events {
             self.params.apply_now(event);
         }
+        self.device.flush(events, &self.params);
     }
 
     fn latency(&self) -> u32 {

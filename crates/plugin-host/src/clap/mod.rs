@@ -19,6 +19,13 @@
 //! plug-in makes itself, from its editor, come back through
 //! [`ClapHost::take_param_changes`], each gesture as one change.
 //!
+//! A plug-in that offers the plug-in kit's agent-commands extension
+//! (`com.loombridge.agent-commands`, which every kit plug-in does) lists
+//! its commands when its instance starts ([`ClapHost::commands`]), and
+//! [`ClapHost::run_command`] runs one on the main thread, returning its
+//! result and the parameters it changed, so the shell can serve them to
+//! agents as device commands and record each run as one undo step.
+//!
 //! Plug-ins run in Beatlayer's own process until Phase 10's sandbox, so a
 //! plug-in that crashes takes the app with it. A plug-in that fails a
 //! call (it can't be loaded, refuses to activate, refuses a state, or
@@ -47,7 +54,10 @@ use clack_extensions::latency::PluginLatency;
 use clack_extensions::params::PluginParams;
 use clack_extensions::state::PluginState as StateExtension;
 use clack_host::prelude::*;
+use lspk_plugin::agent_commands::PluginAgentCommands;
 
+pub use bl_commands::CommandSpec;
+pub use clack_host::entry::EntryDescriptor;
 pub use node::ClapNode;
 
 use handlers::{Host, MainThread, ProcessorData, Shared};
@@ -103,6 +113,16 @@ pub struct ParamChange {
     pub param: ParamId,
     /// Its new value.
     pub value: f64,
+}
+
+/// What running a plug-in's command did.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CommandRun {
+    /// The command's result.
+    pub result: serde_json::Value,
+    /// The parameters whose values it changed, with their new values as
+    /// the plug-in reports them, for the set.
+    pub changes: Vec<(ParamId, f64)>,
 }
 
 /// What a device's plug-in is doing, for `plugin.info`.
@@ -180,6 +200,8 @@ struct Main {
     /// the main thread.
     closing: Vec<(DeviceId, Instance)>,
     changes: Vec<ParamChange>,
+    /// Counts instances started and let go of.
+    generation: u64,
 }
 
 /// One device's plug-in.
@@ -202,7 +224,17 @@ struct Instance {
     editor_open: bool,
     gestures: BTreeSet<u32>,
     held: BTreeMap<u32, f64>,
+    /// Its commands, through the agent-commands extension, as it listed
+    /// them when it started; `None` without the extension.
+    commands: Option<Vec<CommandSpec>>,
+    /// Values its commands set, which the set already holds: the gestures
+    /// it sends for them are dropped when they arrive, rather than made
+    /// undo steps of their own (oldest first, at most [`ECHOES`]).
+    echoes: Vec<(u32, f64)>,
 }
+
+/// How many command changes a plug-in's gestures are matched against.
+const ECHOES: usize = 256;
 
 /// The CLAP host: CLAP's main thread for every plug-in, on the thread that
 /// made it.
@@ -310,6 +342,107 @@ impl ClapHost {
             types.push(found.clone());
         }
         Ok(found)
+    }
+
+    /// Makes a plug-in compiled into this binary loadable as if it were
+    /// the file at `path`: `plugin.load` with that path, and sets naming it,
+    /// find this entry. For tests, and plug-ins built in.
+    ///
+    /// # Safety
+    ///
+    /// `entry` must be a CLAP entry that follows the CLAP specification, as
+    /// loading a plug-in file trusts its entry to.
+    ///
+    /// # Errors
+    ///
+    /// [`ClapError::Load`] if the entry won't start, and
+    /// [`ClapError::WrongThread`] off the main thread.
+    pub unsafe fn add_entry(
+        &self,
+        path: &Path,
+        entry: &'static EntryDescriptor,
+    ) -> Result<(), ClapError> {
+        let mut guard = lock(&self.inner.main);
+        let main = guard.get()?;
+        let name = CString::new(path.to_string_lossy().as_bytes())
+            .map_err(|_| ClapError::Load("the path holds a NUL character".to_owned()))?;
+        // SAFETY: the caller vouches for the entry.
+        let entry = unsafe { PluginEntry::load_from_raw(entry, &name) }
+            .map_err(|e| ClapError::Load(e.to_string()))?;
+        main.entries.insert(path.to_owned(), entry);
+        Ok(())
+    }
+
+    /// The device's plug-in's own commands, by their IDs within the
+    /// plug-in, if it offers the agent-commands extension and is running.
+    #[must_use]
+    pub fn commands(&self, device: DeviceId) -> Option<Vec<CommandSpec>> {
+        let mut guard = lock(&self.inner.main);
+        guard.get().ok()?.instances.get(&device)?.commands.clone()
+    }
+
+    /// A number that changes whenever a plug-in instance starts or is let
+    /// go of, so the shell knows when to look for new commands.
+    #[must_use]
+    pub fn generation(&self) -> u64 {
+        let mut guard = lock(&self.inner.main);
+        guard.get().map_or(0, |main| main.generation)
+    }
+
+    /// Runs the device's plug-in's command `id` with `args` on the main
+    /// thread, through the agent-commands extension, and returns its result
+    /// and the parameters it changed (read from the plug-in before and
+    /// after). The plug-in also sends the changes as gestures, which
+    /// [`ClapHost::take_param_changes`] then finds already in the set.
+    ///
+    /// # Errors
+    ///
+    /// [`ClapError::NoInstance`] without a running plug-in,
+    /// [`ClapError::Refused`] if it has no commands or the command failed,
+    /// saying why.
+    pub fn run_command(
+        &self,
+        device: DeviceId,
+        id: &str,
+        args: &serde_json::Value,
+    ) -> Result<CommandRun, ClapError> {
+        let mut guard = lock(&self.inner.main);
+        let instance = instance(guard.get()?, device)?;
+        let mut plugin = instance.instance.plugin_handle();
+        let commands = plugin
+            .get_extension::<PluginAgentCommands>()
+            .ok_or_else(|| ClapError::Refused("commands: it offers none".to_owned()))?;
+        let before = values(&mut plugin);
+        let result = commands
+            .run(&mut plugin, id, args)
+            .map_err(ClapError::Refused)?;
+        let after = values(&mut plugin);
+        let changes: Vec<(ParamId, f64)> = after
+            .into_iter()
+            .filter(|(param, value)| {
+                before
+                    .iter()
+                    .find(|(p, _)| p == param)
+                    .is_none_or(|(_, old)| old != value)
+            })
+            .collect();
+        // While it's inactive, nothing processes the gestures it queued;
+        // a flush takes them (the changes are in the set already).
+        if let Some(mut inactive) = instance.instance.inactive_plugin_handle()
+            && let Some(params) = inactive.get_extension::<PluginParams>()
+        {
+            params.flush(
+                &mut inactive,
+                &InputEvents::empty(),
+                &mut OutputEvents::void(),
+            );
+        }
+        instance
+            .echoes
+            .extend(changes.iter().map(|(param, value)| (param.0, *value)));
+        let over = instance.echoes.len().saturating_sub(ECHOES);
+        instance.echoes.drain(..over);
+        Ok(CommandRun { result, changes })
     }
 
     /// The plug-ins loaded so far, as device types.
@@ -500,6 +633,7 @@ impl ClapHost {
             .collect();
         for device in gone {
             if let Some(instance) = main.instances.remove(&device) {
+                main.generation += 1;
                 close(main, device, instance);
             }
         }
@@ -600,6 +734,27 @@ fn load_state(instance: &mut Instance, data: &[u8]) -> Result<(), ClapError> {
     state
         .load(&plugin, &mut &data[..])
         .map_err(|_| ClapError::Refused("the state".to_owned()))
+}
+
+/// Each parameter's value, as the plug-in reports it.
+fn values(plugin: &mut PluginMainThreadHandle<'_>) -> Vec<(ParamId, f64)> {
+    let Some(params) = plugin.get_extension::<PluginParams>() else {
+        return Vec::new();
+    };
+    describe::params(plugin)
+        .iter()
+        .filter_map(|p| {
+            let id = ClapId::from_raw(p.id.0)?;
+            Some((p.id, params.get_value(plugin, id)?))
+        })
+        .collect()
+}
+
+/// The plug-in's commands, if it offers the agent-commands extension.
+fn list_commands(instance: &mut PluginInstance<Host>) -> Option<Vec<CommandSpec>> {
+    let mut plugin = instance.plugin_handle();
+    let commands = plugin.get_extension::<PluginAgentCommands>()?;
+    commands.list(&mut plugin).ok()
 }
 
 /// The plug-in's editor, if it opens in a window of its own on this
@@ -713,7 +868,10 @@ fn serve(main: &mut Main, request: Request, inner: &Inner) {
             editor_open: false,
             gestures: BTreeSet::new(),
             held: BTreeMap::new(),
+            commands: None,
+            echoes: Vec::new(),
         };
+        instance.commands = list_commands(&mut instance.instance);
         // Spec: clap-hosting R9, R11. The saved state first, then the
         // set's parameter values over it.
         if let Some(saved) = device.plugin.as_ref().filter(|p| !p.data.is_empty())
@@ -723,6 +881,7 @@ fn serve(main: &mut Main, request: Request, inner: &Inner) {
         }
         set_values(&mut instance, &device);
         main.instances.insert(device.id, instance);
+        main.generation += 1;
     }
     let Some(instance) = main.instances.get_mut(&device.id) else {
         return;
@@ -779,6 +938,7 @@ fn pump(device: DeviceId, instance: &mut Instance, changes: &mut Vec<ParamChange
             take_change(
                 device,
                 (&mut instance.gestures, &mut instance.held),
+                &mut instance.echoes,
                 change,
                 changes,
             );
@@ -860,14 +1020,21 @@ fn pump(device: DeviceId, instance: &mut Instance, changes: &mut Vec<ParamChange
     changed
 }
 
-/// Spec: clap-hosting R6. A change inside a gesture waits for its end.
+/// Spec: clap-hosting R6. A change inside a gesture waits for its end. A
+/// change a command made (spec: clap-hosting R19), which the set already
+/// holds, is dropped.
 fn take_change(
     device: DeviceId,
     (gestures, held): (&mut BTreeSet<u32>, &mut BTreeMap<u32, f64>),
+    echoes: &mut Vec<(u32, f64)>,
     change: ParamOut,
     changes: &mut Vec<ParamChange>,
 ) {
     let mut emit = |id: u32, value: f64| {
+        if let Some(at) = echoes.iter().position(|echo| *echo == (id, value)) {
+            echoes.remove(at);
+            return;
+        }
         let param = ParamId(id);
         changes.retain(|c| !(c.device == device && c.param == param));
         changes.push(ParamChange {

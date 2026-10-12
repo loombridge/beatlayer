@@ -25,7 +25,7 @@ A set (a `.blset` file) holds one song. The song has:
 
 - **Tracks**, in order: audio tracks (hold audio clips), MIDI tracks (hold MIDI clips), and group tracks (hold other tracks and sum them). Then the **return tracks**, which receive sends, and the **Main** track, the song's output, which always exists.
 - **Clips** on audio and MIDI tracks' arrangement lanes, each with a start, a length, a name, and its contents: an audio file named by content hash, or MIDI notes.
-- **Devices** in each track's device chain, in signal order, each with parameters.
+- **Devices** in each track's device chain, in signal order, each with parameters. A plug-in device may bring commands of its own (a plug-in built on Loombridge's plug-in kit does): they're device commands scoped to it, `device.d<device>.<command>`, such as `device.d17.gain.reset`. `list_commands` in the `device` area lists them and `query` on the device names them; run and schedule them like any other command. Each run is one undo step with your name, and its class decides whether the person is asked first.
 - A **mixer** on each track: volume (linear gain, 1 is 0 dB), pan (−1 to 1), mute (the track's activator), solo, and arm.
 - A **tempo map** and a **time-signature map**.
 

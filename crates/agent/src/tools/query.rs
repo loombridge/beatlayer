@@ -79,6 +79,7 @@ pub(crate) fn query(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
     };
     let document = ctx.shell.editor().document();
     let view = View {
+        shell: &*ctx.shell,
         document,
         signatures: &document.settings().time_signatures,
         detail: query.detail,
@@ -174,6 +175,7 @@ fn find_id(document: &Document, raw: u64) -> Option<Found<'_>> {
 
 /// Builds the JSON a query returns.
 struct View<'a> {
+    shell: &'a bl_shell::Shell,
     document: &'a Document,
     signatures: &'a TimeSignatureMap,
     detail: Detail,
@@ -276,6 +278,12 @@ impl View<'_> {
             .map(|(param, value)| json!({ "param": param, "value": value }))
             .collect();
         value["params"] = self.page.slice(params);
+        // A plug-in's own commands, scoped to this device, which `run` and
+        // `schedule` take like any other.
+        let commands = self.shell.device_command_ids(device.id);
+        if !commands.is_empty() {
+            value["commands"] = json!(commands);
+        }
         value
     }
 

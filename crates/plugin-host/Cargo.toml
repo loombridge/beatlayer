@@ -8,6 +8,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+bl-commands.workspace = true
 bl-core.workspace = true
 bl-engine.workspace = true
 bl-model.workspace = true
@@ -25,6 +26,10 @@ clack-extensions = { version = "=0.2.0", features = [
 ] }
 # A node's queues to the main thread: the version bl-engine uses.
 rtrb = "0.4.0"
+# The host side of the plug-in kit's agent-commands extension: a plug-in's
+# commands, listed and run.
+lspk-plugin = { workspace = true, features = ["clap-host"] }
+serde_json = "1"
 
 [dev-dependencies]
 # The test plug-in, built from source; its cdylib is what the tests load.

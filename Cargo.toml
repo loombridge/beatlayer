@@ -39,10 +39,18 @@ bl-shell-spec = { path = "crates/shell-spec" }
 bl-agent = { path = "crates/agent" }
 # The plug-in kit, by git revision until its API settles: a merge commit on
 # its main branch, so the revision stays reachable.
-lspk-rt = { git = "https://github.com/loombridge/plugin-kit", rev = "4c88d0752ea4d00142870ac9371b8adc550eecd3" }
-lspk-params = { git = "https://github.com/loombridge/plugin-kit", rev = "4c88d0752ea4d00142870ac9371b8adc550eecd3" }
-lspk-commands = { git = "https://github.com/loombridge/plugin-kit", rev = "4c88d0752ea4d00142870ac9371b8adc550eecd3" }
-lspk-agent = { git = "https://github.com/loombridge/plugin-kit", rev = "4c88d0752ea4d00142870ac9371b8adc550eecd3" }
+lspk-rt = { git = "https://github.com/loombridge/plugin-kit", rev = "dcb30164a76fadf3b51de4db305546e71b0611e4" }
+lspk-params = { git = "https://github.com/loombridge/plugin-kit", rev = "dcb30164a76fadf3b51de4db305546e71b0611e4" }
+lspk-commands = { git = "https://github.com/loombridge/plugin-kit", rev = "dcb30164a76fadf3b51de4db305546e71b0611e4" }
+lspk-agent = { git = "https://github.com/loombridge/plugin-kit", rev = "dcb30164a76fadf3b51de4db305546e71b0611e4" }
+# The format layer: kit plug-ins compiled in as native devices (bl-devices),
+# and the host side of its agent-commands CLAP extension (bl-plugin-host).
+lspk-plugin = { git = "https://github.com/loombridge/plugin-kit", rev = "dcb30164a76fadf3b51de4db305546e71b0611e4", default-features = false }
+lspk-plugin-agent = { git = "https://github.com/loombridge/plugin-kit", rev = "dcb30164a76fadf3b51de4db305546e71b0611e4" }
+# The kit's example plug-ins, as native devices behind bl-devices' `kit-examples`
+# feature, without their own exports.
+lspk-example-gain = { git = "https://github.com/loombridge/plugin-kit", rev = "dcb30164a76fadf3b51de4db305546e71b0611e4", default-features = false }
+lspk-example-sine = { git = "https://github.com/loombridge/plugin-kit", rev = "dcb30164a76fadf3b51de4db305546e71b0611e4", default-features = false }
 
 [workspace.lints.rust]
 rust_2018_idioms = { level = "warn", priority = -1 }

@@ -303,6 +303,7 @@ pub struct AudioHost {
     /// The CLAP host whose factory makes each engine's plug-in nodes
     /// (WP-2.6).
     plugins: Option<bl_plugin_host::clap::ClapHost>,
+    kit: Option<bl_devices::KitHost>,
 }
 
 impl std::fmt::Debug for AudioHost {
@@ -374,6 +375,7 @@ impl AudioHost {
             engines: 0,
             held_reports: Vec::new(),
             plugins: None,
+            kit: None,
         }
     }
 
@@ -387,6 +389,11 @@ impl AudioHost {
     /// Gives every engine from now on the CLAP host's plug-ins (WP-2.6).
     pub fn set_plugins(&mut self, plugins: bl_plugin_host::clap::ClapHost) {
         self.plugins = Some(plugins);
+    }
+
+    /// Gives every engine from now on the kit plug-ins compiled in.
+    pub fn set_kit(&mut self, kit: bl_devices::KitHost) {
+        self.kit = Some(kit);
     }
 
     /// The running engine's disk streaming figures: open streams, underruns
@@ -843,6 +850,9 @@ impl AudioHost {
         bl_devices::register(&mut registry);
         if let Some(plugins) = &self.plugins {
             registry.add(plugins.factory());
+        }
+        if let Some(kit) = &self.kit {
+            registry.add(kit.factory());
         }
         if let Some(media) = &self.media {
             let streams = MediaStreams::new(Arc::clone(media))

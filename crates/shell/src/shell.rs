@@ -35,6 +35,7 @@ use crate::settings::{
     OnByDefault, Preferences, SettingsPage, ThemeChoice, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT,
     zoom_factor, zoom_percent, zoom_step,
 };
+use bl_devices::KitHost;
 use bl_plugin_host::clap::ClapHost;
 use bl_shell_spec::arrangement as view_ids;
 use bl_shell_spec::browser as browser_ids;
@@ -329,6 +330,18 @@ pub struct Shell {
     native_types: Vec<bl_engine::DeviceType>,
     /// The CLAP host: plug-in devices' instances, on this thread (WP-2.6).
     plugins: ClapHost,
+    /// Plug-ins built on the plug-in kit, compiled in as native devices:
+    /// their instances, on this thread.
+    kit: KitHost,
+    /// The device commands in the registry, by device: plug-ins' own
+    /// commands scoped to their devices.
+    device_commands: std::collections::BTreeMap<bl_model::DeviceId, Vec<String>>,
+    /// What the device commands were last made from: each plug-in device,
+    /// its title and track, and whether its plug-in listed commands.
+    device_commands_key: Vec<(bl_model::DeviceId, String, String, bool)>,
+    /// The CLAP host's generation when the shell last looked for plug-ins'
+    /// commands.
+    plugins_generation: u64,
 }
 
 impl fmt::Debug for Shell {
@@ -417,6 +430,14 @@ impl Shell {
         // CLAP plug-ins (WP-2.6): this thread is their main thread.
         let plugins = ClapHost::new();
         audio.set_plugins(plugins.clone());
+        // The kit's plug-ins compiled in, as native devices: its examples
+        // with bl-devices' `kit-examples` feature, none otherwise.
+        let kit = KitHost::new();
+        bl_devices::kit::add_examples(&kit);
+        audio.set_kit(kit.clone());
+        let native_types = bl_devices::device_types();
+        let mut described = native_types.clone();
+        described.extend(kit.device_types());
         audio.sync(editor.document());
         let mut shell = Self {
             browser_view,
@@ -456,11 +477,15 @@ impl Shell {
             devices: {
                 // Beatlayer's native devices (WP-2.5; none ship yet).
                 let mut devices = DeviceView::new();
-                devices.set_device_types(bl_devices::device_types());
+                devices.set_device_types(described);
                 devices
             },
-            native_types: bl_devices::device_types(),
+            native_types,
             plugins,
+            kit,
+            device_commands: std::collections::BTreeMap::new(),
+            device_commands_key: Vec::new(),
+            plugins_generation: 0,
         };
         shell.give_agents_tokens();
         shell
@@ -883,7 +908,143 @@ impl Shell {
         self.mixer
             .clamp_scroll(self.editor.document(), &self.arrangement);
         self.devices.forget_missing(self.editor.document());
+        // The kit plug-ins' instances first, so a node the engine makes at once
+        // finds its device's.
+        self.kit.sync(self.editor.document());
         self.audio.sync(self.editor.document());
+        self.refresh_device_commands(false);
+    }
+
+    /// Brings the registry's device commands in step with the set: each
+    /// plug-in device whose plug-in lists commands has them, scoped to it,
+    /// and a device that's gone has none. `force` remakes them even if no
+    /// device changed, as when plug-ins may have started.
+    fn refresh_device_commands(&mut self, force: bool) {
+        let doc = self.editor.document();
+        let key: Vec<(bl_model::DeviceId, String, String, bool)> = doc
+            .tracks()
+            .flat_map(|track| {
+                let label = crate::routing::track_label(doc, track.id());
+                track
+                    .devices()
+                    .filter(|d| self.kit.handles(&d.kind) || crate::plugins::is_clap(doc, d.id))
+                    .map(|d| {
+                        let listed = if self.kit.handles(&d.kind) {
+                            self.kit.commands(d.id).is_some()
+                        } else {
+                            self.plugins.commands(d.id).is_some()
+                        };
+                        (d.id, d.title().to_owned(), label.clone(), listed)
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        if !force && key == self.device_commands_key {
+            return;
+        }
+        let found = crate::plugins::device_commands(doc, &self.plugins, &self.kit);
+        for ids in std::mem::take(&mut self.device_commands).into_values() {
+            for id in ids {
+                self.registry.remove(&id);
+            }
+        }
+        for (device, specs) in found {
+            let mut ids = Vec::with_capacity(specs.len());
+            for spec in specs {
+                let id = spec.id.to_string();
+                if self.registry.register(spec).is_ok() {
+                    ids.push(id);
+                }
+            }
+            self.device_commands.insert(device, ids);
+        }
+        self.device_commands_key = key;
+    }
+
+    /// The device commands of `device`: its plug-in's own commands, scoped
+    /// to it (`device.d<device>.<command>`), as the registry holds them.
+    #[must_use]
+    pub fn device_command_ids(&self, device: bl_model::DeviceId) -> &[String] {
+        self.device_commands.get(&device).map_or(&[], Vec::as_slice)
+    }
+
+    /// The kit plug-ins compiled in as native devices: their instances, on
+    /// this thread.
+    #[must_use]
+    pub fn kit(&self) -> &KitHost {
+        &self.kit
+    }
+
+    /// Runs `device`'s plug-in's own command `command`, which the registry
+    /// holds as the device command `id`, and records the parameters it
+    /// changed as one undo step named for it (or inside the step already
+    /// open, as an agent's labelled one).
+    fn run_device_command(
+        &mut self,
+        id: &str,
+        device: bl_model::DeviceId,
+        command: &str,
+        args: Value,
+    ) -> Result<Value, ShellError> {
+        let failed = |message: String| ShellError::Failed {
+            command: id.to_owned(),
+            message,
+        };
+        let kind = self
+            .editor
+            .document()
+            .device(device)
+            .map(|d| d.kind.clone())
+            .ok_or_else(|| ShellError::Unavailable {
+                command: id.to_owned(),
+                reason: format!("{device} isn't in the set"),
+            })?;
+        let (result, changes) = if self.kit.handles(&kind) {
+            self.kit.sync(self.editor.document());
+            let run = self
+                .kit
+                .run_command(device, command, &args)
+                .map_err(failed)?;
+            (run.result, run.changes)
+        } else {
+            let run =
+                self.plugins
+                    .run_command(device, command, &args)
+                    .map_err(|error| match error {
+                        bl_plugin_host::clap::ClapError::Refused(why) => failed(why),
+                        other => failed(other.to_string()),
+                    })?;
+            (run.result, run.changes)
+        };
+        let label = self
+            .registry
+            .get(id)
+            .map_or_else(|| command.to_owned(), |spec| spec.label.to_string());
+        let before = self.editor.document().clone();
+        let applied = self.editor.transact(label, |editor| {
+            for (param, value) in &changes {
+                let same = editor
+                    .document()
+                    .device(device)
+                    .and_then(|d| d.params.get(param))
+                    == Some(value);
+                if !same {
+                    editor.apply(bl_model::Command::SetDeviceParam {
+                        device,
+                        param: *param,
+                        value: *value,
+                    })?;
+                }
+            }
+            Ok::<(), bl_model::EditError>(())
+        });
+        applied.map_err(|error| failed(error.to_string()))?;
+        if *self.editor.document() != before {
+            self.dirty = true;
+            self.document_changed();
+        }
+        self.touch();
+        Ok(result)
     }
 
     /// The Device View's selection, folded devices, clipboard, and
@@ -902,9 +1063,11 @@ impl Shell {
         self.refresh_device_types();
     }
 
-    /// Gives the Device View the native types and the plug-ins loaded.
+    /// Gives the Device View the native types, the kit plug-ins compiled
+    /// in, and the plug-ins loaded.
     fn refresh_device_types(&mut self) {
         let mut types = self.native_types.clone();
+        types.extend(self.kit.device_types());
         types.extend(self.plugins.types().into_iter().map(|t| t.device_type));
         self.devices.set_device_types(types);
     }
@@ -920,6 +1083,13 @@ impl Shell {
     /// set's plug-in devices load their plug-ins from their saved state.
     fn set_replaced(&mut self) {
         self.plugins.clear();
+        self.kit.clear();
+    }
+
+    /// Whether `id` is a device command the registry holds: a plug-in's
+    /// own command scoped to its device.
+    fn is_device_command(&self, id: &str) -> bool {
+        id.starts_with(crate::plugins::DEVICE_COMMAND_PREFIX) && self.registry.contains(id)
     }
 
     /// Runs a plug-in command (WP-2.6).
@@ -1100,7 +1270,7 @@ impl Shell {
         ) {
             // Spec: clap-hosting R8. A copy of a plug-in device starts
             // from its plug-in's state now.
-            crate::plugins::capture_states(&self.plugins, &mut self.editor);
+            crate::plugins::capture_states(&self.plugins, &self.kit, &mut self.editor);
         }
         let user_library = self.browser_view.user_library().map(Path::to_path_buf);
         let zoom = self.zoom();
@@ -1298,11 +1468,34 @@ impl Shell {
         let mut changed = polled.changed;
         // Plug-ins' main-thread work (WP-2.6), and the changes they made
         // themselves.
-        if self.plugins.idle() {
+        let plugins_changed = self.plugins.idle();
+        if plugins_changed {
             self.refresh_device_types();
             changed = true;
         }
-        if crate::plugins::apply_param_changes(&self.plugins, &mut self.editor, &self.devices) {
+        if self.kit.idle() {
+            changed = true;
+        }
+        let generation = self.plugins.generation();
+        if plugins_changed || generation != self.plugins_generation {
+            // A plug-in that started may list commands.
+            self.plugins_generation = generation;
+            self.refresh_device_commands(false);
+            changed = true;
+        }
+        let changes: Vec<(bl_model::DeviceId, bl_model::ParamId, f64)> = self
+            .plugins
+            .take_param_changes()
+            .into_iter()
+            .map(|c| (c.device, c.param, c.value))
+            .chain(
+                self.kit
+                    .take_param_changes()
+                    .into_iter()
+                    .map(|c| (c.device, c.param, c.value)),
+            )
+            .collect();
+        if crate::plugins::apply_param_changes(changes, &mut self.editor, &self.devices) {
             self.dirty = true;
             self.document_changed();
             changed = true;
@@ -1421,6 +1614,7 @@ impl Shell {
             && (model::handles(id)
                 || edit_ids::handles(id)
                 || device_ids::handles(id)
+                || self.is_device_command(id)
                 || track_ids::handles(id)
                 || matches!(
                     id,
@@ -2178,6 +2372,7 @@ impl Shell {
             && (model::handles(id)
                 || edit_ids::handles(id)
                 || device_ids::handles(id)
+                || self.is_device_command(id)
                 || track_ids::handles(id)
                 || id == plugin_ids::LOAD
                 || id.starts_with("set.")
@@ -2208,6 +2403,11 @@ impl Shell {
         }
         if plugin_ids::handles(id) {
             return self.run_plugins(id, args);
+        }
+        if self.is_device_command(id)
+            && let Some((device, command)) = crate::plugins::parse_device_command(id)
+        {
+            return self.run_device_command(id, device, command, args);
         }
         if model::handles(id) {
             let args_floating = args.get("floating") == Some(&Value::Bool(true));
@@ -2500,7 +2700,7 @@ impl Shell {
                 let path = self.set_path.clone().ok_or_else(|| {
                     unavailable("the set has never been saved; use `set.save_as` to give it a file")
                 })?;
-                crate::plugins::capture_states(&self.plugins, &mut self.editor);
+                crate::plugins::capture_states(&self.plugins, &self.kit, &mut self.editor);
                 self.store.set_windows(self.devices.windows().clone());
                 let warnings = self.store.save(&path, &self.editor).map_err(failed)?;
                 self.saved_as(path, &warnings);
@@ -2510,7 +2710,7 @@ impl Shell {
                 // Spec: app-shell R17 to R21. The store decides where in a
                 // project folder the set goes; the result says where.
                 let SaveAsArgs { path } = Self::args(id, args)?;
-                crate::plugins::capture_states(&self.plugins, &mut self.editor);
+                crate::plugins::capture_states(&self.plugins, &self.kit, &mut self.editor);
                 self.store.set_windows(self.devices.windows().clone());
                 let (path, warnings) = self
                     .store

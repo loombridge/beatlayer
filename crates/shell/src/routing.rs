@@ -9,7 +9,7 @@
 //! the computer keyboard) are listed where Live lists them, disabled, and
 //! name the package.
 
-use bl_model::{Document, Input, Monitor, Output, Tap, TrackId, TrackKind};
+use bl_model::{DeviceId, Document, Input, Monitor, Output, Tap, TrackId, TrackKind};
 use bl_shell_spec::commands::APP_SETTINGS;
 use serde_json::{Value, json};
 
@@ -405,16 +405,11 @@ fn input_channel(track: TrackId, input: Input, midi: bool) -> Chooser {
             entries: [Tap::PreFx, Tap::PostFx, Tap::PostMixer]
                 .into_iter()
                 .map(|t| {
-                    let tap_name = match t {
-                        Tap::PreFx => "pre_fx",
-                        Tap::PostFx => "post_fx",
-                        Tap::PostMixer => "post_mixer",
-                    };
                     Entry::choice(
                         tap_label(t),
                         set_input(
                             track,
-                            json!({ "type": "track", "track": from, "tap": tap_name }),
+                            json!({ "type": "track", "track": from, "tap": tap_name(t) }),
                         ),
                         t == tap,
                     )
@@ -533,8 +528,9 @@ fn midi_to(doc: &Document, track: TrackId) -> Chooser {
     chooser("Output Type", entries)
 }
 
-/// The output channel: Track In with a track chosen (observed, while the
-/// track has no devices; its devices' sidechain inputs come with WP-2.19b),
+/// The output channel: Track In with a track chosen (observed; in Live 12
+/// it lists Track In alone even when that track's devices have sidechain
+/// inputs, which take their source themselves),
 /// the interface's outputs with Ext. Out (WP-2.13), nothing otherwise. A
 /// group as the output has no channel.
 fn output_channel(output: Output) -> Chooser {
@@ -584,4 +580,96 @@ fn chooser(name: &'static str, entries: Vec<Entry>) -> Chooser {
         entries,
         pending: None,
     }
+}
+
+fn set_sidechain_input(device: DeviceId, input: Value) -> Invocation {
+    Invocation::new(
+        "device.set_sidechain_input",
+        json!({ "device": device, "input": input }),
+    )
+}
+
+const fn tap_name(tap: Tap) -> &'static str {
+    match tap {
+        Tap::PreFx => "pre_fx",
+        Tap::PostFx => "post_fx",
+        Tap::PostMixer => "post_mixer",
+    }
+}
+
+/// A device's sidechain Source chooser (WP-2.19b; observed in Live 12.4.6):
+/// the audio and group tracks in display order, the device's own track
+/// among them, the returns, and Main ─ No Input. Choosing a track takes it
+/// Post FX. `None` for a device without a sidechain input.
+#[must_use]
+pub fn sidechain_source(doc: &Document, device: DeviceId) -> Option<Chooser> {
+    let input = doc.device(device)?.sidechain?.input;
+    let current = match input {
+        Input::Track { track, .. } => Some(track),
+        _ => None,
+    };
+    let mut entries = Vec::new();
+    for id in doc.track_order() {
+        let listed = doc.track(id).is_some_and(|t| {
+            matches!(
+                t.kind(),
+                TrackKind::Audio | TrackKind::Group | TrackKind::Return | TrackKind::Main
+            )
+        });
+        if listed {
+            entries.push(Entry::choice(
+                track_label(doc, id),
+                set_sidechain_input(
+                    device,
+                    json!({ "type": "track", "track": id, "tap": tap_name(Tap::PostFx) }),
+                ),
+                current == Some(id),
+            ));
+        }
+    }
+    entries.push(Entry::Separator);
+    entries.push(Entry::choice(
+        "No Input",
+        set_sidechain_input(device, json!({ "type": "none" })),
+        input == Input::None,
+    ));
+    let mut chooser = chooser("Sidechain Source", entries);
+    if current.is_none() {
+        "No Input".clone_into(&mut chooser.text);
+    }
+    Some(chooser)
+}
+
+/// A device's sidechain channel chooser: Pre FX · Post FX · Post Mixer with
+/// a track as the source, empty with No Input (observed). `None` for a
+/// device without a sidechain input.
+#[must_use]
+pub fn sidechain_channel(doc: &Document, device: DeviceId) -> Option<Chooser> {
+    let input = doc.device(device)?.sidechain?.input;
+    Some(match input {
+        Input::Track { track, tap } => Chooser {
+            name: "Sidechain Source Channel",
+            text: tap_label(tap).to_owned(),
+            entries: [Tap::PreFx, Tap::PostFx, Tap::PostMixer]
+                .into_iter()
+                .map(|t| {
+                    Entry::choice(
+                        tap_label(t),
+                        set_sidechain_input(
+                            device,
+                            json!({ "type": "track", "track": track, "tap": tap_name(t) }),
+                        ),
+                        t == tap,
+                    )
+                })
+                .collect(),
+            pending: None,
+        },
+        _ => Chooser {
+            name: "Sidechain Source Channel",
+            text: String::new(),
+            entries: Vec::new(),
+            pending: None,
+        },
+    })
 }

@@ -10,6 +10,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{DeviceId, ParamId};
+use crate::track::Input;
 
 /// A device in a track's chain: a native instrument or effect, or a plug-in.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -46,6 +47,91 @@ pub struct Device {
     #[serde(with = "param_pairs")]
     #[schemars(with = "Vec<(ParamId, f64)>")]
     pub params: OrdMap<ParamId, f64>,
+    /// The device's sidechain input, if its type declares one (WP-2.19b):
+    /// where its detector can listen other than its own input. Left out
+    /// of the saved set for a device without one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sidechain: Option<Sidechain>,
+}
+
+/// A device's sidechain input and the settings of its sidechain section
+/// (the routing spec, WP-2.19b): External, Source with its channel, Mix,
+/// SC Gain, and Sidechain Listen.
+///
+/// What feeds it is the track its Source names, tapped where its channel
+/// says; in Live 12 tracks aren't routed into a sidechain from their Audio
+/// To (observed). While External is on, the device's detector hears that
+/// signal scaled by SC Gain, mixed with the device's own input by Mix;
+/// while it's off, its own input.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[schemars(
+    description = "A device's sidechain input: `enabled` (the External switch), `input` \
+                   (Source: `none`, or `track` with a track and a `tap`), `gain` (SC Gain, \
+                   linear, 1 is 0 dB), `mix` (0 the device's own input to 1 the sidechain \
+                   alone), and `listen` (Sidechain Listen: hear what the detector hears)."
+)]
+pub struct Sidechain {
+    /// External: whether the device's detector listens to the sidechain
+    /// rather than its own input. Off on a new device.
+    #[serde(default, skip_serializing_if = "is_off")]
+    pub enabled: bool,
+    /// Source: No Input on a new device, or a track tapped Pre FX, Post
+    /// FX (what choosing a track picks), or Post Mixer.
+    #[serde(default = "no_input", skip_serializing_if = "is_no_input")]
+    pub input: Input,
+    /// SC Gain, linear: 1 (0 dB) on a new device.
+    #[serde(default = "unity", skip_serializing_if = "is_unity")]
+    pub gain: f64,
+    /// Mix: how much of the detector's signal is the sidechain, from 0
+    /// (the device's own input) to 1 (the sidechain alone, 100 %, as on a
+    /// new device).
+    #[serde(default = "unity", skip_serializing_if = "is_unity")]
+    pub mix: f64,
+    /// Sidechain Listen: the device's output is what its detector hears.
+    #[serde(default, skip_serializing_if = "is_off")]
+    pub listen: bool,
+}
+
+impl Default for Sidechain {
+    /// A new device's (observed): External off, No Input, Mix 100 %, SC
+    /// Gain 0 dB, not listening.
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            input: Input::None,
+            gain: 1.0,
+            mix: 1.0,
+            listen: false,
+        }
+    }
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde passes a reference"
+)]
+fn is_off(value: &bool) -> bool {
+    !*value
+}
+
+fn no_input() -> Input {
+    Input::None
+}
+
+fn is_no_input(input: &Input) -> bool {
+    *input == Input::None
+}
+
+fn unity() -> f64 {
+    1.0
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde passes a reference"
+)]
+fn is_unity(value: &f64) -> bool {
+    *value == 1.0
 }
 
 #[expect(
@@ -73,7 +159,15 @@ impl Device {
             enabled: true,
             show_preset_name: true,
             params: OrdMap::new(),
+            sidechain: None,
         }
+    }
+
+    /// The same device with a sidechain input, as a new device has.
+    #[must_use]
+    pub fn with_sidechain(mut self) -> Self {
+        self.sidechain = Some(Sidechain::default());
+        self
     }
 
     /// The same device with another role.

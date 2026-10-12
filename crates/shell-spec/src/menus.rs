@@ -88,7 +88,19 @@ pub enum Action {
     Separator,
 }
 
-/// One row of menus.md, as Beatlayer shows it.
+/// The row of Beatlayer's own Duplicate Track Without Clips (IMP-12),
+/// next to Duplicate: an improvement, so not a row of menus.md, which
+/// records Live's menus.
+pub const IMP_12: &str = "IMP-12";
+
+/// Whether a row is one of Live's, in menus.md, rather than one of
+/// Beatlayer's improvements.
+#[must_use]
+pub fn is_lives(row: &str) -> bool {
+    row.is_empty() || row.starts_with("M-")
+}
+
+/// One row of menus.md, or of an improvement, as Beatlayer shows it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MenuItem {
     /// The row's ID in menus.md, such as `M-FILE-009`; empty for a
@@ -244,6 +256,11 @@ const EDIT: &[Row] = &[
     ("M-EDIT-004", "Copy", Key(&["S-EDIT-002"])),
     ("M-EDIT-005", "Paste", Key(&["S-EDIT-003"])),
     ("M-EDIT-006", "Duplicate", Key(&["S-EDIT-004"])),
+    (
+        IMP_12,
+        "Duplicate Track Without Clips",
+        Cmd(crate::tracks::DUPLICATE_WITHOUT_CLIPS),
+    ),
     ("M-EDIT-007", "Delete", Key(&["S-EDIT-005"])),
     SEPARATOR,
     (
@@ -869,6 +886,7 @@ mod tests {
         for (menu, (heading, rows)) in bar.iter().zip(&reference) {
             let ours: Vec<&str> = menu
                 .walk()
+                .filter(|item| is_lives(item.row))
                 .map(|item| if item.is_separator() { "—" } else { item.row })
                 .collect();
             let theirs: Vec<&str> = rows
@@ -902,7 +920,7 @@ mod tests {
         let items: Vec<&MenuItem> = bar
             .iter()
             .flat_map(Menu::walk)
-            .filter(|i| !i.is_separator())
+            .filter(|i| !i.is_separator() && is_lives(i.row))
             .collect();
         assert_eq!(items.len(), reference.len());
         let mut omitted = Vec::new();

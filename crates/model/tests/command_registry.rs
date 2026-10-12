@@ -47,10 +47,10 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        44,
+        49,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
-         routing, and WP-2.4 two for devices"
+         routing, WP-2.4 two for devices, and WP-2.19b five for sidechains"
     );
 
     for op in &ops {
@@ -421,6 +421,58 @@ fn every_command_runs_by_id() {
     agent.run("device.remove", json!({ "device": synth }));
     assert!(agent.editor.document().device(synth).is_none());
 
+    // A device with a sidechain input (WP-2.19b), listening to another
+    // track.
+    let duck: DeviceId = agent.new_id();
+    agent.run(
+        "device.insert",
+        json!({ "track": reverb, "index": 0, "device": {
+            "id": duck, "name": "Duck", "enabled": true, "params": [],
+            "kind": { "native": { "device_type": "beatlayer.duck" } },
+            "sidechain": {},
+        } }),
+    );
+    agent.run(
+        "device.set_sidechain_input",
+        json!({ "device": duck, "input": { "type": "track", "track": drums, "tap": "post_fx" } }),
+    );
+    agent.run(
+        "device.set_sidechain_enabled",
+        json!({ "device": duck, "enabled": true }),
+    );
+    agent.run(
+        "device.set_sidechain_gain",
+        json!({ "device": duck, "gain": 2.0 }),
+    );
+    agent.run(
+        "device.set_sidechain_mix",
+        json!({ "device": duck, "mix": 0.5 }),
+    );
+    agent.run(
+        "device.set_sidechain_listen",
+        json!({ "device": duck, "listen": true }),
+    );
+    let sidechain = agent
+        .editor
+        .document()
+        .device(duck)
+        .unwrap()
+        .sidechain
+        .unwrap();
+    assert_eq!(
+        sidechain,
+        bl_model::Sidechain {
+            enabled: true,
+            input: Input::Track {
+                track: drums,
+                tap: Tap::PostFx
+            },
+            gain: 2.0,
+            mix: 0.5,
+            listen: true,
+        }
+    );
+
     // Deleting the group deletes the bass inside it; undo brings both back.
     agent.run("track.delete", json!({ "track": group }));
     assert!(agent.editor.document().track(bass).is_none());
@@ -723,6 +775,38 @@ fn schemas_match_what_commands_serialise() {
                 device,
                 param: ParamId(u32::MAX),
                 value: -1e9,
+            },
+        ),
+        (
+            "device.set_sidechain_input",
+            Command::SetSidechainInput {
+                device,
+                input: Input::Track {
+                    track,
+                    tap: Tap::PostMixer,
+                },
+            },
+        ),
+        (
+            "device.set_sidechain_enabled",
+            Command::SetSidechainEnabled {
+                device,
+                enabled: true,
+            },
+        ),
+        (
+            "device.set_sidechain_gain",
+            Command::SetSidechainGain { device, gain: 0.5 },
+        ),
+        (
+            "device.set_sidechain_mix",
+            Command::SetSidechainMix { device, mix: 0.25 },
+        ),
+        (
+            "device.set_sidechain_listen",
+            Command::SetSidechainListen {
+                device,
+                listen: true,
             },
         ),
     ];

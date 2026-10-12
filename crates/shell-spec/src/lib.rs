@@ -25,6 +25,7 @@
 //!   selecting and folding devices, adding them, the device clipboard,
 //!   presets, and hot-swapping; [`context_menus`] holds the device title
 //!   bar's menu.
+//! - [`tracks`]: Duplicate Track Without Clips (WP-2.19b, IMP-12).
 //! - [`transport`]: what the Control Bar's transport section shows
 //!   (`transport.state`), and the IDs of the transport's commands, which
 //!   `bl-engine` and `bl-model` register (WP-1.18).
@@ -50,6 +51,7 @@ pub mod menus;
 pub mod mixer_view;
 pub mod perception;
 pub mod settings;
+pub mod tracks;
 pub mod transport;
 
 use bl_commands::{RegisterError, Registry};
@@ -70,5 +72,6 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     browser::register(registry)?;
     export::register(registry)?;
     devices::register(registry)?;
+    tracks::register(registry)?;
     perception::register(registry)
 }

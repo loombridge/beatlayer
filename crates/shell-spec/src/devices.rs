@@ -13,7 +13,7 @@
 
 use bl_commands::Context::{Browser, DeviceView, Global};
 use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};
-use bl_model::{DeviceId, DeviceKind, DeviceRole, TrackId, TrackKind};
+use bl_model::{DeviceId, DeviceKind, DeviceRole, Tap, TrackId, TrackKind};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -42,6 +42,9 @@ pub const SAVE_DEFAULT_PRESET: &str = "device.save_default_preset";
 pub const LOAD_PRESET: &str = "device.load_preset";
 /// `device.hot_swap`: start or end hot-swapping a device's presets.
 pub const HOT_SWAP: &str = "device.hot_swap";
+/// `device.show_sidechain`: show or hide a device's sidechain section
+/// (WP-2.19b).
+pub const SHOW_SIDECHAIN: &str = "device.show_sidechain";
 
 /// Every command [`register`] adds, so a host knows which IDs to send to
 /// `bl-shell`'s `Shell::run`.
@@ -58,6 +61,7 @@ pub const IDS: &[&str] = &[
     SAVE_DEFAULT_PRESET,
     LOAD_PRESET,
     HOT_SWAP,
+    SHOW_SIDECHAIN,
 ];
 
 /// The document's device commands that act on the selected device when
@@ -86,6 +90,34 @@ pub const DEVICE_GAP: f32 = 7.0;
 /// own (WP-2.5): Live's are each device's own.
 pub const DEFAULT_DEVICE_WIDTH: f32 = 120.0;
 
+/// The width of a device's sidechain strip at 100%, in points: the strip
+/// down its left edge with the section's show/hide toggle and Sidechain
+/// Listen (observed; its width is to observe, and Beatlayer uses a title
+/// bar's height).
+pub const SIDECHAIN_STRIP_WIDTH: f32 = TITLE_BAR_HEIGHT;
+
+/// The width of a shown sidechain section at 100%, in points (to observe).
+pub const SIDECHAIN_SECTION_WIDTH: f32 = 80.0;
+
+/// How wide a device's frame is at 100%: a title bar wide when folded;
+/// otherwise its own width, with its sidechain strip and, while shown, its
+/// sidechain section to the left (WP-2.19b).
+#[must_use]
+pub fn frame_width(frame: &DeviceFrame) -> f32 {
+    if frame.folded {
+        return TITLE_BAR_HEIGHT;
+    }
+    DEFAULT_DEVICE_WIDTH
+        + frame.sidechain.as_ref().map_or(0.0, |s| {
+            SIDECHAIN_STRIP_WIDTH
+                + if s.shown {
+                    SIDECHAIN_SECTION_WIDTH
+                } else {
+                    0.0
+                }
+        })
+}
+
 /// One device as the Device View shows it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct DeviceFrame {
@@ -110,6 +142,31 @@ pub struct DeviceFrame {
     pub selected: bool,
     /// Whether it's the device being hot-swapped.
     pub hot_swap: bool,
+    /// Its sidechain section, if it has a sidechain input (WP-2.19b).
+    pub sidechain: Option<SidechainSection>,
+}
+
+/// A device's sidechain section, as its left strip and the section show it
+/// (WP-2.19b; observed in Live 12.4.6).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SidechainSection {
+    /// Whether the section is shown, by the toggle at the top of the
+    /// device's left strip. It changes only the view.
+    pub shown: bool,
+    /// External: whether the detector listens to the sidechain.
+    pub enabled: bool,
+    /// What the Source chooser shows: a track's label (`3-Audio`,
+    /// `A-Reverb`, `Main`) or `No Input`.
+    pub source: String,
+    /// Its channel: where the source track is tapped, or `null` with No
+    /// Input.
+    pub tap: Option<Tap>,
+    /// Mix, from 0 to 1 (100 %).
+    pub mix: f64,
+    /// SC Gain, linear (1 is 0.00 dB).
+    pub gain: f64,
+    /// Sidechain Listen.
+    pub listen: bool,
 }
 
 /// What `device_view.state` returns.
@@ -182,6 +239,17 @@ pub struct NewDevice {
     /// Where it goes in a chain.
     #[serde(default)]
     pub role: DeviceRole,
+    /// Whether it has a sidechain input, as its type declares (WP-2.19b).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub sidechain: bool,
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde passes a reference"
+)]
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 /// Arguments of `device.add`.
@@ -272,6 +340,18 @@ pub struct HotSwapArgs {
     /// Start (true) or end (false) hot-swapping; switches if left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub on: Option<bool>,
+}
+
+/// Arguments of `device.show_sidechain`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ShowSidechainArgs {
+    /// The device; the selected one if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// Show (true) or hide (false); switches if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shown: Option<bool>,
 }
 
 /// Adds the Device View's commands to a registry.
@@ -431,6 +511,19 @@ fn specs() -> Vec<CommandSpec> {
             .permission(Permission::Read)
             .context(DeviceView)
             .args::<HotSwapArgs>()
+            .result::<DeviceViewState>(),
+        CommandSpec::new(SHOW_SIDECHAIN, "Show Sidechain")
+            .description(
+                "Shows or hides a device's sidechain section, as the toggle at the top of the \
+                 device's left strip does; switches unless `shown` says which. Only devices \
+                 with a sidechain input have one. It changes only the view: it isn't an undo \
+                 step. The section's settings are the set's: `device.set_sidechain_input`, \
+                 `device.set_sidechain_enabled`, `device.set_sidechain_mix`, \
+                 `device.set_sidechain_gain`, and `device.set_sidechain_listen`.",
+            )
+            .permission(Permission::Read)
+            .context(DeviceView)
+            .args::<ShowSidechainArgs>()
             .result::<DeviceViewState>(),
     ]
 }

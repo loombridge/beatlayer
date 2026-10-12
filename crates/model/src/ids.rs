@@ -91,20 +91,9 @@ object_id!(
     "device"
 );
 
-/// A parameter of a device, numbered by the device.
-///
-/// Native devices number their parameters in their descriptors (WP-2.5).
-/// Plug-ins use their format's own parameter IDs, which for CLAP and VST3 are
-/// 32-bit.
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
-)]
-#[serde(transparent)]
-#[schemars(
-    description = "A device parameter's number. Native devices number their own parameters; \
-                   plug-ins use their format's parameter IDs."
-)]
-pub struct ParamId(pub u32);
+// A parameter of a device, numbered by the device: the plug-in kit's
+// `lspk-params` defines it, with the parameter descriptors.
+pub use lspk_params::ParamId;
 
 /// The content hash of a media file: 32 bytes, shown as 64 lowercase hex
 /// digits.

@@ -699,9 +699,7 @@ dependencies = [
 name = "bl-commands"
 version = "0.0.0"
 dependencies = [
- "schemars",
- "serde",
- "serde_json",
+ "lspk-commands",
 ]
 
 [[package]]
@@ -737,6 +735,9 @@ dependencies = [
 [[package]]
 name = "bl-dsp"
 version = "0.0.0"
+dependencies = [
+ "lspk-params",
+]
 
 [[package]]
 name = "bl-engine"
@@ -808,6 +809,7 @@ dependencies = [
  "bl-commands",
  "bl-core",
  "imbl",
+ "lspk-params",
  "proptest",
  "schemars",
  "serde",
@@ -2318,9 +2320,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
+name = "lspk-commands"
+version = "0.0.0"
+source = "git+https://github.com/loombridge/plugin-kit?rev=b5161366e97fe213cb765bb8e40b09dfa69eec5b#b5161366e97fe213cb765bb8e40b09dfa69eec5b"
+dependencies = [
+ "schemars",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "lspk-params"
+version = "0.0.0"
+source = "git+https://github.com/loombridge/plugin-kit?rev=b5161366e97fe213cb765bb8e40b09dfa69eec5b#b5161366e97fe213cb765bb8e40b09dfa69eec5b"
+dependencies = [
+ "schemars",
+ "serde",
+]
+
+[[package]]
 name = "lspk-rt"
 version = "0.0.0"
-source = "git+https://github.com/loombridge/plugin-kit?rev=f8332511e598cea2a0947778b1f007db4c42db2f#f8332511e598cea2a0947778b1f007db4c42db2f"
+source = "git+https://github.com/loombridge/plugin-kit?rev=b5161366e97fe213cb765bb8e40b09dfa69eec5b#b5161366e97fe213cb765bb8e40b09dfa69eec5b"
 dependencies = [
  "libc",
  "rtrb",

@@ -6,7 +6,8 @@
 //! nothing, and never blocks, so it's safe on an audio thread.
 
 pub mod oversample;
-pub mod smooth;
+/// Parameter smoothing, from the plug-in kit's `lspk-params`.
+pub use lspk_params::smooth;
 
 pub use oversample::Oversampler;
 pub use smooth::LinearSmoother;

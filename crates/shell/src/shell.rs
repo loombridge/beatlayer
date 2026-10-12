@@ -2534,10 +2534,16 @@ impl Shell {
             // selection, and the engine's rate; the export changes none.
             let engine_rate = self.engine_rate();
             let args = Self::args(id, args)?;
+            // Spec: offline-plugin-renders R7. Export stops the song first,
+            // as Live does, and borrows the engine's plug-ins (R1).
+            if self.audio.transport_state().playing {
+                let _ = self.audio.send_transport(bl_engine::TransportCommand::Stop);
+            }
             let media: Arc<dyn bl_engine::MediaLibrary> = self.media.clone();
             return crate::export::run_command(
                 self.editor.document(),
                 media,
+                Some(&self.plugins),
                 self.arrangement.time_selection(),
                 engine_rate,
                 &args,
@@ -2565,11 +2571,15 @@ impl Shell {
     /// analysis, rendered offline from the set as it is now. Neither
     /// changes the set, the view, or the engine playing on the device.
     fn run_perception(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        let engine_rate = self.engine_rate();
+        let playing = self.audio.transport_state().playing;
         let source = crate::perception::Source {
             document: self.editor.document(),
             media: self.media.clone(),
             selection: self.arrangement.time_selection(),
-            engine_rate: self.engine_rate(),
+            engine_rate,
+            plugins: Some(&self.plugins),
+            playing,
         };
         match id {
             perception_ids::PREVIEW => {

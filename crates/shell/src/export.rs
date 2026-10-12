@@ -8,7 +8,9 @@
 //!    behind `bl-cli render` and the golden tests, which runs the same
 //!    processor a device's audio thread runs, block after block, as fast as
 //!    it can. The song plays from the range's start, as Play does from an
-//!    insert marker there, with the Arrangement loop off.
+//!    insert marker there, with the Arrangement loop off. Plug-in devices
+//!    render with the plug-ins the engine plays, lent for the render
+//!    ([`ClapHost::lend`], WP-2.6b).
 //! 2. At a file rate below the engine's, the render is converted down with
 //!    the media converter; otherwise the engine renders at the file's rate.
 //! 3. With Normalize, the render goes to a scratch file first, so the gain
@@ -33,6 +35,7 @@ use bl_core::time::{SampleRate, Ticks, TimeSignatureMap};
 use bl_engine::{EngineConfig, MediaLibrary, Offline, Output, Registry, TransportCommand, When};
 use bl_media::{AudioWriter, BitDepth, Dither, EncodeSpec, FileType, RateConverter};
 use bl_model::{ContentHash, DeviceId, Document};
+use bl_plugin_host::clap::ClapHost;
 use bl_shell_spec::editing::Position;
 use bl_shell_spec::export::{
     AUDIO, Dither as SpecDither, ExportArgs, ExportResult, FileType as SpecFileType, RangeSource,
@@ -235,9 +238,10 @@ pub fn hidden_beside(path: &Path, kind: &str) -> PathBuf {
     path.with_file_name(name)
 }
 
-/// Runs an export of `document`, with its clips' audio from `media`. It
-/// checks `cancel` between blocks and calls `progress` with the share done,
-/// from 0 to 1.
+/// Runs an export of `document`, with its clips' audio from `media` and its
+/// plug-in devices' plug-ins borrowed from `plugins` (without it, plug-in
+/// devices pass their input through). It checks `cancel` between blocks and
+/// calls `progress` with the share done, from 0 to 1.
 ///
 /// # Errors
 ///
@@ -247,6 +251,7 @@ pub fn hidden_beside(path: &Path, kind: &str) -> PathBuf {
 pub fn export(
     document: &Document,
     media: Arc<dyn MediaLibrary>,
+    plugins: Option<&ClapHost>,
     job: &Job,
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(f64),
@@ -254,7 +259,8 @@ pub fn export(
     check(job)?;
     let partial = hidden_beside(&job.path, "partial");
     let scratch = hidden_beside(&job.path, "render");
-    let result = run(document, media, job, &partial, &scratch, cancel, progress);
+    let files = (partial.as_path(), scratch.as_path());
+    let result = run(document, media, plugins, job, files, cancel, progress);
     // The scratch file goes either way; the partial file once it's moved or
     // if anything failed.
     let _ = fs::remove_file(&scratch);
@@ -336,7 +342,9 @@ pub struct Rendered {
 }
 
 /// Renders a range of `document` offline, with its clips' audio from
-/// `media`, through the engine code that plays the set on a device
+/// `media` and its plug-in devices' plug-ins borrowed from `plugins` (the
+/// offline plug-in renders spec; a set without a CLAP device borrows
+/// nothing), through the engine code that plays the set on a device
 /// ([`Offline`]): the song plays from the range's start, as Play does from
 /// an insert marker there, with the Arrangement loop off, as fast as the
 /// computer allows, on the calling thread. It hands `sink` the frames in
@@ -348,11 +356,14 @@ pub struct Rendered {
 ///
 /// # Errors
 ///
-/// [`ExportError`]: cancelled, a range it can't render, a sink that
-/// failed, or samples that aren't finite numbers.
+/// [`ExportError`]: cancelled, a range it can't render, a plug-in it
+/// couldn't borrow, a sink that failed, or samples that aren't finite
+/// numbers. Whatever the outcome, every plug-in goes back to the engine.
+#[expect(clippy::too_many_arguments, reason = "the render's inputs")]
 pub fn render(
     document: &Document,
     media: Arc<dyn MediaLibrary>,
+    plugins: Option<&ClapHost>,
     spec: &Render,
     longest: f64,
     cancel: &AtomicBool,
@@ -405,10 +416,31 @@ pub fn render(
 
     let config = EngineConfig::new(render_rate, spec.block);
     let channels = config.channels;
+    // Spec: offline-plugin-renders R1. The plug-ins the engine plays, lent
+    // to the render. The loan is made before the render's engine, so the
+    // engine, and its nodes holding the plug-ins, go first, however the
+    // render ends, and the loan then gives every plug-in back (R4). A set
+    // without a CLAP device borrows nothing: its render never touches the
+    // host or the engine playing.
+    let loan = plugins
+        .filter(|_| crate::plugins::has_clap(document))
+        .map(ClapHost::lend)
+        .transpose()
+        .map_err(|error| ExportError::Failed(error.to_string()))?;
     let mut registry = Registry::new();
     bl_devices::register(&mut registry);
+    if let Some(loan) = &loan {
+        registry.add(loan.factory());
+    }
     let mut offline = Offline::new(config, registry.with_media(media));
     let unhosted = offline.sync(document);
+    // Spec: offline-plugin-renders R2. A plug-in the engine didn't hand
+    // back would render as a pass-through, which isn't what plays.
+    if let Some((device, why)) = loan.as_ref().and_then(|loan| loan.problems().pop()) {
+        return Err(ExportError::Failed(format!(
+            "the plug-in on {device} couldn't be rendered: {why}"
+        )));
+    }
     let missing_media = offline.missing_media().to_vec();
     // Spec: export R3. The range plays straight through from its start,
     // as Play from an insert marker there does, without the loop.
@@ -482,9 +514,9 @@ fn interleave(output: &Output<'_>, samples: &mut Vec<f32>) {
 fn run(
     document: &Document,
     media: Arc<dyn MediaLibrary>,
+    plugins: Option<&ClapHost>,
     job: &Job,
-    partial: &Path,
-    scratch: &Path,
+    (partial, scratch): (&Path, &Path),
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(f64),
 ) -> Result<Report, ExportError> {
@@ -523,6 +555,7 @@ fn run(
     let rendered = render(
         document,
         media,
+        plugins,
         &Render {
             start: job.start,
             length: job.length,
@@ -630,8 +663,8 @@ fn run(
 }
 
 /// Runs `export.audio` with its arguments: the set in `document`, its
-/// clips' audio from `media`, the Arrangement's time `selection`, and the
-/// engine's rate.
+/// clips' audio from `media`, its plug-ins lent by `plugins`, the
+/// Arrangement's time `selection`, and the engine's rate.
 ///
 /// # Errors
 ///
@@ -640,6 +673,7 @@ fn run(
 pub fn run_command(
     document: &Document,
     media: Arc<dyn MediaLibrary>,
+    plugins: Option<&ClapHost>,
     selection: Option<(Ticks, Ticks)>,
     engine_rate: u32,
     args: &ExportArgs,
@@ -697,20 +731,25 @@ pub fn run_command(
         replace: args.replace,
         block: BLOCK,
     };
-    let report =
-        export(document, media, &job, &AtomicBool::new(false), &mut |_| {}).map_err(|error| {
-            match error {
-                ExportError::Invalid(message) => invalid(message),
-                ExportError::Exists(_) => ShellError::Unavailable {
-                    command: AUDIO.to_owned(),
-                    reason: format!("{error}: set `replace` to replace it"),
-                },
-                ExportError::Cancelled | ExportError::Failed(_) => ShellError::Failed {
-                    command: AUDIO.to_owned(),
-                    message: error.to_string(),
-                },
-            }
-        })?;
+    let report = export(
+        document,
+        media,
+        plugins,
+        &job,
+        &AtomicBool::new(false),
+        &mut |_| {},
+    )
+    .map_err(|error| match error {
+        ExportError::Invalid(message) => invalid(message),
+        ExportError::Exists(_) => ShellError::Unavailable {
+            command: AUDIO.to_owned(),
+            reason: format!("{error}: set `replace` to replace it"),
+        },
+        ExportError::Cancelled | ExportError::Failed(_) => ShellError::Failed {
+            command: AUDIO.to_owned(),
+            message: error.to_string(),
+        },
+    })?;
     let written_path = fs::canonicalize(&path).unwrap_or(path);
     Ok(ExportResult {
         path: written_path.display().to_string(),

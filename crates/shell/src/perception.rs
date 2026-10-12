@@ -13,7 +13,10 @@
 //! Both run offline on the calling thread (the main thread, in the app),
 //! on a copy of the set with its own engine, so the engine playing the set
 //! on the audio device carries on undisturbed: nothing here touches the
-//! audio thread or its queue.
+//! audio thread or its queue. Plug-in devices are the exception: the render
+//! borrows the engine's plug-ins (WP-2.6b), so a set with plug-ins renders
+//! only while the transport is stopped (the offline plug-in renders spec,
+//! R8).
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -25,6 +28,7 @@ use bl_core::time::{Frames, SampleRate, Ticks};
 use bl_engine::MediaLibrary;
 use bl_media::{BitDepth, Dither};
 use bl_model::{Command, Document};
+use bl_plugin_host::clap::ClapHost;
 use bl_shell_spec::perception::{
     ANALYZE, ANALYZE_SECONDS, AnalyzeArgs, AnalyzeResult, BandResult, ChannelLevels, KeyResult,
     LevelsResult, LoudnessResult, Measure, PREVIEW, PREVIEW_SECONDS, PREVIEWS_KEPT, PreviewArgs,
@@ -120,8 +124,9 @@ impl Previews {
     }
 }
 
-/// What a render needs from the shell: the set, its media, the
-/// Arrangement's time selection, and the engine's rate.
+/// What a render needs from the shell: the set, its media, its plug-ins,
+/// the Arrangement's time selection, the engine's rate, and whether the
+/// transport plays.
 pub struct Source<'a> {
     /// The set.
     pub document: &'a Document,
@@ -131,6 +136,10 @@ pub struct Source<'a> {
     pub selection: Option<(Ticks, Ticks)>,
     /// The engine's rate.
     pub engine_rate: u32,
+    /// The plug-ins the engine plays, which the render borrows.
+    pub plugins: Option<&'a ClapHost>,
+    /// Whether the transport plays.
+    pub playing: bool,
 }
 
 fn invalid(command: &str, message: impl Into<String>) -> ShellError {
@@ -216,6 +225,16 @@ fn render_range(
     )
     .map_err(|message| invalid(command, message))?;
     let (document, track, mut notes) = document_for(command, source.document, range.track)?;
+    // Spec: offline-plugin-renders R8. Borrowing the plug-ins would take
+    // them from the song playing.
+    if source.playing && source.plugins.is_some() && crate::plugins::has_clap(&document) {
+        return Err(ShellError::Unavailable {
+            command: command.to_owned(),
+            reason: "the set is playing, and rendering it would take its plug-ins from the \
+                     engine playing it; stop the transport with `transport.stop`, then render"
+                .to_owned(),
+        });
+    }
     let sample_rate = sample_rate.unwrap_or(source.engine_rate);
     // Spec: agent-perception R2. The range is cut to the longest render.
     let render_hz = sample_rate.max(source.engine_rate);
@@ -235,6 +254,7 @@ fn render_range(
     let rendered = export::render(
         &document,
         Arc::clone(&source.media),
+        source.plugins,
         &Render {
             start: from,
             length,

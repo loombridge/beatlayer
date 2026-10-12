@@ -186,7 +186,9 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  `normalize` brings the highest peak to 0 dBFS. A rate below the engine's is \
                  rendered at the engine's and converted down. The file is written under a \
                  temporary name and appears only when it's complete. An existing file is \
-                 refused unless `replace` is true. Changes nothing in the set.",
+                 refused unless `replace` is true. Playback stops first, and plug-in devices \
+                 render through the plug-ins the engine plays, lent to the export and handed \
+                 back afterwards. Changes nothing in the set.",
             )
             .permission(Permission::External)
             .context(Global)

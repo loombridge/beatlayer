@@ -26,6 +26,12 @@
 //! result and the parameters it changed, so the shell can serve them to
 //! agents as device commands and record each run as one undo step.
 //!
+//! Offline renders (exports and agents' previews) borrow the same
+//! instances ([`ClapHost::lend`], WP-2.6b), so a plug-in device renders as
+//! it plays: each instance comes back from the engine's node, is
+//! reactivated for the render's rate and block size, and when the [`Loan`]
+//! ends goes back to the engine with the state it had.
+//!
 //! Plug-ins run in Beatlayer's own process until Phase 10's sandbox, so a
 //! plug-in that crashes takes the app with it. A plug-in that fails a
 //! call (it can't be loaded, refuses to activate, refuses a state, or
@@ -43,6 +49,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread::ThreadId;
+use std::time::{Duration, Instant};
 
 use bl_engine::{DeviceType, Node, NodeConfig, NodeFactory};
 use bl_model::{
@@ -77,6 +84,8 @@ pub enum ClapError {
     Refused(String),
     /// It was called off the main thread.
     WrongThread,
+    /// The plug-ins are lent to another offline render already.
+    Lent,
 }
 
 impl fmt::Display for ClapError {
@@ -87,6 +96,7 @@ impl fmt::Display for ClapError {
             Self::NoInstance(device) => write!(f, "{device} has no running CLAP plug-in"),
             Self::Refused(what) => write!(f, "the plug-in refused {what}"),
             Self::WrongThread => f.write_str("CLAP's main-thread calls run on the main thread"),
+            Self::Lent => f.write_str("the plug-ins are lent to another render"),
         }
     }
 }
@@ -134,6 +144,9 @@ pub struct PluginStatus {
     pub path: PathBuf,
     /// Whether it's active: activated for a node and processing.
     pub active: bool,
+    /// The settings it's active for: the engine's rate and block size, or
+    /// an offline render's while one has it.
+    pub active_for: Option<NodeConfig>,
     /// The latency it reported when last activated, in frames.
     pub latency: u32,
     /// What went wrong with it, if anything: it couldn't be loaded,
@@ -202,6 +215,10 @@ struct Main {
     changes: Vec<ParamChange>,
     /// Counts instances started and let go of.
     generation: u64,
+    /// An offline render has the plug-ins ([`ClapHost::lend`]).
+    lending: bool,
+    /// Devices the render couldn't borrow a plug-in for, and why.
+    loan_problems: Vec<(DeviceId, String)>,
 }
 
 /// One device's plug-in.
@@ -220,6 +237,13 @@ struct Instance {
     /// next node or state.
     refused: Option<String>,
     failure: Option<String>,
+    /// It failed while processing: its device is silent, and it isn't
+    /// activated again, live or offline, until the next node or state.
+    silenced: bool,
+    /// The settings it's active for.
+    active_for: Option<NodeConfig>,
+    /// The offline render that has it.
+    lent: Option<Lent>,
     latency: u32,
     editor_open: bool,
     gestures: BTreeSet<u32>,
@@ -235,6 +259,20 @@ struct Instance {
 
 /// How many command changes a plug-in's gestures are matched against.
 const ECHOES: usize = 256;
+
+/// A plug-in lent to an offline render: the render's node, and what to
+/// give back to the engine afterwards.
+struct Lent {
+    ends: HostEnds,
+    /// The plug-in's state before the render, which it gets back.
+    saved: Option<Vec<u8>>,
+    /// Why the engine's node had it refused, if it had.
+    refused: Option<String>,
+}
+
+/// How long a render waits for the engine's node to hand a plug-in back:
+/// a node does at its next block, a few milliseconds away.
+const HAND_BACK_WAIT: Duration = Duration::from_secs(2);
 
 /// The CLAP host: CLAP's main thread for every plug-in, on the thread that
 /// made it.
@@ -523,8 +561,9 @@ impl ClapHost {
         let instance = instance(guard.get()?, device)?;
         load_state(instance, data)?;
         // A state that changes its latency, say, asks for a restart; a
-        // plug-in that refused to activate gets another try.
+        // plug-in that refused to activate, or failed, gets another try.
         instance.refused = None;
+        instance.silenced = false;
         Ok(())
     }
 
@@ -581,6 +620,7 @@ impl ClapHost {
                 plugin_id: plugin_id.clone(),
                 path: path.clone(),
                 active: false,
+                active_for: None,
                 latency: 0,
                 failure: Some(why.clone()),
                 has_editor: false,
@@ -607,6 +647,7 @@ impl ClapHost {
             plugin_id: instance.plugin_id.clone(),
             path: instance.path.clone(),
             active: instance.out,
+            active_for: instance.active_for.filter(|_| instance.out),
             latency: instance.latency,
             failure: instance
                 .failure
@@ -642,6 +683,123 @@ impl ClapHost {
     /// Lets go of every plug-in, as when another set opens.
     pub fn clear(&self) {
         self.retain(&BTreeSet::new());
+    }
+
+    /// Lends the plug-ins to an offline render (WP-2.6b): an export or a
+    /// preview, rendering on this thread. The loan's
+    /// [`factory`](Loan::factory) goes into the render's registry; for
+    /// each CLAP device the render makes a node for, it takes the plug-in
+    /// back from the engine's node (waiting for that node's next block),
+    /// deactivates it, sets it to the rendered set's parameter values, and
+    /// activates it for the render's rate and block size. A device with no
+    /// plug-in yet gets one, from its saved state. Meanwhile the engine's
+    /// node passes its input through.
+    ///
+    /// When the loan is dropped, after the render's engine, every plug-in
+    /// goes back to the engine with the state it had before, activated for
+    /// the engine's rate and block size again; one that failed while
+    /// rendering stays silent in the engine too. Parameter changes a
+    /// plug-in makes while rendering are dropped: a render changes nothing
+    /// in the set.
+    ///
+    /// # Errors
+    ///
+    /// [`ClapError::WrongThread`] off the main thread, and
+    /// [`ClapError::Lent`] while another loan is out.
+    pub fn lend(&self) -> Result<Loan, ClapError> {
+        let mut guard = lock(&self.inner.main);
+        let main = guard.get()?;
+        if main.lending {
+            return Err(ClapError::Lent);
+        }
+        main.lending = true;
+        main.loan_problems.clear();
+        Ok(Loan {
+            inner: Arc::clone(&self.inner),
+            _main_thread: std::marker::PhantomData,
+        })
+    }
+}
+
+/// The host's plug-ins, lent to an offline render ([`ClapHost::lend`]).
+/// Dropping it, on the main thread and after the render's engine, gives
+/// every plug-in back to the engine.
+pub struct Loan {
+    inner: Arc<Inner>,
+    /// It ends on the main thread, which made it.
+    _main_thread: std::marker::PhantomData<*const ()>,
+}
+
+impl fmt::Debug for Loan {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Loan").finish_non_exhaustive()
+    }
+}
+
+impl Loan {
+    /// The factory for the render's registry: it makes each CLAP device's
+    /// node with the device's own plug-in, borrowed from the engine.
+    #[must_use]
+    pub fn factory(&self) -> LoanFactory {
+        LoanFactory {
+            inner: Arc::clone(&self.inner),
+        }
+    }
+
+    /// The devices whose plug-in the render couldn't borrow, and why: the
+    /// engine's node didn't hand it back in time. Their nodes pass their
+    /// input through, so the render isn't what the engine plays.
+    #[must_use]
+    pub fn problems(&self) -> Vec<(DeviceId, String)> {
+        let mut guard = lock(&self.inner.main);
+        guard
+            .get()
+            .map(|main| main.loan_problems.clone())
+            .unwrap_or_default()
+    }
+}
+
+impl Drop for Loan {
+    fn drop(&mut self) {
+        let mut guard = lock(&self.inner.main);
+        if let Ok(main) = guard.get() {
+            end_loan(main);
+        }
+    }
+}
+
+/// A loan's factory for an offline render's registry ([`Loan::factory`]).
+pub struct LoanFactory {
+    inner: Arc<Inner>,
+}
+
+impl NodeFactory for LoanFactory {
+    fn create(&self, device: &Device, config: &NodeConfig) -> Option<Box<dyn Node>> {
+        let DeviceKind::Plugin {
+            format: PluginFormat::Clap,
+            ..
+        } = &device.kind
+        else {
+            return None;
+        };
+        let (node, ends) = ClapNode::new(config);
+        let mut guard = lock(&self.inner.main);
+        let problem = match guard.get() {
+            Ok(main) if main.lending => borrow(main, device, *config, ends, &self.inner).err(),
+            Ok(_) => Some("the plug-ins aren't lent to a render".to_owned()),
+            Err(error) => Some(error.to_string()),
+        };
+        if let (Some(why), Ok(main)) = (problem, guard.get()) {
+            main.loan_problems.push((device.id, why));
+        }
+        Some(Box::new(node))
+    }
+
+    fn device_types(&self) -> Vec<DeviceType> {
+        lock(&self.inner.types)
+            .iter()
+            .map(|t| t.device_type.clone())
+            .collect()
     }
 }
 
@@ -805,83 +963,8 @@ fn serve(main: &mut Main, request: Request, inner: &Inner) {
         config,
         ends,
     } = request;
-    let DeviceKind::Plugin { plugin_id, .. } = &device.kind else {
+    if !ensure_instance(main, &device, inner) {
         return;
-    };
-    // A plug-in left from another set under the same ID is let go of.
-    if main
-        .instances
-        .get(&device.id)
-        .is_some_and(|instance| instance.plugin_id != *plugin_id)
-        && let Some(old) = main.instances.remove(&device.id)
-    {
-        close(main, device.id, old);
-    }
-    if !main.instances.contains_key(&device.id) {
-        let path = device
-            .plugin
-            .as_ref()
-            .map(|p| PathBuf::from(&p.path))
-            .filter(|p| !p.as_os_str().is_empty())
-            .or_else(|| {
-                lock(&inner.types)
-                    .iter()
-                    .find(|t| t.device_type.kind == device.kind)
-                    .map(|t| t.path.clone())
-            });
-        let made = path
-            .clone()
-            .ok_or_else(|| ClapError::UnknownPlugin(plugin_id.clone()))
-            .and_then(|path| {
-                let entry = entry(main, &path)?;
-                new_instance(&entry, plugin_id, &inner.info).map(|i| (i, path))
-            });
-        let (plugin, path) = match made {
-            Ok(made) => made,
-            Err(error) => {
-                // Spec: clap-hosting R12. The device stays, passing its
-                // input through, and keeps its saved state for when the
-                // plug-in is found.
-                main.missing.insert(
-                    device.id,
-                    (
-                        plugin_id.clone(),
-                        path.unwrap_or_default(),
-                        error.to_string(),
-                    ),
-                );
-                return;
-            }
-        };
-        main.missing.remove(&device.id);
-        let mut instance = Instance {
-            plugin_id: plugin_id.clone(),
-            path,
-            instance: plugin,
-            ends: None,
-            retired: Vec::new(),
-            config: None,
-            out: false,
-            refused: None,
-            failure: None,
-            latency: 0,
-            editor_open: false,
-            gestures: BTreeSet::new(),
-            held: BTreeMap::new(),
-            commands: None,
-            echoes: Vec::new(),
-        };
-        instance.commands = list_commands(&mut instance.instance);
-        // Spec: clap-hosting R9, R11. The saved state first, then the
-        // set's parameter values over it.
-        if let Some(saved) = device.plugin.as_ref().filter(|p| !p.data.is_empty())
-            && let Err(error) = load_state(&mut instance, &saved.data)
-        {
-            instance.failure = Some(format!("{error}; it starts from its defaults"));
-        }
-        set_values(&mut instance, &device);
-        main.instances.insert(device.id, instance);
-        main.generation += 1;
     }
     let Some(instance) = main.instances.get_mut(&device.id) else {
         return;
@@ -893,6 +976,223 @@ fn serve(main: &mut Main, request: Request, inner: &Inner) {
     instance.ends = Some(ends);
     instance.config = Some(config);
     instance.refused = None;
+    instance.silenced = false;
+}
+
+/// Makes the device's plug-in if it has none. Returns whether it has one;
+/// one that can't be made is recorded as missing.
+fn ensure_instance(main: &mut Main, device: &Device, inner: &Inner) -> bool {
+    let DeviceKind::Plugin { plugin_id, .. } = &device.kind else {
+        return false;
+    };
+    // A plug-in left from another set under the same ID is let go of.
+    if main
+        .instances
+        .get(&device.id)
+        .is_some_and(|instance| instance.plugin_id != *plugin_id)
+        && let Some(old) = main.instances.remove(&device.id)
+    {
+        close(main, device.id, old);
+    }
+    if main.instances.contains_key(&device.id) {
+        return true;
+    }
+    let path = device
+        .plugin
+        .as_ref()
+        .map(|p| PathBuf::from(&p.path))
+        .filter(|p| !p.as_os_str().is_empty())
+        .or_else(|| {
+            lock(&inner.types)
+                .iter()
+                .find(|t| t.device_type.kind == device.kind)
+                .map(|t| t.path.clone())
+        });
+    let made = path
+        .clone()
+        .ok_or_else(|| ClapError::UnknownPlugin(plugin_id.clone()))
+        .and_then(|path| {
+            let entry = entry(main, &path)?;
+            new_instance(&entry, plugin_id, &inner.info).map(|i| (i, path))
+        });
+    let (plugin, path) = match made {
+        Ok(made) => made,
+        Err(error) => {
+            // Spec: clap-hosting R12. The device stays, passing its input
+            // through, and keeps its saved state for when the plug-in is
+            // found.
+            main.missing.insert(
+                device.id,
+                (
+                    plugin_id.clone(),
+                    path.unwrap_or_default(),
+                    error.to_string(),
+                ),
+            );
+            return false;
+        }
+    };
+    main.missing.remove(&device.id);
+    let mut instance = Instance {
+        plugin_id: plugin_id.clone(),
+        path,
+        instance: plugin,
+        ends: None,
+        retired: Vec::new(),
+        config: None,
+        out: false,
+        refused: None,
+        failure: None,
+        silenced: false,
+        active_for: None,
+        lent: None,
+        latency: 0,
+        editor_open: false,
+        gestures: BTreeSet::new(),
+        held: BTreeMap::new(),
+        commands: None,
+        echoes: Vec::new(),
+    };
+    instance.commands = list_commands(&mut instance.instance);
+    // Spec: clap-hosting R9, R11. The saved state first, then the set's
+    // parameter values over it.
+    if let Some(saved) = device.plugin.as_ref().filter(|p| !p.data.is_empty())
+        && let Err(error) = load_state(&mut instance, &saved.data)
+    {
+        instance.failure = Some(format!("{error}; it starts from its defaults"));
+    }
+    set_values(&mut instance, device);
+    main.instances.insert(device.id, instance);
+    main.generation += 1;
+    true
+}
+
+/// Lends the device's plug-in to an offline render's node (WP-2.6b): takes
+/// it back from the engine's node, and activates it for the render's
+/// settings with the rendered set's parameter values. A plug-in that can't
+/// be made or won't activate leaves the node passing its input through;
+/// one that failed while processing leaves it silent.
+fn borrow(
+    main: &mut Main,
+    device: &Device,
+    config: NodeConfig,
+    ends: HostEnds,
+    inner: &Inner,
+) -> Result<(), String> {
+    if !ensure_instance(main, device, inner) {
+        // Spec: clap-hosting R12, as in the engine.
+        return Ok(());
+    }
+    let Main {
+        instances, changes, ..
+    } = main;
+    let Some(instance) = instances.get_mut(&device.id) else {
+        return Ok(());
+    };
+    if instance.lent.is_some() {
+        return Err("its plug-in is lent to this render already".to_owned());
+    }
+    // Spec: offline-plugin-renders R4. Its state, to give back.
+    let saved = save(instance);
+    // Spec: offline-plugin-renders R2. The engine's node hands it back at
+    // its next block.
+    if instance.out {
+        for ends in instance.ends.iter().chain(&instance.retired) {
+            ends.status.hand_back.store(true, Relaxed);
+        }
+        let until = Instant::now() + HAND_BACK_WAIT;
+        loop {
+            take_back(device.id, instance, changes);
+            if !instance.out {
+                break;
+            }
+            if Instant::now() >= until {
+                return Err(
+                    "the engine playing the set didn't hand its plug-in back in time".to_owned(),
+                );
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+    let mut lent = Lent {
+        ends,
+        saved,
+        refused: instance.refused.take(),
+    };
+    if instance.silenced {
+        // Spec: offline-plugin-renders R6. Failed, it stays silent.
+        lent.ends.status.silent.store(true, Relaxed);
+        instance.lent = Some(lent);
+        return Ok(());
+    }
+    // Spec: offline-plugin-renders R3. The rendered set's values, and the
+    // render's rate and block size.
+    set_values(instance, device);
+    if let Ok((processor, latency)) = activate(&mut instance.instance, &config) {
+        lent.ends.status.latency.store(latency, Relaxed);
+        if lent.ends.to_node.push(processor).is_ok() {
+            instance.out = true;
+            instance.active_for = Some(config);
+        }
+    }
+    // Spec: clap-hosting R12. One that won't activate for the render
+    // leaves its node passing its input through.
+    instance.lent = Some(lent);
+    Ok(())
+}
+
+/// Ends a loan: every lent plug-in goes back to the engine's node with the
+/// state it had, or stays silent if it failed while rendering.
+fn end_loan(main: &mut Main) {
+    if !main.lending {
+        return;
+    }
+    main.lending = false;
+    main.loan_problems.clear();
+    let Main {
+        instances, changes, ..
+    } = main;
+    for (&device, instance) in instances.iter_mut() {
+        let Some(lent) = &instance.lent else { continue };
+        lent.ends.status.hand_back.store(true, Relaxed);
+        // The render's engine is gone, and its node gave the processor
+        // back as it went.
+        take_back(device, instance, changes);
+        let Some(lent) = instance.lent.take() else {
+            continue;
+        };
+        let failed = lent.ends.status.failed.load(Relaxed);
+        if instance.out {
+            // A render's node still holds it: it's deactivated once that
+            // node gives it back.
+            instance.retired.push(lent.ends);
+        }
+        // Spec: offline-plugin-renders R4. The state it had.
+        if let Some(saved) = &lent.saved {
+            let _ = load_state(instance, saved);
+        }
+        instance.refused = lent.refused;
+        if failed {
+            // Spec: offline-plugin-renders R6, clap-hosting R12.
+            instance.silenced = true;
+            instance.failure = Some(
+                "it failed while processing in an offline render; the device is silent".to_owned(),
+            );
+            if let Some(ends) = &instance.ends {
+                ends.status.silent.store(true, Relaxed);
+            }
+        }
+        pump(device, instance, changes);
+    }
+}
+
+/// The plug-in's state, if it keeps one and will save it.
+fn save(instance: &mut Instance) -> Option<Vec<u8>> {
+    let plugin = instance.instance.plugin_handle();
+    let state = plugin.get_extension::<StateExtension>()?;
+    let mut data = Vec::new();
+    state.save(&plugin, &mut data).ok()?;
+    Some(data)
 }
 
 /// Sets the plug-in's parameters to the device's values, while it's
@@ -925,10 +1225,11 @@ fn set_values(instance: &mut Instance, device: &Device) {
     );
 }
 
-/// One plug-in's main-thread work. Returns whether anything changed.
-fn pump(device: DeviceId, instance: &mut Instance, changes: &mut Vec<ParamChange>) -> bool {
+/// Takes back the processors nodes handed back and deactivates the
+/// plug-in, and collects the parameter changes the plug-in made in the
+/// engine's nodes. Returns whether anything changed.
+fn take_back(device: DeviceId, instance: &mut Instance, changes: &mut Vec<ParamChange>) -> bool {
     let mut changed = false;
-    // Processors handed back are deactivated.
     let mut returned = Vec::new();
     for ends in instance.ends.iter_mut().chain(instance.retired.iter_mut()) {
         while let Ok(processor) = ends.from_node.pop() {
@@ -943,6 +1244,14 @@ fn pump(device: DeviceId, instance: &mut Instance, changes: &mut Vec<ParamChange
                 changes,
             );
         }
+    }
+    if let Some(lent) = &mut instance.lent {
+        while let Ok(processor) = lent.ends.from_node.pop() {
+            returned.push(processor);
+        }
+        // Spec: offline-plugin-renders R5. A render changes nothing in the
+        // set.
+        while lent.ends.params.pop().is_ok() {}
     }
     for processor in returned {
         let stopped = processor.into_stopped();
@@ -959,6 +1268,16 @@ fn pump(device: DeviceId, instance: &mut Instance, changes: &mut Vec<ParamChange
     if instance.out && instance.instance.try_deactivate().is_ok() {
         instance.out = false;
     }
+    if !instance.out {
+        instance.active_for = None;
+    }
+    changed
+}
+
+/// One plug-in's main-thread work. Returns whether anything changed.
+fn pump(device: DeviceId, instance: &mut Instance, changes: &mut Vec<ParamChange>) -> bool {
+    // Processors handed back are deactivated.
+    let mut changed = take_back(device, instance, changes);
     instance
         .retired
         .retain(|ends| !(ends.from_node.is_abandoned() && ends.from_node.is_empty()));
@@ -972,21 +1291,25 @@ fn pump(device: DeviceId, instance: &mut Instance, changes: &mut Vec<ParamChange
             .access_handler(|m| m.latency_changed.replace(false));
     if restart
         && instance.out
+        && instance.lent.is_none()
         && let Some(ends) = &instance.ends
     {
         ends.status.hand_back.store(true, Relaxed);
     }
     if let Some(ends) = &instance.ends
         && ends.status.failed.load(Relaxed)
-        && instance.failure.is_none()
+        && !instance.silenced
     {
+        instance.silenced = true;
         instance.failure = Some("it failed while processing; the device is silent".to_owned());
         changed = true;
     }
 
-    // Activate it for its node.
+    // Activate it for its node, unless a render has it.
     if !instance.out
         && instance.refused.is_none()
+        && !instance.silenced
+        && instance.lent.is_none()
         && let (Some(ends), Some(config)) = (&mut instance.ends, instance.config)
         && !ends.to_node.is_abandoned()
         && !instance.instance.is_active()
@@ -998,6 +1321,7 @@ fn pump(device: DeviceId, instance: &mut Instance, changes: &mut Vec<ParamChange
                 ends.status.latency.store(latency, Relaxed);
                 if ends.to_node.push(processor).is_ok() {
                     instance.out = true;
+                    instance.active_for = Some(config);
                 }
             }
             Err(why) => instance.refused = Some(why),

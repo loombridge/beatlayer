@@ -57,6 +57,9 @@ pub(crate) struct Status {
     pub(crate) hand_back: AtomicBool,
     /// The plug-in failed a call on the audio thread.
     pub(crate) failed: AtomicBool,
+    /// The host says the device is silent while the node has no plug-in:
+    /// its plug-in failed elsewhere, in an offline render (WP-2.6b).
+    pub(crate) silent: AtomicBool,
     /// Events dropped because a list was full.
     pub(crate) dropped: AtomicU64,
 }
@@ -245,7 +248,7 @@ impl Node for ClapNode {
             for event in block.events() {
                 self.keep(event.param.0, event.value);
             }
-            if self.failed {
+            if self.failed || self.status.silent.load(Relaxed) {
                 silence(block);
             }
             return;

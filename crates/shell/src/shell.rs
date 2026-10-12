@@ -319,6 +319,9 @@ pub struct Shell {
     /// The Device View's selection, folded devices, clipboard, and
     /// hot-swapping (WP-2.4).
     devices: DeviceView,
+    /// Whether View ▸ Plug-In Windows shows the floating devices' windows
+    /// (WP-2.5b): view state, never part of the set.
+    plug_in_windows: bool,
 }
 
 impl fmt::Debug for Shell {
@@ -439,6 +442,7 @@ impl Shell {
             meters: Vec::new(),
             metering: false,
             previews: crate::perception::Previews::default(),
+            plug_in_windows: true,
             devices: {
                 // Beatlayer's native devices (WP-2.5; none ship yet).
                 let mut devices = DeviceView::new();
@@ -777,6 +781,13 @@ impl Shell {
     pub fn set_focused_window(&mut self, window: WindowKind) {
         if self.focused_window != window {
             self.focused_window = window;
+            if let WindowKind::Device(device) = window
+                && self.editor.document().device(device).is_some()
+            {
+                // A floating device's window in front selects its device,
+                // so keys act on it.
+                self.devices.select_only(device);
+            }
             self.touch();
         }
     }
@@ -895,7 +906,17 @@ impl Shell {
             doc,
             devices::shown_track(&self.arrangement, doc),
             self.prefs.auto_hide_plug_in_windows.0,
+            self.plug_in_windows,
         )
+    }
+
+    /// Whether any device floats, on any track.
+    fn any_floating(&self) -> bool {
+        let doc = self.editor.document();
+        doc.track_order()
+            .into_iter()
+            .filter_map(|t| doc.track(t))
+            .any(|t| t.devices().any(|d| d.floating))
     }
 
     /// Whether Auto-Hide Plug-In Windows is on: a floating device's window
@@ -920,6 +941,7 @@ impl Shell {
                 user_library: user_library.as_deref(),
                 zoom,
                 auto_hide,
+                windows_shown: self.plug_in_windows,
             },
         );
         let outcome = result.map_err(|error| device_error(id, error))?;
@@ -1447,9 +1469,10 @@ impl Shell {
     pub fn active_contexts(&self) -> Vec<Context> {
         match self.focused_window {
             WindowKind::Settings => vec![Context::Settings, Context::Dialog, Context::Global],
-            // A floating device's window: its own controls take their keys,
-            // and the global ones work.
-            WindowKind::Device(_) => vec![Context::Global],
+            // A floating device's window: its device is selected, so the
+            // Device View's keys act on it (Float's among them), and the
+            // global ones work.
+            WindowKind::Device(_) => vec![Context::DeviceView, Context::Global],
             WindowKind::Main => {
                 let mut contexts = Vec::with_capacity(3);
                 match self.focused_area {
@@ -1485,6 +1508,7 @@ impl Shell {
         match id {
             ids::VIEW_FULL_SCREEN => Some(self.full_screen),
             ids::VIEW_TOGGLE_BROWSER => Some(self.browser),
+            ids::VIEW_TOGGLE_PLUG_IN_WINDOWS => Some(self.plug_in_windows),
             ids::FOCUS_TOGGLE_TAB_NAVIGATION => Some(self.prefs.tab_navigation),
             ids::FOCUS_TOGGLE_WRAP_NAVIGATION => Some(self.prefs.wrap_navigation.0),
             SOLO_IN_PLACE => Some(self.editor.document().settings().solo_in_place),
@@ -1572,6 +1596,8 @@ impl Shell {
             }
             // The frontmost window must be a secondary one: with only the
             // main window open, Close Window is disabled (M-FILE-004).
+            // Live's Plug-In Windows is disabled with none open (M-VIEW-028).
+            ids::VIEW_TOGGLE_PLUG_IN_WINDOWS => return self.any_floating(),
             ids::WINDOW_CLOSE => {
                 return match self.focused_window {
                     WindowKind::Settings => self.settings_open,
@@ -1995,11 +2021,16 @@ impl Shell {
             return result;
         }
         if model::handles(id) {
+            let args_floating = args.get("floating") == Some(&Value::Bool(true));
             let changes =
                 model::run(&mut self.editor, id, args).map_err(|error| ShellError::Failed {
                     command: id.to_owned(),
                     message: error.to_string(),
                 })?;
+            if id == device_ids::SET_FLOATING && args_floating {
+                // A device floated shows the windows again (R33).
+                self.plug_in_windows = true;
+            }
             self.dirty = true;
             self.document_changed();
             self.touch();
@@ -2354,6 +2385,17 @@ impl Shell {
                 self.full_screen = !self.full_screen;
                 self.effects.push(Effect::SetFullScreen(self.full_screen));
                 Ok(self.view_result())
+            }
+            ids::VIEW_TOGGLE_PLUG_IN_WINDOWS => {
+                // Spec: device-chains R33. It hides and shows windows only.
+                let ids::TogglePlugInWindowsArgs { shown } = Self::args(id, args)?;
+                if !self.any_floating() {
+                    return Err(unavailable("no device floats"));
+                }
+                self.plug_in_windows = shown.unwrap_or(!self.plug_in_windows);
+                Ok(to_value(&SwitchResult {
+                    on: self.plug_in_windows,
+                }))
             }
             ids::VIEW_TOGGLE_BROWSER => {
                 Self::args::<NoArgs>(id, args)?;

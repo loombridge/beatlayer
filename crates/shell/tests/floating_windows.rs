@@ -359,3 +359,84 @@ fn with_auto_hide_on_a_window_hides_while_another_track_is_selected() {
         .unwrap();
     assert!(windows(&mut shell)[0].shown);
 }
+
+// Spec: device-chains R33
+#[test]
+fn plug_in_windows_hides_and_shows_every_floating_window_without_docking() {
+    let (mut shell, _) = shell();
+    // Disabled with no device floating, as Live's is with no plug-in window.
+    assert!(!shell.can_invoke("view.toggle_plug_in_windows", &json!({})));
+    let utility = add_type(&mut shell, &testing::utility_type());
+    shell
+        .run(
+            "device.set_floating",
+            json!({ "device": utility, "floating": true }),
+        )
+        .unwrap();
+    assert!(shell.can_invoke("view.toggle_plug_in_windows", &json!({})));
+    assert_eq!(
+        shell.switch_state("view.toggle_plug_in_windows"),
+        Some(true)
+    );
+    let steps = history(&shell);
+    let dirty = shell.is_dirty();
+
+    // Cmd-Option-P (Ctrl-Alt-P) and View ▸ Plug-In Windows.
+    let reply = shell
+        .invoke("view.toggle_plug_in_windows", json!({}))
+        .unwrap();
+    assert_eq!(reply, json!({ "on": false }));
+    assert!(!windows(&mut shell)[0].shown, "hidden");
+    assert!(floating(&shell, utility), "still floating");
+    assert_eq!(history(&shell), steps, "no undo step");
+    assert_eq!(shell.is_dirty(), dirty, "nothing in the set changed");
+    assert_eq!(
+        shell.switch_state("view.toggle_plug_in_windows"),
+        Some(false)
+    );
+    shell
+        .invoke("view.toggle_plug_in_windows", json!({}))
+        .unwrap();
+    assert!(windows(&mut shell)[0].shown, "shown again");
+
+    // Floating a device shows them again.
+    shell
+        .run("view.toggle_plug_in_windows", json!({ "shown": false }))
+        .unwrap();
+    let scope = add_type(&mut shell, &testing::scope_type());
+    shell
+        .run(
+            "device.set_floating",
+            json!({ "device": scope, "floating": true }),
+        )
+        .unwrap();
+    assert!(windows(&mut shell).iter().all(|w| w.shown));
+}
+
+// Spec: device-chains R26 (Float's key in a floating window)
+#[test]
+fn in_a_floating_window_float_s_key_docks_its_device() {
+    let (mut shell, _) = shell();
+    let utility = add_type(&mut shell, &testing::utility_type());
+    let scope = add_type(&mut shell, &testing::scope_type());
+    shell
+        .run(
+            "device.set_floating",
+            json!({ "device": utility, "floating": true }),
+        )
+        .unwrap();
+    assert_eq!(shell.devices().selected(), Some(scope));
+    // Its window in front selects its device, and the Device View's keys
+    // (Option-F, Ctrl-Alt-F) reach it.
+    shell.set_focused_window(WindowKind::Device(utility));
+    assert_eq!(shell.devices().selected(), Some(utility));
+    assert!(
+        shell
+            .active_contexts()
+            .contains(&bl_commands::Context::DeviceView)
+    );
+    assert!(shell.can_invoke("device.set_floating", &json!({})));
+    shell.invoke("device.set_floating", json!({})).unwrap();
+    assert!(!floating(&shell, utility));
+    assert_eq!(history(&shell)[0], "Dock Device");
+}

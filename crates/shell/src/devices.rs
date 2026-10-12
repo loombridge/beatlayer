@@ -90,6 +90,8 @@ pub struct Context<'a> {
     pub zoom: f32,
     /// Whether Auto-Hide Plug-In Windows is on.
     pub auto_hide: bool,
+    /// Whether View ▸ Plug-In Windows shows the windows.
+    pub windows_shown: bool,
 }
 
 fn parse<T: DeserializeOwned>(args: Value) -> Result<T, DeviceError> {
@@ -147,6 +149,12 @@ impl DeviceView {
     #[must_use]
     pub fn selected(&self) -> Option<DeviceId> {
         self.selected
+    }
+
+    /// Selects `device` without changing which track the Device View
+    /// shows, as bringing its floating window to the front does (WP-2.5b).
+    pub fn select_only(&mut self, device: DeviceId) {
+        self.selected = Some(device);
     }
 
     /// Whether a device is folded.
@@ -283,15 +291,17 @@ impl DeviceView {
     }
 
     /// Every floating device's window, on any track, in the order of the
-    /// tracks and their chains (`device.windows`). With `auto_hide` on,
+    /// tracks and their chains (`device.windows`). None shows while
+    /// `all_shown` is off (View ▸ Plug-In Windows); with `auto_hide` on,
     /// only the windows of `shown`'s devices show (Auto-Hide Plug-In
-    /// Windows; the device chains spec, R31).
+    /// Windows; the device chains spec, R31 and R33).
     #[must_use]
     pub fn floating_windows(
         &self,
         doc: &Document,
         shown: Option<TrackId>,
         auto_hide: bool,
+        all_shown: bool,
     ) -> FloatingWindows {
         let windows = doc
             .track_order()
@@ -315,7 +325,7 @@ impl DeviceView {
                     grows_across,
                     grows_down,
                     view,
-                    shown: !auto_hide || shown == Some(track),
+                    shown: all_shown && (!auto_hide || shown == Some(track)),
                 }
             })
             .collect();
@@ -414,10 +424,11 @@ impl DeviceView {
             user_library,
             zoom,
             auto_hide,
+            windows_shown,
         } = ctx;
         let track = shown_track(arrangement, editor.document());
         let windows = |view: &Self, editor: &Editor| {
-            view.floating_windows(editor.document(), track, auto_hide)
+            view.floating_windows(editor.document(), track, auto_hide, windows_shown)
         };
         let state = |view: &Self, editor: &Editor, arrangement: &ArrangementView| {
             to_value(&view.state(

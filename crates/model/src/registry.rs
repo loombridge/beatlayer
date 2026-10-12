@@ -853,7 +853,9 @@ const ENTRIES: &[Entry] = &[
             whether a device floats is saved with the set. Moving or resizing the window is \
             `device.set_window`, which isn't an undo step. Plug-ins open their own editor \
             windows instead, so they can't float. It changes nothing in the sound. From the \
-            keyboard (Option-F on macOS) and the menu it switches the selected device.",
+            keyboard (Option-F on macOS, Ctrl-Alt-F on Windows and Linux, with the Device View \
+            or a floating device's window focused) and the menu it switches the selected \
+            device.",
     },
     Entry {
         id: "device.set_param",

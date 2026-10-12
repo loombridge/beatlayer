@@ -37,6 +37,9 @@ pub const WINDOW_CLOSE: &str = "window.close";
 pub const VIEW_FULL_SCREEN: &str = "view.full_screen";
 /// `view.toggle_browser`: show or hide the browser.
 pub const VIEW_TOGGLE_BROWSER: &str = "view.toggle_browser";
+/// `view.toggle_plug_in_windows`: show or hide the floating devices'
+/// windows (View ▸ Plug-In Windows, WP-2.5b).
+pub const VIEW_TOGGLE_PLUG_IN_WINDOWS: &str = "view.toggle_plug_in_windows";
 /// `view.toggle_session_arrangement`: switch the main view.
 pub const VIEW_TOGGLE_SESSION_ARRANGEMENT: &str = "view.toggle_session_arrangement";
 /// `view.zoom_in`: zoom the interface in.
@@ -108,6 +111,7 @@ pub const IDS: &[&str] = &[
     WINDOW_CLOSE,
     VIEW_FULL_SCREEN,
     VIEW_TOGGLE_BROWSER,
+    VIEW_TOGGLE_PLUG_IN_WINDOWS,
     VIEW_TOGGLE_SESSION_ARRANGEMENT,
     VIEW_ZOOM_IN,
     VIEW_ZOOM_OUT,
@@ -235,6 +239,15 @@ pub struct SetResult {
     pub path: Option<String>,
     /// The set's name, as the title bar shows it.
     pub name: String,
+}
+
+/// Arguments of `view.toggle_plug_in_windows`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TogglePlugInWindowsArgs {
+    /// Show (true) or hide (false) them; switches if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shown: Option<bool>,
 }
 
 /// What a command that switches something returns: its new state.
@@ -409,6 +422,20 @@ fn specs() -> Vec<CommandSpec> {
             .binding("S-VIEW-001")
             .args::<NoArgs>()
             .result::<ViewResult>(),
+        CommandSpec::new(VIEW_TOGGLE_PLUG_IN_WINDOWS, "Plug-In Windows")
+            .description(
+                "Shows or hides every floating device's window at once, as View ▸ Plug-In \
+                 Windows does for Live's plug-in windows (Cmd-Option-P); switches unless \
+                 `shown` says which. Hidden windows' devices still float: it isn't docking, \
+                 isn't an undo step, and changes nothing in the set. Floating a device shows \
+                 the windows again. Only runs while a device floats. The result's `on` is \
+                 whether they're shown afterwards.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .binding("S-DEV-009")
+            .args::<TogglePlugInWindowsArgs>()
+            .result::<SwitchResult>(),
         CommandSpec::new(VIEW_TOGGLE_BROWSER, "Browser")
             .description(
                 "Shows or hides the browser at the left of the main window; the main view \

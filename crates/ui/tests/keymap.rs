@@ -225,6 +225,52 @@ fn mods(cmd: bool, ctrl: bool, alt: bool, shift: bool) -> Mods {
     }
 }
 
+// Spec: device-chains R26. Float's key is scoped by focus: with the
+// Device View (or a floating device's window) focused it floats or docks
+// the selected device; with the Arrangement focused the same keys are
+// Create Fade/Crossfade's (S-ARR-008).
+#[test]
+fn float_s_key_reaches_float_in_the_device_view_and_fades_in_the_arrangement() {
+    let keymap = Keymap::live12();
+    let devices = [Context::DeviceView, Context::Global];
+    let arrangement = [Context::Arrangement, Context::Global];
+    let hit = |platform, m, contexts: &[Context]| {
+        keymap
+            .resolve(platform, Key::F, m, contexts)
+            .map(|hit| hit.command.id.clone())
+    };
+    let ctrl_alt = mods(false, true, true, false);
+    let option = mods(false, false, true, false);
+    let cmd_option = mods(true, false, true, false);
+    for (platform, float, fade) in [
+        (Platform::Other, ctrl_alt, ctrl_alt),
+        (Platform::Mac, option, cmd_option),
+    ] {
+        assert_eq!(
+            hit(platform, float, &devices).as_deref(),
+            Some("device.set_floating"),
+            "{platform:?}: Float in the Device View"
+        );
+        assert_ne!(
+            hit(platform, fade, &arrangement).as_deref(),
+            Some("device.set_floating"),
+            "{platform:?}: not Float in the Arrangement"
+        );
+        // The same keys are the fade shortcut's in the Arrangement.
+        let fades = keymap.entry_for("S-ARR-008").unwrap();
+        assert!(
+            fades
+                .chords(platform)
+                .iter()
+                .any(|chord| chord.matches(Key::F, fade)),
+            "{platform:?}"
+        );
+        assert_eq!(fades.context, "arrangement");
+    }
+    // Cmd-Option-F on macOS is the fades', not Float's.
+    assert_eq!(hit(Platform::Mac, cmd_option, &devices), None);
+}
+
 #[test]
 fn keys_resolve_to_commands_in_their_contexts() {
     let keymap = Keymap::live12();

@@ -637,7 +637,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["Cmd+Option+P"]
 win = ["Ctrl+Alt+P"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "view.toggle_plug_in_windows", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-DEV-010"
@@ -4202,7 +4205,7 @@ kind = "key"
 trigger = "press"
 milestone = "M2"
 mac = ["Option+F"]
-win = []
+win = ["Ctrl+Alt+F"]
 status = "bound"
 commands = [
   { id = "device.set_floating", contexts = ["device-view"] },

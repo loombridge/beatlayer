@@ -378,6 +378,8 @@ impl EngineProgram {
                         sample_rate: self.sample_rate,
                         tempo: &self.tempo,
                         sidechain: None,
+                        notes: &[],
+                        notes_out: None,
                     });
                 }
             }
@@ -488,6 +490,8 @@ impl EngineProgram {
                     sidechain: heard
                         .as_ref()
                         .map(|(at, _)| &self.sidechain_pool[at.clone()]),
+                    notes: &[],
+                    notes_out: None,
                 });
                 // Sidechain Listen: the device's output is what it heard.
                 if let Some((at, true)) = heard {
@@ -522,6 +526,8 @@ impl EngineProgram {
                     sample_rate: self.sample_rate,
                     tempo: &self.tempo,
                     sidechain: None,
+                    notes: &[],
+                    notes_out: None,
                 });
             }
         }

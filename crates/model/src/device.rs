@@ -53,6 +53,49 @@ pub struct Device {
     /// of the saved set for a device without one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sidechain: Option<Sidechain>,
+    /// A plug-in's own state and where it was loaded from (WP-2.6), as
+    /// last saved with the set. Left out of the saved set for a native
+    /// device, and for a plug-in until the set is first saved with it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin: Option<PluginState>,
+}
+
+/// A plug-in device's own state, as the set file keeps it (WP-2.6).
+///
+/// The running plug-in's state moves ahead of this as it plays and its
+/// editor changes it; the host takes it again (an amendment, never an undo
+/// step) each time the set is saved, and when the device is copied.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[schemars(
+    description = "A plug-in's own state: `path`, the file it was loaded from, and `data`, the \
+                   state it saved, in base64."
+)]
+pub struct PluginState {
+    /// The plug-in file or bundle it was loaded from, so a reopened set
+    /// finds it before the plug-in scanner (WP-2.9) can by its ID.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub path: String,
+    /// The state the plug-in saved, in the plug-in's own format; empty for
+    /// none. Base64 in the set file.
+    #[serde(default, with = "base64_bytes", skip_serializing_if = "Vec::is_empty")]
+    #[schemars(with = "String")]
+    pub data: Vec<u8>,
+}
+
+/// Serialises bytes as base64 text.
+mod base64_bytes {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub(super) fn serialize<S: Serializer>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&crate::base64::encode(bytes))
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Vec<u8>, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        crate::base64::decode(&text).ok_or_else(|| serde::de::Error::custom("not base64"))
+    }
 }
 
 /// A device's sidechain input and the settings of its sidechain section
@@ -161,6 +204,7 @@ impl Device {
             show_preset_name: true,
             params: OrdMap::new(),
             sidechain: None,
+            plugin: None,
         }
     }
 

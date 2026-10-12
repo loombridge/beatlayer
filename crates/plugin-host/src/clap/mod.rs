@@ -1,0 +1,947 @@
+//! CLAP hosting (WP-2.6; the CLAP hosting spec).
+//!
+//! A [`ClapHost`] lives on the main thread, which is CLAP's main thread
+//! for every plug-in it hosts: it loads plug-in files ([`ClapHost::load`],
+//! until the scanner of WP-2.9 finds them), keeps one plug-in instance per
+//! device, saves and loads their state, opens and closes their editors,
+//! and activates and deactivates them. Its [`ClapFactory`] goes into the
+//! engine's [`Registry`](bl_engine::Registry): the compiler thread asks it
+//! for a device's node, which it makes at once without the plug-in, and
+//! the main thread activates the plug-in for that node the next time it
+//! runs [`ClapHost::idle`] (at once, if the compiler runs on the main
+//! thread, as [`Offline`](bl_engine::Offline) does). The node passes its
+//! input through until the plug-in arrives.
+//!
+//! An instance outlives its node: a device moved, switched off, or deleted
+//! and brought back with undo keeps its plug-in and the plug-in's state,
+//! and a new engine (a new audio device or rate) deactivates the plug-in
+//! and activates it again for its own node. The parameter changes a
+//! plug-in makes itself, from its editor, come back through
+//! [`ClapHost::take_param_changes`], each gesture as one change.
+//!
+//! Plug-ins run in Beatlayer's own process until Phase 10's sandbox, so a
+//! plug-in that crashes takes the app with it. A plug-in that fails a
+//! call (it can't be loaded, refuses to activate, refuses a state, or
+//! returns an error from processing) is contained: see the spec's rules.
+
+mod describe;
+mod events;
+mod handlers;
+mod node;
+
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::ffi::CString;
+use std::fmt;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::Ordering::Relaxed;
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::thread::ThreadId;
+
+use bl_engine::{DeviceType, Node, NodeConfig, NodeFactory};
+use bl_model::{
+    Device, DeviceDescription, DeviceId, DeviceKind, ParamId, PluginFormat, PluginState,
+};
+use clack_extensions::audio_ports::{AudioPortInfoBuffer, PluginAudioPorts};
+use clack_extensions::gui::{GuiApiType, GuiConfiguration, PluginGui};
+use clack_extensions::latency::PluginLatency;
+use clack_extensions::params::PluginParams;
+use clack_extensions::state::PluginState as StateExtension;
+use clack_host::prelude::*;
+
+pub use node::ClapNode;
+
+use handlers::{Host, MainThread, ProcessorData, Shared};
+use node::{HostEnds, MAX_CHANNELS, ParamOut};
+
+/// Why a CLAP host call failed. Nothing changed.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ClapError {
+    /// The file isn't a CLAP plug-in Beatlayer can load, and why.
+    Load(String),
+    /// No plug-in of that ID is known.
+    UnknownPlugin(String),
+    /// The device has no running plug-in: it isn't a CLAP device, or its
+    /// plug-in couldn't be loaded.
+    NoInstance(DeviceId),
+    /// The plug-in refused, and what it refused.
+    Refused(String),
+    /// It was called off the main thread.
+    WrongThread,
+}
+
+impl fmt::Display for ClapError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Load(why) => write!(f, "couldn't load the plug-in: {why}"),
+            Self::UnknownPlugin(id) => write!(f, "no CLAP plug-in {id} is loaded"),
+            Self::NoInstance(device) => write!(f, "{device} has no running CLAP plug-in"),
+            Self::Refused(what) => write!(f, "the plug-in refused {what}"),
+            Self::WrongThread => f.write_str("CLAP's main-thread calls run on the main thread"),
+        }
+    }
+}
+
+impl std::error::Error for ClapError {}
+
+/// A plug-in Beatlayer can make devices of, and the file it's in.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClapType {
+    /// The plug-in file or bundle.
+    pub path: PathBuf,
+    /// Its device type: kind, name, role, and its parameters.
+    pub device_type: DeviceType,
+}
+
+/// A parameter change a plug-in made itself, such as from its editor: one
+/// for each gesture, with its final value, or one for each change outside a
+/// gesture.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ParamChange {
+    /// The device.
+    pub device: DeviceId,
+    /// The parameter.
+    pub param: ParamId,
+    /// Its new value.
+    pub value: f64,
+}
+
+/// What a device's plug-in is doing, for `plugin.info`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PluginStatus {
+    /// The plug-in's CLAP ID.
+    pub plugin_id: String,
+    /// The file it was loaded from.
+    pub path: PathBuf,
+    /// Whether it's active: activated for a node and processing.
+    pub active: bool,
+    /// The latency it reported when last activated, in frames.
+    pub latency: u32,
+    /// What went wrong with it, if anything: it couldn't be loaded,
+    /// refused to activate, or failed while processing.
+    pub failure: Option<String>,
+    /// Whether it has an editor that opens in a window of its own.
+    pub has_editor: bool,
+    /// Whether its editor is open.
+    pub editor_open: bool,
+    /// Each parameter's value, as the plug-in reports it.
+    pub values: Vec<(ParamId, f64)>,
+}
+
+/// Things only the owner thread may touch: the plug-in instances, which
+/// CLAP binds to the main thread.
+struct MainOnly<T> {
+    owner: ThreadId,
+    value: T,
+}
+
+// SAFETY: the value is reached only through `get`, which checks it's on
+// the thread that made it; the instances inside never leave that thread.
+unsafe impl<T> Send for MainOnly<T> {}
+
+impl<T> MainOnly<T> {
+    fn get(&mut self) -> Result<&mut T, ClapError> {
+        if std::thread::current().id() == self.owner {
+            Ok(&mut self.value)
+        } else {
+            Err(ClapError::WrongThread)
+        }
+    }
+}
+
+/// A node the compiler thread made, waiting for its plug-in.
+struct Request {
+    device: Device,
+    config: NodeConfig,
+    ends: HostEnds,
+}
+
+/// What the host and its factory share.
+struct Inner {
+    owner: ThreadId,
+    info: HostInfo,
+    requests: Mutex<Vec<Request>>,
+    types: Mutex<Vec<ClapType>>,
+    main: Mutex<MainOnly<Main>>,
+}
+
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// The main thread's plug-ins.
+#[derive(Default)]
+struct Main {
+    entries: HashMap<PathBuf, PluginEntry>,
+    instances: BTreeMap<DeviceId, Instance>,
+    /// Devices whose plug-in couldn't be made, and why.
+    missing: BTreeMap<DeviceId, (String, PathBuf, String)>,
+    /// Plug-ins let go of while a node still had them, waiting for their
+    /// processors to come back so they can be deactivated and destroyed on
+    /// the main thread.
+    closing: Vec<(DeviceId, Instance)>,
+    changes: Vec<ParamChange>,
+}
+
+/// One device's plug-in.
+struct Instance {
+    plugin_id: String,
+    path: PathBuf,
+    instance: PluginInstance<Host>,
+    /// The node it runs for, and nodes it ran for that haven't given its
+    /// processor back yet.
+    ends: Option<HostEnds>,
+    retired: Vec<HostEnds>,
+    config: Option<NodeConfig>,
+    /// A node has its processor.
+    out: bool,
+    /// Activation failed for this node; it isn't tried again until the
+    /// next node or state.
+    refused: Option<String>,
+    failure: Option<String>,
+    latency: u32,
+    editor_open: bool,
+    gestures: BTreeSet<u32>,
+    held: BTreeMap<u32, f64>,
+}
+
+/// The CLAP host: CLAP's main thread for every plug-in, on the thread that
+/// made it.
+///
+/// Its methods run only on that thread and return [`ClapError::WrongThread`]
+/// elsewhere. [`ClapHost::idle`] must run there often (each frame, as the
+/// shell's poll does) for new nodes to get their plug-ins.
+#[derive(Clone)]
+pub struct ClapHost {
+    inner: Arc<Inner>,
+}
+
+impl Default for ClapHost {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Debug for ClapHost {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ClapHost").finish_non_exhaustive()
+    }
+}
+
+impl ClapHost {
+    /// A host with no plug-ins, whose main thread is this one.
+    #[must_use]
+    pub fn new() -> Self {
+        let owner = std::thread::current().id();
+        let info = HostInfo::new(
+            "Beatlayer",
+            "Beatlayer",
+            "https://github.com/loombridge/beatlayer",
+            env!("CARGO_PKG_VERSION"),
+        )
+        .unwrap_or_else(|_| unreachable!("the host's names have no NUL"));
+        Self {
+            inner: Arc::new(Inner {
+                owner,
+                info,
+                requests: Mutex::new(Vec::new()),
+                types: Mutex::new(Vec::new()),
+                main: Mutex::new(MainOnly {
+                    owner,
+                    value: Main::default(),
+                }),
+            }),
+        }
+    }
+
+    /// The factory for the engine's registry, which makes a node for each
+    /// CLAP device.
+    #[must_use]
+    pub fn factory(&self) -> ClapFactory {
+        ClapFactory {
+            inner: Arc::clone(&self.inner),
+        }
+    }
+
+    /// Loads the CLAP file or bundle at `path` and returns the plug-ins in
+    /// it as device types, which devices can then be made of.
+    ///
+    /// # Errors
+    ///
+    /// [`ClapError::Load`] if it isn't a CLAP plug-in or offers none.
+    pub fn load(&self, path: &Path) -> Result<Vec<ClapType>, ClapError> {
+        let mut guard = lock(&self.inner.main);
+        let main = guard.get()?;
+        let entry = entry(main, path)?;
+        let factory = entry
+            .get_plugin_factory()
+            .ok_or_else(|| ClapError::Load("it offers no plug-ins".to_owned()))?;
+        let mut found = Vec::new();
+        for descriptor in factory.plugin_descriptors() {
+            let Some(id) = descriptor.id() else { continue };
+            let Ok(id) = id.to_str() else { continue };
+            let name = descriptor
+                .name()
+                .and_then(|n| n.to_str().ok())
+                .filter(|n| !n.trim().is_empty())
+                .unwrap_or(id)
+                .to_owned();
+            let role = describe::role(descriptor.features());
+            let mut probe = new_instance(&entry, id, &self.inner.info)?;
+            let params = describe::params(&mut probe.plugin_handle());
+            drop(probe);
+            found.push(ClapType {
+                path: path.to_owned(),
+                device_type: DeviceType {
+                    kind: kind(id),
+                    name,
+                    role,
+                    description: DeviceDescription::new(params),
+                    sidechain: false,
+                },
+            });
+        }
+        drop(guard);
+        if found.is_empty() {
+            return Err(ClapError::Load("it offers no plug-ins".to_owned()));
+        }
+        let mut types = lock(&self.inner.types);
+        for found in &found {
+            types.retain(|t| t.device_type.kind != found.device_type.kind);
+            types.push(found.clone());
+        }
+        Ok(found)
+    }
+
+    /// The plug-ins loaded so far, as device types.
+    #[must_use]
+    pub fn types(&self) -> Vec<ClapType> {
+        lock(&self.inner.types).clone()
+    }
+
+    /// Does the main thread's work: gives new nodes their plug-ins,
+    /// deactivates plug-ins their nodes gave back, restarts plug-ins that
+    /// asked, calls back plug-ins that asked, and collects the parameter
+    /// changes plug-ins made. Returns whether anything a window shows may
+    /// have changed.
+    pub fn idle(&self) -> bool {
+        let requests = std::mem::take(&mut *lock(&self.inner.requests));
+        let mut guard = lock(&self.inner.main);
+        let Ok(main) = guard.get() else { return false };
+        let mut changed = !requests.is_empty();
+        for request in requests {
+            serve(main, request, &self.inner);
+        }
+        let mut changes = Vec::new();
+        for (&device, instance) in &mut main.instances {
+            changed |= pump(device, instance, &mut changes);
+        }
+        let mut discarded = Vec::new();
+        for (device, instance) in &mut main.closing {
+            pump(*device, instance, &mut discarded);
+        }
+        main.closing.retain(|(_, instance)| instance.out);
+        changed |= !changes.is_empty();
+        main.changes.extend(changes);
+        changed
+    }
+
+    /// The parameter changes plug-ins made themselves since the last call:
+    /// each gesture once, with its final value.
+    pub fn take_param_changes(&self) -> Vec<ParamChange> {
+        let mut guard = lock(&self.inner.main);
+        guard
+            .get()
+            .map(|main| std::mem::take(&mut main.changes))
+            .unwrap_or_default()
+    }
+
+    /// The device's plug-in's own state, with the file it came from, as the
+    /// set saves it.
+    ///
+    /// # Errors
+    ///
+    /// [`ClapError::NoInstance`] if the device has no plug-in running, and
+    /// [`ClapError::Refused`] if the plug-in won't save.
+    pub fn save_state(&self, device: DeviceId) -> Result<PluginState, ClapError> {
+        let mut guard = lock(&self.inner.main);
+        let instance = instance(guard.get()?, device)?;
+        let mut data = Vec::new();
+        let plugin = instance.instance.plugin_handle();
+        if let Some(state) = plugin.get_extension::<StateExtension>() {
+            state
+                .save(&plugin, &mut data)
+                .map_err(|_| ClapError::Refused("to save its state".to_owned()))?;
+        }
+        Ok(PluginState {
+            path: instance.path.to_string_lossy().into_owned(),
+            data,
+        })
+    }
+
+    /// Gives the device's plug-in a state it saved before. The plug-in
+    /// keeps the state it had if it refuses.
+    ///
+    /// # Errors
+    ///
+    /// [`ClapError::NoInstance`] if the device has no plug-in running, and
+    /// [`ClapError::Refused`] if the plug-in refuses the state.
+    pub fn load_state(&self, device: DeviceId, data: &[u8]) -> Result<(), ClapError> {
+        let mut guard = lock(&self.inner.main);
+        let instance = instance(guard.get()?, device)?;
+        load_state(instance, data)?;
+        // A state that changes its latency, say, asks for a restart; a
+        // plug-in that refused to activate gets another try.
+        instance.refused = None;
+        Ok(())
+    }
+
+    /// Opens the device's plug-in's editor in a window of its own, titled
+    /// `title`. Embedding an editor in Beatlayer's own window is WP-2.10's.
+    ///
+    /// # Errors
+    ///
+    /// [`ClapError::NoInstance`] without a plug-in, and
+    /// [`ClapError::Refused`] if it has no editor that opens in its own
+    /// window, or it won't open.
+    pub fn open_editor(&self, device: DeviceId, title: &str) -> Result<(), ClapError> {
+        let mut guard = lock(&self.inner.main);
+        let instance = instance(guard.get()?, device)?;
+        if instance.editor_open {
+            return Ok(());
+        }
+        let mut plugin = instance.instance.plugin_handle();
+        let (gui, configuration) = floating_editor(&mut plugin)
+            .ok_or_else(|| ClapError::Refused("to open its editor in a window".to_owned()))?;
+        gui.create(&plugin, configuration)
+            .map_err(|_| ClapError::Refused("to open its editor".to_owned()))?;
+        if let Ok(title) = CString::new(title) {
+            gui.suggest_title(&plugin, &title);
+        }
+        if gui.show(&plugin).is_err() {
+            gui.destroy(&plugin);
+            return Err(ClapError::Refused("to show its editor".to_owned()));
+        }
+        instance.editor_open = true;
+        Ok(())
+    }
+
+    /// Closes the device's plug-in's editor, if it's open.
+    ///
+    /// # Errors
+    ///
+    /// [`ClapError::NoInstance`] without a plug-in.
+    pub fn close_editor(&self, device: DeviceId) -> Result<(), ClapError> {
+        let mut guard = lock(&self.inner.main);
+        let instance = instance(guard.get()?, device)?;
+        close_editor(instance);
+        Ok(())
+    }
+
+    /// What the device's plug-in is doing, or `None` if the device has no
+    /// CLAP plug-in, running or failed.
+    #[must_use]
+    pub fn status(&self, device: DeviceId) -> Option<PluginStatus> {
+        let mut guard = lock(&self.inner.main);
+        let main = guard.get().ok()?;
+        if let Some((plugin_id, path, why)) = main.missing.get(&device) {
+            return Some(PluginStatus {
+                plugin_id: plugin_id.clone(),
+                path: path.clone(),
+                active: false,
+                latency: 0,
+                failure: Some(why.clone()),
+                has_editor: false,
+                editor_open: false,
+                values: Vec::new(),
+            });
+        }
+        let instance = main.instances.get_mut(&device)?;
+        let mut plugin = instance.instance.plugin_handle();
+        let has_editor = floating_editor(&mut plugin).is_some();
+        let values = plugin
+            .get_extension::<PluginParams>()
+            .map(|params| {
+                describe::params(&mut plugin)
+                    .iter()
+                    .filter_map(|p| {
+                        let id = ClapId::from_raw(p.id.0)?;
+                        Some((p.id, params.get_value(&plugin, id)?))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        Some(PluginStatus {
+            plugin_id: instance.plugin_id.clone(),
+            path: instance.path.clone(),
+            active: instance.out,
+            latency: instance.latency,
+            failure: instance
+                .failure
+                .clone()
+                .or_else(|| instance.refused.clone()),
+            has_editor,
+            editor_open: instance.editor_open,
+            values,
+        })
+    }
+
+    /// Lets go of every plug-in whose device isn't in `keep`, as when a set
+    /// closes. Their nodes must be gone first; any still running keeps its
+    /// plug-in until it's dropped.
+    pub fn retain(&self, keep: &BTreeSet<DeviceId>) {
+        let mut guard = lock(&self.inner.main);
+        let Ok(main) = guard.get() else { return };
+        main.missing.retain(|device, _| keep.contains(device));
+        let gone: Vec<DeviceId> = main
+            .instances
+            .keys()
+            .filter(|d| !keep.contains(d))
+            .copied()
+            .collect();
+        for device in gone {
+            if let Some(instance) = main.instances.remove(&device) {
+                close(main, device, instance);
+            }
+        }
+    }
+
+    /// Lets go of every plug-in, as when another set opens.
+    pub fn clear(&self) {
+        self.retain(&BTreeSet::new());
+    }
+}
+
+/// The CLAP plug-ins' factory for the engine's registry. It makes each CLAP
+/// device's node at once; the host gives the node its plug-in.
+pub struct ClapFactory {
+    inner: Arc<Inner>,
+}
+
+impl NodeFactory for ClapFactory {
+    fn create(&self, device: &Device, config: &NodeConfig) -> Option<Box<dyn Node>> {
+        let DeviceKind::Plugin {
+            format: PluginFormat::Clap,
+            ..
+        } = &device.kind
+        else {
+            return None;
+        };
+        let (node, ends) = ClapNode::new(config);
+        lock(&self.inner.requests).push(Request {
+            device: device.clone(),
+            config: *config,
+            ends,
+        });
+        if std::thread::current().id() == self.inner.owner {
+            ClapHost {
+                inner: Arc::clone(&self.inner),
+            }
+            .idle();
+        }
+        Some(Box::new(node))
+    }
+
+    fn device_types(&self) -> Vec<DeviceType> {
+        lock(&self.inner.types)
+            .iter()
+            .map(|t| t.device_type.clone())
+            .collect()
+    }
+}
+
+/// A CLAP plug-in's device kind.
+fn kind(id: &str) -> DeviceKind {
+    DeviceKind::Plugin {
+        format: PluginFormat::Clap,
+        plugin_id: id.to_owned(),
+    }
+}
+
+/// The plug-in file at `path`, loaded once.
+fn entry(main: &mut Main, path: &Path) -> Result<PluginEntry, ClapError> {
+    if let Some(entry) = main.entries.get(path) {
+        return Ok(entry.clone());
+    }
+    // SAFETY: loading a plug-in runs its code in this process, which is
+    // what hosting it in process means (the architecture, "Plug-in
+    // hosting"); clack checks the entry point and the CLAP version.
+    let entry = unsafe { PluginEntry::load(path) }.map_err(|e| ClapError::Load(e.to_string()))?;
+    main.entries.insert(path.to_owned(), entry.clone());
+    Ok(entry)
+}
+
+fn new_instance(
+    entry: &PluginEntry,
+    id: &str,
+    info: &HostInfo,
+) -> Result<PluginInstance<Host>, ClapError> {
+    let id = CString::new(id).map_err(|_| ClapError::UnknownPlugin(id.to_owned()))?;
+    PluginInstance::<Host>::new(
+        |()| Shared::default(),
+        |_| MainThread::default(),
+        entry,
+        &id,
+        info,
+    )
+    .map_err(|e| ClapError::Load(e.to_string()))
+}
+
+fn instance(main: &mut Main, device: DeviceId) -> Result<&mut Instance, ClapError> {
+    main.instances
+        .get_mut(&device)
+        .ok_or(ClapError::NoInstance(device))
+}
+
+fn load_state(instance: &mut Instance, data: &[u8]) -> Result<(), ClapError> {
+    let plugin = instance.instance.plugin_handle();
+    let state = plugin
+        .get_extension::<StateExtension>()
+        .ok_or_else(|| ClapError::Refused("a state: it keeps none".to_owned()))?;
+    state
+        .load(&plugin, &mut &data[..])
+        .map_err(|_| ClapError::Refused("the state".to_owned()))
+}
+
+/// The plug-in's editor, if it opens in a window of its own on this
+/// platform.
+fn floating_editor(
+    plugin: &mut PluginMainThreadHandle<'_>,
+) -> Option<(PluginGui, GuiConfiguration<'static>)> {
+    let gui = plugin.get_extension::<PluginGui>()?;
+    let configuration = GuiConfiguration {
+        api_type: GuiApiType::default_for_current_platform()?,
+        is_floating: true,
+    };
+    gui.is_api_supported(plugin, configuration)
+        .then_some((gui, configuration))
+}
+
+fn close_editor(instance: &mut Instance) {
+    if !instance.editor_open {
+        return;
+    }
+    let plugin = instance.instance.plugin_handle();
+    if let Some(gui) = plugin.get_extension::<PluginGui>() {
+        let _ = gui.hide(&plugin);
+        gui.destroy(&plugin);
+    }
+    instance.editor_open = false;
+}
+
+/// Lets go of a plug-in: closes its editor and asks its node for its
+/// processor, keeping it until that's back.
+fn close(main: &mut Main, device: DeviceId, mut instance: Instance) {
+    close_editor(&mut instance);
+    for ends in instance.ends.iter().chain(&instance.retired) {
+        ends.status.hand_back.store(true, Relaxed);
+    }
+    instance.refused = Some("let go of".to_owned());
+    let mut discarded = Vec::new();
+    pump(device, &mut instance, &mut discarded);
+    if instance.out {
+        main.closing.push((device, instance));
+    }
+}
+
+/// Gives a new node its plug-in, making the plug-in if the device has none.
+fn serve(main: &mut Main, request: Request, inner: &Inner) {
+    let Request {
+        device,
+        config,
+        ends,
+    } = request;
+    let DeviceKind::Plugin { plugin_id, .. } = &device.kind else {
+        return;
+    };
+    // A plug-in left from another set under the same ID is let go of.
+    if main
+        .instances
+        .get(&device.id)
+        .is_some_and(|instance| instance.plugin_id != *plugin_id)
+        && let Some(old) = main.instances.remove(&device.id)
+    {
+        close(main, device.id, old);
+    }
+    if !main.instances.contains_key(&device.id) {
+        let path = device
+            .plugin
+            .as_ref()
+            .map(|p| PathBuf::from(&p.path))
+            .filter(|p| !p.as_os_str().is_empty())
+            .or_else(|| {
+                lock(&inner.types)
+                    .iter()
+                    .find(|t| t.device_type.kind == device.kind)
+                    .map(|t| t.path.clone())
+            });
+        let made = path
+            .clone()
+            .ok_or_else(|| ClapError::UnknownPlugin(plugin_id.clone()))
+            .and_then(|path| {
+                let entry = entry(main, &path)?;
+                new_instance(&entry, plugin_id, &inner.info).map(|i| (i, path))
+            });
+        let (plugin, path) = match made {
+            Ok(made) => made,
+            Err(error) => {
+                // Spec: clap-hosting R12. The device stays, passing its
+                // input through, and keeps its saved state for when the
+                // plug-in is found.
+                main.missing.insert(
+                    device.id,
+                    (
+                        plugin_id.clone(),
+                        path.unwrap_or_default(),
+                        error.to_string(),
+                    ),
+                );
+                return;
+            }
+        };
+        main.missing.remove(&device.id);
+        let mut instance = Instance {
+            plugin_id: plugin_id.clone(),
+            path,
+            instance: plugin,
+            ends: None,
+            retired: Vec::new(),
+            config: None,
+            out: false,
+            refused: None,
+            failure: None,
+            latency: 0,
+            editor_open: false,
+            gestures: BTreeSet::new(),
+            held: BTreeMap::new(),
+        };
+        // Spec: clap-hosting R9, R11. The saved state first, then the
+        // set's parameter values over it.
+        if let Some(saved) = device.plugin.as_ref().filter(|p| !p.data.is_empty())
+            && let Err(error) = load_state(&mut instance, &saved.data)
+        {
+            instance.failure = Some(format!("{error}; it starts from its defaults"));
+        }
+        set_values(&mut instance, &device);
+        main.instances.insert(device.id, instance);
+    }
+    let Some(instance) = main.instances.get_mut(&device.id) else {
+        return;
+    };
+    if let Some(old) = instance.ends.take() {
+        old.status.hand_back.store(true, Relaxed);
+        instance.retired.push(old);
+    }
+    instance.ends = Some(ends);
+    instance.config = Some(config);
+    instance.refused = None;
+}
+
+/// Sets the plug-in's parameters to the device's values, while it's
+/// inactive.
+fn set_values(instance: &mut Instance, device: &Device) {
+    if device.params.is_empty() {
+        return;
+    }
+    let Some(mut plugin) = instance.instance.inactive_plugin_handle() else {
+        return;
+    };
+    let Some(params) = plugin.get_extension::<PluginParams>() else {
+        return;
+    };
+    let mut events = EventBuffer::with_capacity(device.params.len());
+    for (param, value) in &device.params {
+        if let Some(id) = ClapId::from_raw(param.0) {
+            events.push(&clack_host::events::event_types::ParamValueEvent::new(
+                0,
+                id,
+                Pckn::match_all(),
+                *value,
+            ));
+        }
+    }
+    params.flush(
+        &mut plugin,
+        &InputEvents::from_buffer(&events),
+        &mut OutputEvents::void(),
+    );
+}
+
+/// One plug-in's main-thread work. Returns whether anything changed.
+fn pump(device: DeviceId, instance: &mut Instance, changes: &mut Vec<ParamChange>) -> bool {
+    let mut changed = false;
+    // Processors handed back are deactivated.
+    let mut returned = Vec::new();
+    for ends in instance.ends.iter_mut().chain(instance.retired.iter_mut()) {
+        while let Ok(processor) = ends.from_node.pop() {
+            returned.push(processor);
+        }
+        while let Ok(change) = ends.params.pop() {
+            take_change(
+                device,
+                (&mut instance.gestures, &mut instance.held),
+                change,
+                changes,
+            );
+        }
+    }
+    for processor in returned {
+        let stopped = processor.into_stopped();
+        if stopped.matches(&instance.instance) {
+            instance.instance.deactivate(stopped);
+        }
+        instance.out = false;
+        changed = true;
+    }
+    // A node dropped with the processor still in its queue drops it there.
+    if instance.out && !instance.instance.is_active() {
+        instance.out = false;
+    }
+    if instance.out && instance.instance.try_deactivate().is_ok() {
+        instance.out = false;
+    }
+    instance
+        .retired
+        .retain(|ends| !(ends.from_node.is_abandoned() && ends.from_node.is_empty()));
+
+    // A restart, or a new latency, while it's out: ask for it back.
+    let restart = instance
+        .instance
+        .access_shared_handler(|s| s.restart.swap(false, Relaxed))
+        | instance
+            .instance
+            .access_handler(|m| m.latency_changed.replace(false));
+    if restart
+        && instance.out
+        && let Some(ends) = &instance.ends
+    {
+        ends.status.hand_back.store(true, Relaxed);
+    }
+    if let Some(ends) = &instance.ends
+        && ends.status.failed.load(Relaxed)
+        && instance.failure.is_none()
+    {
+        instance.failure = Some("it failed while processing; the device is silent".to_owned());
+        changed = true;
+    }
+
+    // Activate it for its node.
+    if !instance.out
+        && instance.refused.is_none()
+        && let (Some(ends), Some(config)) = (&mut instance.ends, instance.config)
+        && !ends.to_node.is_abandoned()
+        && !instance.instance.is_active()
+    {
+        changed = true;
+        match activate(&mut instance.instance, &config) {
+            Ok((processor, latency)) => {
+                instance.latency = latency;
+                ends.status.latency.store(latency, Relaxed);
+                if ends.to_node.push(processor).is_ok() {
+                    instance.out = true;
+                }
+            }
+            Err(why) => instance.refused = Some(why),
+        }
+    }
+
+    if instance
+        .instance
+        .access_shared_handler(|s| s.callback.swap(false, Relaxed))
+    {
+        instance.instance.call_on_main_thread_callback();
+    }
+    if instance
+        .instance
+        .access_shared_handler(|s| s.editor_closed.swap(false, Relaxed))
+    {
+        close_editor(instance);
+        changed = true;
+    }
+    changed
+}
+
+/// Spec: clap-hosting R6. A change inside a gesture waits for its end.
+fn take_change(
+    device: DeviceId,
+    (gestures, held): (&mut BTreeSet<u32>, &mut BTreeMap<u32, f64>),
+    change: ParamOut,
+    changes: &mut Vec<ParamChange>,
+) {
+    let mut emit = |id: u32, value: f64| {
+        let param = ParamId(id);
+        changes.retain(|c| !(c.device == device && c.param == param));
+        changes.push(ParamChange {
+            device,
+            param,
+            value,
+        });
+    };
+    match change {
+        ParamOut::Begin(id) => {
+            gestures.insert(id);
+        }
+        ParamOut::Value(id, value) => {
+            if gestures.contains(&id) {
+                held.insert(id, value);
+            } else {
+                emit(id, value);
+            }
+        }
+        ParamOut::End(id) => {
+            gestures.remove(&id);
+            if let Some(value) = held.remove(&id) {
+                emit(id, value);
+            }
+        }
+    }
+}
+
+/// Activates a plug-in for a node's settings. Returns its processor and
+/// its latency, or why it refused.
+fn activate(
+    instance: &mut PluginInstance<Host>,
+    config: &NodeConfig,
+) -> Result<(node::Processor, u32), String> {
+    let mut plugin = instance.plugin_handle();
+    let ports = plugin.get_extension::<PluginAudioPorts>();
+    let mut buffer = AudioPortInfoBuffer::default();
+    let mut channels = |is_input: bool| {
+        ports
+            .and_then(|ports| {
+                (ports.count(&plugin, is_input) > 0)
+                    .then(|| ports.get(&plugin, 0, is_input, &mut buffer))
+                    .flatten()
+                    .map(|info| info.channel_count as usize)
+            })
+            .unwrap_or(0)
+            .min(MAX_CHANNELS)
+    };
+    let (inputs, outputs) = (channels(true), channels(false));
+    let params = plugin.get_extension::<PluginParams>();
+    let mut defaults: Vec<(u32, f64)> = describe::params(&mut plugin)
+        .iter()
+        .map(|p| (p.id.0, p.default))
+        .collect();
+    defaults.sort_by_key(|(id, _)| *id);
+    let max_frames = u32::try_from(config.max_frames.max(1)).unwrap_or(u32::MAX);
+    let processor = instance
+        .activate(
+            move |_, _| ProcessorData {
+                inputs,
+                outputs,
+                defaults,
+                params,
+            },
+            PluginAudioConfiguration {
+                sample_rate: f64::from(config.sample_rate.hz()),
+                min_frames_count: 1,
+                max_frames_count: max_frames,
+            },
+        )
+        .map_err(|e| format!("it refused to activate: {e}"))?;
+    let plugin = instance.plugin_handle();
+    let latency = plugin
+        .get_extension::<PluginLatency>()
+        .map_or(0, |latency| latency.get(&plugin));
+    Ok((processor.into(), latency))
+}

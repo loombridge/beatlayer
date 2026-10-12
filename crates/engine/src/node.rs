@@ -85,6 +85,84 @@ pub struct NodeEvent {
     pub value: ParamValue,
 }
 
+/// What a note event does (WP-2.6).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum NoteKind {
+    /// A key goes down.
+    On,
+    /// A key comes up.
+    Off,
+    /// A voice stops at once, as a hi-hat's choke group stops it.
+    Choke,
+}
+
+/// A note for a node, at a frame within the block (WP-2.6): what an
+/// instrument or MIDI effect plays, and what a plug-in sends back out.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NoteEvent {
+    /// The frame in the block where it happens. Always less than the
+    /// block's length.
+    pub offset: u32,
+    /// What it does.
+    pub kind: NoteKind,
+    /// The MIDI channel, from 0 to 15.
+    pub channel: u8,
+    /// The key, from 0 to 127.
+    pub key: u8,
+    /// The velocity, from 0 to 1.
+    pub velocity: f32,
+    /// The note's own ID, to tell notes on one key apart (MPE and CLAP's
+    /// per-note expressions), or `None`.
+    pub note_id: Option<u32>,
+}
+
+/// Where a node writes the notes it sends on (WP-2.6), with room for a
+/// fixed number made before the audio thread uses it: a note past that is
+/// dropped and counted (real-time rule 4).
+#[derive(Clone, Debug)]
+pub struct NoteBuffer {
+    notes: Vec<NoteEvent>,
+    dropped: u64,
+}
+
+impl NoteBuffer {
+    /// A buffer with room for `capacity` notes.
+    #[must_use]
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            notes: Vec::with_capacity(capacity),
+            dropped: 0,
+        }
+    }
+
+    /// Adds a note, or drops and counts it if the buffer is full. Never
+    /// allocates.
+    pub fn push(&mut self, note: NoteEvent) {
+        if self.notes.len() < self.notes.capacity() {
+            self.notes.push(note);
+        } else {
+            self.dropped += 1;
+        }
+    }
+
+    /// The notes, in the order they were written.
+    #[must_use]
+    pub fn notes(&self) -> &[NoteEvent] {
+        &self.notes
+    }
+
+    /// Empties the buffer, keeping its room.
+    pub fn clear(&mut self) {
+        self.notes.clear();
+    }
+
+    /// How many notes it has dropped since it was made.
+    #[must_use]
+    pub fn dropped(&self) -> u64 {
+        self.dropped
+    }
+}
+
 /// What every node in a program is made for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NodeConfig {
@@ -183,6 +261,13 @@ pub struct Block<'a> {
     /// What the device's detector hears from its sidechain input, planar
     /// with the block's channels and stride, while its sidechain is on.
     pub(crate) sidechain: Option<&'a [f32]>,
+    /// The notes the device plays in this block, in order of offset
+    /// (WP-2.6). The engine sends none yet: MIDI clips and inputs reach
+    /// devices with WP-2.1 and 2.2.
+    pub(crate) notes: &'a [NoteEvent],
+    /// Where the device writes the notes it sends on, if anything takes
+    /// them (WP-2.6).
+    pub(crate) notes_out: Option<&'a mut NoteBuffer>,
 }
 
 /// The tempo map of a block made outside a program: 120 BPM throughout.
@@ -230,6 +315,27 @@ impl<'a> Block<'a> {
             sample_rate,
             tempo: &DEFAULT_TEMPO,
             sidechain: None,
+            notes: &[],
+            notes_out: None,
+        }
+    }
+
+    /// The same block with notes to play, in order of offset, and a buffer
+    /// for the notes the node sends on (WP-2.6).
+    ///
+    /// # Panics
+    ///
+    /// If a note isn't inside the block.
+    #[must_use]
+    pub fn with_notes(self, notes: &'a [NoteEvent], out: &'a mut NoteBuffer) -> Self {
+        assert!(
+            notes.iter().all(|n| (n.offset as usize) < self.frames),
+            "a note is outside the block"
+        );
+        Self {
+            notes,
+            notes_out: Some(out),
+            ..self
         }
     }
 
@@ -291,6 +397,21 @@ impl<'a> Block<'a> {
     /// while it writes audio.
     pub fn events(&self) -> &'a [NodeEvent] {
         self.events
+    }
+
+    /// The notes the node plays in this block, in order of offset
+    /// (WP-2.6). Like [`events`](Self::events), the slice outlives the
+    /// borrow of the block.
+    pub fn notes(&self) -> &'a [NoteEvent] {
+        self.notes
+    }
+
+    /// Sends a note on from the node, if anything takes the block's notes;
+    /// otherwise it's dropped. Never allocates.
+    pub fn send_note(&mut self, note: NoteEvent) {
+        if let Some(out) = self.notes_out.as_deref_mut() {
+            out.push(note);
+        }
     }
 
     /// One channel's samples.

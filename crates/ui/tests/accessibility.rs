@@ -883,6 +883,34 @@ fn a_device(h: &mut Harness) {
         .unwrap();
 }
 
+/// The Test Sidechain on audio track 3, the selected track, its sidechain
+/// section shown, no device selected (WP-2.19b).
+fn a_sidechained_device(h: &mut Harness) {
+    let track = h.shell.editor().document().top_level().nth(2).unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let t = bl_engine::testing::key_type();
+    let added = h
+        .shell
+        .run(
+            "device.add",
+            json!({ "device": {
+                "kind": t.kind, "name": t.name, "role": t.role, "sidechain": true,
+            } }),
+        )
+        .unwrap();
+    h.shell
+        .run(
+            "device.show_sidechain",
+            json!({ "device": added["device"], "shown": true }),
+        )
+        .unwrap();
+    h.shell
+        .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
 /// The keyboard in the Device View, as a click there leaves it.
 fn device_view(h: &mut Harness) {
     h.shell.set_focused_area(bl_shell::Area::Detail);
@@ -1185,6 +1213,47 @@ fn paths() -> BTreeMap<&'static str, Path> {
             )),
         ),
         ("device.set_param", Exception(device_params)),
+        // A device's sidechain strip and section (routing R29): Enter on
+        // its buttons, Up and Down on its chooser and number boxes.
+        (
+            "device.show_sidechain",
+            main(
+                a_sidechained_device,
+                device_view,
+                "Show/Hide Sidechain",
+                Key::Enter,
+            ),
+        ),
+        (
+            "device.set_sidechain_listen",
+            main(
+                a_sidechained_device,
+                device_view,
+                "Sidechain Listen",
+                Key::Enter,
+            ),
+        ),
+        (
+            "device.set_sidechain_enabled",
+            main(a_sidechained_device, device_view, "External", Key::Enter),
+        ),
+        (
+            "device.set_sidechain_input",
+            main(
+                a_sidechained_device,
+                device_view,
+                "Sidechain Source",
+                Key::ArrowUp,
+            ),
+        ),
+        (
+            "device.set_sidechain_mix",
+            main(a_sidechained_device, device_view, "Mix", Key::ArrowDown),
+        ),
+        (
+            "device.set_sidechain_gain",
+            main(a_sidechained_device, device_view, "SC Gain", Key::ArrowDown),
+        ),
         ("device_view.state", Exception(Query)),
         // A send knob and the In/Out choosers (the routing spec): Up and
         // Down on them.

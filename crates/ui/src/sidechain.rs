@@ -35,6 +35,10 @@ const ROW_GAP: f32 = 2.0;
 /// is to observe).
 const DRAG_PER_POINT: f64 = 0.008;
 
+/// How far Up or Down moves a number box: a hundredth of its range (to
+/// observe).
+const KEY_STEP: f64 = 0.01;
+
 /// SC Gain's range for a drag, in dB, below which it's −∞ (to observe; the
 /// manual's range is to confirm).
 pub const SC_GAIN_DB: (f64, f64) = (-70.0, 24.0);
@@ -412,6 +416,30 @@ fn number_box(ui: &mut Ui, theme: &Theme, b: NumberBox, rect: Rect, events: &mut
     if response.drag_stopped() {
         events.push(UiEvent::EndGesture);
     }
+    // With the focus on it, Up and Down move it by a hundredth of its range
+    // (to observe), each an undo step.
+    if response.has_focus() {
+        ui.memory_mut(|m| {
+            m.set_focus_lock_filter(
+                b.id,
+                egui::EventFilter {
+                    vertical_arrows: true,
+                    ..Default::default()
+                },
+            );
+        });
+        let step = ui.input(|i| {
+            i32::from(i.key_pressed(egui::Key::ArrowUp))
+                - i32::from(i.key_pressed(egui::Key::ArrowDown))
+        });
+        if step != 0 {
+            let position = ((b.to_position)(b.value) + f64::from(step) * KEY_STEP).clamp(0.0, 1.0);
+            let value = (b.from_position)(position);
+            if value != b.value {
+                events.push(UiEvent::Invoke(set(value)));
+            }
+        }
+    }
     let reset = response.double_clicked()
         || (response.has_focus()
             && ui.input(|i| {
@@ -513,6 +541,29 @@ fn draw_chooser(
     if !enabled {
         return;
     }
+    if response.clicked() {
+        response.request_focus();
+    }
+    // With the focus on it, Up and Down choose the entry before or after the
+    // chosen one, as the In/Out section's choosers do.
+    if response.has_focus() {
+        ui.memory_mut(|m| {
+            m.set_focus_lock_filter(
+                id,
+                egui::EventFilter {
+                    vertical_arrows: true,
+                    ..Default::default()
+                },
+            );
+        });
+        let step = ui.input(|i| {
+            i32::from(i.key_pressed(egui::Key::ArrowDown))
+                - i32::from(i.key_pressed(egui::Key::ArrowUp))
+        });
+        if let Some(run) = stepped(chooser, step) {
+            events.push(UiEvent::Invoke(run.clone()));
+        }
+    }
     egui::Popup::menu(&response)
         .width(rect.width().max(120.0))
         .show(|ui| {
@@ -537,6 +588,32 @@ fn draw_chooser(
                 }
             }
         });
+}
+
+/// The entry `step` places after (or, negative, before) the chosen one:
+/// the first with nothing chosen.
+fn stepped(chooser: &Chooser, step: i32) -> Option<&Invocation> {
+    if step == 0 {
+        return None;
+    }
+    let runs: Vec<(&Invocation, bool)> = chooser
+        .entries
+        .iter()
+        .filter_map(|entry| match entry {
+            Entry::Choice {
+                run: Some(run),
+                chosen,
+                ..
+            } => Some((run, *chosen)),
+            _ => None,
+        })
+        .collect();
+    let at = runs.iter().position(|(_, chosen)| *chosen);
+    let next = match at {
+        Some(at) => at.checked_add_signed(step as isize)?,
+        None => 0,
+    };
+    runs.get(next).map(|(run, _)| *run)
 }
 
 #[cfg(test)]

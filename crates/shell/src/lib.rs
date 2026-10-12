@@ -26,6 +26,10 @@
 //!   one undo step through [`Shell::gesture`].
 //! - [`browser`]: the browser (places, browsing, search, preview, adding
 //!   files to the Arrangement), changed by its commands (WP-1.10).
+//! - [`devices`]: the Device View (WP-2.4): the selected device, folded
+//!   devices, the device clipboard, hot-swapping, and the `device.*`
+//!   commands that run on the shell (adding a device as a person does,
+//!   cut, copy, paste, duplicate, and presets).
 //! - [`export`]: exporting audio (WP-1.12): a range rendered offline
 //!   through the engine and written to a WAV, AIFF, or FLAC file, which
 //!   `export.audio` runs.
@@ -52,6 +56,7 @@ pub mod agent;
 pub mod arrangement;
 pub mod audio;
 pub mod browser;
+pub mod devices;
 pub mod export;
 pub mod files;
 pub mod mixer_controls;
@@ -67,6 +72,9 @@ pub mod transport;
 pub use bl_shell_spec::arrangement as arrangement_commands;
 /// The browser's command IDs and their argument and result types.
 pub use bl_shell_spec::browser as browser_commands;
+/// The Device View's command IDs and their argument and result types
+/// (WP-2.4).
+pub use bl_shell_spec::devices as device_commands;
 /// The Arrangement's editing command IDs and their argument and result
 /// types (WP-1.8b).
 pub use bl_shell_spec::editing as editing_commands;

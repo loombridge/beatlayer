@@ -684,6 +684,7 @@ impl BrowserUi {
             ),
             ItemKind::Audio => glyph(&painter, mark, Glyph::Wave, ink),
             ItemKind::Set => glyph(&painter, mark, Glyph::Set, ink),
+            ItemKind::Preset => glyph(&painter, mark, Glyph::Preset, ink),
         }
         let text_colour = if selected {
             theme.colors.text.0
@@ -720,6 +721,14 @@ impl BrowserUi {
                     json!({ "path": item.path, "keep_others": command(modifiers) }),
                 ),
                 ItemKind::Audio => invoke(events, ids::LOAD_SELECTED, json!({})),
+                // Spec: device-chains R19. While a device is hot-swapped, a
+                // preset loads into it.
+                ItemKind::Preset => {
+                    if !selected {
+                        invoke(events, ids::SELECT, json!({ "paths": [item.path] }));
+                    }
+                    invoke(events, ids::LOAD_SELECTED, json!({}));
+                }
                 ItemKind::Set => {}
             }
         } else if response.clicked() {
@@ -783,6 +792,7 @@ impl BrowserUi {
             }
             ItemKind::Audio => "audio file",
             ItemKind::Set => "Beatlayer set",
+            ItemKind::Preset => "Beatlayer device preset",
         };
         response
             .widget_info(|| WidgetInfo::selected(WidgetType::Other, true, selected, &item.name));
@@ -1117,7 +1127,7 @@ impl BrowserUi {
                     }
                 }
                 ItemKind::Audio => invoke(events, ids::PREVIEW, json!({ "path": item.path })),
-                ItemKind::Set => {}
+                ItemKind::Set | ItemKind::Preset => {}
             }
         }
         if left {
@@ -1342,6 +1352,7 @@ enum Glyph {
     Menu,
     Wave,
     Set,
+    Preset,
     Speaker,
 }
 
@@ -1385,6 +1396,9 @@ fn glyph(painter: &egui::Painter, rect: Rect, glyph: Glyph, colour: Color32) {
                     Stroke::new(1.0, colour),
                 );
             }
+        }
+        Glyph::Preset => {
+            painter.circle_stroke(c, s * 0.9, Stroke::new(1.0, colour));
         }
         Glyph::Set => {
             painter.rect_stroke(

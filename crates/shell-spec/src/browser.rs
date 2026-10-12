@@ -247,6 +247,9 @@ pub enum ItemKind {
     Audio,
     /// A Beatlayer set.
     Set,
+    /// A Beatlayer device preset, which loads into the device being
+    /// hot-swapped (WP-2.4).
+    Preset,
 }
 
 /// One row of the content pane.

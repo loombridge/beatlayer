@@ -26,6 +26,7 @@ use crate::commands::{
     self as ids, PathArgs, SaveAsArgs, SetResult, SettingsArgs, SwitchArgs, SwitchResult,
     TestToneArgs, TestToneState, ThemeArgs, ViewResult, ZoomArgs,
 };
+use crate::devices::{self, DeviceError, DeviceView};
 use crate::files::{ProjectFiles, SetStore, factory_default_set};
 use crate::mixer_controls::{self, Switch};
 use crate::mixer_view::{MixerOf, MixerView, MixerViewError};
@@ -36,6 +37,7 @@ use crate::settings::{
 };
 use bl_shell_spec::arrangement as view_ids;
 use bl_shell_spec::browser as browser_ids;
+use bl_shell_spec::devices as device_ids;
 use bl_shell_spec::editing as edit_ids;
 use bl_shell_spec::export as export_ids;
 use bl_shell_spec::mixer_view as mixer_ids;
@@ -165,6 +167,9 @@ pub enum Effect {
     /// Ask for a folder, then add it to the browser's Places with
     /// `browser.add_folder` (WP-1.10).
     PickFolder,
+    /// Start renaming a device in its title bar, where the person types the
+    /// new name; Return runs `device.rename` with it (WP-2.4).
+    RenameDevice(bl_model::DeviceId),
 }
 
 /// Where a gesture that edits the set is (WP-1.8b): see [`Shell::gesture`].
@@ -305,6 +310,9 @@ pub struct Shell {
     metering: bool,
     /// The agent API's last audio previews (WP-1.16).
     previews: crate::perception::Previews,
+    /// The Device View's selection, folded devices, clipboard, and
+    /// hot-swapping (WP-2.4).
+    devices: DeviceView,
 }
 
 impl fmt::Debug for Shell {
@@ -330,6 +338,24 @@ fn edit_error(id: &str, failure: EditFailure) -> ShellError {
             reason,
         },
         EditFailure::Refused(message) => ShellError::Failed {
+            command: id.to_owned(),
+            message,
+        },
+    }
+}
+
+/// The shell's error for a Device View command that didn't run.
+fn device_error(id: &str, error: DeviceError) -> ShellError {
+    match error {
+        DeviceError::InvalidArgs(message) => ShellError::InvalidArgs {
+            command: id.to_owned(),
+            message,
+        },
+        DeviceError::Unavailable(reason) => ShellError::Unavailable {
+            command: id.to_owned(),
+            reason,
+        },
+        DeviceError::Failed(message) => ShellError::Failed {
             command: id.to_owned(),
             message,
         },
@@ -406,6 +432,7 @@ impl Shell {
             meters: Vec::new(),
             metering: false,
             previews: crate::perception::Previews::default(),
+            devices: DeviceView::new(),
         };
         shell.give_agents_tokens();
         shell
@@ -807,7 +834,72 @@ impl Shell {
             .forget_missing_tracks(self.editor.document());
         self.mixer
             .clamp_scroll(self.editor.document(), &self.arrangement);
+        self.devices.forget_missing(self.editor.document());
         self.audio.sync(self.editor.document());
+    }
+
+    /// The Device View's selection, folded devices, clipboard, and
+    /// hot-swapping (WP-2.4).
+    #[must_use]
+    pub fn devices(&self) -> &DeviceView {
+        &self.devices
+    }
+
+    /// What the Device View shows: the selected track's chain (WP-2.4).
+    #[must_use]
+    pub fn device_view_state(&self) -> device_ids::DeviceViewState {
+        let doc = self.editor.document();
+        self.devices
+            .state(doc, devices::shown_track(&self.arrangement, doc))
+    }
+
+    /// Runs a Device View command and carries out what it asks of the rest
+    /// of the shell.
+    fn run_devices(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        let user_library = self.browser_view.user_library().map(Path::to_path_buf);
+        let result = self.devices.run(
+            id,
+            args,
+            devices::Context {
+                editor: &mut self.editor,
+                arrangement: &mut self.arrangement,
+                user_library: user_library.as_deref(),
+            },
+        );
+        let outcome = result.map_err(|error| device_error(id, error))?;
+        if outcome.document_changed {
+            self.dirty = true;
+            self.document_changed();
+        }
+        if let Some(message) = outcome.message {
+            self.set_message(message, false);
+        }
+        if let Some(route) = outcome.browse {
+            // Spec: device-chains R19. Hot-swapping shows the device's
+            // presets in the browser.
+            self.browser = true;
+            self.run_browser(browser_ids::OPEN_PLACE, json!({ "label": "user_library" }))
+                .ok();
+            for folder in route {
+                self.run_browser(
+                    browser_ids::OPEN_FOLDER,
+                    json!({ "path": folder, "open": true, "keep_others": true }),
+                )
+                .ok();
+            }
+        }
+        self.touch();
+        Ok(outcome.value)
+    }
+
+    /// The browser's selection, if it's one preset file and a device is
+    /// being hot-swapped: what Enter or a double-click loads into it.
+    fn hot_swap_preset(&self) -> Option<PathBuf> {
+        self.devices.hot_swap()?;
+        match self.browser_view.selected() {
+            [one] if bl_project::preset::is_preset(one) => Some(one.clone()),
+            _ => None,
+        }
     }
 
     /// What the Arrangement View shows (WP-1.8a).
@@ -1037,6 +1129,7 @@ impl Shell {
         let labelled = !matches!(id, model::UNDO | model::REDO)
             && (model::handles(id)
                 || edit_ids::handles(id)
+                || device_ids::handles(id)
                 || matches!(
                     id,
                     browser_ids::ADD_TO_ARRANGEMENT | browser_ids::LOAD_SELECTED
@@ -1308,6 +1401,11 @@ impl Shell {
             SOLO_IN_PLACE => Some(self.editor.document().settings().solo_in_place),
             ids::AUDIO_TOGGLE_ENGINE => Some(self.audio.engine_on()),
             browser_ids::SET_PREVIEW => Some(self.browser_view.preview_on()),
+            "device.set_show_preset_name" => self
+                .devices
+                .selected()
+                .and_then(|d| self.editor.document().device(d))
+                .map(|d| d.show_preset_name),
             _ if mixer_ids::handles(id) => self.mixer.switch_state(id, self.front_mixer()),
             _ => self.arrangement.switch_state(id),
         }
@@ -1386,6 +1484,27 @@ impl Shell {
         }
         if ids::handles(id) || transport_ids::handles(id) {
             return true;
+        }
+        if id == browser_ids::LOAD_SELECTED && self.hot_swap_preset().is_some() {
+            return true;
+        }
+        if device_ids::handles(id) {
+            let args = Self::object(args.clone());
+            let doc = self.editor.document();
+            return spec
+                .args
+                .as_ref()
+                .is_some_and(|schema| bl_commands::validate(schema, &args).is_ok())
+                && self.devices.can_run(
+                    id,
+                    &args,
+                    doc,
+                    devices::shown_track(&self.arrangement, doc),
+                );
+        }
+        if id == "device.rename" && args.get("name").is_none() {
+            // A person names the device in its title bar.
+            return self.devices.selected().is_some();
         }
         if browser_ids::handles(id) {
             // A person adding a folder picks it in a dialog.
@@ -1493,6 +1612,27 @@ impl Shell {
             fields.insert("id".to_owned(), json!(1));
             fields.entry("name").or_insert_with(|| json!(name));
             fields.entry("index").or_insert_with(|| json!(index));
+        }
+        if device_ids::ON_SELECTED.contains(&id) && !fields.contains_key("device") {
+            // Spec: device-chains R20. A key or menu item acts on the
+            // selected device, switching it where it switches.
+            let device = self
+                .devices
+                .selected()
+                .ok_or_else(|| ShellError::Unavailable {
+                    command: id.to_owned(),
+                    reason: "select a device first".to_owned(),
+                })?;
+            let current = self.editor.document().device(device);
+            fields.insert("device".to_owned(), json!(device));
+            if id == "device.set_show_preset_name" && !fields.contains_key("shown") {
+                let on = current.is_some_and(|d| d.show_preset_name);
+                fields.insert("shown".to_owned(), json!(!on));
+            }
+            if id == "device.set_enabled" && !fields.contains_key("enabled") {
+                let on = current.is_some_and(|d| d.enabled);
+                fields.insert("enabled".to_owned(), json!(!on));
+            }
         }
         if id == SOLO_IN_PLACE && !fields.contains_key("enabled") {
             // Spec: accessibility R9. Options ▸ Solo in Place switches the
@@ -1630,6 +1770,22 @@ impl Shell {
                 let switch = Switch::of_command(id).expect("just checked");
                 self.toggle_tracks(id, switch, args)
             }
+            "device.rename" if !has("name") => {
+                let args = self.filled_args(id, args)?;
+                let device = serde_json::from_value(args["device"].clone()).map_err(|error| {
+                    ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message: error.to_string(),
+                    }
+                })?;
+                self.effects.push(Effect::RenameDevice(device));
+                self.touch();
+                Ok(Value::Null)
+            }
+            _ if device_ids::ON_SELECTED.contains(&id) && !has("device") => {
+                let args = self.filled_args(id, args)?;
+                self.run(id, args)
+            }
             SOLO_IN_PLACE if !has("enabled") => {
                 let args = self.filled_args(id, args)?;
                 self.run(id, args)
@@ -1680,6 +1836,7 @@ impl Shell {
         if self.edit_gesture.is_some()
             && (model::handles(id)
                 || edit_ids::handles(id)
+                || device_ids::handles(id)
                 || id.starts_with("set.")
                 || id == ids::APP_QUIT)
         {
@@ -1795,6 +1952,22 @@ impl Shell {
                 self.touch();
             }
             return result.map(|state| to_value(&state));
+        }
+        if id == browser_ids::LOAD_SELECTED
+            && let Some(path) = self.hot_swap_preset()
+        {
+            // Spec: device-chains R19. Loading a preset while hot-swapping
+            // loads it into the device.
+            Self::args::<NoArgs>(id, args)?;
+            let loaded = devices::load_hot_swapped(&self.devices, &mut self.editor, &path)
+                .map_err(|error| device_error(id, error))?;
+            self.dirty = true;
+            self.document_changed();
+            self.touch();
+            return Ok(to_value(&loaded));
+        }
+        if device_ids::handles(id) {
+            return self.run_devices(id, args);
         }
         if browser_ids::handles(id) {
             return self.run_browser(id, args);

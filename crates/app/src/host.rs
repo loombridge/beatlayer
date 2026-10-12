@@ -913,6 +913,12 @@ impl Host {
                         .set_fullscreen(on.then_some(Fullscreen::Borderless(None)));
                 }
             }
+            Effect::RenameDevice(_) => {
+                if let Some(main) = &self.main {
+                    self.main_ui.apply_effect(&main.ctx, &effect);
+                    main.window.request_redraw();
+                }
+            }
             Effect::FocusArea(area) => {
                 if let Some(main) = &self.main {
                     main.window.focus_window();

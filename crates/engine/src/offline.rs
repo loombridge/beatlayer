@@ -167,6 +167,26 @@ impl Offline {
     }
 }
 
+impl Drop for Offline {
+    fn drop(&mut self) {
+        // The program and its nodes are freed here, before the engine is
+        // gone, as the drop thread frees them when an engine shuts down: a
+        // node's drop can hand things back (a plug-in to its host, WP-2.6b)
+        // that the caller then expects back. The processor and its queue
+        // let go of the program; collection frees it, then the node data it
+        // let go of, until a pass frees nothing.
+        let (sender, processor, monitor) = channel(self.processor.config());
+        drop(std::mem::replace(&mut self.processor, processor));
+        drop(std::mem::replace(&mut self.sender, sender));
+        drop(std::mem::replace(&mut self.monitor, monitor));
+        let mut held = usize::MAX;
+        while self.collector.held() < held {
+            held = self.collector.held();
+            self.collector.collect();
+        }
+    }
+}
+
 impl std::fmt::Debug for Offline {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Offline")
@@ -386,5 +406,46 @@ mod tests {
             .fold(0.0f32, |p, s| p.max(s.abs()));
         assert!(peak > 0.0, "the group's tone still plays");
         assert_eq!(offline.state().program, Some(11));
+    }
+
+    #[test]
+    fn a_dropped_engine_frees_its_nodes_on_the_spot() {
+        // An offline render's nodes go when it does, so whatever they hold
+        // (a plug-in borrowed from its host, WP-2.6b) is back at once.
+        let probe = std::sync::Arc::new(crate::testing::Probe::default());
+        let mut offline = Offline::new(
+            EngineConfig::new(SampleRate::HZ_48000, 256),
+            crate::testing::registry(&probe),
+        );
+        let mut editor = Editor::new();
+        let track = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id: track,
+                kind: TrackKind::Audio,
+                name: String::new(),
+                parent: None,
+                index: 0,
+            })
+            .unwrap();
+        let device = Device::new(
+            editor.new_id(),
+            "",
+            DeviceKind::Native {
+                device_type: crate::testing::DC.to_owned(),
+            },
+        );
+        editor
+            .apply(Command::InsertDevice {
+                track,
+                index: 0,
+                device,
+            })
+            .unwrap();
+        offline.sync(editor.document());
+        offline.process(256);
+        assert_eq!(probe.made.load(std::sync::atomic::Ordering::Relaxed), 1);
+        drop(offline);
+        assert_eq!(probe.dropped.load(std::sync::atomic::Ordering::Relaxed), 1);
     }
 }

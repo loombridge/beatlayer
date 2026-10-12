@@ -504,8 +504,11 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  through, without the loop, and is cut to its first 30 seconds. `track` \
                  previews one track as it sounds soloed; left out, the whole mix. 16-bit \
                  stereo at 48 kHz is about 190 KB a second: a lower `sample_rate` makes it \
-                 smaller. Rendering doesn't stop or disturb playback. The last 4 previews are \
-                 kept, for `perception.analyze`. Changes nothing in the set.",
+                 smaller. Plug-in devices render through the plug-ins the engine plays, lent \
+                 to the render, so while the transport plays a set with a CLAP plug-in the \
+                 preview is refused (run `transport.stop` first); otherwise rendering doesn't \
+                 stop or disturb playback. The last 4 previews are kept, for \
+                 `perception.analyze`. Changes nothing in the set.",
             )
             .permission(Permission::Read)
             .context(Global)
@@ -523,7 +526,9 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  range (`start`, `length`, and `track`, as for `perception.preview`) to \
                  render one for the analysis, up to ten minutes. `measure` picks what to \
                  measure; left out, everything. Tempo and key are estimates from the audio, \
-                 not the set's settings. Changes nothing in the set.",
+                 not the set's settings. A range renders as `perception.preview` does, \
+                 refused likewise while the transport plays a set with a CLAP plug-in. \
+                 Changes nothing in the set.",
             )
             .permission(Permission::Read)
             .context(Global)

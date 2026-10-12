@@ -104,8 +104,15 @@ fn media_of(fixture: &Fixture) -> Arc<dyn MediaLibrary> {
 /// Runs an export that must succeed, and checks the engine stayed off the
 /// heap.
 fn run(document: &bl_model::Document, media: Arc<dyn MediaLibrary>, job: &Job) -> Report {
-    let report = export::export(document, media, job, &AtomicBool::new(false), &mut |_| {})
-        .unwrap_or_else(|error| panic!("{}: {error}", job.path.display()));
+    let report = export::export(
+        document,
+        media,
+        None,
+        job,
+        &AtomicBool::new(false),
+        &mut |_| {},
+    )
+    .unwrap_or_else(|error| panic!("{}: {error}", job.path.display()));
     assert_eq!(report.heap_operations, 0, "the real-time rules");
     report
 }
@@ -582,6 +589,7 @@ fn cancelling_leaves_nothing_behind() {
                 let result = export::export(
                     scene.document(),
                     media_of(fixture),
+                    None,
                     &job,
                     &cancel,
                     &mut |done| {
@@ -622,6 +630,7 @@ fn a_failure_leaves_nothing_behind() {
         let result = export::export(
             scene.document(),
             media_of(fixture),
+            None,
             &job,
             &AtomicBool::new(false),
             &mut |_| {},
@@ -633,6 +642,7 @@ fn a_failure_leaves_nothing_behind() {
     let result = export::export(
         scene.document(),
         media_of(fixture),
+        None,
         &job(
             temp.0.join("nowhere/mix.wav"),
             FileType::Wav,

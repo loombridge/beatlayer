@@ -690,6 +690,7 @@ dependencies = [
  "bl-project",
  "bl-rt",
  "bl-shell",
+ "bl-test-clap",
  "clap",
  "claxon",
  "flacenc",

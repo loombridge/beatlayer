@@ -121,6 +121,12 @@ pub fn is_clap(doc: &Document, device: DeviceId) -> bool {
     })
 }
 
+/// Whether the set has a CLAP device.
+#[must_use]
+pub fn has_clap(doc: &Document) -> bool {
+    !clap_devices(doc).is_empty()
+}
+
 /// Every CLAP device in the set.
 fn clap_devices(doc: &Document) -> Vec<DeviceId> {
     doc.tracks()

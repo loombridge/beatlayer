@@ -15,6 +15,7 @@
 use bl_commands::Context::Global;
 use bl_commands::{CommandSpec, Permission, RegisterError, Registry};
 use bl_core::time::Ticks;
+use bl_model::TrackId;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -57,6 +58,23 @@ impl FileType {
     }
 }
 
+/// Which track or tracks to render (the export spec, S2; WP-2.26).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RenderedTrack {
+    /// The Main output (post-fader sum of every track, what you hear).
+    #[default]
+    Main,
+    /// All individual tracks in the set: audio and MIDI tracks that make audio,
+    /// group tracks, return tracks, and the Main track, one file each.
+    AllTracks,
+    /// The tracks currently selected in the Arrangement: writes one file per
+    /// selected track that makes audio.
+    SelectedTracks,
+    /// A single track by its ID.
+    Track(TrackId),
+}
+
 /// The noise added before rounding below 32 bits (the export spec, R7).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -69,6 +87,10 @@ pub enum Dither {
     /// processed further.
     #[default]
     Triangular,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 /// Arguments of `export.audio`.
@@ -110,6 +132,14 @@ pub struct ExportArgs {
     /// left alone and the export refused.
     #[serde(default)]
     pub replace: bool,
+    /// Which track(s) to render: `main` (the default), `all_tracks`,
+    /// `selected_tracks`, or a single track `{ "track": <id> }`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rendered_track: Option<RenderedTrack>,
+    /// Include return and Main effects when rendering individual tracks.
+    /// Unavailable (refused) when `rendered_track` is `main`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub include_return_and_main_effects: bool,
 }
 
 /// Where an export's range came from.
@@ -127,19 +157,23 @@ pub enum RangeSource {
 /// What `export.audio` returns.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ExportResult {
-    /// The file written.
+    /// The file written (or the base path if multiple files were written).
     pub path: String,
+    /// Every file written by the export: one for Main or a single track,
+    /// or one per track for all-tracks or selected-tracks exports.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<String>,
     /// Its type.
     pub file_type: FileType,
     /// Bits per sample.
     pub bit_depth: u8,
     /// Frames per second.
     pub sample_rate: u32,
-    /// Channels in each frame.
+    /// Channels in each frame (describes the first file in a multi-file export).
     pub channels: u16,
-    /// Frames in the file.
+    /// Frames in the file (describes the first file in a multi-file export).
     pub frames: u64,
-    /// The file's length in seconds.
+    /// The file's length in seconds (describes the first file in a multi-file export).
     pub seconds: f64,
     /// Where the range started, in ticks from 1.1.1.
     pub start: Ticks,
@@ -149,13 +183,14 @@ pub struct ExportResult {
     pub range: RangeSource,
     /// The dither used: `none` at 32 bits.
     pub dither: Dither,
-    /// The largest sample magnitude written, in dBFS (before rounding), or
-    /// null for silence.
+    /// The largest sample magnitude written across all rendered files, in dBFS
+    /// (before rounding), or null for silence.
     pub peak_dbfs: Option<f64>,
-    /// The gain Normalize applied, in dB: 0 without it.
+    /// The gain Normalize applied, in dB: 0 without it (describes the first file
+    /// in a multi-file export).
     pub gain_db: f64,
-    /// The rate the engine rendered at, which is higher than the file's
-    /// when the file's is below the engine's.
+    /// The rate the engine rendered at (describes the first file in a multi-file
+    /// export), which is higher than the file's when the file's is below the engine's.
     pub render_rate: u32,
     /// How long the export took, in seconds.
     pub took_seconds: f64,
@@ -175,20 +210,23 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     registry.register(
         CommandSpec::new(AUDIO, "Export Audio")
             .description(
-                "Renders the set's Main output (what you hear) to an audio file, offline and \
-                 faster than real time, as the File menu's Export Audio/Video does. `path` is the \
-                 file to write; `bit_depth` (16, 24, or 32) and `sample_rate` are required. The \
-                 file type follows the extension (`.wav`, `.aif`/`.aiff`, `.flac`; FLAC holds 16 \
-                 or 24 bits only). The range is `start` and `length` if given, otherwise the \
-                 Arrangement's time selection, otherwise the whole set from 1.1.1 to the end of \
-                 the last clip; it plays straight through, without the Arrangement loop. Below 32 \
-                 bits, `dither` adds `triangular` noise unless told `rectangular` or `none`. \
-                 `normalize` brings the highest peak to 0 dBFS. A rate below the engine's is \
-                 rendered at the engine's and converted down. The file is written under a \
-                 temporary name and appears only when it's complete. An existing file is \
-                 refused unless `replace` is true. Playback stops first, and plug-in devices \
-                 render through the plug-ins the engine plays, lent to the export and handed \
-                 back afterwards. Changes nothing in the set.",
+                "Renders the set's Main output (what you hear) or individual tracks to audio \
+                 files, offline and faster than real time, as the File menu's Export Audio/Video \
+                 does. `path` is the file to write; `bit_depth` (16, 24, or 32) and `sample_rate` \
+                 are required. `rendered_track` chooses `main` (the default), `all_tracks`, \
+                 `selected_tracks`, or a single track `{ \"track\": <id> }`. With an individual track, \
+                 `include_return_and_main_effects` includes return tracks and Main devices (unavailable \
+                 for `main`). Multi-track exports write one file per track beside `path`. The file type \
+                 follows the extension (`.wav`, `.aif`/`.aiff`, `.flac`; FLAC holds 16 or 24 bits only). \
+                 The range is `start` and `length` if given, otherwise the Arrangement's time \
+                 selection, otherwise the whole set from 1.1.1 to the end of the last clip; it \
+                 plays straight through, without the Arrangement loop. Below 32 bits, `dither` adds \
+                 `triangular` noise unless told `rectangular` or `none`. `normalize` brings the \
+                 highest peak to 0 dBFS. A rate below the engine's is rendered at the engine's and \
+                 converted down. Files are written under temporary names and appear only when \
+                 complete. Existing files are refused unless `replace` is true. Playback stops \
+                 first, and plug-in devices render through the plug-ins the engine plays, lent to \
+                 the export and handed back afterwards. Changes nothing in the set.",
             )
             .permission(Permission::External)
             .context(Global)
@@ -220,11 +258,33 @@ mod tests {
         let schema = spec.args.as_ref().unwrap();
         let ok = json!({ "path": "/a/b.wav", "bit_depth": 24, "sample_rate": 48000 });
         assert!(bl_commands::validate(schema, &ok).is_ok());
+
+        // RenderedTrack variants
+        for rendered in [
+            json!("main"),
+            json!("all_tracks"),
+            json!("selected_tracks"),
+            json!({ "track": 1 }),
+        ] {
+            let mut with_rendered = ok.clone();
+            with_rendered["rendered_track"] = rendered;
+            assert!(
+                bl_commands::validate(schema, &with_rendered).is_ok(),
+                "{with_rendered}"
+            );
+        }
+
+        let mut with_include = ok.clone();
+        with_include["include_return_and_main_effects"] = json!(true);
+        assert!(bl_commands::validate(schema, &with_include).is_ok());
+
         for bad in [
             json!({ "path": "/a/b.wav", "bit_depth": 8, "sample_rate": 48000 }),
             json!({ "path": "/a/b.wav", "bit_depth": 24 }),
             json!({ "path": "/a/b.wav", "bit_depth": 24, "sample_rate": 100 }),
             json!({ "path": "/a/b.wav", "bit_depth": 24, "sample_rate": 48000, "dither": "pow_r" }),
+            json!({ "path": "/a/b.wav", "bit_depth": 24, "sample_rate": 48000, "rendered_track": "invalid" }),
+            json!({ "path": "/a/b.wav", "bit_depth": 24, "sample_rate": 48000, "track": 1 }),
         ] {
             assert!(bl_commands::validate(schema, &bad).is_err(), "{bad}");
         }

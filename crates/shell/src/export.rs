@@ -34,11 +34,12 @@ use std::time::{Duration, Instant};
 use bl_core::time::{SampleRate, Ticks, TimeSignatureMap};
 use bl_engine::{EngineConfig, MediaLibrary, Offline, Output, Registry, TransportCommand, When};
 use bl_media::{AudioWriter, BitDepth, Dither, EncodeSpec, FileType, RateConverter};
-use bl_model::{ContentHash, DeviceId, Document};
+use bl_model::{ContentHash, DeviceId, Document, TrackId};
 use bl_plugin_host::clap::ClapHost;
 use bl_shell_spec::editing::Position;
 use bl_shell_spec::export::{
     AUDIO, Dither as SpecDither, ExportArgs, ExportResult, FileType as SpecFileType, RangeSource,
+    RenderedTrack,
 };
 
 use crate::ShellError;
@@ -256,18 +257,101 @@ pub fn export(
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(f64),
 ) -> Result<Report, ExportError> {
-    check(job)?;
-    let partial = hidden_beside(&job.path, "partial");
-    let scratch = hidden_beside(&job.path, "render");
-    let files = (partial.as_path(), scratch.as_path());
-    let result = run(document, media, plugins, job, files, cancel, progress);
-    // The scratch file goes either way; the partial file once it's moved or
-    // if anything failed.
-    let _ = fs::remove_file(&scratch);
-    if result.is_err() {
-        let _ = fs::remove_file(&partial);
+    let mut reports = export_multi(&[(document, job)], media, plugins, cancel, progress)?;
+    Ok(reports.pop().unwrap())
+}
+
+/// Runs multiple exports as a batch (WP-2.26): checks all jobs first,
+/// renders each to a hidden partial file, and promotes them to their final
+/// destinations once all renders succeed. Cancelling or any render failure
+/// deletes all partial and scratch files and leaves every destination untouched.
+/// If moving a completed partial file into place fails, any earlier destinations
+/// already promoted remain in place while the remaining partial files are deleted.
+///
+/// # Errors
+///
+/// [`ExportError`]: cancelled, a setting that can't be exported, an
+/// existing file, or a render or write that failed. The destinations stay as
+/// they were before (or files already moved on rename failure), and no partial
+/// files are left behind.
+pub fn export_multi(
+    renders: &[(&Document, &Job)],
+    media: Arc<dyn MediaLibrary>,
+    plugins: Option<&ClapHost>,
+    cancel: &AtomicBool,
+    progress: &mut dyn FnMut(f64),
+) -> Result<Vec<Report>, ExportError> {
+    if renders.is_empty() {
+        return Ok(Vec::new());
     }
-    result
+    for (_, job) in renders {
+        check(job)?;
+    }
+
+    let mut partials: Vec<PathBuf> = Vec::with_capacity(renders.len());
+    let mut scratches: Vec<PathBuf> = Vec::with_capacity(renders.len());
+    for (_, job) in renders {
+        partials.push(hidden_beside(&job.path, "partial"));
+        scratches.push(hidden_beside(&job.path, "render"));
+    }
+
+    let total = renders.len() as f64;
+    let mut reports = Vec::with_capacity(renders.len());
+    let mut render_result = Ok(());
+
+    for (i, ((document, job), partial)) in renders.iter().zip(&partials).enumerate() {
+        let scratch = &scratches[i];
+        let files = (partial.as_path(), scratch.as_path());
+        let mut job_progress = |fraction: f64| {
+            let overall = (i as f64 + fraction) / total;
+            progress(overall);
+        };
+        match run(
+            document,
+            media.clone(),
+            plugins,
+            job,
+            files,
+            cancel,
+            &mut job_progress,
+        ) {
+            Ok(report) => reports.push(report),
+            Err(error) => {
+                render_result = Err(error);
+                break;
+            }
+        }
+        let _ = fs::remove_file(scratch);
+    }
+
+    for scratch in &scratches {
+        let _ = fs::remove_file(scratch);
+    }
+
+    if let Err(error) = render_result {
+        for partial in &partials {
+            let _ = fs::remove_file(partial);
+        }
+        return Err(error);
+    }
+
+    // Spec: export R10. Only complete files reach their destinations.
+    // Files are renamed into place one by one. If a rename fails, the files
+    // already moved remain in place while remaining partial files are deleted.
+    for ((_, job), partial) in renders.iter().zip(&partials) {
+        if let Err(error) = fs::rename(partial, &job.path) {
+            for p in &partials {
+                let _ = fs::remove_file(p);
+            }
+            return Err(ExportError::Failed(format!(
+                "{}: {error}",
+                job.path.display()
+            )));
+        }
+    }
+
+    progress(1.0);
+    Ok(reports)
 }
 
 /// Checks a job before anything is rendered or written.
@@ -434,8 +518,10 @@ pub fn render(
     if let Some(loan) = &loan {
         registry.add(loan.factory());
     }
+    kit.sync(document);
     let mut offline = Offline::new(config, registry.with_media(media));
     let unhosted = offline.sync(document);
+    kit.idle();
     // Spec: offline-plugin-renders R2. A plug-in the engine didn't hand
     // back would render as a pass-through, which isn't what plays.
     if let Some((device, why)) = loan.as_ref().and_then(|loan| loan.problems().pop()) {
@@ -647,8 +733,6 @@ fn run(
         return Err(ExportError::Cancelled);
     }
     let written = writer.finish().map_err(|error| failed(partial, &error))?;
-    // Spec: export R10. Only a complete file reaches the destination.
-    fs::rename(partial, &job.path).map_err(|error| failed(&job.path, &error))?;
     progress(1.0);
     Ok(Report {
         frames: written,
@@ -664,9 +748,183 @@ fn run(
     })
 }
 
+/// Sanitizes a track's name for use in a file name: replaces path separators
+/// and illegal characters with `-`, and trims whitespace.
+fn sanitize_name(name: &str) -> String {
+    let sanitized: String = name
+        .chars()
+        .map(|c| match c {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' | '\0'..='\x1f' => '-',
+            _ => c,
+        })
+        .collect();
+    let trimmed = sanitized.trim();
+    if trimmed.is_empty() {
+        "Track".to_owned()
+    } else {
+        trimmed.to_owned()
+    }
+}
+
+/// Generates distinct destination file paths for a list of tracks, named
+/// beside `base_path` as `<base_stem> - <sanitized_track_name>.<ext>`.
+fn track_paths(base_path: &Path, ext: &str, tracks: &[&bl_model::Track]) -> Vec<PathBuf> {
+    let parent = match base_path.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p,
+        _ => Path::new("."),
+    };
+    let base_stem = base_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("Export");
+
+    let mut used = std::collections::HashSet::new();
+    let mut paths = Vec::with_capacity(tracks.len());
+    for track in tracks {
+        let name = sanitize_name(track.name());
+        let mut candidate = parent.join(format!("{base_stem} - {name}.{ext}"));
+        let mut count = 2;
+        while used.contains(&candidate) {
+            candidate = parent.join(format!("{base_stem} - {name} ({count}).{ext}"));
+            count += 1;
+        }
+        used.insert(candidate.clone());
+        paths.push(candidate);
+    }
+    paths
+}
+
+/// Whether a track makes audio when exported as an individual track.
+///
+/// Audio, group, return, and Main tracks make audio. A MIDI track with no
+/// instrument and no audio effects is skipped; one with audio effects but no
+/// instrument renders as silence.
+fn track_makes_audio(track: &bl_model::Track) -> bool {
+    match track.kind() {
+        bl_model::TrackKind::Audio
+        | bl_model::TrackKind::Group
+        | bl_model::TrackKind::Return
+        | bl_model::TrackKind::Main => true,
+        bl_model::TrackKind::Midi => track.devices().any(|d| {
+            d.role == bl_model::DeviceRole::Instrument
+                || d.role == bl_model::DeviceRole::AudioEffect
+        }),
+    }
+}
+
+/// Prepares a document snapshot for rendering an individual track (WP-2.26).
+///
+/// By default (`include_return_and_main_effects: false`), renders the track's
+/// post-fader signal (its devices, volume, and pan) with nothing from return
+/// tracks and nothing from Main's devices or fader:
+/// - solos the track exclusively;
+/// - routes a grouped track straight to Main;
+/// - drops sends and mutes return tracks (or keeps sends for a return track being rendered);
+/// - turns Solo in Place off;
+/// - bypasses Main's devices;
+/// - sets Main's volume to unity (1.0) and pan to centre (0.0).
+///
+/// When `include_return_and_main_effects` is true, the track renders as it does
+/// soloed in the set.
+fn prepare_document_for_track(
+    document: &Document,
+    track_id: TrackId,
+    include_return_and_main_effects: bool,
+) -> Result<Document, String> {
+    if track_id == document.main_id() {
+        return Ok(document.clone());
+    }
+
+    let track = document
+        .track(track_id)
+        .ok_or_else(|| format!("no track has the ID {}", track_id.0))?;
+    let kind = track.kind();
+    let is_grouped = document.parent(track_id).is_some();
+    let returns: Vec<TrackId> = document.returns().collect();
+    let send_targets: Vec<TrackId> = track.sends().map(|(to, _)| to).collect();
+    let main_devices: Vec<DeviceId> = document.main().devices().map(|d| d.id).collect();
+    let main_id = document.main_id();
+
+    let mut doc = document.clone();
+    doc.apply(&bl_model::Command::SoloExclusive { track: track_id })
+        .map_err(|e| e.to_string())?;
+
+    if include_return_and_main_effects {
+        return Ok(doc);
+    }
+
+    // Route a grouped track straight to Main, bypassing enclosing group devices/fader.
+    if is_grouped {
+        doc.apply(&bl_model::Command::SetOutput {
+            track: track_id,
+            output: bl_model::Output::Main,
+        })
+        .map_err(|e| e.to_string())?;
+    }
+
+    // Turn Solo in Place off so solo silences return tracks.
+    doc.apply(&bl_model::Command::SetSoloInPlace { enabled: false })
+        .map_err(|e| e.to_string())?;
+
+    if kind == bl_model::TrackKind::Return {
+        // A return track being exported receives sends from other tracks; silence other returns.
+        for ret in returns {
+            if ret != track_id {
+                doc.apply(&bl_model::Command::SetMute {
+                    track: ret,
+                    mute: true,
+                })
+                .map_err(|e| e.to_string())?;
+            }
+        }
+    } else {
+        // Audio, MIDI, or group track: mute all return tracks and drop this track's sends.
+        for ret in returns {
+            doc.apply(&bl_model::Command::SetMute {
+                track: ret,
+                mute: true,
+            })
+            .map_err(|e| e.to_string())?;
+        }
+        for to in send_targets {
+            doc.apply(&bl_model::Command::SetSend {
+                track: track_id,
+                to,
+                level: 0.0,
+            })
+            .map_err(|e| e.to_string())?;
+        }
+    }
+
+    // Bypass Main's devices.
+    for device in main_devices {
+        doc.apply(&bl_model::Command::SetDeviceEnabled {
+            device,
+            enabled: false,
+        })
+        .map_err(|e| e.to_string())?;
+    }
+
+    // Set Main's fader to unity (volume = 1.0, pan = 0.0).
+    doc.apply(&bl_model::Command::SetVolume {
+        track: main_id,
+        volume: 1.0,
+    })
+    .map_err(|e| e.to_string())?;
+    doc.apply(&bl_model::Command::SetPan {
+        track: main_id,
+        pan: 0.0,
+    })
+    .map_err(|e| e.to_string())?;
+
+    Ok(doc)
+}
+
 /// Runs `export.audio` with its arguments: the set in `document`, its
 /// clips' audio from `media`, its plug-ins lent by `plugins`, the
-/// Arrangement's time `selection`, and the engine's rate.
+/// Arrangement's time `selection`, the Arrangement's `selected_tracks`,
+/// and the engine's rate.
 ///
 /// # Errors
 ///
@@ -677,6 +935,7 @@ pub fn run_command(
     media: Arc<dyn MediaLibrary>,
     plugins: Option<&ClapHost>,
     selection: Option<(Ticks, Ticks)>,
+    selected_tracks: &[TrackId],
     engine_rate: u32,
     args: &ExportArgs,
 ) -> Result<ExportResult, ShellError> {
@@ -720,8 +979,18 @@ pub fn run_command(
     };
     let (start, end, source) =
         range(document, args.start.as_ref(), args.length, selection).map_err(invalid)?;
-    let job = Job {
-        path: path.clone(),
+
+    // Resolve target tracks (WP-2.26)
+    let rendered_choice = args.rendered_track.clone().unwrap_or_default();
+    if args.include_return_and_main_effects && rendered_choice == RenderedTrack::Main {
+        return Err(invalid(
+            "`include_return_and_main_effects` is unavailable when `rendered_track` is Main"
+                .to_owned(),
+        ));
+    }
+
+    let make_job = |dest_path: PathBuf| Job {
+        path: dest_path,
         file_type,
         bit_depth,
         dither,
@@ -733,11 +1002,90 @@ pub fn run_command(
         replace: args.replace,
         block: BLOCK,
     };
-    let report = export(
-        document,
+
+    let (renders, written_paths): (Vec<(Document, Job)>, Vec<PathBuf>) = match rendered_choice {
+        RenderedTrack::Main => {
+            let job = make_job(path.clone());
+            (vec![(document.clone(), job)], vec![path.clone()])
+        }
+        RenderedTrack::Track(id) => {
+            if id == document.main_id() {
+                return Err(invalid(
+                    "the Main track is the whole mix: choose `main` to render it".to_owned(),
+                ));
+            }
+            if document.track(id).is_none() {
+                return Err(invalid(format!("no track has the ID {}", id.0)));
+            }
+            let transformed =
+                prepare_document_for_track(document, id, args.include_return_and_main_effects)
+                    .map_err(invalid)?;
+            let job = make_job(path.clone());
+            (vec![(transformed, job)], vec![path.clone()])
+        }
+        RenderedTrack::AllTracks => {
+            let tracks: Vec<&bl_model::Track> = document
+                .track_order()
+                .into_iter()
+                .filter_map(|id| document.track(id))
+                .filter(|t| track_makes_audio(t))
+                .collect();
+            if tracks.is_empty() {
+                return Err(invalid(
+                    "the set has no tracks to export; add a track or choose Main".to_owned(),
+                ));
+            }
+            let dest_paths = track_paths(&path, file_type.extension(), &tracks);
+            let mut renders = Vec::with_capacity(tracks.len());
+            for (track, dest) in tracks.iter().zip(&dest_paths) {
+                let transformed = prepare_document_for_track(
+                    document,
+                    track.id(),
+                    args.include_return_and_main_effects,
+                )
+                .map_err(invalid)?;
+                renders.push((transformed, make_job(dest.clone())));
+            }
+            (renders, dest_paths)
+        }
+        RenderedTrack::SelectedTracks => {
+            if selected_tracks.is_empty() {
+                return Err(invalid(
+                    "no tracks are selected in the Arrangement: select tracks, or choose all tracks or Main".to_owned(),
+                ));
+            }
+            let tracks: Vec<&bl_model::Track> = document
+                .track_order()
+                .into_iter()
+                .filter(|id| selected_tracks.contains(id))
+                .filter_map(|id| document.track(id))
+                .filter(|t| track_makes_audio(t))
+                .collect();
+            if tracks.is_empty() {
+                return Err(invalid(
+                    "the selected tracks make no audio: add an instrument or audio effect, or choose Main".to_owned(),
+                ));
+            }
+            let dest_paths = track_paths(&path, file_type.extension(), &tracks);
+            let mut renders = Vec::with_capacity(tracks.len());
+            for (track, dest) in tracks.iter().zip(&dest_paths) {
+                let transformed = prepare_document_for_track(
+                    document,
+                    track.id(),
+                    args.include_return_and_main_effects,
+                )
+                .map_err(invalid)?;
+                renders.push((transformed, make_job(dest.clone())));
+            }
+            (renders, dest_paths)
+        }
+    };
+
+    let render_refs: Vec<(&Document, &Job)> = renders.iter().map(|(d, j)| (d, j)).collect();
+    let reports = export_multi(
+        &render_refs,
         media,
         plugins,
-        &job,
         &AtomicBool::new(false),
         &mut |_| {},
     )
@@ -752,9 +1100,41 @@ pub fn run_command(
             message: error.to_string(),
         },
     })?;
-    let written_path = fs::canonicalize(&path).unwrap_or(path);
+
+    let canonical_path = fs::canonicalize(&path).unwrap_or(path);
+    let files: Vec<String> = written_paths
+        .iter()
+        .map(|p| {
+            fs::canonicalize(p)
+                .unwrap_or_else(|_| p.clone())
+                .display()
+                .to_string()
+        })
+        .collect();
+
+    let first_report = reports.first().cloned().unwrap_or_default();
+    let max_peak = reports.iter().map(|r| r.peak).fold(0.0f32, f32::max);
+    let total_took: Duration = reports.iter().map(|r| r.took).sum();
+    let total_frames: u64 = reports.iter().map(|r| r.frames).sum();
+    let mut missing_media = Vec::new();
+    for r in &reports {
+        for m in &r.missing_media {
+            let s = m.to_string();
+            if !missing_media.contains(&s) {
+                missing_media.push(s);
+            }
+        }
+    }
+
+    let speed = if total_took.as_secs_f64() > 0.0 {
+        (total_frames as f64 / f64::from(args.sample_rate.max(1))) / total_took.as_secs_f64()
+    } else {
+        0.0
+    };
+
     Ok(ExportResult {
-        path: written_path.display().to_string(),
+        path: canonical_path.display().to_string(),
+        files,
         file_type: match file_type {
             FileType::Wav => SpecFileType::Wav,
             FileType::Aiff => SpecFileType::Aiff,
@@ -762,9 +1142,9 @@ pub fn run_command(
         },
         bit_depth: args.bit_depth,
         sample_rate: args.sample_rate,
-        channels: report.channels,
-        frames: report.frames,
-        seconds: report.frames as f64 / f64::from(args.sample_rate),
+        channels: first_report.channels,
+        frames: first_report.frames,
+        seconds: first_report.frames as f64 / f64::from(args.sample_rate),
         start,
         end,
         range: source,
@@ -773,16 +1153,12 @@ pub fn run_command(
         } else {
             SpecDither::None
         },
-        peak_dbfs: (report.peak > 0.0).then(|| 20.0 * f64::from(report.peak).log10()),
-        gain_db: 20.0 * report.gain.log10(),
-        render_rate: report.render_rate,
-        took_seconds: report.took.as_secs_f64(),
-        speed: report.speed(args.sample_rate),
-        missing_media: report
-            .missing_media
-            .iter()
-            .map(ToString::to_string)
-            .collect(),
+        peak_dbfs: (max_peak > 0.0).then(|| 20.0 * f64::from(max_peak).log10()),
+        gain_db: 20.0 * first_report.gain.log10(),
+        render_rate: first_report.render_rate,
+        took_seconds: total_took.as_secs_f64(),
+        speed,
+        missing_media,
     })
 }
 

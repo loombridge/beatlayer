@@ -432,8 +432,7 @@ impl Shell {
         audio.set_plugins(plugins.clone());
         // The kit's plug-ins compiled in, as native devices: its examples
         // with bl-devices' `kit-examples` feature, none otherwise.
-        let kit = KitHost::new();
-        bl_devices::kit::add_examples(&kit);
+        let kit = bl_devices::kit_host();
         audio.set_kit(kit.clone());
         let native_types = bl_devices::device_types();
         let mut described = native_types.clone();

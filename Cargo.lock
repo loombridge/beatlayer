@@ -884,6 +884,7 @@ dependencies = [
  "bl-shell-spec",
  "bl-test-clap",
  "getrandom 0.3.4",
+ "lspk-example-gain",
  "rtrb",
  "serde",
  "serde_json",

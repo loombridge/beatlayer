@@ -47,6 +47,9 @@ bl-test-clap = { path = "../test-clap" }
 # The allocation trap, so tests can show the audio callback stays off the
 # heap (the real-time rules).
 bl-rt.workspace = true
+# The kit's example plug-ins for offline render tests.
+bl-devices = { workspace = true, features = ["kit-examples"] }
+lspk-example-gain.workspace = true
 
 [lints]
 workspace = true

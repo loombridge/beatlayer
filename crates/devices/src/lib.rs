@@ -45,3 +45,12 @@ pub fn device_types() -> Vec<DeviceType> {
     register(&mut registry);
     registry.device_types()
 }
+
+/// A [`KitHost`] with the kit plug-ins compiled into Beatlayer: its
+/// examples with the `kit-examples` feature, none otherwise.
+#[must_use]
+pub fn kit_host() -> KitHost {
+    let host = KitHost::new();
+    kit::add_examples(&host);
+    host
+}

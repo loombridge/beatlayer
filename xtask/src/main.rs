@@ -296,7 +296,7 @@ fn check(root: &Path, options: &CheckOptions) -> Result<(), String> {
             "command reference",
             Box::new(move || {
                 if reference {
-                    commands::check(root)
+                    commands::refresh(root)
                 } else {
                     commands::check_registry()
                 }

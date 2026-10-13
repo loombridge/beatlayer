@@ -83,15 +83,14 @@ pub(crate) fn preview(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
     let parsed: PreviewArgs = step!(args(raw));
     step!(ctx.permit(&[Permission::Read], &[ids::PREVIEW], String::new));
     if ctx.view_capture && !bl_shell::plugins::has_clap(ctx.shell.editor().document()) {
-        ctx.state.pending_render = Some(Render {
+        return ToolOutcome::Defer(Deferred::render(Render {
             kind: RenderKind::Preview(parsed),
             document: ctx.shell.editor().document().clone(),
             media: ctx.shell.media_store(),
             selection: ctx.shell.time_selection(),
             engine_rate: ctx.shell.engine_rate(),
             playing: ctx.shell.is_playing(),
-        });
-        return ToolOutcome::Defer(Deferred::Render);
+        }));
     }
     let value = serde_json::to_value(&parsed).unwrap_or_default();
     let result = match ctx.shell.run(ids::PREVIEW, value) {
@@ -124,15 +123,14 @@ pub(crate) fn analyze(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
         && ctx.view_capture
         && !bl_shell::plugins::has_clap(ctx.shell.editor().document())
     {
-        ctx.state.pending_render = Some(Render {
+        return ToolOutcome::Defer(Deferred::render(Render {
             kind: RenderKind::Analyze(parsed),
             document: ctx.shell.editor().document().clone(),
             media: ctx.shell.media_store(),
             selection: ctx.shell.time_selection(),
             engine_rate: ctx.shell.engine_rate(),
             playing: ctx.shell.is_playing(),
-        });
-        return ToolOutcome::Defer(Deferred::Render);
+        }));
     }
     let value = serde_json::to_value(&parsed).unwrap_or_default();
     match ctx.shell.run(ids::ANALYZE, value) {

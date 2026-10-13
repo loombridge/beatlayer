@@ -188,10 +188,16 @@ impl RenderRequest {
 }
 
 /// What a tool asks of the host: a view capture (WP-1.16) or an audio render (WP-2.28).
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(crate) enum Deferred {
     Capture(Capture),
-    Render,
+    Render(std::cell::RefCell<Option<Box<Render>>>),
+}
+
+impl Deferred {
+    pub(crate) fn render(render: Render) -> Self {
+        Self::Render(std::cell::RefCell::new(Some(Box::new(render))))
+    }
 }
 
 /// Beatlayer as the kit's server sees it: the tools, the guide and
@@ -311,9 +317,12 @@ impl Program for Beatlayer {
                     max_size: capture.max_size,
                 });
             }
-            Deferred::Render => {
-                if let Some(render) = self.state.pending_render.take() {
-                    self.render_requests.push(RenderRequest { ticket, render });
+            Deferred::Render(cell) => {
+                if let Some(render) = cell.borrow_mut().take() {
+                    self.render_requests.push(RenderRequest {
+                        ticket,
+                        render: *render,
+                    });
                 }
             }
         }
@@ -397,7 +406,7 @@ impl Agent {
                         Deferred::Capture(_) => {
                             Err("the window closed before the view was captured".to_owned())
                         }
-                        Deferred::Render => {
+                        Deferred::Render(_) => {
                             Err("the window closed before the render finished".to_owned())
                         }
                     });
@@ -433,7 +442,7 @@ impl Agent {
         self.server.finish_deferred(ticket, |deferred| {
             let Capture { view, .. } = match deferred {
                 Deferred::Capture(capture) => capture,
-                Deferred::Render => return Err("expected a view capture".to_owned()),
+                Deferred::Render(_) => return Err("expected a view capture".to_owned()),
             };
             let image = result?;
             let summary = CaptureResult {
@@ -465,7 +474,7 @@ impl Agent {
     ) {
         self.server
             .finish_deferred(ticket, |deferred| match deferred {
-                Deferred::Render => match result {
+                Deferred::Render(_) => match result {
                     Ok(RenderOutcome::Preview(preview_outcome)) => {
                         let bytes = preview_outcome.wav.len() as u64;
                         let preview = shell.previews_mut().add(

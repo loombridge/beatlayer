@@ -116,6 +116,9 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.rustfft]
 opt-level = 3
+# Agent perception (WP-2.28): base64-encoding 30-second audio preview payloads
+# (5–12 MB) in tool results takes ~300 ms unoptimised, stalling the main thread.
+# Optimised, it takes under 15 ms.
 [profile.dev.package.lspk-agent]
 opt-level = 3
 

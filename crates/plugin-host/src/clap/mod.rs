@@ -156,6 +156,9 @@ pub struct PluginStatus {
     pub has_editor: bool,
     /// Whether its editor is open.
     pub editor_open: bool,
+    /// Whether its open editor is hidden: View ▸ Plug-In Windows or
+    /// Auto-Hide Plug-In Windows hid it. Hidden is not closed.
+    pub editor_hidden: bool,
     /// Each parameter's value, as the plug-in reports it.
     pub values: Vec<(ParamId, f64)>,
 }
@@ -237,6 +240,9 @@ struct Instance {
     /// next node or state.
     refused: Option<String>,
     failure: Option<String>,
+    /// Its open editor is hidden: View ▸ Plug-In Windows or Auto-Hide
+    /// Plug-In Windows. Hidden is not closed.
+    editor_hidden: bool,
     /// It failed while processing: its device is silent, and it isn't
     /// activated again, live or offline, until the next node or state.
     silenced: bool,
@@ -594,6 +600,7 @@ impl ClapHost {
             return Err(ClapError::Refused("to show its editor".to_owned()));
         }
         instance.editor_open = true;
+        instance.editor_hidden = false;
         Ok(())
     }
 
@@ -607,6 +614,56 @@ impl ClapHost {
         let instance = instance(guard.get()?, device)?;
         close_editor(instance);
         Ok(())
+    }
+
+    /// Shows or hides the device's plug-in's editor window without closing
+    /// it: View ▸ Plug-In Windows and Auto-Hide Plug-In Windows hide and
+    /// show a plug-in's window as they do a floating device's, and a
+    /// hidden window stays open. Does nothing while its editor is closed.
+    ///
+    /// # Errors
+    ///
+    /// [`ClapError::NoInstance`] without a plug-in, [`ClapError::Refused`]
+    /// if it won't show or hide its editor, and [`ClapError::WrongThread`]
+    /// off the main thread.
+    pub fn set_editor_visible(&self, device: DeviceId, shown: bool) -> Result<(), ClapError> {
+        let mut guard = lock(&self.inner.main);
+        let instance = instance(guard.get()?, device)?;
+        if !instance.editor_open || instance.editor_hidden == !shown {
+            return Ok(());
+        }
+        let plugin = instance.instance.plugin_handle();
+        let Some(gui) = plugin.get_extension::<PluginGui>() else {
+            return Ok(());
+        };
+        let refused = if shown {
+            ClapError::Refused("to show its editor".to_owned())
+        } else {
+            ClapError::Refused("to hide its editor".to_owned())
+        };
+        if shown {
+            gui.show(&plugin).map_err(|_| refused)?;
+        } else {
+            gui.hide(&plugin).map_err(|_| refused)?;
+        }
+        instance.editor_hidden = !shown;
+        Ok(())
+    }
+
+    /// The devices whose plug-in's editor window is open, hidden or shown.
+    #[must_use]
+    pub fn open_editors(&self) -> Vec<DeviceId> {
+        let mut guard = lock(&self.inner.main);
+        guard
+            .get()
+            .map(|main| {
+                main.instances
+                    .iter()
+                    .filter(|(_, i)| i.editor_open)
+                    .map(|(device, _)| *device)
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// What the device's plug-in is doing, or `None` if the device has no
@@ -625,6 +682,7 @@ impl ClapHost {
                 failure: Some(why.clone()),
                 has_editor: false,
                 editor_open: false,
+                editor_hidden: false,
                 values: Vec::new(),
             });
         }
@@ -655,6 +713,7 @@ impl ClapHost {
                 .or_else(|| instance.refused.clone()),
             has_editor,
             editor_open: instance.editor_open,
+            editor_hidden: instance.editor_hidden,
             values,
         })
     }
@@ -939,6 +998,7 @@ fn close_editor(instance: &mut Instance) {
         gui.destroy(&plugin);
     }
     instance.editor_open = false;
+    instance.editor_hidden = false;
 }
 
 /// Lets go of a plug-in: closes its editor and asks its node for its
@@ -1048,6 +1108,7 @@ fn ensure_instance(main: &mut Main, device: &Device, inner: &Inner) -> bool {
         lent: None,
         latency: 0,
         editor_open: false,
+        editor_hidden: false,
         gestures: BTreeSet::new(),
         held: BTreeMap::new(),
         commands: None,

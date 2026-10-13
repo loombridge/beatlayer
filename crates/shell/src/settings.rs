@@ -54,9 +54,10 @@ pub struct Preferences {
     /// for preferences saved before the setting existed.
     pub create_fades_on_clip_edges: OnByDefault,
     /// Auto-Hide Plug-In Windows (Plug-Ins, Plug-In Windows, L-SET-017):
-    /// a floating device's window hides while another track is selected
-    /// and comes back with its track (WP-2.5b), as Live's plug-in windows
-    /// do. On by default, as observed in Live 12.4.6.
+    /// a floating device's window or a plug-in's editor hides while
+    /// another track is selected and comes back with its track (WP-2.5b),
+    /// as Live's plug-in windows do. On by default, as observed in Live
+    /// 12.4.6.
     pub auto_hide_plug_in_windows: OnByDefault,
 }
 

@@ -321,6 +321,44 @@ fn the_editor_opens_and_closes_in_its_own_window() {
     assert!(!host.status(id).unwrap().editor_open);
 }
 
+// Spec: device-chains R31, R33. Hiding is not closing: the editor stays
+// open until it's closed, and a hidden editor shows again.
+#[test]
+fn the_editor_hides_and_shows_without_closing() {
+    let (host, _node) = running(&[]);
+    let id = device(1, &[]).id;
+    assert!(host.open_editors().is_empty());
+    host.open_editor(id, "Test Gain Echo/1-Audio")
+        .expect("it opens");
+    assert_eq!(host.open_editors(), [id]);
+
+    host.set_editor_visible(id, false).unwrap();
+    let hidden = host.status(id).unwrap();
+    assert!(hidden.editor_open, "hiding is not closing");
+    assert!(hidden.editor_hidden);
+    // Hiding it again is a no-op.
+    host.set_editor_visible(id, false).unwrap();
+
+    host.set_editor_visible(id, true).unwrap();
+    let shown = host.status(id).unwrap();
+    assert!(shown.editor_open && !shown.editor_hidden);
+    // Showing it again is a no-op.
+    host.set_editor_visible(id, true).unwrap();
+
+    // A closed editor isn't hidden, and showing it does nothing.
+    host.close_editor(id).unwrap();
+    assert!(!host.status(id).unwrap().editor_open);
+    assert!(host.open_editors().is_empty());
+    host.set_editor_visible(id, true).unwrap();
+    assert!(!host.status(id).unwrap().editor_open);
+
+    // A device without a running plug-in is refused.
+    assert!(matches!(
+        host.set_editor_visible(device(9, &[]).id, false),
+        Err(ClapError::NoInstance(_))
+    ));
+}
+
 // Spec: clap-hosting R14
 #[test]
 fn main_thread_calls_from_another_thread_are_refused() {

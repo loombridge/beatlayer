@@ -229,6 +229,138 @@ fn rename_like(editor: &mut Editor, copy: TrackId, original: TrackId) -> Result<
     Ok(())
 }
 
+/// The tracks from `tracks` that can be grouped, in display order:
+/// tracks whose kind satisfies `can_be_grouped()` and that exist in the document,
+/// excluding Main and Return tracks, and excluding tracks that are already inside
+/// another track in `tracks`.
+#[must_use]
+pub fn groupable(doc: &Document, tracks: &[TrackId]) -> Vec<TrackId> {
+    let inside_another = |id: TrackId| {
+        let mut parent = doc.parent(id);
+        while let Some(group) = parent {
+            if tracks.contains(&group) {
+                return true;
+            }
+            parent = doc.parent(group);
+        }
+        false
+    };
+    doc.track_order()
+        .into_iter()
+        .filter(|&id| {
+            tracks.contains(&id)
+                && doc.track(id).is_some_and(|t| t.kind().can_be_grouped())
+                && !inside_another(id)
+        })
+        .collect()
+}
+
+/// Groups `tracks` into a new group track named "Group" as one undo step named `label`.
+/// Inserts the group track where the first track was, moves each track into it in order,
+/// and returns the new group track ID.
+///
+/// # Errors
+///
+/// If no tracks can be grouped, or if a command fails; the set remains unchanged.
+pub fn group_tracks(
+    editor: &mut Editor,
+    tracks: &[TrackId],
+    label: &'static str,
+) -> Result<TrackId, String> {
+    let members = groupable(editor.document(), tracks);
+    if members.is_empty() {
+        return Err("there's no track to group".to_owned());
+    }
+    let first = members[0];
+    let doc = editor.document();
+    let parent = doc.parent(first);
+    let siblings: Vec<TrackId> = match parent {
+        Some(group) => doc
+            .track(group)
+            .map(|g| g.children().collect())
+            .unwrap_or_default(),
+        None => doc.top_level().collect(),
+    };
+    let insert_index = siblings
+        .iter()
+        .position(|&t| t == first)
+        .unwrap_or(siblings.len());
+
+    let group_id: TrackId = editor.new_id();
+
+    editor
+        .transact(label, |editor| {
+            editor.apply(Command::CreateTrack {
+                id: group_id,
+                kind: TrackKind::Group,
+                name: "Group".to_owned(),
+                parent,
+                index: insert_index,
+            })?;
+            for (i, &member) in members.iter().enumerate() {
+                editor.apply(Command::MoveTrack {
+                    track: member,
+                    parent: Some(group_id),
+                    index: i,
+                })?;
+            }
+            Ok::<_, EditError>(())
+        })
+        .map_err(|e| e.to_string())?;
+
+    Ok(group_id)
+}
+
+/// Ungroups `group` as one undo step named `label`.
+/// Moves all children of `group` to where `group` was, in order, deletes `group`,
+/// and returns the former members in order.
+///
+/// # Errors
+///
+/// If `group` is not a group track or doesn't exist, or if a command fails.
+pub fn ungroup_tracks(
+    editor: &mut Editor,
+    group: TrackId,
+    label: &'static str,
+) -> Result<Vec<TrackId>, String> {
+    let doc = editor.document();
+    let track = doc
+        .track(group)
+        .ok_or_else(|| "track not found".to_owned())?;
+    if track.kind() != TrackKind::Group {
+        return Err("selected track is not a group track".to_owned());
+    }
+    let children: Vec<TrackId> = track.children().collect();
+    let parent = doc.parent(group);
+    let siblings: Vec<TrackId> = match parent {
+        Some(p) => doc
+            .track(p)
+            .map(|g| g.children().collect())
+            .unwrap_or_default(),
+        None => doc.top_level().collect(),
+    };
+    let insert_index = siblings
+        .iter()
+        .position(|&t| t == group)
+        .unwrap_or(siblings.len());
+
+    editor
+        .transact(label, |editor| {
+            for (i, &child) in children.iter().enumerate() {
+                editor.apply(Command::MoveTrack {
+                    track: child,
+                    parent,
+                    index: insert_index + i,
+                })?;
+            }
+            editor.apply(Command::DeleteTrack { track: group })?;
+            Ok::<_, EditError>(())
+        })
+        .map_err(|e| e.to_string())?;
+
+    Ok(children)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -275,5 +407,62 @@ mod tests {
         assert_eq!(copies.len(), 3);
         assert_eq!(editor.undo_history().len(), 4);
         assert_eq!(editor.undo_history().next(), Some("Duplicate"));
+    }
+
+    #[test]
+    fn group_and_ungroup_tracks_round_trip() {
+        let mut editor = Editor::new();
+        let one = add(&mut editor, TrackKind::Audio, "1 Audio", None);
+        let two = add(&mut editor, TrackKind::Midi, "2 MIDI", None);
+        let three = add(&mut editor, TrackKind::Audio, "3 Audio", None);
+
+        let initial_doc = editor.document().clone();
+
+        // Group `two` and `three`
+        let group = group_tracks(&mut editor, &[two, three], "Group Tracks").unwrap();
+        let doc = editor.document();
+        let names: Vec<&str> = doc
+            .track_order()
+            .into_iter()
+            .map(|t| doc.track(t).unwrap().name())
+            .collect();
+        assert_eq!(names, ["1 Audio", "Group", "2 MIDI", "3 Audio", "Main"]);
+        assert_eq!(doc.output_of(two), Some(group));
+        assert_eq!(doc.output_of(three), Some(group));
+        assert_eq!(doc.output_of(group), Some(doc.main_id()));
+        assert_eq!(editor.undo_history().next(), Some("Group Tracks"));
+
+        // Undo grouping
+        editor.undo().unwrap();
+        assert_eq!(editor.document(), &initial_doc);
+
+        // Redo grouping
+        editor.redo().unwrap();
+        assert_eq!(
+            editor.document().track_order(),
+            [one, group, two, three, editor.document().main_id()]
+        );
+
+        // Ungroup
+        let ungrouped = ungroup_tracks(&mut editor, group, "Ungroup Tracks").unwrap();
+        assert_eq!(ungrouped, [two, three]);
+        let doc = editor.document();
+        assert_eq!(doc.track_order(), [one, two, three, doc.main_id()]);
+        assert_eq!(doc.output_of(two), Some(doc.main_id()));
+        assert_eq!(doc.output_of(three), Some(doc.main_id()));
+        assert_eq!(editor.undo_history().next(), Some("Ungroup Tracks"));
+
+        // Undo ungroup
+        editor.undo().unwrap();
+        let doc = editor.document();
+        assert_eq!(doc.track_order(), [one, group, two, three, doc.main_id()]);
+        assert_eq!(doc.output_of(two), Some(group));
+
+        // Redo ungroup
+        editor.redo().unwrap();
+        assert_eq!(
+            editor.document().track_order(),
+            [one, two, three, editor.document().main_id()]
+        );
     }
 }

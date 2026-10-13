@@ -168,8 +168,10 @@ fn discovery_lists_areas_searches_and_describes_with_schemas() {
             "track.create",
             "track.delete",
             "track.duplicate_without_clips",
+            "track.group",
             "track.move",
-            "track.rename"
+            "track.rename",
+            "track.ungroup"
         ]
     );
     let delete = &tracks["commands"][1];

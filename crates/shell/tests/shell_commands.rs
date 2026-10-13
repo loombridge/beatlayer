@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use bl_commands::{Context, Permission};
-use bl_model::Editor;
+use bl_model::{Editor, TrackId};
 use bl_shell::audio::AudioHost;
 use bl_shell::files::{ProjectFiles, SetStore};
 use bl_shell::settings::{Preferences, SettingsPage, ThemeChoice};
@@ -556,4 +556,148 @@ fn unknown_commands_and_bad_arguments_are_refused() {
         ),
         "a command without arguments refuses any, as its schema says"
     );
+}
+
+#[test]
+fn group_and_ungroup_tracks_lifecycle() {
+    let mut shell = Shell::headless();
+    // Default set has: 1 MIDI, 2 MIDI, 3 Audio, 4 Audio, A Reverb, B Delay, Main
+    let doc = shell.editor().document().clone();
+    let initial_tracks = doc.track_order();
+    assert_eq!(initial_tracks.len(), 7);
+    let t3 = initial_tracks[2]; // 3 Audio
+    let t4 = initial_tracks[3]; // 4 Audio
+
+    // With nothing selected (default headless shell has empty selection), can_invoke for group/ungroup is false
+    assert!(!shell.can_invoke("track.group", &json!({})));
+    assert!(!shell.can_invoke("track.ungroup", &json!({})));
+
+    // Select tracks 3 and 4 in arrangement
+    shell
+        .run("arrangement.select_tracks", json!({ "tracks": [t3, t4] }))
+        .unwrap();
+
+    // Group Tracks can invoke; Ungroup cannot
+    assert!(shell.can_invoke("track.group", &json!({})));
+    assert!(!shell.can_invoke("track.ungroup", &json!({})));
+
+    // Run track.group
+    let res = shell.run("track.group", json!({})).unwrap();
+    let group_id: TrackId = serde_json::from_value(res["track"].clone()).unwrap();
+
+    let doc = shell.editor().document();
+    assert_eq!(doc.track(group_id).unwrap().name(), "Group");
+    assert_eq!(
+        doc.track(group_id).unwrap().kind(),
+        bl_model::TrackKind::Group
+    );
+    // Inserts group track where the first selected track was
+    assert_eq!(
+        doc.track_order(),
+        [
+            initial_tracks[0],
+            initial_tracks[1],
+            group_id,
+            t3,
+            t4,
+            initial_tracks[4],
+            initial_tracks[5],
+            initial_tracks[6]
+        ]
+    );
+    // Routes each member to the group
+    assert_eq!(doc.output_of(t3), Some(group_id));
+    assert_eq!(doc.output_of(t4), Some(group_id));
+    // Routes group to Main
+    assert_eq!(doc.output_of(group_id), Some(doc.main_id()));
+    // Leaves group unfolded
+    assert!(!shell.arrangement().is_folded(group_id));
+    // Selects the group track
+    assert_eq!(shell.arrangement().selected_tracks(), [group_id]);
+
+    // Now group track is selected: Ungroup can invoke; Group can also invoke (groups can be grouped)
+    assert!(shell.can_invoke("track.ungroup", &json!({})));
+    assert!(shell.can_invoke("track.group", &json!({})));
+
+    // Single undo transaction named "Group Tracks"
+    assert_eq!(shell.editor().undo_history().next(), Some("Group Tracks"));
+    shell.run("edit.undo", json!({})).unwrap();
+    assert_eq!(
+        shell.editor().document(),
+        &doc_before_group(&initial_tracks, &shell)
+    );
+
+    // Redo grouping
+    shell.run("edit.redo", json!({})).unwrap();
+    let doc = shell.editor().document();
+    assert_eq!(
+        doc.track_order(),
+        [
+            initial_tracks[0],
+            initial_tracks[1],
+            group_id,
+            t3,
+            t4,
+            initial_tracks[4],
+            initial_tracks[5],
+            initial_tracks[6]
+        ]
+    );
+
+    // Re-select group track and ungroup
+    shell
+        .run("arrangement.select_tracks", json!({ "tracks": [group_id] }))
+        .unwrap();
+
+    let ungroup_res = shell.run("track.ungroup", json!({})).unwrap();
+    let members: Vec<TrackId> = serde_json::from_value(ungroup_res["tracks"].clone()).unwrap();
+    assert_eq!(members, [t3, t4]);
+
+    let doc = shell.editor().document();
+    assert_eq!(doc.track_order(), initial_tracks);
+    // Routes members back to Main
+    assert_eq!(doc.output_of(t3), Some(doc.main_id()));
+    assert_eq!(doc.output_of(t4), Some(doc.main_id()));
+    // Selects the first member
+    assert_eq!(shell.arrangement().selected_tracks(), [t3]);
+
+    // Single undo transaction named "Ungroup Tracks"
+    assert_eq!(shell.editor().undo_history().next(), Some("Ungroup Tracks"));
+
+    // Undo Ungroup restores group exactly
+    shell.run("edit.undo", json!({})).unwrap();
+    let doc = shell.editor().document();
+    assert_eq!(
+        doc.track_order(),
+        [
+            initial_tracks[0],
+            initial_tracks[1],
+            group_id,
+            t3,
+            t4,
+            initial_tracks[4],
+            initial_tracks[5],
+            initial_tracks[6]
+        ]
+    );
+    assert_eq!(doc.output_of(t3), Some(group_id));
+
+    // Agent API explicit args test: run with args
+    shell.run("edit.redo", json!({})).unwrap();
+    let group_res2 = shell
+        .run(
+            "track.group",
+            json!({ "tracks": [initial_tracks[0], initial_tracks[1]] }),
+        )
+        .unwrap();
+    let g2: TrackId = serde_json::from_value(group_res2["track"].clone()).unwrap();
+    let ungroup_res2 = shell.run("track.ungroup", json!({ "track": g2 })).unwrap();
+    let g2_members: Vec<TrackId> = serde_json::from_value(ungroup_res2["tracks"].clone()).unwrap();
+    assert_eq!(g2_members, [initial_tracks[0], initial_tracks[1]]);
+}
+
+fn doc_before_group(initial_tracks: &[TrackId], shell: &Shell) -> bl_model::Document {
+    let doc = shell.editor().document().clone();
+    assert_eq!(doc.track_order(), initial_tracks);
+    doc
 }

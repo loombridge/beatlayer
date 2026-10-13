@@ -1313,31 +1313,88 @@ impl Shell {
     }
 
     /// Runs a track command that needs the shell: Duplicate Track Without
-    /// Clips (WP-2.19b, IMP-12), on the tracks named or the selected ones,
-    /// whose copies become the selection.
+    /// Clips (WP-2.19b, IMP-12), Group Tracks (T24), or Ungroup Tracks (T24).
     fn run_tracks(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
-        let track_ids::DuplicateTracksArgs { tracks } = Self::args(id, args)?;
-        let tracks = tracks.unwrap_or_else(|| self.arrangement.selected_tracks().to_vec());
-        let copies = crate::tracks::duplicate_without_clips(
-            &mut self.editor,
-            &tracks,
-            track_ids::DUPLICATE_WITHOUT_CLIPS_STEP,
-        )
-        .map_err(|reason| ShellError::Unavailable {
-            command: id.to_owned(),
-            reason,
-        })?;
-        self.arrangement
-            .run(
-                view_ids::SELECT_TRACKS,
-                json!({ "tracks": copies }),
-                self.editor.document(),
-            )
-            .ok();
-        self.dirty = true;
-        self.document_changed();
-        self.touch();
-        Ok(to_value(&track_ids::TracksDuplicated { tracks: copies }))
+        match id {
+            track_ids::DUPLICATE_WITHOUT_CLIPS => {
+                let track_ids::DuplicateTracksArgs { tracks } = Self::args(id, args)?;
+                let tracks = tracks.unwrap_or_else(|| self.arrangement.selected_tracks().to_vec());
+                let copies = crate::tracks::duplicate_without_clips(
+                    &mut self.editor,
+                    &tracks,
+                    track_ids::DUPLICATE_WITHOUT_CLIPS_STEP,
+                )
+                .map_err(|reason| ShellError::Unavailable {
+                    command: id.to_owned(),
+                    reason,
+                })?;
+                self.arrangement
+                    .run(
+                        view_ids::SELECT_TRACKS,
+                        json!({ "tracks": copies }),
+                        self.editor.document(),
+                    )
+                    .ok();
+                self.dirty = true;
+                self.document_changed();
+                self.touch();
+                Ok(to_value(&track_ids::TracksDuplicated { tracks: copies }))
+            }
+            track_ids::GROUP => {
+                let track_ids::GroupTracksArgs { tracks } = Self::args(id, args)?;
+                let tracks = tracks.unwrap_or_else(|| self.arrangement.selected_tracks().to_vec());
+                let group_id =
+                    crate::tracks::group_tracks(&mut self.editor, &tracks, track_ids::GROUP_STEP)
+                        .map_err(|reason| ShellError::Unavailable {
+                        command: id.to_owned(),
+                        reason,
+                    })?;
+                self.arrangement.unfold(group_id);
+                self.arrangement
+                    .run(
+                        view_ids::SELECT_TRACKS,
+                        json!({ "tracks": [group_id] }),
+                        self.editor.document(),
+                    )
+                    .ok();
+                self.dirty = true;
+                self.document_changed();
+                self.touch();
+                Ok(to_value(&track_ids::TracksGrouped { track: group_id }))
+            }
+            track_ids::UNGROUP => {
+                let track_ids::UngroupTracksArgs { track } = Self::args(id, args)?;
+                let target = track
+                    .or_else(|| self.arrangement.selected_tracks().first().copied())
+                    .ok_or_else(|| ShellError::Unavailable {
+                        command: id.to_owned(),
+                        reason: "no track is selected".to_owned(),
+                    })?;
+                let children = crate::tracks::ungroup_tracks(
+                    &mut self.editor,
+                    target,
+                    track_ids::UNGROUP_STEP,
+                )
+                .map_err(|reason| ShellError::Unavailable {
+                    command: id.to_owned(),
+                    reason,
+                })?;
+                if let Some(&first) = children.first() {
+                    self.arrangement
+                        .run(
+                            view_ids::SELECT_TRACKS,
+                            json!({ "tracks": [first] }),
+                            self.editor.document(),
+                        )
+                        .ok();
+                }
+                self.dirty = true;
+                self.document_changed();
+                self.touch();
+                Ok(to_value(&track_ids::TracksUngrouped { tracks: children }))
+            }
+            _ => Err(ShellError::UnknownCommand(id.to_owned())),
+        }
     }
 
     /// The browser's selection, if it's one preset file and a device is
@@ -2011,12 +2068,36 @@ impl Shell {
                 );
         }
         if track_ids::handles(id) {
-            // Spec: routing R28. The selected tracks, or those named.
-            let named: Option<Vec<TrackId>> = args
-                .get("tracks")
-                .and_then(|v| serde_json::from_value(v.clone()).ok());
-            let tracks = named.unwrap_or_else(|| self.arrangement.selected_tracks().to_vec());
-            return !crate::tracks::duplicated(self.editor.document(), &tracks).is_empty();
+            match id {
+                track_ids::DUPLICATE_WITHOUT_CLIPS => {
+                    // Spec: routing R28. The selected tracks, or those named.
+                    let named: Option<Vec<TrackId>> = args
+                        .get("tracks")
+                        .and_then(|v| serde_json::from_value(v.clone()).ok());
+                    let tracks =
+                        named.unwrap_or_else(|| self.arrangement.selected_tracks().to_vec());
+                    return !crate::tracks::duplicated(self.editor.document(), &tracks).is_empty();
+                }
+                track_ids::GROUP => {
+                    let named: Option<Vec<TrackId>> = args
+                        .get("tracks")
+                        .and_then(|v| serde_json::from_value(v.clone()).ok());
+                    let tracks =
+                        named.unwrap_or_else(|| self.arrangement.selected_tracks().to_vec());
+                    return !crate::tracks::groupable(self.editor.document(), &tracks).is_empty();
+                }
+                track_ids::UNGROUP => {
+                    let named: Option<TrackId> = args
+                        .get("track")
+                        .and_then(|v| serde_json::from_value(v.clone()).ok());
+                    let track =
+                        named.or_else(|| self.arrangement.selected_tracks().first().copied());
+                    return track
+                        .and_then(|t| self.editor.document().track(t))
+                        .is_some_and(|t| t.kind() == TrackKind::Group);
+                }
+                _ => return false,
+            }
         }
         if id == "device.rename" && args.get("name").is_none() {
             // A person names the device in its title bar.

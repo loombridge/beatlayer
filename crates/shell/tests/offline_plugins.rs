@@ -532,3 +532,171 @@ fn a_preview_waits_for_the_song_to_stop_and_an_export_stops_it() {
         .unwrap();
     running(&mut shell, device, 0.5);
 }
+
+/// A shell holding a one-second clip at 1.1.1 on a track with the kit's
+/// Example Gain plug-in at a gain of 0.5.
+fn shell_with_a_kit_device(scratch: &Scratch) -> (Shell, DeviceId) {
+    let mut shell = Shell::headless();
+    let file = scratch.path("Ramp.wav");
+    wav(&file);
+    shell
+        .run(
+            browser_commands::ADD_TO_ARRANGEMENT,
+            json!({ "paths": [file.to_string_lossy()], "at": 0 }),
+        )
+        .unwrap();
+    let track = shell
+        .editor()
+        .document()
+        .tracks()
+        .find(|t| t.clips().next().is_some())
+        .map(bl_model::Track::id)
+        .expect("the clip's track");
+    let types = shell.kit().device_types();
+    let gain_type = types
+        .iter()
+        .find(|t| t.name == "Example Gain")
+        .expect("Example Gain device type");
+    let added = shell
+        .run(
+            "device.add",
+            json!({
+                "device": {
+                    "kind": gain_type.kind,
+                    "name": gain_type.name,
+                    "role": gain_type.role,
+                },
+                "track": track,
+            }),
+        )
+        .unwrap();
+    let device: DeviceId =
+        serde_json::from_value(added["device"].clone()).expect("the new device ID");
+    shell
+        .run(
+            "device.set_param",
+            json!({ "device": device, "param": lspk_example_gain::GAIN, "value": 0.5 }),
+        )
+        .unwrap();
+    (shell, device)
+}
+
+// Spec: device-framework R21, offline-plugin-renders R1, R5
+#[test]
+fn an_export_renders_a_kit_device_and_stays_off_the_heap() {
+    let scratch = Scratch::new("kit-device");
+    // A dry set without the device:
+    let file = scratch.path("Ramp.wav");
+    wav(&file);
+    let mut dry_shell = Shell::headless();
+    dry_shell
+        .run(
+            browser_commands::ADD_TO_ARRANGEMENT,
+            json!({ "paths": [file.to_string_lossy()], "at": 0 }),
+        )
+        .unwrap();
+    let dry_doc = dry_shell.editor().document().clone();
+    let (dry, _) = render(
+        &dry_doc,
+        media(&dry_shell),
+        None,
+        &spec(48_000, export::BLOCK),
+        &mut |_| {},
+    )
+    .unwrap();
+    assert!(dry.iter().any(|s| *s != 0.0), "the dry clip plays");
+
+    // The set with Example Gain at 0.5:
+    let (mut shell, device) = shell_with_a_kit_device(&scratch);
+    let document = shell.editor().document().clone();
+
+    let (exported, rendered) = render(
+        &document,
+        media(&shell),
+        None,
+        &spec(48_000, export::BLOCK),
+        &mut |_| {},
+    )
+    .unwrap();
+    assert!(
+        rendered.unhosted.is_empty(),
+        "kit device is hosted in the render"
+    );
+    assert_eq!(
+        rendered.heap_operations, 0,
+        "the real-time rules: 0 heap violations"
+    );
+    assert_eq!(exported.len(), dry.len());
+    for (out, input) in exported.iter().zip(&dry) {
+        assert!((out - input * 0.5).abs() <= 1e-6, "{out} against {input}");
+    }
+
+    // Running `export.audio` writes the processed audio to disk:
+    let path = scratch.path("kit_gain.wav");
+    let result: ExportResult = serde_json::from_value(
+        shell
+            .run(
+                export_ids::AUDIO,
+                json!({
+                    "path": path.to_string_lossy(),
+                    "bit_depth": 32,
+                    "sample_rate": 48_000,
+                }),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    let file = bl_media::decode_file(&path).unwrap();
+    let left = file.channel(0).unwrap();
+    for (n, sample) in left.iter().take(FRAMES as usize).enumerate() {
+        assert_eq!(sample.to_bits(), exported[n * 2].to_bits(), "frame {n}");
+    }
+
+    // At gain 1.0, the peak is ~6.02 dB higher:
+    shell
+        .run(
+            "device.set_param",
+            json!({ "device": device, "param": lspk_example_gain::GAIN, "value": 1.0 }),
+        )
+        .unwrap();
+    let whole_path = scratch.path("kit_gain_whole.wav");
+    let whole_result: ExportResult = serde_json::from_value(
+        shell
+            .run(
+                export_ids::AUDIO,
+                json!({
+                    "path": whole_path.to_string_lossy(),
+                    "bit_depth": 32,
+                    "sample_rate": 48_000,
+                }),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    let difference = whole_result.peak_dbfs.unwrap() - result.peak_dbfs.unwrap();
+    assert!((difference - 6.0206).abs() < 0.01, "{difference}");
+}
+
+// Spec: offline-plugin-renders R5
+#[test]
+fn renders_with_a_kit_device_are_the_same_every_time_and_at_any_block_size() {
+    let scratch = Scratch::new("kit-determinism");
+    let (shell, _) = shell_with_a_kit_device(&scratch);
+    let document = shell.editor().document().clone();
+    let once = |block| {
+        render(
+            &document,
+            media(&shell),
+            None,
+            &spec(48_000, block),
+            &mut |_| {},
+        )
+        .unwrap()
+        .0
+    };
+    let first = once(export::BLOCK);
+    assert!(first.iter().any(|s| *s != 0.0));
+    for block in [export::BLOCK, 100, 1024, 64] {
+        assert_eq!(bits(&once(block)), bits(&first), "block {block}");
+    }
+}

@@ -429,6 +429,8 @@ pub fn render(
         .map_err(|error| ExportError::Failed(error.to_string()))?;
     let mut registry = Registry::new();
     bl_devices::register(&mut registry);
+    let kit = bl_devices::kit_host();
+    registry.add(kit.factory());
     if let Some(loan) = &loan {
         registry.add(loan.factory());
     }

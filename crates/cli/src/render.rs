@@ -164,6 +164,8 @@ pub fn render_with(
     let config = EngineConfig::new(settings.sample_rate, settings.block);
     let mut registry = Registry::new();
     bl_devices::register(&mut registry);
+    let kit = bl_devices::kit_host();
+    registry.add(kit.factory());
     let mut offline = Offline::new(config, registry.with_media(media));
     let unhosted = offline.sync(document);
     let missing_media = offline.missing_media().to_vec();

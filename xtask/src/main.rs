@@ -627,12 +627,14 @@ fn rtsan_options(runtime: &Path) -> Option<String> {
 
 /// The `llvm-symbolizer` of the LLVM install a runtime belongs to: the
 /// runtime sits in `<llvm>/lib/clang/<version>/lib/<target>/`, and the
-/// symbolizer in `<llvm>/bin/`.
+/// symbolizer in `<llvm>/bin/`. Only that install's symbolizer fits the
+/// runtime; a `bin/llvm-symbolizer` further up the tree is another LLVM's.
 fn symbolizer_beside(runtime: &Path) -> Option<PathBuf> {
-    runtime
-        .ancestors()
-        .map(|dir| dir.join("bin").join("llvm-symbolizer"))
-        .find(|path| path.is_file())
+    // The LLVM root is the runtime's sixth ancestor: its name plus
+    // `<target>`, `lib`, `<version>`, `clang`, and `lib`.
+    let llvm = runtime.ancestors().nth(6)?;
+    let symbolizer = llvm.join("bin").join("llvm-symbolizer");
+    (symbolizer.is_file()).then_some(symbolizer)
 }
 
 /// Fails unless every package `harness_lock` resolves is in `main_lock` at
@@ -1029,16 +1031,22 @@ mod tests {
 
     #[test]
     fn the_symbolizer_is_found_beside_the_runtime() {
-        let llvm = std::env::temp_dir().join(format!("xtask-llvm-{}", std::process::id()));
+        let tmp = std::env::temp_dir().join(format!("xtask-symbolizer-{}", std::process::id()));
+        let llvm = tmp.join("llvm");
         let runtime_dir = llvm.join("lib/clang/20/lib/linux");
         std::fs::create_dir_all(&runtime_dir).unwrap();
-        std::fs::create_dir_all(llvm.join("bin")).unwrap();
+        // The nearest `bin/llvm-symbolizer` above the install (as in `/bin`
+        // when the install sits at `/`) is another LLVM's; it must be ignored.
+        let above = tmp.join("bin/llvm-symbolizer");
+        std::fs::create_dir_all(above.parent().unwrap()).unwrap();
+        std::fs::write(&above, b"").unwrap();
         let runtime = runtime_dir.join("libclang_rt.rtsan-x86_64.a");
         std::fs::write(&runtime, b"").unwrap();
         let missing = symbolizer_beside(&runtime);
+        std::fs::create_dir_all(llvm.join("bin")).unwrap();
         std::fs::write(llvm.join("bin/llvm-symbolizer"), b"").unwrap();
         let found = symbolizer_beside(&runtime);
-        std::fs::remove_dir_all(&llvm).unwrap();
+        std::fs::remove_dir_all(&tmp).unwrap();
         assert_eq!(missing, None);
         assert_eq!(found, Some(llvm.join("bin").join("llvm-symbolizer")));
     }

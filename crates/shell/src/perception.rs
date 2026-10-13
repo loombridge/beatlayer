@@ -10,13 +10,12 @@
 //!   `bl-analysis`: loudness and true peak, levels, the octave-band
 //!   spectrum, tempo, key, and transients.
 //!
-//! Both run offline on the calling thread (the main thread, in the app),
-//! on a copy of the set with its own engine, so the engine playing the set
-//! on the audio device carries on undisturbed: nothing here touches the
-//! audio thread or its queue. Plug-in devices are the exception: the render
-//! borrows the engine's plug-ins (WP-2.6b), so a set with plug-ins renders
-//! only while the transport is stopped (the offline plug-in renders spec,
-//! R8).
+//! Previews render offline on a worker thread (WP-2.28) so long renders
+//! don't stall the calling thread; while waiting, the calling thread polls.
+//! Plug-in devices are the exception: the render borrows the engine's
+//! plug-ins (WP-2.6b), which are main-thread objects, so a set with
+//! plug-ins renders on the calling thread and only while the transport is
+//! stopped (the offline plug-in renders spec, R8).
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -81,6 +80,29 @@ impl Preview {
         )
         .map_err(|error| error.to_string())
     }
+
+    /// What `perception.preview` returns for this preview.
+    ///
+    /// # Errors
+    ///
+    /// A message if the WAV file couldn't be encoded.
+    pub fn result(
+        &self,
+        peak_dbfs: Option<f64>,
+        took_seconds: f64,
+    ) -> Result<PreviewResult, String> {
+        let bytes = self.wav()?.len() as u64;
+        Ok(PreviewResult {
+            id: self.id,
+            uri: preview_uri(self.id),
+            mime_type: "audio/wav".to_owned(),
+            bit_depth: self.bit_depth,
+            bytes,
+            peak_dbfs,
+            rendered: self.rendered.clone(),
+            took_seconds,
+        })
+    }
 }
 
 /// The last previews made, newest last.
@@ -102,7 +124,7 @@ impl Previews {
         self.kept.iter().map(|preview| preview.id)
     }
 
-    fn add(
+    pub fn add(
         &mut self,
         samples: Vec<f32>,
         bit_depth: u8,
@@ -227,7 +249,8 @@ fn render_range(
     let (document, track, mut notes) = document_for(command, source.document, range.track)?;
     // Spec: offline-plugin-renders R8. Borrowing the plug-ins would take
     // them from the song playing.
-    if source.playing && source.plugins.is_some() && crate::plugins::has_clap(&document) {
+    let has_clap = crate::plugins::has_clap(&document);
+    if source.playing && source.plugins.is_some() && has_clap {
         return Err(ShellError::Unavailable {
             command: command.to_owned(),
             reason: "the set is playing, and rendering it would take its plug-ins from the \
@@ -250,18 +273,19 @@ fn render_range(
     } else {
         (Length::To(to), to, false)
     };
+    let spec = Render {
+        start: from,
+        length,
+        sample_rate,
+        engine_rate: source.engine_rate,
+        block: export::BLOCK,
+    };
     let mut samples = Vec::new();
     let rendered = export::render(
         &document,
         Arc::clone(&source.media),
         source.plugins,
-        &Render {
-            start: from,
-            length,
-            sample_rate,
-            engine_rate: source.engine_rate,
-            block: export::BLOCK,
-        },
+        &spec,
         longest + 1.0,
         &AtomicBool::new(false),
         &mut |_| {},
@@ -306,17 +330,28 @@ fn render_range(
     ))
 }
 
-/// Runs `perception.preview`: renders the range and keeps it.
+/// What rendering a preview produced (WP-1.16, WP-2.28).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PreviewRenderOutcome {
+    /// The interleaved audio samples.
+    pub samples: Vec<f32>,
+    /// Metadata of what was rendered.
+    pub rendered: Rendered,
+    /// Peak amplitude in dBFS.
+    pub peak_dbfs: Option<f64>,
+    /// How many seconds the render took.
+    pub took_seconds: f64,
+}
+
+/// Renders a preview range (WP-1.16, WP-2.28).
 ///
 /// # Errors
 ///
-/// [`ShellError`] for a range or track that can't be rendered, or a render
-/// that failed.
-pub fn preview(
-    previews: &mut Previews,
+/// [`ShellError`] for invalid arguments, unavailable devices, or render failures.
+pub fn render_preview(
     source: &Source<'_>,
     args: &PreviewArgs,
-) -> Result<PreviewResult, ShellError> {
+) -> Result<PreviewRenderOutcome, ShellError> {
     if let Some(rate) = args.sample_rate
         && !(8_000..=192_000).contains(&rate)
     {
@@ -339,21 +374,35 @@ pub fn preview(
         PREVIEW_SECONDS,
     )?;
     let peak = samples.iter().fold(0.0f32, |p, s| p.max(s.abs()));
-    let preview = previews.add(samples, args.bit_depth, rendered, source.document.clone());
-    let bytes = preview
-        .wav()
-        .map_err(|message| failed(PREVIEW, message))?
-        .len() as u64;
-    Ok(PreviewResult {
-        id: preview.id,
-        uri: preview_uri(preview.id),
-        mime_type: "audio/wav".to_owned(),
-        bit_depth: preview.bit_depth,
-        bytes,
+    Ok(PreviewRenderOutcome {
+        samples,
+        rendered,
         peak_dbfs: round_opt(amplitude_db(f64::from(peak)), 2),
-        rendered: preview.rendered.clone(),
         took_seconds: round(took, 3),
     })
+}
+
+/// Runs `perception.preview`: renders the range and keeps it.
+///
+/// # Errors
+///
+/// [`ShellError`] for a range or track that can't be rendered, or a render
+/// that failed.
+pub fn preview(
+    previews: &mut Previews,
+    source: &Source<'_>,
+    args: &PreviewArgs,
+) -> Result<PreviewResult, ShellError> {
+    let outcome = render_preview(source, args)?;
+    let preview = previews.add(
+        outcome.samples,
+        args.bit_depth,
+        outcome.rendered,
+        source.document.clone(),
+    );
+    preview
+        .result(outcome.peak_dbfs, outcome.took_seconds)
+        .map_err(|message| failed(PREVIEW, message))
 }
 
 /// Runs `perception.analyze`: measures a preview or a range rendered for

@@ -31,7 +31,7 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
 use bl_agent::http::{HttpConfig, HttpServer, Parked, Served};
-use bl_agent::{Agent, Captured};
+use bl_agent::{Agent, Captured, RenderOutcome};
 use bl_shell::agent::AgentServerStatus;
 use bl_shell::audio::AudioHost;
 use bl_shell::files::ProjectFiles;
@@ -295,6 +295,8 @@ pub enum UserEvent {
     Browser,
     /// A view capture has been encoded (WP-1.16).
     Captured,
+    /// An agent audio preview or analysis finished rendering (WP-2.28).
+    Rendered,
 }
 
 impl From<egui_winit::accesskit_winit::Event> for UserEvent {
@@ -356,11 +358,17 @@ struct Host {
     captures: Vec<PendingCapture>,
     /// Captures encoded off the main thread, coming back.
     captured: (mpsc::Sender<Encoded>, mpsc::Receiver<Encoded>),
+    /// Audio renders off the main thread, coming back (WP-2.28).
+    rendered: (mpsc::Sender<RenderedEvent>, mpsc::Receiver<RenderedEvent>),
 }
 
 /// A view capture encoded off the main thread: its ticket, and the image
 /// or why there's none (WP-1.16).
 type Encoded = (u64, Result<Captured, String>);
+
+/// An agent audio render finished off the main thread: its ticket, and the outcome
+/// or why there's none (WP-2.28).
+type RenderedEvent = (u64, Result<RenderOutcome, String>);
 
 /// An agent's view capture waiting for its window's frame (WP-1.16).
 struct PendingCapture {
@@ -479,6 +487,7 @@ pub fn run(args: Args) -> Result<(), String> {
         agent_parked: Vec::new(),
         captures: Vec::new(),
         captured: mpsc::channel(),
+        rendered: mpsc::channel(),
     };
     host.sync_agent_server();
     event_loop
@@ -1089,6 +1098,7 @@ impl Host {
         }
         self.sync_agent_server();
         self.take_captures();
+        self.take_renders();
         self.resume_agents();
         self.agent.sync_engine(&mut self.shell);
         if self.shown_revision != Some(self.shell.revision()) {
@@ -1486,6 +1496,38 @@ impl Host {
         }
     }
 
+    /// Takes the audio render requests agents asked for (WP-2.28): spawns
+    /// each on a worker thread (`bl-preview-worker`); [`UserEvent::Rendered`]
+    /// brings the results back.
+    fn take_renders(&mut self) {
+        for request in self.agent.take_render_requests() {
+            let sender = self.rendered.0.clone();
+            let proxy = self.proxy.clone();
+            let ticket = request.ticket;
+            let spawned = std::thread::Builder::new()
+                .name("bl-preview-worker".to_owned())
+                .spawn(move || {
+                    let result = request.execute();
+                    let _ = sender.send((ticket, result));
+                    let _ = proxy.send_event(UserEvent::Rendered);
+                });
+            if spawned.is_err() {
+                self.agent.finish_render(
+                    &mut self.shell,
+                    ticket,
+                    Err("couldn't start the preview worker".to_owned()),
+                );
+            }
+        }
+    }
+
+    /// Hands finished audio renders back to the agent API (WP-2.28).
+    fn finish_renders(&mut self) {
+        while let Ok((ticket, result)) = self.rendered.1.try_recv() {
+            self.agent.finish_render(&mut self.shell, ticket, result);
+        }
+    }
+
     /// Asks the person a question for an agent: whether it may connect, or
     /// run a command that asks first. The call waits for the answer.
     fn ask_for_agent(&self, text: &str) -> bool {
@@ -1715,6 +1757,10 @@ impl ApplicationHandler<UserEvent> for Host {
             }
             UserEvent::Captured => {
                 self.finish_captures();
+                self.after_commands(event_loop);
+            }
+            UserEvent::Rendered => {
+                self.finish_renders();
                 self.after_commands(event_loop);
             }
             #[cfg(any(target_os = "macos", windows))]

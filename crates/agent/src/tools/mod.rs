@@ -44,7 +44,7 @@ pub use time::EngineMessage;
 pub(crate) use time::{Playhead, Schedule};
 
 use crate::permission::{Decision, Mode, decide};
-use crate::server::Capture;
+use crate::server::Deferred;
 
 /// What the tools share across sessions: checkpoints and scheduled
 /// commands belong to the project, not to one agent.
@@ -112,12 +112,13 @@ pub(crate) struct Ctx<'a> {
     pub(crate) state: &'a mut State,
     /// The person already allowed this call.
     pub(crate) confirmed: bool,
+    /// Whether a window runs that can capture views and defer renders (WP-1.16, WP-2.28).
+    pub(crate) view_capture: bool,
 }
 
 /// How a tool call ended: the kit's outcome, where a call that waits for
-/// the host is a view capture (WP-1.16), which the app's window draws on
-/// the main thread's next frame.
-pub(crate) type ToolOutcome = lspk_agent::ToolOutcome<Capture>;
+/// the host is a view capture (WP-1.16) or an audio render (WP-2.28).
+pub(crate) type ToolOutcome = lspk_agent::ToolOutcome<Deferred>;
 
 /// A line of the person's question: the command's label, the classes it
 /// asks for, its arguments, and the clips it would replace or shorten, by

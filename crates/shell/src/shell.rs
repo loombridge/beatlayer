@@ -2559,35 +2559,69 @@ impl Shell {
 
     /// The engine's rate: the audio device's, or the rate set in the audio
     /// settings, or 48 kHz when neither is known (the export spec, R6).
-    fn engine_rate(&self) -> u32 {
+    #[must_use]
+    pub fn engine_rate(&self) -> u32 {
         self.audio
             .sample_rate()
             .or(self.audio.settings().sample_rate)
             .unwrap_or(crate::export::DEFAULT_ENGINE_RATE)
     }
 
-    /// Runs a perception command (WP-1.16): an audio preview or an
+    /// Whether the transport is currently playing.
+    #[must_use]
+    pub fn is_playing(&mut self) -> bool {
+        self.audio.transport_state().playing
+    }
+
+    /// The Arrangement's time selection, if there is one.
+    #[must_use]
+    pub fn time_selection(&self) -> Option<(bl_core::time::Ticks, bl_core::time::Ticks)> {
+        self.arrangement.time_selection()
+    }
+
+    /// Runs a perception command (WP-1.16, WP-2.28): an audio preview or an
     /// analysis, rendered offline from the set as it is now. Neither
     /// changes the set, the view, or the engine playing on the device.
     fn run_perception(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
         let engine_rate = self.engine_rate();
         let playing = self.audio.transport_state().playing;
-        let source = crate::perception::Source {
-            document: self.editor.document(),
-            media: self.media.clone(),
-            selection: self.arrangement.time_selection(),
-            engine_rate,
-            plugins: Some(&self.plugins),
-            playing,
-        };
+        let document = self.editor.document().clone();
+        let has_clap = crate::plugins::has_clap(&document);
+        let selection = self.arrangement.time_selection();
+        let media = Arc::clone(&self.media);
         match id {
             perception_ids::PREVIEW => {
                 let args = Self::args(id, args)?;
-                crate::perception::preview(&mut self.previews, &source, &args)
-                    .map(|result| to_value(&result))
+                let source = crate::perception::Source {
+                    document: &document,
+                    media,
+                    selection,
+                    engine_rate,
+                    plugins: has_clap.then_some(&self.plugins),
+                    playing,
+                };
+                let outcome = crate::perception::render_preview(&source, &args)?;
+                let preview =
+                    self.previews
+                        .add(outcome.samples, args.bit_depth, outcome.rendered, document);
+                let result = preview
+                    .result(outcome.peak_dbfs, outcome.took_seconds)
+                    .map_err(|message| ShellError::Failed {
+                        command: perception_ids::PREVIEW.to_owned(),
+                        message,
+                    })?;
+                Ok(to_value(&result))
             }
             perception_ids::ANALYZE => {
                 let args = Self::args(id, args)?;
+                let source = crate::perception::Source {
+                    document: &document,
+                    media,
+                    selection,
+                    engine_rate,
+                    plugins: has_clap.then_some(&self.plugins),
+                    playing,
+                };
                 crate::perception::analyze(&self.previews, &source, &args)
                     .map(|result| to_value(&result))
             }
@@ -2595,7 +2629,9 @@ impl Shell {
                 let _: perception_ids::CaptureArgs = Self::args(id, args)?;
                 Err(ShellError::Unavailable {
                     command: id.to_owned(),
-                    reason: "a view capture is an image of the app's window, which only the                              agent API's `capture_view` tool returns, while the app's window                              is open"
+                    reason: "a view capture is an image of the app's window, which only the \
+                             agent API's `capture_view` tool returns, while the app's window \
+                             is open"
                         .to_owned(),
                 })
             }
@@ -2606,6 +2642,11 @@ impl Shell {
     #[must_use]
     pub fn previews(&self) -> &crate::perception::Previews {
         &self.previews
+    }
+
+    /// The agent API's last audio previews (WP-1.16, WP-2.28).
+    pub fn previews_mut(&mut self) -> &mut crate::perception::Previews {
+        &mut self.previews
     }
 
     /// Arguments as a JSON object: `null` is no arguments.

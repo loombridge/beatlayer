@@ -114,5 +114,7 @@ pub use lspk_agent::{
     ClientInfo, Credential, Outcome, PROTOCOL_VERSIONS, Question, QuestionKind, STDIO_SESSION,
     Session, base64, jsonrpc,
 };
-pub use server::{Agent, CaptureRequest, Captured};
+pub use server::{
+    Agent, CaptureRequest, Captured, PreviewOutcome, RenderKind, RenderOutcome, RenderRequest,
+};
 pub use tools::EngineMessage;

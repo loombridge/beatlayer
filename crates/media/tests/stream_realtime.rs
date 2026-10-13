@@ -41,8 +41,8 @@ use bl_media::{
     AudioSource, Decoder, PlanarMut, StreamConfig, StreamSource, Streamer, StreamerStats,
     Transition,
 };
-use common::TempDir;
 use common::wav::{self, Format};
+use common::{TempDir, full_depth};
 
 const FILES: usize = 64;
 const RATE: u32 = 48_000;
@@ -362,12 +362,19 @@ fn sixty_four_streams_locating_where_nothing_was_cued_wait_only_for_the_disk() {
         device.heap_operations,
     );
     assert_eq!(totals.seek_misses, FILES as u64);
-    assert_eq!(totals.underruns, 0);
+    // Underruns and the wait are wall-clock results, which other processes
+    // on a busy machine can spoil: they're judged at full depth (pushes to
+    // main and the nightly run). Every run checks what was played.
+    if full_depth() {
+        assert_eq!(totals.underruns, 0);
+    }
     assert_eq!(findings.missing.load(Relaxed), totals.waited_frames);
     assert!(findings.checked.load(Relaxed) > 0);
     assert_eq!(findings.wrong.load(Relaxed), 0);
     assert_eq!(device.heap_operations, 0);
     // A loose bound, for slow machines: the disk thread notices within its
     // 2 ms poll and reads 64 first blocks.
-    assert!(wait_ms < 250.0, "{wait_ms} ms");
+    if full_depth() {
+        assert!(wait_ms < 250.0, "{wait_ms} ms");
+    }
 }

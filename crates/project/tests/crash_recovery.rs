@@ -30,7 +30,7 @@ use bl_core::time::Ticks;
 use bl_model::{Clip, ClipData, ClipId, Editor, MidiData, Note, TrackId, TrackKind};
 use bl_project::autosave::Autosave;
 use bl_project::{Project, SetFile, journal, registry};
-use common::{TestDir, depth, large_song};
+use common::{TestDir, depth, full_depth, large_song};
 use serde_json::json;
 
 /// Set for the child: the recovery folder.
@@ -536,7 +536,12 @@ fn edits_are_journalled_within_a_second() {
             "release"
         },
     );
-    assert!(waits[waits.len() - 1] < Duration::from_secs(1));
+    // The second is wall-clock time, which other processes on a busy
+    // machine can take: it's judged at full depth (pushes to main and the
+    // nightly run); every run checks each edit lands.
+    if full_depth() {
+        assert!(waits[waits.len() - 1] < Duration::from_secs(1));
+    }
     // Reopening gives the last edit.
     let final_song = Project::from_editor(&editor, song.media.clone());
     assert_eq!(SetFile::open(&set_path).unwrap().1, final_song);

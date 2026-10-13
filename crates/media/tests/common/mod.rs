@@ -209,3 +209,14 @@ pub fn peak_dbfs(channels: &[&[f32]]) -> f64 {
         .fold(0.0f32, |m, s| m.max(s.abs()));
     20.0 * f64::from(peak).max(1e-30).log10()
 }
+
+/// Whether the tests run at full depth: `BL_TEST_DEPTH=full`, as on pushes
+/// to main and the nightly run. Unset or `quick`, the default for local runs
+/// and pull requests, wall-clock limits aren't judged.
+pub fn full_depth() -> bool {
+    match std::env::var("BL_TEST_DEPTH").as_deref() {
+        Ok("full") => true,
+        Err(_) | Ok("" | "quick") => false,
+        Ok(other) => panic!("BL_TEST_DEPTH is `{other}`: set it to quick or full"),
+    }
+}

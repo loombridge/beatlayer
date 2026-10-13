@@ -403,6 +403,11 @@ impl ArrangementView {
         self.folded.contains(&track)
     }
 
+    /// Unfolds `track` if it was folded.
+    pub fn unfold(&mut self, track: TrackId) {
+        self.folded.remove(&track);
+    }
+
     /// A track's own height, unfolded.
     #[must_use]
     pub fn track_height(&self, track: TrackId) -> f32 {

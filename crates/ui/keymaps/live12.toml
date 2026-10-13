@@ -2935,8 +2935,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Cmd+G"]
 win = ["Ctrl+G"]
-status = "pending"
-package = "WP-1.8b"
+status = "bound"
+commands = [
+  { id = "track.group", contexts = ["track-headers"] },
+]
 
 [[shortcut]]
 id = "S-TRACK-007"
@@ -2947,8 +2949,10 @@ trigger = "press"
 milestone = "M1"
 mac = ["Cmd+Shift+G"]
 win = ["Ctrl+Shift+G"]
-status = "pending"
-package = "WP-1.8b"
+status = "bound"
+commands = [
+  { id = "track.ungroup", contexts = ["track-headers"] },
+]
 
 [[shortcut]]
 id = "S-TRACK-008"

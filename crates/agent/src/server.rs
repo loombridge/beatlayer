@@ -76,6 +76,8 @@ pub struct PreviewOutcome {
     pub args: PreviewArgs,
     /// The rendered preview outcome.
     pub outcome: PreviewRenderOutcome,
+    /// The pre-encoded WAV bytes.
+    pub wav: Vec<u8>,
 }
 
 /// What rendering an audio request produced (WP-2.28).
@@ -89,13 +91,13 @@ pub enum RenderOutcome {
 
 /// What a perception tool asks of the host when deferring an audio render (WP-2.28).
 #[derive(Clone)]
-pub(crate) struct Render {
-    pub(crate) kind: RenderKind,
-    pub(crate) document: Document,
-    pub(crate) media: Arc<dyn MediaLibrary>,
-    pub(crate) selection: Option<(Ticks, Ticks)>,
-    pub(crate) engine_rate: u32,
-    pub(crate) playing: bool,
+pub struct Render {
+    pub kind: RenderKind,
+    pub document: Document,
+    pub media: Arc<dyn MediaLibrary>,
+    pub selection: Option<(Ticks, Ticks)>,
+    pub engine_rate: u32,
+    pub playing: bool,
 }
 
 impl std::fmt::Debug for Render {
@@ -115,55 +117,53 @@ impl std::fmt::Debug for Render {
 pub struct RenderRequest {
     /// What [`Agent::finish_render`] answers it with.
     pub ticket: u64,
-    /// The kind of render (preview or analyze).
-    pub kind: RenderKind,
-    /// The set snapshot to render from.
-    pub document: Document,
-    /// Its media.
-    pub media: Arc<dyn MediaLibrary>,
-    /// The Arrangement's time selection.
-    pub selection: Option<(Ticks, Ticks)>,
-    /// The engine's sample rate.
-    pub engine_rate: u32,
-    /// Whether the transport was playing when the request was made.
-    pub playing: bool,
+    /// The deferred render payload.
+    pub render: Render,
 }
 
 impl std::fmt::Debug for RenderRequest {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RenderRequest")
             .field("ticket", &self.ticket)
-            .field("kind", &self.kind)
-            .field("selection", &self.selection)
-            .field("engine_rate", &self.engine_rate)
-            .field("playing", &self.playing)
+            .field("render", &self.render)
             .finish()
     }
 }
 
 impl RenderRequest {
-    /// Renders the request (WP-2.28) on a worker thread.
+    /// Renders the request (WP-2.28) on a worker thread with optional cancellation.
     ///
     /// # Errors
     ///
     /// A description if the render or analysis failed.
-    pub fn execute(self) -> Result<RenderOutcome, String> {
+    pub fn execute_with_cancel(
+        self,
+        cancel: &std::sync::atomic::AtomicBool,
+    ) -> Result<RenderOutcome, String> {
         let source = bl_shell::perception::Source {
-            document: &self.document,
-            media: self.media,
-            selection: self.selection,
-            engine_rate: self.engine_rate,
+            document: &self.render.document,
+            media: self.render.media,
+            selection: self.render.selection,
+            engine_rate: self.render.engine_rate,
             plugins: None,
-            playing: self.playing,
+            playing: self.render.playing,
+            cancel: Some(cancel),
         };
-        match self.kind {
+        match self.render.kind {
             RenderKind::Preview(args) => {
                 let outcome = bl_shell::perception::render_preview(&source, &args)
                     .map_err(|error| error.to_string())?;
+                let wav = bl_shell::perception::encode_wav(
+                    &outcome.samples,
+                    outcome.rendered.channels,
+                    outcome.rendered.sample_rate,
+                    args.bit_depth,
+                )?;
                 Ok(RenderOutcome::Preview(PreviewOutcome {
-                    document: self.document,
+                    document: self.render.document,
                     args,
                     outcome,
+                    wav,
                 }))
             }
             RenderKind::Analyze(args) => {
@@ -174,13 +174,24 @@ impl RenderRequest {
             }
         }
     }
+
+    /// Renders the request (WP-2.28) on a worker thread without cancellation.
+    ///
+    /// # Errors
+    ///
+    /// A description if the render or analysis failed.
+    pub fn execute(self) -> Result<RenderOutcome, String> {
+        static NEVER_CANCEL: std::sync::atomic::AtomicBool =
+            std::sync::atomic::AtomicBool::new(false);
+        self.execute_with_cancel(&NEVER_CANCEL)
+    }
 }
 
 /// What a tool asks of the host: a view capture (WP-1.16) or an audio render (WP-2.28).
 #[derive(Clone, Debug)]
 pub(crate) enum Deferred {
     Capture(Capture),
-    Render(Box<Render>),
+    Render,
 }
 
 /// Beatlayer as the kit's server sees it: the tools, the guide and
@@ -300,16 +311,10 @@ impl Program for Beatlayer {
                     max_size: capture.max_size,
                 });
             }
-            Deferred::Render(render) => {
-                self.render_requests.push(RenderRequest {
-                    ticket,
-                    kind: render.kind.clone(),
-                    document: render.document.clone(),
-                    media: Arc::clone(&render.media),
-                    selection: render.selection,
-                    engine_rate: render.engine_rate,
-                    playing: render.playing,
-                });
+            Deferred::Render => {
+                if let Some(render) = self.state.pending_render.take() {
+                    self.render_requests.push(RenderRequest { ticket, render });
+                }
             }
         }
     }
@@ -392,7 +397,7 @@ impl Agent {
                         Deferred::Capture(_) => {
                             Err("the window closed before the view was captured".to_owned())
                         }
-                        Deferred::Render(_) => {
+                        Deferred::Render => {
                             Err("the window closed before the render finished".to_owned())
                         }
                     });
@@ -428,7 +433,7 @@ impl Agent {
         self.server.finish_deferred(ticket, |deferred| {
             let Capture { view, .. } = match deferred {
                 Deferred::Capture(capture) => capture,
-                Deferred::Render(_) => return Err("expected a view capture".to_owned()),
+                Deferred::Render => return Err("expected a view capture".to_owned()),
             };
             let image = result?;
             let summary = CaptureResult {
@@ -458,37 +463,35 @@ impl Agent {
         ticket: u64,
         result: Result<RenderOutcome, String>,
     ) {
-        let value_and_media = (|| match result {
-            Ok(RenderOutcome::Preview(preview_outcome)) => {
-                let preview = shell.previews_mut().add(
-                    preview_outcome.outcome.samples,
-                    preview_outcome.args.bit_depth,
-                    preview_outcome.outcome.rendered,
-                    preview_outcome.document,
-                );
-                let result = preview
-                    .result(
-                        preview_outcome.outcome.peak_dbfs,
-                        preview_outcome.outcome.took_seconds,
-                    )
-                    .map_err(|err| err.to_string())?;
-                let wav_bytes = preview.wav().map_err(|err| err.to_string())?;
-                let media = vec![Media {
-                    mime_type: "audio/wav",
-                    bytes: wav_bytes,
-                    uri: Some(bl_shell::perception_commands::preview_uri(preview.id)),
-                }];
-                Ok((serde_json::to_value(&result).unwrap_or_default(), media))
-            }
-            Ok(RenderOutcome::Analyze(analyze_result)) => Ok((
-                serde_json::to_value(&analyze_result).unwrap_or_default(),
-                Vec::new(),
-            )),
-            Err(err) => Err(err),
-        })();
         self.server
-            .finish_deferred(ticket, move |deferred| match deferred {
-                Deferred::Render(_) => value_and_media,
+            .finish_deferred(ticket, |deferred| match deferred {
+                Deferred::Render => match result {
+                    Ok(RenderOutcome::Preview(preview_outcome)) => {
+                        let bytes = preview_outcome.wav.len() as u64;
+                        let preview = shell.previews_mut().add(
+                            preview_outcome.outcome.samples,
+                            preview_outcome.args.bit_depth,
+                            preview_outcome.outcome.rendered,
+                            preview_outcome.document,
+                        );
+                        let result = preview.result_with_bytes(
+                            bytes,
+                            preview_outcome.outcome.peak_dbfs,
+                            preview_outcome.outcome.took_seconds,
+                        );
+                        let media = vec![Media {
+                            mime_type: "audio/wav",
+                            bytes: preview_outcome.wav,
+                            uri: Some(bl_shell::perception_commands::preview_uri(preview.id)),
+                        }];
+                        Ok((serde_json::to_value(&result).unwrap_or_default(), media))
+                    }
+                    Ok(RenderOutcome::Analyze(analyze_result)) => Ok((
+                        serde_json::to_value(&analyze_result).unwrap_or_default(),
+                        Vec::new(),
+                    )),
+                    Err(err) => Err(err),
+                },
                 Deferred::Capture(_) => Err("expected a render".to_owned()),
             });
     }

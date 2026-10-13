@@ -116,3 +116,6 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.rustfft]
 opt-level = 3
+[profile.dev.package.lspk-agent]
+opt-level = 3
+

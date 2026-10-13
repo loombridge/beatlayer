@@ -115,6 +115,7 @@ pub use lspk_agent::{
     Session, base64, jsonrpc,
 };
 pub use server::{
-    Agent, CaptureRequest, Captured, PreviewOutcome, RenderKind, RenderOutcome, RenderRequest,
+    Agent, CaptureRequest, Captured, PreviewOutcome, Render, RenderKind, RenderOutcome,
+    RenderRequest,
 };
 pub use tools::EngineMessage;

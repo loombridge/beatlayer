@@ -60,6 +60,8 @@ pub(crate) struct State {
     pub(crate) engine_attached: bool,
     /// Where the engine last said the transport was.
     pub(crate) playhead: Option<Playhead>,
+    /// An audio render deferred by a perception tool waiting to be taken by the host (WP-2.28).
+    pub(crate) pending_render: Option<crate::server::Render>,
 }
 
 /// The transport's playback commands (WP-1.5): play, stop, continue,

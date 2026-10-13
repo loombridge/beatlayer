@@ -13,6 +13,8 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use bl_agent::client::{Client, InProcess, ToolResult};
@@ -620,9 +622,10 @@ fn in_the_app_a_capture_waits_for_the_host_and_returns_its_image() {
 }
 
 /// Spec: agent-perception R7, WP-2.28.
+/// Spec: agent-perception R7, WP-2.28.
 /// In the app, a preview of a 50-track set defers and renders on a worker thread
-/// while the shell runs commands on the main thread, and matches a main-thread
-/// render sample for sample.
+/// while the shell runs commands on the main thread, keeps the main thread within
+/// its frame budget, and matches a synchronous preview sample for sample.
 #[test]
 fn in_the_app_a_preview_defers_and_renders_on_a_worker_thread_while_the_shell_runs_commands() {
     let dir = TempDir::new("fifty-tracks-app");
@@ -649,60 +652,95 @@ fn in_the_app_a_preview_defers_and_renders_on_a_worker_thread_while_the_shell_ru
         Outcome::Reply(Some(_))
     ));
 
-    // Add the 30-second tone file to Arrangement.
-    let add_file = json!({
+    // Delete initial default tracks so only our 50 audio tracks exist.
+    let initial_tracks: Vec<bl_model::TrackId> = shell.editor().document().top_level().collect();
+    for id in initial_tracks {
+        let _ = shell.run("track.delete", json!({ "track": id }));
+    }
+
+    // Place the 30-second tone clip onto 50 separate tracks using spread: true.
+    let paths = vec![file.to_str().unwrap().to_owned(); 50];
+    let add_files = json!({
         "jsonrpc": "2.0", "id": 2, "method": "tools/call",
         "params": { "name": "run", "arguments": {
             "commands": [{
                 "command": "browser.add_to_arrangement",
-                "args": { "paths": [file.to_str().unwrap()] }
+                "args": { "paths": paths, "spread": true }
             }]
         }}
     });
     assert!(matches!(
-        agent.handle(&mut shell, &session, add_file),
+        agent.handle(&mut shell, &session, add_files),
         Outcome::Reply(Some(_))
     ));
+    let tracks_with_audio = shell
+        .editor()
+        .document()
+        .tracks()
+        .filter(|t| t.clips().len() > 0)
+        .count();
+    assert_eq!(tracks_with_audio, 50);
 
-    // Add 49 more tracks to reach 50 tracks.
-    for i in 0..49 {
-        let create_track = json!({
-            "jsonrpc": "2.0", "id": 100 + i, "method": "tools/call",
-            "params": { "name": "run", "arguments": {
-                "commands": [{ "command": "track.create", "args": { "kind": "audio" } }]
-            }}
-        });
-        assert!(matches!(
-            agent.handle(&mut shell, &session, create_track),
-            Outcome::Reply(Some(_))
-        ));
-    }
+    // Reference synchronous preview run directly on the shell (row 2.28 acceptance).
+    let sync_result = shell
+        .run(bl_shell::perception_commands::PREVIEW, json!({}))
+        .expect("synchronous preview succeeds");
+    let sync_id = sync_result["id"].as_u64().expect("has preview id");
+    let sync_samples = shell
+        .previews()
+        .get(sync_id)
+        .expect("kept in shell")
+        .samples
+        .clone();
 
-    // Call preview. In the app without CLAP devices, it defers (Outcome::Wait).
+    // Call preview via agent API. In the app without CLAP devices, it defers (Outcome::Wait).
     let preview_call = json!({
         "jsonrpc": "2.0", "id": 200, "method": "tools/call",
-        "params": { "name": "preview", "arguments": { "bit_depth": 32 } }
+        "params": { "name": "preview", "arguments": {} }
     });
+    let init_start = Instant::now();
     let Outcome::Wait(ticket) = agent.handle(&mut shell, &session, preview_call) else {
         panic!("preview in the app didn't defer");
     };
-
     let mut requests = agent.take_render_requests();
+    let preview_init_time = init_start.elapsed();
     assert_eq!(requests.len(), 1);
     let request = requests.pop().unwrap();
     assert_eq!(request.ticket, ticket);
 
     // Spawn the worker thread with name "bl-preview-worker".
     let (tx, rx) = std::sync::mpsc::channel();
+    let worker_done = Arc::new(AtomicBool::new(false));
+    let done_flag = Arc::clone(&worker_done);
     let worker = std::thread::Builder::new()
         .name("bl-preview-worker".to_owned())
         .spawn(move || {
             let result = request.execute();
+            done_flag.store(true, Ordering::Relaxed);
             tx.send(result).unwrap();
         })
         .unwrap();
 
-    // While the worker renders on its thread, the shell can run commands on the main thread!
+    // While the worker renders off-thread, run a main-thread loop measuring frame times.
+    let mut max_frame_time = Duration::ZERO;
+    let mut frame_count = 0;
+    while !worker_done.load(Ordering::Relaxed) {
+        let frame_start = Instant::now();
+        let query_call = json!({
+            "jsonrpc": "2.0", "id": 1000 + frame_count, "method": "tools/call",
+            "params": { "name": "query", "arguments": { "target": "tracks" } }
+        });
+        assert!(matches!(
+            agent.handle(&mut shell, &session, query_call),
+            Outcome::Reply(Some(_))
+        ));
+        let frame_time = frame_start.elapsed();
+        max_frame_time = max_frame_time.max(frame_time);
+        frame_count += 1;
+        std::thread::sleep(Duration::from_millis(1));
+    }
+
+    // While waiting for outcome receipt, run a concurrent edit command on the main thread.
     let edit_call = json!({
         "jsonrpc": "2.0", "id": 201, "method": "tools/call",
         "params": { "name": "run", "arguments": {
@@ -718,8 +756,28 @@ fn in_the_app_a_preview_defers_and_renders_on_a_worker_thread_while_the_shell_ru
     let outcome = rx.recv().expect("worker finished");
     worker.join().unwrap();
 
-    // Finish render.
+    // Finish render and measure main-thread finish time.
+    let finish_start = Instant::now();
     agent.finish_render(&mut shell, ticket, outcome);
+    let finish_time = finish_start.elapsed();
+
+    // Frame budget at 60 Hz is 16.6 ms.
+    const FRAME_BUDGET: Duration = Duration::from_millis(17);
+    println!(
+        "WP-2.28 frame times: preview initiation {preview_init_time:?}, main loop max frame {max_frame_time:?} ({frame_count} iterations), finish_render {finish_time:?}"
+    );
+    assert!(
+        preview_init_time < FRAME_BUDGET,
+        "preview initiation ({preview_init_time:?}) exceeded frame budget {FRAME_BUDGET:?}"
+    );
+    assert!(
+        max_frame_time < FRAME_BUDGET,
+        "main-thread loop frame ({max_frame_time:?}) exceeded frame budget {FRAME_BUDGET:?}"
+    );
+    assert!(
+        finish_time < FRAME_BUDGET,
+        "finish_render ({finish_time:?}) exceeded frame budget {FRAME_BUDGET:?}"
+    );
 
     let (answered, Outcome::Reply(Some(reply))) = agent.resume(&mut shell).unwrap() else {
         panic!("no reply for finished render");
@@ -736,31 +794,9 @@ fn in_the_app_a_preview_defers_and_renders_on_a_worker_thread_while_the_shell_ru
     let kept_preview = shell.previews().get(preview_id).expect("kept in shell");
     let worker_samples = &kept_preview.samples;
 
-    // Verify sample-for-sample equality against a direct main-thread export of the set as it was when preview was requested.
-    let spec = bl_shell::export::Render {
-        start: bl_core::time::Ticks::ZERO,
-        length: bl_shell::export::Length::Frames(30 * RATE as u64),
-        sample_rate: RATE,
-        engine_rate: RATE,
-        block: bl_shell::export::BLOCK,
-    };
-    let mut main_thread_samples = Vec::new();
-    bl_shell::export::render(
-        &kept_preview.document,
-        shell.media_store(),
-        None,
-        &spec,
-        31.0,
-        &std::sync::atomic::AtomicBool::new(false),
-        &mut |_| {},
-        &mut |block| {
-            main_thread_samples.extend_from_slice(block);
-            Ok(())
-        },
-    )
-    .unwrap();
-    assert_eq!(worker_samples.len(), main_thread_samples.len());
-    assert_eq!(worker_samples, &main_thread_samples);
+    // Verify sample-for-sample equality against the synchronous preview of the same 50-track set.
+    assert_eq!(worker_samples.len(), sync_samples.len());
+    assert_eq!(worker_samples, &sync_samples);
 
     // Perception analyze still works on the kept preview.
     let analyze_call = json!({
@@ -775,6 +811,59 @@ fn in_the_app_a_preview_defers_and_renders_on_a_worker_thread_while_the_shell_ru
     assert!(
         analysis_reply["result"]["structuredContent"]["levels"]["sample_peak_dbfs"].is_number()
     );
+}
+
+/// Spec: agent-perception R7, WP-2.28.
+/// If the window closes (view_capture becomes false) while a render is in flight,
+/// finish_render does not add the preview to shell.previews.
+#[test]
+fn deferred_render_not_added_to_previews_if_window_closed_before_finish() {
+    let mut shell = Shell::headless();
+    let mut agent = Agent::headless(true);
+    agent.set_view_capture(true);
+    let session = agent.open_session(None);
+    let init = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-11-25",
+            "capabilities": {},
+            "clientInfo": { "name": "listener" }
+        }
+    });
+    assert!(matches!(
+        agent.handle(&mut shell, &session, init),
+        Outcome::Reply(Some(_))
+    ));
+
+    let preview_call = json!({
+        "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+        "params": { "name": "preview", "arguments": { "bit_depth": 32 } }
+    });
+    let Outcome::Wait(ticket) = agent.handle(&mut shell, &session, preview_call) else {
+        panic!("preview didn't defer");
+    };
+
+    let mut requests = agent.take_render_requests();
+    let request = requests.pop().unwrap();
+    assert_eq!(request.ticket, ticket);
+
+    let initial_previews: Vec<u64> = shell.previews().ids().collect();
+
+    // Window closes before render completes.
+    agent.set_view_capture(false);
+
+    // Worker completes the render off-thread.
+    let outcome = request.execute();
+
+    // Host reports finished render.
+    agent.finish_render(&mut shell, ticket, outcome);
+
+    // Previews must remain unchanged: no preview was added.
+    let final_previews: Vec<u64> = shell.previews().ids().collect();
+    assert_eq!(initial_previews, final_previews);
+    assert!(shell.previews().get(ticket).is_none());
 }
 
 /// Spec: agent-perception R7, WP-2.28.

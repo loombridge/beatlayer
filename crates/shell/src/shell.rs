@@ -2585,25 +2585,25 @@ impl Shell {
     fn run_perception(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
         let engine_rate = self.engine_rate();
         let playing = self.audio.transport_state().playing;
-        let document = self.editor.document().clone();
-        let has_clap = crate::plugins::has_clap(&document);
-        let selection = self.arrangement.time_selection();
-        let media = Arc::clone(&self.media);
+        let source = crate::perception::Source {
+            document: self.editor.document(),
+            media: Arc::clone(&self.media) as Arc<dyn bl_engine::MediaLibrary>,
+            selection: self.arrangement.time_selection(),
+            engine_rate,
+            plugins: Some(&self.plugins),
+            playing,
+            cancel: None,
+        };
         match id {
             perception_ids::PREVIEW => {
                 let args = Self::args(id, args)?;
-                let source = crate::perception::Source {
-                    document: &document,
-                    media,
-                    selection,
-                    engine_rate,
-                    plugins: has_clap.then_some(&self.plugins),
-                    playing,
-                };
                 let outcome = crate::perception::render_preview(&source, &args)?;
-                let preview =
-                    self.previews
-                        .add(outcome.samples, args.bit_depth, outcome.rendered, document);
+                let preview = self.previews.add(
+                    outcome.samples,
+                    args.bit_depth,
+                    outcome.rendered,
+                    self.editor.document().clone(),
+                );
                 let result = preview
                     .result(outcome.peak_dbfs, outcome.took_seconds)
                     .map_err(|message| ShellError::Failed {
@@ -2614,14 +2614,6 @@ impl Shell {
             }
             perception_ids::ANALYZE => {
                 let args = Self::args(id, args)?;
-                let source = crate::perception::Source {
-                    document: &document,
-                    media,
-                    selection,
-                    engine_rate,
-                    plugins: has_clap.then_some(&self.plugins),
-                    playing,
-                };
                 crate::perception::analyze(&self.previews, &source, &args)
                     .map(|result| to_value(&result))
             }

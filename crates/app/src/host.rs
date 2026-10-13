@@ -27,11 +27,11 @@
 
 use std::collections::BTreeMap;
 use std::num::NonZeroU32;
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, Mutex, atomic::AtomicBool, mpsc};
 use std::time::{Duration, Instant};
 
 use bl_agent::http::{HttpConfig, HttpServer, Parked, Served};
-use bl_agent::{Agent, Captured, RenderOutcome};
+use bl_agent::{Agent, Captured, RenderOutcome, RenderRequest};
 use bl_shell::agent::AgentServerStatus;
 use bl_shell::audio::AudioHost;
 use bl_shell::files::ProjectFiles;
@@ -360,6 +360,17 @@ struct Host {
     captured: (mpsc::Sender<Encoded>, mpsc::Receiver<Encoded>),
     /// Audio renders off the main thread, coming back (WP-2.28).
     rendered: (mpsc::Sender<RenderedEvent>, mpsc::Receiver<RenderedEvent>),
+    /// Audio render jobs waiting for the background preview worker (WP-2.28).
+    render_jobs: mpsc::Sender<RenderJob>,
+    /// Cancellation flags for queued and active preview renders (WP-2.28).
+    render_cancels: Vec<Arc<AtomicBool>>,
+}
+
+/// An audio render job for the background preview worker thread (WP-2.28).
+struct RenderJob {
+    ticket: u64,
+    request: RenderRequest,
+    cancel: Arc<AtomicBool>,
 }
 
 /// A view capture encoded off the main thread: its ticket, and the image
@@ -457,6 +468,25 @@ pub fn run(args: Args) -> Result<(), String> {
     let theme_choice = shell.theme();
     let platform = Platform::current();
     let menus = menu_bar(MenuPlatform::current());
+    let (job_sender, job_receiver) = mpsc::channel::<RenderJob>();
+    let (rendered_sender, rendered_receiver) = mpsc::channel();
+    let render_proxy = proxy.clone();
+    let worker_sender = rendered_sender.clone();
+    let _ = std::thread::Builder::new()
+        .name("bl-preview-worker".to_owned())
+        .spawn(move || {
+            while let Ok(job) = job_receiver.recv() {
+                if job.cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                    let _ =
+                        worker_sender.send((job.ticket, Err("render was cancelled".to_owned())));
+                    let _ = render_proxy.send_event(UserEvent::Rendered);
+                    continue;
+                }
+                let result = job.request.execute_with_cancel(&job.cancel);
+                let _ = worker_sender.send((job.ticket, result));
+                let _ = render_proxy.send_event(UserEvent::Rendered);
+            }
+        });
     let mut host = Host {
         args,
         shell,
@@ -487,12 +517,16 @@ pub fn run(args: Args) -> Result<(), String> {
         agent_parked: Vec::new(),
         captures: Vec::new(),
         captured: mpsc::channel(),
-        rendered: mpsc::channel(),
+        rendered: (rendered_sender, rendered_receiver),
+        render_jobs: job_sender,
+        render_cancels: Vec::new(),
     };
     host.sync_agent_server();
     event_loop
         .run_app(&mut host)
         .map_err(|e| format!("the event loop failed: {e}"))?;
+    host.cancel_renders();
+    host.agent.set_view_capture(false);
     host.shell.audio_mut().stop();
     if let Some((server, _)) = host.agent_server.take() {
         server.stop();
@@ -1170,6 +1204,8 @@ impl Host {
                     self.shell.set_window_size(size.width, size.height);
                 }
                 self.shell.save_preferences();
+                self.cancel_renders();
+                self.agent.set_view_capture(false);
                 self.quitting = true;
                 event_loop.exit();
             }
@@ -1496,26 +1532,27 @@ impl Host {
         }
     }
 
-    /// Takes the audio render requests agents asked for (WP-2.28): spawns
-    /// each on a worker thread (`bl-preview-worker`); [`UserEvent::Rendered`]
+    /// Takes the audio render requests agents asked for (WP-2.28): queues
+    /// each on the background worker thread (`bl-preview-worker`); [`UserEvent::Rendered`]
     /// brings the results back.
     fn take_renders(&mut self) {
         for request in self.agent.take_render_requests() {
-            let sender = self.rendered.0.clone();
-            let proxy = self.proxy.clone();
+            let cancel = Arc::new(AtomicBool::new(false));
+            self.render_cancels.push(Arc::clone(&cancel));
             let ticket = request.ticket;
-            let spawned = std::thread::Builder::new()
-                .name("bl-preview-worker".to_owned())
-                .spawn(move || {
-                    let result = request.execute();
-                    let _ = sender.send((ticket, result));
-                    let _ = proxy.send_event(UserEvent::Rendered);
-                });
-            if spawned.is_err() {
+            if self
+                .render_jobs
+                .send(RenderJob {
+                    ticket,
+                    request,
+                    cancel,
+                })
+                .is_err()
+            {
                 self.agent.finish_render(
                     &mut self.shell,
                     ticket,
-                    Err("couldn't start the preview worker".to_owned()),
+                    Err("couldn't send request to the preview worker".to_owned()),
                 );
             }
         }
@@ -1525,6 +1562,15 @@ impl Host {
     fn finish_renders(&mut self) {
         while let Ok((ticket, result)) = self.rendered.1.try_recv() {
             self.agent.finish_render(&mut self.shell, ticket, result);
+        }
+        self.render_cancels
+            .retain(|cancel| Arc::strong_count(cancel) > 1);
+    }
+
+    /// Cancels any preview renders currently queued or executing (WP-2.28).
+    fn cancel_renders(&mut self) {
+        for cancel in self.render_cancels.drain(..) {
+            cancel.store(true, std::sync::atomic::Ordering::Relaxed);
         }
     }
 

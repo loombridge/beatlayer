@@ -10,12 +10,12 @@
 //!   `bl-analysis`: loudness and true peak, levels, the octave-band
 //!   spectrum, tempo, key, and transients.
 //!
-//! Previews render offline on a worker thread (WP-2.28) so long renders
-//! don't stall the calling thread; while waiting, the calling thread polls.
-//! Plug-in devices are the exception: the render borrows the engine's
-//! plug-ins (WP-2.6b), which are main-thread objects, so a set with
-//! plug-ins renders on the calling thread and only while the transport is
-//! stopped (the offline plug-in renders spec, R8).
+//! In the app, perception calls without CLAP plug-in devices defer
+//! rendering to a worker thread in the app host (WP-2.28), while this
+//! module provides the synchronous render primitives they execute.
+//! Sets with CLAP plug-in devices render synchronously on the calling thread
+//! while the transport is stopped (the offline plug-in renders spec, R8),
+//! because plug-in instances are main-thread objects borrowed from the engine.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -56,6 +56,33 @@ pub struct Preview {
     pub document: Document,
 }
 
+/// Encodes interleaved audio samples as a WAV byte buffer (WP-2.28).
+///
+/// # Errors
+///
+/// A message if the bit depth is unsupported or WAV encoding fails.
+pub fn encode_wav(
+    samples: &[f32],
+    channels: u16,
+    sample_rate: u32,
+    bit_depth: u8,
+) -> Result<Vec<u8>, String> {
+    let depth =
+        BitDepth::from_bits(u32::from(bit_depth)).ok_or_else(|| format!("{bit_depth} bits"))?;
+    bl_media::wav_bytes(
+        samples,
+        channels,
+        sample_rate,
+        depth,
+        if depth.is_integer() {
+            Dither::Triangular
+        } else {
+            Dither::None
+        },
+    )
+    .map_err(|error| error.to_string())
+}
+
 impl Preview {
     /// The preview as a WAV file: 16 bits with triangular dither, 24 bits,
     /// or 32-bit float, as it was asked for. The same preview makes the
@@ -65,20 +92,32 @@ impl Preview {
     ///
     /// A message if it can't be encoded.
     pub fn wav(&self) -> Result<Vec<u8>, String> {
-        let depth = BitDepth::from_bits(u32::from(self.bit_depth))
-            .ok_or_else(|| format!("{} bits", self.bit_depth))?;
-        bl_media::wav_bytes(
+        encode_wav(
             &self.samples,
             self.rendered.channels,
             self.rendered.sample_rate,
-            depth,
-            if depth.is_integer() {
-                Dither::Triangular
-            } else {
-                Dither::None
-            },
+            self.bit_depth,
         )
-        .map_err(|error| error.to_string())
+    }
+
+    /// What `perception.preview` returns for this preview with pre-encoded WAV bytes (WP-2.28).
+    #[must_use]
+    pub fn result_with_bytes(
+        &self,
+        bytes: u64,
+        peak_dbfs: Option<f64>,
+        took_seconds: f64,
+    ) -> PreviewResult {
+        PreviewResult {
+            id: self.id,
+            uri: preview_uri(self.id),
+            mime_type: "audio/wav".to_owned(),
+            bit_depth: self.bit_depth,
+            bytes,
+            peak_dbfs,
+            rendered: self.rendered.clone(),
+            took_seconds,
+        }
     }
 
     /// What `perception.preview` returns for this preview.
@@ -92,16 +131,7 @@ impl Preview {
         took_seconds: f64,
     ) -> Result<PreviewResult, String> {
         let bytes = self.wav()?.len() as u64;
-        Ok(PreviewResult {
-            id: self.id,
-            uri: preview_uri(self.id),
-            mime_type: "audio/wav".to_owned(),
-            bit_depth: self.bit_depth,
-            bytes,
-            peak_dbfs,
-            rendered: self.rendered.clone(),
-            took_seconds,
-        })
+        Ok(self.result_with_bytes(bytes, peak_dbfs, took_seconds))
     }
 }
 
@@ -162,6 +192,8 @@ pub struct Source<'a> {
     pub plugins: Option<&'a ClapHost>,
     /// Whether the transport plays.
     pub playing: bool,
+    /// A cancellation flag observed during offline rendering (WP-2.28).
+    pub cancel: Option<&'a AtomicBool>,
 }
 
 fn invalid(command: &str, message: impl Into<String>) -> ShellError {
@@ -280,6 +312,8 @@ fn render_range(
         engine_rate: source.engine_rate,
         block: export::BLOCK,
     };
+    static NEVER_CANCEL: AtomicBool = AtomicBool::new(false);
+    let cancel = source.cancel.unwrap_or(&NEVER_CANCEL);
     let mut samples = Vec::new();
     let rendered = export::render(
         &document,
@@ -287,7 +321,7 @@ fn render_range(
         source.plugins,
         &spec,
         longest + 1.0,
-        &AtomicBool::new(false),
+        cancel,
         &mut |_| {},
         &mut |block| {
             samples.extend_from_slice(block);

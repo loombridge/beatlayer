@@ -108,6 +108,10 @@ pub struct PluginInfo {
     pub has_window: bool,
     /// Whether its window is open.
     pub window_open: bool,
+    /// Whether its window is shown: open, and not hidden by View ▸
+    /// Plug-In Windows or Auto-Hide Plug-In Windows. Hiding is not
+    /// closing: a hidden window is still open.
+    pub window_shown: bool,
     /// Each parameter's value, as the plug-in itself reports it, as
     /// `[parameter, value]` pairs.
     pub values: Vec<(ParamId, f64)>,
@@ -141,8 +145,10 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .description(
                 "Opens or closes a plug-in device's own editor in a window of its own, as the \
                  device's title bar button does; switches unless `shown` says which. Only \
-                 plug-ins whose editor opens in its own window can show one yet. It changes \
-                 only the view: it isn't an undo step. Returns `plugin.info`'s report.",
+                 plug-ins whose editor opens in its own window can show one yet. An open \
+                 window follows View ▸ Plug-In Windows and Auto-Hide Plug-In Windows, which \
+                 hide and show it without closing it. It changes only the view: it isn't an \
+                 undo step. Returns `plugin.info`'s report.",
             )
             .permission(Permission::Read)
             .context(DeviceView)
@@ -154,8 +160,9 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .description(
                 "Reports what a plug-in device's plug-in is doing: its CLAP ID and file, \
                  whether it's running, the latency it reports in frames, what went wrong if \
-                 anything, whether its editor window can open and is open, and its \
-                 parameters' values as it reports them. Changes nothing.",
+                 anything, whether its editor window can open, is open, and is shown (a \
+                 hidden window stays open), and its parameters' values as it reports them. \
+                 Changes nothing.",
             )
             .permission(Permission::Read)
             .context(DeviceView)

@@ -322,8 +322,9 @@ pub struct Shell {
     /// The Device View's selection, folded devices, clipboard, and
     /// hot-swapping (WP-2.4).
     devices: DeviceView,
-    /// Whether View ▸ Plug-In Windows shows the floating devices' windows
-    /// (WP-2.5b): view state, never part of the set.
+    /// Whether View ▸ Plug-In Windows shows the plug-in windows (the
+    /// floating devices' windows and the plug-ins' editor windows;
+    /// WP-2.5b): view state, never part of the set.
     plug_in_windows: bool,
     /// The native device types the engine offers, which the plug-ins'
     /// join in the Device View (WP-2.6).
@@ -1207,6 +1208,9 @@ impl Shell {
                     self.plugins
                         .open_editor(device, &format!("{name}/{title}"))
                         .map_err(failed)?;
+                    // Its window follows View ▸ Plug-In Windows and
+                    // Auto-Hide Plug-In Windows (R31, R33).
+                    self.apply_plug_in_windows();
                 } else {
                     self.plugins.close_editor(device).map_err(failed)?;
                 }
@@ -1253,8 +1257,29 @@ impl Shell {
             .any(|t| t.devices().any(|d| d.floating))
     }
 
+    /// Whether any window View ▸ Plug-In Windows shows and hides: a
+    /// floating device's, or a plug-in's editor (R33).
+    fn any_plug_in_window(&self) -> bool {
+        self.any_floating() || !self.plugins.open_editors().is_empty()
+    }
+
+    /// Hides and shows the open plug-in editor windows to follow View ▸
+    /// Plug-In Windows and Auto-Hide Plug-In Windows, as their tracks'
+    /// floating windows do (R31, R33): a hidden editor stays open.
+    fn apply_plug_in_windows(&mut self) {
+        let doc = self.editor.document();
+        let shown_track = devices::shown_track(&self.arrangement, doc);
+        let auto_hide = self.prefs.auto_hide_plug_in_windows.0;
+        for device in self.plugins.open_editors() {
+            let shown =
+                self.plug_in_windows && (!auto_hide || doc.device_track(device) == shown_track);
+            let _ = self.plugins.set_editor_visible(device, shown);
+        }
+    }
+
     /// Whether Auto-Hide Plug-In Windows is on: a floating device's window
-    /// hides while another track is selected (WP-2.5b).
+    /// or a plug-in's editor hides while another track is selected
+    /// (WP-2.5b).
     #[must_use]
     pub fn auto_hide_plug_in_windows(&self) -> bool {
         self.prefs.auto_hide_plug_in_windows.0
@@ -1529,6 +1554,9 @@ impl Shell {
             self.refresh_device_types();
             changed = true;
         }
+        // The open plug-in editors follow View ▸ Plug-In Windows and
+        // Auto-Hide Plug-In Windows, as the tracks' floating windows do.
+        self.apply_plug_in_windows();
         if self.kit.idle() {
             changed = true;
         }
@@ -2032,7 +2060,7 @@ impl Shell {
             // The frontmost window must be a secondary one: with only the
             // main window open, Close Window is disabled (M-FILE-004).
             // Live's Plug-In Windows is disabled with none open (M-VIEW-028).
-            ids::VIEW_TOGGLE_PLUG_IN_WINDOWS => return self.any_floating(),
+            ids::VIEW_TOGGLE_PLUG_IN_WINDOWS => return self.any_plug_in_window(),
             ids::WINDOW_CLOSE => {
                 return match self.focused_window {
                     WindowKind::Settings => self.settings_open,
@@ -2499,6 +2527,7 @@ impl Shell {
             if id == device_ids::SET_FLOATING && args_floating {
                 // A device floated shows the windows again (R33).
                 self.plug_in_windows = true;
+                self.apply_plug_in_windows();
             }
             self.dirty = true;
             self.document_changed();
@@ -2907,10 +2936,11 @@ impl Shell {
             ids::VIEW_TOGGLE_PLUG_IN_WINDOWS => {
                 // Spec: device-chains R33. It hides and shows windows only.
                 let ids::TogglePlugInWindowsArgs { shown } = Self::args(id, args)?;
-                if !self.any_floating() {
-                    return Err(unavailable("no device floats"));
+                if !self.any_plug_in_window() {
+                    return Err(unavailable("no window to show or hide"));
                 }
                 self.plug_in_windows = shown.unwrap_or(!self.plug_in_windows);
+                self.apply_plug_in_windows();
                 Ok(to_value(&SwitchResult {
                     on: self.plug_in_windows,
                 }))
@@ -3029,6 +3059,7 @@ impl Shell {
             ids::SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS => {
                 let SwitchArgs { on } = Self::args(id, args)?;
                 self.prefs.auto_hide_plug_in_windows = OnByDefault(on);
+                self.apply_plug_in_windows();
                 self.save_preferences();
                 Ok(to_value(&SwitchResult { on }))
             }

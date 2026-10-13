@@ -47,6 +47,26 @@ fn value(info: &PluginInfo, param: u32) -> Option<f64> {
         .map(|(_, v)| *v)
 }
 
+/// Loads the test plug-in onto `track` and returns its device.
+fn load(shell: &mut Shell, track: bl_model::TrackId) -> DeviceId {
+    let loaded: PluginLoaded = serde_json::from_value(
+        shell
+            .run(
+                ids::LOAD,
+                json!({ "path": bl_test_clap::bundle(), "track": track }),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    loaded.device
+}
+
+/// `plugin.info`'s report for `device`.
+fn info(shell: &mut Shell, device: DeviceId) -> PluginInfo {
+    let value = shell.run(ids::INFO, json!({ "device": device })).unwrap();
+    serde_json::from_value(value).unwrap()
+}
+
 // Spec: clap-hosting R1, R5, R8, R11, R13, R16
 #[test]
 fn a_plugin_loads_runs_and_keeps_its_state_with_the_set() {
@@ -240,5 +260,154 @@ fn a_change_a_plugin_makes_itself_is_one_undo_step() {
     assert_eq!(
         shell.editor().undo_history().next(),
         Some("Change \"Last Note\"")
+    );
+}
+
+// Spec: device-chains R31, R33. View ▸ Plug-In Windows (Cmd-Opt-P)
+// hides and shows a plug-in's editor window as it hides and shows a
+// floating device's: hiding is not closing, it isn't an undo step, it
+// changes nothing in the set, and the menu item's tick and enabled
+// state account for it.
+#[test]
+fn the_plug_in_windows_toggle_hides_and_shows_a_plugins_editor() {
+    let mut shell = Shell::headless();
+    shell.start_audio();
+    let track = audio_track(&shell);
+    let device = load(&mut shell, track);
+    shell
+        .invoke("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    assert!(wait(&mut shell, device, |i| i.active).has_window);
+
+    // Disabled with no plug-in window open, as Live's is.
+    assert!(!shell.can_invoke("view.toggle_plug_in_windows", &json!({})));
+
+    // Opening its editor enables the menu item, ticked while shown.
+    let open: PluginInfo = serde_json::from_value(
+        shell
+            .run(ids::SHOW_WINDOW, json!({ "device": device }))
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(open.window_open && open.window_shown);
+    assert!(shell.can_invoke("view.toggle_plug_in_windows", &json!({})));
+    assert_eq!(
+        shell.switch_state("view.toggle_plug_in_windows"),
+        Some(true)
+    );
+
+    let steps = shell.editor().undo_history().len();
+    let dirty = shell.is_dirty();
+    // Cmd-Option-P (Ctrl-Alt-P) and View ▸ Plug-In Windows.
+    let reply = shell
+        .invoke("view.toggle_plug_in_windows", json!({}))
+        .unwrap();
+    assert_eq!(reply, json!({ "on": false }));
+    let hidden = info(&mut shell, device);
+    assert!(hidden.window_open, "hiding is not closing");
+    assert!(!hidden.window_shown, "hidden");
+    assert_eq!(shell.editor().undo_history().len(), steps, "no undo step");
+    assert_eq!(shell.is_dirty(), dirty, "nothing in the set changed");
+    assert_eq!(
+        shell.switch_state("view.toggle_plug_in_windows"),
+        Some(false)
+    );
+
+    // Shown again.
+    let reply = shell
+        .invoke("view.toggle_plug_in_windows", json!({}))
+        .unwrap();
+    assert_eq!(reply, json!({ "on": true }));
+    assert!(info(&mut shell, device).window_shown, "shown again");
+
+    // Closing the window is still closing: the item is disabled again.
+    shell
+        .run(
+            ids::SHOW_WINDOW,
+            json!({ "device": device, "shown": false }),
+        )
+        .unwrap();
+    assert!(!shell.can_invoke("view.toggle_plug_in_windows", &json!({})));
+}
+
+// Spec: device-chains R31. A plug-in's editor follows Auto-Hide Plug-In
+// Windows: hidden while its track isn't selected, shown again when it
+// is; off, it stays shown whatever track is selected.
+#[test]
+fn a_plugins_editor_follows_auto_hide_plug_in_windows() {
+    let mut shell = Shell::headless();
+    shell.start_audio();
+    let track = audio_track(&shell);
+    let device = load(&mut shell, track);
+    shell
+        .invoke("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    wait(&mut shell, device, |i| i.active);
+    assert!(shell.auto_hide_plug_in_windows(), "on in a new install");
+    shell
+        .run(ids::SHOW_WINDOW, json!({ "device": device }))
+        .unwrap();
+    assert!(
+        info(&mut shell, device).window_shown,
+        "shown with its track"
+    );
+
+    // Another track selected: hidden, not closed.
+    let other = shell.editor().document().top_level().nth(3).unwrap();
+    assert_ne!(other, track);
+    shell
+        .invoke("arrangement.select_tracks", json!({ "tracks": [other] }))
+        .unwrap();
+    shell.poll();
+    let hidden = info(&mut shell, device);
+    assert!(hidden.window_open, "hiding is not closing");
+    assert!(
+        !hidden.window_shown,
+        "hidden while another track is selected"
+    );
+
+    // Its track again: shown again.
+    shell
+        .invoke("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    shell.poll();
+    assert!(info(&mut shell, device).window_shown, "back with its track");
+
+    // Off, it stays shown whatever track is selected.
+    shell
+        .run(
+            "settings.set_auto_hide_plug_in_windows",
+            json!({ "on": false }),
+        )
+        .unwrap();
+    shell
+        .invoke("arrangement.select_tracks", json!({ "tracks": [other] }))
+        .unwrap();
+    shell.poll();
+    assert!(info(&mut shell, device).window_shown);
+
+    // Opened while its track isn't the selected one: hidden at once.
+    shell
+        .run(
+            "settings.set_auto_hide_plug_in_windows",
+            json!({ "on": true }),
+        )
+        .unwrap();
+    shell
+        .run(
+            ids::SHOW_WINDOW,
+            json!({ "device": device, "shown": false }),
+        )
+        .unwrap();
+    shell
+        .invoke("arrangement.select_tracks", json!({ "tracks": [other] }))
+        .unwrap();
+    shell
+        .run(ids::SHOW_WINDOW, json!({ "device": device }))
+        .unwrap();
+    let opened = info(&mut shell, device);
+    assert!(
+        opened.window_open && !opened.window_shown,
+        "auto-hidden at once"
     );
 }

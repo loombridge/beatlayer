@@ -37,8 +37,9 @@ pub const WINDOW_CLOSE: &str = "window.close";
 pub const VIEW_FULL_SCREEN: &str = "view.full_screen";
 /// `view.toggle_browser`: show or hide the browser.
 pub const VIEW_TOGGLE_BROWSER: &str = "view.toggle_browser";
-/// `view.toggle_plug_in_windows`: show or hide the floating devices'
-/// windows (View ▸ Plug-In Windows, WP-2.5b).
+/// `view.toggle_plug_in_windows`: show or hide the plug-in windows: the
+/// floating devices' windows and the plug-ins' editor windows (View ▸
+/// Plug-In Windows, WP-2.5b).
 pub const VIEW_TOGGLE_PLUG_IN_WINDOWS: &str = "view.toggle_plug_in_windows";
 /// `view.toggle_session_arrangement`: switch the main view.
 pub const VIEW_TOGGLE_SESSION_ARRANGEMENT: &str = "view.toggle_session_arrangement";
@@ -424,12 +425,13 @@ fn specs() -> Vec<CommandSpec> {
             .result::<ViewResult>(),
         CommandSpec::new(VIEW_TOGGLE_PLUG_IN_WINDOWS, "Plug-In Windows")
             .description(
-                "Shows or hides every floating device's window at once, as View ▸ Plug-In \
-                 Windows does for Live's plug-in windows (Cmd-Option-P); switches unless \
-                 `shown` says which. Hidden windows' devices still float: it isn't docking, \
+                "Shows or hides every floating device's window and every plug-in's editor \
+                 window at once, as View ▸ Plug-In Windows does for Live's plug-in windows \
+                 (Cmd-Option-P); switches unless `shown` says which. Hidden windows' devices \
+                 still float, and a hidden editor stays open: it isn't docking or closing, \
                  isn't an undo step, and changes nothing in the set. Floating a device shows \
-                 the windows again. Only runs while a device floats. The result's `on` is \
-                 whether they're shown afterwards.",
+                 the windows again. Only runs while a device floats or a plug-in window is \
+                 open. The result's `on` is whether they're shown afterwards.",
             )
             .permission(Permission::Read)
             .context(Global)
@@ -657,13 +659,14 @@ fn specs() -> Vec<CommandSpec> {
         )
         .description(
             "Switches Auto-Hide Plug-In Windows, on the Settings window's Plug-Ins page; it's on \
-             in a new install, as Live's is. While it's on, a floating device's window hides \
-             while another track is selected and comes back when its own track is selected \
-             again, as Live's plug-in windows do. A hidden window's device still floats: \
-             hiding isn't docking, isn't an undo step, and the set saves the device as \
-             floating. `device.windows` says which windows show. The setting is kept for the \
-             next start, and isn't part of the set. The result's `on` is the setting \
-             afterwards.",
+             in a new install, as Live's is. While it's on, a floating device's window or a \
+             plug-in's editor window hides while another track is selected and comes back \
+             when its own track is selected again, as Live's plug-in windows do. A hidden \
+             window's device still floats, and a hidden editor stays open: hiding isn't \
+             docking or closing, isn't an undo step, and the set saves the device as \
+             floating. `device.windows` and `plugin.info` say which windows show. The \
+             setting is kept for the next start, and isn't part of the set. The result's \
+             `on` is the setting afterwards.",
         )
         .permission(Permission::Edit)
         .context(Settings)

@@ -16,8 +16,9 @@
 //!   its audio: delay compensation is WP-2.11's.)
 //! - **State.** It saves its parameters ([`STATE_MAGIC`] then gain,
 //!   latency, and last note, little-endian) and refuses anything else, but
-//!   for two states that make it fail on purpose: [`FAIL_PROCESS`] makes
-//!   every process call fail, and [`FAIL_ACTIVATE`] its next activation.
+//!   for three states that make it fail on purpose: [`FAIL_PROCESS`]
+//!   makes every process call fail, [`FAIL_ACTIVATE`] its next activation,
+//!   and [`FAIL_GUI`] its next editor show or hide.
 //! - **Editor.** A "floating window" in any windowing API that draws
 //!   nothing, so tests open and close it headless; it refuses to embed.
 
@@ -70,10 +71,13 @@ pub const STATE_MAGIC: &[u8; 4] = b"BLTC";
 pub const FAIL_PROCESS: &[u8] = b"FAIL:PROCESS";
 /// A state that makes the next activation fail.
 pub const FAIL_ACTIVATE: &[u8] = b"FAIL:ACTIVATE";
+/// A state that makes the next editor show or hide fail.
+pub const FAIL_GUI: &[u8] = b"FAIL:GUI";
 
 const NO_FAILURE: u8 = 0;
 const PROCESS_FAILS: u8 = 1;
 const ACTIVATE_FAILS: u8 = 2;
+const GUI_FAILS: u8 = 3;
 
 /// The plug-in.
 pub struct GainEcho;
@@ -449,6 +453,10 @@ impl PluginStateImpl for MainThread<'_> {
             shared.failure.store(ACTIVATE_FAILS, Relaxed);
             return Ok(());
         }
+        if bytes == FAIL_GUI {
+            shared.failure.store(GUI_FAILS, Relaxed);
+            return Ok(());
+        }
         let field = |range: core::ops::Range<usize>| bytes.get(range);
         let (Some(magic), Some(gain), Some(latency), Some(last), 24) = (
             field(0..4),
@@ -523,10 +531,26 @@ impl PluginGuiImpl for MainThread<'_> {
     }
 
     fn show(&self) -> Result<(), PluginError> {
+        if self
+            .shared
+            .failure
+            .compare_exchange(GUI_FAILS, NO_FAILURE, Relaxed, Relaxed)
+            .is_ok()
+        {
+            return Err(PluginError::Message("showing the editor fails on purpose"));
+        }
         Ok(())
     }
 
     fn hide(&self) -> Result<(), PluginError> {
+        if self
+            .shared
+            .failure
+            .compare_exchange(GUI_FAILS, NO_FAILURE, Relaxed, Relaxed)
+            .is_ok()
+        {
+            return Err(PluginError::Message("hiding the editor fails on purpose"));
+        }
         Ok(())
     }
 }

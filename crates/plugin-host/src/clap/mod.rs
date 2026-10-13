@@ -243,6 +243,11 @@ struct Instance {
     /// Its open editor is hidden: View ▸ Plug-In Windows or Auto-Hide
     /// Plug-In Windows. Hidden is not closed.
     editor_hidden: bool,
+    /// The visibility last asked for of its open editor; while the
+    /// window's actual visibility differs from it, the plug-in refused
+    /// the ask, and it's asked again only when the wanted visibility
+    /// changes.
+    editor_wanted: bool,
     /// It failed while processing: its device is silent, and it isn't
     /// activated again, live or offline, until the next node or state.
     silenced: bool,
@@ -601,6 +606,7 @@ impl ClapHost {
         }
         instance.editor_open = true;
         instance.editor_hidden = false;
+        instance.editor_wanted = true;
         Ok(())
     }
 
@@ -620,6 +626,8 @@ impl ClapHost {
     /// it: View ▸ Plug-In Windows and Auto-Hide Plug-In Windows hide and
     /// show a plug-in's window as they do a floating device's, and a
     /// hidden window stays open. Does nothing while its editor is closed.
+    /// While the plug-in refuses, it's asked once, and asked again only
+    /// when the wanted visibility changes, not on every frame.
     ///
     /// # Errors
     ///
@@ -629,25 +637,43 @@ impl ClapHost {
     pub fn set_editor_visible(&self, device: DeviceId, shown: bool) -> Result<(), ClapError> {
         let mut guard = lock(&self.inner.main);
         let instance = instance(guard.get()?, device)?;
-        if !instance.editor_open || instance.editor_hidden == !shown {
+        if !instance.editor_open {
             return Ok(());
         }
-        let plugin = instance.instance.plugin_handle();
-        let Some(gui) = plugin.get_extension::<PluginGui>() else {
-            return Ok(());
-        };
         let refused = if shown {
             ClapError::Refused("to show its editor".to_owned())
         } else {
             ClapError::Refused("to hide its editor".to_owned())
         };
-        if shown {
-            gui.show(&plugin).map_err(|_| refused)?;
-        } else {
-            gui.hide(&plugin).map_err(|_| refused)?;
+        if instance.editor_wanted != shown && instance.editor_hidden != !shown {
+            // The wanted visibility changed, and the window isn't there
+            // yet: ask the plug-in.
+            let plugin = instance.instance.plugin_handle();
+            let Some(gui) = plugin.get_extension::<PluginGui>() else {
+                instance.editor_wanted = shown;
+                return Ok(());
+            };
+            let ok = if shown {
+                gui.show(&plugin).is_ok()
+            } else {
+                gui.hide(&plugin).is_ok()
+            };
+            instance.editor_wanted = shown;
+            if !ok {
+                return Err(refused);
+            }
+            instance.editor_hidden = !shown;
+            return Ok(());
         }
-        instance.editor_hidden = !shown;
-        Ok(())
+        // Unchanged since the last ask: the window is either already
+        // there, or the plug-in refused it and it's asked again only when
+        // the wanted visibility changes.
+        instance.editor_wanted = shown;
+        if instance.editor_hidden == !shown {
+            Ok(())
+        } else {
+            Err(refused)
+        }
     }
 
     /// The devices whose plug-in's editor window is open, hidden or shown.
@@ -999,6 +1025,7 @@ fn close_editor(instance: &mut Instance) {
     }
     instance.editor_open = false;
     instance.editor_hidden = false;
+    instance.editor_wanted = true;
 }
 
 /// Lets go of a plug-in: closes its editor and asks its node for its
@@ -1109,6 +1136,7 @@ fn ensure_instance(main: &mut Main, device: &Device, inner: &Inner) -> bool {
         latency: 0,
         editor_open: false,
         editor_hidden: false,
+        editor_wanted: true,
         gestures: BTreeSet::new(),
         held: BTreeMap::new(),
         commands: None,

@@ -359,6 +359,48 @@ fn the_editor_hides_and_shows_without_closing() {
     ));
 }
 
+// Spec: device-chains R31, R33. Asked to hide, and the plug-in refuses,
+// it's asked once, not on every frame: the host remembers the visibility
+// it asked for, and a changed wanted visibility still reaches the
+// plug-in.
+#[test]
+fn a_plugin_that_refuses_to_hide_is_asked_once() {
+    let (host, _node) = running(&[]);
+    let id = device(1, &[]).id;
+    host.open_editor(id, "Test Gain Echo/1-Audio")
+        .expect("it opens");
+    // Its next show or hide refuses, and it recovers: a second ask would
+    // have hidden, so an editor that stays shown was asked once.
+    host.load_state(id, bl_test_clap::FAIL_GUI).unwrap();
+
+    let refused = host.set_editor_visible(id, false);
+    assert!(matches!(refused, Err(ClapError::Refused(_))), "{refused:?}");
+    assert!(
+        !host.status(id).unwrap().editor_hidden,
+        "it refused to hide"
+    );
+
+    // Asked again, as the shell asks on every frame: refused, without
+    // asking the plug-in a second time.
+    for _ in 0..60 {
+        let again = host.set_editor_visible(id, false);
+        assert!(matches!(again, Err(ClapError::Refused(_))), "{again:?}");
+    }
+    assert!(
+        !host.status(id).unwrap().editor_hidden,
+        "asked once; a second ask would have hidden"
+    );
+
+    // A changed wanted visibility still reaches the plug-in, which has
+    // recovered by now.
+    host.set_editor_visible(id, true).unwrap();
+    host.set_editor_visible(id, false).unwrap();
+    assert!(
+        host.status(id).unwrap().editor_hidden,
+        "asked again, it hides"
+    );
+}
+
 // Spec: clap-hosting R14
 #[test]
 fn main_thread_calls_from_another_thread_are_refused() {

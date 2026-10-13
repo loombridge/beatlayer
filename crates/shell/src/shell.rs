@@ -2544,6 +2544,7 @@ impl Shell {
                 media,
                 Some(&self.plugins),
                 self.arrangement.time_selection(),
+                self.arrangement.selected_tracks(),
                 engine_rate,
                 &args,
             )

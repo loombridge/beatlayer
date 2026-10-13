@@ -15,7 +15,7 @@ bl-model.workspace = true
 # Pure-Rust zstd: no C toolchain, so Windows and Linux cross-checks build from
 # any host, and the fuzzer instruments the decoder along with the rest of the
 # loader. `hash` writes and checks the frame's content checksum.
-ruzstd = { version = "=0.9.0", default-features = false, features = ["std", "hash"] }
+ruzstd = { version = "=0.9.1", default-features = false, features = ["std", "hash"] }
 # Pinned to bl-commands' version: the command reference is
 # generated from these schemas.
 schemars = { version = "=1.2.2", default-features = false, features = ["std", "derive"] }

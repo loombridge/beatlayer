@@ -23,7 +23,7 @@ use serde_json::Value;
 use lspk_agent::Media;
 
 use super::{Ctx, ToolOutcome, args, done, failed, step, tool_definition};
-use crate::server::Capture;
+use crate::server::{Capture, Deferred, Render, RenderKind};
 
 pub(crate) const PREVIEW: &str = "preview";
 pub(crate) const ANALYZE: &str = "analyze";
@@ -82,6 +82,16 @@ pub(crate) fn capture_definition() -> Value {
 pub(crate) fn preview(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
     let parsed: PreviewArgs = step!(args(raw));
     step!(ctx.permit(&[Permission::Read], &[ids::PREVIEW], String::new));
+    if ctx.view_capture && !bl_shell::plugins::has_clap(ctx.shell.editor().document()) {
+        return ToolOutcome::Defer(Deferred::render(Render {
+            kind: RenderKind::Preview(parsed),
+            document: ctx.shell.editor().document().clone(),
+            media: ctx.shell.media_store(),
+            selection: ctx.shell.time_selection(),
+            engine_rate: ctx.shell.engine_rate(),
+            playing: ctx.shell.is_playing(),
+        }));
+    }
     let value = serde_json::to_value(&parsed).unwrap_or_default();
     let result = match ctx.shell.run(ids::PREVIEW, value) {
         Ok(result) => result,
@@ -109,6 +119,19 @@ pub(crate) fn preview(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
 pub(crate) fn analyze(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
     let parsed: AnalyzeArgs = step!(args(raw));
     step!(ctx.permit(&[Permission::Read], &[ids::ANALYZE], String::new));
+    if parsed.preview.is_none()
+        && ctx.view_capture
+        && !bl_shell::plugins::has_clap(ctx.shell.editor().document())
+    {
+        return ToolOutcome::Defer(Deferred::render(Render {
+            kind: RenderKind::Analyze(parsed),
+            document: ctx.shell.editor().document().clone(),
+            media: ctx.shell.media_store(),
+            selection: ctx.shell.time_selection(),
+            engine_rate: ctx.shell.engine_rate(),
+            playing: ctx.shell.is_playing(),
+        }));
+    }
     let value = serde_json::to_value(&parsed).unwrap_or_default();
     match ctx.shell.run(ids::ANALYZE, value) {
         Ok(result) => done(result),
@@ -126,8 +149,8 @@ pub(crate) fn capture(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
             "a `max_size` of {max_size} pixels; give {smallest} to {largest}"
         ));
     }
-    ToolOutcome::Defer(Capture {
+    ToolOutcome::Defer(Deferred::Capture(Capture {
         view: parsed.view,
         max_size,
-    })
+    }))
 }

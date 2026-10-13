@@ -3,10 +3,17 @@
 //! checkpoints and scheduled commands, view captures waiting for the
 //! window, and the engine the host attaches.
 
-use bl_engine::{EngineState, Report};
+use std::sync::Arc;
+
+use bl_core::time::Ticks;
+use bl_engine::{EngineState, MediaLibrary, Report};
+use bl_model::Document;
 use bl_shell::Shell;
 use bl_shell::agent::AGENT_APPROVE_CLIENT;
-use bl_shell::perception_commands::{self as perception, CaptureResult, View};
+use bl_shell::perception::PreviewRenderOutcome;
+use bl_shell::perception_commands::{
+    self as perception, AnalyzeArgs, AnalyzeResult, CaptureResult, PreviewArgs, View,
+};
 use lspk_agent::{Call, Credential, Media, Outcome, Program, Server, ServerInfo, Session};
 use serde_json::{Value, json};
 
@@ -51,6 +58,148 @@ pub(crate) struct Capture {
     pub(crate) max_size: u32,
 }
 
+/// The kind of audio render an agent asked for (WP-2.28).
+#[derive(Clone, Debug, PartialEq)]
+pub enum RenderKind {
+    /// An audio preview of a range or track.
+    Preview(PreviewArgs),
+    /// An audio analysis of a range.
+    Analyze(AnalyzeArgs),
+}
+
+/// What rendering a preview produced (WP-2.28).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PreviewOutcome {
+    /// The document at the time of the request.
+    pub document: Document,
+    /// The preview arguments.
+    pub args: PreviewArgs,
+    /// The rendered preview outcome.
+    pub outcome: PreviewRenderOutcome,
+    /// The pre-encoded WAV bytes.
+    pub wav: Vec<u8>,
+}
+
+/// What rendering an audio request produced (WP-2.28).
+#[derive(Clone, Debug, PartialEq)]
+pub enum RenderOutcome {
+    /// A preview outcome.
+    Preview(PreviewOutcome),
+    /// An analysis result.
+    Analyze(AnalyzeResult),
+}
+
+/// What a perception tool asks of the host when deferring an audio render (WP-2.28).
+#[derive(Clone)]
+pub struct Render {
+    pub kind: RenderKind,
+    pub document: Document,
+    pub media: Arc<dyn MediaLibrary>,
+    pub selection: Option<(Ticks, Ticks)>,
+    pub engine_rate: u32,
+    pub playing: bool,
+}
+
+impl std::fmt::Debug for Render {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Render")
+            .field("kind", &self.kind)
+            .field("selection", &self.selection)
+            .field("engine_rate", &self.engine_rate)
+            .field("playing", &self.playing)
+            .finish()
+    }
+}
+
+/// An audio render the host is asked for (WP-2.28): runs on a worker
+/// thread and hands the outcome to [`Agent::finish_render`] with the ticket.
+#[derive(Clone)]
+pub struct RenderRequest {
+    /// What [`Agent::finish_render`] answers it with.
+    pub ticket: u64,
+    /// The deferred render payload.
+    pub render: Render,
+}
+
+impl std::fmt::Debug for RenderRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RenderRequest")
+            .field("ticket", &self.ticket)
+            .field("render", &self.render)
+            .finish()
+    }
+}
+
+impl RenderRequest {
+    /// Renders the request (WP-2.28) on a worker thread with optional cancellation.
+    ///
+    /// # Errors
+    ///
+    /// A description if the render or analysis failed.
+    pub fn execute_with_cancel(
+        self,
+        cancel: &std::sync::atomic::AtomicBool,
+    ) -> Result<RenderOutcome, String> {
+        let source = bl_shell::perception::Source {
+            document: &self.render.document,
+            media: self.render.media,
+            selection: self.render.selection,
+            engine_rate: self.render.engine_rate,
+            plugins: None,
+            playing: self.render.playing,
+            cancel: Some(cancel),
+        };
+        match self.render.kind {
+            RenderKind::Preview(args) => {
+                let outcome = bl_shell::perception::render_preview(&source, &args)
+                    .map_err(|error| error.to_string())?;
+                let wav = bl_shell::perception::encode_wav(
+                    &outcome.samples,
+                    outcome.rendered.channels,
+                    outcome.rendered.sample_rate,
+                    args.bit_depth,
+                )?;
+                Ok(RenderOutcome::Preview(PreviewOutcome {
+                    document: self.render.document,
+                    args,
+                    outcome,
+                    wav,
+                }))
+            }
+            RenderKind::Analyze(args) => {
+                let previews = bl_shell::perception::Previews::default();
+                let result = bl_shell::perception::analyze(&previews, &source, &args)
+                    .map_err(|error| error.to_string())?;
+                Ok(RenderOutcome::Analyze(result))
+            }
+        }
+    }
+
+    /// Renders the request (WP-2.28) on a worker thread without cancellation.
+    ///
+    /// # Errors
+    ///
+    /// A description if the render or analysis failed.
+    pub fn execute(self) -> Result<RenderOutcome, String> {
+        static NEVER_CANCEL: std::sync::atomic::AtomicBool =
+            std::sync::atomic::AtomicBool::new(false);
+        self.execute_with_cancel(&NEVER_CANCEL)
+    }
+}
+
+/// What a tool asks of the host: a view capture (WP-1.16) or an audio render (WP-2.28).
+#[derive(Debug)]
+pub(crate) enum Deferred {
+    Capture(Capture),
+    Render(std::cell::RefCell<Option<Box<Render>>>),
+}
+
+impl Deferred {
+    pub(crate) fn render(render: Render) -> Self {
+        Self::Render(std::cell::RefCell::new(Some(Box::new(render))))
+    }
+}
+
 /// Beatlayer as the kit's server sees it: the tools, the guide and
 /// previews as resources, and the person's approvals in the agent
 /// settings. Commands run on the shell the server is lent with each
@@ -66,6 +215,8 @@ pub(crate) struct Beatlayer {
     view_capture: bool,
     /// Captures the host hasn't taken yet.
     capture_requests: Vec<CaptureRequest>,
+    /// Audio renders the host hasn't started yet (WP-2.28).
+    render_requests: Vec<RenderRequest>,
 }
 
 impl Program for Beatlayer {
@@ -73,7 +224,7 @@ impl Program for Beatlayer {
     /// A report from the engine: a scheduled command fired, whose edit runs
     /// on the document.
     type Event = Report;
-    type Deferred = Capture;
+    type Deferred = Deferred;
 
     fn info(&self) -> ServerInfo {
         ServerInfo {
@@ -100,10 +251,11 @@ impl Program for Beatlayer {
             session: call.session,
             state: &mut self.state,
             confirmed: call.confirmed,
+            view_capture: self.view_capture,
         };
         Ok(match tools::call(&mut ctx, name, args)? {
             // Spec: agent-perception R9. Only a window can capture a view.
-            ToolOutcome::Defer(_) if !self.view_capture => ToolOutcome::Done(Err(
+            ToolOutcome::Defer(Deferred::Capture(_)) if !self.view_capture => ToolOutcome::Done(Err(
                 "View captures need Beatlayer's window, and none is open here: `bl-cli mcp` runs \
                  headless. Run the Beatlayer app and connect to its agent server (Settings, Tempo \
                  & MIDI, Agents) to capture views; `preview` and `analyze` work here."
@@ -156,12 +308,24 @@ impl Program for Beatlayer {
         self.state.schedule.on_report(shell, report);
     }
 
-    fn defer(&mut self, ticket: u64, capture: &Capture) {
-        self.capture_requests.push(CaptureRequest {
-            ticket,
-            view: capture.view,
-            max_size: capture.max_size,
-        });
+    fn defer(&mut self, ticket: u64, deferred: &Deferred) {
+        match deferred {
+            Deferred::Capture(capture) => {
+                self.capture_requests.push(CaptureRequest {
+                    ticket,
+                    view: capture.view,
+                    max_size: capture.max_size,
+                });
+            }
+            Deferred::Render(cell) => {
+                if let Some(render) = cell.borrow_mut().take() {
+                    self.render_requests.push(RenderRequest {
+                        ticket,
+                        render: *render,
+                    });
+                }
+            }
+        }
     }
 
     fn allows(&self, shell: &Shell, agent: &str) -> bool {
@@ -237,12 +401,18 @@ impl Agent {
         self.program().view_capture = available;
         if !available {
             for ticket in self.server.deferred() {
-                self.finish_capture(
-                    ticket,
-                    Err("the window closed before the view was captured".to_owned()),
-                );
+                self.server
+                    .finish_deferred(ticket, |deferred| match deferred {
+                        Deferred::Capture(_) => {
+                            Err("the window closed before the view was captured".to_owned())
+                        }
+                        Deferred::Render(_) => {
+                            Err("the window closed before the render finished".to_owned())
+                        }
+                    });
             }
             self.program().capture_requests.clear();
+            self.program().render_requests.clear();
         }
     }
 
@@ -259,10 +429,21 @@ impl Agent {
         std::mem::take(&mut self.program().capture_requests)
     }
 
+    /// The render requests agents asked for since the last call, oldest
+    /// first (WP-2.28). Their calls wait ([`Outcome::Wait`]) until the host answers
+    /// each with [`Agent::finish_render`].
+    pub fn take_render_requests(&mut self) -> Vec<RenderRequest> {
+        std::mem::take(&mut self.program().render_requests)
+    }
+
     /// Answers a capture request with the image, or why there's none. The
     /// waiting call's reply comes from [`Agent::resume`], with the ticket.
     pub fn finish_capture(&mut self, ticket: u64, result: Result<Captured, String>) {
-        self.server.finish_deferred(ticket, |Capture { view, .. }| {
+        self.server.finish_deferred(ticket, |deferred| {
+            let Capture { view, .. } = match deferred {
+                Deferred::Capture(capture) => capture,
+                Deferred::Render(_) => return Err("expected a view capture".to_owned()),
+            };
             let image = result?;
             let summary = CaptureResult {
                 view,
@@ -281,6 +462,47 @@ impl Agent {
                 }],
             ))
         });
+    }
+
+    /// Answers a render request with the outcome, or why it failed (WP-2.28).
+    /// The waiting call's reply comes from [`Agent::resume`], with the ticket.
+    pub fn finish_render(
+        &mut self,
+        shell: &mut Shell,
+        ticket: u64,
+        result: Result<RenderOutcome, String>,
+    ) {
+        self.server
+            .finish_deferred(ticket, |deferred| match deferred {
+                Deferred::Render(_) => match result {
+                    Ok(RenderOutcome::Preview(preview_outcome)) => {
+                        let bytes = preview_outcome.wav.len() as u64;
+                        let preview = shell.previews_mut().add(
+                            preview_outcome.outcome.samples,
+                            preview_outcome.args.bit_depth,
+                            preview_outcome.outcome.rendered,
+                            preview_outcome.document,
+                        );
+                        let result = preview.result_with_bytes(
+                            bytes,
+                            preview_outcome.outcome.peak_dbfs,
+                            preview_outcome.outcome.took_seconds,
+                        );
+                        let media = vec![Media {
+                            mime_type: "audio/wav",
+                            bytes: preview_outcome.wav,
+                            uri: Some(bl_shell::perception_commands::preview_uri(preview.id)),
+                        }];
+                        Ok((serde_json::to_value(&result).unwrap_or_default(), media))
+                    }
+                    Ok(RenderOutcome::Analyze(analyze_result)) => Ok((
+                        serde_json::to_value(&analyze_result).unwrap_or_default(),
+                        Vec::new(),
+                    )),
+                    Err(err) => Err(err),
+                },
+                Deferred::Capture(_) => Err("expected a render".to_owned()),
+            });
     }
 
     /// Where the agent API runs.

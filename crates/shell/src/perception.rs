@@ -10,13 +10,12 @@
 //!   `bl-analysis`: loudness and true peak, levels, the octave-band
 //!   spectrum, tempo, key, and transients.
 //!
-//! Both run offline on the calling thread (the main thread, in the app),
-//! on a copy of the set with its own engine, so the engine playing the set
-//! on the audio device carries on undisturbed: nothing here touches the
-//! audio thread or its queue. Plug-in devices are the exception: the render
-//! borrows the engine's plug-ins (WP-2.6b), so a set with plug-ins renders
-//! only while the transport is stopped (the offline plug-in renders spec,
-//! R8).
+//! In the app, perception calls without CLAP plug-in devices defer
+//! rendering to a worker thread in the app host (WP-2.28), while this
+//! module provides the synchronous render primitives they execute.
+//! Sets with CLAP plug-in devices render synchronously on the calling thread
+//! while the transport is stopped (the offline plug-in renders spec, R8),
+//! because plug-in instances are main-thread objects borrowed from the engine.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -57,6 +56,33 @@ pub struct Preview {
     pub document: Document,
 }
 
+/// Encodes interleaved audio samples as a WAV byte buffer (WP-2.28).
+///
+/// # Errors
+///
+/// A message if the bit depth is unsupported or WAV encoding fails.
+pub fn encode_wav(
+    samples: &[f32],
+    channels: u16,
+    sample_rate: u32,
+    bit_depth: u8,
+) -> Result<Vec<u8>, String> {
+    let depth =
+        BitDepth::from_bits(u32::from(bit_depth)).ok_or_else(|| format!("{bit_depth} bits"))?;
+    bl_media::wav_bytes(
+        samples,
+        channels,
+        sample_rate,
+        depth,
+        if depth.is_integer() {
+            Dither::Triangular
+        } else {
+            Dither::None
+        },
+    )
+    .map_err(|error| error.to_string())
+}
+
 impl Preview {
     /// The preview as a WAV file: 16 bits with triangular dither, 24 bits,
     /// or 32-bit float, as it was asked for. The same preview makes the
@@ -66,20 +92,46 @@ impl Preview {
     ///
     /// A message if it can't be encoded.
     pub fn wav(&self) -> Result<Vec<u8>, String> {
-        let depth = BitDepth::from_bits(u32::from(self.bit_depth))
-            .ok_or_else(|| format!("{} bits", self.bit_depth))?;
-        bl_media::wav_bytes(
+        encode_wav(
             &self.samples,
             self.rendered.channels,
             self.rendered.sample_rate,
-            depth,
-            if depth.is_integer() {
-                Dither::Triangular
-            } else {
-                Dither::None
-            },
+            self.bit_depth,
         )
-        .map_err(|error| error.to_string())
+    }
+
+    /// What `perception.preview` returns for this preview with pre-encoded WAV bytes (WP-2.28).
+    #[must_use]
+    pub fn result_with_bytes(
+        &self,
+        bytes: u64,
+        peak_dbfs: Option<f64>,
+        took_seconds: f64,
+    ) -> PreviewResult {
+        PreviewResult {
+            id: self.id,
+            uri: preview_uri(self.id),
+            mime_type: "audio/wav".to_owned(),
+            bit_depth: self.bit_depth,
+            bytes,
+            peak_dbfs,
+            rendered: self.rendered.clone(),
+            took_seconds,
+        }
+    }
+
+    /// What `perception.preview` returns for this preview.
+    ///
+    /// # Errors
+    ///
+    /// A message if the WAV file couldn't be encoded.
+    pub fn result(
+        &self,
+        peak_dbfs: Option<f64>,
+        took_seconds: f64,
+    ) -> Result<PreviewResult, String> {
+        let bytes = self.wav()?.len() as u64;
+        Ok(self.result_with_bytes(bytes, peak_dbfs, took_seconds))
     }
 }
 
@@ -102,7 +154,7 @@ impl Previews {
         self.kept.iter().map(|preview| preview.id)
     }
 
-    fn add(
+    pub fn add(
         &mut self,
         samples: Vec<f32>,
         bit_depth: u8,
@@ -140,6 +192,8 @@ pub struct Source<'a> {
     pub plugins: Option<&'a ClapHost>,
     /// Whether the transport plays.
     pub playing: bool,
+    /// A cancellation flag observed during offline rendering (WP-2.28).
+    pub cancel: Option<&'a AtomicBool>,
 }
 
 fn invalid(command: &str, message: impl Into<String>) -> ShellError {
@@ -227,7 +281,8 @@ fn render_range(
     let (document, track, mut notes) = document_for(command, source.document, range.track)?;
     // Spec: offline-plugin-renders R8. Borrowing the plug-ins would take
     // them from the song playing.
-    if source.playing && source.plugins.is_some() && crate::plugins::has_clap(&document) {
+    let has_clap = crate::plugins::has_clap(&document);
+    if source.playing && source.plugins.is_some() && has_clap {
         return Err(ShellError::Unavailable {
             command: command.to_owned(),
             reason: "the set is playing, and rendering it would take its plug-ins from the \
@@ -250,20 +305,23 @@ fn render_range(
     } else {
         (Length::To(to), to, false)
     };
+    let spec = Render {
+        start: from,
+        length,
+        sample_rate,
+        engine_rate: source.engine_rate,
+        block: export::BLOCK,
+    };
+    static NEVER_CANCEL: AtomicBool = AtomicBool::new(false);
+    let cancel = source.cancel.unwrap_or(&NEVER_CANCEL);
     let mut samples = Vec::new();
     let rendered = export::render(
         &document,
         Arc::clone(&source.media),
         source.plugins,
-        &Render {
-            start: from,
-            length,
-            sample_rate,
-            engine_rate: source.engine_rate,
-            block: export::BLOCK,
-        },
+        &spec,
         longest + 1.0,
-        &AtomicBool::new(false),
+        cancel,
         &mut |_| {},
         &mut |block| {
             samples.extend_from_slice(block);
@@ -306,17 +364,28 @@ fn render_range(
     ))
 }
 
-/// Runs `perception.preview`: renders the range and keeps it.
+/// What rendering a preview produced (WP-1.16, WP-2.28).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PreviewRenderOutcome {
+    /// The interleaved audio samples.
+    pub samples: Vec<f32>,
+    /// Metadata of what was rendered.
+    pub rendered: Rendered,
+    /// Peak amplitude in dBFS.
+    pub peak_dbfs: Option<f64>,
+    /// How many seconds the render took.
+    pub took_seconds: f64,
+}
+
+/// Renders a preview range (WP-1.16, WP-2.28).
 ///
 /// # Errors
 ///
-/// [`ShellError`] for a range or track that can't be rendered, or a render
-/// that failed.
-pub fn preview(
-    previews: &mut Previews,
+/// [`ShellError`] for invalid arguments, unavailable devices, or render failures.
+pub fn render_preview(
     source: &Source<'_>,
     args: &PreviewArgs,
-) -> Result<PreviewResult, ShellError> {
+) -> Result<PreviewRenderOutcome, ShellError> {
     if let Some(rate) = args.sample_rate
         && !(8_000..=192_000).contains(&rate)
     {
@@ -339,21 +408,35 @@ pub fn preview(
         PREVIEW_SECONDS,
     )?;
     let peak = samples.iter().fold(0.0f32, |p, s| p.max(s.abs()));
-    let preview = previews.add(samples, args.bit_depth, rendered, source.document.clone());
-    let bytes = preview
-        .wav()
-        .map_err(|message| failed(PREVIEW, message))?
-        .len() as u64;
-    Ok(PreviewResult {
-        id: preview.id,
-        uri: preview_uri(preview.id),
-        mime_type: "audio/wav".to_owned(),
-        bit_depth: preview.bit_depth,
-        bytes,
+    Ok(PreviewRenderOutcome {
+        samples,
+        rendered,
         peak_dbfs: round_opt(amplitude_db(f64::from(peak)), 2),
-        rendered: preview.rendered.clone(),
         took_seconds: round(took, 3),
     })
+}
+
+/// Runs `perception.preview`: renders the range and keeps it.
+///
+/// # Errors
+///
+/// [`ShellError`] for a range or track that can't be rendered, or a render
+/// that failed.
+pub fn preview(
+    previews: &mut Previews,
+    source: &Source<'_>,
+    args: &PreviewArgs,
+) -> Result<PreviewResult, ShellError> {
+    let outcome = render_preview(source, args)?;
+    let preview = previews.add(
+        outcome.samples,
+        args.bit_depth,
+        outcome.rendered,
+        source.document.clone(),
+    );
+    preview
+        .result(outcome.peak_dbfs, outcome.took_seconds)
+        .map_err(|message| failed(PREVIEW, message))
 }
 
 /// Runs `perception.analyze`: measures a preview or a range rendered for

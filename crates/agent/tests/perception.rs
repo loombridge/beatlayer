@@ -13,6 +13,8 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use bl_agent::client::{Client, InProcess, ToolResult};
@@ -617,4 +619,314 @@ fn in_the_app_a_capture_waits_for_the_host_and_returns_its_image() {
         panic!("a capture without a window waited");
     };
     assert_eq!(reply["result"]["isError"], true);
+}
+
+/// Spec: agent-perception R7, WP-2.28.
+/// Spec: agent-perception R7, WP-2.28.
+/// In the app, a preview of a 50-track set defers and renders on a worker thread
+/// while the shell runs commands on the main thread, keeps the main thread within
+/// its frame budget, and matches a synchronous preview sample for sample.
+#[test]
+fn in_the_app_a_preview_defers_and_renders_on_a_worker_thread_while_the_shell_runs_commands() {
+    let dir = TempDir::new("fifty-tracks-app");
+    let file = dir.wav(
+        "Tone",
+        &signals::sine(440.0, signals::level(-12.0), 30.0, RATE, 1, 0.0),
+    );
+    let mut shell = Shell::headless();
+    let mut agent = Agent::headless(true);
+    agent.set_view_capture(true);
+    let session = agent.open_session(None);
+    let init = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-11-25",
+            "capabilities": {},
+            "clientInfo": { "name": "listener" }
+        }
+    });
+    assert!(matches!(
+        agent.handle(&mut shell, &session, init),
+        Outcome::Reply(Some(_))
+    ));
+
+    // Delete initial default tracks so only our 50 audio tracks exist.
+    let initial_tracks: Vec<bl_model::TrackId> = shell.editor().document().top_level().collect();
+    for id in initial_tracks {
+        let _ = shell.run("track.delete", json!({ "track": id }));
+    }
+
+    // Place the 30-second tone clip onto 50 separate tracks using spread: true.
+    let paths = vec![file.to_str().unwrap().to_owned(); 50];
+    let add_files = json!({
+        "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+        "params": { "name": "run", "arguments": {
+            "commands": [{
+                "command": "browser.add_to_arrangement",
+                "args": { "paths": paths, "spread": true }
+            }]
+        }}
+    });
+    assert!(matches!(
+        agent.handle(&mut shell, &session, add_files),
+        Outcome::Reply(Some(_))
+    ));
+    let tracks_with_audio = shell
+        .editor()
+        .document()
+        .tracks()
+        .filter(|t| t.clips().len() > 0)
+        .count();
+    assert_eq!(tracks_with_audio, 50);
+
+    // Reference synchronous preview run directly on the shell (row 2.28 acceptance).
+    let sync_result = shell
+        .run(bl_shell::perception_commands::PREVIEW, json!({}))
+        .expect("synchronous preview succeeds");
+    let sync_id = sync_result["id"].as_u64().expect("has preview id");
+    let sync_samples = shell
+        .previews()
+        .get(sync_id)
+        .expect("kept in shell")
+        .samples
+        .clone();
+
+    // Call preview via agent API. In the app without CLAP devices, it defers (Outcome::Wait).
+    let preview_call = json!({
+        "jsonrpc": "2.0", "id": 200, "method": "tools/call",
+        "params": { "name": "preview", "arguments": {} }
+    });
+    let init_start = Instant::now();
+    let Outcome::Wait(ticket) = agent.handle(&mut shell, &session, preview_call) else {
+        panic!("preview in the app didn't defer");
+    };
+    let mut requests = agent.take_render_requests();
+    let preview_init_time = init_start.elapsed();
+    assert_eq!(requests.len(), 1);
+    let request = requests.pop().unwrap();
+    assert_eq!(request.ticket, ticket);
+
+    // Spawn the worker thread with name "bl-preview-worker".
+    let (tx, rx) = std::sync::mpsc::channel();
+    let worker_done = Arc::new(AtomicBool::new(false));
+    let done_flag = Arc::clone(&worker_done);
+    let worker = std::thread::Builder::new()
+        .name("bl-preview-worker".to_owned())
+        .spawn(move || {
+            let result = request.execute();
+            done_flag.store(true, Ordering::Relaxed);
+            tx.send(result).unwrap();
+        })
+        .unwrap();
+
+    // While the worker renders off-thread, run a main-thread loop measuring frame times.
+    let mut max_frame_time = Duration::ZERO;
+    let mut frame_count = 0;
+    while !worker_done.load(Ordering::Relaxed) {
+        let frame_start = Instant::now();
+        let query_call = json!({
+            "jsonrpc": "2.0", "id": 1000 + frame_count, "method": "tools/call",
+            "params": { "name": "query", "arguments": { "target": "tracks" } }
+        });
+        assert!(matches!(
+            agent.handle(&mut shell, &session, query_call),
+            Outcome::Reply(Some(_))
+        ));
+        let frame_time = frame_start.elapsed();
+        max_frame_time = max_frame_time.max(frame_time);
+        frame_count += 1;
+        std::thread::sleep(Duration::from_millis(1));
+    }
+
+    // While waiting for outcome receipt, run a concurrent edit command on the main thread.
+    let edit_call = json!({
+        "jsonrpc": "2.0", "id": 201, "method": "tools/call",
+        "params": { "name": "run", "arguments": {
+            "commands": [{ "command": "track.create", "args": { "kind": "midi", "name": "Concurrent" } }]
+        }}
+    });
+    assert!(matches!(
+        agent.handle(&mut shell, &session, edit_call),
+        Outcome::Reply(Some(_))
+    ));
+
+    // Wait for worker to finish.
+    let outcome = rx.recv().expect("worker finished");
+    worker.join().unwrap();
+
+    // Finish render and measure main-thread finish time.
+    let finish_start = Instant::now();
+    agent.finish_render(&mut shell, ticket, outcome);
+    let finish_time = finish_start.elapsed();
+
+    // Assert the structure: while the render is in flight (before finish_render),
+    // the main thread handles several loop iterations and commands. That's what a stall would break.
+    assert!(
+        frame_count > 10,
+        "main thread ran {frame_count} loop iterations while render was in flight"
+    );
+
+    // Wall-clock check to catch a stall (a main-thread render of this 50-track set takes seconds).
+    // A 250 ms ceiling catches a regression where rendering moves back to the main thread,
+    // while tolerating CI runner scheduling jitter across parallel tests.
+    const STALL_LIMIT: Duration = Duration::from_millis(250);
+    println!(
+        "WP-2.28 frame times: preview initiation {preview_init_time:?}, main loop max frame {max_frame_time:?} ({frame_count} iterations), finish_render {finish_time:?}"
+    );
+    assert!(
+        preview_init_time < STALL_LIMIT,
+        "preview initiation ({preview_init_time:?}) exceeded stall limit {STALL_LIMIT:?}"
+    );
+    assert!(
+        max_frame_time < STALL_LIMIT,
+        "main-thread loop frame ({max_frame_time:?}) exceeded stall limit {STALL_LIMIT:?}"
+    );
+    assert!(
+        finish_time < STALL_LIMIT,
+        "finish_render ({finish_time:?}) exceeded stall limit {STALL_LIMIT:?}"
+    );
+
+    let (answered, Outcome::Reply(Some(reply))) = agent.resume(&mut shell).unwrap() else {
+        panic!("no reply for finished render");
+    };
+    assert_eq!(answered, ticket);
+    assert_eq!(reply["id"], 200);
+    let result = &reply["result"];
+    assert_eq!(result["isError"], false);
+    assert_eq!(result["structuredContent"]["rendered"]["seconds"], 30.0);
+    assert_eq!(result["structuredContent"]["rendered"]["truncated"], false);
+    let preview_id = result["structuredContent"]["id"].as_u64().unwrap();
+
+    // The preview is kept in shell.previews.
+    let kept_preview = shell.previews().get(preview_id).expect("kept in shell");
+    let worker_samples = &kept_preview.samples;
+
+    // Verify sample-for-sample equality against the synchronous preview of the same 50-track set.
+    assert_eq!(worker_samples.len(), sync_samples.len());
+    assert_eq!(worker_samples, &sync_samples);
+
+    // Perception analyze still works on the kept preview.
+    let analyze_call = json!({
+        "jsonrpc": "2.0", "id": 202, "method": "tools/call",
+        "params": { "name": "analyze", "arguments": { "preview": preview_id, "measure": ["levels"] } }
+    });
+    let Outcome::Reply(Some(analysis_reply)) = agent.handle(&mut shell, &session, analyze_call)
+    else {
+        panic!("analyze of kept preview didn't reply immediately");
+    };
+    assert_eq!(analysis_reply["result"]["isError"], false);
+    assert!(
+        analysis_reply["result"]["structuredContent"]["levels"]["sample_peak_dbfs"].is_number()
+    );
+}
+
+/// Spec: agent-perception R7, WP-2.28.
+/// If the window closes (view_capture becomes false) while a render is in flight,
+/// finish_render does not add the preview to shell.previews.
+#[test]
+fn deferred_render_not_added_to_previews_if_window_closed_before_finish() {
+    let mut shell = Shell::headless();
+    let mut agent = Agent::headless(true);
+    agent.set_view_capture(true);
+    let session = agent.open_session(None);
+    let init = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-11-25",
+            "capabilities": {},
+            "clientInfo": { "name": "listener" }
+        }
+    });
+    assert!(matches!(
+        agent.handle(&mut shell, &session, init),
+        Outcome::Reply(Some(_))
+    ));
+
+    let preview_call = json!({
+        "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+        "params": { "name": "preview", "arguments": { "bit_depth": 32 } }
+    });
+    let Outcome::Wait(ticket) = agent.handle(&mut shell, &session, preview_call) else {
+        panic!("preview didn't defer");
+    };
+
+    let mut requests = agent.take_render_requests();
+    let request = requests.pop().unwrap();
+    assert_eq!(request.ticket, ticket);
+
+    let initial_previews: Vec<u64> = shell.previews().ids().collect();
+
+    // Window closes before render completes.
+    agent.set_view_capture(false);
+
+    // Worker completes the render off-thread.
+    let outcome = request.execute();
+
+    // Host reports finished render.
+    agent.finish_render(&mut shell, ticket, outcome);
+
+    // Previews must remain unchanged: no preview was added.
+    let final_previews: Vec<u64> = shell.previews().ids().collect();
+    assert_eq!(initial_previews, final_previews);
+}
+
+/// Spec: agent-perception R7, WP-2.28.
+/// In the app, a range analyze defers and finishes through the worker thread.
+#[test]
+fn in_the_app_a_range_analyze_defers_and_finishes() {
+    let mut shell = Shell::headless();
+    let mut agent = Agent::headless(true);
+    agent.set_view_capture(true);
+    let session = agent.open_session(None);
+    let init = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-11-25",
+            "capabilities": {},
+            "clientInfo": { "name": "listener" }
+        }
+    });
+    assert!(matches!(
+        agent.handle(&mut shell, &session, init),
+        Outcome::Reply(Some(_))
+    ));
+
+    let analyze_call = json!({
+        "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+        "params": { "name": "analyze", "arguments": { "start": 0, "length": 960 } }
+    });
+    let Outcome::Wait(ticket) = agent.handle(&mut shell, &session, analyze_call) else {
+        panic!("range analyze in the app didn't defer");
+    };
+
+    let mut requests = agent.take_render_requests();
+    assert_eq!(requests.len(), 1);
+    let request = requests.pop().unwrap();
+    assert_eq!(request.ticket, ticket);
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    let worker = std::thread::Builder::new()
+        .name("bl-preview-worker".to_owned())
+        .spawn(move || {
+            let result = request.execute();
+            tx.send(result).unwrap();
+        })
+        .unwrap();
+
+    let outcome = rx.recv().expect("worker finished");
+    worker.join().unwrap();
+
+    agent.finish_render(&mut shell, ticket, outcome);
+    let (answered, Outcome::Reply(Some(reply))) = agent.resume(&mut shell).unwrap() else {
+        panic!("no reply for finished range analyze");
+    };
+    assert_eq!(answered, ticket);
+    assert_eq!(reply["result"]["isError"], false);
+    assert!(reply["result"]["structuredContent"]["loudness"].is_object());
 }

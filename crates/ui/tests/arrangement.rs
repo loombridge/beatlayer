@@ -21,7 +21,10 @@ use bl_ui::arrangement::peaks::{PeakSource, PeakState};
 use bl_ui::layout::{ArrangementLayout, Element, REFERENCE, ShellLayout};
 use common::{Harness, Window, command};
 use egui::accesskit::Role;
-use egui::{Event, Key, Modifiers, MouseWheelUnit, PointerButton, Pos2, TouchPhase, pos2, vec2};
+use egui::{
+    Color32, Event, FullOutput, Key, Modifiers, MouseWheelUnit, PointerButton, Pos2, Rect,
+    TouchPhase, pos2, vec2,
+};
 use serde_json::json;
 
 const BAR: i64 = Ticks::WHOLE.get();
@@ -498,6 +501,88 @@ fn the_follow_switch_and_the_optimize_buttons_work() {
     });
     h.settle();
     assert_eq!(state(&mut h).visible.start, Ticks(600 * BAR));
+}
+
+/// Every rectangle a frame paints, and the colour it fills it with, walking
+/// the frame's shapes the way `accessibility.rs` walks its focus strokes.
+fn painted_rects(output: &FullOutput) -> Vec<(Rect, Color32)> {
+    fn walk(shape: &egui::Shape, out: &mut Vec<(Rect, Color32)>) {
+        match shape {
+            egui::Shape::Rect(rect) => out.push((rect.rect, rect.fill)),
+            egui::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    walk(shape, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    for clipped in &output.shapes {
+        walk(&clipped.shape, &mut out);
+    }
+    out
+}
+
+/// The rectangle the beat-time ruler paints the loop brace in, from the
+/// view and the set's loop, as `rulers::beat_ruler` computes it.
+fn brace(h: &mut Harness, ruler: Rect) -> Rect {
+    let s = state(h);
+    let loop_ = h.shell.editor().document().settings().arrangement_loop;
+    let x_of = |at: Ticks| {
+        ruler.left() + ((at.get() as f64 - s.visible.start.get() as f64) / s.ticks_per_point) as f32
+    };
+    let (l0, l1) = (x_of(loop_.start), x_of(loop_.end()));
+    Rect::from_min_max(
+        pos2(l0.max(ruler.left() - 1.0), ruler.bottom() - 6.0),
+        pos2(l1.min(ruler.right() + 1.0), ruler.bottom() - 1.0),
+    )
+}
+
+// Spec: arrangement-view R13.
+#[test]
+fn the_loop_brace_is_painted_in_its_on_and_off_colours() {
+    let mut h = Harness::with_title_bar(Window::Main);
+    h.settle();
+    let ruler = layout(&h).beat_ruler;
+    // One colour while the loop is on, another while it's off.
+    let on = h.theme.colors.loop_on.0;
+    let off = h.theme.colors.loop_off.0;
+    assert_ne!(on, off, "the theme gives the brace two colours");
+    let near = |a: f32, b: f32| (a - b).abs() < 0.51;
+    // The fill of the rectangle painted where the brace sits, found by its
+    // rectangle, the way `accessibility.rs` finds the focus strokes.
+    let the_brace = |output: &FullOutput, want: Rect| {
+        painted_rects(output)
+            .into_iter()
+            .find(|(r, _)| {
+                near(r.min.x, want.min.x)
+                    && near(r.max.x, want.max.x)
+                    && near(r.min.y, want.min.y)
+                    && near(r.max.y, want.max.y)
+            })
+            .map(|(_, fill)| fill)
+    };
+    // Off in a new set: the brace is painted in the off colour, along the
+    // ruler's lower edge.
+    let output = h.settle();
+    let want = brace(&mut h, ruler);
+    assert_eq!(
+        the_brace(&output, want),
+        Some(off),
+        "the brace at {want:?} is painted in the off colour"
+    );
+    // On: the same brace is painted in the on colour.
+    h.shell
+        .run("transport.set_loop_enabled", json!({ "enabled": true }))
+        .unwrap();
+    let output = h.settle();
+    let want = brace(&mut h, ruler);
+    assert_eq!(
+        the_brace(&output, want),
+        Some(on),
+        "the brace at {want:?} is painted in the on colour"
+    );
 }
 
 #[test]

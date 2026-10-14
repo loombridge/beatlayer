@@ -18,27 +18,27 @@
 //! in: [`kit`] adapts them, and a [`KitHost`] on the main thread keeps
 //! their instances and runs their commands.
 //!
-//! Beatlayer ships no native device yet: [`register`] adds none, and
-//! [`testing`] has the devices the framework's tests use. The first ship
-//! with WP-2.16 to 2.18. The kit's two example plug-ins join the device
-//! list with the `kit-examples` feature, off by default.
+//! Beatlayer ships one native device so far, the Utility device
+//! ([`utility`], WP-2.18b); [`testing`] has the devices the framework's
+//! tests use. The kit's two example plug-ins join the device list with the
+//! `kit-examples` feature, off by default.
 
 mod framework;
 pub mod kit;
 pub mod testing;
+pub mod utility;
 
 pub use framework::{Audio, NativeDevice, NativeNode, ParamBank, add};
 pub use kit::{KitFactory, KitHost};
 
 use bl_engine::{DeviceType, Registry};
 
-/// Adds Beatlayer's native devices to `registry`. There are none yet.
+/// Adds Beatlayer's native devices to `registry`.
 pub fn register(registry: &mut Registry) {
-    let _ = registry;
+    utility::register(registry);
 }
 
-/// The native device types Beatlayer ships, for the browser and the shell:
-/// none yet.
+/// The native device types Beatlayer ships, for the browser and the shell.
 #[must_use]
 pub fn device_types() -> Vec<DeviceType> {
     let mut registry = Registry::empty();

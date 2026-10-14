@@ -57,7 +57,7 @@ fn floating(shell: &Shell, device: DeviceId) -> bool {
     shell.editor().document().device(device).unwrap().floating
 }
 
-// Spec: device-chains R26
+// Spec: device-chains R26, R32
 #[test]
 fn float_and_dock_are_one_undo_step_each_and_leave_a_strip_in_the_chain() {
     let (mut shell, audio) = shell();

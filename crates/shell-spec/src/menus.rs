@@ -877,6 +877,7 @@ mod tests {
 
     #[test]
     fn every_menu_row_and_separator_is_in_the_model_in_order() {
+        // Spec: app-shell R15.
         let Some(reference) = reference_menus() else {
             return;
         };
@@ -909,6 +910,7 @@ mod tests {
 
     #[test]
     fn labels_are_lives_with_beatlayers_name_and_no_ableton_services() {
+        // Spec: app-shell R15.
         // D21: Beatlayer's name where Live names its own product; items for
         // Ableton's services and other products left out; everything else
         // in Live's words.
@@ -979,6 +981,7 @@ mod tests {
 
     #[test]
     fn hidden_items_take_their_spare_separators_with_them() {
+        // Spec: app-shell R15.
         for platform in [MenuPlatform::Mac, MenuPlatform::Other] {
             for menu in menu_bar(platform) {
                 let items = shown(&menu.items);

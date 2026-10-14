@@ -315,6 +315,7 @@ mod tests {
 
     #[test]
     fn the_block_size_changes_nothing() {
+        // Spec: mixer R20
         let (reference, _) = render(512);
         for block in [1, 61, 4096] {
             let (other, mut offline) = render(block);

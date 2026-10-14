@@ -185,7 +185,7 @@ fn the_mixer_scrolls_within_its_tracks() {
     assert_eq!(state(&mut shell).session.scroll, width * 2.0);
 }
 
-// Spec: mixer-view R7.
+// Spec: mixer-view R7, R20.
 #[test]
 fn a_click_on_solo_or_arm_is_exclusive_and_cmd_adds() {
     let mut shell = Shell::headless();

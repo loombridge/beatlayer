@@ -622,7 +622,6 @@ fn in_the_app_a_capture_waits_for_the_host_and_returns_its_image() {
 }
 
 /// Spec: agent-perception R7, WP-2.28.
-/// Spec: agent-perception R7, WP-2.28.
 /// In the app, a preview of a 50-track set defers and renders on a worker thread
 /// while the shell runs commands on the main thread, keeps the main thread within
 /// its frame budget, and matches a synchronous preview sample for sample.

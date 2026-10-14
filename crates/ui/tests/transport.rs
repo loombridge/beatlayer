@@ -257,7 +257,7 @@ fn follow_pages_the_view_with_the_engines_playhead() {
 
 #[test]
 fn every_control_in_the_transport_section_is_reachable_from_the_keyboard() {
-    // Spec: control-bar-transport R11; the acceptance's third part.
+    // Spec: control-bar-transport R2, R11; the acceptance's third part.
     let mut h = Harness::new(Window::Main);
     h.settle();
     // Option-0 (Alt-0) to the Control Bar; with Use Tab Key to Move Focus
@@ -510,7 +510,7 @@ fn dragging_a_field_steps_it_as_one_undo_step() {
 
 #[test]
 fn the_section_reaches_assistive_technology() {
-    // Spec: control-bar-transport R11.
+    // Spec: control-bar-transport R2, R11.
     let mut h = Harness::new(Window::Main);
     let nodes = Harness::nodes(&h.settle());
     for element in SECTION {

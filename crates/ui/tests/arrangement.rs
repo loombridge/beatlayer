@@ -99,7 +99,7 @@ fn wheel(h: &mut Harness, at: Pos2, delta: egui::Vec2, modifiers: Modifiers) {
 
 #[test]
 fn the_arrangement_sits_where_live_puts_it() {
-    // Spec: arrangement-view R1 (layout.md, L-ARR-001 to 017).
+    // Spec: arrangement-view R1, R2 (layout.md, L-ARR-001 to 017).
     let mut h = Harness::with_title_bar(Window::Main);
     let output = h.settle();
     let l = layout(&h);
@@ -470,7 +470,7 @@ fn headers_fold_select_and_resize() {
 
 #[test]
 fn the_follow_switch_and_the_optimize_buttons_work() {
-    // Spec: arrangement-view R9, R10 (L-CTRL-012, L-ARR-017).
+    // Spec: arrangement-view R9, R10, R13 (L-CTRL-012, L-ARR-017).
     let mut h = Harness::with_title_bar(Window::Main);
     h.settle();
     let shell_layout =

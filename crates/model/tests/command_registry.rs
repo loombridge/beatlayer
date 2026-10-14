@@ -26,6 +26,7 @@ fn document_registry() -> Registry {
 /// label, or has a malformed ID or binding.
 #[test]
 fn every_command_is_complete() {
+    // Spec: mixer R21; routing R20
     let commands = document_registry();
     if let Err(problems) = commands.check() {
         panic!("{problems}");
@@ -117,6 +118,7 @@ impl Agent {
 /// each run is one undo step.
 #[test]
 fn every_command_runs_by_id() {
+    // Spec: mixer R21; routing R20
     let mut agent = Agent::new();
     let quarter = Ticks::QUARTER.0;
     let bar = Ticks::WHOLE.0;
@@ -510,6 +512,7 @@ fn every_command_runs_by_id() {
 /// registered schema, and reads back as the same command through its ID.
 #[test]
 fn schemas_match_what_commands_serialise() {
+    // Spec: mixer R21; routing R20
     let commands = document_registry();
     let mut ids = bl_core::id::IdAllocator::new();
     let mut fresh = || ids.allocate();
@@ -949,6 +952,7 @@ fn bad_requests_change_nothing() {
 /// The default bindings follow the command bindings spec.
 #[test]
 fn bindings_follow_the_spec() {
+    // Spec: mixer R21
     let commands = document_registry();
     let bindings = |id: &str| -> Vec<String> {
         commands

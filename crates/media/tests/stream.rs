@@ -509,6 +509,7 @@ fn seeking_while_stopped_readies_the_new_position() {
 
 #[test]
 fn a_blocking_source_waits_for_the_disk_instead_of_underrunning() {
+    // Spec: disk-streaming R8
     // Offline renders read this way, so an export never underruns.
     let dir = TempDir::new("stream-blocking");
     let path = noise_file(dir.path(), "noise.wav", 48_000, 40_000, 6);

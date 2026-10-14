@@ -470,7 +470,7 @@ fn deactivated_clips_are_silent_and_overlapping_ones_add() {
     assert!(left[36_000..].iter().all(|&s| s == 0.0));
 }
 
-// Spec: audio-clips R10
+// Spec: audio-clips R10, R20, R21
 #[test]
 fn a_locate_or_a_loop_wrap_into_a_clip_plays_its_file_from_that_point() {
     let mut editor = Editor::new();

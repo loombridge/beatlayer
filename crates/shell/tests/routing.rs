@@ -73,7 +73,7 @@ fn choose(shell: &mut Shell, chooser: &Chooser, label: &str) {
     shell.invoke(&run.id, run.args).unwrap();
 }
 
-// Spec: routing R16
+// Spec: routing R16, R21
 #[test]
 fn every_chooser_lists_what_lives_lists_in_the_same_order() {
     let Set {

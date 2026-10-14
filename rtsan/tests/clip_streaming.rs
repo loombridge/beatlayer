@@ -11,6 +11,8 @@
 //! now and then and reads underrun, which play silence. RTSan stops the
 //! process at the first allocation, free, lock, or blocking call in any of
 //! it, and the allocation trap fails the test at any heap use.
+//!
+//! Spec: audio-clips R20, R21.
 
 bl_rt::install_trap!();
 

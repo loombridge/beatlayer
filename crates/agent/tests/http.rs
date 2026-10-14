@@ -10,6 +10,7 @@
 //! the client runs on a thread of its own.
 
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
@@ -850,13 +851,32 @@ fn an_agent_edit_sent_mid_drag_lands_after_the_drop_as_its_own_undo_step() {
     assert_eq!(start(&app), 0);
 }
 
+/// `curl` on the PATH, if there is one. On Windows the file is named
+/// `curl.exe`, as the spawned `curl` resolves it.
+fn curl_on_path() -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    let names: &[&str] = if cfg!(windows) {
+        &["curl", "curl.exe"]
+    } else {
+        &["curl"]
+    };
+    std::env::split_paths(&path).find_map(|dir| {
+        names
+            .iter()
+            .map(|name| dir.join(name))
+            .find(|candidate| candidate.is_file())
+    })
+}
+
 /// A real HTTP client, curl, as a check on the server's HTTP: it sends the
-/// initialize request and a tool call on one kept-alive connection. Run on
-/// demand, where curl is installed:
-/// `cargo test -p bl-agent --test http -- --ignored --nocapture`.
+/// initialize request and a tool call on one kept-alive connection. Where
+/// the PATH has no curl it prints why and skips.
 #[test]
-#[ignore = "needs curl on the PATH"]
 fn curl_talks_to_the_server() {
+    if curl_on_path().is_none() {
+        eprintln!("curl is not on the PATH; skipping the curl HTTP test");
+        return;
+    }
     let mut app = App::start();
     app.shell
         .run("agent.approve_client", json!({ "client": "curl" }))

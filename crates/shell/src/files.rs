@@ -15,7 +15,7 @@ use std::path::{Component, Path, PathBuf};
 
 use bl_model::{ContentHash, DeviceWindows, Editor, TrackId, TrackKind, registry};
 use bl_project::{
-    Media, MediaPath, MediaRef, Project, ProjectFolder, SET_EXTENSION, SetFile, is_set,
+    Media, MediaPath, MediaRef, Project, ProjectFolder, SET_EXTENSION, SaveOptions, SetFile, is_set,
 };
 use serde_json::json;
 
@@ -87,7 +87,43 @@ pub trait SetStore {
     fn windows(&self) -> DeviceWindows {
         DeviceWindows::new()
     }
+
+    /// Writes `editor` to `path` as a copy without making it the open set:
+    /// the default set and templates (WP-2.25). Returns warnings about
+    /// things that went wrong without stopping the write. A store that
+    /// keeps no file can't write one.
+    ///
+    /// # Errors
+    ///
+    /// A message saying why the copy couldn't be written.
+    fn save_copy(&mut self, path: &Path, editor: &Editor) -> Result<Vec<String>, String> {
+        let _ = (path, editor);
+        Err(COPY_UNSUPPORTED.to_owned())
+    }
+
+    /// Copies every file the open set uses that lives outside its project
+    /// folder into the project's `Samples/Imported` folder, re-pointing the
+    /// media table at the copies (WP-2.25, Collect All and Save). Returns
+    /// how many files were copied. A store that keeps no media table copies
+    /// nothing.
+    ///
+    /// # Errors
+    ///
+    /// A message saying why a copy couldn't be made.
+    fn collect(&mut self) -> Result<usize, String> {
+        Ok(0)
+    }
+
+    /// Re-points the open set's media table at the files at `found`, by
+    /// their hashes: what a missing-files search gives back (WP-2.25). A
+    /// store that keeps no media table ignores it.
+    fn relink(&mut self, found: &[(ContentHash, PathBuf)]) {
+        let _ = found;
+    }
 }
+
+/// Why [`SetStore::save_copy`] failed: the store keeps no file of its own.
+const COPY_UNSUPPORTED: &str = "this set store can't write a copy of a set";
 
 /// Beatlayer's set files, through `bl-project`. It keeps the open set's
 /// file (for its revision count) and its media table, which the shell
@@ -205,9 +241,124 @@ impl SetStore for ProjectFiles {
         );
         files
     }
+
+    fn save_copy(&mut self, path: &Path, editor: &Editor) -> Result<Vec<String>, String> {
+        if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("couldn't create {}: {e}", parent.display()))?;
+        }
+        let mut media = self.media.clone();
+        let mut warnings = self.add_media_to(&mut media, path);
+        // The copy lives in a folder of its own, so its media paths are
+        // re-pointed from the open set's folder, as Save Set As does.
+        if let Some(from) = self.folder()
+            && let Some(to) = std::path::absolute(path)
+                .ok()
+                .and_then(|path| path.parent().map(Path::to_path_buf))
+            && let Some(note) = repoint_media(&mut media, &from, &to)
+        {
+            warnings.push(note);
+        }
+        let project = Project::from_editor(editor, media).with_windows(&self.windows);
+        let mut set = SetFile::open(path)
+            .map(|(set, _)| set)
+            .unwrap_or_else(|_| SetFile::new(path.to_owned()));
+        // A copy has no backup history of its own.
+        let report = set
+            .save_with(&project, &SaveOptions { backups: 0 })
+            .map_err(|error| error.to_string())?;
+        Ok(warnings.into_iter().chain(report.warnings).collect())
+    }
+
+    fn collect(&mut self) -> Result<usize, String> {
+        // Spec: file-management R4. The set's external files are copied
+        // into `Samples/Imported` and its media table re-pointed at them.
+        let Some(set) = self.set.clone() else {
+            return Ok(0);
+        };
+        let Some(folder) = self.folder() else {
+            return Ok(0);
+        };
+        let imported = ProjectFolder::new(&folder).imported();
+        let mut media = self.media.clone();
+        // Files added since the set was opened join the table first, so an
+        // external one among them is collected too.
+        let _ = self.add_media_to(&mut media, set.path());
+        let mut copied = 0usize;
+        for file in media.iter().cloned().collect::<Vec<_>>() {
+            // Spec: app-shell R17. A path that doesn't climb out of the
+            // project folder is already inside it.
+            if file.path.is_inside() {
+                continue;
+            }
+            let Some(source) = file.path.resolve(&folder) else {
+                continue;
+            };
+            if !source.is_file() {
+                continue;
+            }
+            std::fs::create_dir_all(&imported)
+                .map_err(|e| format!("couldn't create {}: {e}", imported.display()))?;
+            let name = source.file_name().map_or_else(
+                || file.hash.to_string(),
+                |name| name.to_string_lossy().into_owned(),
+            );
+            let destination = free_import(&imported, &name)?;
+            if destination != source {
+                std::fs::copy(&source, &destination).map_err(|e| {
+                    format!(
+                        "couldn't copy {} into {}: {e}",
+                        source.display(),
+                        imported.display()
+                    )
+                })?;
+            }
+            let Some(relative) = MediaPath::between(&folder, &destination) else {
+                return Err(format!(
+                    "couldn't record where {} went in the project",
+                    destination.display()
+                ));
+            };
+            media.insert(MediaRef {
+                path: relative,
+                ..file
+            });
+            copied += 1;
+        }
+        // Files that reached the table are re-pointed; one that couldn't is
+        // left in `added`, so a later save still says it can't be reached.
+        self.added.retain(|hash, _| media.get(hash).is_none());
+        self.media = media;
+        Ok(copied)
+    }
+
+    fn relink(&mut self, found: &[(ContentHash, PathBuf)]) {
+        let Some(folder) = self.folder() else {
+            return;
+        };
+        for (hash, path) in found {
+            let Some(relative) = MediaPath::between(&folder, &lexical(path)) else {
+                continue;
+            };
+            if let Some(file) = self.media.get(hash).cloned() {
+                self.media.insert(MediaRef {
+                    path: relative,
+                    ..file
+                });
+            }
+        }
+    }
 }
 
 impl ProjectFiles {
+    /// The open set's project folder, the folder its file is in, if it has
+    /// a file.
+    fn folder(&self) -> Option<PathBuf> {
+        let set = self.set.as_ref()?;
+        let path = std::path::absolute(set.path()).ok()?;
+        path.parent().map(Path::to_path_buf)
+    }
+
     /// Saves to `path` with this media table, which becomes the open set's.
     fn write(
         &mut self,
@@ -365,6 +516,45 @@ fn free_project_folder(parent: &Path, name: &str) -> Result<PathBuf, String> {
     ))
 }
 
+/// The most numbered copies tried for one file name (Collect All and Save).
+const MOST_IMPORT_COPIES: u32 = 1_000;
+
+/// A free path in `folder` for a copy of a file called `name`: the name
+/// itself, or `<stem> 2.<ext>` and so on when something already has it, so
+/// collecting never writes over a file (WP-2.25).
+fn free_import(folder: &Path, name: &str) -> Result<PathBuf, String> {
+    let path = Path::new(name);
+    let stem = path
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let extension = path
+        .extension()
+        .map(|extension| format!(".{}", extension.to_string_lossy()))
+        .unwrap_or_default();
+    for n in 1..=MOST_IMPORT_COPIES {
+        let candidate = if n == 1 {
+            folder.join(name)
+        } else {
+            folder.join(format!("{stem} {n}{extension}"))
+        };
+        match std::fs::symlink_metadata(&candidate) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(candidate),
+            Err(error) => {
+                return Err(format!(
+                    "couldn't check for {}: {error}",
+                    candidate.display()
+                ));
+            }
+            Ok(_) => {}
+        }
+    }
+    Err(format!(
+        "every name for {name} up to \"{stem} {MOST_IMPORT_COPIES}{extension}\" is taken in {}",
+        folder.display()
+    ))
+}
+
 /// Re-points the media table's paths, relative to the project folder
 /// `from`, so they're relative to `to` and name the same files (app-shell
 /// R21). Returns a note for the Status Bar if any path couldn't be.
@@ -468,6 +658,17 @@ pub fn factory_default_set() -> Editor {
         .clear_history()
         .expect("no transaction is open while building the default set");
     editor
+}
+
+/// The set a new set starts from: the saved default set at `path` when it
+/// can be read, otherwise [`factory_default_set`] (WP-2.25). File ▸ Save
+/// Beatlayer Set As Default Set makes the open set the one a new set starts
+/// from, as Live's does.
+#[must_use]
+pub fn new_set_from(path: Option<&Path>) -> Editor {
+    path.and_then(|path| SetFile::open(path).ok())
+        .map(|(_, project)| project.editor())
+        .unwrap_or_else(factory_default_set)
 }
 
 #[cfg(test)]

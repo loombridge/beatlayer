@@ -59,6 +59,10 @@ pub struct Preferences {
     /// as Live's plug-in windows do. On by default, as observed in Live
     /// 12.4.6.
     pub auto_hide_plug_in_windows: OnByDefault,
+    /// The saved default set (File ▸ Save Beatlayer Set As Default Set),
+    /// which a new set starts from (WP-2.25). `None` uses the factory
+    /// default set.
+    pub default_set: Option<PathBuf>,
 }
 
 /// A switch that's on unless the preferences say otherwise, read and

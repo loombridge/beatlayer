@@ -993,6 +993,39 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "transport.set_loop_enabled",
             main(nothing, control_bar, "Arrangement Loop", Key::Enter),
         ),
+        // Tempo breakpoints and time-signature markers (WP-2.20): the
+        // arrangement's tempo envelope and marker lane aren't drawn yet, so
+        // agents reach these through the agent API until they are.
+        (
+            "song.set_tempo_breakpoint",
+            Exception(LaterView("the arrangement's tempo envelope (WP-2.20)")),
+        ),
+        (
+            "song.move_tempo_breakpoint",
+            Exception(LaterView("the arrangement's tempo envelope (WP-2.20)")),
+        ),
+        (
+            "song.delete_tempo_breakpoint",
+            Exception(LaterView("the arrangement's tempo envelope (WP-2.20)")),
+        ),
+        (
+            "song.set_time_signature_change",
+            Exception(LaterView(
+                "the arrangement's time-signature marker lane (WP-2.20)",
+            )),
+        ),
+        (
+            "song.move_time_signature_change",
+            Exception(LaterView(
+                "the arrangement's time-signature marker lane (WP-2.20)",
+            )),
+        ),
+        (
+            "song.delete_time_signature_change",
+            Exception(LaterView(
+                "the arrangement's time-signature marker lane (WP-2.20)",
+            )),
+        ),
         // A track's switches (mixer-view R7): Enter on Solo or Arm.
         (
             "mixer.solo_exclusive",
@@ -1151,6 +1184,13 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "set.discard_changes",
             Exception(Equivalent(
                 "the save-changes dialog's Don't Save, the system's dialog",
+            )),
+        ),
+        (
+            "set.relink_missing",
+            Exception(Equivalent(
+                "the File Manager's Automatic Search button, which needs the File Manager (M-FILE-007); \
+                 it also runs by itself when a set with missing files is opened",
             )),
         ),
         (

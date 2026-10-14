@@ -23,6 +23,16 @@ pub const SET_SAVE: &str = "set.save";
 pub const SET_SAVE_AS: &str = "set.save_as";
 /// `set.discard_changes`: throw away the set's unsaved changes.
 pub const SET_DISCARD_CHANGES: &str = "set.discard_changes";
+/// `set.save_as_default`: save the set as the default set a new set starts
+/// from.
+pub const SET_SAVE_AS_DEFAULT: &str = "set.save_as_default";
+/// `set.save_as_template`: save the set as a template in the User Library.
+pub const SET_SAVE_AS_TEMPLATE: &str = "set.save_as_template";
+/// `set.collect_all_and_save`: copy the set's external files into its
+/// project folder, then save it.
+pub const SET_COLLECT_ALL: &str = "set.collect_all_and_save";
+/// `set.relink_missing`: search for the set's missing files and relink them.
+pub const SET_RELINK_MISSING: &str = "set.relink_missing";
 /// `app.quit`: quit.
 pub const APP_QUIT: &str = "app.quit";
 /// `app.hide`: hide the app (macOS).
@@ -105,6 +115,10 @@ pub const IDS: &[&str] = &[
     SET_SAVE,
     SET_SAVE_AS,
     SET_DISCARD_CHANGES,
+    SET_SAVE_AS_DEFAULT,
+    SET_SAVE_AS_TEMPLATE,
+    SET_COLLECT_ALL,
+    SET_RELINK_MISSING,
     APP_QUIT,
     APP_HIDE,
     APP_ABOUT,
@@ -166,6 +180,49 @@ pub struct SaveAsArgs {
     /// holds a set already), and otherwise in a new `<name> Project`
     /// folder inside it; the result says where.
     pub path: String,
+}
+
+/// Arguments of `set.save_as_default`: where the default set goes.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DefaultSetArgs {
+    /// The file to save the default set as, absolute or relative to the
+    /// app's working directory. Left out, it goes in the User Library's
+    /// `Templates` folder, or beside the app's preferences when there is no
+    /// User Library. `.blset` is added if it's missing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+}
+
+/// Arguments of `set.save_as_template`: the template's name.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TemplateArgs {
+    /// The template's name, without the `.blset` extension; left out uses
+    /// the open set's name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+/// Arguments of `set.relink_missing`: folders to search besides the set's
+/// project folder and the User Library.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RelinkArgs {
+    /// Folders to search, each with its subfolders, absolute or relative to
+    /// the app's working directory. May be empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub folders: Vec<String>,
+}
+
+/// What `set.collect_all_and_save` and `set.relink_missing` return.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct FileReport {
+    /// The set's file, if it has one.
+    pub path: Option<String>,
+    /// The number of files the command copied (Collect All and Save) or
+    /// relinked (automatic search).
+    pub files: usize,
 }
 
 /// Arguments of `app.settings`.
@@ -361,6 +418,57 @@ fn specs() -> Vec<CommandSpec> {
             .context(Global)
             .args::<NoArgs>()
             .result::<SetResult>(),
+        CommandSpec::new(SET_SAVE_AS_DEFAULT, "Save Beatlayer Set As Default Set...")
+            .description(
+                "Saves the open set as the default set, which every new set starts from, as \
+                 File ▸ Save Beatlayer Set As Default Set does in Live. `path` names the \
+                 default set's file; left out it goes in the User Library's `Templates` folder, \
+                 or beside the app's preferences when there is no User Library. The open set \
+                 itself doesn't change and keeps its own file. The result's `path` is the \
+                 default set's file.",
+            )
+            .permission(Permission::Destructive)
+            .context(Global)
+            .args::<DefaultSetArgs>()
+            .result::<SetResult>(),
+        CommandSpec::new(SET_SAVE_AS_TEMPLATE, "Save Beatlayer Set As Template...")
+            .description(
+                "Saves the open set as a template in the User Library's `Templates` folder, \
+                 making that folder if it isn't there, as File ▸ Save Beatlayer Set As \
+                 Template does in Live. `name` names the template; left out it takes the open \
+                 set's name. The open set itself doesn't change and keeps its own file. The \
+                 result's `path` is the template's file.",
+            )
+            .permission(Permission::Destructive)
+            .context(Global)
+            .args::<TemplateArgs>()
+            .result::<SetResult>(),
+        CommandSpec::new(SET_COLLECT_ALL, "Collect All and Save")
+            .description(
+                "Copies every file the open set uses that lives outside its project folder into \
+                 the project's `Samples/Imported` folder, re-points the set's media table at \
+                 the copies, and saves the set, as File ▸ Collect All and Save does in Live, so \
+                 the set no longer depends on files elsewhere. Fails if the set has never been \
+                 saved; use `set.save_as` to give it a project folder first. The result's \
+                 `files` is how many files were copied.",
+            )
+            .permission(Permission::External)
+            .context(Global)
+            .args::<NoArgs>()
+            .result::<FileReport>(),
+        CommandSpec::new(SET_RELINK_MISSING, "Relink Missing Files")
+            .description(
+                "Searches for the files the open set uses that are missing or changed, and \
+                 relinks each one to the first file found with the same content, as Live's \
+                 automatic search does. The search covers the set's project folder, the User \
+                 Library, the folders the files were last in, and any `folders` given, each \
+                 with its subfolders. The result's `files` is how many files were relinked. It \
+                 also runs by itself when a set is opened.",
+            )
+            .permission(Permission::External)
+            .context(Global)
+            .args::<RelinkArgs>()
+            .result::<FileReport>(),
         CommandSpec::new(APP_QUIT, "Quit Beatlayer")
             .description(
                 "Quits Beatlayer. Unsaved changes are lost unless the person saves them when \

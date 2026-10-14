@@ -17,7 +17,9 @@ use serde_json::json;
 use crate::arrangement::ArrangementUi;
 use crate::browser::BrowserUi;
 use crate::control_bar::{self, TransportFields};
-use crate::layout::{ELEMENTS, Element, Kind, ShellLayout, Strip, title_bar_height};
+use crate::layout::{
+    DRAWN_MENU_MARGIN, ELEMENTS, Element, Kind, ShellLayout, Strip, title_bar_height,
+};
 use crate::mixer::MixerUi;
 use crate::theme::Theme;
 use crate::widgets::{Look, element};
@@ -294,7 +296,11 @@ impl MainWindowUi {
         }
         if let Some(bar) = menu_bar {
             egui::Panel::top("menu-bar")
-                .frame(Frame::NONE.fill(theme.colors.bar.0).inner_margin(2.0))
+                .frame(
+                    Frame::NONE
+                        .fill(theme.colors.bar.0)
+                        .inner_margin(DRAWN_MENU_MARGIN),
+                )
                 .show(root, |ui| {
                     crate::menus::menu_bar(
                         ui,

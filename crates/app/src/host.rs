@@ -129,11 +129,16 @@ fn within(size: egui::Vec2, limit: Option<egui::Vec2>) -> egui::Vec2 {
 /// if it's smaller, as far as its screen allows (interface-zoom R7). A
 /// screen too small for the zoom's minimum gets a window as big as it
 /// allows, showing the layout's minimum from its top-left corner.
-fn resize_main_window(window: &Window, zoom: f32) {
+fn resize_main_window(window: &Window, zoom: f32, drawn_menus: bool) {
     let inner = window.inner_size().to_logical::<f32>(window.scale_factor());
     let inner = egui::vec2(inner.width, inner.height);
-    let (minimum, wanted) =
-        fit_main_window(inner, zoom, DRAWN_TITLE_BAR, window_screen_limit(window));
+    let (minimum, wanted) = fit_main_window(
+        inner,
+        zoom,
+        DRAWN_TITLE_BAR,
+        drawn_menus,
+        window_screen_limit(window),
+    );
     window.set_min_inner_size(Some(LogicalSize::new(minimum.x, minimum.y)));
     if window.fullscreen().is_some() {
         return;
@@ -683,6 +688,7 @@ impl Host {
             within(egui::vec2(inner.0, inner.1), limit),
             self.shell.zoom(),
             DRAWN_TITLE_BAR,
+            self.drawn_menus(),
             limit,
         );
         let (width, height) = (size.x, size.y);
@@ -1101,12 +1107,13 @@ impl Host {
         // minimum at the new zoom; the Settings window follows once no mouse
         // button is down in it, and takes its size at the new zoom.
         let zoom = self.shell.zoom();
+        let drawn_menus = self.drawn_menus();
         if let Some(main) = &mut self.main
             && (main.zoom - zoom).abs() > 1e-6
         {
             apply_zoom(&main.ctx, zoom);
             main.zoom = zoom;
-            resize_main_window(&main.window, zoom);
+            resize_main_window(&main.window, zoom, drawn_menus);
             main.window.request_redraw();
         }
         let mut rezoomed = false;

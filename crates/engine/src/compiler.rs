@@ -15,7 +15,8 @@ use crate::message::{LoopRegion, ParamEvent, TransportCommand};
 use crate::mixer::{self, Route, Solo, TrackMixer, route};
 use crate::node::{NodeData, NodeKey, ParamValue};
 use crate::program::{
-    DeviceSidechain, EngineProgram, Input, Instance, Migration, NodeSlot, Span, Task,
+    DeviceSidechain, EngineProgram, Input, Instance, Migration, NO_DELAY, NodeSlot, Span, Task,
+    delay_storage,
 };
 use crate::registry::Registry;
 use crate::routing::{Edge, Graph, Via};
@@ -91,6 +92,9 @@ struct Resend {
 struct Placed {
     slot: u32,
     identity: Identity,
+    /// The frames the node's own processing adds, as it reported when it was
+    /// made, so a migrated node keeps its latency (WP-2.11).
+    latency: u32,
 }
 
 /// Turns documents into engine programs, off the audio thread.
@@ -313,6 +317,7 @@ impl Compiler {
                 route,
                 from,
                 tap: edge.tap,
+                delay: NO_DELAY,
             };
             match edge.via.sidechain() {
                 Some(device) => sidechain_inputs.entry(device).or_default().push(input),
@@ -355,6 +360,8 @@ impl Compiler {
         let tasks = build.tasks.len();
         let size = self.config.channels * self.config.max_frames;
         let (order, dependents) = run_order(&build);
+        compensate(&mut build, &order);
+        let (delay_lines, delay_pool) = delay_storage(&build.delays, self.config.channels);
         let program = EngineProgram {
             generation,
             base,
@@ -371,6 +378,9 @@ impl Compiler {
             sidechain_inputs: build.sidechain_inputs,
             pool: vec![0.0; tasks * size],
             tap_pool: vec![0.0; kept as usize * size],
+            delay_lines,
+            delay_pool,
+            delay_scratch: vec![0.0; size],
             channels: self.config.channels,
             max_frames: self.config.max_frames,
             output: task_of[&document.main_id()],
@@ -486,7 +496,7 @@ impl Compiler {
                 build.restate.push(ParamEvent::now(key, param, value));
             }
         }
-        self.place(build, key, Identity::Route, || {
+        self.place(build, key, Identity::Route, 0, || {
             Instance::Route(Box::new(Route::new(level, muted, &config).closed(closed)))
         })
     }
@@ -522,7 +532,7 @@ impl Compiler {
                     switch(audible),
                 ));
             }
-            self.place(build, key, Identity::Player, || {
+            self.place(build, key, Identity::Player, 0, || {
                 Instance::Device(Box::new(ClipPlayer::new(&config).audible(audible)))
             })
         });
@@ -531,17 +541,20 @@ impl Compiler {
         for device in track.devices() {
             let key = NodeKey::Device(device.id);
             let identity = Identity::Device(device.kind.clone());
-            let node = match self.previous(key, &identity) {
-                Some(from) => Err(from),
+            let (node, latency) = match self.previous(key, &identity) {
+                Some(from) => (Err(from), self.previous_latency(key, &identity)),
                 None => match self.registry.create(device, &config) {
-                    Some(node) => Ok(Instance::Device(node)),
+                    Some(node) => {
+                        let latency = node.latency();
+                        (Ok(Instance::Device(node)), latency)
+                    }
                     None => {
                         build.unhosted.push(device.id);
                         continue;
                     }
                 },
             };
-            let slot = claim(build, key, identity, !device.enabled, node);
+            let slot = claim(build, key, identity, !device.enabled, latency, node);
             build.nodes.push(slot);
             if let Some(settings) = &device.sidechain {
                 let sources = sidechain_inputs.remove(&device.id).unwrap_or_default();
@@ -558,9 +571,13 @@ impl Compiler {
             start: sidechain_start,
             end: build.sidechains.len() as u32,
         };
-        let mixer = self.place(build, NodeKey::Mixer(track.id()), Identity::Mixer, || {
-            Instance::Mixer(Box::new(TrackMixer::new(track.mixer(), &config)))
-        });
+        let mixer = self.place(
+            build,
+            NodeKey::Mixer(track.id()),
+            Identity::Mixer,
+            0,
+            || Instance::Mixer(Box::new(TrackMixer::new(track.mixer(), &config))),
+        );
         build.tasks.push(Task {
             track: track.id(),
             inputs,
@@ -568,6 +585,7 @@ impl Compiler {
             nodes,
             sidechains,
             mixer,
+            clip_delay: NO_DELAY,
             pre_fx: None,
             post_fx: None,
             dependents: Span::default(),
@@ -593,7 +611,7 @@ impl Compiler {
                     .map(|(param, value)| ParamEvent::now(key, param, value)),
             );
         }
-        let key = self.place(build, key, Identity::Sidechain, || {
+        let key = self.place(build, key, Identity::Sidechain, 0, || {
             Instance::Sidechain(Box::new(SidechainKey::new(settings, &config)))
         });
         let start = build.sidechain_inputs.len() as u32;
@@ -607,6 +625,7 @@ impl Compiler {
                 start,
                 end: build.sidechain_inputs.len() as u32,
             },
+            before: 0,
         });
     }
 
@@ -619,6 +638,14 @@ impl Compiler {
             .map(|placed| placed.slot)
     }
 
+    /// The latency `key`'s node reported when it was made.
+    fn previous_latency(&self, key: NodeKey, identity: &Identity) -> u32 {
+        self.layout
+            .get(&key)
+            .filter(|placed| placed.identity == *identity)
+            .map_or(0, |placed| placed.latency)
+    }
+
     /// Gives a mixer or a route a slot: the one that ran under `key` in the
     /// last program, or a new one from `make`.
     fn place(
@@ -626,13 +653,14 @@ impl Compiler {
         build: &mut Build,
         key: NodeKey,
         identity: Identity,
+        latency: u32,
         make: impl FnOnce() -> Instance,
     ) -> u32 {
         let node = match self.previous(key, &identity) {
             Some(from) => Err(from),
             None => Ok(make()),
         };
-        claim(build, key, identity, false, node)
+        claim(build, key, identity, false, latency, node)
     }
 }
 
@@ -643,6 +671,7 @@ fn claim(
     key: NodeKey,
     identity: Identity,
     bypass: bool,
+    latency: u32,
     node: Result<Instance, u32>,
 ) -> u32 {
     let slot = build.slots.len() as u32;
@@ -653,8 +682,24 @@ fn claim(
             None
         }
     };
-    build.slots.push(NodeSlot { key, node, bypass });
-    build.layout.insert(key, Placed { slot, identity });
+    build.slots.push(NodeSlot {
+        key,
+        node,
+        bypass,
+        // A switched-off device passes its input through, adding nothing, but
+        // its latency is remembered in the layout so it comes back when the
+        // device is switched on again.
+        latency: if bypass { 0 } else { latency },
+        delay: 0,
+    });
+    build.layout.insert(
+        key,
+        Placed {
+            slot,
+            identity,
+            latency,
+        },
+    );
     slot
 }
 
@@ -685,6 +730,9 @@ struct Build {
     /// The state of routes and players that migrate in, which an edit may
     /// have changed: sent with the program.
     restate: Vec<ParamEvent>,
+    /// The length in frames of each delay line the program needs, in the
+    /// order the inputs and players name them (WP-2.11).
+    delays: Vec<u32>,
 }
 
 /// The key of the route that carries `edge`.
@@ -752,6 +800,114 @@ fn run_order(build: &Build) -> (Vec<u32>, Vec<Vec<u32>>) {
     }
     debug_assert_eq!(order.len(), tasks.len(), "the routing graph has no loop");
     (order, dependents)
+}
+
+/// The frames into the song an edge's signal has when it reaches the summing
+/// point: none for a Pre FX tap, and the source's whole chain after it.
+fn tap_latency(arrival: &[u32], chain: &[u32], from: usize, tap: Tap) -> u32 {
+    match tap {
+        Tap::PreFx => arrival[from],
+        Tap::PostFx | Tap::PostMixer => arrival[from] + chain[from],
+    }
+}
+
+/// Works out and records delay compensation (WP-2.11): how far each track's
+/// clips and each route are held back so every path into a track lines up,
+/// each sidechain's source lines up with its device's own input, and each
+/// node's parameter changes are held back with the audio they act on.
+fn compensate(build: &mut Build, order: &[u32]) {
+    let tasks = build.tasks.len();
+    // The frames each track's device chain adds.
+    let mut chain = vec![0u32; tasks];
+    for (t, task) in build.tasks.iter().enumerate() {
+        for &slot in &build.nodes[task.nodes.range()] {
+            chain[t] += build.slots[slot as usize].latency;
+        }
+    }
+    // How far into its chain each device's own input is.
+    for t in 0..tasks {
+        let mut before = 0;
+        for &slot in &build.nodes[build.tasks[t].nodes.range()] {
+            for s in build.tasks[t].sidechains.range() {
+                if build.sidechains[s].device == slot {
+                    build.sidechains[s].before = before;
+                }
+            }
+            before += build.slots[slot as usize].latency;
+        }
+    }
+    // The frames from song time to each track's input sum: what its inputs
+    // and its devices' sidechain sources make it wait for.
+    let mut arrival = vec![0u32; tasks];
+    for &t in order {
+        let t = t as usize;
+        let task = build.tasks[t];
+        let mut arrived = 0u32;
+        for input in &build.inputs[task.inputs.range()] {
+            arrived = arrived.max(tap_latency(
+                &arrival,
+                &chain,
+                input.from as usize,
+                input.tap,
+            ));
+        }
+        for s in task.sidechains.range() {
+            let sc = build.sidechains[s];
+            for input in &build.sidechain_inputs[sc.inputs.range()] {
+                let need = tap_latency(&arrival, &chain, input.from as usize, input.tap)
+                    .saturating_sub(sc.before);
+                arrived = arrived.max(need);
+            }
+        }
+        arrival[t] = arrived;
+    }
+    // Hold each path back to what the longest one takes, and line each
+    // node's parameter changes up with the audio they act on.
+    for t in 0..tasks {
+        let task = build.tasks[t];
+        let a = arrival[t];
+        for i in task.inputs.range() {
+            let input = build.inputs[i];
+            let lat = tap_latency(&arrival, &chain, input.from as usize, input.tap);
+            let delay = a.saturating_sub(lat);
+            if delay > 0 {
+                let index = line(build, delay);
+                build.inputs[i].delay = index;
+            }
+        }
+        for s in task.sidechains.range() {
+            let sc = build.sidechains[s];
+            for i in sc.inputs.range() {
+                let input = build.sidechain_inputs[i];
+                let lat = tap_latency(&arrival, &chain, input.from as usize, input.tap);
+                let delay = (a + sc.before).saturating_sub(lat);
+                if delay > 0 {
+                    let index = line(build, delay);
+                    build.sidechain_inputs[i].delay = index;
+                }
+            }
+        }
+        if build.tasks[t].player.is_some() && a > 0 {
+            let index = line(build, a);
+            build.tasks[t].clip_delay = index;
+        }
+        if let Some(slot) = task.player {
+            build.slots[slot as usize].delay = a;
+        }
+        let mut before = 0;
+        for &slot in &build.nodes[task.nodes.range()] {
+            build.slots[slot as usize].delay = a + before;
+            before += build.slots[slot as usize].latency;
+        }
+        build.slots[task.mixer as usize].delay = a + chain[t];
+    }
+}
+
+/// A new delay line of `len` frames, returning its index in the program.
+fn line(build: &mut Build, len: u32) -> u32 {
+    let index = build.delays.len() as u32;
+    build.delays.push(len);
+    index
 }
 
 /// Fills in each task's span of the flattened dependents lists.

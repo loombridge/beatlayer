@@ -189,7 +189,6 @@ impl Label {
             Self::Clips => Some("Clip files arrive in milestone M6."),
             Self::Grooves => Some("Grooves arrive with the Groove Pool in milestone M6."),
             Self::Tunings => Some("Tunings arrive in milestone M6."),
-            Self::Templates => Some("Templates arrive with WP-2.25."),
             _ => None,
         }
     }

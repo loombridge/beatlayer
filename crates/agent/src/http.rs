@@ -29,7 +29,7 @@
 //! own, and ends a session on DELETE.
 //!
 //! This module gives the kit's server Beatlayer's endpoint (`/mcp`, and the
-//! Settings window's Agents section as where the token is) and agent
+//! Settings window's Agents page as where the token is) and agent
 //! settings, and the agent API's [`Agent`].
 
 use std::io;
@@ -120,7 +120,7 @@ impl HttpServer {
         let endpoint = Endpoint {
             path: ENDPOINT_PATH.to_owned(),
             realm: "beatlayer".to_owned(),
-            token_location: "Settings, Tempo & MIDI, Agents".to_owned(),
+            token_location: "Settings, Agents".to_owned(),
         };
         kit::HttpServer::start(config, endpoint, wake).map(Self)
     }

@@ -23,11 +23,12 @@ use crate::arrangement::{ArrangementView, TransportView, ViewError, Viewport};
 use crate::audio::{AudioHost, ConfigureAudio, EngineTransport, ToneSettings};
 use crate::browser::{self, BrowserError, BrowserView, Waker};
 use crate::commands::{
-    self as ids, PathArgs, SaveAsArgs, SetResult, SettingsArgs, SwitchArgs, SwitchResult,
-    TestToneArgs, TestToneState, ThemeArgs, ViewResult, ZoomArgs,
+    self as ids, DefaultSetArgs, FileReport, PathArgs, RelinkArgs, SaveAsArgs, SetResult,
+    SettingsArgs, SwitchArgs, SwitchResult, TemplateArgs, TestToneArgs, TestToneState, ThemeArgs,
+    ViewResult, ZoomArgs,
 };
 use crate::devices::{self, DeviceError, DeviceView};
-use crate::files::{ProjectFiles, SetStore, factory_default_set};
+use crate::files::{ProjectFiles, SetStore, new_set_from};
 use crate::mixer_controls::{self, Switch};
 use crate::mixer_view::{MixerOf, MixerView, MixerViewError};
 use crate::permission::CallPermission;
@@ -428,7 +429,9 @@ impl Shell {
         audio.set_tone(prefs.tone);
         let browser_view = BrowserView::new(&prefs.browser, Waker::default());
         audio.set_preview_gain(prefs.browser.preview_volume as f32);
-        let editor = factory_default_set();
+        // Spec: file-management R1. A saved default set is what a new set
+        // starts from; without one, the factory default set.
+        let editor = new_set_from(prefs.default_set.as_deref());
         // The engine's clips stream from the set's media (WP-1.4b).
         let media = Arc::new(MediaStore::new());
         audio.set_media(Arc::clone(&media));
@@ -450,12 +453,13 @@ impl Shell {
         let mut described = native_types.clone();
         described.extend(kit.device_types());
         audio.sync(editor.document());
+        let saved = snapshot(&editor);
         let mut shell = Self {
             browser_view,
             media,
             registry,
             editor,
-            saved: factory_default_set(),
+            saved,
             set_path: None,
             dirty: false,
             store,
@@ -1676,6 +1680,71 @@ impl Shell {
             .and_then(|path| std::path::absolute(path).ok())
             .and_then(|path| path.parent().map(Path::to_path_buf));
         self.browser_view.set_project(folder);
+    }
+
+    /// Where a default set goes when no file is named: the saved default
+    /// set's file, the User Library's `Templates` folder, or beside the
+    /// app's preferences (WP-2.25, file-management R2).
+    fn default_set_file(&self) -> Option<PathBuf> {
+        if let Some(path) = &self.prefs.default_set {
+            return Some(path.clone());
+        }
+        self.templates_folder()
+            .or_else(|| self.config_dir.clone())
+            .map(|folder| folder.join(format!("Default Set.{}", bl_project::SET_EXTENSION)))
+    }
+
+    /// The file `path` names for a default set, with the `.blset` extension
+    /// added when it's missing (WP-2.25).
+    fn default_set_file_at(&self, path: &Path) -> PathBuf {
+        if bl_project::is_set(path) {
+            return path.to_owned();
+        }
+        let mut name = path.as_os_str().to_owned();
+        name.push(".");
+        name.push(bl_project::SET_EXTENSION);
+        PathBuf::from(name)
+    }
+
+    /// The User Library's `Templates` folder, where templates are saved
+    /// (WP-2.25, file-management R3).
+    fn templates_folder(&self) -> Option<PathBuf> {
+        self.browser_view
+            .user_library()
+            .map(|library| library.join("Templates"))
+    }
+
+    /// Searches for the open set's missing or changed files and relinks them
+    /// (WP-2.25, file-management R6): the set's project folder, the User
+    /// Library, the folders the files were last in, and `extra`, each with
+    /// its subfolders. Returns how many were relinked, and re-points the
+    /// set's media table at them.
+    fn relink_missing(&mut self, extra: &[PathBuf]) -> usize {
+        let mut folders: Vec<PathBuf> = Vec::new();
+        if let Some(folder) = self.set_path.as_deref().and_then(Path::parent) {
+            folders.push(folder.to_path_buf());
+        }
+        if let Some(library) = self.browser_view.user_library() {
+            folders.push(library.to_path_buf());
+        }
+        for entry in self.media.entries() {
+            if let Some(folder) = entry.path.parent() {
+                folders.push(folder.to_path_buf());
+            }
+        }
+        folders.extend(extra.iter().cloned());
+        // Keep each folder once, in the order the search should try them.
+        let mut seen = std::collections::HashSet::new();
+        folders.retain(|folder| seen.insert(folder.clone()));
+        let Ok(found) = self.media.relink_missing(&folders) else {
+            return 0;
+        };
+        let found: Vec<(bl_model::ContentHash, PathBuf)> = found
+            .into_iter()
+            .map(|(hash, path)| (bl_model::ContentHash(*hash.as_bytes()), path))
+            .collect();
+        self.store.relink(&found);
+        found.len()
     }
 
     /// Runs a browser command and carries out what it asks of the rest of
@@ -2934,8 +3003,11 @@ impl Shell {
             ids::SET_NEW => {
                 Self::args::<NoArgs>(id, args)?;
                 self.set_replaced();
-                self.editor = factory_default_set();
-                self.saved = factory_default_set();
+                // Spec: file-management R1. A new set starts from the saved
+                // default set when there is one.
+                let editor = new_set_from(self.prefs.default_set.as_deref());
+                self.saved = snapshot(&editor);
+                self.editor = editor;
                 self.store.close();
                 self.devices.set_windows(bl_model::DeviceWindows::new());
                 self.set_path = None;
@@ -2976,6 +3048,19 @@ impl Shell {
                     self.media
                         .add_reference(bl_media::ContentHash::from_bytes(hash.0), path, size);
                 }
+                // Spec: file-management R6. Files that moved are found
+                // again by content, so the set opens able to play them.
+                let relinked = self.relink_missing(&[]);
+                if relinked > 0 {
+                    self.message = Some(Message {
+                        text: format!(
+                            "{relinked} missing file{} found again and relinked",
+                            if relinked == 1 { " was" } else { "s were" }
+                        ),
+                        error: false,
+                        action: None,
+                    });
+                }
                 self.new_set_transport();
                 self.document_changed();
                 self.set_file_changed();
@@ -3015,6 +3100,92 @@ impl Shell {
                     self.document_changed();
                 }
                 Ok(self.set_result())
+            }
+            ids::SET_SAVE_AS_DEFAULT => {
+                // Spec: file-management R2. The open set becomes the one a
+                // new set starts from, saved as a copy so it keeps its own
+                // file and stays open.
+                let DefaultSetArgs { path } = Self::args(id, args)?;
+                let path = match path {
+                    Some(path) => self.default_set_file_at(Path::new(&path)),
+                    None => self.default_set_file().ok_or_else(|| {
+                        unavailable(
+                            "there's nowhere to save the default set: give `path`, or set up a \
+                             User Library",
+                        )
+                    })?,
+                };
+                crate::plugins::capture_states(&self.plugins, &self.kit, &mut self.editor);
+                let warnings = self.store.save_copy(&path, &self.editor).map_err(failed)?;
+                self.prefs.default_set = Some(path.clone());
+                self.save_preferences();
+                self.message = (!warnings.is_empty()).then(|| Message {
+                    text: format!("The default set was saved, but: {}", warnings.join("; ")),
+                    error: false,
+                    action: None,
+                });
+                Ok(to_value(&SetResult {
+                    path: Some(path.to_string_lossy().into_owned()),
+                    name: self.set_name(),
+                }))
+            }
+            ids::SET_SAVE_AS_TEMPLATE => {
+                // Spec: file-management R3. Templates live in the User
+                // Library's `Templates` folder, as in Live.
+                let TemplateArgs { name } = Self::args(id, args)?;
+                let folder = self
+                    .templates_folder()
+                    .ok_or_else(|| unavailable("there's no User Library to save a template in"))?;
+                let name = name.unwrap_or_else(|| self.set_name());
+                if name.is_empty() || name.contains(['/', '\\']) {
+                    return Err(ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message: "a template's name can't be empty or hold a path separator"
+                            .to_owned(),
+                    });
+                }
+                let path = folder.join(format!("{name}.{}", bl_project::SET_EXTENSION));
+                crate::plugins::capture_states(&self.plugins, &self.kit, &mut self.editor);
+                let warnings = self.store.save_copy(&path, &self.editor).map_err(failed)?;
+                self.message = (!warnings.is_empty()).then(|| Message {
+                    text: format!("The template was saved, but: {}", warnings.join("; ")),
+                    error: false,
+                    action: None,
+                });
+                Ok(to_value(&SetResult {
+                    path: Some(path.to_string_lossy().into_owned()),
+                    name,
+                }))
+            }
+            ids::SET_COLLECT_ALL => {
+                Self::args::<NoArgs>(id, args)?;
+                let path = self.set_path.clone().ok_or_else(|| {
+                    unavailable(
+                        "the set has never been saved; use `set.save_as` to give it a project \
+                         folder to collect into",
+                    )
+                })?;
+                crate::plugins::capture_states(&self.plugins, &self.kit, &mut self.editor);
+                self.store.set_windows(self.devices.windows().clone());
+                let files = self.store.collect().map_err(failed)?;
+                let warnings = self.store.save(&path, &self.editor).map_err(failed)?;
+                self.saved_as(path.clone(), &warnings);
+                Ok(to_value(&FileReport {
+                    path: Some(path.to_string_lossy().into_owned()),
+                    files,
+                }))
+            }
+            ids::SET_RELINK_MISSING => {
+                let RelinkArgs { folders } = Self::args(id, args)?;
+                let extra: Vec<PathBuf> = folders.iter().map(PathBuf::from).collect();
+                let files = self.relink_missing(&extra);
+                Ok(to_value(&FileReport {
+                    path: self
+                        .set_path
+                        .as_ref()
+                        .map(|path| path.to_string_lossy().into_owned()),
+                    files,
+                }))
             }
             ids::APP_QUIT => {
                 Self::args::<NoArgs>(id, args)?;

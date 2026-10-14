@@ -70,6 +70,10 @@ pub struct Preferences {
     /// The format to prefer when a plug-in exists in several formats
     /// (WP-2.9, IMP-07).
     pub plugin_format_preference: Option<PluginFormat>,
+    /// The saved default set (File ▸ Save Beatlayer Set As Default Set),
+    /// which a new set starts from (WP-2.25). `None` uses the factory
+    /// default set.
+    pub default_set: Option<PathBuf>,
 }
 
 /// A switch that's on unless the preferences say otherwise, read and

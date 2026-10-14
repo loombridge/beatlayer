@@ -97,6 +97,10 @@ fn every_shell_command_is_on_a_menu_or_a_control() {
         commands::AUDIO_STATUS,
         commands::AUDIO_CONFIGURE,
         commands::AUDIO_SET_TEST_TONE,
+        // The File Manager's Automatic Search, which Manage Files opens
+        // (M-FILE-007); it also runs by itself when a set is opened
+        // (WP-2.25).
+        commands::SET_RELINK_MISSING,
     ]
     .into();
     let bar = menu_bar(MenuPlatform::Mac);

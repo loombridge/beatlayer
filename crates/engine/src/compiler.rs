@@ -12,8 +12,9 @@ use crate::EngineConfig;
 use crate::clips::{ClipList, ClipPlayer};
 use crate::gc::{GcHandle, Program};
 use crate::message::{LoopRegion, ParamEvent, TransportCommand};
+use crate::midi_clips::{MidiClipList, MidiClipPlayer};
 use crate::mixer::{self, Route, Solo, TrackMixer, route};
-use crate::node::{NodeData, NodeKey, ParamValue};
+use crate::node::{NodeData, NodeKey, NoteBuffer, ParamValue};
 use crate::program::{
     DeviceSidechain, EngineProgram, Input, Instance, Migration, NO_DELAY, NodeSlot, Span, Task,
     delay_storage,
@@ -71,6 +72,7 @@ impl Update {
 enum Identity {
     Device(DeviceKind),
     Player,
+    MidiPlayer,
     Mixer,
     Route,
     Sidechain,
@@ -251,31 +253,39 @@ impl Compiler {
         self.compile_with(document, &resend)
     }
 
-    /// Sends `track`'s clip player its clips, if it's an audio track: a
-    /// list, placed under `document`'s tempo map, with each clip's source.
-    /// An empty list clears the player's.
+    /// Sends `track`'s clip player its clips: a list placed under `document`'s
+    /// tempo map. An empty list clears the player's.
     fn send_clips(&mut self, document: &Document, track: TrackId, update: &mut Update) {
-        let Some(track) = document
-            .track(track)
-            .filter(|track| track.kind() == TrackKind::Audio)
-        else {
+        let Some(track) = document.track(track) else {
             return;
         };
-        let loop_start = self.loop_start_frame(document);
-        let built = ClipList::build(
-            track,
-            &document.settings().tempo,
-            self.config.sample_rate,
-            loop_start,
-            &mut self.sources,
-            self.registry.media(),
-        );
-        update.missing.extend(built.missing);
-        update.missing.sort_unstable();
-        update.missing.dedup();
-        update
-            .data
-            .push((NodeKey::Player(track.id()), self.gc.data(built.list)));
+        match track.kind() {
+            TrackKind::Audio => {
+                let loop_start = self.loop_start_frame(document);
+                let built = ClipList::build(
+                    track,
+                    &document.settings().tempo,
+                    self.config.sample_rate,
+                    loop_start,
+                    &mut self.sources,
+                    self.registry.media(),
+                );
+                update.missing.extend(built.missing);
+                update.missing.sort_unstable();
+                update.missing.dedup();
+                update
+                    .data
+                    .push((NodeKey::Player(track.id()), self.gc.data(built.list)));
+            }
+            TrackKind::Midi => {
+                let list =
+                    MidiClipList::build(track, &document.settings().tempo, self.config.sample_rate);
+                update
+                    .data
+                    .push((NodeKey::Player(track.id()), self.gc.data(list)));
+            }
+            _ => {}
+        }
     }
 
     /// The song frame where `document`'s Arrangement loop starts, if it's
@@ -386,6 +396,10 @@ impl Compiler {
             output: task_of[&document.main_id()],
             tempo: document.settings().tempo.clone(),
             sample_rate: self.config.sample_rate,
+            note_buffers: [
+                NoteBuffer::with_capacity(1024),
+                NoteBuffer::with_capacity(1024),
+            ],
         };
         self.generation = generation;
         self.layout = build.layout;
@@ -520,22 +534,40 @@ impl Compiler {
             end: build.inputs.len() as u32,
         };
         let config = self.config.node_config();
-        // An audio track's clip player runs first.
-        let player = (track.kind() == TrackKind::Audio).then(|| {
-            let key = NodeKey::Player(track.id());
-            if self.previous(key, &Identity::Player).is_none() {
-                build.new_players.insert(track.id());
-            } else {
-                build.restate.push(ParamEvent::now(
-                    key,
-                    crate::clips::player::AUDIBLE,
-                    switch(audible),
-                ));
-            }
-            self.place(build, key, Identity::Player, 0, || {
-                Instance::Device(Box::new(ClipPlayer::new(&config).audible(audible)))
-            })
-        });
+        // An audio or MIDI track's clip player runs first.
+        let player = match track.kind() {
+            TrackKind::Audio => Some({
+                let key = NodeKey::Player(track.id());
+                if self.previous(key, &Identity::Player).is_none() {
+                    build.new_players.insert(track.id());
+                } else {
+                    build.restate.push(ParamEvent::now(
+                        key,
+                        crate::clips::player::AUDIBLE,
+                        switch(audible),
+                    ));
+                }
+                self.place(build, key, Identity::Player, 0, || {
+                    Instance::Device(Box::new(ClipPlayer::new(&config).audible(audible)))
+                })
+            }),
+            TrackKind::Midi => Some({
+                let key = NodeKey::Player(track.id());
+                if self.previous(key, &Identity::MidiPlayer).is_none() {
+                    build.new_players.insert(track.id());
+                } else {
+                    build.restate.push(ParamEvent::now(
+                        key,
+                        crate::clips::player::AUDIBLE,
+                        switch(audible),
+                    ));
+                }
+                self.place(build, key, Identity::MidiPlayer, 0, || {
+                    Instance::Device(Box::new(MidiClipPlayer::new(&config).audible(audible)))
+                })
+            }),
+            _ => None,
+        };
         let node_start = build.nodes.len() as u32;
         let sidechain_start = build.sidechains.len() as u32;
         for device in track.devices() {
@@ -1223,9 +1255,10 @@ mod tests {
         );
         assert_eq!(program.generation(), 1);
         assert_eq!(program.base(), None);
-        // A mixer per track, the tone, an output per track but Main, and a
-        // send from each of the three tracks that send to the return.
-        assert_eq!(program.node_count(), 5 + 1 + 4 + 3);
+        // A mixer per track, two MIDI clip players, the tone, an output per
+        // track but Main, and a send from each of the three tracks that send
+        // to the return.
+        assert_eq!(program.node_count(), 5 + 2 + 1 + 4 + 3);
         assert!(update.unhosted.is_empty());
         // The graph a worker pool would walk reaches every task.
         let ready = program.ready_order();
@@ -1604,8 +1637,8 @@ mod tests {
         assert_eq!(clips_in(&update, audio), Some(0));
         assert_eq!(update.missing, vec![ContentHash([2; 32])]);
         assert_eq!(clips_in(&update, other), Some(1));
-        // MIDI tracks have no clip player yet (WP-2.1).
-        assert_eq!(update.data.len(), 2);
+        // 2 audio track players and 2 MIDI track players.
+        assert_eq!(update.data.len(), 4);
     }
 
     // Spec: audio-clips R18, R19

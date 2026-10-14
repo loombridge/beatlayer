@@ -768,16 +768,44 @@ const ENTRIES: &[Entry] = &[
             new clip's brace is the whole file.",
     },
     Entry {
+        id: "clip.set_midi_region",
+        action: Action::Apply("set_midi_clip_region"),
+        label: "Set MIDI Clip Start and End",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Moves a MIDI clip's Start and End markers, in ticks from the clip's \
+            beginning: the clip starts playing at `start` when the song reaches the clip, \
+            and, while its loop is off, plays until `end` (`null` for the end of the clip) \
+            or the clip's own end in the arrangement, whichever comes first, then is silent. \
+            While the loop is on, `start` must be before the loop's end. Use \
+            `clip.set_length` to change how long the clip lasts in the arrangement.",
+    },
+    Entry {
+        id: "clip.set_midi_loop",
+        action: Action::Apply("set_midi_clip_loop"),
+        label: "Set MIDI Clip Loop",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Moves a MIDI clip's loop brace, in ticks from the clip's beginning \
+            (`end` `null` for the end of the clip), as the Clip View's loop Position and \
+            Length fields do. It doesn't switch the loop on or off: use \
+            `clip.set_loop_enabled`. While the loop is on, the clip plays from its Start \
+            marker into the brace, then repeats the brace until the clip ends in the \
+            arrangement; make the clip longer with `clip.set_length` to hear more repeats.",
+    },
+    Entry {
         id: "clip.set_loop_enabled",
         action: Action::Apply("set_clip_loop_enabled"),
         label: "Clip Loop On/Off",
         permission: Permission::Edit,
         contexts: &[ClipView],
         keys: &[],
-        description: "Switches an audio clip's Loop switch on or off, leaving its loop brace \
-            where it is. On, the clip repeats its brace (`clip.set_loop`) for as long as it \
-            lasts in the arrangement; off, it plays from its Start marker to its End marker \
-            once. The Start marker must be before the brace's end to switch it on.",
+        description: "Switches an audio or MIDI clip's Loop switch on or off, leaving its loop brace \
+            where it is. On, the clip repeats its brace (`clip.set_loop` or `clip.set_midi_loop`) \
+            for as long as it lasts in the arrangement; off, it plays from its Start marker to its \
+            End marker once. The Start marker must be before the brace's end to switch it on.",
     },
     Entry {
         id: "clip.set_gain",

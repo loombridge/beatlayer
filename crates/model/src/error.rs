@@ -92,6 +92,9 @@ pub enum ModelError {
     /// The command changes an audio clip's settings, and this clip is a MIDI
     /// clip.
     NotAudioClip(ClipId),
+    /// The command changes a MIDI clip's settings, and this clip is an audio
+    /// clip.
+    NotMidiClip(ClipId),
     /// A track can't take its input from, or send its output to, this
     /// track: itself, or a track of a kind its chooser doesn't list.
     CannotRoute {
@@ -190,6 +193,7 @@ impl fmt::Display for ModelError {
                 write!(f, "note {index} has a key or velocity out of range")
             }
             Self::NotAudioClip(id) => write!(f, "{id} is a MIDI clip; this needs an audio clip"),
+            Self::NotMidiClip(id) => write!(f, "{id} is an audio clip; this needs a MIDI clip"),
             Self::CannotRoute { track, to } => write!(
                 f,
                 "{track} can't take its input from or send its output to {to}: its choosers \

@@ -10,7 +10,7 @@ use imbl::Vector;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::clip::{AudioData, Clip, ClipData};
+use crate::clip::{AudioData, Clip, ClipData, MidiData};
 use crate::device::{Device, DeviceRole};
 use crate::document::Document;
 use crate::error::ModelError;
@@ -352,10 +352,33 @@ pub enum Command {
         #[serde(default)]
         end: Option<f64>,
     },
-    /// Switches an audio clip's loop on or off, leaving its brace where it
+    /// Moves a MIDI clip's Start and End markers: where in its contents it
+    /// starts playing, and where it stops while its loop is off.
+    SetMidiClipRegion {
+        /// The MIDI clip.
+        clip: ClipId,
+        /// The Start marker, in ticks from the clip's beginning.
+        start: Ticks,
+        /// The End marker, in ticks from the clip's beginning, after `start`;
+        /// `null` (or nothing) for the end of the clip.
+        #[serde(default)]
+        end: Option<Ticks>,
+    },
+    /// Moves a MIDI clip's loop brace, leaving its Loop switch as it is.
+    SetMidiClipLoop {
+        /// The MIDI clip.
+        clip: ClipId,
+        /// Where the brace starts, in ticks from the clip's beginning.
+        start: Ticks,
+        /// Where it ends, in ticks, after `start`; `null` (or nothing) for
+        /// the end of the clip.
+        #[serde(default)]
+        end: Option<Ticks>,
+    },
+    /// Switches an audio or MIDI clip's loop on or off, leaving its brace where it
     /// is.
     SetClipLoopEnabled {
-        /// The audio clip.
+        /// The clip.
         clip: ClipId,
         /// Whether the clip repeats its loop brace.
         enabled: bool,
@@ -551,6 +574,8 @@ impl Command {
             Self::TrimClipStart { .. } => "Resize clip",
             Self::SetClipRegion { .. } => "Change clip region",
             Self::SetClipLoop { .. } => "Change clip loop",
+            Self::SetMidiClipRegion { .. } => "Change clip region",
+            Self::SetMidiClipLoop { .. } => "Change clip loop",
             Self::SetClipLoopEnabled { .. } => "Switch clip loop",
             Self::SetClipGain { .. } => "Change clip gain",
             Self::SetClipFades { .. } => "Change clip fades",
@@ -810,9 +835,22 @@ impl Document {
                 audio.loop_start = *start;
                 audio.loop_end = *end;
             }),
-            Command::SetClipLoopEnabled { clip, enabled } => {
-                self.edit_markers(*clip, |audio| audio.looping = *enabled)
+            Command::SetMidiClipRegion { clip, start, end } => {
+                self.edit_midi_markers(*clip, |midi| {
+                    midi.start = *start;
+                    midi.end = *end;
+                })
             }
+            Command::SetMidiClipLoop { clip, start, end } => {
+                self.edit_midi_markers(*clip, |midi| {
+                    midi.loop_start = *start;
+                    midi.loop_end = *end;
+                })
+            }
+            Command::SetClipLoopEnabled { clip, enabled } => match &self.clip_ref(*clip)?.data {
+                ClipData::Audio(_) => self.edit_markers(*clip, |audio| audio.looping = *enabled),
+                ClipData::Midi(_) => self.edit_midi_markers(*clip, |midi| midi.looping = *enabled),
+            },
             Command::SetClipGain { clip, gain } => {
                 self.edit_audio(*clip, |audio| audio.gain = *gain)
             }
@@ -1152,10 +1190,10 @@ impl Document {
         id: ClipId,
         edit: impl FnOnce(&mut AudioData),
     ) -> Result<(), ModelError> {
-        let ClipData::Audio(current) = self.clip_ref(id)?.data else {
+        let ClipData::Audio(current) = &self.clip_ref(id)?.data else {
             return Err(ModelError::NotAudioClip(id));
         };
-        let mut next = current;
+        let mut next = *current;
         edit(&mut next);
         check_marker_order(&next)?;
         self.edit_audio(id, |audio| *audio = next)
@@ -1167,14 +1205,48 @@ impl Document {
         id: ClipId,
         edit: impl FnOnce(&mut AudioData),
     ) -> Result<(), ModelError> {
-        let ClipData::Audio(current) = self.clip_ref(id)?.data else {
+        let ClipData::Audio(current) = &self.clip_ref(id)?.data else {
             return Err(ModelError::NotAudioClip(id));
         };
-        let mut next = current;
+        let mut next = *current;
         edit(&mut next);
         check_audio(&next)?;
-        if next != current {
+        if next != *current {
             self.clip_mut(id)?.data = ClipData::Audio(next);
+        }
+        Ok(())
+    }
+
+    /// Sets a MIDI clip's markers or loop with `edit`, if the result is valid
+    /// and its markers are in order, as Live keeps markers set by hand.
+    fn edit_midi_markers(
+        &mut self,
+        id: ClipId,
+        edit: impl FnOnce(&mut MidiData),
+    ) -> Result<(), ModelError> {
+        let ClipData::Midi(current) = &self.clip_ref(id)?.data else {
+            return Err(ModelError::NotMidiClip(id));
+        };
+        let mut next = current.clone();
+        edit(&mut next);
+        check_midi_marker_order(&next)?;
+        self.edit_midi(id, |midi| *midi = next)
+    }
+
+    /// Changes a MIDI clip's data with `edit`, if the result is valid.
+    fn edit_midi(
+        &mut self,
+        id: ClipId,
+        edit: impl FnOnce(&mut MidiData),
+    ) -> Result<(), ModelError> {
+        let ClipData::Midi(current) = &self.clip_ref(id)?.data else {
+            return Err(ModelError::NotMidiClip(id));
+        };
+        let mut next = current.clone();
+        edit(&mut next);
+        check_clip_data(&ClipData::Midi(next.clone()))?;
+        if next != *current {
+            self.clip_mut(id)?.data = ClipData::Midi(next);
         }
         Ok(())
     }
@@ -1578,15 +1650,54 @@ pub(crate) fn check_clip_data(data: &ClipData) -> Result<(), ModelError> {
     match data {
         ClipData::Midi(midi) => {
             for (index, note) in midi.notes.iter().enumerate() {
-                if note.key > 127 || !(1..=127).contains(&note.velocity) {
+                if note.key > 127
+                    || !(1..=127).contains(&note.velocity)
+                    || !(1..=127).contains(&note.release_velocity)
+                    || !note.probability.is_finite()
+                    || !(0.0..=1.0).contains(&note.probability)
+                {
                     return Err(ModelError::InvalidNote { index });
                 }
                 check_extent(note.start, note.length)?;
             }
-            Ok(())
+            check_midi(midi)
         }
         ClipData::Audio(audio) => check_audio(audio),
     }
+}
+
+/// Checks a MIDI clip's data: markers and loop brace.
+pub(crate) fn check_midi(midi: &MidiData) -> Result<(), ModelError> {
+    if midi.start < Ticks::ZERO {
+        return Err(ModelError::NegativePosition(midi.start));
+    }
+    if let Some(end) = midi.end.filter(|&end| end <= Ticks::ZERO) {
+        return Err(ModelError::EmptyLength(end));
+    }
+    if midi.loop_start < Ticks::ZERO {
+        return Err(ModelError::NegativePosition(midi.loop_start));
+    }
+    if let Some(end) = midi.loop_end.filter(|&end| end <= midi.loop_start) {
+        return Err(ModelError::EmptyLength(end));
+    }
+    Ok(())
+}
+
+/// Checks that a MIDI clip's markers are in order, as setting them by hand
+/// keeps them: the End marker after the Start marker, and, while the loop is
+/// on, the Start marker before the loop brace's end.
+pub(crate) fn check_midi_marker_order(midi: &MidiData) -> Result<(), ModelError> {
+    if let Some(end) = midi.end {
+        check_value("clip end", end.get() as f64, end > midi.start)?;
+    }
+    if let (true, Some(end)) = (midi.looping, midi.loop_end) {
+        check_value(
+            "clip start (at or after the loop end)",
+            midi.start.get() as f64,
+            midi.start < end,
+        )?;
+    }
+    Ok(())
 }
 
 /// Checks an audio clip's data (the audio clips spec, R3 to R6): times
@@ -1826,12 +1937,12 @@ mod tests {
     }
 
     fn midi() -> ClipData {
-        ClipData::Midi(MidiData::new([Note {
-            key: 60,
-            velocity: 100,
-            start: Ticks::ZERO,
-            length: Ticks::QUARTER,
-        }]))
+        ClipData::Midi(MidiData::new([Note::new(
+            60,
+            Ticks::ZERO,
+            Ticks::QUARTER,
+            100,
+        )]))
     }
 
     fn utility(id: DeviceId) -> Device {
@@ -2352,12 +2463,7 @@ mod tests {
             ModelError::EmptyLength(-Ticks::WHOLE)
         );
 
-        let note = |key, velocity| Note {
-            key,
-            velocity,
-            start: Ticks::ZERO,
-            length: Ticks::QUARTER,
-        };
+        let note = |key, velocity| Note::new(key, Ticks::ZERO, Ticks::QUARTER, velocity);
         for (notes, index) in [
             (vec![note(60, 100), note(128, 100)], 1),
             (vec![note(60, 0)], 0),

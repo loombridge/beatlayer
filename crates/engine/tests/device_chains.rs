@@ -190,7 +190,8 @@ fn factories_offer_device_types_with_their_roles() {
         vec![
             testing::gain_type(),
             testing::through_type(),
-            testing::key_type()
+            testing::key_type(),
+            testing::instrument_type(),
         ]
     );
     // A type that declares a sidechain input makes devices that have one

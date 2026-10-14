@@ -112,7 +112,10 @@ impl Clip {
         };
         match &mut part.data {
             ClipData::Audio(audio) => *audio = audio.moved_by(self.start, from, tempo),
-            ClipData::Midi(_) => part.offset = self.offset.saturating_add(from - self.start),
+            ClipData::Midi(midi) => {
+                part.offset = self.offset.saturating_add(from - self.start);
+                midi.move_by(self.start, from);
+            }
         }
         part
     }
@@ -167,7 +170,7 @@ impl Clip {
                 }
                 *audio = next;
             }
-            ClipData::Midi(_) => {
+            ClipData::Midi(midi) => {
                 let offset = start
                     .checked_sub(self.start)
                     .and_then(|by| self.offset.checked_add(by))
@@ -176,6 +179,7 @@ impl Clip {
                     return Err(ModelError::NegativeOffset(offset));
                 }
                 moved.offset = offset;
+                midi.move_by(self.start, start);
             }
         }
         Ok(moved)
@@ -364,26 +368,109 @@ fn is_unity(value: &f64) -> bool {
     *value == 1.0
 }
 
-/// A MIDI clip's data (a stub until WP-2.1).
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[schemars(description = "A MIDI clip's data: its notes.")]
+fn default_release_velocity() -> u8 {
+    64
+}
+
+fn is_default_release_velocity(value: &u8) -> bool {
+    *value == 64
+}
+
+fn default_probability() -> f64 {
+    1.0
+}
+
+fn is_default_probability(value: &f64) -> bool {
+    *value == 1.0
+}
+
+fn is_zero_i8(value: &i8) -> bool {
+    *value == 0
+}
+
+/// A MIDI clip's data: its notes, Start and End markers, and loop brace.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[schemars(description = "A MIDI clip's data: its notes, Start and End markers, and loop brace.")]
 pub struct MidiData {
     /// The notes, in no particular order.
     #[schemars(with = "Vec<Note>")]
     pub notes: Vector<Note>,
+    /// The Start marker: where in its contents the clip starts playing.
+    /// 0 unless given.
+    #[serde(default, skip_serializing_if = "is_zero_ticks")]
+    pub start: Ticks,
+    /// The End marker: where a clip whose loop is off stops playing, after
+    /// the Start marker; `null` (or nothing) for the end of the clip.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<Ticks>,
+    /// The Loop switch: whether the clip repeats its loop brace. Off unless
+    /// given.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub looping: bool,
+    /// Where the loop brace starts, in ticks: 0 or more; 0 unless given.
+    #[serde(default, skip_serializing_if = "is_zero_ticks")]
+    pub loop_start: Ticks,
+    /// Where the loop brace ends, in ticks, after its start; `null` (or nothing)
+    /// for the end of the clip. While the loop is on, the Start marker must
+    /// be before it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loop_end: Option<Ticks>,
 }
 
 impl MidiData {
-    /// MIDI data holding these notes.
+    /// MIDI data holding these notes, unlooped, starting at tick zero.
+    #[must_use]
     pub fn new(notes: impl IntoIterator<Item = Note>) -> Self {
         Self {
             notes: notes.into_iter().collect(),
+            start: Ticks::ZERO,
+            end: None,
+            looping: false,
+            loop_start: Ticks::ZERO,
+            loop_end: None,
         }
+    }
+
+    /// Moves the clip's Start marker when its left edge moves from `from`
+    /// to `to`. With the loop on, a marker that moves later to or past the
+    /// loop brace's end wraps back inside the brace by whole lengths of it.
+    pub fn move_by(&mut self, from: Ticks, to: Ticks) {
+        if from == to {
+            return;
+        }
+        let by = to - from;
+        let mut start = self.start + by;
+        if start < Ticks::ZERO {
+            start = Ticks::ZERO;
+        }
+        if let (true, true, Some(end)) = (self.looping, by > Ticks::ZERO, self.loop_end) {
+            let length = end - self.loop_start;
+            if length > Ticks::ZERO && start >= end {
+                let into = (start - end).get().rem_euclid(length.get());
+                start = self.loop_start
+                    + if into < length.get() {
+                        Ticks(into)
+                    } else {
+                        Ticks::ZERO
+                    };
+            }
+        }
+        self.start = start;
+    }
+
+    /// The data of a clip whose left edge moved from `from` to `to`: its
+    /// Start marker moves by the ticks between them. With the loop on, a
+    /// marker that moves later to or past the loop brace's end wraps back
+    /// inside the brace by whole lengths of it, as Live's does.
+    #[must_use]
+    pub fn moved_by(mut self, from: Ticks, to: Ticks) -> Self {
+        self.move_by(from, to);
+        self
     }
 }
 
 /// A note in a MIDI clip.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Note {
     /// The MIDI key, from 0 to 127. Middle C (C3 in Live) is 60.
     #[schemars(range(max = 127))]
@@ -391,9 +478,62 @@ pub struct Note {
     /// The velocity, from 1 to 127.
     #[schemars(range(min = 1, max = 127))]
     pub velocity: u8,
+    /// The release velocity, from 1 to 127; 64 unless given.
+    #[serde(
+        default = "default_release_velocity",
+        skip_serializing_if = "is_default_release_velocity"
+    )]
+    #[schemars(range(min = 1, max = 127))]
+    pub release_velocity: u8,
     /// Where the note starts, counted from the beginning of the clip's
     /// contents: the clip's start less its offset. Never negative.
     pub start: Ticks,
     /// How long the note lasts. Always positive.
     pub length: Ticks,
+    /// The chance the note will play, from 0 to 1: 1 (100 %) unless given.
+    #[serde(
+        default = "default_probability",
+        skip_serializing_if = "is_default_probability"
+    )]
+    #[schemars(range(min = 0.0, max = 1.0))]
+    pub probability: f64,
+    /// How far velocity may deviate randomly, from -127 to +127: 0 unless given.
+    #[serde(default, skip_serializing_if = "is_zero_i8")]
+    #[schemars(range(min = -127, max = 127))]
+    pub velocity_deviation: i8,
+    /// Whether the note is switched off, so it stays in place but doesn't play.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub mute: bool,
+}
+
+impl Note {
+    /// A new unmuted note with velocity 100, release velocity 64, probability 1.0, and velocity deviation 0.
+    #[must_use]
+    pub fn new(key: u8, start: Ticks, length: Ticks, velocity: u8) -> Self {
+        Self {
+            key,
+            velocity,
+            release_velocity: 64,
+            start,
+            length,
+            probability: 1.0,
+            velocity_deviation: 0,
+            mute: false,
+        }
+    }
+}
+
+impl Default for Note {
+    fn default() -> Self {
+        Self {
+            key: 60,
+            velocity: 100,
+            release_velocity: 64,
+            start: Ticks::ZERO,
+            length: Ticks::QUARTER,
+            probability: 1.0,
+            velocity_deviation: 0,
+            mute: false,
+        }
+    }
 }

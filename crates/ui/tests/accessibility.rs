@@ -1204,6 +1204,8 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("clip.set_gain", Exception(clip_view)),
         ("clip.set_loop", Exception(clip_view)),
         ("clip.set_loop_enabled", Exception(clip_view)),
+        ("clip.set_midi_loop", Exception(clip_view)),
+        ("clip.set_midi_region", Exception(clip_view)),
         ("clip.set_region", Exception(clip_view)),
         ("clip.set_data", Exception(clip_view)),
         // The Device View (WP-2.4): Enter on a title bar's controls.

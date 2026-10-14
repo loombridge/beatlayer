@@ -48,11 +48,12 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        56,
+        58,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
-         set_device_floating, and WP-2.20 six for tempo breakpoints and time-signature markers"
+         set_device_floating, WP-2.20 six for tempo breakpoints and time-signature markers, and \
+         WP-2.1 two for MIDI clips"
     );
 
     for op in &ops {
@@ -334,6 +335,14 @@ fn every_command_runs_by_id() {
         panic!("{clip:?}");
     };
     assert_eq!(midi.notes.len(), 2);
+    agent.run(
+        "clip.set_midi_region",
+        json!({ "clip": riff, "start": quarter, "end": bar * 2 }),
+    );
+    agent.run(
+        "clip.set_midi_loop",
+        json!({ "clip": riff, "start": quarter, "end": bar * 2 }),
+    );
     // Trimming the left edge keeps the end and the contents in place: an
     // audio clip's Start marker moves on by the time of a quarter note.
     agent.run(
@@ -542,12 +551,7 @@ fn schemas_match_what_commands_serialise() {
     let track = TrackId(fresh());
     let clip = ClipId(fresh());
     let device = DeviceId(fresh());
-    let notes = MidiData::new([Note {
-        key: 127,
-        velocity: 1,
-        start: Ticks::ZERO,
-        length: Ticks::QUARTER,
-    }]);
+    let notes = MidiData::new([Note::new(127, Ticks::ZERO, Ticks::QUARTER, 1)]);
     let mut plugin = Device::new(
         device,
         "Synth",
@@ -788,6 +792,22 @@ fn schemas_match_what_commands_serialise() {
             Command::SetClipLoopEnabled {
                 clip,
                 enabled: true,
+            },
+        ),
+        (
+            "clip.set_midi_region",
+            Command::SetMidiClipRegion {
+                clip,
+                start: Ticks::QUARTER,
+                end: Some(Ticks::WHOLE),
+            },
+        ),
+        (
+            "clip.set_midi_loop",
+            Command::SetMidiClipLoop {
+                clip,
+                start: Ticks::QUARTER,
+                end: None,
             },
         ),
         ("clip.set_gain", Command::SetClipGain { clip, gain: 2.0 }),

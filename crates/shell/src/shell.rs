@@ -2234,21 +2234,70 @@ impl Shell {
                 .flatten()
                 .unwrap_or(TrackKind::Audio);
             let doc = self.editor.document();
-            let (index, name) = if kind == TrackKind::Return {
-                let index = doc.returns().len();
-                let letter = crate::routing::return_letter(index);
-                (index, format!("{letter} Return"))
+            // Spec: app-shell R10. The new track goes directly after the
+            // selected track, or after the last of several selected tracks,
+            // in the list it belongs to; with no such track selected, after
+            // the last track, as before.
+            let anchor = self
+                .arrangement
+                .selected_tracks()
+                .iter()
+                .rev()
+                .copied()
+                .find(|&track| match doc.track(track) {
+                    Some(track) if kind == TrackKind::Return => track.kind() == TrackKind::Return,
+                    Some(track) => track.kind().can_be_grouped(),
+                    None => false,
+                });
+            let (parent, index) = match anchor {
+                Some(anchor) if kind == TrackKind::Return => (
+                    None,
+                    doc.returns()
+                        .position(|r| r == anchor)
+                        .map_or(doc.returns().len(), |i| i + 1),
+                ),
+                Some(anchor) => {
+                    let parent = doc.parent(anchor);
+                    let index = match parent {
+                        Some(group) => {
+                            let children: Vec<TrackId> =
+                                doc.track(group).map_or_default(|g| g.children().collect());
+                            children
+                                .iter()
+                                .position(|t| *t == anchor)
+                                .map_or(children.len(), |i| i + 1)
+                        }
+                        None => doc
+                            .top_level()
+                            .position(|t| t == anchor)
+                            .map_or(doc.top_level().len(), |i| i + 1),
+                    };
+                    (parent, index)
+                }
+                None => (
+                    None,
+                    if kind == TrackKind::Return {
+                        doc.returns().len()
+                    } else {
+                        doc.top_level().len()
+                    },
+                ),
+            };
+            let name = if kind == TrackKind::Return {
+                format!("{} Return", crate::routing::return_letter(index))
             } else {
-                let index = doc.top_level().len();
                 let word = match kind {
                     TrackKind::Midi => "MIDI",
                     TrackKind::Group => "Group",
                     _ => "Audio",
                 };
-                (index, format!("{} {word}", index + 1))
+                format!("{} {word}", index + 1)
             };
             // A placeholder that fits the schema; `invoke` issues the real ID.
             fields.insert("id".to_owned(), json!(1));
+            if let Some(parent) = parent {
+                fields.insert("parent".to_owned(), json!(parent));
+            }
             fields.entry("name").or_insert_with(|| json!(name));
             fields.entry("index").or_insert_with(|| json!(index));
         }
@@ -2437,7 +2486,16 @@ impl Shell {
                 let mut args = self.filled_args(id, args)?;
                 let new: TrackId = self.editor.new_id();
                 args["id"] = json!(new);
-                self.run(id, args)
+                let result = self.run(id, args)?;
+                // Spec: app-shell R10. The new track is selected.
+                self.arrangement
+                    .run(
+                        view_ids::SELECT_TRACKS,
+                        json!({ "tracks": [new] }),
+                        self.editor.document(),
+                    )
+                    .ok();
+                Ok(result)
             }
             _ => self.run(id, args),
         }

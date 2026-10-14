@@ -4,7 +4,7 @@
 
 use core::ops::Range;
 
-use bl_core::time::SampleRate;
+use bl_core::time::{Frames, SampleRate, TempoMap};
 use bl_dsp::LinearSmoother;
 use bl_dsp::smooth::DEFAULT_SMOOTHING_SECONDS;
 use bl_engine::{
@@ -94,6 +94,20 @@ impl<'a> Audio<'_, 'a> {
     #[must_use]
     pub fn sample_rate(&self) -> SampleRate {
         self.block.sample_rate()
+    }
+
+    /// The song's tempo map, which places ticks on frames
+    /// ([`Block::tempo`]). A tempo-synced device reads the tempo at the
+    /// song position of each stretch.
+    #[must_use]
+    pub fn tempo(&self) -> &'a TempoMap {
+        self.block.tempo()
+    }
+
+    /// The song position of the stretch's first frame.
+    #[must_use]
+    pub fn song_position(&self) -> Frames {
+        Frames(self.block.transport().position.get() + self.range.start as i64)
     }
 
     /// One channel's samples in the stretch.

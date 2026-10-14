@@ -5,9 +5,10 @@
 //! keyboard settings (Outline View in Focus, Use Tab Key to Move Focus,
 //! Wrap Tab Navigation; WP-1.14), and Plug-Ins' Auto-Hide Plug-In Windows
 //! (L-SET-017, WP-2.5b) are built; the other pages are
-//! in the chooser and say which package builds them. The Tempo & MIDI page (L-SET-014) has the agent server's section
-//! (WP-1.15), which Live doesn't have: it sits with the control surfaces,
-//! the other way programs drive the app.
+//! in the chooser and say which package builds them. The Agents page
+//! (L-SET-020) is Beatlayer's own: the agent server's settings (WP-1.15),
+//! which Live doesn't have. It follows Plug-Ins, the page whose plug-ins
+//! are the other way another program drives the app.
 
 use bl_shell::audio::{
     AudioDevices, AudioStatus, DeviceListing, TONE_MAX_DBFS, TONE_MAX_HZ, TONE_MIN_DBFS,
@@ -112,12 +113,12 @@ impl SettingsUi {
                     record_warp_launch_page(ui, shell, theme, &mut rows, &mut events);
                 }
                 SettingsPage::PlugIns => plug_ins_page(ui, shell, theme, &mut rows, &mut events),
+                SettingsPage::Agents => agents_page(ui, shell, theme, &mut rows, &mut events),
                 SettingsPage::TempoMidi => {
-                    agents_section(ui, shell, theme, &mut rows, &mut events);
                     rows.note(
                         ui,
                         "The Tempo Follower, control surface, and MIDI port settings come with \
-                         later packages; the Agents section will follow them.",
+                         later packages.",
                     );
                 }
                 other => rows.note(
@@ -731,11 +732,12 @@ fn theme_page(
     );
 }
 
-/// The agent server's section (WP-1.15), on the Tempo & MIDI page: the
-/// switch, where agents connect, the server's token, and the agents the
-/// person has allowed, each with its autonomous switch and its own token
-/// (WP-1.15c).
-fn agents_section(
+/// The Agents page (L-SET-020, WP-1.15): the switch, where agents connect,
+/// the server's token, and the agents the person has allowed, each with its
+/// autonomous switch and its own token (WP-1.15c). Beatlayer's own page,
+/// straight after Plug-Ins; the whole section moved here unchanged from the
+/// Tempo & MIDI page.
+fn agents_page(
     ui: &mut Ui,
     shell: &Shell,
     theme: &Theme,
@@ -767,7 +769,7 @@ fn agents_section(
         (None, None) => "Starting".to_owned(),
     };
     rows.text_row(ui, "Status", &state);
-    rows.text_row(ui, "Address", &settings.url());
+    rows.copyable_row(ui, "Address", "agent-address", &settings.url());
     if !settings.token.is_empty() {
         let rect = rows.row(ui, "Token", SettingsLayout::CHOOSER);
         if ui.put(rect, egui::Button::new("New Token")).clicked() {
@@ -912,6 +914,11 @@ fn page_chooser(
     });
 }
 
+/// The width of a Copy button beside an address or a token on the Agents
+/// page. Not measured in Live, which has no such button: a switch's width,
+/// narrowed to the word.
+const COPY_BUTTON: f32 = 44.0;
+
 /// Lays out a page's rows top to bottom (L-SET-003): section headings with
 /// a rule, labels at one x, controls at another, rows 22 points apart.
 struct Rows<'a> {
@@ -1045,16 +1052,43 @@ impl<'a> Rows<'a> {
         self.y += SettingsLayout::OPTION_ROW;
     }
 
-    /// A token on a line of its own, the page's whole width, so all 64
-    /// digits show; it can be selected and copied but not edited. This is
+    /// A token on a line of its own, so all 64 digits show beside its Copy
+    /// button; it can be selected and copied but not edited. This is
     /// where the person sees a token: the only place the window reveals a
     /// [`agent::Secret`].
     fn token_field(&mut self, ui: &mut Ui, id_salt: &str, label: &str, token: &agent::Secret) {
         let rect = Rect::from_min_size(
             pos2(self.layout.label_x, self.y),
-            vec2(self.right() - self.layout.label_x, 18.0),
+            vec2(self.right() - self.layout.label_x - COPY_BUTTON - 6.0, 18.0),
         );
-        let mut text: &str = token.expose();
+        self.field_and_copy(ui, rect, id_salt, label, token.expose());
+        self.y += SettingsLayout::OPTION_ROW;
+    }
+
+    /// A row that shows a value in a read-only field that can be selected
+    /// and copied, with a Copy button beside it.
+    fn copyable_row(&mut self, ui: &mut Ui, label: &str, id_salt: &str, value: &str) {
+        self.label(ui, label);
+        let rect = Rect::from_min_size(
+            pos2(self.layout.control_x, self.y),
+            vec2(
+                self.right() - self.layout.control_x - COPY_BUTTON - 6.0,
+                18.0,
+            ),
+        );
+        self.field_and_copy(ui, rect, id_salt, label, value);
+        self.y += SettingsLayout::OPTION_ROW;
+    }
+
+    /// A read-only field showing `value`, with a Copy button to its right
+    /// that puts the whole value on the clipboard. The field is where the
+    /// mouse or the keyboard selects the text, and Cmd+C (Ctrl+C on Windows
+    /// and Linux) copies the selection; the button copies the whole value
+    /// without a selection. Copying changes nothing in the set, so it isn't
+    /// an undo step. `label` names the value and its button for assistive
+    /// technology.
+    fn field_and_copy(&self, ui: &mut Ui, rect: Rect, id_salt: &str, label: &str, value: &str) {
+        let mut text = value;
         let response = ui.put(
             rect,
             egui::TextEdit::singleline(&mut text)
@@ -1068,7 +1102,17 @@ impl<'a> Rows<'a> {
             node.set_label(label.to_owned());
             node.set_read_only();
         });
-        self.y += SettingsLayout::OPTION_ROW;
+        let copy = Rect::from_min_size(
+            pos2(rect.right() + 6.0, rect.top()),
+            vec2(COPY_BUTTON, rect.height()),
+        );
+        let response = ui.put(copy, egui::Button::new("Copy"));
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_label(format!("Copy {label}"));
+        });
+        if response.clicked() {
+            ui.ctx().copy_text(value.to_owned());
+        }
     }
 
     fn note(&mut self, ui: &Ui, text: &str) {

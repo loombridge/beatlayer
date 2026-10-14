@@ -1,9 +1,10 @@
-//! The agent server's section of the Settings window (WP-1.15), headless:
-//! on the Tempo & MIDI page (L-SET-014, laid out as L-SET-003), off until
+//! The agent server's settings of the Settings window (WP-1.15), headless:
+//! on the Agents page (L-SET-020, laid out as L-SET-003), off until
 //! the person switches it on, with the address, the token, and each
 //! allowed agent's autonomous switch and own token (WP-1.15c), every
 //! control reachable by a screen reader and each change a registered
-//! command.
+//! command. The address and the tokens can be selected and copied, each
+//! with a Copy button beside it.
 
 mod common;
 
@@ -13,18 +14,18 @@ use bl_shell::agent::AgentServerStatus;
 use bl_shell::settings::SettingsPage;
 use common::{Harness, Window};
 use egui::accesskit::{Action, ActionRequest, Role, TreeId};
-use egui::{Event, Id};
+use egui::{Event, Id, OutputCommand};
 use serde_json::json;
 
-fn open_tempo_midi() -> Harness {
+fn open_agents() -> Harness {
     let mut h = Harness::new(Window::Settings);
     h.shell
-        .invoke("app.settings", json!({ "page": "tempo-midi" }))
+        .invoke("app.settings", json!({ "page": "agents" }))
         .unwrap();
     h.shell.take_effects();
     h.settings.refresh();
     h.settle();
-    assert_eq!(h.shell.settings_page(), SettingsPage::TempoMidi);
+    assert_eq!(h.shell.settings_page(), SettingsPage::Agents);
     h
 }
 
@@ -43,7 +44,7 @@ fn press(h: &mut Harness, label: &str) {
 
 #[test]
 fn the_agent_server_is_off_until_switched_on_and_then_shows_where_to_connect() {
-    let mut h = open_tempo_midi();
+    let mut h = open_agents();
     let nodes = Harness::nodes(&h.frame(vec![]));
     let switch = Harness::node(&nodes, "Agent Server");
     assert_eq!(switch.role, Role::Button);
@@ -100,7 +101,7 @@ fn the_agent_server_is_off_until_switched_on_and_then_shows_where_to_connect() {
 
 #[test]
 fn each_allowed_agent_has_an_autonomous_switch_and_can_be_forgotten() {
-    let mut h = open_tempo_midi();
+    let mut h = open_agents();
     h.shell
         .run("agent.approve_client", json!({ "client": "claude-code" }))
         .unwrap();
@@ -146,7 +147,7 @@ fn painted(output: &egui::FullOutput) -> String {
 #[test]
 fn each_allowed_agent_s_token_shows_in_its_row_and_new_token_replaces_it() {
     // Spec: agent-permissions R12, R13.
-    let mut h = open_tempo_midi();
+    let mut h = open_agents();
     h.shell
         .run("agent.set_server", json!({ "on": true }))
         .unwrap();
@@ -217,14 +218,160 @@ fn each_allowed_agent_s_token_shows_in_its_row_and_new_token_replaces_it() {
     assert_eq!(Harness::node(&nodes, "Token: claude-code").value, new);
 }
 
+/// Clicks the node labelled `label` and returns what the clipboard got:
+/// egui's `CopyText` command, over the click's frame and the next few in
+/// case the action is handled a frame later.
+fn click(h: &mut Harness, label: &str) -> Vec<String> {
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    let id = Harness::node(&nodes, label).id;
+    let copied = |output: &egui::FullOutput| -> Vec<String> {
+        output
+            .platform_output
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                OutputCommand::CopyText(text) => Some(text.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+    let mut out = copied(&h.frame(vec![Event::AccessKitActionRequest(ActionRequest {
+        action: Action::Click,
+        target_tree: TreeId::ROOT,
+        target_node: id,
+        data: None,
+    })]));
+    for _ in 0..3 {
+        if !out.is_empty() {
+            break;
+        }
+        out = copied(&h.frame(vec![]));
+    }
+    out
+}
+
+#[test]
+fn the_page_list_puts_agents_after_plug_ins_with_none_of_the_settings_on_tempo_midi() {
+    // Decided 14 October 2026: the agent server's settings move to
+    // a page of their own, straight after Plug-Ins.
+    let mut h = open_agents();
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    let list = nodes
+        .iter()
+        .find(|n| n.role == Role::TabList)
+        .expect("a tab list");
+    let mut tabs: Vec<&str> = Vec::new();
+    let mut stack = vec![list.id];
+    while let Some(id) = stack.pop() {
+        let node = nodes.iter().find(|n| n.id == id).unwrap();
+        if node.role == Role::Tab {
+            tabs.push(node.label.as_str());
+        }
+        stack.extend(node.children.iter().rev());
+    }
+    let plug_ins = tabs.iter().position(|t| *t == "Plug-Ins").unwrap();
+    assert_eq!(
+        tabs[plug_ins + 1],
+        "Agents",
+        "Agents follows Plug-Ins: {tabs:?}"
+    );
+
+    // The section's controls are on the Agents page.
+    h.shell
+        .run("agent.set_server", json!({ "on": true }))
+        .unwrap();
+    h.shell
+        .run("agent.approve_client", json!({ "client": "claude-code" }))
+        .unwrap();
+    let nodes = Harness::nodes(&h.settle());
+    for label in [
+        "Agent Server",
+        "Status",
+        "Address",
+        "Token",
+        "Autonomous: claude-code",
+        "Token: claude-code",
+    ] {
+        let _ = Harness::node(&nodes, label);
+    }
+    // The section's two headings are painted text, not controls.
+    let text = painted(&h.frame(vec![]));
+    assert!(text.contains("Agents"), "{text}");
+    assert!(text.contains("Allowed Agents"), "{text}");
+
+    // None of it is left on Tempo & MIDI.
+    h.shell
+        .invoke("app.settings", json!({ "page": "tempo-midi" }))
+        .unwrap();
+    h.shell.take_effects();
+    h.settings.refresh();
+    h.settle();
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    for label in [
+        "Agent Server",
+        "Status",
+        "Address",
+        "Token",
+        "Autonomous: claude-code",
+        "Token: claude-code",
+    ] {
+        assert!(
+            !nodes.iter().any(|n| n.label == label),
+            "{label} is still on Tempo & MIDI"
+        );
+    }
+    let text = painted(&h.frame(vec![]));
+    assert!(!text.contains("Allowed Agents"), "{text}");
+}
+
+#[test]
+fn each_copy_button_puts_its_value_on_the_clipboard_and_the_values_are_selectable() {
+    let mut h = open_agents();
+    h.shell
+        .run("agent.set_server", json!({ "on": true }))
+        .unwrap();
+    h.shell
+        .run("agent.approve_client", json!({ "client": "claude-code" }))
+        .unwrap();
+    let server = h.shell.agent_settings().token.clone();
+    let own = h
+        .shell
+        .agent_settings()
+        .client("claude-code")
+        .unwrap()
+        .token
+        .clone();
+    let url = h.shell.agent_settings().url();
+
+    // The values sit in selectable read-only fields, not plain labels.
+    let nodes = Harness::nodes(&h.settle());
+    for (label, value) in [
+        ("Address", url.as_str()),
+        ("Token", server.expose()),
+        ("Token: claude-code", own.expose()),
+    ] {
+        let node = Harness::node(&nodes, label);
+        assert_eq!(node.role, Role::TextInput, "{label} is selectable");
+        assert_eq!(node.value, value, "{label}");
+    }
+
+    // Each Copy button puts exactly its value on the clipboard.
+    assert_eq!(click(&mut h, "Copy Address"), [url]);
+    assert_eq!(click(&mut h, "Copy Token"), [server.expose().to_owned()]);
+    assert_eq!(
+        click(&mut h, "Copy Token: claude-code"),
+        [own.expose().to_owned()]
+    );
+}
+
 /// The UI's CPU time per frame for this view, against a scene like
 /// ADR-001's benchmark: 200 tracks and 5,000 clips in the open set, the
 /// agent server on, and 20 allowed agents. Run it in release:
 /// `cargo test --release -p bl-ui --test agent_settings -- --ignored --nocapture`.
 #[test]
 #[ignore = "a measurement, run on demand in release"]
-fn frame_time_of_the_agents_section() {
-    let mut h = open_tempo_midi();
+fn frame_time_of_the_agents_page() {
+    let mut h = open_agents();
     h.shell.edit(|editor| {
         for t in 0..200usize {
             let track: bl_model::TrackId = editor.new_id();
@@ -275,7 +422,7 @@ fn frame_time_of_the_agents_section() {
     let median = times[times.len() / 2];
     let p99 = times[times.len() * 99 / 100];
     eprintln!(
-        "Settings, Tempo & MIDI, Agents section: median {median:.3} ms, p99 {p99:.3} ms of CPU \
+        "Settings, Agents page: median {median:.3} ms, p99 {p99:.3} ms of CPU \
          per frame over {} frames (layout, AccessKit tree, and tessellation; no GPU)",
         times.len()
     );

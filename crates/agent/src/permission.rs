@@ -32,7 +32,7 @@ pub use lspk_agent::permission::{Decision, Mode};
 fn rules() -> lspk_agent::permission::Rules<'static> {
     lspk_agent::permission::Rules {
         person_only: &bl_shell::agent::handles,
-        settings: "Beatlayer's Settings window (Tempo & MIDI, Agents)",
+        settings: "Beatlayer's Settings window (Agents)",
         headless: "bl-cli mcp",
     }
 }

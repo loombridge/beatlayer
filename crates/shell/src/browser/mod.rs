@@ -367,6 +367,14 @@ impl BrowserView {
         roots
     }
 
+    /// The User Library's `Templates` folder, where set templates are saved
+    /// (WP-2.25; the browser spec, R2).
+    fn templates_folder(&self) -> Option<PathBuf> {
+        self.user_library
+            .as_ref()
+            .map(|library| library.join("Templates"))
+    }
+
     /// A place's folder.
     fn place_path(&self, label: &Label) -> Option<PathBuf> {
         match label {
@@ -499,6 +507,20 @@ impl BrowserView {
                     }
                     self.rows = Rows::Hits { snapshot, hits };
                 }
+                None if label == Label::Templates => {
+                    // Spec: file-management R5. Templates aren't in the
+                    // index; the folder is listed and filtered by name.
+                    let mut items = Vec::new();
+                    if let Some(folder) = self.templates_folder() {
+                        self.list_into(&folder, 0, &mut items);
+                    }
+                    let needle = self.search.trim().to_lowercase();
+                    items.retain(|item| item.name.to_lowercase().contains(&needle));
+                    if items.is_empty() {
+                        self.note = Some(format!("Nothing matches \u{201c}{needle}\u{201d}."));
+                    }
+                    self.rows = Rows::Items(items);
+                }
                 None => {
                     self.rows = Rows::Items(Vec::new());
                     self.note = Some(label.pending().map_or_else(
@@ -552,6 +574,24 @@ impl BrowserView {
                     }
                     None => {
                         self.note = Some("The User Library hasn't been set up.".to_owned());
+                    }
+                },
+                Label::Templates => match self.templates_folder() {
+                    Some(path) if path.is_dir() => {
+                        self.list_into(&path, 0, &mut items);
+                        if items.is_empty() {
+                            self.note = Some(
+                                "No templates yet: save one with File ▸ Save Beatlayer Set As \
+                                 Template...."
+                                    .to_owned(),
+                            );
+                        }
+                    }
+                    _ => {
+                        self.note = Some(
+                            "The User Library hasn't been set up, so there's no Templates folder."
+                                .to_owned(),
+                        );
                     }
                 },
                 other => {

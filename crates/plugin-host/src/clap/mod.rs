@@ -110,6 +110,10 @@ pub struct ClapType {
     pub path: PathBuf,
     /// Its device type: kind, name, role, and its parameters.
     pub device_type: DeviceType,
+    /// Its vendor, if it gives one (the scanner's list, WP-2.9).
+    pub vendor: Option<String>,
+    /// Its version, if it gives one (the scanner's list, WP-2.9).
+    pub version: Option<String>,
 }
 
 /// A parameter change a plug-in made itself, such as from its editor: one
@@ -367,6 +371,18 @@ impl ClapHost {
                 .unwrap_or(id)
                 .to_owned();
             let role = describe::role(descriptor.features());
+            let vendor = descriptor
+                .vendor()
+                .and_then(|v| v.to_str().ok())
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .map(str::to_owned);
+            let version = descriptor
+                .version()
+                .and_then(|v| v.to_str().ok())
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .map(str::to_owned);
             let mut probe = new_instance(&entry, id, &self.inner.info)?;
             let params = describe::params(&mut probe.plugin_handle());
             drop(probe);
@@ -379,6 +395,8 @@ impl ClapHost {
                     description: DeviceDescription::new(params),
                     sidechain: false,
                 },
+                vendor,
+                version,
             });
         }
         drop(guard);

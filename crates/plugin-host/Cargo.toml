@@ -7,6 +7,13 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+# `beatlayer-scan`: the scanner's child process (WP-2.9). It loads one
+# plug-in file and prints what it found as JSON, so the main app never loads
+# a plug-in that may crash or hang.
+[[bin]]
+name = "beatlayer-scan"
+path = "src/bin/beatlayer-scan.rs"
+
 [dependencies]
 bl-commands.workspace = true
 bl-core.workspace = true
@@ -29,6 +36,7 @@ rtrb = "0.4.0"
 # The host side of the plug-in kit's agent-commands extension: a plug-in's
 # commands, listed and run.
 lspk-plugin = { workspace = true, features = ["clap-host"] }
+serde = { version = "1.0.228", default-features = false, features = ["std", "derive"] }
 serde_json = "1"
 
 [dev-dependencies]

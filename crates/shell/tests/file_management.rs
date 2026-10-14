@@ -307,7 +307,7 @@ fn templates_are_saved_into_the_user_library_and_listed() {
     let saved = shell
         .run("set.save_as_template", json!({ "name": "My Template" }))
         .unwrap();
-    let template = library.join("Templates/My Template.blset");
+    let template = library.join("Templates").join("My Template.blset");
     assert_eq!(saved["path"], text(&template));
     assert!(template.is_file(), "the Templates folder is made");
     assert!(track_names(&shell).iter().any(|name| name == "Lead"));

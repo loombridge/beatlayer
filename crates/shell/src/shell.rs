@@ -38,6 +38,7 @@ use crate::settings::{
 };
 use bl_devices::KitHost;
 use bl_plugin_host::clap::ClapHost;
+use bl_plugin_host::scan::Scanner;
 use bl_shell_spec::arrangement as view_ids;
 use bl_shell_spec::browser as browser_ids;
 use bl_shell_spec::devices as device_ids;
@@ -332,6 +333,9 @@ pub struct Shell {
     native_types: Vec<bl_engine::DeviceType>,
     /// The CLAP host: plug-in devices' instances, on this thread (WP-2.6).
     plugins: ClapHost,
+    /// The plug-in scanner (WP-2.9): the plug-ins found on this machine,
+    /// their blocklist, and their cache.
+    scanner: Scanner,
     /// Plug-ins built on the plug-in kit, compiled in as native devices:
     /// their instances, on this thread.
     kit: KitHost,
@@ -434,6 +438,13 @@ impl Shell {
         // CLAP plug-ins (WP-2.6): this thread is their main thread.
         let plugins = ClapHost::new();
         audio.set_plugins(plugins.clone());
+        // The plug-in scanner (WP-2.9): finds the plug-ins on this machine
+        // in a child process, caching and blocklisting what it finds. Its
+        // cache lives with the preferences.
+        let scanner = match &config_dir {
+            Some(dir) => Scanner::new().with_store(dir.join(crate::settings::PLUGIN_SCAN_FILE)),
+            None => Scanner::new(),
+        };
         // The kit's plug-ins compiled in, as native devices: its examples
         // with bl-devices' `kit-examples` feature, none otherwise.
         let kit = bl_devices::kit_host();
@@ -486,13 +497,27 @@ impl Shell {
             },
             native_types,
             plugins,
+            scanner,
             kit,
             device_commands: std::collections::BTreeMap::new(),
             device_commands_key: Vec::new(),
             plugins_generation: 0,
         };
         shell.give_agents_tokens();
+        shell.publish_plugins();
         shell
+    }
+
+    /// What the plug-in scanner has found, with the browser's hidden and
+    /// format filters applied (WP-2.9, IMP-07), pushed into the browser's
+    /// Plug-Ins label.
+    fn publish_plugins(&mut self) {
+        let plugins = self.scanner.visible(
+            self.prefs.show_hidden_plugins,
+            &self.prefs.hidden_plugins,
+            self.prefs.plugin_format_preference,
+        );
+        self.browser_view.set_plugins(plugins);
     }
 
     /// Makes each allowed agent that has no token of its own one (an agent
@@ -1226,6 +1251,56 @@ impl Shell {
                 let device = target(self, device)?;
                 self.plugins.idle();
                 info(self, device)
+            }
+            plugin_ids::SCAN | plugin_ids::RESCAN => {
+                let plugin_ids::ScanArgs { paths } = Self::args(id, args)?;
+                let paths: Vec<std::path::PathBuf> = match paths {
+                    Some(paths) => paths.into_iter().map(std::path::PathBuf::from).collect(),
+                    None => bl_plugin_host::scan::system_paths(bl_model::PluginFormat::Clap),
+                };
+                let report = crate::plugins::scan_report(
+                    &self.scanner,
+                    bl_model::PluginFormat::Clap,
+                    &paths,
+                    id == plugin_ids::RESCAN,
+                    &self.prefs.hidden_plugins,
+                );
+                self.publish_plugins();
+                Ok(to_value(&report))
+            }
+            plugin_ids::LIST => {
+                let _: plugin_ids::ListArgs = Self::args(id, args)?;
+                let list = crate::plugins::set_plugin_list(self.editor.document(), &self.scanner);
+                Ok(to_value(&list))
+            }
+            plugin_ids::SETTINGS => {
+                let plugin_ids::PluginSettingsArgs {
+                    hidden,
+                    show_hidden,
+                    format_preference,
+                } = Self::args(id, args)?;
+                let mut changed = false;
+                if let Some(hidden) = hidden {
+                    self.prefs.hidden_plugins = hidden.into_iter().collect();
+                    changed = true;
+                }
+                if let Some(show_hidden) = show_hidden {
+                    self.prefs.show_hidden_plugins = show_hidden;
+                    changed = true;
+                }
+                if let Some(format) = format_preference {
+                    self.prefs.plugin_format_preference = Some(format);
+                    changed = true;
+                }
+                if changed {
+                    self.save_preferences();
+                    self.publish_plugins();
+                }
+                Ok(to_value(&plugin_ids::PluginSettings {
+                    hidden: self.prefs.hidden_plugins.iter().cloned().collect(),
+                    show_hidden: self.prefs.show_hidden_plugins,
+                    format_preference: self.prefs.plugin_format_preference,
+                }))
             }
             _ => Err(ShellError::UnknownCommand(id.to_owned())),
         }

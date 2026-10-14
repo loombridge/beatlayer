@@ -74,6 +74,10 @@ pub const FAIL_ACTIVATE: &[u8] = b"FAIL:ACTIVATE";
 /// A state that makes the next editor show or hide fail.
 pub const FAIL_GUI: &[u8] = b"FAIL:GUI";
 
+/// The environment variable a test sets so a scan crashes (`crash`) or hangs
+/// (`hang`) on purpose. Only the scanner's tests set it.
+pub const TEST_SCAN_VAR: &str = "BL_TEST_CLAP_SCAN";
+
 const NO_FAILURE: u8 = 0;
 const PROCESS_FAILS: u8 = 1;
 const ACTIVATE_FAILS: u8 = 2;
@@ -165,6 +169,17 @@ impl Plugin for GainEcho {
 
 impl DefaultPluginFactory for GainEcho {
     fn get_descriptor() -> PluginDescriptor {
+        // Spec: plugin-scanning R5. A scan can be made to crash or hang on
+        // purpose, so the scanner's child process isolation and timeout are
+        // tested with a real plug-in: the test sets `BL_TEST_CLAP_SCAN`.
+        // Only the tests ever set it, and the test plug-in is never shipped.
+        match std::env::var(TEST_SCAN_VAR).as_deref() {
+            Ok("crash") => std::process::abort(),
+            Ok("hang") => loop {
+                std::thread::sleep(std::time::Duration::from_secs(3600));
+            },
+            _ => {}
+        }
         use clack_plugin::plugin::features::{AUDIO_EFFECT, STEREO};
         PluginDescriptor::new(PLUGIN_ID, PLUGIN_NAME)
             .with_vendor("Beatlayer tests")

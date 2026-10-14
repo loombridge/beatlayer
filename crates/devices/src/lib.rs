@@ -18,28 +18,34 @@
 //! in: [`kit`] adapts them, and a [`KitHost`] on the main thread keeps
 //! their instances and runs their commands.
 //!
-//! Beatlayer's own native devices ship from WP-2.16 to 2.18; [`limiter`] is
-//! the first. [`testing`] has the devices the framework's tests use. The
-//! kit's two example plug-ins join the device list with the `kit-examples`
-//! feature, off by default.
+//! Beatlayer ships its first native devices: the limiter ([`limiter`]) and
+//! the tempo-synced delay ([`delay`]); [`register`] adds them to the
+//! engine. The first instruments and the rest of the core effects ship
+//! with WP-2.16 to 2.18. [`testing`] has the devices the framework's tests
+//! use. The kit's two example plug-ins join the device list with the
+//! `kit-examples` feature, off by default.
 
+pub mod delay;
 mod framework;
 pub mod kit;
 pub mod limiter;
 pub mod testing;
 
+pub use delay::{DELAY, delay_type};
 pub use framework::{Audio, NativeDevice, NativeNode, ParamBank, add};
 pub use kit::{KitFactory, KitHost};
 pub use limiter::{Brickwall, limiter_type};
 
 use bl_engine::{DeviceType, Registry};
 
-/// Adds Beatlayer's native devices to `registry`.
+/// Adds Beatlayer's native devices to `registry`: the limiter and the delay.
 pub fn register(registry: &mut Registry) {
     limiter::register(registry);
+    delay::register(registry);
 }
 
-/// The native device types Beatlayer ships, for the browser and the shell.
+/// The native device types Beatlayer ships, for the browser and the shell:
+/// the limiter and the delay.
 #[must_use]
 pub fn device_types() -> Vec<DeviceType> {
     let mut registry = Registry::empty();

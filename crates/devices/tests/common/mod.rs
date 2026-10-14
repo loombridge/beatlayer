@@ -4,7 +4,7 @@
 #![allow(dead_code, reason = "each test file uses some")]
 
 use bl_core::id::Id;
-use bl_core::time::SampleRate;
+use bl_core::time::{SampleRate, TempoMap};
 use bl_engine::{
     Block, DeviceType, Node, NodeConfig, NodeEvent, ParamValue, Registry, TransportInfo,
 };
@@ -60,6 +60,25 @@ pub fn run(node: &mut dyn Node, input: &[f32], events: &[NodeEvent]) -> Vec<Vec<
             TransportInfo::default(),
             RATE,
         );
+        bl_rt::rt_test!({ node.process(&mut block) });
+    }
+    data.chunks(frames).map(<[f32]>::to_vec).collect()
+}
+
+/// Runs one block of per-channel `input` through `node` at `tempo` and
+/// `transport`, as a real-time section, and returns each channel.
+pub fn run_at(
+    node: &mut dyn Node,
+    input: &[Vec<f32>],
+    events: &[NodeEvent],
+    tempo: &TempoMap,
+    transport: TransportInfo,
+) -> Vec<Vec<f32>> {
+    let frames = input[0].len();
+    let mut data: Vec<f32> = input.iter().flat_map(|c| c.iter().copied()).collect();
+    {
+        let mut block = Block::new(&mut data, CHANNELS, frames, frames, events, transport, RATE)
+            .with_tempo(tempo);
         bl_rt::rt_test!({ node.process(&mut block) });
     }
     data.chunks(frames).map(<[f32]>::to_vec).collect()

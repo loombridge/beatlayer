@@ -86,7 +86,7 @@ pub fn run(args: &Args, path: &Path) -> Result<(), String> {
             settings_window(zoom, title_bar)
         } else {
             let (w, h) = args.window_size.unwrap_or((1600.0, 1000.0));
-            vec2(w, h - below).max(minimum_window(zoom, title_bar))
+            vec2(w, h - below).max(minimum_window(zoom, title_bar, false))
         }
     };
     let mut size = window_size(zoom);

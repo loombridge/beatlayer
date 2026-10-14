@@ -22,9 +22,10 @@
 //! crisp. A window `zoom` times as large as another shows exactly what the
 //! other shows at 100%, every rectangle `zoom` times as large
 //! ([`layout_size`], [`ShellLayout::scale`]); its smallest size grows with
-//! the zoom ([`minimum_window`]). Only the drawn title bar keeps its 23
-//! window points, as the system's buttons in it don't scale
-//! ([`title_bar_height`]).
+//! the zoom ([`minimum_window`]), counting the drawn menu bar where menus
+//! are drawn in the window ([`drawn_menu_bar_height`]). Only the drawn
+//! title bar keeps its 23 window points, as the system's buttons in it
+//! don't scale ([`title_bar_height`]).
 
 use egui::{Pos2, Rect, Vec2, pos2, vec2};
 
@@ -33,6 +34,9 @@ pub mod mixer;
 /// Live's title bar height at the reference size (L-WIN-002). layout.md
 /// measures from the window's top edge; the content area starts below it.
 pub const TITLE_BAR: f32 = 23.0;
+
+/// Inner margin of the drawn menu bar panel (top and bottom).
+pub const DRAWN_MENU_MARGIN: f32 = 2.0;
 
 /// The reference window: 1600 × 1000 points with its title bar, so the
 /// content area is 1600 × 977.
@@ -51,6 +55,17 @@ pub const MARGIN: f32 = 9.0;
 /// The Settings window's size with its title bar (L-SET-001).
 pub const SETTINGS_WINDOW: Vec2 = vec2(562.0, 617.0);
 
+/// The drawn menu bar's height in layout points, derived from egui's style:
+/// its interactive button height ([`egui::Spacing::interact_size`]), its top
+/// and bottom inner margins ([`DRAWN_MENU_MARGIN`]), and its panel separator
+/// line stroke.
+#[must_use]
+pub fn drawn_menu_bar_height(style: &egui::Style) -> f32 {
+    style.spacing.interact_size.y
+        + 2.0 * DRAWN_MENU_MARGIN
+        + style.visuals.widgets.noninteractive.bg_stroke.width.round()
+}
+
 /// A y position measured in Live's window, as a content-area position.
 const fn y(window_y: f32) -> f32 {
     window_y - TITLE_BAR
@@ -66,10 +81,20 @@ pub fn layout_size(content: Vec2, zoom: f32) -> Vec2 {
 /// The main window's smallest inner size in window points at `zoom`:
 /// [`MINIMUM`] scaled by the zoom, with Live's title bar where Beatlayer
 /// draws it (`title_bar`, macOS), which keeps its height at every zoom
-/// (interface-zoom R7, R9).
+/// (interface-zoom R7, R9), and the drawn menu bar's height scaled by the
+/// zoom where menus are drawn in the window (`menu_bar`, Linux).
 #[must_use]
-pub fn minimum_window(zoom: f32, title_bar: bool) -> Vec2 {
-    MINIMUM * zoom + vec2(0.0, if title_bar { TITLE_BAR } else { 0.0 })
+pub fn minimum_window(zoom: f32, title_bar: bool, menu_bar: bool) -> Vec2 {
+    let menu_bar_height = if menu_bar {
+        drawn_menu_bar_height(&egui::Style::default()) * zoom
+    } else {
+        0.0
+    };
+    MINIMUM * zoom
+        + vec2(
+            0.0,
+            if title_bar { TITLE_BAR } else { 0.0 } + menu_bar_height,
+        )
 }
 
 /// The main window's minimum and its new inner size, in window points, when
@@ -84,9 +109,10 @@ pub fn fit_main_window(
     current: Vec2,
     zoom: f32,
     title_bar: bool,
+    menu_bar: bool,
     screen: Option<Vec2>,
 ) -> (Vec2, Vec2) {
-    let minimum = minimum_window(zoom, title_bar);
+    let minimum = minimum_window(zoom, title_bar, menu_bar);
     let minimum = screen.map_or(minimum, |screen| minimum.min(screen));
     (minimum, current.max(minimum))
 }

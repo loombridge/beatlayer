@@ -15,7 +15,8 @@ use bl_shell::commands as ids;
 use bl_shell::settings::{SettingsPage, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, zoom_factor};
 use bl_ui::layout::{
     ArrangementLayout, ELEMENTS, MARGIN, MINIMUM, REFERENCE, Row, SETTINGS_WINDOW, SettingsLayout,
-    ShellLayout, Strip, TITLE_BAR, fit_main_window, layout_size, minimum_window, settings_window,
+    ShellLayout, Strip, TITLE_BAR, drawn_menu_bar_height, fit_main_window, layout_size,
+    minimum_window, settings_window,
 };
 use common::{Harness, Window, command};
 use egui::accesskit::{Action, Role};
@@ -186,7 +187,7 @@ fn rows_keep_their_places_and_nothing_overlaps_at_every_percentage() {
     for browser in [true, false] {
         let reference = main_window_rows(REFERENCE, browser);
         for zoom in every_percent() {
-            let minimum = minimum_window(zoom, false);
+            let minimum = minimum_window(zoom, false, false);
             for window in [
                 minimum,
                 REFERENCE.max(minimum),
@@ -217,7 +218,7 @@ fn controls_keep_their_live_size_times_the_zoom() {
     // keep their measured widths and heights (L-WIN-003, L-STAT), times the
     // zoom, and stay in Live's order with the margins scaled too.
     for zoom in every_percent() {
-        let window = minimum_window(zoom, false);
+        let window = minimum_window(zoom, false, false);
         let layout = ShellLayout::compute(layout_size(window, zoom), true).scale(zoom);
         for (placement, (_, rect)) in ELEMENTS.iter().zip(&layout.elements) {
             if placement.strip == Strip::ControlBar {
@@ -253,10 +254,18 @@ fn the_minimum_window_grows_with_the_zoom() {
     // its 23 points.
     println!("| Zoom | Minimum window (content) | With Live's title bar (macOS) |");
     for zoom in every_step() {
-        let content = minimum_window(zoom, false);
-        let framed = minimum_window(zoom, true);
+        let content = minimum_window(zoom, false, false);
+        let framed = minimum_window(zoom, true, false);
+        let with_menus = minimum_window(zoom, false, true);
         assert!((content - MINIMUM * zoom).length() < EPS);
         assert!((framed - content - vec2(0.0, TITLE_BAR)).length() < EPS);
+        assert!(
+            (with_menus
+                - content
+                - vec2(0.0, drawn_menu_bar_height(&egui::Style::default()) * zoom))
+            .length()
+                < EPS
+        );
         let laid_out = layout_size(content, zoom);
         assert!((laid_out - MINIMUM).length() < EPS, "{laid_out:?}");
         // A window any smaller lays out the minimum and shows part of it:
@@ -283,22 +292,22 @@ fn the_window_grows_to_its_minimum_as_far_as_the_screen_allows() {
     let reference = vec2(1600.0, 1000.0);
     // Live's reference window holds every zoom up to 120% as it is.
     for zoom in [0.5, 1.0, 1.2] {
-        let (minimum, size) = fit_main_window(reference, zoom, true, None);
+        let (minimum, size) = fit_main_window(reference, zoom, true, false, None);
         assert_eq!(size, reference, "{zoom}");
-        assert!((minimum - minimum_window(zoom, true)).length() < EPS);
+        assert!((minimum - minimum_window(zoom, true, false)).length() < EPS);
     }
     // At 150% the minimum is 1980 × 983 points: it grows wider and keeps
     // its height.
-    let (_, size) = fit_main_window(reference, 1.5, true, None);
+    let (_, size) = fit_main_window(reference, 1.5, true, false, None);
     assert!((size - vec2(1980.0, 1000.0)).length() < EPS, "{size:?}");
     // On a 1728 × 1117-point screen (95% × 90% of it usable) at 200%, the
     // minimum and the window are as big as the screen allows.
     let screen = vec2(1728.0 * 0.95, 1117.0 * 0.9);
-    let (minimum, size) = fit_main_window(reference, 2.0, true, Some(screen));
+    let (minimum, size) = fit_main_window(reference, 2.0, true, false, Some(screen));
     assert_eq!(minimum, screen);
     assert_eq!(size, screen);
     // A window bigger than the minimum is left alone, even on a small screen.
-    let (_, size) = fit_main_window(vec2(2400.0, 1400.0), 1.5, false, Some(screen));
+    let (_, size) = fit_main_window(vec2(2400.0, 1400.0), 1.5, false, false, Some(screen));
     assert_eq!(size, vec2(2400.0, 1400.0));
 }
 
@@ -366,7 +375,7 @@ fn the_main_window_draws_every_row_scaled_at_every_step() {
     // scaled by the zoom, and the drawn title bar stays 23 points.
     for title_bar in [false, true] {
         for zoom in every_step() {
-            let minimum = minimum_window(zoom, title_bar);
+            let minimum = minimum_window(zoom, title_bar, false);
             let reference = vec2(1600.0, if title_bar { 1000.0 } else { 977.0 });
             for window in [minimum, reference.max(minimum)] {
                 let mut h = if title_bar {
@@ -628,4 +637,48 @@ fn the_view_menu_has_the_zoom_items_in_live_s_order() {
         commands,
         [ids::VIEW_ZOOM_IN, ids::VIEW_ZOOM_OUT, ids::VIEW_ZOOM_RESET]
     );
+}
+
+#[test]
+fn the_main_window_with_drawn_menus_holds_the_status_bar_at_minimum_size() {
+    // Spec: interface-zoom R7, Open questions ("The drawn menu bar").
+    // With drawn menus in the window (Linux by default, or with
+    // --drawn-menus), the minimum window size counts the drawn menu bar's
+    // height, so at the minimum size the Status Bar is fully inside the
+    // window at 100% and at a larger zoom.
+    for zoom in [1.0f32, 1.5f32] {
+        let mut h = Harness::new(Window::Main);
+        h.menu_bar = Some(bl_shell::menus::menu_bar(
+            bl_shell::menus::MenuPlatform::Other,
+        ));
+        h.shell
+            .run(
+                ids::VIEW_SET_ZOOM,
+                json!({ "percent": (zoom * 100.0).round() as u16 }),
+            )
+            .unwrap();
+        h.size = minimum_window(zoom, false, true);
+        let output = h.settle();
+        let what = format!("{:.0}% with drawn menus", zoom * 100.0);
+
+        let layout = h.main.drawn_layout().expect("drawn layout");
+        // In layout points, the window's content height is h.size.y / zoom.
+        let window_height = h.size.y / zoom;
+        assert!(
+            layout.status_bar.bottom() <= window_height + EPS,
+            "{what}: Status Bar bottom ({}) is past the window's bottom ({})",
+            layout.status_bar.bottom(),
+            window_height,
+        );
+
+        // AccessKit nodes also verify that the Status Bar is drawn inside the window.
+        let nodes = Harness::nodes(&output);
+        let status = drawn_as(&nodes, "Status Bar", Some(Role::Group)).expect("Status Bar node");
+        assert!(
+            status.bottom() <= window_height + EPS,
+            "{what}: Status Bar node bottom ({}) is past window ({})",
+            status.bottom(),
+            window_height,
+        );
+    }
 }

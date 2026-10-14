@@ -1043,28 +1043,23 @@ fn paths() -> BTreeMap<&'static str, Path> {
         // The Settings window's controls (Tab, then Enter or Up and Down).
         (
             "agent.set_server",
-            settings("tempo-midi", nothing, "Agent Server", Key::Enter),
+            settings("agents", nothing, "Agent Server", Key::Enter),
         ),
         (
             "agent.new_token",
-            settings("tempo-midi", server_on, "New Token", Key::Enter),
+            settings("agents", server_on, "New Token", Key::Enter),
         ),
         (
             "agent.set_autonomous",
-            settings("tempo-midi", an_agent, "Autonomous: Tester", Key::Enter),
+            settings("agents", an_agent, "Autonomous: Tester", Key::Enter),
         ),
         (
             "agent.forget_client",
-            settings("tempo-midi", an_agent, "Forget Tester", Key::Enter),
+            settings("agents", an_agent, "Forget Tester", Key::Enter),
         ),
         (
             "agent.new_client_token",
-            settings(
-                "tempo-midi",
-                server_and_agent,
-                "New Token: Tester",
-                Key::Enter,
-            ),
+            settings("agents", server_and_agent, "New Token: Tester", Key::Enter),
         ),
         (
             "audio.configure",
@@ -1326,6 +1321,27 @@ fn paths() -> BTreeMap<&'static str, Path> {
         (
             "plugin.show_window",
             Exception(LaterView("the plug-in device panel (WP-2.10)")),
+        ),
+        // WP-2.9's scanner and settings: the Plug-Ins label lists what the
+        // scanner found, but the button that scans (Live's Rescan) and the
+        // hide-plug-ins controls are later views.
+        (
+            "plugin.scan",
+            Exception(LaterView("the Settings Plug-Ins page's Rescan (WP-2.5b)")),
+        ),
+        (
+            "plugin.rescan",
+            Exception(LaterView("the Settings Plug-Ins page's Rescan (WP-2.5b)")),
+        ),
+        (
+            "plugin.list",
+            Exception(LaterView("the set's plug-ins view (Phase 6, IMP-29)")),
+        ),
+        (
+            "plugin.settings",
+            Exception(LaterView(
+                "the browser's hide-plug-ins and format controls (Phase 6, IMP-07)",
+            )),
         ),
         // A send knob and the In/Out choosers (the routing spec): Up and
         // Down on them.

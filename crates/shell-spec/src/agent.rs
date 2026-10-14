@@ -9,10 +9,10 @@
 //! asked about each time and is never autonomous, whatever name it gives.
 //!
 //! The settings live in the preferences and show in the Settings window,
-//! on the Tempo & MIDI page beside Live's control surfaces, which are the
-//! other way another program drives the app. They change what agents may
-//! do, so only a person changes them: the agent API refuses every command
-//! in this module, whatever the agent's permissions.
+//! on the Agents page: a page of its own, straight after Plug-Ins, because
+//! Live has no agent settings. They change what agents may do, so only a
+//! person changes them: the agent API refuses every command in this module,
+//! whatever the agent's permissions.
 
 use bl_commands::Context::Settings;
 use bl_commands::{CommandSpec, Permission, RegisterError, Registry};

@@ -1,9 +1,12 @@
 //! Preferences: what the Settings window changes, and what the app keeps
 //! between starts.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+
+use bl_model::PluginFormat;
 
 pub use bl_shell_spec::settings::{
     SettingsPage, ThemeChoice, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, ZOOM_STEPS, zoom_factor,
@@ -59,6 +62,14 @@ pub struct Preferences {
     /// as Live's plug-in windows do. On by default, as observed in Live
     /// 12.4.6.
     pub auto_hide_plug_in_windows: OnByDefault,
+    /// The plug-ins the browser hides, as `format/plugin_id` keys
+    /// (WP-2.9, IMP-07). A set that uses a hidden plug-in still loads it.
+    pub hidden_plugins: BTreeSet<String>,
+    /// Whether the browser shows hidden plug-ins (WP-2.9, IMP-07).
+    pub show_hidden_plugins: bool,
+    /// The format to prefer when a plug-in exists in several formats
+    /// (WP-2.9, IMP-07).
+    pub plugin_format_preference: Option<PluginFormat>,
     /// The saved default set (File ▸ Save Beatlayer Set As Default Set),
     /// which a new set starts from (WP-2.25). `None` uses the factory
     /// default set.
@@ -79,6 +90,10 @@ impl Default for OnByDefault {
 
 /// The file name of the preferences, inside the config directory.
 pub const PREFERENCES_FILE: &str = "preferences.json";
+
+/// The file name of the plug-in scanner's cache and blocklist (WP-2.9),
+/// inside the config directory.
+pub const PLUGIN_SCAN_FILE: &str = "plugin-scan.json";
 
 impl Preferences {
     /// Reads preferences from `dir`, or the defaults if there are none.

@@ -25,6 +25,10 @@ pub enum SettingsPage {
     Library,
     /// Plug-Ins (L-SET-017).
     PlugIns,
+    /// Agents (L-SET-020). Beatlayer's own page: the agent server's
+    /// settings (WP-1.15), which Live doesn't have. It follows Plug-Ins in
+    /// the chooser (a Beatlayer addition, decided 14 October 2026).
+    Agents,
     /// Record, Warp & Launch (L-SET-018).
     RecordWarpLaunch,
     /// Licenses & Updates (L-SET-019).
@@ -33,7 +37,7 @@ pub enum SettingsPage {
 
 impl SettingsPage {
     /// Every page, in the page chooser's order.
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 11] = [
         Self::DisplayInput,
         Self::ThemeColors,
         Self::Audio,
@@ -42,6 +46,7 @@ impl SettingsPage {
         Self::FileFolder,
         Self::Library,
         Self::PlugIns,
+        Self::Agents,
         Self::RecordWarpLaunch,
         Self::LicensesUpdates,
     ];
@@ -58,6 +63,7 @@ impl SettingsPage {
             Self::FileFolder => "File & Folder",
             Self::Library => "Library",
             Self::PlugIns => "Plug-Ins",
+            Self::Agents => "Agents",
             Self::RecordWarpLaunch => "Record, Warp & Launch",
             Self::LicensesUpdates => "Licenses & Updates",
         }
@@ -75,6 +81,7 @@ impl SettingsPage {
             Self::FileFolder => "L-SET-015",
             Self::Library => "L-SET-016",
             Self::PlugIns => "L-SET-017",
+            Self::Agents => "L-SET-020",
             Self::RecordWarpLaunch => "L-SET-018",
             Self::LicensesUpdates => "L-SET-019",
         }
@@ -83,8 +90,8 @@ impl SettingsPage {
     /// Whether this build has any of the page's settings, or only its place
     /// in the chooser. The shell (WP-1.7) builds Audio and the theme choice,
     /// WP-1.17 Display & Input's Zoom, WP-1.4b Record, Warp & Launch's
-    /// Create Fades on Clip Edges, and WP-2.5b Plug-Ins' Auto-Hide Plug-In
-    /// Windows.
+    /// Create Fades on Clip Edges, WP-2.5b Plug-Ins' Auto-Hide Plug-In
+    /// Windows, and WP-1.15 the Agents page's agent server settings.
     #[must_use]
     pub const fn is_built(self) -> bool {
         matches!(
@@ -94,6 +101,7 @@ impl SettingsPage {
                 | Self::DisplayInput
                 | Self::RecordWarpLaunch
                 | Self::PlugIns
+                | Self::Agents
         )
     }
 
@@ -209,7 +217,8 @@ mod tests {
             })
             .collect();
         assert_eq!(ids[2], "audio");
-        assert_eq!(ids[8], "record-warp-launch");
+        assert_eq!(ids[8], "agents");
+        assert_eq!(ids[9], "record-warp-launch");
     }
 
     #[test]

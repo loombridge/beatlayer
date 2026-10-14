@@ -75,6 +75,15 @@ pub struct EngineProgram {
     /// The copies tasks keep of their signal before their devices or
     /// before their mixer, for routes that tap there: one buffer each.
     pub(crate) tap_pool: Vec<f32>,
+    /// The delay lines that carry delay compensation (WP-2.11): one per
+    /// delayed route, plus one per track whose clips are delayed.
+    pub(crate) delay_lines: Vec<DelayLine>,
+    /// The audio the delay lines hold: each line `channels` channels of
+    /// `len` frames.
+    pub(crate) delay_pool: Vec<f32>,
+    /// A scratch buffer for a delayed route's input: `channels` channels of
+    /// `max_frames` frames, reused by every route.
+    pub(crate) delay_scratch: Vec<f32>,
     pub(crate) channels: usize,
     pub(crate) max_frames: usize,
     /// The task whose buffer is the engine's output: Main's.
@@ -115,6 +124,12 @@ pub(crate) struct NodeSlot {
     /// Switched off: the node keeps its state and takes parameter changes,
     /// but doesn't process.
     pub(crate) bypass: bool,
+    /// The frames its own processing adds, for delay compensation
+    /// (WP-2.11): a device's `latency`, and zero for everything else.
+    pub(crate) latency: u32,
+    /// The frames a parameter change aimed at this node is held back, so
+    /// automation lines up with the compensated audio (WP-2.11).
+    pub(crate) delay: u32,
 }
 
 /// A node that moves from the program before into this one.
@@ -146,6 +161,100 @@ pub(crate) struct Input {
     pub(crate) from: u32,
     /// Where in that task the signal is taken.
     pub(crate) tap: Tap,
+    /// The delay line its signal is delayed through to line it up with the
+    /// destination's other inputs (WP-2.11), or [`NO_DELAY`].
+    pub(crate) delay: u32,
+}
+
+/// No delay line: an input that arrives with no compensation of its own.
+pub(crate) const NO_DELAY: u32 = u32::MAX;
+
+/// A delay line that holds a signal back by `len` frames, for delay
+/// compensation (WP-2.11). Its `at` is where its samples start in the
+/// program's delay pool, and `write` the frame it writes next.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct DelayLine {
+    pub(crate) at: u32,
+    pub(crate) len: u32,
+    pub(crate) write: u32,
+}
+
+/// Where the delay lines for `lengths` sit in one pool, with every write
+/// position at zero: each line `channels` channels of `lengths[i]` frames.
+pub(crate) fn delay_storage(lengths: &[u32], channels: usize) -> (Vec<DelayLine>, Vec<f32>) {
+    let mut lines = Vec::with_capacity(lengths.len());
+    let mut total = 0usize;
+    for &len in lengths {
+        lines.push(DelayLine {
+            at: total as u32,
+            len,
+            write: 0,
+        });
+        total += channels * len as usize;
+    }
+    (lines, vec![0.0; total])
+}
+
+/// Delays `from` by its line into `scratch`, writing `from` into the line.
+/// `scratch` and `from` are planar with `channels` channels `stride` apart,
+/// and neither may alias `pool`.
+fn delay_into(
+    line: &mut DelayLine,
+    pool: &mut [f32],
+    scratch: &mut [f32],
+    from: &[f32],
+    channels: usize,
+    stride: usize,
+    frames: usize,
+) {
+    let len = line.len as usize;
+    for c in 0..channels {
+        let base = line.at as usize + c * len;
+        let source = &from[c * stride..c * stride + frames];
+        let out = &mut scratch[c * stride..c * stride + frames];
+        let mut w = line.write as usize;
+        for i in 0..frames {
+            let at = base + w;
+            out[i] = pool[at];
+            pool[at] = source[i];
+            w += 1;
+            if w == len {
+                w = 0;
+            }
+        }
+        if c + 1 == channels {
+            line.write = w as u32;
+        }
+    }
+}
+
+/// Delays `samples` in place by its line, writing the past samples out as
+/// the present ones go in.
+fn delay_in_place(
+    line: &mut DelayLine,
+    pool: &mut [f32],
+    samples: &mut [f32],
+    channels: usize,
+    stride: usize,
+    frames: usize,
+) {
+    let len = line.len as usize;
+    for c in 0..channels {
+        let base = line.at as usize + c * len;
+        let channel = &mut samples[c * stride..c * stride + frames];
+        let mut w = line.write as usize;
+        for sample in channel.iter_mut() {
+            let at = base + w;
+            std::mem::swap(&mut pool[at], &mut *sample);
+            w += 1;
+            if w == len {
+                w = 0;
+            }
+        }
+        if c + 1 == channels {
+            line.write = w as u32;
+        }
+    }
 }
 
 /// A device's sidechain in a task's chain.
@@ -159,6 +268,9 @@ pub(crate) struct DeviceSidechain {
     pub(crate) buffer: u32,
     /// Its sources, in `sidechain_inputs`.
     pub(crate) inputs: Span,
+    /// The frames its track's devices before it add, so its sources line up
+    /// with the device's own input (WP-2.11).
+    pub(crate) before: u32,
 }
 
 /// One track.
@@ -174,6 +286,9 @@ pub(crate) struct Task {
     pub(crate) sidechains: Span,
     /// The slot of the track's mixer.
     pub(crate) mixer: u32,
+    /// The delay line its clips are held back through so they line up with
+    /// its inputs (WP-2.11), or [`NO_DELAY`].
+    pub(crate) clip_delay: u32,
     /// The task's buffer in `tap_pool` for its signal before its devices,
     /// if a route reads it.
     pub(crate) pre_fx: Option<u32>,
@@ -388,6 +503,19 @@ impl EngineProgram {
                 }
             }
 
+            // Its clips, held back to line up with its inputs.
+            if task.clip_delay != NO_DELAY {
+                let line = &mut self.delay_lines[task.clip_delay as usize];
+                delay_in_place(
+                    line,
+                    &mut self.delay_pool,
+                    &mut self.pool[own.clone()],
+                    channels,
+                    stride,
+                    frames,
+                );
+            }
+
             // Add the inputs, each through its route.
             for &input in &self.task_inputs[task.inputs.range()] {
                 delivered += gather(events, input.route, from, until, scratch);
@@ -404,27 +532,58 @@ impl EngineProgram {
                     Tap::PostFx => self.tasks[source].post_fx,
                     Tap::PostMixer => None,
                 };
-                match (input.tap, kept) {
-                    (Tap::PostMixer, _) => {
-                        let theirs = source * size..(source + 1) * size;
-                        let Ok([mine, theirs]) = self.pool.get_disjoint_mut([own.clone(), theirs])
-                        else {
-                            continue;
-                        };
-                        route.mix(mine, theirs, channels, stride, frames, scratch);
+                if input.delay != NO_DELAY {
+                    // Hold the source back, then add what comes out.
+                    let at = match (input.tap, kept) {
+                        (Tap::PostMixer, _) => source * size,
+                        (_, Some(buffer)) => buffer as usize * size,
+                        (_, None) => continue,
+                    };
+                    let pool = match (input.tap, kept) {
+                        (Tap::PostMixer, _) => &self.pool,
+                        _ => &self.tap_pool,
+                    };
+                    delay_into(
+                        &mut self.delay_lines[input.delay as usize],
+                        &mut self.delay_pool,
+                        &mut self.delay_scratch[..size],
+                        &pool[at..at + size],
+                        channels,
+                        stride,
+                        frames,
+                    );
+                    route.mix(
+                        &mut self.pool[own.clone()],
+                        &self.delay_scratch[..size],
+                        channels,
+                        stride,
+                        frames,
+                        scratch,
+                    );
+                } else {
+                    match (input.tap, kept) {
+                        (Tap::PostMixer, _) => {
+                            let theirs = source * size..(source + 1) * size;
+                            let Ok([mine, theirs]) =
+                                self.pool.get_disjoint_mut([own.clone(), theirs])
+                            else {
+                                continue;
+                            };
+                            route.mix(mine, theirs, channels, stride, frames, scratch);
+                        }
+                        (_, Some(buffer)) => {
+                            let theirs = buffer as usize * size..(buffer as usize + 1) * size;
+                            route.mix(
+                                &mut self.pool[own.clone()],
+                                &self.tap_pool[theirs],
+                                channels,
+                                stride,
+                                frames,
+                                scratch,
+                            );
+                        }
+                        (_, None) => {}
                     }
-                    (_, Some(buffer)) => {
-                        let theirs = buffer as usize * size..(buffer as usize + 1) * size;
-                        route.mix(
-                            &mut self.pool[own.clone()],
-                            &self.tap_pool[theirs],
-                            channels,
-                            stride,
-                            frames,
-                            scratch,
-                        );
-                    }
-                    (_, None) => {}
                 }
             }
 
@@ -588,10 +747,32 @@ impl EngineProgram {
                 Tap::PostFx => source.post_fx.map(|b| (&self.tap_pool, b as usize)),
                 Tap::PostMixer => Some((&self.pool, input.from as usize)),
             };
-            if let Some((pool, buffer)) = theirs {
+            let Some((pool, buffer)) = theirs else {
+                continue;
+            };
+            let theirs = &pool[buffer * size..(buffer + 1) * size];
+            if input.delay != NO_DELAY {
+                delay_into(
+                    &mut self.delay_lines[input.delay as usize],
+                    &mut self.delay_pool,
+                    &mut self.delay_scratch[..size],
+                    theirs,
+                    channels,
+                    stride,
+                    frames,
+                );
                 route.mix(
                     &mut self.sidechain_pool[at.clone()],
-                    &pool[buffer * size..(buffer + 1) * size],
+                    &self.delay_scratch[..size],
+                    channels,
+                    stride,
+                    frames,
+                    scratch,
+                );
+            } else {
+                route.mix(
+                    &mut self.sidechain_pool[at.clone()],
+                    theirs,
                     channels,
                     stride,
                     frames,

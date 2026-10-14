@@ -567,7 +567,16 @@ fn an_agent_s_clip_set_data_that_drops_notes_asks_first_and_one_that_adds_notes_
     assert_eq!(data.notes.len(), 2);
 
     // Tempo and time signatures keep their class.
-    for command in ["song.set_tempo", "song.set_time_signatures"] {
+    for command in [
+        "song.set_tempo",
+        "song.set_time_signatures",
+        "song.set_tempo_breakpoint",
+        "song.move_tempo_breakpoint",
+        "song.delete_tempo_breakpoint",
+        "song.set_time_signature_change",
+        "song.move_time_signature_change",
+        "song.delete_time_signature_change",
+    ] {
         let described = call(
             &mut client,
             "describe_command",

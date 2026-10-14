@@ -113,6 +113,8 @@ enum Op {
     SetDeviceParam(Index, u8, f64),
     SetTempo(f64),
     SetTimeSignature(u8, u8),
+    SetTempoBreakpoint(i16, f64),
+    SetTimeSignatureChange(i16, u8, u8),
     SetLoop(i16, u16),
     SetLoopEnabled(bool),
 }
@@ -195,6 +197,10 @@ fn op() -> impl Strategy<Value = Op> {
         3 => (i(), 0u8..8, value(-100.0..100.0)).prop_map(|(d, p, v)| Op::SetDeviceParam(d, p, v)),
         1 => (20.0..999.0).prop_map(Op::SetTempo),
         1 => (1u8..=12, 0u8..5).prop_map(|(n, d)| Op::SetTimeSignature(n, d)),
+        // Sometimes before 1.1.1, which the document refuses.
+        1 => (-2i16..64, 20.0..999.0).prop_map(|(at, bpm)| Op::SetTempoBreakpoint(at, bpm)),
+        1 => (-2i16..64, 1u8..=12, 0u8..5)
+            .prop_map(|(at, n, d)| Op::SetTimeSignatureChange(at, n, d)),
         // Sometimes before 1.1.1 or empty, which the document refuses.
         1 => (-2i16..64, 0u16..64).prop_map(|(start, length)| Op::SetLoop(start, length)),
         1 => any::<bool>().prop_map(Op::SetLoopEnabled),
@@ -520,6 +526,14 @@ impl Op {
                 time_signatures: TimeSignatureMap::constant(
                     TimeSignature::new(*numerator, 1 << d).unwrap(),
                 ),
+            },
+            Self::SetTempoBreakpoint(at, bpm) => Command::SetTempoBreakpoint {
+                at: Ticks::QUARTER * i64::from(*at),
+                bpm: Bpm::new(*bpm).unwrap(),
+            },
+            Self::SetTimeSignatureChange(at, numerator, d) => Command::SetTimeSignatureChange {
+                at: Ticks::QUARTER * i64::from(*at),
+                signature: TimeSignature::new(*numerator, 1 << d).unwrap(),
             },
             Self::SetLoop(start, length) => Command::SetLoop {
                 start: Ticks::QUARTER * i64::from(*start),

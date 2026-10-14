@@ -42,6 +42,8 @@ Placement, menus, gestures and keyboard shortcuts match Live's, which is functio
 
    The tests run under cargo-nextest, in parallel. The property, stress, and kill tests run fewer cases by default (`BL_TEST_DEPTH=quick`); `BL_TEST_DEPTH=full cargo xtask check` runs them as `main` does.
 
+   Check Windows clippy as well (`cargo xtask clippy-windows`, or `CARGO_FEATURE_PURE=1 cargo clippy --workspace --all-targets --all-features --locked --target x86_64-pc-windows-msvc -- -D warnings`).
+
 1. If a golden test fails, your change altered what the engine renders. If that's a mistake, fix it. If it's intended, remake the references and say in the pull request why each one changed:
 
    ```sh

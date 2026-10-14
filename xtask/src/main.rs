@@ -57,6 +57,7 @@ Tasks:
                  runtime already on this machine (the file RTSAN_LIB_PATH names, or
                  Homebrew's llvm on macOS, or LLVM 20 or later on Linux). Arguments after
                  `--` go to the test binaries; `-- --nocapture` shows the reports.
+  clippy-windows Run clippy for the Windows target (x86_64-pc-windows-msvc)
   help           Show this message
 ";
 
@@ -108,7 +109,7 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = workspace_root().and_then(|root| run(&root, &args));
     match result {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(code) => code,
         Err(message) => {
             eprintln!("error: {message}");
             ExitCode::FAILURE
@@ -116,33 +117,33 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(root: &Path, args: &[String]) -> Result<(), String> {
+fn run(root: &Path, args: &[String]) -> Result<ExitCode, String> {
     let task = args.first().map(String::as_str);
     let options = args.get(1..).unwrap_or_default();
     match task {
-        Some("check") => check(root, &check_options(options)?),
-        Some("layers") => layers(root),
+        Some("check") => check(root, &check_options(options)?).map(|()| ExitCode::SUCCESS),
+        Some("layers") => layers(root).map(|()| ExitCode::SUCCESS),
         Some("ui-parity") => match options {
-            [] => ui_parity::generate(root),
-            [flag] if flag == "--check" => ui_parity::check(root),
+            [] => ui_parity::generate(root).map(|()| ExitCode::SUCCESS),
+            [flag] if flag == "--check" => ui_parity::check(root).map(|()| ExitCode::SUCCESS),
             _ => Err(format!("usage: cargo xtask ui-parity [--check]\n\n{USAGE}")),
         },
         Some("commands") => match options {
-            [] => commands::generate(root),
-            [flag] if flag == "--check" => commands::check(root),
+            [] => commands::generate(root).map(|()| ExitCode::SUCCESS),
+            [flag] if flag == "--check" => commands::check(root).map(|()| ExitCode::SUCCESS),
             _ => Err(format!("usage: cargo xtask commands [--check]\n\n{USAGE}")),
         },
         Some("keymap") => match options {
-            [] => keymap::generate(root),
-            [flag] if flag == "--check" => keymap::check(root),
+            [] => keymap::generate(root).map(|()| ExitCode::SUCCESS),
+            [flag] if flag == "--check" => keymap::check(root).map(|()| ExitCode::SUCCESS),
             _ => Err(format!("usage: cargo xtask keymap [--check]\n\n{USAGE}")),
         },
-        Some("deny-selftest") => deny_selftest(root),
-        Some("private-terms") => private_terms::check(root),
-        Some("golden") => golden(root, options),
-        Some("progress") => dashboard::print(root, options),
-        Some("dashboard") => dashboard::serve(root, options),
-        Some("package") => package::package(root),
+        Some("deny-selftest") => deny_selftest(root).map(|()| ExitCode::SUCCESS),
+        Some("private-terms") => private_terms::check(root).map(|()| ExitCode::SUCCESS),
+        Some("golden") => golden(root, options).map(|()| ExitCode::SUCCESS),
+        Some("progress") => dashboard::print(root, options).map(|()| ExitCode::SUCCESS),
+        Some("dashboard") => dashboard::serve(root, options).map(|()| ExitCode::SUCCESS),
+        Some("package") => package::package(root).map(|()| ExitCode::SUCCESS),
         Some("rtsan") => {
             let passed_on = match options.first().map(String::as_str) {
                 None => &[][..],
@@ -153,11 +154,15 @@ fn run(root: &Path, args: &[String]) -> Result<(), String> {
                     ));
                 }
             };
-            rtsan(root, passed_on)
+            rtsan(root, passed_on).map(|()| ExitCode::SUCCESS)
         }
+        Some("clippy-windows") => match options {
+            [] => clippy_windows(root),
+            _ => Err(format!("usage: cargo xtask clippy-windows\n\n{USAGE}")),
+        },
         None | Some("help" | "-h" | "--help") => {
             print!("{USAGE}");
-            Ok(())
+            Ok(ExitCode::SUCCESS)
         }
         Some(other) => Err(format!("unknown task `{other}`\n\n{USAGE}")),
     }
@@ -977,6 +982,61 @@ fn workspace_root() -> Result<PathBuf, String> {
         .ok_or_else(|| format!("{} has no parent directory", manifest.display()))
 }
 
+const WINDOWS_TARGET: &str = "x86_64-pc-windows-msvc";
+
+fn is_target_installed(installed_targets: &str, target: &str) -> bool {
+    installed_targets.lines().any(|line| line.trim() == target)
+}
+
+fn check_target_installed(installed_targets: &str, target: &str) -> Result<(), String> {
+    if is_target_installed(installed_targets, target) {
+        Ok(())
+    } else {
+        Err(format!(
+            "the `{target}` target isn't installed. Install it with `rustup target add {target}`."
+        ))
+    }
+}
+
+fn require_windows_target() -> Result<(), String> {
+    let output = Command::new("rustup")
+        .args(["target", "list", "--installed"])
+        .output()
+        .map_err(|e| format!("couldn't run `rustup target list --installed`: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "`rustup target list --installed` failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    check_target_installed(&stdout, WINDOWS_TARGET)
+}
+
+fn clippy_windows(root: &Path) -> Result<ExitCode, String> {
+    require_windows_target()?;
+    let status = Command::new(cargo_bin())
+        .env("CARGO_FEATURE_PURE", "1")
+        .args([
+            "clippy",
+            "--workspace",
+            "--all-targets",
+            "--all-features",
+            "--locked",
+            "--target",
+            WINDOWS_TARGET,
+            "--",
+            "-D",
+            "warnings",
+        ])
+        .current_dir(root)
+        .status()
+        .map_err(|e| format!("couldn't run cargo clippy: {e}"))?;
+    Ok(status
+        .code()
+        .map_or(ExitCode::FAILURE, |c| ExitCode::from(c as u8)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1098,5 +1158,24 @@ source = \"registry+https://github.com/rust-lang/crates.io-index\"
             found[1].components().any(|part| part.as_os_str() == "23"),
             "{found:?}"
         );
+    }
+
+    #[test]
+    fn windows_target_check() {
+        let installed = "aarch64-apple-darwin\nx86_64-apple-darwin\nx86_64-pc-windows-msvc\n";
+        assert!(check_target_installed(installed, WINDOWS_TARGET).is_ok());
+
+        let missing = "aarch64-apple-darwin\nx86_64-apple-darwin\n";
+        let err = check_target_installed(missing, WINDOWS_TARGET).unwrap_err();
+        assert!(
+            err.contains("rustup target add x86_64-pc-windows-msvc"),
+            "unexpected error message: {err}"
+        );
+
+        let crlf = "aarch64-apple-darwin\r\nx86_64-pc-windows-msvc \r\n";
+        assert!(check_target_installed(crlf, WINDOWS_TARGET).is_ok());
+
+        let substring = "x86_64-pc-windows-msvc-extra\n";
+        assert!(check_target_installed(substring, WINDOWS_TARGET).is_err());
     }
 }

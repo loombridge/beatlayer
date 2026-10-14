@@ -1010,28 +1010,23 @@ fn paths() -> BTreeMap<&'static str, Path> {
         // The Settings window's controls (Tab, then Enter or Up and Down).
         (
             "agent.set_server",
-            settings("tempo-midi", nothing, "Agent Server", Key::Enter),
+            settings("agents", nothing, "Agent Server", Key::Enter),
         ),
         (
             "agent.new_token",
-            settings("tempo-midi", server_on, "New Token", Key::Enter),
+            settings("agents", server_on, "New Token", Key::Enter),
         ),
         (
             "agent.set_autonomous",
-            settings("tempo-midi", an_agent, "Autonomous: Tester", Key::Enter),
+            settings("agents", an_agent, "Autonomous: Tester", Key::Enter),
         ),
         (
             "agent.forget_client",
-            settings("tempo-midi", an_agent, "Forget Tester", Key::Enter),
+            settings("agents", an_agent, "Forget Tester", Key::Enter),
         ),
         (
             "agent.new_client_token",
-            settings(
-                "tempo-midi",
-                server_and_agent,
-                "New Token: Tester",
-                Key::Enter,
-            ),
+            settings("agents", server_and_agent, "New Token: Tester", Key::Enter),
         ),
         (
             "audio.configure",

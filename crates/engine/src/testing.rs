@@ -29,7 +29,7 @@ use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 
 use bl_model::{Device, DeviceRole, ParamId};
 
-use crate::node::{Block, Node, NodeData, NodeEvent, ParamValue, segments};
+use crate::node::{Block, Node, NodeData, NodeEvent, NoteEvent, ParamValue, segments};
 use crate::registry::{DeviceType, Registry};
 
 /// The DC node's device type.
@@ -48,10 +48,18 @@ pub const GAIN: &str = "test.gain";
 pub const THROUGH: &str = "test.through";
 /// The sidechain probe's device type.
 pub const KEY: &str = "test.key";
+/// The test instrument device type (WP-2.1).
+pub const INSTRUMENT: &str = "test.instrument";
 /// The DC node's value.
 pub const VALUE: ParamId = ParamId(0);
 /// The gain node's gain, linear.
 pub const GAIN_PARAM: ParamId = ParamId(0);
+
+/// The test instrument as a device type: an instrument named "Test Instrument".
+#[must_use]
+pub fn instrument_type() -> DeviceType {
+    DeviceType::native(INSTRUMENT, "Test Instrument", DeviceRole::Instrument)
+}
 
 /// The test gain as a device type: an audio effect named "Test Gain".
 #[must_use]
@@ -73,6 +81,13 @@ pub fn key_type() -> DeviceType {
     DeviceType::native(KEY, "Test Sidechain", DeviceRole::AudioEffect).with_sidechain()
 }
 
+/// A note event recorded by the test instrument with its song frame position.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RecordedNote {
+    pub frame: i64,
+    pub event: NoteEvent,
+}
+
 /// What the test nodes report, shared with the test.
 #[derive(Debug, Default)]
 pub struct Probe {
@@ -85,6 +100,22 @@ pub struct Probe {
     /// Which counter published `counted`: 1 for the first one made, and so
     /// on.
     pub counter: AtomicU64,
+    /// The consumer of recorded notes from the test instrument.
+    pub note_consumer: std::sync::Mutex<Option<rtrb::Consumer<RecordedNote>>>,
+}
+
+impl Probe {
+    /// Drains all recorded notes from the test instrument.
+    #[must_use]
+    pub fn recorded_notes(&self) -> Vec<RecordedNote> {
+        let mut notes = Vec::new();
+        if let Some(consumer) = self.note_consumer.lock().unwrap().as_mut() {
+            while let Ok(note) = consumer.pop() {
+                notes.push(note);
+            }
+        }
+        notes
+    }
 }
 
 /// The engine's own devices and the test nodes, reporting to `probe`.
@@ -127,6 +158,15 @@ pub fn registry(probe: &Arc<Probe>) -> Registry {
     let p = Arc::clone(probe);
     registry.add_device(key_type(), move |_, _| {
         Box::new(Key {
+            _tracked: Tracked::new(&p),
+        })
+    });
+    let p = Arc::clone(probe);
+    registry.add_device(instrument_type(), move |_, _| {
+        let (producer, consumer) = rtrb::RingBuffer::new(4096);
+        *p.note_consumer.lock().unwrap() = Some(consumer);
+        Box::new(TestInstrument {
+            producer,
             _tracked: Tracked::new(&p),
         })
     });
@@ -372,6 +412,24 @@ impl Node for Key {
             for (sample, key) in block.data[at.clone()].iter_mut().zip(&heard[at]) {
                 *sample *= key;
             }
+        }
+    }
+}
+
+/// Records all note events it receives with their song frames.
+struct TestInstrument {
+    producer: rtrb::Producer<RecordedNote>,
+    _tracked: Tracked,
+}
+
+impl Node for TestInstrument {
+    fn process(&mut self, block: &mut Block<'_>) {
+        let pos = block.transport().position.get();
+        for &event in block.notes() {
+            let _ = self.producer.push(RecordedNote {
+                frame: pos + event.offset as i64,
+                event,
+            });
         }
     }
 }

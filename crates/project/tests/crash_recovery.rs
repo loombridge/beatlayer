@@ -93,11 +93,13 @@ fn edit(editor: &mut Editor, n: u64) -> String {
             }
         }
         1 if !midi.is_empty() => {
-            let notes = (0..4).map(|i| Note {
-                key: u8::try_from(48 + (n + i) % 24).unwrap(),
-                velocity: 100,
-                start: Ticks::QUARTER * i64::try_from(i).unwrap(),
-                length: Ticks::QUARTER,
+            let notes = (0..4).map(|i| {
+                Note::new(
+                    u8::try_from(48 + (n + i) % 24).unwrap(),
+                    Ticks::QUARTER * i64::try_from(i).unwrap(),
+                    Ticks::QUARTER,
+                    100,
+                )
             });
             let clip = Clip::new(
                 editor.new_id(),

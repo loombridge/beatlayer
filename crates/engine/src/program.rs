@@ -8,7 +8,7 @@ use bl_core::time::{SampleRate, TempoMap};
 use bl_model::{ParamId, Tap, TrackId};
 
 use crate::mixer::{MeterReading, Route, TrackMixer};
-use crate::node::{Block, Node, NodeEvent, NodeKey, ParamValue, TransportInfo};
+use crate::node::{Block, Node, NodeEvent, NodeKey, NoteBuffer, ParamValue, TransportInfo};
 use crate::sidechain::SidechainKey;
 
 /// A compiled song, ready to run on the audio thread: a flat array of
@@ -81,6 +81,7 @@ pub struct EngineProgram {
     pub(crate) output: u32,
     pub(crate) tempo: TempoMap,
     pub(crate) sample_rate: SampleRate,
+    pub(crate) note_buffers: [NoteBuffer; 2],
 }
 
 /// What can sit in a program's slot.
@@ -359,6 +360,9 @@ impl EngineProgram {
                 self.pool[start..start + frames].fill(0.0);
             }
 
+            let mut note_idx = 0;
+            self.note_buffers[0].clear();
+
             // The clips first, alone in the buffer, so the player's gate
             // (Monitor In silences them) scales only them.
             if let Some(slot) = task.player {
@@ -379,7 +383,7 @@ impl EngineProgram {
                         tempo: &self.tempo,
                         sidechain: None,
                         notes: &[],
-                        notes_out: None,
+                        notes_out: Some(&mut self.note_buffers[0]),
                     });
                 }
             }
@@ -474,8 +478,21 @@ impl EngineProgram {
                 let Some(node) = node.as_mut().and_then(Instance::as_node) else {
                     continue;
                 };
+                let next_note_idx = 1 - note_idx;
+                let (in_buf, out_buf) = if note_idx == 0 {
+                    let (first, second) = self.note_buffers.split_at_mut(1);
+                    (&first[0], &mut second[0])
+                } else {
+                    let (first, second) = self.note_buffers.split_at_mut(1);
+                    (&second[0], &mut first[0])
+                };
+                out_buf.clear();
                 if bypass {
                     node.flush(scratch);
+                    for &note in in_buf.notes() {
+                        out_buf.push(note);
+                    }
+                    note_idx = next_note_idx;
                     continue;
                 }
                 node.process(&mut Block {
@@ -490,9 +507,10 @@ impl EngineProgram {
                     sidechain: heard
                         .as_ref()
                         .map(|(at, _)| &self.sidechain_pool[at.clone()]),
-                    notes: &[],
-                    notes_out: None,
+                    notes: in_buf.notes(),
+                    notes_out: Some(out_buf),
                 });
+                note_idx = next_note_idx;
                 // Sidechain Listen: the device's output is what it heard.
                 if let Some((at, true)) = heard {
                     for c in 0..channels {

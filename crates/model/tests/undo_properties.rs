@@ -276,11 +276,8 @@ fn clip_data(data: &Data, track_kind: Option<TrackKind>) -> ClipData {
         ClipData::Audio(AudioData::new(ContentHash([data.media; 32])))
     } else {
         ClipData::Midi(MidiData::new(data.notes.iter().map(
-            |&(key, velocity, start, length)| Note {
-                key,
-                velocity,
-                start: sixteenths(start),
-                length: sixteenths(length),
+            |&(key, velocity, start, length)| {
+                Note::new(key, sixteenths(start), sixteenths(length), velocity)
             },
         )))
     }

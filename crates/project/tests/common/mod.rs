@@ -462,11 +462,8 @@ fn apply(editor: &mut Editor, step: &Step) {
                 ClipData::Audio(audio_data(*media))
             } else {
                 ClipData::Midi(MidiData::new(notes.iter().map(
-                    |&(key, velocity, start, length)| Note {
-                        key,
-                        velocity,
-                        start: Ticks(start),
-                        length: Ticks(length),
+                    |&(key, velocity, start, length)| {
+                        Note::new(key, Ticks(start), Ticks(length), velocity)
                     },
                 )))
             };
@@ -539,11 +536,13 @@ pub fn large_song(tracks: u32, clips_per_track: i64) -> Project {
                 hash[..4].copy_from_slice(&t.to_le_bytes());
                 ClipData::Audio(AudioData::new(ContentHash(hash)))
             } else {
-                ClipData::Midi(MidiData::new((0..32i64).map(|n| Note {
-                    key: u8::try_from(36 + n).unwrap(),
-                    velocity: 100,
-                    start: Ticks::SIXTEENTH * n,
-                    length: Ticks::SIXTEENTH,
+                ClipData::Midi(MidiData::new((0..32i64).map(|n| {
+                    Note::new(
+                        u8::try_from(36 + n).unwrap(),
+                        Ticks::SIXTEENTH * n,
+                        Ticks::SIXTEENTH,
+                        100,
+                    )
                 })))
             };
             let clip = Clip::new(

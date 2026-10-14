@@ -102,7 +102,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["Shift+Slash"]
 win = ["Shift+Slash"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "view.toggle_info_view", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-VIEW-009"

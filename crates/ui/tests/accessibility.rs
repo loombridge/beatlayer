@@ -1154,6 +1154,13 @@ fn paths() -> BTreeMap<&'static str, Path> {
             )),
         ),
         (
+            "set.relink_missing",
+            Exception(Equivalent(
+                "the File Manager's Automatic Search button, which needs the File Manager (M-FILE-007); \
+                 it also runs by itself when a set with missing files is opened",
+            )),
+        ),
+        (
             "agent.approve_client",
             Exception(Equivalent(
                 "the system dialog that asks when an agent first connects, Allow",

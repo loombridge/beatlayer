@@ -3,6 +3,8 @@
 //! takes and sends parameter changes, keeps its state, reports its
 //! latency, opens its editor, and fails without taking the engine with it.
 //! Every block runs as a real-time section under the allocation trap.
+//!
+//! Spec: clap-hosting R17.
 
 bl_rt::install_trap!();
 

@@ -16,6 +16,7 @@ use serde_json::json;
 
 #[test]
 fn with_live_s_title_bar_drawn_the_page_chooser_sits_where_live_s_does() {
+    // Spec: app-shell R14.
     // D22, L-SET-001, L-SET-002: a 562 x 617 window, the first page row 25
     // points tall from y 34, the chooser 140 points wide.
     let mut h = Harness::with_title_bar(Window::Settings);

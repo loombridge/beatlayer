@@ -67,7 +67,7 @@ const TRANSPORT: &[(&str, &str)] = &[
 
 #[test]
 fn the_shell_registers_the_transport_and_runs_it_on_the_engine() {
-    // Spec: control-bar-transport R12, R13
+    // Spec: control-bar-transport R2, R12, R13
     let mut shell = shell();
     let registry = shell.registry();
     assert!(registry.problems().is_empty(), "{:?}", registry.problems());

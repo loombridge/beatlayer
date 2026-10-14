@@ -242,7 +242,7 @@ mod tests {
 
     #[test]
     fn every_listed_id_is_registered_and_complete() {
-        // Spec: export R15.
+        // Spec: export R15, R16.
         let mut registry = Registry::new();
         register(&mut registry).unwrap();
         assert_eq!(registry.len(), IDS.len());

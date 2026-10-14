@@ -2,6 +2,8 @@
 //! registered command or is marked pending, and items enable with what can
 //! run now (D16, D17). Its rows, separators, and labels are checked against
 //! the menu reference in `bl-shell-spec`.
+//!
+//! Spec: export R16.
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -28,6 +30,7 @@ fn ui_parity(file: &str) -> Option<String> {
     Some(std::fs::read_to_string(docs.join("ui-parity").join(file)).unwrap())
 }
 
+// Spec: app-shell R15.
 #[test]
 fn every_item_reaches_a_command_or_is_pending() {
     let mut registry = Registry::new();
@@ -109,6 +112,7 @@ fn every_shell_command_is_on_a_menu_or_a_control() {
     }
 }
 
+// Spec: app-shell R16.
 #[test]
 fn menu_items_enable_with_what_can_run_now() {
     let mut shell = Shell::headless();

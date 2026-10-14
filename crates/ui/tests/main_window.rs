@@ -346,6 +346,7 @@ fn assert_near(drawn: [f64; 4], live: [f64; 4], what: &str) {
 
 #[test]
 fn with_live_s_title_bar_drawn_top_anchored_rows_sit_at_layout_md_s_positions() {
+    // Spec: app-shell R14.
     // D22, L-WIN-002: on macOS the window's content covers the whole frame
     // and Beatlayer draws Live's 23-point title bar, so at 1600 x 1000
     // points every row sits at layout.md's window coordinates.

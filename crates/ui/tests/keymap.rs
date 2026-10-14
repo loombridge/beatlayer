@@ -273,6 +273,7 @@ fn float_s_key_reaches_float_in_the_device_view_and_fades_in_the_arrangement() {
 
 #[test]
 fn keys_resolve_to_commands_in_their_contexts() {
+    // Spec: app-shell R16.
     let keymap = Keymap::live12();
     let main = [Context::Arrangement, Context::Global];
     let resolve = |platform, key, m, contexts: &[Context]| {

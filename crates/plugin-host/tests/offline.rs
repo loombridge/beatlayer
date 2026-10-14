@@ -4,6 +4,8 @@
 //! active at the engine's settings with the state it had. The engine's node
 //! runs on a thread of its own here, as on an audio device, and every block
 //! is a real-time section under the allocation trap.
+//!
+//! Spec: clap-hosting R17.
 
 bl_rt::install_trap!();
 

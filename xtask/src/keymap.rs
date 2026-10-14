@@ -430,6 +430,7 @@ mod tests {
 
     #[test]
     fn the_repository_keymap_is_in_sync() {
+        // Spec: export R16
         let root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .expect("xtask sits in the workspace root");

@@ -173,7 +173,7 @@ fn zooming_keeps_the_anchor_still_within_limits() {
 
 #[test]
 fn scrolling_stops_at_the_start_and_the_last_track() {
-    // Spec: arrangement-view R7.
+    // Spec: arrangement-view R2, R7.
     let mut shell = Shell::headless();
     let state0 = run(&mut shell, ids::SCROLL, json!({ "x": -500.0, "y": -500.0 }));
     assert_eq!(state0.visible.start, Ticks::ZERO);
@@ -424,7 +424,7 @@ fn snapping_follows_the_grid() {
 
 #[test]
 fn folding_tracks_and_groups() {
-    // Spec: arrangement-view R14.
+    // Spec: arrangement-view R2, R14.
     let mut shell = Shell::headless();
     shell
         .invoke("track.create", json!({ "kind": "group" }))

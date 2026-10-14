@@ -2,6 +2,8 @@
 //! the CLAP hosting spec, R2, R3, R15): the engine's parameter changes reach
 //! it, a chain edit keeps its instance, and a device deleted and brought
 //! back gets the same plug-in. Every block runs under the allocation trap.
+//!
+//! Spec: clap-hosting R17.
 
 bl_rt::install_trap!();
 

@@ -93,6 +93,7 @@ fn every_fixture_renders_bit_identically_twice() {
     }
 }
 
+// Spec: mixer R20.
 #[test]
 fn the_block_size_changes_nothing() {
     for fixture in fixtures() {

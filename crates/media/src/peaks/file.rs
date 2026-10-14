@@ -182,6 +182,13 @@ fn parse(bytes: &[u8], source: ContentHash) -> Result<Peaks, String> {
             "{frames_per_peak} frames per peak, merging {factor}"
         ));
     }
+    let min_data = frames
+        .div_ceil(FRAMES_PER_PEAK)
+        .checked_mul(u64::from(channels))
+        .and_then(|p| p.checked_mul(2));
+    if min_data.is_none_or(|needed| needed > bytes.len() as u64) {
+        return Err("the file is too short for its frame count".into());
+    }
     let layout = Layout::new(frames, channels).map_err(|e| e.to_string())?;
     if levels != layout.levels
         || header != header_len(layout.runs.len())
@@ -348,5 +355,19 @@ mod tests {
             .collect();
         assert_eq!(names, ["peaks.blpeaks"]);
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn rejects_a_header_whose_frame_count_the_file_cannot_hold() {
+        let peaks = sample_peaks();
+        let source = ContentHash::of_bytes(b"source");
+        let mut bytes = peaks.to_file_bytes(source);
+        let huge_frames: u64 = 1_000_000_000;
+        bytes[48..56].copy_from_slice(&huge_frames.to_le_bytes());
+        let err = Peaks::from_file_bytes(&bytes, source).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "damaged or malformed media: peak file: the file is too short for its frame count"
+        );
     }
 }

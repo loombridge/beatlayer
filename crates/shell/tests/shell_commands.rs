@@ -88,6 +88,113 @@ fn the_insert_track_keys_fill_in_the_new_track() {
 }
 
 #[test]
+fn the_insert_track_keys_put_the_new_track_after_the_selected_track() {
+    // Spec: app-shell R10.
+    let mut shell = Shell::headless();
+    let selected = shell.editor().document().top_level().next().unwrap();
+    shell
+        .run("arrangement.select_tracks", json!({ "tracks": [selected] }))
+        .unwrap();
+    shell
+        .invoke("track.create", json!({ "kind": "audio" }))
+        .unwrap();
+    assert_eq!(
+        track_names(&shell),
+        ["1 MIDI", "2 Audio", "2 MIDI", "3 Audio", "4 Audio"]
+    );
+    let new = shell.editor().document().top_level().nth(1).unwrap();
+    assert_eq!(shell.arrangement().selected_tracks(), &[new]);
+}
+
+#[test]
+fn the_insert_track_keys_put_the_new_track_after_the_last_of_several_selected() {
+    // Spec: app-shell R10.
+    let mut shell = Shell::headless();
+    let selected: Vec<TrackId> = shell.editor().document().top_level().take(3).collect();
+    shell
+        .run("arrangement.select_tracks", json!({ "tracks": selected }))
+        .unwrap();
+    shell
+        .invoke("track.create", json!({ "kind": "midi" }))
+        .unwrap();
+    assert_eq!(
+        track_names(&shell),
+        ["1 MIDI", "2 MIDI", "3 Audio", "4 MIDI", "4 Audio"]
+    );
+    let new = shell.editor().document().top_level().nth(3).unwrap();
+    assert_eq!(shell.arrangement().selected_tracks(), &[new]);
+}
+
+#[test]
+fn the_insert_track_key_puts_the_new_return_after_the_selected_return() {
+    // Spec: app-shell R10.
+    let mut shell = Shell::headless();
+    let selected = shell.editor().document().returns().last().unwrap();
+    shell
+        .run("arrangement.select_tracks", json!({ "tracks": [selected] }))
+        .unwrap();
+    shell
+        .invoke("track.create", json!({ "kind": "return" }))
+        .unwrap();
+    let doc = shell.editor().document();
+    let names: Vec<String> = doc
+        .returns()
+        .map(|r| doc.track(r).unwrap().name().to_owned())
+        .collect();
+    assert_eq!(names, ["A Return", "B Return", "C Return"]);
+    let new = doc.returns().next_back().unwrap();
+    assert_eq!(shell.arrangement().selected_tracks(), &[new]);
+}
+
+#[test]
+fn the_insert_track_keys_add_after_the_last_track_with_none_selected() {
+    // Spec: app-shell R10.
+    let mut shell = Shell::headless();
+    let first = shell.editor().document().top_level().next().unwrap();
+    shell
+        .run("arrangement.select_tracks", json!({ "tracks": [first] }))
+        .unwrap();
+    shell
+        .run("arrangement.select_tracks", json!({ "tracks": [] }))
+        .unwrap();
+    shell
+        .invoke("track.create", json!({ "kind": "audio" }))
+        .unwrap();
+    assert_eq!(
+        track_names(&shell),
+        ["1 MIDI", "2 MIDI", "3 Audio", "4 Audio", "5 Audio"]
+    );
+    let new = shell.editor().document().top_level().next_back().unwrap();
+    assert_eq!(shell.arrangement().selected_tracks(), &[new]);
+}
+
+#[test]
+fn an_audio_insert_with_returns_in_the_selection_goes_after_the_last_other_selected_track() {
+    // Spec: app-shell R10. The new track goes after the last selected track
+    // in the list it belongs to, so a selected return can't anchor an audio
+    // track.
+    let mut shell = Shell::headless();
+    let doc = shell.editor().document();
+    let audio = doc.top_level().nth(2).unwrap();
+    let return_track = doc.returns().next().unwrap();
+    shell
+        .run(
+            "arrangement.select_tracks",
+            json!({ "tracks": [audio, return_track] }),
+        )
+        .unwrap();
+    shell
+        .invoke("track.create", json!({ "kind": "audio" }))
+        .unwrap();
+    assert_eq!(
+        track_names(&shell),
+        ["1 MIDI", "2 MIDI", "3 Audio", "4 Audio", "4 Audio"]
+    );
+    let new = shell.editor().document().top_level().nth(3).unwrap();
+    assert_eq!(shell.arrangement().selected_tracks(), &[new]);
+}
+
+#[test]
 fn quitting_or_starting_over_with_unsaved_changes_asks_first() {
     // Spec: app-shell R4.
     let mut shell = Shell::headless();

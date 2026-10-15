@@ -204,7 +204,7 @@ fn layout() -> DeviceLayout {
 
 /// Adds the delay to `registry`.
 pub fn register(registry: &mut Registry) {
-    add(registry, delay_type(), Delay::new);
+    add(registry, delay_type(), |_, config| Delay::new(config));
 }
 
 /// How a change of delay time is handled.

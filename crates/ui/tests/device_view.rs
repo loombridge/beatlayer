@@ -470,3 +470,65 @@ fn the_sidechain_strip_shows_the_section_and_its_controls_set_the_sidechain() {
     h.settle();
     assert!(section(&h, key).listen);
 }
+
+/// A file dropped into the window, as the app's drag and drop gives egui.
+#[derive(Debug)]
+struct DroppedFile(std::path::PathBuf);
+
+impl egui::DroppedFile for DroppedFile {
+    fn path(&self) -> &std::path::Path {
+        &self.0
+    }
+
+    fn bytes(&self) -> Result<Vec<u8>, String> {
+        std::fs::read(&self.0).map_err(|error| error.to_string())
+    }
+}
+
+// Spec: sampler R11
+#[test]
+fn a_dropped_sample_loads_into_the_sampler_under_the_pointer() {
+    let mut h = harness();
+    let sampler = bl_devices::sampler_type();
+    let device = add(
+        &mut h,
+        json!({ "kind": sampler.kind, "name": sampler.name, "role": sampler.role }),
+    );
+    let frame = frame_of(&mut h, device);
+
+    // A real audio file, as one dragged from Finder.
+    let file = std::env::temp_dir().join(format!("bl-ui-sampler-{}.wav", std::process::id()));
+    let samples: Vec<f32> = (0..480)
+        .map(|i| (i as f32 * 440.0 / 48_000.0 * std::f32::consts::TAU).sin() * 0.25)
+        .collect();
+    let bytes = bl_media::wav_bytes(
+        &samples,
+        1,
+        48_000,
+        bl_media::BitDepth::Int16,
+        bl_media::Dither::None,
+    )
+    .unwrap();
+    std::fs::write(&file, bytes).unwrap();
+
+    assert_eq!(
+        h.shell.editor().document().device(device).unwrap().media,
+        None,
+        "a new sampler has no sample"
+    );
+    h.frame(vec![Event::PointerMoved(frame.center())]);
+    h.dropped
+        .push(std::sync::Arc::new(DroppedFile(file.clone())));
+    h.frame(Vec::new());
+    assert!(
+        h.shell
+            .editor()
+            .document()
+            .device(device)
+            .unwrap()
+            .media
+            .is_some(),
+        "the drop loaded the sample"
+    );
+    let _ = std::fs::remove_file(&file);
+}

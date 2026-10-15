@@ -1,0 +1,226 @@
+# Builds Beatlayer's release packages when a `v*` tag is pushed: a DMG holding
+# Beatlayer.app on macOS, an MSI on Windows, and an AppImage and a tarball on
+# Linux. It attaches them to a GitHub release that is left as a **draft**, for
+# a person to review and publish by hand. It never publishes on its own.
+#
+# A manual run (`gh workflow run release.yml`, or the Actions tab) builds the
+# same packages and uploads them as workflow artifacts, but creates no release:
+# there is no tag to name one after. That is the dry run used to test the
+# workflow without pushing a tag.
+#
+# The builds are unsigned. macOS is the exception: its app is ad-hoc signed
+# with `codesign --sign -` (by way of APPLE_SIGNING_IDENTITY, which
+# `cargo xtask package` passes to cargo-packager), because Apple silicon needs
+# a signature to run a binary at all. No signing certificate, key, or secret is
+# used or required anywhere in this workflow.
+#
+# Every third-party action is pinned to a full commit SHA, with its version in
+# a comment. Update the SHA and the comment together. cargo-packager is pinned
+# the same way, to a version and to a SHA-256 for each runner's prebuilt
+# binary; keep both in step with xtask/src/package.rs.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: >-
+          Build the packages and upload them as artifacts without creating a
+          release. A manual run cannot create one anyway: there is no tag.
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # A release build is never cancelled: a newer tag does not supersede it.
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  package:
+    name: package (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS arm64
+            os: macos-15
+            target: aarch64-apple-darwin
+            exe: ""
+            packager-target: aarch64-apple-darwin
+            packager-sha256: 934703947b24b4b4bb11ddd08f5ab93d84956378278711261b7b8a210e08fd14
+          - name: Windows x64
+            os: windows-2025
+            target: x86_64-pc-windows-msvc
+            exe: .exe
+            packager-target: x86_64-pc-windows-msvc
+            packager-sha256: 24e25795c002e357ffadf9c5e990ba289215537286bcbea652a5967400782a3b
+          - name: Linux x64
+            os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            exe: ""
+            # The static musl build runs whatever the runner's glibc.
+            packager-target: x86_64-unknown-linux-musl
+            packager-sha256: f33514070c58a44c4a7ecdc31349957a2a2b21cfab03109200842a1d78d9439d
+    defaults:
+      run:
+        shell: bash
+    env:
+      # Keep in step with CARGO_PACKAGER_VERSION in xtask/src/package.rs, which
+      # refuses any other version.
+      CARGO_PACKAGER_VERSION: 0.11.8
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Prepare the runner
+        uses: ./.github/actions/prepare
+
+      # Saved only from main, so a release build does not fill the cache quota.
+      - name: Restore the dependency cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-bin: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # cargo-packager publishes no binaries of its own, so this takes
+      # cargo-quickinstall's build of the crates.io release, checked against
+      # the SHA-256 in the matrix, rather than compiling it on every release.
+      - name: Install cargo-packager
+        env:
+          TARGET: ${{ matrix.packager-target }}
+          SHA256: ${{ matrix.packager-sha256 }}
+          EXE: ${{ matrix.exe }}
+        run: |
+          archive="cargo-packager-$CARGO_PACKAGER_VERSION-$TARGET.tar.gz"
+          url="https://github.com/cargo-bins/cargo-quickinstall/releases/download/cargo-packager-$CARGO_PACKAGER_VERSION/$archive"
+          mkdir -p "$RUNNER_TEMP/cargo-packager"
+          # Relative paths inside: GNU tar on Windows reads the `D:` of an
+          # absolute path as a remote host.
+          (
+            cd "$RUNNER_TEMP/cargo-packager"
+            curl --fail --silent --show-error --location --retry 3 --output "$archive" "$url"
+            # macOS's sha256sum takes different options from GNU's, so this
+            # compares the digest itself.
+            if command -v sha256sum > /dev/null; then
+              actual=$(sha256sum "$archive" | cut -d ' ' -f 1)
+            else
+              actual=$(shasum -a 256 "$archive" | cut -d ' ' -f 1)
+            fi
+            if [ "$actual" != "$SHA256" ]; then
+              echo "::error::$archive has SHA-256 $actual, not the pinned $SHA256"
+              exit 1
+            fi
+            echo "$archive: SHA-256 matches"
+            tar -xzf "$archive"
+            binary=$(find . -type f -name "cargo-packager$EXE" | head -n 1)
+            mkdir -p "$HOME/.cargo/bin"
+            mv "$binary" "$HOME/.cargo/bin/"
+          )
+          cargo packager --version
+
+      # The ad-hoc identity is a dash, not a secret: cargo-packager reads it
+      # from APPLE_SIGNING_IDENTITY and runs `codesign --sign -` on the app
+      # before it builds the DMG around it. The other runners stay unsigned.
+      - name: Package
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && '-' || '' }}
+        run: cargo xtask package
+
+      # The acceptance check for the macOS build: its ad-hoc signature must
+      # verify. `cargo xtask package` already mounted the DMG and ran the app
+      # inside it; this checks the signature that lets Apple silicon run it.
+      - name: Verify the macOS app's signature
+        if: runner.os == 'macOS'
+        run: |
+          app=(target/packages/*.app)
+          if [ "${#app[@]}" -ne 1 ]; then
+            echo "::error::expected one .app in target/packages, found ${#app[@]}"
+            exit 1
+          fi
+          codesign --verify --verbose=2 "${app[0]}"
+          codesign --display --verbose=2 "${app[0]}" 2>&1 | sed -n '1,10p'
+
+      - name: Name the packages for the release
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          # A manual run has a branch ref, whose slashes are not file names.
+          ref="${GITHUB_REF_NAME//\//-}"
+          mkdir -p dist
+          shopt -s nullglob
+          n=0
+          for file in target/packages/*.dmg target/packages/*.msi target/packages/*.AppImage target/packages/*.tar.gz; do
+            case "$file" in
+              *.tar.gz) extension=tar.gz ;;
+              *) extension="${file##*.}" ;;
+            esac
+            n=$((n + 1))
+            cp "$file" "dist/beatlayer-${ref}-${TARGET}.${extension}"
+            echo "$file -> dist/beatlayer-${ref}-${TARGET}.${extension}"
+          done
+          if [ "$n" -eq 0 ]; then
+            echo "::error::cargo xtask package left no packages in target/packages"
+            exit 1
+          fi
+
+      - name: Upload the packages
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ matrix.name }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: draft release
+    needs: package
+    # A tag push creates the draft; a manual run is a dry run and stops after
+    # uploading artifacts.
+    if: github.event_name == 'push' && inputs.dry_run != true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Collect the packages
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          path: dist
+          merge-multiple: true
+
+      # The release is created as a draft and stays one: nothing in this
+      # workflow publishes it. Re-running the workflow for the same tag
+      # replaces the assets on the existing draft.
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -l dist
+          if ! gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" \
+              --draft \
+              --title "Beatlayer $GITHUB_REF_NAME" \
+              --notes-file RELEASE-NOTES.md
+          fi
+          gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          gh release view "$GITHUB_REF_NAME" --json isDraft,tagName,assets \
+            --jq '{draft: .isDraft, tag: .tagName, assets: [.assets[].name]}'

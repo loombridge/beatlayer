@@ -280,6 +280,9 @@ pub struct Shell {
     config_dir: Option<PathBuf>,
     main_view: MainView,
     browser: bool,
+    /// Whether the Info View shows (L-INFO-001): view state, never part of
+    /// the set, like the browser's.
+    info_view: bool,
     full_screen: bool,
     settings_open: bool,
     focused_window: WindowKind,
@@ -454,6 +457,7 @@ impl Shell {
         described.extend(kit.device_types());
         audio.sync(editor.document());
         let saved = snapshot(&editor);
+        let plugin_panels = prefs.plugin_panels.clone();
         let mut shell = Self {
             browser_view,
             media,
@@ -469,6 +473,7 @@ impl Shell {
             config_dir,
             main_view: MainView::Arrangement,
             browser: true,
+            info_view: true,
             full_screen: false,
             focused_window: WindowKind::Main,
             focused_area: Area::MainView,
@@ -493,6 +498,7 @@ impl Shell {
                 // Beatlayer's native devices (WP-2.5; none ship yet).
                 let mut devices = DeviceView::new();
                 devices.set_device_types(described);
+                devices.set_plugin_panels(plugin_panels);
                 devices
             },
             native_types,
@@ -695,6 +701,12 @@ impl Shell {
     #[must_use]
     pub fn browser_visible(&self) -> bool {
         self.browser
+    }
+
+    /// Whether the Info View shows (L-INFO-001): view state only.
+    #[must_use]
+    pub fn info_view_visible(&self) -> bool {
+        self.info_view
     }
 
     /// Whether the main window is in full-screen mode.
@@ -1142,7 +1154,12 @@ impl Shell {
         };
         let info = |shell: &Self, device| {
             crate::plugins::info(&shell.plugins, device)
-                .map(|info| to_value(&info))
+                .map(|mut info| {
+                    // WP-2.10: where the window sits, from the frame store
+                    // the set keeps.
+                    info.window = shell.devices.window_frame(device);
+                    to_value(&info)
+                })
                 .ok_or_else(|| unavailable(format!("{device}'s plug-in hasn't started yet")))
         };
         match id {
@@ -1251,6 +1268,65 @@ impl Shell {
                 let device = target(self, device)?;
                 self.plugins.idle();
                 info(self, device)
+            }
+            plugin_ids::SET_WINDOW => {
+                let plugin_ids::SetWindowArgs { device, frame } = Self::args(id, args)?;
+                let device = target(self, device)?;
+                if !frame.is_valid() {
+                    return Err(ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message:
+                            "a window's position and size must be finite, and its size above 0"
+                                .to_owned(),
+                    });
+                }
+                // WP-2.10: the frame store the set saves; no undo step.
+                self.devices.set_editor_frame(device, frame);
+                self.plugins.idle();
+                info(self, device)
+            }
+            plugin_ids::SET_PANEL_PARAM => {
+                let plugin_ids::SetPanelParamArgs {
+                    device,
+                    index,
+                    param,
+                } = Self::args(id, args)?;
+                let device = target(self, device)?;
+                if index >= plugin_ids::PANEL_KNOBS {
+                    return Err(ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message: format!(
+                            "a plug-in panel has {} knobs, so index {index} is out of range",
+                            plugin_ids::PANEL_KNOBS
+                        ),
+                    });
+                }
+                let kind = self
+                    .editor
+                    .document()
+                    .device(device)
+                    .map(|d| d.kind.clone())
+                    .ok_or_else(|| unavailable(format!("no {device}")))?;
+                let Some(key) = DeviceView::plugin_key(&kind) else {
+                    return Err(ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message: format!("{device} isn't a plug-in device"),
+                    });
+                };
+                let mapping = self.prefs.plugin_panels.entry(key).or_default();
+                match param {
+                    Some(param) => {
+                        mapping.insert(index, param);
+                    }
+                    None => {
+                        mapping.remove(&index);
+                    }
+                }
+                self.devices
+                    .set_plugin_panels(self.prefs.plugin_panels.clone());
+                self.save_preferences();
+                self.touch();
+                Ok(to_value(&self.device_view_state()))
             }
             plugin_ids::SCAN | plugin_ids::RESCAN => {
                 let plugin_ids::ScanArgs { paths } = Self::args(id, args)?;
@@ -1367,6 +1443,9 @@ impl Shell {
     /// Runs a Device View command and carries out what it asks of the rest
     /// of the shell.
     fn run_devices(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        if id == device_ids::LOAD_SAMPLE {
+            return self.load_sample(id, args);
+        }
         if matches!(
             id,
             device_ids::CUT | device_ids::COPY | device_ids::DUPLICATE
@@ -1414,6 +1493,77 @@ impl Shell {
         }
         self.touch();
         Ok(outcome.value)
+    }
+
+    /// Loads a file into a device that plays one sample
+    /// (`device.load_sample`, WP-2.16): the media store takes the file, the
+    /// set records where it is and the device names it by content hash, and
+    /// the engine plays it. One undo step.
+    fn load_sample(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        let device_ids::LoadSampleArgs { device, path } = Self::args(id, args)?;
+        let device =
+            device
+                .or_else(|| self.devices.selected())
+                .ok_or_else(|| ShellError::Unavailable {
+                    command: id.to_owned(),
+                    reason: "select a device first".to_owned(),
+                })?;
+        let kind = self
+            .editor
+            .document()
+            .device(device)
+            .map(|device| device.kind.clone())
+            .ok_or_else(|| ShellError::InvalidArgs {
+                command: id.to_owned(),
+                message: format!("no {device}"),
+            })?;
+        // Only the sampler plays a sample (the sampler spec, R11).
+        let sampler = bl_model::DeviceKind::Native {
+            device_type: bl_devices::sampler::SAMPLER.to_owned(),
+        };
+        if kind != sampler {
+            return Err(ShellError::Failed {
+                command: id.to_owned(),
+                message: format!("{device} doesn't play a sample"),
+            });
+        }
+        let path = PathBuf::from(path);
+        let hash = self
+            .media
+            .import(&path)
+            .map_err(|error| ShellError::Failed {
+                command: id.to_owned(),
+                message: format!("{}: {error}", path.display()),
+            })?;
+        let entry = self.media.entry(hash).ok_or_else(|| ShellError::Failed {
+            command: id.to_owned(),
+            message: "the media store lost the file".to_owned(),
+        })?;
+        // The set records where the file is, so it reopens playing it
+        // (WP-2.25's media table).
+        let media = bl_model::ContentHash(*hash.as_bytes());
+        self.store.add_media(media, &entry.path, entry.size);
+        self.editor
+            .apply(bl_model::Command::SetDeviceSample {
+                device,
+                media: Some(media),
+            })
+            .map_err(|error| ShellError::Failed {
+                command: id.to_owned(),
+                message: error.to_string(),
+            })?;
+        self.dirty = true;
+        self.document_changed();
+        self.touch();
+        let name = entry
+            .path
+            .file_name()
+            .map_or(String::new(), |name| name.to_string_lossy().into_owned());
+        Ok(to_value(&device_ids::LoadSampleResult {
+            device,
+            media,
+            name,
+        }))
     }
 
     /// Runs a track command that needs the shell: Duplicate Track Without
@@ -2115,6 +2265,7 @@ impl Shell {
         match id {
             ids::VIEW_FULL_SCREEN => Some(self.full_screen),
             ids::VIEW_TOGGLE_BROWSER => Some(self.browser),
+            ids::VIEW_TOGGLE_INFO_VIEW => Some(self.info_view),
             ids::VIEW_TOGGLE_PLUG_IN_WINDOWS => Some(self.plug_in_windows),
             ids::FOCUS_TOGGLE_TAB_NAVIGATION => Some(self.prefs.tab_navigation),
             ids::FOCUS_TOGGLE_WRAP_NAVIGATION => Some(self.prefs.wrap_navigation.0),
@@ -3004,6 +3155,7 @@ impl Shell {
         to_value(&ViewResult {
             main_view: self.main_view.id().to_owned(),
             browser: self.browser,
+            info_view: self.info_view,
             full_screen: self.full_screen,
             zoom: self.zoom(),
         })
@@ -3288,6 +3440,11 @@ impl Shell {
                 if !self.browser && self.focused_area == Area::Browser {
                     self.focused_area = Area::MainView;
                 }
+                Ok(self.view_result())
+            }
+            ids::VIEW_TOGGLE_INFO_VIEW => {
+                Self::args::<NoArgs>(id, args)?;
+                self.info_view = !self.info_view;
                 Ok(self.view_result())
             }
             ids::VIEW_TOGGLE_SESSION_ARRANGEMENT => {

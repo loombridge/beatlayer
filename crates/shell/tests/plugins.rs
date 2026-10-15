@@ -10,7 +10,7 @@ use bl_model::{DeviceId, ParamId, TrackKind};
 use bl_shell::device_commands::{DeviceParameters, DeviceViewState};
 use bl_shell::plugin_commands::{self as ids, PluginInfo, PluginLoaded};
 use bl_shell::{Shell, commands};
-use bl_test_clap::{GAIN, PLUGIN_ID, PLUGIN_NAME};
+use bl_test_clap::{GAIN, LAST_NOTE, PLUGIN_ID, PLUGIN_NAME};
 use serde_json::{Value, json};
 
 fn audio_track(shell: &Shell) -> bl_model::TrackId {
@@ -409,5 +409,207 @@ fn a_plugins_editor_follows_auto_hide_plug_in_windows() {
     assert!(
         opened.window_open && !opened.window_shown,
         "auto-hidden at once"
+    );
+}
+
+// Spec: clap-hosting R13, R16; WP-2.10. A plug-in's editor window is part
+// of the window layer: where it sits and how big it is are saved with the
+// set beside the document, so it reopens where it was left, and moving or
+// resizing it is never an undo step.
+#[test]
+fn a_plugin_windows_place_survives_a_set_round_trip() {
+    let scratch =
+        std::env::temp_dir().join(format!("bl-shell-plugin-window-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&scratch);
+    std::fs::create_dir_all(&scratch).unwrap();
+
+    let mut shell = Shell::headless();
+    shell.start_audio();
+    let track = audio_track(&shell);
+    let device = load(&mut shell, track);
+    wait(&mut shell, device, |i| i.active);
+    shell
+        .run(ids::SHOW_WINDOW, json!({ "device": device }))
+        .unwrap();
+
+    let frame = bl_model::WindowFrame {
+        x: 120.0,
+        y: 80.0,
+        width: 500.0,
+        height: 400.0,
+    };
+    let steps = shell.editor().undo_history().len();
+    let placed: PluginInfo = serde_json::from_value(
+        shell
+            .run(ids::SET_WINDOW, json!({ "device": device, "frame": frame }))
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(placed.window, Some(frame));
+    assert_eq!(shell.editor().undo_history().len(), steps, "no undo step");
+
+    // A frame that isn't finite, or whose size isn't above 0, is refused.
+    assert!(
+        shell
+            .run(
+                ids::SET_WINDOW,
+                json!({ "device": device, "frame": { "x": 0.0, "y": 0.0, "width": -1.0, "height": 1.0 } }),
+            )
+            .is_err()
+    );
+
+    // Saved and opened again, the window is where it was left.
+    let saved = shell
+        .run(
+            commands::SET_SAVE_AS,
+            json!({ "path": scratch.join("Windows.blset") }),
+        )
+        .unwrap();
+    let path = saved["path"].as_str().unwrap().to_owned();
+    shell.run(commands::SET_NEW, json!({})).unwrap();
+    shell
+        .run(commands::SET_OPEN, json!({ "path": path }))
+        .unwrap();
+    let reopened = wait(&mut shell, device, |i| i.active);
+    assert_eq!(reopened.window, Some(frame));
+
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+// Spec: clap-hosting R16; the plug-in device panel (WP-2.10, D19, IMP-03).
+// A plug-in device's panel is eight knobs mapped to the plug-in's first
+// parameters, remappable with `plugin.set_panel_param`, and the mapping is
+// remembered per plug-in.
+#[test]
+fn the_panel_maps_the_plugins_parameters_and_a_remap_is_remembered_per_plugin() {
+    let mut shell = Shell::headless();
+    shell.start_audio();
+    let track = audio_track(&shell);
+    let device = load(&mut shell, track);
+    wait(&mut shell, device, |i| i.active);
+    shell
+        .run("device.select", json!({ "device": device }))
+        .unwrap();
+
+    let panel = |shell: &mut Shell| {
+        let view: DeviceViewState =
+            serde_json::from_value(shell.run("device_view.state", json!({})).unwrap()).unwrap();
+        view.devices
+            .iter()
+            .find(|d| d.id == device)
+            .unwrap()
+            .panel
+            .clone()
+            .unwrap()
+    };
+
+    let first = panel(&mut shell);
+    assert!(first.plugin, "a plug-in device's panel");
+    let names: Vec<&str> = first
+        .description
+        .params
+        .iter()
+        .map(|p| p.name.as_str())
+        .collect();
+    assert_eq!(names, ["Gain", "Latency", "Last Note"]);
+
+    // Remap the first knob to the plug-in's third parameter.
+    let remapped: DeviceViewState = serde_json::from_value(
+        shell
+            .run(
+                ids::SET_PANEL_PARAM,
+                json!({ "device": device, "index": 0, "param": LAST_NOTE }),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    let after = remapped
+        .devices
+        .iter()
+        .find(|d| d.id == device)
+        .unwrap()
+        .panel
+        .clone()
+        .unwrap();
+    assert_eq!(after.description.params[0].name, "Last Note");
+    assert_eq!(
+        shell
+            .preferences()
+            .plugin_panels
+            .get(&format!("clap/{PLUGIN_ID}"))
+            .and_then(|m| m.get(&0)),
+        Some(&ParamId(LAST_NOTE)),
+        "recorded per plug-in"
+    );
+
+    // Another device of the same plug-in keeps the mapping.
+    let other = load(&mut shell, track);
+    shell
+        .run("device.select", json!({ "device": other }))
+        .unwrap();
+    let view: DeviceViewState =
+        serde_json::from_value(shell.run("device_view.state", json!({})).unwrap()).unwrap();
+    let other_panel = view
+        .devices
+        .iter()
+        .find(|d| d.id == other)
+        .unwrap()
+        .panel
+        .clone()
+        .unwrap();
+    assert_eq!(other_panel.description.params[0].name, "Last Note");
+
+    // Null restores the knob to the plug-in's parameter at that place.
+    shell
+        .run(
+            ids::SET_PANEL_PARAM,
+            json!({ "device": other, "index": 0, "param": null }),
+        )
+        .unwrap();
+    let view: DeviceViewState =
+        serde_json::from_value(shell.run("device_view.state", json!({})).unwrap()).unwrap();
+    let restored = view
+        .devices
+        .iter()
+        .find(|d| d.id == other)
+        .unwrap()
+        .panel
+        .clone()
+        .unwrap();
+    assert_eq!(restored.description.params[0].name, "Gain");
+}
+
+// Spec: device-chains R31, R33; WP-2.10. View ▸ Plug-In Windows hides and
+// shows every open plug-in window, not just the selected device's.
+#[test]
+fn plug_in_windows_hides_and_shows_every_editor() {
+    let mut shell = Shell::headless();
+    shell.start_audio();
+    let track = audio_track(&shell);
+    shell
+        .invoke("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let a = load(&mut shell, track);
+    let b = load(&mut shell, track);
+    wait(&mut shell, a, |i| i.active);
+    wait(&mut shell, b, |i| i.active);
+    shell.run(ids::SHOW_WINDOW, json!({ "device": a })).unwrap();
+    shell.run(ids::SHOW_WINDOW, json!({ "device": b })).unwrap();
+    assert!(info(&mut shell, a).window_shown && info(&mut shell, b).window_shown);
+
+    shell
+        .invoke("view.toggle_plug_in_windows", json!({}))
+        .unwrap();
+    assert!(
+        !info(&mut shell, a).window_shown && !info(&mut shell, b).window_shown,
+        "both hidden"
+    );
+
+    shell
+        .invoke("view.toggle_plug_in_windows", json!({}))
+        .unwrap();
+    assert!(
+        info(&mut shell, a).window_shown && info(&mut shell, b).window_shown,
+        "both shown again"
     );
 }

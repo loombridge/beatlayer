@@ -87,6 +87,9 @@ pub enum Dither {
     /// processed further.
     #[default]
     Triangular,
+    /// Noise Shaped: Beatlayer's own noise-shaped dither, for a final
+    /// 16- or 24-bit render.
+    NoiseShaped,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -277,6 +280,15 @@ mod tests {
         let mut with_include = ok.clone();
         with_include["include_return_and_main_effects"] = json!(true);
         assert!(bl_commands::validate(schema, &with_include).is_ok());
+
+        for dither in ["none", "rectangular", "triangular", "noise_shaped"] {
+            let mut with_dither = ok.clone();
+            with_dither["dither"] = json!(dither);
+            assert!(
+                bl_commands::validate(schema, &with_dither).is_ok(),
+                "{with_dither}"
+            );
+        }
 
         for bad in [
             json!({ "path": "/a/b.wav", "bit_depth": 8, "sample_rate": 48000 }),

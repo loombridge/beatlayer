@@ -583,9 +583,11 @@ pub fn system_paths(format: PluginFormat) -> Vec<PathBuf> {
     }
     if format == PluginFormat::Vst3 {
         // The rest of the VST3 format's plug-in locations (macOS' user and
-        // global folders and Windows' global folder are above): Windows'
-        // user folder and Linux' global folders. Folders this machine
-        // doesn't have are skipped when the paths are searched.
+        // global folders and Windows' global folder are above): macOS'
+        // network folder, Windows' user folder and Linux' global folders.
+        // Folders this machine doesn't have are skipped when the paths are
+        // searched.
+        paths.push(PathBuf::from("/Network/Library/Audio/Plug-Ins/VST3"));
         if let Some(local) = std::env::var_os("LOCALAPPDATA") {
             paths.push(PathBuf::from(local).join("Programs/Common/VST3"));
         }

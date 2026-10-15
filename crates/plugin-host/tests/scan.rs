@@ -275,6 +275,7 @@ fn the_vst3_folders_follow_the_formats_locations() {
     #[cfg(target_os = "macos")]
     {
         assert!(paths.contains(&PathBuf::from("/Library/Audio/Plug-Ins/VST3")));
+        assert!(paths.contains(&PathBuf::from("/Network/Library/Audio/Plug-Ins/VST3")));
         assert!(ends_with("Library/Audio/Plug-Ins/VST3"));
     }
     #[cfg(target_os = "linux")]

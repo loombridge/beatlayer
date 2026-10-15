@@ -197,7 +197,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["Cmd+Option+3"]
 win = ["Ctrl+Alt+3"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "view.toggle_clip_view", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-VIEW-016"
@@ -1940,7 +1943,10 @@ trigger = "latch"
 milestone = "M2"
 mac = ["B"]
 win = ["B"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "view.draw_mode", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-GRID-002"

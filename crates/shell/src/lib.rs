@@ -63,6 +63,7 @@ pub mod agent;
 pub mod arrangement;
 pub mod audio;
 pub mod browser;
+pub mod clip_view;
 pub mod devices;
 pub mod export;
 pub mod files;
@@ -92,6 +93,9 @@ pub use bl_shell_spec::export as export_commands;
 /// The Mixer view's command IDs and their argument and result types
 /// (WP-1.9).
 pub use bl_shell_spec::mixer_view as mixer_view_commands;
+/// The Clip View's note-editing command IDs and their argument and result
+/// types (WP-2.3).
+pub use bl_shell_spec::notes as note_commands;
 /// The perception commands' IDs and their argument and result types
 /// (WP-1.16).
 pub use bl_shell_spec::perception as perception_commands;

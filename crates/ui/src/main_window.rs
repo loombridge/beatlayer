@@ -112,6 +112,8 @@ pub struct MainWindowUi {
     mixer: MixerUi,
     /// The Device View (WP-2.4).
     devices: crate::device_view::DeviceViewUi,
+    /// The Clip View's note editor (WP-2.3): its scroll and drags.
+    clip_view: crate::clip_view::ClipViewUi,
     /// The keymap, read the first time something shows a key from it (the
     /// Info View, the Mixer Config Menu's items).
     keymap: Option<crate::keymap::Keymap>,
@@ -194,6 +196,7 @@ impl MainWindowUi {
             transport: TransportFields::new(),
             mixer: MixerUi::new(),
             devices: crate::device_view::DeviceViewUi::new(),
+            clip_view: crate::clip_view::ClipViewUi::default(),
             keymap: None,
             info: InfoViewContent::default(),
             mixer_typing: false,
@@ -234,6 +237,12 @@ impl MainWindowUi {
     #[must_use]
     pub fn info_view_content(&self) -> &InfoViewContent {
         &self.info
+    }
+
+    /// The Clip View's note editor, to read what it drew.
+    #[must_use]
+    pub fn clip_view(&self) -> &crate::clip_view::ClipViewUi {
+        &self.clip_view
     }
 
     /// The browser, to read what it drew.
@@ -367,8 +376,15 @@ impl MainWindowUi {
             // under the pointer are known by the time it reads them.
             self.status_bar(ui, shell, theme, &layout, &mut events);
             self.info_view(ui, theme, shell, layout.info_view);
-            self.devices
-                .show(ui, shell, theme, layout.device_view, &mut events);
+            if shell.clip_view().visible() {
+                // Spec: piano-roll. The Clip View takes the detail area in
+                // place of the Device View.
+                self.clip_view
+                    .show(ui, shell, theme, layout.device_view, &mut events);
+            } else {
+                self.devices
+                    .show(ui, shell, theme, layout.device_view, &mut events);
+            }
             self.device_titles = shell
                 .device_view_state()
                 .devices
@@ -1006,6 +1022,30 @@ fn look(element: Element, shell: &Shell) -> Look {
             ),
             ..Look::default()
         },
+        Element::ClipViewToggle => Look {
+            on: shell.clip_view().visible(),
+            value: Some(
+                if shell.clip_view().visible() {
+                    "shown"
+                } else {
+                    "hidden"
+                }
+                .to_owned(),
+            ),
+            ..Look::default()
+        },
+        Element::DrawMode => Look {
+            on: shell.clip_view().draw_mode(),
+            value: Some(
+                if shell.clip_view().draw_mode() {
+                    "on"
+                } else {
+                    "off"
+                }
+                .to_owned(),
+            ),
+            ..Look::default()
+        },
         Element::TapTempo => text("TAP"),
         // The transport section's values come from `control_bar`.
         Element::Quantization => text("1 Bar"),
@@ -1103,6 +1143,8 @@ fn command_of(element: Element) -> Option<&'static str> {
     match element {
         Element::BrowserToggle => Some(ids::VIEW_TOGGLE_BROWSER),
         Element::InfoToggle => Some(ids::VIEW_TOGGLE_INFO_VIEW),
+        Element::ClipViewToggle => Some(ids::VIEW_TOGGLE_CLIP_VIEW),
+        Element::DrawMode => Some(ids::VIEW_DRAW_MODE),
         Element::SessionView | Element::ArrangementView => {
             Some(ids::VIEW_TOGGLE_SESSION_ARRANGEMENT)
         }
@@ -1116,6 +1158,8 @@ fn click(element: Element, shell: &Shell) -> Option<Invocation> {
     match element {
         Element::BrowserToggle => Some(Invocation::new(ids::VIEW_TOGGLE_BROWSER, json!({}))),
         Element::InfoToggle => Some(Invocation::new(ids::VIEW_TOGGLE_INFO_VIEW, json!({}))),
+        Element::ClipViewToggle => Some(Invocation::new(ids::VIEW_TOGGLE_CLIP_VIEW, json!({}))),
+        Element::DrawMode => Some(Invocation::new(ids::VIEW_DRAW_MODE, json!({}))),
         Element::Follow => Some(Invocation::new(
             bl_shell::arrangement_commands::FOLLOW,
             json!({}),

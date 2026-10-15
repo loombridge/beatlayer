@@ -502,7 +502,9 @@ impl Reverb {
             + 0.01)
             * rate;
         let predelay = predelay.ceil() as usize + 4;
-        let comb = (COMB_SAMPLES[COMBS - 1] + STEREO_SPREAD) * rate / 44_100.0 * SIZE_LARGE
+        // Every comb's line must hold the longest delay at the largest size.
+        let longest = COMB_SAMPLES.iter().copied().fold(f64::MIN, f64::max);
+        let comb = (longest + STEREO_SPREAD) * rate / 44_100.0 * SIZE_LARGE
             + CHORUS_MILLISECONDS * rate / 1_000.0
             + 4.0;
         let comb = comb.ceil() as usize;

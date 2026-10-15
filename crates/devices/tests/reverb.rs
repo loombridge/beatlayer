@@ -153,6 +153,41 @@ fn decay_time_matches_the_setting_at_three_settings() {
     }
 }
 
+// Spec: reverb R8, R9
+#[test]
+fn decay_time_holds_at_full_size() {
+    // The comb lines must fit the largest size: a line that clamps would
+    // decay faster than Decay and leave the whole bank on one delay.
+    for size in [80.0, 100.0] {
+        let decay = 2.0;
+        let params = with(&[
+            (DECAY, decay),
+            (SIZE, size),
+            (REFLECT, 0.0),
+            (DIFFUSE, 100.0),
+            (SCALE, 0.0),
+        ]);
+        let frames = (decay * 1.5 * RATE.as_f64()) as usize;
+        let [left, _] = impulse_response(&params, frames, 512);
+        let mut edc = vec![0.0f64; frames + 1];
+        for n in (0..frames).rev() {
+            let sample = f64::from(left[n]);
+            edc[n] = edc[n + 1] + sample * sample;
+        }
+        assert!(edc[0] > 0.0, "the impulse made a tail");
+        let threshold = edc[0] * 1e-6;
+        let measured = edc
+            .iter()
+            .position(|e| *e <= threshold)
+            .expect("the tail falls by 60 dB") as f64
+            / RATE.as_f64();
+        assert!(
+            (measured - decay).abs() <= 0.1 * decay,
+            "RT60 {measured:.3} s at size {size} against {decay} s"
+        );
+    }
+}
+
 // Spec: reverb R10
 #[test]
 fn freeze_holds_the_tail_without_growing() {

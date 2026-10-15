@@ -4,7 +4,7 @@
 use core::fmt;
 use core::ops::Range;
 
-use bl_core::time::{SampleRate, TempoMap};
+use bl_core::time::{SampleRate, TempoMap, TimeSignatureMap};
 use bl_model::{ParamId, Tap, TrackId};
 
 use crate::mixer::{MeterReading, Route, TrackMixer};
@@ -89,6 +89,7 @@ pub struct EngineProgram {
     /// The task whose buffer is the engine's output: Main's.
     pub(crate) output: u32,
     pub(crate) tempo: TempoMap,
+    pub(crate) time_signatures: TimeSignatureMap,
     pub(crate) sample_rate: SampleRate,
     pub(crate) note_buffers: [NoteBuffer; 2],
 }

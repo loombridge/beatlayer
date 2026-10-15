@@ -53,6 +53,9 @@ bl-media.workspace = true
 # The test plug-in, built from source, which `bl-cli export` renders with
 # (WP-2.6b).
 bl-test-clap = { path = "../test-clap" }
+# The agent API's MIDI file tests write and read Standard MIDI Files
+# (WP-2.21).
+bl-interop.workspace = true
 
 [lints]
 workspace = true

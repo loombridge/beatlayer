@@ -12,9 +12,9 @@ use bl_media::MediaStore;
 use bl_model::{
     AudioData, Clip, ClipData, ClipId, Command, ContentHash, Document, Editor, TrackId, TrackKind,
 };
-use bl_shell_spec::browser::{AddResult, AddToArrangementArgs, PlacedClip};
+use bl_shell_spec::browser::{AddResult, AddToArrangementArgs, ItemKind, PlacedClip};
 
-use super::listing::stem;
+use super::listing::{self, stem};
 use crate::arrangement::placing;
 
 /// The undo step a drop makes. Live's name for it isn't observed yet
@@ -76,8 +76,27 @@ fn prepare(media: &MediaStore, path: &Path) -> Result<Prepared, AddError> {
     })
 }
 
+/// Whether `path` names an audio file, by its extension: the files a
+/// Session slot takes without decoding first.
+pub(crate) fn is_audio(path: &str) -> bool {
+    Path::new(path)
+        .file_name()
+        .and_then(|name| listing::file_kind(&name.to_string_lossy()))
+        == Some(ItemKind::Audio)
+}
+
+/// Reads one file for a Session slot: its media entry, its name, and how
+/// long it lasts in seconds.
+pub(crate) fn prepare_for_slot(
+    media: &MediaStore,
+    path: &Path,
+) -> Result<(MediaFile, String, f64), AddError> {
+    let prepared = prepare(media, path)?;
+    Ok((prepared.media, prepared.name, prepared.seconds))
+}
+
 /// How long a file lasts at the song's tempo when it starts at `start`.
-fn length_at(doc: &Document, start: Ticks, seconds: f64) -> Ticks {
+pub(crate) fn length_at(doc: &Document, start: Ticks, seconds: f64) -> Ticks {
     let tempo = &doc.settings().tempo;
     let end = tempo.seconds_to_ticks(tempo.ticks_to_seconds(start) + seconds);
     Ticks((end.get() - start.get()).max(1))

@@ -4,7 +4,12 @@
 //! names down its left edge (L-CLIP-012), and the note area on the clip's
 //! editing grid (L-CLIP-013). The clip's contents fill the editor's width:
 //! contents tick `MidiData::start`, where the clip starts playing, sits at
-//! the clip's start, and the clip's length fills the rest.
+//! the clip's start, and the clip's length fills the rest. Above the note
+//! area, the editor ruler and marker strip (L-CLIP-011) holds the clip's
+//! Start and End markers and its loop brace: dragging a marker or the brace
+//! edits the clip through the document's own commands, in the clip's
+//! contents ticks, snapping to the editing grid (Cmd — Alt on Windows —
+//! bypasses it).
 //!
 //! People select notes by clicking and by dragging a marquee, move them by
 //! dragging (in time and in pitch, snapping to the grid, with Cmd — Alt on
@@ -14,13 +19,17 @@
 //! ([`bl_shell::note_commands`]), the same ones agents run: a click is an
 //! invocation, and a drag sends its command on each frame as a
 //! [`UiEvent::Gesture`] measured from where the drag began, so the whole
-//! drag is one undo step (the piano roll spec, R11).
+//! drag is one undo step (the piano roll spec, R11). Up and Down transpose
+//! the selected notes by a semitone, and with Shift by an octave
+//! (S-A11Y-008, S-A11Y-009), running `note.move`.
 //!
-//! Nothing here owns the state: whether the view shows, Draw Mode, and the
-//! note selection are the shell's. Only the vertical scroll and the drags
-//! under way live here.
+//! Nothing here owns the state: whether the view shows, Draw Mode, the note
+//! selection, and the Quantize settings are the shell's. Only the vertical
+//! scroll and the drags under way live here.
 
+use bl_commands::Context;
 use bl_core::time::Ticks;
+use bl_model::registry::{SET_MIDI_LOOP, SET_MIDI_REGION};
 use bl_model::{ClipData, ClipId, Document, MidiData, Note};
 use bl_shell::arrangement::ArrangementView;
 use bl_shell::clip_view::{move_limits, notes_in_order, resize_limit};
@@ -40,14 +49,48 @@ pub const KEY_HEIGHT: f32 = 8.0;
 /// How close to a note's end, in points, a press resizes it rather than
 /// moving it.
 pub const EDGE_GRAB: f32 = 4.0;
+/// How tall the editor ruler and marker strip is, in points (L-CLIP-011).
+pub const STRIP_HEIGHT: f32 = 16.0;
+/// How close to a marker's or a loop-brace end's line, in points, a press
+/// grabs it rather than the brace's body.
+pub const HANDLE_GRAB: f32 = 4.0;
+/// How wide a marker's flag is, in points, at the strip's top.
+const FLAG: f32 = 5.0;
+/// How tall the loop brace is, in points, along the strip's bottom.
+const BRACE: f32 = 6.0;
 /// The key at the top edge a view with no notes starts at: middle C, C3 in
 /// Live's names.
 const DEFAULT_TOP: f32 = 60.0;
 
-/// The note area: the Clip View without its key track.
+/// The editor ruler and marker strip above the note area (L-CLIP-011):
+/// the clip's Start and End markers and its loop brace.
+#[must_use]
+pub fn strip_rect(view: Rect) -> Rect {
+    Rect::from_min_max(view.min, pos2(view.max.x, view.top() + STRIP_HEIGHT))
+}
+
+/// The note area: the Clip View without its marker strip and key track.
 #[must_use]
 pub fn grid_rect(view: Rect) -> Rect {
-    Rect::from_min_max(pos2(view.left() + KEY_WIDTH, view.top()), view.max)
+    Rect::from_min_max(
+        pos2(view.left() + KEY_WIDTH, view.top() + STRIP_HEIGHT),
+        view.max,
+    )
+}
+
+/// Where a MIDI clip's End marker is, in ticks: its `end`, or the clip's
+/// end.
+fn end_tick(midi: &MidiData, length: Ticks) -> Ticks {
+    midi.end.unwrap_or(midi.start + length)
+}
+
+/// The loop brace's ends, in ticks: `loop_start`, and `loop_end` (`null`
+/// ending at the clip's end).
+fn loop_ticks(midi: &MidiData, length: Ticks) -> (Ticks, Ticks) {
+    (
+        midi.loop_start,
+        midi.loop_end.unwrap_or(midi.start + length),
+    )
 }
 
 /// Where a key's row starts in `grid`, with `top` the key at the grid's
@@ -138,6 +181,48 @@ enum NoteDrag {
     },
 }
 
+/// What a drag in the marker strip is moving: a marker or the loop brace.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StripPart {
+    /// The Start marker, where the clip starts playing.
+    Start,
+    /// The End marker, where an unlooped clip stops.
+    End,
+    /// The loop brace's start.
+    LoopStart,
+    /// The loop brace's end.
+    LoopEnd,
+    /// The loop brace's body: both its ends move together.
+    LoopBody,
+}
+
+/// A drag in the marker strip: what it grabs, and the clip's markers, loop
+/// and length when the drag began. Every frame's command is measured from
+/// there, so the whole drag is one gesture and one undo step (piano-roll
+/// R11), and the marker being dragged holds still under the pointer.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct StripDrag {
+    clip: ClipId,
+    /// What the press grabbed.
+    part: StripPart,
+    /// The contents tick under the press.
+    grab: Ticks,
+    /// The Start and End markers when the drag began, in contents ticks;
+    /// `end` `None` is the clip's end.
+    start: Ticks,
+    end: Option<Ticks>,
+    /// The loop brace when the drag began; `loop_end` `None` is the clip's
+    /// end.
+    loop_start: Ticks,
+    loop_end: Option<Ticks>,
+    /// Whether the loop is on: a Start marker must stay before the brace's
+    /// end while it is.
+    looping: bool,
+    /// The clip's length in ticks, so `None` ends resolve to the clip's
+    /// end.
+    length: Ticks,
+}
+
 /// The key at the top edge a view with notes starts at: the highest note
 /// and two rows above it.
 fn default_top(midi: &MidiData) -> f32 {
@@ -170,6 +255,46 @@ fn hit_note(
             (u32::try_from(place).unwrap_or(u32::MAX), zone)
         })
     })
+}
+
+/// What a point in the marker strip is over, if anything: a marker, or an
+/// end or the body of the loop brace. The markers sit in the strip's upper
+/// part and the brace in its lower part, so a Start marker that falls on
+/// the brace's start is still reachable.
+fn hit_strip(
+    strip: Rect,
+    grid: Rect,
+    start: Ticks,
+    length: Ticks,
+    midi: &MidiData,
+    pos: Pos2,
+) -> Option<StripPart> {
+    if !strip.contains(pos) {
+        return None;
+    }
+    let x_of = |tick: Ticks| x_of_tick(grid, start, length, tick);
+    let near = |tick: Ticks| (x_of(tick) - pos.x).abs() <= HANDLE_GRAB;
+    if pos.y < strip.top() + STRIP_HEIGHT / 2.0 {
+        // The Start marker first, then the End marker, so an End marker over
+        // a Start marker stays reachable.
+        if near(midi.start) {
+            Some(StripPart::Start)
+        } else {
+            near(end_tick(midi, length)).then_some(StripPart::End)
+        }
+    } else {
+        let (from, to) = loop_ticks(midi, length);
+        if near(from) {
+            Some(StripPart::LoopStart)
+        } else if near(to) {
+            Some(StripPart::LoopEnd)
+        } else {
+            let (x0, x1) = (x_of(from), x_of(to));
+            (x0.min(x1)..=x0.max(x1))
+                .contains(&pos.x)
+                .then_some(StripPart::LoopBody)
+        }
+    }
 }
 
 /// The notes a drag grabbed: the selection when the grabbed note is in it,
@@ -219,6 +344,8 @@ pub struct ClipViewUi {
     top: f32,
     /// The drag under way in the note area, if any.
     drag: Option<NoteDrag>,
+    /// The drag under way in the marker strip, if any.
+    strip_drag: Option<StripDrag>,
     /// The marquee under way: where it began, and where it is now.
     marquee: Option<(Pos2, Pos2)>,
 }
@@ -229,6 +356,7 @@ impl Default for ClipViewUi {
             shown: None,
             top: DEFAULT_TOP,
             drag: None,
+            strip_drag: None,
             marquee: None,
         }
     }
@@ -274,6 +402,7 @@ impl ClipViewUi {
         let Some((clip, midi, length)) = editor else {
             self.shown = None;
             self.drag = None;
+            self.strip_drag = None;
             self.marquee = None;
             return;
         };
@@ -282,10 +411,12 @@ impl ClipViewUi {
             self.shown = Some(clip);
             self.top = default_top(&midi);
             self.drag = None;
+            self.strip_drag = None;
             self.marquee = None;
         }
         let grid = grid_rect(rect);
-        if grid.width() < 1.0 || grid.height() < KEY_HEIGHT {
+        let strip = strip_rect(rect);
+        if grid.width() < 1.0 || grid.height() < KEY_HEIGHT || strip.height() < 1.0 {
             return;
         }
         let notes = notes_in_order(&midi);
@@ -293,24 +424,36 @@ impl ClipViewUi {
             .clip_view()
             .selected_notes(doc, shell.arrangement())
             .to_vec();
+        // While the Start marker is dragged, the editor keeps the axis the
+        // drag began on, so the notes hold still under the moving marker;
+        // releasing re-anchors the contents to the new marker (R4).
+        let axis = match self.strip_drag {
+            Some(drag) if drag.part == StripPart::Start => drag.start,
+            _ => midi.start,
+        };
         self.paint(
-            ui, shell, theme, clip, grid, &midi, length, &notes, &selected,
+            ui, shell, theme, clip, strip, grid, &midi, axis, length, &notes, &selected,
         );
         self.input(
             ui,
             shell,
             doc,
             shell.arrangement(),
+            strip,
             grid,
             clip,
             &midi,
+            axis,
             length,
             &notes,
             events,
         );
     }
 
-    /// Paints the key track, the grid, the notes, and the marquee.
+    /// Paints the marker strip with the clip's markers and loop brace, the
+    /// key track, the grid, the notes, and the marquee. `axis` is the
+    /// contents tick the note area's left edge shows: `MidiData::start`,
+    /// or the tick a Start marker drag began on (R4).
     #[expect(clippy::too_many_arguments, reason = "the editor's whole layout")]
     fn paint(
         &self,
@@ -318,16 +461,20 @@ impl ClipViewUi {
         shell: &Shell,
         theme: &Theme,
         clip: ClipId,
+        strip: Rect,
         grid: Rect,
         midi: &MidiData,
+        axis: Ticks,
         length: Ticks,
         notes: &[Note],
         selected: &[u32],
     ) {
         let painter = ui.painter();
         let colours = &theme.colors;
-        let start = midi.start;
+        let start = axis;
         let top = self.top;
+
+        self.paint_strip(painter, theme, strip, grid, midi, axis, length);
 
         // The key track: white and black keys, each named when its row has
         // the room, the C rows otherwise.
@@ -430,7 +577,63 @@ impl ClipViewUi {
         }
     }
 
-    /// The note area's clicks, drags, and wheel.
+    /// Paints the editor ruler and marker strip (L-CLIP-011): the clip's
+    /// Start and End markers, each a line with a flag at its top, and the
+    /// loop brace along the strip's lower edge in the on and off colours
+    /// the Arrangement's brace wears.
+    #[expect(clippy::too_many_arguments, reason = "the strip's whole layout")]
+    fn paint_strip(
+        &self,
+        painter: &egui::Painter,
+        theme: &Theme,
+        strip: Rect,
+        grid: Rect,
+        midi: &MidiData,
+        axis: Ticks,
+        length: Ticks,
+    ) {
+        let colours = &theme.colors;
+        painter.rect_filled(strip, 0.0, colours.ruler.0);
+        let x_of = |tick: Ticks| x_of_tick(grid, axis, length, tick);
+        let marker = |tick: Ticks| {
+            let x = x_of(tick);
+            painter.line_segment(
+                [pos2(x, strip.top()), pos2(x, grid.top())],
+                Stroke::new(1.0, colours.insert_marker.0),
+            );
+            painter.rect_filled(
+                Rect::from_min_max(
+                    pos2(x - FLAG / 2.0, strip.top()),
+                    pos2(x + FLAG / 2.0, strip.top() + FLAG),
+                ),
+                0.0,
+                colours.insert_marker.0,
+            );
+        };
+        marker(midi.start);
+        marker(end_tick(midi, length));
+        let (from, to) = loop_ticks(midi, length);
+        let brace = Rect::from_min_max(
+            pos2(x_of(from), grid.top() - BRACE),
+            pos2(x_of(to), grid.top()),
+        );
+        painter.rect_filled(
+            brace,
+            1.0,
+            if midi.looping {
+                colours.loop_on.0
+            } else {
+                colours.loop_off.0
+            },
+        );
+        painter.line_segment(
+            [strip.left_bottom(), strip.right_bottom()],
+            Stroke::new(1.0, colours.separator.0),
+        );
+    }
+
+    /// The marker strip's and the note area's clicks, drags, and wheel, and
+    /// the note-selection keys.
     #[expect(clippy::too_many_arguments, reason = "the editor's whole input")]
     fn input(
         &mut self,
@@ -438,13 +641,29 @@ impl ClipViewUi {
         shell: &Shell,
         doc: &Document,
         arrangement: &ArrangementView,
+        strip: Rect,
         grid: Rect,
         clip: ClipId,
         midi: &MidiData,
+        axis: Ticks,
         length: Ticks,
         notes: &[Note],
         events: &mut Vec<UiEvent>,
     ) {
+        // Spec: piano-roll R11. The marker strip's drags run the document's
+        // clip commands, one gesture each.
+        self.strip_input(
+            ui,
+            doc,
+            arrangement,
+            strip,
+            grid,
+            clip,
+            midi,
+            axis,
+            length,
+            events,
+        );
         let response = ui.interact(
             grid,
             Id::new(("clip-view-grid", clip)),
@@ -452,7 +671,7 @@ impl ClipViewUi {
         );
         let keys = EditKeys::from(ui.input(|i| i.modifiers));
         let draw_mode = shell.clip_view().draw_mode();
-        let start = midi.start;
+        let start = axis;
         let hit = |pos: Pos2| hit_note(grid, start, length, self.top, notes, pos);
 
         if response.drag_started()
@@ -605,6 +824,115 @@ impl ClipViewUi {
                 self.top = (self.top + scroll / KEY_HEIGHT).clamp(0.0, 127.0);
             }
         }
+        // Spec: piano-roll. S-A11Y-008 and S-A11Y-009, the note-selection
+        // keys: with notes selected, Up and Down transpose them a semitone,
+        // and with Shift an octave. The Clip View holds the detail area's
+        // keys (the shell's contexts say which apply).
+        if shell.active_contexts().contains(&Context::NoteSelection) {
+            let semitones = ui.input(|i| {
+                i.events
+                    .iter()
+                    .filter_map(|event| match event {
+                        egui::Event::Key {
+                            key,
+                            pressed: true,
+                            modifiers,
+                            ..
+                        } if !modifiers.command && !modifiers.ctrl && !modifiers.alt => match key {
+                            Key::ArrowUp if modifiers.shift => Some(12),
+                            Key::ArrowUp => Some(1),
+                            Key::ArrowDown if modifiers.shift => Some(-12),
+                            Key::ArrowDown => Some(-1),
+                            _ => None,
+                        },
+                        _ => None,
+                    })
+                    .next_back()
+            });
+            if let Some(semitones) = semitones {
+                events.push(UiEvent::Invoke(Invocation::new(
+                    ids::MOVE_NOTES,
+                    json!({ "clip": clip, "semitones": semitones }),
+                )));
+            }
+        }
+    }
+
+    /// The marker strip's clicks and drags: each drag moves a marker or the
+    /// loop brace, through the document's clip commands, as one gesture
+    /// (piano-roll R11).
+    #[expect(clippy::too_many_arguments, reason = "the strip's whole input")]
+    fn strip_input(
+        &mut self,
+        ui: &mut Ui,
+        doc: &Document,
+        arrangement: &ArrangementView,
+        strip: Rect,
+        grid: Rect,
+        clip: ClipId,
+        midi: &MidiData,
+        axis: Ticks,
+        length: Ticks,
+        events: &mut Vec<UiEvent>,
+    ) {
+        let response = ui.interact(
+            strip,
+            Id::new(("clip-view-strip", clip)),
+            Sense::click_and_drag(),
+        );
+        let keys = EditKeys::from(ui.input(|i| i.modifiers));
+        if response.drag_started()
+            && let Some(press) = ui.input(|i| i.pointer.press_origin())
+            && let Some(part) = hit_strip(strip, grid, axis, length, midi, press)
+        {
+            self.strip_drag = Some(StripDrag {
+                clip,
+                part,
+                grab: tick_at(grid, axis, length, press.x),
+                start: midi.start,
+                end: midi.end,
+                loop_start: midi.loop_start,
+                loop_end: midi.loop_end,
+                looping: midi.looping,
+                length,
+            });
+        }
+        let pointer = response
+            .interact_pointer_pos()
+            .or_else(|| ui.input(|i| i.pointer.interact_pos()));
+        if response.dragged()
+            && let (Some(drag), Some(pos)) = (self.strip_drag, pointer)
+        {
+            let (id, args) = drag.invocation(arrangement, doc, keys, grid, pos);
+            gesture(events, GesturePhase::Update, id, args);
+        }
+        if self.strip_drag.is_some() && ui.input(|i| i.key_pressed(Key::Escape)) {
+            self.strip_drag = None;
+            events.push(UiEvent::Gesture {
+                phase: GesturePhase::Cancel,
+                invocation: None,
+            });
+        }
+        if response.drag_stopped() {
+            let last = match (self.strip_drag, pointer) {
+                (Some(drag), Some(pos)) => {
+                    let (id, args) = drag.invocation(arrangement, doc, keys, grid, pos);
+                    Some(Invocation::new(id, args))
+                }
+                _ => None,
+            };
+            if self.strip_drag.take().is_some() {
+                events.push(UiEvent::Gesture {
+                    phase: GesturePhase::Commit,
+                    invocation: last,
+                });
+            }
+        }
+        if let Some(hover) = response.hover_pos()
+            && hit_strip(strip, grid, axis, length, midi, hover).is_some()
+        {
+            ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
+        }
     }
 }
 
@@ -656,6 +984,78 @@ impl NoteDrag {
                 (
                     ids::RESIZE_NOTES,
                     json!({ "clip": clip, "notes": places, "by": by }),
+                )
+            }
+        }
+    }
+}
+
+impl StripDrag {
+    /// The drag's command for the pointer at `pos`, measured from where the
+    /// drag began: a marker's or the loop brace's new place in the clip's
+    /// contents, snapped to the editing grid (Cmd — Alt on Windows —
+    /// bypasses it).
+    fn invocation(
+        &self,
+        arrangement: &ArrangementView,
+        doc: &Document,
+        keys: EditKeys,
+        grid: Rect,
+        pos: Pos2,
+    ) -> (&'static str, Value) {
+        let at = tick_at(grid, self.start, self.length, pos.x);
+        let snapped = arrangement.snap_drag(doc, at, keys.bypass);
+        let delta = snapped - self.grab;
+        let clip_end = self.start + self.length;
+        let end = self.end.unwrap_or(clip_end);
+        let loop_end = self.loop_end.unwrap_or(clip_end);
+        match self.part {
+            // Spec: midi-clips R4. The Start marker stays before the End
+            // marker, and before the brace's end while the loop is on.
+            StripPart::Start => {
+                let mut upper = end;
+                if self.looping {
+                    upper = upper.min(loop_end);
+                }
+                let start =
+                    (self.start + delta).clamp(Ticks::ZERO, (upper - Ticks(1)).max(Ticks::ZERO));
+                (
+                    SET_MIDI_REGION,
+                    json!({ "clip": self.clip, "start": start, "end": self.end }),
+                )
+            }
+            StripPart::End => {
+                let end = (end + delta).max(self.start + Ticks(1));
+                (
+                    SET_MIDI_REGION,
+                    json!({ "clip": self.clip, "start": self.start, "end": end }),
+                )
+            }
+            StripPart::LoopStart => {
+                let start = (self.loop_start + delta)
+                    .clamp(Ticks::ZERO, (loop_end - Ticks(1)).max(Ticks::ZERO));
+                (
+                    SET_MIDI_LOOP,
+                    json!({ "clip": self.clip, "start": start, "end": self.loop_end }),
+                )
+            }
+            StripPart::LoopEnd => {
+                let end = (loop_end + delta).max(self.loop_start + Ticks(1));
+                (
+                    SET_MIDI_LOOP,
+                    json!({ "clip": self.clip, "start": self.loop_start, "end": end }),
+                )
+            }
+            // The body moves the whole brace, keeping its length.
+            StripPart::LoopBody => {
+                let shift = delta.max(-self.loop_start);
+                (
+                    SET_MIDI_LOOP,
+                    json!({
+                        "clip": self.clip,
+                        "start": self.loop_start + shift,
+                        "end": loop_end + shift,
+                    }),
                 )
             }
         }

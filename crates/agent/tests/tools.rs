@@ -1052,6 +1052,93 @@ fn the_guide_s_example_runs_as_written() {
 }
 
 #[test]
+fn an_agent_quantises_and_transposes_notes_by_command() {
+    // Spec: piano-roll (WP-2.3 part 3). Quantise and transpose reach the
+    // Clip View's notes through the same commands the mouse runs, and each
+    // call is one undo step labelled with the agent's name (agent-permissions
+    // R6).
+    let mut client = headless(false);
+    let created = call(
+        &mut client,
+        "run",
+        json!({ "label": "A clip of notes", "commands": [
+            { "command": "track.create",
+              "args": { "id": {"$new": "notes"}, "kind": "midi", "name": "Notes",
+                        "index": 0 } },
+            { "command": "clip.create",
+              "args": { "track": {"$ref": "notes"},
+                        "clip": { "id": {"$new": "clip"}, "name": "Notes", "start": 0,
+                                  "length": 705_600, "mute": false,
+                                  "data": { "midi": { "notes": [
+                                      { "key": 60, "velocity": 100, "start": 130,
+                                        "length": 480 },
+                                      { "key": 120, "velocity": 100, "start": 500,
+                                        "length": 480 }
+                                  ] } } } } },
+        ] }),
+    );
+    let clip = created["ids"]["clip"].as_u64().unwrap();
+
+    // Quantise the first note to 1/16 lines at 100 percent.
+    let quantised = call(
+        &mut client,
+        "run",
+        json!({ "label": "Quantise the notes", "commands": [
+            { "command": "note.quantize",
+              "args": { "clip": clip, "notes": [0], "grid": 120, "amount": 100 } },
+        ] }),
+    );
+    assert_eq!(quantised["ran"], 1);
+    assert_eq!(quantised["undo_step"], "test-agent: Quantise the notes");
+    let notes = agent_notes(&mut client);
+    assert_eq!(notes[0], (60, 120), "the start landed on the line");
+
+    // Transposing past key 127 is refused and changes nothing; down an
+    // octave is one labelled undo step.
+    let refused = client
+        .call(
+            "run",
+            json!({ "commands": [
+                { "command": "note.move",
+                  "args": { "clip": clip, "notes": [1], "semitones": 12 } },
+            ] }),
+        )
+        .unwrap();
+    assert!(refused.is_error, "{}", refused.text);
+    assert!(
+        refused.text.contains("0 to 127"),
+        "the refusal names the keys: {}",
+        refused.text
+    );
+    assert_eq!(agent_notes(&mut client)[1].0, 120, "and changes nothing");
+    let moved = call(
+        &mut client,
+        "run",
+        json!({ "label": "Transpose down", "commands": [
+            { "command": "note.move",
+              "args": { "clip": clip, "notes": [1], "semitones": -12 } },
+        ] }),
+    );
+    assert_eq!(moved["undo_step"], "test-agent: Transpose down");
+    assert_eq!(agent_notes(&mut client)[1].0, 108, "an octave down");
+}
+
+/// The MIDI clips' notes, as (key, start) pairs by start then key.
+fn agent_notes(client: &mut Client<InProcess>) -> Vec<(u8, i64)> {
+    let document = client.transport().shell.editor().document();
+    let mut notes = Vec::new();
+    for track in document.tracks() {
+        for clip in track.clips() {
+            if let bl_model::ClipData::Midi(midi) = &clip.data {
+                notes.extend(midi.notes.iter().map(|note| (note.key, note.start.get())));
+            }
+        }
+    }
+    notes.sort_by_key(|note| (note.1, note.0));
+    notes
+}
+
+#[test]
 fn malformed_messages_get_json_rpc_errors_and_notifications_get_nothing() {
     let mut transport = InProcess::new(Agent::headless(false), Shell::headless());
     use bl_agent::client::Transport as _;

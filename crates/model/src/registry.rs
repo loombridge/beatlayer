@@ -57,6 +57,10 @@ use crate::editor::{EditError, Editor};
 pub const UNDO: &str = "edit.undo";
 /// The ID of the command that redoes the newest undone step.
 pub const REDO: &str = "edit.redo";
+/// The ID of `clip.set_midi_region`: a MIDI clip's Start and End markers.
+pub const SET_MIDI_REGION: &str = "clip.set_midi_region";
+/// The ID of `clip.set_midi_loop`: a MIDI clip's loop brace.
+pub const SET_MIDI_LOOP: &str = "clip.set_midi_loop";
 
 /// Adds every document command, and undo and redo, to a registry.
 ///
@@ -823,7 +827,7 @@ const ENTRIES: &[Entry] = &[
             new clip's brace is the whole file.",
     },
     Entry {
-        id: "clip.set_midi_region",
+        id: SET_MIDI_REGION,
         action: Action::Apply("set_midi_clip_region"),
         label: "Set MIDI Clip Start and End",
         permission: Permission::Edit,
@@ -837,7 +841,7 @@ const ENTRIES: &[Entry] = &[
             `clip.set_length` to change how long the clip lasts in the arrangement.",
     },
     Entry {
-        id: "clip.set_midi_loop",
+        id: SET_MIDI_LOOP,
         action: Action::Apply("set_midi_clip_loop"),
         label: "Set MIDI Clip Loop",
         permission: Permission::Edit,

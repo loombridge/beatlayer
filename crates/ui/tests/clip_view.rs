@@ -9,7 +9,9 @@ use bl_model::{Clip, ClipData, ClipId, Command, Document, MidiData, Note, TrackI
 use bl_shell::clip_view::notes_in_order;
 use bl_shell::files::factory_default_set;
 use bl_ui::arrangement::benchmark;
-use bl_ui::clip_view::{KEY_HEIGHT, grid_rect, note_rect, tick_at, x_of_tick, y_of_key};
+use bl_ui::clip_view::{
+    KEY_HEIGHT, grid_rect, note_rect, strip_rect, tick_at, x_of_tick, y_of_key,
+};
 use common::{Harness, Window, command};
 use egui::{Event, Modifiers, MouseWheelUnit, PointerButton, Pos2, Rect, TouchPhase, pos2, vec2};
 use serde_json::json;
@@ -90,6 +92,14 @@ impl Notes {
         }
     }
 
+    /// The clip's loop brace and switch, as the document holds them.
+    fn loop_brace(&self) -> (Ticks, Option<Ticks>, bool) {
+        match &self.doc().clip(self.clip).unwrap().data {
+            ClipData::Midi(midi) => (midi.loop_start, midi.loop_end, midi.looping),
+            ClipData::Audio(_) => panic!("the clip is MIDI"),
+        }
+    }
+
     /// The editing grid's step under the Clip View: one grid step.
     fn step(&self) -> Ticks {
         self.h.shell.arrangement().grid_ticks(self.doc())
@@ -110,6 +120,33 @@ impl Notes {
             pos2(bounds.x1 as f32, bounds.y1 as f32),
         );
         grid_rect(view)
+    }
+
+    /// The marker strip's rectangle, from the Clip View's accessible node.
+    fn strip(&mut self) -> Rect {
+        let output = self.h.settle();
+        let nodes = Harness::nodes(&output);
+        let node = Harness::node(&nodes, "Clip View");
+        let bounds = node.bounds.expect("the Clip View has bounds");
+        let view = Rect::from_min_max(
+            pos2(bounds.x0 as f32, bounds.y0 as f32),
+            pos2(bounds.x1 as f32, bounds.y1 as f32),
+        );
+        strip_rect(view)
+    }
+
+    /// A point in the marker strip at `tick`: in the strip's upper part for
+    /// a marker, its lower part for the loop brace.
+    fn at_strip(&mut self, tick: Ticks, marker: bool) -> Pos2 {
+        let strip = self.strip();
+        let grid = self.grid();
+        let x = x_of_tick(grid, self.marker(), self.length(), tick);
+        let y = if marker {
+            strip.top() + 4.0
+        } else {
+            strip.bottom() - 3.0
+        };
+        pos2(x, y)
     }
 
     /// A point in the note area: `tick` contents ticks into the clip, in the
@@ -428,6 +465,100 @@ fn the_wheel_scrolls_the_key_track() {
         "three rows with one wheel notch, moved {}",
         after - before
     );
+}
+
+#[test]
+fn the_arrow_keys_transpose_the_selection_a_semitone_or_an_octave() {
+    // Spec: piano-roll (WP-2.3 part 3). S-A11Y-008 and S-A11Y-009: with
+    // notes selected, Up and Down transpose by a semitone, Shift by an
+    // octave, each running `note.move` as one undo step.
+    let step = n_step();
+    let mut n = set(vec![Note::new(60, Ticks::ZERO, step, 100)]);
+    // A click selects the note and gives the Clip View the keyboard.
+    let at = n.at(60, step / 2);
+    n.click(at, Modifiers::NONE);
+    let before = n.doc().clone();
+    n.h.key(egui::Key::ArrowUp, Modifiers::NONE);
+    assert_eq!(n.notes()[0].key, 61, "a semitone up");
+    n.one_step(&before, "Move notes");
+    n.h.key(egui::Key::ArrowUp, Modifiers::SHIFT);
+    assert_eq!(n.notes()[0].key, 73, "an octave with Shift");
+    n.h.key(egui::Key::ArrowDown, Modifiers::SHIFT);
+    assert_eq!(n.notes()[0].key, 61, "and down again");
+    n.h.key(egui::Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(n.notes()[0].key, 60);
+}
+
+#[test]
+fn transposing_past_the_top_key_is_refused_and_changes_nothing() {
+    // Spec: piano-roll (WP-2.3 part 3). A note at key 127 can't go higher:
+    // the edit is refused, the set is unchanged, and no step is recorded.
+    let step = n_step();
+    let mut n = set(vec![Note::new(127, Ticks::ZERO, step, 100)]);
+    let at = n.at(127, step / 2);
+    n.click(at, Modifiers::NONE);
+    let before = n.doc().clone();
+    let steps = n.steps();
+    n.h.key(egui::Key::ArrowUp, Modifiers::SHIFT);
+    assert_eq!(*n.doc(), before, "nothing moved");
+    assert_eq!(n.steps(), steps, "and no step was recorded");
+}
+
+#[test]
+fn cmd_u_quantises_the_selected_notes() {
+    // Spec: piano-roll (WP-2.3 part 3). Cmd-U (S-NOTE-011) runs
+    // `note.quantize` with the view's settings — the editing grid, note
+    // starts, 100 percent.
+    let step = n_step();
+    let mut n = set(vec![Note::new(60, step / 3, step, 100)]);
+    let at = n.at(60, step / 3 + step / 2);
+    n.click(at, Modifiers::NONE);
+    let before = n.doc().clone();
+    n.h.key(egui::Key::U, command());
+    assert_eq!(
+        n.notes()[0].start,
+        Ticks::ZERO,
+        "the note lands on the grid line before it"
+    );
+    n.one_step(&before, "Quantize notes");
+}
+
+#[test]
+fn dragging_the_loop_brace_edits_the_clip_in_one_step() {
+    // Spec: piano-roll (WP-2.3 part 3). The brace's start drags along the
+    // strip's lower edge, snapping to the editing grid, as one undo step.
+    let step = n_step();
+    let mut n = set(vec![Note::new(60, Ticks::ZERO, step, 100)]);
+    assert_eq!(
+        n.loop_brace(),
+        (Ticks::ZERO, None, false),
+        "a new clip's brace is the whole clip, unlooped"
+    );
+    let before = n.doc().clone();
+    let from = n.at_strip(Ticks::ZERO, false);
+    let to = n.at_strip(4 * step, false);
+    n.drag(from, to, Modifiers::NONE);
+    assert_eq!(
+        n.loop_brace(),
+        (4 * step, None, false),
+        "the brace's start moved on the grid"
+    );
+    n.one_step(&before, "Change clip loop");
+}
+
+#[test]
+fn dragging_the_start_marker_edits_the_clips_region_in_one_step() {
+    // Spec: piano-roll (WP-2.3 part 3). The Start marker drags in the
+    // strip's upper part: its new place becomes the contents tick the clip
+    // starts playing from (R4), as one undo step.
+    let step = n_step();
+    let mut n = set(vec![Note::new(60, Ticks::ZERO, step, 100)]);
+    let before = n.doc().clone();
+    let from = n.at_strip(Ticks::ZERO, true);
+    let to = n.at_strip(4 * step, true);
+    n.drag(from, to, Modifiers::NONE);
+    assert_eq!(n.marker(), 4 * step, "the Start marker moved");
+    n.one_step(&before, "Change clip region");
 }
 
 /// The default editing grid's step, for a test that builds its clip with

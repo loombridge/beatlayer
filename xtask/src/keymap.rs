@@ -185,6 +185,18 @@ const WIDGET: &[(&str, &str)] = &[
          time-selection menu (its grid choices run `arrangement.set_grid`), or the chosen \
          place's in the browser's sidebar (`browser.remove_folder`)",
     ),
+    // WP-2.3: the Clip View's note selection reads the transpose keys itself,
+    // each running `note.move` (part 3).
+    (
+        "S-A11Y-008",
+        "the Clip View's note editor: Up and Down transpose the selected notes by a semitone \
+         (`note.move`)",
+    ),
+    (
+        "S-A11Y-009",
+        "the Clip View's note editor: Shift-Up and Shift-Down transpose the selected notes by \
+         an octave (`note.move`)",
+    ),
 ];
 
 /// The package that binds each M1 shortcut the shell doesn't: exact IDs

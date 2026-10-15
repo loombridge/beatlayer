@@ -90,6 +90,7 @@ fn a_thousand_recompiles_during_playback_touch_no_heap_and_drop_no_audio() {
     let backend = NullBackend::with_options(NullOptions {
         pacing: Pacing::RealTime,
         frame_limit: None,
+        channels: 2,
     });
     let request = StreamRequest {
         output: Some(PortRequest::default()),

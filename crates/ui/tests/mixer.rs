@@ -1066,8 +1066,9 @@ fn every_mixer_control_reaches_assistive_technology() {
     assert_eq!(inside(&nodes, "3 Audio", "Track Pan").unwrap().value, "C");
     let solo = inside(&nodes, "3 Audio", "Solo").unwrap();
     assert_eq!((solo.role, solo.value.as_str()), (Role::Button, "off"));
-    // The sends and the In/Out section work since WP-2.19; the audio
-    // interface's channels wait for WP-2.13.
+    // The sends and the In/Out section work since WP-2.19; the Ext. In
+    // channel and Main Out list the interface's channels, and the harness's
+    // device has no input open, so there's nothing to choose (WP-2.13).
     let send = inside(&nodes, "3 Audio", "A-Return").unwrap();
     assert!(!send.disabled && send.value == "-inf dB");
     let monitor = inside(&nodes, "3 Audio", "Monitoring").unwrap();
@@ -1075,7 +1076,9 @@ fn every_mixer_control_reaches_assistive_technology() {
     let input = inside(&nodes, "3 Audio", "Input Type").unwrap();
     assert!(!input.disabled && input.value == "Ext. In");
     let channel = inside(&nodes, "3 Audio", "Input Channel").unwrap();
-    assert!(channel.disabled && channel.description.contains("WP-2.13"));
+    assert!(channel.disabled && channel.value == "1/2");
+    let main_out = inside(&nodes, "Main", "Main Output").unwrap();
+    assert!(!main_out.disabled && main_out.value == "1/2");
     // A screen reader's increment and decrement step the fader.
     let t = tracks(&h.shell);
     h.accesskit(

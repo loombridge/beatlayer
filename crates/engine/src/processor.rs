@@ -282,11 +282,28 @@ impl Processor {
 
     /// Processes one block of `frames` frames (at most
     /// [`EngineConfig::max_frames`]; more are cut to that) and returns its
-    /// output. Real-time safe.
+    /// output. Real-time safe. A device's input is not seen: pass it through
+    /// [`process_with_input`](Self::process_with_input).
     pub fn process(&mut self, frames: usize) -> Output<'_> {
+        self.process_with_input(frames, &crate::NoInput)
+    }
+
+    /// Processes one block with the audio device's input, for tracks whose
+    /// Audio From is Ext. In (WP-2.13). `frames` is at most
+    /// [`EngineConfig::max_frames`]; more are cut to that. Real-time safe:
+    /// the input is copied into the program's own buffers, which were made
+    /// when the engine was.
+    pub fn process_with_input(
+        &mut self,
+        frames: usize,
+        input: &dyn crate::DeviceInput,
+    ) -> Output<'_> {
         let began = Instant::now();
         let frames = frames.min(self.config.max_frames);
         self.drain();
+        if let Some(program) = self.program.as_mut() {
+            program.get_mut().copy_device_input(input, frames);
+        }
         self.resolve_due(frames);
         let mut done = 0;
         while done < frames {

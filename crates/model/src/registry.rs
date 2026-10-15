@@ -591,15 +591,18 @@ const ENTRIES: &[Entry] = &[
         keys: &[],
         description: "Sets where an audio or MIDI track takes its input from, as the In/Out \
             section's Audio From or MIDI From chooser and its channel do. An audio track can \
-            take `external` (Ext. In, the audio interface; silent until audio input is built), \
-            `resampling` (the Main output, for recording the mix; the track's own output and \
-            sends are then silent so it can't feed back), `none`, or `track` with another \
-            audio track, a group, a return track, or Main and a `tap`: `pre_fx` (before its devices), \
-            `post_fx` (after its devices, before its mixer), or `post_mixer` (its output, the \
-            default). A MIDI track can take `all_ins`, `computer_keyboard`, `none`, or another \
-            MIDI track (MIDI reaches tracks once MIDI playback is built). The input is heard \
-            only while the track monitors it (`routing.set_monitor`). A routing may make a \
-            loop, as in Live; the engine plays the routing that closes it as silence.",
+            take `external` (Ext. In, the audio interface's inputs, with a `channel`: a single \
+            channel (`{ \"type\": \"mono\", \"channel\": 3 }`) or a stereo pair (`{ \"type\": \
+            \"pair\", \"channel\": 3 }`, the pair 3/4), counted from 1; silent until the \
+            interface has input), `resampling` (the Main output, for recording the mix; the \
+            track's own output and sends are then silent so it can't feed back), `none`, or \
+            `track` with another audio track, a group, a return track, or Main and a `tap`: \
+            `pre_fx` (before its devices), `post_fx` (after its devices, before its mixer), or \
+            `post_mixer` (its output, the default). A MIDI track can take `all_ins`, \
+            `computer_keyboard`, `none`, or another MIDI track (MIDI reaches tracks once MIDI \
+            playback is built). The input is heard only while the track monitors it \
+            (`routing.set_monitor`). A routing may make a loop, as in Live; the engine plays \
+            the routing that closes it as silence.",
     },
     Entry {
         id: "routing.set_monitor",
@@ -637,6 +640,31 @@ const ENTRIES: &[Entry] = &[
         keys: &[],
         description: "Sets where a MIDI track's MIDI goes, as its MIDI To chooser does: \
             another MIDI track (its Track In), or `null` for No Output (a new MIDI track's).",
+    },
+    Entry {
+        id: "routing.set_main_out",
+        action: Action::Apply("set_main_out"),
+        label: "Set Main Out",
+        permission: Permission::Edit,
+        contexts: &[Session, Arrangement],
+        keys: &[],
+        description: "Sets Main's Main Out, the audio interface's output channels the Main mix \
+            goes to, as Main's In/Out section does: `channel` is a stereo pair of the \
+            interface's outputs (`{ \"type\": \"pair\", \"channel\": 3 }` is the pair 3/4), \
+            counted from 1. The default is the first pair, 1/2.",
+    },
+    Entry {
+        id: "routing.set_cue_out",
+        action: Action::Apply("set_cue_out"),
+        label: "Set Cue Out",
+        permission: Permission::Edit,
+        contexts: &[Session, Arrangement],
+        keys: &[],
+        description: "Sets Main's Cue Out, the audio interface's output channels the cue mix \
+            goes to, as Main's In/Out section does: `channel` is a stereo pair of the \
+            interface's outputs, counted from 1; the default is the first pair, 1/2. It \
+            carries the cue mix once cue mode is built (a later package); the choice is kept \
+            and saved with the set.",
     },
     Entry {
         id: "clip.create",

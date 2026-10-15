@@ -89,4 +89,4 @@ pub use ids::{ClipId, ContentHash, DeviceId, ParamId, ParseContentHashError, Tra
 /// The persistent collections the document's public types hold.
 pub use imbl::{OrdMap, Vector};
 pub use param::{DeviceDescription, ParamDescriptor, ParamKind, ParamUnit};
-pub use track::{Input, Mixer, Monitor, Output, Routing, SendTap, Tap, Track, TrackKind};
+pub use track::{Channel, Input, Mixer, Monitor, Output, Routing, SendTap, Tap, Track, TrackKind};

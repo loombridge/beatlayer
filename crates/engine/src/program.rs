@@ -5,7 +5,7 @@ use core::fmt;
 use core::ops::Range;
 
 use bl_core::time::{SampleRate, TempoMap};
-use bl_model::{ParamId, Tap, TrackId};
+use bl_model::{Channel, ParamId, Tap, TrackId};
 
 use crate::mixer::{MeterReading, Route, TrackMixer};
 use crate::node::{Block, Node, NodeEvent, NodeKey, NoteBuffer, ParamValue, TransportInfo};
@@ -84,6 +84,16 @@ pub struct EngineProgram {
     /// A scratch buffer for a delayed route's input: `channels` channels of
     /// `max_frames` frames, reused by every route.
     pub(crate) delay_scratch: Vec<f32>,
+    /// The audio device's input for the block being processed:
+    /// `device_input_channels` channels of `max_frames` frames, filled by
+    /// [`Processor::process`](crate::Processor::process) before the tasks
+    /// run.
+    pub(crate) device_input: Vec<f32>,
+    /// The device's input channels; zero without a device that has input.
+    pub(crate) device_input_channels: usize,
+    /// One task's device input mapped to the tracks' stereo layout, one
+    /// task at a time.
+    pub(crate) device_scratch: Vec<f32>,
     pub(crate) channels: usize,
     pub(crate) max_frames: usize,
     /// The task whose buffer is the engine's output: Main's.
@@ -164,6 +174,18 @@ pub(crate) struct Input {
     /// The delay line its signal is delayed through to line it up with the
     /// destination's other inputs (WP-2.11), or [`NO_DELAY`].
     pub(crate) delay: u32,
+}
+
+/// A task's own input taken from the audio interface, Ext. In (WP-2.13):
+/// the device channels it hears, through a route whose Monitor gate opens
+/// and closes it like any other input.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct DeviceInput {
+    /// The slot of the route's gain.
+    pub(crate) route: u32,
+    /// Which of the interface's inputs, counted from 1: one channel, or a
+    /// stereo pair.
+    pub(crate) channel: Channel,
 }
 
 /// No delay line: an input that arrives with no compensation of its own.
@@ -257,6 +279,39 @@ fn delay_in_place(
     }
 }
 
+/// Maps the device's input into a task's stereo layout: one interface
+/// channel feeds both sides, a stereo pair one each; a channel the device
+/// doesn't have is silence (WP-2.13). `input` holds `device_channels`
+/// channels `stride` frames apart; `scratch` is the program's channels.
+fn map_device_input(
+    scratch: &mut [f32],
+    input: &[f32],
+    device_channels: usize,
+    channel: Channel,
+    channels: usize,
+    stride: usize,
+    frames: usize,
+) {
+    let (left, right) = match channel {
+        Channel::Mono(channel) => (channel, channel),
+        Channel::Pair(channel) => (channel, channel.saturating_add(1)),
+    };
+    for (side, device) in [left, right].into_iter().enumerate().take(channels) {
+        let to = &mut scratch[side * stride..side * stride + frames];
+        match device
+            .checked_sub(1)
+            .map(usize::from)
+            .filter(|&index| index < device_channels)
+        {
+            Some(index) => {
+                let from = &input[index * stride..index * stride + frames];
+                to.copy_from_slice(from);
+            }
+            None => to.fill(0.0),
+        }
+    }
+}
+
 /// A device's sidechain in a task's chain.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct DeviceSidechain {
@@ -278,6 +333,9 @@ pub(crate) struct DeviceSidechain {
 pub(crate) struct Task {
     pub(crate) track: TrackId,
     pub(crate) inputs: Span,
+    /// The task's input taken from the audio interface, if its Audio From
+    /// is Ext. In (WP-2.13).
+    pub(crate) device_input: Option<DeviceInput>,
     /// The slot of the track's clip player, which runs first.
     pub(crate) player: Option<u32>,
     /// The device chain.
@@ -418,6 +476,28 @@ impl EngineProgram {
         }
     }
 
+    /// Copies the device's input for the block being processed into the
+    /// program's own buffer, so the tasks never read the device's
+    /// (WP-2.13). `frames` is cut to the program's own, and a device
+    /// channel past the program's is dropped. Real-time safe: the buffer
+    /// was made with the program.
+    pub(crate) fn copy_device_input(&mut self, input: &dyn crate::DeviceInput, frames: usize) {
+        let channels = self.device_input_channels;
+        let stride = self.max_frames;
+        let frames = frames.min(stride);
+        for c in 0..channels {
+            let to = &mut self.device_input[c * stride..c * stride + frames];
+            match (c < input.channels()).then(|| input.channel(c)) {
+                Some(from) => {
+                    let len = frames.min(from.len());
+                    to[..len].copy_from_slice(&from[..len]);
+                    to[len..].fill(0.0);
+                }
+                None => to.fill(0.0),
+            }
+        }
+    }
+
     /// The meters of a task's track.
     pub(crate) fn meters(&self, task: u32) -> MeterReading {
         let mixer = self.tasks[task as usize].mixer as usize;
@@ -514,6 +594,36 @@ impl EngineProgram {
                     stride,
                     frames,
                 );
+            }
+
+            // The interface's input, if the track takes Ext. In: its
+            // channels, through the route whose Monitor gate opens and
+            // closes it (WP-2.13).
+            if let Some(device) = task.device_input {
+                delivered += gather(events, device.route, from, until, scratch);
+                map_device_input(
+                    &mut self.device_scratch,
+                    &self.device_input,
+                    self.device_input_channels,
+                    device.channel,
+                    channels,
+                    stride,
+                    frames,
+                );
+                if let Some(Some(Instance::Route(route))) = self
+                    .slots
+                    .get_mut(device.route as usize)
+                    .map(|slot| slot.node.as_mut())
+                {
+                    route.mix(
+                        &mut self.pool[own.clone()],
+                        &self.device_scratch,
+                        channels,
+                        stride,
+                        frames,
+                        scratch,
+                    );
+                }
             }
 
             // Add the inputs, each through its route.

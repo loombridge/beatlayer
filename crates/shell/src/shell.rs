@@ -650,6 +650,14 @@ impl Shell {
         &mut self.audio
     }
 
+    /// The audio interface the In/Out choosers list: the open device's
+    /// channels, or none while no stream is open.
+    #[must_use]
+    pub fn interface(&self) -> crate::routing::Interface {
+        let (inputs, outputs) = self.audio.channels();
+        crate::routing::Interface { inputs, outputs }
+    }
+
     /// The preferences.
     #[must_use]
     pub fn preferences(&self) -> &Preferences {

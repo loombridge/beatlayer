@@ -27,6 +27,12 @@ bl-model.workspace = true
 # Plug-ins built on the plug-in kit, compiled in (`kit`): the `Plugin` trait,
 # without its formats.
 lspk-plugin.workspace = true
+# The kit's DSP for the native polysynth (WP-2.17): envelopes, zero-delay
+# feedback filters and polyphonic voice management, and its band-limited
+# wavetable oscillators.
+lspk-dsp.workspace = true
+lspk-voice.workspace = true
+lspk-wavetable.workspace = true
 lspk-example-gain = { workspace = true, optional = true }
 lspk-example-sine = { workspace = true, optional = true }
 # A kit device's processor reaches its node through a one-slot queue: the
@@ -41,6 +47,9 @@ bl-rt.workspace = true
 # The kit adapter's tests run the kit's example plug-ins.
 lspk-example-gain.workspace = true
 lspk-example-sine.workspace = true
+# The polysynth's aliasing test measures the spectrum with an FFT, the
+# version the analysis and media crates already bring in.
+realfft = "3.5.0"
 
 [lints]
 workspace = true

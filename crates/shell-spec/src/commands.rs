@@ -11,6 +11,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::audio::{AudioDevices, AudioStatus, ConfigureAudio};
+use crate::notes::ClipViewState;
 use crate::settings::{SettingsPage, ThemeChoice};
 
 /// `set.new`: replace the set with the factory default set.
@@ -47,6 +48,10 @@ pub const WINDOW_CLOSE: &str = "window.close";
 pub const VIEW_FULL_SCREEN: &str = "view.full_screen";
 /// `view.toggle_browser`: show or hide the browser.
 pub const VIEW_TOGGLE_BROWSER: &str = "view.toggle_browser";
+/// `view.toggle_clip_view`: show or hide the Clip View (WP-2.3).
+pub const VIEW_TOGGLE_CLIP_VIEW: &str = "view.toggle_clip_view";
+/// `view.draw_mode`: switch Draw Mode (B, WP-2.3).
+pub const VIEW_DRAW_MODE: &str = "view.draw_mode";
 /// `view.toggle_info_view`: show or hide the Info View.
 pub const VIEW_TOGGLE_INFO_VIEW: &str = "view.toggle_info_view";
 /// `view.toggle_plug_in_windows`: show or hide the plug-in windows: the
@@ -128,6 +133,8 @@ pub const IDS: &[&str] = &[
     WINDOW_CLOSE,
     VIEW_FULL_SCREEN,
     VIEW_TOGGLE_BROWSER,
+    VIEW_TOGGLE_CLIP_VIEW,
+    VIEW_DRAW_MODE,
     VIEW_TOGGLE_INFO_VIEW,
     VIEW_TOGGLE_PLUG_IN_WINDOWS,
     VIEW_TOGGLE_SESSION_ARRANGEMENT,
@@ -562,6 +569,34 @@ fn specs() -> Vec<CommandSpec> {
             .binding("S-BRW-002")
             .args::<NoArgs>()
             .result::<ViewResult>(),
+        CommandSpec::new(VIEW_TOGGLE_CLIP_VIEW, "Clip View")
+            .description(
+                "Shows or hides the Clip View in the detail area, which holds the MIDI Note \
+                 Editor for the Arrangement's selected MIDI clip; while it shows, it takes \
+                 the detail area in place of the Device View. It shows the clip the \
+                 Arrangement has selected, with its notes, and selecting another MIDI clip \
+                 switches the editor to it, clearing the note selection. Changes nothing in \
+                 the set and isn't an undo step. The result says whether it shows, what clip \
+                 the editor holds, and which notes are selected.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .binding("S-VIEW-015")
+            .args::<NoArgs>()
+            .result::<ClipViewState>(),
+        CommandSpec::new(VIEW_DRAW_MODE, "Draw Mode")
+            .description(
+                "Switches Draw Mode (B; Options ▸ Draw Mode), which changes what a click in \
+                 the MIDI Note Editor's note area does: with it on, clicking empty grid adds \
+                 a note one grid step long, and clicking a note removes it; with it off, \
+                 clicking selects. Changes nothing in the set and isn't an undo step. The \
+                 result says whether it's on.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .binding("S-GRID-001")
+            .args::<NoArgs>()
+            .result::<ClipViewState>(),
         CommandSpec::new(VIEW_TOGGLE_INFO_VIEW, "Info")
             .description(
                 "Shows or hides the Info View at the bottom left of the main window, which \

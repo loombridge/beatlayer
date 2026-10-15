@@ -4,6 +4,9 @@
 //!   device in a chain, with sample-accurate note and parameter events in
 //!   and out, its state saved with the set, its latency reported, and its
 //!   editor in a window of its own.
+//! - [`vst3`]: VST3 hosting, part 1 (WP-2.7): a plug-in bundle or module
+//!   loaded by path runs as a device, its component and controller
+//!   connected, with sample-accurate parameter changes and notes.
 //! - [`scan`]: the plug-in scanner (WP-2.9): finds the plug-ins on this
 //!   machine in a child process with a timeout, blocklists the ones that
 //!   fail, and caches what it found by path and modification time.
@@ -13,5 +16,6 @@
 
 pub mod clap;
 pub mod scan;
+pub mod vst3;
 #[cfg(any(target_os = "windows", all(unix, not(target_os = "macos"))))]
 pub mod window;

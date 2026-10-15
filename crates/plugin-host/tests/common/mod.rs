@@ -93,3 +93,24 @@ pub fn run(
         notes: out.notes().to_vec(),
     }
 }
+
+/// The VST3 test plug-in as a `.vst3` bundle (WP-2.7).
+pub fn vst3_bundle() -> &'static Path {
+    bl_test_vst3::bundle()
+}
+
+/// A VST3 Test Gain Echo device with `params` (plain values) set.
+pub fn vst3_device(id: u64, params: &[(u32, f64)]) -> Device {
+    let mut device = Device::new(
+        DeviceId(Id::new(id).expect("an ID")),
+        bl_test_vst3::PLUGIN_NAME,
+        DeviceKind::Plugin {
+            format: PluginFormat::Vst3,
+            plugin_id: bl_test_vst3::plugin_id(),
+        },
+    );
+    for (param, value) in params {
+        device.params.insert(ParamId(*param), *value);
+    }
+    device
+}

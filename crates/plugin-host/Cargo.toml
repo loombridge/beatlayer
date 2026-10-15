@@ -33,6 +33,12 @@ clack-extensions = { version = "=0.2.0", features = [
 ] }
 # A node's queues to the main thread: the version bl-engine uses.
 rtrb = "0.4.0"
+# Loading a VST3 module: dlopen/LoadLibrary and its symbols.
+libloading = "0.8"
+# VST3 hosting (WP-2.7), pinned like CLAP's bindings: pure-Rust bindings
+# generated from the VST3 SDK's headers (MIT OR Apache-2.0); the C++ SDK
+# itself isn't compiled.
+vst3 = "0.3.0"
 # The host side of the plug-in kit's agent-commands extension: a plug-in's
 # commands, listed and run.
 lspk-plugin = { workspace = true, features = ["clap-host"] }
@@ -55,8 +61,10 @@ windows-sys = { version = "0.52", features = [
 x11rb = { version = "0.13", default-features = false }
 
 [dev-dependencies]
-# The test plug-in, built from source; its cdylib is what the tests load.
+# The test plug-ins, built from source; their cdylibs are what the tests
+# load.
 bl-test-clap = { path = "../test-clap" }
+bl-test-vst3 = { path = "../test-vst3" }
 # Every block in the tests runs as a real-time section under the
 # allocation trap.
 bl-rt.workspace = true

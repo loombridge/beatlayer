@@ -976,6 +976,7 @@ pub fn run_command(
         SpecDither::None => Dither::None,
         SpecDither::Rectangular => Dither::Rectangular,
         SpecDither::Triangular => Dither::Triangular,
+        SpecDither::NoiseShaped => Dither::NoiseShaped,
     };
     let (start, end, source) =
         range(document, args.start.as_ref(), args.length, selection).map_err(invalid)?;

@@ -1512,7 +1512,7 @@ impl Shell {
         ) {
             // Spec: clap-hosting R8. A copy of a plug-in device starts
             // from its plug-in's state now.
-            crate::plugins::capture_states(&self.plugins, &self.kit, &mut self.editor);
+            crate::plugins::capture_states(&self.plugins, &self.vst3, &self.kit, &mut self.editor);
         }
         let user_library = self.browser_view.user_library().map(Path::to_path_buf);
         let zoom = self.zoom();
@@ -1849,6 +1849,12 @@ impl Shell {
             self.refresh_device_types();
             changed = true;
         }
+        // A plug-in that changed its latency: the engine recompiles with
+        // it, so delay compensation follows it (WP-2.7, WP-2.11).
+        for (device, frames) in self.vst3.take_latency_changes() {
+            self.audio.set_device_latency(device, frames);
+            changed = true;
+        }
         // The open plug-in editors follow View ▸ Plug-In Windows and
         // Auto-Hide Plug-In Windows, as the tracks' floating windows do.
         self.apply_plug_in_windows();
@@ -1867,6 +1873,12 @@ impl Shell {
             .take_param_changes()
             .into_iter()
             .map(|c| (c.device, c.param, c.value))
+            .chain(
+                self.vst3
+                    .take_param_changes()
+                    .into_iter()
+                    .map(|c| (c.device, c.param, c.value)),
+            )
             .chain(
                 self.kit
                     .take_param_changes()
@@ -3427,7 +3439,12 @@ impl Shell {
                 let path = self.set_path.clone().ok_or_else(|| {
                     unavailable("the set has never been saved; use `set.save_as` to give it a file")
                 })?;
-                crate::plugins::capture_states(&self.plugins, &self.kit, &mut self.editor);
+                crate::plugins::capture_states(
+                    &self.plugins,
+                    &self.vst3,
+                    &self.kit,
+                    &mut self.editor,
+                );
                 self.store.set_windows(self.devices.windows().clone());
                 let warnings = self.store.save(&path, &self.editor).map_err(failed)?;
                 self.saved_as(path, &warnings);
@@ -3437,7 +3454,12 @@ impl Shell {
                 // Spec: app-shell R17 to R21. The store decides where in a
                 // project folder the set goes; the result says where.
                 let SaveAsArgs { path } = Self::args(id, args)?;
-                crate::plugins::capture_states(&self.plugins, &self.kit, &mut self.editor);
+                crate::plugins::capture_states(
+                    &self.plugins,
+                    &self.vst3,
+                    &self.kit,
+                    &mut self.editor,
+                );
                 self.store.set_windows(self.devices.windows().clone());
                 let (path, warnings) = self
                     .store
@@ -3471,7 +3493,12 @@ impl Shell {
                         )
                     })?,
                 };
-                crate::plugins::capture_states(&self.plugins, &self.kit, &mut self.editor);
+                crate::plugins::capture_states(
+                    &self.plugins,
+                    &self.vst3,
+                    &self.kit,
+                    &mut self.editor,
+                );
                 let warnings = self.store.save_copy(&path, &self.editor).map_err(failed)?;
                 self.prefs.default_set = Some(path.clone());
                 self.save_preferences();
@@ -3501,7 +3528,12 @@ impl Shell {
                     });
                 }
                 let path = folder.join(format!("{name}.{}", bl_project::SET_EXTENSION));
-                crate::plugins::capture_states(&self.plugins, &self.kit, &mut self.editor);
+                crate::plugins::capture_states(
+                    &self.plugins,
+                    &self.vst3,
+                    &self.kit,
+                    &mut self.editor,
+                );
                 let warnings = self.store.save_copy(&path, &self.editor).map_err(failed)?;
                 self.message = (!warnings.is_empty()).then(|| Message {
                     text: format!("The template was saved, but: {}", warnings.join("; ")),
@@ -3521,7 +3553,12 @@ impl Shell {
                          folder to collect into",
                     )
                 })?;
-                crate::plugins::capture_states(&self.plugins, &self.kit, &mut self.editor);
+                crate::plugins::capture_states(
+                    &self.plugins,
+                    &self.vst3,
+                    &self.kit,
+                    &mut self.editor,
+                );
                 self.store.set_windows(self.devices.windows().clone());
                 let files = self.store.collect().map_err(failed)?;
                 let warnings = self.store.save(&path, &self.editor).map_err(failed)?;

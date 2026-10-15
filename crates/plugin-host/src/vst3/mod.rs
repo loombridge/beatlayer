@@ -1,9 +1,12 @@
-//! VST3 hosting, part 1 (WP-2.7; the VST3 hosting spec): loading a `.vst3`
+//! VST3 hosting (WP-2.7; the VST3 hosting spec): loading a `.vst3`
 //! module, its factory and each audio class as a device type, the component
 //! and its controller connected, and processing block by block with each
 //! parameter change on its sample offset and each note in the event list on
 //! its frame. The node passes its input through until the plug-in is
-//! active. State, latency changes and the editor are the next part's.
+//! active. Saving and restoring the component's and the controller's state
+//! with the set, latency and restarts, and the changes a plug-in's own
+//! editor makes, are part 2's (as clap-hosting R6, R8 to R12 does for
+//! CLAP).
 //!
 //! A [`Vst3Host`] lives on the main thread, like the CLAP host: it loads
 //! modules, keeps one component and controller per device, and activates
@@ -13,6 +16,7 @@
 mod describe;
 mod handlers;
 mod node;
+mod stream;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::ffi::{c_char, c_void};
@@ -20,17 +24,20 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::ptr;
 use std::rc::Rc;
+use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread::ThreadId;
 
 use bl_engine::{DeviceType, Node, NodeConfig, NodeFactory};
-use bl_model::{Device, DeviceDescription, DeviceId, DeviceKind, ParamId, PluginFormat};
+use bl_model::{
+    Device, DeviceDescription, DeviceId, DeviceKind, ParamId, PluginFormat, PluginState,
+};
 use vst3::Steinberg::Vst::*;
 use vst3::Steinberg::*;
 use vst3::{ComPtr, ComWrapper};
 
-use handlers::{ComponentHandler, HostApplication};
+use handlers::{ComponentHandler, Gestures, HostApplication};
 use node::{HostEnds, MAX_BUSES};
 
 pub use node::Vst3Node;
@@ -135,6 +142,57 @@ impl ParamMap {
     }
 }
 
+/// A parameter change a plug-in's controller made itself, such as from its
+/// editor: one for each gesture, with its final value, or one for each
+/// change outside a gesture (spec: clap-hosting R6, which the VST3 spec
+/// mirrors).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ParamChange {
+    /// The device.
+    pub device: DeviceId,
+    /// The parameter.
+    pub param: ParamId,
+    /// Its new value, in plain units.
+    pub value: f64,
+}
+
+/// What a saved state starts with: the component's state and the
+/// controller's, each with its length.
+const STATE_MAGIC: &[u8; 4] = b"BLTV";
+
+/// The state bytes a VST3 host saves: the component's state and the
+/// controller's, each length-prefixed, little-endian, after [`STATE_MAGIC`].
+/// Tests and tools use it to hand a plug-in a state, as
+/// [`Vst3Host::load_state`] takes one.
+#[must_use]
+pub fn plugin_state(component: &[u8], controller: &[u8]) -> Vec<u8> {
+    let mut data = Vec::with_capacity(12 + component.len() + controller.len());
+    data.extend_from_slice(STATE_MAGIC);
+    for chunk in [component, controller] {
+        data.extend_from_slice(&u32::try_from(chunk.len()).unwrap_or(u32::MAX).to_le_bytes());
+        data.extend_from_slice(chunk);
+    }
+    data
+}
+
+/// Splits [`plugin_state`]'s bytes back into the component's state and the
+/// controller's.
+fn split_state(data: &[u8]) -> Option<(&[u8], &[u8])> {
+    if data.get(..4) != Some(STATE_MAGIC.as_slice()) {
+        return None;
+    }
+    let length = |at: usize| -> Option<usize> {
+        let bytes: [u8; 4] = data.get(at..at + 4)?.try_into().ok()?;
+        usize::try_from(u32::from_le_bytes(bytes)).ok()
+    };
+    let component_len = length(4)?;
+    let component = data.get(8..8 + component_len)?;
+    let controller_at = 8 + component_len;
+    let controller_len = length(controller_at)?;
+    let controller = data.get(controller_at + 4..controller_at + 4 + controller_len)?;
+    Some((component, controller))
+}
+
 /// Things only the owner thread may touch: the plug-in instances, which
 /// VST3 hosts on the main thread.
 struct MainOnly<T> {
@@ -169,6 +227,11 @@ struct Inner {
     requests: Mutex<Vec<Request>>,
     types: Mutex<Vec<Vst3Type>>,
     main: Mutex<MainOnly<Main>>,
+    /// The latency each device's plug-in last reported. The main thread
+    /// writes it, and the compiler thread reads it when it makes a node for
+    /// a device whose plug-in already runs (after an engine restart, say),
+    /// so the node starts with the latency the plug-in has.
+    latencies: Mutex<BTreeMap<DeviceId, u32>>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -190,8 +253,12 @@ struct Main {
     modules: HashMap<PathBuf, Rc<Module>>,
     /// The host application the plug-ins are initialized with.
     host: ComWrapper<HostApplication>,
-    /// The component handler their controllers report to.
-    handler: ComWrapper<ComponentHandler>,
+    /// The changes the plug-ins' controllers made themselves since the last
+    /// call, for the set's undo steps.
+    changes: Vec<ParamChange>,
+    /// The devices whose plug-in reported a new latency, for the engine's
+    /// delay compensation.
+    latency_changes: Vec<(DeviceId, u32)>,
 }
 
 impl Main {
@@ -202,7 +269,8 @@ impl Main {
             missing: BTreeMap::new(),
             modules: HashMap::new(),
             host: ComWrapper::new(HostApplication),
-            handler: ComWrapper::new(ComponentHandler),
+            changes: Vec::new(),
+            latency_changes: Vec::new(),
         }
     }
 }
@@ -261,6 +329,10 @@ struct Instance {
     /// effect is its own controller: the component is initialized and
     /// terminated once, as VST3's own host does.
     separate: bool,
+    /// The flags it asked a restart with, shared with its handler.
+    restart: Arc<AtomicU32>,
+    /// The gestures its controller made, shared with its handler.
+    gestures: Arc<Gestures>,
     /// Its parameters.
     params: Vec<describe::Parameter>,
     /// The values to send it at the first frame of its next block,
@@ -283,6 +355,14 @@ struct Instance {
     silenced: bool,
     failure: Option<String>,
     latency: u32,
+    /// The host's component handler, which the controller reports its own
+    /// changes and restart asks to. Declared last, so it outlives both the
+    /// controller that holds it and the component it is set through.
+    #[expect(
+        dead_code,
+        reason = "held for its lifetime: the controller keeps a pointer to it"
+    )]
+    handler: ComWrapper<ComponentHandler>,
 }
 
 /// The VST3 host: VST3's main thread for every plug-in, on the thread that
@@ -322,6 +402,7 @@ impl Vst3Host {
                     owner,
                     value: Main::new(),
                 }),
+                latencies: Mutex::new(BTreeMap::new()),
             }),
         }
     }
@@ -422,9 +503,11 @@ impl Vst3Host {
     }
 
     /// Does the main thread's work: gives new nodes their plug-ins,
-    /// deactivates plug-ins their nodes gave back, and lets go of closed
-    /// ones once their nodes are done with them. Returns whether anything
-    /// a window shows may have changed.
+    /// deactivates plug-ins their nodes gave back, restarts plug-ins that
+    /// asked, tells their controllers what their nodes applied, and
+    /// collects both the changes the controllers made themselves and the
+    /// latencies they reported. Returns whether anything a window shows may
+    /// have changed.
     pub fn idle(&self) -> bool {
         let requests = std::mem::take(&mut *lock(&self.inner.requests));
         let mut guard = lock(&self.inner.main);
@@ -433,18 +516,97 @@ impl Vst3Host {
         for request in requests {
             serve(main, request, &self.inner);
         }
-        for instance in main.instances.values_mut() {
-            changed |= pump(instance);
+        let mut changes = Vec::new();
+        let mut latency_changes = Vec::new();
+        let mut latencies = lock(&self.inner.latencies);
+        for (&device, instance) in &mut main.instances {
+            changed |= pump(
+                device,
+                instance,
+                &mut changes,
+                &mut latency_changes,
+                &mut latencies,
+            );
         }
-        for (_, instance) in &mut main.closing {
-            pump(instance);
+        for (device, instance) in &mut main.closing {
+            changed |= pump(
+                *device,
+                instance,
+                &mut changes,
+                &mut latency_changes,
+                &mut latencies,
+            );
             if instance.handed.is_none() {
                 teardown(instance);
             }
         }
         main.closing
             .retain(|(_, instance)| instance.handed.is_some());
+        changed |= !changes.is_empty() || !latency_changes.is_empty();
+        main.changes.extend(changes);
+        main.latency_changes.extend(latency_changes);
         changed
+    }
+
+    /// The parameter changes the plug-ins' controllers made themselves
+    /// since the last call: each gesture once, with its final value, in
+    /// plain units.
+    pub fn take_param_changes(&self) -> Vec<ParamChange> {
+        let mut guard = lock(&self.inner.main);
+        guard
+            .get()
+            .map(|main| std::mem::take(&mut main.changes))
+            .unwrap_or_default()
+    }
+
+    /// The devices whose plug-in reported a new latency when it was last
+    /// activated since the last call, with the latency in frames: the
+    /// engine recompiles with it, so delay compensation follows a plug-in
+    /// that changed its own.
+    pub fn take_latency_changes(&self) -> Vec<(DeviceId, u32)> {
+        let mut guard = lock(&self.inner.main);
+        guard
+            .get()
+            .map(|main| std::mem::take(&mut main.latency_changes))
+            .unwrap_or_default()
+    }
+
+    /// The device's plug-in's own state, with the file it came from, as the
+    /// set saves it: the component's state and the controller's, together.
+    ///
+    /// # Errors
+    ///
+    /// [`Vst3Error::NoInstance`] if the device has no plug-in running, and
+    /// [`Vst3Error::Refused`] if the plug-in won't save.
+    pub fn save_state(&self, device: DeviceId) -> Result<PluginState, Vst3Error> {
+        let mut guard = lock(&self.inner.main);
+        let instance = instance(guard.get()?, device)?;
+        let (component, controller) = saved_state(instance)?;
+        Ok(PluginState {
+            path: instance.path.to_string_lossy().into_owned(),
+            data: plugin_state(&component, &controller),
+        })
+    }
+
+    /// Gives the device's plug-in a state it saved before: the component's
+    /// state, the controller's, and the values the component's mean for the
+    /// controller in between. The plug-in keeps the state it had if it
+    /// refuses.
+    ///
+    /// # Errors
+    ///
+    /// [`Vst3Error::NoInstance`] if the device has no plug-in running, and
+    /// [`Vst3Error::Refused`] if the plug-in refuses the state, naming
+    /// which part.
+    pub fn load_state(&self, device: DeviceId, data: &[u8]) -> Result<(), Vst3Error> {
+        let mut guard = lock(&self.inner.main);
+        let instance = instance(guard.get()?, device)?;
+        load_state(instance, data)?;
+        // A state that changes its latency, say, asks for a restart; a
+        // plug-in that refused to activate, or failed, gets another try.
+        instance.refused = None;
+        instance.silenced = false;
+        Ok(())
     }
 
     /// What the device's plug-in is doing, or `None` if the device has no
@@ -515,6 +677,7 @@ impl Vst3Host {
                 close(main, device, instance);
             }
         }
+        lock(&self.inner.latencies).retain(|device, _| keep.contains(device));
     }
 
     /// Lets go of every plug-in, as when another set opens.
@@ -538,7 +701,11 @@ impl NodeFactory for Vst3Factory {
         else {
             return None;
         };
-        let (node, ends) = Vst3Node::new(config);
+        // A plug-in that already runs keeps its latency: the node reads it
+        // at once, so a program compiled after an engine restart compensates
+        // the same way as one compiled before it.
+        let latency = lock(&self.inner.latencies).get(&device.id).copied();
+        let (node, ends) = Vst3Node::new(config, latency.unwrap_or(0));
         lock(&self.inner.requests).push(Request {
             device: device.clone(),
             config: *config,
@@ -779,7 +946,8 @@ fn module_binary(path: &Path) -> Result<PathBuf, Vst3Error> {
 }
 
 /// Makes the class's instance: a component and its controller, both
-/// initialized, the controller given the handler, and the two connected.
+/// initialized, the controller given its own component handler, and the
+/// two connected.
 fn new_instance(main: &Main, module: &Module, cid: &TUID) -> Result<Instance, Vst3Error> {
     let component = create_instance::<IComponent>(module, cid)?;
     let host = main
@@ -820,9 +988,18 @@ fn new_instance(main: &Main, module: &Module, cid: &TUID) -> Result<Instance, Vs
             ));
         }
     }
-    if let Some(handler) = main.handler.as_com_ref::<IComponentHandler>() {
-        // SAFETY: the handler is the host's own object, which outlives the
-        // controller.
+    // Each instance has a component handler of its own, so the gestures
+    // and restart asks it records belong to this device (spec:
+    // clap-hosting R6, R10, which the VST3 spec mirrors).
+    let gestures = Arc::new(Gestures::default());
+    let restart = Arc::new(AtomicU32::new(0));
+    let handler = ComWrapper::new(ComponentHandler::new(
+        Arc::clone(&gestures),
+        Arc::clone(&restart),
+    ));
+    if let Some(handler) = handler.as_com_ref::<IComponentHandler>() {
+        // SAFETY: the handler is this instance's own object, which outlives
+        // the controller it is set on.
         unsafe { controller.setComponentHandler(handler.as_ptr()) };
     }
     // A single-component effect is its own controller, so there is nothing
@@ -851,6 +1028,8 @@ fn new_instance(main: &Main, module: &Module, cid: &TUID) -> Result<Instance, Vs
         controller,
         connected,
         separate,
+        restart,
+        gestures,
         params,
         pending: Vec::new(),
         ends: None,
@@ -862,6 +1041,7 @@ fn new_instance(main: &Main, module: &Module, cid: &TUID) -> Result<Instance, Vs
         silenced: false,
         failure: None,
         latency: 0,
+        handler,
     })
 }
 
@@ -909,6 +1089,71 @@ fn teardown(instance: &mut Instance) {
             instance.controller.terminate();
         }
     }
+}
+
+/// The device's running plug-in, or why it has none.
+fn instance(main: &mut Main, device: DeviceId) -> Result<&mut Instance, Vst3Error> {
+    main.instances
+        .get_mut(&device)
+        .ok_or(Vst3Error::NoInstance(device))
+}
+
+/// Saves the component's state and the controller's, each on the main
+/// thread, as [`Vst3Host::save_state`] reports them.
+fn saved_state(instance: &Instance) -> Result<(Vec<u8>, Vec<u8>), Vst3Error> {
+    let component = stream::save(|state| {
+        // SAFETY: the component is a live object and writes into the host's
+        // stream, which lives through the call.
+        unsafe { instance.component.getState(state) }
+    })?;
+    // A single-component effect is its own controller, so its state is its
+    // component's, saved once.
+    let controller = if instance.separate {
+        stream::save(|state| {
+            // SAFETY: the controller is a live object and writes into the
+            // host's stream, which lives through the call.
+            unsafe { instance.controller.getState(state) }
+        })?
+    } else {
+        Vec::new()
+    };
+    Ok((component, controller))
+}
+
+/// Gives the plug-in a saved state: the component's, what it means for the
+/// controller, then the controller's own (spec: vst3-hosting R9, R11, as
+/// clap-hosting's R9, R11).
+fn load_state(instance: &mut Instance, data: &[u8]) -> Result<(), Vst3Error> {
+    let (component, controller) =
+        split_state(data).ok_or_else(|| Vst3Error::Refused("the state".to_owned()))?;
+    let result = stream::load(component, |state| {
+        // SAFETY: the component is a live object and reads the host's
+        // stream, which lives through the call.
+        unsafe { instance.component.setState(state) }
+    });
+    if result != kResultOk {
+        return Err(Vst3Error::Refused("the component's state".to_owned()));
+    }
+    if instance.separate {
+        // The controller's values follow the component's, as VST3's own
+        // host asks. A controller that can't take it keeps its values: the
+        // set's own parameter values are applied over them next (R11).
+        stream::load(component, |state| {
+            // SAFETY: the controller is a live object and reads the host's
+            // stream, which lives through the call.
+            unsafe { instance.controller.setComponentState(state) }
+        });
+        if !controller.is_empty() {
+            let result = stream::load(controller, |state| {
+                // SAFETY: as above.
+                unsafe { instance.controller.setState(state) }
+            });
+            if result != kResultOk {
+                return Err(Vst3Error::Refused("the controller's state".to_owned()));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Gives a new node its plug-in, making the plug-in if the device has none.
@@ -990,6 +1235,13 @@ fn ensure_instance(main: &mut Main, device: &Device, inner: &Inner) -> bool {
     };
     instance.path = path;
     main.missing.remove(&device.id);
+    // Spec: vst3-hosting R9, R11 (as clap-hosting's R9, R11): the saved
+    // state first, then the set's parameter values over it.
+    if let Some(saved) = device.plugin.as_ref().filter(|p| !p.data.is_empty())
+        && let Err(error) = load_state(&mut instance, &saved.data)
+    {
+        instance.failure = Some(format!("{error}; it starts from its defaults"));
+    }
     set_values(&mut instance, device);
     main.instances.insert(device.id, instance);
     true
@@ -1147,12 +1399,38 @@ fn take_back(instance: &mut Instance) -> bool {
 }
 
 /// One plug-in's main-thread work: deactivate what nodes gave back,
-/// activate what waits for its node. Returns whether anything changed.
-fn pump(instance: &mut Instance) -> bool {
+/// restart it when it asked, tell its controller what its node applied,
+/// collect the changes its controller made itself, activate what waits for
+/// its node, and report a latency that changed. Returns whether anything
+/// changed.
+fn pump(
+    device: DeviceId,
+    instance: &mut Instance,
+    changes: &mut Vec<ParamChange>,
+    latency_changes: &mut Vec<(DeviceId, u32)>,
+    latencies: &mut BTreeMap<DeviceId, u32>,
+) -> bool {
     let mut changed = take_back(instance);
     instance
         .retired
         .retain(|ends| !(ends.from_node.is_abandoned() && ends.from_node.is_empty()));
+
+    // A restart it asked for — its latency changed, say: ask its node for
+    // the component; the next pump activates it again, and the node passes
+    // its input through for the blocks between (R10).
+    if instance.restart.swap(0, Relaxed) != 0
+        && instance.handed.is_some()
+        && let Some(ends) = &instance.ends
+    {
+        ends.status.hand_back.store(true, Relaxed);
+        changed = true;
+    }
+
+    // The values its node applied, so the controller's parameters are the
+    // device's (R5), and the changes its controller made itself, for the
+    // set (R6).
+    changed |= sync_controller(instance);
+    changed |= take_gestures(device, instance, changes);
 
     if let Some(ends) = &instance.ends
         && ends.status.failed.load(Relaxed)
@@ -1172,7 +1450,20 @@ fn pump(instance: &mut Instance) -> bool {
         match activate(instance, &config) {
             Ok(active) => {
                 let generation = active.generation;
+                // The latency it reports now: the engine recompiles with it,
+                // so delay compensation follows a plug-in that changed its
+                // own (R10, delay-compensation R6), and a node made later
+                // reads it at once.
+                latencies.insert(device, active.latency);
+                if instance.latency != active.latency {
+                    latency_changes.push((device, active.latency));
+                }
                 instance.latency = active.latency;
+                if let Some(ends) = &instance.ends {
+                    // The node reports it from now on, before its next block
+                    // takes the component (R10).
+                    ends.status.latency.store(active.latency, Relaxed);
+                }
                 let pushed = instance.ends.as_mut().is_some_and(|ends| {
                     !ends.to_node.is_abandoned() && ends.to_node.push(active).is_ok()
                 });
@@ -1188,6 +1479,41 @@ fn pump(instance: &mut Instance) -> bool {
         }
     }
     changed
+}
+
+/// Tells the controller the values its node applied to the component, so
+/// its parameters are the device's (R5). Returns whether anything changed.
+fn sync_controller(instance: &mut Instance) -> bool {
+    let mut changed = false;
+    for ends in instance.ends.iter_mut().chain(instance.retired.iter_mut()) {
+        while let Ok((id, normalized)) = ends.applied.pop() {
+            // SAFETY: the controller takes its own parameter's value, by
+            // ID, on the main thread.
+            if unsafe { instance.controller.setParamNormalized(id, normalized) } == kResultOk {
+                changed = true;
+            }
+        }
+    }
+    changed
+}
+
+/// Takes the changes the plug-in's controller made itself, such as from its
+/// editor: each gesture once, with its final value, in plain units (R6).
+/// Returns whether there were any.
+fn take_gestures(device: DeviceId, instance: &Instance, changes: &mut Vec<ParamChange>) -> bool {
+    let gestures = Arc::clone(&instance.gestures);
+    let before = changes.len();
+    gestures.take(|id, normalized| {
+        // SAFETY: the controller maps its own parameter's value, by ID, on
+        // the main thread.
+        let plain = unsafe { instance.controller.normalizedParamToPlain(id, normalized) };
+        changes.push(ParamChange {
+            device,
+            param: ParamId(id),
+            value: plain,
+        });
+    });
+    changes.len() > before
 }
 
 /// Lets go of a plug-in: asks its node for the component, keeping the

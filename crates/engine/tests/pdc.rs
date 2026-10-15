@@ -13,11 +13,12 @@ bl_rt::install_trap!();
 mod common;
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering::Relaxed};
 
 use bl_commands::Registry as Commands;
 use bl_core::time::Ticks;
 use bl_engine::testing::{DELAY, DELAY_FRAMES, KEY};
-use bl_engine::{MediaMap, TransportCommand};
+use bl_engine::{Block, MediaMap, Node, NodeConfig, TransportCommand};
 use bl_media::SampleData;
 use bl_model::{
     AudioData, Clip, ClipData, Command, ContentHash, Device, DeviceId, DeviceKind, Editor, TrackId,
@@ -277,4 +278,110 @@ fn a_sidechain_keyed_from_another_track_lines_up() {
         LATENCY
     );
     assert!(out[LATENCY + 1..].iter().all(|&s| s == 0.0), "silent after");
+}
+
+/// Plays the song from 1.1.1 again, so the impulse it carries sounds once
+/// more.
+fn replay(rig: &mut Rig) {
+    rig.sender.transport(TransportCommand::Stop);
+    rig.sender.transport(TransportCommand::Play);
+    assert!(rig.sender.flush(), "the queue is full");
+}
+
+/// A test device whose latency changes when a test moves it, as a plug-in
+/// that restarted for a new one has (WP-2.7): it delays every sample by
+/// what it reports, so a test can tell whether the compensation followed.
+struct Restarted {
+    latency: Arc<AtomicU32>,
+    samples: Vec<f32>,
+    write: usize,
+    channels: usize,
+}
+
+impl Restarted {
+    /// The longest latency the ring holds.
+    const MAX: usize = 4096;
+
+    fn new(config: &NodeConfig, latency: Arc<AtomicU32>) -> Self {
+        Self {
+            latency,
+            samples: vec![0.0; config.channels * Self::MAX],
+            write: 0,
+            channels: config.channels,
+        }
+    }
+}
+
+impl Node for Restarted {
+    fn process(&mut self, block: &mut Block<'_>) {
+        let frames = usize::try_from(self.latency.load(Relaxed))
+            .unwrap_or(0)
+            .min(Self::MAX);
+        if frames == 0 {
+            return;
+        }
+        let channels = block.channels().min(self.channels);
+        for c in 0..channels {
+            let base = c * Self::MAX;
+            let mut w = self.write;
+            for sample in block.channel_mut(c) {
+                let read = (w + Self::MAX - frames) % Self::MAX;
+                let held = self.samples[base + read];
+                self.samples[base + w] = *sample;
+                *sample = held;
+                w += 1;
+                if w == Self::MAX {
+                    w = 0;
+                }
+            }
+            if c + 1 == channels {
+                self.write = w;
+            }
+        }
+    }
+
+    fn latency(&self) -> u32 {
+        self.latency.load(Relaxed)
+    }
+}
+
+// WP-2.7, delay-compensation R6. A device's node reports a new latency, as
+// a plug-in that restarted for one does; the compiler recompiles with what
+// it's told and the compensation follows.
+#[test]
+fn a_latency_change_recompiles_and_the_compensation_follows() {
+    const RESTARTED: &str = "test.restarted";
+    let mut media = MediaMap::new();
+    media.insert(hash(1), impulse(1.0));
+    media.insert(hash(2), impulse(-1.0));
+    let latency = Arc::new(AtomicU32::new(LATENCY as u32));
+    let shared = Arc::clone(&latency);
+    let mut rig = Rig::with_registry(64, move |registry| {
+        registry.set_media(Arc::new(media));
+        registry.add_native(RESTARTED, move |_device, config| {
+            Box::new(Restarted::new(config, Arc::clone(&shared)))
+        });
+    });
+    rig.sync();
+    rig.sender.transport(TransportCommand::Play);
+    let ed = &mut rig.editor;
+    let a = track(ed, TrackKind::Audio, None);
+    let b = track(ed, TrackKind::Audio, None);
+    clip(ed, a, hash(1));
+    clip(ed, b, hash(2));
+    let d = device(ed, b, RESTARTED, &[]);
+    rig.sync();
+    let out = rig.render(2 * LATENCY + 512, 64);
+    assert_null(&out, "aligned at the first latency");
+
+    // The device now reports 300: the compiler recompiles with what the
+    // shell tells it for a restarted plug-in, and the compensation follows.
+    latency.store(300, Relaxed);
+    let update = rig.compiler.latency(d, 300);
+    assert!(update.program.is_some(), "a new program");
+    rig.sender.send_update(update);
+    assert!(rig.sender.flush(), "the queue is full");
+    replay(&mut rig);
+    let out = rig.render(2 * LATENCY + 512, 64);
+    assert_null(&out, "aligned at the new latency");
 }

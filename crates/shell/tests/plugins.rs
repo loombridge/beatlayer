@@ -650,7 +650,7 @@ fn a_vst3_plugin_loads_runs_and_processes_through_the_commands() {
         serde_json::from_value(shell.run("device_view.state", json!({})).unwrap()).unwrap();
     let frame = view.devices.iter().find(|d| d.id == device).unwrap();
     assert!(frame.selected);
-    assert_eq!(frame.panel.as_ref().unwrap().description.params.len(), 1);
+    assert_eq!(frame.panel.as_ref().unwrap().description.params.len(), 3);
     let params: DeviceParameters = serde_json::from_value(
         shell
             .run("device.parameters", json!({ "device": device }))
@@ -694,4 +694,262 @@ fn a_vst3_plugin_loads_runs_and_processes_through_the_commands() {
     assert!(info.active);
     assert_eq!(info.failure, None);
     assert!(info.values.contains(&(ParamId(bl_test_vst3::GAIN), 1.0)));
+}
+
+/// Loads the VST3 test plug-in onto `track` and returns its device.
+fn load_vst3(shell: &mut Shell, path: &std::path::Path, track: bl_model::TrackId) -> DeviceId {
+    let loaded: PluginLoaded = serde_json::from_value(
+        shell
+            .run(ids::LOAD, json!({ "path": path, "track": track }))
+            .unwrap(),
+    )
+    .unwrap();
+    loaded.device
+}
+
+// Spec: vst3-hosting R1, R5, R8, R9, R11, R16 (as clap-hosting's). A VST3
+// plug-in's state round-trips a saved set, exactly, with the file it came
+// from, all through registered commands as an agent runs them.
+#[test]
+fn a_vst3_plugin_keeps_its_state_with_the_set() {
+    let scratch = std::env::temp_dir().join(format!("bl-shell-vst3-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&scratch);
+    std::fs::create_dir_all(&scratch).unwrap();
+
+    let mut shell = Shell::headless();
+    shell.start_audio();
+    assert!(shell.audio().engine_running(), "{:?}", shell.audio());
+    let track = audio_track(&shell);
+    let device = load_vst3(&mut shell, bl_test_vst3::bundle(), track);
+    assert_eq!(shell.editor().undo_history().next(), Some("Insert Device"));
+
+    // The engine runs it, and a parameter change reaches the plug-in and
+    // its controller, which `plugin.info` reads.
+    let info = wait(&mut shell, device, |i| i.active);
+    assert_eq!(info.latency, 0);
+    assert_eq!(info.failure, None);
+    shell
+        .run(
+            "device.set_param",
+            json!({ "device": device, "param": bl_test_vst3::GAIN, "value": 0.5 }),
+        )
+        .unwrap();
+    wait(&mut shell, device, |i| {
+        value(i, bl_test_vst3::GAIN) == Some(0.5)
+    });
+
+    // The controller makes a gesture on Last Note, as its editor would.
+    shell
+        .vst3()
+        .load_state(
+            device,
+            &bl_plugin_host::vst3::plugin_state(&[], &bl_test_vst3::gesture_state(48, 64)),
+        )
+        .unwrap();
+    wait(&mut shell, device, |i| {
+        value(i, bl_test_vst3::LAST_NOTE) == Some(64.0)
+    });
+
+    // Saved, the set holds the component's and the controller's state
+    // together, taken in without an undo step.
+    let history = shell.editor().undo_history().len();
+    let saved = shell
+        .run(
+            commands::SET_SAVE_AS,
+            json!({ "path": scratch.join("Plug.blset") }),
+        )
+        .unwrap();
+    let path = saved["path"].as_str().unwrap().to_owned();
+    let state = shell
+        .editor()
+        .document()
+        .device(device)
+        .and_then(|d| d.plugin.clone())
+        .expect("the state, taken in before the save");
+    assert_eq!(&state.data[..4], b"BLTV");
+    assert_eq!(shell.editor().undo_history().len(), history);
+
+    // Opened again, a new plug-in instance starts from it.
+    shell.run(commands::SET_NEW, json!({})).unwrap();
+    shell
+        .run(commands::SET_OPEN, json!({ "path": path }))
+        .unwrap();
+    let info = wait(&mut shell, device, |i| i.active);
+    assert_eq!(value(&info, bl_test_vst3::GAIN), Some(0.5));
+    assert_eq!(value(&info, bl_test_vst3::LAST_NOTE), Some(64.0));
+    assert_eq!(
+        shell.editor().document().device(device).unwrap().plugin,
+        Some(state)
+    );
+
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+// Spec: vst3-hosting R6 (as clap-hosting's R6). A gesture the plug-in's
+// controller makes is one undo step, named for its parameter, carrying its
+// final value.
+#[test]
+fn a_change_a_vst3_plugin_makes_itself_is_one_undo_step() {
+    let mut shell = Shell::headless();
+    shell.start_audio();
+    let track = audio_track(&shell);
+    let device = load_vst3(&mut shell, bl_test_vst3::bundle(), track);
+    wait(&mut shell, device, |i| i.active);
+
+    let steps = shell.editor().undo_history().len();
+    shell
+        .vst3()
+        .load_state(
+            device,
+            &bl_plugin_host::vst3::plugin_state(&[], &bl_test_vst3::gesture_state(48, 64)),
+        )
+        .unwrap();
+    assert!(shell.poll());
+    assert_eq!(
+        shell
+            .editor()
+            .document()
+            .device(device)
+            .unwrap()
+            .params
+            .get(&ParamId(bl_test_vst3::LAST_NOTE)),
+        Some(&64.0)
+    );
+    assert_eq!(shell.editor().undo_history().len(), steps + 1);
+    assert_eq!(
+        shell.editor().undo_history().next(),
+        Some("Change \"Last Note\"")
+    );
+}
+
+// Spec: vst3-hosting R10 (as clap-hosting's R10); delay-compensation R6.
+// A latency change restarts the plug-in through the shell's poll, and the
+// engine recompiles with it, so its delay compensation follows.
+#[test]
+fn a_vst3_latency_change_restarts_the_plugin_and_reaches_the_engine() {
+    let mut shell = Shell::headless();
+    shell.start_audio();
+    let track = audio_track(&shell);
+    let device = load_vst3(&mut shell, bl_test_vst3::bundle(), track);
+    let info = wait(&mut shell, device, |i| i.active);
+    assert_eq!(info.latency, 0);
+    let before = shell
+        .audio()
+        .compile_counts()
+        .expect("a running engine")
+        .programs;
+
+    // A person moves the plug-in's latency up: it takes the value in its
+    // next block, its controller asks for a restart, and the host
+    // deactivates and activates it again.
+    shell
+        .run(
+            "device.set_param",
+            json!({ "device": device, "param": bl_test_vst3::LATENCY, "value": 256 }),
+        )
+        .unwrap();
+    let info = wait(&mut shell, device, |i| i.latency == 256);
+    assert!(info.active);
+    assert_eq!(info.failure, None);
+
+    // The shell told the engine, which compiled a program with it.
+    let until = Instant::now() + Duration::from_secs(10);
+    loop {
+        let programs = shell
+            .audio()
+            .compile_counts()
+            .expect("a running engine")
+            .programs;
+        if programs > before {
+            break;
+        }
+        assert!(Instant::now() < until, "the engine never recompiled");
+        shell.poll();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+// Spec: vst3-hosting R12 (as clap-hosting's R12). A missing plug-in keeps
+// its saved state through a save: nothing can be saved over it.
+#[test]
+fn a_missing_vst3_plugin_keeps_its_saved_state_through_a_save() {
+    let scratch =
+        std::env::temp_dir().join(format!("bl-shell-vst3-missing-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&scratch);
+    std::fs::create_dir_all(&scratch).unwrap();
+
+    let mut shell = Shell::headless();
+    shell.start_audio();
+    let track = audio_track(&shell);
+    let device = load_vst3(&mut shell, bl_test_vst3::bundle(), track);
+    wait(&mut shell, device, |i| i.active);
+    shell
+        .run(
+            "device.set_param",
+            json!({ "device": device, "param": bl_test_vst3::GAIN, "value": 0.5 }),
+        )
+        .unwrap();
+    wait(&mut shell, device, |i| {
+        value(i, bl_test_vst3::GAIN) == Some(0.5)
+    });
+    let saved = shell
+        .run(
+            commands::SET_SAVE_AS,
+            json!({ "path": scratch.join("Gone.blset") }),
+        )
+        .unwrap();
+    let path = saved["path"].as_str().unwrap().to_owned();
+    let state = shell
+        .editor()
+        .document()
+        .device(device)
+        .and_then(|d| d.plugin.clone())
+        .expect("the state, taken in before the save");
+
+    // The set travels to a machine where the plug-in's file isn't: its path
+    // points where none is, and its state stays in the file.
+    let bytes = std::fs::read(&path).unwrap();
+    let (mut project, info) =
+        bl_project::format::decode(&bytes, &bl_project::LoadOptions::default()).unwrap();
+    let mut editor = project.editor();
+    let moved = bl_model::PluginState {
+        path: "/nowhere/Gone.vst3".to_owned(),
+        data: state.data.clone(),
+    };
+    editor
+        .amend_plugin_state(device, Some(moved.clone()))
+        .unwrap();
+    project.document = editor.document().clone();
+    project.ids = editor.ids();
+    let rewritten = bl_project::format::encode(&project, info.revision + 1).unwrap();
+    std::fs::write(&path, rewritten).unwrap();
+
+    // Opened here, the plug-in isn't found; the device passes its input
+    // through and says why.
+    shell.run(commands::SET_NEW, json!({})).unwrap();
+    shell
+        .run(commands::SET_OPEN, json!({ "path": path }))
+        .unwrap();
+    let info = wait(&mut shell, device, |i| i.failure.is_some());
+    assert!(!info.active, "{info:?}");
+    assert!(
+        info.failure
+            .as_deref()
+            .unwrap_or_default()
+            .contains("couldn't load"),
+        "{info:?}"
+    );
+
+    // Saving keeps the state the set holds: nothing can be saved over it.
+    assert_eq!(
+        shell.editor().document().device(device).unwrap().plugin,
+        Some(moved.clone())
+    );
+    shell.run(commands::SET_SAVE, json!({})).unwrap();
+    assert_eq!(
+        shell.editor().document().device(device).unwrap().plugin,
+        Some(moved)
+    );
+
+    let _ = std::fs::remove_dir_all(&scratch);
 }

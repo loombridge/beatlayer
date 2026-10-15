@@ -37,6 +37,11 @@ pub const GAIN_MAX: f64 = 2.0;
 /// How far the echoed notes are transposed, in semitones.
 pub const ECHO_TRANSPOSE: i16 = 12;
 
+/// The environment variable a test sets so a scan crashes (`crash`) or hangs
+/// (`hang`) on purpose, as `bl-test-clap` does for CLAP. Only the scanner's
+/// tests set it.
+pub const TEST_SCAN_VAR: &str = "BL_TEST_VST3_SCAN";
+
 /// How many parameter queues and points one block's changes hold; past that
 /// the rest of the block is dropped, as it is in the host.
 const MAX_QUEUES: usize = 8;
@@ -793,6 +798,17 @@ pub extern "system" fn ModuleExit() -> bool {
 /// binary and gets a new factory from it.
 #[unsafe(no_mangle)]
 pub extern "system" fn GetPluginFactory() -> *mut IPluginFactory {
+    // Spec: plugin-scanning R5, as `bl-test-clap` does for CLAP. A scan can
+    // be made to crash or hang on purpose, so the scanner's child process
+    // isolation and timeout are tested with a real VST3 plug-in: the test
+    // sets `BL_TEST_VST3_SCAN`.
+    match std::env::var(TEST_SCAN_VAR).as_deref() {
+        Ok("crash") => std::process::abort(),
+        Ok("hang") => loop {
+            std::thread::sleep(std::time::Duration::from_secs(3600));
+        },
+        _ => {}
+    }
     let wrapper = ComWrapper::new(Factory);
     match wrapper.to_com_ptr::<IPluginFactory>() {
         Some(factory) => factory.into_raw(),

@@ -1475,14 +1475,11 @@ impl Shell {
             }
             plugin_ids::SCAN | plugin_ids::RESCAN => {
                 let plugin_ids::ScanArgs { paths } = Self::args(id, args)?;
-                let paths: Vec<std::path::PathBuf> = match paths {
-                    Some(paths) => paths.into_iter().map(std::path::PathBuf::from).collect(),
-                    None => bl_plugin_host::scan::system_paths(bl_model::PluginFormat::Clap),
-                };
+                let paths: Option<Vec<std::path::PathBuf>> =
+                    paths.map(|paths| paths.into_iter().map(std::path::PathBuf::from).collect());
                 let report = crate::plugins::scan_report(
                     &self.scanner,
-                    bl_model::PluginFormat::Clap,
-                    &paths,
+                    paths.as_deref(),
                     id == plugin_ids::RESCAN,
                     &self.prefs.hidden_plugins,
                 );

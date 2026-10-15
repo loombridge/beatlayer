@@ -222,8 +222,8 @@ pub type SetPanelParamResult = crate::devices::DeviceViewState;
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ScanArgs {
-    /// The files or folders to scan; the system's plug-in folders if left
-    /// out.
+    /// The files or folders to scan; each format's system plug-in folders
+    /// if left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub paths: Option<Vec<String>>,
 }
@@ -451,13 +451,13 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .description(
                 "Finds the plug-ins installed on this machine and describes each one: its \
                  format, its file, its identifier, name, vendor, version, and role in a chain. \
-                 Scans the files or folders in `paths`, or the system's plug-in folders when \
-                 `paths` is left out. Each plug-in is loaded in a separate process with a \
-                 timeout, so a plug-in that crashes or hangs is put on a blocklist with the \
-                 reason instead of taking Beatlayer down; a file whose size and modification \
-                 time are unchanged is answered from the cache. CLAP is the only format \
-                 scanned so far. Reads plug-in files outside the project, so an agent asks \
-                 first.",
+                 Scans the files or folders in `paths`, or each format's own system plug-in \
+                 folders (CLAP's and VST3's conventions) when `paths` is left out. Plug-ins \
+                 of every hosted format are scanned. Each one is loaded in a separate process \
+                 with a timeout, so a plug-in that crashes or hangs is put on a blocklist with \
+                 the reason instead of taking Beatlayer down; a file whose size and \
+                 modification time are unchanged is answered from the cache. Reads plug-in \
+                 files outside the project, so an agent asks first.",
             )
             .permission(Permission::External)
             .contexts([Global, DeviceView])
@@ -467,9 +467,9 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     registry.register(
         CommandSpec::new(RESCAN, "Rescan Plug-Ins")
             .description(
-                "Scans the plug-ins in `paths` (or the system's plug-in folders) again, \
-                 ignoring the cache and clearing the blocklist for them, as the Rescan button \
-                 does. Returns `plugin.scan`'s report.",
+                "Scans the plug-ins in `paths` (or each format's system plug-in folders) \
+                 again, ignoring the cache and clearing the blocklist for them, as the Rescan \
+                 button does. Returns `plugin.scan`'s report.",
             )
             .permission(Permission::External)
             .contexts([Global, DeviceView])

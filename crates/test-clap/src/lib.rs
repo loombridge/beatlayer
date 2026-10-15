@@ -18,7 +18,9 @@
 //!   latency, and last note, little-endian) and refuses anything else, but
 //!   for three states that make it fail on purpose: [`FAIL_PROCESS`]
 //!   makes every process call fail, [`FAIL_ACTIVATE`] its next activation,
-//!   and [`FAIL_GUI`] its next editor show or hide.
+//!   and [`FAIL_GUI`] its next editor show or hide. [`ASK_RESIZE`] makes
+//!   it ask the host for an editor window size ([`ASK_RESIZE_WIDTH`] by
+//!   [`ASK_RESIZE_HEIGHT`]), as a plug-in that resizes its own view does.
 //! - **Editor.** A window that draws nothing, so tests open and close it
 //!   headless: floating in any windowing API, and embedded into the host's
 //!   window on the platforms that build one (win32 and x11; WP-2.10). What
@@ -37,7 +39,7 @@ use clack_extensions::audio_ports::{
     PluginAudioPortsImpl,
 };
 use clack_extensions::gui::{
-    GuiApiType, GuiConfiguration, GuiSize, PluginGui, PluginGuiImpl, Window,
+    GuiApiType, GuiConfiguration, GuiSize, HostGui, PluginGui, PluginGuiImpl, Window,
 };
 use clack_extensions::latency::{PluginLatency, PluginLatencyImpl};
 use clack_extensions::note_ports::{
@@ -88,6 +90,13 @@ pub const FAIL_PROCESS: &[u8] = b"FAIL:PROCESS";
 pub const FAIL_ACTIVATE: &[u8] = b"FAIL:ACTIVATE";
 /// A state that makes the next editor show or hide fail.
 pub const FAIL_GUI: &[u8] = b"FAIL:GUI";
+/// A state that asks the host to resize this plug-in's editor window, as
+/// a plug-in resizing its own view does (`request_resize`; WP-2.10).
+pub const ASK_RESIZE: &[u8] = b"ASK:RESIZE";
+/// The size [`ASK_RESIZE`] asks for, in physical pixels.
+pub const ASK_RESIZE_WIDTH: u32 = 500;
+/// The height [`ASK_RESIZE`] asks for, in physical pixels.
+pub const ASK_RESIZE_HEIGHT: u32 = 400;
 
 /// The environment variable a test sets so a scan crashes (`crash`) or hangs
 /// (`hang`) on purpose. Only the scanner's tests set it.
@@ -180,6 +189,14 @@ impl Shared<'_> {
             {
                 self.set(id.get(), param.value());
             }
+        }
+    }
+
+    /// Asks the host to resize this plug-in's editor window, as a plug-in
+    /// that resizes its own view does (`request_resize`; WP-2.10).
+    fn ask_resize(&self, width: u32, height: u32) {
+        if let Some(gui) = self.host.get_extension::<HostGui>() {
+            let _ = gui.request_resize(&self.host, width, height);
         }
     }
 }
@@ -530,6 +547,10 @@ impl PluginStateImpl for MainThread<'_> {
         }
         if bytes == FAIL_GUI {
             shared.failure.store(GUI_FAILS, Relaxed);
+            return Ok(());
+        }
+        if bytes == ASK_RESIZE {
+            shared.ask_resize(ASK_RESIZE_WIDTH, ASK_RESIZE_HEIGHT);
             return Ok(());
         }
         let field = |range: core::ops::Range<usize>| bytes.get(range);

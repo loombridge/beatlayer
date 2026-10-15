@@ -1,10 +1,10 @@
 //! Editor host windows (WP-2.10): where the platform builds one, a test
 //! CLAP editor opens in a window Beatlayer owns, with the plug-in's view
-//! embedded into it, the display's scale reaches the plug-in, and the
-//! editor resizes and closes again. Windows and X11 only: macOS editors
-//! keep floating in the plug-in's own window until its host-window
-//! embedding lands. On Linux these need an X display; CI runs them under
-//! Xvfb.
+//! embedded into it, the display's scale reaches the plug-in, the editor
+//! resizes — as the person drags it, and as the plug-in asks the host
+//! itself — and it closes again. Windows and X11 only: macOS editors keep
+//! floating in the plug-in's own window until its host-window embedding
+//! lands. On Linux these need an X display; CI runs them under Xvfb.
 
 #![cfg(any(target_os = "windows", all(unix, not(target_os = "macos"))))]
 
@@ -14,7 +14,10 @@ use bl_engine::NodeFactory as _;
 use bl_model::{DeviceId, ParamId};
 use bl_plugin_host::clap::ClapHost;
 use bl_plugin_host::window::GuiSize;
-use common::{EDITOR_HEIGHT, EDITOR_SCALE, EDITOR_WIDTH, bundle, config, device};
+use common::{
+    ASK_RESIZE, ASK_RESIZE_HEIGHT, ASK_RESIZE_WIDTH, EDITOR_HEIGHT, EDITOR_SCALE, EDITOR_WIDTH,
+    bundle, config, device,
+};
 
 /// A host with the test plug-in loaded and a running instance for it: a
 /// node for its device, which the main thread gives its plug-in at once.
@@ -86,4 +89,30 @@ fn the_editor_resizes_to_the_size_the_plugin_takes_and_closes() {
     let closed = host.status(device).unwrap();
     assert!(!closed.editor_open, "closed");
     assert_eq!(closed.editor_scale, None, "its window is gone");
+}
+
+// Spec: clap-hosting R13; WP-2.10. A plug-in that resizes its own view
+// asks the host (`request_resize`), and the host window follows it.
+#[test]
+fn a_resize_the_plugin_asks_for_reaches_the_host_window() {
+    let (host, device) = running();
+    host.open_editor(device, "Test Gain Echo/1-Audio")
+        .expect("it opens");
+    host.load_state(device, ASK_RESIZE).expect("it asks");
+    host.idle();
+    assert_eq!(
+        host.status(device).unwrap().editor_size,
+        Some(GuiSize {
+            width: ASK_RESIZE_WIDTH,
+            height: ASK_RESIZE_HEIGHT,
+        }),
+        "the window the plug-in asked for"
+    );
+
+    host.close_editor(device).unwrap();
+    assert_eq!(
+        host.status(device).unwrap().editor_size,
+        None,
+        "its window is gone"
+    );
 }

@@ -58,7 +58,7 @@ use bl_model::{
     Device, DeviceDescription, DeviceId, DeviceKind, ParamId, PluginFormat, PluginState,
 };
 use clack_extensions::audio_ports::{AudioPortInfoBuffer, PluginAudioPorts};
-use clack_extensions::gui::{GuiApiType, GuiConfiguration, PluginGui};
+use clack_extensions::gui::{GuiApiType, GuiConfiguration, GuiSize, PluginGui};
 use clack_extensions::latency::PluginLatency;
 use clack_extensions::params::PluginParams;
 use clack_extensions::state::PluginState as StateExtension;
@@ -66,7 +66,7 @@ use clack_host::prelude::*;
 use lspk_plugin::agent_commands::PluginAgentCommands;
 
 #[cfg(any(target_os = "windows", all(unix, not(target_os = "macos"))))]
-use crate::window::{EditorWindow, GuiSize, WindowEvent};
+use crate::window::{EditorWindow, WindowEvent};
 
 pub use bl_commands::CommandSpec;
 pub use clack_host::entry::EntryDescriptor;
@@ -172,6 +172,9 @@ pub struct PluginStatus {
     /// (`set_scale`); `None` while it floats in a window of its own, or
     /// has no editor (WP-2.10).
     pub editor_scale: Option<f64>,
+    /// Its host window's client size, in physical pixels; `None` while its
+    /// editor floats in a window of its own, or isn't open (WP-2.10).
+    pub editor_size: Option<GuiSize>,
     /// Each parameter's value, as the plug-in reports it.
     pub values: Vec<(ParamId, f64)>,
 }
@@ -797,6 +800,7 @@ impl ClapHost {
                 editor_open: false,
                 editor_hidden: false,
                 editor_scale: None,
+                editor_size: None,
                 values: Vec::new(),
             });
         }
@@ -819,6 +823,10 @@ impl ClapHost {
         let editor_scale = instance.editor.as_ref().map(|editor| editor.scale);
         #[cfg(not(any(target_os = "windows", all(unix, not(target_os = "macos")))))]
         let editor_scale = None;
+        #[cfg(any(target_os = "windows", all(unix, not(target_os = "macos"))))]
+        let editor_size = instance.editor.as_ref().map(|editor| editor.window.size());
+        #[cfg(not(any(target_os = "windows", all(unix, not(target_os = "macos")))))]
+        let editor_size = None;
         Some(PluginStatus {
             plugin_id: instance.plugin_id.clone(),
             path: instance.path.clone(),
@@ -833,6 +841,7 @@ impl ClapHost {
             editor_open: instance.editor_open,
             editor_hidden: instance.editor_hidden,
             editor_scale,
+            editor_size,
             values,
         })
     }
@@ -1263,6 +1272,27 @@ fn pump_editor(instance: &mut Instance) -> bool {
     changed
 }
 
+/// A size the plug-in itself asked its editor's window to become (CLAP's
+/// `request_resize`, WP-2.10): the host window takes it, as the plug-in's
+/// own view already did. A plug-in that takes no new size is told the size
+/// the window has instead (`set_size`), which reverts its resize.
+#[cfg(any(target_os = "windows", all(unix, not(target_os = "macos"))))]
+fn resize_for_plugin(instance: &mut Instance, size: GuiSize) {
+    let plugin = instance.instance.plugin_handle();
+    let Some(gui) = plugin.get_extension::<PluginGui>() else {
+        return;
+    };
+    let Some(editor) = &instance.editor else {
+        // A floating editor resizes its own window.
+        return;
+    };
+    if gui.can_resize(&plugin) {
+        editor.window.resize(size);
+    } else {
+        let _ = gui.set_size(&plugin, editor.window.size());
+    }
+}
+
 fn close_editor(instance: &mut Instance) {
     if !instance.editor_open {
         return;
@@ -1691,6 +1721,15 @@ fn pump(device: DeviceId, instance: &mut Instance, changes: &mut Vec<ParamChange
     #[cfg(any(target_os = "windows", all(unix, not(target_os = "macos"))))]
     {
         changed |= pump_editor(instance);
+    }
+    // WP-2.10: a size the plug-in itself asked its editor's host window
+    // for (CLAP's `request_resize`).
+    #[cfg(any(target_os = "windows", all(unix, not(target_os = "macos"))))]
+    if let Some((width, height)) = instance
+        .instance
+        .access_shared_handler(|shared| shared.take_resize_request())
+    {
+        resize_for_plugin(instance, GuiSize { width, height });
     }
     changed
 }

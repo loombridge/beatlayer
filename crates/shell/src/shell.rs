@@ -414,6 +414,22 @@ fn edit_error(id: &str, failure: EditFailure) -> ShellError {
     }
 }
 
+/// Whether `id` is one of the clip marker commands the Clip View's marker
+/// strip drags (`clip.set_midi_region`, `clip.set_midi_loop`). They are
+/// document commands, but the strip's drags run them as gestures, so moving
+/// a marker or the loop brace however far is one undo step (piano-roll R11).
+fn clip_marker_command(id: &str) -> bool {
+    matches!(id, model::SET_MIDI_REGION | model::SET_MIDI_LOOP)
+}
+
+/// The name of the undo step a marker-strip gesture makes.
+fn marker_label(id: &str) -> &'static str {
+    match id {
+        model::SET_MIDI_REGION => "Change clip region",
+        _ => "Change clip loop",
+    }
+}
+
 /// The shell's error for a MIDI file command that didn't run.
 fn midi_file_error(id: &str, error: crate::midi_files::MidiFileError) -> ShellError {
     match error {
@@ -2268,6 +2284,7 @@ impl Shell {
                 || device_ids::handles(id)
                 || self.is_device_command(id)
                 || track_ids::handles(id)
+                || note_ids::handles(id)
                 || midi_ids::handles(id)
                 || matches!(
                     id,
@@ -2348,7 +2365,10 @@ impl Shell {
         }
         let mut outcome = Ok(Value::Null);
         if let Some(invocation) = invocation {
-            if !edit_ids::handles(&invocation.id) && !note_ids::handles(&invocation.id) {
+            if !edit_ids::handles(&invocation.id)
+                && !note_ids::handles(&invocation.id)
+                && !clip_marker_command(&invocation.id)
+            {
                 return Err(ShellError::Unavailable {
                     command: invocation.id.clone(),
                     reason: "only the Arrangement's and the Clip View's editing commands run as \
@@ -2372,6 +2392,8 @@ impl Shell {
     fn gesture_step(&mut self, invocation: &Invocation) -> Result<Value, ShellError> {
         let label = if note_ids::handles(&invocation.id) {
             clip_view::label(&invocation.id)
+        } else if clip_marker_command(&invocation.id) {
+            marker_label(&invocation.id)
         } else {
             editing::label(&invocation.id, &invocation.args)
         };
@@ -2398,7 +2420,13 @@ impl Shell {
                    clip_view: &mut ClipView,
                    clipboard: &mut Option<Clipboard>,
                    invocation: &Invocation| {
-            if note_ids::handles(&invocation.id) {
+            if clip_marker_command(&invocation.id) {
+                // The document's own clip commands, run per frame like the
+                // Clip View's note commands.
+                model::run(editor, &invocation.id, invocation.args.clone())
+                    .map(|changes| to_value(&changes))
+                    .map_err(|error| EditFailure::Refused(error.to_string()))
+            } else if note_ids::handles(&invocation.id) {
                 clip_view::run(
                     &invocation.id,
                     invocation.args.clone(),

@@ -661,13 +661,14 @@ fn the_same_export_is_the_same_bytes_at_any_block_size() {
     let fixture = fixture("clip-mid-bar").unwrap();
     let scene = fixture.scene();
     let temp = TempDir::new("blocks");
-    for (file_type, dither) in [
-        (FileType::Flac, Dither::Triangular),
-        (FileType::Wav, Dither::Rectangular),
+    for (case, file_type, dither) in [
+        ("triangular", FileType::Flac, Dither::Triangular),
+        ("rectangular", FileType::Wav, Dither::Rectangular),
+        ("noise-shaped", FileType::Wav, Dither::NoiseShaped),
     ] {
         let mut files = Vec::new();
         for (n, block) in [512, 512, 61, 4096].into_iter().enumerate() {
-            let path = temp.0.join(format!("{n}.{}", file_type.extension()));
+            let path = temp.0.join(format!("{case}-{n}.{}", file_type.extension()));
             let mut job = job(path.clone(), file_type, BitDepth::Int16, scene.frames);
             job.dither = dither;
             job.block = block;
@@ -679,7 +680,9 @@ fn the_same_export_is_the_same_bytes_at_any_block_size() {
             "{file_type:?}"
         );
         // Dither changes the file, by at most a step either way.
-        let path = temp.0.join(format!("plain.{}", file_type.extension()));
+        let path = temp
+            .0
+            .join(format!("{case}-plain.{}", file_type.extension()));
         run(
             scene.document(),
             media_of(fixture),
@@ -687,12 +690,13 @@ fn the_same_export_is_the_same_bytes_at_any_block_size() {
         );
         assert_ne!(fs::read(&path).unwrap(), files[0]);
         let plain = decode(&path).2;
-        let dithered = decode(&temp.0.join(format!("0.{}", file_type.extension()))).2;
+        let dithered = decode(&temp.0.join(format!("{case}-0.{}", file_type.extension()))).2;
         let step = 1.0 / 32_768.0;
-        let reach = if dither == Dither::Triangular {
-            2.0
-        } else {
-            1.0
+        let reach = match dither {
+            Dither::Triangular => 2.0,
+            // The shaper's feedback adds up to a few steps of noise.
+            Dither::NoiseShaped => 6.5,
+            _ => 1.0,
         };
         for (a, b) in plain.iter().zip(&dithered) {
             assert!((a - b).abs() <= reach * step + 1e-9, "{a} against {b}");

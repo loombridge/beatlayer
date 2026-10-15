@@ -580,8 +580,7 @@ fn load_module(path: &Path) -> Result<Module, Vst3Error> {
     // SAFETY: loading a plug-in runs its code in this process, which is
     // what hosting it in process means (the architecture, "Plug-in
     // hosting"); the module's own code is its own.
-    let mut library =
-        unsafe { Library::new(&binary) }.map_err(|e| Vst3Error::Load(e.to_string()))?;
+    let library = unsafe { Library::new(&binary) }.map_err(|e| Vst3Error::Load(e.to_string()))?;
     #[cfg(target_os = "windows")]
     {
         // SAFETY: the module exports it or it doesn't; that's all the VST3
@@ -590,11 +589,14 @@ fn load_module(path: &Path) -> Result<Module, Vst3Error> {
             .ok()
             .map(|symbol| *symbol);
         if let Some(init) = init {
+            // SAFETY: the module exported it, and it's still loaded.
             let _ = unsafe { init() };
         }
     }
+    // On platforms whose module entry point wants the module's own handle,
+    // the library is asked for it and put back.
     #[cfg(unix)]
-    {
+    let library = {
         // SAFETY: the module exports it or it doesn't; the entry point gets
         // the module's own handle, which stays loaded.
         let entry = unsafe {
@@ -602,14 +604,15 @@ fn load_module(path: &Path) -> Result<Module, Vst3Error> {
         }
         .ok()
         .map(|symbol| *symbol);
-        if let Some(entry) = entry {
-            library = library_handle(library, |handle| {
+        match entry {
+            Some(entry) => library_handle(library, |handle| {
                 // SAFETY: the module exported the entry point, which gets
                 // the module's own handle.
                 let _ = unsafe { entry(handle) };
-            });
+            }),
+            None => library,
         }
-    }
+    };
     #[cfg(target_os = "macos")]
     let bundle = {
         // The bundle's entry point gets the `CFBundleRef` of the `.vst3`
@@ -658,16 +661,6 @@ fn load_module(path: &Path) -> Result<Module, Vst3Error> {
 fn library_handle<R>(library: Library, use_handle: impl FnOnce(*mut c_void) -> R) -> Library {
     let raw = library.into_raw();
     let handle = raw.cast::<c_void>();
-    let result = use_handle(handle);
-    let _ = result;
-    // SAFETY: the raw handle came from `into_raw` just above.
-    unsafe { Library::from_raw(raw) }
-}
-
-#[cfg(windows)]
-fn library_handle<R>(library: Library, use_handle: impl FnOnce(*mut c_void) -> R) -> Library {
-    let raw = library.into_raw();
-    let handle = raw as *mut c_void;
     let result = use_handle(handle);
     let _ = result;
     // SAFETY: the raw handle came from `into_raw` just above.
@@ -1031,11 +1024,17 @@ fn set_values(instance: &mut Instance, device: &Device) {
 /// VST3 order, then an [`Active`](node::Active) for the node.
 fn activate(instance: &mut Instance, config: &NodeConfig) -> Result<node::Active, String> {
     let processor = &instance.processor;
+    // The bindings type these C enums by the platform's default (`int` on
+    // Windows, `unsigned int` elsewhere), so each is converted once here
+    // rather than with a cast that one platform wouldn't need.
+    let audio = i32::try_from(MediaTypes_::kAudio).unwrap_or_default();
+    let input = i32::try_from(BusDirections_::kInput).unwrap_or_default();
+    let output = i32::try_from(BusDirections_::kOutput).unwrap_or_default();
+    let samples32 = i32::try_from(SymbolicSampleSizes_::kSample32).unwrap_or_default();
+    let realtime = i32::try_from(ProcessModes_::kRealtime).unwrap_or_default();
     // SAFETY: the processor is a live object and these are its own calls,
     // from the main thread.
-    if unsafe { processor.canProcessSampleSize(SymbolicSampleSizes_::kSample32 as i32) }
-        != kResultOk
-    {
+    if unsafe { processor.canProcessSampleSize(samples32) } != kResultOk {
         return Err("it doesn't process 32-bit audio".to_owned());
     }
     let mut inputs = [SpeakerArr::kStereo];
@@ -1045,8 +1044,8 @@ fn activate(instance: &mut Instance, config: &NodeConfig) -> Result<node::Active
     // SAFETY: as above.
     unsafe { processor.setBusArrangements(inputs.as_mut_ptr(), 1, outputs.as_mut_ptr(), 1) };
     let setup = ProcessSetup {
-        processMode: ProcessModes_::kRealtime as i32,
-        symbolicSampleSize: SymbolicSampleSizes_::kSample32 as i32,
+        processMode: realtime,
+        symbolicSampleSize: samples32,
         maxSamplesPerBlock: i32::try_from(config.max_frames.max(1)).unwrap_or(i32::MAX),
         sampleRate: f64::from(config.sample_rate.hz()),
     };
@@ -1057,65 +1056,30 @@ fn activate(instance: &mut Instance, config: &NodeConfig) -> Result<node::Active
     }
     let component = &instance.component;
     // SAFETY: as above.
-    let inputs_count =
-        unsafe { component.getBusCount(MediaTypes_::kAudio as i32, BusDirections_::kInput as i32) }
-            .clamp(0, MAX_BUSES as i32);
+    let inputs_count = unsafe { component.getBusCount(audio, input) }.clamp(0, MAX_BUSES as i32);
     // SAFETY: as above.
-    let outputs_count = unsafe {
-        component.getBusCount(MediaTypes_::kAudio as i32, BusDirections_::kOutput as i32)
-    }
-    .clamp(0, MAX_BUSES as i32);
+    let outputs_count = unsafe { component.getBusCount(audio, output) }.clamp(0, MAX_BUSES as i32);
     let mut in_channels = [0usize; MAX_BUSES];
     let mut out_channels = [0usize; MAX_BUSES];
     for bus in 0..inputs_count {
         // SAFETY: an all-zero bus info is valid; the component fills it.
         let mut info: BusInfo = unsafe { std::mem::zeroed() };
         // SAFETY: the component reports its buses by index.
-        if unsafe {
-            component.getBusInfo(
-                MediaTypes_::kAudio as i32,
-                BusDirections_::kInput as i32,
-                bus,
-                &mut info,
-            )
-        } == kResultOk
-        {
+        if unsafe { component.getBusInfo(audio, input, bus, &mut info) } == kResultOk {
             in_channels[bus as usize] = usize::try_from(info.channelCount.max(0)).unwrap_or(0);
         }
         // SAFETY: as above.
-        unsafe {
-            component.activateBus(
-                MediaTypes_::kAudio as i32,
-                BusDirections_::kInput as i32,
-                bus,
-                1,
-            )
-        };
+        unsafe { component.activateBus(audio, input, bus, 1) };
     }
     for bus in 0..outputs_count {
         // SAFETY: an all-zero bus info is valid; the component fills it.
         let mut info: BusInfo = unsafe { std::mem::zeroed() };
         // SAFETY: the component reports its buses by index.
-        if unsafe {
-            component.getBusInfo(
-                MediaTypes_::kAudio as i32,
-                BusDirections_::kOutput as i32,
-                bus,
-                &mut info,
-            )
-        } == kResultOk
-        {
+        if unsafe { component.getBusInfo(audio, output, bus, &mut info) } == kResultOk {
             out_channels[bus as usize] = usize::try_from(info.channelCount.max(0)).unwrap_or(0);
         }
         // SAFETY: as above.
-        unsafe {
-            component.activateBus(
-                MediaTypes_::kAudio as i32,
-                BusDirections_::kOutput as i32,
-                bus,
-                1,
-            )
-        };
+        unsafe { component.activateBus(audio, output, bus, 1) };
     }
     // SAFETY: as above.
     if unsafe { component.setActive(1) } != kResultOk {

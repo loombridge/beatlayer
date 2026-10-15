@@ -875,10 +875,13 @@ impl Node for Vst3Node {
 /// The note an event list holds, if it's one Beatlayer takes.
 fn note_out(event: &Event) -> Option<NoteEvent> {
     let offset = u32::try_from(event.sampleOffset.max(0)).unwrap_or(0);
+    // The bindings type the event types by the platform's default, while
+    // the event's own field is `uint16`; comparing them there works the
+    // same on every platform.
     // SAFETY: the event's type says which union member it holds.
     unsafe {
-        match event.r#type as i32 {
-            x if x == Event_::EventTypes_::kNoteOnEvent as i32 => {
+        match event.r#type {
+            x if x == Event_::EventTypes_::kNoteOnEvent as u16 => {
                 let note = event.__field0.noteOn;
                 Some(NoteEvent {
                     offset,
@@ -889,7 +892,7 @@ fn note_out(event: &Event) -> Option<NoteEvent> {
                     note_id: (note.noteId >= 0).then_some(note.noteId as u32),
                 })
             }
-            x if x == Event_::EventTypes_::kNoteOffEvent as i32 => {
+            x if x == Event_::EventTypes_::kNoteOffEvent as u16 => {
                 let note = event.__field0.noteOff;
                 Some(NoteEvent {
                     offset,

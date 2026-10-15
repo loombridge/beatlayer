@@ -44,6 +44,7 @@ use bl_shell_spec::browser as browser_ids;
 use bl_shell_spec::devices as device_ids;
 use bl_shell_spec::editing as edit_ids;
 use bl_shell_spec::export as export_ids;
+use bl_shell_spec::midi_files as midi_ids;
 use bl_shell_spec::mixer_view as mixer_ids;
 use bl_shell_spec::perception as perception_ids;
 use bl_shell_spec::plugins as plugin_ids;
@@ -373,6 +374,20 @@ fn edit_error(id: &str, failure: EditFailure) -> ShellError {
             reason,
         },
         EditFailure::Refused(message) => ShellError::Failed {
+            command: id.to_owned(),
+            message,
+        },
+    }
+}
+
+/// The shell's error for a MIDI file command that didn't run.
+fn midi_file_error(id: &str, error: crate::midi_files::MidiFileError) -> ShellError {
+    match error {
+        crate::midi_files::MidiFileError::InvalidArgs(message) => ShellError::InvalidArgs {
+            command: id.to_owned(),
+            message,
+        },
+        crate::midi_files::MidiFileError::Failed(message) => ShellError::Failed {
             command: id.to_owned(),
             message,
         },
@@ -1844,6 +1859,7 @@ impl Shell {
                 || device_ids::handles(id)
                 || self.is_device_command(id)
                 || track_ids::handles(id)
+                || midi_ids::handles(id)
                 || matches!(
                     id,
                     browser_ids::ADD_TO_ARRANGEMENT | browser_ids::LOAD_SELECTED
@@ -2684,6 +2700,7 @@ impl Shell {
                 || device_ids::handles(id)
                 || self.is_device_command(id)
                 || track_ids::handles(id)
+                || midi_ids::handles(id)
                 || id == plugin_ids::LOAD
                 || id.starts_with("set.")
                 || id == ids::APP_QUIT)
@@ -2862,6 +2879,9 @@ impl Shell {
             )
             .map(|result| to_value(&result));
         }
+        if midi_ids::handles(id) {
+            return self.run_midi_files(id, args);
+        }
         if !ids::handles(id) {
             return Err(ShellError::UnknownCommand(id.to_owned()));
         }
@@ -2880,12 +2900,43 @@ impl Shell {
             .unwrap_or(crate::export::DEFAULT_ENGINE_RATE)
     }
 
+    /// Runs a Standard MIDI File command (WP-2.21): importing a file into the
+    /// Arrangement, or writing a MIDI clip out as one.
+    fn run_midi_files(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        match id {
+            midi_ids::IMPORT => {
+                let args = Self::args::<midi_ids::MidiImportArgs>(id, args)?;
+                let at = args.at.unwrap_or_else(|| self.arrangement.insert_marker());
+                let path = PathBuf::from(&args.path);
+                let result = crate::midi_files::import(
+                    &mut self.editor,
+                    &path,
+                    args.track,
+                    at,
+                    args.import_tempo,
+                )
+                .map_err(|error| midi_file_error(id, error))?;
+                self.dirty = true;
+                self.document_changed();
+                self.touch();
+                Ok(to_value(&result))
+            }
+            midi_ids::EXPORT => {
+                let args = Self::args::<midi_ids::MidiExportArgs>(id, args)?;
+                let result = crate::midi_files::export(self.editor.document(), &args)
+                    .map_err(|error| midi_file_error(id, error))?;
+                self.touch();
+                Ok(to_value(&result))
+            }
+            _ => Err(ShellError::UnknownCommand(id.to_owned())),
+        }
+    }
+
     /// Whether the transport is currently playing.
     #[must_use]
     pub fn is_playing(&mut self) -> bool {
         self.audio.transport_state().playing
     }
-
     /// The Arrangement's time selection, if there is one.
     #[must_use]
     pub fn time_selection(&self) -> Option<(bl_core::time::Ticks, bl_core::time::Ticks)> {

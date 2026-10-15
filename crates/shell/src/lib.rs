@@ -66,6 +66,7 @@ pub mod browser;
 pub mod devices;
 pub mod export;
 pub mod files;
+pub mod midi_files;
 pub mod mixer_controls;
 pub mod mixer_view;
 pub mod perception;

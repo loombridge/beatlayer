@@ -1,27 +1,30 @@
 //! Standard MIDI Files (WP-2.21): reading a `.mid` into tracks of notes and
-//! writing notes out as a type 1 file.
+//! writing a clip's notes out as a type 1 file.
 //!
 //! A file's notes are read from its note-on and note-off messages: a note-on
 //! with velocity 0 counts as a note-off, as the standard says, a note-off
 //! whose velocity is 0 or missing takes the default release velocity (64),
 //! and a note left open at the end of a track is closed there. Positions are
 //! converted from the file's own ticks per quarter note to Beatlayer's, so a
-//! file plays at the song's tempo like any clip: a MIDI file's own tempo is
-//! read but not applied.
+//! file plays at the song's tempo like any clip.
 //!
-//! Writing uses the file's whole length, not its tempo: the notes go out as a
-//! type 1 file at [`DIVISION`] ticks to the quarter note.
+//! A file's tempo and time-signature events are read into a [`TempoMap`] and
+//! a [`TimeSignatureMap`], and its track chunks keep their names and notes.
+//! What the import command does with the tempo and signatures is a separate
+//! question; this module only says what the file holds.
 
 use std::fmt;
 use std::path::Path;
 
-use bl_core::time::{Bpm, TICKS_PER_QUARTER, Ticks};
+use bl_core::time::{
+    Bpm, TICKS_PER_QUARTER, TempoMap, TempoSegment, Ticks, TimeSignature, TimeSignatureChange,
+    TimeSignatureMap,
+};
 use bl_model::Note;
 use midly::num::{u4, u7, u15, u24, u28};
-use midly::{Format, Header, MetaMessage, MidiMessage, Smf, Timing, Track, TrackEvent, TrackEventKind};
-
-/// The extensions of the MIDI files Beatlayer opens, lower-case.
-pub const EXTENSIONS: &[&str] = &["mid", "midi"];
+use midly::{
+    Format, Header, MetaMessage, MidiMessage, Smf, Timing, Track, TrackEvent, TrackEventKind,
+};
 
 /// The ticks to the quarter note Beatlayer writes into a file: the largest
 /// number a Standard MIDI File's header can hold (a 15-bit field) that
@@ -30,7 +33,12 @@ pub const EXTENSIONS: &[&str] = &["mid", "midi"];
 /// length exactly.
 pub const DIVISION: u16 = 28_224;
 
-/// The file a format is, for reading: Standard MIDI File type 0, 1, or 2.
+/// The MIDI clocks per metronome click and 32nd notes per quarter note a
+/// written file announces, as the standard's defaults.
+const CLOCKS_PER_CLICK: u8 = 24;
+const THIRTY_SECONDS_PER_QUARTER: u8 = 8;
+
+/// The file a format is, as the standard names it: type 0, 1, or 2.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FileType {
     /// Type 0: one track holding every channel.
@@ -41,11 +49,10 @@ pub enum FileType {
     Sequential,
 }
 
-/// One track of a file: its name, its notes from the start of the file, and
-/// how long its contents run.
+/// One track chunk of a file: its name and its notes from the file's start.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ImportedTrack {
-    /// The track's name, from its Track Name event, or empty.
+    /// The chunk's name, from its Track Name event, or empty.
     pub name: String,
     /// Its notes, ordered by start then key.
     pub notes: Vec<Note>,
@@ -61,9 +68,16 @@ pub struct Imported {
     /// One entry per track chunk, in the file's order, including chunks with
     /// no notes.
     pub tracks: Vec<ImportedTrack>,
-    /// The file's first tempo, if it carries one and it is a tempo Beatlayer
-    /// can hold (the first tempo event wins, as in the standard).
-    pub tempo: Option<Bpm>,
+    /// The file's tempo map: one constant 120 bpm segment when it carries no
+    /// tempo event, the standard's default.
+    pub tempo: TempoMap,
+    /// Whether the file carried a tempo event.
+    pub has_tempo: bool,
+    /// The file's time-signature map: 4/4 throughout when it carries no
+    /// time-signature event.
+    pub time_signatures: TimeSignatureMap,
+    /// Whether the file carried a time-signature event.
+    pub has_time_signature: bool,
 }
 
 /// Why a MIDI file couldn't be read or written.
@@ -135,36 +149,46 @@ pub fn read_bytes(bytes: &[u8]) -> Result<Imported, MidiFileError> {
         Format::Parallel => FileType::Parallel,
         Format::Sequential => FileType::Sequential,
     };
-    let mut tempo = None;
+    let mut tempos: Vec<(Ticks, Bpm)> = Vec::new();
+    let mut signatures: Vec<(Ticks, TimeSignature)> = Vec::new();
     let mut tracks = Vec::with_capacity(smf.tracks.len());
     for track in &smf.tracks {
         let (name, notes, length) = read_track(track, division);
-        if tempo.is_none() {
-            tempo = first_tempo(track);
-        }
+        collect_tempo(track, division, &mut tempos);
+        collect_signatures(track, division, &mut signatures);
         tracks.push(ImportedTrack {
             name,
             notes,
             length,
         });
     }
+    let has_tempo = !tempos.is_empty();
+    let has_time_signature = !signatures.is_empty();
     Ok(Imported {
         format,
         tracks,
-        tempo,
+        tempo: tempo_map(tempos),
+        has_tempo,
+        time_signatures: signature_map(signatures),
+        has_time_signature,
     })
 }
 
-/// Writes `notes` as a type 1 Standard MIDI File, with `tempo` as its tempo
-/// when it is given (a file without one plays at 120 bpm, the standard's
-/// default).
+/// Writes `notes` as a type 1 Standard MIDI File: its tempo and time
+/// signature at tick 0, then the notes.
 ///
 /// # Errors
 ///
-/// [`MidiFileError`] if a position or length can't be written (a note further
-/// than the format's delta times can reach) or the file can't be written.
-pub fn write(path: &Path, name: &str, notes: &[Note], tempo: Option<Bpm>) -> Result<(), MidiFileError> {
-    let bytes = write_bytes(name, notes, tempo)?;
+/// [`MidiFileError`] if a position or length is out of range or the file
+/// can't be written.
+pub fn write(
+    path: &Path,
+    name: &str,
+    notes: &[Note],
+    tempo: Bpm,
+    signature: TimeSignature,
+) -> Result<(), MidiFileError> {
+    let bytes = write_bytes(name, notes, tempo, signature)?;
     std::fs::write(path, bytes)?;
     Ok(())
 }
@@ -178,21 +202,25 @@ pub fn write(path: &Path, name: &str, notes: &[Note], tempo: Option<Bpm>) -> Res
 pub fn write_bytes(
     name: &str,
     notes: &[Note],
-    tempo: Option<Bpm>,
+    tempo: Bpm,
+    signature: TimeSignature,
 ) -> Result<Vec<u8>, MidiFileError> {
     let division = i64::from(DIVISION);
     // Each event is a tick, a tie-break order (meta, note-offs, note-ons, so
     // a note-off never cuts a note that starts on the same tick), and what it
     // is.
-    let mut events: Vec<(i64, u8, TrackEventKind<'_>)> = Vec::with_capacity(notes.len() * 2 + 3);
+    let mut events: Vec<(i64, u8, TrackEventKind<'_>)> = Vec::with_capacity(notes.len() * 2 + 4);
     events.push((
         0,
         0,
         TrackEventKind::Meta(MetaMessage::TrackName(name.as_bytes())),
     ));
-    if let Some(bpm) = tempo {
-        events.push((0, 0, TrackEventKind::Meta(MetaMessage::Tempo(per_quarter(bpm)))));
-    }
+    events.push((
+        0,
+        0,
+        TrackEventKind::Meta(MetaMessage::Tempo(per_quarter(tempo))),
+    ));
+    events.push((0, 0, TrackEventKind::Meta(time_signature(signature))));
     let mut end = 0_i64;
     for note in notes {
         let start = to_units(note.start, division)?;
@@ -222,7 +250,8 @@ pub fn write_bytes(
     let mut track = Track::new();
     let mut previous = 0_i64;
     for (tick, _, kind) in events {
-        let delta = u32::try_from((tick - previous).max(0)).map_err(|_| MidiFileError::OutOfRange)?;
+        let delta =
+            u32::try_from((tick - previous).max(0)).map_err(|_| MidiFileError::OutOfRange)?;
         previous = tick;
         track.push(TrackEvent {
             delta: u28::new(delta),
@@ -247,11 +276,26 @@ fn midi(message: MidiMessage) -> TrackEventKind<'static> {
     }
 }
 
+/// The time-signature meta message a signature is: its denominator as the
+/// power of two the standard writes.
+fn time_signature(signature: TimeSignature) -> MetaMessage<'static> {
+    let mut power = 0_u8;
+    while (1_u16 << power) < u16::from(signature.denominator()) {
+        power += 1;
+    }
+    MetaMessage::TimeSignature(
+        signature.numerator(),
+        power,
+        CLOCKS_PER_CLICK,
+        THIRTY_SECONDS_PER_QUARTER,
+    )
+}
+
 /// The microseconds per quarter note a tempo is, clamped to what the meta
 /// message holds.
 fn per_quarter(bpm: Bpm) -> u24 {
     let micros = (60_000_000.0 / bpm.get()).round();
-    let micros = micros.clamp(1.0, f64::from(u32::from(u24::max_value())));
+    let micros = micros.clamp(1.0, f64::from(u24::max_value().as_int()));
     u24::new(micros as u32)
 }
 
@@ -274,7 +318,15 @@ fn read_track(track: &Track<'_>, division: i64) -> (String, Vec<Note>, Ticks) {
                 match message {
                     // A note-on with velocity 0 is a note-off (the standard).
                     MidiMessage::NoteOn { key, vel } if vel.as_int() == 0 => {
-                        close(&mut open, &mut notes, channel, key.as_int(), at, 0, division);
+                        close(
+                            &mut open,
+                            &mut notes,
+                            channel,
+                            key.as_int(),
+                            at,
+                            0,
+                            division,
+                        );
                     }
                     MidiMessage::NoteOn { key, vel } => {
                         let slot = channel * 128 + usize::from(key.as_int());
@@ -345,15 +397,88 @@ fn close(
     notes.push(note);
 }
 
-/// The first tempo a track carries, if Beatlayer can hold it.
-fn first_tempo(track: &Track<'_>) -> Option<Bpm> {
-    track.iter().find_map(|event| match event.kind {
-        TrackEventKind::Meta(MetaMessage::Tempo(micros)) => {
+/// Adds a track's tempo events to `into`.
+fn collect_tempo(track: &Track<'_>, division: i64, into: &mut Vec<(Ticks, Bpm)>) {
+    let mut at = 0_i64;
+    for event in track {
+        at = at.saturating_add(i64::from(event.delta.as_int()));
+        if let TrackEventKind::Meta(MetaMessage::Tempo(micros)) = event.kind {
             let bpm = 60_000_000.0 / f64::from(micros.as_int());
-            Bpm::new(bpm).ok()
+            if let Ok(bpm) = Bpm::new(bpm) {
+                into.push((to_ticks(at, division), bpm));
+            }
         }
-        _ => None,
-    })
+    }
+}
+
+/// Adds a track's time-signature events to `into`.
+fn collect_signatures(track: &Track<'_>, division: i64, into: &mut Vec<(Ticks, TimeSignature)>) {
+    let mut at = 0_i64;
+    for event in track {
+        at = at.saturating_add(i64::from(event.delta.as_int()));
+        if let TrackEventKind::Meta(MetaMessage::TimeSignature(numerator, power, ..)) = event.kind {
+            // The denominator is written as the power of two it is; a
+            // signature Beatlayer can't hold is left out.
+            let denominator = match u32::from(power) {
+                0..=4 => 1_u8 << power,
+                _ => continue,
+            };
+            if let Ok(signature) = TimeSignature::new(numerator, denominator) {
+                into.push((to_ticks(at, division), signature));
+            }
+        }
+    }
+}
+
+/// A tempo map from a file's tempo events, in order: 120 bpm until the first
+/// event, and each event's tempo from its position on. Events at the same
+/// position keep the last.
+fn tempo_map(mut events: Vec<(Ticks, Bpm)>) -> TempoMap {
+    events.sort_by_key(|(at, _)| *at);
+    let mut segments: Vec<TempoSegment> = Vec::with_capacity(events.len() + 1);
+    if events.first().is_none_or(|(at, _)| *at != Ticks::ZERO) {
+        segments.push(TempoSegment::Constant {
+            start: Ticks::ZERO,
+            bpm: Bpm::DEFAULT,
+        });
+    }
+    let mut previous: Option<Ticks> = None;
+    for (at, bpm) in events {
+        let segment = TempoSegment::Constant { start: at, bpm };
+        if previous == Some(at) {
+            *segments.last_mut().expect("a segment precedes a repeat") = segment;
+        } else {
+            segments.push(segment);
+            previous = Some(at);
+        }
+    }
+    TempoMap::new(segments).unwrap_or_else(|_| TempoMap::constant(Bpm::DEFAULT))
+}
+
+/// A time-signature map from a file's signature events, in order: 4/4 until
+/// the first event, and each event's signature from its position on. Events
+/// at the same position keep the last.
+fn signature_map(mut events: Vec<(Ticks, TimeSignature)>) -> TimeSignatureMap {
+    events.sort_by_key(|(at, _)| *at);
+    let mut changes: Vec<TimeSignatureChange> = Vec::with_capacity(events.len() + 1);
+    if events.first().is_none_or(|(at, _)| *at != Ticks::ZERO) {
+        changes.push(TimeSignatureChange {
+            at: Ticks::ZERO,
+            signature: TimeSignature::FOUR_FOUR,
+        });
+    }
+    let mut previous: Option<Ticks> = None;
+    for (at, signature) in events {
+        let change = TimeSignatureChange { at, signature };
+        if previous == Some(at) {
+            *changes.last_mut().expect("a change precedes a repeat") = change;
+        } else {
+            changes.push(change);
+            previous = Some(at);
+        }
+    }
+    TimeSignatureMap::new(changes)
+        .unwrap_or_else(|_| TimeSignatureMap::constant(TimeSignature::FOUR_FOUR))
 }
 
 /// The Beatlayer ticks a count of the file's own ticks is, rounded to the

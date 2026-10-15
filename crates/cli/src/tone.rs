@@ -522,6 +522,7 @@ mod tests {
         let backend = NullBackend::with_options(NullOptions {
             pacing: Pacing::Free,
             frame_limit: Some(48_000),
+            channels: 2,
         });
         let mut stream = backend
             .open_stream(

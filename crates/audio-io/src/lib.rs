@@ -21,15 +21,19 @@
 //!
 //! | Backend | Platform | Built on | Duplex |
 //! |---|---|---|---|
-//! | Core Audio | macOS | `cpal` | not yet |
-//! | WASAPI (shared) | Windows | `cpal` | not yet |
+//! | Core Audio | macOS | `cpal` | two streams, one device |
+//! | WASAPI (shared) | Windows | `cpal` | two streams, one device |
 //! | ASIO | Windows, `asio` feature | `azo` | yes |
-//! | JACK, ALSA | Linux | `cpal` | not yet |
+//! | JACK, ALSA | Linux | `cpal` | two streams, one device |
 //! | Null | all | a timer thread | yes |
 //!
 //! `cpal` 0.18 has no duplex streams on Core Audio or PipeWire, so its
-//! backends refuse a request with input. Beatlayer's own Core Audio backend
-//! replaces it on macOS in a later package.
+//! backends open an input stream alongside the output stream on the same
+//! device and carry the samples between the two callbacks through a
+//! lock-free ring made when the stream opens (WP-2.13). The two callbacks
+//! run on the one device's clock. A caller that needs input and output on
+//! different devices needs an aggregate device, which Beatlayer's own Core
+//! Audio backend brings in a later package.
 //!
 //! On Linux, PipeWire plays through its ALSA plug-in and its JACK server.
 //! `cpal`'s native PipeWire host stays off until `deny.toml` allows the

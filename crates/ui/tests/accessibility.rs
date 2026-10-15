@@ -864,6 +864,34 @@ fn session_main(h: &mut Harness) {
     h.settle();
 }
 
+/// The shell runs audio on a four-channel null device, so the In/Out
+/// choosers list two output pairs and four inputs, as an interface does
+/// (WP-2.13).
+fn four_channel_interface(h: &mut Harness) {
+    use bl_audio_io::{BackendKind, NullBackend, NullOptions};
+    use bl_shell::audio::{AudioHost, AudioSettings};
+    use bl_shell::files::ProjectFiles;
+    use bl_shell::settings::Preferences;
+
+    let backend = NullBackend::with_options(NullOptions {
+        channels: 4,
+        ..NullOptions::default()
+    });
+    let audio = AudioHost::with_backends(
+        vec![BackendKind::Null],
+        Box::new(move |_| Ok(Box::new(backend.clone()))),
+        AudioSettings::default(),
+    );
+    let mut shell = Shell::new(
+        Preferences::default(),
+        None,
+        audio,
+        Box::new(ProjectFiles::new()),
+    );
+    shell.start_audio();
+    h.shell = shell;
+}
+
 /// A Test Gain on audio track 3, the selected track, with no device
 /// selected (WP-2.4).
 fn a_device(h: &mut Harness) {
@@ -1420,6 +1448,27 @@ fn paths() -> BTreeMap<&'static str, Path> {
         (
             "routing.set_monitor",
             main(nothing, arrangement_track_3, "Monitoring", Key::ArrowRight),
+        ),
+        // Main's Cue Out and Main Out (WP-2.13): Up and Down on them step
+        // through the interface's output pairs, which need more than one
+        // pair to step to.
+        (
+            "routing.set_cue_out",
+            main(
+                four_channel_interface,
+                session_main,
+                "Cue Output",
+                Key::ArrowDown,
+            ),
+        ),
+        (
+            "routing.set_main_out",
+            main(
+                four_channel_interface,
+                session_main,
+                "Main Output",
+                Key::ArrowDown,
+            ),
         ),
         // A return's Pre/Post switch, in Main's column: Enter switches it.
         (

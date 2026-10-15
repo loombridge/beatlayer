@@ -191,7 +191,7 @@ fn the_sidechain_section_lists_its_sources_as_live_does() {
         )
         .unwrap();
     let InOut::Clips { output_channel, .. } =
-        routing::in_out(shell.editor().document(), audio[0]).unwrap()
+        routing::in_out(shell.editor().document(), audio[0], shell.interface()).unwrap()
     else {
         panic!("an audio track");
     };

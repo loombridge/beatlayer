@@ -1011,6 +1011,7 @@ dependencies = [
 name = "bl-ui"
 version = "0.0.0"
 dependencies = [
+ "bl-audio-io",
  "bl-commands",
  "bl-core",
  "bl-devices",

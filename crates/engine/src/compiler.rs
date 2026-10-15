@@ -16,8 +16,8 @@ use crate::midi_clips::{MidiClipList, MidiClipPlayer};
 use crate::mixer::{self, Route, Solo, TrackMixer, route};
 use crate::node::{NodeData, NodeKey, NoteBuffer, ParamValue};
 use crate::program::{
-    DeviceSidechain, EngineProgram, Input, Instance, Migration, NO_DELAY, NodeSlot, Span, Task,
-    delay_storage,
+    DeviceInput, DeviceSidechain, EngineProgram, Input, Instance, Migration, NO_DELAY, NodeSlot,
+    Span, Task, delay_storage,
 };
 use crate::registry::Registry;
 use crate::routing::{Edge, Graph, Via};
@@ -399,6 +399,9 @@ impl Compiler {
             delay_lines,
             delay_pool,
             delay_scratch: vec![0.0; size],
+            device_input: vec![0.0; self.config.input_channels * self.config.max_frames],
+            device_input_channels: self.config.input_channels,
+            device_scratch: vec![0.0; size],
             channels: self.config.channels,
             max_frames: self.config.max_frames,
             output: task_of[&document.main_id()],
@@ -565,6 +568,29 @@ impl Compiler {
             end: build.inputs.len() as u32,
         };
         let config = self.config.node_config();
+        // The track's own input from the audio interface, Ext. In
+        // (WP-2.13): its own route, whose Monitor gate opens and closes it
+        // like any other input.
+        let device_input = match track.routing().input {
+            bl_model::Input::External { channel } if track.kind() == TrackKind::Audio => {
+                let key = NodeKey::DeviceInput(track.id());
+                let closed = !track.routing().monitoring(track.mixer().arm);
+                if self.previous(key, &Identity::Route).is_some() {
+                    for (param, value) in [
+                        (route::LEVEL, 1.0),
+                        (route::SOLO_MUTE, switch(false)),
+                        (route::CLOSED, switch(closed)),
+                    ] {
+                        build.restate.push(ParamEvent::now(key, param, value));
+                    }
+                }
+                let route = self.place(build, key, Identity::Route, 0, || {
+                    Instance::Route(Box::new(Route::new(1.0, false, &config).closed(closed)))
+                });
+                Some(DeviceInput { route, channel })
+            }
+            _ => None,
+        };
         // An audio or MIDI track's clip player runs first.
         let player = match track.kind() {
             TrackKind::Audio => Some({
@@ -649,6 +675,7 @@ impl Compiler {
         build.tasks.push(Task {
             track: track.id(),
             inputs,
+            device_input,
             player,
             nodes,
             sidechains,
@@ -1170,6 +1197,18 @@ fn route_events(changes: &ChangeSet, old: &Document, new: &Document, params: &mu
                 switch(clips_audible(track)),
             ));
         }
+        // Ext. In hears the interface while the track monitors it; Monitor
+        // or Arm alone doesn't recompile (WP-2.13).
+        if matches!(track.routing().input, bl_model::Input::External { .. }) {
+            let closed = |t: &Track| !t.routing().monitoring(t.mixer().arm);
+            if closed(then) != closed(track) {
+                params.push(ParamEvent::now(
+                    NodeKey::DeviceInput(track.id()),
+                    route::CLOSED,
+                    switch(closed(track)),
+                ));
+            }
+        }
     }
 }
 
@@ -1500,13 +1539,14 @@ mod tests {
         assert!(program.slots[slot as usize].bypass);
         let before = program.node_count();
 
-        // A new audio track brings a clip player, a mixer, an output, and a
-        // send to the return; the rest migrate. With no clips, the player
+        // A new audio track brings a clip player, a mixer, an output, a
+        // send to the return, and the interface input its Audio From (Ext.
+        // In) opens (WP-2.13); the rest migrate. With no clips, the player
         // needs no data.
         let new = track(&mut f.editor, TrackKind::Audio, None);
         let update = f.sync();
         let program = update.program.as_ref().unwrap().get();
-        assert_eq!(program.node_count(), before + 4);
+        assert_eq!(program.node_count(), before + 5);
         assert_eq!(program.migration_count(), before);
         assert!(update.data.is_empty());
         for key in [
@@ -1517,6 +1557,7 @@ mod tests {
                 track: new,
                 to: f.ret,
             },
+            NodeKey::DeviceInput(new),
         ] {
             assert!(program.slot_of(key).is_some(), "{key}");
         }

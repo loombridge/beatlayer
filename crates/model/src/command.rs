@@ -235,6 +235,11 @@ pub enum Command {
         track: TrackId,
         /// The input.
         input: Input,
+        /// The MIDI channel to take, 1 to 16, or `null` (or nothing) for
+        /// All Channels. Only a MIDI port input has a channel.
+        #[serde(default)]
+        #[schemars(range(min = 1, max = 16))]
+        channel: Option<u8>,
     },
     /// Sets an audio or MIDI track's Monitor switch.
     SetMonitor {
@@ -770,8 +775,17 @@ impl Document {
                 self.settings.solo_in_place = *enabled;
                 Ok(())
             }
-            Command::SetInput { track, input } => {
-                self.edit_routing(*track, |routing| routing.input = *input)
+            Command::SetInput {
+                track,
+                input,
+                channel,
+            } => {
+                let input = input.clone();
+                let channel = *channel;
+                self.edit_routing(*track, |routing| {
+                    routing.input = input;
+                    routing.channel = channel;
+                })
             }
             Command::SetMonitor { track, monitor } => {
                 check_kind(
@@ -937,7 +951,8 @@ impl Document {
                 Ok(())
             }
             Command::SetSidechainInput { device, input } => {
-                self.edit_sidechain(*device, |s| s.input = *input)?;
+                let input = input.clone();
+                self.edit_sidechain(*device, |s| s.input = input)?;
                 self.check_routing(self.device_owner(*device)?)
             }
             Command::SetSidechainEnabled { device, enabled } => {
@@ -967,9 +982,10 @@ impl Document {
         let mut sidechain = self
             .device_ref(id)?
             .sidechain
+            .clone()
             .ok_or(ModelError::NoSidechain(id))?;
         edit(&mut sidechain);
-        if Some(sidechain) != self.device_ref(id)?.sidechain {
+        if Some(&sidechain) != self.device_ref(id)?.sidechain.as_ref() {
             self.device_mut(id)?.sidechain = Some(sidechain);
         }
         Ok(())
@@ -1050,7 +1066,7 @@ impl Document {
         id: TrackId,
         edit: impl FnOnce(&mut crate::track::Routing),
     ) -> Result<(), ModelError> {
-        let mut routing = self.track_ref(id)?.routing;
+        let mut routing = self.track_ref(id)?.routing.clone();
         edit(&mut routing);
         if routing == self.track_ref(id)?.routing {
             return Ok(());
@@ -1854,6 +1870,7 @@ mod tests {
     use crate::clip::{EDGE_FADE_SECONDS as EDGE_FADE, MidiData, Note};
     use crate::device::{DeviceKind, DeviceRole, PluginFormat};
     use crate::ids::ContentHash;
+    use crate::track::Routing;
 
     /// A document and the allocator for its IDs.
     struct Song {
@@ -3605,6 +3622,134 @@ mod tests {
             json,
             format!("{{\"op\":\"delete_track\",\"track\":{}}}", track.0.get())
         );
+    }
+
+    // Spec: routing R1, R2, R16
+    #[test]
+    fn a_midi_tracks_input_is_all_ins_or_a_port_with_a_channel() {
+        let mut song = Song::new();
+        let audio = song.track(TrackKind::Audio, None);
+        let midi = song.track(TrackKind::Midi, None);
+        let group = song.track(TrackKind::Group, None);
+        let ret = song.track(TrackKind::Return, None);
+        let main = song.main();
+
+        // A new MIDI track takes All Ins on All Channels, an audio track
+        // Ext. In, and the other kinds no input.
+        assert_eq!(
+            *song.doc.track(midi).unwrap().routing(),
+            Routing::new(TrackKind::Midi)
+        );
+        assert_eq!(
+            *song.doc.track(audio).unwrap().routing(),
+            Routing::new(TrackKind::Audio)
+        );
+        assert_eq!(song.doc.track(group).unwrap().routing().input, Input::None);
+
+        // A port and its channel change together, as one undo step.
+        let port = Input::Port {
+            name: "IAC Bus 1".to_owned(),
+        };
+        song.apply(Command::SetInput {
+            track: midi,
+            input: port.clone(),
+            channel: Some(16),
+        })
+        .unwrap();
+        let routing = song.doc.track(midi).unwrap().routing();
+        assert_eq!(
+            (routing.input.clone(), routing.channel),
+            (port.clone(), Some(16))
+        );
+        // The same command with no channel means All Channels.
+        song.apply(Command::SetInput {
+            track: midi,
+            input: port,
+            channel: None,
+        })
+        .unwrap();
+        assert_eq!(song.doc.track(midi).unwrap().routing().channel, None);
+
+        // Only a MIDI track takes All Ins, the computer keyboard, or a
+        // port; a port needs a name, and a channel needs a port.
+        for track in [audio, group, ret, main] {
+            assert!(matches!(
+                song.reject(Command::SetInput {
+                    track,
+                    input: Input::ComputerKeyboard,
+                    channel: None,
+                }),
+                ModelError::WrongTrackKind { .. }
+            ));
+        }
+        for (input, channel) in [
+            (Input::AllIns, Some(3)),
+            (Input::ComputerKeyboard, Some(3)),
+            (
+                Input::Port {
+                    name: String::new(),
+                },
+                None,
+            ),
+            (
+                Input::Port {
+                    name: "Keys".to_owned(),
+                },
+                Some(0),
+            ),
+            (
+                Input::Port {
+                    name: "Keys".to_owned(),
+                },
+                Some(17),
+            ),
+        ] {
+            assert!(matches!(
+                song.reject(Command::SetInput {
+                    track: midi,
+                    input,
+                    channel,
+                }),
+                ModelError::InvalidInput(_)
+            ));
+        }
+
+        // Monitoring is In, Auto, or Off, on audio and MIDI tracks alone.
+        for (track, allowed) in [
+            (audio, true),
+            (midi, true),
+            (group, false),
+            (ret, false),
+            (main, false),
+        ] {
+            let command = Command::SetMonitor {
+                track,
+                monitor: Monitor::In,
+            };
+            if allowed {
+                song.apply(command).unwrap();
+                assert_eq!(
+                    song.doc.track(track).unwrap().routing().monitor,
+                    Monitor::In
+                );
+            } else {
+                assert!(matches!(
+                    song.reject(command),
+                    ModelError::WrongTrackKind { .. }
+                ));
+            }
+        }
+        let json = serde_json::to_value(Command::SetInput {
+            track: midi,
+            input: Input::Port {
+                name: "Keys".to_owned(),
+            },
+            channel: Some(2),
+        })
+        .unwrap();
+        assert_eq!(json["op"], "set_input");
+        assert_eq!(json["input"]["type"], "port");
+        assert_eq!(json["channel"], 2);
     }
 
     #[test]

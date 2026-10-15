@@ -110,14 +110,15 @@ impl SendTap {
 /// Where a track takes its input from: the In/Out section's input type
 /// chooser, Audio From on an audio track and MIDI From on a MIDI track, with
 /// its channel (the routing spec).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[schemars(
     description = "Where a track takes its input from. Audio tracks: `external` (Ext. In, the \
                    audio interface's inputs; a new audio track's), `resampling` (the Main \
                    output), `track` (another audio track, a return, or Main, tapped at `tap`), \
                    or `none` (No Input). MIDI tracks: `all_ins` (every MIDI input; a new MIDI \
-                   track's), `computer_keyboard`, `track` (another MIDI track), or `none`."
+                   track's), `computer_keyboard`, `port` (one MIDI input, by its name as the \
+                   MIDI settings list it), `track` (another MIDI track), or `none`."
 )]
 pub enum Input {
     /// No Input.
@@ -125,11 +126,18 @@ pub enum Input {
     /// Ext. In: the audio interface's inputs. Audio tracks only; it carries
     /// silence until duplex audio (WP-2.13).
     External,
-    /// All Ins: every MIDI input port, merged. MIDI tracks only; MIDI input
-    /// arrives with WP-2.2.
+    /// All Ins: every MIDI input port whose Track switch is on, and the
+    /// computer MIDI keyboard. MIDI tracks only.
     AllIns,
-    /// The computer MIDI keyboard. MIDI tracks only (WP-2.2).
+    /// The computer MIDI keyboard. MIDI tracks only.
     ComputerKeyboard,
+    /// One MIDI input port, by the name the MIDI system gives it. MIDI
+    /// tracks only. The track keeps the name while the port is away and
+    /// receives again when a port of that name returns.
+    Port {
+        /// The port's name, as the MIDI settings list it.
+        name: String,
+    },
     /// Resampling: the Main output. Audio tracks only.
     Resampling,
     /// Another track's signal.
@@ -239,10 +247,14 @@ impl Output {
 
 /// A track's In/Out settings: its input and its channel, Monitor, and its
 /// output (the routing spec).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Routing {
-    /// Audio From or MIDI From, with its channel.
+    /// Audio From or MIDI From.
     pub input: Input,
+    /// The input channel: the MIDI channel to take, 1 to 16, or `None` for
+    /// All Channels. Only a MIDI port input has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel: Option<u8>,
     /// The Monitor switch.
     pub monitor: Monitor,
     /// Audio To.
@@ -256,8 +268,8 @@ pub struct Routing {
 
 impl Routing {
     /// A new track's routing: an audio track takes Ext. In, a MIDI track
-    /// All Ins, both with Monitor Auto, and both go to Main (or
-    /// their group); MIDI To is No Output. Other kinds take no input.
+    /// All Ins on All Channels, both with Monitor Auto, and both go to Main
+    /// (or their group); MIDI To is No Output. Other kinds take no input.
     #[must_use]
     pub const fn new(kind: TrackKind) -> Self {
         let (input, monitor) = match kind {
@@ -267,6 +279,7 @@ impl Routing {
         };
         Self {
             input,
+            channel: None,
             monitor,
             output: Output::Default,
             midi_output: None,

@@ -211,7 +211,7 @@ fn every_command_runs_by_id() {
         json!({ "track": keys, "to": bass }),
     );
     let document = agent.editor.document();
-    let routing = *document.track(drums).unwrap().routing();
+    let routing = document.track(drums).unwrap().routing().clone();
     assert_eq!(
         routing.input,
         Input::Track {
@@ -502,6 +502,7 @@ fn every_command_runs_by_id() {
         .device(duck)
         .unwrap()
         .sidechain
+        .clone()
         .unwrap();
     assert_eq!(
         sidechain,
@@ -688,6 +689,7 @@ fn schemas_match_what_commands_serialise() {
                     track: TrackId(fresh()),
                     tap: Tap::PreFx,
                 },
+                channel: None,
             },
         ),
         (
@@ -957,7 +959,7 @@ fn bad_requests_change_nothing() {
 
     type Expected<'a> = &'a dyn Fn(RunError) -> bool;
     let invalid = |error: RunError| matches!(error, RunError::InvalidArgs { .. });
-    let cases: [(&str, Value, Expected<'_>); 11] = [
+    let cases: [(&str, Value, Expected<'_>); 14] = [
         ("track.explode", json!({}), &|e| {
             e == RunError::UnknownCommand("track.explode".to_owned())
         }),
@@ -1008,6 +1010,36 @@ fn bad_requests_change_nothing() {
                     RunError::Edit(EditError::Command(ModelError::EmptyLength(_)))
                 )
             },
+        ),
+        // Spec: routing R2, R16
+        (
+            "routing.set_input",
+            json!({ "track": track, "input": { "type": "all_ins" } }),
+            &|e| {
+                matches!(
+                    e,
+                    RunError::Edit(EditError::Command(ModelError::WrongTrackKind { .. }))
+                )
+            },
+        ),
+        (
+            "routing.set_input",
+            json!({
+                "track": track,
+                "input": { "type": "port", "name": "Keys" },
+                "channel": 17,
+            }),
+            &|e| {
+                matches!(
+                    e,
+                    RunError::Edit(EditError::Command(ModelError::InvalidInput(_)))
+                )
+            },
+        ),
+        (
+            "routing.set_monitor",
+            json!({ "track": track, "monitor": "sometimes" }),
+            &invalid,
         ),
     ];
     for (id, args, expected) in cases {

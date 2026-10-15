@@ -596,10 +596,14 @@ const ENTRIES: &[Entry] = &[
             sends are then silent so it can't feed back), `none`, or `track` with another \
             audio track, a group, a return track, or Main and a `tap`: `pre_fx` (before its devices), \
             `post_fx` (after its devices, before its mixer), or `post_mixer` (its output, the \
-            default). A MIDI track can take `all_ins`, `computer_keyboard`, `none`, or another \
-            MIDI track (MIDI reaches tracks once MIDI playback is built). The input is heard \
-            only while the track monitors it (`routing.set_monitor`). A routing may make a \
-            loop, as in Live; the engine plays the routing that closes it as silence.",
+            default). A MIDI track can take `all_ins` (every MIDI input whose Track switch is \
+            on in the settings, and the computer MIDI keyboard), `computer_keyboard`, `port` \
+            with the port's `name` as the MIDI settings list it, `none`, or another MIDI track \
+            (which carries MIDI once MIDI playback is built). `channel` is 1 to 16 to take only \
+            that channel, or null (the default) for All Channels; only a port input has one. \
+            The input is heard only while the track monitors it (`routing.set_monitor`). A \
+            routing may make a loop, as in Live; the engine plays the routing that closes it as \
+            silence.",
     },
     Entry {
         id: "routing.set_monitor",

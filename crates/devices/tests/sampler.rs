@@ -1,9 +1,10 @@
-//! Snapshot, the native sampler (WP-2.16, part 1; the sampler spec):
-//! playing a sample at the right pitch and length, the region and its
-//! loop's crossfade, the envelope's times, velocity and pan, glide and
-//! portamento, One-Shot, voice stealing, and the sample the engine gets
-//! from the set. Every block runs as a real-time section under the
-//! allocation trap.
+//! Snapshot, the native sampler (WP-2.16; the sampler spec): playing a
+//! sample at the right pitch and length, the region and its loop's
+//! crossfade, the envelope's times, velocity and pan, glide and
+//! portamento, One-Shot, voice stealing, Slicing's slices, the filter's
+//! types, key tracking and envelope, the LFO's filter route and its tempo
+//! sync, and the sample the engine gets from the set. Every block runs as
+//! a real-time section under the allocation trap.
 
 bl_rt::install_trap!();
 
@@ -11,10 +12,13 @@ mod common;
 
 use std::sync::Arc;
 
-use bl_core::time::{TICKS_PER_QUARTER, Ticks};
+use bl_core::time::{Bpm, TICKS_PER_QUARTER, TempoMap, Ticks};
 use bl_devices::sampler::{
-    ATTACK, DECAY, FADE, FADE_OUT, GAIN, GLIDE, GLIDE_MODE, GLIDE_TIME, LENGTH, LOOP, MODE, PAN,
-    RELEASE, SAMPLER, START, SUSTAIN, TRIGGER, VELOCITY, VOICES, VOLUME, sampler_type,
+    ATTACK, DECAY, FADE, FADE_OUT, FILTER, FILTER_ENV_AMOUNT, FILTER_ENV_DECAY, FILTER_ENV_SUSTAIN,
+    FILTER_FREQ, FILTER_KEY, FILTER_TYPE, GAIN, GLIDE, GLIDE_MODE, GLIDE_TIME, LENGTH, LFO,
+    LFO_DIVISION, LFO_FILTER, LFO_RATE, LFO_SYNC, LFO_VOLUME, LOOP, MODE, PAN, RELEASE, SAMPLER,
+    SLICE_BY, SLICE_DIVISION, SLICE_REGIONS, SLICE_SENSITIVITY, START, SUSTAIN, TRIGGER, VELOCITY,
+    VOICES, VOLUME, sampler_type,
 };
 use bl_engine::{
     Block, Collector, DeviceType, EngineConfig, MediaMap, Node, NodeEvent, NoteBuffer, NoteEvent,
@@ -85,6 +89,55 @@ fn run_notes(node: &mut dyn Node, frames: usize, notes: &[NoteEvent]) -> Vec<Vec
 /// The first frame of `samples` where `wanted` holds, or the end.
 fn first(samples: &[f32], wanted: impl Fn(&f32) -> bool) -> usize {
     samples.iter().position(wanted).unwrap_or(samples.len())
+}
+
+/// The sample rate the tests run at, in hertz.
+const HZ: f64 = 48_000.0;
+
+/// Runs one block of `frames` frames through `node` at `tempo`, silent at
+/// the start, playing `notes`, as a real-time section, and returns each
+/// channel.
+fn run_notes_at(
+    node: &mut dyn Node,
+    frames: usize,
+    notes: &[NoteEvent],
+    tempo: &TempoMap,
+) -> Vec<Vec<f32>> {
+    let mut data = vec![0.0f32; CHANNELS * frames];
+    let mut out = NoteBuffer::with_capacity(notes.len().max(1));
+    {
+        let mut block = Block::new(
+            &mut data,
+            CHANNELS,
+            frames,
+            frames,
+            &[],
+            TransportInfo::default(),
+            RATE,
+        )
+        .with_notes(notes, &mut out)
+        .with_tempo(tempo);
+        bl_rt::rt_test!({ node.process(&mut block) });
+    }
+    data.chunks(frames).map(<[f32]>::to_vec).collect()
+}
+
+/// The amplitude of `hz` in `signal`, by a windowed DFT.
+fn amplitude_at(signal: &[f32], hz: f64) -> f64 {
+    let n = signal.len() as f64;
+    let (mut re, mut im) = (0.0f64, 0.0f64);
+    for (i, &x) in signal.iter().enumerate() {
+        let w = 0.5 - 0.5 * (core::f64::consts::TAU * i as f64 / n).cos();
+        let phase = core::f64::consts::TAU * hz * i as f64 / HZ;
+        re += f64::from(x) * w * phase.cos();
+        im -= f64::from(x) * w * phase.sin();
+    }
+    2.0 * re.hypot(im) / n
+}
+
+/// A gain in decibels.
+fn db(gain: f64) -> f64 {
+    20.0 * gain.log10()
 }
 
 // Spec: sampler R1
@@ -512,5 +565,359 @@ fn the_samplers_blocks_run_under_the_allocation_trap() {
         )
         .with_notes(&notes, &mut buffer);
         bl_rt::rt_test!({ node.process(&mut block) });
+    }
+}
+
+// Spec: sampler R13 (one note per slice, in order) and R14 (transient
+// slicing)
+#[test]
+fn slicing_a_drum_loop_by_transient_finds_its_hits_within_a_millisecond() {
+    // Four hits, one every 9600 frames: a tone burst with an instant
+    // attack, decaying over 2400 frames, each quieter than the one before.
+    let drum = sample(38_400, |i| {
+        let amplitude = 0.8 - 0.15 * (i / 9600) as f32;
+        let at = (i % 9600) as f32;
+        if at < 2400.0 {
+            amplitude * (1.0 - at / 2400.0) * (std::f32::consts::TAU * 300.0 * at / 48_000.0).cos()
+        } else {
+            0.0
+        }
+    });
+    let collector = Collector::new();
+    let mut node = sampler(&[(MODE, 2.0), (SLICE_SENSITIVITY, 50.0)], 38_400);
+    give(node.as_mut(), &collector, &drum);
+    // A slice starts reading its sample where its hit is, so the note's
+    // first output sample is the hit's: a slice that began a millisecond
+    // late would miss the first 48 frames of the burst, and its first
+    // sample would be the burst's 48-frames-in value.
+    for index in 0..4usize {
+        let key = 60 + index as u8;
+        let out = run_notes(node.as_mut(), 38_400, &[note(0, NoteKind::On, key, 1.0)]);
+        let first = 0.8 - 0.15 * index as f32;
+        let late =
+            first * (1.0 - 48.0 / 2400.0) * (std::f32::consts::TAU * 300.0 * 48.0 / 48_000.0).cos();
+        assert!(
+            (late..=first + 1e-6).contains(&out[0][0]),
+            "slice {index} plays the sample from {}: its hit's first sample is {first}",
+            out[0][0]
+        );
+    }
+    // A key past the slices plays nothing.
+    let out = run_notes(node.as_mut(), 38_400, &[note(0, NoteKind::On, 64, 1.0)]);
+    assert!(out.iter().flatten().all(|s| *s == 0.0), "no fifth slice");
+}
+
+// Spec: sampler R15 (Region and Beat slicing; Manual places no slices)
+#[test]
+fn region_and_beat_slicing_cut_the_region_by_parameter_and_tempo() {
+    // A ramp of one frame per sample: a slice's output begins with its own
+    // start's value.
+    let ramp = sample(48_000, |i| i as f32 / 48_000.0);
+    let collector = Collector::new();
+
+    // Region slicing: four equal slices.
+    let mut node = sampler(
+        &[(MODE, 2.0), (SLICE_BY, 2.0), (SLICE_REGIONS, 4.0)],
+        48_000,
+    );
+    give(node.as_mut(), &collector, &ramp);
+    for (index, start) in [0u64, 12_000, 24_000, 36_000].into_iter().enumerate() {
+        let key = 60 + index as u8;
+        let out = run_notes(node.as_mut(), 48_000, &[note(0, NoteKind::On, key, 1.0)]);
+        let wanted = (start + 10) as f32 / 48_000.0;
+        assert!(
+            (out[0][10] - wanted).abs() < 1e-4,
+            "slice {index} starts at {start}: {}",
+            out[0][10]
+        );
+    }
+
+    // Beat slicing: a quarter note is 24000 frames at 120 BPM, so the
+    // region cuts in two; at 60 BPM the division is the whole sample, one
+    // slice.
+    let mut node = sampler(
+        &[(MODE, 2.0), (SLICE_BY, 1.0), (SLICE_DIVISION, 4.0)],
+        48_000,
+    );
+    give(node.as_mut(), &collector, &ramp);
+    let at_120 = TempoMap::constant(Bpm::new(120.0).expect("120 BPM"));
+    let out = run_notes_at(
+        node.as_mut(),
+        48_000,
+        &[note(0, NoteKind::On, 61, 1.0)],
+        &at_120,
+    );
+    let wanted = 24_010.0 / 48_000.0;
+    assert!(
+        (out[0][10] as f64 - wanted).abs() < 1e-4,
+        "the second slice at 120 BPM: {}",
+        out[0][10]
+    );
+    let at_60 = TempoMap::constant(Bpm::new(60.0).expect("60 BPM"));
+    let out = run_notes_at(
+        node.as_mut(),
+        48_000,
+        &[note(0, NoteKind::On, 61, 1.0)],
+        &at_60,
+    );
+    assert!(
+        out.iter().flatten().all(|s| *s == 0.0),
+        "at 60 BPM the division is the whole sample: one slice"
+    );
+
+    // Manual slicing places no slices automatically.
+    let mut node = sampler(&[(MODE, 2.0), (SLICE_BY, 3.0)], 48_000);
+    give(node.as_mut(), &collector, &ramp);
+    let out = run_notes(node.as_mut(), 48_000, &[note(0, NoteKind::On, 60, 1.0)]);
+    assert!(
+        out.iter().flatten().all(|s| *s == 0.0),
+        "Manual has no slices to play"
+    );
+}
+
+// Spec: sampler R16 (the filter's types match their prototypes)
+#[test]
+fn the_filters_types_match_their_prototypes_within_point_two_db() {
+    let frequencies = [
+        200.0, 400.0, 700.0, 1_000.0, 1_400.0, 2_000.0, 4_000.0, 8_000.0,
+    ];
+    // One sample holding every test frequency at once.
+    let sines = sample(24_000, |i| {
+        let t = i as f64 / HZ;
+        let sum: f64 = frequencies
+            .iter()
+            .map(|hz| (core::f64::consts::TAU * hz * t).sin())
+            .sum();
+        (sum / frequencies.len() as f64 * 0.8) as f32
+    });
+    let collector = Collector::new();
+    let cutoff = 1_000.0;
+    let s_at = |hz: f64, cutoff: f64| {
+        (core::f64::consts::PI * hz / HZ).tan() / (core::f64::consts::PI * cutoff / HZ).tan()
+    };
+    // The kit's prototypes, written out independently (the kit's own
+    // filter tests do the same): a second-order section with damping k.
+    // The low-pass and high-pass run at a Butterworth's damping and the
+    // band-pass and notch at 1 (unity at the centre).
+    let second = |k: f64, s: f64| 1.0 / ((1.0 - s * s).powi(2) + (k * s).powi(2)).sqrt();
+    let prototype = |kind: usize, s: f64| -> f64 {
+        let k = 2f64.sqrt();
+        let lp = |k: f64| second(k, s);
+        let hp = |k: f64| s * s * second(k, s);
+        let bp = |k: f64| s * second(k, s);
+        let notch = |k: f64| (1.0 - s * s).abs() * second(k, s);
+        match kind {
+            0 => lp(k),
+            // The fourth-order pair: 2 sin(3π/8) then 2 sin(π/8).
+            1 => lp(1.847_759) * second(0.765_366_9, s),
+            2 => hp(k),
+            3 => hp(1.847_759) * s * s * second(0.765_366_9, s),
+            4 => bp(1.0),
+            5 => bp(1.0).powi(2),
+            // Peak and notch run at a damping of 2 at resonance 0: the
+            // peak is flat there, the notch's centre is its zero.
+            6 => notch(2.0),
+            7 => notch(2.0).powi(2),
+            _ => unreachable!(),
+        }
+    };
+    for kind in 0..8usize {
+        let mut plain = sampler(&[], 24_000);
+        give(plain.as_mut(), &collector, &sines);
+        let plain = run_notes(plain.as_mut(), 24_000, &[note(0, NoteKind::On, 60, 1.0)]);
+        let mut filtered = sampler(
+            &[
+                (FILTER, 1.0),
+                (FILTER_TYPE, kind as f64),
+                (FILTER_FREQ, cutoff),
+            ],
+            24_000,
+        );
+        give(filtered.as_mut(), &collector, &sines);
+        let filtered = run_notes(filtered.as_mut(), 24_000, &[note(0, NoteKind::On, 60, 1.0)]);
+        let mut worst = (0.0f64, 0.0f64);
+        for hz in frequencies {
+            let measured = db(amplitude_at(&filtered[0][8_000..16_000], hz)
+                / amplitude_at(&plain[0][8_000..16_000], hz));
+            let expected = db(prototype(kind, s_at(hz, cutoff)));
+            println!("type {kind} at {hz} Hz: {measured:.3} dB (prototype {expected:.3} dB)");
+            // At the notch's centre the prototype's response is zero; the
+            // measured one is a deep notch instead.
+            if expected.is_infinite() {
+                assert!(
+                    measured < -30.0,
+                    "type {kind} at {hz} Hz: a notch of only {measured:.1} dB"
+                );
+                continue;
+            }
+            if (measured - expected).abs() > worst.0 {
+                worst = ((measured - expected).abs(), hz);
+            }
+        }
+        assert!(
+            worst.0 <= 0.2,
+            "type {kind}: off by {:.3} dB at {:.0} Hz",
+            worst.0,
+            worst.1
+        );
+    }
+}
+
+// Spec: sampler R16 (Key tracks the note; the filter envelope moves the
+// cutoff)
+#[test]
+fn key_tracking_and_the_filter_envelope_move_the_cutoff() {
+    // A 4 kHz tone; it plays twice as fast an octave up.
+    let tone = sample(24_000, |i| {
+        ((core::f64::consts::TAU * 4_000.0 * i as f64 / HZ).sin() * 0.8) as f32
+    });
+    let collector = Collector::new();
+    let s_at = |hz: f64, cutoff: f64| {
+        (core::f64::consts::PI * hz / HZ).tan() / (core::f64::consts::PI * cutoff / HZ).tan()
+    };
+    let lp12 = |s: f64| 1.0 / ((1.0 - s * s).powi(2) + 2.0 * s * s).sqrt();
+    let play = |params: &[(ParamId, f64)], key: u8| -> Vec<f32> {
+        let mut node = sampler(params, 24_000);
+        give(node.as_mut(), &collector, &tone);
+        run_notes(node.as_mut(), 24_000, &[note(0, NoteKind::On, key, 1.0)]).remove(0)
+    };
+
+    // The reference: the tone at C4, 8 kHz, unfiltered.
+    let plain = play(&[], 72);
+    let plain = amplitude_at(&plain[8_000..16_000], 8_000.0);
+
+    // Key 0: the cutoff stays at 1 kHz, an octave below the keyed one.
+    let no_key = play(
+        &[(FILTER, 1.0), (FILTER_FREQ, 1_000.0), (FILTER_KEY, 0.0)],
+        72,
+    );
+    let measured = db(amplitude_at(&no_key[8_000..16_000], 8_000.0) / plain);
+    let expected = db(lp12(s_at(8_000.0, 1_000.0)));
+    assert!(
+        (measured - expected).abs() <= 0.3,
+        "Key 0: {measured:.3} dB, wanted {expected:.3} dB"
+    );
+
+    // Key 100 %: the cutoff follows the note an octave up, to 2 kHz.
+    let keyed = play(
+        &[(FILTER, 1.0), (FILTER_FREQ, 1_000.0), (FILTER_KEY, 100.0)],
+        72,
+    );
+    let measured = db(amplitude_at(&keyed[8_000..16_000], 8_000.0) / plain);
+    let expected = db(lp12(s_at(8_000.0, 2_000.0)));
+    assert!(
+        (measured - expected).abs() <= 0.3,
+        "Key 100 %: {measured:.3} dB, wanted {expected:.3} dB"
+    );
+
+    // The filter envelope at full amount opens the cutoff four octaves
+    // and its own Decay falls back to the knob's frequency: loud at first,
+    // then the low-pass's attenuation at 1 kHz.
+    let enveloped = play(
+        &[
+            (FILTER, 1.0),
+            (FILTER_FREQ, 1_000.0),
+            (FILTER_ENV_AMOUNT, 100.0),
+            (FILTER_ENV_DECAY, 100.0),
+            (FILTER_ENV_SUSTAIN, 0.0),
+        ],
+        60,
+    );
+    let plain_c3 = play(&[], 60);
+    let plain_c3 = amplitude_at(&plain_c3[8_000..16_000], 4_000.0);
+    let early = db(amplitude_at(&enveloped[1_000..2_000], 4_000.0) / plain_c3);
+    assert!(early > -3.0, "open at first: {early:.3} dB");
+    let late = db(amplitude_at(&enveloped[16_000..24_000], 4_000.0) / plain_c3);
+    let expected = db(lp12(s_at(4_000.0, 1_000.0)));
+    assert!(
+        (late - expected).abs() <= 0.3,
+        "closed after the decay: {late:.3} dB, wanted {expected:.3} dB"
+    );
+}
+
+// Spec: sampler R17 (the LFO's Filter amount moves the cutoff)
+#[test]
+fn the_lfos_filter_amount_moves_the_cutoff() {
+    // A 4 kHz tone through a 1 kHz low-pass: with the LFO's Filter amount
+    // at full depth the cutoff swings four octaves, so the level swings.
+    let tone = sample(48_000, |i| {
+        ((core::f64::consts::TAU * 4_000.0 * i as f64 / HZ).sin() * 0.8) as f32
+    });
+    let collector = Collector::new();
+    let peak = |window: &[f32]| window.iter().fold(0.0f32, |peak, x| peak.max(x.abs()));
+    // At 2 Hz a cycle is 24000 frames: the first window is the top of the
+    // swing, around frame 6000, and the second its bottom, around 18000.
+    let measure = |depth: f64| -> (f32, f32) {
+        let mut node = sampler(
+            &[
+                (FILTER, 1.0),
+                (FILTER_FREQ, 1_000.0),
+                (LFO, 1.0),
+                (LFO_RATE, 2.0),
+                (LFO_FILTER, depth),
+            ],
+            48_000,
+        );
+        give(node.as_mut(), &collector, &tone);
+        let out = run_notes(node.as_mut(), 48_000, &[note(0, NoteKind::On, 60, 1.0)]);
+        (peak(&out[0][4_000..8_000]), peak(&out[0][16_000..20_000]))
+    };
+    let (top, bottom) = measure(0.0);
+    assert!(
+        (top - bottom).abs() < 0.01 * bottom,
+        "without depth the level holds: {top} against {bottom}"
+    );
+    let (top, bottom) = measure(100.0);
+    assert!(top > 0.5, "the top of the swing passes the tone: {top}");
+    assert!(
+        bottom < 0.05 * top,
+        "the bottom closes the cutoff: {bottom} against {top}"
+    );
+}
+
+// Spec: sampler R17 (the LFO syncs to the tempo)
+#[test]
+fn the_lfo_syncs_to_the_tempo() {
+    let flat = sample(96_000, |_| 0.5);
+    let collector = Collector::new();
+    // A volume LFO at full amount swings the level from 0 to 1: the gaps
+    // between the crossings of the unmodulated level are half a cycle.
+    let gaps = |bpm: f64| -> Vec<f64> {
+        let mut node = sampler(
+            &[
+                (LFO, 1.0),
+                (LFO_SYNC, 1.0),
+                (LFO_DIVISION, 4.0),
+                (LFO_VOLUME, 100.0),
+            ],
+            96_000,
+        );
+        give(node.as_mut(), &collector, &flat);
+        let tempo = TempoMap::constant(Bpm::new(bpm).expect("a tempo"));
+        let out = run_notes_at(
+            node.as_mut(),
+            96_000,
+            &[note(0, NoteKind::On, 60, 1.0)],
+            &tempo,
+        );
+        let crossings: Vec<usize> = out[0]
+            .windows(2)
+            .enumerate()
+            .filter(|(_, w)| (w[0] > 0.5) != (w[1] > 0.5))
+            .map(|(i, _)| i)
+            .collect();
+        crossings.windows(2).map(|w| (w[1] - w[0]) as f64).collect()
+    };
+    // A quarter note at 120 BPM is 24000 frames, at 60 BPM 48000; half a
+    // cycle is half that.
+    for (bpm, half) in [(120.0, 12_000.0), (60.0, 24_000.0)] {
+        let gaps = gaps(bpm);
+        assert!(gaps.len() >= 2, "{bpm} BPM: only {} crossings", gaps.len());
+        for gap in &gaps {
+            assert!(
+                (gap - half).abs() < 100.0,
+                "{bpm} BPM: half a cycle is {gap} frames, wanted {half}"
+            );
+        }
     }
 }

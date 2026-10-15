@@ -300,12 +300,15 @@ pub struct AudioHost {
     engines: u64,
     /// Reports from engines that have closed, not yet taken.
     held_reports: Vec<Report>,
-    /// The CLAP host whose factory makes each engine's plug-in nodes
+    /// The CLAP host whose factory makes each engine's CLAP nodes
     /// (WP-2.6).
     plugins: Option<bl_plugin_host::clap::ClapHost>,
     /// The Audio Unit host (WP-2.8), when the shell has one: this platform
     /// may not host them.
     au: Option<bl_plugin_host::au::AuHost>,
+    /// The VST3 host whose factory makes each engine's VST3 nodes
+    /// (WP-2.7).
+    vst3: Option<bl_plugin_host::vst3::Vst3Host>,
     kit: Option<bl_devices::KitHost>,
 }
 
@@ -379,6 +382,7 @@ impl AudioHost {
             held_reports: Vec::new(),
             plugins: None,
             au: None,
+            vst3: None,
             kit: None,
         }
     }
@@ -399,6 +403,11 @@ impl AudioHost {
     /// for nodes (WP-2.8).
     pub fn set_au(&mut self, au: bl_plugin_host::au::AuHost) {
         self.au = Some(au);
+    }
+
+    /// Gives every engine from now on the VST3 host's plug-ins (WP-2.7).
+    pub fn set_vst3(&mut self, vst3: bl_plugin_host::vst3::Vst3Host) {
+        self.vst3 = Some(vst3);
     }
 
     /// Gives every engine from now on the kit plug-ins compiled in.
@@ -863,6 +872,9 @@ impl AudioHost {
         }
         if let Some(au) = &self.au {
             registry.add(au.factory());
+        }
+        if let Some(vst3) = &self.vst3 {
+            registry.add(vst3.factory());
         }
         if let Some(kit) = &self.kit {
             registry.add(kit.factory());

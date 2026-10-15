@@ -1,10 +1,11 @@
-//! Encoding: writing audio files (WP-1.12, the export spec).
+//! Encoding: writing audio files (WP-1.12, the export spec; MP3, WP-2.26).
 //!
 //! [`AudioWriter`] writes WAV, AIFF, or FLAC at 16 or 24 bits (integers) or
 //! 32 bits (IEEE floating point, in WAV and AIFF-C), a block of interleaved
 //! 32-bit float samples at a time, so a file of any length is written
 //! without holding it in memory. Below 32 bits a [`Quantiser`] dithers (or
-//! not) and rounds each sample to the nearest step.
+//! not) and rounds each sample to the nearest step. MP3 is lossy and has no
+//! bit depth: its samples go to the encoder as they are, at 320 kbps CBR.
 //!
 //! [`Dither::NoiseShaped`] is Beatlayer's own noise-shaped dither, not a
 //! reproduction of any licensed one. It uses error-feedback noise shaping
@@ -24,6 +25,8 @@
 //! - FLAC goes through `flacenc`, one frame at a time, straight to the
 //!   file; the stream's header, with its MD5 and length, is written again
 //!   when the stream is complete.
+//! - MP3 goes through LAME (the `mp3lame-encoder` bindings), 320 kbps CBR,
+//!   at one of MP3's sample rates.
 //!
 //! Every writer patches its header when it finishes, so a file isn't
 //! complete until [`AudioWriter::finish`] returns. Writing it under a
@@ -47,7 +50,15 @@ pub enum FileType {
     Aiff,
     /// FLAC: lossless, integers only.
     Flac,
+    /// MP3: lossy, 320 kbps CBR, one or two channels.
+    Mp3,
 }
+
+/// The sample rates MP3 holds: MPEG-1 (32, 44.1 and 48 kHz), MPEG-2 (16,
+/// 22.05 and 24 kHz), and MPEG-2.5 (8, 11.025 and 12 kHz).
+pub const MP3_RATES: [u32; 9] = [
+    8_000, 11_025, 12_000, 16_000, 22_050, 24_000, 32_000, 44_100, 48_000,
+];
 
 impl FileType {
     /// The usual extension, without the dot.
@@ -57,11 +68,12 @@ impl FileType {
             Self::Wav => "wav",
             Self::Aiff => "aif",
             Self::Flac => "flac",
+            Self::Mp3 => "mp3",
         }
     }
 
     /// The file type a path's extension names: `.wav`, `.aif` or `.aiff`,
-    /// or `.flac`, in any case.
+    /// `.flac`, or `.mp3`, in any case.
     #[must_use]
     pub fn from_path(path: &Path) -> Option<Self> {
         let extension = path.extension()?.to_str()?.to_ascii_lowercase();
@@ -69,12 +81,14 @@ impl FileType {
             "wav" | "wave" => Some(Self::Wav),
             "aif" | "aiff" | "aifc" => Some(Self::Aiff),
             "flac" => Some(Self::Flac),
+            "mp3" => Some(Self::Mp3),
             _ => None,
         }
     }
 
     /// Whether this file type can hold samples of `depth`. FLAC holds
-    /// integers only, so not 32-bit float.
+    /// integers only, so not 32-bit float; MP3 is lossy and has no bit
+    /// depth, so any depth is written as 320 kbps CBR.
     #[must_use]
     pub fn holds(self, depth: BitDepth) -> bool {
         !(self == Self::Flac && depth == BitDepth::Float32)
@@ -265,13 +279,13 @@ impl Quantiser {
 pub struct EncodeSpec {
     /// The file type.
     pub file_type: FileType,
-    /// The bits in each sample.
+    /// The bits in each sample. Ignored by MP3, which has no bit depth.
     pub bit_depth: BitDepth,
-    /// The dither below 32 bits; ignored at 32.
+    /// The dither below 32 bits; ignored at 32. Ignored by MP3.
     pub dither: Dither,
     /// Frames per second.
     pub sample_rate: u32,
-    /// Channels in each frame, from 1 to 8.
+    /// Channels in each frame, from 1 to 8 (MP3 holds 1 or 2).
     pub channels: u16,
 }
 
@@ -279,6 +293,7 @@ enum Sink {
     Wav(hound::WavWriter<BufWriter<File>>),
     Aiff(AiffWriter),
     Flac(Box<FlacWriter>),
+    Mp3(Mp3Writer),
 }
 
 /// Writes an audio file a block at a time. See the module's notes.
@@ -311,8 +326,8 @@ impl AudioWriter {
     /// # Errors
     ///
     /// [`MediaError::Encode`] if the file type can't hold the depth (32-bit
-    /// FLAC), the rate or channel count is out of range, or the file can't
-    /// be created.
+    /// FLAC), the rate or channel count is out of range (MP3 takes 1 or 2
+    /// channels at one of its own rates), or the file can't be created.
     pub fn create(path: &Path, spec: EncodeSpec) -> Result<Self, MediaError> {
         Self::create_seeded(path, spec, DITHER_SEED)
     }
@@ -328,6 +343,25 @@ impl AudioWriter {
                 path,
                 "FLAC holds integer samples only; write 32-bit float as WAV or AIFF",
             ));
+        }
+        if spec.file_type == FileType::Mp3 {
+            if !(1..=2).contains(&spec.channels) {
+                return Err(encode_error(
+                    path,
+                    format!("{} channels; MP3 holds one or two", spec.channels),
+                ));
+            }
+            if !MP3_RATES.contains(&spec.sample_rate) {
+                let rates: Vec<String> = MP3_RATES.iter().map(u32::to_string).collect();
+                return Err(encode_error(
+                    path,
+                    format!(
+                        "a sample rate of {} Hz; MP3 holds {} Hz",
+                        spec.sample_rate,
+                        rates.join(", ")
+                    ),
+                ));
+            }
         }
         if !(1..=8).contains(&spec.channels) {
             return Err(encode_error(
@@ -363,6 +397,9 @@ impl AudioWriter {
             FileType::Flac => Sink::Flac(Box::new(
                 FlacWriter::new(file, &spec).map_err(|error| encode_error(path, error))?,
             )),
+            FileType::Mp3 => {
+                Sink::Mp3(Mp3Writer::new(file, &spec).map_err(|error| encode_error(path, error))?)
+            }
         };
         Ok(Self {
             sink,
@@ -406,7 +443,10 @@ impl AudioWriter {
             )));
         }
         let failed = |what: String| MediaError::Encode(what);
-        if self.spec.bit_depth.is_integer() {
+        if let Sink::Mp3(mp3) = &mut self.sink {
+            // MP3 is lossy: the samples go to the encoder as they are.
+            mp3.write(samples).map_err(failed)?;
+        } else if self.spec.bit_depth.is_integer() {
             self.ints.clear();
             self.ints
                 .extend(samples.iter().map(|&s| self.quantiser.quantise(s)));
@@ -425,6 +465,7 @@ impl AudioWriter {
                     .write_ints(&self.ints)
                     .map_err(|e| failed(e.to_string()))?,
                 Sink::Flac(flac) => flac.write(&self.ints)?,
+                Sink::Mp3(_) => unreachable!("MP3 took the samples above"),
             }
         } else {
             match &mut self.sink {
@@ -438,6 +479,7 @@ impl AudioWriter {
                     .write_floats(samples)
                     .map_err(|e| failed(e.to_string()))?,
                 Sink::Flac(_) => unreachable!("FLAC refuses 32-bit float when it's created"),
+                Sink::Mp3(_) => unreachable!("MP3 took the samples above"),
             }
         }
         self.frames += (samples.len() / channels) as u64;
@@ -456,6 +498,7 @@ impl AudioWriter {
             Sink::Wav(wav) => wav.finalize().map_err(|e| failed(e.to_string()))?,
             Sink::Aiff(aiff) => aiff.finish().map_err(|e| failed(e.to_string()))?,
             Sink::Flac(flac) => flac.finish()?,
+            Sink::Mp3(mp3) => mp3.finish()?,
         }
         Ok(self.frames)
     }
@@ -778,6 +821,86 @@ impl FlacWriter {
     }
 }
 
+/// MP3 at 320 kbps CBR, through LAME (WP-2.26).
+///
+/// LAME writes an empty frame at the start of the stream, which the final
+/// LAME tag replaces when the stream is complete: the tag records the
+/// encoder's delay and the padding it added, so a decoder trims the decode
+/// back to exactly the frames written (the audio import spec, R4). The
+/// destination is a file, so the tag goes over the empty frame in place.
+struct Mp3Writer {
+    file: BufWriter<File>,
+    encoder: mp3lame_encoder::Encoder,
+    /// Channels in a frame, for the encoder's interleaved input.
+    channels: usize,
+    /// The encoded bytes of the block being written, reused.
+    out: Vec<u8>,
+}
+
+fn mp3_error(what: impl std::fmt::Display) -> MediaError {
+    MediaError::Encode(format!("MP3: {what}"))
+}
+
+impl Mp3Writer {
+    fn new(file: BufWriter<File>, spec: &EncodeSpec) -> Result<Self, String> {
+        let channels = usize::from(spec.channels);
+        let encoder = mp3lame_encoder::Builder::new()
+            .ok_or_else(|| "LAME couldn't be created".to_owned())?
+            .with_num_channels(spec.channels as u8)
+            .map_err(|error| error.to_string())?
+            .with_sample_rate(spec.sample_rate)
+            .map_err(|error| error.to_string())?
+            .with_brate(mp3lame_encoder::Bitrate::Kbps320)
+            .map_err(|error| error.to_string())?
+            .build()
+            .map_err(|error| error.to_string())?;
+        Ok(Self {
+            file,
+            encoder,
+            channels,
+            out: Vec::new(),
+        })
+    }
+
+    fn write(&mut self, samples: &[f32]) -> Result<(), String> {
+        let frames = samples.len() / self.channels;
+        self.out.clear();
+        self.out
+            .reserve(mp3lame_encoder::max_required_buffer_size(frames));
+        self.encoder
+            .encode_to_vec(mp3lame_encoder::InterleavedPcm(samples), &mut self.out)
+            .map_err(|error| error.to_string())?;
+        self.file
+            .write_all(&self.out)
+            .map_err(|error| error.to_string())
+    }
+
+    fn finish(mut self) -> Result<(), MediaError> {
+        self.out.clear();
+        // FlushGap pads the last frame with silence; the tag's padding then
+        // has it trimmed off again.
+        self.out.reserve(7200);
+        self.encoder
+            .flush_to_vec::<mp3lame_encoder::FlushGap>(&mut self.out)
+            .map_err(mp3_error)?;
+        self.file.write_all(&self.out).map_err(mp3_error)?;
+        // The empty frame LAME put at the start becomes the LAME tag frame,
+        // in place: it records the encoder's delay and the padding to trim.
+        // No ID3 tag is written, so the empty frame is the very first byte.
+        let tag_size = self.encoder.lame_tag_size();
+        if tag_size > 0 {
+            let mut tag = Vec::with_capacity(tag_size);
+            if self.encoder.lame_tag_encode_to_vec(&mut tag).is_some() {
+                self.file.flush().map_err(mp3_error)?;
+                self.file.seek(SeekFrom::Start(0)).map_err(mp3_error)?;
+                self.file.write_all(&tag).map_err(mp3_error)?;
+            }
+        }
+        self.file.flush().map_err(mp3_error)?;
+        self.file.get_ref().sync_all().map_err(mp3_error)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1016,10 +1139,15 @@ mod tests {
             FileType::from_path(Path::new("a.flac")),
             Some(FileType::Flac)
         );
-        assert_eq!(FileType::from_path(Path::new("a.mp3")), None);
+        assert_eq!(FileType::from_path(Path::new("a.mp3")), Some(FileType::Mp3));
+        assert_eq!(FileType::from_path(Path::new("a.MP3")), Some(FileType::Mp3));
         assert_eq!(FileType::from_path(Path::new("a")), None);
         assert!(!FileType::Flac.holds(BitDepth::Float32));
         assert!(FileType::Flac.holds(BitDepth::Int24));
+        // MP3 has no bit depth: every depth writes 320 kbps CBR.
+        assert!(FileType::Mp3.holds(BitDepth::Int16));
+        assert!(FileType::Mp3.holds(BitDepth::Float32));
+        assert_eq!(FileType::Mp3.extension(), "mp3");
         assert_eq!(BitDepth::from_bits(24), Some(BitDepth::Int24));
         assert_eq!(BitDepth::from_bits(8), None);
     }
@@ -1101,6 +1229,64 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Spec: export R23 (WP-2.26). An MP3 holds exactly the frames written,
+    /// at the export's rate and channels: LAME's tag records the encoder's
+    /// delay and padding, so a decoder trims them back off (the audio import
+    /// spec, R4). The bit depth and dither don't reach the file.
+    #[test]
+    fn an_mp3_decodes_to_the_frames_written() {
+        let temp = TempDir::new("mp3");
+        let samples = signal(48_011);
+        let spec = EncodeSpec {
+            file_type: FileType::Mp3,
+            bit_depth: BitDepth::Int24,
+            dither: Dither::Triangular,
+            sample_rate: 48_000,
+            channels: 2,
+        };
+        for rate in [48_000, 44_100] {
+            let path = temp.0.join(format!("x{rate}.mp3"));
+            let spec = EncodeSpec {
+                sample_rate: rate,
+                ..spec
+            };
+            let mut writer = AudioWriter::create(&path, spec).unwrap();
+            for chunk in samples.chunks(2 * 777) {
+                writer.write(chunk).unwrap();
+            }
+            assert_eq!(writer.finish().unwrap(), 48_011);
+
+            let decoder = Decoder::open(&path).unwrap_or_else(|e| panic!("{path:?}: {e}"));
+            let info = *decoder.info();
+            assert_eq!(info.sample_rate, rate, "{path:?}");
+            assert_eq!(info.channels, 2, "{path:?}");
+            assert_eq!(
+                decoder.decode_to_end().unwrap().frames(),
+                48_011,
+                "{path:?}"
+            );
+        }
+
+        // MP3 holds one or two channels, at one of its own rates.
+        let three = EncodeSpec {
+            channels: 3,
+            ..spec
+        };
+        assert!(matches!(
+            AudioWriter::create(&temp.0.join("three.mp3"), three),
+            Err(MediaError::Encode(_))
+        ));
+        let high = EncodeSpec {
+            sample_rate: 96_000,
+            ..spec
+        };
+        assert!(matches!(
+            AudioWriter::create(&temp.0.join("high.mp3"), high),
+            Err(MediaError::Encode(_))
+        ));
+        assert!(!temp.0.join("three.mp3").exists());
     }
 
     #[test]

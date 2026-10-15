@@ -11,7 +11,7 @@
 //! agents list, run, query, and schedule them like any other command.
 
 use std::collections::BTreeSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use bl_commands::schemars::Schema;
 use bl_commands::{CommandSpec, Context, Permission};
@@ -20,6 +20,7 @@ use bl_model::{Command, Device, DeviceId, DeviceKind, Document, Editor, ParamId,
 use bl_plugin_host::au::AuHost;
 use bl_plugin_host::clap::ClapHost;
 use bl_plugin_host::scan::Scanner;
+use bl_plugin_host::vst3::Vst3Host;
 use bl_shell_spec::plugins::{
     BlockedItem, PluginInfo, PluginScan, ScannedItem, SetPlugin, SetPluginList,
 };
@@ -148,6 +149,37 @@ pub fn has_clap(doc: &Document) -> bool {
     !clap_devices(doc).is_empty()
 }
 
+/// Whether `device` is a VST3 plug-in device in `doc`.
+#[must_use]
+pub fn is_vst3(doc: &Document, device: DeviceId) -> bool {
+    doc.device(device).is_some_and(|d| {
+        matches!(
+            d.kind,
+            DeviceKind::Plugin {
+                format: PluginFormat::Vst3,
+                ..
+            }
+        )
+    })
+}
+
+/// Whether `device` is a plug-in device of a hosted format in `doc`.
+#[must_use]
+pub fn is_plugin(doc: &Document, device: DeviceId) -> bool {
+    is_clap(doc, device) || is_vst3(doc, device)
+}
+
+/// Whether `path` names a VST3 bundle or module: its own name or a folder
+/// on it ends in `.vst3`.
+#[must_use]
+pub fn is_vst3_path(path: &Path) -> bool {
+    path.components().any(|part| {
+        part.as_os_str()
+            .to_str()
+            .is_some_and(|name| name.ends_with(".vst3"))
+    })
+}
+
 /// Every CLAP device in the set.
 fn clap_devices(doc: &Document) -> Vec<DeviceId> {
     devices(doc, PluginFormat::Clap)
@@ -244,11 +276,32 @@ pub fn apply_param_changes(
     changed
 }
 
-/// What `plugin.info` reports for `device`: the CLAP host's report for a
-/// CLAP device, or the AU host's for an Audio Unit.
+/// What `plugin.info` reports for `device`, from whichever host has it:
+/// the CLAP host's report for a CLAP device, the Audio Unit host's for an
+/// Audio Unit, or the VST3 host's.
 #[must_use]
-pub fn info(plugins: &ClapHost, au: &AuHost, device: DeviceId) -> Option<PluginInfo> {
-    let status = plugins.status(device).or_else(|| au.status(device))?;
+pub fn info(
+    plugins: &ClapHost,
+    au: &AuHost,
+    vst3: &Vst3Host,
+    device: DeviceId,
+) -> Option<PluginInfo> {
+    if let Some(status) = plugins.status(device).or_else(|| au.status(device)) {
+        return Some(PluginInfo {
+            device,
+            plugin: status.plugin_id,
+            path: status.path.to_string_lossy().into_owned(),
+            active: status.active,
+            latency: status.latency,
+            failure: status.failure,
+            has_window: status.has_editor,
+            window_open: status.editor_open,
+            window_shown: status.editor_open && !status.editor_hidden,
+            window: None,
+            values: status.values,
+        });
+    }
+    let status = vst3.status(device)?;
     Some(PluginInfo {
         device,
         plugin: status.plugin_id,

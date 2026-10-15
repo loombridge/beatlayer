@@ -18,16 +18,17 @@
 //! in: [`kit`] adapts them, and a [`KitHost`] on the main thread keeps
 //! their instances and runs their commands.
 //!
-//! Beatlayer ships its first native devices: the limiter ([`limiter`]),
-//! the tempo-synced delay ([`delay`]), the algorithmic reverb ([`reverb`]),
-//! the Utility device ([`utility`], WP-2.18b) and the parametric EQ
-//! ([`eq`], WP-2.18a); [`register`] adds them to the engine. The
-//! instruments are the polysynth ([`polysynth`], WP-2.17) and the sampler
-//! ([`sampler`], WP-2.16). The rest of the core effects ship with WP-2.18.
-//! [`testing`] has the devices the framework's tests use. The kit's two
-//! example plug-ins join the device list with the `kit-examples` feature,
-//! off by default.
+//! Beatlayer ships its first native devices: the compressor ([`compressor`]),
+//! the parametric EQ ([`eq`], WP-2.18a), the algorithmic reverb
+//! ([`reverb`]), the limiter ([`limiter`]), the tempo-synced delay
+//! ([`delay`]) and the Utility device ([`utility`], WP-2.18b); [`register`]
+//! adds them to the engine. The instruments are the polysynth
+//! ([`polysynth`], WP-2.17) and the sampler ([`sampler`], WP-2.16). The
+//! rest of the core effects ship with WP-2.18. [`testing`] has the devices
+//! the framework's tests use. The kit's two example plug-ins join the
+//! device list with the `kit-examples` feature, off by default.
 
+pub mod compressor;
 pub mod delay;
 pub mod eq;
 mod framework;
@@ -39,6 +40,7 @@ pub mod sampler;
 pub mod testing;
 pub mod utility;
 
+pub use compressor::{COMPRESSOR, Squeeze, compressor_type};
 pub use delay::{DELAY, delay_type};
 pub use eq::{Contour, EQ, eq_type};
 pub use framework::{Audio, NativeDevice, NativeNode, ParamBank, add};
@@ -50,9 +52,11 @@ pub use sampler::{Sampler, sampler_type};
 
 use bl_engine::{DeviceType, Registry};
 
-/// Adds Beatlayer's native devices to `registry`: the polysynth, the
-/// limiter, the delay, the reverb, Utility, the EQ and the sampler.
+/// Adds Beatlayer's native devices to `registry`: the compressor, the
+/// polysynth, the limiter, the delay, the reverb, Utility, the EQ and the
+/// sampler.
 pub fn register(registry: &mut Registry) {
+    compressor::register(registry);
     polysynth::register(registry);
     limiter::register(registry);
     delay::register(registry);
@@ -63,8 +67,8 @@ pub fn register(registry: &mut Registry) {
 }
 
 /// The native device types Beatlayer ships, for the browser and the shell:
-/// the polysynth, the limiter, the delay, the reverb, Utility, the EQ and
-/// the sampler.
+/// the compressor, the polysynth, the limiter, the delay, the reverb,
+/// Utility, the EQ and the sampler.
 #[must_use]
 pub fn device_types() -> Vec<DeviceType> {
     let mut registry = Registry::empty();

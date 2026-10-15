@@ -309,7 +309,7 @@ fn layout() -> DeviceLayout {
 
 /// Adds the sampler to `registry`.
 pub fn register(registry: &mut Registry) {
-    add(registry, sampler_type(), |_| Sampler::new());
+    add(registry, sampler_type(), |_, _| Sampler::new());
 }
 
 /// Which playback mode a device is in.

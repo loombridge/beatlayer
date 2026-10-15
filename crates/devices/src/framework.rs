@@ -129,6 +129,21 @@ impl<'a> Audio<'_, 'a> {
         let range = self.range.clone();
         &mut self.block.channel_mut(channel)[range]
     }
+
+    /// What the device's detector hears over the stretch on `channel`, if
+    /// the device has a sidechain input and its sidechain is on (WP-2.19b):
+    /// the source track's signal through the sidechain's gain and mix, with
+    /// the device's own input, or `None` while it's off: then the detector
+    /// hears the stretch's own audio ([`Self::channel_mut`]).
+    ///
+    /// # Panics
+    ///
+    /// If `channel` isn't less than [`channels`](Self::channels).
+    #[must_use]
+    pub fn sidechain(&self, channel: usize) -> Option<&[f32]> {
+        let range = self.range.clone();
+        self.block.sidechain(channel).map(|data| &data[range])
+    }
 }
 
 /// One parameter's state on the audio thread.
@@ -277,6 +292,36 @@ impl ParamBank {
     }
 }
 
+/// A delay of a stretch of samples, read a whole number of samples back.
+/// [`read`](Self::read) reads what was written before the current sample,
+/// so a delay of 0 isn't representable: a device that offers one passes
+/// its input through instead.
+pub(crate) struct DelayLine {
+    samples: Vec<f32>,
+    at: usize,
+}
+
+impl DelayLine {
+    pub(crate) fn new(max_delay: usize) -> Self {
+        Self {
+            samples: vec![0.0; max_delay + 1],
+            at: 0,
+        }
+    }
+
+    /// The sample `delay` writes ago.
+    pub(crate) fn read(&self, delay: usize) -> f32 {
+        let len = self.samples.len();
+        self.samples[(self.at + len - delay % len) % len]
+    }
+
+    pub(crate) fn write(&mut self, sample: f32) {
+        let len = self.samples.len();
+        self.samples[self.at] = sample;
+        self.at = (self.at + 1) % len;
+    }
+}
+
 /// A native device in the engine: it splits each block at its parameter
 /// changes, so each lands on its exact frame (sample-accurate automation,
 /// rule G2), and hands the device each stretch with its parameters.
@@ -353,6 +398,10 @@ impl<D: NativeDevice> Node for NativeNode<D> {
 /// and each device of its kind runs as a [`NativeNode`] around the device
 /// `make` makes.
 ///
+/// `make` sees the device's parameter values, so a device whose latency
+/// they set (a look-ahead, say) reports it from the moment it's built, as
+/// the compiler asks for delay compensation (WP-2.11).
+///
 /// # Panics
 ///
 /// If `device_type` isn't native, or its description breaks a rule
@@ -361,7 +410,7 @@ impl<D: NativeDevice> Node for NativeNode<D> {
 pub fn add<D, F>(registry: &mut Registry, device_type: DeviceType, make: F)
 where
     D: NativeDevice,
-    F: Fn(&NodeConfig) -> D + Send + Sync + 'static,
+    F: Fn(&Device, &NodeConfig) -> D + Send + Sync + 'static,
 {
     assert!(
         matches!(device_type.kind, DeviceKind::Native { .. }),
@@ -373,6 +422,11 @@ where
     }
     let description = device_type.description.clone();
     registry.add_device(device_type, move |device, config| {
-        Box::new(NativeNode::new(make(config), &description, device, config))
+        Box::new(NativeNode::new(
+            make(device, config),
+            &description,
+            device,
+            config,
+        ))
     });
 }

@@ -992,7 +992,10 @@ trigger = "latch"
 milestone = "M2"
 mac = ["A"]
 win = ["A"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "arrangement.automation_mode", contexts = ["arrangement"] },
+]
 
 [[shortcut]]
 id = "S-ENV-002"

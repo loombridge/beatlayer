@@ -837,6 +837,14 @@ enum Reason {
 
 fn nothing(_: &mut Harness) {}
 
+/// Shows the tracks' automation lanes, so their choosers are drawn.
+fn automation_mode_on(h: &mut Harness) {
+    h.shell
+        .run("arrangement.automation_mode", json!({ "on": true }))
+        .unwrap();
+    h.settle();
+}
+
 fn arrangement_track_3(h: &mut Harness) {
     h.key(Key::Num2, Modifiers::ALT);
     let track = h.shell.editor().document().top_level().nth(2).unwrap();
@@ -1239,6 +1247,17 @@ fn paths() -> BTreeMap<&'static str, Path> {
         (
             "perception.capture_view",
             Exception(AgentOnly("an agent's capture of a view as an image")),
+        ),
+        // The automation lane's choosers (WP-2.12): Tab to the device
+        // chooser, then Up or Down steps the parameter the lane shows.
+        (
+            "arrangement.show_automation",
+            main(
+                automation_mode_on,
+                nothing,
+                "Automation Device",
+                Key::ArrowDown,
+            ),
         ),
         // Agents' forms of gestures and dialogs.
         (

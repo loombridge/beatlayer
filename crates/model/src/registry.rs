@@ -686,10 +686,11 @@ const ENTRIES: &[Entry] = &[
         permission: Permission::Edit,
         contexts: &[Global],
         keys: &[],
-        description: "Moves one of a track's automation breakpoints from `at` to `to`, keeping \
-            its value, as dragging it along an automation lane does. `to` is 0 (1.1.1) or \
-            later and mustn't land on another breakpoint of the same envelope. A position with \
-            no breakpoint is refused.",
+        description: "Moves one of a track's automation breakpoints from `at` to `to` and, with \
+            `value`, to that value, as dragging it on an automation lane does. `to` is 0 (1.1.1) \
+            or later and mustn't land on another breakpoint of the same envelope, and `value` is \
+            in the parameter's own units. Without `value` the breakpoint keeps its value. A \
+            position with no breakpoint is refused.",
     },
     Entry {
         id: "automation.delete_breakpoint",

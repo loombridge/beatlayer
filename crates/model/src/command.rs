@@ -286,7 +286,9 @@ pub enum Command {
         /// chooses which side the segment bows to.
         bend: f64,
     },
-    /// Moves one of a track's automation breakpoints, keeping its value.
+    /// Moves one of a track's automation breakpoints to `to` and, with
+    /// `value`, to that value: what dragging a breakpoint on an automation
+    /// lane does. Without `value` its value stays.
     MoveAutomationBreakpoint {
         /// The track the parameter belongs to.
         track: TrackId,
@@ -297,6 +299,10 @@ pub enum Command {
         /// Where it goes: 0 (1.1.1) or later, and not where another
         /// breakpoint of the same envelope already is.
         to: Ticks,
+        /// The value it takes there, in the parameter's own units, or `null`
+        /// (or nothing) to keep the value it has.
+        #[serde(default)]
+        value: Option<f64>,
     },
     /// Deletes one of a track's automation breakpoints, so the segments
     /// either side of it become the one starting at the breakpoint before
@@ -1059,7 +1065,8 @@ impl Document {
                 target,
                 at,
                 to,
-            } => self.move_automation_breakpoint(*track, *target, *at, *to),
+                value,
+            } => self.move_automation_breakpoint(*track, *target, *at, *to, *value),
             Command::DeleteAutomationBreakpoint { track, target, at } => {
                 self.delete_automation_breakpoint(*track, *target, *at)
             }
@@ -2015,17 +2022,21 @@ impl Document {
             .map_err(automation_point_error)
     }
 
-    /// Moves the breakpoint at `at` on `target`'s envelope to `to`, keeping
-    /// its value.
+    /// Moves the breakpoint at `at` on `target`'s envelope to `to`, and to
+    /// `value` when one is given.
     fn move_automation_breakpoint(
         &mut self,
         track: TrackId,
         target: AutomationTarget,
         at: Ticks,
         to: Ticks,
+        value: Option<f64>,
     ) -> Result<(), ModelError> {
         if to < Ticks::ZERO {
             return Err(ModelError::NegativePosition(to));
+        }
+        if let Some(value) = value {
+            check_value("automation value", value, value.is_finite())?;
         }
         self.check_automation_target(track, target)?;
         let automation =
@@ -2039,7 +2050,11 @@ impl Document {
         automation
             .envelope
             .move_point(at, to)
-            .map_err(automation_point_error)
+            .map_err(automation_point_error)?;
+        if let Some(value) = value {
+            automation.envelope.set(to, value);
+        }
+        Ok(())
     }
 
     /// Deletes the breakpoint at `at` on `target`'s envelope, joining its
@@ -4203,6 +4218,7 @@ mod tests {
             target: volume,
             at: Ticks::WHOLE,
             to: Ticks::WHOLE * 2,
+            value: None,
         })
         .unwrap();
         assert_eq!(
@@ -4233,6 +4249,7 @@ mod tests {
                 target: volume,
                 at: Ticks::WHOLE,
                 to: Ticks::WHOLE * 4,
+                value: None,
             }),
             ModelError::NoChange {
                 what: "breakpoint",
@@ -4245,6 +4262,7 @@ mod tests {
                 target: volume,
                 at: Ticks::ZERO,
                 to: Ticks::WHOLE * 2,
+                value: None,
             }),
             ModelError::ChangeInUse {
                 what: "breakpoint",
@@ -4432,6 +4450,68 @@ mod tests {
                 .unwrap()
                 .automation_for(&param)
                 .is_none()
+        );
+        song.doc.check_invariants().unwrap();
+    }
+
+    /// Spec: automation R7. A drag moves a breakpoint in time and, with a
+    /// value, to that value; without one its value stays.
+    #[test]
+    fn moving_a_breakpoint_can_change_its_value() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        let volume = AutomationTarget::Mixer {
+            param: MixerParam::Volume,
+        };
+        song.apply(Command::SetAutomationBreakpoint {
+            track,
+            target: volume,
+            at: Ticks::ZERO,
+            value: 1.0,
+        })
+        .unwrap();
+        song.apply(Command::SetAutomationBreakpoint {
+            track,
+            target: volume,
+            at: Ticks::WHOLE,
+            value: 0.25,
+        })
+        .unwrap();
+        song.apply(Command::MoveAutomationBreakpoint {
+            track,
+            target: volume,
+            at: Ticks::WHOLE,
+            to: Ticks::WHOLE * 2,
+            value: Some(0.5),
+        })
+        .unwrap();
+        let envelope = &song
+            .doc
+            .track(track)
+            .unwrap()
+            .automation_for(&volume)
+            .unwrap()
+            .envelope;
+        assert_eq!(
+            envelope.point(Ticks::WHOLE * 2),
+            Some(Breakpoint {
+                at: Ticks::WHOLE * 2,
+                value: 0.5,
+                bend: 0.0,
+            })
+        );
+        assert_eq!(envelope.point(Ticks::WHOLE), None);
+        // A value that isn't a number is refused.
+        assert!(
+            song.reject(Command::MoveAutomationBreakpoint {
+                track,
+                target: volume,
+                at: Ticks::WHOLE * 2,
+                to: Ticks::WHOLE * 3,
+                value: Some(f64::NAN),
+            })
+            .to_string()
+            .contains("automation value")
         );
         song.doc.check_invariants().unwrap();
     }

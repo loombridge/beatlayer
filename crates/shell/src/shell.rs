@@ -414,6 +414,29 @@ fn edit_error(id: &str, failure: EditFailure) -> ShellError {
     }
 }
 
+/// Whether `id` is an automation edit a drag on an automation lane runs as
+/// one undo step (WP-2.12).
+fn is_automation_edit(id: &str) -> bool {
+    matches!(
+        id,
+        "automation.set_breakpoint"
+            | "automation.set_curve"
+            | "automation.move_breakpoint"
+            | "automation.delete_breakpoint"
+    )
+}
+
+/// The undo step a drag on an automation lane records, named as Live's undo
+/// history names that work.
+fn automation_label(id: &str) -> &'static str {
+    match id {
+        "automation.set_curve" => "Curve Automation Segment",
+        "automation.move_breakpoint" => "Move Automation Breakpoint",
+        "automation.delete_breakpoint" => "Delete Automation Breakpoint",
+        _ => "Add Automation Breakpoint",
+    }
+}
+
 /// The shell's error for a MIDI file command that didn't run.
 fn midi_file_error(id: &str, error: crate::midi_files::MidiFileError) -> ShellError {
     match error {
@@ -2348,7 +2371,10 @@ impl Shell {
         }
         let mut outcome = Ok(Value::Null);
         if let Some(invocation) = invocation {
-            if !edit_ids::handles(&invocation.id) && !note_ids::handles(&invocation.id) {
+            if !edit_ids::handles(&invocation.id)
+                && !note_ids::handles(&invocation.id)
+                && !is_automation_edit(&invocation.id)
+            {
                 return Err(ShellError::Unavailable {
                     command: invocation.id.clone(),
                     reason: "only the Arrangement's and the Clip View's editing commands run as \
@@ -2372,6 +2398,8 @@ impl Shell {
     fn gesture_step(&mut self, invocation: &Invocation) -> Result<Value, ShellError> {
         let label = if note_ids::handles(&invocation.id) {
             clip_view::label(&invocation.id)
+        } else if is_automation_edit(&invocation.id) {
+            automation_label(&invocation.id)
         } else {
             editing::label(&invocation.id, &invocation.args)
         };
@@ -2406,6 +2434,14 @@ impl Shell {
                     clip_view,
                     arrangement,
                 )
+            } else if is_automation_edit(&invocation.id) {
+                // WP-2.12: a drag on an automation lane moves, curves, or
+                // deletes breakpoints, as one undo step.
+                model::run(editor, &invocation.id, invocation.args.clone())
+                    .map(|changes| to_value(&changes))
+                    .map_err(|error| {
+                        crate::arrangement::editing::EditFailure::Refused(error.to_string())
+                    })
             } else {
                 editing::run(
                     &invocation.id,

@@ -990,6 +990,14 @@ fn server_and_agent(h: &mut Harness) {
     an_agent(h);
 }
 
+/// An assistant API key stored in the headless keychain, so the Agents
+/// page shows its Forget button.
+fn assistant_key_set(h: &mut Harness) {
+    h.shell
+        .run("assistant.set_key", json!({ "key": "sk-headless-test" }))
+        .unwrap();
+}
+
 /// Every command without a key or a menu item, and how it's reached.
 fn paths() -> BTreeMap<&'static str, Path> {
     use Path::{Control, Exception};
@@ -1088,6 +1096,37 @@ fn paths() -> BTreeMap<&'static str, Path> {
                 "the arrangement's time-signature marker lane (WP-2.20)",
             )),
         ),
+        // Automation (WP-2.12): the Control Bar's Re-Enable Automation
+        // button, and the arrangement's automation lanes, which aren't
+        // drawn yet.
+        (
+            "automation.re_enable",
+            main(nothing, control_bar, "Re-Enable Automation", Key::Enter),
+        ),
+        (
+            "automation.set_breakpoint",
+            Exception(LaterView("the arrangement's automation lanes (WP-2.12)")),
+        ),
+        (
+            "automation.set_curve",
+            Exception(LaterView("the arrangement's automation lanes (WP-2.12)")),
+        ),
+        (
+            "automation.move_breakpoint",
+            Exception(LaterView("the arrangement's automation lanes (WP-2.12)")),
+        ),
+        (
+            "automation.delete_breakpoint",
+            Exception(LaterView("the arrangement's automation lanes (WP-2.12)")),
+        ),
+        (
+            "automation.delete",
+            Exception(LaterView("the arrangement's automation lanes (WP-2.12)")),
+        ),
+        (
+            "automation.re_enable_for",
+            Exception(LaterView("the arrangement's automation lanes (WP-2.12)")),
+        ),
         // A track's switches (mixer-view R7): Enter on Solo or Arm.
         (
             "mixer.solo_exclusive",
@@ -1122,6 +1161,40 @@ fn paths() -> BTreeMap<&'static str, Path> {
         (
             "agent.new_client_token",
             settings("agents", server_and_agent, "New Token: Tester", Key::Enter),
+        ),
+        // The built-in assistant's settings on the Agents page (WP-2.23,
+        // part 4).
+        (
+            "assistant.set_provider",
+            settings("agents", nothing, "Assistant Provider", Key::ArrowDown),
+        ),
+        (
+            "assistant.set_base_url",
+            settings("agents", nothing, "Assistant Base URL", Key::K),
+        ),
+        (
+            "assistant.set_model",
+            settings("agents", nothing, "Assistant Model", Key::K),
+        ),
+        (
+            "assistant.set_key",
+            Exception(Equivalent(
+                "the API key field, typed into and then stored with Set: the key has no one \
+                 key of its own, since it changes the keychain",
+            )),
+        ),
+        (
+            "assistant.forget_key",
+            settings(
+                "agents",
+                assistant_key_set,
+                "Forget Assistant API Key",
+                Key::Enter,
+            ),
+        ),
+        (
+            "assistant.toggle_activity_log",
+            settings("agents", nothing, "Open Assistant Activity Log", Key::Enter),
         ),
         (
             "audio.configure",
@@ -1309,8 +1382,19 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("clip_view.select_notes", Exception(note_editor)),
         ("note.add", Exception(note_editor)),
         ("note.delete", Exception(note_editor)),
-        ("note.move", Exception(note_editor)),
+        // `note.move` has its own path now: the note-selection keys
+        // transpose the selected notes (S-A11Y-008, S-A11Y-009).
         ("note.resize", Exception(note_editor)),
+        // The Quantize settings are the Quantize Settings dialog's values
+        // (M-EDIT-036, Cmd-Shift-U): its controls aren't recorded yet, so
+        // the menu item shows disabled and agents reach the command until
+        // the dialog is built (the piano-roll spec, part 3).
+        (
+            "clip_view.quantize_settings",
+            Exception(LaterView(
+                "the Quantize Settings dialog (M-EDIT-036, milestone M2)",
+            )),
+        ),
         ("note.set_value", Exception(note_editor)),
         ("note.ramp_value", Exception(note_editor)),
         ("view.lane", Exception(note_editor)),

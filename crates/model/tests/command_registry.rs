@@ -9,10 +9,10 @@ use bl_commands::{Registry, args_schema, tagged_variant, validate};
 use bl_core::time::{Bpm, TempoMap, Ticks, TimeSignature, TimeSignatureMap};
 use bl_model::registry::{self, RunError};
 use bl_model::{
-    ArrangementLoop, AudioData, Change, ChangeSet, Channel, Clip, ClipData, ClipId, Command,
-    ContentHash, CountIn, Device, DeviceId, DeviceKind, EditError, Editor, Input, MetronomeRhythm,
-    MetronomeSound, MidiData, ModelError, Monitor, Note, Output, ParamId, PluginFormat, SceneId,
-    SendTap, Tap, TrackId, TrackKind,
+    ArrangementLoop, AudioData, AutomationTarget, Change, ChangeSet, Channel, Clip, ClipData,
+    ClipId, Command, ContentHash, CountIn, Device, DeviceId, DeviceKind, EditError, Editor, Input,
+    MetronomeRhythm, MetronomeSound, MidiData, MixerParam, ModelError, Monitor, Note, Output,
+    ParamId, PluginFormat, SceneId, SendTap, Tap, TrackId, TrackKind,
 };
 use serde_json::{Value, json};
 
@@ -50,14 +50,14 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        73,
+        80,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
          set_device_floating, WP-2.20 six for tempo breakpoints and time-signature markers, \
          WP-2.1 two for MIDI clips, WP-2.16 set_device_sample, WP-2.15 five for the metronome, \
-         WP-2.13 the two for Main Out and Cue Out, and WP-3.1 five for scenes and two for slot \
-         clips"
+         WP-2.13 the two for Main Out and Cue Out, WP-3.1 five for scenes and two for slot \
+         clips, and WP-2.12 seven for automation"
     );
 
     for op in &ops {
@@ -631,6 +631,137 @@ fn every_command_runs_by_id() {
         }
     );
 
+    // Automation, one envelope per parameter (WP-2.12): a mixer control, a
+    // send, and a device parameter; the hand move that overrides an
+    // envelope; and the two Re-Enable commands.
+    let volume = json!({ "type": "mixer", "param": "volume" });
+    let send = json!({ "type": "send", "to": reverb });
+    let changes = agent.run(
+        "automation.set_breakpoint",
+        json!({ "track": drums, "target": volume, "at": 0, "value": 1.0 }),
+    );
+    assert_eq!(changes.tracks.get(&drums), Some(&Change::Modified));
+    agent.run(
+        "automation.set_breakpoint",
+        json!({ "track": drums, "target": volume, "at": bar, "value": 0.25 }),
+    );
+    agent.run(
+        "automation.set_curve",
+        json!({ "track": drums, "target": volume, "at": 0, "bend": -0.5 }),
+    );
+    agent.run(
+        "automation.set_breakpoint",
+        json!({ "track": group, "target": send, "at": 0, "value": 0.5 }),
+    );
+    agent.run(
+        "automation.set_breakpoint",
+        json!({ "track": reverb, "target": { "type": "device", "device": eq, "param": 3 },
+                "at": 0, "value": -6.0 }),
+    );
+    let document = agent.editor.document();
+    let automation = document
+        .track(drums)
+        .unwrap()
+        .automation_for(&AutomationTarget::Mixer {
+            param: MixerParam::Volume,
+        })
+        .expect("an envelope");
+    assert!(automation.enabled);
+    assert_eq!(
+        automation.envelope.points().collect::<Vec<_>>(),
+        vec![
+            bl_model::Breakpoint {
+                at: Ticks::ZERO,
+                value: 1.0,
+                bend: -0.5,
+            },
+            bl_model::Breakpoint {
+                at: Ticks(bar),
+                value: 0.25,
+                bend: 0.0,
+            }
+        ]
+    );
+    assert!(
+        document
+            .track(reverb)
+            .unwrap()
+            .automation_for(&AutomationTarget::Device {
+                device: eq,
+                param: ParamId(3)
+            })
+            .is_some()
+    );
+    // A hand move overrides the envelope: the control's value wins until
+    // Re-Enable Automation.
+    agent.run(
+        "mixer.set_volume",
+        json!({ "track": drums, "volume": 0.75 }),
+    );
+    let document = agent.editor.document();
+    assert!(document.track(drums).unwrap().automation_overridden());
+    assert_eq!(document.track(drums).unwrap().mixer().volume, 0.75);
+    agent.run(
+        "automation.re_enable_for",
+        json!({ "track": drums, "target": volume }),
+    );
+    assert!(
+        !agent
+            .editor
+            .document()
+            .track(drums)
+            .unwrap()
+            .automation_overridden()
+    );
+    agent.run("mixer.set_volume", json!({ "track": drums, "volume": 0.5 }));
+    agent.run("automation.re_enable", json!({}));
+    assert!(
+        !agent
+            .editor
+            .document()
+            .track(drums)
+            .unwrap()
+            .automation_overridden()
+    );
+    // Moving and deleting breakpoints, and deleting a whole envelope.
+    agent.run(
+        "automation.move_breakpoint",
+        json!({ "track": drums, "target": volume, "at": bar, "to": bar * 2 }),
+    );
+    agent.run(
+        "automation.delete_breakpoint",
+        json!({ "track": drums, "target": volume, "at": bar * 2 }),
+    );
+    agent.run(
+        "automation.delete",
+        json!({ "track": group, "target": send }),
+    );
+    assert!(
+        agent
+            .editor
+            .document()
+            .track(group)
+            .unwrap()
+            .automation_for(&AutomationTarget::Send { to: reverb })
+            .is_none()
+    );
+    // Deleting the last breakpoint takes the envelope with it.
+    agent.run(
+        "automation.delete_breakpoint",
+        json!({ "track": drums, "target": volume, "at": 0 }),
+    );
+    assert!(
+        agent
+            .editor
+            .document()
+            .track(drums)
+            .unwrap()
+            .automation_for(&AutomationTarget::Mixer {
+                param: MixerParam::Volume
+            })
+            .is_none()
+    );
+
     // Metronome (WP-2.15).
     agent.run(
         "transport.set_metronome_enabled",
@@ -832,6 +963,69 @@ fn schemas_match_what_commands_serialise() {
         (
             "mixer.set_solo_in_place",
             Command::SetSoloInPlace { enabled: false },
+        ),
+        (
+            "automation.set_breakpoint",
+            Command::SetAutomationBreakpoint {
+                track,
+                target: AutomationTarget::Mixer {
+                    param: MixerParam::Volume,
+                },
+                at: Ticks::QUARTER,
+                value: 1.0,
+            },
+        ),
+        (
+            "automation.set_curve",
+            Command::SetAutomationCurve {
+                track,
+                target: AutomationTarget::Mixer {
+                    param: MixerParam::Pan,
+                },
+                at: Ticks::QUARTER,
+                bend: -0.5,
+            },
+        ),
+        (
+            "automation.move_breakpoint",
+            Command::MoveAutomationBreakpoint {
+                track,
+                target: AutomationTarget::Device {
+                    device,
+                    param: ParamId(7),
+                },
+                at: Ticks::QUARTER,
+                to: Ticks::WHOLE,
+            },
+        ),
+        (
+            "automation.delete_breakpoint",
+            Command::DeleteAutomationBreakpoint {
+                track,
+                target: AutomationTarget::Send {
+                    to: TrackId(fresh()),
+                },
+                at: Ticks::QUARTER,
+            },
+        ),
+        (
+            "automation.delete",
+            Command::DeleteAutomation {
+                track,
+                target: AutomationTarget::Mixer {
+                    param: MixerParam::Mute,
+                },
+            },
+        ),
+        ("automation.re_enable", Command::ReEnableAutomation {}),
+        (
+            "automation.re_enable_for",
+            Command::ReEnableAutomationFor {
+                track,
+                target: AutomationTarget::Send {
+                    to: TrackId(fresh()),
+                },
+            },
         ),
         (
             "routing.set_input",

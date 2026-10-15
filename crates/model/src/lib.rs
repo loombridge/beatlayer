@@ -57,6 +57,7 @@
 //!
 //! The rules taken from Live are in the tracks and undo spec.
 
+pub mod automation;
 mod base64;
 mod changes;
 mod clip;
@@ -76,6 +77,9 @@ mod scene;
 mod shared;
 mod track;
 
+pub use automation::{
+    Automation, AutomationTarget, Breakpoint, Envelope, MixerParam, TrackAutomation, curve_value,
+};
 pub use changes::{Change, ChangeSet};
 pub use clip::{AudioData, Clip, ClipData, ClipFolds, EDGE_FADE_SECONDS, MidiData, Note};
 pub use command::Command;

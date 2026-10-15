@@ -1,6 +1,6 @@
 //! The Clip View's note-editing commands in the command registry (WP-2.3):
-//! selecting the MIDI Note Editor's notes, drawing, deleting, moving and
-//! resizing them.
+//! selecting the MIDI Note Editor's notes, drawing, deleting, moving,
+//! resizing and quantising them, and the view's Quantize settings.
 //!
 //! A note is named by its place in the clip's notes in order (by start,
 //! then pitch): place 0 is the earliest note, 0 again the lowest of those
@@ -36,6 +36,10 @@ pub const DELETE_NOTES: &str = "note.delete";
 pub const MOVE_NOTES: &str = "note.move";
 /// `note.resize`: move notes' ends.
 pub const RESIZE_NOTES: &str = "note.resize";
+/// `note.quantize`: quantise notes to a grid, over their starts or ends.
+pub const QUANTIZE_NOTES: &str = "note.quantize";
+/// `clip_view.quantize_settings`: the Clip View's Quantize settings.
+pub const QUANTIZE_SETTINGS: &str = "clip_view.quantize_settings";
 /// `note.set_value`: set one value of notes (velocity, release velocity,
 /// chance, or velocity deviation).
 pub const SET_VALUE: &str = "note.set_value";
@@ -50,6 +54,8 @@ pub const IDS: &[&str] = &[
     DELETE_NOTES,
     MOVE_NOTES,
     RESIZE_NOTES,
+    QUANTIZE_NOTES,
+    QUANTIZE_SETTINGS,
     SET_VALUE,
     RAMP_VALUE,
 ];
@@ -259,6 +265,92 @@ pub struct ResizeNotesArgs {
     pub by: Ticks,
 }
 
+/// Whether `note.quantize` moves notes' starts or their ends.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[schemars(
+    description = "What `note.quantize` moves toward the grid: `note_start` (the default) \
+                   moves each note's start, `note_end` moves its end instead, leaving the \
+                   start alone."
+)]
+pub enum QuantizeTarget {
+    /// Move the notes' starts.
+    #[default]
+    NoteStart,
+    /// Move the notes' ends; the starts stay put.
+    NoteEnd,
+}
+
+/// The Clip View's Quantize settings, as `clip_view.quantize_settings`
+/// reports them: what `note.quantize` uses when its arguments leave them
+/// out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct QuantizeSettings {
+    /// The spacing between the quantise grid's lines, in ticks. `null`
+    /// (nothing) follows the Clip View's editing grid, the step the note
+    /// area draws, at the moment the command runs.
+    pub grid: Option<Ticks>,
+    /// Whether quantise moves note starts or note ends.
+    pub target: QuantizeTarget,
+    /// How far each note moves toward its grid line, as a percentage from 0
+    /// (nothing moves) to 100 (every note lands on the line).
+    pub amount: u8,
+}
+
+/// What a new Clip View starts with: the editor's grid, note starts, all
+/// the way (100 percent).
+impl Default for QuantizeSettings {
+    fn default() -> Self {
+        Self {
+            grid: None,
+            target: QuantizeTarget::NoteStart,
+            amount: 100,
+        }
+    }
+}
+
+/// Arguments of `note.quantize`. Fields left out use the Quantize settings.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct QuantizeNotesArgs {
+    /// The MIDI clip. Left out, the one the Clip View shows (the
+    /// Arrangement's selected clip).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// The notes, by their place in the clip's notes in order (by start,
+    /// then pitch). Left out, the selected notes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<Vec<u32>>,
+    /// The grid line spacing in ticks, over the Quantize settings. Lines
+    /// are laid out from each bar's start, as the editing grid's are; a
+    /// spacing of whole bars counts bars from 1.1.1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grid: Option<Ticks>,
+    /// What to move toward the grid.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<QuantizeTarget>,
+    /// How far each note moves toward its grid line, from 0 to 100 percent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub amount: Option<u8>,
+}
+
+/// Arguments of `clip_view.quantize_settings`. Fields left out keep their
+/// values.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct QuantizeSettingsArgs {
+    /// The quantise grid's line spacing in ticks; must be positive. A new
+    /// view follows the Clip View's editing grid until one is set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grid: Option<Ticks>,
+    /// What quantise moves toward the grid.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<QuantizeTarget>,
+    /// How far each note moves toward its grid line, from 0 to 100 percent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub amount: Option<u8>,
+}
+
 /// What a note edit did, and what's selected afterwards.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct NoteEditResult {
@@ -375,6 +467,38 @@ fn specs() -> Vec<CommandSpec> {
              step.",
         )
         .args::<ResizeNotesArgs>(),
+        CommandSpec::new(QUANTIZE_NOTES, "Quantize")
+            .description(
+                "Quantises notes (`notes`, or the selected notes) to `grid`: each note moves \
+                 `amount` percent of the way from its start (or its end, with `target` \
+                 `note_end`) to the nearest grid line, so 100 percent lands it on the line \
+                 and 50 percent halves its distance to it. The lines are laid out from each \
+                 bar's start, as the note editor's grid is, and a spacing of whole bars \
+                 counts bars from 1.1.1. `grid`, `target`, and `amount` left out use the \
+                 Clip View's Quantize settings (`clip_view.quantize_settings`), which follow \
+                 the note editor's editing grid until a grid is set. Quantising is one undo \
+                 step, and the quantised notes stay selected.",
+            )
+            .permission(Permission::Edit)
+            .contexts([ClipView, NoteEditor, NoteSelection])
+            .binding("S-NOTE-011")
+            .args::<QuantizeNotesArgs>()
+            .result::<NoteEditResult>(),
+        CommandSpec::new(QUANTIZE_SETTINGS, "Quantize Settings")
+            .description(
+                "Reads or changes the Clip View's Quantize settings, the values `note.quantize \
+                 and Cmd-U use when their arguments leave them out: `grid`, the spacing \
+                 between the quantise grid's lines in ticks (positive; left unset, it follows \
+                 the note editor's editing grid), `target`, whether quantise moves note \
+                 starts or note ends, and `amount`, how far each note moves toward its grid \
+                 line as a percentage from 0 to 100. Fields left out keep their values, and \
+                 the result reports all of them. The settings belong to the view, like Draw \
+                 Mode: changing them changes nothing in the set and is no undo step.",
+            )
+            .permission(Permission::Read)
+            .contexts([ClipView, NoteEditor, NoteSelection])
+            .args::<QuantizeSettingsArgs>()
+            .result::<QuantizeSettings>(),
         edit(
             SET_VALUE,
             "Set Note Value",
@@ -429,5 +553,17 @@ mod tests {
         assert_eq!(class(ADD_NOTE), Some(Permission::Edit));
         assert_eq!(class(MOVE_NOTES), Some(Permission::Edit));
         assert_eq!(class(RESIZE_NOTES), Some(Permission::Edit));
+        assert_eq!(class(QUANTIZE_NOTES), Some(Permission::Edit));
+        // The Quantize settings are view state, like Draw Mode.
+        assert_eq!(class(QUANTIZE_SETTINGS), Some(Permission::Read));
+        // Cmd-U quantises the selected notes (S-NOTE-011).
+        let bindings: Vec<&str> = registry
+            .get(QUANTIZE_NOTES)
+            .unwrap()
+            .bindings
+            .iter()
+            .map(|binding| binding.shortcut.as_ref())
+            .collect();
+        assert_eq!(bindings, ["S-NOTE-011"]);
     }
 }

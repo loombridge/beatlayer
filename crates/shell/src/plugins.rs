@@ -10,12 +10,18 @@
 //! `device.d<device>.<command>` (such as `device.d17.gain.reset`), so
 //! agents list, run, query, and schedule them like any other command.
 
+use std::collections::BTreeSet;
+use std::path::PathBuf;
+
 use bl_commands::schemars::Schema;
 use bl_commands::{CommandSpec, Context, Permission};
 use bl_devices::KitHost;
 use bl_model::{Command, Device, DeviceId, DeviceKind, Document, Editor, ParamId, PluginFormat};
 use bl_plugin_host::clap::ClapHost;
-use bl_shell_spec::plugins::PluginInfo;
+use bl_plugin_host::scan::Scanner;
+use bl_shell_spec::plugins::{
+    BlockedItem, PluginInfo, PluginScan, ScannedItem, SetPlugin, SetPluginList,
+};
 use serde_json::json;
 
 use crate::devices::DeviceView;
@@ -213,4 +219,107 @@ pub fn info(plugins: &ClapHost, device: DeviceId) -> Option<PluginInfo> {
         window_shown: status.editor_open && !status.editor_hidden,
         values: status.values,
     })
+}
+
+/// Runs a scan (or a rescan) and reports it for `plugin.scan` /
+/// `plugin.rescan` (WP-2.9).
+#[must_use]
+pub fn scan_report(
+    scanner: &Scanner,
+    format: PluginFormat,
+    paths: &[PathBuf],
+    fresh: bool,
+    hidden: &BTreeSet<String>,
+) -> PluginScan {
+    let report = if fresh {
+        scanner.rescan(format, paths)
+    } else {
+        scanner.scan(format, paths)
+    };
+    PluginScan {
+        plugins: report
+            .plugins
+            .into_iter()
+            .map(|p| ScannedItem {
+                hidden: hidden.contains(&p.key()),
+                format: p.format,
+                path: p.path.to_string_lossy().into_owned(),
+                plugin_id: p.plugin_id,
+                name: p.name,
+                vendor: p.vendor,
+                version: p.version,
+                role: p.role,
+            })
+            .collect(),
+        blocked: report
+            .blocked
+            .into_iter()
+            .map(|b| BlockedItem {
+                format: b.format,
+                path: b.path.to_string_lossy().into_owned(),
+                reason: b.reason,
+            })
+            .collect(),
+        scanned: report.scanned,
+        cached: report.cached,
+    }
+}
+
+/// Every plug-in `doc` uses, grouped by format and ID, for `plugin.list`
+/// (IMP-29).
+#[must_use]
+pub fn set_plugin_list(doc: &Document, scanner: &Scanner) -> SetPluginList {
+    let scanned = scanner.plugins();
+    let blocked = scanner.blocked();
+    let mut order: Vec<(String, SetPlugin)> = Vec::new();
+    for track in doc.tracks() {
+        for device in track.devices() {
+            let DeviceKind::Plugin { format, plugin_id } = &device.kind else {
+                continue;
+            };
+            let key = format!(
+                "{}/{}",
+                bl_plugin_host::scan::format_name(*format),
+                plugin_id
+            );
+            let path = device
+                .plugin
+                .as_ref()
+                .map(|state| state.path.clone())
+                .filter(|p| !p.is_empty());
+            let known = scanned
+                .iter()
+                .find(|p| p.format == *format && p.plugin_id == *plugin_id);
+            let blocked_reason = path.as_deref().and_then(|p| {
+                blocked
+                    .iter()
+                    .find(|b| b.path.to_string_lossy() == p)
+                    .map(|b| b.reason.clone())
+            });
+            let existing = order.iter_mut().find(|(k, _)| *k == key);
+            if let Some((_, plugin)) = existing {
+                plugin.devices.push(device.id);
+                plugin.tracks.push(track.id());
+                continue;
+            }
+            order.push((
+                key,
+                SetPlugin {
+                    format: *format,
+                    plugin_id: plugin_id.clone(),
+                    name: device.title().to_owned(),
+                    path: path.clone(),
+                    vendor: known.and_then(|p| p.vendor.clone()),
+                    version: known.and_then(|p| p.version.clone()),
+                    devices: vec![device.id],
+                    tracks: vec![track.id()],
+                    missing: known.is_none() || blocked_reason.is_some(),
+                    blocked: blocked_reason,
+                },
+            ));
+        }
+    }
+    let mut plugins: Vec<SetPlugin> = order.into_iter().map(|(_, p)| p).collect();
+    plugins.sort_by(|a, b| a.name.cmp(&b.name).then(a.plugin_id.cmp(&b.plugin_id)));
+    SetPluginList { plugins }
 }

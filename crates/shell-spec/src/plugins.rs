@@ -10,7 +10,7 @@
 
 use bl_commands::Context::{DeviceView, Global};
 use bl_commands::{CommandSpec, Permission, RegisterError, Registry};
-use bl_model::{DeviceId, ParamId, TrackId};
+use bl_model::{DeviceId, DeviceRole, ParamId, PluginFormat, TrackId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -20,10 +20,19 @@ pub const LOAD: &str = "plugin.load";
 pub const SHOW_WINDOW: &str = "plugin.show_window";
 /// `plugin.info`: what a plug-in device's plug-in is doing.
 pub const INFO: &str = "plugin.info";
+/// `plugin.scan`: find the plug-ins installed on this machine (WP-2.9).
+pub const SCAN: &str = "plugin.scan";
+/// `plugin.rescan`: scan again, ignoring the cache (WP-2.9).
+pub const RESCAN: &str = "plugin.rescan";
+/// `plugin.list`: every plug-in the set uses, and where (WP-2.9, IMP-29).
+pub const LIST: &str = "plugin.list";
+/// `plugin.settings`: hidden plug-ins and the format preference (WP-2.9,
+/// IMP-07).
+pub const SETTINGS: &str = "plugin.settings";
 
 /// Every command [`register`] adds, so a host knows which IDs to send to
 /// `bl-shell`'s `Shell::run`.
-pub const IDS: &[&str] = &[LOAD, SHOW_WINDOW, INFO];
+pub const IDS: &[&str] = &[LOAD, SHOW_WINDOW, INFO, SCAN, RESCAN, LIST, SETTINGS];
 
 /// Whether `id` is one of the plug-in commands.
 #[must_use]
@@ -117,6 +126,131 @@ pub struct PluginInfo {
     pub values: Vec<(ParamId, f64)>,
 }
 
+/// Arguments of `plugin.scan` and `plugin.rescan`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ScanArgs {
+    /// The files or folders to scan; the system's plug-in folders if left
+    /// out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paths: Option<Vec<String>>,
+}
+
+/// A plug-in the scanner found.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ScannedItem {
+    /// Its format (`clap`, `vst3`, `au`, or `lv2`).
+    pub format: PluginFormat,
+    /// The file or bundle it's in.
+    pub path: String,
+    /// Its identifier within its format (its CLAP ID).
+    pub plugin_id: String,
+    /// Its name.
+    pub name: String,
+    /// Its vendor, if it gives one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vendor: Option<String>,
+    /// Its version, if it gives one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// What it is in a chain.
+    pub role: DeviceRole,
+    /// Whether the browser hides it (IMP-07).
+    pub hidden: bool,
+}
+
+/// A plug-in that failed a scan, and why.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct BlockedItem {
+    /// Its format.
+    pub format: PluginFormat,
+    /// The file or bundle it's in.
+    pub path: String,
+    /// Why it failed: it crashed, hung, or refused to load.
+    pub reason: String,
+}
+
+/// What `plugin.scan` and `plugin.rescan` return.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PluginScan {
+    /// Every plug-in the scan found.
+    pub plugins: Vec<ScannedItem>,
+    /// Every plug-in that failed, with why.
+    pub blocked: Vec<BlockedItem>,
+    /// How many files the scanner loaded.
+    pub scanned: usize,
+    /// How many files the cache answered.
+    pub cached: usize,
+}
+
+/// Args of `plugin.list`: none.
+pub type ListArgs = bl_commands::NoArgs;
+
+/// One plug-in a set uses (IMP-29).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SetPlugin {
+    /// Its format.
+    pub format: PluginFormat,
+    /// Its identifier within its format.
+    pub plugin_id: String,
+    /// Its name, as the set's device has it.
+    pub name: String,
+    /// The file the set says it came from, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// Its vendor, from the scanner, if it's known on this machine.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vendor: Option<String>,
+    /// Its version, from the scanner, if it's known on this machine.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// The devices in the set that use it.
+    pub devices: Vec<DeviceId>,
+    /// The tracks those devices are on.
+    pub tracks: Vec<TrackId>,
+    /// Whether this machine has it: the scanner hasn't seen it, or the
+    /// scanner blocklisted its file.
+    pub missing: bool,
+    /// Why it's missing, if the scanner blocklisted its file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocked: Option<String>,
+}
+
+/// What `plugin.list` returns.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SetPluginList {
+    /// Every plug-in the set uses.
+    pub plugins: Vec<SetPlugin>,
+}
+
+/// Arguments of `plugin.settings`: the fields to change; none to read them.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PluginSettingsArgs {
+    /// The hidden plug-ins to remember, as `format/plugin_id` keys (IMP-07);
+    /// empty hides none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hidden: Option<Vec<String>>,
+    /// Whether the browser shows hidden plug-ins.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub show_hidden: Option<bool>,
+    /// The format to prefer when a plug-in exists in several.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format_preference: Option<PluginFormat>,
+}
+
+/// What `plugin.settings` returns.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PluginSettings {
+    /// The hidden plug-ins, as `format/plugin_id` keys.
+    pub hidden: Vec<String>,
+    /// Whether the browser shows hidden plug-ins.
+    pub show_hidden: bool,
+    /// The preferred format, if one is chosen.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format_preference: Option<PluginFormat>,
+}
+
 /// Adds the plug-in commands to a registry.
 ///
 /// # Errors
@@ -133,7 +267,8 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  out. Its parameters become the device's, which `device.parameters` lists and \
                  `device.set_param` and automation change; its own state is saved with the \
                  set. The plug-in's code runs inside Beatlayer, so load only plug-ins you \
-                 trust. Until the plug-in scanner arrives, this is how plug-ins are loaded.",
+                 trust. The scanner (`plugin.scan`) lists the plug-ins on this machine; this \
+                 command still loads one by its path.",
             )
             .permission(Permission::External)
             .contexts([Global, DeviceView])
@@ -168,6 +303,64 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .context(DeviceView)
             .args::<PluginInfoArgs>()
             .result::<PluginInfo>(),
+    )?;
+    registry.register(
+        CommandSpec::new(SCAN, "Scan Plug-Ins")
+            .description(
+                "Finds the plug-ins installed on this machine and describes each one: its \
+                 format, its file, its identifier, name, vendor, version, and role in a chain. \
+                 Scans the files or folders in `paths`, or the system's plug-in folders when \
+                 `paths` is left out. Each plug-in is loaded in a separate process with a \
+                 timeout, so a plug-in that crashes or hangs is put on a blocklist with the \
+                 reason instead of taking Beatlayer down; a file whose size and modification \
+                 time are unchanged is answered from the cache. CLAP is the only format \
+                 scanned so far. Reads plug-in files outside the project, so an agent asks \
+                 first.",
+            )
+            .permission(Permission::External)
+            .contexts([Global, DeviceView])
+            .args::<ScanArgs>()
+            .result::<PluginScan>(),
+    )?;
+    registry.register(
+        CommandSpec::new(RESCAN, "Rescan Plug-Ins")
+            .description(
+                "Scans the plug-ins in `paths` (or the system's plug-in folders) again, \
+                 ignoring the cache and clearing the blocklist for them, as the Rescan button \
+                 does. Returns `plugin.scan`'s report.",
+            )
+            .permission(Permission::External)
+            .contexts([Global, DeviceView])
+            .args::<ScanArgs>()
+            .result::<PluginScan>(),
+    )?;
+    registry.register(
+        CommandSpec::new(LIST, "List Plug-Ins in the Set")
+            .description(
+                "Lists every plug-in the set uses, grouped by plug-in: its format, its \
+                 identifier, name, the file the set says it came from, its vendor and version \
+                 when the scanner knows them, the devices and tracks that use it, and whether \
+                 this machine has it (missing when the scanner hasn't seen it, or says why it \
+                 is blocklisted). Changes nothing.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .args::<ListArgs>()
+            .result::<SetPluginList>(),
+    )?;
+    registry.register(
+        CommandSpec::new(SETTINGS, "Plug-In Settings")
+            .description(
+                "Reads or changes how the browser shows plug-ins (IMP-07): `hidden` is the \
+                 plug-ins to hide, as `format/plugin_id` keys; `show_hidden` whether hidden \
+                 plug-ins still show; and `format_preference` the format to prefer when a \
+                 plug-in exists in several. Fields left out are unchanged. Returns the \
+                 settings. A set that uses a hidden plug-in still loads it.",
+            )
+            .permission(Permission::Edit)
+            .context(Global)
+            .args::<PluginSettingsArgs>()
+            .result::<PluginSettings>(),
     )
 }
 

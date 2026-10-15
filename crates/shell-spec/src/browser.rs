@@ -186,13 +186,9 @@ impl Label {
             }
             Self::MidiEffects => Some("MIDI effects arrive in milestone M5."),
             Self::Modulators => Some("Modulators arrive in milestone M5."),
-            Self::PlugIns => {
-                Some("Plug-ins appear here once the plug-in scanner arrives (WP-2.9).")
-            }
             Self::Clips => Some("Clip files arrive in milestone M6."),
             Self::Grooves => Some("Grooves arrive with the Groove Pool in milestone M6."),
             Self::Tunings => Some("Tunings arrive in milestone M6."),
-            Self::Templates => Some("Templates arrive with WP-2.25."),
             _ => None,
         }
     }
@@ -250,6 +246,8 @@ pub enum ItemKind {
     /// A Beatlayer device preset, which loads into the device being
     /// hot-swapped (WP-2.4).
     Preset,
+    /// A plug-in the scanner found (WP-2.9).
+    Plugin,
 }
 
 /// One row of the content pane.

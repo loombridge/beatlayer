@@ -204,6 +204,9 @@ pub struct BrowserView {
     focus: Part,
     focus_requests: u64,
     waker: Waker,
+    /// The plug-ins the scanner found (WP-2.9), already filtered by the
+    /// hidden and format preferences; the Plug-Ins label lists them.
+    plugins: Vec<bl_plugin_host::scan::ScannedPlugin>,
 }
 
 fn parse<T: DeserializeOwned>(args: Value) -> Result<T, BrowserError> {
@@ -251,6 +254,7 @@ impl BrowserView {
             focus: Part::Content,
             focus_requests: 0,
             waker,
+            plugins: Vec::new(),
         };
         view.user_library.clone_from(&prefs.user_library);
         view.places_changed();
@@ -261,6 +265,16 @@ impl BrowserView {
     #[must_use]
     pub fn waker(&self) -> &Waker {
         &self.waker
+    }
+
+    /// Sets the plug-ins the Plug-Ins label lists (WP-2.9). The shell
+    /// passes what the scanner found, already filtered by the hidden and
+    /// format preferences.
+    pub fn set_plugins(&mut self, plugins: Vec<bl_plugin_host::scan::ScannedPlugin>) {
+        self.plugins = plugins;
+        if self.label == Label::PlugIns {
+            self.rebuild();
+        }
     }
 
     /// The preferences to keep.
@@ -365,6 +379,14 @@ impl BrowserView {
             push(Label::Folder(folder.to_string_lossy().into_owned()), folder);
         }
         roots
+    }
+
+    /// The User Library's `Templates` folder, where set templates are saved
+    /// (WP-2.25; the browser spec, R2).
+    fn templates_folder(&self) -> Option<PathBuf> {
+        self.user_library
+            .as_ref()
+            .map(|library| library.join("Templates"))
     }
 
     /// A place's folder.
@@ -481,6 +503,35 @@ impl BrowserView {
     fn rebuild(&mut self) {
         self.note = None;
         let label = self.label.clone();
+        if label == Label::PlugIns {
+            // Spec: plugin-scanning R7. The Plug-Ins label lists what the
+            // scanner found, hidden plug-ins already filtered out.
+            let query = self.search.trim().to_ascii_lowercase();
+            let items: Vec<Item> = self
+                .plugins
+                .iter()
+                .filter(|p| query.is_empty() || p.name.to_ascii_lowercase().contains(&query))
+                .map(|p| Item {
+                    path: format!("{}#{}", p.path.to_string_lossy(), p.plugin_id),
+                    name: p.name.clone(),
+                    kind: ItemKind::Plugin,
+                    depth: 0,
+                    open: false,
+                    folder: None,
+                })
+                .collect();
+            if items.is_empty() {
+                self.note = Some(if query.is_empty() {
+                    "No plug-ins found yet. Rescan to look for the plug-ins on this machine."
+                        .to_owned()
+                } else {
+                    format!("Nothing matches \u{201c}{}\u{201d}.", self.search.trim())
+                });
+            }
+            self.rows = Rows::Items(items);
+            self.cursor = self.selected.last().and_then(|path| self.position_of(path));
+            return;
+        }
         if !self.search.trim().is_empty() || label == Label::Samples {
             match self.scope(&label) {
                 Some((scope, audio_only)) => {
@@ -498,6 +549,20 @@ impl BrowserView {
                         });
                     }
                     self.rows = Rows::Hits { snapshot, hits };
+                }
+                None if label == Label::Templates => {
+                    // Spec: file-management R5. Templates aren't in the
+                    // index; the folder is listed and filtered by name.
+                    let mut items = Vec::new();
+                    if let Some(folder) = self.templates_folder() {
+                        self.list_into(&folder, 0, &mut items);
+                    }
+                    let needle = self.search.trim().to_lowercase();
+                    items.retain(|item| item.name.to_lowercase().contains(&needle));
+                    if items.is_empty() {
+                        self.note = Some(format!("Nothing matches \u{201c}{needle}\u{201d}."));
+                    }
+                    self.rows = Rows::Items(items);
                 }
                 None => {
                     self.rows = Rows::Items(Vec::new());
@@ -552,6 +617,24 @@ impl BrowserView {
                     }
                     None => {
                         self.note = Some("The User Library hasn't been set up.".to_owned());
+                    }
+                },
+                Label::Templates => match self.templates_folder() {
+                    Some(path) if path.is_dir() => {
+                        self.list_into(&path, 0, &mut items);
+                        if items.is_empty() {
+                            self.note = Some(
+                                "No templates yet: save one with File ▸ Save Beatlayer Set As \
+                                 Template...."
+                                    .to_owned(),
+                            );
+                        }
+                    }
+                    _ => {
+                        self.note = Some(
+                            "The User Library hasn't been set up, so there's no Templates folder."
+                                .to_owned(),
+                        );
                     }
                 },
                 other => {

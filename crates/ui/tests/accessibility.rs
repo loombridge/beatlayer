@@ -993,6 +993,39 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "transport.set_loop_enabled",
             main(nothing, control_bar, "Arrangement Loop", Key::Enter),
         ),
+        // Tempo breakpoints and time-signature markers (WP-2.20): the
+        // arrangement's tempo envelope and marker lane aren't drawn yet, so
+        // agents reach these through the agent API until they are.
+        (
+            "song.set_tempo_breakpoint",
+            Exception(LaterView("the arrangement's tempo envelope (WP-2.20)")),
+        ),
+        (
+            "song.move_tempo_breakpoint",
+            Exception(LaterView("the arrangement's tempo envelope (WP-2.20)")),
+        ),
+        (
+            "song.delete_tempo_breakpoint",
+            Exception(LaterView("the arrangement's tempo envelope (WP-2.20)")),
+        ),
+        (
+            "song.set_time_signature_change",
+            Exception(LaterView(
+                "the arrangement's time-signature marker lane (WP-2.20)",
+            )),
+        ),
+        (
+            "song.move_time_signature_change",
+            Exception(LaterView(
+                "the arrangement's time-signature marker lane (WP-2.20)",
+            )),
+        ),
+        (
+            "song.delete_time_signature_change",
+            Exception(LaterView(
+                "the arrangement's time-signature marker lane (WP-2.20)",
+            )),
+        ),
         // A track's switches (mixer-view R7): Enter on Solo or Arm.
         (
             "mixer.solo_exclusive",
@@ -1010,28 +1043,23 @@ fn paths() -> BTreeMap<&'static str, Path> {
         // The Settings window's controls (Tab, then Enter or Up and Down).
         (
             "agent.set_server",
-            settings("tempo-midi", nothing, "Agent Server", Key::Enter),
+            settings("agents", nothing, "Agent Server", Key::Enter),
         ),
         (
             "agent.new_token",
-            settings("tempo-midi", server_on, "New Token", Key::Enter),
+            settings("agents", server_on, "New Token", Key::Enter),
         ),
         (
             "agent.set_autonomous",
-            settings("tempo-midi", an_agent, "Autonomous: Tester", Key::Enter),
+            settings("agents", an_agent, "Autonomous: Tester", Key::Enter),
         ),
         (
             "agent.forget_client",
-            settings("tempo-midi", an_agent, "Forget Tester", Key::Enter),
+            settings("agents", an_agent, "Forget Tester", Key::Enter),
         ),
         (
             "agent.new_client_token",
-            settings(
-                "tempo-midi",
-                server_and_agent,
-                "New Token: Tester",
-                Key::Enter,
-            ),
+            settings("agents", server_and_agent, "New Token: Tester", Key::Enter),
         ),
         (
             "audio.configure",
@@ -1154,6 +1182,13 @@ fn paths() -> BTreeMap<&'static str, Path> {
             )),
         ),
         (
+            "set.relink_missing",
+            Exception(Equivalent(
+                "the File Manager's Automatic Search button, which needs the File Manager (M-FILE-007); \
+                 it also runs by itself when a set with missing files is opened",
+            )),
+        ),
+        (
             "agent.approve_client",
             Exception(Equivalent(
                 "the system dialog that asks when an agent first connects, Allow",
@@ -1169,6 +1204,8 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("clip.set_gain", Exception(clip_view)),
         ("clip.set_loop", Exception(clip_view)),
         ("clip.set_loop_enabled", Exception(clip_view)),
+        ("clip.set_midi_loop", Exception(clip_view)),
+        ("clip.set_midi_region", Exception(clip_view)),
         ("clip.set_region", Exception(clip_view)),
         ("clip.set_data", Exception(clip_view)),
         // The Device View (WP-2.4): Enter on a title bar's controls.
@@ -1284,6 +1321,27 @@ fn paths() -> BTreeMap<&'static str, Path> {
         (
             "plugin.show_window",
             Exception(LaterView("the plug-in device panel (WP-2.10)")),
+        ),
+        // WP-2.9's scanner and settings: the Plug-Ins label lists what the
+        // scanner found, but the button that scans (Live's Rescan) and the
+        // hide-plug-ins controls are later views.
+        (
+            "plugin.scan",
+            Exception(LaterView("the Settings Plug-Ins page's Rescan (WP-2.5b)")),
+        ),
+        (
+            "plugin.rescan",
+            Exception(LaterView("the Settings Plug-Ins page's Rescan (WP-2.5b)")),
+        ),
+        (
+            "plugin.list",
+            Exception(LaterView("the set's plug-ins view (Phase 6, IMP-29)")),
+        ),
+        (
+            "plugin.settings",
+            Exception(LaterView(
+                "the browser's hide-plug-ins and format controls (Phase 6, IMP-07)",
+            )),
         ),
         // A send knob and the In/Out choosers (the routing spec): Up and
         // Down on them.

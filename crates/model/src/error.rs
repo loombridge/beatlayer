@@ -92,6 +92,9 @@ pub enum ModelError {
     /// The command changes an audio clip's settings, and this clip is a MIDI
     /// clip.
     NotAudioClip(ClipId),
+    /// The command changes a MIDI clip's settings, and this clip is an audio
+    /// clip.
+    NotMidiClip(ClipId),
     /// A track can't take its input from, or send its output to, this
     /// track: itself, or a track of a kind its chooser doesn't list.
     CannotRoute {
@@ -116,6 +119,28 @@ pub enum ModelError {
     DeviceOrder {
         /// The track whose chain it is.
         track: TrackId,
+    },
+    /// There's no tempo breakpoint or time-signature change at this
+    /// position.
+    NoChange {
+        /// What's missing, such as "tempo breakpoint".
+        what: &'static str,
+        /// The position asked about.
+        at: Ticks,
+    },
+    /// Another tempo breakpoint or time-signature change is already at this
+    /// position.
+    ChangeInUse {
+        /// What would collide, such as "tempo breakpoint".
+        what: &'static str,
+        /// The position asked for.
+        at: Ticks,
+    },
+    /// The first tempo breakpoint or time-signature change sits at 1.1.1
+    /// and can't be moved or deleted.
+    FirstChange {
+        /// What can't move, such as "tempo breakpoint".
+        what: &'static str,
     },
 }
 
@@ -168,6 +193,7 @@ impl fmt::Display for ModelError {
                 write!(f, "note {index} has a key or velocity out of range")
             }
             Self::NotAudioClip(id) => write!(f, "{id} is a MIDI clip; this needs an audio clip"),
+            Self::NotMidiClip(id) => write!(f, "{id} is an audio clip; this needs a MIDI clip"),
             Self::CannotRoute { track, to } => write!(
                 f,
                 "{track} can't take its input from or send its output to {to}: its choosers \
@@ -188,6 +214,16 @@ impl fmt::Display for ModelError {
                 f,
                 "{track}'s chain must hold its MIDI effects first, then at most one instrument, \
                  then its audio effects"
+            ),
+            Self::NoChange { what, at } => {
+                write!(f, "there's no {what} at {at}")
+            }
+            Self::ChangeInUse { what, at } => {
+                write!(f, "there's already a {what} at {at}")
+            }
+            Self::FirstChange { what } => write!(
+                f,
+                "the first {what} sits at 1.1.1 and can't be moved or deleted"
             ),
         }
     }

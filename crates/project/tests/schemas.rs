@@ -112,11 +112,13 @@ fn fixture_project() -> Project {
     editor
         .apply(Command::CreateClip { track: kick, clip })
         .unwrap();
-    let notes = (0..8).map(|n| Note {
-        key: 42,
-        velocity: 64 + n * 8,
-        start: Ticks::SIXTEENTH * (i64::from(n) * 2),
-        length: Ticks::SIXTEENTH,
+    let notes = (0..8).map(|n| {
+        Note::new(
+            42,
+            Ticks::SIXTEENTH * (i64::from(n) * 2),
+            Ticks::SIXTEENTH,
+            64 + n * 8,
+        )
     });
     let mut clip = Clip::new(
         editor.new_id(),
@@ -130,12 +132,12 @@ fn fixture_project() -> Project {
         .unwrap();
     // A triplet-length note, which only lands on whole ticks at 705,600 per
     // quarter note.
-    let triplet = Note {
-        key: 36,
-        velocity: 127,
-        start: Ticks(Ticks::QUARTER.get() / 3),
-        length: Ticks(Ticks::QUARTER.get() * 2 / 3),
-    };
+    let triplet = Note::new(
+        36,
+        Ticks(Ticks::QUARTER.get() / 3),
+        Ticks(Ticks::QUARTER.get() * 2 / 3),
+        127,
+    );
     let clip = Clip::new(
         editor.new_id(),
         Ticks::WHOLE * 2,

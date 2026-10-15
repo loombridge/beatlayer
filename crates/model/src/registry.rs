@@ -294,6 +294,82 @@ const ENTRIES: &[Entry] = &[
             and beats, not where clips sit in ticks.",
     },
     Entry {
+        id: "song.set_tempo_breakpoint",
+        action: Action::Apply("set_tempo_breakpoint"),
+        label: "Set Tempo Breakpoint",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Sets the tempo at `at` on the Main track's Song Tempo envelope, adding a \
+            breakpoint there or replacing the one that's there, as dragging a breakpoint does. \
+            Tempos are quarter notes per minute, from 1 to 1,000, and `at` is 0 (1.1.1) or \
+            later. A breakpoint between two others splits the segment there, keeping the \
+            neighbours. Clips and notes keep their positions in ticks, so a new tempo changes \
+            when they sound, not where they sit in bars. Use `song.set_tempo` to replace the \
+            whole map at once.",
+    },
+    Entry {
+        id: "song.move_tempo_breakpoint",
+        action: Action::Apply("move_tempo_breakpoint"),
+        label: "Move Tempo Breakpoint",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Moves the tempo breakpoint at `at` to `to`, keeping its tempo, as dragging \
+            one along the Main track's Song Tempo envelope does. Both are tick positions, `to` \
+            is 0 (1.1.1) or later, and it mustn't land on another breakpoint. The first \
+            breakpoint, at 1.1.1, can't move; `at` there is refused.",
+    },
+    Entry {
+        id: "song.delete_tempo_breakpoint",
+        action: Action::Apply("delete_tempo_breakpoint"),
+        label: "Delete Tempo Breakpoint",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Deletes the tempo breakpoint at `at` from the Main track's Song Tempo \
+            envelope, joining its neighbours with a straight segment. The first breakpoint, at \
+            1.1.1, can't be deleted; `at` there is refused. A position with no breakpoint is \
+            refused too.",
+    },
+    Entry {
+        id: "song.set_time_signature_change",
+        action: Action::Apply("set_time_signature_change"),
+        label: "Set Time Signature Change",
+        permission: Permission::Edit,
+        contexts: &[Global, Arrangement],
+        keys: &[],
+        description: "Sets the time-signature marker at `at` to `signature`, adding one when \
+            there's none, as Create > Insert Time Signature Change and the marker's numerator \
+            and denominator fields do. The marker sits anywhere at 0 (1.1.1) or later and \
+            always starts a new bar there, so a change before the previous bar is full cuts it \
+            short. Numerators run 1 to 99 and denominators are 1, 2, 4, 8, or 16. Use \
+            `song.set_time_signatures` to replace the whole map.",
+    },
+    Entry {
+        id: "song.move_time_signature_change",
+        action: Action::Apply("move_time_signature_change"),
+        label: "Move Time Signature Change",
+        permission: Permission::Edit,
+        contexts: &[Global, Arrangement],
+        keys: &[],
+        description: "Moves the time-signature marker at `at` to `to`, as dragging it along the \
+            arrangement's time-signature lane does. Both are tick positions, `to` is 0 (1.1.1) \
+            or later, and it mustn't land on another marker. The first marker, at 1.1.1, can't \
+            move; `at` there is refused.",
+    },
+    Entry {
+        id: "song.delete_time_signature_change",
+        action: Action::Apply("delete_time_signature_change"),
+        label: "Delete Time Signature Change",
+        permission: Permission::Edit,
+        contexts: &[Global, Arrangement],
+        keys: &[],
+        description: "Deletes the time-signature marker at `at`, so the signature before it runs \
+            on through that position. The first marker, at 1.1.1, can't be deleted; `at` there \
+            is refused. A position with no marker is refused too.",
+    },
+    Entry {
         id: "transport.set_loop",
         action: Action::Apply("set_loop"),
         label: "Set Loop Brace",
@@ -692,16 +768,44 @@ const ENTRIES: &[Entry] = &[
             new clip's brace is the whole file.",
     },
     Entry {
+        id: "clip.set_midi_region",
+        action: Action::Apply("set_midi_clip_region"),
+        label: "Set MIDI Clip Start and End",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Moves a MIDI clip's Start and End markers, in ticks from the clip's \
+            beginning: the clip starts playing at `start` when the song reaches the clip, \
+            and, while its loop is off, plays until `end` (`null` for the end of the clip) \
+            or the clip's own end in the arrangement, whichever comes first, then is silent. \
+            While the loop is on, `start` must be before the loop's end. Use \
+            `clip.set_length` to change how long the clip lasts in the arrangement.",
+    },
+    Entry {
+        id: "clip.set_midi_loop",
+        action: Action::Apply("set_midi_clip_loop"),
+        label: "Set MIDI Clip Loop",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Moves a MIDI clip's loop brace, in ticks from the clip's beginning \
+            (`end` `null` for the end of the clip), as the Clip View's loop Position and \
+            Length fields do. It doesn't switch the loop on or off: use \
+            `clip.set_loop_enabled`. While the loop is on, the clip plays from its Start \
+            marker into the brace, then repeats the brace until the clip ends in the \
+            arrangement; make the clip longer with `clip.set_length` to hear more repeats.",
+    },
+    Entry {
         id: "clip.set_loop_enabled",
         action: Action::Apply("set_clip_loop_enabled"),
         label: "Clip Loop On/Off",
         permission: Permission::Edit,
         contexts: &[ClipView],
         keys: &[],
-        description: "Switches an audio clip's Loop switch on or off, leaving its loop brace \
-            where it is. On, the clip repeats its brace (`clip.set_loop`) for as long as it \
-            lasts in the arrangement; off, it plays from its Start marker to its End marker \
-            once. The Start marker must be before the brace's end to switch it on.",
+        description: "Switches an audio or MIDI clip's Loop switch on or off, leaving its loop brace \
+            where it is. On, the clip repeats its brace (`clip.set_loop` or `clip.set_midi_loop`) \
+            for as long as it lasts in the arrangement; off, it plays from its Start marker to its \
+            End marker once. The Start marker must be before the brace's end to switch it on.",
     },
     Entry {
         id: "clip.set_gain",

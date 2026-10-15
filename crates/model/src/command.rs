@@ -3,12 +3,14 @@
 use std::collections::BTreeSet;
 
 use bl_core::id::Id;
-use bl_core::time::{TempoMap, Ticks, TimeSignatureMap};
+use bl_core::time::{
+    Bpm, TempoMap, TempoSegment, Ticks, TimeSignature, TimeSignatureChange, TimeSignatureMap,
+};
 use imbl::Vector;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::clip::{AudioData, Clip, ClipData};
+use crate::clip::{AudioData, Clip, ClipData, MidiData};
 use crate::device::{Device, DeviceRole};
 use crate::document::Document;
 use crate::error::ModelError;
@@ -44,6 +46,55 @@ pub enum Command {
     SetTimeSignatures {
         /// The new time-signature map.
         time_signatures: TimeSignatureMap,
+    },
+    /// Sets the tempo at a position on the Main track's Song Tempo envelope,
+    /// as dragging a breakpoint there does: the breakpoint at `at` becomes
+    /// `bpm`, or a new one is added when there's none, and the segments
+    /// either side follow it.
+    SetTempoBreakpoint {
+        /// Where the breakpoint sits: 0 (1.1.1) or later.
+        at: Ticks,
+        /// The tempo there, as quarter notes per minute.
+        bpm: Bpm,
+    },
+    /// Moves the tempo breakpoint at `at` to `to`, keeping its tempo. The
+    /// first breakpoint, at 1.1.1, can't move.
+    MoveTempoBreakpoint {
+        /// Where the breakpoint is now.
+        at: Ticks,
+        /// Where it goes: 0 (1.1.1) or later, and not where another
+        /// breakpoint already is.
+        to: Ticks,
+    },
+    /// Deletes the tempo breakpoint at `at`, joining its neighbours with a
+    /// straight segment. The first breakpoint, at 1.1.1, can't be deleted.
+    DeleteTempoBreakpoint {
+        /// Where the breakpoint is.
+        at: Ticks,
+    },
+    /// Inserts or replaces a time-signature marker at `at`: the signature
+    /// at a position in the arrangement becomes `signature`, and a new bar
+    /// starts there.
+    SetTimeSignatureChange {
+        /// Where the marker sits: 0 (1.1.1) or later.
+        at: Ticks,
+        /// The signature from there on.
+        signature: TimeSignature,
+    },
+    /// Moves the time-signature marker at `at` to `to`. The first, at
+    /// 1.1.1, can't move.
+    MoveTimeSignatureChange {
+        /// Where the marker is now.
+        at: Ticks,
+        /// Where it goes: 0 (1.1.1) or later, and not where another marker
+        /// already is.
+        to: Ticks,
+    },
+    /// Deletes the time-signature marker at `at`. The first, at 1.1.1,
+    /// can't be deleted.
+    DeleteTimeSignatureChange {
+        /// Where the marker is.
+        at: Ticks,
     },
     /// Moves the Arrangement loop brace, leaving the Loop switch as it is.
     SetLoop {
@@ -301,10 +352,33 @@ pub enum Command {
         #[serde(default)]
         end: Option<f64>,
     },
-    /// Switches an audio clip's loop on or off, leaving its brace where it
+    /// Moves a MIDI clip's Start and End markers: where in its contents it
+    /// starts playing, and where it stops while its loop is off.
+    SetMidiClipRegion {
+        /// The MIDI clip.
+        clip: ClipId,
+        /// The Start marker, in ticks from the clip's beginning.
+        start: Ticks,
+        /// The End marker, in ticks from the clip's beginning, after `start`;
+        /// `null` (or nothing) for the end of the clip.
+        #[serde(default)]
+        end: Option<Ticks>,
+    },
+    /// Moves a MIDI clip's loop brace, leaving its Loop switch as it is.
+    SetMidiClipLoop {
+        /// The MIDI clip.
+        clip: ClipId,
+        /// Where the brace starts, in ticks from the clip's beginning.
+        start: Ticks,
+        /// Where it ends, in ticks, after `start`; `null` (or nothing) for
+        /// the end of the clip.
+        #[serde(default)]
+        end: Option<Ticks>,
+    },
+    /// Switches an audio or MIDI clip's loop on or off, leaving its brace where it
     /// is.
     SetClipLoopEnabled {
-        /// The audio clip.
+        /// The clip.
         clip: ClipId,
         /// Whether the clip repeats its loop brace.
         enabled: bool,
@@ -461,6 +535,14 @@ impl Command {
         match self {
             Self::SetTempo { .. } => "Change tempo",
             Self::SetTimeSignatures { .. } => "Change time signatures",
+            // Live's undo history names tempo envelope work as adding,
+            // moving, and deleting breakpoints.
+            Self::SetTempoBreakpoint { .. } => "Change tempo breakpoint",
+            Self::MoveTempoBreakpoint { .. } => "Move tempo breakpoint",
+            Self::DeleteTempoBreakpoint { .. } => "Delete tempo breakpoint",
+            Self::SetTimeSignatureChange { .. } => "Change time signature",
+            Self::MoveTimeSignatureChange { .. } => "Move time signature change",
+            Self::DeleteTimeSignatureChange { .. } => "Delete time signature change",
             Self::SetLoop { .. } => "Change loop",
             Self::SetLoopEnabled { .. } => "Switch loop",
             Self::CreateTrack { .. } => "Create track",
@@ -492,6 +574,8 @@ impl Command {
             Self::TrimClipStart { .. } => "Resize clip",
             Self::SetClipRegion { .. } => "Change clip region",
             Self::SetClipLoop { .. } => "Change clip loop",
+            Self::SetMidiClipRegion { .. } => "Change clip region",
+            Self::SetMidiClipLoop { .. } => "Change clip loop",
             Self::SetClipLoopEnabled { .. } => "Switch clip loop",
             Self::SetClipGain { .. } => "Change clip gain",
             Self::SetClipFades { .. } => "Change clip fades",
@@ -563,6 +647,16 @@ impl Document {
                 }
                 Ok(())
             }
+            Command::SetTempoBreakpoint { at, bpm } => self.set_tempo_breakpoint(*at, *bpm),
+            Command::MoveTempoBreakpoint { at, to } => self.move_tempo_breakpoint(*at, *to),
+            Command::DeleteTempoBreakpoint { at } => self.delete_tempo_breakpoint(*at),
+            Command::SetTimeSignatureChange { at, signature } => {
+                self.set_time_signature_change(*at, *signature)
+            }
+            Command::MoveTimeSignatureChange { at, to } => {
+                self.move_time_signature_change(*at, *to)
+            }
+            Command::DeleteTimeSignatureChange { at } => self.delete_time_signature_change(*at),
             Command::SetLoop { start, length } => {
                 check_extent(*start, *length)?;
                 let brace = &mut self.settings.arrangement_loop;
@@ -741,9 +835,22 @@ impl Document {
                 audio.loop_start = *start;
                 audio.loop_end = *end;
             }),
-            Command::SetClipLoopEnabled { clip, enabled } => {
-                self.edit_markers(*clip, |audio| audio.looping = *enabled)
+            Command::SetMidiClipRegion { clip, start, end } => {
+                self.edit_midi_markers(*clip, |midi| {
+                    midi.start = *start;
+                    midi.end = *end;
+                })
             }
+            Command::SetMidiClipLoop { clip, start, end } => {
+                self.edit_midi_markers(*clip, |midi| {
+                    midi.loop_start = *start;
+                    midi.loop_end = *end;
+                })
+            }
+            Command::SetClipLoopEnabled { clip, enabled } => match &self.clip_ref(*clip)?.data {
+                ClipData::Audio(_) => self.edit_markers(*clip, |audio| audio.looping = *enabled),
+                ClipData::Midi(_) => self.edit_midi_markers(*clip, |midi| midi.looping = *enabled),
+            },
             Command::SetClipGain { clip, gain } => {
                 self.edit_audio(*clip, |audio| audio.gain = *gain)
             }
@@ -1083,10 +1190,10 @@ impl Document {
         id: ClipId,
         edit: impl FnOnce(&mut AudioData),
     ) -> Result<(), ModelError> {
-        let ClipData::Audio(current) = self.clip_ref(id)?.data else {
+        let ClipData::Audio(current) = &self.clip_ref(id)?.data else {
             return Err(ModelError::NotAudioClip(id));
         };
-        let mut next = current;
+        let mut next = *current;
         edit(&mut next);
         check_marker_order(&next)?;
         self.edit_audio(id, |audio| *audio = next)
@@ -1098,14 +1205,48 @@ impl Document {
         id: ClipId,
         edit: impl FnOnce(&mut AudioData),
     ) -> Result<(), ModelError> {
-        let ClipData::Audio(current) = self.clip_ref(id)?.data else {
+        let ClipData::Audio(current) = &self.clip_ref(id)?.data else {
             return Err(ModelError::NotAudioClip(id));
         };
-        let mut next = current;
+        let mut next = *current;
         edit(&mut next);
         check_audio(&next)?;
-        if next != current {
+        if next != *current {
             self.clip_mut(id)?.data = ClipData::Audio(next);
+        }
+        Ok(())
+    }
+
+    /// Sets a MIDI clip's markers or loop with `edit`, if the result is valid
+    /// and its markers are in order, as Live keeps markers set by hand.
+    fn edit_midi_markers(
+        &mut self,
+        id: ClipId,
+        edit: impl FnOnce(&mut MidiData),
+    ) -> Result<(), ModelError> {
+        let ClipData::Midi(current) = &self.clip_ref(id)?.data else {
+            return Err(ModelError::NotMidiClip(id));
+        };
+        let mut next = current.clone();
+        edit(&mut next);
+        check_midi_marker_order(&next)?;
+        self.edit_midi(id, |midi| *midi = next)
+    }
+
+    /// Changes a MIDI clip's data with `edit`, if the result is valid.
+    fn edit_midi(
+        &mut self,
+        id: ClipId,
+        edit: impl FnOnce(&mut MidiData),
+    ) -> Result<(), ModelError> {
+        let ClipData::Midi(current) = &self.clip_ref(id)?.data else {
+            return Err(ModelError::NotMidiClip(id));
+        };
+        let mut next = current.clone();
+        edit(&mut next);
+        check_clip_data(&ClipData::Midi(next.clone()))?;
+        if next != *current {
+            self.clip_mut(id)?.data = ClipData::Midi(next);
         }
         Ok(())
     }
@@ -1144,6 +1285,152 @@ impl Document {
         insert_at(&mut self.track_mut(track)?.devices, index, device)?;
         self.index.device_track.insert(id, track);
         check_chain(self.track_ref(track)?)
+    }
+
+    // The Main track's Song Tempo envelope and the arrangement's
+    // time-signature markers, as edits on the settings' maps.
+
+    /// Sets the tempo at `at` to `bpm`, adding a breakpoint there or
+    /// replacing the one that's there. A breakpoint between two others
+    /// splits the segment, keeping the neighbours.
+    fn set_tempo_breakpoint(&mut self, at: Ticks, bpm: Bpm) -> Result<(), ModelError> {
+        if at < Ticks::ZERO {
+            return Err(ModelError::NegativePosition(at));
+        }
+        let mut points = tempo_breakpoints(&self.settings.tempo);
+        points.retain(|&(position, _)| position != at);
+        points.push((at, bpm));
+        points.sort_by_key(|&(position, _)| position);
+        self.settings.tempo = tempo_from_breakpoints(points);
+        Ok(())
+    }
+
+    /// Moves the tempo breakpoint at `at` to `to`, keeping its tempo.
+    fn move_tempo_breakpoint(&mut self, at: Ticks, to: Ticks) -> Result<(), ModelError> {
+        if to < Ticks::ZERO {
+            return Err(ModelError::NegativePosition(to));
+        }
+        if at == Ticks::ZERO {
+            return Err(ModelError::FirstChange {
+                what: "tempo breakpoint",
+            });
+        }
+        let points = tempo_breakpoints(&self.settings.tempo);
+        let moved: Vec<(Ticks, Bpm)> = points.iter().copied().filter(|&(p, _)| p == at).collect();
+        if moved.is_empty() {
+            return Err(ModelError::NoChange {
+                what: "tempo breakpoint",
+                at,
+            });
+        }
+        if to != at && points.iter().any(|&(p, _)| p == to) {
+            return Err(ModelError::ChangeInUse {
+                what: "tempo breakpoint",
+                at: to,
+            });
+        }
+        let mut next: Vec<(Ticks, Bpm)> = points.into_iter().filter(|&(p, _)| p != at).collect();
+        next.extend(moved.into_iter().map(|(_, bpm)| (to, bpm)));
+        next.sort_by_key(|&(position, _)| position);
+        self.settings.tempo = tempo_from_breakpoints(next);
+        Ok(())
+    }
+
+    /// Deletes the tempo breakpoint at `at`, joining its neighbours with a
+    /// straight segment.
+    fn delete_tempo_breakpoint(&mut self, at: Ticks) -> Result<(), ModelError> {
+        if at == Ticks::ZERO {
+            return Err(ModelError::FirstChange {
+                what: "tempo breakpoint",
+            });
+        }
+        let points = tempo_breakpoints(&self.settings.tempo);
+        if !points.iter().any(|&(p, _)| p == at) {
+            return Err(ModelError::NoChange {
+                what: "tempo breakpoint",
+                at,
+            });
+        }
+        let next: Vec<(Ticks, Bpm)> = points.into_iter().filter(|&(p, _)| p != at).collect();
+        self.settings.tempo = tempo_from_breakpoints(next);
+        Ok(())
+    }
+
+    /// Sets the time-signature marker at `at`, adding one when there's none.
+    fn set_time_signature_change(
+        &mut self,
+        at: Ticks,
+        signature: TimeSignature,
+    ) -> Result<(), ModelError> {
+        if at < Ticks::ZERO {
+            return Err(ModelError::NegativePosition(at));
+        }
+        let mut changes: Vec<TimeSignatureChange> =
+            self.settings.time_signatures.changes().collect();
+        match changes.iter_mut().find(|change| change.at == at) {
+            Some(change) => change.signature = signature,
+            None => {
+                changes.push(TimeSignatureChange { at, signature });
+                changes.sort_by_key(|change| change.at);
+            }
+        }
+        self.settings.time_signatures = time_signature_map(changes);
+        Ok(())
+    }
+
+    /// Moves the time-signature marker at `at` to `to`.
+    fn move_time_signature_change(&mut self, at: Ticks, to: Ticks) -> Result<(), ModelError> {
+        if to < Ticks::ZERO {
+            return Err(ModelError::NegativePosition(to));
+        }
+        if at == Ticks::ZERO {
+            return Err(ModelError::FirstChange {
+                what: "time signature",
+            });
+        }
+        let mut changes: Vec<TimeSignatureChange> =
+            self.settings.time_signatures.changes().collect();
+        if !changes.iter().any(|change| change.at == at) {
+            return Err(ModelError::NoChange {
+                what: "time signature",
+                at,
+            });
+        }
+        if to != at && changes.iter().any(|change| change.at == to) {
+            return Err(ModelError::ChangeInUse {
+                what: "time signature",
+                at: to,
+            });
+        }
+        for change in &mut changes {
+            if change.at == at {
+                change.at = to;
+            }
+        }
+        changes.sort_by_key(|change| change.at);
+        self.settings.time_signatures = time_signature_map(changes);
+        Ok(())
+    }
+
+    /// Deletes the time-signature marker at `at`.
+    fn delete_time_signature_change(&mut self, at: Ticks) -> Result<(), ModelError> {
+        if at == Ticks::ZERO {
+            return Err(ModelError::FirstChange {
+                what: "time signature",
+            });
+        }
+        let mut changes: Vec<TimeSignatureChange> =
+            self.settings.time_signatures.changes().collect();
+        let before = changes.len();
+        changes.retain(|change| change.at != at);
+        if changes.len() == before {
+            return Err(ModelError::NoChange {
+                what: "time signature",
+                at,
+            });
+        }
+        self.settings.time_signatures = time_signature_map(changes);
+        Ok(())
     }
 
     // Lookups that fail with the error a command reports.
@@ -1288,6 +1575,36 @@ fn check_value(what: &'static str, value: f64, ok: bool) -> Result<(), ModelErro
     }
 }
 
+/// The breakpoints that [`TempoMap::from_breakpoints`] rebuilds `tempo`
+/// from: each segment's starting tempo, and, where a segment arrives at a
+/// tempo the next one doesn't start at (a jump), a second breakpoint at the
+/// next segment's start carrying the arrival.
+fn tempo_breakpoints(tempo: &TempoMap) -> Vec<(Ticks, Bpm)> {
+    let segments: Vec<TempoSegment> = tempo.segments().collect();
+    let mut points = Vec::with_capacity(segments.len() + 1);
+    for (index, segment) in segments.iter().enumerate() {
+        points.push((segment.start(), segment.start_bpm()));
+        if let Some(next) = segments.get(index + 1)
+            && segment.end_bpm() != next.start_bpm()
+        {
+            points.push((next.start(), segment.end_bpm()));
+        }
+    }
+    points
+}
+
+/// Builds a tempo map from breakpoints this module made, which always start
+/// at tick zero and don't move backwards, so the map is valid.
+fn tempo_from_breakpoints(points: Vec<(Ticks, Bpm)>) -> TempoMap {
+    TempoMap::from_breakpoints(points).expect("a tempo map edited this way stays valid")
+}
+
+/// Builds a time-signature map from changes this module made, which always
+/// start at tick zero and are in order, so the map is valid.
+fn time_signature_map(changes: Vec<TimeSignatureChange>) -> TimeSignatureMap {
+    TimeSignatureMap::new(changes).expect("a time-signature map edited this way stays valid")
+}
+
 /// Checks that a clip's data matches the track it's on.
 pub(crate) fn check_clip_fits(track: &Track, data: &ClipData) -> Result<(), ModelError> {
     match (track.kind, data) {
@@ -1333,15 +1650,54 @@ pub(crate) fn check_clip_data(data: &ClipData) -> Result<(), ModelError> {
     match data {
         ClipData::Midi(midi) => {
             for (index, note) in midi.notes.iter().enumerate() {
-                if note.key > 127 || !(1..=127).contains(&note.velocity) {
+                if note.key > 127
+                    || !(1..=127).contains(&note.velocity)
+                    || !(1..=127).contains(&note.release_velocity)
+                    || !note.probability.is_finite()
+                    || !(0.0..=1.0).contains(&note.probability)
+                {
                     return Err(ModelError::InvalidNote { index });
                 }
                 check_extent(note.start, note.length)?;
             }
-            Ok(())
+            check_midi(midi)
         }
         ClipData::Audio(audio) => check_audio(audio),
     }
+}
+
+/// Checks a MIDI clip's data: markers and loop brace.
+pub(crate) fn check_midi(midi: &MidiData) -> Result<(), ModelError> {
+    if midi.start < Ticks::ZERO {
+        return Err(ModelError::NegativePosition(midi.start));
+    }
+    if let Some(end) = midi.end.filter(|&end| end <= Ticks::ZERO) {
+        return Err(ModelError::EmptyLength(end));
+    }
+    if midi.loop_start < Ticks::ZERO {
+        return Err(ModelError::NegativePosition(midi.loop_start));
+    }
+    if let Some(end) = midi.loop_end.filter(|&end| end <= midi.loop_start) {
+        return Err(ModelError::EmptyLength(end));
+    }
+    Ok(())
+}
+
+/// Checks that a MIDI clip's markers are in order, as setting them by hand
+/// keeps them: the End marker after the Start marker, and, while the loop is
+/// on, the Start marker before the loop brace's end.
+pub(crate) fn check_midi_marker_order(midi: &MidiData) -> Result<(), ModelError> {
+    if let Some(end) = midi.end {
+        check_value("clip end", end.get() as f64, end > midi.start)?;
+    }
+    if let (true, Some(end)) = (midi.looping, midi.loop_end) {
+        check_value(
+            "clip start (at or after the loop end)",
+            midi.start.get() as f64,
+            midi.start < end,
+        )?;
+    }
+    Ok(())
 }
 
 /// Checks an audio clip's data (the audio clips spec, R3 to R6): times
@@ -1581,12 +1937,12 @@ mod tests {
     }
 
     fn midi() -> ClipData {
-        ClipData::Midi(MidiData::new([Note {
-            key: 60,
-            velocity: 100,
-            start: Ticks::ZERO,
-            length: Ticks::QUARTER,
-        }]))
+        ClipData::Midi(MidiData::new([Note::new(
+            60,
+            Ticks::ZERO,
+            Ticks::QUARTER,
+            100,
+        )]))
     }
 
     fn utility(id: DeviceId) -> Device {
@@ -2107,12 +2463,7 @@ mod tests {
             ModelError::EmptyLength(-Ticks::WHOLE)
         );
 
-        let note = |key, velocity| Note {
-            key,
-            velocity,
-            start: Ticks::ZERO,
-            length: Ticks::QUARTER,
-        };
+        let note = |key, velocity| Note::new(key, Ticks::ZERO, Ticks::QUARTER, velocity);
         for (notes, index) in [
             (vec![note(60, 100), note(128, 100)], 1),
             (vec![note(60, 0)], 0),
@@ -2987,6 +3338,217 @@ mod tests {
         .unwrap();
         assert_eq!(song.doc.settings().tempo, tempo);
         assert_eq!(song.doc.settings().time_signatures, signatures);
+    }
+
+    /// Spec: musical-time R4, R5, R7, R8. Tempo changes and time-signature
+    /// changes are edited one breakpoint or marker at a time: a step and a
+    /// ramp, a signature change that cuts a bar short, and the refusals.
+    #[test]
+    fn tempo_breakpoints_and_signature_markers_edit_one_at_a_time() {
+        let bpm = |value| Bpm::new(value).unwrap();
+        let mut song = Song::new();
+        let bar = Ticks::WHOLE;
+
+        // A breakpoint on the Song Tempo envelope: the segments either side
+        // run straight to it. 120 BPM at 1.1.1, reaching 60 at bar 1.3.
+        song.apply(Command::SetTempoBreakpoint {
+            at: bar / 2,
+            bpm: bpm(60.0),
+        })
+        .unwrap();
+        let tempo = &song.doc.settings().tempo;
+        assert_eq!(tempo.bpm_at(Ticks::ZERO), bpm(120.0));
+        assert_eq!(tempo.bpm_at(bar / 4), bpm(90.0));
+        assert_eq!(tempo.bpm_at(bar / 2), bpm(60.0));
+        assert_eq!(tempo.bpm_at(bar), bpm(60.0), "the last breakpoint holds on");
+
+        // A second breakpoint ramps on from it.
+        song.apply(Command::SetTempoBreakpoint {
+            at: bar,
+            bpm: bpm(90.0),
+        })
+        .unwrap();
+        let tempo = &song.doc.settings().tempo;
+        assert_eq!(tempo.bpm_at(bar / 4), bpm(90.0));
+        assert_eq!(tempo.bpm_at(bar / 2), bpm(60.0));
+        assert_eq!(tempo.bpm_at(bar), bpm(90.0));
+
+        // Moving and deleting a breakpoint.
+        song.apply(Command::MoveTempoBreakpoint {
+            at: bar / 2,
+            to: bar * 2,
+        })
+        .unwrap();
+        let tempo = &song.doc.settings().tempo;
+        assert_eq!(tempo.bpm_at(bar / 2), bpm(105.0));
+        assert_eq!(tempo.bpm_at(bar * 2), bpm(60.0));
+        song.apply(Command::DeleteTempoBreakpoint { at: bar * 2 })
+            .unwrap();
+        assert_eq!(song.doc.settings().tempo.bpm_at(bar * 2), bpm(90.0));
+
+        // A step: two breakpoints at one position, as the envelope draws
+        // when a breakpoint is dropped on another, set through the full map.
+        song.apply(Command::SetTempo {
+            tempo: TempoMap::from_breakpoints([
+                (Ticks::ZERO, bpm(120.0)),
+                (bar, bpm(120.0)),
+                (bar, bpm(90.0)),
+            ])
+            .unwrap(),
+        })
+        .unwrap();
+        let tempo = &song.doc.settings().tempo;
+        assert_eq!(tempo.bpm_at(bar - Ticks(1)), bpm(120.0));
+        assert_eq!(tempo.bpm_at(bar), bpm(90.0));
+        assert_eq!(
+            tempo.ticks_to_seconds(bar),
+            2.0,
+            "two seconds at 120 to bar 2"
+        );
+
+        // The refusals leave the map as it was.
+        for command in [
+            Command::SetTempoBreakpoint {
+                at: -Ticks(1),
+                bpm: bpm(90.0),
+            },
+            Command::MoveTempoBreakpoint {
+                at: Ticks::ZERO,
+                to: bar,
+            },
+            Command::DeleteTempoBreakpoint { at: Ticks::ZERO },
+            Command::DeleteTempoBreakpoint { at: bar * 3 },
+        ] {
+            assert!(song.doc.apply(&command).is_err(), "{command:?}");
+        }
+        // Moving a breakpoint onto another one is refused.
+        song.apply(Command::SetTempoBreakpoint {
+            at: bar * 2,
+            bpm: bpm(60.0),
+        })
+        .unwrap();
+        let before = song.doc.settings().tempo.clone();
+        assert_eq!(
+            song.reject(Command::MoveTempoBreakpoint {
+                at: bar * 2,
+                to: bar
+            }),
+            ModelError::ChangeInUse {
+                what: "tempo breakpoint",
+                at: bar,
+            }
+        );
+        assert_eq!(song.doc.settings().tempo, before);
+        assert_eq!(
+            song.reject(Command::MoveTempoBreakpoint {
+                at: bar * 4,
+                to: bar * 5,
+            }),
+            ModelError::NoChange {
+                what: "tempo breakpoint",
+                at: bar * 4,
+            }
+        );
+        assert_eq!(
+            song.reject(Command::SetTempoBreakpoint {
+                at: -Ticks(1),
+                bpm: bpm(90.0),
+            }),
+            ModelError::NegativePosition(-Ticks(1))
+        );
+
+        // Time-signature markers: 4/4 at 1.1.1, then 7/8 at bar 2. The 7/8
+        // bar is 7/8 of a whole note, so bar 3 starts 1⅞ bars in.
+        let seven_eight = TimeSignature::new(7, 8).unwrap();
+        song.apply(Command::SetTimeSignatureChange {
+            at: bar,
+            signature: seven_eight,
+        })
+        .unwrap();
+        let signatures = &song.doc.settings().time_signatures;
+        assert_eq!(
+            signatures.signature_at(Ticks::ZERO),
+            TimeSignature::FOUR_FOUR
+        );
+        assert_eq!(signatures.signature_at(bar), seven_eight);
+        assert_eq!(signatures.bar_start(2), bar + bar * 7 / 8);
+        assert_eq!(signatures.to_bbs(bar + bar * 7 / 8).to_string(), "3.1.1");
+        assert_eq!(signatures.to_bbs(bar + bar / 4).to_string(), "2.3.1");
+
+        // Moving it to bar 2.1.1 (where it already is not) and deleting it.
+        song.apply(Command::SetTimeSignatureChange {
+            at: bar * 2,
+            signature: TimeSignature::new(3, 4).unwrap(),
+        })
+        .unwrap();
+        song.apply(Command::MoveTimeSignatureChange {
+            at: bar * 2,
+            to: bar * 3,
+        })
+        .unwrap();
+        let signatures = &song.doc.settings().time_signatures;
+        assert_eq!(
+            signatures.signature_at(bar * 3),
+            TimeSignature::new(3, 4).unwrap()
+        );
+        song.apply(Command::DeleteTimeSignatureChange { at: bar * 3 })
+            .unwrap();
+        assert_eq!(
+            song.doc.settings().time_signatures.signature_at(bar * 3),
+            seven_eight
+        );
+        assert_eq!(
+            song.doc.settings().time_signatures.changes().len(),
+            2,
+            "the 4/4 at 1.1.1 and the 7/8 at bar 2"
+        );
+
+        // The same refusals for markers.
+        assert_eq!(
+            song.reject(Command::SetTimeSignatureChange {
+                at: -Ticks(1),
+                signature: seven_eight,
+            }),
+            ModelError::NegativePosition(-Ticks(1))
+        );
+        assert_eq!(
+            song.reject(Command::DeleteTimeSignatureChange { at: Ticks::ZERO }),
+            ModelError::FirstChange {
+                what: "time signature",
+            }
+        );
+        assert_eq!(
+            song.reject(Command::DeleteTimeSignatureChange { at: bar * 5 }),
+            ModelError::NoChange {
+                what: "time signature",
+                at: bar * 5,
+            }
+        );
+        assert_eq!(
+            song.reject(Command::MoveTimeSignatureChange {
+                at: Ticks::ZERO,
+                to: bar * 4,
+            }),
+            ModelError::FirstChange {
+                what: "time signature",
+            }
+        );
+        // Moving a marker onto another one is refused.
+        song.apply(Command::SetTimeSignatureChange {
+            at: bar * 2,
+            signature: TimeSignature::new(3, 4).unwrap(),
+        })
+        .unwrap();
+        assert_eq!(
+            song.reject(Command::MoveTimeSignatureChange {
+                at: bar,
+                to: bar * 2,
+            }),
+            ModelError::ChangeInUse {
+                what: "time signature",
+                at: bar * 2,
+            }
+        );
     }
 
     #[test]

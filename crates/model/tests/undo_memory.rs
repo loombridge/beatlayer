@@ -151,11 +151,13 @@ fn device(editor: &mut Editor, track: TrackId, index: usize) -> DeviceId {
 }
 
 fn notes(velocity: u8) -> MidiData {
-    MidiData::new((0..NOTES_PER_CLIP).map(|n| Note {
-        key: 48 + u8::try_from(n).unwrap(),
-        velocity,
-        start: Ticks::SIXTEENTH * n,
-        length: Ticks::SIXTEENTH,
+    MidiData::new((0..NOTES_PER_CLIP).map(|n| {
+        Note::new(
+            48 + u8::try_from(n).unwrap(),
+            Ticks::SIXTEENTH * n,
+            Ticks::SIXTEENTH,
+            velocity,
+        )
     }))
 }
 

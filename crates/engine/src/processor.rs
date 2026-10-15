@@ -479,9 +479,25 @@ impl Processor {
     }
 
     fn queue_param(&mut self, event: ParamEvent) {
+        // A change sent for a song frame is held back by its node's latency,
+        // so automation lines up with the compensated audio (WP-2.11). One
+        // sent to take effect now stays now: a person's control move isn't
+        // delayed.
+        let delay = match event.at {
+            When::Now => 0,
+            When::Frame(_) => self
+                .program
+                .as_ref()
+                .and_then(|program| {
+                    let program = program.get();
+                    let slot = program.slot_of(event.key)?;
+                    program.slots.get(slot as usize).map(|slot| slot.delay)
+                })
+                .unwrap_or(0),
+        };
         let frame = match event.at {
             When::Now => self.clock,
-            When::Frame(frame) => frame,
+            When::Frame(frame) => frame.saturating_add(u64::from(delay)),
         };
         if self.pending.len() == self.pending.capacity() {
             self.counters.events_overflowed += 1;

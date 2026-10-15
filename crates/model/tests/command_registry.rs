@@ -48,11 +48,12 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        50,
+        58,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
-         routing, WP-2.4 two for devices, WP-2.19b five for sidechains, and WP-2.5b \
-         set_device_floating"
+         routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
+         set_device_floating, WP-2.20 six for tempo breakpoints and time-signature markers, and \
+         WP-2.1 two for MIDI clips"
     );
 
     for op in &ops {
@@ -245,6 +246,29 @@ fn every_command_runs_by_id() {
         "song.set_time_signatures",
         json!({ "time_signatures": [{ "at": 0, "signature": { "numerator": 7, "denominator": 8 } }] }),
     );
+    // Tempo breakpoints and time-signature markers, one edit each.
+    let changes = agent.run(
+        "song.set_tempo_breakpoint",
+        json!({ "at": bar * 2, "bpm": 100.0 }),
+    );
+    assert!(changes.settings);
+    agent.run(
+        "song.move_tempo_breakpoint",
+        json!({ "at": bar * 2, "to": bar * 3 }),
+    );
+    agent.run("song.delete_tempo_breakpoint", json!({ "at": bar * 3 }));
+    agent.run(
+        "song.set_time_signature_change",
+        json!({ "at": bar, "signature": { "numerator": 4, "denominator": 4 } }),
+    );
+    agent.run(
+        "song.move_time_signature_change",
+        json!({ "at": bar, "to": bar * 2 }),
+    );
+    agent.run(
+        "song.delete_time_signature_change",
+        json!({ "at": bar * 2 }),
+    );
     let changes = agent.run(
         "transport.set_loop",
         json!({ "start": bar * 2, "length": bar }),
@@ -311,6 +335,14 @@ fn every_command_runs_by_id() {
         panic!("{clip:?}");
     };
     assert_eq!(midi.notes.len(), 2);
+    agent.run(
+        "clip.set_midi_region",
+        json!({ "clip": riff, "start": quarter, "end": bar * 2 }),
+    );
+    agent.run(
+        "clip.set_midi_loop",
+        json!({ "clip": riff, "start": quarter, "end": bar * 2 }),
+    );
     // Trimming the left edge keeps the end and the contents in place: an
     // audio clip's Start marker moves on by the time of a quarter note.
     agent.run(
@@ -519,12 +551,7 @@ fn schemas_match_what_commands_serialise() {
     let track = TrackId(fresh());
     let clip = ClipId(fresh());
     let device = DeviceId(fresh());
-    let notes = MidiData::new([Note {
-        key: 127,
-        velocity: 1,
-        start: Ticks::ZERO,
-        length: Ticks::QUARTER,
-    }]);
+    let notes = MidiData::new([Note::new(127, Ticks::ZERO, Ticks::QUARTER, 1)]);
     let mut plugin = Device::new(
         device,
         "Synth",
@@ -545,6 +572,46 @@ fn schemas_match_what_commands_serialise() {
             "song.set_time_signatures",
             Command::SetTimeSignatures {
                 time_signatures: TimeSignatureMap::constant(TimeSignature::new(3, 4).unwrap()),
+            },
+        ),
+        (
+            "song.set_tempo_breakpoint",
+            Command::SetTempoBreakpoint {
+                at: Ticks::QUARTER * 4,
+                bpm: Bpm::new(140.0).unwrap(),
+            },
+        ),
+        (
+            "song.move_tempo_breakpoint",
+            Command::MoveTempoBreakpoint {
+                at: Ticks::QUARTER * 4,
+                to: Ticks::QUARTER * 8,
+            },
+        ),
+        (
+            "song.delete_tempo_breakpoint",
+            Command::DeleteTempoBreakpoint {
+                at: Ticks::QUARTER * 4,
+            },
+        ),
+        (
+            "song.set_time_signature_change",
+            Command::SetTimeSignatureChange {
+                at: Ticks::QUARTER * 4,
+                signature: TimeSignature::new(3, 4).unwrap(),
+            },
+        ),
+        (
+            "song.move_time_signature_change",
+            Command::MoveTimeSignatureChange {
+                at: Ticks::QUARTER * 4,
+                to: Ticks::QUARTER * 8,
+            },
+        ),
+        (
+            "song.delete_time_signature_change",
+            Command::DeleteTimeSignatureChange {
+                at: Ticks::QUARTER * 4,
             },
         ),
         (
@@ -725,6 +792,22 @@ fn schemas_match_what_commands_serialise() {
             Command::SetClipLoopEnabled {
                 clip,
                 enabled: true,
+            },
+        ),
+        (
+            "clip.set_midi_region",
+            Command::SetMidiClipRegion {
+                clip,
+                start: Ticks::QUARTER,
+                end: Some(Ticks::WHOLE),
+            },
+        ),
+        (
+            "clip.set_midi_loop",
+            Command::SetMidiClipLoop {
+                clip,
+                start: Ticks::QUARTER,
+                end: None,
             },
         ),
         ("clip.set_gain", Command::SetClipGain { clip, gain: 2.0 }),

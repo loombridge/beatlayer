@@ -842,6 +842,7 @@ dependencies = [
  "clack-host",
  "lspk-plugin",
  "rtrb",
+ "serde",
  "serde_json",
 ]
 

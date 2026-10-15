@@ -13,6 +13,7 @@
 //! | [`GAIN`] | multiplies every sample by its gain (WP-2.4) | the gain, 1 by default |
 //! | [`THROUGH`] | passes its input through untouched (WP-2.4) | none |
 //! | [`KEY`] | multiplies its input by what its detector hears, while its sidechain is on (WP-2.19b) | none |
+//! | [`DELAY`] | delays every sample by its frames, and reports that latency (WP-2.11) | the frames |
 //!
 //! [`GAIN`] and [`THROUGH`] are offered as device types ([`gain_type`],
 //! [`through_type`]), audio effects named "Test Gain" and "Test
@@ -29,7 +30,7 @@ use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 
 use bl_model::{Device, DeviceRole, ParamId};
 
-use crate::node::{Block, Node, NodeData, NodeEvent, ParamValue, segments};
+use crate::node::{Block, Node, NodeConfig, NodeData, NodeEvent, NoteEvent, ParamValue, segments};
 use crate::registry::{DeviceType, Registry};
 
 /// The DC node's device type.
@@ -48,10 +49,22 @@ pub const GAIN: &str = "test.gain";
 pub const THROUGH: &str = "test.through";
 /// The sidechain probe's device type.
 pub const KEY: &str = "test.key";
+/// The test instrument device type (WP-2.1).
+pub const INSTRUMENT: &str = "test.instrument";
+/// The delay node's device type (WP-2.11).
+pub const DELAY: &str = "test.delay";
 /// The DC node's value.
 pub const VALUE: ParamId = ParamId(0);
 /// The gain node's gain, linear.
 pub const GAIN_PARAM: ParamId = ParamId(0);
+/// The delay node's delay, in frames.
+pub const DELAY_FRAMES: ParamId = ParamId(0);
+
+/// The test instrument as a device type: an instrument named "Test Instrument".
+#[must_use]
+pub fn instrument_type() -> DeviceType {
+    DeviceType::native(INSTRUMENT, "Test Instrument", DeviceRole::Instrument)
+}
 
 /// The test gain as a device type: an audio effect named "Test Gain".
 #[must_use]
@@ -73,6 +86,13 @@ pub fn key_type() -> DeviceType {
     DeviceType::native(KEY, "Test Sidechain", DeviceRole::AudioEffect).with_sidechain()
 }
 
+/// A note event recorded by the test instrument with its song frame position.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RecordedNote {
+    pub frame: i64,
+    pub event: NoteEvent,
+}
+
 /// What the test nodes report, shared with the test.
 #[derive(Debug, Default)]
 pub struct Probe {
@@ -85,6 +105,22 @@ pub struct Probe {
     /// Which counter published `counted`: 1 for the first one made, and so
     /// on.
     pub counter: AtomicU64,
+    /// The consumer of recorded notes from the test instrument.
+    pub note_consumer: std::sync::Mutex<Option<rtrb::Consumer<RecordedNote>>>,
+}
+
+impl Probe {
+    /// Drains all recorded notes from the test instrument.
+    #[must_use]
+    pub fn recorded_notes(&self) -> Vec<RecordedNote> {
+        let mut notes = Vec::new();
+        if let Some(consumer) = self.note_consumer.lock().unwrap().as_mut() {
+            while let Ok(note) = consumer.pop() {
+                notes.push(note);
+            }
+        }
+        notes
+    }
 }
 
 /// The engine's own devices and the test nodes, reporting to `probe`.
@@ -129,6 +165,19 @@ pub fn registry(probe: &Arc<Probe>) -> Registry {
         Box::new(Key {
             _tracked: Tracked::new(&p),
         })
+    });
+    let p = Arc::clone(probe);
+    registry.add_device(instrument_type(), move |_, _| {
+        let (producer, consumer) = rtrb::RingBuffer::new(4096);
+        *p.note_consumer.lock().unwrap() = Some(consumer);
+        Box::new(TestInstrument {
+            producer,
+            _tracked: Tracked::new(&p),
+        })
+    });
+    let p = Arc::clone(probe);
+    registry.add_native(DELAY, move |device, config| {
+        Box::new(DelayNode::new(device, config, &p))
     });
     registry
 }
@@ -373,5 +422,81 @@ impl Node for Key {
                 *sample *= key;
             }
         }
+    }
+}
+
+/// Records all note events it receives with their song frames.
+struct TestInstrument {
+    producer: rtrb::Producer<RecordedNote>,
+    _tracked: Tracked,
+}
+
+impl Node for TestInstrument {
+    fn process(&mut self, block: &mut Block<'_>) {
+        let pos = block.transport().position.get();
+        for &event in block.notes() {
+            let _ = self.producer.push(RecordedNote {
+                frame: pos + event.offset as i64,
+                event,
+            });
+        }
+    }
+}
+
+/// Delays every sample by its number of frames, and reports that latency, so
+/// delay compensation has a device with a known delay to test with (WP-2.11).
+#[derive(Debug)]
+struct DelayNode {
+    frames: usize,
+    write: usize,
+    /// One ring of `frames` samples per channel.
+    samples: Vec<f32>,
+    channels: usize,
+    _tracked: Tracked,
+}
+
+impl DelayNode {
+    fn new(device: &Device, config: &NodeConfig, probe: &Arc<Probe>) -> Self {
+        let frames = device
+            .params
+            .get(&DELAY_FRAMES)
+            .copied()
+            .unwrap_or(0.0)
+            .max(0.0) as usize;
+        Self {
+            frames,
+            write: 0,
+            samples: vec![0.0; config.channels * frames],
+            channels: config.channels,
+            _tracked: Tracked::new(probe),
+        }
+    }
+}
+
+impl Node for DelayNode {
+    fn process(&mut self, block: &mut Block<'_>) {
+        if self.frames == 0 {
+            return;
+        }
+        let channels = block.channels().min(self.channels);
+        for c in 0..channels {
+            let base = c * self.frames;
+            let mut w = self.write;
+            for sample in block.channel_mut(c) {
+                let at = base + w;
+                std::mem::swap(&mut self.samples[at], sample);
+                w += 1;
+                if w == self.frames {
+                    w = 0;
+                }
+            }
+            if c + 1 == channels {
+                self.write = w;
+            }
+        }
+    }
+
+    fn latency(&self) -> u32 {
+        self.frames as u32
     }
 }

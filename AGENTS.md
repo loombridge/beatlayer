@@ -28,7 +28,7 @@ The roadmap, architecture, build plan, and parity plan aren't published yet; a m
 
 One work package per branch (`wp/<id>-<slug>`) and per pull request, with acceptance evidence pasted in the PR.
 
-Iterate with `cargo xtask check --affected`, which tests only the crates your branch changes and their dependents. Before a PR, it must pass on macOS locally, with its summary pasted in the PR, as must `cargo xtask check --without-docs` (maintainers) and Windows clippy (`cargo xtask clippy-windows`, or `CARGO_FEATURE_PURE=1 cargo clippy --workspace --all-targets --all-features --locked --target x86_64-pc-windows-msvc -- -D warnings`). CI runs Windows and Linux on every pull request and macOS nightly, so the local macOS run is the only macOS check a change gets before it merges.
+Iterate with `cargo xtask check --affected`, which tests only the crates your branch changes and their dependents. Before a PR, it must pass on macOS locally, with its summary pasted in the PR. That is the only local check: CI builds and tests Windows and Linux on every pull request, and a full macOS check runs every night, which catches anything that breaks outside the crates a change touched. A nightly failure is fixed in a follow-up pull request. `cargo xtask check` and `cargo xtask clippy-windows` remain available when you want the whole picture before CI.
 
 Commits: the project's own commits are authored as `Loombridge <code@loombridge.io>`. Set it once per checkout: `git config user.name Loombridge && git config user.email code@loombridge.io`. Outside contributors commit under their own names with the Developer Certificate of Origin ([CONTRIBUTING.md](CONTRIBUTING.md)).
 

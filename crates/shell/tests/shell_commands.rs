@@ -545,6 +545,19 @@ fn view_commands_switch_the_view_and_zoom() {
 }
 
 #[test]
+fn the_info_view_toggle_works_like_the_browsers() {
+    // Spec: info-view R2, R5 (WP-2.24): view state, not set state.
+    let mut shell = Shell::headless();
+    assert!(shell.info_view_visible(), "a new set opens with it shown");
+    let result = shell.run("view.toggle_info_view", json!({})).unwrap();
+    assert_eq!(result["info_view"], json!(false));
+    assert_eq!(shell.switch_state("view.toggle_info_view"), Some(false));
+    let result = shell.run("view.toggle_info_view", json!({})).unwrap();
+    assert_eq!(result["info_view"], json!(true));
+    assert!(shell.info_view_visible());
+}
+
+#[test]
 fn focus_commands_move_the_focus_and_set_the_contexts() {
     // Spec: app-shell R11.
     let mut shell = Shell::headless();

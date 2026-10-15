@@ -27,7 +27,7 @@ fn y(window_y: f32) -> f32 {
 
 #[test]
 fn the_panes_sit_where_live_puts_them() {
-    let layout = ShellLayout::compute(REFERENCE, true);
+    let layout = ShellLayout::compute(REFERENCE, true, true);
     let browser = layout.browser.expect("the browser shows by default");
     // L-WIN-004: x 9 to 311, from 61 to the detail area's top less 8.
     assert_eq!((browser.left(), browser.right()), (9.0, 311.0));
@@ -44,10 +44,8 @@ fn the_panes_sit_where_live_puts_them() {
         (layout.detail.top(), layout.detail.bottom()),
         (y(774.0), y(962.0))
     );
-    assert_eq!(
-        (layout.info_view.left(), layout.info_view.right()),
-        (9.0, 240.0)
-    );
+    let info = layout.info_view.expect("the Info View shows by default");
+    assert_eq!((info.left(), info.right()), (9.0, 240.0));
     assert_eq!(
         (layout.device_view.left(), layout.device_view.right()),
         (249.0, 1591.0)
@@ -71,7 +69,7 @@ fn the_panes_sit_where_live_puts_them() {
 
 #[test]
 fn each_control_starts_where_layout_md_measured_it() {
-    let layout = ShellLayout::compute(REFERENCE, true);
+    let layout = ShellLayout::compute(REFERENCE, true, true);
     // The left edges layout.md gives, at 1600 × 1000 with the Learn View
     // closed. Each comes straight from the row's text.
     let expected: &[(Element, f32)] = &[
@@ -146,8 +144,8 @@ fn each_control_starts_where_layout_md_measured_it() {
 
 #[test]
 fn groups_stretch_with_the_window_and_controls_keep_their_size() {
-    let wide = ShellLayout::compute(REFERENCE + vec2(280.0, 0.0), true);
-    let reference = ShellLayout::compute(REFERENCE, true);
+    let wide = ShellLayout::compute(REFERENCE + vec2(280.0, 0.0), true, true);
+    let reference = ShellLayout::compute(REFERENCE, true, true);
     // The left groups stay; the right groups follow the right edge; the
     // middle groups take their share of the extra width.
     assert_eq!(wide.rect(Element::Tempo), reference.rect(Element::Tempo));
@@ -159,7 +157,7 @@ fn groups_stretch_with_the_window_and_controls_keep_their_size() {
         }
     }
     // Taller: the detail area and the Status Bar keep their heights.
-    let tall = ShellLayout::compute(REFERENCE + vec2(0.0, 200.0), true);
+    let tall = ShellLayout::compute(REFERENCE + vec2(0.0, 200.0), true, true);
     assert_eq!(tall.detail.height(), 188.0);
     assert_eq!(tall.status_bar.height(), 25.0);
     assert_eq!(

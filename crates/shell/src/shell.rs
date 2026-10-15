@@ -22,6 +22,7 @@ use crate::arrangement::editing::{self, Clipboard, EditFailure};
 use crate::arrangement::{ArrangementView, TransportView, ViewError, Viewport};
 use crate::audio::{AudioHost, ConfigureAudio, EngineTransport, ToneSettings};
 use crate::browser::{self, BrowserError, BrowserView, Waker};
+use crate::clip_view::{self, ClipView};
 use crate::commands::{
     self as ids, DefaultSetArgs, FileReport, PathArgs, RelinkArgs, SaveAsArgs, SetResult,
     SettingsArgs, SwitchArgs, SwitchResult, TemplateArgs, TestToneArgs, TestToneState, ThemeArgs,
@@ -46,6 +47,7 @@ use bl_shell_spec::editing as edit_ids;
 use bl_shell_spec::export as export_ids;
 use bl_shell_spec::midi_files as midi_ids;
 use bl_shell_spec::mixer_view as mixer_ids;
+use bl_shell_spec::notes as note_ids;
 use bl_shell_spec::perception as perception_ids;
 use bl_shell_spec::plugins as plugin_ids;
 use bl_shell_spec::tracks as track_ids;
@@ -199,6 +201,7 @@ pub enum GesturePhase {
 #[derive(Debug)]
 struct Gesture {
     view: ArrangementView,
+    clip_view: ClipView,
     last: Option<Invocation>,
 }
 
@@ -299,6 +302,9 @@ pub struct Shell {
     agent_status: AgentServerStatus,
     /// What the Arrangement View shows (WP-1.8a).
     arrangement: ArrangementView,
+    /// What the Clip View shows (WP-2.3): whether it's open, Draw Mode, and
+    /// the notes selected in its MIDI Note Editor.
+    clip_view: ClipView,
     /// A number that changes whenever the document may have changed.
     document_revision: u64,
     /// The browser (WP-1.10).
@@ -499,6 +505,7 @@ impl Shell {
             revision: 0,
             agent_status: AgentServerStatus::default(),
             arrangement: ArrangementView::new(),
+            clip_view: ClipView::default(),
             document_revision: 0,
             clipboard: None,
             edit_gesture: None,
@@ -1682,6 +1689,12 @@ impl Shell {
         &self.arrangement
     }
 
+    /// What the Clip View shows (WP-2.3).
+    #[must_use]
+    pub fn clip_view(&self) -> &ClipView {
+        &self.clip_view
+    }
+
     /// What the mixers show (WP-1.9).
     #[must_use]
     pub fn mixer_view(&self) -> &MixerView {
@@ -2057,14 +2070,15 @@ impl Shell {
     }
 
     /// Runs one step of a gesture that edits the set, such as dragging
-    /// clips (WP-1.8b; arrangement-editing R13). A gesture is one undo
-    /// step however many frames it lasts: its first update opens a
-    /// transaction, each update runs `invocation`, an editing command with
-    /// arguments measured from where the gesture began, on the set as it
-    /// was then, and the commit closes the transaction. The set follows the
-    /// gesture as it goes, so the view and the engine show it. A frame
-    /// whose command is refused (a clip pushed before 1.1.1) keeps the last
-    /// one that worked. Cancelling puts the set and the selection back.
+    /// clips or notes (WP-1.8b; arrangement-editing R13, piano-roll R11). A
+    /// gesture is one undo step however many frames it lasts: its first
+    /// update opens a transaction, each update runs `invocation`, an editing
+    /// command with arguments measured from where the gesture began, on the
+    /// set as it was then, and the commit closes the transaction. The set
+    /// follows the gesture as it goes, so the view and the engine show it. A
+    /// frame whose command is refused (a clip pushed before 1.1.1, a note
+    /// past key 127) keeps the last one that worked. Cancelling puts the set
+    /// and the selection back.
     ///
     /// # Errors
     ///
@@ -2080,6 +2094,7 @@ impl Shell {
             if let Some(gesture) = self.edit_gesture.take() {
                 self.editor.cancel().ok();
                 self.arrangement.restore_selection(&gesture.view);
+                self.clip_view = gesture.clip_view;
                 self.document_changed();
                 self.touch();
             }
@@ -2087,10 +2102,12 @@ impl Shell {
         }
         let mut outcome = Ok(Value::Null);
         if let Some(invocation) = invocation {
-            if !edit_ids::handles(&invocation.id) {
+            if !edit_ids::handles(&invocation.id) && !note_ids::handles(&invocation.id) {
                 return Err(ShellError::Unavailable {
                     command: invocation.id.clone(),
-                    reason: "only the Arrangement's editing commands run as gestures".to_owned(),
+                    reason: "only the Arrangement's and the Clip View's editing commands run as \
+                             gestures"
+                        .to_owned(),
                 });
             }
             outcome = self.gesture_step(invocation);
@@ -2107,11 +2124,16 @@ impl Shell {
     }
 
     fn gesture_step(&mut self, invocation: &Invocation) -> Result<Value, ShellError> {
-        let label = editing::label(&invocation.id, &invocation.args);
+        let label = if note_ids::handles(&invocation.id) {
+            clip_view::label(&invocation.id)
+        } else {
+            editing::label(&invocation.id, &invocation.args)
+        };
         match &self.edit_gesture {
             None => {
                 self.edit_gesture = Some(Gesture {
                     view: self.arrangement.clone(),
+                    clip_view: self.clip_view.clone(),
                     last: None,
                 });
             }
@@ -2121,15 +2143,39 @@ impl Shell {
                 self.editor.cancel().ok();
                 let view = gesture.view.clone();
                 self.arrangement.restore_selection(&view);
+                self.clip_view = gesture.clip_view.clone();
             }
         }
         self.editor.begin(label);
-        let result = editing::run(
-            &invocation.id,
-            invocation.args.clone(),
+        let run = |editor: &mut Editor,
+                   arrangement: &mut ArrangementView,
+                   clip_view: &mut ClipView,
+                   clipboard: &mut Option<Clipboard>,
+                   invocation: &Invocation| {
+            if note_ids::handles(&invocation.id) {
+                clip_view::run(
+                    &invocation.id,
+                    invocation.args.clone(),
+                    editor,
+                    clip_view,
+                    arrangement,
+                )
+            } else {
+                editing::run(
+                    &invocation.id,
+                    invocation.args.clone(),
+                    editor,
+                    arrangement,
+                    clipboard,
+                )
+            }
+        };
+        let result = run(
             &mut self.editor,
             &mut self.arrangement,
+            &mut self.clip_view,
             &mut self.clipboard,
+            invocation,
         );
         let Some(gesture) = self.edit_gesture.as_mut() else {
             return Ok(Value::Null);
@@ -2141,12 +2187,12 @@ impl Shell {
             }
             Err(failure) => {
                 if let Some(last) = gesture.last.clone() {
-                    let _ = editing::run(
-                        &last.id,
-                        last.args,
+                    let _ = run(
                         &mut self.editor,
                         &mut self.arrangement,
+                        &mut self.clip_view,
                         &mut self.clipboard,
+                        &last,
                     );
                 }
                 Err(edit_error(&invocation.id, failure))
@@ -2262,6 +2308,19 @@ impl Shell {
                     },
                     Area::Browser => contexts.push(self.browser_view.focus().context()),
                     Area::Detail if self.value_focused => contexts.push(Context::ValueField),
+                    // Spec: piano-roll. With the Clip View open, its MIDI
+                    // Note Editor holds the detail area's keys.
+                    Area::Detail if self.clip_view.visible() => {
+                        contexts.push(Context::ClipView);
+                        contexts.push(Context::NoteEditor);
+                        if !self
+                            .clip_view
+                            .selected_notes(self.editor.document(), &self.arrangement)
+                            .is_empty()
+                        {
+                            contexts.push(Context::NoteSelection);
+                        }
+                    }
                     Area::Detail => contexts.push(Context::DeviceView),
                     Area::ControlBar | Area::StatusBar => {}
                 }
@@ -2281,6 +2340,8 @@ impl Shell {
         match id {
             ids::VIEW_FULL_SCREEN => Some(self.full_screen),
             ids::VIEW_TOGGLE_BROWSER => Some(self.browser),
+            ids::VIEW_TOGGLE_CLIP_VIEW => Some(self.clip_view.visible()),
+            ids::VIEW_DRAW_MODE => Some(self.clip_view.draw_mode()),
             ids::VIEW_TOGGLE_INFO_VIEW => Some(self.info_view),
             ids::VIEW_TOGGLE_PLUG_IN_WINDOWS => Some(self.plug_in_windows),
             ids::FOCUS_TOGGLE_TAB_NAVIGATION => Some(self.prefs.tab_navigation),
@@ -2881,6 +2942,7 @@ impl Shell {
         if self.edit_gesture.is_some()
             && (model::handles(id)
                 || edit_ids::handles(id)
+                || note_ids::handles(id)
                 || device_ids::handles(id)
                 || self.is_device_command(id)
                 || track_ids::handles(id)
@@ -2903,6 +2965,24 @@ impl Shell {
                 &mut self.editor,
                 &mut self.arrangement,
                 &mut self.clipboard,
+            )
+            .map_err(|failure| edit_error(id, failure));
+            if *self.editor.document() != before {
+                self.dirty = true;
+                self.document_changed();
+            }
+            self.touch();
+            return result;
+        }
+        if note_ids::handles(id) {
+            // Spec: piano-roll. The Clip View's note edits.
+            let before = self.editor.document().clone();
+            let result = clip_view::run(
+                id,
+                args,
+                &mut self.editor,
+                &mut self.clip_view,
+                &self.arrangement,
             )
             .map_err(|failure| edit_error(id, failure));
             if *self.editor.document() != before {
@@ -3251,6 +3331,7 @@ impl Shell {
                 self.main_view = MainView::Arrangement;
                 self.message = None;
                 self.arrangement.reset();
+                self.clip_view.forget_selection();
                 self.mixer.reset();
                 self.new_set_transport();
                 self.document_changed();
@@ -3276,6 +3357,7 @@ impl Shell {
                 self.dirty = false;
                 self.message = None;
                 self.arrangement.reset();
+                self.clip_view.forget_selection();
                 self.mixer.reset();
                 // The set's files go into the media store, so its clips'
                 // waveforms build (browser R15) and the engine finds their
@@ -3492,6 +3574,26 @@ impl Shell {
                     self.focused_area = Area::MainView;
                 }
                 Ok(self.view_result())
+            }
+            ids::VIEW_TOGGLE_CLIP_VIEW => {
+                // Spec: piano-roll; L-STAT-004. View state only.
+                Self::args::<NoArgs>(id, args)?;
+                self.clip_view.toggle();
+                Ok(to_value(
+                    &self
+                        .clip_view
+                        .state(self.editor.document(), &self.arrangement),
+                ))
+            }
+            ids::VIEW_DRAW_MODE => {
+                // Spec: piano-roll R2; S-GRID-001, M-OPT-017. View state only.
+                Self::args::<NoArgs>(id, args)?;
+                self.clip_view.toggle_draw_mode();
+                Ok(to_value(
+                    &self
+                        .clip_view
+                        .state(self.editor.document(), &self.arrangement),
+                ))
             }
             ids::VIEW_TOGGLE_INFO_VIEW => {
                 Self::args::<NoArgs>(id, args)?;

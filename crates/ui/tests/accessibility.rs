@@ -967,6 +967,11 @@ fn paths() -> BTreeMap<&'static str, Path> {
         key,
     };
     let clip_view = LaterView("the Clip View (milestone M2)");
+    // The Clip View's note editing (WP-2.3): the pointer reaches each of
+    // these — a click, a marquee, and drags in the note editor — and their
+    // keys (shortcuts.md, `note-editor` and `note-selection`) come with a
+    // later package.
+    let note_editor = LaterView("the note editor's keys (the note-editor shortcuts, milestone M2)");
     let device_params = Equivalent(
         "a described device's parameter controls in the Device View: Tab to one, then Up and \
          Down step it and Delete sets its default (the device framework spec, R17)",
@@ -1221,6 +1226,11 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("clip.set_midi_region", Exception(clip_view)),
         ("clip.set_region", Exception(clip_view)),
         ("clip.set_data", Exception(clip_view)),
+        ("clip_view.select_notes", Exception(note_editor)),
+        ("note.add", Exception(note_editor)),
+        ("note.delete", Exception(note_editor)),
+        ("note.move", Exception(note_editor)),
+        ("note.resize", Exception(note_editor)),
         // The Device View (WP-2.4): Enter on a title bar's controls.
         (
             "device.select",

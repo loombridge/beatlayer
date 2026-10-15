@@ -30,6 +30,8 @@
 //! - [`device_panel`]: the generic device UI (WP-2.5): any described
 //!   device's controls and display cells, drawn from its descriptors and
 //!   its layout.
+//! - [`clip_view`]: the Clip View (WP-2.3): the MIDI Note Editor, with its
+//!   key track, grid, and note editing.
 //!
 //! Nothing here owns a window or an event loop: the app (`beatlayer`)
 //! drives these from its winit loop, and tests drive them headless with an
@@ -37,6 +39,7 @@
 
 pub mod arrangement;
 pub mod browser;
+pub mod clip_view;
 pub mod control_bar;
 pub mod device_panel;
 pub mod device_view;

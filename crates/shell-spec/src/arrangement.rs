@@ -12,7 +12,7 @@
 use bl_commands::Context::{Arrangement, Global, TrackHeaders};
 use bl_commands::{Binding, CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_core::time::Ticks;
-use bl_model::{ClipId, TrackId};
+use bl_model::{AutomationTarget, ClipId, TrackId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -69,6 +69,12 @@ pub const SET_TRACK_HEIGHT: &str = "arrangement.set_track_height";
 /// `arrangement.focus_title_bar`: move to the highlighted track's title bar
 /// (Esc).
 pub const FOCUS_TITLE_BAR: &str = "arrangement.focus_title_bar";
+/// `arrangement.automation_mode`: show or hide the tracks' automation lanes
+/// (A).
+pub const AUTOMATION_MODE: &str = "arrangement.automation_mode";
+/// `arrangement.show_automation`: choose the parameter a track's automation
+/// lane shows, or hide the lane.
+pub const SHOW_AUTOMATION: &str = "arrangement.show_automation";
 
 /// Every command [`register`] adds, so a host knows which IDs to send to
 /// `bl-shell`'s `Shell::run`.
@@ -98,6 +104,8 @@ pub const IDS: &[&str] = &[
     FOLD_GROUPS,
     SET_TRACK_HEIGHT,
     FOCUS_TITLE_BAR,
+    AUTOMATION_MODE,
+    SHOW_AUTOMATION,
 ];
 
 /// Whether `id` is one of the Arrangement View's commands.
@@ -339,6 +347,24 @@ pub struct ArrangementState {
     pub folded_tracks: Vec<TrackId>,
     /// How many views `arrangement.zoom_back` can go back to.
     pub zoom_back_steps: usize,
+    /// Whether Automation Mode is on: each track shows its automation lane
+    /// under its lane, with the device and parameter choosers.
+    pub automation_mode: bool,
+    /// The parameter each track's automation lane shows, for the tracks whose
+    /// lane isn't showing the default (their volume): the choosers' choice.
+    /// `target` `null` means the lane draws no envelope.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub automation_lanes: Vec<AutomationLane>,
+}
+
+/// One track's automation lane and the parameter it shows, as
+/// `arrangement.show_automation` last set it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct AutomationLane {
+    /// The track.
+    pub track: TrackId,
+    /// The parameter the lane shows, or `null` while it draws no envelope.
+    pub target: Option<AutomationTarget>,
 }
 
 /// Arguments of `arrangement.zoom`.
@@ -506,6 +532,18 @@ pub struct TrackHeightArgs {
     /// Points to add to each track's height (negative makes it shorter).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delta: Option<f64>,
+}
+
+/// Arguments of `arrangement.show_automation`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ShowAutomationArgs {
+    /// The track whose automation lane to show.
+    pub track: TrackId,
+    /// The parameter the lane shows: a mixer control, a send, or a device
+    /// parameter. `null` (or nothing) hides the track's automation lane.
+    #[serde(default)]
+    pub target: Option<AutomationTarget>,
 }
 
 /// Adds the Arrangement View's commands to a registry.
@@ -792,6 +830,28 @@ fn specs() -> Vec<CommandSpec> {
         .context(Arrangement)
         .binding("S-ARR-034")
         .args::<NoArgs>(),
+        view(
+            AUTOMATION_MODE,
+            "Automation Mode",
+            "Switches Automation Mode: while it's on, every track shows an automation lane under \
+             its lane, with the device and parameter choosers that pick the parameter it shows, \
+             and its envelope is drawn and edited there. A (the View menu item and the button \
+             above the track headers) does the same. Changes only the view.",
+        )
+        .contexts([Global, Arrangement])
+        .binding("S-ENV-001")
+        .args::<SwitchArgs>(),
+        view(
+            SHOW_AUTOMATION,
+            "Show Automation",
+            "Picks the parameter `track`'s automation lane shows, as its device chooser (the \
+             track mixer, one of its devices, or `null` for None) and parameter chooser do. A \
+             track's lane shows its volume until the choosers pick another parameter; with \
+             `target` `null` it draws no envelope, while the lane and its choosers stay. Changes \
+             only the view.",
+        )
+        .contexts([Global, Arrangement])
+        .args::<ShowAutomationArgs>(),
     ]
 }
 

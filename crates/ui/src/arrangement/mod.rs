@@ -15,6 +15,7 @@
 //! keyboard is in [`editing`] (WP-1.8b), whose behaviour is in the
 //! arrangement editing spec.
 
+pub mod automation;
 pub mod benchmark;
 pub mod context_menu;
 pub mod editing;
@@ -41,13 +42,14 @@ use egui::{
 };
 use serde_json::{Value, json};
 
+use self::automation::AutomationGestures;
 use self::context_menu::ContextMenus;
 use self::editing::{ClipGestures, EditKeys, Lanes};
 use self::gpu::{ArrangementCallback, Shared, SharedFrame, Slot, lock};
 use self::headers::Header;
 use self::peaks::{PeakLibrary, PeakSource};
 use self::scene::{ClipIndex, FrameStats, Label, LanesInput, ShownClip};
-use crate::layout::ArrangementLayout;
+use crate::layout::{ArrangementLayout, header_columns};
 use crate::main_window::{UiEvent, main_view_id};
 use crate::theme::Theme;
 
@@ -107,6 +109,12 @@ pub fn optimize_width_id() -> Id {
     Id::new("arrangement-optimize-width")
 }
 
+/// The ID of the Automation Mode switch above the track headers (WP-2.12).
+#[must_use]
+pub fn automation_mode_id() -> Id {
+    Id::new("arrangement-automation-mode")
+}
+
 /// What a frame's lanes were built from: when it's unchanged, the last
 /// frame's instances are drawn again without being rebuilt.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -143,6 +151,9 @@ enum Drag {
     /// Moving, copying, or resizing clips (WP-1.8b), which [`editing`]
     /// follows.
     Clips,
+    /// Dragging a breakpoint or curving a segment on an automation lane
+    /// (WP-2.12).
+    Automation,
 }
 
 /// The Arrangement View's state between frames: caches and gestures, never
@@ -162,6 +173,8 @@ pub struct ArrangementUi {
     reported_viewport: Option<(f32, f32)>,
     /// Editing gestures under way (WP-1.8b).
     clips: ClipGestures,
+    /// Automation lane gestures under way (WP-2.12).
+    automation: AutomationGestures,
     /// The clip and time-selection context menus (WP-1.8b).
     menus: ContextMenus,
     /// The playhead the last frame drew: its position and its x, if it was
@@ -172,6 +185,9 @@ pub struct ArrangementUi {
     mixer: Option<Rect>,
     /// The clips this frame put in the accessibility tree (WP-1.14).
     described: Vec<bl_model::ClipId>,
+    /// Where the last frame put the track lanes (WP-2.12), for working out
+    /// an automation lane's rectangle.
+    lanes: Option<Rect>,
 }
 
 impl std::fmt::Debug for ArrangementUi {
@@ -211,10 +227,12 @@ impl ArrangementUi {
             drag: None,
             reported_viewport: None,
             clips: ClipGestures::default(),
+            automation: AutomationGestures::default(),
             menus: ContextMenus::new(),
             playhead: None,
             mixer: None,
             described: Vec::new(),
+            lanes: None,
         }
     }
 
@@ -231,6 +249,21 @@ impl ArrangementUi {
     #[must_use]
     pub fn mixer_rect(&self) -> Option<Rect> {
         self.mixer
+    }
+
+    /// A track's automation lane as the last frame drew it (WP-2.12):
+    /// `None` while Automation Mode is off, the track is folded, or the
+    /// track has no row in view.
+    #[must_use]
+    pub fn automation_lane_rect(
+        &self,
+        view: &ArrangementView,
+        doc: &Document,
+        track: TrackId,
+    ) -> Option<Rect> {
+        let lanes = self.lanes?;
+        let row = view.rows(doc).into_iter().find(|row| row.track == track)?;
+        (row.automation > 0.0).then(|| automation::lane_rect(&row, lanes, view.scroll_y() as f32))
     }
 
     /// Takes waveform peaks from `source`, such as the app's
@@ -292,6 +325,7 @@ impl ArrangementUi {
         };
         self.mixer = layout.mixer;
         let lanes = layout.lanes;
+        self.lanes = Some(lanes);
 
         // The lanes' size, for the view commands that need it.
         let size = (lanes.width(), lanes.height());
@@ -387,7 +421,7 @@ impl ArrangementUi {
                 },
             ));
         self.draw_labels(ui, doc, theme, lanes);
-        let lanes_response = self.lanes_input(ui, view, doc, &layout, horizontal, events);
+        let lanes_response = self.lanes_input(ui, shell, view, doc, &layout, horizontal, events);
         // WP-1.8b: right-clicking a clip or the lanes opens their menu.
         if lanes_response.secondary_clicked()
             && let Some(pos) = lanes_response.interact_pointer_pos()
@@ -433,6 +467,7 @@ impl ArrangementUi {
             self.menus.show(ui, shell, events);
         });
         self.draw_overlays(ui, view, theme, &layout, horizontal);
+        self.draw_automation(ui, shell, view, doc, theme, &layout, horizontal);
 
         // The rulers.
         if let Some(strip) = layout.overview {
@@ -522,9 +557,11 @@ impl ArrangementUi {
         (index < self.rows.len() && self.rows[index].top <= y).then_some(index)
     }
 
+    #[expect(clippy::too_many_arguments, reason = "the frame's inputs")]
     fn lanes_input(
         &mut self,
         ui: &mut Ui,
+        shell: &Shell,
         view: &ArrangementView,
         doc: &Document,
         layout: &ArrangementLayout,
@@ -551,11 +588,26 @@ impl ArrangementUi {
             rows: &self.rows,
             scroll_y,
         };
+        let automation_lanes = automation::Lanes {
+            view,
+            doc,
+            rect: lanes,
+            horizontal,
+            rows: &self.rows,
+            scroll_y,
+        };
         if response.drag_started()
             && let Some(press) = ui.input(|i| i.pointer.press_origin())
         {
+            // WP-2.12: a press on a breakpoint drags it, and Option/Alt on a
+            // segment curves it.
+            let automation = automation_lanes
+                .lane_at(press, shell)
+                .is_some_and(|lane| self.automation.begin(&lane, press, modifiers));
             self.drag = Some(if pan_keys {
                 Drag::Pan
+            } else if automation {
+                Drag::Automation
             } else if self.clips.begin(&clip_lanes, press, keys, events) {
                 // WP-1.8b: a clip's title bar or edge.
                 Drag::Clips
@@ -581,6 +633,12 @@ impl ArrangementUi {
                 Some(Drag::Clips) => {
                     if let Some(pos) = pointer {
                         self.clips.update(&clip_lanes, pos, keys, events);
+                    }
+                }
+                Some(Drag::Automation) => {
+                    if let Some(pos) = pointer {
+                        self.automation
+                            .update(view, doc, horizontal, pos, modifiers, events);
                     }
                 }
                 Some(Drag::Pan) => {
@@ -617,9 +675,18 @@ impl ArrangementUi {
             self.clips.cancel(events);
             self.drag = None;
         }
+        if self.drag == Some(Drag::Automation) && ui.input(|i| i.key_pressed(Key::Escape)) {
+            self.automation.cancel(events);
+            self.drag = None;
+        }
         if response.drag_stopped() {
-            if self.drag == Some(Drag::Clips) {
-                self.clips.end(&clip_lanes, pointer, keys, events);
+            match self.drag {
+                Some(Drag::Clips) => self.clips.end(&clip_lanes, pointer, keys, events),
+                Some(Drag::Automation) => {
+                    self.automation
+                        .end(view, doc, horizontal, pointer, modifiers, events);
+                }
+                _ => {}
             }
             self.drag = None;
         }
@@ -629,19 +696,36 @@ impl ArrangementUi {
         {
             ui.ctx().set_cursor_icon(icon);
         }
-        if response.clicked()
-            && let Some(pos) = response.interact_pointer_pos()
-            && !self.clips.click(&clip_lanes, pos, keys, events)
-        {
-            // I-CLICK-011: the insert marker, and the track under it.
-            let track = self
-                .row_at(lanes, scroll_y, pos)
-                .map(|i| self.rows[i].track);
-            let mut args = json!({ "at": view.snap(doc, at(pos)) });
-            if let Some(track) = track {
-                args["track"] = json!(track);
+        if response.double_clicked() {
+            if let Some(pos) = response.interact_pointer_pos()
+                && let Some(lane) = automation_lanes.lane_at(pos, shell)
+            {
+                // WP-2.12: Alt/Option double-click straightens a segment; off
+                // a segment it adds a breakpoint.
+                let _ = self
+                    .automation
+                    .double_click(view, doc, &lane, pos, modifiers, events);
             }
-            invoke(events, ids::SET_INSERT_MARKER, args);
+        } else if response.clicked()
+            && let Some(pos) = response.interact_pointer_pos()
+        {
+            // WP-2.12: clicking a breakpoint deletes it, and a segment adds
+            // one there.
+            let handled = automation_lanes.lane_at(pos, shell).is_some_and(|lane| {
+                self.automation
+                    .click(view, doc, &lane, pos, modifiers, events)
+            });
+            if !handled && !self.clips.click(&clip_lanes, pos, keys, events) {
+                // I-CLICK-011: the insert marker, and the track under it.
+                let track = self
+                    .row_at(lanes, scroll_y, pos)
+                    .map(|i| self.rows[i].track);
+                let mut args = json!({ "at": view.snap(doc, at(pos)) });
+                if let Some(track) = track {
+                    args["track"] = json!(track);
+                }
+                invoke(events, ids::SET_INSERT_MARKER, args);
+            }
         }
 
         // The wheel and the trackpad, over the lanes or the headers.
@@ -744,6 +828,58 @@ impl ArrangementUi {
                 theme.small_font(),
                 theme.colors.pending.0,
             );
+        }
+    }
+
+    #[expect(clippy::too_many_arguments, reason = "the frame's inputs")]
+    fn draw_automation(
+        &self,
+        ui: &Ui,
+        shell: &Shell,
+        view: &ArrangementView,
+        doc: &Document,
+        theme: &Theme,
+        layout: &ArrangementLayout,
+        horizontal: Horizontal,
+    ) {
+        if !view.automation_mode() {
+            return;
+        }
+        let lanes = layout.lanes;
+        let scroll_y = view.scroll_y() as f32;
+        let painter = ui.painter_at(lanes);
+        let automation_lanes = automation::Lanes {
+            view,
+            doc,
+            rect: lanes,
+            horizontal,
+            rows: &self.rows,
+            scroll_y,
+        };
+        for row in &self.rows {
+            if row.automation <= 0.0 {
+                continue;
+            }
+            let rect = automation::lane_rect(row, lanes, scroll_y);
+            if !rect.intersects(lanes) {
+                continue;
+            }
+            automation::paint_lane(&painter, rect, theme);
+            if let Some(lane) = automation_lanes.lane(row, shell) {
+                automation::paint_envelope(&painter, &lane, theme);
+            }
+            // The lane's accessible node, naming the parameter it shows.
+            let id = automation::lane_id(row.track);
+            let _ = ui.interact(rect, id, Sense::hover());
+            let name = match view.automation_lane(row.track) {
+                Some(target) => automation::target_label(shell, doc, target),
+                None => "None".to_owned(),
+            };
+            ui.ctx().accesskit_node_builder(id, |node| {
+                node.set_role(Role::Group);
+                node.set_label("Automation Lane".to_owned());
+                node.set_value(name.clone());
+            });
         }
     }
 
@@ -1033,6 +1169,26 @@ impl ArrangementUi {
                 &self.every_track,
                 events,
             );
+            // WP-2.12: the automation lane's device and parameter choosers,
+            // in the header column at the lane's row.
+            if row.automation > 0.0 {
+                let lane = Rect::from_min_max(
+                    pos2(column.left(), top + row.height),
+                    pos2(
+                        column.left() + header_columns::TITLE.1,
+                        top + row.height + row.automation,
+                    ),
+                );
+                automation::lane_header(
+                    &mut header_ui,
+                    shell,
+                    theme,
+                    row.track,
+                    view.automation_lane(row.track),
+                    lane,
+                    events,
+                );
+            }
         }
         // The returns and Main, pinned under the lanes (L-ARR-014).
         for (index, id) in pinned.iter().enumerate() {
@@ -1095,7 +1251,7 @@ impl ArrangementUi {
         layout: &ArrangementLayout,
         events: &mut Vec<UiEvent>,
     ) {
-        // L-ARR-010: inert until locators (M6) and automation (WP-2.12).
+        // L-ARR-010: inert until locators (M6).
         for (rect, name, text, package) in [
             (layout.set_locator, "Set Locator", "Set", "milestone M6"),
             (
@@ -1105,7 +1261,6 @@ impl ArrangementUi {
                 "milestone M6",
             ),
             (layout.next_locator, "Next Locator", "▶", "milestone M6"),
-            (layout.automation_mode, "Automation Mode", "A", "WP-2.12"),
             (layout.lock_envelopes, "Lock Envelopes", "L", "WP-2.12"),
             (layout.waveform_zoom, "Waveform Zoom", "", "milestone M2"),
             (
@@ -1137,8 +1292,16 @@ impl ArrangementUi {
                 node.set_description(format!("Not built yet: arrives with {package}."));
             });
         }
-        // L-ARR-017: Optimize Height and Width, live.
+        // L-ARR-017: Optimize Height and Width, live; WP-2.12: Automation Mode.
         for (rect, id, name, text, on, command) in [
+            (
+                layout.automation_mode,
+                automation_mode_id(),
+                "Automation Mode",
+                "A",
+                view.automation_mode(),
+                ids::AUTOMATION_MODE,
+            ),
             (
                 layout.optimize_height,
                 optimize_height_id(),
@@ -1183,8 +1346,11 @@ impl ArrangementUi {
             }
             // Optimize Height and Width come after the selected track's
             // header in the Arrangement's Tab order (observed in Live
-            // 12.4.6; the accessibility spec, R4).
-            crate::focus::register(ui.ctx(), id, bl_shell::Area::MainView, None);
+            // 12.4.6; the accessibility spec, R4). Automation Mode's
+            // keyboard path is its A key (S-ENV-001).
+            if command != ids::AUTOMATION_MODE {
+                crate::focus::register(ui.ctx(), id, bl_shell::Area::MainView, None);
+            }
             response.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, on, name));
         }
     }

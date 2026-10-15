@@ -146,6 +146,14 @@ pub fn parse_binding(binding: &str, platform: Platform) -> Option<Vec<Chord>> {
                     index: None,
                 }]);
             }
+            // Fn-Right is End on macOS's compact keyboards (S-SES-021).
+            ("Fn", Platform::Mac) if last == "Right" => {
+                return Some(vec![Chord {
+                    key: Key::End,
+                    mods,
+                    index: None,
+                }]);
+            }
             _ => return None,
         }
     }

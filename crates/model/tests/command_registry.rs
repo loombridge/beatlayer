@@ -10,8 +10,9 @@ use bl_core::time::{Bpm, TempoMap, Ticks, TimeSignature, TimeSignatureMap};
 use bl_model::registry::{self, RunError};
 use bl_model::{
     ArrangementLoop, AudioData, Change, ChangeSet, Clip, ClipData, ClipId, Command, ContentHash,
-    Device, DeviceId, DeviceKind, EditError, Editor, Input, MidiData, ModelError, Monitor, Note,
-    Output, ParamId, PluginFormat, SendTap, Tap, TrackId, TrackKind,
+    CountIn, Device, DeviceId, DeviceKind, EditError, Editor, Input, MetronomeRhythm,
+    MetronomeSound, MidiData, ModelError, Monitor, Note, Output, ParamId, PluginFormat, SendTap,
+    Tap, TrackId, TrackKind,
 };
 use serde_json::{Value, json};
 
@@ -48,12 +49,13 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        59,
+        64,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
          set_device_floating, WP-2.20 six for tempo breakpoints and time-signature markers, \
-         WP-2.1 two for MIDI clips, and WP-2.16 set_device_sample"
+         WP-2.1 two for MIDI clips, WP-2.16 set_device_sample, and WP-2.15 five for the \
+         metronome"
     );
 
     for op in &ops {
@@ -523,6 +525,43 @@ fn every_command_runs_by_id() {
         }
     );
 
+    // Metronome (WP-2.15).
+    agent.run(
+        "transport.set_metronome_enabled",
+        json!({ "enabled": true }),
+    );
+    assert!(agent.editor.document().settings().metronome.enabled);
+    agent.run(
+        "transport.set_metronome_count_in",
+        json!({ "count_in": "1_bar" }),
+    );
+    assert_eq!(
+        agent.editor.document().settings().metronome.count_in,
+        CountIn::Bars1
+    );
+    agent.run("transport.set_metronome_sound", json!({ "sound": "wood" }));
+    assert_eq!(
+        agent.editor.document().settings().metronome.sound,
+        MetronomeSound::Wood
+    );
+    agent.run("transport.set_metronome_rhythm", json!({ "rhythm": "1/8" }));
+    assert_eq!(
+        agent.editor.document().settings().metronome.rhythm,
+        MetronomeRhythm::Eighth
+    );
+    agent.run(
+        "transport.set_metronome_only_while_recording",
+        json!({ "only_while_recording": true }),
+    );
+    assert!(
+        agent
+            .editor
+            .document()
+            .settings()
+            .metronome
+            .only_while_recording
+    );
+
     // Deleting the group deletes the bass inside it; undo brings both back.
     agent.run("track.delete", json!({ "track": group }));
     assert!(agent.editor.document().track(bass).is_none());
@@ -925,6 +964,34 @@ fn schemas_match_what_commands_serialise() {
                 listen: true,
             },
         ),
+        (
+            "transport.set_metronome_enabled",
+            Command::SetMetronomeEnabled { enabled: true },
+        ),
+        (
+            "transport.set_metronome_count_in",
+            Command::SetMetronomeCountIn {
+                count_in: CountIn::Bars2,
+            },
+        ),
+        (
+            "transport.set_metronome_sound",
+            Command::SetMetronomeSound {
+                sound: MetronomeSound::Click,
+            },
+        ),
+        (
+            "transport.set_metronome_rhythm",
+            Command::SetMetronomeRhythm {
+                rhythm: MetronomeRhythm::Sixteenth,
+            },
+        ),
+        (
+            "transport.set_metronome_only_while_recording",
+            Command::SetMetronomeOnlyWhileRecording {
+                only_while_recording: true,
+            },
+        ),
     ];
     let covered: BTreeSet<&str> = examples.iter().map(|(id, _)| *id).collect();
     let document_commands: BTreeSet<&str> = commands
@@ -1100,6 +1167,11 @@ fn bindings_follow_the_spec() {
     assert_eq!(bindings("mixer.set_arm"), ["S-TRACK-013 toggles arm"]);
     // Spec: command-bindings R6
     assert_eq!(bindings("clip.set_mute"), ["S-ARR-027 toggles mute"]);
+    // Spec: command-bindings S-TRANS-011
+    assert_eq!(
+        bindings("transport.set_metronome_enabled"),
+        ["S-TRANS-011 toggles enabled"]
+    );
 
     // Spec: command-bindings R7
     let bound: BTreeSet<&str> = commands
@@ -1122,6 +1194,7 @@ fn bindings_follow_the_spec() {
         "clip.set_mute",
         // Beatlayer's own key, Option-F on macOS (IMP-14, S-DEV-015).
         "device.set_floating",
+        "transport.set_metronome_enabled",
     ]
     .into_iter()
     .collect();

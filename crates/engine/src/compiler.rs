@@ -235,6 +235,11 @@ impl Compiler {
                     .push(TransportCommand::SetLoop(loop_region(document)));
                 self.sources.cue_loop(self.loop_start_frame(document));
             }
+            if old.settings().metronome != document.settings().metronome {
+                update.transport.push(TransportCommand::SetMetronome(
+                    document.settings().metronome,
+                ));
+            }
             for track in tracks {
                 self.send_clips(document, track, &mut update);
             }
@@ -398,6 +403,7 @@ impl Compiler {
             max_frames: self.config.max_frames,
             output: task_of[&document.main_id()],
             tempo: document.settings().tempo.clone(),
+            time_signatures: document.settings().time_signatures.clone(),
             sample_rate: self.config.sample_rate,
             note_buffers: [
                 NoteBuffer::with_capacity(1024),
@@ -409,7 +415,10 @@ impl Compiler {
         self.synced = Some(document.clone());
         let mut update = Update {
             program: Some(self.gc.program(program)),
-            transport: vec![TransportCommand::SetLoop(loop_region(document))],
+            transport: vec![
+                TransportCommand::SetLoop(loop_region(document)),
+                TransportCommand::SetMetronome(document.settings().metronome),
+            ],
             params: build.restate,
             unhosted: build.unhosted,
             ..Update::default()

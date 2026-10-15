@@ -2,7 +2,7 @@
 
 use std::time::Instant;
 
-use bl_core::time::{Frames, SampleRate, TempoMap, Ticks};
+use bl_core::time::{Frames, SampleRate, TempoMap, Ticks, TimeSignatureMap};
 use bl_model::ParamId;
 use bl_rt::log::{Level, Writer};
 use bl_rt::rt_log;
@@ -13,6 +13,7 @@ use crate::gc::Program;
 use crate::message::{
     Action, LoopRegion, Message, ParamEvent, Report, ScheduledCommand, TransportCommand, When,
 };
+use crate::metronome::{Block, MetronomeEngine};
 use crate::node::{NodeData, NodeEvent, NodeKey, ParamValue, TransportInfo};
 use crate::program::{EngineProgram, Resolved};
 use crate::state::{EngineCounters, EngineState, TrackMeter};
@@ -175,6 +176,8 @@ pub struct Processor {
     program: Option<Program>,
     /// The tempo map until a program arrives with one.
     fallback_tempo: TempoMap,
+    fallback_time_signatures: TimeSignatureMap,
+    metronome: MetronomeEngine,
     /// `channels` channels of `max_frames` frames.
     output: Vec<f32>,
     /// Frames in the last block.
@@ -216,6 +219,8 @@ impl Processor {
             state,
             program: None,
             fallback_tempo: TempoMap::default(),
+            fallback_time_signatures: TimeSignatureMap::default(),
+            metronome: MetronomeEngine::new(),
             output: vec![0.0; config.channels * config.max_frames],
             last: 0,
             clock: 0,
@@ -321,6 +326,7 @@ impl Processor {
         let carry = self.carry();
         // Spec: device-changes R1
         self.playing = false;
+        self.metronome.stop();
         self.silence_meters();
         self.publish(0.0);
         carry
@@ -377,6 +383,7 @@ impl Processor {
         let rate = self.config.sample_rate;
         self.clock = carry.clock;
         self.playing = false;
+        self.metronome.stop();
         self.position = self.frames_at(carry.position);
         self.insert_marker = carry.insert_marker;
         self.loop_region = carry.loop_region;
@@ -547,6 +554,7 @@ impl Processor {
             TransportCommand::Play => self.play_from_insert_marker(),
             // Spec: transport R3, R4
             TransportCommand::Stop => {
+                self.metronome.stop();
                 if self.playing {
                     self.playing = false;
                 } else {
@@ -560,6 +568,7 @@ impl Processor {
             TransportCommand::PlayStop => {
                 if self.playing {
                     self.playing = false;
+                    self.metronome.stop();
                 } else {
                     self.play_from_insert_marker();
                 }
@@ -569,6 +578,7 @@ impl Processor {
                 self.insert_marker = ticks.max(Ticks::ZERO);
                 if self.playing {
                     self.position = self.frames_at(self.insert_marker);
+                    self.metronome.stop();
                 }
             }
             // Spec: transport R9
@@ -586,10 +596,18 @@ impl Processor {
                 self.loop_region = region;
                 self.update_loop_frames();
             }
+            TransportCommand::SetMetronome(settings) => self.metronome.set_settings(settings),
+            TransportCommand::SetRecording(recording) => self.metronome.set_recording(recording),
         }
     }
 
     fn play_from_insert_marker(&mut self) {
+        let (tempo, sigs) = match &self.program {
+            Some(p) => (&p.get().tempo, &p.get().time_signatures),
+            None => (&self.fallback_tempo, &self.fallback_time_signatures),
+        };
+        self.metronome
+            .start_count_in(self.config.sample_rate, tempo, sigs, self.insert_marker);
         self.position = self.frames_at(self.insert_marker);
         self.playing = true;
     }
@@ -740,6 +758,13 @@ impl Processor {
         if !self.playing {
             return next;
         }
+        if self.metronome.is_counting_in() {
+            let count_in = self.metronome.count_in_remaining();
+            if count_in > 0 && count_in < next {
+                next = count_in;
+            }
+            return next;
+        }
         let mut song = |frame: Frames| {
             let ahead = frame.saturating_sub(self.position).get();
             if ahead > 0 && ahead < next as i64 {
@@ -762,6 +787,24 @@ impl Processor {
     /// there, so the next part starts at the loop's start.
     fn render(&mut self, offset: usize, length: usize) {
         let stride = self.config.max_frames;
+        if self.metronome.is_counting_in() {
+            for c in 0..self.config.channels {
+                let to = c * stride + offset;
+                self.output[to..to + length].fill(0.0);
+            }
+            self.metronome.render_count_in(
+                Block {
+                    output: &mut self.output,
+                    stride,
+                    channels: self.config.channels,
+                    offset,
+                    length,
+                },
+                self.config.sample_rate,
+            );
+            return;
+        }
+
         let transport = TransportInfo {
             playing: self.playing,
             position: self.position,
@@ -790,6 +833,23 @@ impl Processor {
             }
         }
         if self.playing {
+            let (tempo, sigs) = match &self.program {
+                Some(p) => (&p.get().tempo, &p.get().time_signatures),
+                None => (&self.fallback_tempo, &self.fallback_time_signatures),
+            };
+            self.metronome.render_active(
+                Block {
+                    output: &mut self.output,
+                    stride,
+                    channels: self.config.channels,
+                    offset,
+                    length,
+                },
+                self.position,
+                self.config.sample_rate,
+                tempo,
+                sigs,
+            );
             let before = self.position;
             self.position += Frames(length as i64);
             // Spec: transport R13, R14

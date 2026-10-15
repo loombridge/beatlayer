@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::clip::Clip;
 use crate::device::Device;
 use crate::ids::{ClipId, DeviceId, TrackId};
+use crate::metronome::MetronomeSettings;
 use crate::shared::Shared;
 use crate::track::{Track, TrackKind};
 
@@ -31,17 +32,22 @@ pub struct Settings {
     /// it, so the saved form of such a set is unchanged.
     #[serde(default = "on", skip_serializing_if = "is_on")]
     pub solo_in_place: bool,
+    /// Metronome settings: enabled, count-in, sound, rhythm, and only while
+    /// recording (WP-2.15). A set whose metronome is default doesn't write it.
+    #[serde(default, skip_serializing_if = "MetronomeSettings::is_default")]
+    pub metronome: MetronomeSettings,
 }
 
 impl Default for Settings {
     /// 120 BPM and 4/4 throughout, the default loop brace with the loop off,
-    /// and Solo in Place on.
+    /// Solo in Place on, and default metronome settings.
     fn default() -> Self {
         Self {
             tempo: TempoMap::default(),
             time_signatures: TimeSignatureMap::default(),
             arrangement_loop: ArrangementLoop::default(),
             solo_in_place: true,
+            metronome: MetronomeSettings::default(),
         }
     }
 }

@@ -1019,19 +1019,26 @@ fn set_values(instance: &mut Instance, device: &Device) {
     }
 }
 
+/// A VST3 enum value as the `int32` a VST3 call takes.
+///
+/// The bindings type the C enums by the platform's default (`int` on
+/// Windows, `unsigned int` elsewhere), so the same conversion is needed on
+/// one platform and rejected as useless on the other. The values involved
+/// are small constants; nothing is lost.
+fn int32_of(value: impl TryInto<i32>) -> i32 {
+    value.try_into().unwrap_or_default()
+}
+
 /// Activates an instance for a node: the sample size, the bus
 /// arrangements, processing setup, activation and processing start, in the
 /// VST3 order, then an [`Active`](node::Active) for the node.
 fn activate(instance: &mut Instance, config: &NodeConfig) -> Result<node::Active, String> {
     let processor = &instance.processor;
-    // The bindings type these C enums by the platform's default (`int` on
-    // Windows, `unsigned int` elsewhere), so each is converted once here
-    // rather than with a cast that one platform wouldn't need.
-    let audio = i32::try_from(MediaTypes_::kAudio).unwrap_or_default();
-    let input = i32::try_from(BusDirections_::kInput).unwrap_or_default();
-    let output = i32::try_from(BusDirections_::kOutput).unwrap_or_default();
-    let samples32 = i32::try_from(SymbolicSampleSizes_::kSample32).unwrap_or_default();
-    let realtime = i32::try_from(ProcessModes_::kRealtime).unwrap_or_default();
+    let audio = int32_of(MediaTypes_::kAudio);
+    let input = int32_of(BusDirections_::kInput);
+    let output = int32_of(BusDirections_::kOutput);
+    let samples32 = int32_of(SymbolicSampleSizes_::kSample32);
+    let realtime = int32_of(ProcessModes_::kRealtime);
     // SAFETY: the processor is a live object and these are its own calls,
     // from the main thread.
     if unsafe { processor.canProcessSampleSize(samples32) } != kResultOk {

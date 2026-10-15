@@ -82,11 +82,14 @@
 #[cfg(test)]
 bl_rt::install_trap!();
 
+mod automation;
 pub mod clips;
 mod compiler;
 mod engine;
 mod gc;
+mod input;
 mod message;
+mod metronome;
 mod midi;
 pub mod midi_clips;
 pub mod mixer;
@@ -108,10 +111,12 @@ pub mod testing;
 
 use bl_core::time::SampleRate;
 
+pub use automation::AutomationList;
 pub use clips::{ClipPlayer, MediaLibrary, MediaMap, MediaStreams, OpenedSource, SourceCues};
 pub use compiler::{Compiler, Update};
 pub use engine::{CompileCounts, Engine, Restarter, Sender, channel};
 pub use gc::{Collector, DROP_PERIOD, DropThread, GcHandle, Program};
+pub use input::{DeviceInput, NoInput};
 pub use message::{
     Action, LoopRegion, ParamEvent, Report, ScheduledCommand, TransportCommand, When,
 };
@@ -121,8 +126,8 @@ pub use midi::{
 pub use midi_clips::{MidiClipList, MidiClipPlayer};
 pub use mixer::METER_RELEASE_DB_PER_SECOND;
 pub use node::{
-    Block, Node, NodeConfig, NodeData, NodeEvent, NodeKey, NoteBuffer, NoteEvent, NoteKind,
-    ParamValue, Segment, Segments, TransportInfo, segments,
+    Block, Node, NodeConfig, NodeData, NodeEvent, NodeKey, NoteBuffer, NoteEvent, NoteExpression,
+    NoteKind, ParamValue, Segment, Segments, TransportInfo, segments,
 };
 pub use offline::Offline;
 pub use processor::{Carry, Output, Processor};
@@ -141,6 +146,10 @@ pub struct EngineConfig {
     pub max_frames: usize,
     /// Output channels, and channels in every track's buffer.
     pub channels: usize,
+    /// The audio device's input channels, for tracks whose Audio From is
+    /// Ext. In (WP-2.13). Zero — no input — until a device with input
+    /// opens.
+    pub input_channels: usize,
     /// Messages the queue to the audio thread holds. More wait on the
     /// sending side ([`Sender::backlog`]).
     pub queue_capacity: usize,
@@ -173,6 +182,7 @@ impl EngineConfig {
             sample_rate,
             max_frames,
             channels: 2,
+            input_channels: 0,
             queue_capacity: 4096,
             max_pending_events: 4096,
             max_scheduled: 256,

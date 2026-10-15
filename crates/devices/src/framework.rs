@@ -8,7 +8,8 @@ use bl_core::time::{Frames, SampleRate, TempoMap};
 use bl_dsp::LinearSmoother;
 use bl_dsp::smooth::DEFAULT_SMOOTHING_SECONDS;
 use bl_engine::{
-    Block, DeviceType, Node, NodeConfig, NodeEvent, NoteEvent, ParamValue, Registry, segments,
+    AutomationList, Block, DeviceType, Node, NodeConfig, NodeData, NodeEvent, NoteEvent,
+    ParamValue, Registry, segments,
 };
 use bl_model::{Device, DeviceDescription, DeviceKind, ParamDescriptor, ParamId};
 
@@ -30,6 +31,15 @@ pub trait NativeDevice: Send + 'static {
     /// here. The default does nothing.
     fn flush(&mut self, events: &[NodeEvent], params: &ParamBank) {
         let _ = (events, params);
+    }
+
+    /// Takes data the compiler made for the device off the audio thread:
+    /// the decoded audio of a device that plays media (a sampler's sample,
+    /// WP-2.16). The default drops it. Dropping a [`NodeData`] here is
+    /// real-time safe: it only lets go of it, and the engine's drop thread
+    /// frees what it held.
+    fn receive_data(&mut self, data: NodeData) {
+        drop(data);
     }
 
     /// How many frames it delays its input by, for delay compensation
@@ -119,6 +129,21 @@ impl<'a> Audio<'_, 'a> {
         let range = self.range.clone();
         &mut self.block.channel_mut(channel)[range]
     }
+
+    /// What the device's detector hears over the stretch on `channel`, if
+    /// the device has a sidechain input and its sidechain is on (WP-2.19b):
+    /// the source track's signal through the sidechain's gain and mix, with
+    /// the device's own input, or `None` while it's off: then the detector
+    /// hears the stretch's own audio ([`Self::channel_mut`]).
+    ///
+    /// # Panics
+    ///
+    /// If `channel` isn't less than [`channels`](Self::channels).
+    #[must_use]
+    pub fn sidechain(&self, channel: usize) -> Option<&[f32]> {
+        let range = self.range.clone();
+        self.block.sidechain(channel).map(|data| &data[range])
+    }
 }
 
 /// One parameter's state on the audio thread.
@@ -138,6 +163,9 @@ struct Slot {
 pub struct ParamBank {
     slots: Vec<Slot>,
     frames: usize,
+    /// The envelopes driving the device's parameters while the song plays
+    /// (WP-2.12).
+    automation: Option<NodeData>,
 }
 
 impl ParamBank {
@@ -162,7 +190,19 @@ impl ParamBank {
                 }
             })
             .collect();
-        Self { slots, frames: 0 }
+        Self {
+            slots,
+            frames: 0,
+            automation: None,
+        }
+    }
+
+    /// Takes the envelopes driving the device's parameters (WP-2.12), if
+    /// that's what the data holds; anything else is let go of.
+    pub fn receive_data(&mut self, data: NodeData) {
+        if data.downcast_ref::<AutomationList>().is_some() {
+            self.automation = Some(data);
+        }
     }
 
     /// Where parameter `id` is in the bank: its place in the description.
@@ -197,12 +237,28 @@ impl ParamBank {
         }
     }
 
-    /// Works out every parameter's value for the next `frames` frames.
-    fn advance(&mut self, frames: usize) {
+    /// Works out every parameter's value for the next `frames` frames: an
+    /// automated one from its envelope, on the exact frame, when the song
+    /// plays at song frame `from`; the rest gliding toward their values as
+    /// always.
+    fn advance(&mut self, frames: usize, from: Option<i64>) {
         self.frames = frames;
+        let automation = from.and_then(|_| self.automation.clone());
+        let automation = automation
+            .as_ref()
+            .and_then(|data| data.downcast_ref::<AutomationList>());
         for slot in &mut self.slots {
             let frames = frames.min(slot.ramp.len());
-            if slot.smoother.is_settled() {
+            let envelope = automation.and_then(|list| list.envelope(slot.descriptor.id));
+            if let (Some(envelope), Some(from)) = (envelope, from) {
+                for (i, value) in slot.ramp[..frames].iter_mut().enumerate() {
+                    *value = slot.descriptor.clamp(envelope.value_at(from + i as i64)) as f32;
+                }
+                slot.smoother.snap(
+                    slot.descriptor
+                        .clamp(envelope.value_at(from + frames as i64 - 1)),
+                );
+            } else if slot.smoother.is_settled() {
                 slot.ramp[..frames].fill(slot.smoother.value() as f32);
             } else {
                 for value in &mut slot.ramp[..frames] {
@@ -267,6 +323,36 @@ impl ParamBank {
     }
 }
 
+/// A delay of a stretch of samples, read a whole number of samples back.
+/// [`read`](Self::read) reads what was written before the current sample,
+/// so a delay of 0 isn't representable: a device that offers one passes
+/// its input through instead.
+pub(crate) struct DelayLine {
+    samples: Vec<f32>,
+    at: usize,
+}
+
+impl DelayLine {
+    pub(crate) fn new(max_delay: usize) -> Self {
+        Self {
+            samples: vec![0.0; max_delay + 1],
+            at: 0,
+        }
+    }
+
+    /// The sample `delay` writes ago.
+    pub(crate) fn read(&self, delay: usize) -> f32 {
+        let len = self.samples.len();
+        self.samples[(self.at + len - delay % len) % len]
+    }
+
+    pub(crate) fn write(&mut self, sample: f32) {
+        let len = self.samples.len();
+        self.samples[self.at] = sample;
+        self.at = (self.at + 1) % len;
+    }
+}
+
 /// A native device in the engine: it splits each block at its parameter
 /// changes, so each lands on its exact frame (sample-accurate automation,
 /// rule G2), and hands the device each stretch with its parameters.
@@ -307,11 +393,18 @@ impl<D: NativeDevice> NativeNode<D> {
 impl<D: NativeDevice> Node for NativeNode<D> {
     fn process(&mut self, block: &mut Block<'_>) {
         let frames = block.frames();
+        let transport = block.transport();
         for segment in segments(block.events(), frames) {
             for event in segment.events {
                 self.params.apply(event);
             }
-            self.params.advance(segment.range.len());
+            // Spec: automation R2. While the song plays, an automated
+            // parameter takes its value from its envelope on the exact
+            // frame.
+            let from = transport
+                .playing
+                .then(|| transport.position.get() + segment.range.start as i64);
+            self.params.advance(segment.range.len(), from);
             let last = segment.range.end >= frames;
             let mut audio = Audio {
                 block,
@@ -330,6 +423,16 @@ impl<D: NativeDevice> Node for NativeNode<D> {
         self.device.flush(events, &self.params);
     }
 
+    fn receive_data(&mut self, data: NodeData) {
+        // Automation (WP-2.12) goes to the parameter bank; anything else is
+        // the device's own data (WP-2.16).
+        if data.downcast_ref::<AutomationList>().is_some() {
+            self.params.receive_data(data);
+        } else {
+            self.device.receive_data(data);
+        }
+    }
+
     fn latency(&self) -> u32 {
         self.device.latency()
     }
@@ -339,6 +442,10 @@ impl<D: NativeDevice> Node for NativeNode<D> {
 /// and each device of its kind runs as a [`NativeNode`] around the device
 /// `make` makes.
 ///
+/// `make` sees the device's parameter values, so a device whose latency
+/// they set (a look-ahead, say) reports it from the moment it's built, as
+/// the compiler asks for delay compensation (WP-2.11).
+///
 /// # Panics
 ///
 /// If `device_type` isn't native, or its description breaks a rule
@@ -347,7 +454,7 @@ impl<D: NativeDevice> Node for NativeNode<D> {
 pub fn add<D, F>(registry: &mut Registry, device_type: DeviceType, make: F)
 where
     D: NativeDevice,
-    F: Fn(&NodeConfig) -> D + Send + Sync + 'static,
+    F: Fn(&Device, &NodeConfig) -> D + Send + Sync + 'static,
 {
     assert!(
         matches!(device_type.kind, DeviceKind::Native { .. }),
@@ -359,6 +466,11 @@ where
     }
     let description = device_type.description.clone();
     registry.add_device(device_type, move |device, config| {
-        Box::new(NativeNode::new(make(config), &description, device, config))
+        Box::new(NativeNode::new(
+            make(device, config),
+            &description,
+            device,
+            config,
+        ))
     });
 }

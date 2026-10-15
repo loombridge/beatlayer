@@ -7,9 +7,11 @@
 use std::collections::BTreeSet;
 
 use bl_core::id::Id;
+use bl_core::time::Ticks;
 use imbl::{OrdMap, Vector};
 use serde::{Deserialize, Serialize};
 
+use crate::automation::{AutomationTarget, Breakpoint, Envelope};
 use crate::clip::Clip;
 use crate::command::{
     check_chain, check_clip, check_clip_fits, check_device, check_extent, check_mixer,
@@ -18,7 +20,8 @@ use crate::command::{
 use crate::device::Device;
 use crate::document::{Document, Index, Settings};
 use crate::error::ModelError;
-use crate::ids::TrackId;
+use crate::ids::{SceneId, TrackId};
+use crate::scene::{Scene, default_scenes};
 use crate::shared::Shared;
 use crate::track::{Mixer, Routing, Track, TrackKind};
 
@@ -28,6 +31,10 @@ pub(crate) struct DocumentRepr {
     tracks: Vec<TrackRepr>,
     returns: Vec<TrackRepr>,
     main: TrackRepr,
+    /// The scenes, in order. Nothing in a set saved before WP-3.1, which
+    /// loads with the default a new set opens with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    scenes: Option<Vec<Scene>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -44,12 +51,52 @@ struct TrackRepr {
     /// track's of its kind. Sets saved before WP-2.19 have none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     routing: Option<Routing>,
+    /// The track's automation, one entry per automated parameter. Sets
+    /// saved before WP-2.12 have none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    automation: Vec<AutomationRepr>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     devices: Vec<Device>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     clips: Vec<Clip>,
+    /// The clips in the track's Session slots. Sets saved before WP-3.1
+    /// have none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    slots: Vec<SlotRepr>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     children: Vec<TrackRepr>,
+}
+
+/// Whether an envelope drives its parameter: on unless a hand move turned
+/// it off, so a set that overrode none reads as before.
+fn on() -> bool {
+    true
+}
+
+/// For serde's `skip_serializing_if`, which passes a reference.
+fn is_on(value: &bool) -> bool {
+    *value
+}
+
+/// One parameter's automation as the set saves it.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct AutomationRepr {
+    /// The parameter it drives.
+    target: AutomationTarget,
+    /// Its envelope's breakpoints, in position order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    points: Vec<Breakpoint>,
+    /// Whether the envelope drives the parameter; left out while it does,
+    /// so a set that overrode none reads the same as before.
+    #[serde(default = "on", skip_serializing_if = "is_on")]
+    enabled: bool,
+}
+
+/// One saved Session slot that holds a clip.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct SlotRepr {
+    scene: SceneId,
+    clip: Clip,
 }
 
 impl From<&Document> for DocumentRepr {
@@ -60,6 +107,7 @@ impl From<&Document> for DocumentRepr {
             tracks: doc.top.iter().map(track).collect(),
             returns: doc.returns.iter().map(track).collect(),
             main: track(&doc.main),
+            scenes: Some(doc.scenes().cloned().collect()),
         }
     }
 }
@@ -83,8 +131,23 @@ impl TrackRepr {
             mixer: track.mixer,
             sends: track.sends().collect(),
             routing: (track.routing != Routing::new(track.kind)).then(|| track.routing.clone()),
+            automation: track
+                .automation()
+                .map(|(target, automation)| AutomationRepr {
+                    target: *target,
+                    points: automation.envelope.points().collect(),
+                    enabled: automation.enabled,
+                })
+                .collect(),
             devices: track.devices().cloned().collect(),
             clips: track.clips().cloned().collect(),
+            slots: track
+                .slots()
+                .map(|(scene, clip)| SlotRepr {
+                    scene,
+                    clip: clip.clone(),
+                })
+                .collect(),
             children: track
                 .children
                 .iter()
@@ -98,17 +161,23 @@ impl TryFrom<DocumentRepr> for Document {
     type Error = ModelError;
 
     fn try_from(repr: DocumentRepr) -> Result<Self, ModelError> {
+        let DocumentRepr {
+            settings,
+            tracks,
+            returns,
+            main,
+            scenes,
+        } = repr;
         let mut loader = Loader {
             tracks: OrdMap::new(),
             index: Index::default(),
             seen: BTreeSet::new(),
         };
-        if repr.main.kind != TrackKind::Main {
+        if main.kind != TrackKind::Main {
             return Err(ModelError::MainTrack);
         }
-        let main = loader.add(repr.main, None)?;
-        let returns = repr
-            .returns
+        let main = loader.add(main, None)?;
+        let returns = returns
             .into_iter()
             .map(|track| {
                 if track.kind == TrackKind::Return {
@@ -118,23 +187,44 @@ impl TryFrom<DocumentRepr> for Document {
                 }
             })
             .collect::<Result<Vector<_>, _>>()?;
-        let top = repr
-            .tracks
+        let top = tracks
             .into_iter()
             .map(|track| loader.add_grouped(track, None))
             .collect::<Result<Vector<_>, _>>()?;
-        let document = Self {
-            settings: repr.settings,
+        if let Some(scenes) = &scenes {
+            for scene in scenes {
+                loader.claim(scene.id.0)?;
+            }
+        }
+        let mut document = Self {
+            settings,
             main,
             top,
             returns,
             tracks: loader.tracks,
+            // Filled below: a set saved before WP-3.1 brings no scenes and
+            // opens with the default a new set gets, whose IDs sit after
+            // the document's largest.
+            scenes: Vector::new(),
             index: loader.index,
         };
-        // Routing names tracks anywhere in the tree, so it's checked once
-        // every track is in.
+        document.scenes = match scenes {
+            Some(scenes) => scenes.into_iter().collect(),
+            None => default_scenes(document.max_id())?.into_iter().collect(),
+        };
+        // Slots name their scenes, which may be the defaults just made.
+        for track in document.tracks.values() {
+            for scene in track.slots.keys() {
+                if document.scene(*scene).is_none() {
+                    return Err(ModelError::NoSuchScene(*scene));
+                }
+            }
+        }
+        // Routing and automation name tracks and devices anywhere in the
+        // tree, so they're checked once every track is in.
         for id in document.track_order() {
             document.check_routing(id)?;
+            document.check_automation(id)?;
         }
         Ok(document)
     }
@@ -165,7 +255,7 @@ impl Loader {
     fn add(&mut self, repr: TrackRepr, parent: Option<TrackId>) -> Result<TrackId, ModelError> {
         let id = repr.id;
         self.claim(id.0)?;
-        if !repr.clips.is_empty() && !repr.kind.holds_clips() {
+        if (!repr.clips.is_empty() || !repr.slots.is_empty()) && !repr.kind.holds_clips() {
             return Err(wrong_kind(&repr, "an audio or MIDI track"));
         }
         if !repr.children.is_empty() && repr.kind != TrackKind::Group {
@@ -195,6 +285,16 @@ impl Loader {
                 return Err(ModelError::DuplicateId(to.0));
             }
         }
+        for entry in repr.automation {
+            let envelope = Envelope::from_points(entry.points)?;
+            let automation = crate::automation::Automation {
+                envelope,
+                enabled: entry.enabled,
+            };
+            if track.automation.insert(entry.target, automation).is_some() {
+                return Err(ModelError::DuplicateId(id.0));
+            }
+        }
         for device in repr.devices {
             self.claim(device.id.0)?;
             check_device(&device)?;
@@ -209,6 +309,23 @@ impl Loader {
             check_clip(&clip)?;
             self.index.clip_track.insert(clip.id, id);
             track.clips.insert(clip.id, Shared::new(clip));
+        }
+        for slot in repr.slots {
+            self.claim(slot.clip.id.0)?;
+            check_clip_fits(&track, &slot.clip.data)?;
+            if slot.clip.start != Ticks::ZERO {
+                return Err(ModelError::SlotClipPosition(slot.clip.start));
+            }
+            check_extent(slot.clip.start, slot.clip.length)?;
+            check_clip(&slot.clip)?;
+            self.index.clip_track.insert(slot.clip.id, id);
+            if track
+                .slots
+                .insert(slot.scene, Shared::new(slot.clip))
+                .is_some()
+            {
+                return Err(ModelError::DuplicateId(slot.scene.0));
+            }
         }
         for child in repr.children {
             let child = self.add_grouped(child, Some(id))?;
@@ -243,13 +360,14 @@ mod tests {
     use bl_core::time::Ticks;
     use serde_json::{Value, json};
 
-    use crate::clip::{AudioData, Clip, ClipData};
+    use crate::AutomationTarget;
+    use crate::clip::{AudioData, Clip, ClipData, MidiData};
     use crate::command::Command;
     use crate::device::{Device, DeviceKind};
     use crate::editor::Editor;
-    use crate::ids::{ContentHash, ParamId, TrackId};
+    use crate::ids::{ClipId, ContentHash, ParamId, SceneId, TrackId};
     use crate::track::TrackKind;
-    use crate::{Document, Settings};
+    use crate::{DEFAULT_SCENE_COUNT, Document, Settings};
 
     /// A song with a group holding an audio track with a clip and a device,
     /// and a return track.
@@ -414,6 +532,118 @@ mod tests {
         assert_eq!(loaded, doc);
     }
 
+    // Spec: session-view R13
+    #[test]
+    fn scenes_and_slot_clips_save_and_load() {
+        let mut editor = Editor::new();
+        let track = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id: track,
+                kind: TrackKind::Midi,
+                name: "Keys".to_owned(),
+                parent: None,
+                index: 0,
+            })
+            .unwrap();
+        let scene: SceneId = editor.new_id();
+        editor
+            .apply(Command::CreateScene {
+                id: scene,
+                index: 1,
+            })
+            .unwrap();
+        editor
+            .apply(Command::RenameScene {
+                scene,
+                name: "Chorus".to_owned(),
+            })
+            .unwrap();
+        let clip: ClipId = editor.new_id();
+        editor
+            .apply(Command::CreateSlotClip {
+                track,
+                scene,
+                clip: Clip::new(
+                    clip,
+                    Ticks::ZERO,
+                    Ticks::WHOLE,
+                    ClipData::Midi(MidiData::default()),
+                ),
+            })
+            .unwrap();
+        let doc = editor.document().clone();
+        let value = serde_json::to_value(&doc).unwrap();
+        // The scenes save in order, and the clip under its track's slots.
+        assert_eq!(value["scenes"][1]["name"], json!("Chorus"));
+        let saved = &value["tracks"][0]["slots"][0];
+        assert_eq!(saved["scene"], json!(scene.0.get()));
+        assert_eq!(saved["clip"]["id"], json!(clip.0.get()));
+        let loaded = load(value).unwrap();
+        assert_eq!(loaded, doc);
+        assert_eq!(loaded.scene_position(scene), Some(1));
+        assert_eq!(loaded.slot(track, scene).unwrap().id, clip);
+        loaded.check_invariants().unwrap();
+
+        // A slot that names a scene the set doesn't hold doesn't load.
+        let mut broken = serde_json::to_value(&doc).unwrap();
+        broken["tracks"][0]["slots"][0]["scene"] = json!(9999);
+        let error = load(broken).unwrap_err();
+        assert!(error.contains("no scene"), "{error}");
+        // A slot clip has no position, and a slot holds one clip.
+        let mut broken = serde_json::to_value(&doc).unwrap();
+        broken["tracks"][0]["slots"][0]["clip"]["start"] = json!(Ticks::WHOLE.0);
+        let error = load(broken).unwrap_err();
+        assert!(error.contains("no position"), "{error}");
+        let mut broken = serde_json::to_value(&doc).unwrap();
+        let slot = broken["tracks"][0]["slots"][0].clone();
+        broken["tracks"][0]["slots"]
+            .as_array_mut()
+            .unwrap()
+            .push(slot);
+        let error = load(broken).unwrap_err();
+        assert!(error.contains("more than once"), "{error}");
+        // Only audio and MIDI tracks hold slot clips.
+        let mut broken = serde_json::to_value(&doc).unwrap();
+        let slot = broken["tracks"][0]["slots"][0].clone();
+        broken["main"]["slots"] = json!([slot]);
+        let error = load(broken).unwrap_err();
+        assert!(error.contains("audio or MIDI"), "{error}");
+    }
+
+    // Spec: session-view R14
+    #[test]
+    fn a_set_saved_before_scenes_and_slots_loads_with_the_default() {
+        let (doc, _) = song();
+        let mut value = serde_json::to_value(&doc).unwrap();
+        value.as_object_mut().unwrap().remove("scenes");
+        let loaded = load(value).unwrap();
+        assert_eq!(loaded.scene_count(), DEFAULT_SCENE_COUNT);
+        assert!(loaded.scenes().all(|scene| scene.name.is_empty()));
+        assert!(
+            !loaded.tracks().any(|track| track.slots().len() > 0),
+            "no slots in a set saved before them"
+        );
+        assert_eq!(
+            loaded.max_id(),
+            loaded.scenes().last().expect("eight scenes").id.0,
+            "the default scenes take the IDs after the document's largest"
+        );
+        loaded.check_invariants().unwrap();
+        // Saving it again writes the scenes, so the next load keeps them.
+        let again: Document =
+            serde_json::from_value(serde_json::to_value(&loaded).unwrap()).unwrap();
+        assert_eq!(again, loaded);
+
+        // A set whose IDs leave no room for the scenes is refused, not a
+        // panic.
+        let mut broken = serde_json::to_value(&doc).unwrap();
+        broken.as_object_mut().unwrap().remove("scenes");
+        broken["main"]["id"] = json!(u64::MAX - 4);
+        let error = load(broken).unwrap_err();
+        assert!(error.contains("no room"), "{error}");
+    }
+
     // Spec: audio-clips R15
     #[test]
     fn audio_clip_settings_are_saved_only_where_they_differ_from_a_new_clips() {
@@ -474,6 +704,146 @@ mod tests {
         bad["tracks"][0]["clips"][0]["data"]["audio"]["loop_end"] = json!(0.1);
         let error = load(bad).unwrap_err();
         assert!(error.contains("loop end 0.1 is out of range"), "{error}");
+    }
+
+    // Spec: automation R7
+    #[test]
+    fn automation_saves_with_the_set_and_loads_back() {
+        let (mut doc, [_, audio, ret]) = song();
+        let device = doc.track(audio).unwrap().devices().next().unwrap().id;
+        let volume = AutomationTarget::Mixer {
+            param: crate::MixerParam::Volume,
+        };
+        for (target, at, value) in [
+            (volume, Ticks::ZERO, 1.0),
+            (volume, Ticks::WHOLE, 0.25),
+            (AutomationTarget::Send { to: ret }, Ticks::ZERO, 0.5),
+            (
+                AutomationTarget::Device {
+                    device,
+                    param: ParamId(4),
+                },
+                Ticks::ZERO,
+                -6.0,
+            ),
+        ] {
+            doc.apply(&Command::SetAutomationBreakpoint {
+                track: audio,
+                target,
+                at,
+                value,
+            })
+            .unwrap();
+        }
+        // A hand move overrides the volume's envelope; it's saved overridden.
+        doc.apply(&Command::SetVolume {
+            track: audio,
+            volume: 0.5,
+        })
+        .unwrap();
+        // The volume's segment is curved: its bend saves with the breakpoint
+        // at the segment's start.
+        doc.apply(&Command::SetAutomationCurve {
+            track: audio,
+            target: volume,
+            at: Ticks::ZERO,
+            bend: -0.5,
+        })
+        .unwrap();
+        let value = serde_json::to_value(&doc).unwrap();
+        let saved = value["tracks"][0]["children"][0]["automation"]
+            .as_array()
+            .unwrap();
+        assert_eq!(
+            saved.len(),
+            3,
+            "one entry per parameter, not per breakpoint"
+        );
+        let entry = |param: &str| {
+            saved
+                .iter()
+                .find(|entry| entry["target"]["param"] == json!(param))
+                .unwrap()
+        };
+        assert_eq!(
+            entry("volume")["target"],
+            json!({ "type": "mixer", "param": "volume" })
+        );
+        assert_eq!(
+            entry("volume")["points"],
+            json!([
+                { "at": 0, "value": 1.0, "bend": -0.5 },
+                { "at": Ticks::WHOLE.0, "value": 0.25 }
+            ])
+        );
+        assert_eq!(entry("volume")["enabled"], json!(false));
+        assert_eq!(
+            saved
+                .iter()
+                .find(|entry| entry["target"]["type"] == json!("send"))
+                .unwrap()["target"],
+            json!({ "type": "send", "to": ret.0.get() })
+        );
+        assert_eq!(
+            saved
+                .iter()
+                .find(|entry| entry["target"]["type"] == json!("device"))
+                .unwrap()["points"],
+            json!([{ "at": 0, "value": -6.0 }])
+        );
+        let loaded = load(value).unwrap();
+        assert_eq!(loaded, doc);
+        loaded.check_invariants().unwrap();
+
+        // Broken saved automation doesn't load.
+        let broken = |edit: &dyn Fn(&mut Value)| {
+            let mut value = serde_json::to_value(&doc).unwrap();
+            edit(&mut value);
+            load(value).unwrap_err()
+        };
+        fn first_entry(value: &mut Value) -> &mut Value {
+            value["tracks"][0]["children"][0]["automation"]
+                .as_array_mut()
+                .unwrap()
+                .first_mut()
+                .unwrap()
+        }
+        let error = broken(&|value| {
+            first_entry(value)["points"] = json!([
+                { "at": 10, "value": 0.0 },
+                { "at": 5, "value": 1.0 }
+            ]);
+        });
+        assert!(error.contains("already a breakpoint"), "{error}");
+        let error = broken(&|value| {
+            first_entry(value)["points"] = json!([
+                { "at": 0, "value": 0.0 },
+                { "at": 0, "value": 1.0 }
+            ]);
+        });
+        assert!(error.contains("already a breakpoint"), "{error}");
+        let error = broken(&|value| {
+            first_entry(value)["points"] = json!([{ "at": 0, "value": true }]);
+        });
+        assert!(!error.is_empty());
+        let error = broken(&|value| {
+            first_entry(value)["enabled"] = json!("yes");
+        });
+        assert!(!error.is_empty());
+        let error = broken(&|value| {
+            first_entry(value)["points"] = json!([{ "at": -5, "value": 0.0 }]);
+        });
+        assert!(error.contains("before zero"), "{error}");
+        let error = broken(&|value| {
+            first_entry(value)["points"] = json!([
+                { "at": 0, "value": 0.0, "bend": 2.0 },
+                { "at": 1_000, "value": 1.0 }
+            ]);
+        });
+        assert!(
+            error.contains("automation bend 2 is out of range"),
+            "{error}"
+        );
     }
 
     #[test]

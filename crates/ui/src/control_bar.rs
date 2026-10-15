@@ -38,6 +38,7 @@ pub const SECTION: &[Element] = &[
     Element::Tempo,
     Element::SignatureNumerator,
     Element::SignatureDenominator,
+    Element::Metronome,
     Element::Follow,
     Element::PositionBars,
     Element::PositionBeats,
@@ -92,6 +93,7 @@ pub fn command(element: Element) -> Option<&'static str> {
         Element::Play => Some(ids::PLAY),
         Element::Stop => Some(ids::STOP),
         Element::Loop => Some(ids::SET_LOOP_ENABLED),
+        Element::Metronome => Some(ids::SET_METRONOME_ENABLED),
         Element::Follow => Some(FOLLOW),
         element => Some(match field(element)?.group {
             Group::Position => ids::LOCATE,
@@ -106,15 +108,35 @@ pub fn command(element: Element) -> Option<&'static str> {
 #[must_use]
 pub fn click(element: Element, shell: &Shell) -> Option<Invocation> {
     match element {
+        Element::ReEnableAutomation => Some(Invocation::new(RE_ENABLE_AUTOMATION, json!({}))),
         Element::Play => Some(Invocation::new(ids::PLAY, json!({}))),
         Element::Stop => Some(Invocation::new(ids::STOP, json!({}))),
         Element::Loop => Some(Invocation::new(
             ids::SET_LOOP_ENABLED,
             json!({ "enabled": !loop_on(shell) }),
         )),
+        Element::Metronome => Some(Invocation::new(
+            ids::SET_METRONOME_ENABLED,
+            json!({ "enabled": !metronome_on(shell) }),
+        )),
         _ => None,
     }
 }
+
+/// Whether any of the set's automated controls is overridden: the Control
+/// Bar's Re-Enable Automation button lights while one is (the automation
+/// spec, R5).
+#[must_use]
+pub fn automation_overridden(shell: &Shell) -> bool {
+    shell
+        .editor()
+        .document()
+        .tracks()
+        .any(bl_model::Track::automation_overridden)
+}
+
+/// The Re-Enable Automation command (the automation spec, R5).
+pub const RE_ENABLE_AUTOMATION: &str = bl_model::registry::RE_ENABLE_AUTOMATION;
 
 fn loop_on(shell: &Shell) -> bool {
     shell
@@ -123,6 +145,10 @@ fn loop_on(shell: &Shell) -> bool {
         .settings()
         .arrangement_loop
         .enabled
+}
+
+fn metronome_on(shell: &Shell) -> bool {
+    shell.editor().document().settings().metronome.enabled
 }
 
 /// What a group is called, for assistive technology.
@@ -189,6 +215,37 @@ impl TransportFields {
             }
             Element::Loop => {
                 let on = loop_on(shell);
+                return Some(Look {
+                    on,
+                    value: Some(if on { "on" } else { "off" }.to_owned()),
+                    ..Look::default()
+                });
+            }
+            Element::ReEnableAutomation => {
+                // Spec: automation R5. It lights while any of the set's
+                // automated controls is overridden: the Re-Enable Automation
+                // button of the manual's Overriding Automation.
+                let overridden = automation_overridden(shell);
+                return Some(Look {
+                    on: overridden,
+                    value: Some(
+                        if overridden {
+                            "some automation is off"
+                        } else {
+                            "every envelope drives its control"
+                        }
+                        .to_owned(),
+                    ),
+                    description: Some(
+                        "Puts every control whose automation a hand move turned off \
+                         back under its envelope."
+                            .to_owned(),
+                    ),
+                    ..Look::default()
+                });
+            }
+            Element::Metronome => {
+                let on = metronome_on(shell);
                 return Some(Look {
                     on,
                     value: Some(if on { "on" } else { "off" }.to_owned()),

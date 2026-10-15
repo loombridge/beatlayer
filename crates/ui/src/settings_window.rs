@@ -10,6 +10,7 @@
 //! which Live doesn't have. It follows Plug-Ins, the page whose plug-ins
 //! are the other way another program drives the app.
 
+use bl_shell::assistant::AssistantProvider;
 use bl_shell::audio::{
     AudioDevices, AudioStatus, DeviceListing, TONE_MAX_DBFS, TONE_MAX_HZ, TONE_MIN_DBFS,
     TONE_MIN_HZ,
@@ -17,7 +18,7 @@ use bl_shell::audio::{
 use bl_shell::settings::{
     SettingsPage, ThemeChoice, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, zoom_step,
 };
-use bl_shell::{Invocation, Shell, agent, commands as ids};
+use bl_shell::{Invocation, Shell, agent, assistant, commands as ids};
 use egui::accesskit::Role;
 use egui::{Align2, CentralPanel, Frame, Id, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use serde_json::{Value, json};
@@ -38,6 +39,10 @@ pub struct SettingsUi {
     /// A move to the next or previous control, done at the start of the
     /// next frame.
     move_focus: Option<egui::FocusDirection>,
+    /// The assistant's API key being typed on the Agents page, before Set
+    /// stores it (WP-2.23, part 4). It's cleared once stored and never
+    /// echoed back from the shell.
+    assistant_key: String,
 }
 
 impl Default for SettingsUi {
@@ -54,6 +59,7 @@ impl SettingsUi {
             devices: None,
             stale: true,
             move_focus: None,
+            assistant_key: String::new(),
         }
     }
 
@@ -75,6 +81,9 @@ impl SettingsUi {
     pub fn prepare(&mut self, shell: &mut Shell) {
         if self.stale {
             self.devices = Some(shell.audio_mut().devices());
+            // The assistant's key lives in the keychain: read whether one is
+            // stored when the window opens, not every frame (WP-2.23).
+            shell.refresh_assistant_key();
             self.stale = false;
         }
     }
@@ -113,7 +122,16 @@ impl SettingsUi {
                     record_warp_launch_page(ui, shell, theme, &mut rows, &mut events);
                 }
                 SettingsPage::PlugIns => plug_ins_page(ui, shell, theme, &mut rows, &mut events),
-                SettingsPage::Agents => agents_page(ui, shell, theme, &mut rows, &mut events),
+                SettingsPage::Agents => {
+                    agents_page(
+                        ui,
+                        shell,
+                        theme,
+                        &mut rows,
+                        &mut events,
+                        &mut self.assistant_key,
+                    );
+                }
                 SettingsPage::TempoMidi => {
                     rows.note(
                         ui,
@@ -743,6 +761,7 @@ fn agents_page(
     theme: &Theme,
     rows: &mut Rows<'_>,
     events: &mut Vec<UiEvent>,
+    assistant_key: &mut String,
 ) {
     let settings = shell.agent_settings();
     let status = shell.agent_status();
@@ -844,6 +863,219 @@ fn agents_page(
          you first unless the agent is autonomous (the switch beside its name). Web pages \
          can't connect.",
     );
+    assistant_section(ui, shell, theme, rows, events, assistant_key);
+}
+
+/// The width of an assistant setting's text field on the Agents page.
+const ASSISTANT_FIELD: f32 = 240.0;
+
+/// The built-in assistant's settings on the Agents page (WP-2.23, part 4):
+/// the provider, its base URL and model, the API key entry (stored to the
+/// OS keychain, shown masked and never echoed), and the activity log. The
+/// assistant is Beatlayer's own, so this is a Beatlayer addition on the
+/// Agents page.
+fn assistant_section(
+    ui: &mut Ui,
+    shell: &Shell,
+    theme: &Theme,
+    rows: &mut Rows<'_>,
+    events: &mut Vec<UiEvent>,
+    key: &mut String,
+) {
+    let settings = shell.assistant_settings();
+    let state = shell.assistant_state();
+    let invoke = |events: &mut Vec<UiEvent>, id: &str, args: Value| {
+        events.push(UiEvent::Invoke(Invocation::new(id, args)));
+    };
+    rows.heading(ui, "Assistant");
+
+    let rect = rows.row(ui, "Provider", SettingsLayout::DEVICE_CHOOSER);
+    let choices: Vec<Choice<AssistantProvider>> = AssistantProvider::ALL
+        .into_iter()
+        .map(|provider| Choice {
+            label: provider.label().to_owned(),
+            value: provider,
+        })
+        .collect();
+    if let Some(provider) = chooser(
+        ui,
+        theme,
+        "assistant-provider",
+        "Assistant Provider",
+        rect,
+        &choices,
+        Some(&settings.provider),
+        true,
+    ) {
+        invoke(
+            events,
+            assistant::ASSISTANT_SET_PROVIDER,
+            json!({ "provider": provider }),
+        );
+    }
+
+    // The base URL is only the OpenAI-compatible provider's: it's where
+    // OpenRouter and local servers are reached.
+    let rect = rows.row(ui, "Base URL", ASSISTANT_FIELD);
+    let mut base_url = settings.base_url.clone();
+    let response = ui
+        .put(
+            rect,
+            egui::TextEdit::singleline(&mut base_url)
+                .id_salt("assistant-base-url")
+                .hint_text("The provider's own")
+                .interactive(settings.provider.has_base_url()),
+        )
+        .on_hover_text(
+            "The OpenAI-compatible server's address, such as http://localhost:11434/v1 for \
+             Ollama. Empty uses the provider's own.",
+        );
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_label("Assistant Base URL".to_owned());
+    });
+    if response.changed() {
+        invoke(
+            events,
+            assistant::ASSISTANT_SET_BASE_URL,
+            json!({ "base_url": base_url }),
+        );
+    }
+
+    let rect = rows.row(ui, "Model", ASSISTANT_FIELD);
+    let mut model = settings.model.clone();
+    let response = ui.put(
+        rect,
+        egui::TextEdit::singleline(&mut model).id_salt("assistant-model"),
+    );
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_label("Assistant Model".to_owned());
+    });
+    if response.changed() {
+        invoke(
+            events,
+            assistant::ASSISTANT_SET_MODEL,
+            json!({ "model": model }),
+        );
+    }
+
+    // The API key: typed into a masked field, written to the keychain by
+    // `assistant.set_key` and never read back (WP-2.23, part 4).
+    rows.label(ui, "API Key");
+    let rect = Rect::from_min_size(
+        pos2(rows.layout.control_x, rows.y),
+        vec2(ASSISTANT_FIELD - COPY_BUTTON - 6.0, 18.0),
+    );
+    let response = ui.put(
+        rect,
+        egui::TextEdit::singleline(key)
+            .id_salt("assistant-key")
+            .password(true),
+    );
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_label("Assistant API Key".to_owned());
+    });
+    let set = Rect::from_min_size(
+        pos2(rect.right() + 6.0, rect.top()),
+        vec2(COPY_BUTTON, rect.height()),
+    );
+    let response = ui.put(set, egui::Button::new("Set"));
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_label("Set Assistant API Key".to_owned());
+    });
+    if response.clicked() && !key.is_empty() {
+        invoke(
+            events,
+            assistant::ASSISTANT_SET_KEY,
+            json!({ "key": key.clone() }),
+        );
+        key.clear();
+    }
+    rows.y += SettingsLayout::OPTION_ROW;
+    rows.text_row(
+        ui,
+        "Key",
+        if state.key_set {
+            "Stored in the keychain"
+        } else {
+            "None stored"
+        },
+    );
+    if state.key_set {
+        let rect = rows.row(ui, "Forget", SettingsLayout::CHOOSER);
+        let response = ui.put(rect, egui::Button::new("Forget Key"));
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_label("Forget Assistant API Key".to_owned());
+        });
+        if response.clicked() {
+            invoke(events, assistant::ASSISTANT_FORGET_KEY, json!({}));
+        }
+    }
+
+    let rect = rows.row(ui, "Activity Log", SettingsLayout::CHOOSER);
+    let open = shell.assistant_log_open();
+    let response = ui.put(rect, egui::Button::new(if open { "Close" } else { "Open" }));
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_label("Open Assistant Activity Log".to_owned());
+    });
+    if response.clicked() {
+        invoke(events, assistant::ASSISTANT_TOGGLE_ACTIVITY_LOG, json!({}));
+    }
+    if open {
+        rows.heading(ui, "Recent Activity");
+        if shell.assistant_log().is_empty() {
+            rows.text_row(
+                ui,
+                "Activity Log",
+                "The assistant hasn't run a command yet.",
+            );
+        }
+        for entry in shell.assistant_log() {
+            let result = outcome_text(&entry.outcome);
+            rows.text_row(
+                ui,
+                &clock(entry.at),
+                &format!("{}: {result}", entry.command),
+            );
+        }
+    }
+
+    rows.note(
+        ui,
+        "The built-in assistant answers a prompt by running commands on the open set, the \
+         same tools the agent API offers. Its provider, base URL and model are kept with the \
+         preferences; its API key is stored only in your computer's keychain and never shown \
+         again. A command that deletes or reaches outside the project asks you first, unless \
+         you chose to always allow it.",
+    );
+}
+
+/// The activity log's result column: what came of a command the assistant
+/// ran, short enough for one line.
+fn outcome_text(outcome: &bl_shell::assistant::Outcome) -> String {
+    use bl_shell::assistant::Outcome;
+    const MAX: usize = 60;
+    let text = match outcome {
+        Outcome::Ran(value) => format!("ran, {value}"),
+        Outcome::Denied(message) => format!("denied: {message}"),
+        Outcome::Failed(message) => format!("failed: {message}"),
+    };
+    if text.chars().count() > MAX {
+        let short: String = text.chars().take(MAX).collect();
+        format!("{short}…")
+    } else {
+        text
+    }
+}
+
+/// An activity entry's time as `HH:MM:SS` in UTC, since the app keeps no
+/// local-time clock.
+fn clock(at: std::time::SystemTime) -> String {
+    let seconds = at
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|since| since.as_secs())
+        .unwrap_or(0);
+    let day = seconds % 86_400;
+    format!("{:02}:{:02}:{:02}", day / 3600, (day % 3600) / 60, day % 60)
 }
 
 /// The page chooser (L-SET-002): one row per page, in Live's order.

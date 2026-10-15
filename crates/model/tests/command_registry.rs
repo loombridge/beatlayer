@@ -9,9 +9,10 @@ use bl_commands::{Registry, args_schema, tagged_variant, validate};
 use bl_core::time::{Bpm, TempoMap, Ticks, TimeSignature, TimeSignatureMap};
 use bl_model::registry::{self, RunError};
 use bl_model::{
-    ArrangementLoop, AudioData, Change, ChangeSet, Clip, ClipData, ClipId, Command, ContentHash,
-    Device, DeviceId, DeviceKind, EditError, Editor, Input, MidiData, ModelError, Monitor, Note,
-    Output, ParamId, PluginFormat, SendTap, Tap, TrackId, TrackKind,
+    ArrangementLoop, AudioData, AutomationTarget, Change, ChangeSet, Channel, Clip, ClipData,
+    ClipId, Command, ContentHash, CountIn, Device, DeviceId, DeviceKind, EditError, Editor, Input,
+    MetronomeRhythm, MetronomeSound, MidiData, MixerParam, ModelError, Monitor, Note, Output,
+    ParamId, PluginFormat, SceneId, SendTap, Tap, TrackId, TrackKind,
 };
 use serde_json::{Value, json};
 
@@ -26,7 +27,7 @@ fn document_registry() -> Registry {
 /// label, or has a malformed ID or binding.
 #[test]
 fn every_command_is_complete() {
-    // Spec: mixer R21; routing R20
+    // Spec: mixer R21; routing R20; session-view R12
     let commands = document_registry();
     if let Err(problems) = commands.check() {
         panic!("{problems}");
@@ -37,6 +38,7 @@ fn every_command_is_complete() {
 /// schema as its arguments, and so are undo and redo.
 #[test]
 fn every_document_command_is_registered() {
+    // Spec: session-view R12
     let commands = document_registry();
     let enum_schema = args_schema::<Command>();
     let ops: Vec<&str> = enum_schema
@@ -48,12 +50,14 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        58,
+        80,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
-         set_device_floating, WP-2.20 six for tempo breakpoints and time-signature markers, and \
-         WP-2.1 two for MIDI clips"
+         set_device_floating, WP-2.20 six for tempo breakpoints and time-signature markers, \
+         WP-2.1 two for MIDI clips, WP-2.16 set_device_sample, WP-2.15 five for the metronome, \
+         WP-2.13 the two for Main Out and Cue Out, WP-3.1 five for scenes and two for slot \
+         clips, and WP-2.12 seven for automation"
     );
 
     for op in &ops {
@@ -119,7 +123,7 @@ impl Agent {
 /// each run is one undo step.
 #[test]
 fn every_command_runs_by_id() {
-    // Spec: mixer R21; routing R20
+    // Spec: mixer R21; routing R20; session-view R12
     let mut agent = Agent::new();
     let quarter = Ticks::QUARTER.0;
     let bar = Ticks::WHOLE.0;
@@ -227,6 +231,43 @@ fn every_command_runs_by_id() {
     assert_eq!(
         document.track(keys).unwrap().routing().midi_output,
         Some(bass)
+    );
+    // Ext. In with a channel, and Main's Main Out (WP-2.13): the agent API
+    // sets both, as an agent recording from an interface would.
+    agent.run(
+        "routing.set_input",
+        json!({ "track": drums, "input": { "type": "external", "channel": { "type": "mono", "channel": 3 } } }),
+    );
+    agent.run(
+        "routing.set_main_out",
+        json!({ "channel": { "type": "pair", "channel": 3 } }),
+    );
+    agent.run(
+        "routing.set_cue_out",
+        json!({ "channel": { "type": "pair", "channel": 2 } }),
+    );
+    let document = agent.editor.document();
+    assert_eq!(
+        document.track(drums).unwrap().routing().input,
+        Input::External {
+            channel: Channel::Mono(3)
+        }
+    );
+    assert_eq!(
+        document
+            .track(document.main_id())
+            .unwrap()
+            .routing()
+            .main_out,
+        Channel::Pair(3)
+    );
+    assert_eq!(
+        document
+            .track(document.main_id())
+            .unwrap()
+            .routing()
+            .cue_out,
+        Channel::Pair(2)
     );
     assert_eq!(
         agent.editor.undo_history().next(),
@@ -405,6 +446,73 @@ fn every_command_runs_by_id() {
     agent.run("clip.delete", json!({ "clip": loop_clip }));
     assert!(agent.editor.document().clip(loop_clip).is_none());
 
+    // Session: scenes and the clips in their slots (WP-3.1).
+    let scenes: Vec<SceneId> = agent
+        .editor
+        .document()
+        .scenes()
+        .map(|scene| scene.id)
+        .collect();
+    let (first, second) = (scenes[0], scenes[1]);
+    let slot_riff: ClipId = agent.new_id();
+    agent.run(
+        "clip.create_in_slot",
+        json!({ "track": bass, "scene": first, "clip": {
+            "id": slot_riff, "name": "", "start": 0, "length": bar, "mute": false,
+            "data": { "midi": { "notes": [
+                { "key": 40, "velocity": 100, "start": 0, "length": quarter },
+            ] } },
+        } }),
+    );
+    let slot_loop: ClipId = agent.new_id();
+    agent.run(
+        "clip.create_in_slot",
+        json!({ "track": drums, "scene": first, "clip": {
+            "id": slot_loop, "name": "Loop", "start": 0, "length": bar, "mute": false,
+            "data": { "audio": { "media": "cd".repeat(32) } },
+        } }),
+    );
+    agent.run(
+        "clip.move_to_slot",
+        json!({ "clip": slot_riff, "track": bass, "scene": second }),
+    );
+    let document = agent.editor.document();
+    assert_eq!(
+        document.slot(bass, second).map(|clip| clip.id),
+        Some(slot_riff)
+    );
+    assert!(document.slot(bass, first).is_none());
+    assert_eq!(document.clip_track(slot_loop), Some(drums));
+
+    // The scene commands: rename, move, duplicate, insert, delete.
+    agent.run("scene.rename", json!({ "scene": first, "name": "Verse" }));
+    assert_eq!(agent.editor.document().scene(first).unwrap().name, "Verse");
+    agent.run("scene.move", json!({ "scene": first, "index": 4 }));
+    assert_eq!(agent.editor.document().scene_position(first), Some(4));
+    let copy: SceneId = agent.new_id();
+    let copy_clip: ClipId = agent.new_id();
+    agent.run(
+        "scene.duplicate",
+        json!({ "scene": first, "id": copy, "clips": [[drums, copy_clip]] }),
+    );
+    let document = agent.editor.document();
+    assert_eq!(document.scene_position(copy), Some(5));
+    assert_eq!(
+        document.slot(drums, copy).map(|clip| clip.id),
+        Some(copy_clip)
+    );
+    let new_scene: SceneId = agent.new_id();
+    agent.run("scene.create", json!({ "id": new_scene, "index": 0 }));
+    assert_eq!(agent.editor.document().scene_position(new_scene), Some(0));
+    // Deleting the scene takes the clips in its slots with it; the copies
+    // stay.
+    agent.run("scene.delete", json!({ "scene": second }));
+    assert!(agent.editor.document().slot(bass, second).is_none());
+    assert!(agent.editor.document().clip(slot_riff).is_none());
+    assert!(agent.editor.document().clip(copy_clip).is_some());
+    agent.run("clip.delete", json!({ "clip": slot_loop }));
+    assert!(agent.editor.document().clip(slot_loop).is_none());
+
     // Devices.
     let eq: DeviceId = agent.new_id();
     agent.run(
@@ -457,11 +565,17 @@ fn every_command_runs_by_id() {
         "device.set_param",
         json!({ "device": eq, "param": 3, "value": -12.5 }),
     );
+    agent.run(
+        "device.set_sample",
+        json!({ "device": eq, "media": "0303030303030303030303030303030303030303030303030303030303030303" }),
+    );
     let device = agent.editor.document().device(eq).unwrap();
     assert_eq!(agent.editor.document().device_track(eq), Some(reverb));
     assert_eq!((device.name.as_str(), device.enabled), ("Tone", false));
     assert_eq!(device.params.get(&ParamId(3)), Some(&-12.5));
     assert_eq!(device.params.get(&ParamId(1)), Some(&0.25));
+    let media = device.media.expect("the sample it plays");
+    assert_eq!(media, ContentHash([3u8; 32]));
     agent.run("device.remove", json!({ "device": synth }));
     assert!(agent.editor.document().device(synth).is_none());
 
@@ -518,6 +632,174 @@ fn every_command_runs_by_id() {
         }
     );
 
+    // Automation, one envelope per parameter (WP-2.12): a mixer control, a
+    // send, and a device parameter; the hand move that overrides an
+    // envelope; and the two Re-Enable commands.
+    let volume = json!({ "type": "mixer", "param": "volume" });
+    let send = json!({ "type": "send", "to": reverb });
+    let changes = agent.run(
+        "automation.set_breakpoint",
+        json!({ "track": drums, "target": volume, "at": 0, "value": 1.0 }),
+    );
+    assert_eq!(changes.tracks.get(&drums), Some(&Change::Modified));
+    agent.run(
+        "automation.set_breakpoint",
+        json!({ "track": drums, "target": volume, "at": bar, "value": 0.25 }),
+    );
+    agent.run(
+        "automation.set_curve",
+        json!({ "track": drums, "target": volume, "at": 0, "bend": -0.5 }),
+    );
+    agent.run(
+        "automation.set_breakpoint",
+        json!({ "track": group, "target": send, "at": 0, "value": 0.5 }),
+    );
+    agent.run(
+        "automation.set_breakpoint",
+        json!({ "track": reverb, "target": { "type": "device", "device": eq, "param": 3 },
+                "at": 0, "value": -6.0 }),
+    );
+    let document = agent.editor.document();
+    let automation = document
+        .track(drums)
+        .unwrap()
+        .automation_for(&AutomationTarget::Mixer {
+            param: MixerParam::Volume,
+        })
+        .expect("an envelope");
+    assert!(automation.enabled);
+    assert_eq!(
+        automation.envelope.points().collect::<Vec<_>>(),
+        vec![
+            bl_model::Breakpoint {
+                at: Ticks::ZERO,
+                value: 1.0,
+                bend: -0.5,
+            },
+            bl_model::Breakpoint {
+                at: Ticks(bar),
+                value: 0.25,
+                bend: 0.0,
+            }
+        ]
+    );
+    assert!(
+        document
+            .track(reverb)
+            .unwrap()
+            .automation_for(&AutomationTarget::Device {
+                device: eq,
+                param: ParamId(3)
+            })
+            .is_some()
+    );
+    // A hand move overrides the envelope: the control's value wins until
+    // Re-Enable Automation.
+    agent.run(
+        "mixer.set_volume",
+        json!({ "track": drums, "volume": 0.75 }),
+    );
+    let document = agent.editor.document();
+    assert!(document.track(drums).unwrap().automation_overridden());
+    assert_eq!(document.track(drums).unwrap().mixer().volume, 0.75);
+    agent.run(
+        "automation.re_enable_for",
+        json!({ "track": drums, "target": volume }),
+    );
+    assert!(
+        !agent
+            .editor
+            .document()
+            .track(drums)
+            .unwrap()
+            .automation_overridden()
+    );
+    agent.run("mixer.set_volume", json!({ "track": drums, "volume": 0.5 }));
+    agent.run("automation.re_enable", json!({}));
+    assert!(
+        !agent
+            .editor
+            .document()
+            .track(drums)
+            .unwrap()
+            .automation_overridden()
+    );
+    // Moving and deleting breakpoints, and deleting a whole envelope.
+    agent.run(
+        "automation.move_breakpoint",
+        json!({ "track": drums, "target": volume, "at": bar, "to": bar * 2 }),
+    );
+    agent.run(
+        "automation.delete_breakpoint",
+        json!({ "track": drums, "target": volume, "at": bar * 2 }),
+    );
+    agent.run(
+        "automation.delete",
+        json!({ "track": group, "target": send }),
+    );
+    assert!(
+        agent
+            .editor
+            .document()
+            .track(group)
+            .unwrap()
+            .automation_for(&AutomationTarget::Send { to: reverb })
+            .is_none()
+    );
+    // Deleting the last breakpoint takes the envelope with it.
+    agent.run(
+        "automation.delete_breakpoint",
+        json!({ "track": drums, "target": volume, "at": 0 }),
+    );
+    assert!(
+        agent
+            .editor
+            .document()
+            .track(drums)
+            .unwrap()
+            .automation_for(&AutomationTarget::Mixer {
+                param: MixerParam::Volume
+            })
+            .is_none()
+    );
+
+    // Metronome (WP-2.15).
+    agent.run(
+        "transport.set_metronome_enabled",
+        json!({ "enabled": true }),
+    );
+    assert!(agent.editor.document().settings().metronome.enabled);
+    agent.run(
+        "transport.set_metronome_count_in",
+        json!({ "count_in": "1_bar" }),
+    );
+    assert_eq!(
+        agent.editor.document().settings().metronome.count_in,
+        CountIn::Bars1
+    );
+    agent.run("transport.set_metronome_sound", json!({ "sound": "wood" }));
+    assert_eq!(
+        agent.editor.document().settings().metronome.sound,
+        MetronomeSound::Wood
+    );
+    agent.run("transport.set_metronome_rhythm", json!({ "rhythm": "1/8" }));
+    assert_eq!(
+        agent.editor.document().settings().metronome.rhythm,
+        MetronomeRhythm::Eighth
+    );
+    agent.run(
+        "transport.set_metronome_only_while_recording",
+        json!({ "only_while_recording": true }),
+    );
+    assert!(
+        agent
+            .editor
+            .document()
+            .settings()
+            .metronome
+            .only_while_recording
+    );
+
     // Deleting the group deletes the bass inside it; undo brings both back.
     agent.run("track.delete", json!({ "track": group }));
     assert!(agent.editor.document().track(bass).is_none());
@@ -545,13 +827,15 @@ fn every_command_runs_by_id() {
 /// registered schema, and reads back as the same command through its ID.
 #[test]
 fn schemas_match_what_commands_serialise() {
-    // Spec: mixer R21; routing R20
+    // Spec: mixer R21; routing R20; session-view R12
     let commands = document_registry();
     let mut ids = bl_core::id::IdAllocator::new();
     let mut fresh = || ids.allocate();
     let track = TrackId(fresh());
     let clip = ClipId(fresh());
     let device = DeviceId(fresh());
+    let scene = SceneId(fresh());
+    let scene_copy = SceneId(fresh());
     let notes = MidiData::new([Note::new(127, Ticks::ZERO, Ticks::QUARTER, 1)]);
     let mut plugin = Device::new(
         device,
@@ -682,6 +966,69 @@ fn schemas_match_what_commands_serialise() {
             Command::SetSoloInPlace { enabled: false },
         ),
         (
+            "automation.set_breakpoint",
+            Command::SetAutomationBreakpoint {
+                track,
+                target: AutomationTarget::Mixer {
+                    param: MixerParam::Volume,
+                },
+                at: Ticks::QUARTER,
+                value: 1.0,
+            },
+        ),
+        (
+            "automation.set_curve",
+            Command::SetAutomationCurve {
+                track,
+                target: AutomationTarget::Mixer {
+                    param: MixerParam::Pan,
+                },
+                at: Ticks::QUARTER,
+                bend: -0.5,
+            },
+        ),
+        (
+            "automation.move_breakpoint",
+            Command::MoveAutomationBreakpoint {
+                track,
+                target: AutomationTarget::Device {
+                    device,
+                    param: ParamId(7),
+                },
+                at: Ticks::QUARTER,
+                to: Ticks::WHOLE,
+            },
+        ),
+        (
+            "automation.delete_breakpoint",
+            Command::DeleteAutomationBreakpoint {
+                track,
+                target: AutomationTarget::Send {
+                    to: TrackId(fresh()),
+                },
+                at: Ticks::QUARTER,
+            },
+        ),
+        (
+            "automation.delete",
+            Command::DeleteAutomation {
+                track,
+                target: AutomationTarget::Mixer {
+                    param: MixerParam::Mute,
+                },
+            },
+        ),
+        ("automation.re_enable", Command::ReEnableAutomation {}),
+        (
+            "automation.re_enable_for",
+            Command::ReEnableAutomationFor {
+                track,
+                target: AutomationTarget::Send {
+                    to: TrackId(fresh()),
+                },
+            },
+        ),
+        (
             "routing.set_input",
             Command::SetInput {
                 track,
@@ -711,6 +1058,18 @@ fn schemas_match_what_commands_serialise() {
         (
             "routing.set_midi_output",
             Command::SetMidiOutput { track, to: None },
+        ),
+        (
+            "routing.set_main_out",
+            Command::SetMainOut {
+                channel: Channel::Pair(3),
+            },
+        ),
+        (
+            "routing.set_cue_out",
+            Command::SetCueOut {
+                channel: Channel::Pair(2),
+            },
         ),
         (
             "clip.create",
@@ -883,6 +1242,13 @@ fn schemas_match_what_commands_serialise() {
             },
         ),
         (
+            "device.set_sample",
+            Command::SetDeviceSample {
+                device,
+                media: Some(ContentHash([3u8; 32])),
+            },
+        ),
+        (
             "device.set_sidechain_input",
             Command::SetSidechainInput {
                 device,
@@ -912,6 +1278,75 @@ fn schemas_match_what_commands_serialise() {
             Command::SetSidechainListen {
                 device,
                 listen: true,
+            },
+        ),
+        (
+            "transport.set_metronome_enabled",
+            Command::SetMetronomeEnabled { enabled: true },
+        ),
+        (
+            "transport.set_metronome_count_in",
+            Command::SetMetronomeCountIn {
+                count_in: CountIn::Bars2,
+            },
+        ),
+        (
+            "transport.set_metronome_sound",
+            Command::SetMetronomeSound {
+                sound: MetronomeSound::Click,
+            },
+        ),
+        (
+            "transport.set_metronome_rhythm",
+            Command::SetMetronomeRhythm {
+                rhythm: MetronomeRhythm::Sixteenth,
+            },
+        ),
+        (
+            "transport.set_metronome_only_while_recording",
+            Command::SetMetronomeOnlyWhileRecording {
+                only_while_recording: true,
+            },
+        ),
+        (
+            "clip.create_in_slot",
+            Command::CreateSlotClip {
+                track,
+                scene,
+                clip: Clip::new(
+                    clip,
+                    Ticks::ZERO,
+                    Ticks::WHOLE,
+                    ClipData::Midi(notes.clone()),
+                ),
+            },
+        ),
+        (
+            "clip.move_to_slot",
+            Command::MoveSlotClip { clip, track, scene },
+        ),
+        (
+            "scene.create",
+            Command::CreateScene {
+                id: scene,
+                index: 1,
+            },
+        ),
+        ("scene.delete", Command::DeleteScene { scene }),
+        ("scene.move", Command::MoveScene { scene, index: 0 }),
+        (
+            "scene.duplicate",
+            Command::DuplicateScene {
+                scene,
+                id: scene_copy,
+                clips: vec![(track, clip)],
+            },
+        ),
+        (
+            "scene.rename",
+            Command::RenameScene {
+                scene,
+                name: "Verse".to_owned(),
             },
         ),
     ];
@@ -1119,6 +1554,11 @@ fn bindings_follow_the_spec() {
     assert_eq!(bindings("mixer.set_arm"), ["S-TRACK-013 toggles arm"]);
     // Spec: command-bindings R6
     assert_eq!(bindings("clip.set_mute"), ["S-ARR-027 toggles mute"]);
+    // Spec: command-bindings S-TRANS-011
+    assert_eq!(
+        bindings("transport.set_metronome_enabled"),
+        ["S-TRANS-011 toggles enabled"]
+    );
 
     // Spec: command-bindings R7
     let bound: BTreeSet<&str> = commands
@@ -1141,6 +1581,7 @@ fn bindings_follow_the_spec() {
         "clip.set_mute",
         // Beatlayer's own key, Option-F on macOS (IMP-14, S-DEV-015).
         "device.set_floating",
+        "transport.set_metronome_enabled",
     ]
     .into_iter()
     .collect();

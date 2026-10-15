@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use bl_model::ParamId;
 use bl_model::PluginFormat;
 
 pub use bl_shell_spec::settings::{
@@ -14,6 +15,7 @@ pub use bl_shell_spec::settings::{
 };
 
 use crate::agent::AgentSettings;
+use crate::assistant::AssistantSettings;
 use crate::audio::{AudioSettings, ToneSettings};
 
 /// Everything the app keeps between starts, saved as JSON.
@@ -49,6 +51,13 @@ pub struct Preferences {
     /// The agent server: whether it runs, its port and token, and the
     /// agents allowed to connect (WP-1.15).
     pub agent: AgentSettings,
+    /// The built-in assistant's provider, base URL and model (WP-2.23,
+    /// part 4). Its API key is in the OS keychain, never here.
+    pub assistant: AssistantSettings,
+    /// The assistant commands the person chose "always allow" for, so a
+    /// destructive or external command it calls doesn't ask again
+    /// (WP-2.23, part 4).
+    pub assistant_always: BTreeSet<String>,
     /// The browser's places and preview (WP-1.10).
     pub browser: crate::browser::BrowserPrefs,
     /// Create Fades on Clip Edges (Record, Warp & Launch, L-SET-018): new
@@ -70,6 +79,12 @@ pub struct Preferences {
     /// The format to prefer when a plug-in exists in several formats
     /// (WP-2.9, IMP-07).
     pub plugin_format_preference: Option<PluginFormat>,
+    /// Which parameter each knob of a plug-in device's panel shows
+    /// (WP-2.10, D19), by `format/plugin_id` and then by knob: absent
+    /// entries keep the plug-in's own parameter at that place. Remembered
+    /// per plug-in, so a device of a known plug-in keeps its mapping.
+    pub plugin_panels:
+        std::collections::BTreeMap<String, std::collections::BTreeMap<usize, ParamId>>,
     /// The saved default set (File ▸ Save Beatlayer Set As Default Set),
     /// which a new set starts from (WP-2.25). `None` uses the factory
     /// default set.

@@ -20,7 +20,7 @@ use bl_audio_io::{
     PortRequest, ProcessContext, StreamRequest,
 };
 use bl_core::midi::{MidiInputEvent, MidiMessage, MidiSource, PortId};
-use bl_engine::{MIDI_EVENTS_PER_TRACK, MidiEvent, Processor};
+use bl_engine::{MIDI_EVENTS_PER_TRACK, MidiEvent, NoInput, Processor};
 use bl_model::{Command, Input, Monitor, TrackId, TrackKind};
 use common::{RATE, Rig, track};
 use rtrb::{Producer, RingBuffer};
@@ -78,7 +78,7 @@ impl Midi {
     fn block_at(&mut self, now: Instant) {
         let processor = &mut self.rig.processor;
         bl_rt::rt_test!({
-            processor.process_at(BLOCK, now);
+            processor.process_at(BLOCK, &NoInput, now);
         });
         self.blocks += 1;
     }
@@ -406,7 +406,7 @@ impl AudioCallback for Play {
     ) {
         let now = Instant::now();
         let clock = self.processor.clock();
-        self.processor.process_at(ctx.frames, now);
+        self.processor.process_at(ctx.frames, &NoInput, now);
         if let Some(input) = self.processor.midi_input(self.track) {
             for &MidiEvent { offset, .. } in input.events {
                 let i = self.count.load(Relaxed);
@@ -444,7 +444,7 @@ fn timing_jitter_with_a_real_time_audio_thread_and_a_midi_thread() {
     };
     let backend = NullBackend::with_options(NullOptions {
         pacing: Pacing::RealTime,
-        frame_limit: None,
+        ..NullOptions::default()
     });
     let request = StreamRequest {
         output: Some(PortRequest::default()),

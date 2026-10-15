@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 use crate::document::Document;
 use crate::error::ModelError;
 use crate::ids::TrackId;
-use crate::track::{Input, Output, Routing, Track, TrackKind};
+use crate::track::{Channel, Input, Output, Routing, Track, TrackKind};
 
 impl Document {
     /// Where a track's audio goes in the end: Main, a group or another
@@ -38,6 +38,7 @@ impl Document {
         let track = self.track_ref(id)?;
         check_input(self, track)?;
         check_output(self, track)?;
+        check_main_out(track)?;
         if let Some(to) = track.routing.midi_output {
             if track.kind != TrackKind::Midi {
                 return Err(wrong_kind(track, "a MIDI track"));
@@ -48,6 +49,17 @@ impl Document {
             if let Some(sidechain) = &device.sidechain {
                 check_sidechain_input(self, track, sidechain.input.clone())?;
             }
+        }
+        Ok(())
+    }
+
+    /// Checks every parameter a track's automation drives: a control of its
+    /// mixer, one of its sends to a return track, or a parameter of a device
+    /// in its chain. What a loaded document must pass.
+    pub(crate) fn check_automation(&self, id: TrackId) -> Result<(), ModelError> {
+        let track = self.track_ref(id)?;
+        for target in track.automation.keys() {
+            self.check_automation_target(id, *target)?;
         }
         Ok(())
     }
@@ -166,10 +178,11 @@ fn wrong_kind(track: &Track, needs: &'static str) -> ModelError {
     }
 }
 
-/// An audio track takes Ext. In, Resampling, another audio or group
-/// track, a return, Main, or nothing; a MIDI track All Ins, the computer keyboard,
-/// a port, another MIDI track, or nothing; other kinds take no input. A port
-/// needs a name, and a channel belongs to a port (the routing spec, R2, R16).
+/// An audio track takes Ext. In (one channel or a stereo pair), Resampling,
+/// another audio or group track, a return, Main, or nothing; a MIDI track
+/// All Ins, the computer keyboard, a port, another MIDI track, or nothing;
+/// other kinds take no input. A port needs a name, and a channel belongs to
+/// a port (the routing spec, R2, R16).
 fn check_input(doc: &Document, track: &Track) -> Result<(), ModelError> {
     let input = &track.routing.input;
     if let Input::Port { name } = input
@@ -187,7 +200,7 @@ fn check_input(doc: &Document, track: &Track) -> Result<(), ModelError> {
     }
     match (track.kind, input) {
         (TrackKind::Audio | TrackKind::Midi, Input::None)
-        | (TrackKind::Audio, Input::External | Input::Resampling)
+        | (TrackKind::Audio, Input::External { .. } | Input::Resampling)
         | (TrackKind::Midi, Input::AllIns | Input::ComputerKeyboard | Input::Port { .. }) => Ok(()),
         (TrackKind::Audio, Input::Track { track: from, .. }) => {
             doc.check_target(track, *from, |kind| {
@@ -235,6 +248,27 @@ fn check_output(doc: &Document, track: &Track) -> Result<(), ModelError> {
     }
 }
 
+/// Main Out and Cue Out belong to Main and take a stereo pair of the
+/// interface's outputs; every other track keeps them at their default.
+fn check_main_out(track: &Track) -> Result<(), ModelError> {
+    let (main_out, cue_out) = (track.routing.main_out, track.routing.cue_out);
+    if track.kind != TrackKind::Main {
+        return if main_out.is_first_pair() && cue_out.is_first_pair() {
+            Ok(())
+        } else {
+            Err(wrong_kind(track, "the Main track"))
+        };
+    }
+    if [main_out, cue_out]
+        .iter()
+        .all(|c| matches!(c, Channel::Pair(_)))
+    {
+        Ok(())
+    } else {
+        Err(ModelError::NotStereoPair)
+    }
+}
+
 /// A sidechain's Source: No Input, or an audio, group, or return track or
 /// Main, the device's own track included (observed). Ext. In isn't listed
 /// in Live without an audio device, and is refused until it's observed with
@@ -266,7 +300,7 @@ mod tests {
     use crate::editor::Editor;
     use crate::error::ModelError;
     use crate::ids::TrackId;
-    use crate::track::{Input, Monitor, Output, Routing, Tap, TrackKind};
+    use crate::track::{Channel, Input, Monitor, Output, Routing, Tap, TrackKind};
     use crate::{Document, SendTap};
 
     fn add(editor: &mut Editor, kind: TrackKind, parent: Option<TrackId>) -> TrackId {
@@ -320,7 +354,12 @@ mod tests {
         let midi = add(&mut editor, TrackKind::Midi, None);
         let doc = editor.document();
         let routing = doc.track(audio).unwrap().routing().clone();
-        assert_eq!(routing.input, Input::External);
+        assert_eq!(
+            routing.input,
+            Input::External {
+                channel: Channel::Pair(1)
+            }
+        );
         assert_eq!(routing.monitor, Monitor::Auto);
         assert_eq!(routing.output, Output::Default);
         let routing = doc.track(midi).unwrap().routing().clone();
@@ -349,7 +388,13 @@ mod tests {
         for from in [b, g, r, main] {
             input(&mut editor, a, Input::Track { track: from, tap }).unwrap();
         }
-        for ok in [Input::Resampling, Input::External, Input::None] {
+        for ok in [
+            Input::Resampling,
+            Input::External {
+                channel: Channel::Mono(3),
+            },
+            Input::None,
+        ] {
             input(&mut editor, a, ok).unwrap();
         }
         assert!(matches!(
@@ -362,8 +407,26 @@ mod tests {
         input(&mut editor, m, Input::ComputerKeyboard).unwrap();
         assert!(input(&mut editor, m, Input::Track { track: a, tap }).is_err());
         assert!(input(&mut editor, m, Input::Resampling).is_err());
-        assert!(input(&mut editor, g, Input::External).is_err());
-        assert!(input(&mut editor, r, Input::External).is_err());
+        assert!(
+            input(
+                &mut editor,
+                g,
+                Input::External {
+                    channel: Channel::Pair(1)
+                }
+            )
+            .is_err()
+        );
+        assert!(
+            input(
+                &mut editor,
+                r,
+                Input::External {
+                    channel: Channel::Pair(2)
+                }
+            )
+            .is_err()
+        );
 
         // Audio To: Main, an audio track, the track's group, Sends Only, Ext. Out.
         for to in [
@@ -427,6 +490,77 @@ mod tests {
                 .is_err()
         );
         editor.document().check_invariants().unwrap();
+    }
+
+    // Spec: routing R2, WP-2.13
+    #[test]
+    fn changes_to_ext_in_and_main_out_are_routing_edits_undo_removes() {
+        let mut editor = Editor::new();
+        let a = add(&mut editor, TrackKind::Audio, None);
+        let main = editor.document().main_id();
+        for channel in [
+            Channel::Mono(3),
+            Channel::Pair(3),
+            Channel::Mono(1),
+            Channel::Pair(1),
+        ] {
+            input(&mut editor, a, Input::External { channel }).unwrap();
+            assert_eq!(
+                editor.document().track(a).unwrap().routing().input,
+                Input::External { channel }
+            );
+        }
+        editor
+            .apply(Command::SetMainOut {
+                channel: Channel::Pair(3),
+            })
+            .unwrap();
+        editor
+            .apply(Command::SetCueOut {
+                channel: Channel::Pair(2),
+            })
+            .unwrap();
+        let routing = editor.document().track(main).unwrap().routing().clone();
+        assert_eq!(routing.main_out, Channel::Pair(3));
+        assert_eq!(routing.cue_out, Channel::Pair(2));
+        assert_eq!(
+            Command::SetMainOut {
+                channel: Channel::Pair(1)
+            }
+            .label(),
+            "Change \"Routing\""
+        );
+        assert!(matches!(
+            editor.apply(Command::SetMainOut {
+                channel: Channel::Mono(1)
+            }),
+            Err(crate::EditError::Command(ModelError::NotStereoPair))
+        ));
+        editor.undo().unwrap();
+        assert_eq!(
+            editor.document().track(main).unwrap().routing().cue_out,
+            Channel::Pair(1),
+            "undo restores Cue Out"
+        );
+
+        // Saved and loaded, and an unloadable set is refused.
+        let saved = serde_json::to_value(editor.document()).unwrap();
+        assert_eq!(
+            saved["main"]["routing"]["main_out"],
+            serde_json::json!({ "type": "pair", "channel": 3 })
+        );
+        let loaded: Document = serde_json::from_value(saved.clone()).unwrap();
+        assert_eq!(&loaded, editor.document());
+        let mut broken = saved;
+        broken["tracks"][0]["routing"] = serde_json::json!({
+            "input": { "type": "none" },
+            "monitor": "off",
+            "main_out": { "type": "pair", "channel": 3 },
+        });
+        assert!(
+            serde_json::from_value::<Document>(broken).is_err(),
+            "Main Out on another track doesn't load"
+        );
     }
 
     // Spec: routing R5
@@ -646,7 +780,9 @@ mod tests {
                 track: m,
                 tap: Tap::PreFx,
             },
-            Input::External,
+            Input::External {
+                channel: Channel::Pair(1),
+            },
             Input::Resampling,
         ] {
             assert!(set(&mut editor, bad).is_err());

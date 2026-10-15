@@ -16,13 +16,16 @@
 //! engine goes with it, and the next one starts with the same document and
 //! the song where it was, stopped (the control bar transport spec,
 //! R16). The stream's callback ([`EngineCallback`]) runs the engine's
-//! processor, plays the Settings window's test tone in its place while the
-//! tone is on, at the Tone Volume and Tone Frequency the person set (D23),
-//! adds the browser's preview voice (`bl_engine::preview`, WP-1.10), and
-//! measures how long it all takes, which the CPU meter shows. It runs
-//! on the audio thread, so it follows the real-time rules: no allocation,
-//! no lock, no blocking call (`tests/realtime.rs` checks it under the
-//! allocation trap, and `rtsan/tests/shell.rs` under RealtimeSanitizer).
+//! processor, handing it the device's input for tracks whose Audio From is
+//! Ext. In and playing the engine's Main output on the device channels Main
+//! Out names (WP-2.13); it plays the Settings window's test tone in its
+//! place while the tone is on, at the Tone Volume and Tone Frequency the
+//! person set (D23), adds the browser's preview voice (`bl_engine::preview`,
+//! WP-1.10), and measures how long it all takes, which the CPU meter shows.
+//! It runs on the audio thread, so it follows the real-time rules: no
+//! allocation, no lock, no blocking call (`tests/realtime.rs` checks it
+//! under the allocation trap, and `rtsan/tests/shell.rs` under
+//! RealtimeSanitizer).
 //!
 //! The settings and reports themselves are data in `bl-shell-spec`,
 //! re-exported here.
@@ -46,7 +49,7 @@ use bl_engine::{
     Processor, Registry, Report, ScheduledCommand, TransportCommand,
 };
 use bl_media::{MediaStore, StreamerStats};
-use bl_model::Document;
+use bl_model::{Channel, Document};
 pub use bl_shell_spec::audio::{
     AudioDevices, AudioSettings, AudioStatus, ConfigureAudio, DeviceListing, DeviceRef, DriverInfo,
     TONE_DEFAULT_DBFS, TONE_DEFAULT_HZ, TONE_MAX_DBFS, TONE_MAX_HZ, TONE_MIN_DBFS, TONE_MIN_HZ,
@@ -94,6 +97,9 @@ pub struct EngineShared {
     tone_amplitude: AtomicU32,
     /// The test tone's frequency in hertz, as `f32` bits.
     tone_hz: AtomicU32,
+    /// The 0-based device output channel Main's left channel goes to (Main
+    /// Out, WP-2.13); its right channel follows it.
+    main_out: AtomicU32,
 }
 
 impl Default for EngineShared {
@@ -104,6 +110,7 @@ impl Default for EngineShared {
             tone: AtomicBool::new(false),
             tone_amplitude: AtomicU32::new(0),
             tone_hz: AtomicU32::new(0),
+            main_out: AtomicU32::new(0),
         };
         shared.set_tone(ToneSettings::default());
         shared
@@ -126,10 +133,28 @@ impl EngineShared {
             .store((tone.frequency_hz as f32).to_bits(), Relaxed);
     }
 
+    /// Sets the device channel Main's left channel goes to, from the set's
+    /// Main Out.
+    pub fn set_main_out(&self, left: u32) {
+        self.main_out.store(left, Relaxed);
+    }
+
     /// Nanoseconds of audio the callback has produced.
     #[must_use]
     pub fn audio_ns(&self) -> u64 {
         self.audio_ns.load(Relaxed)
+    }
+}
+
+/// The left device output channel a set's Main Out names, counted from 0
+/// there (the set counts from 1), or 0 for anything else.
+fn main_out_left(document: &Document) -> u32 {
+    match document
+        .track(document.main_id())
+        .map(|t| t.routing().main_out)
+    {
+        Some(Channel::Pair(channel)) => u32::from(channel.saturating_sub(1)),
+        _ => 0,
     }
 }
 
@@ -188,7 +213,7 @@ impl AudioCallback for EngineCallback {
     fn process(
         &mut self,
         ctx: &ProcessContext,
-        _input: &AudioBuffer<'_>,
+        input: &AudioBuffer<'_>,
         output: &mut AudioBufferMut<'_>,
     ) {
         let started = Instant::now();
@@ -198,16 +223,35 @@ impl AudioCallback for EngineCallback {
             self.processor = incoming.pop().ok();
         }
         if let Some(processor) = self.processor.as_mut() {
-            // The engine runs in blocks of at most its own size, and plays
-            // its channels (stereo) on the device's first ones; a device
-            // with more leaves the rest silent.
+            // The engine runs in blocks of at most its own size. Its Main
+            // output goes to the device channels Main Out names (WP-2.13),
+            // and its tracks' Ext. In inputs come from the device's input.
+            let main_out = self.shared.main_out.load(Relaxed) as usize;
             let channels = output.channels();
             let mut done = 0;
             while done < ctx.frames {
                 let frames = (ctx.frames - done).min(processor.config().max_frames);
-                let block = processor.process(frames);
-                for c in 0..channels.min(block.channels()) {
-                    output.channel_mut(c)[done..done + frames].copy_from_slice(block.channel(c));
+                // The block's callback time, on the clock MIDI input is
+                // stamped against: the callback's start, moved on by the
+                // blocks before it in this callback (docs/specs/midi-io.md,
+                // R15, R16).
+                let block_at = started
+                    + Duration::from_secs_f64(done as f64 / f64::from(ctx.sample_rate.max(1)));
+                let block = processor.process_at(
+                    frames,
+                    &InputPart {
+                        input,
+                        offset: done,
+                        frames,
+                    },
+                    block_at,
+                );
+                for c in 0..block.channels() {
+                    let to = main_out + c;
+                    if to < channels {
+                        output.channel_mut(to)[done..done + frames]
+                            .copy_from_slice(block.channel(c));
+                    }
                 }
                 done += frames;
             }
@@ -237,6 +281,24 @@ impl AudioCallback for EngineCallback {
         let audio = ctx.frames as u64 * 1_000_000_000 / u64::from(ctx.sample_rate.max(1));
         self.shared.busy_ns.fetch_add(busy, Relaxed);
         self.shared.audio_ns.fetch_add(audio, Relaxed);
+    }
+}
+
+/// The device's input for one part of a block, as the engine reads it: a
+/// view of the callback's input buffer from `offset` for `frames` frames.
+struct InputPart<'a> {
+    input: &'a AudioBuffer<'a>,
+    offset: usize,
+    frames: usize,
+}
+
+impl bl_engine::DeviceInput for InputPart<'_> {
+    fn channels(&self) -> usize {
+        self.input.channels()
+    }
+
+    fn channel(&self, index: usize) -> &[f32] {
+        &self.input.channel(index)[self.offset..self.offset + self.frames]
     }
 }
 
@@ -300,9 +362,15 @@ pub struct AudioHost {
     engines: u64,
     /// Reports from engines that have closed, not yet taken.
     held_reports: Vec<Report>,
-    /// The CLAP host whose factory makes each engine's plug-in nodes
+    /// The CLAP host whose factory makes each engine's CLAP nodes
     /// (WP-2.6).
     plugins: Option<bl_plugin_host::clap::ClapHost>,
+    /// The Audio Unit host (WP-2.8), when the shell has one: this platform
+    /// may not host them.
+    au: Option<bl_plugin_host::au::AuHost>,
+    /// The VST3 host whose factory makes each engine's VST3 nodes
+    /// (WP-2.7).
+    vst3: Option<bl_plugin_host::vst3::Vst3Host>,
     kit: Option<bl_devices::KitHost>,
 }
 
@@ -375,6 +443,8 @@ impl AudioHost {
             engines: 0,
             held_reports: Vec::new(),
             plugins: None,
+            au: None,
+            vst3: None,
             kit: None,
         }
     }
@@ -389,6 +459,17 @@ impl AudioHost {
     /// Gives every engine from now on the CLAP host's plug-ins (WP-2.6).
     pub fn set_plugins(&mut self, plugins: bl_plugin_host::clap::ClapHost) {
         self.plugins = Some(plugins);
+    }
+
+    /// Gives the Audio Unit host, whose units the engine's registry asks
+    /// for nodes (WP-2.8).
+    pub fn set_au(&mut self, au: bl_plugin_host::au::AuHost) {
+        self.au = Some(au);
+    }
+
+    /// Gives every engine from now on the VST3 host's plug-ins (WP-2.7).
+    pub fn set_vst3(&mut self, vst3: bl_plugin_host::vst3::Vst3Host) {
+        self.vst3 = Some(vst3);
     }
 
     /// Gives every engine from now on the kit plug-ins compiled in.
@@ -495,6 +576,7 @@ impl AudioHost {
     /// loop). The host keeps it for the next engine too.
     pub fn sync(&mut self, document: &Document) {
         self.document = Some(document.clone());
+        self.shared.set_main_out(main_out_left(document));
         if let Some(engine) = &self.engine {
             engine.sync(document);
         }
@@ -845,11 +927,20 @@ impl AudioHost {
         let rate = SampleRate::new(info.sample_rate)
             .ok_or_else(|| "the device runs at 0 Hz".to_owned())?;
         let max_frames = (info.max_block_frames as usize).max(1);
-        let config = EngineConfig::new(rate, max_frames);
+        let config = EngineConfig {
+            input_channels: info.input_channels.into(),
+            ..EngineConfig::new(rate, max_frames)
+        };
         let mut registry = Registry::new();
         bl_devices::register(&mut registry);
         if let Some(plugins) = &self.plugins {
             registry.add(plugins.factory());
+        }
+        if let Some(au) = &self.au {
+            registry.add(au.factory());
+        }
+        if let Some(vst3) = &self.vst3 {
+            registry.add(vst3.factory());
         }
         if let Some(kit) = &self.kit {
             registry.add(kit.factory());
@@ -909,6 +1000,16 @@ impl AudioHost {
     #[must_use]
     pub fn sample_rate(&self) -> Option<u32> {
         self.stream.as_ref().map(|stream| stream.info().sample_rate)
+    }
+
+    /// The open device's input and output channels, both zero while no
+    /// stream is open: what the In/Out choosers list as the interface.
+    #[must_use]
+    pub fn channels(&self) -> (u16, u16) {
+        self.stream.as_ref().map_or((0, 0), |stream| {
+            let info = stream.info();
+            (info.input_channels, info.output_channels)
+        })
     }
 
     /// Plays a browser preview through the open stream, replacing the one
@@ -1089,5 +1190,91 @@ mod tests {
         let mut data = vec![0.0f32; 256];
         run_block(&mut engine, &mut data, 1, 44_100);
         assert!(data.iter().all(|s| *s == 0.0));
+    }
+
+    /// A detached engine with one test tone on a MIDI track, as `bl-engine`'s
+    /// own tests make one.
+    fn toned_engine() -> Engine {
+        use bl_engine::nodes::{TEST_TONE, test_tone};
+        use bl_engine::testing::{self, Probe};
+        use bl_model::{Command, Device, DeviceKind, Editor, TrackKind};
+
+        let probe = Arc::new(Probe::default());
+        let engine = Engine::start_detached(
+            EngineConfig::new(SampleRate::HZ_48000, 256),
+            testing::registry(&probe),
+        )
+        .unwrap();
+        let mut editor = Editor::new();
+        let track = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id: track,
+                kind: TrackKind::Midi,
+                name: "Tone".to_owned(),
+                parent: None,
+                index: 0,
+            })
+            .unwrap();
+        let mut device = Device::new(
+            editor.new_id(),
+            "",
+            DeviceKind::Native {
+                device_type: TEST_TONE.to_owned(),
+            },
+        );
+        device.params.insert(test_tone::FREQUENCY, 1_000.0);
+        device.params.insert(test_tone::LEVEL, -6.0);
+        editor
+            .apply(Command::InsertDevice {
+                track,
+                index: 0,
+                device,
+            })
+            .unwrap();
+        engine.sync(editor.document());
+        assert!(engine.flush(Duration::from_secs(5)));
+        engine
+    }
+
+    // Spec: routing R16 (WP-2.13)
+    #[test]
+    fn main_out_places_the_main_mix_on_the_device_channels_it_names() {
+        let engine = toned_engine();
+        let processor = engine
+            .restarter()
+            .restart(
+                EngineConfig::new(SampleRate::HZ_48000, 256),
+                None,
+                Duration::from_secs(5),
+            )
+            .unwrap();
+        let (mut handoff, incoming) = RingBuffer::new(1);
+        handoff.push(processor).unwrap();
+        let shared = Arc::new(EngineShared::default());
+        shared.set_main_out(2); // Main Out 3/4, the set counting from 1.
+        let mut engine = EngineCallback::with_engine(Arc::clone(&shared), incoming);
+
+        let mut data = vec![0.0f32; 4 * 256];
+        run_block(&mut engine, &mut data, 4, 48_000);
+        assert!(
+            data[..512].iter().all(|&s| s == 0.0),
+            "channels 1/2 stay silent"
+        );
+        assert!(
+            data[512..].iter().any(|&s| s != 0.0),
+            "the mix plays on 3/4"
+        );
+        assert_eq!(&data[512..768], &data[768..1024], "both of the pair");
+
+        // Main Out 1/2 again: the first two channels.
+        shared.set_main_out(0);
+        data.fill(0.0);
+        run_block(&mut engine, &mut data, 4, 48_000);
+        assert!(data[..512].iter().any(|&s| s != 0.0));
+        assert!(
+            data[512..].iter().all(|&s| s == 0.0),
+            "channels 3/4 stay silent"
+        );
     }
 }

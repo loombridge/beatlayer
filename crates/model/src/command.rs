@@ -10,13 +10,18 @@ use imbl::Vector;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::automation::{
+    AutomationTarget, MixerParam, PointError, check_bend, drop_device, entry, override_target,
+};
 use crate::clip::{AudioData, Clip, ClipData, MidiData};
 use crate::device::{Device, DeviceRole};
 use crate::document::Document;
 use crate::error::ModelError;
-use crate::ids::{ClipId, DeviceId, ParamId, TrackId};
+use crate::ids::{ClipId, ContentHash, DeviceId, ParamId, SceneId, TrackId};
+use crate::metronome::{CountIn, MetronomeRhythm, MetronomeSound};
+use crate::scene::Scene;
 use crate::shared::Shared;
-use crate::track::{Input, Mixer, Monitor, Output, SendTap, Track, TrackKind};
+use crate::track::{Channel, Input, Mixer, Monitor, Output, SendTap, Track, TrackKind};
 
 /// One edit to a document.
 ///
@@ -108,6 +113,32 @@ pub enum Command {
     SetLoopEnabled {
         /// Whether playback loops between the brace's start and end.
         enabled: bool,
+    },
+    /// Switches the metronome on or off.
+    SetMetronomeEnabled {
+        /// Whether the metronome clicks during playback.
+        enabled: bool,
+    },
+    /// Sets the metronome count-in length before playback or recording starts.
+    SetMetronomeCountIn {
+        /// The count-in duration in bars: none, 1 bar, 2 bars, or 4 bars.
+        count_in: CountIn,
+    },
+    /// Chooses the metronome sound character: Classic, Click, or Wood.
+    SetMetronomeSound {
+        /// The synthesised sound character.
+        sound: MetronomeSound,
+    },
+    /// Sets the rhythmic division the metronome clicks at: Auto, 1 Bar,
+    /// 1/2, 1/2T, 1/4, 1/4T, 1/8, 1/8T, 1/16, or 1/16T.
+    SetMetronomeRhythm {
+        /// The rhythm division.
+        rhythm: MetronomeRhythm,
+    },
+    /// Sets whether the metronome only clicks while recording.
+    SetMetronomeOnlyWhileRecording {
+        /// When on, clicks only sound while recording.
+        only_while_recording: bool,
     },
 
     /// Creates an empty track with default mixer settings.
@@ -223,6 +254,82 @@ pub enum Command {
         /// `pre` or `post`.
         tap: SendTap,
     },
+    /// Sets the value of one of a track's automatable parameters at a
+    /// position on its envelope, adding a breakpoint there or replacing the
+    /// one that's there, as clicking or dragging a breakpoint does. A
+    /// parameter with no envelope gets its first breakpoint, at that value,
+    /// and its envelope drives it from then on.
+    SetAutomationBreakpoint {
+        /// The track the parameter belongs to.
+        track: TrackId,
+        /// The parameter: a mixer control, a send, or a device parameter.
+        target: AutomationTarget,
+        /// Where the breakpoint sits: 0 (1.1.1) or later.
+        at: Ticks,
+        /// The value there, in the parameter's own units.
+        value: f64,
+    },
+    /// Curves the segment starting at one of a track's automation
+    /// breakpoints, as holding Alt (Windows) or Option (macOS) while
+    /// dragging a line segment on an automation lane does: the value between
+    /// that breakpoint and the next follows a power curve shaped by `bend`.
+    /// A bend of 0 makes the segment a straight line again, as the same drag
+    /// with a double-click does.
+    SetAutomationCurve {
+        /// The track the parameter belongs to.
+        track: TrackId,
+        /// The parameter.
+        target: AutomationTarget,
+        /// Where the segment starts: the breakpoint there.
+        at: Ticks,
+        /// The bend, from −1 to 1: 0 is the straight line, and the sign
+        /// chooses which side the segment bows to.
+        bend: f64,
+    },
+    /// Moves one of a track's automation breakpoints, keeping its value.
+    MoveAutomationBreakpoint {
+        /// The track the parameter belongs to.
+        track: TrackId,
+        /// The parameter.
+        target: AutomationTarget,
+        /// Where the breakpoint is now.
+        at: Ticks,
+        /// Where it goes: 0 (1.1.1) or later, and not where another
+        /// breakpoint of the same envelope already is.
+        to: Ticks,
+    },
+    /// Deletes one of a track's automation breakpoints, so the segments
+    /// either side of it become the one starting at the breakpoint before
+    /// it. Deleting the last one takes the parameter's envelope with it.
+    DeleteAutomationBreakpoint {
+        /// The track the parameter belongs to.
+        track: TrackId,
+        /// The parameter.
+        target: AutomationTarget,
+        /// Where the breakpoint is.
+        at: Ticks,
+    },
+    /// Deletes all of a track parameter's automation: its envelope and every
+    /// breakpoint on it, as Delete Automation in the control's context menu
+    /// does. The control's value stays where it is.
+    DeleteAutomation {
+        /// The track the parameter belongs to.
+        track: TrackId,
+        /// The parameter.
+        target: AutomationTarget,
+    },
+    /// Turns every overridden envelope in the song back on, as the Control
+    /// Bar's Re-Enable Automation button does: every automated control a
+    /// hand move turned off follows its envelope again.
+    ReEnableAutomation {},
+    /// Turns one parameter's overridden envelope back on, as Re-Enable
+    /// Automation in its context menu does.
+    ReEnableAutomationFor {
+        /// The track the parameter belongs to.
+        track: TrackId,
+        /// The parameter.
+        target: AutomationTarget,
+    },
     /// Switches Solo in Place on or off.
     SetSoloInPlace {
         /// Whether soloing a track keeps the return tracks audible.
@@ -262,6 +369,19 @@ pub enum Command {
         /// Another MIDI track, or `null` (or nothing) for No Output.
         to: Option<TrackId>,
     },
+    /// Sets Main's Main Out: the audio interface's output channels the Main
+    /// mix goes to, as a stereo pair.
+    SetMainOut {
+        /// The pair: its first channel, counted from 1 (`{ "type": "pair",
+        /// "channel": 3 }` is 3/4).
+        channel: Channel,
+    },
+    /// Sets Main's Cue Out: the audio interface's output channels the cue
+    /// mix goes to, as a stereo pair.
+    SetCueOut {
+        /// The pair: its first channel, counted from 1.
+        channel: Channel,
+    },
 
     /// Puts a new clip on an audio or MIDI track. Its data must match the
     /// track.
@@ -271,12 +391,13 @@ pub enum Command {
         /// The clip, with a new ID.
         clip: Clip,
     },
-    /// Deletes a clip.
+    /// Deletes a clip, from the Arrangement or from a track's Session slot.
     DeleteClip {
         /// The clip.
         clip: ClipId,
     },
-    /// Moves a clip to a new start on the same or another track.
+    /// Moves a clip to a new start on the same or another track, out of the
+    /// Session slot it may sit in.
     MoveClip {
         /// The clip.
         clip: ClipId,
@@ -408,6 +529,76 @@ pub enum Command {
         fade_out: f64,
     },
 
+    /// Inserts a new empty scene at `index` among the scenes: it holds an
+    /// empty slot in every audio and MIDI track. A new set opens with eight
+    /// scenes (the layout reference's default state).
+    CreateScene {
+        /// The new scene's ID.
+        id: SceneId,
+        /// Where it goes among the scenes, from 0 to the number of scenes.
+        index: usize,
+    },
+    /// Deletes a scene with the clips in its slots. The clips in the other
+    /// scenes stay where they are.
+    DeleteScene {
+        /// The scene.
+        scene: SceneId,
+    },
+    /// Moves a scene to `index` among the scenes, with its clips. `index`
+    /// counts positions after the scene is taken out of its current place.
+    MoveScene {
+        /// The scene.
+        scene: SceneId,
+        /// Where it goes among the scenes.
+        index: usize,
+    },
+    /// Copies a scene and the clips in its slots into a new scene directly
+    /// after it. `clips` lists every track that holds a clip in the scene,
+    /// each with the ID its copy takes: a copy is an independent clip. A
+    /// scene whose slots are all empty copies no clips, so `clips` is empty.
+    DuplicateScene {
+        /// The scene.
+        scene: SceneId,
+        /// The new scene's ID.
+        id: SceneId,
+        /// Each track that holds a clip in the scene, with the new ID its
+        /// copy takes, each track once.
+        clips: Vec<(TrackId, ClipId)>,
+    },
+    /// Renames a scene. A name may be empty: a scene without a name shows
+    /// its number, which is its position.
+    RenameScene {
+        /// The scene.
+        scene: SceneId,
+        /// The new name.
+        name: String,
+    },
+
+    /// Puts a clip in a track's Session slot at `scene`: what Insert Empty
+    /// MIDI Clip (Cmd+Shift+M) and a clip dropped in a slot do. Only audio
+    /// and MIDI tracks hold slot clips, the slot must be empty, and, since a
+    /// slot has no place in the Arrangement, the clip's `start` must be 0.
+    /// Launching a slot clip is WP-3.2's.
+    CreateSlotClip {
+        /// The track.
+        track: TrackId,
+        /// The scene whose slot it goes in.
+        scene: SceneId,
+        /// The clip, with a new ID.
+        clip: Clip,
+    },
+    /// Moves a clip into a track's Session slot at `scene`, out of the slot
+    /// or the Arrangement lane it sits in. The target slot must be empty,
+    /// unless it's the clip's own slot.
+    MoveSlotClip {
+        /// The clip.
+        clip: ClipId,
+        /// The track whose slot it goes in.
+        track: TrackId,
+        /// The scene whose slot it goes in.
+        scene: SceneId,
+    },
+
     /// Inserts a new device at `index` in a track's chain, keeping the
     /// chain in order: MIDI effects, then the instrument, then audio
     /// effects.
@@ -490,6 +681,16 @@ pub enum Command {
         /// The value, in the parameter's own units.
         value: f64,
     },
+    /// Sets the media a device plays, by content hash (WP-2.16): the
+    /// sampler's sample, which the media store holds like a clip's audio.
+    SetDeviceSample {
+        /// The device.
+        device: DeviceId,
+        /// The media, by content hash, or `null` to play none. The media
+        /// store is where the audio comes from; a device given media the
+        /// store doesn't hold is silent.
+        media: Option<ContentHash>,
+    },
     /// Sets where a device's sidechain listens: its sidechain section's
     /// Source, with its channel. The device must have a sidechain input.
     SetSidechainInput {
@@ -550,6 +751,11 @@ impl Command {
             Self::DeleteTimeSignatureChange { .. } => "Delete time signature change",
             Self::SetLoop { .. } => "Change loop",
             Self::SetLoopEnabled { .. } => "Switch loop",
+            Self::SetMetronomeEnabled { .. } => "Metronome",
+            Self::SetMetronomeCountIn { .. } => "Metronome Count-In",
+            Self::SetMetronomeSound { .. } => "Metronome Sound",
+            Self::SetMetronomeRhythm { .. } => "Metronome Rhythm",
+            Self::SetMetronomeOnlyWhileRecording { .. } => "Hear Metronome Only While Recording",
             Self::CreateTrack { .. } => "Create track",
             Self::DeleteTrack { .. } => "Delete track",
             Self::MoveTrack { .. } => "Move track",
@@ -563,10 +769,20 @@ impl Command {
             Self::ArmExclusive { .. } => "Arm track",
             Self::SetSend { .. } => "Change send",
             Self::SetSendTap { .. } => "Switch Pre/Post",
-            Self::SetSoloInPlace { .. } => "Switch Solo in Place",
-            Self::SetInput { .. } | Self::SetOutput { .. } | Self::SetMidiOutput { .. } => {
-                "Change \"Routing\""
+            Self::SetAutomationBreakpoint { .. } => "Add Automation Breakpoint",
+            Self::SetAutomationCurve { .. } => "Curve Automation Segment",
+            Self::MoveAutomationBreakpoint { .. } => "Move Automation Breakpoint",
+            Self::DeleteAutomationBreakpoint { .. } => "Delete Automation Breakpoint",
+            Self::DeleteAutomation { .. } => "Delete Automation",
+            Self::ReEnableAutomation { .. } | Self::ReEnableAutomationFor { .. } => {
+                "Re-Enable Automation"
             }
+            Self::SetSoloInPlace { .. } => "Switch Solo in Place",
+            Self::SetInput { .. }
+            | Self::SetOutput { .. }
+            | Self::SetMidiOutput { .. }
+            | Self::SetMainOut { .. }
+            | Self::SetCueOut { .. } => "Change \"Routing\"",
             Self::SetMonitor { .. } => "Change monitoring",
             Self::CreateClip { .. } => "Create clip",
             Self::DeleteClip { .. } => "Delete clip",
@@ -584,6 +800,15 @@ impl Command {
             Self::SetClipLoopEnabled { .. } => "Switch clip loop",
             Self::SetClipGain { .. } => "Change clip gain",
             Self::SetClipFades { .. } => "Change clip fades",
+            Self::CreateScene { .. } => "Create scene",
+            Self::DeleteScene { .. } => "Delete scene",
+            Self::MoveScene { .. } => "Move scene",
+            // WP-3.1. Live's undo name for duplicating a scene is to
+            // observe; Beatlayer's names the edit.
+            Self::DuplicateScene { .. } => "Duplicate scene",
+            Self::RenameScene { .. } => "Rename scene",
+            Self::CreateSlotClip { .. } => "Create clip",
+            Self::MoveSlotClip { .. } => "Move clip",
             // Spec: device-chains R14. Live 12.4.6's names, where observed.
             Self::InsertDevice { .. } => "Insert Device",
             Self::RemoveDevice { .. } => "Delete Device(s)",
@@ -598,6 +823,10 @@ impl Command {
                 floating: false, ..
             } => "Dock Device",
             Self::SetDeviceParam { .. } => "Change parameter",
+            // WP-2.16. Live's undo name for loading a Simpler sample is to
+            // observe; Beatlayer's names the edit.
+            Self::SetDeviceSample { media: Some(_), .. } => "Load Sample",
+            Self::SetDeviceSample { media: None, .. } => "Clear Sample",
             // WP-2.19b, as Live 12.4.6 names them (observed); Listen's is to
             // observe.
             Self::SetSidechainInput { .. } => "Change \"Routing\"",
@@ -608,14 +837,22 @@ impl Command {
         }
     }
 
-    /// The ID of the object this command creates, if it creates one.
+    /// The IDs of the objects this command creates, in the order it creates
+    /// them: the track, clip, device, scene, or clip copies.
     #[must_use]
-    pub fn created_id(&self) -> Option<Id> {
+    pub fn created_ids(&self) -> Vec<Id> {
         match self {
-            Self::CreateTrack { id, .. } => Some(id.0),
-            Self::CreateClip { clip, .. } => Some(clip.id.0),
-            Self::InsertDevice { device, .. } => Some(device.id.0),
-            _ => None,
+            Self::CreateTrack { id, .. } => vec![id.0],
+            Self::CreateClip { clip, .. } => vec![clip.id.0],
+            Self::CreateSlotClip { clip, .. } => vec![clip.id.0],
+            Self::InsertDevice { device, .. } => vec![device.id.0],
+            Self::CreateScene { id, .. } => vec![id.0],
+            Self::DuplicateScene { id, clips, .. } => {
+                let mut ids = vec![id.0];
+                ids.extend(clips.iter().map(|(_, copy)| copy.0));
+                ids
+            }
+            _ => Vec::new(),
         }
     }
 }
@@ -673,6 +910,28 @@ impl Document {
                 self.settings.arrangement_loop.enabled = *enabled;
                 Ok(())
             }
+            Command::SetMetronomeEnabled { enabled } => {
+                self.settings.metronome.enabled = *enabled;
+                Ok(())
+            }
+            Command::SetMetronomeCountIn { count_in } => {
+                self.settings.metronome.count_in = *count_in;
+                Ok(())
+            }
+            Command::SetMetronomeSound { sound } => {
+                self.settings.metronome.sound = *sound;
+                Ok(())
+            }
+            Command::SetMetronomeRhythm { rhythm } => {
+                self.settings.metronome.rhythm = *rhythm;
+                Ok(())
+            }
+            Command::SetMetronomeOnlyWhileRecording {
+                only_while_recording,
+            } => {
+                self.settings.metronome.only_while_recording = *only_while_recording;
+                Ok(())
+            }
             Command::CreateTrack {
                 id,
                 kind,
@@ -695,14 +954,28 @@ impl Document {
             Command::SetVolume { track, volume } => {
                 check_value("volume", *volume, volume.is_finite() && *volume >= 0.0)?;
                 if self.track_ref(*track)?.mixer.volume != *volume {
-                    self.track_mut(*track)?.mixer.volume = *volume;
+                    let track_ref = self.track_mut(*track)?;
+                    track_ref.mixer.volume = *volume;
+                    override_target(
+                        &mut track_ref.automation,
+                        &AutomationTarget::Mixer {
+                            param: MixerParam::Volume,
+                        },
+                    );
                 }
                 Ok(())
             }
             Command::SetPan { track, pan } => {
                 check_value("pan", *pan, (-1.0..=1.0).contains(pan))?;
                 if self.track_ref(*track)?.mixer.pan != *pan {
-                    self.track_mut(*track)?.mixer.pan = *pan;
+                    let track_ref = self.track_mut(*track)?;
+                    track_ref.mixer.pan = *pan;
+                    override_target(
+                        &mut track_ref.automation,
+                        &AutomationTarget::Mixer {
+                            param: MixerParam::Pan,
+                        },
+                    );
                 }
                 Ok(())
             }
@@ -710,7 +983,14 @@ impl Document {
                 let current = self.track_ref(*track)?;
                 check_kind(current, TrackKind::has_mute_and_solo, NOT_MAIN)?;
                 if current.mixer.mute != *mute {
-                    self.track_mut(*track)?.mixer.mute = *mute;
+                    let track_ref = self.track_mut(*track)?;
+                    track_ref.mixer.mute = *mute;
+                    override_target(
+                        &mut track_ref.automation,
+                        &AutomationTarget::Mixer {
+                            param: MixerParam::Mute,
+                        },
+                    );
                 }
                 Ok(())
             }
@@ -760,6 +1040,60 @@ impl Document {
                     } else {
                         sends.insert(*to, *level);
                     }
+                    override_target(
+                        &mut self.track_mut(*track)?.automation,
+                        &AutomationTarget::Send { to: *to },
+                    );
+                }
+                Ok(())
+            }
+            Command::SetAutomationBreakpoint {
+                track,
+                target,
+                at,
+                value,
+            } => self.set_automation_breakpoint(*track, *target, *at, *value),
+            Command::SetAutomationCurve {
+                track,
+                target,
+                at,
+                bend,
+            } => self.set_automation_curve(*track, *target, *at, *bend),
+            Command::MoveAutomationBreakpoint {
+                track,
+                target,
+                at,
+                to,
+            } => self.move_automation_breakpoint(*track, *target, *at, *to),
+            Command::DeleteAutomationBreakpoint { track, target, at } => {
+                self.delete_automation_breakpoint(*track, *target, *at)
+            }
+            Command::DeleteAutomation { track, target } => {
+                self.check_automation_target(*track, *target)?;
+                self.track_mut(*track)?.automation.remove(target);
+                Ok(())
+            }
+            Command::ReEnableAutomation {} => {
+                for id in self.track_order() {
+                    let track = self.track_mut(id)?;
+                    let overridden: Vec<AutomationTarget> = track
+                        .automation
+                        .iter()
+                        .filter(|(_, automation)| !automation.enabled)
+                        .map(|(target, _)| *target)
+                        .collect();
+                    for target in overridden {
+                        if let Some(automation) = track.automation.get_mut(&target) {
+                            automation.enabled = true;
+                        }
+                    }
+                }
+                Ok(())
+            }
+            Command::ReEnableAutomationFor { track, target } => {
+                self.check_automation_target(*track, *target)?;
+                if let Some(automation) = self.track_mut(*track)?.automation.get_mut(target) {
+                    automation.enabled = true;
                 }
                 Ok(())
             }
@@ -802,13 +1136,14 @@ impl Document {
             Command::SetMidiOutput { track, to } => {
                 self.edit_routing(*track, |routing| routing.midi_output = *to)
             }
-            Command::CreateClip { track, clip } => self.create_clip(*track, clip),
-            Command::DeleteClip { clip } => {
-                let owner = self.clip_owner(*clip)?;
-                self.track_mut(owner)?.clips.remove(clip);
-                self.index.clip_track.remove(clip);
-                Ok(())
+            Command::SetMainOut { channel } => {
+                self.set_main_channel(*channel, |routing| &mut routing.main_out)
             }
+            Command::SetCueOut { channel } => {
+                self.set_main_channel(*channel, |routing| &mut routing.cue_out)
+            }
+            Command::CreateClip { track, clip } => self.create_clip(*track, clip),
+            Command::DeleteClip { clip } => self.remove_clip(*clip),
             Command::MoveClip { clip, track, start } => self.move_clip(*clip, *track, *start),
             Command::MoveClips { clips, by } => self.move_clips(clips, *by),
             Command::SetClipLength { clip, length } => {
@@ -876,6 +1211,19 @@ impl Document {
                 audio.fade_in = *fade_in;
                 audio.fade_out = *fade_out;
             }),
+            Command::CreateScene { id, index } => self.create_scene(*id, *index),
+            Command::DeleteScene { scene } => self.delete_scene(*scene),
+            Command::MoveScene { scene, index } => self.move_scene(*scene, *index),
+            Command::DuplicateScene { scene, id, clips } => {
+                self.duplicate_scene(*scene, *id, clips)
+            }
+            Command::RenameScene { scene, name } => self.rename_scene(*scene, name),
+            Command::CreateSlotClip { track, scene, clip } => {
+                self.create_slot_clip(*track, *scene, clip)
+            }
+            Command::MoveSlotClip { clip, track, scene } => {
+                self.move_slot_clip(*clip, *track, *scene)
+            }
             Command::InsertDevice {
                 track,
                 index,
@@ -888,6 +1236,7 @@ impl Document {
                     .ok_or(ModelError::NoSuchDevice(*device))?;
                 chain.remove(position);
                 self.index.device_track.remove(device);
+                drop_device(&mut self.track_mut(owner)?.automation, *device);
                 Ok(())
             }
             Command::MoveDevice {
@@ -946,7 +1295,21 @@ impl Document {
             } => {
                 check_value("parameter value", *value, value.is_finite())?;
                 if self.device_ref(*device)?.params.get(param) != Some(value) {
+                    let owner = self.device_owner(*device)?;
                     self.device_mut(*device)?.params.insert(*param, *value);
+                    override_target(
+                        &mut self.track_mut(owner)?.automation,
+                        &AutomationTarget::Device {
+                            device: *device,
+                            param: *param,
+                        },
+                    );
+                }
+                Ok(())
+            }
+            Command::SetDeviceSample { device, media } => {
+                if self.device_ref(*device)?.media != *media {
+                    self.device_mut(*device)?.media = *media;
                 }
                 Ok(())
             }
@@ -1039,6 +1402,9 @@ impl Document {
             for clip in track.clips.keys() {
                 self.index.clip_track.remove(clip);
             }
+            for clip in track.slots.values() {
+                self.index.clip_track.remove(&clip.id);
+            }
             for device in &track.devices {
                 self.index.device_track.remove(&device.id);
             }
@@ -1073,6 +1439,22 @@ impl Document {
         }
         self.track_mut(id)?.routing = routing;
         self.check_routing(id)
+    }
+
+    /// Sets Main's Main Out or Cue Out, as `slot` names it, one of the two.
+    fn set_main_channel(
+        &mut self,
+        channel: Channel,
+        slot: fn(&mut crate::track::Routing) -> &mut Channel,
+    ) -> Result<(), ModelError> {
+        let main = self.main_id();
+        let mut routing = self.track_ref(main)?.routing.clone();
+        *slot(&mut routing) = channel;
+        if routing == self.track_ref(main)?.routing {
+            return Ok(());
+        }
+        self.track_mut(main)?.routing = routing;
+        self.check_routing(main)
     }
 
     /// Turns a mixer switch (solo or arm) on for `track` and off on every
@@ -1149,7 +1531,9 @@ impl Document {
         let clip = self.clip_ref(id)?;
         check_clip_fits(self.track_ref(track)?, &clip.data)?;
         check_extent(start, clip.length)?;
-        if owner == track {
+        // A clip already on the track's Arrangement lane just moves; one in
+        // a Session slot leaves the slot for the lane.
+        if owner == track && self.track_ref(owner)?.clips.contains_key(&id) {
             if clip.start != start {
                 self.clip_mut(id)?.start = start;
             }
@@ -1157,8 +1541,194 @@ impl Document {
         }
         let mut moved = clip.clone();
         moved.start = start;
-        self.track_mut(owner)?.clips.remove(&id);
+        self.remove_clip(id)?;
         self.track_mut(track)?.clips.insert(id, Shared::new(moved));
+        self.index.clip_track.insert(id, track);
+        Ok(())
+    }
+
+    /// Removes a clip from the Arrangement lane or the Session slot it sits
+    /// in, and from the lookups.
+    fn remove_clip(&mut self, id: ClipId) -> Result<(), ModelError> {
+        let owner = self.clip_owner(id)?;
+        if self.track_ref(owner)?.clips.contains_key(&id) {
+            self.track_mut(owner)?.clips.remove(&id);
+        } else {
+            let scene = self
+                .track_ref(owner)?
+                .slots
+                .iter()
+                .find(|(_, clip)| clip.id == id)
+                .map(|(&scene, _)| scene)
+                .ok_or(ModelError::NoSuchClip(id))?;
+            self.track_mut(owner)?.slots.remove(&scene);
+        }
+        self.index.clip_track.remove(&id);
+        Ok(())
+    }
+
+    fn create_scene(&mut self, id: SceneId, index: usize) -> Result<(), ModelError> {
+        self.check_fresh(id.0)?;
+        insert_at(&mut self.scenes, index, Scene::new(id))
+    }
+
+    /// Deletes a scene, and the clips in its slots with it. The clips in
+    /// the other scenes stay.
+    fn delete_scene(&mut self, id: SceneId) -> Result<(), ModelError> {
+        let position = self.scene_position(id).ok_or(ModelError::NoSuchScene(id))?;
+        self.scenes.remove(position);
+        // Only the tracks that hold a clip in the scene change.
+        let holders: Vec<TrackId> = self
+            .tracks
+            .iter()
+            .filter(|(_, track)| track.slots.contains_key(&id))
+            .map(|(&track, _)| track)
+            .collect();
+        for track in holders {
+            let clip = self
+                .track_mut(track)?
+                .slots
+                .remove(&id)
+                .expect("just checked the slot holds a clip");
+            self.index.clip_track.remove(&clip.id);
+        }
+        Ok(())
+    }
+
+    /// Moves a scene to `index` among the scenes, counting positions after
+    /// it is taken out. Its clips stay in its slots, which are keyed by the
+    /// scene's ID, so they move with it.
+    fn move_scene(&mut self, id: SceneId, index: usize) -> Result<(), ModelError> {
+        let position = self.scene_position(id).ok_or(ModelError::NoSuchScene(id))?;
+        if position == index {
+            return Ok(());
+        }
+        let scene = self.scenes.remove(position);
+        insert_at(&mut self.scenes, index, scene)
+    }
+
+    fn rename_scene(&mut self, id: SceneId, name: &str) -> Result<(), ModelError> {
+        let position = self.scene_position(id).ok_or(ModelError::NoSuchScene(id))?;
+        if let Some(scene) = self.scenes.get_mut(position)
+            && scene.name != *name
+        {
+            scene.name = name.to_owned();
+        }
+        Ok(())
+    }
+
+    /// Copies a scene and its clips straight after it: one fresh scene, and
+    /// an independent copy of each clip the scene holds, under the IDs the
+    /// caller lists, every track that holds one listed once.
+    fn duplicate_scene(
+        &mut self,
+        id: SceneId,
+        copy: SceneId,
+        clips: &[(TrackId, ClipId)],
+    ) -> Result<(), ModelError> {
+        let position = self.scene_position(id).ok_or(ModelError::NoSuchScene(id))?;
+        self.check_fresh(copy.0)?;
+        let mut copies = Vec::with_capacity(clips.len());
+        let mut tracks = BTreeSet::new();
+        for &(track, clip) in clips {
+            if !tracks.insert(track) {
+                return Err(ModelError::DuplicateId(track.0));
+            }
+            let source = self
+                .track_ref(track)?
+                .slot(id)
+                .ok_or(ModelError::SceneCopyMismatch { scene: id, track })?
+                .clone();
+            self.check_fresh(clip.0)?;
+            copies.push((track, clip, source));
+        }
+        for track in self.tracks.values() {
+            if track.slots.contains_key(&id) && !tracks.contains(&track.id) {
+                return Err(ModelError::SceneCopyMismatch {
+                    scene: id,
+                    track: track.id,
+                });
+            }
+        }
+        let mut copies_seen: BTreeSet<Id> = BTreeSet::new();
+        copies_seen.insert(copy.0);
+        for &(_, clip, _) in &copies {
+            if !copies_seen.insert(clip.0) {
+                return Err(ModelError::DuplicateId(clip.0));
+            }
+        }
+        let name = self
+            .scene(id)
+            .expect("just checked the scene exists")
+            .name
+            .clone();
+        for (track, clip, source) in copies {
+            let copied = Clip {
+                id: clip,
+                start: Ticks::ZERO,
+                ..source
+            };
+            self.track_mut(track)?
+                .slots
+                .insert(copy, Shared::new(copied));
+            self.index.clip_track.insert(clip, track);
+        }
+        insert_at(&mut self.scenes, position + 1, Scene { id: copy, name })
+    }
+
+    fn create_slot_clip(
+        &mut self,
+        track: TrackId,
+        scene: SceneId,
+        clip: &Clip,
+    ) -> Result<(), ModelError> {
+        self.check_fresh(clip.id.0)?;
+        let target = self.track_ref(track)?;
+        check_kind(target, TrackKind::holds_clips, AUDIO_OR_MIDI)?;
+        self.scene_position(scene)
+            .ok_or(ModelError::NoSuchScene(scene))?;
+        check_clip_fits(target, &clip.data)?;
+        if clip.start != Ticks::ZERO {
+            return Err(ModelError::SlotClipPosition(clip.start));
+        }
+        check_extent(clip.start, clip.length)?;
+        check_clip(clip)?;
+        if target.slot(scene).is_some() {
+            return Err(ModelError::SlotOccupied { track, scene });
+        }
+        self.track_mut(track)?
+            .slots
+            .insert(scene, Shared::new(clip.clone()));
+        self.index.clip_track.insert(clip.id, track);
+        Ok(())
+    }
+
+    /// Moves a clip into a slot, out of the slot or lane it sits in. A slot
+    /// clip has no position, so the clip arrives with its start at 0.
+    fn move_slot_clip(
+        &mut self,
+        id: ClipId,
+        track: TrackId,
+        scene: SceneId,
+    ) -> Result<(), ModelError> {
+        self.clip_owner(id)?;
+        let target = self.track_ref(track)?;
+        check_kind(target, TrackKind::holds_clips, AUDIO_OR_MIDI)?;
+        self.scene_position(scene)
+            .ok_or(ModelError::NoSuchScene(scene))?;
+        let current = self.clip_ref(id)?.clone();
+        check_clip_fits(target, &current.data)?;
+        if target.slot(scene).is_some_and(|held| held.id != id) {
+            return Err(ModelError::SlotOccupied { track, scene });
+        }
+        self.remove_clip(id)?;
+        let moved = Clip {
+            start: Ticks::ZERO,
+            ..current
+        };
+        self.track_mut(track)?
+            .slots
+            .insert(scene, Shared::new(moved));
         self.index.clip_track.insert(id, track);
         Ok(())
     }
@@ -1169,6 +1739,9 @@ impl Document {
         for &id in clips {
             if !seen.insert(id) {
                 return Err(ModelError::DuplicateId(id.0));
+            }
+            if !self.in_arrangement(id)? {
+                return Err(ModelError::ClipInSlot(id));
             }
             let clip = self.clip_ref(id)?;
             let start = clip
@@ -1187,6 +1760,9 @@ impl Document {
     }
 
     fn trim_clip_start(&mut self, id: ClipId, start: Ticks) -> Result<(), ModelError> {
+        if !self.in_arrangement(id)? {
+            return Err(ModelError::ClipInSlot(id));
+        }
         let clip = self.clip_ref(id)?;
         if clip.start == start {
             return Ok(());
@@ -1300,6 +1876,9 @@ impl Document {
         let device = self.track_mut(owner)?.devices.remove(old_position);
         insert_at(&mut self.track_mut(track)?.devices, index, device)?;
         self.index.device_track.insert(id, track);
+        if owner != track {
+            drop_device(&mut self.track_mut(owner)?.automation, id);
+        }
         check_chain(self.track_ref(track)?)
     }
 
@@ -1369,6 +1948,143 @@ impl Document {
         }
         let next: Vec<(Ticks, Bpm)> = points.into_iter().filter(|&(p, _)| p != at).collect();
         self.settings.tempo = tempo_from_breakpoints(next);
+        Ok(())
+    }
+
+    // A track's automation: one envelope per automatable parameter, as
+    // edits on the track's map (WP-2.12).
+
+    /// Checks that `target` names a parameter of `track`: a control of its
+    /// mixer, one of its sends to a return track, or a parameter of a device
+    /// in its chain.
+    pub(crate) fn check_automation_target(
+        &self,
+        track: TrackId,
+        target: AutomationTarget,
+    ) -> Result<(), ModelError> {
+        match target {
+            AutomationTarget::Mixer { .. } => {
+                self.track_ref(track)?;
+            }
+            AutomationTarget::Send { to } => {
+                check_kind(self.track_ref(track)?, TrackKind::has_sends, SENDER)?;
+                check_kind(
+                    self.track_ref(to)?,
+                    |kind| kind == TrackKind::Return,
+                    RETURN,
+                )?;
+            }
+            AutomationTarget::Device { device, .. } => {
+                let track_ref = self.track_ref(track)?;
+                if track_ref.device_position(device).is_none() {
+                    return Err(ModelError::DeviceNotInTrack { device, track });
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Sets the value of `target` at `at` on its envelope, adding a
+    /// breakpoint there or replacing the one that's there. The envelope
+    /// keeps driving the parameter (or starts to, if this is its first
+    /// breakpoint): only a hand move or Re-Enable Automation changes that.
+    fn set_automation_breakpoint(
+        &mut self,
+        track: TrackId,
+        target: AutomationTarget,
+        at: Ticks,
+        value: f64,
+    ) -> Result<(), ModelError> {
+        if at < Ticks::ZERO {
+            return Err(ModelError::NegativePosition(at));
+        }
+        check_value("automation value", value, value.is_finite())?;
+        self.check_automation_target(track, target)?;
+        entry(&mut self.track_mut(track)?.automation, target)
+            .envelope
+            .set(at, value);
+        Ok(())
+    }
+
+    /// Sets the bend of the segment starting at `at` on `target`'s envelope:
+    /// 0 makes the segment a straight line again.
+    fn set_automation_curve(
+        &mut self,
+        track: TrackId,
+        target: AutomationTarget,
+        at: Ticks,
+        bend: f64,
+    ) -> Result<(), ModelError> {
+        check_bend(bend)?;
+        self.check_automation_target(track, target)?;
+        let automation =
+            self.track_mut(track)?
+                .automation
+                .get_mut(&target)
+                .ok_or(ModelError::NoChange {
+                    what: "breakpoint",
+                    at,
+                })?;
+        automation
+            .envelope
+            .set_bend(at, bend)
+            .map_err(automation_point_error)
+    }
+
+    /// Moves the breakpoint at `at` on `target`'s envelope to `to`, keeping
+    /// its value.
+    fn move_automation_breakpoint(
+        &mut self,
+        track: TrackId,
+        target: AutomationTarget,
+        at: Ticks,
+        to: Ticks,
+    ) -> Result<(), ModelError> {
+        if to < Ticks::ZERO {
+            return Err(ModelError::NegativePosition(to));
+        }
+        self.check_automation_target(track, target)?;
+        let automation =
+            self.track_mut(track)?
+                .automation
+                .get_mut(&target)
+                .ok_or(ModelError::NoChange {
+                    what: "breakpoint",
+                    at,
+                })?;
+        automation
+            .envelope
+            .move_point(at, to)
+            .map_err(automation_point_error)
+    }
+
+    /// Deletes the breakpoint at `at` on `target`'s envelope, joining its
+    /// neighbours with a straight segment. Deleting the last one takes the
+    /// parameter's envelope with it.
+    fn delete_automation_breakpoint(
+        &mut self,
+        track: TrackId,
+        target: AutomationTarget,
+        at: Ticks,
+    ) -> Result<(), ModelError> {
+        self.check_automation_target(track, target)?;
+        let empty =
+            {
+                let automation = self.track_mut(track)?.automation.get_mut(&target).ok_or(
+                    ModelError::NoChange {
+                        what: "breakpoint",
+                        at,
+                    },
+                )?;
+                automation
+                    .envelope
+                    .delete(at)
+                    .map_err(automation_point_error)?;
+                automation.envelope.is_empty()
+            };
+        if empty {
+            self.track_mut(track)?.automation.remove(&target);
+        }
         Ok(())
     }
 
@@ -1466,15 +2182,38 @@ impl Document {
         self.clip_track(id).ok_or(ModelError::NoSuchClip(id))
     }
 
+    /// Whether a clip sits on its track's Arrangement lane rather than in a
+    /// Session slot.
+    fn in_arrangement(&self, id: ClipId) -> Result<bool, ModelError> {
+        Ok(self
+            .track_ref(self.clip_owner(id)?)?
+            .clips
+            .contains_key(&id))
+    }
+
     fn clip_ref(&self, id: ClipId) -> Result<&Clip, ModelError> {
         self.clip(id).ok_or(ModelError::NoSuchClip(id))
     }
 
     fn clip_mut(&mut self, id: ClipId) -> Result<&mut Clip, ModelError> {
         let owner = self.clip_owner(id)?;
-        self.track_mut(owner)?
-            .clips
-            .get_mut(&id)
+        let track = self.track_mut(owner)?;
+        if track.clips.contains_key(&id) {
+            return track
+                .clips
+                .get_mut(&id)
+                .map(Shared::make_mut)
+                .ok_or(ModelError::NoSuchClip(id));
+        }
+        let scene = track
+            .slots
+            .iter()
+            .find(|(_, clip)| clip.id == id)
+            .map(|(&scene, _)| scene)
+            .ok_or(ModelError::NoSuchClip(id))?;
+        track
+            .slots
+            .get_mut(&scene)
             .map(Shared::make_mut)
             .ok_or(ModelError::NoSuchClip(id))
     }
@@ -1580,6 +2319,24 @@ fn check_kind(
             kind: track.kind,
             needs,
         })
+    }
+}
+
+/// An envelope edit's error as the model's, for the command that asked.
+fn automation_point_error(error: PointError) -> ModelError {
+    match error {
+        PointError::Missing(at) => ModelError::NoChange {
+            what: "breakpoint",
+            at,
+        },
+        PointError::Taken(at) => ModelError::ChangeInUse {
+            what: "breakpoint",
+            at,
+        },
+        PointError::NoSegment(at) => ModelError::NoChange {
+            what: "segment",
+            at,
+        },
     }
 }
 
@@ -1867,9 +2624,11 @@ mod tests {
     use bl_core::time::{Bpm, TempoMap, TimeSignature};
 
     use super::*;
+    use crate::automation::Breakpoint;
     use crate::clip::{EDGE_FADE_SECONDS as EDGE_FADE, MidiData, Note};
     use crate::device::{DeviceKind, DeviceRole, PluginFormat};
     use crate::ids::ContentHash;
+    use crate::scene::DEFAULT_SCENE_COUNT;
     use crate::track::Routing;
 
     /// A document and the allocator for its IDs.
@@ -1881,7 +2640,9 @@ mod tests {
     impl Song {
         fn new() -> Self {
             let mut ids = IdAllocator::new();
-            let doc = Document::new(TrackId(ids.allocate()));
+            let main = TrackId(ids.allocate());
+            let scenes = (0..DEFAULT_SCENE_COUNT).map(|_| SceneId(ids.allocate()));
+            let doc = Document::new(main, scenes);
             Self { doc, ids }
         }
 
@@ -3357,6 +4118,462 @@ mod tests {
         assert_eq!(song.doc.settings().time_signatures, signatures);
     }
 
+    // Spec: automation R1 to R6
+    #[test]
+    fn automation_is_one_envelope_per_parameter_and_a_hand_move_overrides_it() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        let ret = song.track(TrackKind::Return, None);
+        let device = song.device(track);
+        let volume = AutomationTarget::Mixer {
+            param: MixerParam::Volume,
+        };
+        let send = AutomationTarget::Send { to: ret };
+        let param = AutomationTarget::Device {
+            device,
+            param: ParamId(2),
+        };
+
+        // A first breakpoint makes the envelope, and the envelope drives the
+        // control.
+        song.apply(Command::SetAutomationBreakpoint {
+            track,
+            target: volume,
+            at: Ticks::ZERO,
+            value: 1.0,
+        })
+        .unwrap();
+        song.apply(Command::SetAutomationBreakpoint {
+            track,
+            target: volume,
+            at: Ticks::WHOLE,
+            value: 0.5,
+        })
+        .unwrap();
+        let automation = song
+            .doc
+            .track(track)
+            .unwrap()
+            .automation_for(&volume)
+            .unwrap();
+        assert!(automation.enabled);
+        assert_eq!(
+            automation.envelope.points().collect::<Vec<_>>(),
+            vec![
+                Breakpoint {
+                    at: Ticks::ZERO,
+                    value: 1.0,
+                    bend: 0.0
+                },
+                Breakpoint {
+                    at: Ticks::WHOLE,
+                    value: 0.5,
+                    bend: 0.0
+                }
+            ]
+        );
+        // Between two breakpoints the line, and before the first and after
+        // the last the nearest one's value.
+        assert_eq!(automation.envelope.value_at(Ticks::ZERO), Some(1.0));
+        assert_eq!(automation.envelope.value_at(Ticks::WHOLE / 2), Some(0.75));
+        assert_eq!(automation.envelope.value_at(Ticks::WHOLE * 2), Some(0.5));
+
+        // Setting the same position replaces the breakpoint's value; a send
+        // and a device parameter hold envelopes of their own.
+        song.apply(Command::SetAutomationBreakpoint {
+            track,
+            target: volume,
+            at: Ticks::WHOLE,
+            value: 0.25,
+        })
+        .unwrap();
+        assert_eq!(
+            song.doc
+                .track(track)
+                .unwrap()
+                .automation_for(&volume)
+                .unwrap()
+                .envelope
+                .points()
+                .count(),
+            2
+        );
+        song.apply(Command::SetAutomationBreakpoint {
+            track,
+            target: send,
+            at: Ticks::ZERO,
+            value: 0.5,
+        })
+        .unwrap();
+        song.apply(Command::SetAutomationBreakpoint {
+            track,
+            target: param,
+            at: Ticks::ZERO,
+            value: -6.0,
+        })
+        .unwrap();
+        assert_eq!(song.doc.track(track).unwrap().automation().count(), 3);
+
+        // Moving and deleting a breakpoint.
+        song.apply(Command::MoveAutomationBreakpoint {
+            track,
+            target: volume,
+            at: Ticks::WHOLE,
+            to: Ticks::WHOLE * 2,
+        })
+        .unwrap();
+        assert_eq!(
+            song.doc
+                .track(track)
+                .unwrap()
+                .automation_for(&volume)
+                .unwrap()
+                .envelope
+                .points()
+                .collect::<Vec<_>>(),
+            vec![
+                Breakpoint {
+                    at: Ticks::ZERO,
+                    value: 1.0,
+                    bend: 0.0
+                },
+                Breakpoint {
+                    at: Ticks::WHOLE * 2,
+                    value: 0.25,
+                    bend: 0.0
+                }
+            ]
+        );
+        assert_eq!(
+            song.reject(Command::MoveAutomationBreakpoint {
+                track,
+                target: volume,
+                at: Ticks::WHOLE,
+                to: Ticks::WHOLE * 4,
+            }),
+            ModelError::NoChange {
+                what: "breakpoint",
+                at: Ticks::WHOLE,
+            }
+        );
+        assert_eq!(
+            song.reject(Command::MoveAutomationBreakpoint {
+                track,
+                target: volume,
+                at: Ticks::ZERO,
+                to: Ticks::WHOLE * 2,
+            }),
+            ModelError::ChangeInUse {
+                what: "breakpoint",
+                at: Ticks::WHOLE * 2,
+            }
+        );
+
+        // Moving the control by hand overrides the envelope: the control's
+        // value wins, the envelope stays, and Re-Enable brings it back.
+        song.apply(Command::SetVolume {
+            track,
+            volume: 0.75,
+        })
+        .unwrap();
+        let automation = song
+            .doc
+            .track(track)
+            .unwrap()
+            .automation_for(&volume)
+            .unwrap();
+        assert!(!automation.enabled);
+        assert_eq!(automation.envelope.points().count(), 2);
+        assert!(song.doc.track(track).unwrap().automation_overridden());
+        song.apply(Command::ReEnableAutomationFor {
+            track,
+            target: volume,
+        })
+        .unwrap();
+        assert!(
+            song.doc
+                .track(track)
+                .unwrap()
+                .automation_for(&volume)
+                .unwrap()
+                .enabled
+        );
+        // A hand move on a control with no envelope changes nothing else.
+        song.apply(Command::SetPan { track, pan: 0.5 }).unwrap();
+        assert!(!song.doc.track(track).unwrap().automation_overridden());
+
+        // The same for a device parameter and a send, and Re-Enable
+        // Automation turns every overridden envelope back on at once.
+        song.apply(Command::SetDeviceParam {
+            device,
+            param: ParamId(2),
+            value: -3.0,
+        })
+        .unwrap();
+        assert!(
+            !song
+                .doc
+                .track(track)
+                .unwrap()
+                .automation_for(&param)
+                .unwrap()
+                .enabled
+        );
+        song.apply(Command::SetSend {
+            track,
+            to: ret,
+            level: 0.25,
+        })
+        .unwrap();
+        assert!(
+            !song
+                .doc
+                .track(track)
+                .unwrap()
+                .automation_for(&send)
+                .unwrap()
+                .enabled
+        );
+        song.apply(Command::ReEnableAutomation {}).unwrap();
+        assert!(!song.doc.track(track).unwrap().automation_overridden());
+
+        // Deleting a parameter's automation takes the whole envelope; the
+        // control keeps its value. Deleting again changes nothing.
+        song.apply(Command::DeleteAutomation {
+            track,
+            target: send,
+        })
+        .unwrap();
+        assert!(
+            song.doc
+                .track(track)
+                .unwrap()
+                .automation_for(&send)
+                .is_none()
+        );
+        assert_eq!(song.doc.track(track).unwrap().send(ret), 0.25);
+        song.apply(Command::DeleteAutomation {
+            track,
+            target: send,
+        })
+        .unwrap();
+
+        // Deleting the last breakpoint takes the envelope with it.
+        song.apply(Command::DeleteAutomationBreakpoint {
+            track,
+            target: volume,
+            at: Ticks::ZERO,
+        })
+        .unwrap();
+        assert_eq!(
+            song.doc
+                .track(track)
+                .unwrap()
+                .automation_for(&volume)
+                .unwrap()
+                .envelope
+                .points()
+                .count(),
+            1
+        );
+        song.apply(Command::DeleteAutomationBreakpoint {
+            track,
+            target: volume,
+            at: Ticks::WHOLE * 2,
+        })
+        .unwrap();
+        assert!(
+            song.doc
+                .track(track)
+                .unwrap()
+                .automation_for(&volume)
+                .is_none()
+        );
+
+        // Targets the track doesn't have are refused: a send to something
+        // that isn't a return track, and a device in another chain.
+        let other = song.track(TrackKind::Audio, None);
+        let other_device = song.device(other);
+        assert!(
+            song.doc
+                .apply(&Command::SetAutomationBreakpoint {
+                    track,
+                    target: AutomationTarget::Send { to: other },
+                    at: Ticks::ZERO,
+                    value: 0.5,
+                })
+                .is_err()
+        );
+        assert_eq!(
+            song.reject(Command::SetAutomationBreakpoint {
+                track,
+                target: AutomationTarget::Device {
+                    device: other_device,
+                    param: ParamId(0),
+                },
+                at: Ticks::ZERO,
+                value: 0.5,
+            }),
+            ModelError::DeviceNotInTrack {
+                device: other_device,
+                track,
+            }
+        );
+        // A position before 1.1.1, and a value that isn't a number.
+        assert!(
+            song.doc
+                .apply(&Command::SetAutomationBreakpoint {
+                    track,
+                    target: param,
+                    at: -Ticks(1),
+                    value: 0.5,
+                })
+                .is_err()
+        );
+        assert!(
+            song.doc
+                .apply(&Command::SetAutomationBreakpoint {
+                    track,
+                    target: param,
+                    at: Ticks::ZERO,
+                    value: f64::NAN,
+                })
+                .is_err()
+        );
+
+        // Deleting a device takes its automation with it.
+        song.apply(Command::RemoveDevice { device }).unwrap();
+        assert!(
+            song.doc
+                .track(track)
+                .unwrap()
+                .automation_for(&param)
+                .is_none()
+        );
+        song.doc.check_invariants().unwrap();
+    }
+
+    /// Spec: automation R12. A segment's bend lives on the breakpoint at
+    /// its start; 0 straightens the segment again, and a bend outside −1 to
+    /// 1, a position with no breakpoint, and the last breakpoint are
+    /// refused.
+    #[test]
+    fn curving_a_segment_stores_its_bend_and_straightens_again() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        let volume = AutomationTarget::Mixer {
+            param: MixerParam::Volume,
+        };
+        for (at, value) in [(Ticks::ZERO, 0.0), (Ticks::WHOLE, 1.0)] {
+            song.apply(Command::SetAutomationBreakpoint {
+                track,
+                target: volume,
+                at,
+                value,
+            })
+            .unwrap();
+        }
+        song.apply(Command::SetAutomationCurve {
+            track,
+            target: volume,
+            at: Ticks::ZERO,
+            bend: -1.0,
+        })
+        .unwrap();
+        let automation = song
+            .doc
+            .track(track)
+            .unwrap()
+            .automation_for(&volume)
+            .unwrap();
+        assert_eq!(
+            automation.envelope.points().collect::<Vec<_>>(),
+            vec![
+                Breakpoint {
+                    at: Ticks::ZERO,
+                    value: 0.0,
+                    bend: -1.0
+                },
+                Breakpoint {
+                    at: Ticks::WHOLE,
+                    value: 1.0,
+                    bend: 0.0
+                }
+            ]
+        );
+        let half = automation.envelope.value_at(Ticks::WHOLE / 2).unwrap();
+        assert!((half - 0.5f64.sqrt()).abs() < 1e-12, "{half}");
+
+        // A bend of 0 straightens the segment again, as the same drag with
+        // a double-click does, and the breakpoints stay where they are.
+        song.apply(Command::SetAutomationCurve {
+            track,
+            target: volume,
+            at: Ticks::ZERO,
+            bend: 0.0,
+        })
+        .unwrap();
+        let automation = song
+            .doc
+            .track(track)
+            .unwrap()
+            .automation_for(&volume)
+            .unwrap();
+        assert_eq!(automation.envelope.point(Ticks::ZERO).unwrap().bend, 0.0);
+        assert_eq!(automation.envelope.value_at(Ticks::WHOLE / 2), Some(0.5));
+
+        // Refusals: a bend outside −1 to 1, a position with no breakpoint,
+        // and the last breakpoint, with no segment after it.
+        assert_eq!(
+            song.reject(Command::SetAutomationCurve {
+                track,
+                target: volume,
+                at: Ticks::ZERO,
+                bend: 1.5,
+            }),
+            ModelError::InvalidValue {
+                what: "automation bend",
+                value: 1.5,
+            }
+        );
+        assert_eq!(
+            song.reject(Command::SetAutomationCurve {
+                track,
+                target: volume,
+                at: Ticks::QUARTER,
+                bend: 0.5,
+            }),
+            ModelError::NoChange {
+                what: "breakpoint",
+                at: Ticks::QUARTER,
+            }
+        );
+        assert_eq!(
+            song.reject(Command::SetAutomationCurve {
+                track,
+                target: volume,
+                at: Ticks::WHOLE,
+                bend: 0.5,
+            }),
+            ModelError::NoChange {
+                what: "segment",
+                at: Ticks::WHOLE,
+            }
+        );
+        assert!(
+            song.doc
+                .track(track)
+                .unwrap()
+                .automation_for(&volume)
+                .unwrap()
+                .envelope
+                .points()
+                .all(|point| point.bend == 0.0),
+            "the refusals changed nothing"
+        );
+        song.doc.check_invariants().unwrap();
+    }
+
     /// Spec: musical-time R4, R5, R7, R8. Tempo changes and time-signature
     /// changes are edited one breakpoint or marker at a time: a step and a
     /// ramp, a signature change that cuts a bar short, and the refusals.
@@ -3763,9 +4980,324 @@ mod tests {
                 track,
                 clip: Clip::new(id, Ticks::ZERO, Ticks::WHOLE, audio()),
             }
-            .created_id(),
-            Some(id.0)
+            .created_ids(),
+            vec![id.0]
         );
-        assert_eq!(Command::DeleteTrack { track }.created_id(), None);
+        assert!(Command::DeleteTrack { track }.created_ids().is_empty());
+    }
+
+    // Spec: session-view R1, R4, R5, R6, R7, R8
+    #[test]
+    fn scenes_insert_move_rename_duplicate_and_delete() {
+        let mut song = Song::new();
+        assert_eq!(song.doc.scene_count(), crate::DEFAULT_SCENE_COUNT);
+        assert!(
+            song.doc.scenes().all(|scene| scene.name.is_empty()),
+            "the default scenes have no names of their own"
+        );
+        let audio_track = song.track(TrackKind::Audio, None);
+        let scene: SceneId = song.fresh();
+        song.apply(Command::CreateScene {
+            id: scene,
+            index: 0,
+        })
+        .unwrap();
+        assert_eq!(song.doc.scene_position(scene), Some(0));
+        assert_eq!(song.doc.scene(scene).unwrap().name, "");
+        song.apply(Command::RenameScene {
+            scene,
+            name: "Verse".to_owned(),
+        })
+        .unwrap();
+        assert_eq!(song.doc.scene(scene).unwrap().name, "Verse");
+
+        // A clip in the scene's slot moves with the scene.
+        let clip: ClipId = song.fresh();
+        song.apply(Command::CreateSlotClip {
+            track: audio_track,
+            scene,
+            clip: Clip::new(clip, Ticks::ZERO, Ticks::WHOLE, audio()),
+        })
+        .unwrap();
+        song.apply(Command::MoveScene { scene, index: 3 }).unwrap();
+        assert_eq!(song.doc.scene_position(scene), Some(3));
+        assert_eq!(song.doc.slot(audio_track, scene).unwrap().id, clip);
+
+        // Duplicating copies the scene, its name, and an independent clip,
+        // straight after it.
+        let copy: SceneId = song.fresh();
+        let copy_clip: ClipId = song.fresh();
+        song.apply(Command::DuplicateScene {
+            scene,
+            id: copy,
+            clips: vec![(audio_track, copy_clip)],
+        })
+        .unwrap();
+        assert_eq!(song.doc.scene_position(copy), Some(4));
+        assert_eq!(song.doc.scene(copy).unwrap().name, "Verse");
+        let copied = song.doc.slot(audio_track, copy).unwrap();
+        assert_eq!(copied.id, copy_clip);
+        assert_eq!(copied.data, audio());
+
+        // Every clip in the scene must be listed, and only those.
+        let other = song.track(TrackKind::Audio, None);
+        let missing: SceneId = song.fresh();
+        assert_eq!(
+            song.reject(Command::DuplicateScene {
+                scene,
+                id: missing,
+                clips: Vec::new(),
+            }),
+            ModelError::SceneCopyMismatch {
+                scene,
+                track: audio_track
+            }
+        );
+        let (one, two) = (song.fresh(), song.fresh());
+        assert_eq!(
+            song.reject(Command::DuplicateScene {
+                scene,
+                id: missing,
+                clips: vec![(audio_track, one), (audio_track, two)],
+            }),
+            ModelError::DuplicateId(audio_track.0)
+        );
+        let (one, two) = (song.fresh(), song.fresh());
+        assert_eq!(
+            song.reject(Command::DuplicateScene {
+                scene,
+                id: missing,
+                clips: vec![(audio_track, one), (other, two)],
+            }),
+            ModelError::SceneCopyMismatch {
+                scene,
+                track: other,
+            }
+        );
+        // The scene's copy and the clips' copies are one set of new IDs.
+        assert_eq!(
+            song.reject(Command::DuplicateScene {
+                scene,
+                id: missing,
+                clips: vec![(audio_track, ClipId(missing.0))],
+            }),
+            ModelError::DuplicateId(missing.0)
+        );
+
+        // Deleting takes the scene's clips with it; the copies stay.
+        song.apply(Command::DeleteScene { scene }).unwrap();
+        assert!(song.doc.scene(scene).is_none());
+        assert!(song.doc.clip(clip).is_none());
+        assert_eq!(song.doc.slot(audio_track, copy).unwrap().id, copy_clip);
+        assert_eq!(
+            song.reject(Command::DeleteScene { scene }),
+            ModelError::NoSuchScene(scene)
+        );
+    }
+
+    // Spec: session-view R2, R3, R9
+    #[test]
+    fn slot_clips_need_a_track_with_slots_and_an_empty_slot() {
+        let mut song = Song::new();
+        let audio_track = song.track(TrackKind::Audio, None);
+        let midi_track = song.track(TrackKind::Midi, None);
+        let group = song.track(TrackKind::Group, None);
+        let ret = song.track(TrackKind::Return, None);
+        let main = song.main();
+        let scene = song.doc.scenes().next().unwrap().id;
+
+        let audio_clip: ClipId = song.fresh();
+        song.apply(Command::CreateSlotClip {
+            track: audio_track,
+            scene,
+            clip: Clip::new(audio_clip, Ticks::ZERO, Ticks::WHOLE, audio()),
+        })
+        .unwrap();
+        let midi_clip: ClipId = song.fresh();
+        song.apply(Command::CreateSlotClip {
+            track: midi_track,
+            scene,
+            clip: Clip::new(midi_clip, Ticks::ZERO, Ticks::WHOLE, midi()),
+        })
+        .unwrap();
+        assert_eq!(song.doc.clip_count(), 2);
+        assert_eq!(song.doc.clip_track(audio_clip), Some(audio_track));
+        assert_eq!(song.doc.clip(audio_clip).unwrap().id, audio_clip);
+
+        // The data must fit the track, and only audio and MIDI tracks hold
+        // slot clips.
+        for (track, data) in [
+            (audio_track, midi()),
+            (midi_track, audio()),
+            (group, midi()),
+            (ret, audio()),
+            (main, midi()),
+        ] {
+            let clip = Clip::new(song.fresh(), Ticks::ZERO, Ticks::WHOLE, data);
+            assert!(matches!(
+                song.apply(Command::CreateSlotClip { track, scene, clip }),
+                Err(ModelError::WrongTrackKind { .. })
+            ));
+        }
+        // A slot holds one clip, and a slot clip has no position.
+        let occupied = Clip::new(song.fresh(), Ticks::ZERO, Ticks::WHOLE, audio());
+        assert_eq!(
+            song.reject(Command::CreateSlotClip {
+                track: audio_track,
+                scene,
+                clip: occupied,
+            }),
+            ModelError::SlotOccupied {
+                track: audio_track,
+                scene,
+            }
+        );
+        let placed = Clip::new(song.fresh(), Ticks::WHOLE, Ticks::WHOLE, audio());
+        assert!(matches!(
+            song.reject(Command::CreateSlotClip {
+                track: audio_track,
+                scene,
+                clip: placed,
+            }),
+            ModelError::SlotClipPosition(_)
+        ));
+        // The scene must exist.
+        let nowhere: SceneId = song.fresh();
+        let clip = Clip::new(song.fresh(), Ticks::ZERO, Ticks::WHOLE, audio());
+        assert_eq!(
+            song.reject(Command::CreateSlotClip {
+                track: audio_track,
+                scene: nowhere,
+                clip,
+            }),
+            ModelError::NoSuchScene(nowhere)
+        );
+    }
+
+    // Spec: session-view R10, R11
+    #[test]
+    fn slot_clips_move_between_slots_and_the_arrangement() {
+        let mut song = Song::new();
+        let audio_track = song.track(TrackKind::Audio, None);
+        let other = song.track(TrackKind::Audio, None);
+        let midi_track = song.track(TrackKind::Midi, None);
+        let scenes: Vec<SceneId> = song.doc.scenes().map(|scene| scene.id).collect();
+        let (first, second) = (scenes[0], scenes[1]);
+        let clip: ClipId = song.fresh();
+        song.apply(Command::CreateSlotClip {
+            track: audio_track,
+            scene: first,
+            clip: Clip::new(clip, Ticks::ZERO, Ticks::WHOLE, audio()),
+        })
+        .unwrap();
+
+        // Moving a clip into its own slot changes nothing.
+        song.apply(Command::MoveSlotClip {
+            clip,
+            track: audio_track,
+            scene: first,
+        })
+        .unwrap();
+        assert_eq!(song.doc.slot(audio_track, first).unwrap().id, clip);
+
+        // To another track, and to another scene.
+        song.apply(Command::MoveSlotClip {
+            clip,
+            track: other,
+            scene: first,
+        })
+        .unwrap();
+        assert_eq!(song.doc.slot(other, first).unwrap().id, clip);
+        assert!(song.doc.slot(audio_track, first).is_none());
+        song.apply(Command::MoveSlotClip {
+            clip,
+            track: other,
+            scene: second,
+        })
+        .unwrap();
+        assert_eq!(song.doc.slot(other, second).unwrap().id, clip);
+        assert_eq!(song.doc.clip_track(clip), Some(other));
+
+        // A slot that holds another clip, or a track without slots, is
+        // refused.
+        let blocker: ClipId = song.fresh();
+        song.apply(Command::CreateSlotClip {
+            track: audio_track,
+            scene: second,
+            clip: Clip::new(blocker, Ticks::ZERO, Ticks::WHOLE, audio()),
+        })
+        .unwrap();
+        assert_eq!(
+            song.reject(Command::MoveSlotClip {
+                clip,
+                track: audio_track,
+                scene: second,
+            }),
+            ModelError::SlotOccupied {
+                track: audio_track,
+                scene: second,
+            }
+        );
+        assert!(matches!(
+            song.reject(Command::MoveSlotClip {
+                clip,
+                track: midi_track,
+                scene: second,
+            }),
+            ModelError::WrongTrackKind { .. }
+        ));
+
+        // Out of the slot onto the Arrangement lane, and back, arriving at
+        // 0.
+        song.apply(Command::MoveClip {
+            clip,
+            track: other,
+            start: Ticks::WHOLE * 4,
+        })
+        .unwrap();
+        assert_eq!(song.doc.clip(clip).unwrap().start, Ticks::WHOLE * 4);
+        assert!(song.doc.slot(other, second).is_none());
+        song.apply(Command::MoveSlotClip {
+            clip,
+            track: other,
+            scene: second,
+        })
+        .unwrap();
+        assert_eq!(song.doc.clip(clip).unwrap().start, Ticks::ZERO);
+        assert_eq!(song.doc.slot(other, second).unwrap().id, clip);
+
+        // Deleting a slot clip frees its slot.
+        song.apply(Command::DeleteClip { clip }).unwrap();
+        assert!(song.doc.clip(clip).is_none());
+        assert!(song.doc.slot(other, second).is_none());
+        assert_eq!(song.doc.clip_count(), 1);
+    }
+
+    // Spec: session-view R11
+    #[test]
+    fn the_clip_edits_work_on_a_slot_clip() {
+        let mut song = Song::new();
+        let midi_track = song.track(TrackKind::Midi, None);
+        let scene = song.doc.scenes().next().unwrap().id;
+        let clip: ClipId = song.fresh();
+        song.apply(Command::CreateSlotClip {
+            track: midi_track,
+            scene,
+            clip: Clip::new(clip, Ticks::ZERO, Ticks::WHOLE, midi()),
+        })
+        .unwrap();
+        // The clip edits that don't place a clip work on a slot clip too.
+        song.apply(Command::RenameClip {
+            clip,
+            name: "Riff".to_owned(),
+        })
+        .unwrap();
+        song.apply(Command::SetClipMute { clip, mute: true })
+            .unwrap();
+        song.apply(Command::SetClipData { clip, data: midi() })
+            .unwrap();
+        let held = song.doc.slot(midi_track, scene).unwrap();
+        assert_eq!((held.name.as_str(), held.mute), ("Riff", true));
+        assert_eq!(song.doc.clip(clip).unwrap().name, "Riff");
     }
 }

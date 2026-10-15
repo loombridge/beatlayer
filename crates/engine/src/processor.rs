@@ -3,7 +3,7 @@
 use std::time::Instant;
 
 use bl_core::midi::MidiInputEvent;
-use bl_core::time::{Frames, SampleRate, TempoMap, Ticks};
+use bl_core::time::{Frames, SampleRate, TempoMap, Ticks, TimeSignatureMap};
 use bl_model::ParamId;
 use bl_rt::log::{Level, Writer};
 use bl_rt::rt_log;
@@ -14,6 +14,7 @@ use crate::gc::Program;
 use crate::message::{
     Action, LoopRegion, Message, ParamEvent, Report, ScheduledCommand, TransportCommand, When,
 };
+use crate::metronome::{Block, MetronomeEngine};
 use crate::midi::{MidiCounters, MidiIn, TrackMidiInput};
 use crate::node::{NodeData, NodeEvent, NodeKey, ParamValue, TransportInfo};
 use crate::program::{EngineProgram, Resolved};
@@ -177,6 +178,8 @@ pub struct Processor {
     program: Option<Program>,
     /// The tempo map until a program arrives with one.
     fallback_tempo: TempoMap,
+    fallback_time_signatures: TimeSignatureMap,
+    metronome: MetronomeEngine,
     /// `channels` channels of `max_frames` frames.
     output: Vec<f32>,
     /// Frames in the last block.
@@ -220,6 +223,8 @@ impl Processor {
             state,
             program: None,
             fallback_tempo: TempoMap::default(),
+            fallback_time_signatures: TimeSignatureMap::default(),
+            metronome: MetronomeEngine::new(),
             output: vec![0.0; config.channels * config.max_frames],
             last: 0,
             clock: 0,
@@ -313,19 +318,47 @@ impl Processor {
 
     /// Processes one block of `frames` frames (at most
     /// [`EngineConfig::max_frames`]; more are cut to that) and returns its
-    /// output. Real-time safe.
+    /// output. Real-time safe. No device input is seen, and the block is
+    /// timed from now: a device's callback goes through
+    /// [`process_at`](Self::process_at), which takes its input and the time
+    /// its callback ran.
     pub fn process(&mut self, frames: usize) -> Output<'_> {
-        self.process_at(frames, Instant::now())
+        self.process_at(frames, &crate::NoInput, Instant::now())
     }
 
-    /// Processes one block, as [`Processor::process`] does, that the audio
-    /// callback started at `now`: the time MIDI input is placed against
-    /// (`docs/specs/midi-io.md`, R15). A device's callback passes the time
-    /// it was called; a test passes times of its own. Real-time safe.
-    pub fn process_at(&mut self, frames: usize, now: Instant) -> Output<'_> {
+    /// Processes one block with the audio device's input, for tracks whose
+    /// Audio From is Ext. In (WP-2.13). `frames` is at most
+    /// [`EngineConfig::max_frames`]; more are cut to that. Real-time safe:
+    /// the input is copied into the program's own buffers, which were made
+    /// when the engine was.
+    pub fn process_with_input(
+        &mut self,
+        frames: usize,
+        input: &dyn crate::DeviceInput,
+    ) -> Output<'_> {
+        self.process_at(frames, input, Instant::now())
+    }
+
+    /// Processes one block, as [`Processor::process`] does, with the audio
+    /// device's `input` and timed at `now`, the time the audio callback
+    /// started the block. `now` is the clock MIDI input is placed against
+    /// (`docs/specs/midi-io.md`, R15, R16): a device's callback passes the
+    /// time it was called, so the block clock's delay-locked loop can smooth
+    /// the jitter in when it runs, and a test passes times of its own.
+    /// Real-time safe: the input is copied into the program's own buffers,
+    /// which were made when the engine was.
+    pub fn process_at(
+        &mut self,
+        frames: usize,
+        input: &dyn crate::DeviceInput,
+        now: Instant,
+    ) -> Output<'_> {
         let began = Instant::now();
         let frames = frames.min(self.config.max_frames);
         self.drain();
+        if let Some(program) = self.program.as_mut() {
+            program.get_mut().copy_device_input(input, frames);
+        }
         // Spec: midi-io R12, R14, R15
         let routes = self.program.as_mut().map(|p| &mut p.get_mut().midi);
         self.midi.take(now, self.clock, frames, routes);
@@ -363,6 +396,7 @@ impl Processor {
         let carry = self.carry();
         // Spec: device-changes R1
         self.playing = false;
+        self.metronome.stop();
         self.silence_meters();
         self.publish(0.0);
         carry
@@ -419,6 +453,7 @@ impl Processor {
         let rate = self.config.sample_rate;
         self.clock = carry.clock;
         self.playing = false;
+        self.metronome.stop();
         self.position = self.frames_at(carry.position);
         self.insert_marker = carry.insert_marker;
         self.loop_region = carry.loop_region;
@@ -556,14 +591,14 @@ impl Processor {
     }
 
     fn deliver(&mut self, key: NodeKey, data: NodeData) {
-        let node = self.program.as_mut().and_then(|program| {
+        let instance = self.program.as_mut().and_then(|program| {
             let program = program.get_mut();
             let slot = program.slot_of(key)?;
-            program.node_mut(slot)
+            program.instance_mut(slot)
         });
-        match node {
-            Some(node) => {
-                node.receive_data(data);
+        match instance {
+            Some(instance) => {
+                instance.receive_data(data);
                 self.counters.data_delivered += 1;
             }
             // Dropping the data only lets go of it.
@@ -589,6 +624,7 @@ impl Processor {
             TransportCommand::Play => self.play_from_insert_marker(),
             // Spec: transport R3, R4
             TransportCommand::Stop => {
+                self.metronome.stop();
                 if self.playing {
                     self.playing = false;
                 } else {
@@ -602,6 +638,7 @@ impl Processor {
             TransportCommand::PlayStop => {
                 if self.playing {
                     self.playing = false;
+                    self.metronome.stop();
                 } else {
                     self.play_from_insert_marker();
                 }
@@ -611,6 +648,7 @@ impl Processor {
                 self.insert_marker = ticks.max(Ticks::ZERO);
                 if self.playing {
                     self.position = self.frames_at(self.insert_marker);
+                    self.metronome.stop();
                 }
             }
             // Spec: transport R9
@@ -628,10 +666,18 @@ impl Processor {
                 self.loop_region = region;
                 self.update_loop_frames();
             }
+            TransportCommand::SetMetronome(settings) => self.metronome.set_settings(settings),
+            TransportCommand::SetRecording(recording) => self.metronome.set_recording(recording),
         }
     }
 
     fn play_from_insert_marker(&mut self) {
+        let (tempo, sigs) = match &self.program {
+            Some(p) => (&p.get().tempo, &p.get().time_signatures),
+            None => (&self.fallback_tempo, &self.fallback_time_signatures),
+        };
+        self.metronome
+            .start_count_in(self.config.sample_rate, tempo, sigs, self.insert_marker);
         self.position = self.frames_at(self.insert_marker);
         self.playing = true;
     }
@@ -782,6 +828,13 @@ impl Processor {
         if !self.playing {
             return next;
         }
+        if self.metronome.is_counting_in() {
+            let count_in = self.metronome.count_in_remaining();
+            if count_in > 0 && count_in < next {
+                next = count_in;
+            }
+            return next;
+        }
         let mut song = |frame: Frames| {
             let ahead = frame.saturating_sub(self.position).get();
             if ahead > 0 && ahead < next as i64 {
@@ -804,6 +857,24 @@ impl Processor {
     /// there, so the next part starts at the loop's start.
     fn render(&mut self, offset: usize, length: usize) {
         let stride = self.config.max_frames;
+        if self.metronome.is_counting_in() {
+            for c in 0..self.config.channels {
+                let to = c * stride + offset;
+                self.output[to..to + length].fill(0.0);
+            }
+            self.metronome.render_count_in(
+                Block {
+                    output: &mut self.output,
+                    stride,
+                    channels: self.config.channels,
+                    offset,
+                    length,
+                },
+                self.config.sample_rate,
+            );
+            return;
+        }
+
         let transport = TransportInfo {
             playing: self.playing,
             position: self.position,
@@ -832,6 +903,23 @@ impl Processor {
             }
         }
         if self.playing {
+            let (tempo, sigs) = match &self.program {
+                Some(p) => (&p.get().tempo, &p.get().time_signatures),
+                None => (&self.fallback_tempo, &self.fallback_time_signatures),
+            };
+            self.metronome.render_active(
+                Block {
+                    output: &mut self.output,
+                    stride,
+                    channels: self.config.channels,
+                    offset,
+                    length,
+                },
+                self.position,
+                self.config.sample_rate,
+                tempo,
+                sigs,
+            );
             let before = self.position;
             self.position += Frames(length as i64);
             // Spec: transport R13, R14

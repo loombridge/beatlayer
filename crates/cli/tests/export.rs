@@ -661,13 +661,14 @@ fn the_same_export_is_the_same_bytes_at_any_block_size() {
     let fixture = fixture("clip-mid-bar").unwrap();
     let scene = fixture.scene();
     let temp = TempDir::new("blocks");
-    for (file_type, dither) in [
-        (FileType::Flac, Dither::Triangular),
-        (FileType::Wav, Dither::Rectangular),
+    for (case, file_type, dither) in [
+        ("triangular", FileType::Flac, Dither::Triangular),
+        ("rectangular", FileType::Wav, Dither::Rectangular),
+        ("noise-shaped", FileType::Wav, Dither::NoiseShaped),
     ] {
         let mut files = Vec::new();
         for (n, block) in [512, 512, 61, 4096].into_iter().enumerate() {
-            let path = temp.0.join(format!("{n}.{}", file_type.extension()));
+            let path = temp.0.join(format!("{case}-{n}.{}", file_type.extension()));
             let mut job = job(path.clone(), file_type, BitDepth::Int16, scene.frames);
             job.dither = dither;
             job.block = block;
@@ -679,7 +680,9 @@ fn the_same_export_is_the_same_bytes_at_any_block_size() {
             "{file_type:?}"
         );
         // Dither changes the file, by at most a step either way.
-        let path = temp.0.join(format!("plain.{}", file_type.extension()));
+        let path = temp
+            .0
+            .join(format!("{case}-plain.{}", file_type.extension()));
         run(
             scene.document(),
             media_of(fixture),
@@ -687,17 +690,139 @@ fn the_same_export_is_the_same_bytes_at_any_block_size() {
         );
         assert_ne!(fs::read(&path).unwrap(), files[0]);
         let plain = decode(&path).2;
-        let dithered = decode(&temp.0.join(format!("0.{}", file_type.extension()))).2;
+        let dithered = decode(&temp.0.join(format!("{case}-0.{}", file_type.extension()))).2;
         let step = 1.0 / 32_768.0;
-        let reach = if dither == Dither::Triangular {
-            2.0
-        } else {
-            1.0
+        let reach = match dither {
+            Dither::Triangular => 2.0,
+            // The shaper's feedback adds up to a few steps of noise.
+            Dither::NoiseShaped => 6.5,
+            _ => 1.0,
         };
         for (a, b) in plain.iter().zip(&dithered) {
             assert!((a - b).abs() <= reach * step + 1e-9, "{a} against {b}");
         }
     }
+}
+
+/// The bit rate and sample rate an MPEG-1 Layer III file's first frame
+/// header says, from the file's first four bytes.
+fn mp3_frame_header(bytes: &[u8]) -> (u32, u32) {
+    assert_eq!(bytes[0], 0xff, "a frame sync");
+    assert_eq!(bytes[1] & 0xe0, 0xe0, "a frame sync");
+    assert_eq!((bytes[1] >> 3) & 3, 3, "MPEG-1");
+    assert_eq!((bytes[1] >> 1) & 3, 1, "Layer III");
+    const BIT_RATES: [u32; 16] = [
+        0, 32_000, 40_000, 48_000, 56_000, 64_000, 80_000, 96_000, 112_000, 128_000, 160_000,
+        192_000, 224_000, 256_000, 320_000, 0,
+    ];
+    const RATES: [u32; 3] = [44_100, 48_000, 32_000];
+    (
+        BIT_RATES[(bytes[2] >> 4) as usize],
+        RATES[((bytes[2] >> 2) & 3) as usize],
+    )
+}
+
+/// The power at `freq` hertz in `samples`, by Goertzel's method.
+fn goertzel(samples: &[f64], rate: f64, freq: f64) -> f64 {
+    let coeff = 2.0 * (std::f64::consts::TAU * freq / rate).cos();
+    let (mut s1, mut s2) = (0.0, 0.0);
+    for &x in samples {
+        let s0 = x + coeff * s1 - s2;
+        s2 = s1;
+        s1 = s0;
+    }
+    s1 * s1 + s2 * s2 - coeff * s1 * s2
+}
+
+/// The signal-to-error ratio in dB below `band` hertz, of `output` against
+/// `reference` (interleaved, `channels` to a frame): the worst channel's,
+/// as the audio import spec measures a lossy decode (R5). Both are
+/// Hann-windowed over the middle 80% of the frames and their power summed
+/// over 256 frequencies in the band.
+fn band_snr_db(reference: &[f32], output: &[f32], channels: usize, rate: u32, band: f64) -> f64 {
+    const BINS: usize = 256;
+    (0..channels)
+        .map(|channel| {
+            let take = |samples: &[f32]| -> Vec<f64> {
+                samples
+                    .iter()
+                    .skip(channel)
+                    .step_by(channels)
+                    .map(|&s| f64::from(s))
+                    .collect()
+            };
+            let (reference, output) = (take(reference), take(output));
+            let n = reference.len().min(output.len());
+            let (start, len) = (n / 10, n - n / 10);
+            let mut signal = vec![0.0; len];
+            let mut error = vec![0.0; len];
+            for i in 0..len {
+                let window = 0.5 - 0.5 * (std::f64::consts::TAU * i as f64 / len as f64).cos();
+                signal[i] = reference[start + i] * window;
+                error[i] = (output[start + i] - reference[start + i]) * window;
+            }
+            let power = |samples: &[f64]| -> f64 {
+                (0..BINS)
+                    .map(|k| {
+                        goertzel(
+                            samples,
+                            f64::from(rate),
+                            band * (k as f64 + 0.5) / BINS as f64,
+                        )
+                    })
+                    .sum()
+            };
+            10.0 * (power(&signal) / power(&error).max(1e-30)).log10()
+        })
+        .fold(f64::INFINITY, f64::min)
+}
+
+/// Spec: export R23 (WP-2.26). An MP3 export is 320 kbps CBR at the export's
+/// rate, and decodes, through Beatlayer's own decoder, within the audio
+/// import spec's MP3 tolerance of the WAV export of the same render.
+#[test]
+fn an_mp3_export_decodes_within_the_lossy_tolerance() {
+    let temp = TempDir::new("mp3");
+    let (editor, media) = eight_stems(1.0);
+    let media: Arc<dyn MediaLibrary> = Arc::new(media);
+    let frames = 48_000;
+
+    let wav_path = temp.0.join("stems.wav");
+    run(
+        editor.document(),
+        media.clone(),
+        &job(wav_path.clone(), FileType::Wav, BitDepth::Float32, frames),
+    );
+    let (rate, channels, reference) = decode(&wav_path);
+
+    let mp3_path = temp.0.join("stems.mp3");
+    let report = run(
+        editor.document(),
+        media,
+        &job(mp3_path.clone(), FileType::Mp3, BitDepth::Int24, frames),
+    );
+    assert_eq!(report.frames, frames, "the frames written");
+
+    let bytes = fs::read(&mp3_path).unwrap();
+    assert_eq!(
+        mp3_frame_header(&bytes),
+        (320_000, 48_000),
+        "320 kbps CBR at the export's rate"
+    );
+
+    let (mp3_rate, mp3_channels, decoded) = decode(&mp3_path);
+    assert_eq!(mp3_rate, rate);
+    assert_eq!(mp3_channels, channels);
+    assert_eq!(
+        decoded.len(),
+        reference.len(),
+        "the same frames as the WAV export"
+    );
+    // The audio import spec's MP3 tolerance for a sine, 65 dB below
+    // 15 kHz, a few dB under what LAME reaches.
+    let snr = band_snr_db(&reference, &decoded, channels, rate, 15_000.0);
+    println!("an MP3 export of eight stems: {snr:.1} dB below 15 kHz (limit 65)");
+    assert!(snr >= 65.0, "{snr:.1} dB below 15 kHz");
 }
 
 fn bl_cli(args: &[&str]) -> Output {

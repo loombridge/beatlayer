@@ -86,6 +86,11 @@ object_id!(
     "clip"
 );
 object_id!(
+    /// The ID of a scene: a row of the Session grid.
+    SceneId,
+    "scene"
+);
+object_id!(
     /// The ID of a device in a track's device chain.
     DeviceId,
     "device"

@@ -55,6 +55,9 @@ use crate::editor::{EditError, Editor};
 
 /// The ID of the command that undoes the newest step.
 pub const UNDO: &str = "edit.undo";
+/// The ID of the command that turns every overridden envelope in the song
+/// back on: the Control Bar's Re-Enable Automation button.
+pub const RE_ENABLE_AUTOMATION: &str = "automation.re_enable";
 /// The ID of the command that redoes the newest undone step.
 pub const REDO: &str = "edit.redo";
 
@@ -398,6 +401,61 @@ const ENTRIES: &[Entry] = &[
             saved with the set, and undo switches it back.",
     },
     Entry {
+        id: "transport.set_metronome_enabled",
+        action: Action::Apply("set_metronome_enabled"),
+        label: "Metronome",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[Key::Toggles("S-TRANS-011", "enabled")],
+        description: "Switches the metronome on or off, as the Control Bar's Metronome switch and \
+            the Playback menu's Metronome item do. When on, the metronome clicks on each beat of the \
+            song, with the downbeat accented. The switch is saved with the set, and undo switches it back.",
+    },
+    Entry {
+        id: "transport.set_metronome_count_in",
+        action: Action::Apply("set_metronome_count_in"),
+        label: "Metronome Count-In",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Sets the metronome count-in length: `none`, `1_bar`, `2_bars`, or `4_bars`. \
+            When enabled, starting playback or recording plays the chosen bars of metronome clicks \
+            before the transport moves. The setting is saved with the set, and undo restores it.",
+    },
+    Entry {
+        id: "transport.set_metronome_sound",
+        action: Action::Apply("set_metronome_sound"),
+        label: "Metronome Sound",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Chooses the metronome's sound character: `classic`, `click`, or `wood`. \
+            All sounds are synthesized in code. The setting is saved with the set, and undo restores it.",
+    },
+    Entry {
+        id: "transport.set_metronome_rhythm",
+        action: Action::Apply("set_metronome_rhythm"),
+        label: "Metronome Rhythm",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Sets the rhythmic division the metronome clicks at: `auto` (follows the time \
+            signature's denominator), `1_bar`, `1/2`, `1/2t`, `1/4`, `1/4t`, `1/8`, `1/8t`, `1/16`, \
+            or `1/16t`. If a division exceeds the bar length under the current time signature, \
+            clicks follow the auto interval. The setting is saved with the set, and undo restores it.",
+    },
+    Entry {
+        id: "transport.set_metronome_only_while_recording",
+        action: Action::Apply("set_metronome_only_while_recording"),
+        label: "Hear Metronome Only While Recording",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Switches whether the metronome clicks only while recording or during playback as \
+            well, as the Playback menu and Metronome Settings menu do. The setting is saved with the \
+            set, and undo switches it back.",
+    },
+    Entry {
         id: "track.create",
         action: Action::Apply("create_track"),
         label: "Insert Track",
@@ -583,6 +641,106 @@ const ENTRIES: &[Entry] = &[
             setting is saved with the set.",
     },
     Entry {
+        id: "automation.set_breakpoint",
+        action: Action::Apply("set_automation_breakpoint"),
+        label: "Set Automation Breakpoint",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Sets one of a track's automatable parameters at `at` on its envelope, \
+            adding a breakpoint there or replacing the value of the one that's there, as \
+            clicking or dragging a breakpoint on an automation lane does. `target` names the \
+            parameter: `{\"type\": \"mixer\", \"param\": \"volume\"}`, `{\"type\": \"send\", \
+            \"to\": <return track>}`, or `{\"type\": \"device\", \"device\": <device>, \
+            \"param\": <parameter>}`. A parameter with no envelope yet gets its first \
+            breakpoint and its envelope drives it from then on. Values are in the parameter's \
+            own units: volume as linear gain, pan from -1 to 1, the Track Activator 1 for \
+            muted, and a device parameter as the device's own value. `at` is 0 (1.1.1) or \
+            later. The value between two breakpoints follows the segment's shape: the straight \
+            line unless `automation.set_curve` bent it; before the first and after the last \
+            the nearest one's value holds.",
+    },
+    Entry {
+        id: "automation.set_curve",
+        action: Action::Apply("set_automation_curve"),
+        label: "Curve Automation Segment",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Curves one of a track's automation segments, as holding Alt (Windows) or \
+            Option (macOS) while dragging a line segment on an automation lane does. `track` \
+            and `target` name the parameter as `automation.set_breakpoint` does, and `at` is \
+            the position of the breakpoint the segment starts at. `bend` is a signed number \
+            from -1 to 1: 0 is the straight line, the sign chooses which side the segment bows \
+            to, and its size how far. Between the two breakpoints the value is `from + (to - \
+            from) * t^(2^bend)`, `t` running from 0 at the segment's start to 1 at its end, so \
+            the value stays between the two breakpoints' values. A bend of 0 straightens the \
+            segment again, as the same drag with a double-click does. Refused when no \
+            breakpoint is at `at`, or when `at` is the last breakpoint, with no segment after \
+            it. Beatlayer's own law: Live's curved shape isn't measured yet.",
+    },
+    Entry {
+        id: "automation.move_breakpoint",
+        action: Action::Apply("move_automation_breakpoint"),
+        label: "Move Automation Breakpoint",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Moves one of a track's automation breakpoints from `at` to `to`, keeping \
+            its value, as dragging it along an automation lane does. `to` is 0 (1.1.1) or \
+            later and mustn't land on another breakpoint of the same envelope. A position with \
+            no breakpoint is refused.",
+    },
+    Entry {
+        id: "automation.delete_breakpoint",
+        action: Action::Apply("delete_automation_breakpoint"),
+        label: "Delete Automation Breakpoint",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Deletes one of a track's automation breakpoints, so the segments either \
+            side of it become the one starting at the breakpoint before it, as clicking a \
+            breakpoint on an automation lane does. Deleting the last one takes the parameter's \
+            envelope with it, so the parameter follows its control again. A position with no \
+            breakpoint is refused.",
+    },
+    Entry {
+        id: "automation.delete",
+        action: Action::Apply("delete_automation"),
+        label: "Delete Automation",
+        permission: Permission::Destructive,
+        contexts: &[Global],
+        keys: &[],
+        description: "Deletes all of one of a track's parameters' automation: its envelope and \
+            every breakpoint on it, as Delete Automation in the control's context menu does. \
+            The control's value stays where it is and the parameter follows it again. Nothing \
+            changes if the parameter has no automation.",
+    },
+    Entry {
+        id: RE_ENABLE_AUTOMATION,
+        action: Action::Apply("re_enable_automation"),
+        label: "Re-Enable Automation",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Turns every overridden envelope in the song back on, as the Control Bar's \
+            Re-Enable Automation button does: every automated control that a hand move turned \
+            off follows its envelope again. It's one undo step, and nothing changes when no \
+            envelope is overridden. Use `automation.re_enable_for` for one parameter.",
+    },
+    Entry {
+        id: "automation.re_enable_for",
+        action: Action::Apply("re_enable_automation_for"),
+        label: "Re-Enable Automation for a Parameter",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Turns one parameter's overridden envelope back on, as Re-Enable \
+            Automation in that control's context menu does. `track` and `target` name the \
+            parameter the same way `automation.set_breakpoint` does. Nothing changes if the \
+            parameter's envelope isn't overridden.",
+    },
+    Entry {
         id: "routing.set_input",
         action: Action::Apply("set_input"),
         label: "Set Input",
@@ -591,19 +749,20 @@ const ENTRIES: &[Entry] = &[
         keys: &[],
         description: "Sets where an audio or MIDI track takes its input from, as the In/Out \
             section's Audio From or MIDI From chooser and its channel do. An audio track can \
-            take `external` (Ext. In, the audio interface; silent until audio input is built), \
-            `resampling` (the Main output, for recording the mix; the track's own output and \
-            sends are then silent so it can't feed back), `none`, or `track` with another \
-            audio track, a group, a return track, or Main and a `tap`: `pre_fx` (before its devices), \
-            `post_fx` (after its devices, before its mixer), or `post_mixer` (its output, the \
-            default). A MIDI track can take `all_ins` (every MIDI input whose Track switch is \
-            on in the settings, and the computer MIDI keyboard), `computer_keyboard`, `port` \
-            with the port's `name` as the MIDI settings list it, `none`, or another MIDI track \
-            (which carries MIDI once MIDI playback is built). `channel` is 1 to 16 to take only \
-            that channel, or null (the default) for All Channels; only a port input has one. \
-            The input is heard only while the track monitors it (`routing.set_monitor`). A \
-            routing may make a loop, as in Live; the engine plays the routing that closes it as \
-            silence.",
+            take `external` (Ext. In, the audio interface's inputs, with a `channel`: a single \
+            channel (`{ \"type\": \"mono\", \"channel\": 3 }`) or a stereo pair (`{ \"type\": \
+            \"pair\", \"channel\": 3 }`, the pair 3/4), counted from 1), `resampling` (the Main \
+            output, for recording the mix; the track's own output and sends are then silent so \
+            it can't feed back), `none`, or `track` with another audio track, a group, a return \
+            track, or Main and a `tap`: `pre_fx` (before its devices), `post_fx` (after its \
+            devices, before its mixer), or `post_mixer` (its output, the default). A MIDI track \
+            can take `all_ins` (every MIDI input whose Track switch is on in the settings, and \
+            the computer MIDI keyboard), `computer_keyboard`, `port` with the port's `name` as \
+            the MIDI settings list it, `none`, or another MIDI track (which carries MIDI once \
+            MIDI playback is built). `channel` is 1 to 16 to take only that channel, or null \
+            (the default) for All Channels; only a port input has one. The input is heard only \
+            while the track monitors it (`routing.set_monitor`). A routing may make a loop, as \
+            in Live; the engine plays the routing that closes it as silence.",
     },
     Entry {
         id: "routing.set_monitor",
@@ -643,6 +802,31 @@ const ENTRIES: &[Entry] = &[
             another MIDI track (its Track In), or `null` for No Output (a new MIDI track's).",
     },
     Entry {
+        id: "routing.set_main_out",
+        action: Action::Apply("set_main_out"),
+        label: "Set Main Out",
+        permission: Permission::Edit,
+        contexts: &[Session, Arrangement],
+        keys: &[],
+        description: "Sets Main's Main Out, the audio interface's output channels the Main mix \
+            goes to, as Main's In/Out section does: `channel` is a stereo pair of the \
+            interface's outputs (`{ \"type\": \"pair\", \"channel\": 3 }` is the pair 3/4), \
+            counted from 1. The default is the first pair, 1/2.",
+    },
+    Entry {
+        id: "routing.set_cue_out",
+        action: Action::Apply("set_cue_out"),
+        label: "Set Cue Out",
+        permission: Permission::Edit,
+        contexts: &[Session, Arrangement],
+        keys: &[],
+        description: "Sets Main's Cue Out, the audio interface's output channels the cue mix \
+            goes to, as Main's In/Out section does: `channel` is a stereo pair of the \
+            interface's outputs, counted from 1; the default is the first pair, 1/2. It \
+            carries the cue mix once cue mode is built (a later package); the choice is kept \
+            and saved with the set.",
+    },
+    Entry {
         id: "clip.create",
         action: Action::Apply("create_clip"),
         label: "Create Clip",
@@ -667,10 +851,10 @@ const ENTRIES: &[Entry] = &[
         // The Delete key deletes the Arrangement's selection
         // (`arrangement.delete`, WP-1.8b), which may be clips or time.
         keys: &[],
-        description: "Deletes a clip from the arrangement. Undo restores it, but because it \
-            removes the person's work an agent asks first. To keep a clip but stop it playing, \
-            use `clip.set_mute`. To delete the clips or the time selected in the Arrangement, \
-            use `arrangement.delete`.",
+        description: "Deletes a clip, from the Arrangement or from a track's Session slot. \
+            Undo restores it, but because it removes the person's work an agent asks first. To \
+            keep a clip but stop it playing, use `clip.set_mute`. To delete the clips or the \
+            time selected in the Arrangement, use `arrangement.delete`.",
     },
     Entry {
         id: "clip.move",
@@ -855,6 +1039,90 @@ const ENTRIES: &[Entry] = &[
             where it ends, use `clip.set_length`.",
     },
     Entry {
+        id: "clip.create_in_slot",
+        action: Action::Apply("create_slot_clip"),
+        label: "Create Clip in Slot",
+        permission: Permission::Edit,
+        contexts: &[Session],
+        keys: &[],
+        description: "Puts a clip in a track's Session slot at `scene`, as Insert Empty MIDI \
+            Clip (Cmd+Shift+M) and dropping a clip in a slot do. Only audio and MIDI tracks hold \
+            slot clips, the slot must be empty, and the clip's data must match the track. A slot \
+            clip is a clip like an Arrangement clip, but it has no position there, so its \
+            `start` must be 0. `clip.id` must be a new ID the project has issued for it.",
+    },
+    Entry {
+        id: "clip.move_to_slot",
+        action: Action::Apply("move_slot_clip"),
+        label: "Move Clip to Slot",
+        permission: Permission::Edit,
+        contexts: &[Session],
+        keys: &[],
+        description: "Moves a clip into a track's Session slot at `scene`, out of the slot or \
+            the Arrangement lane it sits in, as dragging a clip between slots does. The target \
+            slot must be empty, unless it's the clip's own slot, and the clip's data must match \
+            the track. A slot clip has no position in the Arrangement: it arrives with its \
+            start at 0.",
+    },
+    Entry {
+        id: "scene.create",
+        action: Action::Apply("create_scene"),
+        label: "Insert Scene",
+        permission: Permission::Edit,
+        contexts: &[Session],
+        keys: &[],
+        description: "Inserts a new empty scene at `index` among the scenes, as Create ▸ \
+            Insert Scene (Cmd+I) does: it holds an empty slot in every audio and MIDI track. A \
+            new set opens with eight scenes. `id` must be a new ID the project has issued for \
+            it.",
+    },
+    Entry {
+        id: "scene.delete",
+        action: Action::Apply("delete_scene"),
+        label: "Delete Scene",
+        permission: Permission::Destructive,
+        contexts: &[Session],
+        keys: &[],
+        description: "Deletes a scene, and the clips in its slots with it; the clips in the \
+            other scenes stay. Undo restores everything it deleted, but because it removes the \
+            person's work an agent asks first.",
+    },
+    Entry {
+        id: "scene.move",
+        action: Action::Apply("move_scene"),
+        label: "Move Scene",
+        permission: Permission::Edit,
+        contexts: &[Session],
+        keys: &[],
+        description: "Moves a scene to `index` among the scenes, with the clips in its slots, as \
+            dragging a scene does. The index counts positions after the scene is taken out of \
+            its current place, so moving a scene down past its neighbour is its current index \
+            plus one.",
+    },
+    Entry {
+        id: "scene.duplicate",
+        action: Action::Apply("duplicate_scene"),
+        label: "Duplicate Scene",
+        permission: Permission::Edit,
+        contexts: &[Session],
+        keys: &[],
+        description: "Copies a scene and the clips in its slots into a new scene directly after \
+            it, as Edit ▸ Duplicate does. `clips` lists every track that holds a clip in the \
+            scene, each with the new ID its copy takes; each copy is an independent clip. A \
+            scene whose slots are all empty copies no clips. `id` must be a new ID the project \
+            has issued for it.",
+    },
+    Entry {
+        id: "scene.rename",
+        action: Action::Apply("rename_scene"),
+        label: "Rename Scene",
+        permission: Permission::Edit,
+        contexts: &[Session],
+        keys: &[],
+        description: "Renames a scene. A name may be empty: a scene without a name shows its \
+            number, which is its position.",
+    },
+    Entry {
         id: "device.insert",
         action: Action::Apply("insert_device"),
         label: "Insert Device",
@@ -975,6 +1243,19 @@ const ENTRIES: &[Entry] = &[
         description: "Sets one of a device's parameters to a value in the parameter's own \
             units. The value must be finite. Parameters that haven't been set keep their \
             defaults.",
+    },
+    Entry {
+        id: "device.set_sample",
+        action: Action::Apply("set_device_sample"),
+        label: "Set Sample",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sets the audio a device plays (`media`, a content hash, or null to play \
+            none), which the media store holds like a clip's audio. A device whose type plays a \
+            sample plays that file; other devices ignore it. The set keeps the reference, so it \
+            reopens playing the same file. To load a file from disk as a person does, use \
+            `device.load_sample`.",
     },
     Entry {
         id: "device.set_sidechain_input",

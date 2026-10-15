@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use bl_core::midi::{MidiInputEvent, MidiMessage, MidiSource};
 use bl_core::time::SampleRate;
-use bl_engine::{Collector, Compiler, EngineConfig, Processor, Registry, Sender, channel};
+use bl_engine::{Collector, Compiler, EngineConfig, NoInput, Processor, Registry, Sender, channel};
 use bl_midi_io::{ComputerKeyboard, Direction, MidiPorts, PortSwitches, TestBackend, input_queue};
 use bl_model::{Command, Editor, Input, Monitor, TrackId, TrackKind};
 
@@ -74,7 +74,7 @@ impl Rig {
     fn block_at(&mut self, now: Instant) {
         let processor = &mut self.processor;
         bl_rt::rt_test!({
-            processor.process_at(BLOCK, now);
+            processor.process_at(BLOCK, &NoInput, now);
         });
     }
 

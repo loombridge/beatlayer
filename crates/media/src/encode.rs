@@ -1,10 +1,23 @@
-//! Encoding: writing audio files (WP-1.12, the export spec).
+//! Encoding: writing audio files (WP-1.12, the export spec; MP3, WP-2.26).
 //!
 //! [`AudioWriter`] writes WAV, AIFF, or FLAC at 16 or 24 bits (integers) or
 //! 32 bits (IEEE floating point, in WAV and AIFF-C), a block of interleaved
 //! 32-bit float samples at a time, so a file of any length is written
 //! without holding it in memory. Below 32 bits a [`Quantiser`] dithers (or
-//! not) and rounds each sample to the nearest step.
+//! not) and rounds each sample to the nearest step. MP3 is lossy and has no
+//! bit depth: its samples go to the encoder as they are, at 320 kbps CBR.
+//!
+//! [`Dither::NoiseShaped`] is Beatlayer's own noise-shaped dither, not a
+//! reproduction of any licensed one. It uses error-feedback noise shaping
+//! (R. W. Cutler, "Transmission systems employing quantization", U.S.
+//! Patent 2,927,962, 1960) with the shaping filter chosen for where hearing
+//! is least sensitive, the idea Lipshitz, Wannamaker and Vanderkooy set out
+//! in "Minimally audible noise shaping" (J. Audio Eng. Soc. 39(11), 1991).
+//! A second-order high-pass filter (1 − z⁻¹)² shapes both a triangular
+//! dither and the rounding error, so the noise it leaves falls in the 2–5
+//! kHz region hearing is most sensitive to and rises above 15 kHz. Its
+//! filter state is kept per channel, so one channel's noise never feeds the
+//! next.
 //!
 //! - WAV goes through `hound`.
 //! - AIFF is written here: `FORM`, `COMM`, and `SSND` chunks, big-endian;
@@ -12,6 +25,8 @@
 //! - FLAC goes through `flacenc`, one frame at a time, straight to the
 //!   file; the stream's header, with its MD5 and length, is written again
 //!   when the stream is complete.
+//! - MP3 goes through LAME (the `mp3lame-encoder` bindings), 320 kbps CBR,
+//!   at one of MP3's sample rates.
 //!
 //! Every writer patches its header when it finishes, so a file isn't
 //! complete until [`AudioWriter::finish`] returns. Writing it under a
@@ -35,7 +50,15 @@ pub enum FileType {
     Aiff,
     /// FLAC: lossless, integers only.
     Flac,
+    /// MP3: lossy, 320 kbps CBR, one or two channels.
+    Mp3,
 }
+
+/// The sample rates MP3 holds: MPEG-1 (32, 44.1 and 48 kHz), MPEG-2 (16,
+/// 22.05 and 24 kHz), and MPEG-2.5 (8, 11.025 and 12 kHz).
+pub const MP3_RATES: [u32; 9] = [
+    8_000, 11_025, 12_000, 16_000, 22_050, 24_000, 32_000, 44_100, 48_000,
+];
 
 impl FileType {
     /// The usual extension, without the dot.
@@ -45,11 +68,12 @@ impl FileType {
             Self::Wav => "wav",
             Self::Aiff => "aif",
             Self::Flac => "flac",
+            Self::Mp3 => "mp3",
         }
     }
 
     /// The file type a path's extension names: `.wav`, `.aif` or `.aiff`,
-    /// or `.flac`, in any case.
+    /// `.flac`, or `.mp3`, in any case.
     #[must_use]
     pub fn from_path(path: &Path) -> Option<Self> {
         let extension = path.extension()?.to_str()?.to_ascii_lowercase();
@@ -57,12 +81,14 @@ impl FileType {
             "wav" | "wave" => Some(Self::Wav),
             "aif" | "aiff" | "aifc" => Some(Self::Aiff),
             "flac" => Some(Self::Flac),
+            "mp3" => Some(Self::Mp3),
             _ => None,
         }
     }
 
     /// Whether this file type can hold samples of `depth`. FLAC holds
-    /// integers only, so not 32-bit float.
+    /// integers only, so not 32-bit float; MP3 is lossy and has no bit
+    /// depth, so any depth is written as 320 kbps CBR.
     #[must_use]
     pub fn holds(self, depth: BitDepth) -> bool {
         !(self == Self::Flac && depth == BitDepth::Float32)
@@ -120,6 +146,12 @@ pub enum Dither {
     /// distribution.
     #[default]
     Triangular,
+    /// Beatlayer's noise-shaped dither: a triangular dither and the
+    /// rounding error, both passed through a second-order high-pass filter,
+    /// so their noise leaves the frequencies hearing is most sensitive to
+    /// and rises above 15 kHz. See the module's notes for the method and
+    /// its sources. Only 16- and 24-bit exports use it.
+    NoiseShaped,
 }
 
 /// The seed every [`Quantiser`] starts from unless given another, so an
@@ -132,27 +164,51 @@ pub const DITHER_SEED: u64 = 0x6265_6174_6c61_7972;
 /// to the nearest step (halves away from zero), and clipped to the depth's
 /// range, so 1.0 becomes the largest positive step. NaN becomes 0. Without
 /// dither, this is how the golden references round the engine's output.
+///
+/// [`Dither::NoiseShaped`] feeds the rounding error, and a shaped dither,
+/// back through a second-order high-pass filter, one filter per channel.
 #[derive(Clone, Debug)]
 pub struct Quantiser {
     scale: f64,
     dither: Dither,
     state: u64,
+    /// Channels in a frame: the shaper's state is kept apart for each, so a
+    /// channel's noise doesn't feed the next one.
+    channels: usize,
+    /// Which channel the next sample belongs to.
+    channel: usize,
+    /// The noise shaper's state, one per channel (only used by
+    /// [`Dither::NoiseShaped`]).
+    shaper: Vec<Shaper>,
+}
+
+/// One channel's noise-shaping filter state: the last two rounding errors
+/// and the last two dither values, so (1 − z⁻¹)² can be applied to both.
+#[derive(Clone, Copy, Debug, Default)]
+struct Shaper {
+    errors: [f64; 2],
+    dithers: [f64; 2],
 }
 
 impl Quantiser {
     /// A quantiser to `bits` (from 2 to 32) with `dither`, its noise
-    /// generator started from `seed`.
+    /// generator started from `seed`, for interleaved frames of `channels`
+    /// channels.
     ///
     /// # Panics
     ///
-    /// If `bits` is outside 2 to 32.
+    /// If `bits` is outside 2 to 32, or `channels` is zero.
     #[must_use]
-    pub fn new(bits: u32, dither: Dither, seed: u64) -> Self {
+    pub fn new(bits: u32, dither: Dither, channels: usize, seed: u64) -> Self {
         assert!((2..=32).contains(&bits), "{bits} bits");
+        assert!(channels >= 1, "{channels} channels");
         Self {
             scale: 2f64.powi(bits as i32 - 1),
             dither,
             state: seed,
+            channels,
+            channel: 0,
+            shaper: vec![Shaper::default(); channels],
         }
     }
 
@@ -166,21 +222,53 @@ impl Quantiser {
         (z >> 11) as f64 * (1.0 / (1u64 << 53) as f64)
     }
 
+    /// Two uniform numbers, for a triangular distribution over ±1 step.
+    fn triangular(&mut self) -> f64 {
+        self.uniform() + self.uniform() - 1.0
+    }
+
     /// The dither noise for the next sample, in steps.
     fn noise(&mut self) -> f64 {
         match self.dither {
             Dither::None => 0.0,
             Dither::Rectangular => self.uniform() - 0.5,
-            Dither::Triangular => self.uniform() + self.uniform() - 1.0,
+            Dither::Triangular => self.triangular(),
+            Dither::NoiseShaped => 0.0,
         }
     }
 
     /// `sample` as an integer step.
     pub fn quantise(&mut self, sample: f32) -> i32 {
+        let channel = self.channel;
+        self.channel = (self.channel + 1) % self.channels;
+        let scaled = f64::from(sample) * self.scale;
+        if self.dither == Dither::NoiseShaped {
+            // The dither and the rounding error both pass through
+            // (1 − z⁻¹)²: `t` is the triangular noise, `d` its shaped
+            // version, and `2e₁ − e₂` feeds back the shaped error.
+            let t = self.triangular();
+            let shaper = &mut self.shaper[channel];
+            let d = t - 2.0 * shaper.dithers[0] + shaper.dithers[1];
+            shaper.dithers = [t, shaper.dithers[0]];
+            let v = scaled + d + 2.0 * shaper.errors[0] - shaper.errors[1];
+            let rounded = v.round();
+            let y = rounded.clamp(-self.scale, self.scale - 1.0);
+            // Only the rounding error is fed back. A clipped sample's whole
+            // overshoot must not be: a run of them would grow the error
+            // without bound and leave full-scale noise ringing on after the
+            // clipping ends. A non-finite sample keeps out of the loop too,
+            // so it stays the 0 it is without dither.
+            let error = v - rounded;
+            shaper.errors = [
+                if error.is_finite() { error } else { 0.0 },
+                shaper.errors[0],
+            ];
+            return y as i32;
+        }
         let noise = self.noise();
         // Scaling by a power of two is exact, so the rounding is the one
         // step that loses anything.
-        (f64::from(sample) * self.scale + noise)
+        (scaled + noise)
             .round()
             .clamp(-self.scale, self.scale - 1.0) as i32
     }
@@ -191,13 +279,13 @@ impl Quantiser {
 pub struct EncodeSpec {
     /// The file type.
     pub file_type: FileType,
-    /// The bits in each sample.
+    /// The bits in each sample. Ignored by MP3, which has no bit depth.
     pub bit_depth: BitDepth,
-    /// The dither below 32 bits; ignored at 32.
+    /// The dither below 32 bits; ignored at 32. Ignored by MP3.
     pub dither: Dither,
     /// Frames per second.
     pub sample_rate: u32,
-    /// Channels in each frame, from 1 to 8.
+    /// Channels in each frame, from 1 to 8 (MP3 holds 1 or 2).
     pub channels: u16,
 }
 
@@ -205,6 +293,7 @@ enum Sink {
     Wav(hound::WavWriter<BufWriter<File>>),
     Aiff(AiffWriter),
     Flac(Box<FlacWriter>),
+    Mp3(Mp3Writer),
 }
 
 /// Writes an audio file a block at a time. See the module's notes.
@@ -237,8 +326,8 @@ impl AudioWriter {
     /// # Errors
     ///
     /// [`MediaError::Encode`] if the file type can't hold the depth (32-bit
-    /// FLAC), the rate or channel count is out of range, or the file can't
-    /// be created.
+    /// FLAC), the rate or channel count is out of range (MP3 takes 1 or 2
+    /// channels at one of its own rates), or the file can't be created.
     pub fn create(path: &Path, spec: EncodeSpec) -> Result<Self, MediaError> {
         Self::create_seeded(path, spec, DITHER_SEED)
     }
@@ -254,6 +343,25 @@ impl AudioWriter {
                 path,
                 "FLAC holds integer samples only; write 32-bit float as WAV or AIFF",
             ));
+        }
+        if spec.file_type == FileType::Mp3 {
+            if !(1..=2).contains(&spec.channels) {
+                return Err(encode_error(
+                    path,
+                    format!("{} channels; MP3 holds one or two", spec.channels),
+                ));
+            }
+            if !MP3_RATES.contains(&spec.sample_rate) {
+                let rates: Vec<String> = MP3_RATES.iter().map(u32::to_string).collect();
+                return Err(encode_error(
+                    path,
+                    format!(
+                        "a sample rate of {} Hz; MP3 holds {} Hz",
+                        spec.sample_rate,
+                        rates.join(", ")
+                    ),
+                ));
+            }
         }
         if !(1..=8).contains(&spec.channels) {
             return Err(encode_error(
@@ -289,11 +397,19 @@ impl AudioWriter {
             FileType::Flac => Sink::Flac(Box::new(
                 FlacWriter::new(file, &spec).map_err(|error| encode_error(path, error))?,
             )),
+            FileType::Mp3 => {
+                Sink::Mp3(Mp3Writer::new(file, &spec).map_err(|error| encode_error(path, error))?)
+            }
         };
         Ok(Self {
             sink,
             spec,
-            quantiser: Quantiser::new(spec.bit_depth.bits().min(24), spec.dither, seed),
+            quantiser: Quantiser::new(
+                spec.bit_depth.bits().min(24),
+                spec.dither,
+                usize::from(spec.channels),
+                seed,
+            ),
             frames: 0,
             ints: Vec::new(),
         })
@@ -327,7 +443,10 @@ impl AudioWriter {
             )));
         }
         let failed = |what: String| MediaError::Encode(what);
-        if self.spec.bit_depth.is_integer() {
+        if let Sink::Mp3(mp3) = &mut self.sink {
+            // MP3 is lossy: the samples go to the encoder as they are.
+            mp3.write(samples).map_err(failed)?;
+        } else if self.spec.bit_depth.is_integer() {
             self.ints.clear();
             self.ints
                 .extend(samples.iter().map(|&s| self.quantiser.quantise(s)));
@@ -346,6 +465,7 @@ impl AudioWriter {
                     .write_ints(&self.ints)
                     .map_err(|e| failed(e.to_string()))?,
                 Sink::Flac(flac) => flac.write(&self.ints)?,
+                Sink::Mp3(_) => unreachable!("MP3 took the samples above"),
             }
         } else {
             match &mut self.sink {
@@ -359,6 +479,7 @@ impl AudioWriter {
                     .write_floats(samples)
                     .map_err(|e| failed(e.to_string()))?,
                 Sink::Flac(_) => unreachable!("FLAC refuses 32-bit float when it's created"),
+                Sink::Mp3(_) => unreachable!("MP3 took the samples above"),
             }
         }
         self.frames += (samples.len() / channels) as u64;
@@ -377,6 +498,7 @@ impl AudioWriter {
             Sink::Wav(wav) => wav.finalize().map_err(|e| failed(e.to_string()))?,
             Sink::Aiff(aiff) => aiff.finish().map_err(|e| failed(e.to_string()))?,
             Sink::Flac(flac) => flac.finish()?,
+            Sink::Mp3(mp3) => mp3.finish()?,
         }
         Ok(self.frames)
     }
@@ -429,7 +551,8 @@ pub fn wav_bytes(
     {
         let mut wav = hound::WavWriter::new(&mut bytes, spec).map_err(|e| failed(e.to_string()))?;
         if bit_depth.is_integer() {
-            let mut quantiser = Quantiser::new(bit_depth.bits(), dither, DITHER_SEED);
+            let mut quantiser =
+                Quantiser::new(bit_depth.bits(), dither, usize::from(channels), DITHER_SEED);
             for &sample in samples {
                 let step = quantiser.quantise(sample);
                 let written = if bit_depth == BitDepth::Int16 {
@@ -698,6 +821,86 @@ impl FlacWriter {
     }
 }
 
+/// MP3 at 320 kbps CBR, through LAME (WP-2.26).
+///
+/// LAME writes an empty frame at the start of the stream, which the final
+/// LAME tag replaces when the stream is complete: the tag records the
+/// encoder's delay and the padding it added, so a decoder trims the decode
+/// back to exactly the frames written (the audio import spec, R4). The
+/// destination is a file, so the tag goes over the empty frame in place.
+struct Mp3Writer {
+    file: BufWriter<File>,
+    encoder: mp3lame_encoder::Encoder,
+    /// Channels in a frame, for the encoder's interleaved input.
+    channels: usize,
+    /// The encoded bytes of the block being written, reused.
+    out: Vec<u8>,
+}
+
+fn mp3_error(what: impl std::fmt::Display) -> MediaError {
+    MediaError::Encode(format!("MP3: {what}"))
+}
+
+impl Mp3Writer {
+    fn new(file: BufWriter<File>, spec: &EncodeSpec) -> Result<Self, String> {
+        let channels = usize::from(spec.channels);
+        let encoder = mp3lame_encoder::Builder::new()
+            .ok_or_else(|| "LAME couldn't be created".to_owned())?
+            .with_num_channels(spec.channels as u8)
+            .map_err(|error| error.to_string())?
+            .with_sample_rate(spec.sample_rate)
+            .map_err(|error| error.to_string())?
+            .with_brate(mp3lame_encoder::Bitrate::Kbps320)
+            .map_err(|error| error.to_string())?
+            .build()
+            .map_err(|error| error.to_string())?;
+        Ok(Self {
+            file,
+            encoder,
+            channels,
+            out: Vec::new(),
+        })
+    }
+
+    fn write(&mut self, samples: &[f32]) -> Result<(), String> {
+        let frames = samples.len() / self.channels;
+        self.out.clear();
+        self.out
+            .reserve(mp3lame_encoder::max_required_buffer_size(frames));
+        self.encoder
+            .encode_to_vec(mp3lame_encoder::InterleavedPcm(samples), &mut self.out)
+            .map_err(|error| error.to_string())?;
+        self.file
+            .write_all(&self.out)
+            .map_err(|error| error.to_string())
+    }
+
+    fn finish(mut self) -> Result<(), MediaError> {
+        self.out.clear();
+        // FlushGap pads the last frame with silence; the tag's padding then
+        // has it trimmed off again.
+        self.out.reserve(7200);
+        self.encoder
+            .flush_to_vec::<mp3lame_encoder::FlushGap>(&mut self.out)
+            .map_err(mp3_error)?;
+        self.file.write_all(&self.out).map_err(mp3_error)?;
+        // The empty frame LAME put at the start becomes the LAME tag frame,
+        // in place: it records the encoder's delay and the padding to trim.
+        // No ID3 tag is written, so the empty frame is the very first byte.
+        let tag_size = self.encoder.lame_tag_size();
+        if tag_size > 0 {
+            let mut tag = Vec::with_capacity(tag_size);
+            if self.encoder.lame_tag_encode_to_vec(&mut tag).is_some() {
+                self.file.flush().map_err(mp3_error)?;
+                self.file.seek(SeekFrom::Start(0)).map_err(mp3_error)?;
+                self.file.write_all(&tag).map_err(mp3_error)?;
+            }
+        }
+        self.file.flush().map_err(mp3_error)?;
+        self.file.get_ref().sync_all().map_err(mp3_error)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -730,7 +933,7 @@ mod tests {
     // Spec: export R4, R7.
     #[test]
     fn samples_round_to_the_nearest_step_and_clip() {
-        let mut q = Quantiser::new(24, Dither::None, 0);
+        let mut q = Quantiser::new(24, Dither::None, 1, 0);
         assert_eq!(q.quantise(0.0), 0);
         assert_eq!(q.quantise(0.5), 1 << 22);
         assert_eq!(q.quantise(-1.0), -(1 << 23));
@@ -743,7 +946,7 @@ mod tests {
         );
         assert_eq!(q.quantise(-1.5 / 8_388_608.0), -2);
         assert_eq!(q.quantise(f32::NAN), 0);
-        let mut q = Quantiser::new(16, Dither::None, 0);
+        let mut q = Quantiser::new(16, Dither::None, 1, 0);
         assert_eq!(q.quantise(1.0), i32::from(i16::MAX));
         assert_eq!(q.quantise(-1.0), i32::from(i16::MIN));
         assert_eq!(q.quantise(0.25), 8192);
@@ -753,8 +956,8 @@ mod tests {
     #[test]
     fn dither_stays_within_its_steps_and_repeats() {
         for dither in [Dither::Rectangular, Dither::Triangular] {
-            let mut q = Quantiser::new(16, dither, DITHER_SEED);
-            let mut again = Quantiser::new(16, dither, DITHER_SEED);
+            let mut q = Quantiser::new(16, dither, 1, DITHER_SEED);
+            let mut again = Quantiser::new(16, dither, 1, DITHER_SEED);
             let mut sum = 0i64;
             let mut squares = 0f64;
             let n = 200_000;
@@ -780,8 +983,145 @@ mod tests {
             }
         }
         // With no dither, a value on a step stays there.
-        let mut q = Quantiser::new(16, Dither::None, 7);
+        let mut q = Quantiser::new(16, Dither::None, 1, 7);
         assert!((0..1000).all(|_| q.quantise(3.0 / 32_768.0) == 3));
+    }
+
+    /// |X|² at `freq` hertz in `samples` (steps), by Goertzel's method, for
+    /// a real signal at `rate` hertz.
+    fn goertzel(samples: &[f64], rate: f64, freq: f64) -> f64 {
+        let coeff = 2.0 * (std::f64::consts::TAU * freq / rate).cos();
+        let (mut s1, mut s2) = (0.0, 0.0);
+        for &x in samples {
+            let s0 = x + coeff * s1 - s2;
+            s2 = s1;
+            s1 = s0;
+        }
+        s1 * s1 + s2 * s2 - coeff * s1 * s2
+    }
+
+    /// The mean one-sided noise power spectral density across `low..high`
+    /// hertz, sampled at `count` frequencies: steps² per hertz.
+    fn band_density(samples: &[f64], rate: f64, low: f64, high: f64, count: usize) -> f64 {
+        let n = samples.len() as f64;
+        (0..count)
+            .map(|k| {
+                let freq = low + (high - low) * (k as f64 + 0.5) / count as f64;
+                2.0 * goertzel(samples, rate, freq) / (n * rate)
+            })
+            .sum::<f64>()
+            / count as f64
+    }
+
+    /// Spec: export R7 (WP-2.27). With digital silence in, the shaped
+    /// dither's noise is lower in the 2–5 kHz band hearing is most
+    /// sensitive to than triangular dither's flat noise, and higher above
+    /// 15 kHz, where the shaping moves it.
+    #[test]
+    fn the_noise_shaped_dither_moves_its_noise_out_of_the_ear() {
+        let rate = 48_000.0f64;
+        let n = 1 << 17;
+        let noise = |dither| {
+            let mut q = Quantiser::new(16, dither, 1, DITHER_SEED);
+            (0..n)
+                .map(|_| f64::from(q.quantise(0.0)))
+                .collect::<Vec<f64>>()
+        };
+        let shaped = noise(Dither::NoiseShaped);
+        let triangular = noise(Dither::Triangular);
+        let shaped_ear = band_density(&shaped, rate, 2_000.0, 5_000.0, 64);
+        let triangular_ear = band_density(&triangular, rate, 2_000.0, 5_000.0, 64);
+        let shaped_top = band_density(&shaped, rate, 15_000.0, 23_000.0, 64);
+        let triangular_top = band_density(&triangular, rate, 15_000.0, 23_000.0, 64);
+        assert!(
+            shaped_ear < triangular_ear / 2.0,
+            "2–5 kHz: shaped {shaped_ear:e}, triangular {triangular_ear:e}"
+        );
+        assert!(
+            shaped_top > triangular_top * 2.0,
+            "above 15 kHz: shaped {shaped_top:e}, triangular {triangular_top:e}"
+        );
+        // The shaping moves the noise rather than multiplying it: the whole
+        // band holds no more than about 12 dB more than triangular's.
+        let shaped_all = band_density(&shaped, rate, 100.0, 23_000.0, 256);
+        let triangular_all = band_density(&triangular, rate, 100.0, 23_000.0, 256);
+        assert!(
+            shaped_all < triangular_all * 16.0,
+            "{shaped_all:e} against {triangular_all:e}"
+        );
+    }
+
+    /// Spec: export R7 (WP-2.27). A −90 dBFS sine, about one step at 16
+    /// bits, still stands well above the noise the shaped dither leaves.
+    #[test]
+    fn a_minus_90_dbfs_sine_stays_above_the_noise_shaped_dither() {
+        let rate = 48_000.0f64;
+        let freq = 1_000.0f64;
+        let n = 1 << 17;
+        let amplitude = 10f64.powf(-90.0 / 20.0);
+        let mut q = Quantiser::new(16, Dither::NoiseShaped, 1, DITHER_SEED);
+        let out: Vec<f64> = (0..n)
+            .map(|i| {
+                let x = amplitude * (std::f64::consts::TAU * freq * i as f64 / rate).sin();
+                f64::from(q.quantise(x as f32))
+            })
+            .collect();
+        // The tone's amplitude, from its spectral line: |X| ≈ n·A/2.
+        let tone = 2.0 * goertzel(&out, rate, freq).sqrt() / n as f64;
+        // The noise the shaping leaves where hearing is most sensitive.
+        let noise = (band_density(&out, rate, 2_000.0, 5_000.0, 64) * 3_000.0).sqrt();
+        assert!(tone > 0.8, "the sine is {} steps", tone);
+        assert!(
+            tone > noise * 5.0,
+            "the sine {tone} against {noise} of noise"
+        );
+    }
+
+    /// Spec: export R7, R14 (WP-2.27). The shaped dither repeats from the
+    /// same seed, and each sample stays within the shaping noise of the
+    /// plain rounding, so an export with it nulls within its own noise.
+    #[test]
+    fn the_noise_shaped_dither_repeats_and_stays_within_its_noise() {
+        let mut a = Quantiser::new(16, Dither::NoiseShaped, 2, DITHER_SEED);
+        let mut b = Quantiser::new(16, Dither::NoiseShaped, 2, DITHER_SEED);
+        let mut plain = Quantiser::new(16, Dither::None, 2, DITHER_SEED);
+        for i in 0..100_000 {
+            let t = i as f64 / 48_000.0;
+            let x = (0.5 * (std::f64::consts::TAU * 997.0 * t).sin()) as f32;
+            let shaped = a.quantise(x);
+            assert_eq!(shaped, b.quantise(x), "the same seed repeats, at {i}");
+            let rounded = plain.quantise(x);
+            assert!(
+                (f64::from(shaped) - f64::from(rounded)).abs() <= 6.5,
+                "at {i}: {shaped} against {rounded}"
+            );
+        }
+    }
+
+    /// Spec: export R7 (WP-2.27). Samples past full scale clip; a run of
+    /// them must not grow the shaper's error, or the silence after it comes
+    /// out at full scale for hours. A non-finite sample, which quantises to
+    /// the same 0 it does without dither, must leave the loop clean too.
+    #[test]
+    fn a_clipped_run_leaves_the_noise_shaper_stable() {
+        let mut q = Quantiser::new(16, Dither::NoiseShaped, 1, DITHER_SEED);
+        for _ in 0..48_000 {
+            assert_eq!(q.quantise(1.5), i32::from(i16::MAX));
+        }
+        for i in 0..4_800 {
+            let sample = q.quantise(0.0);
+            assert!(
+                sample.abs() <= 8,
+                "silence {i} samples past the clipped run: {sample}"
+            );
+        }
+        // A non-finite sample quantises to the same 0 it does without
+        // dither, and it leaves the loop clean too.
+        assert_eq!(q.quantise(f32::NAN), 0);
+        for i in 0..100 {
+            let sample = q.quantise(0.0);
+            assert!(sample.abs() <= 8, "silence {i} after the NaN: {sample}");
+        }
     }
 
     #[test]
@@ -799,10 +1139,15 @@ mod tests {
             FileType::from_path(Path::new("a.flac")),
             Some(FileType::Flac)
         );
-        assert_eq!(FileType::from_path(Path::new("a.mp3")), None);
+        assert_eq!(FileType::from_path(Path::new("a.mp3")), Some(FileType::Mp3));
+        assert_eq!(FileType::from_path(Path::new("a.MP3")), Some(FileType::Mp3));
         assert_eq!(FileType::from_path(Path::new("a")), None);
         assert!(!FileType::Flac.holds(BitDepth::Float32));
         assert!(FileType::Flac.holds(BitDepth::Int24));
+        // MP3 has no bit depth: every depth writes 320 kbps CBR.
+        assert!(FileType::Mp3.holds(BitDepth::Int16));
+        assert!(FileType::Mp3.holds(BitDepth::Float32));
+        assert_eq!(FileType::Mp3.extension(), "mp3");
         assert_eq!(BitDepth::from_bits(24), Some(BitDepth::Int24));
         assert_eq!(BitDepth::from_bits(8), None);
     }
@@ -865,7 +1210,7 @@ mod tests {
                 assert_eq!(info.channels, 2, "{path:?}");
                 let data = decoder.decode_to_end().unwrap();
                 assert_eq!(data.frames(), 10_001, "{path:?}");
-                let mut q = Quantiser::new(depth.bits().min(24), Dither::None, 0);
+                let mut q = Quantiser::new(depth.bits().min(24), Dither::None, 2, 0);
                 let scale = f64::from(1u32 << (depth.bits().min(24) - 1));
                 for (n, frame) in samples.chunks(2).enumerate() {
                     for (c, &written) in frame.iter().enumerate() {
@@ -884,6 +1229,64 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Spec: export R23 (WP-2.26). An MP3 holds exactly the frames written,
+    /// at the export's rate and channels: LAME's tag records the encoder's
+    /// delay and padding, so a decoder trims them back off (the audio import
+    /// spec, R4). The bit depth and dither don't reach the file.
+    #[test]
+    fn an_mp3_decodes_to_the_frames_written() {
+        let temp = TempDir::new("mp3");
+        let samples = signal(48_011);
+        let spec = EncodeSpec {
+            file_type: FileType::Mp3,
+            bit_depth: BitDepth::Int24,
+            dither: Dither::Triangular,
+            sample_rate: 48_000,
+            channels: 2,
+        };
+        for rate in [48_000, 44_100] {
+            let path = temp.0.join(format!("x{rate}.mp3"));
+            let spec = EncodeSpec {
+                sample_rate: rate,
+                ..spec
+            };
+            let mut writer = AudioWriter::create(&path, spec).unwrap();
+            for chunk in samples.chunks(2 * 777) {
+                writer.write(chunk).unwrap();
+            }
+            assert_eq!(writer.finish().unwrap(), 48_011);
+
+            let decoder = Decoder::open(&path).unwrap_or_else(|e| panic!("{path:?}: {e}"));
+            let info = *decoder.info();
+            assert_eq!(info.sample_rate, rate, "{path:?}");
+            assert_eq!(info.channels, 2, "{path:?}");
+            assert_eq!(
+                decoder.decode_to_end().unwrap().frames(),
+                48_011,
+                "{path:?}"
+            );
+        }
+
+        // MP3 holds one or two channels, at one of its own rates.
+        let three = EncodeSpec {
+            channels: 3,
+            ..spec
+        };
+        assert!(matches!(
+            AudioWriter::create(&temp.0.join("three.mp3"), three),
+            Err(MediaError::Encode(_))
+        ));
+        let high = EncodeSpec {
+            sample_rate: 96_000,
+            ..spec
+        };
+        assert!(matches!(
+            AudioWriter::create(&temp.0.join("high.mp3"), high),
+            Err(MediaError::Encode(_))
+        ));
+        assert!(!temp.0.join("three.mp3").exists());
     }
 
     #[test]

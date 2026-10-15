@@ -84,7 +84,7 @@ pub fn utility_type() -> DeviceType {
 
 /// Adds the Utility device to `registry`.
 pub fn register(registry: &mut Registry) {
-    add(registry, utility_type(), |_| Utility::new());
+    add(registry, utility_type(), |_, _| Utility::new());
 }
 
 /// Utility's state between blocks: the DC filter's state per channel and the

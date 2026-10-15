@@ -28,7 +28,8 @@ runs:
         # Audio: ALSA, JACK, and PipeWire headers for the audio I/O backends.
         # Windowing: X11, XCB, xkbcommon, Wayland, GL, and fontconfig headers
         #   for the UI candidates (GPUI, egui) and for plug-in editor windows
-        #   (baseview or winit).
+        #   (baseview or winit). Xvfb gives the headless runner an X display
+        #   for the plug-in editor window tests (WP-2.10).
         sudo apt-get update
         sudo apt-get install --yes --no-install-recommends \
           pkg-config \
@@ -51,4 +52,5 @@ runs:
           libxkbcommon-x11-dev \
           libwayland-dev \
           libgl-dev \
-          libfontconfig-dev
+          libfontconfig-dev \
+          xvfb

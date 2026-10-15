@@ -5,7 +5,7 @@
 //! and 4, returns A-Reverb and B-Delay, and Main. The behaviour is in the
 //! routing spec.
 
-use bl_model::{Input, Monitor, Output, Tap, TrackId, TrackKind};
+use bl_model::{Channel, Input, Monitor, Output, Tap, TrackId, TrackKind};
 use bl_shell::Shell;
 use bl_shell::routing::{self, Chooser, InOut, return_letter, track_label};
 use serde_json::json;
@@ -38,7 +38,13 @@ fn observed_set() -> Set {
 }
 
 fn section(shell: &Shell, track: TrackId) -> InOut {
-    routing::in_out(shell.editor().document(), track).unwrap()
+    routing::in_out(shell.editor().document(), track, shell.interface()).unwrap()
+}
+
+/// The In/Out section with an interface whose channels `interface` names,
+/// for the choosers that list the device's channels.
+fn section_with(shell: &Shell, track: TrackId, interface: routing::Interface) -> InOut {
+    routing::in_out(shell.editor().document(), track, interface).unwrap()
 }
 
 fn clips(shell: &Shell, track: TrackId) -> (Chooser, Chooser, Monitor, Chooser, Chooser) {
@@ -106,7 +112,9 @@ fn every_chooser_lists_what_lives_lists_in_the_same_order() {
         ]
     );
     assert_eq!(input.text, "Ext. In");
-    assert_eq!(channel.pending, Some(routing::DUPLEX_AUDIO));
+    assert_eq!(channel.pending, None, "the channel list follows the device");
+    assert_eq!(channel.text, "1/2", "the first pair, with no device open");
+    assert_eq!(channel.labels(), Vec::<&str>::new());
     assert_eq!(monitor, Monitor::Auto);
     assert_eq!(
         output.labels(),
@@ -201,14 +209,138 @@ fn every_chooser_lists_what_lives_lists_in_the_same_order() {
     let (_, channel) = output_only(&shell, returns[0]);
     assert_eq!(channel.labels(), ["Track In"]);
 
-    // Main: Cue Out and Main Out wait for the audio interface's outputs.
+    // Main: Cue Out and Main Out list the interface's outputs, which
+    // arrive with the audio interface (WP-2.13); with none open, only
+    // Configure…, as Live shows with no audio device (observed).
     match section(&shell, shell.editor().document().main_id()) {
         InOut::Main { cue, main } => {
-            assert_eq!(cue.labels(), ["Configure…"]);
-            assert_eq!(main.pending, Some(routing::DUPLEX_AUDIO));
+            assert_eq!(cue.labels(), ["Configure…", "─"]);
+            assert_eq!(cue.text, "1/2");
+            assert_eq!(main.labels(), ["Configure…", "─"]);
+            assert_eq!(main.text, "1/2");
         }
         other => panic!("{other:?}"),
     }
+}
+
+/// The Ext. In channel and Main Out choosers list the open interface's
+/// channels, and the agent API sets both, as the routing spec's commands do
+/// (WP-2.13).
+#[test]
+fn the_interface_choosers_list_its_channels_and_the_agent_api_sets_them() {
+    let Set {
+        mut shell, audio, ..
+    } = observed_set();
+    let interface = routing::Interface {
+        inputs: 4,
+        outputs: 4,
+    };
+
+    // Ext. In's channel: the single channels, then the pairs.
+    let channel_of = |shell: &Shell| match section_with(shell, audio[0], interface) {
+        InOut::Clips { input_channel, .. } => input_channel,
+        other => panic!("{other:?}"),
+    };
+    let channel = channel_of(&shell);
+    assert_eq!(channel.labels(), ["1", "2", "3", "4", "1/2", "3/4"]);
+    assert_eq!(channel.text, "1/2");
+    shell
+        .run(
+            "routing.set_input",
+            json!({ "track": audio[0], "input": { "type": "external", "channel": { "type": "mono", "channel": 3 } } }),
+        )
+        .unwrap();
+    assert_eq!(
+        shell
+            .editor()
+            .document()
+            .track(audio[0])
+            .unwrap()
+            .routing()
+            .input,
+        Input::External {
+            channel: Channel::Mono(3)
+        }
+    );
+    assert_eq!(channel_of(&shell).text, "3");
+    let channel = channel_of(&shell);
+    choose(&mut shell, &channel, "4");
+    assert_eq!(
+        shell
+            .editor()
+            .document()
+            .track(audio[0])
+            .unwrap()
+            .routing()
+            .input,
+        Input::External {
+            channel: Channel::Mono(4)
+        }
+    );
+    let channel = channel_of(&shell);
+    choose(&mut shell, &channel, "3/4");
+    assert_eq!(
+        shell
+            .editor()
+            .document()
+            .track(audio[0])
+            .unwrap()
+            .routing()
+            .input,
+        Input::External {
+            channel: Channel::Pair(3)
+        }
+    );
+
+    // Main Out and Cue Out: the interface's output pairs, set by command.
+    let main_id = shell.editor().document().main_id();
+    let (cue, main) = match section_with(&shell, main_id, interface) {
+        InOut::Main { cue, main } => (cue, main),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(cue.labels(), ["Configure…", "─", "1/2", "3/4"]);
+    assert_eq!(main.labels(), ["Configure…", "─", "1/2", "3/4"]);
+    assert_eq!(main.text, "1/2");
+    shell
+        .run(
+            "routing.set_main_out",
+            json!({ "channel": { "type": "pair", "channel": 3 } }),
+        )
+        .unwrap();
+    shell
+        .run(
+            "routing.set_cue_out",
+            json!({ "channel": { "type": "pair", "channel": 2 } }),
+        )
+        .unwrap();
+    let routing = shell
+        .editor()
+        .document()
+        .track(main_id)
+        .unwrap()
+        .routing()
+        .clone();
+    assert_eq!(routing.main_out, Channel::Pair(3));
+    assert_eq!(routing.cue_out, Channel::Pair(2));
+    assert_eq!(
+        shell.editor().undo_history().next(),
+        Some("Change \"Routing\"")
+    );
+    let (cue, main) = match section_with(&shell, main_id, interface) {
+        InOut::Main { cue, main } => (cue, main),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(main.text, "3/4");
+    assert_eq!(cue.text, "2/3");
+    // A mono channel is refused for Main Out.
+    assert!(
+        shell
+            .run(
+                "routing.set_main_out",
+                json!({ "channel": { "type": "mono", "channel": 1 } }),
+            )
+            .is_err()
+    );
 }
 
 // Spec: routing R16, R6

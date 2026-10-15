@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 use bl_core::midi::{MidiInputEvent, MidiMessage, MidiSource, PortId};
 use bl_core::time::SampleRate;
-use bl_engine::{Collector, Compiler, EngineConfig, Registry, channel};
+use bl_engine::{Collector, Compiler, EngineConfig, NoInput, Registry, channel};
 use bl_model::{Command, Editor, Input, Monitor, TrackKind};
 
 // Without `--cfg lspk_rtsan` (`rtsan/.cargo/config.toml`), this doesn't build.
@@ -120,7 +120,7 @@ fn midi_input_passes_under_rtsan() {
             thread::sleep(wait);
         }
         bl_rt::rt_test!({
-            processor.process_at(256, Instant::now());
+            processor.process_at(256, &NoInput, Instant::now());
         });
         if round % 50 == 0 {
             collector.collect();

@@ -217,6 +217,7 @@ pub fn info(plugins: &ClapHost, device: DeviceId) -> Option<PluginInfo> {
         has_window: status.has_editor,
         window_open: status.editor_open,
         window_shown: status.editor_open && !status.editor_hidden,
+        window: None,
         values: status.values,
     })
 }

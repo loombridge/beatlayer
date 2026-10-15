@@ -200,6 +200,11 @@ pub struct DevicePanel {
     /// Each parameter's value now, in the description's order, in the
     /// parameter's own units.
     pub values: Vec<f64>,
+    /// Whether this is a plug-in device's panel (WP-2.10, D19): eight knobs
+    /// mapped to the plug-in's own parameters, with the rest of the body a
+    /// target that opens the plug-in's editor. False for a native device.
+    #[serde(default)]
+    pub plugin: bool,
 }
 
 impl DevicePanel {

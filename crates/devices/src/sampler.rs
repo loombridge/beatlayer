@@ -1177,8 +1177,12 @@ impl NativeDevice for Sampler {
         let at = |id: ParamId| params.index(id).expect("the description holds it");
         let rate = audio.sample_rate();
         let settings = self.settings(params, rate, audio.tempo(), audio.song_position());
-        self.slices
-            .update(&sample, &settings, Arc::as_ptr(&sample) as usize);
+        // Slices are Slicing mode's alone: working them out in Classic or
+        // One-Shot would scan the region on the audio thread for nothing.
+        if settings.mode == Mode::Slice {
+            self.slices
+                .update(&sample, &settings, Arc::as_ptr(&sample) as usize);
+        }
         let gain = params.ramp(at(GAIN));
         let volume = params.ramp(at(VOLUME));
         let pan = params.ramp(at(PAN));
@@ -1392,7 +1396,14 @@ impl Slices {
         let signature = SliceSignature {
             by: s.slice_by,
             sensitivity: (s.sensitivity * 100.0).round(),
-            division_frames: s.division_frames,
+            // Only Beat slicing reads the tempo through this, so only Beat
+            // re-slices while it moves: a tempo ramp must not re-scan the
+            // region every block.
+            division_frames: if s.slice_by == SliceBy::Beat {
+                s.division_frames
+            } else {
+                0.0
+            },
             region_start: s.region_start,
             region_end: s.region_end,
             sample: address,

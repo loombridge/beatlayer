@@ -48,8 +48,8 @@ that warning.
 1. Make the AppImage executable and run it:
 
    ```sh
-   chmod +x Beatlayer-*.AppImage
-   ./Beatlayer-*.AppImage
+   chmod +x beatlayer-*.AppImage
+   ./beatlayer-*.AppImage
    ```
 
    Alternatively, unpack the `.tar.gz` and run the `beatlayer` binary inside it.

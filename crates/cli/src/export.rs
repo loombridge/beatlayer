@@ -78,6 +78,7 @@ pub enum DitherArg {
     None,
     Rectangular,
     Triangular,
+    NoiseShaped,
 }
 
 /// The arguments of `export.audio` these command-line arguments ask for.
@@ -113,6 +114,7 @@ fn command_args(args: &ExportArgs, shell: &Shell) -> Result<Value, String> {
             DitherArg::None => Dither::None,
             DitherArg::Rectangular => Dither::Rectangular,
             DitherArg::Triangular => Dither::Triangular,
+            DitherArg::NoiseShaped => Dither::NoiseShaped,
         },
         "normalize": args.normalize,
         "replace": args.replace,
@@ -170,6 +172,7 @@ pub fn run(args: &ExportArgs) -> Outcome {
         if result.bit_depth == 32 { " float" } else { "" },
         match result.dither {
             Dither::None => String::new(),
+            Dither::NoiseShaped => ", noise shaped dither".to_owned(),
             other => format!(", {other:?} dither").to_lowercase(),
         }
     );

@@ -7,7 +7,7 @@ bl_rt::install_trap!();
 mod common;
 
 use bl_devices::limiter::{
-    AUTO, CEILING, CEILING_MODE, LIMITER, LINK, RELEASE, ROUTING, limiter_type,
+    AUTO, CEILING, CEILING_MODE, LIMITER, LINK, LOOKAHEAD, RELEASE, ROUTING, limiter_type,
 };
 use bl_dsp::Oversampler;
 use bl_engine::{Block, DeviceType, Node, Registry, TransportInfo};
@@ -107,6 +107,13 @@ fn the_output_is_delayed_by_the_look_ahead_and_reported_as_latency() {
     assert!(
         out[0][lookahead + 1..].iter().all(|s| *s == 0.0),
         "nothing after it"
+    );
+    // A set's own choice is reported before the device first runs, too:
+    // the engine asks for the latency when it builds the node.
+    let six = brickwall(&[(LOOKAHEAD, 2.0)], 1024);
+    assert_eq!(
+        six.latency() as usize,
+        (0.006 * RATE.as_f64()).ceil() as usize
     );
 }
 

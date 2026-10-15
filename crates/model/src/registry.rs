@@ -973,6 +973,19 @@ const ENTRIES: &[Entry] = &[
             defaults.",
     },
     Entry {
+        id: "device.set_sample",
+        action: Action::Apply("set_device_sample"),
+        label: "Set Sample",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sets the audio a device plays (`media`, a content hash, or null to play \
+            none), which the media store holds like a clip's audio. A device whose type plays a \
+            sample plays that file; other devices ignore it. The set keeps the reference, so it \
+            reopens playing the same file. To load a file from disk as a person does, use \
+            `device.load_sample`.",
+    },
+    Entry {
         id: "device.set_sidechain_input",
         action: Action::Apply("set_sidechain_input"),
         label: "Set Sidechain Input",

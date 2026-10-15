@@ -14,7 +14,7 @@ use crate::clip::{AudioData, Clip, ClipData, MidiData};
 use crate::device::{Device, DeviceRole};
 use crate::document::Document;
 use crate::error::ModelError;
-use crate::ids::{ClipId, DeviceId, ParamId, TrackId};
+use crate::ids::{ClipId, ContentHash, DeviceId, ParamId, TrackId};
 use crate::shared::Shared;
 use crate::track::{Input, Mixer, Monitor, Output, SendTap, Track, TrackKind};
 
@@ -485,6 +485,16 @@ pub enum Command {
         /// The value, in the parameter's own units.
         value: f64,
     },
+    /// Sets the media a device plays, by content hash (WP-2.16): the
+    /// sampler's sample, which the media store holds like a clip's audio.
+    SetDeviceSample {
+        /// The device.
+        device: DeviceId,
+        /// The media, by content hash, or `null` to play none. The media
+        /// store is where the audio comes from; a device given media the
+        /// store doesn't hold is silent.
+        media: Option<ContentHash>,
+    },
     /// Sets where a device's sidechain listens: its sidechain section's
     /// Source, with its channel. The device must have a sidechain input.
     SetSidechainInput {
@@ -593,6 +603,10 @@ impl Command {
                 floating: false, ..
             } => "Dock Device",
             Self::SetDeviceParam { .. } => "Change parameter",
+            // WP-2.16. Live's undo name for loading a Simpler sample is to
+            // observe; Beatlayer's names the edit.
+            Self::SetDeviceSample { media: Some(_), .. } => "Load Sample",
+            Self::SetDeviceSample { media: None, .. } => "Clear Sample",
             // WP-2.19b, as Live 12.4.6 names them (observed); Listen's is to
             // observe.
             Self::SetSidechainInput { .. } => "Change \"Routing\"",
@@ -933,6 +947,12 @@ impl Document {
                 check_value("parameter value", *value, value.is_finite())?;
                 if self.device_ref(*device)?.params.get(param) != Some(value) {
                     self.device_mut(*device)?.params.insert(*param, *value);
+                }
+                Ok(())
+            }
+            Command::SetDeviceSample { device, media } => {
+                if self.device_ref(*device)?.media != *media {
+                    self.device_mut(*device)?.media = *media;
                 }
                 Ok(())
             }

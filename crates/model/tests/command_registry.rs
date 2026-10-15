@@ -48,12 +48,12 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        58,
+        59,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
-         set_device_floating, WP-2.20 six for tempo breakpoints and time-signature markers, and \
-         WP-2.1 two for MIDI clips"
+         set_device_floating, WP-2.20 six for tempo breakpoints and time-signature markers, \
+         WP-2.1 two for MIDI clips, and WP-2.16 set_device_sample"
     );
 
     for op in &ops {
@@ -457,11 +457,17 @@ fn every_command_runs_by_id() {
         "device.set_param",
         json!({ "device": eq, "param": 3, "value": -12.5 }),
     );
+    agent.run(
+        "device.set_sample",
+        json!({ "device": eq, "media": "0303030303030303030303030303030303030303030303030303030303030303" }),
+    );
     let device = agent.editor.document().device(eq).unwrap();
     assert_eq!(agent.editor.document().device_track(eq), Some(reverb));
     assert_eq!((device.name.as_str(), device.enabled), ("Tone", false));
     assert_eq!(device.params.get(&ParamId(3)), Some(&-12.5));
     assert_eq!(device.params.get(&ParamId(1)), Some(&0.25));
+    let media = device.media.expect("the sample it plays");
+    assert_eq!(media, ContentHash([3u8; 32]));
     agent.run("device.remove", json!({ "device": synth }));
     assert!(agent.editor.document().device(synth).is_none());
 
@@ -878,6 +884,13 @@ fn schemas_match_what_commands_serialise() {
                 device,
                 param: ParamId(u32::MAX),
                 value: -1e9,
+            },
+        ),
+        (
+            "device.set_sample",
+            Command::SetDeviceSample {
+                device,
+                media: Some(ContentHash([3u8; 32])),
             },
         ),
         (

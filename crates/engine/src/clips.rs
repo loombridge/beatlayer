@@ -83,6 +83,18 @@ pub trait MediaLibrary: Send + Sync {
     /// play; `None` if the media is missing, has changed, or doesn't decode.
     /// A clip without its audio plays silence.
     fn open(&self, media: ContentHash, rate: SampleRate, start: u64) -> Option<OpenedSource>;
+
+    /// The media decoded into memory at `rate`, whole, for a device that
+    /// reads it at positions of its own (a sampler's sample, WP-2.16):
+    /// `None` if the media is missing, has changed, or doesn't decode, and
+    /// the default has none, so a device given none plays silence. Decoding
+    /// reads and converts, so call it off the audio thread; the audio is
+    /// shared with every reader of the same file at that rate while it
+    /// lives.
+    fn sample(&self, media: ContentHash, rate: SampleRate) -> Option<Arc<SampleData>> {
+        let _ = (media, rate);
+        None
+    }
 }
 
 /// A source in memory over `data`, which is at the engine's rate.
@@ -99,6 +111,11 @@ impl MediaLibrary for MediaStore {
     fn open(&self, media: ContentHash, rate: SampleRate, _start: u64) -> Option<OpenedSource> {
         let hash = bl_media::ContentHash::from_bytes(media.0);
         self.load_at_rate(hash, rate.hz()).ok().map(in_memory)
+    }
+
+    fn sample(&self, media: ContentHash, rate: SampleRate) -> Option<Arc<SampleData>> {
+        let hash = bl_media::ContentHash::from_bytes(media.0);
+        self.load_at_rate(hash, rate.hz()).ok()
     }
 }
 
@@ -203,6 +220,14 @@ impl MediaLibrary for MediaStreams {
             }
         }
     }
+
+    /// Decodes the whole file into memory at the engine's rate, through the
+    /// store it streams from: a device that reads the audio at positions of
+    /// its own needs all of it.
+    fn sample(&self, media: ContentHash, rate: SampleRate) -> Option<Arc<SampleData>> {
+        let hash = bl_media::ContentHash::from_bytes(media.0);
+        self.store.load_at_rate(hash, rate.hz()).ok()
+    }
 }
 
 /// Cues on one stream.
@@ -267,6 +292,14 @@ impl MediaLibrary for MediaMap {
         }
         let converted = convert_sample_rate(audio, rate.hz()).ok()?;
         Some(in_memory(Arc::new(converted)))
+    }
+
+    fn sample(&self, media: ContentHash, rate: SampleRate) -> Option<Arc<SampleData>> {
+        let audio = self.files.get(&media)?;
+        if audio.sample_rate() == rate.hz() {
+            return Some(Arc::clone(audio));
+        }
+        convert_sample_rate(audio, rate.hz()).ok().map(Arc::new)
     }
 }
 

@@ -263,6 +263,7 @@ pub fn info(plugins: &ClapHost, vst3: &Vst3Host, device: DeviceId) -> Option<Plu
         has_window: status.has_editor,
         window_open: status.editor_open,
         window_shown: status.editor_open && !status.editor_hidden,
+        window: None,
         values: status.values,
     })
 }

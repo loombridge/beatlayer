@@ -10,7 +10,7 @@
 
 use bl_commands::Context::{DeviceView, Global};
 use bl_commands::{CommandSpec, Permission, RegisterError, Registry};
-use bl_model::{DeviceId, DeviceRole, ParamId, PluginFormat, TrackId};
+use bl_model::{DeviceId, DeviceRole, ParamId, PluginFormat, TrackId, WindowFrame};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -20,6 +20,12 @@ pub const LOAD: &str = "plugin.load";
 pub const SHOW_WINDOW: &str = "plugin.show_window";
 /// `plugin.info`: what a plug-in device's plug-in is doing.
 pub const INFO: &str = "plugin.info";
+/// `plugin.set_window`: where a plug-in device's editor window sits
+/// (WP-2.10).
+pub const SET_WINDOW: &str = "plugin.set_window";
+/// `plugin.set_panel_param`: which parameter a plug-in device's panel knob
+/// shows (WP-2.10, D19).
+pub const SET_PANEL_PARAM: &str = "plugin.set_panel_param";
 /// `plugin.scan`: find the plug-ins installed on this machine (WP-2.9).
 pub const SCAN: &str = "plugin.scan";
 /// `plugin.rescan`: scan again, ignoring the cache (WP-2.9).
@@ -32,7 +38,21 @@ pub const SETTINGS: &str = "plugin.settings";
 
 /// Every command [`register`] adds, so a host knows which IDs to send to
 /// `bl-shell`'s `Shell::run`.
-pub const IDS: &[&str] = &[LOAD, SHOW_WINDOW, INFO, SCAN, RESCAN, LIST, SETTINGS];
+pub const IDS: &[&str] = &[
+    LOAD,
+    SHOW_WINDOW,
+    INFO,
+    SET_WINDOW,
+    SET_PANEL_PARAM,
+    SCAN,
+    RESCAN,
+    LIST,
+    SETTINGS,
+];
+
+/// How many knobs a plug-in device's panel shows (WP-2.10, D19, IMP-03):
+/// its first parameters'.
+pub const PANEL_KNOBS: usize = 8;
 
 /// Whether `id` is one of the plug-in commands.
 #[must_use]
@@ -121,10 +141,54 @@ pub struct PluginInfo {
     /// Plug-In Windows or Auto-Hide Plug-In Windows. Hiding is not
     /// closing: a hidden window is still open.
     pub window_shown: bool,
+    /// Where its window sits and how big it is, once it has been placed
+    /// (`plugin.set_window`); `null` until then. Saved with the set beside
+    /// the document, so moving or resizing is never an undo step
+    /// (WP-2.10; as [`FloatingWindow`](crate::devices::FloatingWindow)).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window: Option<WindowFrame>,
     /// Each parameter's value, as the plug-in itself reports it, as
     /// `[parameter, value]` pairs.
     pub values: Vec<(ParamId, f64)>,
 }
+
+/// Arguments of `plugin.set_window`: where a plug-in device's editor
+/// window sits and how big it is (WP-2.10). Not an undo step.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetWindowArgs {
+    /// The device; the selected one if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// Where its window sits and how big it is, in points.
+    pub frame: WindowFrame,
+}
+
+/// What `plugin.set_window` returns: the window's place, as `plugin.info`
+/// reports it.
+pub type SetWindowResult = PluginInfo;
+
+/// Arguments of `plugin.set_panel_param`: which parameter one of a plug-in
+/// device's panel knobs shows (WP-2.10, D19). The mapping is remembered
+/// per plug-in, so another device of the same plug-in keeps it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetPanelParamArgs {
+    /// The device; the selected one if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The knob, 0 for the first (leftmost) and up to
+    /// [`PANEL_KNOBS`] − 1.
+    pub index: usize,
+    /// The parameter it shows, from the plug-in's own; `null` restores the
+    /// knob to the plug-in's parameter at that place.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub param: Option<ParamId>,
+}
+
+/// What `plugin.set_panel_param` returns: the device's panel, as
+/// `device_view.state` reports it.
+pub type SetPanelParamResult = crate::devices::DeviceViewState;
 
 /// Arguments of `plugin.scan` and `plugin.rescan`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -304,6 +368,34 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .context(DeviceView)
             .args::<PluginInfoArgs>()
             .result::<PluginInfo>(),
+    )?;
+    registry.register(
+        CommandSpec::new(SET_WINDOW, "Set Plug-In Window Place")
+            .description(
+                "Records where a plug-in device's editor window sits and how big it is, in \
+                 points (`frame`): its place is saved with the set beside the document, so \
+                 moving or resizing a window is never an undo step. A plug-in window reopens \
+                 where it was left. Returns `plugin.info`'s report.",
+            )
+            .permission(Permission::Read)
+            .context(DeviceView)
+            .args::<SetWindowArgs>()
+            .result::<SetWindowResult>(),
+    )?;
+    registry.register(
+        CommandSpec::new(SET_PANEL_PARAM, "Set Plug-In Panel Parameter")
+            .description(
+                "Sets which of a plug-in device's own parameters a panel knob shows (D19): \
+                 `index` is the knob, 0 for the first and up to seven, and `param` the \
+                 parameter, or null to restore the knob to the plug-in's parameter at that \
+                 place. The mapping is remembered per plug-in, so another device of the same \
+                 plug-in keeps it, and it changes only the view: it isn't an undo step. \
+                 Returns the Device View's state.",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<SetPanelParamArgs>()
+            .result::<SetPanelParamResult>(),
     )?;
     registry.register(
         CommandSpec::new(SCAN, "Scan Plug-Ins")

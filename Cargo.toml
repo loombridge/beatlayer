@@ -39,18 +39,24 @@ bl-shell-spec = { path = "crates/shell-spec" }
 bl-agent = { path = "crates/agent" }
 # The plug-in kit, by git revision until its API settles: a merge commit on
 # its main branch, so the revision stays reachable.
-lspk-rt = { git = "https://github.com/loombridge/plugin-kit", rev = "dcb30164a76fadf3b51de4db305546e71b0611e4" }
-lspk-params = { git = "https://github.com/loombridge/plugin-kit", rev = "dcb30164a76fadf3b51de4db305546e71b0611e4" }
-lspk-commands = { git = "https://github.com/loombridge/plugin-kit", rev = "dcb30164a76fadf3b51de4db305546e71b0611e4" }
-lspk-agent = { git = "https://github.com/loombridge/plugin-kit", rev = "dcb30164a76fadf3b51de4db305546e71b0611e4" }
+lspk-rt = { git = "https://github.com/loombridge/plugin-kit", rev = "31d44c3c7d074b61c8e21bfd8c2577930e4b1703" }
+lspk-params = { git = "https://github.com/loombridge/plugin-kit", rev = "31d44c3c7d074b61c8e21bfd8c2577930e4b1703" }
+lspk-commands = { git = "https://github.com/loombridge/plugin-kit", rev = "31d44c3c7d074b61c8e21bfd8c2577930e4b1703" }
+lspk-agent = { git = "https://github.com/loombridge/plugin-kit", rev = "31d44c3c7d074b61c8e21bfd8c2577930e4b1703" }
 # The format layer: kit plug-ins compiled in as native devices (bl-devices),
 # and the host side of its agent-commands CLAP extension (bl-plugin-host).
-lspk-plugin = { git = "https://github.com/loombridge/plugin-kit", rev = "dcb30164a76fadf3b51de4db305546e71b0611e4", default-features = false }
-lspk-plugin-agent = { git = "https://github.com/loombridge/plugin-kit", rev = "dcb30164a76fadf3b51de4db305546e71b0611e4" }
+lspk-plugin = { git = "https://github.com/loombridge/plugin-kit", rev = "31d44c3c7d074b61c8e21bfd8c2577930e4b1703", default-features = false }
+lspk-plugin-agent = { git = "https://github.com/loombridge/plugin-kit", rev = "31d44c3c7d074b61c8e21bfd8c2577930e4b1703" }
+# The kit's DSP, voice management and wavetables, for the native polysynth
+# (WP-2.17): zero-delay-feedback filters and envelopes, polyphonic voices,
+# and band-limited oscillators.
+lspk-dsp = { git = "https://github.com/loombridge/plugin-kit", rev = "31d44c3c7d074b61c8e21bfd8c2577930e4b1703" }
+lspk-voice = { git = "https://github.com/loombridge/plugin-kit", rev = "31d44c3c7d074b61c8e21bfd8c2577930e4b1703" }
+lspk-wavetable = { git = "https://github.com/loombridge/plugin-kit", rev = "31d44c3c7d074b61c8e21bfd8c2577930e4b1703" }
 # The kit's example plug-ins, as native devices behind bl-devices' `kit-examples`
 # feature, without their own exports.
-lspk-example-gain = { git = "https://github.com/loombridge/plugin-kit", rev = "dcb30164a76fadf3b51de4db305546e71b0611e4", default-features = false }
-lspk-example-sine = { git = "https://github.com/loombridge/plugin-kit", rev = "dcb30164a76fadf3b51de4db305546e71b0611e4", default-features = false }
+lspk-example-gain = { git = "https://github.com/loombridge/plugin-kit", rev = "31d44c3c7d074b61c8e21bfd8c2577930e4b1703", default-features = false }
+lspk-example-sine = { git = "https://github.com/loombridge/plugin-kit", rev = "31d44c3c7d074b61c8e21bfd8c2577930e4b1703", default-features = false }
 
 [workspace.lints.rust]
 rust_2018_idioms = { level = "warn", priority = -1 }
@@ -77,6 +83,15 @@ opt-level = 3
 # and its true-peak interpolator and FFTs are a hundred times slower
 # unoptimised.
 [profile.dev.package.bl-analysis]
+opt-level = 3
+# The plug-in kit's DSP, voice manager and wavetable oscillators too (the
+# polysynth, WP-2.17): the voice-budget test measures the device, not an
+# unoptimised build, and a debug build plays a polyphonic patch in real time.
+[profile.dev.package.lspk-dsp]
+opt-level = 3
+[profile.dev.package.lspk-voice]
+opt-level = 3
+[profile.dev.package.lspk-wavetable]
 opt-level = 3
 [profile.dev.package.symphonia]
 opt-level = 3

@@ -42,8 +42,9 @@ serde_json = "1"
 rtrb = "0.4.0"
 
 [dev-dependencies]
-# The test plug-in, built from source, which the plug-in tests load.
+# The test plug-ins, built from source, which the plug-in tests load.
 bl-test-clap = { path = "../test-clap" }
+bl-test-vst3 = { path = "../test-vst3" }
 # The allocation trap, so tests can show the audio callback stays off the
 # heap (the real-time rules).
 bl-rt.workspace = true

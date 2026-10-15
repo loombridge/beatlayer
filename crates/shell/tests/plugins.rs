@@ -411,3 +411,86 @@ fn a_plugins_editor_follows_auto_hide_plug_in_windows() {
         "auto-hidden at once"
     );
 }
+
+// Spec: vst3-hosting R1, R3, R4, R9. A VST3 plug-in loads by path through
+// the commands as an agent runs them, the Device View describes it, and it
+// processes a block through the shell's host with its parameters.
+#[test]
+fn a_vst3_plugin_loads_runs_and_processes_through_the_commands() {
+    use bl_core::time::SampleRate;
+    use bl_engine::{Block, NodeConfig, NodeFactory, NoteBuffer, TransportInfo};
+
+    let mut shell = Shell::headless();
+    let track = audio_track(&shell);
+    let loaded: PluginLoaded = serde_json::from_value(
+        shell
+            .run(
+                ids::LOAD,
+                json!({ "path": bl_test_vst3::bundle(), "track": track }),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        (loaded.plugin.as_str(), loaded.name.as_str()),
+        (
+            bl_test_vst3::plugin_id().as_str(),
+            bl_test_vst3::PLUGIN_NAME
+        )
+    );
+    assert_eq!(shell.editor().undo_history().next(), Some("Insert Device"));
+    let device = loaded.device;
+
+    // The Device View describes it, and agents read its parameters.
+    shell
+        .run("device.select", json!({ "device": device }))
+        .unwrap();
+    let view: DeviceViewState =
+        serde_json::from_value(shell.run("device_view.state", json!({})).unwrap()).unwrap();
+    let frame = view.devices.iter().find(|d| d.id == device).unwrap();
+    assert!(frame.selected);
+    assert_eq!(frame.panel.as_ref().unwrap().description.params.len(), 1);
+    let params: DeviceParameters = serde_json::from_value(
+        shell
+            .run("device.parameters", json!({ "device": device }))
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(params.params[0].descriptor.name, "Gain");
+
+    // The engine runs it: a block comes back with the gain applied, and
+    // `plugin.info` says it's active with its one parameter.
+    let device = shell.editor().document().device(device).unwrap().clone();
+    let config = NodeConfig {
+        sample_rate: SampleRate::HZ_48000,
+        max_frames: 64,
+        channels: 2,
+    };
+    let mut node = NodeFactory::create(&shell.vst3().factory(), &device, &config)
+        .expect("a node for a VST3 device");
+    let mut data = vec![0.5f32; 128];
+    let mut out = NoteBuffer::with_capacity(8);
+    {
+        let mut block = Block::new(
+            &mut data,
+            2,
+            64,
+            64,
+            &[],
+            TransportInfo::default(),
+            SampleRate::HZ_48000,
+        )
+        .with_notes(&[], &mut out);
+        node.process(&mut block);
+    }
+    assert!(data.iter().all(|s| *s == 0.5), "the gain of 1: {data:?}");
+    let info: PluginInfo = serde_json::from_value(
+        shell
+            .run(ids::INFO, json!({ "device": device.id }))
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(info.active);
+    assert_eq!(info.failure, None);
+    assert!(info.values.contains(&(ParamId(bl_test_vst3::GAIN), 1.0)));
+}

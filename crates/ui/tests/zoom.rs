@@ -41,7 +41,7 @@ fn every_step() -> impl Iterator<Item = f32> {
 /// controls, then the Arrangement View's parts in the main view (with the
 /// Overview and the factory default set's two returns and Main pinned).
 fn main_window_rows(size: Vec2, browser: bool) -> Vec<Row> {
-    let shell = ShellLayout::compute(size, browser);
+    let shell = ShellLayout::compute(size, browser, true);
     let arrangement = ArrangementLayout::compute(shell.main_view, true, 3);
     let mut rows = shell.rows();
     rows.extend(arrangement.rows());
@@ -169,7 +169,8 @@ fn every_row_scales_by_the_zoom_at_every_percentage() {
                     );
                 }
                 // The shell's own scaling agrees with the rows'.
-                let scaled = ShellLayout::compute(layout_size(window, zoom), browser).scale(zoom);
+                let scaled =
+                    ShellLayout::compute(layout_size(window, zoom), browser, true).scale(zoom);
                 assert!((scaled.content.width() - window.x).abs() < EPS * 10.0);
                 assert!((scaled.content.height() - window.y).abs() < EPS * 10.0);
             }
@@ -219,7 +220,7 @@ fn controls_keep_their_live_size_times_the_zoom() {
     // zoom, and stay in Live's order with the margins scaled too.
     for zoom in every_percent() {
         let window = minimum_window(zoom, false, false);
-        let layout = ShellLayout::compute(layout_size(window, zoom), true).scale(zoom);
+        let layout = ShellLayout::compute(layout_size(window, zoom), true, true).scale(zoom);
         for (placement, (_, rect)) in ELEMENTS.iter().zip(&layout.elements) {
             if placement.strip == Strip::ControlBar {
                 assert!((rect.height() - 18.0 * zoom).abs() < EPS * 10.0);
@@ -271,7 +272,8 @@ fn the_minimum_window_grows_with_the_zoom() {
         // A window any smaller lays out the minimum and shows part of it:
         // still nothing overlaps (layout.rs's tests), but the far right and
         // bottom are out of view.
-        let smaller = ShellLayout::compute(layout_size(content - vec2(40.0, 40.0), zoom), true);
+        let smaller =
+            ShellLayout::compute(layout_size(content - vec2(40.0, 40.0), zoom), true, true);
         assert_eq!(smaller.content.size(), MINIMUM);
         println!(
             "| {:.0}% | {:.0} × {:.0} | {:.0} × {:.0} |",

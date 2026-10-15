@@ -445,6 +445,7 @@ pub fn state(shell: &Shell, engine: EngineTransport) -> TransportState {
         tempo_editable: editable(shell, Group::Tempo),
         time_signature: format!("{}/{}", signature.numerator(), signature.denominator()),
         time_signature_editable: editable(shell, Group::Numerator),
+        metronome: doc.settings().metronome,
     }
 }
 

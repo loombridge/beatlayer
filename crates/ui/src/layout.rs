@@ -377,8 +377,8 @@ pub const ELEMENTS: &[Placement] = &[
     p(E::NudgeUp, "L-CTRL-006", "Phase Nudge Up", CB, 145.0, 18.0, Left, Button, Some("M7")),
     p(E::SignatureNumerator, "L-CTRL-007", "Time Signature Numerator", CB, 167.0, 20.0, Left, Value, None),
     p(E::SignatureDenominator, "L-CTRL-007", "Time Signature Denominator", CB, 189.0, 18.0, Left, Value, None),
-    p(E::Metronome, "L-CTRL-009", "Metronome", CB, 209.0, 26.0, Left, Switch, Some("WP-2.15")),
-    p(E::MetronomeMenu, "L-CTRL-009", "Metronome Settings", CB, 237.0, 10.0, Left, MenuArrow, Some("WP-2.15")),
+    p(E::Metronome, "L-CTRL-009", "Metronome", CB, 209.0, 26.0, Left, Switch, None),
+    p(E::MetronomeMenu, "L-CTRL-009", "Metronome Settings", CB, 237.0, 10.0, Left, MenuArrow, None),
     p(E::Quantization, "L-CTRL-010", "Quantization Menu", CB, 250.0, 45.0, Left, Chooser, Some("M3")),
     p(E::ScaleMode, "L-CTRL-011", "Scale Mode", CB, 314.0, 18.0, Left, Switch, Some("M6")),
     p(E::RootNote, "L-CTRL-011", "Root Note", CB, 335.0, 44.0, Left, Chooser, Some("M6")),
@@ -404,7 +404,7 @@ pub const ELEMENTS: &[Placement] = &[
     p(E::LoopLengthBars, "L-CTRL-018", "Loop Length Bars", CB, 1029.0, 26.0, Middle, Value, None),
     p(E::LoopLengthBeats, "L-CTRL-018", "Loop Length Beats", CB, 1055.0, 25.0, Middle, Value, None),
     p(E::LoopLengthSixteenths, "L-CTRL-018", "Loop Length Sixteenths", CB, 1080.0, 26.0, Middle, Value, None),
-    p(E::DrawMode, "L-CTRL-019", "Draw Mode", CB, 1283.0, 17.0, Right, Switch, Some("WP-1.8b")),
+    p(E::DrawMode, "L-CTRL-019", "Draw Mode", CB, 1283.0, 17.0, Right, Switch, None),
     p(E::ComputerKeyboard, "L-CTRL-020", "Computer MIDI Keyboard", CB, 1302.0, 17.0, Right, Switch, Some("WP-2.2")),
     p(E::KeyMap, "L-CTRL-021", "Key Map Mode", CB, 1321.0, 27.0, Right, Switch, Some("M7")),
     p(E::KeyIndicators, "L-CTRL-021", "Key Input and Output Indicators", CB, 1350.0, 7.0, Right, Indicator, Some("M7")),
@@ -416,9 +416,9 @@ pub const ELEMENTS: &[Placement] = &[
     p(E::MidiIndicators, "L-CTRL-026", "MIDI Track Input and Output Indicators", CB, 1527.0, 14.0, Right, Indicator, Some("WP-2.2")),
     p(E::SessionView, "L-CTRL-027", "Session View", CB, 1549.0, 20.0, Right, Switch, None),
     p(E::ArrangementView, "L-CTRL-027", "Arrangement View", CB, 1570.0, 20.0, Right, Switch, None),
-    p(E::InfoToggle, "L-STAT-001", "Show/Hide Info View", SB, 17.0, 16.0, Left, Switch, Some("M2")),
+    p(E::InfoToggle, "L-STAT-001", "Show/Hide Info View", SB, 17.0, 16.0, Left, Switch, None),
     p(E::Message, "L-STAT-002", "Status", SB, 44.0, 1196.0, Left, Display, None),
-    p(E::ClipViewToggle, "L-STAT-004", "Show/Hide Clip View", SB, 1259.0, 10.0, Right, Switch, Some("M2")),
+    p(E::ClipViewToggle, "L-STAT-004", "Show/Hide Clip View", SB, 1259.0, 10.0, Right, Switch, None),
     p(E::ClipSelector, "L-STAT-005", "Clip View Selector", SB, 1270.0, 198.0, Right, Display, Some("M2")),
     p(E::DeviceViewToggle, "L-STAT-006", "Show/Hide Device View", SB, 1486.0, 10.0, Right, Switch, Some("M2")),
     p(E::DeviceSelector, "L-STAT-007", "Device View Selector", SB, 1497.0, 41.0, Right, Display, Some("M2")),
@@ -455,9 +455,11 @@ pub struct ShellLayout {
     /// The detail area (L-WIN-006): the Info View and the Clip or Device
     /// View.
     pub detail: Rect,
-    /// The Info View, at the detail area's left (L-INFO-001).
-    pub info_view: Rect,
-    /// The Device View, right of the Info View (L-DEV-001).
+    /// The Info View, at the detail area's left, while it shows
+    /// (L-INFO-001).
+    pub info_view: Option<Rect>,
+    /// The Device View, right of the Info View (L-DEV-001), or taking the
+    /// whole detail area while the Info View hides.
     pub device_view: Rect,
     /// The Status Bar strip (L-WIN-007).
     pub status_bar: Rect,
@@ -467,9 +469,10 @@ pub struct ShellLayout {
 
 impl ShellLayout {
     /// Lays out a content area of `size` points, with or without the
-    /// browser. Sizes below [`MINIMUM`] are laid out as [`MINIMUM`].
+    /// browser, and with or without the Info View. Sizes below [`MINIMUM`]
+    /// are laid out as [`MINIMUM`].
     #[must_use]
-    pub fn compute(size: Vec2, browser: bool) -> Self {
+    pub fn compute(size: Vec2, browser: bool, info_view: bool) -> Self {
         let size = size.max(MINIMUM);
         let (w, h) = (size.x, size.y);
         let extra = w - REFERENCE.x;
@@ -491,8 +494,12 @@ impl ShellLayout {
             browser.then(|| Rect::from_min_max(pos2(MARGIN, y(61.0)), pos2(311.0, views_bottom)));
         let main_left = browser_rect.map_or(MARGIN, |b| b.right() + MARGIN);
         let main_view = Rect::from_min_max(pos2(main_left, y(61.0)), pos2(right, views_bottom));
-        let info_view = Rect::from_min_max(detail.min, pos2(240.0, detail.bottom()));
-        let device_view = Rect::from_min_max(pos2(249.0, detail.top()), detail.max);
+        let info_view =
+            info_view.then(|| Rect::from_min_max(detail.min, pos2(240.0, detail.bottom())));
+        // With the Info View hidden the Device View takes the detail area's
+        // whole width.
+        let device_left = info_view.map_or(detail.min.x, |info| info.right() + 9.0);
+        let device_view = Rect::from_min_max(pos2(device_left, detail.top()), detail.max);
 
         let elements = ELEMENTS
             .iter()
@@ -542,7 +549,6 @@ impl ShellLayout {
             &mut self.control_bar,
             &mut self.main_view,
             &mut self.detail,
-            &mut self.info_view,
             &mut self.device_view,
             &mut self.status_bar,
         ] {
@@ -550,6 +556,9 @@ impl ShellLayout {
         }
         if let Some(browser) = &mut self.browser {
             move_rect(browser);
+        }
+        if let Some(info_view) = &mut self.info_view {
+            move_rect(info_view);
         }
         for (_, rect) in &mut self.elements {
             move_rect(rect);
@@ -567,7 +576,6 @@ impl ShellLayout {
             &mut self.control_bar,
             &mut self.main_view,
             &mut self.detail,
-            &mut self.info_view,
             &mut self.device_view,
             &mut self.status_bar,
         ] {
@@ -575,6 +583,9 @@ impl ShellLayout {
         }
         if let Some(browser) = &mut self.browser {
             scale(browser);
+        }
+        if let Some(info_view) = &mut self.info_view {
+            scale(info_view);
         }
         for (_, rect) in &mut self.elements {
             scale(rect);
@@ -590,10 +601,12 @@ impl ShellLayout {
             row("L-WIN-003", "Control Bar", self.control_bar),
             row("L-WIN-005", "Main view", self.main_view),
             row("L-WIN-006", "Detail area", self.detail),
-            row("L-INFO-001", "Info View", self.info_view),
             row("L-DEV-001", "Device View", self.device_view),
             row("L-WIN-007", "Status Bar", self.status_bar),
         ];
+        if let Some(info_view) = self.info_view {
+            rows.insert(3, row("L-INFO-001", "Info View", info_view));
+        }
         if let Some(browser) = self.browser {
             rows.insert(1, row("L-WIN-004", "Browser", browser));
         }
@@ -1030,7 +1043,7 @@ mod tests {
     #[test]
     fn elements_are_in_order_and_do_not_overlap_at_the_reference_or_minimum() {
         for size in [REFERENCE, MINIMUM, vec2(2400.0, 1400.0)] {
-            let layout = ShellLayout::compute(size, true);
+            let layout = ShellLayout::compute(size, true, true);
             for strip in [Strip::ControlBar, Strip::StatusBar] {
                 let rects: Vec<Rect> = ELEMENTS
                     .iter()
@@ -1054,7 +1067,7 @@ mod tests {
     // Spec: browser R1.
     #[test]
     fn the_browser_layout_follows_layout_md() {
-        let shell = ShellLayout::compute(REFERENCE, true).translate(vec2(0.0, TITLE_BAR));
+        let shell = ShellLayout::compute(REFERENCE, true, true).translate(vec2(0.0, TITLE_BAR));
         let column = shell.browser.unwrap();
         // L-WIN-004: x 9 to 311, y 61 to 766.
         assert_eq!(
@@ -1092,10 +1105,34 @@ mod tests {
 
     #[test]
     fn hiding_the_browser_widens_the_main_view() {
-        let with = ShellLayout::compute(REFERENCE, true);
-        let without = ShellLayout::compute(REFERENCE, false);
+        let with = ShellLayout::compute(REFERENCE, true, true);
+        let without = ShellLayout::compute(REFERENCE, false, true);
         assert_eq!(without.browser, None);
         assert_eq!(without.main_view.left(), MARGIN);
         assert_eq!(without.main_view.right(), with.main_view.right());
+    }
+
+    // Spec: info-view R1, R3.
+    #[test]
+    fn the_info_view_shows_at_the_detail_areas_left() {
+        let layout = ShellLayout::compute(REFERENCE, true, true);
+        let info = layout.info_view.unwrap();
+        // L-INFO-001: the detail area's left, 231 points wide.
+        assert_eq!(info.min, layout.detail.min);
+        assert_eq!(info.right(), 240.0);
+        assert_eq!(info.bottom(), layout.detail.bottom());
+        assert_eq!(layout.device_view.left(), 249.0);
+        assert!(layout.rows().iter().any(|r| r.id == "L-INFO-001"));
+    }
+
+    // Spec: info-view R2.
+    #[test]
+    fn hiding_the_info_view_widens_the_device_view() {
+        let shown = ShellLayout::compute(REFERENCE, true, true);
+        let hidden = ShellLayout::compute(REFERENCE, true, false);
+        assert_eq!(hidden.info_view, None);
+        assert_eq!(hidden.device_view.left(), hidden.detail.left());
+        assert_eq!(hidden.device_view.right(), shown.device_view.right());
+        assert!(!hidden.rows().iter().any(|r| r.id == "L-INFO-001"));
     }
 }

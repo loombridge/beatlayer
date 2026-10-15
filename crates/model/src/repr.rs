@@ -7,6 +7,7 @@
 use std::collections::BTreeSet;
 
 use bl_core::id::Id;
+use bl_core::time::Ticks;
 use imbl::{OrdMap, Vector};
 use serde::{Deserialize, Serialize};
 
@@ -19,7 +20,8 @@ use crate::command::{
 use crate::device::Device;
 use crate::document::{Document, Index, Settings};
 use crate::error::ModelError;
-use crate::ids::TrackId;
+use crate::ids::{SceneId, TrackId};
+use crate::scene::{Scene, default_scenes};
 use crate::shared::Shared;
 use crate::track::{Mixer, Routing, Track, TrackKind};
 
@@ -29,6 +31,10 @@ pub(crate) struct DocumentRepr {
     tracks: Vec<TrackRepr>,
     returns: Vec<TrackRepr>,
     main: TrackRepr,
+    /// The scenes, in order. Nothing in a set saved before WP-3.1, which
+    /// loads with the default a new set opens with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    scenes: Option<Vec<Scene>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -53,6 +59,10 @@ struct TrackRepr {
     devices: Vec<Device>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     clips: Vec<Clip>,
+    /// The clips in the track's Session slots. Sets saved before WP-3.1
+    /// have none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    slots: Vec<SlotRepr>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     children: Vec<TrackRepr>,
 }
@@ -82,6 +92,13 @@ struct AutomationRepr {
     enabled: bool,
 }
 
+/// One saved Session slot that holds a clip.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct SlotRepr {
+    scene: SceneId,
+    clip: Clip,
+}
+
 impl From<&Document> for DocumentRepr {
     fn from(doc: &Document) -> Self {
         let track = |id: &TrackId| TrackRepr::new(doc, *id);
@@ -90,6 +107,7 @@ impl From<&Document> for DocumentRepr {
             tracks: doc.top.iter().map(track).collect(),
             returns: doc.returns.iter().map(track).collect(),
             main: track(&doc.main),
+            scenes: Some(doc.scenes().cloned().collect()),
         }
     }
 }
@@ -123,6 +141,13 @@ impl TrackRepr {
                 .collect(),
             devices: track.devices().cloned().collect(),
             clips: track.clips().cloned().collect(),
+            slots: track
+                .slots()
+                .map(|(scene, clip)| SlotRepr {
+                    scene,
+                    clip: clip.clone(),
+                })
+                .collect(),
             children: track
                 .children
                 .iter()
@@ -136,17 +161,23 @@ impl TryFrom<DocumentRepr> for Document {
     type Error = ModelError;
 
     fn try_from(repr: DocumentRepr) -> Result<Self, ModelError> {
+        let DocumentRepr {
+            settings,
+            tracks,
+            returns,
+            main,
+            scenes,
+        } = repr;
         let mut loader = Loader {
             tracks: OrdMap::new(),
             index: Index::default(),
             seen: BTreeSet::new(),
         };
-        if repr.main.kind != TrackKind::Main {
+        if main.kind != TrackKind::Main {
             return Err(ModelError::MainTrack);
         }
-        let main = loader.add(repr.main, None)?;
-        let returns = repr
-            .returns
+        let main = loader.add(main, None)?;
+        let returns = returns
             .into_iter()
             .map(|track| {
                 if track.kind == TrackKind::Return {
@@ -156,19 +187,39 @@ impl TryFrom<DocumentRepr> for Document {
                 }
             })
             .collect::<Result<Vector<_>, _>>()?;
-        let top = repr
-            .tracks
+        let top = tracks
             .into_iter()
             .map(|track| loader.add_grouped(track, None))
             .collect::<Result<Vector<_>, _>>()?;
-        let document = Self {
-            settings: repr.settings,
+        if let Some(scenes) = &scenes {
+            for scene in scenes {
+                loader.claim(scene.id.0)?;
+            }
+        }
+        let mut document = Self {
+            settings,
             main,
             top,
             returns,
             tracks: loader.tracks,
+            // Filled below: a set saved before WP-3.1 brings no scenes and
+            // opens with the default a new set gets, whose IDs sit after
+            // the document's largest.
+            scenes: Vector::new(),
             index: loader.index,
         };
+        document.scenes = match scenes {
+            Some(scenes) => scenes.into_iter().collect(),
+            None => default_scenes(document.max_id())?.into_iter().collect(),
+        };
+        // Slots name their scenes, which may be the defaults just made.
+        for track in document.tracks.values() {
+            for scene in track.slots.keys() {
+                if document.scene(*scene).is_none() {
+                    return Err(ModelError::NoSuchScene(*scene));
+                }
+            }
+        }
         // Routing and automation name tracks and devices anywhere in the
         // tree, so they're checked once every track is in.
         for id in document.track_order() {
@@ -204,7 +255,7 @@ impl Loader {
     fn add(&mut self, repr: TrackRepr, parent: Option<TrackId>) -> Result<TrackId, ModelError> {
         let id = repr.id;
         self.claim(id.0)?;
-        if !repr.clips.is_empty() && !repr.kind.holds_clips() {
+        if (!repr.clips.is_empty() || !repr.slots.is_empty()) && !repr.kind.holds_clips() {
             return Err(wrong_kind(&repr, "an audio or MIDI track"));
         }
         if !repr.children.is_empty() && repr.kind != TrackKind::Group {
@@ -259,6 +310,23 @@ impl Loader {
             self.index.clip_track.insert(clip.id, id);
             track.clips.insert(clip.id, Shared::new(clip));
         }
+        for slot in repr.slots {
+            self.claim(slot.clip.id.0)?;
+            check_clip_fits(&track, &slot.clip.data)?;
+            if slot.clip.start != Ticks::ZERO {
+                return Err(ModelError::SlotClipPosition(slot.clip.start));
+            }
+            check_extent(slot.clip.start, slot.clip.length)?;
+            check_clip(&slot.clip)?;
+            self.index.clip_track.insert(slot.clip.id, id);
+            if track
+                .slots
+                .insert(slot.scene, Shared::new(slot.clip))
+                .is_some()
+            {
+                return Err(ModelError::DuplicateId(slot.scene.0));
+            }
+        }
         for child in repr.children {
             let child = self.add_grouped(child, Some(id))?;
             track.children.push_back(child);
@@ -293,13 +361,13 @@ mod tests {
     use serde_json::{Value, json};
 
     use crate::AutomationTarget;
-    use crate::clip::{AudioData, Clip, ClipData};
+    use crate::clip::{AudioData, Clip, ClipData, MidiData};
     use crate::command::Command;
     use crate::device::{Device, DeviceKind};
     use crate::editor::Editor;
-    use crate::ids::{ContentHash, ParamId, TrackId};
+    use crate::ids::{ClipId, ContentHash, ParamId, SceneId, TrackId};
     use crate::track::TrackKind;
-    use crate::{Document, Settings};
+    use crate::{DEFAULT_SCENE_COUNT, Document, Settings};
 
     /// A song with a group holding an audio track with a clip and a device,
     /// and a return track.
@@ -462,6 +530,118 @@ mod tests {
         let loaded = load(value).unwrap();
         assert_eq!(loaded.device(device).unwrap().plugin, Some(state));
         assert_eq!(loaded, doc);
+    }
+
+    // Spec: session-view R13
+    #[test]
+    fn scenes_and_slot_clips_save_and_load() {
+        let mut editor = Editor::new();
+        let track = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id: track,
+                kind: TrackKind::Midi,
+                name: "Keys".to_owned(),
+                parent: None,
+                index: 0,
+            })
+            .unwrap();
+        let scene: SceneId = editor.new_id();
+        editor
+            .apply(Command::CreateScene {
+                id: scene,
+                index: 1,
+            })
+            .unwrap();
+        editor
+            .apply(Command::RenameScene {
+                scene,
+                name: "Chorus".to_owned(),
+            })
+            .unwrap();
+        let clip: ClipId = editor.new_id();
+        editor
+            .apply(Command::CreateSlotClip {
+                track,
+                scene,
+                clip: Clip::new(
+                    clip,
+                    Ticks::ZERO,
+                    Ticks::WHOLE,
+                    ClipData::Midi(MidiData::default()),
+                ),
+            })
+            .unwrap();
+        let doc = editor.document().clone();
+        let value = serde_json::to_value(&doc).unwrap();
+        // The scenes save in order, and the clip under its track's slots.
+        assert_eq!(value["scenes"][1]["name"], json!("Chorus"));
+        let saved = &value["tracks"][0]["slots"][0];
+        assert_eq!(saved["scene"], json!(scene.0.get()));
+        assert_eq!(saved["clip"]["id"], json!(clip.0.get()));
+        let loaded = load(value).unwrap();
+        assert_eq!(loaded, doc);
+        assert_eq!(loaded.scene_position(scene), Some(1));
+        assert_eq!(loaded.slot(track, scene).unwrap().id, clip);
+        loaded.check_invariants().unwrap();
+
+        // A slot that names a scene the set doesn't hold doesn't load.
+        let mut broken = serde_json::to_value(&doc).unwrap();
+        broken["tracks"][0]["slots"][0]["scene"] = json!(9999);
+        let error = load(broken).unwrap_err();
+        assert!(error.contains("no scene"), "{error}");
+        // A slot clip has no position, and a slot holds one clip.
+        let mut broken = serde_json::to_value(&doc).unwrap();
+        broken["tracks"][0]["slots"][0]["clip"]["start"] = json!(Ticks::WHOLE.0);
+        let error = load(broken).unwrap_err();
+        assert!(error.contains("no position"), "{error}");
+        let mut broken = serde_json::to_value(&doc).unwrap();
+        let slot = broken["tracks"][0]["slots"][0].clone();
+        broken["tracks"][0]["slots"]
+            .as_array_mut()
+            .unwrap()
+            .push(slot);
+        let error = load(broken).unwrap_err();
+        assert!(error.contains("more than once"), "{error}");
+        // Only audio and MIDI tracks hold slot clips.
+        let mut broken = serde_json::to_value(&doc).unwrap();
+        let slot = broken["tracks"][0]["slots"][0].clone();
+        broken["main"]["slots"] = json!([slot]);
+        let error = load(broken).unwrap_err();
+        assert!(error.contains("audio or MIDI"), "{error}");
+    }
+
+    // Spec: session-view R14
+    #[test]
+    fn a_set_saved_before_scenes_and_slots_loads_with_the_default() {
+        let (doc, _) = song();
+        let mut value = serde_json::to_value(&doc).unwrap();
+        value.as_object_mut().unwrap().remove("scenes");
+        let loaded = load(value).unwrap();
+        assert_eq!(loaded.scene_count(), DEFAULT_SCENE_COUNT);
+        assert!(loaded.scenes().all(|scene| scene.name.is_empty()));
+        assert!(
+            !loaded.tracks().any(|track| track.slots().len() > 0),
+            "no slots in a set saved before them"
+        );
+        assert_eq!(
+            loaded.max_id(),
+            loaded.scenes().last().expect("eight scenes").id.0,
+            "the default scenes take the IDs after the document's largest"
+        );
+        loaded.check_invariants().unwrap();
+        // Saving it again writes the scenes, so the next load keeps them.
+        let again: Document =
+            serde_json::from_value(serde_json::to_value(&loaded).unwrap()).unwrap();
+        assert_eq!(again, loaded);
+
+        // A set whose IDs leave no room for the scenes is refused, not a
+        // panic.
+        let mut broken = serde_json::to_value(&doc).unwrap();
+        broken.as_object_mut().unwrap().remove("scenes");
+        broken["main"]["id"] = json!(u64::MAX - 4);
+        let error = load(broken).unwrap_err();
+        assert!(error.contains("no room"), "{error}");
     }
 
     // Spec: audio-clips R15

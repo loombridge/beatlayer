@@ -211,7 +211,7 @@ fn place(
 
 /// Runs `edit` as one transaction labelled `label`, returning its result
 /// and whether it recorded an undo step. A failure puts the document back.
-fn transaction<T>(
+pub(crate) fn transaction<T>(
     editor: &mut Editor,
     label: &'static str,
     edit: impl FnOnce(&mut Editor) -> Result<T, EditFailure>,

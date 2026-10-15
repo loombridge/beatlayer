@@ -10,7 +10,7 @@ use imbl::OrdMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::{DeviceId, ParamId};
+use crate::ids::{ContentHash, DeviceId, ParamId};
 use crate::track::Input;
 
 /// A device in a track's chain: a native instrument or effect, or a plug-in.
@@ -66,6 +66,11 @@ pub struct Device {
     /// device, and for a plug-in until the set is first saved with it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin: Option<PluginState>,
+    /// The media the device plays, by content hash (WP-2.16): the sampler's
+    /// sample, which the media store holds like a clip's audio (the sampler
+    /// spec, R11). Left out of the saved set for a device that plays none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media: Option<ContentHash>,
 }
 
 /// A plug-in device's own state, as the set file keeps it (WP-2.6).
@@ -250,6 +255,7 @@ impl Device {
             sidechain: None,
             floating: false,
             plugin: None,
+            media: None,
         }
     }
 

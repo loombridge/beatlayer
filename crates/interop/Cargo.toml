@@ -8,8 +8,15 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+bl-core.workspace = true
 bl-model.workspace = true
 bl-project.workspace = true
+# Standard MIDI File reading and writing (architecture, "Files"): pure Rust.
+# Unlicense, which `deny.toml` allows.
+midly = "0.5.3"
+
+[dev-dependencies]
+midly = "0.5.3"
 
 [lints]
 workspace = true

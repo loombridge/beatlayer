@@ -38,6 +38,7 @@ pub const SECTION: &[Element] = &[
     Element::Tempo,
     Element::SignatureNumerator,
     Element::SignatureDenominator,
+    Element::Metronome,
     Element::Follow,
     Element::PositionBars,
     Element::PositionBeats,
@@ -92,6 +93,7 @@ pub fn command(element: Element) -> Option<&'static str> {
         Element::Play => Some(ids::PLAY),
         Element::Stop => Some(ids::STOP),
         Element::Loop => Some(ids::SET_LOOP_ENABLED),
+        Element::Metronome => Some(ids::SET_METRONOME_ENABLED),
         Element::Follow => Some(FOLLOW),
         element => Some(match field(element)?.group {
             Group::Position => ids::LOCATE,
@@ -112,6 +114,10 @@ pub fn click(element: Element, shell: &Shell) -> Option<Invocation> {
         Element::Loop => Some(Invocation::new(
             ids::SET_LOOP_ENABLED,
             json!({ "enabled": !loop_on(shell) }),
+        )),
+        Element::Metronome => Some(Invocation::new(
+            ids::SET_METRONOME_ENABLED,
+            json!({ "enabled": !metronome_on(shell) }),
         )),
         _ => None,
     }
@@ -139,6 +145,10 @@ fn loop_on(shell: &Shell) -> bool {
         .settings()
         .arrangement_loop
         .enabled
+}
+
+fn metronome_on(shell: &Shell) -> bool {
+    shell.editor().document().settings().metronome.enabled
 }
 
 /// What a group is called, for assistive technology.
@@ -231,6 +241,14 @@ impl TransportFields {
                          back under its envelope."
                             .to_owned(),
                     ),
+                    ..Look::default()
+                });
+            }
+            Element::Metronome => {
+                let on = metronome_on(shell);
+                return Some(Look {
+                    on,
+                    value: Some(if on { "on" } else { "off" }.to_owned()),
                     ..Look::default()
                 });
             }

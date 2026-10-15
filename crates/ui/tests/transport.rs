@@ -51,7 +51,7 @@ fn state(shell: &mut Shell) -> TransportState {
 
 /// Where an element is drawn, in a harness without a drawn title bar.
 fn rect(element: Element) -> egui::Rect {
-    ShellLayout::compute(REFERENCE, true).rect(element)
+    ShellLayout::compute(REFERENCE, true, true).rect(element)
 }
 
 fn focus(h: &mut Harness, element: Element) {
@@ -550,7 +550,6 @@ fn the_section_reaches_assistive_technology() {
         ("MIDI Arrangement Overdub", "WP-2.14"),
         ("Automation Arm", "WP-2.12"),
         ("Punch-In", "WP-2.13"),
-        ("Metronome", "WP-2.15"),
         ("Tap Tempo", "M2"),
     ] {
         let node = Harness::node(&nodes, name);
@@ -559,5 +558,20 @@ fn the_section_reaches_assistive_technology() {
             "{name}"
         );
     }
+    // Metronome is now active (WP-2.15).
+    let metro = Harness::node(&nodes, "Metronome");
+    assert!(!metro.disabled, "Metronome should be active");
+    assert!(!state(&mut h.shell).metronome.enabled);
+
+    // Toggling via shortcut 'O'.
+    press(&mut h, Key::O, Modifiers::NONE);
+    h.settle();
+    assert!(state(&mut h.shell).metronome.enabled);
+
+    // Toggling via clicking the metronome switch.
+    h.accesskit(element_id(Element::Metronome), Action::Click);
+    h.settle();
+    assert!(!state(&mut h.shell).metronome.enabled);
+
     h.shell.audio_mut().stop();
 }

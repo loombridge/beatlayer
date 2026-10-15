@@ -5,12 +5,13 @@
 //! can check them and list them in the command reference without linking a UI
 //! crate or an audio host. `bl-shell`'s `Shell::run` runs them by ID.
 
-use bl_commands::Context::{Dialog, Global, Settings, TabFocus};
+use bl_commands::Context::{ClipView, Dialog, Global, NoteEditor, Settings, TabFocus};
 use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::audio::{AudioDevices, AudioStatus, ConfigureAudio};
+use crate::notes::{ClipViewState, NoteField};
 use crate::settings::{SettingsPage, ThemeChoice};
 
 /// `set.new`: replace the set with the factory default set.
@@ -47,6 +48,17 @@ pub const WINDOW_CLOSE: &str = "window.close";
 pub const VIEW_FULL_SCREEN: &str = "view.full_screen";
 /// `view.toggle_browser`: show or hide the browser.
 pub const VIEW_TOGGLE_BROWSER: &str = "view.toggle_browser";
+/// `view.toggle_clip_view`: show or hide the Clip View (WP-2.3).
+pub const VIEW_TOGGLE_CLIP_VIEW: &str = "view.toggle_clip_view";
+/// `view.draw_mode`: switch Draw Mode (B, WP-2.3).
+pub const VIEW_DRAW_MODE: &str = "view.draw_mode";
+/// `view.fold_notes`: fold the note editor to the rows that hold notes (F,
+/// WP-2.3).
+pub const VIEW_FOLD_NOTES: &str = "view.fold_notes";
+/// `view.lane`: choose which value the Clip View's lane shows (WP-2.3).
+pub const VIEW_LANE: &str = "view.lane";
+/// `view.toggle_info_view`: show or hide the Info View.
+pub const VIEW_TOGGLE_INFO_VIEW: &str = "view.toggle_info_view";
 /// `view.toggle_plug_in_windows`: show or hide the plug-in windows: the
 /// floating devices' windows and the plug-ins' editor windows (View ▸
 /// Plug-In Windows, WP-2.5b).
@@ -126,6 +138,11 @@ pub const IDS: &[&str] = &[
     WINDOW_CLOSE,
     VIEW_FULL_SCREEN,
     VIEW_TOGGLE_BROWSER,
+    VIEW_TOGGLE_CLIP_VIEW,
+    VIEW_DRAW_MODE,
+    VIEW_FOLD_NOTES,
+    VIEW_LANE,
+    VIEW_TOGGLE_INFO_VIEW,
     VIEW_TOGGLE_PLUG_IN_WINDOWS,
     VIEW_TOGGLE_SESSION_ARRANGEMENT,
     VIEW_ZOOM_IN,
@@ -308,6 +325,27 @@ pub struct TogglePlugInWindowsArgs {
     pub shown: Option<bool>,
 }
 
+/// Arguments of `view.fold_notes`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FoldNotesArgs {
+    /// The MIDI clip. Left out, the one the Clip View shows (the
+    /// Arrangement's selected clip).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<bl_model::ClipId>,
+    /// Fold (true) or unfold (false); switches if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folded: Option<bool>,
+}
+
+/// Arguments of `view.lane`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LaneArgs {
+    /// Which value the lane shows.
+    pub lane: NoteField,
+}
+
 /// What a command that switches something returns: its new state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SwitchResult {
@@ -322,6 +360,8 @@ pub struct ViewResult {
     pub main_view: String,
     /// Whether the browser shows.
     pub browser: bool,
+    /// Whether the Info View shows.
+    pub info_view: bool,
     /// Whether the main window is in full-screen mode.
     pub full_screen: bool,
     /// The interface zoom, where 1 is 100%.
@@ -555,6 +595,75 @@ fn specs() -> Vec<CommandSpec> {
             .context(Global)
             .binding("S-VIEW-010")
             .binding("S-BRW-002")
+            .args::<NoArgs>()
+            .result::<ViewResult>(),
+        CommandSpec::new(VIEW_TOGGLE_CLIP_VIEW, "Clip View")
+            .description(
+                "Shows or hides the Clip View in the detail area, which holds the MIDI Note \
+                 Editor for the Arrangement's selected MIDI clip; while it shows, it takes \
+                 the detail area in place of the Device View. It shows the clip the \
+                 Arrangement has selected, with its notes, and selecting another MIDI clip \
+                 switches the editor to it, clearing the note selection. Changes nothing in \
+                 the set and isn't an undo step. The result says whether it shows, what clip \
+                 the editor holds, and which notes are selected.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .binding("S-VIEW-015")
+            .args::<NoArgs>()
+            .result::<ClipViewState>(),
+        CommandSpec::new(VIEW_DRAW_MODE, "Draw Mode")
+            .description(
+                "Switches Draw Mode (B; Options ▸ Draw Mode), which changes what a click in \
+                 the MIDI Note Editor's note area does: with it on, clicking empty grid adds \
+                 a note one grid step long, and clicking a note removes it; with it off, \
+                 clicking selects. Changes nothing in the set and isn't an undo step. The \
+                 result says whether it's on.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .binding("S-GRID-001")
+            .args::<NoArgs>()
+            .result::<ClipViewState>(),
+        CommandSpec::new(VIEW_FOLD_NOTES, "Fold to Notes")
+            .description(
+                "Folds or unfolds the MIDI Note Editor (F, View ▸ Fold to Notes): while it's \
+                 folded, the editor shows only the key rows that hold notes, one under the \
+                 next, and not the empty rows between them. `clip` names the clip; left out, \
+                 the one the editor shows. `folded` says which way; left out, it switches. \
+                 Folding changes nothing in the set and isn't an undo step: it's saved with \
+                 the set beside the song, so it's there again when the set is reopened. The \
+                 result says whether the editor is folded now.",
+            )
+            .permission(Permission::Read)
+            .contexts([ClipView, NoteEditor])
+            .binding("S-NOTE-038")
+            .args::<FoldNotesArgs>()
+            .result::<ClipViewState>(),
+        CommandSpec::new(VIEW_LANE, "Note Editor Lane")
+            .description(
+                "Chooses which of a note's values the lane under the MIDI Note Editor shows \
+                 and edits: `velocity` (the lane's default), `release_velocity`, `chance`, or \
+                 `velocity_deviation`. Dragging a note's stem in the lane sets that value on \
+                 that note, and dragging across several notes ramps it; the same edits are \
+                 the `note.set_value` and `note.ramp_value` commands. Changes only the view, \
+                 so it's no undo step and isn't saved with the set.",
+            )
+            .permission(Permission::Read)
+            .contexts([ClipView, NoteEditor])
+            .args::<LaneArgs>()
+            .result::<ClipViewState>(),
+        CommandSpec::new(VIEW_TOGGLE_INFO_VIEW, "Info")
+            .description(
+                "Shows or hides the Info View at the bottom left of the main window, which \
+                 reads whatever the pointer is over: the control's name, the help text of \
+                 the command it runs, and its key on a separate line, and shows nothing \
+                 while the pointer is over empty space. A new set opens with it shown, as \
+                 in Live. Changes nothing in the set and isn't an undo step.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .binding("S-VIEW-008")
             .args::<NoArgs>()
             .result::<ViewResult>(),
         CommandSpec::new(

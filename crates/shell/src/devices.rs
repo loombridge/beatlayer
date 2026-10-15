@@ -14,9 +14,10 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use bl_engine::DeviceType;
+use bl_model::device_layout::{BODY_HEIGHT, ControlBand, LayoutNode, Widget};
 use bl_model::{
-    Command, Device, DeviceDescription, DeviceId, DeviceKind, DeviceRole, DeviceWindows, Document,
-    Editor, TrackId, TrackKind,
+    Command, Device, DeviceDescription, DeviceId, DeviceKind, DeviceLayout, DeviceRole,
+    DeviceWindows, Document, Editor, ParamId, TrackId, TrackKind,
 };
 use bl_project::preset::{self, Preset};
 use bl_shell_spec::arrangement as view_ids;
@@ -49,6 +50,10 @@ pub struct DeviceView {
     /// window back where it was; a save keeps only those of devices the
     /// set has.
     windows: DeviceWindows,
+    /// Which parameter each knob of a plug-in device's panel shows
+    /// (WP-2.10, D19), by `format/plugin_id`: absent entries keep the
+    /// plug-in's own parameter at that place. Synced from the preferences.
+    plugin_panels: std::collections::BTreeMap<String, std::collections::BTreeMap<usize, ParamId>>,
 }
 
 /// Why a device command didn't run.
@@ -192,8 +197,15 @@ impl DeviceView {
     }
 
     /// What the generic UI draws for `device`, if its type is described.
+    /// A plug-in device gets the plug-in panel (WP-2.10, D19): up to
+    /// [`PANEL_KNOBS`](bl_shell_spec::plugins::PANEL_KNOBS) knobs, mapped to
+    /// the plug-in's first parameters or to the preferences' remap, with
+    /// the rest of the body an open-editor target.
     fn panel(&self, device: &Device) -> Option<DevicePanel> {
         let description = self.description(&device.kind)?;
+        if let Some(key) = Self::plugin_key(&device.kind) {
+            return Some(self.plugin_panel(description, &device.params, &key));
+        }
         Some(DevicePanel {
             values: description
                 .params
@@ -201,7 +213,46 @@ impl DeviceView {
                 .map(|p| description.value(&device.params, p.id).unwrap_or(p.default))
                 .collect(),
             description: description.clone(),
+            plugin: false,
         })
+    }
+
+    /// A plug-in device's panel (WP-2.10, D19): the plug-in's first
+    /// parameters as knobs, in the preferences' remap where one is set.
+    fn plugin_panel(
+        &self,
+        description: &DeviceDescription,
+        values: &bl_model::OrdMap<ParamId, f64>,
+        key: &str,
+    ) -> DevicePanel {
+        let remap = self.plugin_panels.get(key);
+        let mapped = |index: usize| -> Option<&bl_model::ParamDescriptor> {
+            remap
+                .and_then(|m| m.get(&index))
+                .and_then(|id| description.param(*id))
+                .or_else(|| description.params.get(index))
+        };
+        let selected: Vec<bl_model::ParamDescriptor> = (0..bl_shell_spec::plugins::PANEL_KNOBS)
+            .filter_map(mapped)
+            .cloned()
+            .collect();
+        let controls: Vec<(ParamId, Widget)> =
+            selected.iter().map(|p| (p.id, Widget::Knob)).collect();
+        let layout = DeviceLayout::new(LayoutNode::Band(ControlBand::stacked(
+            BODY_HEIGHT,
+            &controls,
+        )));
+        DevicePanel {
+            values: selected
+                .iter()
+                .map(|p| description.value(values, p.id).unwrap_or(p.default))
+                .collect(),
+            description: DeviceDescription {
+                params: selected,
+                layout,
+            },
+            plugin: true,
+        }
     }
 
     /// `device`'s parameters as `device.parameters` reports them.
@@ -290,6 +341,44 @@ impl DeviceView {
         self.windows = windows;
     }
 
+    /// Where a device's window sits, if one has been placed: a floating
+    /// device's (WP-2.5b) or a plug-in device's editor window (WP-2.10).
+    #[must_use]
+    pub fn window_frame(&self, device: DeviceId) -> Option<bl_model::WindowFrame> {
+        self.windows.get(&device).copied()
+    }
+
+    /// Records where a plug-in device's editor window sits (`plugin.set_window`,
+    /// WP-2.10): the same frame store as a floating device's, so a save
+    /// keeps it and it's never an undo step.
+    pub fn set_editor_frame(&mut self, device: DeviceId, frame: bl_model::WindowFrame) {
+        self.windows.insert(device, frame);
+    }
+
+    /// The parameter mapping a plug-in device's panel knobs use, from the
+    /// preferences: absent entries keep the plug-in's own parameter at that
+    /// place (WP-2.10, D19).
+    pub fn set_plugin_panels(
+        &mut self,
+        panels: std::collections::BTreeMap<String, std::collections::BTreeMap<usize, ParamId>>,
+    ) {
+        self.plugin_panels = panels;
+    }
+
+    /// The preferences key of a plug-in device, `format/plugin_id`
+    /// (WP-2.10, D19), or `None` for a device that isn't a plug-in.
+    #[must_use]
+    pub fn plugin_key(kind: &DeviceKind) -> Option<String> {
+        match kind {
+            DeviceKind::Plugin { format, plugin_id } => Some(format!(
+                "{}/{}",
+                bl_plugin_host::scan::format_name(*format),
+                plugin_id
+            )),
+            _ => None,
+        }
+    }
+
     /// Every floating device's window, on any track, in the order of the
     /// tracks and their chains (`device.windows`). None shows while
     /// `all_shown` is off (View ▸ Plug-In Windows); with `auto_hide` on,
@@ -341,6 +430,10 @@ impl DeviceView {
             kind: d.kind.clone(),
             role: d.role,
             enabled: d.enabled,
+            takes_sample: matches!(
+                &d.kind,
+                DeviceKind::Native { device_type } if device_type == bl_devices::sampler::SAMPLER
+            ),
             show_preset_name: d.show_preset_name,
             folded: self.folded.contains(&d.id),
             floating: d.floating,

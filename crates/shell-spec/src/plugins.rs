@@ -1,25 +1,34 @@
 //! Plug-in commands in the command registry (WP-2.6; the CLAP hosting
-//! spec): loading a CLAP plug-in from its file as a device, its editor
-//! window, and what it's doing.
+//! spec, and WP-2.7 for VST3): loading a plug-in from its file as a
+//! device, its editor window, and what it's doing.
 //!
 //! A plug-in device is otherwise a device like any other: `device.set_param`
 //! changes its parameters, `device.parameters` lists them, and saving the
 //! set keeps its state. Finding plug-ins by scanning the system's plug-in
-//! folders is WP-2.9's; embedding editors in Beatlayer's own windows is
-//! WP-2.10's.
+//! folders is WP-2.9's; an editor embeds into a window of Beatlayer's own
+//! (WP-2.10) on Windows and Linux, where the host builds one.
 
 use bl_commands::Context::{DeviceView, Global};
 use bl_commands::{CommandSpec, Permission, RegisterError, Registry};
-use bl_model::{DeviceId, DeviceRole, ParamId, PluginFormat, TrackId};
+use bl_model::{DeviceId, DeviceRole, ParamId, PluginFormat, TrackId, WindowFrame};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// `plugin.load`: load a CLAP plug-in from its file and add it as a device.
+/// `plugin.load`: load a plug-in from its file and add it as a device.
 pub const LOAD: &str = "plugin.load";
+/// `plugin.load_au`: load an Audio Unit, by its component description, and
+/// add it as a device (WP-2.8, macOS only).
+pub const LOAD_AU: &str = "plugin.load_au";
 /// `plugin.show_window`: open or close a plug-in device's editor window.
 pub const SHOW_WINDOW: &str = "plugin.show_window";
 /// `plugin.info`: what a plug-in device's plug-in is doing.
 pub const INFO: &str = "plugin.info";
+/// `plugin.set_window`: where a plug-in device's editor window sits
+/// (WP-2.10).
+pub const SET_WINDOW: &str = "plugin.set_window";
+/// `plugin.set_panel_param`: which parameter a plug-in device's panel knob
+/// shows (WP-2.10, D19).
+pub const SET_PANEL_PARAM: &str = "plugin.set_panel_param";
 /// `plugin.scan`: find the plug-ins installed on this machine (WP-2.9).
 pub const SCAN: &str = "plugin.scan";
 /// `plugin.rescan`: scan again, ignoring the cache (WP-2.9).
@@ -32,7 +41,22 @@ pub const SETTINGS: &str = "plugin.settings";
 
 /// Every command [`register`] adds, so a host knows which IDs to send to
 /// `bl-shell`'s `Shell::run`.
-pub const IDS: &[&str] = &[LOAD, SHOW_WINDOW, INFO, SCAN, RESCAN, LIST, SETTINGS];
+pub const IDS: &[&str] = &[
+    LOAD,
+    LOAD_AU,
+    SHOW_WINDOW,
+    INFO,
+    SET_WINDOW,
+    SET_PANEL_PARAM,
+    SCAN,
+    RESCAN,
+    LIST,
+    SETTINGS,
+];
+
+/// How many knobs a plug-in device's panel shows (WP-2.10, D19, IMP-03):
+/// its first parameters'.
+pub const PANEL_KNOBS: usize = 8;
 
 /// Whether `id` is one of the plug-in commands.
 #[must_use]
@@ -44,11 +68,33 @@ pub fn handles(id: &str) -> bool {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LoadPluginArgs {
-    /// The CLAP plug-in's file or bundle (`.clap`).
+    /// The plug-in's file or bundle (`.clap`, or `.vst3` for VST3).
     pub path: String,
-    /// Which of the file's plug-ins, by its CLAP ID; the first if left out.
+    /// Which of the file's plug-ins, by its ID; the first if left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin: Option<String>,
+    /// The track; the selected track if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track: Option<TrackId>,
+    /// Where it goes in the chain; as `device.add` places it if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<usize>,
+}
+
+/// Arguments of `plugin.load_au`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LoadAudioUnitArgs {
+    /// The component's type, four characters: `aufx` for an effect, `aumu`
+    /// or `augn` for an instrument, `aumi` for a MIDI effect.
+    #[serde(rename = "type")]
+    pub component_type: String,
+    /// The component's subtype, four characters, such as `dely` for Apple's
+    /// AUDelay.
+    pub subtype: String,
+    /// The component's manufacturer, four characters, such as `appl` for
+    /// Apple's units.
+    pub manufacturer: String,
     /// The track; the selected track if left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub track: Option<TrackId>,
@@ -67,7 +113,7 @@ pub struct PluginLoaded {
     /// Whether a new MIDI track was made for it, as `device.add` does for
     /// an instrument or MIDI effect.
     pub new_track: bool,
-    /// The plug-in's CLAP ID.
+    /// The plug-in's ID: a CLAP ID, or a VST3 class ID.
     pub plugin: String,
     /// Its name.
     pub name: String,
@@ -99,7 +145,7 @@ pub struct PluginInfoArgs {
 pub struct PluginInfo {
     /// The device.
     pub device: DeviceId,
-    /// The plug-in's CLAP ID.
+    /// The plug-in's ID: a CLAP ID, or a VST3 class ID.
     pub plugin: String,
     /// The file it was loaded from.
     pub path: String,
@@ -113,7 +159,9 @@ pub struct PluginInfo {
     /// failed while processing (the device is silent).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure: Option<String>,
-    /// Whether it has an editor that opens in a window of its own.
+    /// Whether it has an editor that can open: embedded in a window of
+    /// Beatlayer's own on Windows and Linux (WP-2.10), or in a floating
+    /// window of the plug-in's own.
     pub has_window: bool,
     /// Whether its window is open.
     pub window_open: bool,
@@ -121,17 +169,61 @@ pub struct PluginInfo {
     /// Plug-In Windows or Auto-Hide Plug-In Windows. Hiding is not
     /// closing: a hidden window is still open.
     pub window_shown: bool,
+    /// Where its window sits and how big it is, once it has been placed
+    /// (`plugin.set_window`); `null` until then. Saved with the set beside
+    /// the document, so moving or resizing is never an undo step
+    /// (WP-2.10; as [`FloatingWindow`](crate::devices::FloatingWindow)).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window: Option<WindowFrame>,
     /// Each parameter's value, as the plug-in itself reports it, as
     /// `[parameter, value]` pairs.
     pub values: Vec<(ParamId, f64)>,
 }
 
+/// Arguments of `plugin.set_window`: where a plug-in device's editor
+/// window sits and how big it is (WP-2.10). Not an undo step.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetWindowArgs {
+    /// The device; the selected one if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// Where its window sits and how big it is, in points.
+    pub frame: WindowFrame,
+}
+
+/// What `plugin.set_window` returns: the window's place, as `plugin.info`
+/// reports it.
+pub type SetWindowResult = PluginInfo;
+
+/// Arguments of `plugin.set_panel_param`: which parameter one of a plug-in
+/// device's panel knobs shows (WP-2.10, D19). The mapping is remembered
+/// per plug-in, so another device of the same plug-in keeps it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetPanelParamArgs {
+    /// The device; the selected one if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The knob, 0 for the first (leftmost) and up to
+    /// [`PANEL_KNOBS`] − 1.
+    pub index: usize,
+    /// The parameter it shows, from the plug-in's own; `null` restores the
+    /// knob to the plug-in's parameter at that place.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub param: Option<ParamId>,
+}
+
+/// What `plugin.set_panel_param` returns: the device's panel, as
+/// `device_view.state` reports it.
+pub type SetPanelParamResult = crate::devices::DeviceViewState;
+
 /// Arguments of `plugin.scan` and `plugin.rescan`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ScanArgs {
-    /// The files or folders to scan; the system's plug-in folders if left
-    /// out.
+    /// The files or folders to scan; each format's system plug-in folders
+    /// if left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub paths: Option<Vec<String>>,
 }
@@ -143,7 +235,7 @@ pub struct ScannedItem {
     pub format: PluginFormat,
     /// The file or bundle it's in.
     pub path: String,
-    /// Its identifier within its format (its CLAP ID).
+    /// Its identifier within its format (a CLAP ID, or a VST3 class ID).
     pub plugin_id: String,
     /// Its name.
     pub name: String,
@@ -260,15 +352,16 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     registry.register(
         CommandSpec::new(LOAD, "Load Plug-In")
             .description(
-                "Loads a CLAP plug-in from its file or bundle (`path`, a `.clap`) and adds it \
-                 as a device, as `device.add` adds one: to the selected track (or `track`), at \
-                 `index` or where its role goes, selected, one undo step (Insert Device). \
-                 `plugin` picks one of the file's plug-ins by its CLAP ID; the first if left \
-                 out. Its parameters become the device's, which `device.parameters` lists and \
-                 `device.set_param` and automation change; its own state is saved with the \
-                 set. The plug-in's code runs inside Beatlayer, so load only plug-ins you \
-                 trust. The scanner (`plugin.scan`) lists the plug-ins on this machine; this \
-                 command still loads one by its path.",
+                "Loads a plug-in from its file or bundle (`path`: a `.clap` file, or a \
+                 `.vst3` bundle or module) and adds it as a device, as `device.add` adds one: \
+                 to the selected track (or `track`), at `index` or where its role goes, \
+                 selected, one undo step (Insert Device). `plugin` picks one of the file's \
+                 plug-ins by its ID (CLAP's, or a VST3 class ID); the first if left out. Its \
+                 parameters become the device's, which `device.parameters` lists and \
+                 `device.set_param` and automation change. The plug-in's code runs inside \
+                 Beatlayer, so load only plug-ins you trust. The scanner (`plugin.scan`) \
+                 lists the plug-ins on this machine; this command still loads one by its \
+                 path.",
             )
             .permission(Permission::External)
             .contexts([Global, DeviceView])
@@ -276,14 +369,35 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .result::<PluginLoaded>(),
     )?;
     registry.register(
+        CommandSpec::new(LOAD_AU, "Load Audio Unit")
+            .description(
+                "Loads the Audio Unit with the given component description — its `type`, \
+                 `subtype`, and `manufacturer`, four characters each, such as Apple's \
+                 `aufx`, `dely`, `appl` for AUDelay — and adds it as a device, as \
+                 `device.add` adds one: to the selected track (or `track`), at `index` or \
+                 where its role goes, selected, one undo step (Insert Device). Its \
+                 parameters become the device's, which `device.parameters` lists and \
+                 `device.set_param` and automation change; its own state is saved with the \
+                 set. Audio Units are macOS only: on Windows and Linux this fails with \
+                 that reason. Its own editor window arrives with the Audio Unit scanner; \
+                 `plugin.show_window` says so until then. The unit's code runs inside \
+                 Beatlayer, so load only units you trust.",
+            )
+            .permission(Permission::External)
+            .contexts([Global, DeviceView])
+            .args::<LoadAudioUnitArgs>()
+            .result::<PluginLoaded>(),
+    )?;
+    registry.register(
         CommandSpec::new(SHOW_WINDOW, "Show Plug-In Window")
             .description(
-                "Opens or closes a plug-in device's own editor in a window of its own, as the \
-                 device's title bar button does; switches unless `shown` says which. Only \
-                 plug-ins whose editor opens in its own window can show one yet. An open \
-                 window follows View ▸ Plug-In Windows and Auto-Hide Plug-In Windows, which \
-                 hide and show it without closing it. It changes only the view: it isn't an \
-                 undo step. Returns `plugin.info`'s report.",
+                "Opens or closes a plug-in device's editor, as the device's title bar button \
+                 does; switches unless `shown` says which. On Windows and Linux the editor \
+                 opens in a window Beatlayer owns, with the plug-in's own view embedded into \
+                 it; on macOS, and for a plug-in that won't embed, in a floating window of the \
+                 plug-in's own. An open window follows View ▸ Plug-In Windows and Auto-Hide \
+                 Plug-In Windows, which hide and show it without closing it. It changes only \
+                 the view: it isn't an undo step. Returns `plugin.info`'s report.",
             )
             .permission(Permission::Read)
             .context(DeviceView)
@@ -293,11 +407,11 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     registry.register(
         CommandSpec::new(INFO, "Plug-In Info")
             .description(
-                "Reports what a plug-in device's plug-in is doing: its CLAP ID and file, \
-                 whether it's running, the latency it reports in frames, what went wrong if \
-                 anything, whether its editor window can open, is open, and is shown (a \
-                 hidden window stays open), and its parameters' values as it reports them. \
-                 Changes nothing.",
+                "Reports what a plug-in device's plug-in is doing: its ID and file, whether \
+                 it's running, the latency it reports in frames, what went wrong if anything, \
+                 whether its editor window can open, is open, and is shown (a hidden window \
+                 stays open), and its parameters' values as it reports them. Changes \
+                 nothing.",
             )
             .permission(Permission::Read)
             .context(DeviceView)
@@ -305,17 +419,45 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .result::<PluginInfo>(),
     )?;
     registry.register(
+        CommandSpec::new(SET_WINDOW, "Set Plug-In Window Place")
+            .description(
+                "Records where a plug-in device's editor window sits and how big it is, in \
+                 points (`frame`): its place is saved with the set beside the document, so \
+                 moving or resizing a window is never an undo step. A plug-in window reopens \
+                 where it was left. Returns `plugin.info`'s report.",
+            )
+            .permission(Permission::Read)
+            .context(DeviceView)
+            .args::<SetWindowArgs>()
+            .result::<SetWindowResult>(),
+    )?;
+    registry.register(
+        CommandSpec::new(SET_PANEL_PARAM, "Set Plug-In Panel Parameter")
+            .description(
+                "Sets which of a plug-in device's own parameters a panel knob shows (D19): \
+                 `index` is the knob, 0 for the first and up to seven, and `param` the \
+                 parameter, or null to restore the knob to the plug-in's parameter at that \
+                 place. The mapping is remembered per plug-in, so another device of the same \
+                 plug-in keeps it, and it changes only the view: it isn't an undo step. \
+                 Returns the Device View's state.",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<SetPanelParamArgs>()
+            .result::<SetPanelParamResult>(),
+    )?;
+    registry.register(
         CommandSpec::new(SCAN, "Scan Plug-Ins")
             .description(
                 "Finds the plug-ins installed on this machine and describes each one: its \
                  format, its file, its identifier, name, vendor, version, and role in a chain. \
-                 Scans the files or folders in `paths`, or the system's plug-in folders when \
-                 `paths` is left out. Each plug-in is loaded in a separate process with a \
-                 timeout, so a plug-in that crashes or hangs is put on a blocklist with the \
-                 reason instead of taking Beatlayer down; a file whose size and modification \
-                 time are unchanged is answered from the cache. CLAP is the only format \
-                 scanned so far. Reads plug-in files outside the project, so an agent asks \
-                 first.",
+                 Scans the files or folders in `paths`, or each format's own system plug-in \
+                 folders (CLAP's and VST3's conventions) when `paths` is left out. Plug-ins \
+                 of every hosted format are scanned. Each one is loaded in a separate process \
+                 with a timeout, so a plug-in that crashes or hangs is put on a blocklist with \
+                 the reason instead of taking Beatlayer down; a file whose size and \
+                 modification time are unchanged is answered from the cache. Reads plug-in \
+                 files outside the project, so an agent asks first.",
             )
             .permission(Permission::External)
             .contexts([Global, DeviceView])
@@ -325,9 +467,9 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     registry.register(
         CommandSpec::new(RESCAN, "Rescan Plug-Ins")
             .description(
-                "Scans the plug-ins in `paths` (or the system's plug-in folders) again, \
-                 ignoring the cache and clearing the blocklist for them, as the Rescan button \
-                 does. Returns `plugin.scan`'s report.",
+                "Scans the plug-ins in `paths` (or each format's system plug-in folders) \
+                 again, ignoring the cache and clearing the blocklist for them, as the Rescan \
+                 button does. Returns `plugin.scan`'s report.",
             )
             .permission(Permission::External)
             .contexts([Global, DeviceView])

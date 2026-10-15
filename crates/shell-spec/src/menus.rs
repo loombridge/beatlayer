@@ -21,9 +21,10 @@ use crate::commands::{
     APP_ABOUT, APP_HIDE, APP_QUIT, APP_SETTINGS, AUDIO_TOGGLE_ENGINE, FOCUS_ARRANGEMENT,
     FOCUS_CONTROL_BAR, FOCUS_NEXT, FOCUS_NEXT_NEIGHBOR, FOCUS_PREVIOUS, FOCUS_PREVIOUS_NEIGHBOR,
     FOCUS_TOGGLE_TAB_NAVIGATION, FOCUS_TOGGLE_WRAP_NAVIGATION, SET_COLLECT_ALL, SET_NEW, SET_OPEN,
-    SET_SAVE, SET_SAVE_AS, SET_SAVE_AS_DEFAULT, SET_SAVE_AS_TEMPLATE, VIEW_FULL_SCREEN,
-    VIEW_TOGGLE_BROWSER, VIEW_TOGGLE_PLUG_IN_WINDOWS, VIEW_TOGGLE_SESSION_ARRANGEMENT,
-    VIEW_ZOOM_IN, VIEW_ZOOM_OUT, VIEW_ZOOM_RESET, WINDOW_CLOSE,
+    SET_SAVE, SET_SAVE_AS, SET_SAVE_AS_DEFAULT, SET_SAVE_AS_TEMPLATE, VIEW_DRAW_MODE,
+    VIEW_FULL_SCREEN, VIEW_TOGGLE_BROWSER, VIEW_TOGGLE_CLIP_VIEW, VIEW_TOGGLE_INFO_VIEW,
+    VIEW_TOGGLE_PLUG_IN_WINDOWS, VIEW_TOGGLE_SESSION_ARRANGEMENT, VIEW_ZOOM_IN, VIEW_ZOOM_OUT,
+    VIEW_ZOOM_RESET, WINDOW_CLOSE,
 };
 use crate::mixer_view::{
     FOCUS as MIXER_FOCUS, IN_OUT as MIXER_IN_OUT, RETURN_TRACKS as MIXER_RETURN_TRACKS,
@@ -463,7 +464,7 @@ const PLAYBACK: &[Row] = &[
     (
         "M-PLAY-011",
         "Hear Metronome Only While Recording",
-        Pending(None),
+        Cmd(crate::transport::SET_METRONOME_ONLY_WHILE_RECORDING),
     ),
     SEPARATOR,
     ("M-PLAY-012", "Back to Arrangement", Key(&["S-TRANS-009"])),
@@ -477,7 +478,7 @@ const VIEW: &[Row] = &[
     ("M-VIEW-003b", "Zoom Out", Cmd(VIEW_ZOOM_OUT)),
     ("M-VIEW-003c", "Reset Zoom to 100%", Cmd(VIEW_ZOOM_RESET)),
     SEPARATOR,
-    ("M-VIEW-004", "Info", Key(&["S-VIEW-008"])),
+    ("M-VIEW-004", "Info", Cmd(VIEW_TOGGLE_INFO_VIEW)),
     ("M-VIEW-005", "Learn View", Key(&["S-VIEW-018"])),
     (
         "M-VIEW-006",
@@ -493,7 +494,7 @@ const VIEW: &[Row] = &[
         Cmd(VIEW_TOGGLE_SESSION_ARRANGEMENT),
     ),
     SEPARATOR,
-    ("M-VIEW-010", "Clip View", Key(&["S-VIEW-015"])),
+    ("M-VIEW-010", "Clip View", Cmd(VIEW_TOGGLE_CLIP_VIEW)),
     ("M-VIEW-011", "Device View", Key(&["S-VIEW-016"])),
     (
         "M-VIEW-012",
@@ -698,7 +699,7 @@ const OPTIONS: &[Row] = &[
     ("M-OPT-015", "Snap Automation to Grid", Pending(None)),
     ("M-OPT-016", "Fixed Grid", Key(&["S-GRID-006"])),
     SEPARATOR,
-    ("M-OPT-017", "Draw Mode", Key(&["S-GRID-001"])),
+    ("M-OPT-017", "Draw Mode", Cmd(VIEW_DRAW_MODE)),
     ("M-OPT-018", "Step Input Mode", Key(&["S-NOTE-044"])),
     SEPARATOR,
     ("M-OPT-019", "Highlight Scales", Key(&["S-NOTE-035"])),

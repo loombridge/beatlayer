@@ -569,6 +569,38 @@ fn every_transport_command_runs_by_id() {
         assert_eq!(sample, (clock % 24_000) as f32);
     }
 
+    // Metronome & recording (WP-2.15).
+    run(
+        &mut rig,
+        "transport.set_metronome_enabled",
+        json!({ "enabled": true }),
+    );
+    run(
+        &mut rig,
+        "transport.set_metronome_count_in",
+        json!({ "count_in": "1_bar" }),
+    );
+    run(
+        &mut rig,
+        "transport.set_metronome_sound",
+        json!({ "sound": "wood" }),
+    );
+    run(
+        &mut rig,
+        "transport.set_metronome_rhythm",
+        json!({ "rhythm": "1/8" }),
+    );
+    run(
+        &mut rig,
+        "transport.set_metronome_only_while_recording",
+        json!({ "only_while_recording": true }),
+    );
+    run(
+        &mut rig,
+        "transport.set_recording",
+        json!({ "recording": true }),
+    );
+
     let mut registered: Vec<String> = commands
         .iter()
         .map(|spec| spec.id.to_string())
@@ -610,6 +642,7 @@ fn the_bindings_follow_the_spec() {
         ["S-ARR-033"]
     );
     assert_eq!(bindings("transport.play_from_insert_marker"), ["S-ARR-032"]);
+    assert_eq!(bindings("transport.set_metronome_enabled"), ["S-TRANS-011"]);
     for id in [
         "transport.play",
         "transport.stop",
@@ -618,6 +651,11 @@ fn the_bindings_follow_the_spec() {
         "transport.return_to_start",
         "transport.set_loop",
         "transport.set_loop_enabled",
+        "transport.set_recording",
+        "transport.set_metronome_count_in",
+        "transport.set_metronome_sound",
+        "transport.set_metronome_rhythm",
+        "transport.set_metronome_only_while_recording",
     ] {
         assert_eq!(bindings(id), Vec::<String>::new(), "{id}");
     }

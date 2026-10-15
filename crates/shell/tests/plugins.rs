@@ -10,7 +10,7 @@ use bl_model::{DeviceId, ParamId, TrackKind};
 use bl_shell::device_commands::{DeviceParameters, DeviceViewState};
 use bl_shell::plugin_commands::{self as ids, PluginInfo, PluginLoaded};
 use bl_shell::{Shell, commands};
-use bl_test_clap::{GAIN, PLUGIN_ID, PLUGIN_NAME};
+use bl_test_clap::{GAIN, LAST_NOTE, PLUGIN_ID, PLUGIN_NAME};
 use serde_json::{Value, json};
 
 fn audio_track(shell: &Shell) -> bl_model::TrackId {
@@ -102,7 +102,7 @@ fn a_plugin_loads_runs_and_keeps_its_state_with_the_set() {
         serde_json::from_value(shell.run("device_view.state", json!({})).unwrap()).unwrap();
     let frame = view.devices.iter().find(|d| d.id == device).unwrap();
     assert!(frame.selected);
-    assert_eq!(frame.panel.as_ref().unwrap().description.params.len(), 3);
+    assert_eq!(frame.panel.as_ref().unwrap().description.params.len(), 6);
     let params: DeviceParameters = serde_json::from_value(
         shell
             .run("device.parameters", json!({ "device": device }))
@@ -410,4 +410,298 @@ fn a_plugins_editor_follows_auto_hide_plug_in_windows() {
         opened.window_open && !opened.window_shown,
         "auto-hidden at once"
     );
+}
+
+// Spec: clap-hosting R13, R16; WP-2.10. A plug-in's editor window is part
+// of the window layer: where it sits and how big it is are saved with the
+// set beside the document, so it reopens where it was left, and moving or
+// resizing it is never an undo step.
+#[test]
+fn a_plugin_windows_place_survives_a_set_round_trip() {
+    let scratch =
+        std::env::temp_dir().join(format!("bl-shell-plugin-window-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&scratch);
+    std::fs::create_dir_all(&scratch).unwrap();
+
+    let mut shell = Shell::headless();
+    shell.start_audio();
+    let track = audio_track(&shell);
+    let device = load(&mut shell, track);
+    wait(&mut shell, device, |i| i.active);
+    shell
+        .run(ids::SHOW_WINDOW, json!({ "device": device }))
+        .unwrap();
+
+    let frame = bl_model::WindowFrame {
+        x: 120.0,
+        y: 80.0,
+        width: 500.0,
+        height: 400.0,
+    };
+    let steps = shell.editor().undo_history().len();
+    let placed: PluginInfo = serde_json::from_value(
+        shell
+            .run(ids::SET_WINDOW, json!({ "device": device, "frame": frame }))
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(placed.window, Some(frame));
+    assert_eq!(shell.editor().undo_history().len(), steps, "no undo step");
+
+    // A frame that isn't finite, or whose size isn't above 0, is refused.
+    assert!(
+        shell
+            .run(
+                ids::SET_WINDOW,
+                json!({ "device": device, "frame": { "x": 0.0, "y": 0.0, "width": -1.0, "height": 1.0 } }),
+            )
+            .is_err()
+    );
+
+    // Saved and opened again, the window is where it was left.
+    let saved = shell
+        .run(
+            commands::SET_SAVE_AS,
+            json!({ "path": scratch.join("Windows.blset") }),
+        )
+        .unwrap();
+    let path = saved["path"].as_str().unwrap().to_owned();
+    shell.run(commands::SET_NEW, json!({})).unwrap();
+    shell
+        .run(commands::SET_OPEN, json!({ "path": path }))
+        .unwrap();
+    let reopened = wait(&mut shell, device, |i| i.active);
+    assert_eq!(reopened.window, Some(frame));
+
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+// Spec: clap-hosting R16; the plug-in device panel (WP-2.10, D19, IMP-03).
+// A plug-in device's panel is eight knobs mapped to the plug-in's first
+// parameters, remappable with `plugin.set_panel_param`, and the mapping is
+// remembered per plug-in.
+#[test]
+fn the_panel_maps_the_plugins_parameters_and_a_remap_is_remembered_per_plugin() {
+    let mut shell = Shell::headless();
+    shell.start_audio();
+    let track = audio_track(&shell);
+    let device = load(&mut shell, track);
+    wait(&mut shell, device, |i| i.active);
+    shell
+        .run("device.select", json!({ "device": device }))
+        .unwrap();
+
+    let panel = |shell: &mut Shell| {
+        let view: DeviceViewState =
+            serde_json::from_value(shell.run("device_view.state", json!({})).unwrap()).unwrap();
+        view.devices
+            .iter()
+            .find(|d| d.id == device)
+            .unwrap()
+            .panel
+            .clone()
+            .unwrap()
+    };
+
+    let first = panel(&mut shell);
+    assert!(first.plugin, "a plug-in device's panel");
+    let names: Vec<&str> = first
+        .description
+        .params
+        .iter()
+        .map(|p| p.name.as_str())
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "Gain",
+            "Latency",
+            "Last Note",
+            "Editor Scale",
+            "Editor Width",
+            "Editor Height"
+        ]
+    );
+
+    // Remap the first knob to the plug-in's third parameter.
+    let remapped: DeviceViewState = serde_json::from_value(
+        shell
+            .run(
+                ids::SET_PANEL_PARAM,
+                json!({ "device": device, "index": 0, "param": LAST_NOTE }),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    let after = remapped
+        .devices
+        .iter()
+        .find(|d| d.id == device)
+        .unwrap()
+        .panel
+        .clone()
+        .unwrap();
+    assert_eq!(after.description.params[0].name, "Last Note");
+    assert_eq!(
+        shell
+            .preferences()
+            .plugin_panels
+            .get(&format!("clap/{PLUGIN_ID}"))
+            .and_then(|m| m.get(&0)),
+        Some(&ParamId(LAST_NOTE)),
+        "recorded per plug-in"
+    );
+
+    // Another device of the same plug-in keeps the mapping.
+    let other = load(&mut shell, track);
+    shell
+        .run("device.select", json!({ "device": other }))
+        .unwrap();
+    let view: DeviceViewState =
+        serde_json::from_value(shell.run("device_view.state", json!({})).unwrap()).unwrap();
+    let other_panel = view
+        .devices
+        .iter()
+        .find(|d| d.id == other)
+        .unwrap()
+        .panel
+        .clone()
+        .unwrap();
+    assert_eq!(other_panel.description.params[0].name, "Last Note");
+
+    // Null restores the knob to the plug-in's parameter at that place.
+    shell
+        .run(
+            ids::SET_PANEL_PARAM,
+            json!({ "device": other, "index": 0, "param": null }),
+        )
+        .unwrap();
+    let view: DeviceViewState =
+        serde_json::from_value(shell.run("device_view.state", json!({})).unwrap()).unwrap();
+    let restored = view
+        .devices
+        .iter()
+        .find(|d| d.id == other)
+        .unwrap()
+        .panel
+        .clone()
+        .unwrap();
+    assert_eq!(restored.description.params[0].name, "Gain");
+}
+
+// Spec: device-chains R31, R33; WP-2.10. View ▸ Plug-In Windows hides and
+// shows every open plug-in window, not just the selected device's.
+#[test]
+fn plug_in_windows_hides_and_shows_every_editor() {
+    let mut shell = Shell::headless();
+    shell.start_audio();
+    let track = audio_track(&shell);
+    shell
+        .invoke("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let a = load(&mut shell, track);
+    let b = load(&mut shell, track);
+    wait(&mut shell, a, |i| i.active);
+    wait(&mut shell, b, |i| i.active);
+    shell.run(ids::SHOW_WINDOW, json!({ "device": a })).unwrap();
+    shell.run(ids::SHOW_WINDOW, json!({ "device": b })).unwrap();
+    assert!(info(&mut shell, a).window_shown && info(&mut shell, b).window_shown);
+
+    shell
+        .invoke("view.toggle_plug_in_windows", json!({}))
+        .unwrap();
+    assert!(
+        !info(&mut shell, a).window_shown && !info(&mut shell, b).window_shown,
+        "both hidden"
+    );
+
+    shell
+        .invoke("view.toggle_plug_in_windows", json!({}))
+        .unwrap();
+    assert!(
+        info(&mut shell, a).window_shown && info(&mut shell, b).window_shown,
+        "both shown again"
+    );
+}
+// Spec: vst3-hosting R1, R3, R4, R9. A VST3 plug-in loads by path through
+// the commands as an agent runs them, the Device View describes it, and it
+// processes a block through the shell's host with its parameters.
+#[test]
+fn a_vst3_plugin_loads_runs_and_processes_through_the_commands() {
+    use bl_core::time::SampleRate;
+    use bl_engine::{Block, NodeConfig, NodeFactory, NoteBuffer, TransportInfo};
+
+    let mut shell = Shell::headless();
+    let track = audio_track(&shell);
+    let loaded: PluginLoaded = serde_json::from_value(
+        shell
+            .run(
+                ids::LOAD,
+                json!({ "path": bl_test_vst3::bundle(), "track": track }),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        (loaded.plugin.as_str(), loaded.name.as_str()),
+        (
+            bl_test_vst3::plugin_id().as_str(),
+            bl_test_vst3::PLUGIN_NAME
+        )
+    );
+    assert_eq!(shell.editor().undo_history().next(), Some("Insert Device"));
+    let device = loaded.device;
+
+    // The Device View describes it, and agents read its parameters.
+    shell
+        .run("device.select", json!({ "device": device }))
+        .unwrap();
+    let view: DeviceViewState =
+        serde_json::from_value(shell.run("device_view.state", json!({})).unwrap()).unwrap();
+    let frame = view.devices.iter().find(|d| d.id == device).unwrap();
+    assert!(frame.selected);
+    assert_eq!(frame.panel.as_ref().unwrap().description.params.len(), 1);
+    let params: DeviceParameters = serde_json::from_value(
+        shell
+            .run("device.parameters", json!({ "device": device }))
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(params.params[0].descriptor.name, "Gain");
+
+    // The engine runs it: a block comes back with the gain applied, and
+    // `plugin.info` says it's active with its one parameter.
+    let device = shell.editor().document().device(device).unwrap().clone();
+    let config = NodeConfig {
+        sample_rate: SampleRate::HZ_48000,
+        max_frames: 64,
+        channels: 2,
+    };
+    let mut node = NodeFactory::create(&shell.vst3().factory(), &device, &config)
+        .expect("a node for a VST3 device");
+    let mut data = vec![0.5f32; 128];
+    let mut out = NoteBuffer::with_capacity(8);
+    {
+        let mut block = Block::new(
+            &mut data,
+            2,
+            64,
+            64,
+            &[],
+            TransportInfo::default(),
+            SampleRate::HZ_48000,
+        )
+        .with_notes(&[], &mut out);
+        node.process(&mut block);
+    }
+    assert!(data.iter().all(|s| *s == 0.5), "the gain of 1: {data:?}");
+    let info: PluginInfo = serde_json::from_value(
+        shell
+            .run(ids::INFO, json!({ "device": device.id }))
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(info.active);
+    assert_eq!(info.failure, None);
+    assert!(info.values.contains(&(ParamId(bl_test_vst3::GAIN), 1.0)));
 }

@@ -1,6 +1,6 @@
-//! Exporting audio (WP-1.12): a range of the set rendered offline through
-//! the engine and written to a WAV, AIFF, or FLAC file. The behaviour it
-//! follows is in the export spec.
+//! Exporting audio (WP-1.12; MP3, WP-2.26): a range of the set rendered
+//! offline through the engine and written to a WAV, AIFF, FLAC, or MP3
+//! file. The behaviour it follows is in the export spec.
 //!
 //! [`export`] runs one export on the calling thread:
 //!
@@ -33,7 +33,7 @@ use std::time::{Duration, Instant};
 
 use bl_core::time::{SampleRate, Ticks, TimeSignatureMap};
 use bl_engine::{EngineConfig, MediaLibrary, Offline, Output, Registry, TransportCommand, When};
-use bl_media::{AudioWriter, BitDepth, Dither, EncodeSpec, FileType, RateConverter};
+use bl_media::{AudioWriter, BitDepth, Dither, EncodeSpec, FileType, MP3_RATES, RateConverter};
 use bl_model::{ContentHash, DeviceId, Document, TrackId};
 use bl_plugin_host::clap::ClapHost;
 use bl_shell_spec::editing::Position;
@@ -373,6 +373,16 @@ fn check(job: &Job) -> Result<(), ExportError> {
     }
     if !job.file_type.holds(job.bit_depth) {
         return invalid("FLAC holds 16 or 24 bits; export 32-bit float as WAV or AIFF".to_owned());
+    }
+    // Spec: export R23 (WP-2.26). MP3 holds its own rates; anything else is
+    // refused before the render. Its bit depth and dither don't apply.
+    if job.file_type == FileType::Mp3 && !MP3_RATES.contains(&job.sample_rate) {
+        let rates: Vec<String> = MP3_RATES.iter().map(u32::to_string).collect();
+        return invalid(format!(
+            "a sample rate of {} Hz; MP3 holds {} Hz",
+            job.sample_rate,
+            rates.join(", ")
+        ));
     }
     if job.path.file_name().is_none() || job.path.is_dir() {
         return invalid(format!("{} isn't a file name", job.path.display()));
@@ -949,7 +959,7 @@ pub fn run_command(
         (None, Some(named)) => named,
         (None, None) => {
             return Err(invalid(format!(
-                "{} has no audio file extension; end it in .wav, .aif, or .flac, or give \
+                "{} has no audio file extension; end it in .wav, .aif, .flac, or .mp3, or give \
                  `file_type`",
                 args.path
             )));
@@ -959,6 +969,7 @@ pub fn run_command(
                 SpecFileType::Wav => FileType::Wav,
                 SpecFileType::Aiff => FileType::Aiff,
                 SpecFileType::Flac => FileType::Flac,
+                SpecFileType::Mp3 => FileType::Mp3,
             };
             if named.is_some_and(|named| named != asked) {
                 return Err(invalid(format!(
@@ -1140,6 +1151,7 @@ pub fn run_command(
             FileType::Wav => SpecFileType::Wav,
             FileType::Aiff => SpecFileType::Aiff,
             FileType::Flac => SpecFileType::Flac,
+            FileType::Mp3 => SpecFileType::Mp3,
         },
         bit_depth: args.bit_depth,
         sample_rate: args.sample_rate,
@@ -1149,7 +1161,7 @@ pub fn run_command(
         start,
         end,
         range: source,
-        dither: if bit_depth.is_integer() {
+        dither: if bit_depth.is_integer() && file_type != FileType::Mp3 {
             args.dither.unwrap_or_default()
         } else {
             SpecDither::None

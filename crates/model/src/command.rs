@@ -10,6 +10,9 @@ use imbl::Vector;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::automation::{
+    AutomationTarget, MixerParam, PointError, drop_device, entry, override_target,
+};
 use crate::clip::{AudioData, Clip, ClipData, MidiData};
 use crate::device::{Device, DeviceRole};
 use crate::document::Document;
@@ -222,6 +225,65 @@ pub enum Command {
         track: TrackId,
         /// `pre` or `post`.
         tap: SendTap,
+    },
+    /// Sets the value of one of a track's automatable parameters at a
+    /// position on its envelope, adding a breakpoint there or replacing the
+    /// one that's there, as clicking or dragging a breakpoint does. A
+    /// parameter with no envelope gets its first breakpoint, at that value,
+    /// and its envelope drives it from then on.
+    SetAutomationBreakpoint {
+        /// The track the parameter belongs to.
+        track: TrackId,
+        /// The parameter: a mixer control, a send, or a device parameter.
+        target: AutomationTarget,
+        /// Where the breakpoint sits: 0 (1.1.1) or later.
+        at: Ticks,
+        /// The value there, in the parameter's own units.
+        value: f64,
+    },
+    /// Moves one of a track's automation breakpoints, keeping its value.
+    MoveAutomationBreakpoint {
+        /// The track the parameter belongs to.
+        track: TrackId,
+        /// The parameter.
+        target: AutomationTarget,
+        /// Where the breakpoint is now.
+        at: Ticks,
+        /// Where it goes: 0 (1.1.1) or later, and not where another
+        /// breakpoint of the same envelope already is.
+        to: Ticks,
+    },
+    /// Deletes one of a track's automation breakpoints, joining its
+    /// neighbours with a straight segment. Deleting the last one takes the
+    /// parameter's envelope with it.
+    DeleteAutomationBreakpoint {
+        /// The track the parameter belongs to.
+        track: TrackId,
+        /// The parameter.
+        target: AutomationTarget,
+        /// Where the breakpoint is.
+        at: Ticks,
+    },
+    /// Deletes all of a track parameter's automation: its envelope and every
+    /// breakpoint on it, as Delete Automation in the control's context menu
+    /// does. The control's value stays where it is.
+    DeleteAutomation {
+        /// The track the parameter belongs to.
+        track: TrackId,
+        /// The parameter.
+        target: AutomationTarget,
+    },
+    /// Turns every overridden envelope in the song back on, as the Control
+    /// Bar's Re-Enable Automation button does: every automated control a
+    /// hand move turned off follows its envelope again.
+    ReEnableAutomation {},
+    /// Turns one parameter's overridden envelope back on, as Re-Enable
+    /// Automation in its context menu does.
+    ReEnableAutomationFor {
+        /// The track the parameter belongs to.
+        track: TrackId,
+        /// The parameter.
+        target: AutomationTarget,
     },
     /// Switches Solo in Place on or off.
     SetSoloInPlace {
@@ -558,6 +620,13 @@ impl Command {
             Self::ArmExclusive { .. } => "Arm track",
             Self::SetSend { .. } => "Change send",
             Self::SetSendTap { .. } => "Switch Pre/Post",
+            Self::SetAutomationBreakpoint { .. } => "Add Automation Breakpoint",
+            Self::MoveAutomationBreakpoint { .. } => "Move Automation Breakpoint",
+            Self::DeleteAutomationBreakpoint { .. } => "Delete Automation Breakpoint",
+            Self::DeleteAutomation { .. } => "Delete Automation",
+            Self::ReEnableAutomation { .. } | Self::ReEnableAutomationFor { .. } => {
+                "Re-Enable Automation"
+            }
             Self::SetSoloInPlace { .. } => "Switch Solo in Place",
             Self::SetInput { .. } | Self::SetOutput { .. } | Self::SetMidiOutput { .. } => {
                 "Change \"Routing\""
@@ -690,14 +759,28 @@ impl Document {
             Command::SetVolume { track, volume } => {
                 check_value("volume", *volume, volume.is_finite() && *volume >= 0.0)?;
                 if self.track_ref(*track)?.mixer.volume != *volume {
-                    self.track_mut(*track)?.mixer.volume = *volume;
+                    let track_ref = self.track_mut(*track)?;
+                    track_ref.mixer.volume = *volume;
+                    override_target(
+                        &mut track_ref.automation,
+                        &AutomationTarget::Mixer {
+                            param: MixerParam::Volume,
+                        },
+                    );
                 }
                 Ok(())
             }
             Command::SetPan { track, pan } => {
                 check_value("pan", *pan, (-1.0..=1.0).contains(pan))?;
                 if self.track_ref(*track)?.mixer.pan != *pan {
-                    self.track_mut(*track)?.mixer.pan = *pan;
+                    let track_ref = self.track_mut(*track)?;
+                    track_ref.mixer.pan = *pan;
+                    override_target(
+                        &mut track_ref.automation,
+                        &AutomationTarget::Mixer {
+                            param: MixerParam::Pan,
+                        },
+                    );
                 }
                 Ok(())
             }
@@ -705,7 +788,14 @@ impl Document {
                 let current = self.track_ref(*track)?;
                 check_kind(current, TrackKind::has_mute_and_solo, NOT_MAIN)?;
                 if current.mixer.mute != *mute {
-                    self.track_mut(*track)?.mixer.mute = *mute;
+                    let track_ref = self.track_mut(*track)?;
+                    track_ref.mixer.mute = *mute;
+                    override_target(
+                        &mut track_ref.automation,
+                        &AutomationTarget::Mixer {
+                            param: MixerParam::Mute,
+                        },
+                    );
                 }
                 Ok(())
             }
@@ -755,6 +845,54 @@ impl Document {
                     } else {
                         sends.insert(*to, *level);
                     }
+                    override_target(
+                        &mut self.track_mut(*track)?.automation,
+                        &AutomationTarget::Send { to: *to },
+                    );
+                }
+                Ok(())
+            }
+            Command::SetAutomationBreakpoint {
+                track,
+                target,
+                at,
+                value,
+            } => self.set_automation_breakpoint(*track, *target, *at, *value),
+            Command::MoveAutomationBreakpoint {
+                track,
+                target,
+                at,
+                to,
+            } => self.move_automation_breakpoint(*track, *target, *at, *to),
+            Command::DeleteAutomationBreakpoint { track, target, at } => {
+                self.delete_automation_breakpoint(*track, *target, *at)
+            }
+            Command::DeleteAutomation { track, target } => {
+                self.check_automation_target(*track, *target)?;
+                self.track_mut(*track)?.automation.remove(target);
+                Ok(())
+            }
+            Command::ReEnableAutomation {} => {
+                for id in self.track_order() {
+                    let track = self.track_mut(id)?;
+                    let overridden: Vec<AutomationTarget> = track
+                        .automation
+                        .iter()
+                        .filter(|(_, automation)| !automation.enabled)
+                        .map(|(target, _)| *target)
+                        .collect();
+                    for target in overridden {
+                        if let Some(automation) = track.automation.get_mut(&target) {
+                            automation.enabled = true;
+                        }
+                    }
+                }
+                Ok(())
+            }
+            Command::ReEnableAutomationFor { track, target } => {
+                self.check_automation_target(*track, *target)?;
+                if let Some(automation) = self.track_mut(*track)?.automation.get_mut(target) {
+                    automation.enabled = true;
                 }
                 Ok(())
             }
@@ -874,6 +1012,7 @@ impl Document {
                     .ok_or(ModelError::NoSuchDevice(*device))?;
                 chain.remove(position);
                 self.index.device_track.remove(device);
+                drop_device(&mut self.track_mut(owner)?.automation, *device);
                 Ok(())
             }
             Command::MoveDevice {
@@ -932,7 +1071,15 @@ impl Document {
             } => {
                 check_value("parameter value", *value, value.is_finite())?;
                 if self.device_ref(*device)?.params.get(param) != Some(value) {
+                    let owner = self.device_owner(*device)?;
                     self.device_mut(*device)?.params.insert(*param, *value);
+                    override_target(
+                        &mut self.track_mut(owner)?.automation,
+                        &AutomationTarget::Device {
+                            device: *device,
+                            param: *param,
+                        },
+                    );
                 }
                 Ok(())
             }
@@ -1284,6 +1431,9 @@ impl Document {
         let device = self.track_mut(owner)?.devices.remove(old_position);
         insert_at(&mut self.track_mut(track)?.devices, index, device)?;
         self.index.device_track.insert(id, track);
+        if owner != track {
+            drop_device(&mut self.track_mut(owner)?.automation, id);
+        }
         check_chain(self.track_ref(track)?)
     }
 
@@ -1353,6 +1503,118 @@ impl Document {
         }
         let next: Vec<(Ticks, Bpm)> = points.into_iter().filter(|&(p, _)| p != at).collect();
         self.settings.tempo = tempo_from_breakpoints(next);
+        Ok(())
+    }
+
+    // A track's automation: one envelope per automatable parameter, as
+    // edits on the track's map (WP-2.12).
+
+    /// Checks that `target` names a parameter of `track`: a control of its
+    /// mixer, one of its sends to a return track, or a parameter of a device
+    /// in its chain.
+    pub(crate) fn check_automation_target(
+        &self,
+        track: TrackId,
+        target: AutomationTarget,
+    ) -> Result<(), ModelError> {
+        match target {
+            AutomationTarget::Mixer { .. } => {
+                self.track_ref(track)?;
+            }
+            AutomationTarget::Send { to } => {
+                check_kind(self.track_ref(track)?, TrackKind::has_sends, SENDER)?;
+                check_kind(
+                    self.track_ref(to)?,
+                    |kind| kind == TrackKind::Return,
+                    RETURN,
+                )?;
+            }
+            AutomationTarget::Device { device, .. } => {
+                let track_ref = self.track_ref(track)?;
+                if track_ref.device_position(device).is_none() {
+                    return Err(ModelError::DeviceNotInTrack { device, track });
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Sets the value of `target` at `at` on its envelope, adding a
+    /// breakpoint there or replacing the one that's there. The envelope
+    /// keeps driving the parameter (or starts to, if this is its first
+    /// breakpoint): only a hand move or Re-Enable Automation changes that.
+    fn set_automation_breakpoint(
+        &mut self,
+        track: TrackId,
+        target: AutomationTarget,
+        at: Ticks,
+        value: f64,
+    ) -> Result<(), ModelError> {
+        if at < Ticks::ZERO {
+            return Err(ModelError::NegativePosition(at));
+        }
+        check_value("automation value", value, value.is_finite())?;
+        self.check_automation_target(track, target)?;
+        entry(&mut self.track_mut(track)?.automation, target)
+            .envelope
+            .set(at, value);
+        Ok(())
+    }
+
+    /// Moves the breakpoint at `at` on `target`'s envelope to `to`, keeping
+    /// its value.
+    fn move_automation_breakpoint(
+        &mut self,
+        track: TrackId,
+        target: AutomationTarget,
+        at: Ticks,
+        to: Ticks,
+    ) -> Result<(), ModelError> {
+        if to < Ticks::ZERO {
+            return Err(ModelError::NegativePosition(to));
+        }
+        self.check_automation_target(track, target)?;
+        let automation =
+            self.track_mut(track)?
+                .automation
+                .get_mut(&target)
+                .ok_or(ModelError::NoChange {
+                    what: "breakpoint",
+                    at,
+                })?;
+        automation
+            .envelope
+            .move_point(at, to)
+            .map_err(automation_point_error)
+    }
+
+    /// Deletes the breakpoint at `at` on `target`'s envelope, joining its
+    /// neighbours with a straight segment. Deleting the last one takes the
+    /// parameter's envelope with it.
+    fn delete_automation_breakpoint(
+        &mut self,
+        track: TrackId,
+        target: AutomationTarget,
+        at: Ticks,
+    ) -> Result<(), ModelError> {
+        self.check_automation_target(track, target)?;
+        let empty =
+            {
+                let automation = self.track_mut(track)?.automation.get_mut(&target).ok_or(
+                    ModelError::NoChange {
+                        what: "breakpoint",
+                        at,
+                    },
+                )?;
+                automation
+                    .envelope
+                    .delete(at)
+                    .map_err(automation_point_error)?;
+                automation.envelope.is_empty()
+            };
+        if empty {
+            self.track_mut(track)?.automation.remove(&target);
+        }
         Ok(())
     }
 
@@ -1564,6 +1826,20 @@ fn check_kind(
             kind: track.kind,
             needs,
         })
+    }
+}
+
+/// An envelope edit's error as the model's, for the command that asked.
+fn automation_point_error(error: PointError) -> ModelError {
+    match error {
+        PointError::Missing(at) => ModelError::NoChange {
+            what: "breakpoint",
+            at,
+        },
+        PointError::Taken(at) => ModelError::ChangeInUse {
+            what: "breakpoint",
+            at,
+        },
     }
 }
 
@@ -3338,6 +3614,319 @@ mod tests {
         .unwrap();
         assert_eq!(song.doc.settings().tempo, tempo);
         assert_eq!(song.doc.settings().time_signatures, signatures);
+    }
+
+    // Spec: automation R1 to R6
+    #[test]
+    fn automation_is_one_envelope_per_parameter_and_a_hand_move_overrides_it() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        let ret = song.track(TrackKind::Return, None);
+        let device = song.device(track);
+        let volume = AutomationTarget::Mixer {
+            param: MixerParam::Volume,
+        };
+        let send = AutomationTarget::Send { to: ret };
+        let param = AutomationTarget::Device {
+            device,
+            param: ParamId(2),
+        };
+
+        // A first breakpoint makes the envelope, and the envelope drives the
+        // control.
+        song.apply(Command::SetAutomationBreakpoint {
+            track,
+            target: volume,
+            at: Ticks::ZERO,
+            value: 1.0,
+        })
+        .unwrap();
+        song.apply(Command::SetAutomationBreakpoint {
+            track,
+            target: volume,
+            at: Ticks::WHOLE,
+            value: 0.5,
+        })
+        .unwrap();
+        let automation = song
+            .doc
+            .track(track)
+            .unwrap()
+            .automation_for(&volume)
+            .unwrap();
+        assert!(automation.enabled);
+        assert_eq!(
+            automation.envelope.points().collect::<Vec<_>>(),
+            vec![(Ticks::ZERO, 1.0), (Ticks::WHOLE, 0.5)]
+        );
+        // Between two breakpoints the line, and before the first and after
+        // the last the nearest one's value.
+        assert_eq!(automation.envelope.value_at(Ticks::ZERO), Some(1.0));
+        assert_eq!(automation.envelope.value_at(Ticks::WHOLE / 2), Some(0.75));
+        assert_eq!(automation.envelope.value_at(Ticks::WHOLE * 2), Some(0.5));
+
+        // Setting the same position replaces the breakpoint's value; a send
+        // and a device parameter hold envelopes of their own.
+        song.apply(Command::SetAutomationBreakpoint {
+            track,
+            target: volume,
+            at: Ticks::WHOLE,
+            value: 0.25,
+        })
+        .unwrap();
+        assert_eq!(
+            song.doc
+                .track(track)
+                .unwrap()
+                .automation_for(&volume)
+                .unwrap()
+                .envelope
+                .points()
+                .count(),
+            2
+        );
+        song.apply(Command::SetAutomationBreakpoint {
+            track,
+            target: send,
+            at: Ticks::ZERO,
+            value: 0.5,
+        })
+        .unwrap();
+        song.apply(Command::SetAutomationBreakpoint {
+            track,
+            target: param,
+            at: Ticks::ZERO,
+            value: -6.0,
+        })
+        .unwrap();
+        assert_eq!(song.doc.track(track).unwrap().automation().count(), 3);
+
+        // Moving and deleting a breakpoint.
+        song.apply(Command::MoveAutomationBreakpoint {
+            track,
+            target: volume,
+            at: Ticks::WHOLE,
+            to: Ticks::WHOLE * 2,
+        })
+        .unwrap();
+        assert_eq!(
+            song.doc
+                .track(track)
+                .unwrap()
+                .automation_for(&volume)
+                .unwrap()
+                .envelope
+                .points()
+                .collect::<Vec<_>>(),
+            vec![(Ticks::ZERO, 1.0), (Ticks::WHOLE * 2, 0.25)]
+        );
+        assert_eq!(
+            song.reject(Command::MoveAutomationBreakpoint {
+                track,
+                target: volume,
+                at: Ticks::WHOLE,
+                to: Ticks::WHOLE * 4,
+            }),
+            ModelError::NoChange {
+                what: "breakpoint",
+                at: Ticks::WHOLE,
+            }
+        );
+        assert_eq!(
+            song.reject(Command::MoveAutomationBreakpoint {
+                track,
+                target: volume,
+                at: Ticks::ZERO,
+                to: Ticks::WHOLE * 2,
+            }),
+            ModelError::ChangeInUse {
+                what: "breakpoint",
+                at: Ticks::WHOLE * 2,
+            }
+        );
+
+        // Moving the control by hand overrides the envelope: the control's
+        // value wins, the envelope stays, and Re-Enable brings it back.
+        song.apply(Command::SetVolume {
+            track,
+            volume: 0.75,
+        })
+        .unwrap();
+        let automation = song
+            .doc
+            .track(track)
+            .unwrap()
+            .automation_for(&volume)
+            .unwrap();
+        assert!(!automation.enabled);
+        assert_eq!(automation.envelope.points().count(), 2);
+        assert!(song.doc.track(track).unwrap().automation_overridden());
+        song.apply(Command::ReEnableAutomationFor {
+            track,
+            target: volume,
+        })
+        .unwrap();
+        assert!(
+            song.doc
+                .track(track)
+                .unwrap()
+                .automation_for(&volume)
+                .unwrap()
+                .enabled
+        );
+        // A hand move on a control with no envelope changes nothing else.
+        song.apply(Command::SetPan { track, pan: 0.5 }).unwrap();
+        assert!(!song.doc.track(track).unwrap().automation_overridden());
+
+        // The same for a device parameter and a send, and Re-Enable
+        // Automation turns every overridden envelope back on at once.
+        song.apply(Command::SetDeviceParam {
+            device,
+            param: ParamId(2),
+            value: -3.0,
+        })
+        .unwrap();
+        assert!(
+            !song
+                .doc
+                .track(track)
+                .unwrap()
+                .automation_for(&param)
+                .unwrap()
+                .enabled
+        );
+        song.apply(Command::SetSend {
+            track,
+            to: ret,
+            level: 0.25,
+        })
+        .unwrap();
+        assert!(
+            !song
+                .doc
+                .track(track)
+                .unwrap()
+                .automation_for(&send)
+                .unwrap()
+                .enabled
+        );
+        song.apply(Command::ReEnableAutomation {}).unwrap();
+        assert!(!song.doc.track(track).unwrap().automation_overridden());
+
+        // Deleting a parameter's automation takes the whole envelope; the
+        // control keeps its value. Deleting again changes nothing.
+        song.apply(Command::DeleteAutomation {
+            track,
+            target: send,
+        })
+        .unwrap();
+        assert!(
+            song.doc
+                .track(track)
+                .unwrap()
+                .automation_for(&send)
+                .is_none()
+        );
+        assert_eq!(song.doc.track(track).unwrap().send(ret), 0.25);
+        song.apply(Command::DeleteAutomation {
+            track,
+            target: send,
+        })
+        .unwrap();
+
+        // Deleting the last breakpoint takes the envelope with it.
+        song.apply(Command::DeleteAutomationBreakpoint {
+            track,
+            target: volume,
+            at: Ticks::ZERO,
+        })
+        .unwrap();
+        assert_eq!(
+            song.doc
+                .track(track)
+                .unwrap()
+                .automation_for(&volume)
+                .unwrap()
+                .envelope
+                .points()
+                .count(),
+            1
+        );
+        song.apply(Command::DeleteAutomationBreakpoint {
+            track,
+            target: volume,
+            at: Ticks::WHOLE * 2,
+        })
+        .unwrap();
+        assert!(
+            song.doc
+                .track(track)
+                .unwrap()
+                .automation_for(&volume)
+                .is_none()
+        );
+
+        // Targets the track doesn't have are refused: a send to something
+        // that isn't a return track, and a device in another chain.
+        let other = song.track(TrackKind::Audio, None);
+        let other_device = song.device(other);
+        assert!(
+            song.doc
+                .apply(&Command::SetAutomationBreakpoint {
+                    track,
+                    target: AutomationTarget::Send { to: other },
+                    at: Ticks::ZERO,
+                    value: 0.5,
+                })
+                .is_err()
+        );
+        assert_eq!(
+            song.reject(Command::SetAutomationBreakpoint {
+                track,
+                target: AutomationTarget::Device {
+                    device: other_device,
+                    param: ParamId(0),
+                },
+                at: Ticks::ZERO,
+                value: 0.5,
+            }),
+            ModelError::DeviceNotInTrack {
+                device: other_device,
+                track,
+            }
+        );
+        // A position before 1.1.1, and a value that isn't a number.
+        assert!(
+            song.doc
+                .apply(&Command::SetAutomationBreakpoint {
+                    track,
+                    target: param,
+                    at: -Ticks(1),
+                    value: 0.5,
+                })
+                .is_err()
+        );
+        assert!(
+            song.doc
+                .apply(&Command::SetAutomationBreakpoint {
+                    track,
+                    target: param,
+                    at: Ticks::ZERO,
+                    value: f64::NAN,
+                })
+                .is_err()
+        );
+
+        // Deleting a device takes its automation with it.
+        song.apply(Command::RemoveDevice { device }).unwrap();
+        assert!(
+            song.doc
+                .track(track)
+                .unwrap()
+                .automation_for(&param)
+                .is_none()
+        );
+        song.doc.check_invariants().unwrap();
     }
 
     /// Spec: musical-time R4, R5, R7, R8. Tempo changes and time-signature

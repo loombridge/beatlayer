@@ -7,9 +7,11 @@
 use std::collections::BTreeSet;
 
 use bl_core::id::Id;
+use bl_core::time::Ticks;
 use imbl::{OrdMap, Vector};
 use serde::{Deserialize, Serialize};
 
+use crate::automation::{AutomationTarget, Envelope};
 use crate::clip::Clip;
 use crate::command::{
     check_chain, check_clip, check_clip_fits, check_device, check_extent, check_mixer,
@@ -44,12 +46,41 @@ struct TrackRepr {
     /// track's of its kind. Sets saved before WP-2.19 have none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     routing: Option<Routing>,
+    /// The track's automation, one entry per automated parameter. Sets
+    /// saved before WP-2.12 have none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    automation: Vec<AutomationRepr>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     devices: Vec<Device>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     clips: Vec<Clip>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     children: Vec<TrackRepr>,
+}
+
+/// Whether an envelope drives its parameter: on unless a hand move turned
+/// it off, so a set that overrode none reads as before.
+fn on() -> bool {
+    true
+}
+
+/// For serde's `skip_serializing_if`, which passes a reference.
+fn is_on(value: &bool) -> bool {
+    *value
+}
+
+/// One parameter's automation as the set saves it.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct AutomationRepr {
+    /// The parameter it drives.
+    target: AutomationTarget,
+    /// Its envelope's breakpoints, in position order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    points: Vec<(Ticks, f64)>,
+    /// Whether the envelope drives the parameter; left out while it does,
+    /// so a set that overrode none reads the same as before.
+    #[serde(default = "on", skip_serializing_if = "is_on")]
+    enabled: bool,
 }
 
 impl From<&Document> for DocumentRepr {
@@ -83,6 +114,14 @@ impl TrackRepr {
             mixer: track.mixer,
             sends: track.sends().collect(),
             routing: (track.routing != Routing::new(track.kind)).then_some(track.routing),
+            automation: track
+                .automation()
+                .map(|(target, automation)| AutomationRepr {
+                    target: *target,
+                    points: automation.envelope.points().collect(),
+                    enabled: automation.enabled,
+                })
+                .collect(),
             devices: track.devices().cloned().collect(),
             clips: track.clips().cloned().collect(),
             children: track
@@ -131,10 +170,11 @@ impl TryFrom<DocumentRepr> for Document {
             tracks: loader.tracks,
             index: loader.index,
         };
-        // Routing names tracks anywhere in the tree, so it's checked once
-        // every track is in.
+        // Routing and automation name tracks and devices anywhere in the
+        // tree, so they're checked once every track is in.
         for id in document.track_order() {
             document.check_routing(id)?;
+            document.check_automation(id)?;
         }
         Ok(document)
     }
@@ -195,6 +235,16 @@ impl Loader {
                 return Err(ModelError::DuplicateId(to.0));
             }
         }
+        for entry in repr.automation {
+            let envelope = Envelope::from_points(entry.points)?;
+            let automation = crate::automation::Automation {
+                envelope,
+                enabled: entry.enabled,
+            };
+            if track.automation.insert(entry.target, automation).is_some() {
+                return Err(ModelError::DuplicateId(id.0));
+            }
+        }
         for device in repr.devices {
             self.claim(device.id.0)?;
             check_device(&device)?;
@@ -243,6 +293,7 @@ mod tests {
     use bl_core::time::Ticks;
     use serde_json::{Value, json};
 
+    use crate::AutomationTarget;
     use crate::clip::{AudioData, Clip, ClipData};
     use crate::command::Command;
     use crate::device::{Device, DeviceKind};
@@ -474,6 +525,118 @@ mod tests {
         bad["tracks"][0]["clips"][0]["data"]["audio"]["loop_end"] = json!(0.1);
         let error = load(bad).unwrap_err();
         assert!(error.contains("loop end 0.1 is out of range"), "{error}");
+    }
+
+    // Spec: automation R7
+    #[test]
+    fn automation_saves_with_the_set_and_loads_back() {
+        let (mut doc, [_, audio, ret]) = song();
+        let device = doc.track(audio).unwrap().devices().next().unwrap().id;
+        let volume = AutomationTarget::Mixer {
+            param: crate::MixerParam::Volume,
+        };
+        for (target, at, value) in [
+            (volume, Ticks::ZERO, 1.0),
+            (volume, Ticks::WHOLE, 0.25),
+            (AutomationTarget::Send { to: ret }, Ticks::ZERO, 0.5),
+            (
+                AutomationTarget::Device {
+                    device,
+                    param: ParamId(4),
+                },
+                Ticks::ZERO,
+                -6.0,
+            ),
+        ] {
+            doc.apply(&Command::SetAutomationBreakpoint {
+                track: audio,
+                target,
+                at,
+                value,
+            })
+            .unwrap();
+        }
+        // A hand move overrides the volume's envelope; it's saved overridden.
+        doc.apply(&Command::SetVolume {
+            track: audio,
+            volume: 0.5,
+        })
+        .unwrap();
+        let value = serde_json::to_value(&doc).unwrap();
+        let saved = value["tracks"][0]["children"][0]["automation"]
+            .as_array()
+            .unwrap();
+        assert_eq!(
+            saved.len(),
+            3,
+            "one entry per parameter, not per breakpoint"
+        );
+        let entry = |param: &str| {
+            saved
+                .iter()
+                .find(|entry| entry["target"]["param"] == json!(param))
+                .unwrap()
+        };
+        assert_eq!(
+            entry("volume")["target"],
+            json!({ "type": "mixer", "param": "volume" })
+        );
+        assert_eq!(
+            entry("volume")["points"],
+            json!([[0, 1.0], [Ticks::WHOLE.0, 0.25]])
+        );
+        assert_eq!(entry("volume")["enabled"], json!(false));
+        assert_eq!(
+            saved
+                .iter()
+                .find(|entry| entry["target"]["type"] == json!("send"))
+                .unwrap()["target"],
+            json!({ "type": "send", "to": ret.0.get() })
+        );
+        assert_eq!(
+            saved
+                .iter()
+                .find(|entry| entry["target"]["type"] == json!("device"))
+                .unwrap()["points"],
+            json!([[0, -6.0]])
+        );
+        let loaded = load(value).unwrap();
+        assert_eq!(loaded, doc);
+        loaded.check_invariants().unwrap();
+
+        // Broken saved automation doesn't load.
+        let broken = |edit: &dyn Fn(&mut Value)| {
+            let mut value = serde_json::to_value(&doc).unwrap();
+            edit(&mut value);
+            load(value).unwrap_err()
+        };
+        fn first_entry(value: &mut Value) -> &mut Value {
+            value["tracks"][0]["children"][0]["automation"]
+                .as_array_mut()
+                .unwrap()
+                .first_mut()
+                .unwrap()
+        }
+        let error = broken(&|value| {
+            first_entry(value)["points"] = json!([[10, 0.0], [5, 1.0]]);
+        });
+        assert!(error.contains("already a breakpoint"), "{error}");
+        let error = broken(&|value| {
+            first_entry(value)["points"] = json!([[0, 0.0], [0, 1.0]]);
+        });
+        assert!(error.contains("already a breakpoint"), "{error}");
+        let error = broken(&|value| {
+            first_entry(value)["points"] = json!([[0, true]]);
+        });
+        assert!(!error.is_empty());
+        let error = broken(&|value| {
+            first_entry(value)["enabled"] = json!("yes");
+        });
+        assert!(!error.is_empty());
+        let error = broken(&|value| {
+            first_entry(value)["points"] = json!([[-5, 0.0]]);
+        });
+        assert!(error.contains("before zero"), "{error}");
     }
 
     #[test]

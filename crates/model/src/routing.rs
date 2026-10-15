@@ -52,6 +52,17 @@ impl Document {
         Ok(())
     }
 
+    /// Checks every parameter a track's automation drives: a control of its
+    /// mixer, one of its sends to a return track, or a parameter of a device
+    /// in its chain. What a loaded document must pass.
+    pub(crate) fn check_automation(&self, id: TrackId) -> Result<(), ModelError> {
+        let track = self.track_ref(id)?;
+        for target in track.automation.keys() {
+            self.check_automation_target(id, *target)?;
+        }
+        Ok(())
+    }
+
     fn check_target(
         &self,
         track: &Track,

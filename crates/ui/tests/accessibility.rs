@@ -1026,6 +1026,33 @@ fn paths() -> BTreeMap<&'static str, Path> {
                 "the arrangement's time-signature marker lane (WP-2.20)",
             )),
         ),
+        // Automation (WP-2.12): the Control Bar's Re-Enable Automation
+        // button, and the arrangement's automation lanes, which aren't
+        // drawn yet.
+        (
+            "automation.re_enable",
+            main(nothing, control_bar, "Re-Enable Automation", Key::Enter),
+        ),
+        (
+            "automation.set_breakpoint",
+            Exception(LaterView("the arrangement's automation lanes (WP-2.12)")),
+        ),
+        (
+            "automation.move_breakpoint",
+            Exception(LaterView("the arrangement's automation lanes (WP-2.12)")),
+        ),
+        (
+            "automation.delete_breakpoint",
+            Exception(LaterView("the arrangement's automation lanes (WP-2.12)")),
+        ),
+        (
+            "automation.delete",
+            Exception(LaterView("the arrangement's automation lanes (WP-2.12)")),
+        ),
+        (
+            "automation.re_enable_for",
+            Exception(LaterView("the arrangement's automation lanes (WP-2.12)")),
+        ),
         // A track's switches (mixer-view R7): Enter on Solo or Arm.
         (
             "mixer.solo_exclusive",

@@ -2403,8 +2403,6 @@ impl Shell {
         if let Some(invocation) = invocation {
             if !edit_ids::handles(&invocation.id)
                 && !note_ids::handles(&invocation.id)
-            if !edit_ids::handles(&invocation.id)
-                && !note_ids::handles(&invocation.id)
                 && !is_automation_edit(&invocation.id)
                 && !clip_marker_command(&invocation.id)
             {

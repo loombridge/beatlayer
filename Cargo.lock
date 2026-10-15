@@ -705,6 +705,7 @@ name = "bl-assistant"
 version = "0.0.0"
 dependencies = [
  "bl-commands",
+ "bl-model",
  "keyring",
  "rustls",
  "rustls-native-certs",

@@ -31,6 +31,9 @@ serde_json = "1"
 # The tests' command argument types: the schemas, with their `$defs` and
 # `$ref`s, that each provider converts to its own tool format.
 schemars = { version = "=1.2.2", default-features = false, features = ["std", "derive"] }
+# The agent-loop tests' commands: a real document and undo history, so a
+# turn's edits can be run and undone for real.
+bl-model.workspace = true
 
 [lints]
 workspace = true

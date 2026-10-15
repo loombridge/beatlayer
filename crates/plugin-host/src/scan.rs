@@ -11,9 +11,8 @@
 //! [`beatlayer-scan`](../bin/beatlayer-scan.rs): it loads the file and prints
 //! what it found as JSON, and only it ever loads the plug-in's code.
 //!
-//! CLAP is the only format scanned so far; VST3, Audio Unit, and LV2 are the
-//! hooks [`PluginFormat`] and [`format_extension`] leave for WP-2.7 and
-//! WP-2.8.
+//! CLAP and Audio Unit (macOS only) are scanned; VST3 and LV2 are the hooks
+//! [`PluginFormat`] and [`format_extension`] leave for their hosting.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
@@ -144,6 +143,7 @@ impl ChildReply {
     pub fn describe(format: PluginFormat, path: &Path) -> Result<Vec<ScannedPlugin>, String> {
         match format {
             PluginFormat::Clap => clap_plugins(path),
+            PluginFormat::AudioUnit => au_plugins(path),
             other => Err(format!(
                 "{} plug-ins aren't scanned yet",
                 format_name(other)
@@ -158,6 +158,13 @@ fn clap_plugins(path: &Path) -> Result<Vec<ScannedPlugin>, String> {
     let host = crate::clap::ClapHost::new();
     let found = host.load(path).map_err(|e| e.to_string())?;
     Ok(found.into_iter().map(ScannedPlugin::from_clap).collect())
+}
+
+/// Describes the Audio Units a `.component` bundle declares, by loading each
+/// one in its own right, as the scanner child process does (WP-2.8's second
+/// part). On Windows and Linux this answers that Audio Units are macOS only.
+fn au_plugins(path: &Path) -> Result<Vec<ScannedPlugin>, String> {
+    crate::au::scan_file(path).map_err(|e| e.to_string())
 }
 
 impl ScannedPlugin {
@@ -533,6 +540,11 @@ pub fn system_paths(format: PluginFormat) -> Vec<PathBuf> {
                 paths.push(home.join("Library/Audio/Plug-Ins/LV2"));
             }
         }
+    }
+    if format == PluginFormat::AudioUnit {
+        // Apple's own units live here, not in the user's or the system's
+        // plug-in folders; the scan is expected to find them (WP-2.8).
+        paths.push(PathBuf::from("/System/Library/Components"));
     }
     paths.push(PathBuf::from("/Library/Audio/Plug-Ins").join(format_folder(format)));
     paths

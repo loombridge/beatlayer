@@ -101,6 +101,42 @@ fn a_plugin_that_fails_a_scan_is_blocklisted_and_reported() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+// Spec: plugin-scanning R1, R7; au-hosting's second part. The commands list
+// Apple's built-in Audio Units, and they join the browser's Plug-Ins label.
+#[cfg(target_os = "macos")]
+#[test]
+fn scanning_finds_audio_units_and_they_join_the_browser() {
+    if !ready() {
+        eprintln!("beatlayer-scan wasn't built; skipping (build the workspace's bins)");
+        return;
+    }
+    let mut shell = Shell::headless();
+    let scan: PluginScan = serde_json::from_value(
+        shell
+            .run(
+                ids::SCAN,
+                json!({ "paths": ["/System/Library/Components"] }),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    let delay = scan
+        .plugins
+        .iter()
+        .find(|p| p.plugin_id == "aufx/dely/appl")
+        .expect("AUDelay among Apple's built-in units");
+    assert_eq!(delay.format, bl_model::PluginFormat::AudioUnit);
+    assert!(delay.path.ends_with(".component"), "{:?}", delay.path);
+
+    // Spec: plugin-scanning R7. The Plug-Ins label lists it.
+    shell
+        .run(browser_ids::OPEN_PLACE, json!({ "label": "plug_ins" }))
+        .unwrap();
+    let state: bl_shell::browser_commands::BrowserState =
+        serde_json::from_value(shell.run(browser_ids::STATE, json!({})).unwrap()).unwrap();
+    assert!(state.total_rows >= 1, "{state:?}");
+}
+
 #[test]
 fn hidden_plug_ins_leave_the_browser_and_come_back_with_show_hidden() {
     if !ready() {

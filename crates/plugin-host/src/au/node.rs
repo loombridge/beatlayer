@@ -18,9 +18,10 @@
 //! scheduled parameter events (AUDelay's Dry/Wet Mix does), while their
 //! MIDI events land on the frames they're scheduled for.
 
+use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering::Relaxed};
+use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicU64, Ordering::Relaxed};
 
 use bl_engine::{Block, Node, NodeConfig, NodeEvent, NoteEvent, NoteKind, ParamValue};
 use block2::RcBlock;
@@ -62,6 +63,11 @@ pub(crate) struct Status {
     pub(crate) failed: AtomicBool,
     /// Events dropped because a list was full.
     pub(crate) dropped: AtomicU64,
+    /// The editor's parameter-observer token, so the host's own parameter
+    /// changes aren't reported back as the unit's own (WP-2.8's second
+    /// part); null while no editor is open. Written on the main thread,
+    /// read on the audio thread.
+    pub(crate) observer: AtomicPtr<c_void>,
 }
 
 /// An Audio Unit and everything the audio thread renders it with, made on
@@ -294,7 +300,7 @@ impl Node for AuNode {
             while index < self.events.len() && self.events[index].0 as usize <= offset {
                 match self.events[index].1 {
                     In::Param(param, value) => {
-                        if !processor.set_param(param, value) {
+                        if !processor.set_param(param, value, self.status.observer.load(Relaxed)) {
                             self.status.dropped.fetch_add(1, Relaxed);
                         }
                     }
@@ -509,14 +515,23 @@ impl Processor {
         }
     }
 
-    /// Sets a parameter, before the segment it starts.
-    pub(crate) fn set_param(&mut self, param: u32, value: f64) -> bool {
+    /// Sets a parameter, before the segment it starts. `originator` is the
+    /// editor's parameter-observer token, so the host's own change isn't
+    /// reported back as the unit's own; null while no editor is open.
+    pub(crate) fn set_param(&mut self, param: u32, value: f64, originator: *mut c_void) -> bool {
         let Some((parameter, _)) = self.params.get(param as usize) else {
             return false;
         };
         // SAFETY: setting a value is a host call on the unit's own thread,
         // for a parameter of its tree, between render calls.
-        unsafe { parameter.setValue(value as f32) };
+        if originator.is_null() {
+            // SAFETY: as above.
+            unsafe { parameter.setValue(value as f32) };
+        } else {
+            // SAFETY: as above; `originator` is the observer token while an
+            // editor is open, and setValue:originator: only compares it.
+            unsafe { parameter.setValue_originator(value as f32, originator) };
+        }
         true
     }
 

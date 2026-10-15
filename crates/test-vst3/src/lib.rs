@@ -174,7 +174,9 @@ impl IComponentTrait for Processor {
         let bus = unsafe { &mut *bus };
         bus.direction = dir;
         bus.busType = BusTypes_::kMain as BusType;
-        bus.flags = BusInfo_::BusFlags_::kDefaultActive;
+        // The bindings' default enum type is signed on Windows and unsigned
+        // elsewhere; the field is always `uint32`.
+        bus.flags = BusInfo_::BusFlags_::kDefaultActive as uint32;
         match media_type as MediaTypes {
             MediaTypes_::kAudio => {
                 bus.mediaType = MediaTypes_::kAudio as MediaType;

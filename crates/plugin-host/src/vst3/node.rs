@@ -660,11 +660,13 @@ impl Vst3Node {
         let beats = ticks.0 as f64 / TICKS_PER_QUARTER as f64;
         use ProcessContext_::StatesAndFlags_ as Flags;
         let context = &mut self.context;
-        context.state = Flags::kTempoValid
+        // The bindings' default enum type is signed on Windows and unsigned
+        // elsewhere; the field is always `uint32`.
+        context.state = (Flags::kTempoValid
             | Flags::kTimeSigValid
             | Flags::kProjectTimeMusicValid
             | Flags::kContTimeValid
-            | if info.playing { Flags::kPlaying } else { 0 };
+            | if info.playing { Flags::kPlaying } else { 0 }) as uint32;
         context.sampleRate = f64::from(rate.hz());
         context.projectTimeSamples = info.position.0;
         context.continousTimeSamples = i64::try_from(self.steady).unwrap_or(i64::MAX);

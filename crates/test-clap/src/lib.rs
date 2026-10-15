@@ -19,8 +19,13 @@
 //!   for three states that make it fail on purpose: [`FAIL_PROCESS`]
 //!   makes every process call fail, [`FAIL_ACTIVATE`] its next activation,
 //!   and [`FAIL_GUI`] its next editor show or hide.
-//! - **Editor.** A "floating window" in any windowing API that draws
-//!   nothing, so tests open and close it headless; it refuses to embed.
+//! - **Editor.** A window that draws nothing, so tests open and close it
+//!   headless: floating in any windowing API, and embedded into the host's
+//!   window on the platforms that build one (win32 and x11; WP-2.10). What
+//!   the host tells it about the window — the display's scale (`set_scale`)
+//!   and the size it sets (`set_size`) — it reports back as its
+//!   [`EDITOR_SCALE`], [`EDITOR_WIDTH`] and [`EDITOR_HEIGHT`] parameters,
+//!   so tests can check the host's window layer reaches the plug-in.
 
 use std::ffi::CStr;
 use std::path::{Path, PathBuf};
@@ -31,7 +36,9 @@ use clack_extensions::audio_ports::{
     AudioPortFlags, AudioPortInfo, AudioPortInfoWriter, AudioPortType, PluginAudioPorts,
     PluginAudioPortsImpl,
 };
-use clack_extensions::gui::{GuiConfiguration, GuiSize, PluginGui, PluginGuiImpl, Window};
+use clack_extensions::gui::{
+    GuiApiType, GuiConfiguration, GuiSize, PluginGui, PluginGuiImpl, Window,
+};
 use clack_extensions::latency::{PluginLatency, PluginLatencyImpl};
 use clack_extensions::note_ports::{
     NoteDialect, NoteDialects, NotePortInfo, NotePortInfoWriter, PluginNotePorts,
@@ -63,6 +70,14 @@ pub const LATENCY: u32 = 2;
 /// Last Note: the key of the last note-on, 0 to 127, stepped. The plug-in
 /// sets it itself.
 pub const LAST_NOTE: u32 = 3;
+/// Editor Scale: the display's scale the host gave the editor
+/// (`set_scale`), 1.0 at 96 DPI; 0 until the host gives one.
+pub const EDITOR_SCALE: u32 = 4;
+/// Editor Width: the width the host last set the editor to (`set_size`),
+/// in physical pixels; 0 until it sets one.
+pub const EDITOR_WIDTH: u32 = 5;
+/// Editor Height: the height the host last set the editor to (`set_size`).
+pub const EDITOR_HEIGHT: u32 = 6;
 /// How far the echoed notes are transposed, in semitones.
 pub const ECHO_TRANSPOSE: i16 = 12;
 /// What a saved state starts with.
@@ -86,13 +101,18 @@ const GUI_FAILS: u8 = 3;
 /// The plug-in.
 pub struct GainEcho;
 
-/// What the main thread and the audio thread share: the parameters.
+/// What the main thread and the audio thread share: the parameters, and
+/// what the host told the editor (WP-2.10).
 pub struct Shared<'a> {
     host: HostSharedHandle<'a>,
     gain: AtomicU64,
     latency: AtomicU32,
     active_latency: AtomicU32,
     last_note: AtomicU64,
+    /// The display's scale the host gave the editor, as bits.
+    editor_scale: AtomicU64,
+    editor_width: AtomicU32,
+    editor_height: AtomicU32,
     failure: AtomicU8,
 }
 
@@ -118,6 +138,25 @@ impl Shared<'_> {
             LAST_NOTE => self
                 .last_note
                 .store(value.clamp(0.0, 127.0).round().to_bits(), Relaxed),
+            EDITOR_SCALE => self.editor_scale.store(value.to_bits(), Relaxed),
+            EDITOR_WIDTH => {
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    clippy::cast_sign_loss,
+                    reason = "clamped to 0..=8192 and rounded first"
+                )]
+                let width = value.clamp(0.0, 8192.0).round() as u32;
+                self.editor_width.store(width, Relaxed);
+            }
+            EDITOR_HEIGHT => {
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    clippy::cast_sign_loss,
+                    reason = "clamped to 0..=8192 and rounded first"
+                )]
+                let height = value.clamp(0.0, 8192.0).round() as u32;
+                self.editor_height.store(height, Relaxed);
+            }
             _ => {}
         }
     }
@@ -127,6 +166,9 @@ impl Shared<'_> {
             GAIN => Some(self.gain()),
             LATENCY => Some(f64::from(self.latency.load(Relaxed))),
             LAST_NOTE => Some(f64::from_bits(self.last_note.load(Relaxed))),
+            EDITOR_SCALE => Some(f64::from_bits(self.editor_scale.load(Relaxed))),
+            EDITOR_WIDTH => Some(f64::from(self.editor_width.load(Relaxed))),
+            EDITOR_HEIGHT => Some(f64::from(self.editor_height.load(Relaxed))),
             _ => None,
         }
     }
@@ -194,6 +236,9 @@ impl DefaultPluginFactory for GainEcho {
             latency: AtomicU32::new(0),
             active_latency: AtomicU32::new(0),
             last_note: AtomicU64::new(0.0f64.to_bits()),
+            editor_scale: AtomicU64::new(0.0f64.to_bits()),
+            editor_width: AtomicU32::new(0),
+            editor_height: AtomicU32::new(0),
             failure: AtomicU8::new(NO_FAILURE),
         })
     }
@@ -377,7 +422,7 @@ impl PluginNotePortsImpl for MainThread<'_> {
 
 impl PluginMainThreadParams for MainThread<'_> {
     fn count(&self) -> u32 {
-        3
+        6
     }
 
     fn get_info(&self, index: u32, info: &mut ParamInfoWriter<'_>) {
@@ -395,6 +440,21 @@ impl PluginMainThreadParams for MainThread<'_> {
                 LAST_NOTE,
                 b"Last Note",
                 127.0,
+                0.0,
+                automatable | ParamInfoFlags::IS_STEPPED,
+            ),
+            3 => (EDITOR_SCALE, b"Editor Scale", 8.0, 0.0, automatable),
+            4 => (
+                EDITOR_WIDTH,
+                b"Editor Width",
+                8192.0,
+                0.0,
+                automatable | ParamInfoFlags::IS_STEPPED,
+            ),
+            5 => (
+                EDITOR_HEIGHT,
+                b"Editor Height",
+                8192.0,
                 0.0,
                 automatable | ParamInfoFlags::IS_STEPPED,
             ),
@@ -503,9 +563,27 @@ impl PluginLatencyImpl for MainThread<'_> {
     }
 }
 
+/// The windowing API an embedded editor uses on this platform: `win32` on
+/// Windows and `x11` on the other X11 platforms; macOS editors only float
+/// for now, so it refuses to embed there (WP-2.10).
+fn embed_api() -> Option<GuiApiType<'static>> {
+    #[cfg(target_os = "windows")]
+    {
+        Some(GuiApiType::WIN32)
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        Some(GuiApiType::X11)
+    }
+    #[cfg(not(any(target_os = "windows", all(unix, not(target_os = "macos")))))]
+    {
+        None
+    }
+}
+
 impl PluginGuiImpl for MainThread<'_> {
     fn is_api_supported(&self, configuration: GuiConfiguration<'_>) -> bool {
-        configuration.is_floating
+        configuration.is_floating || embed_api().is_some_and(|api| api == configuration.api_type)
     }
 
     fn get_preferred_api(&self) -> Option<GuiConfiguration<'_>> {
@@ -513,16 +591,18 @@ impl PluginGuiImpl for MainThread<'_> {
     }
 
     fn create(&self, configuration: GuiConfiguration<'_>) -> Result<(), PluginError> {
-        if configuration.is_floating {
+        if configuration.is_floating || embed_api().is_some_and(|api| api == configuration.api_type)
+        {
             Ok(())
         } else {
-            Err(PluginError::Message("only floating windows"))
+            Err(PluginError::Message("this editor doesn't embed that way"))
         }
     }
 
     fn destroy(&self) {}
 
-    fn set_scale(&self, _scale: f64) -> Result<(), PluginError> {
+    fn set_scale(&self, scale: f64) -> Result<(), PluginError> {
+        self.shared.editor_scale.store(scale.to_bits(), Relaxed);
         Ok(())
     }
 
@@ -533,12 +613,30 @@ impl PluginGuiImpl for MainThread<'_> {
         })
     }
 
-    fn set_size(&self, _size: GuiSize) -> Result<(), PluginError> {
+    fn can_resize(&self) -> bool {
+        true
+    }
+
+    fn adjust_size(&self, size: GuiSize) -> Option<GuiSize> {
+        Some(size)
+    }
+
+    fn set_size(&self, size: GuiSize) -> Result<(), PluginError> {
+        self.shared
+            .editor_width
+            .store(size.width.min(8192), Relaxed);
+        self.shared
+            .editor_height
+            .store(size.height.min(8192), Relaxed);
         Ok(())
     }
 
-    fn set_parent(&self, _window: Window<'_, '_>) -> Result<(), PluginError> {
-        Err(PluginError::Message("only floating windows"))
+    fn set_parent(&self, window: Window<'_, '_>) -> Result<(), PluginError> {
+        if window.api_type().to_standard_api() == embed_api() {
+            Ok(())
+        } else {
+            Err(PluginError::Message("this editor doesn't embed that way"))
+        }
     }
 
     fn set_transient(&self, _window: Window<'_, '_>) -> Result<(), PluginError> {

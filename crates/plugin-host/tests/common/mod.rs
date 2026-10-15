@@ -13,7 +13,9 @@ use bl_engine::{
 };
 use bl_model::{Device, DeviceId, DeviceKind, ParamId, PluginFormat};
 
-pub use bl_test_clap::{GAIN, LAST_NOTE, LATENCY, PLUGIN_ID, PLUGIN_NAME};
+pub use bl_test_clap::{
+    EDITOR_HEIGHT, EDITOR_SCALE, EDITOR_WIDTH, GAIN, LAST_NOTE, LATENCY, PLUGIN_ID, PLUGIN_NAME,
+};
 
 pub const RATE: SampleRate = SampleRate::HZ_48000;
 pub const CHANNELS: usize = 2;

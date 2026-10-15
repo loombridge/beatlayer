@@ -102,7 +102,7 @@ fn a_plugin_loads_runs_and_keeps_its_state_with_the_set() {
         serde_json::from_value(shell.run("device_view.state", json!({})).unwrap()).unwrap();
     let frame = view.devices.iter().find(|d| d.id == device).unwrap();
     assert!(frame.selected);
-    assert_eq!(frame.panel.as_ref().unwrap().description.params.len(), 3);
+    assert_eq!(frame.panel.as_ref().unwrap().description.params.len(), 6);
     let params: DeviceParameters = serde_json::from_value(
         shell
             .run("device.parameters", json!({ "device": device }))
@@ -511,7 +511,17 @@ fn the_panel_maps_the_plugins_parameters_and_a_remap_is_remembered_per_plugin() 
         .iter()
         .map(|p| p.name.as_str())
         .collect();
-    assert_eq!(names, ["Gain", "Latency", "Last Note"]);
+    assert_eq!(
+        names,
+        [
+            "Gain",
+            "Latency",
+            "Last Note",
+            "Editor Scale",
+            "Editor Width",
+            "Editor Height"
+        ]
+    );
 
     // Remap the first knob to the plug-in's third parameter.
     let remapped: DeviceViewState = serde_json::from_value(

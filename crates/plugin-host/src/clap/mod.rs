@@ -3,14 +3,16 @@
 //! A [`ClapHost`] lives on the main thread, which is CLAP's main thread
 //! for every plug-in it hosts: it loads plug-in files ([`ClapHost::load`],
 //! until the scanner of WP-2.9 finds them), keeps one plug-in instance per
-//! device, saves and loads their state, opens and closes their editors,
-//! and activates and deactivates them. Its [`ClapFactory`] goes into the
-//! engine's [`Registry`](bl_engine::Registry): the compiler thread asks it
-//! for a device's node, which it makes at once without the plug-in, and
-//! the main thread activates the plug-in for that node the next time it
-//! runs [`ClapHost::idle`] (at once, if the compiler runs on the main
-//! thread, as [`Offline`](bl_engine::Offline) does). The node passes its
-//! input through until the plug-in arrives.
+//! device, saves and loads their state, opens and closes their editors (in
+//! a host window of Beatlayer's own with the plug-in's view embedded,
+//! where the platform builds one, or in a floating window of the plug-in's
+//! own; WP-2.10), and activates and deactivates them. Its [`ClapFactory`]
+//! goes into the engine's [`Registry`](bl_engine::Registry): the compiler
+//! thread asks it for a device's node, which it makes at once without the
+//! plug-in, and the main thread activates the plug-in for that node the
+//! next time it runs [`ClapHost::idle`] (at once, if the compiler runs on
+//! the main thread, as [`Offline`](bl_engine::Offline) does). The node
+//! passes its input through until the plug-in arrives.
 //!
 //! An instance outlives its node: a device moved, switched off, or deleted
 //! and brought back with undo keeps its plug-in and the plug-in's state,
@@ -62,6 +64,9 @@ use clack_extensions::params::PluginParams;
 use clack_extensions::state::PluginState as StateExtension;
 use clack_host::prelude::*;
 use lspk_plugin::agent_commands::PluginAgentCommands;
+
+#[cfg(any(target_os = "windows", all(unix, not(target_os = "macos"))))]
+use crate::window::{EditorWindow, GuiSize, WindowEvent};
 
 pub use bl_commands::CommandSpec;
 pub use clack_host::entry::EntryDescriptor;
@@ -163,6 +168,10 @@ pub struct PluginStatus {
     /// Whether its open editor is hidden: View ▸ Plug-In Windows or
     /// Auto-Hide Plug-In Windows hid it. Hidden is not closed.
     pub editor_hidden: bool,
+    /// The display's scale the host gave its embedded editor
+    /// (`set_scale`); `None` while it floats in a window of its own, or
+    /// has no editor (WP-2.10).
+    pub editor_scale: Option<f64>,
     /// Each parameter's value, as the plug-in reports it.
     pub values: Vec<(ParamId, f64)>,
 }
@@ -244,6 +253,10 @@ struct Instance {
     /// next node or state.
     refused: Option<String>,
     failure: Option<String>,
+    /// Its editor, while it's open in a host window of Beatlayer's own
+    /// (WP-2.10).
+    #[cfg(any(target_os = "windows", all(unix, not(target_os = "macos"))))]
+    editor: Option<Editor>,
     /// Its open editor is hidden: View ▸ Plug-In Windows or Auto-Hide
     /// Plug-In Windows. Hidden is not closed.
     editor_hidden: bool,
@@ -270,6 +283,15 @@ struct Instance {
     /// it sends for them are dropped when they arrive, rather than made
     /// undo steps of their own (oldest first, at most [`ECHOES`]).
     echoes: Vec<(u32, f64)>,
+}
+
+/// An editor embedded in a host window of Beatlayer's own (WP-2.10): the
+/// window, and the display's scale the plug-in was told with `set_scale`.
+/// Dropping it closes the window, after the plug-in's view is destroyed.
+#[cfg(any(target_os = "windows", all(unix, not(target_os = "macos"))))]
+struct Editor {
+    window: EditorWindow,
+    scale: f64,
 }
 
 /// How many command changes a plug-in's gestures are matched against.
@@ -596,18 +618,23 @@ impl ClapHost {
         Ok(())
     }
 
-    /// Opens the device's plug-in's editor in a window of its own, titled
-    /// `title`. Embedding an editor in Beatlayer's own window is WP-2.10's.
+    /// Opens the device's plug-in's editor: in a host window of
+    /// Beatlayer's own, with the plug-in's view embedded into it, where the
+    /// platform builds one and the plug-in supports it (WP-2.10); in a
+    /// floating window of the plug-in's own otherwise, titled `title`.
     ///
     /// # Errors
     ///
     /// [`ClapError::NoInstance`] without a plug-in, and
-    /// [`ClapError::Refused`] if it has no editor that opens in its own
-    /// window, or it won't open.
+    /// [`ClapError::Refused`] if it has no editor, or it won't open.
     pub fn open_editor(&self, device: DeviceId, title: &str) -> Result<(), ClapError> {
         let mut guard = lock(&self.inner.main);
         let instance = instance(guard.get()?, device)?;
         if instance.editor_open {
+            return Ok(());
+        }
+        #[cfg(any(target_os = "windows", all(unix, not(target_os = "macos"))))]
+        if open_embedded(instance, title)? {
             return Ok(());
         }
         let mut plugin = instance.instance.plugin_handle();
@@ -681,6 +708,13 @@ impl ClapHost {
                 return Err(refused);
             }
             instance.editor_hidden = !shown;
+            // The host window hides and shows with the plug-in's view.
+            #[cfg(any(target_os = "windows", all(unix, not(target_os = "macos"))))]
+            {
+                if let Some(editor) = &instance.editor {
+                    editor.window.set_visible(shown);
+                }
+            }
             return Ok(());
         }
         // Unchanged since the last ask: the window is either already
@@ -692,6 +726,41 @@ impl ClapHost {
         } else {
             Err(refused)
         }
+    }
+
+    /// Resizes the device's editor window, as dragging its edge does: the
+    /// size the plug-in adjusts to is asked of it (`adjust_size`), told to
+    /// it (`set_size`), and the host window follows. The shell gives it the
+    /// frame a window reopens with.
+    ///
+    /// # Errors
+    ///
+    /// [`ClapError::NoInstance`] without a plug-in, [`ClapError::WrongThread`]
+    /// off the main thread, and [`ClapError::Refused`] if its editor isn't
+    /// open in a host window, or the plug-in won't take the size.
+    #[cfg(any(target_os = "windows", all(unix, not(target_os = "macos"))))]
+    pub fn resize_editor(&self, device: DeviceId, size: GuiSize) -> Result<(), ClapError> {
+        let mut guard = lock(&self.inner.main);
+        let instance = instance(guard.get()?, device)?;
+        if !instance.editor_open || instance.editor.is_none() {
+            return Err(ClapError::Refused(
+                "to resize an editor that isn't in a host window".to_owned(),
+            ));
+        }
+        let plugin = instance.instance.plugin_handle();
+        let Some(gui) = plugin.get_extension::<PluginGui>() else {
+            return Err(ClapError::Refused("to resize its editor".to_owned()));
+        };
+        if !gui.can_resize(&plugin) {
+            return Err(ClapError::Refused("to resize its editor".to_owned()));
+        }
+        let working = gui.adjust_size(&plugin, size).unwrap_or(size);
+        gui.set_size(&plugin, working)
+            .map_err(|_| ClapError::Refused("to resize its editor".to_owned()))?;
+        if let Some(editor) = &instance.editor {
+            editor.window.resize(working);
+        }
+        Ok(())
     }
 
     /// The devices whose plug-in's editor window is open, hidden or shown.
@@ -727,12 +796,13 @@ impl ClapHost {
                 has_editor: false,
                 editor_open: false,
                 editor_hidden: false,
+                editor_scale: None,
                 values: Vec::new(),
             });
         }
         let instance = main.instances.get_mut(&device)?;
         let mut plugin = instance.instance.plugin_handle();
-        let has_editor = floating_editor(&mut plugin).is_some();
+        let has_editor = has_editor(&mut plugin);
         let values = plugin
             .get_extension::<PluginParams>()
             .map(|params| {
@@ -745,6 +815,10 @@ impl ClapHost {
                     .collect()
             })
             .unwrap_or_default();
+        #[cfg(any(target_os = "windows", all(unix, not(target_os = "macos"))))]
+        let editor_scale = instance.editor.as_ref().map(|editor| editor.scale);
+        #[cfg(not(any(target_os = "windows", all(unix, not(target_os = "macos")))))]
+        let editor_scale = None;
         Some(PluginStatus {
             plugin_id: instance.plugin_id.clone(),
             path: instance.path.clone(),
@@ -758,6 +832,7 @@ impl ClapHost {
             has_editor,
             editor_open: instance.editor_open,
             editor_hidden: instance.editor_hidden,
+            editor_scale,
             values,
         })
     }
@@ -1032,6 +1107,162 @@ fn floating_editor(
         .then_some((gui, configuration))
 }
 
+/// Whether the plug-in's editor can open: embedded in a host window of
+/// Beatlayer's own (WP-2.10), where the platform builds one and the
+/// plug-in supports it, or in a floating window of its own.
+fn has_editor(plugin: &mut PluginMainThreadHandle<'_>) -> bool {
+    if floating_editor(plugin).is_some() {
+        return true;
+    }
+    #[cfg(any(target_os = "windows", all(unix, not(target_os = "macos"))))]
+    {
+        embedded_editor(plugin).is_some()
+    }
+    #[cfg(not(any(target_os = "windows", all(unix, not(target_os = "macos")))))]
+    {
+        false
+    }
+}
+
+/// The plug-in's editor embedded in a host window of Beatlayer's own, where
+/// the platform builds one and the plug-in supports the API (WP-2.10).
+#[cfg(any(target_os = "windows", all(unix, not(target_os = "macos"))))]
+fn embedded_editor(
+    plugin: &PluginMainThreadHandle<'_>,
+) -> Option<(PluginGui, GuiConfiguration<'static>)> {
+    let gui = plugin.get_extension::<PluginGui>()?;
+    let configuration = GuiConfiguration {
+        api_type: GuiApiType::default_for_current_platform()?,
+        is_floating: false,
+    };
+    gui.is_api_supported(plugin, configuration)
+        .then_some((gui, configuration))
+}
+
+/// Opens `instance`'s plug-in's editor embedded in a host window of
+/// Beatlayer's own (WP-2.10): `Ok(true)` once it's open, `Ok(false)` if
+/// this plug-in wants a floating window of its own instead (the caller
+/// opens that).
+///
+/// CLAP's order for an embedded editor: `create`, the display's scale
+/// (`set_scale`), the size (`get_size`, which the window is made with),
+/// the parent (`set_parent`), then `show`.
+#[cfg(any(target_os = "windows", all(unix, not(target_os = "macos"))))]
+fn open_embedded(instance: &mut Instance, title: &str) -> Result<bool, ClapError> {
+    let plugin = instance.instance.plugin_handle();
+    let Some((gui, configuration)) = embedded_editor(&plugin) else {
+        return Ok(false);
+    };
+    gui.create(&plugin, configuration)
+        .map_err(|_| ClapError::Refused("to open its editor".to_owned()))?;
+    let Some(size) = gui.get_size(&plugin) else {
+        gui.destroy(&plugin);
+        return Err(ClapError::Refused("to size its editor".to_owned()));
+    };
+    let resizable = gui.can_resize(&plugin);
+    let window = match EditorWindow::open(title, size, resizable) {
+        Ok(window) => window,
+        Err(why) => {
+            gui.destroy(&plugin);
+            return Err(ClapError::Refused(format!(
+                "to open its editor in a window: {why}"
+            )));
+        }
+    };
+    // The display's scale, for a plug-in that doesn't read it itself
+    // (CLAP's `set_scale`). A refusal isn't fatal: the win32 and x11 APIs
+    // measure in physical pixels besides.
+    let scale = window.scale();
+    let _ = gui.set_scale(&plugin, scale);
+    // SAFETY: the window outlives the plug-in's GUI: the GUI is destroyed
+    // with the editor, before the window is dropped (`close_editor`).
+    if unsafe { gui.set_parent(&plugin, window.handle()) }.is_err() {
+        gui.destroy(&plugin);
+        return Err(ClapError::Refused(
+            "to embed its editor in a window".to_owned(),
+        ));
+    }
+    if gui.show(&plugin).is_err() {
+        gui.destroy(&plugin);
+        return Err(ClapError::Refused("to show its editor".to_owned()));
+    }
+    window.set_visible(true);
+    instance.editor = Some(Editor { window, scale });
+    instance.editor_open = true;
+    instance.editor_hidden = false;
+    instance.editor_wanted = true;
+    Ok(true)
+}
+
+/// Tells the plug-in its editor's window is now `size` physical pixels, as
+/// CLAP asks for an embedded editor (`adjust_size`, then `set_size`); a
+/// size the plug-in adjusts goes back to the window.
+#[cfg(any(target_os = "windows", all(unix, not(target_os = "macos"))))]
+fn tell_editor_size(instance: &mut Instance, size: GuiSize) {
+    let plugin = instance.instance.plugin_handle();
+    let Some(gui) = plugin.get_extension::<PluginGui>() else {
+        return;
+    };
+    let working = gui.adjust_size(&plugin, size).unwrap_or(size);
+    let _ = gui.set_size(&plugin, working);
+    if working != size
+        && let Some(editor) = &instance.editor
+    {
+        editor.window.resize(working);
+    }
+}
+
+/// Tells the plug-in its editor's display scale changed, and remembers it
+/// (`set_scale`).
+#[cfg(any(target_os = "windows", all(unix, not(target_os = "macos"))))]
+fn tell_editor_scale(instance: &mut Instance, scale: f64) {
+    let plugin = instance.instance.plugin_handle();
+    if let Some(gui) = plugin.get_extension::<PluginGui>() {
+        let _ = gui.set_scale(&plugin, scale);
+    }
+    if let Some(editor) = &mut instance.editor {
+        editor.scale = scale;
+    }
+}
+
+/// What the person did to the device's editor window since the last look
+/// (WP-2.10): a resize or a move to a monitor of another DPI reaches the
+/// plug-in, and a window the person closed closes the editor.
+#[cfg(any(target_os = "windows", all(unix, not(target_os = "macos"))))]
+fn pump_editor(instance: &mut Instance) -> bool {
+    let mut changed = false;
+    loop {
+        let event = {
+            if !instance.editor_open {
+                break;
+            }
+            let Some(editor) = &instance.editor else {
+                break;
+            };
+            editor.window.poll()
+        };
+        let Some(event) = event else {
+            break;
+        };
+        match event {
+            WindowEvent::Resized(size) => {
+                tell_editor_size(instance, size);
+                changed = true;
+            }
+            WindowEvent::ScaleChanged(scale) => {
+                tell_editor_scale(instance, scale);
+                changed = true;
+            }
+            WindowEvent::Closed => {
+                close_editor(instance);
+                changed = true;
+                break;
+            }
+        }
+    }
+    changed
+}
+
 fn close_editor(instance: &mut Instance) {
     if !instance.editor_open {
         return;
@@ -1040,6 +1271,12 @@ fn close_editor(instance: &mut Instance) {
     if let Some(gui) = plugin.get_extension::<PluginGui>() {
         let _ = gui.hide(&plugin);
         gui.destroy(&plugin);
+    }
+    // The window closes with the editor, after the plug-in's view is
+    // destroyed.
+    #[cfg(any(target_os = "windows", all(unix, not(target_os = "macos"))))]
+    {
+        instance.editor = None;
     }
     instance.editor_open = false;
     instance.editor_hidden = false;
@@ -1155,6 +1392,8 @@ fn ensure_instance(main: &mut Main, device: &Device, inner: &Inner) -> bool {
         editor_open: false,
         editor_hidden: false,
         editor_wanted: true,
+        #[cfg(any(target_os = "windows", all(unix, not(target_os = "macos"))))]
+        editor: None,
         gestures: BTreeSet::new(),
         held: BTreeMap::new(),
         commands: None,
@@ -1447,6 +1686,11 @@ fn pump(device: DeviceId, instance: &mut Instance, changes: &mut Vec<ParamChange
     {
         close_editor(instance);
         changed = true;
+    }
+    // WP-2.10: what the person did to its editor's host window.
+    #[cfg(any(target_os = "windows", all(unix, not(target_os = "macos"))))]
+    {
+        changed |= pump_editor(instance);
     }
     changed
 }

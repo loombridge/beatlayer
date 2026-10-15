@@ -457,6 +457,7 @@ impl Shell {
         described.extend(kit.device_types());
         audio.sync(editor.document());
         let saved = snapshot(&editor);
+        let plugin_panels = prefs.plugin_panels.clone();
         let mut shell = Self {
             browser_view,
             media,
@@ -497,6 +498,7 @@ impl Shell {
                 // Beatlayer's native devices (WP-2.5; none ship yet).
                 let mut devices = DeviceView::new();
                 devices.set_device_types(described);
+                devices.set_plugin_panels(plugin_panels);
                 devices
             },
             native_types,
@@ -1152,7 +1154,12 @@ impl Shell {
         };
         let info = |shell: &Self, device| {
             crate::plugins::info(&shell.plugins, device)
-                .map(|info| to_value(&info))
+                .map(|mut info| {
+                    // WP-2.10: where the window sits, from the frame store
+                    // the set keeps.
+                    info.window = shell.devices.window_frame(device);
+                    to_value(&info)
+                })
                 .ok_or_else(|| unavailable(format!("{device}'s plug-in hasn't started yet")))
         };
         match id {
@@ -1261,6 +1268,65 @@ impl Shell {
                 let device = target(self, device)?;
                 self.plugins.idle();
                 info(self, device)
+            }
+            plugin_ids::SET_WINDOW => {
+                let plugin_ids::SetWindowArgs { device, frame } = Self::args(id, args)?;
+                let device = target(self, device)?;
+                if !frame.is_valid() {
+                    return Err(ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message:
+                            "a window's position and size must be finite, and its size above 0"
+                                .to_owned(),
+                    });
+                }
+                // WP-2.10: the frame store the set saves; no undo step.
+                self.devices.set_editor_frame(device, frame);
+                self.plugins.idle();
+                info(self, device)
+            }
+            plugin_ids::SET_PANEL_PARAM => {
+                let plugin_ids::SetPanelParamArgs {
+                    device,
+                    index,
+                    param,
+                } = Self::args(id, args)?;
+                let device = target(self, device)?;
+                if index >= plugin_ids::PANEL_KNOBS {
+                    return Err(ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message: format!(
+                            "a plug-in panel has {} knobs, so index {index} is out of range",
+                            plugin_ids::PANEL_KNOBS
+                        ),
+                    });
+                }
+                let kind = self
+                    .editor
+                    .document()
+                    .device(device)
+                    .map(|d| d.kind.clone())
+                    .ok_or_else(|| unavailable(format!("no {device}")))?;
+                let Some(key) = DeviceView::plugin_key(&kind) else {
+                    return Err(ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message: format!("{device} isn't a plug-in device"),
+                    });
+                };
+                let mapping = self.prefs.plugin_panels.entry(key).or_default();
+                match param {
+                    Some(param) => {
+                        mapping.insert(index, param);
+                    }
+                    None => {
+                        mapping.remove(&index);
+                    }
+                }
+                self.devices
+                    .set_plugin_panels(self.prefs.plugin_panels.clone());
+                self.save_preferences();
+                self.touch();
+                Ok(to_value(&self.device_view_state()))
             }
             plugin_ids::SCAN | plugin_ids::RESCAN => {
                 let plugin_ids::ScanArgs { paths } = Self::args(id, args)?;

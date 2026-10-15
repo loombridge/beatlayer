@@ -1322,6 +1322,19 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "plugin.show_window",
             Exception(LaterView("the plug-in device panel (WP-2.10)")),
         ),
+        (
+            "plugin.set_window",
+            Exception(Equivalent(
+                "moving or resizing a plug-in window, which the system's window keys and \
+                 commands do, as for a floating device's window",
+            )),
+        ),
+        (
+            "plugin.set_panel_param",
+            Exception(LaterView(
+                "the plug-in device panel's configure mode (Phase 5)",
+            )),
+        ),
         // WP-2.9's scanner and settings: the Plug-Ins label lists what the
         // scanner found, but the button that scans (Live's Rescan) and the
         // hide-plug-ins controls are later views.

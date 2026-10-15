@@ -528,6 +528,9 @@ impl Processor {
         let channel = note.channel.min(15);
         let key = note.key.min(127);
         let mut bytes = match note.kind {
+            // Per-note expressions wait for MPE hosting (the parity
+            // matrix's note): a plug-in's note port takes them then.
+            NoteKind::Expression { .. } => return false,
             NoteKind::On => {
                 #[expect(
                     clippy::cast_possible_truncation,

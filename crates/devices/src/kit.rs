@@ -854,6 +854,9 @@ impl<P: Plugin> NativeDevice for KitDevice<P> {
                     velocity: note.velocity,
                 },
                 NoteKind::Choke => Event::NoteChoke { time, note: which },
+                // Per-note expressions wait for the kit host's MPE work:
+                // the instruments that play them today are native.
+                NoteKind::Expression { .. } => continue,
             });
         }
         let frames = audio.frames();

@@ -19,15 +19,17 @@
 //! their instances and runs their commands.
 //!
 //! Beatlayer ships its first native devices: the compressor ([`compressor`]),
-//! the limiter ([`limiter`]), the tempo-synced delay ([`delay`]) and the
-//! Utility device ([`utility`], WP-2.18b); [`register`] adds them to the
-//! engine. The first instruments and the rest of the core effects ship with
-//! WP-2.16 to 2.18. [`testing`] has the devices the framework's tests use.
-//! The kit's two example plug-ins join the device list with the
+//! the parametric EQ ([`eq`], WP-2.18a), the limiter ([`limiter`]), the
+//! tempo-synced delay ([`delay`]) and the Utility device ([`utility`],
+//! WP-2.18b); [`register`] adds them to the engine. The first instruments
+//! and the rest of the core effects ship with WP-2.16 to 2.18. [`testing`]
+//! has the devices the framework's tests use. The kit's two example
+//! plug-ins join the device list with the
 //! `kit-examples` feature, off by default.
 
 pub mod compressor;
 pub mod delay;
+pub mod eq;
 mod framework;
 pub mod kit;
 pub mod limiter;
@@ -36,23 +38,25 @@ pub mod utility;
 
 pub use compressor::{COMPRESSOR, Squeeze, compressor_type};
 pub use delay::{DELAY, delay_type};
+pub use eq::{Contour, EQ, eq_type};
 pub use framework::{Audio, NativeDevice, NativeNode, ParamBank, add};
 pub use kit::{KitFactory, KitHost};
 pub use limiter::{Brickwall, limiter_type};
 
 use bl_engine::{DeviceType, Registry};
 
-/// Adds Beatlayer's native devices to `registry`: the compressor, the
-/// limiter, the delay and Utility.
+/// Adds Beatlayer's native devices to `registry`: the compressor, the EQ,
+/// the limiter, the delay and Utility.
 pub fn register(registry: &mut Registry) {
     compressor::register(registry);
     limiter::register(registry);
     delay::register(registry);
     utility::register(registry);
+    eq::register(registry);
 }
 
 /// The native device types Beatlayer ships, for the browser and the shell:
-/// the compressor, the limiter, the delay and Utility.
+/// the compressor, the EQ, the limiter, the delay and Utility.
 #[must_use]
 pub fn device_types() -> Vec<DeviceType> {
     let mut registry = Registry::empty();

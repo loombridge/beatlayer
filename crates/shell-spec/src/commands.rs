@@ -47,6 +47,8 @@ pub const WINDOW_CLOSE: &str = "window.close";
 pub const VIEW_FULL_SCREEN: &str = "view.full_screen";
 /// `view.toggle_browser`: show or hide the browser.
 pub const VIEW_TOGGLE_BROWSER: &str = "view.toggle_browser";
+/// `view.toggle_info_view`: show or hide the Info View.
+pub const VIEW_TOGGLE_INFO_VIEW: &str = "view.toggle_info_view";
 /// `view.toggle_plug_in_windows`: show or hide the plug-in windows: the
 /// floating devices' windows and the plug-ins' editor windows (View ▸
 /// Plug-In Windows, WP-2.5b).
@@ -126,6 +128,7 @@ pub const IDS: &[&str] = &[
     WINDOW_CLOSE,
     VIEW_FULL_SCREEN,
     VIEW_TOGGLE_BROWSER,
+    VIEW_TOGGLE_INFO_VIEW,
     VIEW_TOGGLE_PLUG_IN_WINDOWS,
     VIEW_TOGGLE_SESSION_ARRANGEMENT,
     VIEW_ZOOM_IN,
@@ -322,6 +325,8 @@ pub struct ViewResult {
     pub main_view: String,
     /// Whether the browser shows.
     pub browser: bool,
+    /// Whether the Info View shows.
+    pub info_view: bool,
     /// Whether the main window is in full-screen mode.
     pub full_screen: bool,
     /// The interface zoom, where 1 is 100%.
@@ -555,6 +560,19 @@ fn specs() -> Vec<CommandSpec> {
             .context(Global)
             .binding("S-VIEW-010")
             .binding("S-BRW-002")
+            .args::<NoArgs>()
+            .result::<ViewResult>(),
+        CommandSpec::new(VIEW_TOGGLE_INFO_VIEW, "Info")
+            .description(
+                "Shows or hides the Info View at the bottom left of the main window, which \
+                 reads whatever the pointer is over: the control's name, the help text of \
+                 the command it runs, and its key on a separate line, and shows nothing \
+                 while the pointer is over empty space. A new set opens with it shown, as \
+                 in Live. Changes nothing in the set and isn't an undo step.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .binding("S-VIEW-008")
             .args::<NoArgs>()
             .result::<ViewResult>(),
         CommandSpec::new(

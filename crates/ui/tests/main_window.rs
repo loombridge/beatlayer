@@ -112,7 +112,7 @@ fn clicking_the_sample_rate_opens_the_audio_settings() {
     // Spec: app-shell R9 (L-CTRL-023).
     let mut h = Harness::new(Window::Main);
     h.settle();
-    let rect = ShellLayout::compute(REFERENCE, true).rect(Element::SampleRate);
+    let rect = ShellLayout::compute(REFERENCE, true, true).rect(Element::SampleRate);
     h.click(rect.center());
     let events = h.take_events();
     assert!(events.contains(&UiEvent::Invoke(bl_shell::Invocation::new(
@@ -126,7 +126,7 @@ fn clicking_the_sample_rate_opens_the_audio_settings() {
 fn the_browser_toggle_hides_the_browser_and_widens_the_main_view() {
     let mut h = Harness::new(Window::Main);
     h.settle();
-    let rect = ShellLayout::compute(REFERENCE, true).rect(Element::BrowserToggle);
+    let rect = ShellLayout::compute(REFERENCE, true, true).rect(Element::BrowserToggle);
     h.click(rect.center());
     assert!(!h.shell.browser_visible());
     let nodes = Harness::nodes(&h.settle());
@@ -280,7 +280,7 @@ fn with_the_engine_off_the_cpu_meter_reads_off() {
         status.value
     );
     // Clicking the message opens the Audio settings.
-    let rect = ShellLayout::compute(REFERENCE, true).rect(Element::Message);
+    let rect = ShellLayout::compute(REFERENCE, true, true).rect(Element::Message);
     h.click(rect.left_center() + egui::vec2(20.0, 0.0));
     assert!(h.shell.settings_open());
 }
@@ -295,7 +295,7 @@ fn controls_are_drawn_where_the_layout_places_them() {
     let mut h = Harness::new(Window::Main);
     let output = h.settle();
     let nodes = Harness::nodes(&output);
-    let layout = ShellLayout::compute(REFERENCE, true);
+    let layout = ShellLayout::compute(REFERENCE, true, true);
     println!("| Row | Element | x from | x to | y from | y to |");
     for placement in ELEMENTS {
         let node = nodes

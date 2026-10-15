@@ -66,9 +66,12 @@ pub fn utility_type() -> DeviceType {
                 0.0,
                 ParamUnit::None,
             )
-            .decimals(0),
-            ParamDescriptor::toggle(UTILITY_MUTE, "Mute", false),
-            ParamDescriptor::choice(UTILITY_POLARITY, "Polarity", &["Normal", "Inverted"], 0),
+            .decimals(0)
+            .describe("Moves the signal left or right of the middle."),
+            ParamDescriptor::toggle(UTILITY_MUTE, "Mute", false)
+                .describe("Turns the signal off without changing the other settings."),
+            ParamDescriptor::choice(UTILITY_POLARITY, "Polarity", &["Normal", "Inverted"], 0)
+                .describe("Inverts the signal's phase, or leaves it."),
         ]),
     )
 }
@@ -78,14 +81,17 @@ pub fn utility_type() -> DeviceType {
 pub fn drive_type() -> DeviceType {
     DeviceType::native(DRIVE, "Framework Test Drive", DeviceRole::AudioEffect).with_description(
         DeviceDescription::new(vec![
-            ParamDescriptor::gain(DRIVE_DRIVE, "Drive", 36.0, 0.0),
-            ParamDescriptor::gain(DRIVE_OUTPUT, "Output", 6.0, 0.0),
+            ParamDescriptor::gain(DRIVE_DRIVE, "Drive", 36.0, 0.0)
+                .describe("How much the signal is driven into the saturator."),
+            ParamDescriptor::gain(DRIVE_OUTPUT, "Output", 6.0, 0.0)
+                .describe("Brings the saturated signal back to level."),
             ParamDescriptor::choice(
                 DRIVE_OVERSAMPLING,
                 "Oversampling",
                 &["Off", "2x", "4x", "8x"],
                 2,
-            ),
+            )
+            .describe("How many times the rate the saturator runs at."),
         ]),
     )
 }
@@ -102,17 +108,22 @@ pub fn scope_type() -> DeviceType {
             100.0,
             ParamUnit::Milliseconds,
         )
-        .logarithmic(),
-        ParamDescriptor::gain(SCOPE_GAIN, "Gain", 24.0, 0.0),
-        ParamDescriptor::toggle(SCOPE_FREEZE, "Freeze", false),
-        ParamDescriptor::integer(SCOPE_DIVISIONS, "Divisions", (1, 16), 4, ParamUnit::None),
+        .logarithmic()
+        .describe("How much of the signal the display shows, in milliseconds."),
+        ParamDescriptor::gain(SCOPE_GAIN, "Gain", 24.0, 0.0)
+            .describe("Raises or lowers what the display shows, without changing the signal."),
+        ParamDescriptor::toggle(SCOPE_FREEZE, "Freeze", false)
+            .describe("Holds the display still while the audio keeps going."),
+        ParamDescriptor::integer(SCOPE_DIVISIONS, "Divisions", (1, 16), 4, ParamUnit::None)
+            .describe("How many divisions the display's grid has."),
         ParamDescriptor::continuous(
             SCOPE_TRIGGER,
             "Trigger",
             (-100.0, 100.0),
             0.0,
             ParamUnit::Percent,
-        ),
+        )
+        .describe("The level at which the display's window begins."),
     ];
     let layout = DeviceLayout::new(LayoutNode::Row(vec![
         LayoutNode::Band(ControlBand::stacked(

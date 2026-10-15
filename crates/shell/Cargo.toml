@@ -10,6 +10,9 @@ publish.workspace = true
 [dependencies]
 # Measures the agent API's previews (WP-1.16).
 bl-analysis.workspace = true
+# The built-in assistant (WP-2.23): the API keys in the OS keychain, and the
+# agent loop the panel runs (parts 1-2), whose tool calls the shell hosts.
+bl-assistant.workspace = true
 bl-audio-io.workspace = true
 bl-commands.workspace = true
 # IDs for objects a command will create, which the agent API hands out.

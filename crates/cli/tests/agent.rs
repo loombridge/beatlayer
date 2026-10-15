@@ -1049,6 +1049,34 @@ fn without_autonomous_bl_cli_mcp_refuses_what_would_ask_and_says_how_to_allow_it
 }
 
 #[test]
+fn the_assistant_settings_are_the_person_s_own_through_the_agent_api() {
+    // Spec: agent-permissions R9, by analogy. Even an autonomous session
+    // may not change the built-in assistant's settings or its key.
+    let mut client = bl_cli_mcp(&["--autonomous"]);
+    let model = client
+        .call(
+            "run",
+            json!({ "commands": [{ "command": "assistant.set_model",
+                                   "args": { "model": "gpt-4o" } }] }),
+        )
+        .unwrap();
+    assert!(model.is_error, "{}", model.text);
+    assert!(model.text.contains("only a person"), "{}", model.text);
+    assert!(model.text.contains("assistant.set_model"), "{}", model.text);
+
+    let key = client
+        .call(
+            "run",
+            json!({ "commands": [{ "command": "assistant.set_key",
+                                   "args": { "key": "sk-not-stored" } }] }),
+        )
+        .unwrap();
+    assert!(key.is_error, "{}", key.text);
+    assert!(key.text.contains("only a person"), "{}", key.text);
+    assert!(client.into_transport().finish().unwrap().success());
+}
+
+#[test]
 fn an_autonomous_agent_can_quit_bl_cli_mcp() {
     let mut client = bl_cli_mcp(&["--autonomous"]);
     let quit = call(

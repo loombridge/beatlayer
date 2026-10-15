@@ -36,6 +36,9 @@ toml = { version = "1", default-features = false, features = ["std", "parse", "s
 # The null device and its channels, for the In/Out choosers' tests
 # (WP-2.13).
 bl-audio-io.workspace = true
+# The assistant loop's scripted provider, so the Agents page's activity log
+# tests can fill it through a real turn (WP-2.23, part 4).
+bl-assistant.workspace = true
 # The device framework's test devices, for the generic UI's tests (WP-2.5).
 bl-devices.workspace = true
 # Every registered command, for the keyboard-reachability test (WP-1.14),

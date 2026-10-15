@@ -974,6 +974,14 @@ fn server_and_agent(h: &mut Harness) {
     an_agent(h);
 }
 
+/// An assistant API key stored in the headless keychain, so the Agents
+/// page shows its Forget button.
+fn assistant_key_set(h: &mut Harness) {
+    h.shell
+        .run("assistant.set_key", json!({ "key": "sk-headless-test" }))
+        .unwrap();
+}
+
 /// Every command without a key or a menu item, and how it's reached.
 fn paths() -> BTreeMap<&'static str, Path> {
     use Path::{Control, Exception};
@@ -1106,6 +1114,40 @@ fn paths() -> BTreeMap<&'static str, Path> {
         (
             "agent.new_client_token",
             settings("agents", server_and_agent, "New Token: Tester", Key::Enter),
+        ),
+        // The built-in assistant's settings on the Agents page (WP-2.23,
+        // part 4).
+        (
+            "assistant.set_provider",
+            settings("agents", nothing, "Assistant Provider", Key::ArrowDown),
+        ),
+        (
+            "assistant.set_base_url",
+            settings("agents", nothing, "Assistant Base URL", Key::K),
+        ),
+        (
+            "assistant.set_model",
+            settings("agents", nothing, "Assistant Model", Key::K),
+        ),
+        (
+            "assistant.set_key",
+            Exception(Equivalent(
+                "the API key field, typed into and then stored with Set: the key has no one \
+                 key of its own, since it changes the keychain",
+            )),
+        ),
+        (
+            "assistant.forget_key",
+            settings(
+                "agents",
+                assistant_key_set,
+                "Forget Assistant API Key",
+                Key::Enter,
+            ),
+        ),
+        (
+            "assistant.toggle_activity_log",
+            settings("agents", nothing, "Open Assistant Activity Log", Key::Enter),
         ),
         (
             "audio.configure",

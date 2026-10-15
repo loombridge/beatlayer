@@ -119,7 +119,7 @@ pub struct PluginInfoArgs {
 pub struct PluginInfo {
     /// The device.
     pub device: DeviceId,
-    /// The plug-in's CLAP ID.
+    /// The plug-in's ID: a CLAP ID, or a VST3 class ID.
     pub plugin: String,
     /// The file it was loaded from.
     pub path: String,

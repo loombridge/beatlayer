@@ -809,6 +809,9 @@ impl Sampler {
             NoteKind::On => self.note_on(note, settings),
             NoteKind::Off => self.note_off(note.key, settings),
             NoteKind::Choke => self.choke(note.key, settings),
+            // The sampler plays no per-note expression (MPE): today only
+            // Cascade does.
+            NoteKind::Expression { .. } => {}
         }
     }
 

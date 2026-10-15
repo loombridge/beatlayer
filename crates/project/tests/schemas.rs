@@ -238,6 +238,7 @@ fn fixture_project() -> Project {
         ids,
         media,
         windows: bl_model::DeviceWindows::new(),
+        folds: bl_model::ClipFolds::new(),
     }
 }
 

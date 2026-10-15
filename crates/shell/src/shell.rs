@@ -9,7 +9,7 @@ use bl_core::id::Id;
 use bl_core::time::Ticks;
 use bl_engine::transport as engine_transport;
 use bl_media::MediaStore;
-use bl_model::{ChangeSet, Editor, TrackId, TrackKind, registry as model};
+use bl_model::{ChangeSet, ClipData, Editor, TrackId, TrackKind, registry as model};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -24,9 +24,9 @@ use crate::audio::{AudioHost, ConfigureAudio, EngineTransport, ToneSettings};
 use crate::browser::{self, BrowserError, BrowserView, Waker};
 use crate::clip_view::{self, ClipView};
 use crate::commands::{
-    self as ids, DefaultSetArgs, FileReport, PathArgs, RelinkArgs, SaveAsArgs, SetResult,
-    SettingsArgs, SwitchArgs, SwitchResult, TemplateArgs, TestToneArgs, TestToneState, ThemeArgs,
-    ViewResult, ZoomArgs,
+    self as ids, DefaultSetArgs, FileReport, FoldNotesArgs, LaneArgs, PathArgs, RelinkArgs,
+    SaveAsArgs, SetResult, SettingsArgs, SwitchArgs, SwitchResult, TemplateArgs, TestToneArgs,
+    TestToneState, ThemeArgs, ViewResult, ZoomArgs,
 };
 use crate::devices::{self, DeviceError, DeviceView};
 use crate::files::{ProjectFiles, SetStore, new_set_from};
@@ -2465,6 +2465,11 @@ impl Shell {
             ids::VIEW_TOGGLE_BROWSER => Some(self.browser),
             ids::VIEW_TOGGLE_CLIP_VIEW => Some(self.clip_view.visible()),
             ids::VIEW_DRAW_MODE => Some(self.clip_view.draw_mode()),
+            ids::VIEW_FOLD_NOTES => Some(
+                self.clip_view
+                    .shown_clip(self.editor.document(), &self.arrangement)
+                    .is_some_and(|clip| self.clip_view.is_folded(clip)),
+            ),
             ids::VIEW_TOGGLE_INFO_VIEW => Some(self.info_view),
             ids::VIEW_TOGGLE_PLUG_IN_WINDOWS => Some(self.plug_in_windows),
             ids::FOCUS_TOGGLE_TAB_NAVIGATION => Some(self.prefs.tab_navigation),
@@ -3449,6 +3454,7 @@ impl Shell {
                 self.editor = editor;
                 self.store.close();
                 self.devices.set_windows(bl_model::DeviceWindows::new());
+                self.clip_view.set_folds(bl_model::ClipFolds::new());
                 self.set_path = None;
                 self.dirty = false;
                 self.main_view = MainView::Arrangement;
@@ -3473,6 +3479,8 @@ impl Shell {
                 // Spec: device-chains R29. Floating windows reopen where
                 // they were saved.
                 self.devices.set_windows(self.store.windows());
+                // Spec: piano-roll. Folded note editors too.
+                self.clip_view.set_folds(self.store.folds());
                 self.saved = snapshot(&editor);
                 self.set_replaced();
                 self.editor = editor;
@@ -3519,6 +3527,7 @@ impl Shell {
                     &mut self.editor,
                 );
                 self.store.set_windows(self.devices.windows().clone());
+                self.store.set_folds(self.clip_view.folds().clone());
                 let warnings = self.store.save(&path, &self.editor).map_err(failed)?;
                 self.saved_as(path, &warnings);
                 Ok(self.set_result())
@@ -3534,6 +3543,7 @@ impl Shell {
                     &mut self.editor,
                 );
                 self.store.set_windows(self.devices.windows().clone());
+                self.store.set_folds(self.clip_view.folds().clone());
                 let (path, warnings) = self
                     .store
                     .save_as(Path::new(&path), &self.editor)
@@ -3633,6 +3643,7 @@ impl Shell {
                     &mut self.editor,
                 );
                 self.store.set_windows(self.devices.windows().clone());
+                self.store.set_folds(self.clip_view.folds().clone());
                 let files = self.store.collect().map_err(failed)?;
                 let warnings = self.store.save(&path, &self.editor).map_err(failed)?;
                 self.saved_as(path.clone(), &warnings);
@@ -3737,6 +3748,44 @@ impl Shell {
                 // Spec: piano-roll R2; S-GRID-001, M-OPT-017. View state only.
                 Self::args::<NoArgs>(id, args)?;
                 self.clip_view.toggle_draw_mode();
+                Ok(to_value(
+                    &self
+                        .clip_view
+                        .state(self.editor.document(), &self.arrangement),
+                ))
+            }
+            ids::VIEW_FOLD_NOTES => {
+                // Spec: piano-roll; M-VIEW-039, S-NOTE-038. View state only,
+                // saved with the set.
+                let FoldNotesArgs { clip, folded } = Self::args(id, args)?;
+                let clip = match clip {
+                    Some(clip) => clip,
+                    None => self
+                        .clip_view
+                        .shown_clip(self.editor.document(), &self.arrangement)
+                        .ok_or_else(|| unavailable("no MIDI clip is shown in the Clip View"))?,
+                };
+                match self.editor.document().clip(clip) {
+                    None => {
+                        return Err(failed(format!("no clip has the ID {}", clip.0)));
+                    }
+                    Some(value) if !matches!(value.data, ClipData::Midi(_)) => {
+                        return Err(failed("the clip isn't a MIDI clip".to_owned()));
+                    }
+                    Some(_) => {}
+                }
+                let folded = folded.unwrap_or(!self.clip_view.is_folded(clip));
+                self.clip_view.set_folded(clip, folded);
+                Ok(to_value(
+                    &self
+                        .clip_view
+                        .state(self.editor.document(), &self.arrangement),
+                ))
+            }
+            ids::VIEW_LANE => {
+                // Spec: piano-roll; the lane shows one of a note's values.
+                let LaneArgs { lane } = Self::args(id, args)?;
+                self.clip_view.set_lane(lane);
                 Ok(to_value(
                     &self
                         .clip_view

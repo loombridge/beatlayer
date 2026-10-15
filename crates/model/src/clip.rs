@@ -17,6 +17,8 @@
 //!
 //! [`Clip::part`] and [`Clip::with_start`] make those changes.
 
+use std::collections::BTreeSet;
+
 use bl_core::time::{TempoMap, Ticks, TimeSignature};
 use imbl::Vector;
 use schemars::JsonSchema;
@@ -24,6 +26,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::ModelError;
 use crate::ids::{ClipId, ContentHash};
+
+/// The clips whose MIDI Note Editors are folded to the rows that hold notes
+/// (WP-2.3): saved with the set, but not part of the document, so folding
+/// isn't an undo step.
+pub type ClipFolds = BTreeSet<ClipId>;
 
 /// A clip on a track's arrangement lane.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]

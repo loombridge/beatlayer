@@ -5,13 +5,13 @@
 //! can check them and list them in the command reference without linking a UI
 //! crate or an audio host. `bl-shell`'s `Shell::run` runs them by ID.
 
-use bl_commands::Context::{Dialog, Global, Settings, TabFocus};
+use bl_commands::Context::{ClipView, Dialog, Global, NoteEditor, Settings, TabFocus};
 use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::audio::{AudioDevices, AudioStatus, ConfigureAudio};
-use crate::notes::ClipViewState;
+use crate::notes::{ClipViewState, NoteField};
 use crate::settings::{SettingsPage, ThemeChoice};
 
 /// `set.new`: replace the set with the factory default set.
@@ -52,6 +52,11 @@ pub const VIEW_TOGGLE_BROWSER: &str = "view.toggle_browser";
 pub const VIEW_TOGGLE_CLIP_VIEW: &str = "view.toggle_clip_view";
 /// `view.draw_mode`: switch Draw Mode (B, WP-2.3).
 pub const VIEW_DRAW_MODE: &str = "view.draw_mode";
+/// `view.fold_notes`: fold the note editor to the rows that hold notes (F,
+/// WP-2.3).
+pub const VIEW_FOLD_NOTES: &str = "view.fold_notes";
+/// `view.lane`: choose which value the Clip View's lane shows (WP-2.3).
+pub const VIEW_LANE: &str = "view.lane";
 /// `view.toggle_info_view`: show or hide the Info View.
 pub const VIEW_TOGGLE_INFO_VIEW: &str = "view.toggle_info_view";
 /// `view.toggle_plug_in_windows`: show or hide the plug-in windows: the
@@ -135,6 +140,8 @@ pub const IDS: &[&str] = &[
     VIEW_TOGGLE_BROWSER,
     VIEW_TOGGLE_CLIP_VIEW,
     VIEW_DRAW_MODE,
+    VIEW_FOLD_NOTES,
+    VIEW_LANE,
     VIEW_TOGGLE_INFO_VIEW,
     VIEW_TOGGLE_PLUG_IN_WINDOWS,
     VIEW_TOGGLE_SESSION_ARRANGEMENT,
@@ -316,6 +323,27 @@ pub struct TogglePlugInWindowsArgs {
     /// Show (true) or hide (false) them; switches if left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shown: Option<bool>,
+}
+
+/// Arguments of `view.fold_notes`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FoldNotesArgs {
+    /// The MIDI clip. Left out, the one the Clip View shows (the
+    /// Arrangement's selected clip).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<bl_model::ClipId>,
+    /// Fold (true) or unfold (false); switches if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folded: Option<bool>,
+}
+
+/// Arguments of `view.lane`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LaneArgs {
+    /// Which value the lane shows.
+    pub lane: NoteField,
 }
 
 /// What a command that switches something returns: its new state.
@@ -596,6 +624,34 @@ fn specs() -> Vec<CommandSpec> {
             .context(Global)
             .binding("S-GRID-001")
             .args::<NoArgs>()
+            .result::<ClipViewState>(),
+        CommandSpec::new(VIEW_FOLD_NOTES, "Fold to Notes")
+            .description(
+                "Folds or unfolds the MIDI Note Editor (F, View ▸ Fold to Notes): while it's \
+                 folded, the editor shows only the key rows that hold notes, one under the \
+                 next, and not the empty rows between them. `clip` names the clip; left out, \
+                 the one the editor shows. `folded` says which way; left out, it switches. \
+                 Folding changes nothing in the set and isn't an undo step: it's saved with \
+                 the set beside the song, so it's there again when the set is reopened. The \
+                 result says whether the editor is folded now.",
+            )
+            .permission(Permission::Read)
+            .contexts([ClipView, NoteEditor])
+            .binding("S-NOTE-038")
+            .args::<FoldNotesArgs>()
+            .result::<ClipViewState>(),
+        CommandSpec::new(VIEW_LANE, "Note Editor Lane")
+            .description(
+                "Chooses which of a note's values the lane under the MIDI Note Editor shows \
+                 and edits: `velocity` (the lane's default), `release_velocity`, `chance`, or \
+                 `velocity_deviation`. Dragging a note's stem in the lane sets that value on \
+                 that note, and dragging across several notes ramps it; the same edits are \
+                 the `note.set_value` and `note.ramp_value` commands. Changes only the view, \
+                 so it's no undo step and isn't saved with the set.",
+            )
+            .permission(Permission::Read)
+            .contexts([ClipView, NoteEditor])
+            .args::<LaneArgs>()
             .result::<ClipViewState>(),
         CommandSpec::new(VIEW_TOGGLE_INFO_VIEW, "Info")
             .description(

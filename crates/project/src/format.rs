@@ -10,13 +10,15 @@
 //!      "ids": 412,               the next object ID to hand out
 //!      "media": [ { "hash": "…", "path": "Samples/Imported/Kick.wav", "size": 88244 } ],
 //!      "windows": { "12": { "x": 80, "y": 120, "width": 320, "height": 174 } },
+//!      "folds": [ 12, 15 ],     the clips whose note editors are folded
 //!      "document": { … }         the song, as bl-model serialises it
 //!    }
 //! ```
 //!
 //! `windows` holds where each floating device's window sits (WP-2.5b), and
-//! is left out when no device floats. It sits beside the document rather
-//! than in it, so moving a window is never an undo step.
+//! `folds` the clips whose MIDI Note Editors are folded (WP-2.3). Both are
+//! left out when empty. They sit beside the document rather than in it, so
+//! moving a window or folding an editor is never an undo step.
 //!
 //! `format` and `schema` come first and keep their names in every version,
 //! so a reader can tell what a file is and which migrations it needs before
@@ -31,7 +33,7 @@
 use std::io::Read;
 
 use bl_core::id::IdAllocator;
-use bl_model::{DeviceWindows, Document, Editor};
+use bl_model::{ClipFolds, DeviceWindows, Document, Editor};
 use ruzstd::decoding::StreamingDecoder;
 use ruzstd::encoding::{CompressionLevel, compress_to_vec};
 use serde::{Deserialize, Serialize};
@@ -63,6 +65,10 @@ pub struct Project {
     /// Where each floating device's window sits (WP-2.5b): saved with the
     /// set, but not part of the document, so it's no undo step.
     pub windows: DeviceWindows,
+    /// Which clips' MIDI Note Editors are folded to the rows that hold notes
+    /// (WP-2.3): saved with the set, but not part of the document, so
+    /// folding is no undo step.
+    pub folds: ClipFolds,
 }
 
 impl Project {
@@ -81,6 +87,7 @@ impl Project {
             ids: editor.ids(),
             media,
             windows: DeviceWindows::new(),
+            folds: ClipFolds::new(),
         }
     }
 
@@ -92,6 +99,18 @@ impl Project {
             .iter()
             .filter(|(device, frame)| self.document.device(**device).is_some() && frame.is_valid())
             .map(|(device, frame)| (*device, *frame))
+            .collect();
+        self
+    }
+
+    /// The same project with these folded clips, keeping only those its
+    /// document has.
+    #[must_use]
+    pub fn with_folds(mut self, folds: &ClipFolds) -> Self {
+        self.folds = folds
+            .iter()
+            .filter(|clip| self.document.clip(**clip).is_some())
+            .copied()
             .collect();
         self
     }
@@ -160,6 +179,8 @@ struct Saving<'a> {
     media: &'a Media,
     #[serde(skip_serializing_if = "DeviceWindows::is_empty")]
     windows: &'a DeviceWindows,
+    #[serde(skip_serializing_if = "ClipFolds::is_empty")]
+    folds: &'a ClipFolds,
     document: &'a Document,
 }
 
@@ -173,6 +194,7 @@ impl<'a> Saving<'a> {
             ids: project.ids,
             media: &project.media,
             windows: &project.windows,
+            folds: &project.folds,
             document: &project.document,
         }
     }
@@ -193,6 +215,8 @@ struct Saved {
     media: Media,
     #[serde(default)]
     windows: DeviceWindows,
+    #[serde(default)]
+    folds: ClipFolds,
     document: Document,
 }
 
@@ -293,6 +317,7 @@ pub fn decode_json(json: &[u8], options: &LoadOptions) -> Result<(Project, SetIn
         mut ids,
         media,
         windows,
+        folds,
         document,
         ..
     } = saved;
@@ -309,14 +334,17 @@ pub fn decode_json(json: &[u8], options: &LoadOptions) -> Result<(Project, SetIn
         return Err(LoadError::invalid("the set's object IDs are exhausted"));
     }
     // A frame that's damaged, or for a device that isn't there, is
-    // dropped: the window opens where the app puts a new one.
+    // dropped: the window opens where the app puts a new one. So is a
+    // fold for a clip that isn't there.
     let project = Project {
         document,
         ids,
         media,
         windows: DeviceWindows::new(),
+        folds: ClipFolds::new(),
     }
-    .with_windows(&windows);
+    .with_windows(&windows)
+    .with_folds(&folds);
     let info = SetInfo {
         revision,
         saved_by,

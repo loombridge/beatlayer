@@ -1176,7 +1176,7 @@ fn only_the_columns_in_view_are_built() {
 
 /// Every row the mixers place at a content size, at 100%.
 fn mixer_rows(size: Vec2) -> Vec<Row> {
-    let shell = ShellLayout::compute(size, true);
+    let shell = ShellLayout::compute(size, true, true);
     let session = SessionLayout::compute(shell.main_view, Some(Sections::DEFAULT));
     let mut rows = session.rows();
     rows.extend(MixerLayout::compute(session.mixer.unwrap(), 4, 2, Sections::DEFAULT, 0.0).rows());
@@ -1229,7 +1229,7 @@ fn mixer_rows_keep_their_places_at_every_zoom() {
         let nodes = tree(&mut h);
         let drawn = rect_of(Harness::node(&nodes, "Session Mixer"));
         let top = TITLE_BAR / zoom;
-        let expected = ShellLayout::compute(REFERENCE, true).main_view;
+        let expected = ShellLayout::compute(REFERENCE, true, true).main_view;
         assert!(
             (drawn.top() - (expected.bottom() - 300.5 + top)).abs() < 0.1,
             "{percent}%: {drawn:?}"

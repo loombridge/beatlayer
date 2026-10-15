@@ -104,3 +104,26 @@ fn every_parameter_is_automatable_to_the_frame() {
     }
     assert!(count >= 12);
 }
+
+// Spec: info-view R6 (D17, WP-2.24): the Info View reads a parameter's
+// registered description, so every parameter of every device type
+// Beatlayer registers — shipped, kit plug-ins, and the framework's test
+// devices — has one written.
+#[test]
+fn every_parameter_has_a_description() {
+    let mut types = bl_devices::device_types();
+    types.extend(bl_devices::kit_host().device_types());
+    types.extend(testing::device_types());
+    let mut count = 0;
+    for device_type in types {
+        for param in &device_type.description.params {
+            count += 1;
+            let who = format!("{}: {}", device_type.name, param.name);
+            assert!(
+                !param.description.trim().is_empty(),
+                "{who} has no description"
+            );
+        }
+    }
+    assert!(count >= 12, "at least the test devices' parameters");
+}

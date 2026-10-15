@@ -36,7 +36,7 @@ fn state(h: &mut Harness) -> ArrangementState {
 /// The Arrangement's layout in a harness that draws Live's title bar, so
 /// its coordinates are layout.md's window coordinates.
 fn layout(h: &Harness) -> ArrangementLayout {
-    let shell = ShellLayout::compute(h.size - vec2(0.0, bl_ui::layout::TITLE_BAR), true)
+    let shell = ShellLayout::compute(h.size - vec2(0.0, bl_ui::layout::TITLE_BAR), true, true)
         .translate(vec2(0.0, bl_ui::layout::TITLE_BAR));
     let doc = h.shell.editor().document();
     let pinned = doc.returns().len() + 1;
@@ -477,7 +477,7 @@ fn the_follow_switch_and_the_optimize_buttons_work() {
     let mut h = Harness::with_title_bar(Window::Main);
     h.settle();
     let shell_layout =
-        ShellLayout::compute(REFERENCE, true).translate(vec2(0.0, bl_ui::layout::TITLE_BAR));
+        ShellLayout::compute(REFERENCE, true, true).translate(vec2(0.0, bl_ui::layout::TITLE_BAR));
     h.click(shell_layout.rect(Element::Follow).center());
     assert!(!state(&mut h).follow);
     h.click(shell_layout.rect(Element::Follow).center());

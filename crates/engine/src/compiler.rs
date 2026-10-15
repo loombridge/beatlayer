@@ -9,6 +9,7 @@ use bl_model::{
 };
 
 use crate::EngineConfig;
+use crate::automation;
 use crate::clips::{ClipList, ClipPlayer};
 use crate::gc::{GcHandle, Program};
 use crate::message::{LoopRegion, ParamEvent, TransportCommand};
@@ -100,6 +101,10 @@ struct Placed {
     /// The frames the node's own processing adds, as it reported when it was
     /// made, so a migrated node keeps its latency (WP-2.11).
     latency: u32,
+    /// The frames a parameter change aimed at the node is held back, so
+    /// automation acts on the audio it is meant for (WP-2.11): its slot's
+    /// delay, worked out when the program is compiled.
+    delay: u32,
 }
 
 /// Turns documents into engine programs, off the audio thread.
@@ -247,6 +252,25 @@ impl Compiler {
         };
         // A new program's restatement of migrated nodes goes first.
         update.params.extend(params);
+        // A track whose envelopes changed sends its nodes their lists again,
+        // empty ones included, which clear the envelopes a node had. A new
+        // tempo map moved every envelope, so every track's goes again.
+        let all = old.settings().tempo != document.settings().tempo;
+        for track in document.tracks() {
+            let id = track.id();
+            let differs = match (old.track(id), document.track(id)) {
+                (Some(before), Some(after)) => before.automation_map() != after.automation_map(),
+                // A new track's nodes are new, with no envelopes to clear,
+                // and a deleted track's nodes are gone with the track.
+                _ => false,
+            };
+            if all || differs {
+                // The track whose envelopes changed gets every list, so an
+                // empty one clears what a node had; a tempo map that moved
+                // them only sends the ones that drive something.
+                self.send_automation(document, id, !differs, &mut update);
+            }
+        }
         update
     }
 
@@ -379,6 +403,13 @@ impl Compiler {
         let size = self.config.channels * self.config.max_frames;
         let (order, dependents) = run_order(&build);
         compensate(&mut build, &order);
+        // Automation is placed with each node's delay in it (WP-2.11), so
+        // remember what every node's turned out to be.
+        for slot in &build.slots {
+            if let Some(placed) = build.layout.get_mut(&slot.key) {
+                placed.delay = slot.delay;
+            }
+        }
         let (delay_lines, delay_pool) = delay_storage(&build.delays, self.config.channels);
         let program = EngineProgram {
             generation,
@@ -464,8 +495,39 @@ impl Compiler {
             if send {
                 self.send_clips(document, id, &mut update);
             }
+            // Every node is new in a new program, so each is sent the
+            // automation that drives its parameters: a node with none is
+            // new too, and has none anyway.
+            self.send_automation(document, id, true, &mut update);
         }
         update
+    }
+
+    /// Sends each of `track`'s nodes the automation driving its parameters
+    /// (WP-2.12): the track's mixer, each of its sends, and each device in
+    /// its chain, each held back by the node's delay. An empty list clears
+    /// the envelopes a node had, so a node whose envelopes all went follows
+    /// its controls again; `driving_only` leaves those out, for a new
+    /// program, where a node without envelopes is new and has none.
+    fn send_automation(
+        &self,
+        document: &Document,
+        track: TrackId,
+        driving_only: bool,
+        update: &mut Update,
+    ) {
+        let Some(track) = document.track(track) else {
+            return;
+        };
+        let rate = self.config.sample_rate;
+        for (key, list) in automation::lists(document, track.id(), rate, |key| {
+            i64::from(self.layout.get(&key).map_or(0, |placed| placed.delay))
+        }) {
+            if driving_only && list.is_empty() {
+                continue;
+            }
+            update.data.push((key, self.gc.data(list)));
+        }
     }
 
     /// Keeps `document` as the latest without compiling it, for an engine
@@ -793,6 +855,7 @@ fn claim(
             slot,
             identity,
             latency,
+            delay: 0,
         },
     );
     slot

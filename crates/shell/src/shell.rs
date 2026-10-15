@@ -39,6 +39,7 @@ use crate::files::{ProjectFiles, SetStore, new_set_from};
 use crate::mixer_controls::{self, Switch};
 use crate::mixer_view::{MixerOf, MixerView, MixerViewError};
 use crate::permission::CallPermission;
+use crate::session_view::{SessionView, SessionViewError};
 use crate::settings::{
     OnByDefault, Preferences, SettingsPage, ThemeChoice, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT,
     zoom_factor, zoom_percent, zoom_step,
@@ -58,6 +59,7 @@ use bl_shell_spec::mixer_view as mixer_ids;
 use bl_shell_spec::notes as note_ids;
 use bl_shell_spec::perception as perception_ids;
 use bl_shell_spec::plugins as plugin_ids;
+use bl_shell_spec::session_view as session_ids;
 use bl_shell_spec::tracks as track_ids;
 use bl_shell_spec::transport as transport_ids;
 
@@ -345,6 +347,9 @@ pub struct Shell {
     gesture: bool,
     /// What the mixers show (WP-1.9).
     mixer: MixerView,
+    /// What the Session View grid has selected and how far it's scrolled
+    /// (WP-3.7).
+    session: SessionView,
     /// The meters the engine last published, one per track (WP-1.9).
     meters: Vec<bl_engine::TrackMeter>,
     /// Whether the meters were the engine's when last polled.
@@ -434,6 +439,22 @@ fn automation_label(id: &str) -> &'static str {
         "automation.move_breakpoint" => "Move Automation Breakpoint",
         "automation.delete_breakpoint" => "Delete Automation Breakpoint",
         _ => "Add Automation Breakpoint",
+    }
+}
+
+/// Whether `id` is one of the clip marker commands the Clip View's marker
+/// strip drags (`clip.set_midi_region`, `clip.set_midi_loop`). They are
+/// document commands, but the strip's drags run them as gestures, so moving
+/// a marker or the loop brace however far is one undo step (piano-roll R11).
+fn clip_marker_command(id: &str) -> bool {
+    matches!(id, model::SET_MIDI_REGION | model::SET_MIDI_LOOP)
+}
+
+/// The name of the undo step a marker-strip gesture makes.
+fn marker_label(id: &str) -> &'static str {
+    match id {
+        model::SET_MIDI_REGION => "Change clip region",
+        _ => "Change clip loop",
     }
 }
 
@@ -571,6 +592,7 @@ impl Shell {
             seen_insert_marker: None,
             gesture: false,
             mixer: MixerView::new(),
+            session: SessionView::new(),
             meters: Vec::new(),
             metering: false,
             previews: crate::perception::Previews::default(),
@@ -1970,6 +1992,13 @@ impl Shell {
         &self.mixer
     }
 
+    /// What the Session View grid has selected and how far it's scrolled
+    /// (WP-3.7).
+    #[must_use]
+    pub fn session(&self) -> &SessionView {
+        &self.session
+    }
+
     /// The mixer of the view in front.
     #[must_use]
     pub fn front_mixer(&self) -> MixerOf {
@@ -2291,6 +2320,7 @@ impl Shell {
                 || device_ids::handles(id)
                 || self.is_device_command(id)
                 || track_ids::handles(id)
+                || note_ids::handles(id)
                 || midi_ids::handles(id)
                 || matches!(
                     id,
@@ -2373,7 +2403,10 @@ impl Shell {
         if let Some(invocation) = invocation {
             if !edit_ids::handles(&invocation.id)
                 && !note_ids::handles(&invocation.id)
+            if !edit_ids::handles(&invocation.id)
+                && !note_ids::handles(&invocation.id)
                 && !is_automation_edit(&invocation.id)
+                && !clip_marker_command(&invocation.id)
             {
                 return Err(ShellError::Unavailable {
                     command: invocation.id.clone(),
@@ -2400,6 +2433,8 @@ impl Shell {
             clip_view::label(&invocation.id)
         } else if is_automation_edit(&invocation.id) {
             automation_label(&invocation.id)
+        } else if clip_marker_command(&invocation.id) {
+            marker_label(&invocation.id)
         } else {
             editing::label(&invocation.id, &invocation.args)
         };
@@ -2426,7 +2461,13 @@ impl Shell {
                    clip_view: &mut ClipView,
                    clipboard: &mut Option<Clipboard>,
                    invocation: &Invocation| {
-            if note_ids::handles(&invocation.id) {
+            if clip_marker_command(&invocation.id) {
+                // The document's own clip commands, run per frame like the
+                // Clip View's note commands.
+                model::run(editor, &invocation.id, invocation.args.clone())
+                    .map(|changes| to_value(&changes))
+                    .map_err(|error| EditFailure::Refused(error.to_string()))
+            } else if note_ids::handles(&invocation.id) {
                 clip_view::run(
                     &invocation.id,
                     invocation.args.clone(),
@@ -3383,6 +3424,65 @@ impl Shell {
             }
             return result.map(|state| to_value(&state));
         }
+        if session_ids::handles(id) {
+            // Spec: session-view. The grid's selection and scroll are view
+            // state; its edits run the set's scene and slot commands as one
+            // undo step.
+            let columns = crate::mixer_view::columns(self.editor.document(), &self.arrangement);
+            let scenes: Vec<bl_model::SceneId> = self
+                .editor
+                .document()
+                .scenes()
+                .map(|scene| scene.id)
+                .collect();
+            let edge_fades = self.prefs.create_fades_on_clip_edges.0;
+            let outcome = self
+                .session
+                .run(
+                    id,
+                    args,
+                    crate::session_view::Context {
+                        editor: &mut self.editor,
+                        media: &self.media,
+                        columns: &columns,
+                        scenes: &scenes,
+                        edge_fades,
+                    },
+                )
+                .map_err(|error| match error {
+                    SessionViewError::InvalidArgs(message) => ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message,
+                    },
+                    SessionViewError::Unavailable(reason) => ShellError::Unavailable {
+                        command: id.to_owned(),
+                        reason,
+                    },
+                    SessionViewError::Failed(message) => ShellError::Failed {
+                        command: id.to_owned(),
+                        message,
+                    },
+                })?;
+            for file in &outcome.media {
+                self.store.add_media(file.hash, &file.path, file.size);
+            }
+            if outcome.document_changed {
+                self.dirty = true;
+                self.document_changed();
+            }
+            if id == session_ids::FOCUS {
+                // Spec: session-view. Navigate ▸ Session View shows it and
+                // moves the focus into it.
+                self.main_view = MainView::Session;
+                self.focused_window = WindowKind::Main;
+                self.focused_area = Area::MainView;
+                self.effects.push(Effect::FocusArea(Area::MainView));
+            }
+            if id != session_ids::STATE {
+                self.touch();
+            }
+            return Ok(outcome.value);
+        }
         if id == browser_ids::LOAD_SELECTED
             && let Some(path) = self.hot_swap_preset()
         {
@@ -3621,6 +3721,7 @@ impl Shell {
                 self.arrangement.reset();
                 self.clip_view.forget_selection();
                 self.mixer.reset();
+                self.session.reset();
                 self.new_set_transport();
                 self.document_changed();
                 self.set_file_changed();
@@ -3649,6 +3750,7 @@ impl Shell {
                 self.arrangement.reset();
                 self.clip_view.forget_selection();
                 self.mixer.reset();
+                self.session.reset();
                 // The set's files go into the media store, so its clips'
                 // waveforms build (browser R15) and the engine finds their
                 // audio when the set reaches it.

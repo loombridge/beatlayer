@@ -126,7 +126,7 @@ impl KeyRows {
 
     /// Where the row at `row` starts in `grid`.
     fn y_of_row(&self, grid: Rect, row: usize) -> f32 {
-        grid.top() + (row as f32 - self.first) * KEY_HEIGHT
+        grid.top() + (row as f32 - self.top_row()) * KEY_HEIGHT
     }
 
     /// The key at `y` in `grid`: continuous while unfolded, the shown row
@@ -235,6 +235,13 @@ fn lane_labels(field: NoteField) -> [&'static str; 3] {
     }
 }
 
+/// Where a note's stem starts, x, in `grid`: at the note's start, one point
+/// right of it, as the lane paints it.
+#[must_use]
+fn stem_x(grid: Rect, start: Ticks, length: Ticks, note: &Note) -> f32 {
+    x_of_tick(grid, start, length, note.start) + 1.0
+}
+
 /// The notes whose stems a drag from `from_x` to `to_x` runs over, in the
 /// clip's note order.
 fn covered_notes(
@@ -250,7 +257,10 @@ fn covered_notes(
     notes
         .iter()
         .enumerate()
-        .filter(|(_, note)| (low..=high).contains(&x_of_tick(grid, start, length, note.start)))
+        .filter(|(_, note)| {
+            let stem = stem_x(grid, start, length, note) + STEM_WIDTH / 2.0;
+            (low..=high).contains(&stem)
+        })
         .map(|(place, _)| u32::try_from(place).unwrap_or(u32::MAX))
         .collect()
 }
@@ -699,7 +709,7 @@ impl ClipViewUi {
             );
         }
         for (place, note) in notes.iter().enumerate() {
-            let x = x_of_tick(grid, start, length, note.start) + 1.0;
+            let x = stem_x(grid, start, length, note);
             if x + STEM_WIDTH < grid.left() || x > grid.right() {
                 continue;
             }
@@ -1076,6 +1086,67 @@ impl LaneDrag {
                     }),
                 ))
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn grid() -> Rect {
+        Rect::from_min_max(pos2(0.0, 0.0), pos2(200.0, 300.0))
+    }
+
+    fn note(key: u8, start: i64) -> Note {
+        Note::new(key, Ticks(start), Ticks(10), 100)
+    }
+
+    #[test]
+    fn the_key_track_rows_sit_where_the_notes_show() {
+        // Spec: piano-roll R12, R16. A key's row is where `y_of_key` puts
+        // the key, however the wheel has scrolled the editor: the key track,
+        // the grid lines and the notes share one geometry. Folded, a row is
+        // the key's place among the rows that show.
+        let notes = [note(60, 0), note(64, 40)];
+        for top in [60.0f32, 127.0, 0.0, 62.5] {
+            let rows = KeyRows::of(false, &notes, top, 0.0);
+            for key in [0u8, 40, 60, 64, 127] {
+                let row = rows.keys.iter().position(|shown| *shown == key).unwrap();
+                assert_eq!(
+                    rows.y_of_row(grid(), row),
+                    y_of_key(grid(), top, key),
+                    "key {key} with top {top}"
+                );
+            }
+        }
+        let rows = KeyRows::of(true, &notes, 60.0, 0.0);
+        assert_eq!(rows.keys, vec![64u8, 60]);
+        assert_eq!(rows.y_of_row(grid(), 0), grid().top());
+        assert_eq!(rows.y_of_row(grid(), 1), grid().top() + KEY_HEIGHT);
+    }
+
+    #[test]
+    fn a_drag_covers_every_stem_it_runs_over() {
+        // Spec: piano-roll R15. A note's stem is STEM_WIDTH wide, a point
+        // right of the note's start: a press anywhere on the stem covers the
+        // note, and one clear of every stem covers none.
+        let notes = [note(60, 0), note(64, 40)];
+        let (start, length) = (Ticks::ZERO, Ticks(80));
+        for (place, note) in notes.iter().enumerate() {
+            let left = stem_x(grid(), start, length, note);
+            for x in [left, left + STEM_WIDTH / 2.0, left + STEM_WIDTH] {
+                assert_eq!(
+                    covered_notes(grid(), start, length, &notes, x, x),
+                    [u32::try_from(place).unwrap()],
+                    "a press at {x}"
+                );
+            }
+            let clear = left - KEY_WIDTH;
+            assert!(
+                covered_notes(grid(), start, length, &notes, clear, clear).is_empty(),
+                "a press at {clear} covers nothing"
+            );
         }
     }
 }

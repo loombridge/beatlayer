@@ -185,6 +185,54 @@ fn an_agent_exports_the_set_it_built_and_the_file_nulls_against_its_render() {
     assert!(written == expected, "the export nulls against the render");
 }
 
+/// Spec: export R15, R23 (WP-2.26). An agent exports the set as MP3 by
+/// command, and the file is 320 kbps CBR at the export's rate.
+#[test]
+fn an_agent_exports_an_mp3_by_command() {
+    let dir = TempDir::new("mp3");
+    let stem = dir.0.join("Stem.wav");
+    write_stem(&stem, 440.0, 1.0);
+
+    let mut client = bl_cli_mcp(&["--autonomous"]);
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "browser.add_to_arrangement",
+                               "args": { "paths": [stem.to_string_lossy()], "at": 0 } }] }),
+    );
+
+    let file = dir.0.join("Agent Mix.mp3");
+    let exported = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "export.audio",
+                               "args": { "path": file.to_string_lossy(), "bit_depth": 16,
+                                         "sample_rate": 48000, "file_type": "mp3" } }] }),
+    );
+    let result = &exported["results"][0]["result"];
+    assert_eq!(result["file_type"], "mp3");
+    assert_eq!(result["sample_rate"], 48_000);
+    assert_eq!(result["dither"], "none", "MP3 has no dither");
+    assert!(client.into_transport().finish().unwrap().success());
+
+    // The file is an MPEG-1 Layer III stream at 320 kbps, and decodes to
+    // the frames the command reports.
+    let bytes = fs::read(&file).unwrap();
+    assert_eq!(bytes[0], 0xff, "a frame sync");
+    assert_eq!((bytes[1] >> 3) & 3, 3, "MPEG-1");
+    assert_eq!((bytes[1] >> 1) & 3, 1, "Layer III");
+    assert_eq!(bytes[2] >> 4, 14, "the 320 kbps bit rate index");
+    let decoder = bl_media::Decoder::open(&file).unwrap();
+    assert_eq!(decoder.info().sample_rate, 48_000);
+    let decoded = decoder.decode_to_end().unwrap();
+    assert_eq!(decoded.frames() as u64, result["frames"].as_u64().unwrap());
+    assert!(
+        decoded.frames() > 40_000,
+        "about a second: {}",
+        decoded.frames()
+    );
+}
+
 /// Spec: export R15.
 #[test]
 fn without_autonomous_an_export_is_refused_and_writes_nothing() {

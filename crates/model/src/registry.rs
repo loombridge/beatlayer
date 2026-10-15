@@ -718,10 +718,10 @@ const ENTRIES: &[Entry] = &[
         // The Delete key deletes the Arrangement's selection
         // (`arrangement.delete`, WP-1.8b), which may be clips or time.
         keys: &[],
-        description: "Deletes a clip from the arrangement. Undo restores it, but because it \
-            removes the person's work an agent asks first. To keep a clip but stop it playing, \
-            use `clip.set_mute`. To delete the clips or the time selected in the Arrangement, \
-            use `arrangement.delete`.",
+        description: "Deletes a clip, from the Arrangement or from a track's Session slot. \
+            Undo restores it, but because it removes the person's work an agent asks first. To \
+            keep a clip but stop it playing, use `clip.set_mute`. To delete the clips or the \
+            time selected in the Arrangement, use `arrangement.delete`.",
     },
     Entry {
         id: "clip.move",
@@ -904,6 +904,90 @@ const ENTRIES: &[Entry] = &[
             moves by as many ticks and stays at 0 or more. The clip can't start before 0, or at \
             or after its end. To move a clip with its contents, use `clip.move`; to change \
             where it ends, use `clip.set_length`.",
+    },
+    Entry {
+        id: "clip.create_in_slot",
+        action: Action::Apply("create_slot_clip"),
+        label: "Create Clip in Slot",
+        permission: Permission::Edit,
+        contexts: &[Session],
+        keys: &[],
+        description: "Puts a clip in a track's Session slot at `scene`, as Insert Empty MIDI \
+            Clip (Cmd+Shift+M) and dropping a clip in a slot do. Only audio and MIDI tracks hold \
+            slot clips, the slot must be empty, and the clip's data must match the track. A slot \
+            clip is a clip like an Arrangement clip, but it has no position there, so its \
+            `start` must be 0. `clip.id` must be a new ID the project has issued for it.",
+    },
+    Entry {
+        id: "clip.move_to_slot",
+        action: Action::Apply("move_slot_clip"),
+        label: "Move Clip to Slot",
+        permission: Permission::Edit,
+        contexts: &[Session],
+        keys: &[],
+        description: "Moves a clip into a track's Session slot at `scene`, out of the slot or \
+            the Arrangement lane it sits in, as dragging a clip between slots does. The target \
+            slot must be empty, unless it's the clip's own slot, and the clip's data must match \
+            the track. A slot clip has no position in the Arrangement: it arrives with its \
+            start at 0.",
+    },
+    Entry {
+        id: "scene.create",
+        action: Action::Apply("create_scene"),
+        label: "Insert Scene",
+        permission: Permission::Edit,
+        contexts: &[Session],
+        keys: &[],
+        description: "Inserts a new empty scene at `index` among the scenes, as Create ▸ \
+            Insert Scene (Cmd+I) does: it holds an empty slot in every audio and MIDI track. A \
+            new set opens with eight scenes. `id` must be a new ID the project has issued for \
+            it.",
+    },
+    Entry {
+        id: "scene.delete",
+        action: Action::Apply("delete_scene"),
+        label: "Delete Scene",
+        permission: Permission::Destructive,
+        contexts: &[Session],
+        keys: &[],
+        description: "Deletes a scene, and the clips in its slots with it; the clips in the \
+            other scenes stay. Undo restores everything it deleted, but because it removes the \
+            person's work an agent asks first.",
+    },
+    Entry {
+        id: "scene.move",
+        action: Action::Apply("move_scene"),
+        label: "Move Scene",
+        permission: Permission::Edit,
+        contexts: &[Session],
+        keys: &[],
+        description: "Moves a scene to `index` among the scenes, with the clips in its slots, as \
+            dragging a scene does. The index counts positions after the scene is taken out of \
+            its current place, so moving a scene down past its neighbour is its current index \
+            plus one.",
+    },
+    Entry {
+        id: "scene.duplicate",
+        action: Action::Apply("duplicate_scene"),
+        label: "Duplicate Scene",
+        permission: Permission::Edit,
+        contexts: &[Session],
+        keys: &[],
+        description: "Copies a scene and the clips in its slots into a new scene directly after \
+            it, as Edit ▸ Duplicate does. `clips` lists every track that holds a clip in the \
+            scene, each with the new ID its copy takes; each copy is an independent clip. A \
+            scene whose slots are all empty copies no clips. `id` must be a new ID the project \
+            has issued for it.",
+    },
+    Entry {
+        id: "scene.rename",
+        action: Action::Apply("rename_scene"),
+        label: "Rename Scene",
+        permission: Permission::Edit,
+        contexts: &[Session],
+        keys: &[],
+        description: "Renames a scene. A name may be empty: a scene without a name shows its \
+            number, which is its position.",
     },
     Entry {
         id: "device.insert",

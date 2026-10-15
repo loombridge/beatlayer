@@ -11,8 +11,8 @@ use bl_model::registry::{self, RunError};
 use bl_model::{
     ArrangementLoop, AudioData, Change, ChangeSet, Clip, ClipData, ClipId, Command, ContentHash,
     CountIn, Device, DeviceId, DeviceKind, EditError, Editor, Input, MetronomeRhythm,
-    MetronomeSound, MidiData, ModelError, Monitor, Note, Output, ParamId, PluginFormat, SendTap,
-    Tap, TrackId, TrackKind,
+    MetronomeSound, MidiData, ModelError, Monitor, Note, Output, ParamId, PluginFormat, SceneId,
+    SendTap, Tap, TrackId, TrackKind,
 };
 use serde_json::{Value, json};
 
@@ -27,7 +27,7 @@ fn document_registry() -> Registry {
 /// label, or has a malformed ID or binding.
 #[test]
 fn every_command_is_complete() {
-    // Spec: mixer R21; routing R20
+    // Spec: mixer R21; routing R20; session-view R12
     let commands = document_registry();
     if let Err(problems) = commands.check() {
         panic!("{problems}");
@@ -38,6 +38,7 @@ fn every_command_is_complete() {
 /// schema as its arguments, and so are undo and redo.
 #[test]
 fn every_document_command_is_registered() {
+    // Spec: session-view R12
     let commands = document_registry();
     let enum_schema = args_schema::<Command>();
     let ops: Vec<&str> = enum_schema
@@ -49,13 +50,13 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        64,
+        71,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
          set_device_floating, WP-2.20 six for tempo breakpoints and time-signature markers, \
-         WP-2.1 two for MIDI clips, WP-2.16 set_device_sample, and WP-2.15 five for the \
-         metronome"
+         WP-2.1 two for MIDI clips, WP-2.16 set_device_sample, WP-2.15 five for the \
+         metronome, and WP-3.1 five for scenes and two for slot clips"
     );
 
     for op in &ops {
@@ -121,7 +122,7 @@ impl Agent {
 /// each run is one undo step.
 #[test]
 fn every_command_runs_by_id() {
-    // Spec: mixer R21; routing R20
+    // Spec: mixer R21; routing R20; session-view R12
     let mut agent = Agent::new();
     let quarter = Ticks::QUARTER.0;
     let bar = Ticks::WHOLE.0;
@@ -407,6 +408,73 @@ fn every_command_runs_by_id() {
     agent.run("clip.delete", json!({ "clip": loop_clip }));
     assert!(agent.editor.document().clip(loop_clip).is_none());
 
+    // Session: scenes and the clips in their slots (WP-3.1).
+    let scenes: Vec<SceneId> = agent
+        .editor
+        .document()
+        .scenes()
+        .map(|scene| scene.id)
+        .collect();
+    let (first, second) = (scenes[0], scenes[1]);
+    let slot_riff: ClipId = agent.new_id();
+    agent.run(
+        "clip.create_in_slot",
+        json!({ "track": bass, "scene": first, "clip": {
+            "id": slot_riff, "name": "", "start": 0, "length": bar, "mute": false,
+            "data": { "midi": { "notes": [
+                { "key": 40, "velocity": 100, "start": 0, "length": quarter },
+            ] } },
+        } }),
+    );
+    let slot_loop: ClipId = agent.new_id();
+    agent.run(
+        "clip.create_in_slot",
+        json!({ "track": drums, "scene": first, "clip": {
+            "id": slot_loop, "name": "Loop", "start": 0, "length": bar, "mute": false,
+            "data": { "audio": { "media": "cd".repeat(32) } },
+        } }),
+    );
+    agent.run(
+        "clip.move_to_slot",
+        json!({ "clip": slot_riff, "track": bass, "scene": second }),
+    );
+    let document = agent.editor.document();
+    assert_eq!(
+        document.slot(bass, second).map(|clip| clip.id),
+        Some(slot_riff)
+    );
+    assert!(document.slot(bass, first).is_none());
+    assert_eq!(document.clip_track(slot_loop), Some(drums));
+
+    // The scene commands: rename, move, duplicate, insert, delete.
+    agent.run("scene.rename", json!({ "scene": first, "name": "Verse" }));
+    assert_eq!(agent.editor.document().scene(first).unwrap().name, "Verse");
+    agent.run("scene.move", json!({ "scene": first, "index": 4 }));
+    assert_eq!(agent.editor.document().scene_position(first), Some(4));
+    let copy: SceneId = agent.new_id();
+    let copy_clip: ClipId = agent.new_id();
+    agent.run(
+        "scene.duplicate",
+        json!({ "scene": first, "id": copy, "clips": [[drums, copy_clip]] }),
+    );
+    let document = agent.editor.document();
+    assert_eq!(document.scene_position(copy), Some(5));
+    assert_eq!(
+        document.slot(drums, copy).map(|clip| clip.id),
+        Some(copy_clip)
+    );
+    let new_scene: SceneId = agent.new_id();
+    agent.run("scene.create", json!({ "id": new_scene, "index": 0 }));
+    assert_eq!(agent.editor.document().scene_position(new_scene), Some(0));
+    // Deleting the scene takes the clips in its slots with it; the copies
+    // stay.
+    agent.run("scene.delete", json!({ "scene": second }));
+    assert!(agent.editor.document().slot(bass, second).is_none());
+    assert!(agent.editor.document().clip(slot_riff).is_none());
+    assert!(agent.editor.document().clip(copy_clip).is_some());
+    agent.run("clip.delete", json!({ "clip": slot_loop }));
+    assert!(agent.editor.document().clip(slot_loop).is_none());
+
     // Devices.
     let eq: DeviceId = agent.new_id();
     agent.run(
@@ -589,13 +657,15 @@ fn every_command_runs_by_id() {
 /// registered schema, and reads back as the same command through its ID.
 #[test]
 fn schemas_match_what_commands_serialise() {
-    // Spec: mixer R21; routing R20
+    // Spec: mixer R21; routing R20; session-view R12
     let commands = document_registry();
     let mut ids = bl_core::id::IdAllocator::new();
     let mut fresh = || ids.allocate();
     let track = TrackId(fresh());
     let clip = ClipId(fresh());
     let device = DeviceId(fresh());
+    let scene = SceneId(fresh());
+    let scene_copy = SceneId(fresh());
     let notes = MidiData::new([Note::new(127, Ticks::ZERO, Ticks::QUARTER, 1)]);
     let mut plugin = Device::new(
         device,
@@ -990,6 +1060,47 @@ fn schemas_match_what_commands_serialise() {
             "transport.set_metronome_only_while_recording",
             Command::SetMetronomeOnlyWhileRecording {
                 only_while_recording: true,
+            },
+        ),
+        (
+            "clip.create_in_slot",
+            Command::CreateSlotClip {
+                track,
+                scene,
+                clip: Clip::new(
+                    clip,
+                    Ticks::ZERO,
+                    Ticks::WHOLE,
+                    ClipData::Midi(notes.clone()),
+                ),
+            },
+        ),
+        (
+            "clip.move_to_slot",
+            Command::MoveSlotClip { clip, track, scene },
+        ),
+        (
+            "scene.create",
+            Command::CreateScene {
+                id: scene,
+                index: 1,
+            },
+        ),
+        ("scene.delete", Command::DeleteScene { scene }),
+        ("scene.move", Command::MoveScene { scene, index: 0 }),
+        (
+            "scene.duplicate",
+            Command::DuplicateScene {
+                scene,
+                id: scene_copy,
+                clips: vec![(track, clip)],
+            },
+        ),
+        (
+            "scene.rename",
+            Command::RenameScene {
+                scene,
+                name: "Verse".to_owned(),
             },
         ),
     ];

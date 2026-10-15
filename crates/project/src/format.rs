@@ -691,6 +691,14 @@ mod tests {
         assert_eq!(loaded.ids.peek().get(), project.document.max_id().get() + 1);
         assert_eq!(loaded.document, project.document);
 
+        // An allocator ahead of the document keeps its gap: IDs handed out
+        // and not used stay used.
+        let gap = project.document.max_id().get() + 5;
+        let mut ahead = json_of(&project, 1);
+        ahead["ids"] = json!(gap);
+        let (loaded, _) = load_json(&ahead).unwrap();
+        assert_eq!(loaded.ids.peek().get(), gap);
+
         // An allocator that could never hand out another ID is refused, and so
         // is a document that uses the last ID.
         value["ids"] = json!(u64::MAX);

@@ -1434,6 +1434,36 @@ fn paths() -> BTreeMap<&'static str, Path> {
                  (midi-clips R19)",
             )),
         ),
+        // The Session View's scenes and slots (WP-3.1): the grid, its
+        // context menus, and their keys are WP-3.7's.
+        (
+            "scene.create",
+            Exception(LaterView("the Session grid and its menus (WP-3.7)")),
+        ),
+        (
+            "scene.delete",
+            Exception(LaterView("the Session grid and its menus (WP-3.7)")),
+        ),
+        (
+            "scene.move",
+            Exception(LaterView("the Session grid and its menus (WP-3.7)")),
+        ),
+        (
+            "scene.duplicate",
+            Exception(LaterView("the Session grid and its menus (WP-3.7)")),
+        ),
+        (
+            "scene.rename",
+            Exception(LaterView("the Session grid and its menus (WP-3.7)")),
+        ),
+        (
+            "clip.create_in_slot",
+            Exception(LaterView("the Session grid and its menus (WP-3.7)")),
+        ),
+        (
+            "clip.move_to_slot",
+            Exception(LaterView("the Session grid and its menus (WP-3.7)")),
+        ),
         // Gaps.
         (
             "export.audio",

@@ -14,8 +14,9 @@ use crate::clip::{AudioData, Clip, ClipData, MidiData};
 use crate::device::{Device, DeviceRole};
 use crate::document::Document;
 use crate::error::ModelError;
-use crate::ids::{ClipId, ContentHash, DeviceId, ParamId, TrackId};
+use crate::ids::{ClipId, ContentHash, DeviceId, ParamId, SceneId, TrackId};
 use crate::metronome::{CountIn, MetronomeRhythm, MetronomeSound};
+use crate::scene::Scene;
 use crate::shared::Shared;
 use crate::track::{Input, Mixer, Monitor, Output, SendTap, Track, TrackKind};
 
@@ -293,12 +294,13 @@ pub enum Command {
         /// The clip, with a new ID.
         clip: Clip,
     },
-    /// Deletes a clip.
+    /// Deletes a clip, from the Arrangement or from a track's Session slot.
     DeleteClip {
         /// The clip.
         clip: ClipId,
     },
-    /// Moves a clip to a new start on the same or another track.
+    /// Moves a clip to a new start on the same or another track, out of the
+    /// Session slot it may sit in.
     MoveClip {
         /// The clip.
         clip: ClipId,
@@ -428,6 +430,76 @@ pub enum Command {
         /// The fade-out's length in seconds up to the clip's end: 0 for none.
         #[schemars(range(min = 0.0))]
         fade_out: f64,
+    },
+
+    /// Inserts a new empty scene at `index` among the scenes: it holds an
+    /// empty slot in every audio and MIDI track. A new set opens with eight
+    /// scenes (the layout reference's default state).
+    CreateScene {
+        /// The new scene's ID.
+        id: SceneId,
+        /// Where it goes among the scenes, from 0 to the number of scenes.
+        index: usize,
+    },
+    /// Deletes a scene with the clips in its slots. The clips in the other
+    /// scenes stay where they are.
+    DeleteScene {
+        /// The scene.
+        scene: SceneId,
+    },
+    /// Moves a scene to `index` among the scenes, with its clips. `index`
+    /// counts positions after the scene is taken out of its current place.
+    MoveScene {
+        /// The scene.
+        scene: SceneId,
+        /// Where it goes among the scenes.
+        index: usize,
+    },
+    /// Copies a scene and the clips in its slots into a new scene directly
+    /// after it. `clips` lists every track that holds a clip in the scene,
+    /// each with the ID its copy takes: a copy is an independent clip. A
+    /// scene whose slots are all empty copies no clips, so `clips` is empty.
+    DuplicateScene {
+        /// The scene.
+        scene: SceneId,
+        /// The new scene's ID.
+        id: SceneId,
+        /// Each track that holds a clip in the scene, with the new ID its
+        /// copy takes, each track once.
+        clips: Vec<(TrackId, ClipId)>,
+    },
+    /// Renames a scene. A name may be empty: a scene without a name shows
+    /// its number, which is its position.
+    RenameScene {
+        /// The scene.
+        scene: SceneId,
+        /// The new name.
+        name: String,
+    },
+
+    /// Puts a clip in a track's Session slot at `scene`: what Insert Empty
+    /// MIDI Clip (Cmd+Shift+M) and a clip dropped in a slot do. Only audio
+    /// and MIDI tracks hold slot clips, the slot must be empty, and, since a
+    /// slot has no place in the Arrangement, the clip's `start` must be 0.
+    /// Launching a slot clip is WP-3.2's.
+    CreateSlotClip {
+        /// The track.
+        track: TrackId,
+        /// The scene whose slot it goes in.
+        scene: SceneId,
+        /// The clip, with a new ID.
+        clip: Clip,
+    },
+    /// Moves a clip into a track's Session slot at `scene`, out of the slot
+    /// or the Arrangement lane it sits in. The target slot must be empty,
+    /// unless it's the clip's own slot.
+    MoveSlotClip {
+        /// The clip.
+        clip: ClipId,
+        /// The track whose slot it goes in.
+        track: TrackId,
+        /// The scene whose slot it goes in.
+        scene: SceneId,
     },
 
     /// Inserts a new device at `index` in a track's chain, keeping the
@@ -621,6 +693,15 @@ impl Command {
             Self::SetClipLoopEnabled { .. } => "Switch clip loop",
             Self::SetClipGain { .. } => "Change clip gain",
             Self::SetClipFades { .. } => "Change clip fades",
+            Self::CreateScene { .. } => "Create scene",
+            Self::DeleteScene { .. } => "Delete scene",
+            Self::MoveScene { .. } => "Move scene",
+            // WP-3.1. Live's undo name for duplicating a scene is to
+            // observe; Beatlayer's names the edit.
+            Self::DuplicateScene { .. } => "Duplicate scene",
+            Self::RenameScene { .. } => "Rename scene",
+            Self::CreateSlotClip { .. } => "Create clip",
+            Self::MoveSlotClip { .. } => "Move clip",
             // Spec: device-chains R14. Live 12.4.6's names, where observed.
             Self::InsertDevice { .. } => "Insert Device",
             Self::RemoveDevice { .. } => "Delete Device(s)",
@@ -649,14 +730,22 @@ impl Command {
         }
     }
 
-    /// The ID of the object this command creates, if it creates one.
+    /// The IDs of the objects this command creates, in the order it creates
+    /// them: the track, clip, device, scene, or clip copies.
     #[must_use]
-    pub fn created_id(&self) -> Option<Id> {
+    pub fn created_ids(&self) -> Vec<Id> {
         match self {
-            Self::CreateTrack { id, .. } => Some(id.0),
-            Self::CreateClip { clip, .. } => Some(clip.id.0),
-            Self::InsertDevice { device, .. } => Some(device.id.0),
-            _ => None,
+            Self::CreateTrack { id, .. } => vec![id.0],
+            Self::CreateClip { clip, .. } => vec![clip.id.0],
+            Self::CreateSlotClip { clip, .. } => vec![clip.id.0],
+            Self::InsertDevice { device, .. } => vec![device.id.0],
+            Self::CreateScene { id, .. } => vec![id.0],
+            Self::DuplicateScene { id, clips, .. } => {
+                let mut ids = vec![id.0];
+                ids.extend(clips.iter().map(|(_, copy)| copy.0));
+                ids
+            }
+            _ => Vec::new(),
         }
     }
 }
@@ -857,12 +946,7 @@ impl Document {
                 self.edit_routing(*track, |routing| routing.midi_output = *to)
             }
             Command::CreateClip { track, clip } => self.create_clip(*track, clip),
-            Command::DeleteClip { clip } => {
-                let owner = self.clip_owner(*clip)?;
-                self.track_mut(owner)?.clips.remove(clip);
-                self.index.clip_track.remove(clip);
-                Ok(())
-            }
+            Command::DeleteClip { clip } => self.remove_clip(*clip),
             Command::MoveClip { clip, track, start } => self.move_clip(*clip, *track, *start),
             Command::MoveClips { clips, by } => self.move_clips(clips, *by),
             Command::SetClipLength { clip, length } => {
@@ -930,6 +1014,19 @@ impl Document {
                 audio.fade_in = *fade_in;
                 audio.fade_out = *fade_out;
             }),
+            Command::CreateScene { id, index } => self.create_scene(*id, *index),
+            Command::DeleteScene { scene } => self.delete_scene(*scene),
+            Command::MoveScene { scene, index } => self.move_scene(*scene, *index),
+            Command::DuplicateScene { scene, id, clips } => {
+                self.duplicate_scene(*scene, *id, clips)
+            }
+            Command::RenameScene { scene, name } => self.rename_scene(*scene, name),
+            Command::CreateSlotClip { track, scene, clip } => {
+                self.create_slot_clip(*track, *scene, clip)
+            }
+            Command::MoveSlotClip { clip, track, scene } => {
+                self.move_slot_clip(*clip, *track, *scene)
+            }
             Command::InsertDevice {
                 track,
                 index,
@@ -1097,6 +1194,9 @@ impl Document {
             for clip in track.clips.keys() {
                 self.index.clip_track.remove(clip);
             }
+            for clip in track.slots.values() {
+                self.index.clip_track.remove(&clip.id);
+            }
             for device in &track.devices {
                 self.index.device_track.remove(&device.id);
             }
@@ -1207,7 +1307,9 @@ impl Document {
         let clip = self.clip_ref(id)?;
         check_clip_fits(self.track_ref(track)?, &clip.data)?;
         check_extent(start, clip.length)?;
-        if owner == track {
+        // A clip already on the track's Arrangement lane just moves; one in
+        // a Session slot leaves the slot for the lane.
+        if owner == track && self.track_ref(owner)?.clips.contains_key(&id) {
             if clip.start != start {
                 self.clip_mut(id)?.start = start;
             }
@@ -1215,8 +1317,194 @@ impl Document {
         }
         let mut moved = clip.clone();
         moved.start = start;
-        self.track_mut(owner)?.clips.remove(&id);
+        self.remove_clip(id)?;
         self.track_mut(track)?.clips.insert(id, Shared::new(moved));
+        self.index.clip_track.insert(id, track);
+        Ok(())
+    }
+
+    /// Removes a clip from the Arrangement lane or the Session slot it sits
+    /// in, and from the lookups.
+    fn remove_clip(&mut self, id: ClipId) -> Result<(), ModelError> {
+        let owner = self.clip_owner(id)?;
+        if self.track_ref(owner)?.clips.contains_key(&id) {
+            self.track_mut(owner)?.clips.remove(&id);
+        } else {
+            let scene = self
+                .track_ref(owner)?
+                .slots
+                .iter()
+                .find(|(_, clip)| clip.id == id)
+                .map(|(&scene, _)| scene)
+                .ok_or(ModelError::NoSuchClip(id))?;
+            self.track_mut(owner)?.slots.remove(&scene);
+        }
+        self.index.clip_track.remove(&id);
+        Ok(())
+    }
+
+    fn create_scene(&mut self, id: SceneId, index: usize) -> Result<(), ModelError> {
+        self.check_fresh(id.0)?;
+        insert_at(&mut self.scenes, index, Scene::new(id))
+    }
+
+    /// Deletes a scene, and the clips in its slots with it. The clips in
+    /// the other scenes stay.
+    fn delete_scene(&mut self, id: SceneId) -> Result<(), ModelError> {
+        let position = self.scene_position(id).ok_or(ModelError::NoSuchScene(id))?;
+        self.scenes.remove(position);
+        // Only the tracks that hold a clip in the scene change.
+        let holders: Vec<TrackId> = self
+            .tracks
+            .iter()
+            .filter(|(_, track)| track.slots.contains_key(&id))
+            .map(|(&track, _)| track)
+            .collect();
+        for track in holders {
+            let clip = self
+                .track_mut(track)?
+                .slots
+                .remove(&id)
+                .expect("just checked the slot holds a clip");
+            self.index.clip_track.remove(&clip.id);
+        }
+        Ok(())
+    }
+
+    /// Moves a scene to `index` among the scenes, counting positions after
+    /// it is taken out. Its clips stay in its slots, which are keyed by the
+    /// scene's ID, so they move with it.
+    fn move_scene(&mut self, id: SceneId, index: usize) -> Result<(), ModelError> {
+        let position = self.scene_position(id).ok_or(ModelError::NoSuchScene(id))?;
+        if position == index {
+            return Ok(());
+        }
+        let scene = self.scenes.remove(position);
+        insert_at(&mut self.scenes, index, scene)
+    }
+
+    fn rename_scene(&mut self, id: SceneId, name: &str) -> Result<(), ModelError> {
+        let position = self.scene_position(id).ok_or(ModelError::NoSuchScene(id))?;
+        if let Some(scene) = self.scenes.get_mut(position)
+            && scene.name != *name
+        {
+            scene.name = name.to_owned();
+        }
+        Ok(())
+    }
+
+    /// Copies a scene and its clips straight after it: one fresh scene, and
+    /// an independent copy of each clip the scene holds, under the IDs the
+    /// caller lists, every track that holds one listed once.
+    fn duplicate_scene(
+        &mut self,
+        id: SceneId,
+        copy: SceneId,
+        clips: &[(TrackId, ClipId)],
+    ) -> Result<(), ModelError> {
+        let position = self.scene_position(id).ok_or(ModelError::NoSuchScene(id))?;
+        self.check_fresh(copy.0)?;
+        let mut copies = Vec::with_capacity(clips.len());
+        let mut tracks = BTreeSet::new();
+        for &(track, clip) in clips {
+            if !tracks.insert(track) {
+                return Err(ModelError::DuplicateId(track.0));
+            }
+            let source = self
+                .track_ref(track)?
+                .slot(id)
+                .ok_or(ModelError::SceneCopyMismatch { scene: id, track })?
+                .clone();
+            self.check_fresh(clip.0)?;
+            copies.push((track, clip, source));
+        }
+        for track in self.tracks.values() {
+            if track.slots.contains_key(&id) && !tracks.contains(&track.id) {
+                return Err(ModelError::SceneCopyMismatch {
+                    scene: id,
+                    track: track.id,
+                });
+            }
+        }
+        let mut copies_seen: BTreeSet<Id> = BTreeSet::new();
+        copies_seen.insert(copy.0);
+        for &(_, clip, _) in &copies {
+            if !copies_seen.insert(clip.0) {
+                return Err(ModelError::DuplicateId(clip.0));
+            }
+        }
+        let name = self
+            .scene(id)
+            .expect("just checked the scene exists")
+            .name
+            .clone();
+        for (track, clip, source) in copies {
+            let copied = Clip {
+                id: clip,
+                start: Ticks::ZERO,
+                ..source
+            };
+            self.track_mut(track)?
+                .slots
+                .insert(copy, Shared::new(copied));
+            self.index.clip_track.insert(clip, track);
+        }
+        insert_at(&mut self.scenes, position + 1, Scene { id: copy, name })
+    }
+
+    fn create_slot_clip(
+        &mut self,
+        track: TrackId,
+        scene: SceneId,
+        clip: &Clip,
+    ) -> Result<(), ModelError> {
+        self.check_fresh(clip.id.0)?;
+        let target = self.track_ref(track)?;
+        check_kind(target, TrackKind::holds_clips, AUDIO_OR_MIDI)?;
+        self.scene_position(scene)
+            .ok_or(ModelError::NoSuchScene(scene))?;
+        check_clip_fits(target, &clip.data)?;
+        if clip.start != Ticks::ZERO {
+            return Err(ModelError::SlotClipPosition(clip.start));
+        }
+        check_extent(clip.start, clip.length)?;
+        check_clip(clip)?;
+        if target.slot(scene).is_some() {
+            return Err(ModelError::SlotOccupied { track, scene });
+        }
+        self.track_mut(track)?
+            .slots
+            .insert(scene, Shared::new(clip.clone()));
+        self.index.clip_track.insert(clip.id, track);
+        Ok(())
+    }
+
+    /// Moves a clip into a slot, out of the slot or lane it sits in. A slot
+    /// clip has no position, so the clip arrives with its start at 0.
+    fn move_slot_clip(
+        &mut self,
+        id: ClipId,
+        track: TrackId,
+        scene: SceneId,
+    ) -> Result<(), ModelError> {
+        self.clip_owner(id)?;
+        let target = self.track_ref(track)?;
+        check_kind(target, TrackKind::holds_clips, AUDIO_OR_MIDI)?;
+        self.scene_position(scene)
+            .ok_or(ModelError::NoSuchScene(scene))?;
+        let current = self.clip_ref(id)?.clone();
+        check_clip_fits(target, &current.data)?;
+        if target.slot(scene).is_some_and(|held| held.id != id) {
+            return Err(ModelError::SlotOccupied { track, scene });
+        }
+        self.remove_clip(id)?;
+        let moved = Clip {
+            start: Ticks::ZERO,
+            ..current
+        };
+        self.track_mut(track)?
+            .slots
+            .insert(scene, Shared::new(moved));
         self.index.clip_track.insert(id, track);
         Ok(())
     }
@@ -1227,6 +1515,9 @@ impl Document {
         for &id in clips {
             if !seen.insert(id) {
                 return Err(ModelError::DuplicateId(id.0));
+            }
+            if !self.in_arrangement(id)? {
+                return Err(ModelError::ClipInSlot(id));
             }
             let clip = self.clip_ref(id)?;
             let start = clip
@@ -1245,6 +1536,9 @@ impl Document {
     }
 
     fn trim_clip_start(&mut self, id: ClipId, start: Ticks) -> Result<(), ModelError> {
+        if !self.in_arrangement(id)? {
+            return Err(ModelError::ClipInSlot(id));
+        }
         let clip = self.clip_ref(id)?;
         if clip.start == start {
             return Ok(());
@@ -1524,15 +1818,38 @@ impl Document {
         self.clip_track(id).ok_or(ModelError::NoSuchClip(id))
     }
 
+    /// Whether a clip sits on its track's Arrangement lane rather than in a
+    /// Session slot.
+    fn in_arrangement(&self, id: ClipId) -> Result<bool, ModelError> {
+        Ok(self
+            .track_ref(self.clip_owner(id)?)?
+            .clips
+            .contains_key(&id))
+    }
+
     fn clip_ref(&self, id: ClipId) -> Result<&Clip, ModelError> {
         self.clip(id).ok_or(ModelError::NoSuchClip(id))
     }
 
     fn clip_mut(&mut self, id: ClipId) -> Result<&mut Clip, ModelError> {
         let owner = self.clip_owner(id)?;
-        self.track_mut(owner)?
-            .clips
-            .get_mut(&id)
+        let track = self.track_mut(owner)?;
+        if track.clips.contains_key(&id) {
+            return track
+                .clips
+                .get_mut(&id)
+                .map(Shared::make_mut)
+                .ok_or(ModelError::NoSuchClip(id));
+        }
+        let scene = track
+            .slots
+            .iter()
+            .find(|(_, clip)| clip.id == id)
+            .map(|(&scene, _)| scene)
+            .ok_or(ModelError::NoSuchClip(id))?;
+        track
+            .slots
+            .get_mut(&scene)
             .map(Shared::make_mut)
             .ok_or(ModelError::NoSuchClip(id))
     }
@@ -1928,6 +2245,7 @@ mod tests {
     use crate::clip::{EDGE_FADE_SECONDS as EDGE_FADE, MidiData, Note};
     use crate::device::{DeviceKind, DeviceRole, PluginFormat};
     use crate::ids::ContentHash;
+    use crate::scene::DEFAULT_SCENE_COUNT;
 
     /// A document and the allocator for its IDs.
     struct Song {
@@ -1938,7 +2256,9 @@ mod tests {
     impl Song {
         fn new() -> Self {
             let mut ids = IdAllocator::new();
-            let doc = Document::new(TrackId(ids.allocate()));
+            let main = TrackId(ids.allocate());
+            let scenes = (0..DEFAULT_SCENE_COUNT).map(|_| SceneId(ids.allocate()));
+            let doc = Document::new(main, scenes);
             Self { doc, ids }
         }
 
@@ -3692,9 +4012,324 @@ mod tests {
                 track,
                 clip: Clip::new(id, Ticks::ZERO, Ticks::WHOLE, audio()),
             }
-            .created_id(),
-            Some(id.0)
+            .created_ids(),
+            vec![id.0]
         );
-        assert_eq!(Command::DeleteTrack { track }.created_id(), None);
+        assert!(Command::DeleteTrack { track }.created_ids().is_empty());
+    }
+
+    // Spec: session-view R1, R4, R5, R6, R7, R8
+    #[test]
+    fn scenes_insert_move_rename_duplicate_and_delete() {
+        let mut song = Song::new();
+        assert_eq!(song.doc.scene_count(), crate::DEFAULT_SCENE_COUNT);
+        assert!(
+            song.doc.scenes().all(|scene| scene.name.is_empty()),
+            "the default scenes have no names of their own"
+        );
+        let audio_track = song.track(TrackKind::Audio, None);
+        let scene: SceneId = song.fresh();
+        song.apply(Command::CreateScene {
+            id: scene,
+            index: 0,
+        })
+        .unwrap();
+        assert_eq!(song.doc.scene_position(scene), Some(0));
+        assert_eq!(song.doc.scene(scene).unwrap().name, "");
+        song.apply(Command::RenameScene {
+            scene,
+            name: "Verse".to_owned(),
+        })
+        .unwrap();
+        assert_eq!(song.doc.scene(scene).unwrap().name, "Verse");
+
+        // A clip in the scene's slot moves with the scene.
+        let clip: ClipId = song.fresh();
+        song.apply(Command::CreateSlotClip {
+            track: audio_track,
+            scene,
+            clip: Clip::new(clip, Ticks::ZERO, Ticks::WHOLE, audio()),
+        })
+        .unwrap();
+        song.apply(Command::MoveScene { scene, index: 3 }).unwrap();
+        assert_eq!(song.doc.scene_position(scene), Some(3));
+        assert_eq!(song.doc.slot(audio_track, scene).unwrap().id, clip);
+
+        // Duplicating copies the scene, its name, and an independent clip,
+        // straight after it.
+        let copy: SceneId = song.fresh();
+        let copy_clip: ClipId = song.fresh();
+        song.apply(Command::DuplicateScene {
+            scene,
+            id: copy,
+            clips: vec![(audio_track, copy_clip)],
+        })
+        .unwrap();
+        assert_eq!(song.doc.scene_position(copy), Some(4));
+        assert_eq!(song.doc.scene(copy).unwrap().name, "Verse");
+        let copied = song.doc.slot(audio_track, copy).unwrap();
+        assert_eq!(copied.id, copy_clip);
+        assert_eq!(copied.data, audio());
+
+        // Every clip in the scene must be listed, and only those.
+        let other = song.track(TrackKind::Audio, None);
+        let missing: SceneId = song.fresh();
+        assert_eq!(
+            song.reject(Command::DuplicateScene {
+                scene,
+                id: missing,
+                clips: Vec::new(),
+            }),
+            ModelError::SceneCopyMismatch {
+                scene,
+                track: audio_track
+            }
+        );
+        let (one, two) = (song.fresh(), song.fresh());
+        assert_eq!(
+            song.reject(Command::DuplicateScene {
+                scene,
+                id: missing,
+                clips: vec![(audio_track, one), (audio_track, two)],
+            }),
+            ModelError::DuplicateId(audio_track.0)
+        );
+        let (one, two) = (song.fresh(), song.fresh());
+        assert_eq!(
+            song.reject(Command::DuplicateScene {
+                scene,
+                id: missing,
+                clips: vec![(audio_track, one), (other, two)],
+            }),
+            ModelError::SceneCopyMismatch {
+                scene,
+                track: other,
+            }
+        );
+        // The scene's copy and the clips' copies are one set of new IDs.
+        assert_eq!(
+            song.reject(Command::DuplicateScene {
+                scene,
+                id: missing,
+                clips: vec![(audio_track, ClipId(missing.0))],
+            }),
+            ModelError::DuplicateId(missing.0)
+        );
+
+        // Deleting takes the scene's clips with it; the copies stay.
+        song.apply(Command::DeleteScene { scene }).unwrap();
+        assert!(song.doc.scene(scene).is_none());
+        assert!(song.doc.clip(clip).is_none());
+        assert_eq!(song.doc.slot(audio_track, copy).unwrap().id, copy_clip);
+        assert_eq!(
+            song.reject(Command::DeleteScene { scene }),
+            ModelError::NoSuchScene(scene)
+        );
+    }
+
+    // Spec: session-view R2, R3, R9
+    #[test]
+    fn slot_clips_need_a_track_with_slots_and_an_empty_slot() {
+        let mut song = Song::new();
+        let audio_track = song.track(TrackKind::Audio, None);
+        let midi_track = song.track(TrackKind::Midi, None);
+        let group = song.track(TrackKind::Group, None);
+        let ret = song.track(TrackKind::Return, None);
+        let main = song.main();
+        let scene = song.doc.scenes().next().unwrap().id;
+
+        let audio_clip: ClipId = song.fresh();
+        song.apply(Command::CreateSlotClip {
+            track: audio_track,
+            scene,
+            clip: Clip::new(audio_clip, Ticks::ZERO, Ticks::WHOLE, audio()),
+        })
+        .unwrap();
+        let midi_clip: ClipId = song.fresh();
+        song.apply(Command::CreateSlotClip {
+            track: midi_track,
+            scene,
+            clip: Clip::new(midi_clip, Ticks::ZERO, Ticks::WHOLE, midi()),
+        })
+        .unwrap();
+        assert_eq!(song.doc.clip_count(), 2);
+        assert_eq!(song.doc.clip_track(audio_clip), Some(audio_track));
+        assert_eq!(song.doc.clip(audio_clip).unwrap().id, audio_clip);
+
+        // The data must fit the track, and only audio and MIDI tracks hold
+        // slot clips.
+        for (track, data) in [
+            (audio_track, midi()),
+            (midi_track, audio()),
+            (group, midi()),
+            (ret, audio()),
+            (main, midi()),
+        ] {
+            let clip = Clip::new(song.fresh(), Ticks::ZERO, Ticks::WHOLE, data);
+            assert!(matches!(
+                song.apply(Command::CreateSlotClip { track, scene, clip }),
+                Err(ModelError::WrongTrackKind { .. })
+            ));
+        }
+        // A slot holds one clip, and a slot clip has no position.
+        let occupied = Clip::new(song.fresh(), Ticks::ZERO, Ticks::WHOLE, audio());
+        assert_eq!(
+            song.reject(Command::CreateSlotClip {
+                track: audio_track,
+                scene,
+                clip: occupied,
+            }),
+            ModelError::SlotOccupied {
+                track: audio_track,
+                scene,
+            }
+        );
+        let placed = Clip::new(song.fresh(), Ticks::WHOLE, Ticks::WHOLE, audio());
+        assert!(matches!(
+            song.reject(Command::CreateSlotClip {
+                track: audio_track,
+                scene,
+                clip: placed,
+            }),
+            ModelError::SlotClipPosition(_)
+        ));
+        // The scene must exist.
+        let nowhere: SceneId = song.fresh();
+        let clip = Clip::new(song.fresh(), Ticks::ZERO, Ticks::WHOLE, audio());
+        assert_eq!(
+            song.reject(Command::CreateSlotClip {
+                track: audio_track,
+                scene: nowhere,
+                clip,
+            }),
+            ModelError::NoSuchScene(nowhere)
+        );
+    }
+
+    // Spec: session-view R10, R11
+    #[test]
+    fn slot_clips_move_between_slots_and_the_arrangement() {
+        let mut song = Song::new();
+        let audio_track = song.track(TrackKind::Audio, None);
+        let other = song.track(TrackKind::Audio, None);
+        let midi_track = song.track(TrackKind::Midi, None);
+        let scenes: Vec<SceneId> = song.doc.scenes().map(|scene| scene.id).collect();
+        let (first, second) = (scenes[0], scenes[1]);
+        let clip: ClipId = song.fresh();
+        song.apply(Command::CreateSlotClip {
+            track: audio_track,
+            scene: first,
+            clip: Clip::new(clip, Ticks::ZERO, Ticks::WHOLE, audio()),
+        })
+        .unwrap();
+
+        // Moving a clip into its own slot changes nothing.
+        song.apply(Command::MoveSlotClip {
+            clip,
+            track: audio_track,
+            scene: first,
+        })
+        .unwrap();
+        assert_eq!(song.doc.slot(audio_track, first).unwrap().id, clip);
+
+        // To another track, and to another scene.
+        song.apply(Command::MoveSlotClip {
+            clip,
+            track: other,
+            scene: first,
+        })
+        .unwrap();
+        assert_eq!(song.doc.slot(other, first).unwrap().id, clip);
+        assert!(song.doc.slot(audio_track, first).is_none());
+        song.apply(Command::MoveSlotClip {
+            clip,
+            track: other,
+            scene: second,
+        })
+        .unwrap();
+        assert_eq!(song.doc.slot(other, second).unwrap().id, clip);
+        assert_eq!(song.doc.clip_track(clip), Some(other));
+
+        // A slot that holds another clip, or a track without slots, is
+        // refused.
+        let blocker: ClipId = song.fresh();
+        song.apply(Command::CreateSlotClip {
+            track: audio_track,
+            scene: second,
+            clip: Clip::new(blocker, Ticks::ZERO, Ticks::WHOLE, audio()),
+        })
+        .unwrap();
+        assert_eq!(
+            song.reject(Command::MoveSlotClip {
+                clip,
+                track: audio_track,
+                scene: second,
+            }),
+            ModelError::SlotOccupied {
+                track: audio_track,
+                scene: second,
+            }
+        );
+        assert!(matches!(
+            song.reject(Command::MoveSlotClip {
+                clip,
+                track: midi_track,
+                scene: second,
+            }),
+            ModelError::WrongTrackKind { .. }
+        ));
+
+        // Out of the slot onto the Arrangement lane, and back, arriving at
+        // 0.
+        song.apply(Command::MoveClip {
+            clip,
+            track: other,
+            start: Ticks::WHOLE * 4,
+        })
+        .unwrap();
+        assert_eq!(song.doc.clip(clip).unwrap().start, Ticks::WHOLE * 4);
+        assert!(song.doc.slot(other, second).is_none());
+        song.apply(Command::MoveSlotClip {
+            clip,
+            track: other,
+            scene: second,
+        })
+        .unwrap();
+        assert_eq!(song.doc.clip(clip).unwrap().start, Ticks::ZERO);
+        assert_eq!(song.doc.slot(other, second).unwrap().id, clip);
+
+        // Deleting a slot clip frees its slot.
+        song.apply(Command::DeleteClip { clip }).unwrap();
+        assert!(song.doc.clip(clip).is_none());
+        assert!(song.doc.slot(other, second).is_none());
+        assert_eq!(song.doc.clip_count(), 1);
+    }
+
+    // Spec: session-view R11
+    #[test]
+    fn the_clip_edits_work_on_a_slot_clip() {
+        let mut song = Song::new();
+        let midi_track = song.track(TrackKind::Midi, None);
+        let scene = song.doc.scenes().next().unwrap().id;
+        let clip: ClipId = song.fresh();
+        song.apply(Command::CreateSlotClip {
+            track: midi_track,
+            scene,
+            clip: Clip::new(clip, Ticks::ZERO, Ticks::WHOLE, midi()),
+        })
+        .unwrap();
+        // The clip edits that don't place a clip work on a slot clip too.
+        song.apply(Command::RenameClip {
+            clip,
+            name: "Riff".to_owned(),
+        })
+        .unwrap();
+        song.apply(Command::SetClipMute { clip, mute: true })
+            .unwrap();
+        song.apply(Command::SetClipData { clip, data: midi() })
+            .unwrap();
+        let held = song.doc.slot(midi_track, scene).unwrap();
+        assert_eq!((held.name.as_str(), held.mute), ("Riff", true));
+        assert_eq!(song.doc.clip(clip).unwrap().name, "Riff");
     }
 }

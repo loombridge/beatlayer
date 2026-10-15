@@ -7,8 +7,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::clip::Clip;
 use crate::device::Device;
-use crate::ids::{ClipId, DeviceId, TrackId};
+use crate::ids::{ClipId, DeviceId, SceneId, TrackId};
 use crate::metronome::MetronomeSettings;
+use crate::scene::Scene;
 use crate::shared::Shared;
 use crate::track::{Track, TrackKind};
 
@@ -135,6 +136,9 @@ pub struct Document {
     pub(crate) top: Vector<TrackId>,
     pub(crate) returns: Vector<TrackId>,
     pub(crate) tracks: OrdMap<TrackId, Shared<Track>>,
+    /// The scenes, in order, top to bottom. Each audio and MIDI track has a
+    /// clip slot in every scene; the clips live in the tracks.
+    pub(crate) scenes: Vector<Scene>,
     pub(crate) index: Index,
 }
 
@@ -151,9 +155,12 @@ pub(crate) struct Index {
 }
 
 impl Document {
-    /// An empty song: default settings and a Main track with this ID.
+    /// An empty song: default settings, a Main track with this ID, and one
+    /// unnamed scene per given ID, in order. A new set's scenes are the
+    /// eight a project's allocator hands out ([`Editor::new`](crate::Editor::new));
+    /// a document may also hold none.
     #[must_use]
-    pub fn new(main: TrackId) -> Self {
+    pub fn new(main: TrackId, scenes: impl IntoIterator<Item = SceneId>) -> Self {
         let mut tracks = OrdMap::new();
         tracks.insert(
             main,
@@ -165,6 +172,7 @@ impl Document {
             top: Vector::new(),
             returns: Vector::new(),
             tracks,
+            scenes: scenes.into_iter().map(Scene::new).collect(),
             index: Index::default(),
         }
     }
@@ -187,6 +195,36 @@ impl Document {
         self.tracks
             .get(&self.main)
             .expect("a document always has its Main track")
+    }
+
+    /// The scenes, in order, top to bottom.
+    pub fn scenes(&self) -> impl ExactSizeIterator<Item = &Scene> + DoubleEndedIterator + '_ {
+        self.scenes.iter()
+    }
+
+    /// The scene with this ID.
+    #[must_use]
+    pub fn scene(&self, id: SceneId) -> Option<&Scene> {
+        self.scenes.iter().find(|scene| scene.id == id)
+    }
+
+    /// Where a scene sits among the scenes, counting from 0: its number
+    /// less 1.
+    #[must_use]
+    pub fn scene_position(&self, id: SceneId) -> Option<usize> {
+        self.scenes.iter().position(|scene| scene.id == id)
+    }
+
+    /// How many scenes there are.
+    #[must_use]
+    pub fn scene_count(&self) -> usize {
+        self.scenes.len()
+    }
+
+    /// The clip in a track's slot at `scene`, if the slot holds one.
+    #[must_use]
+    pub fn slot(&self, track: TrackId, scene: SceneId) -> Option<&Clip> {
+        self.track(track)?.slot(scene)
     }
 
     /// The track with this ID.
@@ -243,11 +281,12 @@ impl Document {
         self.tracks.len()
     }
 
-    /// The clip with this ID.
+    /// The clip with this ID, whether it sits in the Arrangement or in a
+    /// track's slot.
     #[must_use]
     pub fn clip(&self, id: ClipId) -> Option<&Clip> {
         let track = self.index.clip_track.get(&id)?;
-        self.tracks.get(track)?.clips.get(&id).map(|clip| &**clip)
+        self.tracks.get(track)?.clip(id)
     }
 
     /// The track that holds a clip.
@@ -295,21 +334,23 @@ impl Document {
         self.index.device_track.len()
     }
 
-    /// Whether any track, clip, or device has this ID.
+    /// Whether any track, clip, device, or scene has this ID.
     #[must_use]
     pub fn contains(&self, id: Id) -> bool {
         self.tracks.contains_key(&TrackId(id))
             || self.index.clip_track.contains_key(&ClipId(id))
             || self.index.device_track.contains_key(&DeviceId(id))
+            || self.scenes.iter().any(|scene| scene.id.0 == id)
     }
 
-    /// The largest ID of any track, clip, or device.
+    /// The largest ID of any track, clip, device, or scene.
     #[must_use]
     pub fn max_id(&self) -> Id {
         let track = self.tracks.get_max().map(|(id, _)| id.0);
         let clip = self.index.clip_track.get_max().map(|(id, _)| id.0);
         let device = self.index.device_track.get_max().map(|(id, _)| id.0);
-        [track, clip, device]
+        let scene = self.scenes.iter().map(|scene| scene.id.0).max();
+        [track, clip, device, scene]
             .into_iter()
             .flatten()
             .max()
@@ -346,6 +387,7 @@ impl PartialEq for Document {
             && (self.top.ptr_eq(&other.top) || self.top == other.top)
             && (self.returns.ptr_eq(&other.returns) || self.returns == other.returns)
             && self.tracks == other.tracks
+            && (self.scenes.ptr_eq(&other.scenes) || self.scenes == other.scenes)
     }
 }
 
@@ -354,12 +396,19 @@ mod tests {
     use bl_core::id::IdAllocator;
 
     use super::*;
+    use crate::DEFAULT_SCENE_COUNT;
     use crate::command::Command;
 
-    fn track_ids(n: usize) -> (TrackId, Vec<TrackId>) {
+    /// A new, empty song and the allocator that made it: its Main track and
+    /// its default scenes have IDs, and the returned `n` track IDs are free
+    /// to build tracks with.
+    fn song(n: usize) -> (Document, IdAllocator, TrackId, Vec<TrackId>) {
         let mut ids = IdAllocator::new();
         let main = TrackId(ids.allocate());
-        (main, (0..n).map(|_| TrackId(ids.allocate())).collect())
+        let scenes = (0..DEFAULT_SCENE_COUNT).map(|_| SceneId(ids.allocate()));
+        let doc = Document::new(main, scenes);
+        let tracks = (0..n).map(|_| TrackId(ids.allocate())).collect();
+        (doc, ids, main, tracks)
     }
 
     fn create(id: TrackId, kind: TrackKind, parent: Option<TrackId>, index: usize) -> Command {
@@ -372,15 +421,21 @@ mod tests {
         }
     }
 
+    // Spec: session-view R1
     #[test]
-    fn new_document_has_only_main() {
-        let (main, _) = track_ids(0);
-        let doc = Document::new(main);
+    fn a_new_document_has_main_and_the_default_scenes() {
+        let (doc, _, main, _) = song(0);
         assert_eq!(doc.track_count(), 1);
         assert_eq!(doc.main().kind(), TrackKind::Main);
         assert_eq!(doc.main().name(), "Main");
         assert_eq!(doc.track_order(), vec![main]);
-        assert_eq!(doc.max_id(), main.0);
+        assert_eq!(doc.scene_count(), DEFAULT_SCENE_COUNT);
+        assert!(doc.scenes().all(|scene| scene.name.is_empty()));
+        assert_eq!(
+            doc.max_id(),
+            doc.scenes().last().expect("eight scenes").id.0,
+            "the default scenes take the IDs after the Main track's"
+        );
         assert!(doc.contains(main.0));
         assert_eq!(doc.settings(), &Settings::default());
         doc.check_invariants().unwrap();
@@ -388,8 +443,7 @@ mod tests {
 
     #[test]
     fn display_order() {
-        let (main, t) = track_ids(6);
-        let mut doc = Document::new(main);
+        let (mut doc, _, main, t) = song(6);
         // A return created first still comes after every other track.
         doc.apply(&create(t[0], TrackKind::Return, None, 0))
             .unwrap();
@@ -420,8 +474,7 @@ mod tests {
 
     #[test]
     fn clones_share_and_stay_put() {
-        let (main, t) = track_ids(1);
-        let mut doc = Document::new(main);
+        let (mut doc, _, main, t) = song(1);
         let before = doc.clone();
         doc.apply(&create(t[0], TrackKind::Audio, None, 0)).unwrap();
         assert_eq!(before.track_count(), 1);
@@ -443,8 +496,7 @@ mod tests {
     // Spec: mixer R7, R8, R16
     #[test]
     fn the_mixer_is_saved_only_where_it_differs_from_a_new_set() {
-        let (main, t) = track_ids(3);
-        let mut doc = Document::new(main);
+        let (mut doc, _, _, t) = song(3);
         doc.apply(&create(t[0], TrackKind::Return, None, 0))
             .unwrap();
         doc.apply(&create(t[1], TrackKind::Audio, None, 0)).unwrap();
@@ -501,8 +553,8 @@ mod tests {
     // Spec: transport R18
     #[test]
     fn a_new_sets_loop_is_four_bars_from_the_start_and_off() {
-        let (main, _) = track_ids(0);
-        let brace = Document::new(main).settings().arrangement_loop;
+        let (doc, _, _, _) = song(0);
+        let brace = doc.settings().arrangement_loop;
         assert_eq!(brace.start, Ticks::ZERO);
         assert_eq!(brace.length, Ticks::WHOLE * 4);
         assert_eq!(brace.end(), Ticks::WHOLE * 4);
@@ -513,8 +565,7 @@ mod tests {
     // Spec: transport R16, R17
     #[test]
     fn the_loop_is_part_of_the_set_and_saved_when_it_isnt_the_default() {
-        let (main, _) = track_ids(0);
-        let mut doc = Document::new(main);
+        let (mut doc, _, _, _) = song(0);
         let saved = serde_json::to_value(&doc).unwrap();
         assert!(
             saved["settings"].get("arrangement_loop").is_none(),

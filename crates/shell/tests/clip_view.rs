@@ -180,6 +180,32 @@ fn moving_notes_in_time_and_pitch_is_one_step() {
 }
 
 #[test]
+fn moving_a_note_names_it_where_it_lands() {
+    // Spec: piano-roll R3, R7, R13. The result and the selection name the
+    // moved note by its new place, not the first place.
+    let mut song = song(vec![
+        song_note(60, 0, SIXTEENTH),
+        song_note(64, BAR, QUARTER),
+    ]);
+    let result = song.one_step(
+        ids::MOVE_NOTES,
+        json!({ "notes": [1], "by": BAR, "semitones": 0 }),
+    );
+    assert_eq!(
+        song.notes()[1].start,
+        Ticks(2 * BAR),
+        "the later note moved"
+    );
+    assert_eq!(result.notes, [1], "reported where it landed");
+    assert_eq!(result.selected, [1], "and selected there");
+    // The next command with no `notes` acts on that selection, so it moves
+    // the moved note, not the one at place 0.
+    song.one_step(ids::MOVE_NOTES, json!({ "semitones": 12 }));
+    assert_eq!(song.notes()[1].key, 76, "the moved note, up a semitone");
+    assert_eq!(song.notes()[0].key, 60, "place 0 is untouched");
+}
+
+#[test]
 fn resizing_notes_moves_their_ends_and_keeps_a_tick() {
     // Spec: piano-roll R9. The starts don't move, and a note keeps at least
     // one tick.

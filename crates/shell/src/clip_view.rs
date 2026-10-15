@@ -392,16 +392,18 @@ pub fn run(
             let semitones = semitones.unwrap_or(0);
             let (after, recorded) = transaction(editor, "Move notes", |editor| {
                 let mut moved = ordered.clone();
+                let mut moved_notes = Vec::with_capacity(places.len());
                 for place in &places {
                     let mut note = moved[*place as usize];
                     note.start = note_start(note, by)?;
                     note.key = note_key(note, semitones)?;
                     moved[*place as usize] = note;
+                    moved_notes.push(note);
                 }
                 moved.sort_by_key(|note| (note.start, note.key));
-                let places: Vec<u32> = places
+                let places: Vec<u32> = moved_notes
                     .iter()
-                    .map(|place| place_of(&moved, ordered[*place as usize]))
+                    .map(|note| place_of(&moved, *note))
                     .collect();
                 set_notes(editor, clip, &midi, moved)?;
                 Ok(places)

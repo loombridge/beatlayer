@@ -614,7 +614,8 @@ pub(crate) fn parse_backup_name(stem: &str, name: &str) -> Option<BackupStamp> {
 }
 
 /// A time as `YYYY-MM-DD HHMMSS` in UTC. Times before 1970 count as 1970.
-pub(crate) fn utc_stamp(time: SystemTime) -> String {
+/// Backup file names and recorded files are stamped with it.
+pub fn utc_stamp(time: SystemTime) -> String {
     let seconds = time.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
     let days = i64::try_from(seconds / 86_400).unwrap_or(i64::MAX / 2);
     let (year, month, day) = civil_from_days(days);

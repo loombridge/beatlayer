@@ -72,6 +72,10 @@ pub mod route {
     /// Closed when not 0: the route feeds a track's input, and the track
     /// isn't monitoring it (the routing spec).
     pub const CLOSED: ParamId = ParamId(2);
+    /// Whether the track whose input this route feeds monitors with Auto
+    /// (the routing spec, R11): while its clips play, the route closes,
+    /// which the audio thread sets each block.
+    pub const AUTO: ParamId = ParamId(3);
 }
 
 /// The gains of Live's constant-power pan law for `pan` from −1 (left) to 1
@@ -445,6 +449,12 @@ pub struct Route {
     level: f64,
     solo_mute: bool,
     closed: bool,
+    /// The track this route feeds monitors with Auto: while its clips play,
+    /// the route closes (the routing spec, R11).
+    auto: bool,
+    /// Whether the track's clips played in the last block, set by the
+    /// program before it sums the track's inputs.
+    playing_clip: bool,
     gain: Ramp,
     smoothing: u32,
 }
@@ -457,6 +467,8 @@ impl Route {
             level: 0.0,
             solo_mute,
             closed: false,
+            auto: false,
+            playing_clip: false,
             gain: Ramp::at(0.0),
             smoothing: smoothing_frames(config.sample_rate),
         };
@@ -474,6 +486,26 @@ impl Route {
         self
     }
 
+    /// The same route, closing while its track's clips play or not,
+    /// resting there.
+    #[must_use]
+    pub fn auto(mut self, auto: bool) -> Self {
+        self.auto = auto;
+        self.gain = Ramp::at(self.target());
+        self
+    }
+
+    /// Sets whether the track's clips played in the last block: under
+    /// Monitor Auto the route closes while they do (the routing spec, R11).
+    /// The gain glides like any other change; the program calls it once per
+    /// block, before it sums the track's inputs.
+    pub(crate) fn set_playing_clip(&mut self, playing: bool) {
+        if self.playing_clip != playing {
+            self.playing_clip = playing;
+            self.gain.toward(self.target(), self.smoothing);
+        }
+    }
+
     /// The gain now.
     #[must_use]
     pub fn gain(&self) -> f64 {
@@ -488,7 +520,7 @@ impl Route {
     }
 
     fn target(&self) -> f64 {
-        if self.solo_mute || self.closed {
+        if self.solo_mute || self.closed || (self.auto && self.playing_clip) {
             0.0
         } else {
             self.level
@@ -505,6 +537,8 @@ impl Route {
             (route::SOLO_MUTE, ParamValue::Default) => self.solo_mute = false,
             (route::CLOSED, ParamValue::Set(closed)) => self.closed = closed != 0.0,
             (route::CLOSED, ParamValue::Default) => self.closed = false,
+            (route::AUTO, ParamValue::Set(auto)) => self.auto = auto != 0.0,
+            (route::AUTO, ParamValue::Default) => self.auto = false,
             _ => {}
         }
     }

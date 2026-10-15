@@ -3,8 +3,9 @@
 use bl_core::time::{Frames, Ticks};
 use bl_model::ParamId;
 
-use crate::gc::Program;
+use crate::gc::{Owned, Program};
 use crate::node::{NodeData, NodeKey, ParamValue};
+use crate::recording::RecordingPlan;
 
 /// When a parameter change or a transport command takes effect.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -174,8 +175,13 @@ pub enum Report {
 pub(crate) enum Message {
     Program(Program),
     Param(ParamEvent),
-    Data { key: NodeKey, data: NodeData },
+    Data {
+        key: NodeKey,
+        data: NodeData,
+    },
     Transport(TransportCommand, When),
     Schedule(ScheduledCommand),
     Cancel(u64),
+    /// What to record while the transport records (WP-2.13).
+    Record(Owned<RecordingPlan>),
 }

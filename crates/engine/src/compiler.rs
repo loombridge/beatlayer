@@ -535,17 +535,23 @@ impl Compiler {
         };
         let muted = solo.edge_muted(edge);
         let closed = edge.monitored && !to.routing().monitoring(to.mixer().arm);
+        // Spec: routing R11. Under Monitor Auto the route also closes while
+        // the track's clips play, which the program sets each block.
+        let auto = edge.monitored && to.routing().monitor == bl_model::Monitor::Auto;
         if self.previous(key, &Identity::Route).is_some() {
             for (param, value) in [
                 (route::LEVEL, level),
                 (route::SOLO_MUTE, switch(muted)),
                 (route::CLOSED, switch(closed)),
+                (route::AUTO, switch(auto)),
             ] {
                 build.restate.push(ParamEvent::now(key, param, value));
             }
         }
         self.place(build, key, Identity::Route, 0, || {
-            Instance::Route(Box::new(Route::new(level, muted, &config).closed(closed)))
+            Instance::Route(Box::new(
+                Route::new(level, muted, &config).closed(closed).auto(auto),
+            ))
         })
     }
 
@@ -575,17 +581,21 @@ impl Compiler {
             bl_model::Input::External { channel } if track.kind() == TrackKind::Audio => {
                 let key = NodeKey::DeviceInput(track.id());
                 let closed = !track.routing().monitoring(track.mixer().arm);
+                let auto = track.routing().monitor == bl_model::Monitor::Auto;
                 if self.previous(key, &Identity::Route).is_some() {
                     for (param, value) in [
                         (route::LEVEL, 1.0),
                         (route::SOLO_MUTE, switch(false)),
                         (route::CLOSED, switch(closed)),
+                        (route::AUTO, switch(auto)),
                     ] {
                         build.restate.push(ParamEvent::now(key, param, value));
                     }
                 }
                 let route = self.place(build, key, Identity::Route, 0, || {
-                    Instance::Route(Box::new(Route::new(1.0, false, &config).closed(closed)))
+                    Instance::Route(Box::new(
+                        Route::new(1.0, false, &config).closed(closed).auto(auto),
+                    ))
                 });
                 Some(DeviceInput { route, channel })
             }
@@ -1170,20 +1180,27 @@ fn route_events(changes: &ChangeSet, old: &Document, new: &Document, params: &mu
             && document
                 .track(edge.to)
                 .is_some_and(|to| !to.routing().monitoring(to.mixer().arm));
-        (solo.edge_muted(edge), closed)
+        let auto = edge.monitored
+            && document
+                .track(edge.to)
+                .is_some_and(|to| to.routing().monitor == bl_model::Monitor::Auto);
+        (solo.edge_muted(edge), closed, auto)
     };
     for edge in &is.edges {
         let key = route_key(edge);
         let Some(old_edge) = was.edges.iter().find(|e| route_key(e) == key) else {
             continue;
         };
-        let (muted_then, closed_then) = state(old, &before, old_edge);
-        let (muted, closed) = state(new, &after, edge);
+        let (muted_then, closed_then, auto_then) = state(old, &before, old_edge);
+        let (muted, closed, auto) = state(new, &after, edge);
         if muted_then != muted {
             params.push(ParamEvent::now(key, route::SOLO_MUTE, switch(muted)));
         }
         if closed_then != closed {
             params.push(ParamEvent::now(key, route::CLOSED, switch(closed)));
+        }
+        if auto_then != auto {
+            params.push(ParamEvent::now(key, route::AUTO, switch(auto)));
         }
     }
     for track in new.tracks().filter(|t| t.kind() == TrackKind::Audio) {
@@ -1198,7 +1215,8 @@ fn route_events(changes: &ChangeSet, old: &Document, new: &Document, params: &mu
             ));
         }
         // Ext. In hears the interface while the track monitors it; Monitor
-        // or Arm alone doesn't recompile (WP-2.13).
+        // or Arm alone doesn't recompile (WP-2.13). Under Monitor Auto it
+        // also closes while the track's clips play (the routing spec, R11).
         if matches!(track.routing().input, bl_model::Input::External { .. }) {
             let closed = |t: &Track| !t.routing().monitoring(t.mixer().arm);
             if closed(then) != closed(track) {
@@ -1206,6 +1224,14 @@ fn route_events(changes: &ChangeSet, old: &Document, new: &Document, params: &mu
                     NodeKey::DeviceInput(track.id()),
                     route::CLOSED,
                     switch(closed(track)),
+                ));
+            }
+            let auto = |t: &Track| t.routing().monitor == bl_model::Monitor::Auto;
+            if auto(then) != auto(track) {
+                params.push(ParamEvent::now(
+                    NodeKey::DeviceInput(track.id()),
+                    route::AUTO,
+                    switch(auto(track)),
                 ));
             }
         }

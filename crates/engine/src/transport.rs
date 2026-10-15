@@ -288,8 +288,10 @@ const ENTRIES: &[Entry] = &[
         label: "Set Recording",
         contexts: &[Global],
         keys: &[],
-        description: "Sets whether the transport is recording, so features like Hear Metronome \
-            Only While Recording know whether to sound.",
+        description: "Sets whether the transport is recording: while it is, each armed audio \
+            track records its input into the project's Samples/Recorded/ and the recording \
+            becomes a clip on its track when it ends. Features like Hear Metronome Only While \
+            Recording follow it too.",
     },
 ];
 

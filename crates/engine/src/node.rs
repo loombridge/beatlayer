@@ -243,6 +243,14 @@ pub trait Node: Send + 'static {
         drop(data);
     }
 
+    /// Whether the node played a clip in the block it last processed
+    /// (WP-2.13): a track's clip player says so while a clip of its track
+    /// sounds, so the track's input routes close under Monitor Auto
+    /// (the routing spec, R11). The default is no.
+    fn playing_clip(&self) -> bool {
+        false
+    }
+
     /// How many frames the node delays its input by, for delay compensation
     /// (WP-2.11).
     fn latency(&self) -> u32 {

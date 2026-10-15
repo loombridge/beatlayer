@@ -171,6 +171,14 @@ impl GcHandle {
         Program(OwnedGc::new_loc(program, &self.0))
     }
 
+    /// Wraps a value the audio thread may drop, such as a recording plan
+    /// (WP-2.13): dropping it there only lets go of it, and the collector
+    /// frees it later.
+    #[must_use]
+    pub fn wrap<T: Send + 'static>(&self, value: T) -> Owned<T> {
+        Owned(OwnedGc::new_loc(value, &self.0))
+    }
+
     /// How many values the collector holds.
     #[must_use]
     pub fn held(&self) -> usize {
@@ -205,6 +213,16 @@ impl Program {
 impl std::fmt::Debug for Program {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.get().fmt(f)
+    }
+}
+
+/// A value on its way to the audio thread, wrapped so that dropping it there
+/// never frees anything; the collector frees it later.
+pub struct Owned<T: Send + 'static>(OwnedGc<T, LocalRtGc>);
+
+impl<T: Send + 'static> Owned<T> {
+    pub(crate) fn get_mut(&mut self) -> &mut T {
+        self.0.get_mut()
     }
 }
 

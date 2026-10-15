@@ -185,6 +185,27 @@ const WIDGET: &[(&str, &str)] = &[
          time-selection menu (its grid choices run `arrangement.set_grid`), or the chosen \
          place's in the browser's sidebar (`browser.remove_folder`)",
     ),
+    // WP-3.7: the Session View grid reads its arrows, Page keys, Home and
+    // End, and Esc itself, because each shortcut has keys that act
+    // differently and the keymap gives a shortcut one command with one set of
+    // arguments.
+    (
+        "S-SES-002",
+        "the Session View: the arrows select the neighbouring slot, across the tracks and \
+         down the scenes (`session.select`)",
+    ),
+    (
+        "S-SES-010",
+        "the Session View: Up and Down select the scene above or below (`session.select`)",
+    ),
+    (
+        "S-SES-011",
+        "the Session View: Page Up and Page Down move eight scenes (`session.select`)",
+    ),
+    (
+        "S-SES-019",
+        "the Session View: Esc goes to the highlighted track's title bar (`session.select`)",
+    ),
 ];
 
 /// The package that binds each M1 shortcut the shell doesn't: exact IDs

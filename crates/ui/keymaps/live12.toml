@@ -286,7 +286,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Option+1"]
 win = ["Alt+1"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.focus", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-FOCUS-003"
@@ -2105,7 +2108,8 @@ trigger = "press"
 milestone = "M3"
 mac = ["Up", "Down", "Left", "Right"]
 win = ["Up", "Down", "Left", "Right"]
-status = "pending"
+status = "widget"
+handler = "the Session View: the arrows select the neighbouring slot, across the tracks and down the scenes (`session.select`)"
 
 [[shortcut]]
 id = "S-SES-003"
@@ -2116,7 +2120,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Cmd+A"]
 win = ["Ctrl+A"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.select_all", contexts = ["session"] },
+]
 
 [[shortcut]]
 id = "S-SES-004"
@@ -2160,7 +2167,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Cmd+Shift+M"]
 win = ["Ctrl+Shift+M"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.insert_empty_midi_clip", contexts = ["session"] },
+]
 
 [[shortcut]]
 id = "S-SES-008"
@@ -2171,7 +2181,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Cmd+I"]
 win = ["Ctrl+I"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.insert_scene", contexts = ["session"] },
+]
 
 [[shortcut]]
 id = "S-SES-009"
@@ -2193,7 +2206,8 @@ trigger = "press"
 milestone = "M3"
 mac = ["Up", "Down"]
 win = ["Up", "Down"]
-status = "pending"
+status = "widget"
+handler = "the Session View: Up and Down select the scene above or below (`session.select`)"
 
 [[shortcut]]
 id = "S-SES-011"
@@ -2204,7 +2218,8 @@ trigger = "press"
 milestone = "M3"
 mac = ["PageUp", "PageDown"]
 win = ["PageUp", "PageDown"]
-status = "pending"
+status = "widget"
+handler = "the Session View: Page Up and Page Down move eight scenes (`session.select`)"
 
 [[shortcut]]
 id = "S-SES-012"
@@ -2281,7 +2296,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["0"]
 win = ["0"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.deactivate", contexts = ["session"] },
+]
 
 [[shortcut]]
 id = "S-SES-019"
@@ -2292,7 +2310,8 @@ trigger = "press"
 milestone = "M3"
 mac = ["Esc"]
 win = ["Esc"]
-status = "pending"
+status = "widget"
+handler = "the Session View: Esc goes to the highlighted track's title bar (`session.select`)"
 
 [[shortcut]]
 id = "S-SES-020"
@@ -2303,7 +2322,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Home", "Fn+Left"]
 win = ["Home"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.select_edge", contexts = ["session"], args = { edge = "first" } },
+]
 
 [[shortcut]]
 id = "S-SES-021"
@@ -2314,7 +2336,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["End", "Fn+Right"]
 win = ["End"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.select_edge", contexts = ["session"], args = { edge = "last" } },
+]
 
 [[shortcut]]
 id = "S-SES-022"
@@ -2325,7 +2350,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["End", "Fn+Right"]
 win = ["End"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.select_edge", contexts = ["session"], args = { edge = "last" } },
+]
 
 [[shortcut]]
 id = "S-SES-023"

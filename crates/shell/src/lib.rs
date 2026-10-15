@@ -74,6 +74,7 @@ pub mod perception;
 pub mod permission;
 pub mod plugins;
 pub mod routing;
+pub mod session_view;
 pub mod settings;
 mod shell;
 pub mod tracks;
@@ -102,6 +103,9 @@ pub use bl_shell_spec::notes as note_commands;
 pub use bl_shell_spec::perception as perception_commands;
 /// The plug-in command IDs and their argument and result types (WP-2.6).
 pub use bl_shell_spec::plugins as plugin_commands;
+/// The Session View grid's command IDs and their argument and result types
+/// (WP-3.7).
+pub use bl_shell_spec::session_view as session_view_commands;
 pub use bl_shell_spec::settings::ZOOM_STEPS;
 /// The shell's track command IDs and their argument and result types
 /// (WP-2.19b).

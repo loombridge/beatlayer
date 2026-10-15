@@ -58,6 +58,7 @@ pub mod mixer_view;
 pub mod notes;
 pub mod perception;
 pub mod plugins;
+pub mod session_view;
 pub mod settings;
 pub mod tracks;
 pub mod transport;
@@ -83,6 +84,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     midi_files::register(registry)?;
     devices::register(registry)?;
     tracks::register(registry)?;
+    session_view::register(registry)?;
     plugins::register(registry)?;
     perception::register(registry)
 }

@@ -33,6 +33,7 @@ use crate::files::{ProjectFiles, SetStore, new_set_from};
 use crate::mixer_controls::{self, Switch};
 use crate::mixer_view::{MixerOf, MixerView, MixerViewError};
 use crate::permission::CallPermission;
+use crate::session_view::{SessionView, SessionViewError};
 use crate::settings::{
     OnByDefault, Preferences, SettingsPage, ThemeChoice, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT,
     zoom_factor, zoom_percent, zoom_step,
@@ -52,6 +53,7 @@ use bl_shell_spec::mixer_view as mixer_ids;
 use bl_shell_spec::notes as note_ids;
 use bl_shell_spec::perception as perception_ids;
 use bl_shell_spec::plugins as plugin_ids;
+use bl_shell_spec::session_view as session_ids;
 use bl_shell_spec::tracks as track_ids;
 use bl_shell_spec::transport as transport_ids;
 
@@ -327,6 +329,9 @@ pub struct Shell {
     gesture: bool,
     /// What the mixers show (WP-1.9).
     mixer: MixerView,
+    /// What the Session View grid has selected and how far it's scrolled
+    /// (WP-3.7).
+    session: SessionView,
     /// The meters the engine last published, one per track (WP-1.9).
     meters: Vec<bl_engine::TrackMeter>,
     /// Whether the meters were the engine's when last polled.
@@ -526,6 +531,7 @@ impl Shell {
             seen_insert_marker: None,
             gesture: false,
             mixer: MixerView::new(),
+            session: SessionView::new(),
             meters: Vec::new(),
             metering: false,
             previews: crate::perception::Previews::default(),
@@ -1819,6 +1825,13 @@ impl Shell {
     #[must_use]
     pub fn mixer_view(&self) -> &MixerView {
         &self.mixer
+    }
+
+    /// What the Session View grid has selected and how far it's scrolled
+    /// (WP-3.7).
+    #[must_use]
+    pub fn session(&self) -> &SessionView {
+        &self.session
     }
 
     /// The mixer of the view in front.
@@ -3221,6 +3234,65 @@ impl Shell {
             }
             return result.map(|state| to_value(&state));
         }
+        if session_ids::handles(id) {
+            // Spec: session-view. The grid's selection and scroll are view
+            // state; its edits run the set's scene and slot commands as one
+            // undo step.
+            let columns = crate::mixer_view::columns(self.editor.document(), &self.arrangement);
+            let scenes: Vec<bl_model::SceneId> = self
+                .editor
+                .document()
+                .scenes()
+                .map(|scene| scene.id)
+                .collect();
+            let edge_fades = self.prefs.create_fades_on_clip_edges.0;
+            let outcome = self
+                .session
+                .run(
+                    id,
+                    args,
+                    crate::session_view::Context {
+                        editor: &mut self.editor,
+                        media: &self.media,
+                        columns: &columns,
+                        scenes: &scenes,
+                        edge_fades,
+                    },
+                )
+                .map_err(|error| match error {
+                    SessionViewError::InvalidArgs(message) => ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message,
+                    },
+                    SessionViewError::Unavailable(reason) => ShellError::Unavailable {
+                        command: id.to_owned(),
+                        reason,
+                    },
+                    SessionViewError::Failed(message) => ShellError::Failed {
+                        command: id.to_owned(),
+                        message,
+                    },
+                })?;
+            for file in &outcome.media {
+                self.store.add_media(file.hash, &file.path, file.size);
+            }
+            if outcome.document_changed {
+                self.dirty = true;
+                self.document_changed();
+            }
+            if id == session_ids::FOCUS {
+                // Spec: session-view. Navigate ▸ Session View shows it and
+                // moves the focus into it.
+                self.main_view = MainView::Session;
+                self.focused_window = WindowKind::Main;
+                self.focused_area = Area::MainView;
+                self.effects.push(Effect::FocusArea(Area::MainView));
+            }
+            if id != session_ids::STATE {
+                self.touch();
+            }
+            return Ok(outcome.value);
+        }
         if id == browser_ids::LOAD_SELECTED
             && let Some(path) = self.hot_swap_preset()
         {
@@ -3459,6 +3531,7 @@ impl Shell {
                 self.arrangement.reset();
                 self.clip_view.forget_selection();
                 self.mixer.reset();
+                self.session.reset();
                 self.new_set_transport();
                 self.document_changed();
                 self.set_file_changed();
@@ -3487,6 +3560,7 @@ impl Shell {
                 self.arrangement.reset();
                 self.clip_view.forget_selection();
                 self.mixer.reset();
+                self.session.reset();
                 // The set's files go into the media store, so its clips'
                 // waveforms build (browser R15) and the engine finds their
                 // audio when the set reaches it.

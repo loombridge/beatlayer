@@ -13,12 +13,18 @@ use crate::shared::Shared;
 use crate::track::{Track, TrackKind};
 
 /// Song-wide settings.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Settings {
     /// The tempo map. The default is 120 BPM throughout.
     pub tempo: TempoMap,
     /// The time-signature map. The default is 4/4 throughout.
     pub time_signatures: TimeSignatureMap,
+    /// The Main track's crossfader, from 0 (the A end) through 0.5 (the
+    /// centre, where it starts) to 1 (the B end), as the Crossfader section
+    /// shows it (the mixer spec, R23). A set at the centre doesn't write it,
+    /// so a set saved before WP-3.17 loads unchanged.
+    #[serde(default = "centre", skip_serializing_if = "is_centre")]
+    pub crossfader: f64,
     /// The Arrangement loop: the loop brace and the Loop switch. A set saved
     /// before WP-1.5 has none and loads with the default; a set whose loop is
     /// the default doesn't write it, so the saved form of such a set is
@@ -39,17 +45,30 @@ pub struct Settings {
 }
 
 impl Default for Settings {
-    /// 120 BPM and 4/4 throughout, the default loop brace with the loop off,
-    /// Solo in Place on, and default metronome settings.
+    /// 120 BPM and 4/4 throughout, the crossfader centred, the default loop
+    /// brace with the loop off, Solo in Place on, and default metronome
+    /// settings.
     fn default() -> Self {
         Self {
             tempo: TempoMap::default(),
             time_signatures: TimeSignatureMap::default(),
+            crossfader: centre(),
             arrangement_loop: ArrangementLoop::default(),
             solo_in_place: true,
             metronome: MetronomeSettings::default(),
         }
     }
+}
+
+/// The crossfader's centre, in fader positions.
+fn centre() -> f64 {
+    0.5
+}
+
+/// Whether the crossfader is at the centre, where a set's saved form leaves
+/// it out.
+fn is_centre(position: &f64) -> bool {
+    *position == centre()
 }
 
 fn on() -> bool {
@@ -355,6 +374,7 @@ mod tests {
 
     use super::*;
     use crate::command::Command;
+    use crate::track::CrossfadeAssign;
 
     fn track_ids(n: usize) -> (TrackId, Vec<TrackId>) {
         let mut ids = IdAllocator::new();
@@ -495,6 +515,46 @@ mod tests {
         }
         let mut broken = saved;
         broken["tracks"][0]["mixer"]["tap"] = serde_json::json!("pre");
+        assert!(serde_json::from_value::<Document>(broken).is_err());
+    }
+
+    // Spec: mixer R23
+    #[test]
+    fn the_crossfader_and_the_assignments_save_only_where_they_differ() {
+        let (main, t) = track_ids(2);
+        let mut doc = Document::new(main);
+        doc.apply(&create(t[0], TrackKind::Audio, None, 0)).unwrap();
+        doc.apply(&create(t[1], TrackKind::Midi, None, 1)).unwrap();
+        // A new set: the fader is centred and no track is assigned, and
+        // neither is written, so sets saved before WP-3.17 look the same.
+        let saved = serde_json::to_value(&doc).unwrap();
+        assert!(saved["settings"].get("crossfader").is_none());
+        assert!(saved["tracks"][0]["mixer"].get("crossfade").is_none());
+        assert!(saved["main"]["mixer"].get("crossfade").is_none());
+
+        doc.apply(&Command::SetCrossfader { position: 0.25 })
+            .unwrap();
+        doc.apply(&Command::SetCrossfadeAssign {
+            track: t[0],
+            assign: CrossfadeAssign::B,
+        })
+        .unwrap();
+        let saved = serde_json::to_value(&doc).unwrap();
+        assert_eq!(saved["settings"]["crossfader"], serde_json::json!(0.25));
+        assert_eq!(
+            saved["tracks"][0]["mixer"]["crossfade"],
+            serde_json::json!("b")
+        );
+        let loaded: Document = serde_json::from_value(saved.clone()).unwrap();
+        assert_eq!(loaded, doc);
+        loaded.check_invariants().unwrap();
+
+        // A position outside 0 to 1, and an assignment on Main, don't load.
+        let mut broken = saved.clone();
+        broken["settings"]["crossfader"] = serde_json::json!(-1.0);
+        assert!(serde_json::from_value::<Document>(broken).is_err());
+        let mut broken = saved;
+        broken["main"]["mixer"]["crossfade"] = serde_json::json!("a");
         assert!(serde_json::from_value::<Document>(broken).is_err());
     }
 

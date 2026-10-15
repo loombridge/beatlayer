@@ -27,8 +27,9 @@ use crate::commands::{
     VIEW_ZOOM_RESET, WINDOW_CLOSE,
 };
 use crate::mixer_view::{
-    FOCUS as MIXER_FOCUS, IN_OUT as MIXER_IN_OUT, RETURN_TRACKS as MIXER_RETURN_TRACKS,
-    SENDS as MIXER_SENDS, TOGGLE as MIXER_TOGGLE, VOLUME as MIXER_VOLUME,
+    CROSSFADER as MIXER_CROSSFADER, FOCUS as MIXER_FOCUS, IN_OUT as MIXER_IN_OUT,
+    RETURN_TRACKS as MIXER_RETURN_TRACKS, SENDS as MIXER_SENDS, TOGGLE as MIXER_TOGGLE,
+    VOLUME as MIXER_VOLUME,
 };
 
 /// The platform a menu bar is for: macOS has an application menu; Windows
@@ -555,7 +556,7 @@ const VIEW: &[Row] = &[
     ("M-VIEW-032c", "Volume", Cmd(MIXER_VOLUME)),
     ("M-VIEW-032-sep1", "", Action::Separator),
     ("M-VIEW-032d", "Track Options", Pending(None)),
-    ("M-VIEW-032e", "Crossfader", Pending(None)),
+    ("M-VIEW-032e", "Crossfader", Cmd(MIXER_CROSSFADER)),
     ("M-VIEW-032f", "Performance Impact", Pending(None)),
     ("M-VIEW-032-sep2", "", Action::Separator),
     ("M-VIEW-032g", "Return Tracks", Cmd(MIXER_RETURN_TRACKS)),

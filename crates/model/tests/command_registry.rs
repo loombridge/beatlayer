@@ -10,9 +10,9 @@ use bl_core::time::{Bpm, TempoMap, Ticks, TimeSignature, TimeSignatureMap};
 use bl_model::registry::{self, RunError};
 use bl_model::{
     ArrangementLoop, AudioData, Change, ChangeSet, Clip, ClipData, ClipId, Command, ContentHash,
-    CountIn, Device, DeviceId, DeviceKind, EditError, Editor, Input, MetronomeRhythm,
-    MetronomeSound, MidiData, ModelError, Monitor, Note, Output, ParamId, PluginFormat, SendTap,
-    Tap, TrackId, TrackKind,
+    CountIn, CrossfadeAssign, Device, DeviceId, DeviceKind, EditError, Editor, Input,
+    MetronomeRhythm, MetronomeSound, MidiData, ModelError, Monitor, Note, Output, ParamId,
+    PluginFormat, SendTap, Tap, TrackId, TrackKind,
 };
 use serde_json::{Value, json};
 
@@ -49,13 +49,13 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        64,
+        66,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
          set_device_floating, WP-2.20 six for tempo breakpoints and time-signature markers, \
-         WP-2.1 two for MIDI clips, WP-2.16 set_device_sample, and WP-2.15 five for the \
-         metronome"
+         WP-2.1 two for MIDI clips, WP-2.16 set_device_sample, WP-2.15 five for the \
+         metronome, and WP-3.17 two for the crossfader"
     );
 
     for op in &ops {
@@ -177,9 +177,17 @@ fn every_command_runs_by_id() {
     );
     let changes = agent.run("mixer.set_solo_in_place", json!({ "enabled": false }));
     assert!(changes.settings);
+    agent.run("mixer.set_crossfader", json!({ "position": 0.75 }));
+    let changes = agent.run(
+        "mixer.set_crossfade_assign",
+        json!({ "track": drums, "assign": "a" }),
+    );
+    assert_eq!(changes.tracks.get(&drums), Some(&Change::Modified));
     let document = agent.editor.document();
     let mixer = *document.track(drums).unwrap().mixer();
     assert_eq!((mixer.volume, mixer.pan, mixer.mute), (0.5, -0.25, true));
+    assert_eq!(mixer.crossfade, CrossfadeAssign::A);
+    assert_eq!(document.settings().crossfader, 0.75);
     assert!(
         !mixer.solo && !mixer.arm,
         "released by the exclusive switches"
@@ -726,6 +734,17 @@ fn schemas_match_what_commands_serialise() {
             Command::SetSoloInPlace { enabled: false },
         ),
         (
+            "mixer.set_crossfader",
+            Command::SetCrossfader { position: 0.25 },
+        ),
+        (
+            "mixer.set_crossfade_assign",
+            Command::SetCrossfadeAssign {
+                track,
+                assign: CrossfadeAssign::B,
+            },
+        ),
+        (
             "routing.set_input",
             Command::SetInput {
                 track,
@@ -1034,10 +1053,11 @@ fn bad_requests_change_nothing() {
     .unwrap();
     let before = editor.document().clone();
     let steps = editor.undo_history().len();
+    let main = editor.document().main_id();
 
     type Expected<'a> = &'a dyn Fn(RunError) -> bool;
     let invalid = |error: RunError| matches!(error, RunError::InvalidArgs { .. });
-    let cases: [(&str, Value, Expected<'_>); 11] = [
+    let cases: [(&str, Value, Expected<'_>); 13] = [
         ("track.explode", json!({}), &|e| {
             e == RunError::UnknownCommand("track.explode".to_owned())
         }),
@@ -1089,6 +1109,22 @@ fn bad_requests_change_nothing() {
                 )
             },
         ),
+        ("mixer.set_crossfader", json!({ "position": 2.0 }), &|e| {
+            matches!(
+                e,
+                RunError::Edit(EditError::Command(ModelError::InvalidValue { .. }))
+            )
+        }),
+        (
+            "mixer.set_crossfade_assign",
+            json!({ "track": main, "assign": "a" }),
+            &|e| {
+                matches!(
+                    e,
+                    RunError::Edit(EditError::Command(ModelError::WrongTrackKind { .. }))
+                )
+            },
+        ),
     ];
     for (id, args, expected) in cases {
         let error = registry::run(&mut editor, id, args.clone()).unwrap_err();
@@ -1106,6 +1142,13 @@ fn bad_requests_change_nothing() {
         .as_ref()
         .unwrap();
     assert!(validate(schema, &json!({ "track": track, "volume": -1.0 })).is_err());
+    let schema = commands
+        .get("mixer.set_crossfader")
+        .unwrap()
+        .args
+        .as_ref()
+        .unwrap();
+    assert!(validate(schema, &json!({ "position": 2.0 })).is_err());
     assert_eq!(
         registry::command_from_args(registry::UNDO, json!({})),
         Err(RunError::NotADocumentEdit(registry::UNDO))

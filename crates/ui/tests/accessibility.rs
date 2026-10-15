@@ -967,6 +967,11 @@ fn paths() -> BTreeMap<&'static str, Path> {
         key,
     };
     let clip_view = LaterView("the Clip View (milestone M2)");
+    // The Clip View's note editing (WP-2.3): the pointer reaches each of
+    // these — a click, a marquee, and drags in the note editor — and their
+    // keys (shortcuts.md, `note-editor` and `note-selection`) come with a
+    // later package.
+    let note_editor = LaterView("the note editor's keys (the note-editor shortcuts, milestone M2)");
     let device_params = Equivalent(
         "a described device's parameter controls in the Device View: Tab to one, then Up and \
          Down step it and Delete sets its default (the device framework spec, R17)",
@@ -975,6 +980,12 @@ fn paths() -> BTreeMap<&'static str, Path> {
         "the device's context menu, from its Show Options button (Enter, then the arrows), as \
          in Live",
     );
+    let metronome_menu = Equivalent(
+        "the Metronome settings menu, from its pop-up arrow or context menu, as in Live \
+         (manual 19.4.1)",
+    );
+    let recording =
+        LaterView("the Record button and transport recording (milestone M2, S-TRANS-006)");
     let editing = Equivalent(
         "the Arrangement's editing keys run it: paste, Delete, Left and Right, and Enter then \
          Left or Right (arrangement-editing R12)",
@@ -993,6 +1004,13 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "transport.set_loop_enabled",
             main(nothing, control_bar, "Arrangement Loop", Key::Enter),
         ),
+        (
+            "transport.set_metronome_count_in",
+            Exception(metronome_menu),
+        ),
+        ("transport.set_metronome_sound", Exception(metronome_menu)),
+        ("transport.set_metronome_rhythm", Exception(metronome_menu)),
+        ("transport.set_recording", Exception(recording)),
         // Tempo breakpoints and time-signature markers (WP-2.20): the
         // arrangement's tempo envelope and marker lane aren't drawn yet, so
         // agents reach these through the agent API until they are.
@@ -1208,6 +1226,11 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("clip.set_midi_region", Exception(clip_view)),
         ("clip.set_region", Exception(clip_view)),
         ("clip.set_data", Exception(clip_view)),
+        ("clip_view.select_notes", Exception(note_editor)),
+        ("note.add", Exception(note_editor)),
+        ("note.delete", Exception(note_editor)),
+        ("note.move", Exception(note_editor)),
+        ("note.resize", Exception(note_editor)),
         // The Device View (WP-2.4): Enter on a title bar's controls.
         (
             "device.select",
@@ -1257,6 +1280,18 @@ fn paths() -> BTreeMap<&'static str, Path> {
             )),
         ),
         ("device.set_param", Exception(device_params)),
+        (
+            "device.load_sample",
+            Exception(Gap(
+                "loading a sample has no key or menu item yet: dropping the file on the \
+                 sampler's Device View frame is the only way, and where Live's own path (its \
+                 Hot-Swap control) goes is to observe (sampler R11)",
+            )),
+        ),
+        (
+            "device.set_sample",
+            Exception(Equivalent("loading a sample (`device.load_sample`)")),
+        ),
         // A device's sidechain strip and section (routing R29): Enter on
         // its buttons, Up and Down on its chooser and number boxes.
         (
@@ -1329,6 +1364,19 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "plugin.show_window",
             Exception(LaterView("the plug-in device panel (WP-2.10)")),
         ),
+        (
+            "plugin.set_window",
+            Exception(Equivalent(
+                "moving or resizing a plug-in window, which the system's window keys and \
+                 commands do, as for a floating device's window",
+            )),
+        ),
+        (
+            "plugin.set_panel_param",
+            Exception(LaterView(
+                "the plug-in device panel's configure mode (Phase 5)",
+            )),
+        ),
         // WP-2.9's scanner and settings: the Plug-Ins label lists what the
         // scanner found, but the button that scans (Live's Rescan) and the
         // hide-plug-ins controls are later views.
@@ -1385,6 +1433,22 @@ fn paths() -> BTreeMap<&'static str, Path> {
                 "Live doesn't support editing audio clip fades with a screen reader (manual \
                  41.4.1.3); its fade keys, Cmd-Option-F and Cmd-Option-Delete (S-ARR-008, \
                  S-ARR-009), aren't bound yet",
+            )),
+        ),
+        // MIDI file import and export (WP-2.21): the menus show them, and a
+        // person reaches them once the file dialogs are built.
+        (
+            "midi.import_file",
+            Exception(Equivalent(
+                "the Create menu's Import MIDI File... dialog, which waits on the file dialogs \
+                 (midi-clips R16)",
+            )),
+        ),
+        (
+            "midi.export_clip",
+            Exception(Equivalent(
+                "the File menu's Export MIDI Clip... dialog, which waits on the file dialogs \
+                 (midi-clips R19)",
             )),
         ),
         // Gaps.
@@ -1596,6 +1660,7 @@ fn every_m1_command_is_reachable_from_the_keyboard() {
     assert_eq!(
         gaps,
         [
+            "device.load_sample",
             "export.audio",
             "set.discard_recovery",
             "set.recover",

@@ -93,6 +93,10 @@ pub enum TransportCommand {
     SetInsertMarker(Ticks),
     /// Sets the Arrangement loop, or switches it off with `None`.
     SetLoop(Option<LoopRegion>),
+    /// Sets the metronome settings (WP-2.15).
+    SetMetronome(bl_model::MetronomeSettings),
+    /// Sets whether the transport is recording.
+    SetRecording(bool),
 }
 
 /// The part of the song the Arrangement loop repeats: playback that reaches

@@ -65,6 +65,17 @@ pub fn dc(editor: &mut Editor, track: TrackId, value: f64) -> DeviceId {
     device(editor, track, testing::DC, &[(testing::VALUE, value)])
 }
 
+/// Whether the tests run at full depth: `BL_TEST_DEPTH=full`, as on pushes
+/// to main and the nightly run. Unset or `quick`, the default for local runs
+/// and pull requests, wall-clock results aren't judged.
+pub fn full_depth() -> bool {
+    match std::env::var("BL_TEST_DEPTH").as_deref() {
+        Ok("full") => true,
+        Err(_) | Ok("" | "quick") => false,
+        Ok(other) => panic!("BL_TEST_DEPTH is `{other}`: set it to quick or full"),
+    }
+}
+
 /// An engine's three ends and a compiler, all on the test's thread.
 pub struct Rig {
     pub editor: Editor,

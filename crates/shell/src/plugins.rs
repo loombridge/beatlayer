@@ -259,6 +259,7 @@ pub fn info(plugins: &ClapHost, au: &AuHost, device: DeviceId) -> Option<PluginI
         has_window: status.has_editor,
         window_open: status.editor_open,
         window_shown: status.editor_open && !status.editor_hidden,
+        window: None,
         values: status.values,
     })
 }

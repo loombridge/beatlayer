@@ -19,6 +19,19 @@ filter = "package(bl-project) & binary(crash_recovery) & test(=edits_are_journal
 threads-required = 4
 priority = 100
 
+# These two watch for dropouts: a block whose callback takes longer than the
+# block lasts. That is a wall-clock result, so beside other tests they would
+# time their load instead. Each takes four test slots, the whole of a CI
+# runner, so it runs with the runner to itself there; a bigger machine leaves
+# room for others. They start straight after the disk test above.
+[[profile.default.overrides]]
+filter = """
+    (package(bl-engine) & binary(playhead) & test(=the_ui_thread_sees_the_playhead_the_engine_played))
+    | (package(bl-engine) & binary(stress) & test(=a_thousand_recompiles_during_playback_touch_no_heap_and_drop_no_audio))
+"""
+threads-required = 4
+priority = 90
+
 # The slowest tests, at either BL_TEST_DEPTH, start next, so a run doesn't
 # end waiting for one that started late.
 [[profile.default.overrides]]

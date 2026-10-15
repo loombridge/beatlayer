@@ -121,7 +121,7 @@ fn a_device_with_a_parameter_that_cant_be_automated_never_registers() {
     fixed.automatable = false;
     let bad = DeviceType::native("test.fixed", "Fixed", DeviceRole::AudioEffect)
         .with_description(DeviceDescription::new(vec![fixed]));
-    bl_devices::add(&mut Registry::empty(), bad, |_| Nothing);
+    bl_devices::add(&mut Registry::empty(), bad, |_, _| Nothing);
 }
 
 // Spec: device-framework R4

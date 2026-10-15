@@ -398,6 +398,61 @@ const ENTRIES: &[Entry] = &[
             saved with the set, and undo switches it back.",
     },
     Entry {
+        id: "transport.set_metronome_enabled",
+        action: Action::Apply("set_metronome_enabled"),
+        label: "Metronome",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[Key::Toggles("S-TRANS-011", "enabled")],
+        description: "Switches the metronome on or off, as the Control Bar's Metronome switch and \
+            the Playback menu's Metronome item do. When on, the metronome clicks on each beat of the \
+            song, with the downbeat accented. The switch is saved with the set, and undo switches it back.",
+    },
+    Entry {
+        id: "transport.set_metronome_count_in",
+        action: Action::Apply("set_metronome_count_in"),
+        label: "Metronome Count-In",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Sets the metronome count-in length: `none`, `1_bar`, `2_bars`, or `4_bars`. \
+            When enabled, starting playback or recording plays the chosen bars of metronome clicks \
+            before the transport moves. The setting is saved with the set, and undo restores it.",
+    },
+    Entry {
+        id: "transport.set_metronome_sound",
+        action: Action::Apply("set_metronome_sound"),
+        label: "Metronome Sound",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Chooses the metronome's sound character: `classic`, `click`, or `wood`. \
+            All sounds are synthesized in code. The setting is saved with the set, and undo restores it.",
+    },
+    Entry {
+        id: "transport.set_metronome_rhythm",
+        action: Action::Apply("set_metronome_rhythm"),
+        label: "Metronome Rhythm",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Sets the rhythmic division the metronome clicks at: `auto` (follows the time \
+            signature's denominator), `1_bar`, `1/2`, `1/2t`, `1/4`, `1/4t`, `1/8`, `1/8t`, `1/16`, \
+            or `1/16t`. If a division exceeds the bar length under the current time signature, \
+            clicks follow the auto interval. The setting is saved with the set, and undo restores it.",
+    },
+    Entry {
+        id: "transport.set_metronome_only_while_recording",
+        action: Action::Apply("set_metronome_only_while_recording"),
+        label: "Hear Metronome Only While Recording",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Switches whether the metronome clicks only while recording or during playback as \
+            well, as the Playback menu and Metronome Settings menu do. The setting is saved with the \
+            set, and undo switches it back.",
+    },
+    Entry {
         id: "track.create",
         action: Action::Apply("create_track"),
         label: "Insert Track",
@@ -971,6 +1026,19 @@ const ENTRIES: &[Entry] = &[
         description: "Sets one of a device's parameters to a value in the parameter's own \
             units. The value must be finite. Parameters that haven't been set keep their \
             defaults.",
+    },
+    Entry {
+        id: "device.set_sample",
+        action: Action::Apply("set_device_sample"),
+        label: "Set Sample",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sets the audio a device plays (`media`, a content hash, or null to play \
+            none), which the media store holds like a clip's audio. A device whose type plays a \
+            sample plays that file; other devices ignore it. The set keeps the reference, so it \
+            reopens playing the same file. To load a file from disk as a person does, use \
+            `device.load_sample`.",
     },
     Entry {
         id: "device.set_sidechain_input",

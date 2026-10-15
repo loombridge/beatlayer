@@ -280,6 +280,9 @@ pub struct Shell {
     config_dir: Option<PathBuf>,
     main_view: MainView,
     browser: bool,
+    /// Whether the Info View shows (L-INFO-001): view state, never part of
+    /// the set, like the browser's.
+    info_view: bool,
     full_screen: bool,
     settings_open: bool,
     focused_window: WindowKind,
@@ -469,6 +472,7 @@ impl Shell {
             config_dir,
             main_view: MainView::Arrangement,
             browser: true,
+            info_view: true,
             full_screen: false,
             focused_window: WindowKind::Main,
             focused_area: Area::MainView,
@@ -695,6 +699,12 @@ impl Shell {
     #[must_use]
     pub fn browser_visible(&self) -> bool {
         self.browser
+    }
+
+    /// Whether the Info View shows (L-INFO-001): view state only.
+    #[must_use]
+    pub fn info_view_visible(&self) -> bool {
+        self.info_view
     }
 
     /// Whether the main window is in full-screen mode.
@@ -2189,6 +2199,7 @@ impl Shell {
         match id {
             ids::VIEW_FULL_SCREEN => Some(self.full_screen),
             ids::VIEW_TOGGLE_BROWSER => Some(self.browser),
+            ids::VIEW_TOGGLE_INFO_VIEW => Some(self.info_view),
             ids::VIEW_TOGGLE_PLUG_IN_WINDOWS => Some(self.plug_in_windows),
             ids::FOCUS_TOGGLE_TAB_NAVIGATION => Some(self.prefs.tab_navigation),
             ids::FOCUS_TOGGLE_WRAP_NAVIGATION => Some(self.prefs.wrap_navigation.0),
@@ -3045,6 +3056,7 @@ impl Shell {
         to_value(&ViewResult {
             main_view: self.main_view.id().to_owned(),
             browser: self.browser,
+            info_view: self.info_view,
             full_screen: self.full_screen,
             zoom: self.zoom(),
         })
@@ -3329,6 +3341,11 @@ impl Shell {
                 if !self.browser && self.focused_area == Area::Browser {
                     self.focused_area = Area::MainView;
                 }
+                Ok(self.view_result())
+            }
+            ids::VIEW_TOGGLE_INFO_VIEW => {
+                Self::args::<NoArgs>(id, args)?;
+                self.info_view = !self.info_view;
                 Ok(self.view_result())
             }
             ids::VIEW_TOGGLE_SESSION_ARRANGEMENT => {

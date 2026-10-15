@@ -9,8 +9,8 @@
 use std::collections::BTreeSet;
 use std::thread::ThreadId;
 
-use bl_engine::{Device, DeviceType, Node, NodeConfig, NodeFactory};
-use bl_model::{DeviceId, PluginState};
+use bl_engine::{DeviceType, Node, NodeConfig, NodeFactory};
+use bl_model::{Device, DeviceId, PluginState};
 
 use super::AuError;
 pub use crate::clap::PluginStatus;

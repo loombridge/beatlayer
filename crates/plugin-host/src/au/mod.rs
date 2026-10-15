@@ -60,6 +60,10 @@ impl std::error::Error for AuError {}
 /// The four characters a component description's field holds as text: all
 /// four, even a trailing space (Apple's DLS synth's subtype is `dls `), so
 /// reading an id back gives the description it was made from.
+///
+/// Used by the macOS host's role mapping and by the tests' `id_of`: on
+/// Windows and Linux a library build has no caller.
+#[cfg(any(target_os = "macos", test))]
 fn field(code: u32) -> String {
     let bytes = code.to_be_bytes();
     String::from_utf8_lossy(&bytes).into_owned()
@@ -107,6 +111,10 @@ pub fn parse_description_id(id: &str) -> Option<(&str, &str, &str)> {
 }
 
 /// The three four-character codes a `plugin_id` names, if it names them.
+///
+/// Used by the macOS host's component lookup: a library build on Windows
+/// and Linux has no caller.
+#[cfg(target_os = "macos")]
 pub(crate) fn description_fields(id: &str) -> Option<(u32, u32, u32)> {
     let (kind, subtype, manufacturer) = parse_description_id(id)?;
     Some((field_of(kind)?, field_of(subtype)?, field_of(manufacturer)?))

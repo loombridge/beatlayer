@@ -70,6 +70,9 @@ pub enum ModelError {
     /// The Main track can't be created, deleted, or moved, and a document
     /// has exactly one.
     MainTrack,
+    /// Main Out and Cue Out take a stereo pair of the audio interface's
+    /// outputs, not a single channel.
+    NotStereoPair,
     /// Tracks of this kind can't go inside a group: only audio, MIDI, and
     /// group tracks can.
     CannotGroup {
@@ -210,6 +213,9 @@ impl fmt::Display for ModelError {
             Self::MainTrack => f.write_str(
                 "the Main track can't be created, deleted, or moved, and there must be exactly one",
             ),
+            Self::NotStereoPair => {
+                f.write_str("Main Out and Cue Out take a stereo pair of the interface's outputs")
+            }
             Self::CannotGroup { kind } => write!(f, "a {kind} track can't go inside a group"),
             Self::GroupCycle { track, parent } => {
                 write!(f, "{track} can't go inside {parent}, which is inside it")

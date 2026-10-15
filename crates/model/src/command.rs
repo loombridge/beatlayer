@@ -18,7 +18,7 @@ use crate::ids::{ClipId, ContentHash, DeviceId, ParamId, SceneId, TrackId};
 use crate::metronome::{CountIn, MetronomeRhythm, MetronomeSound};
 use crate::scene::Scene;
 use crate::shared::Shared;
-use crate::track::{Input, Mixer, Monitor, Output, SendTap, Track, TrackKind};
+use crate::track::{Channel, Input, Mixer, Monitor, Output, SendTap, Track, TrackKind};
 
 /// One edit to a document.
 ///
@@ -284,6 +284,19 @@ pub enum Command {
         track: TrackId,
         /// Another MIDI track, or `null` (or nothing) for No Output.
         to: Option<TrackId>,
+    },
+    /// Sets Main's Main Out: the audio interface's output channels the Main
+    /// mix goes to, as a stereo pair.
+    SetMainOut {
+        /// The pair: its first channel, counted from 1 (`{ "type": "pair",
+        /// "channel": 3 }` is 3/4).
+        channel: Channel,
+    },
+    /// Sets Main's Cue Out: the audio interface's output channels the cue
+    /// mix goes to, as a stereo pair.
+    SetCueOut {
+        /// The pair: its first channel, counted from 1.
+        channel: Channel,
     },
 
     /// Puts a new clip on an audio or MIDI track. Its data must match the
@@ -673,9 +686,11 @@ impl Command {
             Self::SetSend { .. } => "Change send",
             Self::SetSendTap { .. } => "Switch Pre/Post",
             Self::SetSoloInPlace { .. } => "Switch Solo in Place",
-            Self::SetInput { .. } | Self::SetOutput { .. } | Self::SetMidiOutput { .. } => {
-                "Change \"Routing\""
-            }
+            Self::SetInput { .. }
+            | Self::SetOutput { .. }
+            | Self::SetMidiOutput { .. }
+            | Self::SetMainOut { .. }
+            | Self::SetCueOut { .. } => "Change \"Routing\"",
             Self::SetMonitor { .. } => "Change monitoring",
             Self::CreateClip { .. } => "Create clip",
             Self::DeleteClip { .. } => "Delete clip",
@@ -944,6 +959,12 @@ impl Document {
             }
             Command::SetMidiOutput { track, to } => {
                 self.edit_routing(*track, |routing| routing.midi_output = *to)
+            }
+            Command::SetMainOut { channel } => {
+                self.set_main_channel(*channel, |routing| &mut routing.main_out)
+            }
+            Command::SetCueOut { channel } => {
+                self.set_main_channel(*channel, |routing| &mut routing.cue_out)
             }
             Command::CreateClip { track, clip } => self.create_clip(*track, clip),
             Command::DeleteClip { clip } => self.remove_clip(*clip),
@@ -1231,6 +1252,22 @@ impl Document {
         }
         self.track_mut(id)?.routing = routing;
         self.check_routing(id)
+    }
+
+    /// Sets Main's Main Out or Cue Out, as `slot` names it, one of the two.
+    fn set_main_channel(
+        &mut self,
+        channel: Channel,
+        slot: fn(&mut crate::track::Routing) -> &mut Channel,
+    ) -> Result<(), ModelError> {
+        let main = self.main_id();
+        let mut routing = self.track_ref(main)?.routing;
+        *slot(&mut routing) = channel;
+        if routing == self.track_ref(main)?.routing {
+            return Ok(());
+        }
+        self.track_mut(main)?.routing = routing;
+        self.check_routing(main)
     }
 
     /// Turns a mixer switch (solo or arm) on for `track` and off on every

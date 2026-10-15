@@ -100,6 +100,7 @@ fn the_ui_thread_sees_the_playhead_the_engine_played() {
     let backend = NullBackend::with_options(NullOptions {
         pacing: Pacing::RealTime,
         frame_limit: None,
+        channels: 2,
     });
     let request = StreamRequest {
         output: Some(PortRequest::default()),
@@ -165,5 +166,11 @@ fn the_ui_thread_sees_the_playhead_the_engine_played() {
     assert!(wraps_seen >= 3, "only {wraps_seen} wraps seen");
     assert!(stats.audio_thread.unwrap().trap_installed);
     assert_eq!(stats.heap_operations, 0);
-    assert_eq!(stats.dropouts, 0, "{stats:?}");
+    // A dropout is a block whose callback took longer than the block lasts:
+    // a wall-clock result that other processes on a busy machine can cause.
+    // It's judged at full depth (pushes to main and the nightly run), which
+    // runs this test with the runner to itself; every run checks the rest.
+    if common::full_depth() {
+        assert_eq!(stats.dropouts, 0, "{stats:?}");
+    }
 }

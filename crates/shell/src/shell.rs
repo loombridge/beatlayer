@@ -9,7 +9,7 @@ use bl_core::id::Id;
 use bl_core::time::Ticks;
 use bl_engine::transport as engine_transport;
 use bl_media::MediaStore;
-use bl_model::{ChangeSet, Editor, TrackId, TrackKind, registry as model};
+use bl_model::{ChangeSet, ClipData, Editor, TrackId, TrackKind, registry as model};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -22,10 +22,11 @@ use crate::arrangement::editing::{self, Clipboard, EditFailure};
 use crate::arrangement::{ArrangementView, TransportView, ViewError, Viewport};
 use crate::audio::{AudioHost, ConfigureAudio, EngineTransport, ToneSettings};
 use crate::browser::{self, BrowserError, BrowserView, Waker};
+use crate::clip_view::{self, ClipView};
 use crate::commands::{
-    self as ids, DefaultSetArgs, FileReport, PathArgs, RelinkArgs, SaveAsArgs, SetResult,
-    SettingsArgs, SwitchArgs, SwitchResult, TemplateArgs, TestToneArgs, TestToneState, ThemeArgs,
-    ViewResult, ZoomArgs,
+    self as ids, DefaultSetArgs, FileReport, FoldNotesArgs, LaneArgs, PathArgs, RelinkArgs,
+    SaveAsArgs, SetResult, SettingsArgs, SwitchArgs, SwitchResult, TemplateArgs, TestToneArgs,
+    TestToneState, ThemeArgs, ViewResult, ZoomArgs,
 };
 use crate::devices::{self, DeviceError, DeviceView};
 use crate::files::{ProjectFiles, SetStore, new_set_from};
@@ -37,8 +38,10 @@ use crate::settings::{
     zoom_factor, zoom_percent, zoom_step,
 };
 use bl_devices::KitHost;
+use bl_plugin_host::au::AuHost;
 use bl_plugin_host::clap::ClapHost;
 use bl_plugin_host::scan::Scanner;
+use bl_plugin_host::vst3::Vst3Host;
 use bl_shell_spec::arrangement as view_ids;
 use bl_shell_spec::browser as browser_ids;
 use bl_shell_spec::devices as device_ids;
@@ -46,6 +49,7 @@ use bl_shell_spec::editing as edit_ids;
 use bl_shell_spec::export as export_ids;
 use bl_shell_spec::midi_files as midi_ids;
 use bl_shell_spec::mixer_view as mixer_ids;
+use bl_shell_spec::notes as note_ids;
 use bl_shell_spec::perception as perception_ids;
 use bl_shell_spec::plugins as plugin_ids;
 use bl_shell_spec::tracks as track_ids;
@@ -199,6 +203,7 @@ pub enum GesturePhase {
 #[derive(Debug)]
 struct Gesture {
     view: ArrangementView,
+    clip_view: ClipView,
     last: Option<Invocation>,
 }
 
@@ -299,6 +304,9 @@ pub struct Shell {
     agent_status: AgentServerStatus,
     /// What the Arrangement View shows (WP-1.8a).
     arrangement: ArrangementView,
+    /// What the Clip View shows (WP-2.3): whether it's open, Draw Mode, and
+    /// the notes selected in its MIDI Note Editor.
+    clip_view: ClipView,
     /// A number that changes whenever the document may have changed.
     document_revision: u64,
     /// The browser (WP-1.10).
@@ -335,8 +343,13 @@ pub struct Shell {
     /// The native device types the engine offers, which the plug-ins'
     /// join in the Device View (WP-2.6).
     native_types: Vec<bl_engine::DeviceType>,
-    /// The CLAP host: plug-in devices' instances, on this thread (WP-2.6).
+    /// The CLAP host: CLAP devices' instances, on this thread (WP-2.6).
     plugins: ClapHost,
+    /// The Audio Unit host: AU devices' units, on this thread, macOS only
+    /// (WP-2.8).
+    au: AuHost,
+    /// The VST3 host: VST3 devices' instances, on this thread (WP-2.7).
+    vst3: Vst3Host,
     /// The plug-in scanner (WP-2.9): the plug-ins found on this machine,
     /// their blocklist, and their cache.
     scanner: Scanner,
@@ -456,6 +469,12 @@ impl Shell {
         // CLAP plug-ins (WP-2.6): this thread is their main thread.
         let plugins = ClapHost::new();
         audio.set_plugins(plugins.clone());
+        // Audio Units (WP-2.8): their units live with this thread too.
+        let au = AuHost::new();
+        audio.set_au(au.clone());
+        // VST3 plug-ins (WP-2.7): this thread is their main thread too.
+        let vst3 = Vst3Host::new();
+        audio.set_vst3(vst3.clone());
         // The plug-in scanner (WP-2.9): finds the plug-ins on this machine
         // in a child process, caching and blocklisting what it finds. Its
         // cache lives with the preferences.
@@ -499,9 +518,11 @@ impl Shell {
             revision: 0,
             agent_status: AgentServerStatus::default(),
             arrangement: ArrangementView::new(),
+            clip_view: ClipView::default(),
             document_revision: 0,
             clipboard: None,
             edit_gesture: None,
+            au,
             seen_insert_marker: None,
             gesture: false,
             mixer: MixerView::new(),
@@ -518,6 +539,7 @@ impl Shell {
             },
             native_types,
             plugins,
+            vst3,
             scanner,
             kit,
             device_commands: std::collections::BTreeMap::new(),
@@ -663,6 +685,14 @@ impl Shell {
     /// The audio device, to sample its CPU load.
     pub fn audio_mut(&mut self) -> &mut AudioHost {
         &mut self.audio
+    }
+
+    /// The audio interface the In/Out choosers list: the open device's
+    /// channels, or none while no stream is open.
+    #[must_use]
+    pub fn interface(&self) -> crate::routing::Interface {
+        let (inputs, outputs) = self.audio.channels();
+        crate::routing::Interface { inputs, outputs }
     }
 
     /// The preferences.
@@ -1125,20 +1155,30 @@ impl Shell {
         let mut types = self.native_types.clone();
         types.extend(self.kit.device_types());
         types.extend(self.plugins.types().into_iter().map(|t| t.device_type));
+        types.extend(self.au.types().into_iter().map(|t| t.device_type));
+        types.extend(self.vst3.types().into_iter().map(|t| t.device_type));
         self.devices.set_device_types(types);
     }
 
-    /// The CLAP host, whose plug-ins are the set's plug-in devices
+    /// The CLAP host, whose plug-ins are the set's CLAP devices
     /// (WP-2.6).
     #[must_use]
     pub fn plugins(&self) -> &ClapHost {
         &self.plugins
     }
 
+    /// The VST3 host, whose plug-ins are the set's VST3 devices (WP-2.7).
+    #[must_use]
+    pub fn vst3(&self) -> &Vst3Host {
+        &self.vst3
+    }
+
     /// Lets go of the plug-ins of the set being replaced (WP-2.6): the new
     /// set's plug-in devices load their plug-ins from their saved state.
     fn set_replaced(&mut self) {
         self.plugins.clear();
+        self.au.clear();
+        self.vst3.clear();
         self.kit.clear();
     }
 
@@ -1158,17 +1198,19 @@ impl Shell {
             let device = device
                 .or(shell.devices.selected())
                 .ok_or_else(|| unavailable("select a plug-in device first".to_owned()))?;
-            if crate::plugins::is_clap(shell.editor.document(), device) {
+            if crate::plugins::is_plugin(shell.editor.document(), device)
+                || crate::plugins::is_au(shell.editor.document(), device)
+            {
                 Ok(device)
             } else {
                 Err(ShellError::InvalidArgs {
                     command: id.to_owned(),
-                    message: format!("{device} isn't a CLAP plug-in device"),
+                    message: format!("{device} isn't a plug-in device"),
                 })
             }
         };
         let info = |shell: &Self, device| {
-            crate::plugins::info(&shell.plugins, device)
+            crate::plugins::info(&shell.plugins, &shell.au, &shell.vst3, device)
                 .map(|mut info| {
                     // WP-2.10: where the window sits, from the frame store
                     // the set keeps.
@@ -1185,27 +1227,44 @@ impl Shell {
                     track,
                     index,
                 } = Self::args(id, args)?;
-                let found =
-                    self.plugins
-                        .load(Path::new(&path))
-                        .map_err(|e| ShellError::Failed {
-                            command: id.to_owned(),
-                            message: e.to_string(),
-                        })?;
-                let chosen = match &plugin {
-                    Some(wanted) => found.iter().find(|t| {
-                        matches!(&t.device_type.kind,
+                let path = std::path::PathBuf::from(path);
+                let failed = |e: String| ShellError::Failed {
+                    command: id.to_owned(),
+                    message: e,
+                };
+                let found: Vec<(bl_engine::DeviceType, std::path::PathBuf)> =
+                    if crate::plugins::is_vst3_path(&path) {
+                        self.vst3
+                            .load(&path)
+                            .map_err(|e| failed(e.to_string()))?
+                            .into_iter()
+                            .map(|t| (t.device_type, t.path))
+                            .collect()
+                    } else {
+                        self.plugins
+                            .load(&path)
+                            .map_err(|e| failed(e.to_string()))?
+                            .into_iter()
+                            .map(|t| (t.device_type, t.path))
+                            .collect()
+                    };
+                let (device_type, loaded_path) = match &plugin {
+                    Some(wanted) => found.iter().find(|(t, _)| {
+                        matches!(&t.kind,
                             bl_model::DeviceKind::Plugin { plugin_id, .. } if plugin_id == wanted)
                     }),
                     None => found.first(),
                 }
                 .ok_or_else(|| ShellError::InvalidArgs {
                     command: id.to_owned(),
-                    message: format!("{path} has no plug-in {}", plugin.unwrap_or_default()),
+                    message: format!(
+                        "{} has no plug-in {}",
+                        path.display(),
+                        plugin.unwrap_or_default()
+                    ),
                 })?
                 .clone();
                 self.refresh_device_types();
-                let device_type = chosen.device_type;
                 let added: device_ids::DeviceAdded = serde_json::from_value(self.run_devices(
                     device_ids::ADD,
                     to_value(&device_ids::AddDeviceArgs {
@@ -1228,7 +1287,65 @@ impl Shell {
                 let _ = self.editor.amend_plugin_state(
                     added.device,
                     Some(bl_model::PluginState {
-                        path: chosen.path.to_string_lossy().into_owned(),
+                        path: loaded_path.to_string_lossy().into_owned(),
+                        data: Vec::new(),
+                    }),
+                );
+                let plugin_id = match &device_type.kind {
+                    bl_model::DeviceKind::Plugin { plugin_id, .. } => plugin_id.clone(),
+                    bl_model::DeviceKind::Native { device_type } => device_type.clone(),
+                };
+                Ok(to_value(&plugin_ids::PluginLoaded {
+                    device: added.device,
+                    track: added.track,
+                    new_track: added.new_track,
+                    plugin: plugin_id,
+                    name: device_type.name,
+                }))
+            }
+            plugin_ids::LOAD_AU => {
+                let plugin_ids::LoadAudioUnitArgs {
+                    component_type,
+                    subtype,
+                    manufacturer,
+                    track,
+                    index,
+                } = Self::args(id, args)?;
+                let found = self
+                    .au
+                    .load(&component_type, &subtype, &manufacturer)
+                    .map_err(|error| match error {
+                        bl_plugin_host::au::AuError::Unavailable => unavailable(error.to_string()),
+                        error => ShellError::Failed {
+                            command: id.to_owned(),
+                            message: error.to_string(),
+                        },
+                    })?;
+                self.refresh_device_types();
+                let device_type = found.device_type;
+                let added: device_ids::DeviceAdded = serde_json::from_value(self.run_devices(
+                    device_ids::ADD,
+                    to_value(&device_ids::AddDeviceArgs {
+                        device: device_ids::NewDevice {
+                            kind: device_type.kind.clone(),
+                            name: device_type.name.clone(),
+                            role: device_type.role,
+                            sidechain: false,
+                        },
+                        track,
+                        index,
+                    }),
+                )?)
+                .map_err(|e| ShellError::Failed {
+                    command: id.to_owned(),
+                    message: e.to_string(),
+                })?;
+                // Spec: au-hosting R8. An Audio Unit has no file: the set
+                // keeps its own state from the start.
+                let _ = self.editor.amend_plugin_state(
+                    added.device,
+                    Some(bl_model::PluginState {
+                        path: String::new(),
                         data: Vec::new(),
                     }),
                 );
@@ -1247,8 +1364,20 @@ impl Shell {
             plugin_ids::SHOW_WINDOW => {
                 let plugin_ids::ShowWindowArgs { device, shown } = Self::args(id, args)?;
                 let device = target(self, device)?;
+                if crate::plugins::is_au(self.editor.document(), device) {
+                    // Spec: au-hosting R13. A unit's own editor arrives with
+                    // WP-2.8's second part.
+                    return Err(unavailable(
+                        "Audio Units' own editor windows aren't hosted yet".to_owned(),
+                    ));
+                }
+                if crate::plugins::is_vst3(self.editor.document(), device) {
+                    return Err(unavailable(
+                        "a VST3 plug-in's editor is a later part of VST3 hosting".to_owned(),
+                    ));
+                }
                 self.plugins.idle();
-                let open = crate::plugins::info(&self.plugins, device)
+                let open = crate::plugins::info(&self.plugins, &self.au, &self.vst3, device)
                     .is_some_and(|info| info.window_open);
                 let failed = |e: bl_plugin_host::clap::ClapError| ShellError::Failed {
                     command: id.to_owned(),
@@ -1282,6 +1411,7 @@ impl Shell {
                 let plugin_ids::PluginInfoArgs { device } = Self::args(id, args)?;
                 let device = target(self, device)?;
                 self.plugins.idle();
+                self.vst3.idle();
                 info(self, device)
             }
             plugin_ids::SET_WINDOW => {
@@ -1345,14 +1475,11 @@ impl Shell {
             }
             plugin_ids::SCAN | plugin_ids::RESCAN => {
                 let plugin_ids::ScanArgs { paths } = Self::args(id, args)?;
-                let paths: Vec<std::path::PathBuf> = match paths {
-                    Some(paths) => paths.into_iter().map(std::path::PathBuf::from).collect(),
-                    None => bl_plugin_host::scan::system_paths(bl_model::PluginFormat::Clap),
-                };
+                let paths: Option<Vec<std::path::PathBuf>> =
+                    paths.map(|paths| paths.into_iter().map(std::path::PathBuf::from).collect());
                 let report = crate::plugins::scan_report(
                     &self.scanner,
-                    bl_model::PluginFormat::Clap,
-                    &paths,
+                    paths.as_deref(),
                     id == plugin_ids::RESCAN,
                     &self.prefs.hidden_plugins,
                 );
@@ -1467,7 +1594,7 @@ impl Shell {
         ) {
             // Spec: clap-hosting R8. A copy of a plug-in device starts
             // from its plug-in's state now.
-            crate::plugins::capture_states(&self.plugins, &self.kit, &mut self.editor);
+            crate::plugins::capture_states(&self.plugins, &self.au, &self.kit, &mut self.editor);
         }
         let user_library = self.browser_view.user_library().map(Path::to_path_buf);
         let zoom = self.zoom();
@@ -1682,6 +1809,12 @@ impl Shell {
         &self.arrangement
     }
 
+    /// What the Clip View shows (WP-2.3).
+    #[must_use]
+    pub fn clip_view(&self) -> &ClipView {
+        &self.clip_view
+    }
+
     /// What the mixers show (WP-1.9).
     #[must_use]
     pub fn mixer_view(&self) -> &MixerView {
@@ -1791,9 +1924,9 @@ impl Shell {
             self.set_message(error, true);
         }
         let mut changed = polled.changed;
-        // Plug-ins' main-thread work (WP-2.6), and the changes they made
-        // themselves.
-        let plugins_changed = self.plugins.idle();
+        // Plug-ins' main-thread work (WP-2.6 to WP-2.8), and the changes
+        // they made themselves.
+        let plugins_changed = self.plugins.idle() | self.au.idle() | self.vst3.idle();
         if plugins_changed {
             self.refresh_device_types();
             changed = true;
@@ -2057,14 +2190,15 @@ impl Shell {
     }
 
     /// Runs one step of a gesture that edits the set, such as dragging
-    /// clips (WP-1.8b; arrangement-editing R13). A gesture is one undo
-    /// step however many frames it lasts: its first update opens a
-    /// transaction, each update runs `invocation`, an editing command with
-    /// arguments measured from where the gesture began, on the set as it
-    /// was then, and the commit closes the transaction. The set follows the
-    /// gesture as it goes, so the view and the engine show it. A frame
-    /// whose command is refused (a clip pushed before 1.1.1) keeps the last
-    /// one that worked. Cancelling puts the set and the selection back.
+    /// clips or notes (WP-1.8b; arrangement-editing R13, piano-roll R11). A
+    /// gesture is one undo step however many frames it lasts: its first
+    /// update opens a transaction, each update runs `invocation`, an editing
+    /// command with arguments measured from where the gesture began, on the
+    /// set as it was then, and the commit closes the transaction. The set
+    /// follows the gesture as it goes, so the view and the engine show it. A
+    /// frame whose command is refused (a clip pushed before 1.1.1, a note
+    /// past key 127) keeps the last one that worked. Cancelling puts the set
+    /// and the selection back.
     ///
     /// # Errors
     ///
@@ -2080,6 +2214,7 @@ impl Shell {
             if let Some(gesture) = self.edit_gesture.take() {
                 self.editor.cancel().ok();
                 self.arrangement.restore_selection(&gesture.view);
+                self.clip_view = gesture.clip_view;
                 self.document_changed();
                 self.touch();
             }
@@ -2087,10 +2222,12 @@ impl Shell {
         }
         let mut outcome = Ok(Value::Null);
         if let Some(invocation) = invocation {
-            if !edit_ids::handles(&invocation.id) {
+            if !edit_ids::handles(&invocation.id) && !note_ids::handles(&invocation.id) {
                 return Err(ShellError::Unavailable {
                     command: invocation.id.clone(),
-                    reason: "only the Arrangement's editing commands run as gestures".to_owned(),
+                    reason: "only the Arrangement's and the Clip View's editing commands run as \
+                             gestures"
+                        .to_owned(),
                 });
             }
             outcome = self.gesture_step(invocation);
@@ -2107,11 +2244,16 @@ impl Shell {
     }
 
     fn gesture_step(&mut self, invocation: &Invocation) -> Result<Value, ShellError> {
-        let label = editing::label(&invocation.id, &invocation.args);
+        let label = if note_ids::handles(&invocation.id) {
+            clip_view::label(&invocation.id)
+        } else {
+            editing::label(&invocation.id, &invocation.args)
+        };
         match &self.edit_gesture {
             None => {
                 self.edit_gesture = Some(Gesture {
                     view: self.arrangement.clone(),
+                    clip_view: self.clip_view.clone(),
                     last: None,
                 });
             }
@@ -2121,15 +2263,39 @@ impl Shell {
                 self.editor.cancel().ok();
                 let view = gesture.view.clone();
                 self.arrangement.restore_selection(&view);
+                self.clip_view = gesture.clip_view.clone();
             }
         }
         self.editor.begin(label);
-        let result = editing::run(
-            &invocation.id,
-            invocation.args.clone(),
+        let run = |editor: &mut Editor,
+                   arrangement: &mut ArrangementView,
+                   clip_view: &mut ClipView,
+                   clipboard: &mut Option<Clipboard>,
+                   invocation: &Invocation| {
+            if note_ids::handles(&invocation.id) {
+                clip_view::run(
+                    &invocation.id,
+                    invocation.args.clone(),
+                    editor,
+                    clip_view,
+                    arrangement,
+                )
+            } else {
+                editing::run(
+                    &invocation.id,
+                    invocation.args.clone(),
+                    editor,
+                    arrangement,
+                    clipboard,
+                )
+            }
+        };
+        let result = run(
             &mut self.editor,
             &mut self.arrangement,
+            &mut self.clip_view,
             &mut self.clipboard,
+            invocation,
         );
         let Some(gesture) = self.edit_gesture.as_mut() else {
             return Ok(Value::Null);
@@ -2141,12 +2307,12 @@ impl Shell {
             }
             Err(failure) => {
                 if let Some(last) = gesture.last.clone() {
-                    let _ = editing::run(
-                        &last.id,
-                        last.args,
+                    let _ = run(
                         &mut self.editor,
                         &mut self.arrangement,
+                        &mut self.clip_view,
                         &mut self.clipboard,
+                        &last,
                     );
                 }
                 Err(edit_error(&invocation.id, failure))
@@ -2262,6 +2428,19 @@ impl Shell {
                     },
                     Area::Browser => contexts.push(self.browser_view.focus().context()),
                     Area::Detail if self.value_focused => contexts.push(Context::ValueField),
+                    // Spec: piano-roll. With the Clip View open, its MIDI
+                    // Note Editor holds the detail area's keys.
+                    Area::Detail if self.clip_view.visible() => {
+                        contexts.push(Context::ClipView);
+                        contexts.push(Context::NoteEditor);
+                        if !self
+                            .clip_view
+                            .selected_notes(self.editor.document(), &self.arrangement)
+                            .is_empty()
+                        {
+                            contexts.push(Context::NoteSelection);
+                        }
+                    }
                     Area::Detail => contexts.push(Context::DeviceView),
                     Area::ControlBar | Area::StatusBar => {}
                 }
@@ -2281,6 +2460,13 @@ impl Shell {
         match id {
             ids::VIEW_FULL_SCREEN => Some(self.full_screen),
             ids::VIEW_TOGGLE_BROWSER => Some(self.browser),
+            ids::VIEW_TOGGLE_CLIP_VIEW => Some(self.clip_view.visible()),
+            ids::VIEW_DRAW_MODE => Some(self.clip_view.draw_mode()),
+            ids::VIEW_FOLD_NOTES => Some(
+                self.clip_view
+                    .shown_clip(self.editor.document(), &self.arrangement)
+                    .is_some_and(|clip| self.clip_view.is_folded(clip)),
+            ),
             ids::VIEW_TOGGLE_INFO_VIEW => Some(self.info_view),
             ids::VIEW_TOGGLE_PLUG_IN_WINDOWS => Some(self.plug_in_windows),
             ids::FOCUS_TOGGLE_TAB_NAVIGATION => Some(self.prefs.tab_navigation),
@@ -2881,6 +3067,7 @@ impl Shell {
         if self.edit_gesture.is_some()
             && (model::handles(id)
                 || edit_ids::handles(id)
+                || note_ids::handles(id)
                 || device_ids::handles(id)
                 || self.is_device_command(id)
                 || track_ids::handles(id)
@@ -2903,6 +3090,24 @@ impl Shell {
                 &mut self.editor,
                 &mut self.arrangement,
                 &mut self.clipboard,
+            )
+            .map_err(|failure| edit_error(id, failure));
+            if *self.editor.document() != before {
+                self.dirty = true;
+                self.document_changed();
+            }
+            self.touch();
+            return result;
+        }
+        if note_ids::handles(id) {
+            // Spec: piano-roll. The Clip View's note edits.
+            let before = self.editor.document().clone();
+            let result = clip_view::run(
+                id,
+                args,
+                &mut self.editor,
+                &mut self.clip_view,
+                &self.arrangement,
             )
             .map_err(|failure| edit_error(id, failure));
             if *self.editor.document() != before {
@@ -3246,11 +3451,13 @@ impl Shell {
                 self.editor = editor;
                 self.store.close();
                 self.devices.set_windows(bl_model::DeviceWindows::new());
+                self.clip_view.set_folds(bl_model::ClipFolds::new());
                 self.set_path = None;
                 self.dirty = false;
                 self.main_view = MainView::Arrangement;
                 self.message = None;
                 self.arrangement.reset();
+                self.clip_view.forget_selection();
                 self.mixer.reset();
                 self.new_set_transport();
                 self.document_changed();
@@ -3269,6 +3476,8 @@ impl Shell {
                 // Spec: device-chains R29. Floating windows reopen where
                 // they were saved.
                 self.devices.set_windows(self.store.windows());
+                // Spec: piano-roll. Folded note editors too.
+                self.clip_view.set_folds(self.store.folds());
                 self.saved = snapshot(&editor);
                 self.set_replaced();
                 self.editor = editor;
@@ -3276,6 +3485,7 @@ impl Shell {
                 self.dirty = false;
                 self.message = None;
                 self.arrangement.reset();
+                self.clip_view.forget_selection();
                 self.mixer.reset();
                 // The set's files go into the media store, so its clips'
                 // waveforms build (browser R15) and the engine finds their
@@ -3307,8 +3517,14 @@ impl Shell {
                 let path = self.set_path.clone().ok_or_else(|| {
                     unavailable("the set has never been saved; use `set.save_as` to give it a file")
                 })?;
-                crate::plugins::capture_states(&self.plugins, &self.kit, &mut self.editor);
+                crate::plugins::capture_states(
+                    &self.plugins,
+                    &self.au,
+                    &self.kit,
+                    &mut self.editor,
+                );
                 self.store.set_windows(self.devices.windows().clone());
+                self.store.set_folds(self.clip_view.folds().clone());
                 let warnings = self.store.save(&path, &self.editor).map_err(failed)?;
                 self.saved_as(path, &warnings);
                 Ok(self.set_result())
@@ -3317,8 +3533,14 @@ impl Shell {
                 // Spec: app-shell R17 to R21. The store decides where in a
                 // project folder the set goes; the result says where.
                 let SaveAsArgs { path } = Self::args(id, args)?;
-                crate::plugins::capture_states(&self.plugins, &self.kit, &mut self.editor);
+                crate::plugins::capture_states(
+                    &self.plugins,
+                    &self.au,
+                    &self.kit,
+                    &mut self.editor,
+                );
                 self.store.set_windows(self.devices.windows().clone());
+                self.store.set_folds(self.clip_view.folds().clone());
                 let (path, warnings) = self
                     .store
                     .save_as(Path::new(&path), &self.editor)
@@ -3351,7 +3573,12 @@ impl Shell {
                         )
                     })?,
                 };
-                crate::plugins::capture_states(&self.plugins, &self.kit, &mut self.editor);
+                crate::plugins::capture_states(
+                    &self.plugins,
+                    &self.au,
+                    &self.kit,
+                    &mut self.editor,
+                );
                 let warnings = self.store.save_copy(&path, &self.editor).map_err(failed)?;
                 self.prefs.default_set = Some(path.clone());
                 self.save_preferences();
@@ -3381,7 +3608,12 @@ impl Shell {
                     });
                 }
                 let path = folder.join(format!("{name}.{}", bl_project::SET_EXTENSION));
-                crate::plugins::capture_states(&self.plugins, &self.kit, &mut self.editor);
+                crate::plugins::capture_states(
+                    &self.plugins,
+                    &self.au,
+                    &self.kit,
+                    &mut self.editor,
+                );
                 let warnings = self.store.save_copy(&path, &self.editor).map_err(failed)?;
                 self.message = (!warnings.is_empty()).then(|| Message {
                     text: format!("The template was saved, but: {}", warnings.join("; ")),
@@ -3401,8 +3633,14 @@ impl Shell {
                          folder to collect into",
                     )
                 })?;
-                crate::plugins::capture_states(&self.plugins, &self.kit, &mut self.editor);
+                crate::plugins::capture_states(
+                    &self.plugins,
+                    &self.au,
+                    &self.kit,
+                    &mut self.editor,
+                );
                 self.store.set_windows(self.devices.windows().clone());
+                self.store.set_folds(self.clip_view.folds().clone());
                 let files = self.store.collect().map_err(failed)?;
                 let warnings = self.store.save(&path, &self.editor).map_err(failed)?;
                 self.saved_as(path.clone(), &warnings);
@@ -3492,6 +3730,64 @@ impl Shell {
                     self.focused_area = Area::MainView;
                 }
                 Ok(self.view_result())
+            }
+            ids::VIEW_TOGGLE_CLIP_VIEW => {
+                // Spec: piano-roll; L-STAT-004. View state only.
+                Self::args::<NoArgs>(id, args)?;
+                self.clip_view.toggle();
+                Ok(to_value(
+                    &self
+                        .clip_view
+                        .state(self.editor.document(), &self.arrangement),
+                ))
+            }
+            ids::VIEW_DRAW_MODE => {
+                // Spec: piano-roll R2; S-GRID-001, M-OPT-017. View state only.
+                Self::args::<NoArgs>(id, args)?;
+                self.clip_view.toggle_draw_mode();
+                Ok(to_value(
+                    &self
+                        .clip_view
+                        .state(self.editor.document(), &self.arrangement),
+                ))
+            }
+            ids::VIEW_FOLD_NOTES => {
+                // Spec: piano-roll; M-VIEW-039, S-NOTE-038. View state only,
+                // saved with the set.
+                let FoldNotesArgs { clip, folded } = Self::args(id, args)?;
+                let clip = match clip {
+                    Some(clip) => clip,
+                    None => self
+                        .clip_view
+                        .shown_clip(self.editor.document(), &self.arrangement)
+                        .ok_or_else(|| unavailable("no MIDI clip is shown in the Clip View"))?,
+                };
+                match self.editor.document().clip(clip) {
+                    None => {
+                        return Err(failed(format!("no clip has the ID {}", clip.0)));
+                    }
+                    Some(value) if !matches!(value.data, ClipData::Midi(_)) => {
+                        return Err(failed("the clip isn't a MIDI clip".to_owned()));
+                    }
+                    Some(_) => {}
+                }
+                let folded = folded.unwrap_or(!self.clip_view.is_folded(clip));
+                self.clip_view.set_folded(clip, folded);
+                Ok(to_value(
+                    &self
+                        .clip_view
+                        .state(self.editor.document(), &self.arrangement),
+                ))
+            }
+            ids::VIEW_LANE => {
+                // Spec: piano-roll; the lane shows one of a note's values.
+                let LaneArgs { lane } = Self::args(id, args)?;
+                self.clip_view.set_lane(lane);
+                Ok(to_value(
+                    &self
+                        .clip_view
+                        .state(self.editor.document(), &self.arrangement),
+                ))
             }
             ids::VIEW_TOGGLE_INFO_VIEW => {
                 Self::args::<NoArgs>(id, args)?;

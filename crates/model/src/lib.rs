@@ -77,7 +77,7 @@ mod shared;
 mod track;
 
 pub use changes::{Change, ChangeSet};
-pub use clip::{AudioData, Clip, ClipData, EDGE_FADE_SECONDS, MidiData, Note};
+pub use clip::{AudioData, Clip, ClipData, ClipFolds, EDGE_FADE_SECONDS, MidiData, Note};
 pub use command::Command;
 pub use device::{
     Device, DeviceKind, DeviceRole, DeviceWindows, PluginFormat, PluginState, Sidechain,
@@ -93,4 +93,4 @@ pub use imbl::{OrdMap, Vector};
 pub use metronome::{CountIn, MetronomeRhythm, MetronomeSettings, MetronomeSound};
 pub use param::{DeviceDescription, ParamDescriptor, ParamKind, ParamUnit};
 pub use scene::{DEFAULT_SCENE_COUNT, Scene};
-pub use track::{Input, Mixer, Monitor, Output, Routing, SendTap, Tap, Track, TrackKind};
+pub use track::{Channel, Input, Mixer, Monitor, Output, Routing, SendTap, Tap, Track, TrackKind};

@@ -1,0 +1,39 @@
+[package]
+name = "bl-assistant"
+description = "The built-in assistant: model providers over the command registry, and keys in the OS keychain."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+# The commands the model calls: each one's description and argument schema
+# becomes a tool (WP-2.23).
+bl-commands.workspace = true
+# API keys: the OS keychain, never a settings or project file. The default
+# features are its platform stores: Keychain on macOS, Credential Manager on
+# Windows, the Secret Service on Linux.
+keyring = "4.2.0"
+# The HTTP client for the providers' streaming APIs, blocking and without an
+# async runtime, like the agent API's server. The TLS roots are the
+# platform's own store (below), and the crypto provider is ring.
+ureq = { version = "3.4.2", default-features = false, features = ["rustls-no-provider", "gzip"] }
+# The TLS implementation behind ureq, with ring as the crypto provider.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+# The platform's certificate store (Keychain on macOS, the system store on
+# Windows and Linux), which the TLS roots come from.
+rustls-native-certs = "0.8"
+serde = { version = "1.0.228", default-features = false, features = ["std", "derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+# The tests' command argument types: the schemas, with their `$defs` and
+# `$ref`s, that each provider converts to its own tool format.
+schemars = { version = "=1.2.2", default-features = false, features = ["std", "derive"] }
+# The agent-loop tests' commands: a real document and undo history, so a
+# turn's edits can be run and undone for real.
+bl-model.workspace = true
+
+[lints]
+workspace = true

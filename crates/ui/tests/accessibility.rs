@@ -864,6 +864,34 @@ fn session_main(h: &mut Harness) {
     h.settle();
 }
 
+/// The shell runs audio on a four-channel null device, so the In/Out
+/// choosers list two output pairs and four inputs, as an interface does
+/// (WP-2.13).
+fn four_channel_interface(h: &mut Harness) {
+    use bl_audio_io::{BackendKind, NullBackend, NullOptions};
+    use bl_shell::audio::{AudioHost, AudioSettings};
+    use bl_shell::files::ProjectFiles;
+    use bl_shell::settings::Preferences;
+
+    let backend = NullBackend::with_options(NullOptions {
+        channels: 4,
+        ..NullOptions::default()
+    });
+    let audio = AudioHost::with_backends(
+        vec![BackendKind::Null],
+        Box::new(move |_| Ok(Box::new(backend.clone()))),
+        AudioSettings::default(),
+    );
+    let mut shell = Shell::new(
+        Preferences::default(),
+        None,
+        audio,
+        Box::new(ProjectFiles::new()),
+    );
+    shell.start_audio();
+    h.shell = shell;
+}
+
 /// A Test Gain on audio track 3, the selected track, with no device
 /// selected (WP-2.4).
 fn a_device(h: &mut Harness) {
@@ -967,6 +995,11 @@ fn paths() -> BTreeMap<&'static str, Path> {
         key,
     };
     let clip_view = LaterView("the Clip View (milestone M2)");
+    // The Clip View's note editing (WP-2.3): the pointer reaches each of
+    // these — a click, a marquee, and drags in the note editor — and their
+    // keys (shortcuts.md, `note-editor` and `note-selection`) come with a
+    // later package.
+    let note_editor = LaterView("the note editor's keys (the note-editor shortcuts, milestone M2)");
     let device_params = Equivalent(
         "a described device's parameter controls in the Device View: Tab to one, then Up and \
          Down step it and Delete sets its default (the device framework spec, R17)",
@@ -1221,6 +1254,14 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("clip.set_midi_region", Exception(clip_view)),
         ("clip.set_region", Exception(clip_view)),
         ("clip.set_data", Exception(clip_view)),
+        ("clip_view.select_notes", Exception(note_editor)),
+        ("note.add", Exception(note_editor)),
+        ("note.delete", Exception(note_editor)),
+        ("note.move", Exception(note_editor)),
+        ("note.resize", Exception(note_editor)),
+        ("note.set_value", Exception(note_editor)),
+        ("note.ramp_value", Exception(note_editor)),
+        ("view.lane", Exception(note_editor)),
         // The Device View (WP-2.4): Enter on a title bar's controls.
         (
             "device.select",
@@ -1343,6 +1384,13 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "plugin.load",
             Exception(LaterView("the browser's plug-ins (WP-2.9)")),
         ),
+        // Audio Units (WP-2.8) load by component description until the
+        // browser lists them (WP-2.8's second part) and the scanner finds
+        // them.
+        (
+            "plugin.load_au",
+            Exception(LaterView("the browser's Audio Units (WP-2.8)")),
+        ),
         (
             "plugin.show_window",
             Exception(LaterView("the plug-in device panel (WP-2.10)")),
@@ -1403,6 +1451,27 @@ fn paths() -> BTreeMap<&'static str, Path> {
         (
             "routing.set_monitor",
             main(nothing, arrangement_track_3, "Monitoring", Key::ArrowRight),
+        ),
+        // Main's Cue Out and Main Out (WP-2.13): Up and Down on them step
+        // through the interface's output pairs, which need more than one
+        // pair to step to.
+        (
+            "routing.set_cue_out",
+            main(
+                four_channel_interface,
+                session_main,
+                "Cue Output",
+                Key::ArrowDown,
+            ),
+        ),
+        (
+            "routing.set_main_out",
+            main(
+                four_channel_interface,
+                session_main,
+                "Main Output",
+                Key::ArrowDown,
+            ),
         ),
         // A return's Pre/Post switch, in Main's column: Enter switches it.
         (

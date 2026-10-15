@@ -16,6 +16,9 @@
 //!   moving, copying, resizing, splitting, deleting, and duplicating clips,
 //!   and the clipboard; [`context_menus`], the clip and time-selection
 //!   menus that reach them.
+//! - [`notes`]: the Clip View's note-editing commands (WP-2.3): selecting
+//!   the MIDI Note Editor's notes, drawing, deleting, moving and resizing
+//!   them.
 //! - [`browser`]: the browser's commands (WP-1.10): places, browsing,
 //!   search, preview, and adding files to the Arrangement.
 //! - [`mixer_view`]: the Mixer view's view commands (WP-1.9): showing and
@@ -52,6 +55,7 @@ pub mod export;
 pub mod menus;
 pub mod midi_files;
 pub mod mixer_view;
+pub mod notes;
 pub mod perception;
 pub mod plugins;
 pub mod settings;
@@ -71,6 +75,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     commands::register(registry)?;
     arrangement::register(registry)?;
     editing::register(registry)?;
+    notes::register(registry)?;
     transport::register(registry)?;
     mixer_view::register(registry)?;
     browser::register(registry)?;

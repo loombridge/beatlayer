@@ -33,6 +33,10 @@ allow = [
     # Weak copyleft that can be combined with GPL-3.0.
     "MPL-2.0",
     "LGPL-2.1-or-later",
+    # The mp3lame crates (WP-2.26) declare the deprecated SPDX id
+    # "LGPL-3.0"; cargo-deny matches GNU licences pedantically, so the
+    # deprecated form needs its own entry and doesn't match the two below.
+    "LGPL-3.0",
     "LGPL-3.0-only",
     "LGPL-3.0-or-later",
     # Strong copyleft that can be combined with GPL-3.0-or-later.

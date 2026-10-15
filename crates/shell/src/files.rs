@@ -15,8 +15,8 @@ use std::path::{Component, Path, PathBuf};
 
 use bl_core::id::IdAllocator;
 use bl_model::{
-    ContentHash, DEFAULT_SCENE_COUNT, DeviceWindows, Document, Editor, SceneId, TrackId, TrackKind,
-    registry,
+    ClipFolds, ContentHash, DEFAULT_SCENE_COUNT, DeviceWindows, Document, Editor, SceneId, TrackId,
+    TrackKind, registry,
 };
 use bl_project::{
     Media, MediaPath, MediaRef, Project, ProjectFolder, SET_EXTENSION, SaveOptions, SetFile, is_set,
@@ -92,6 +92,19 @@ pub trait SetStore {
         DeviceWindows::new()
     }
 
+    /// Gives the store which clips' MIDI Note Editors are folded (WP-2.3),
+    /// for the next save to write beside the document. A store that keeps
+    /// no folds ignores it.
+    fn set_folds(&mut self, folds: ClipFolds) {
+        let _ = folds;
+    }
+
+    /// Which of the open set's clips' MIDI Note Editors are folded, as it
+    /// was saved.
+    fn folds(&self) -> ClipFolds {
+        ClipFolds::new()
+    }
+
     /// Writes `editor` to `path` as a copy without making it the open set:
     /// the default set and templates (WP-2.25). Returns warnings about
     /// things that went wrong without stopping the write. A store that
@@ -142,6 +155,9 @@ pub struct ProjectFiles {
     /// Floating devices' window frames (WP-2.5b): the open set's, then the
     /// shell's for the next save.
     windows: DeviceWindows,
+    /// Folded MIDI Note Editors (WP-2.3): the open set's, then the shell's
+    /// for the next save.
+    folds: ClipFolds,
 }
 
 impl ProjectFiles {
@@ -167,6 +183,7 @@ impl SetStore for ProjectFiles {
         self.set = Some(set);
         self.media = project.media;
         self.windows = project.windows;
+        self.folds = project.folds;
         self.added.clear();
         Ok((editor, opened))
     }
@@ -210,6 +227,7 @@ impl SetStore for ProjectFiles {
         self.set = None;
         self.media = Media::new();
         self.windows = DeviceWindows::new();
+        self.folds = ClipFolds::new();
         self.added.clear();
     }
 
@@ -219,6 +237,14 @@ impl SetStore for ProjectFiles {
 
     fn windows(&self) -> DeviceWindows {
         self.windows.clone()
+    }
+
+    fn set_folds(&mut self, folds: ClipFolds) {
+        self.folds = folds;
+    }
+
+    fn folds(&self) -> ClipFolds {
+        self.folds.clone()
     }
 
     fn add_media(&mut self, hash: ContentHash, path: &Path, size: u64) {
@@ -263,7 +289,9 @@ impl SetStore for ProjectFiles {
         {
             warnings.push(note);
         }
-        let project = Project::from_editor(editor, media).with_windows(&self.windows);
+        let project = Project::from_editor(editor, media)
+            .with_windows(&self.windows)
+            .with_folds(&self.folds);
         let mut set = SetFile::open(path)
             .map(|(set, _)| set)
             .unwrap_or_else(|_| SetFile::new(path.to_owned()));
@@ -371,7 +399,9 @@ impl ProjectFiles {
         mut media: Media,
     ) -> Result<Vec<String>, String> {
         let warnings = self.add_media_to(&mut media, path);
-        let project = Project::from_editor(editor, media).with_windows(&self.windows);
+        let project = Project::from_editor(editor, media)
+            .with_windows(&self.windows)
+            .with_folds(&self.folds);
         let mut set = self
             .set
             .clone()

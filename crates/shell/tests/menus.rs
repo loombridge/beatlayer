@@ -101,6 +101,12 @@ fn every_shell_command_is_on_a_menu_or_a_control() {
         // (M-FILE-007); it also runs by itself when a set is opened
         // (WP-2.25).
         commands::SET_RELINK_MISSING,
+        // The MIDI Note Editor's lane and fold (WP-2.3): the View menu's
+        // Fold to Notes reaches view.fold_notes through its key (M-VIEW-039,
+        // S-NOTE-038), the lane header's own menu reaches view.lane
+        // (L-CLIP-014), and agents reach both.
+        commands::VIEW_FOLD_NOTES,
+        commands::VIEW_LANE,
     ]
     .into();
     let bar = menu_bar(MenuPlatform::Mac);

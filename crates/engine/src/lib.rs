@@ -99,6 +99,7 @@ mod processor;
 mod program;
 mod registry;
 pub mod routing;
+pub mod session;
 pub mod sidechain;
 mod sources;
 mod state;
@@ -127,6 +128,7 @@ pub use offline::Offline;
 pub use processor::{Carry, Output, Processor};
 pub use program::EngineProgram;
 pub use registry::{DeviceType, NodeFactory, Registry};
+pub use session::{SessionCommand, SessionPlayback, SlotState, SlotStatus};
 pub use state::{EngineCounters, EngineState, Monitor, TrackMeter};
 
 /// An engine's fixed sizes, chosen when it's made. The audio thread works
@@ -154,6 +156,10 @@ pub struct EngineConfig {
     pub max_scheduled: usize,
     /// Tracks with a meter in [`EngineState::meters`].
     pub max_tracks: usize,
+    /// Session slots the engine can launch at once, for
+    /// [`EngineState::session`]: two per track, the clip playing (or
+    /// stopping) and the one queued to replace it.
+    pub max_slots: usize,
     /// Reports waiting for the main thread.
     pub report_capacity: usize,
 }
@@ -161,7 +167,8 @@ pub struct EngineConfig {
 impl EngineConfig {
     /// Stereo at `sample_rate`, in blocks of up to `max_frames` frames, with
     /// room for 4,096 queued messages and pending parameter changes, 256
-    /// scheduled commands, 1,024 metered tracks, and 1,024 reports.
+    /// scheduled commands, 1,024 metered tracks, 2,048 Session slots, and
+    /// 1,024 reports.
     ///
     /// # Panics
     ///
@@ -181,6 +188,7 @@ impl EngineConfig {
             max_pending_events: 4096,
             max_scheduled: 256,
             max_tracks: 1024,
+            max_slots: 2048,
             report_capacity: 1024,
         }
     }

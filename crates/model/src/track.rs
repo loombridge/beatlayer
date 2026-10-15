@@ -1,6 +1,7 @@
 //! Tracks and their mixer settings.
 
 use core::fmt;
+use std::collections::BTreeSet;
 
 use imbl::{OrdMap, Vector};
 use schemars::JsonSchema;
@@ -411,6 +412,10 @@ pub struct Track {
     /// scene, and a slot with no entry is empty. Return, group, and Main
     /// tracks have none.
     pub(crate) slots: OrdMap<SceneId, Shared<Clip>>,
+    /// The scenes whose slot's Clip Stop button was removed (WP-3.2, C-SLOT-006,
+    /// S-SES-005): every audio and MIDI slot has one until then. Return,
+    /// group, and Main tracks have none.
+    pub(crate) removed_stop_buttons: BTreeSet<SceneId>,
     pub(crate) children: Vector<TrackId>,
 }
 
@@ -426,6 +431,7 @@ impl Track {
             devices: Vector::new(),
             clips: OrdMap::new(),
             slots: OrdMap::new(),
+            removed_stop_buttons: BTreeSet::new(),
             children: Vector::new(),
         }
     }
@@ -505,6 +511,18 @@ impl Track {
         self.slots.get(&scene).map(|clip| &**clip)
     }
 
+    /// Whether the slot at `scene` has a Clip Stop button (WP-3.2,
+    /// S-SES-005): every audio and MIDI slot has one until it's removed.
+    #[must_use]
+    pub fn has_stop_button(&self, scene: SceneId) -> bool {
+        self.kind.holds_clips() && !self.removed_stop_buttons.contains(&scene)
+    }
+
+    /// The scenes whose slots' Clip Stop buttons were removed, in order.
+    pub fn removed_stop_buttons(&self) -> impl ExactSizeIterator<Item = SceneId> + '_ {
+        self.removed_stop_buttons.iter().copied()
+    }
+
     /// The clip with this ID, whether it sits on the Arrangement lane or in
     /// a Session slot.
     #[must_use]
@@ -528,6 +546,7 @@ impl Track {
             || self.name != other.name
             || self.mixer != other.mixer
             || self.routing != other.routing
+            || self.removed_stop_buttons != other.removed_stop_buttons
             || !(self.sends.ptr_eq(&other.sends) || self.sends == other.sends)
             || !(self.children.ptr_eq(&other.children) || self.children == other.children)
             || !(self.devices.ptr_eq(&other.devices)

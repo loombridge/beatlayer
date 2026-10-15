@@ -9,6 +9,8 @@ use bl_core::time::{Frames, SampleRate, TempoMap};
 use bl_model::{DeviceId, ParamId, TrackId};
 use rtgc::{ArcGc, LocalRtGc};
 
+use crate::session::SessionPlayback;
+
 /// What a node is in the document, which stays the same from one compile to
 /// the next. The compiler moves a node instance into the new program when
 /// its key survives, so the node keeps its state.
@@ -297,6 +299,9 @@ pub struct Block<'a> {
     /// Where the device writes the notes it sends on, if anything takes
     /// them (WP-2.6).
     pub(crate) notes_out: Option<&'a mut NoteBuffer>,
+    /// The Session slots playing on the tracks, with the frame each clip
+    /// launched on (WP-3.2). Empty for a block outside a program's run.
+    pub(crate) session: &'a [SessionPlayback],
 }
 
 /// The tempo map of a block made outside a program: 120 BPM throughout.
@@ -346,6 +351,7 @@ impl<'a> Block<'a> {
             sidechain: None,
             notes: &[],
             notes_out: None,
+            session: &[],
         }
     }
 
@@ -366,6 +372,13 @@ impl<'a> Block<'a> {
             notes_out: Some(out),
             ..self
         }
+    }
+
+    /// The same block with the Session slots playing on the tracks
+    /// (WP-3.2). For tests of nodes outside a program.
+    #[must_use]
+    pub fn with_session(self, session: &'a [SessionPlayback]) -> Self {
+        Self { session, ..self }
     }
 
     /// The same block with a sidechain signal: planar, with the block's
@@ -411,6 +424,13 @@ impl<'a> Block<'a> {
     /// The transport as the block starts.
     pub fn transport(&self) -> TransportInfo {
         self.transport
+    }
+
+    /// The Session slots playing on the tracks, each with the song frame
+    /// its clip launched on (WP-3.2): a track's player sounds the slot clip
+    /// whose track is its own. Empty outside a program's run.
+    pub fn session(&self) -> &'a [SessionPlayback] {
+        self.session
     }
 
     /// The song's tempo map, which places ticks on frames: the song

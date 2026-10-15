@@ -5,6 +5,7 @@ use bl_model::ParamId;
 
 use crate::gc::Program;
 use crate::node::{NodeData, NodeKey, ParamValue};
+use crate::session::SessionCommand;
 
 /// When a parameter change or a transport command takes effect.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -176,6 +177,9 @@ pub(crate) enum Message {
     Param(ParamEvent),
     Data { key: NodeKey, data: NodeData },
     Transport(TransportCommand, When),
+    /// A Session View command (WP-3.2): a launch, a stop, or the global
+    /// launch quantisation.
+    Session(SessionCommand),
     Schedule(ScheduledCommand),
     Cancel(u64),
 }

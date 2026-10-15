@@ -3,7 +3,7 @@
 use std::time::Instant;
 
 use bl_core::time::{Frames, SampleRate, TempoMap, Ticks, TimeSignatureMap};
-use bl_model::ParamId;
+use bl_model::{LaunchSettings, ParamId, SceneId, TrackId};
 use bl_rt::log::{Level, Writer};
 use bl_rt::rt_log;
 use rtrb::{Consumer, Producer};
@@ -16,6 +16,7 @@ use crate::message::{
 use crate::metronome::{Block, MetronomeEngine};
 use crate::node::{NodeData, NodeEvent, NodeKey, ParamValue, TransportInfo};
 use crate::program::{EngineProgram, Resolved};
+use crate::session::{Playhead, SessionCommand, SessionLauncher, SessionPlayback, SlotStatus};
 use crate::state::{EngineCounters, EngineState, TrackMeter};
 
 /// A parameter change waiting for its frame.
@@ -76,6 +77,9 @@ pub struct Carry {
     scheduled: Vec<ScheduledCommand>,
     /// Transport commands waiting for their frames, in the order they came.
     timed: Vec<Timed>,
+    /// The global launch quantisation and its enabled switch, which nothing
+    /// else carries to the processor that takes over (WP-3.2).
+    launch: LaunchSettings,
 }
 
 impl Carry {
@@ -107,6 +111,12 @@ impl Carry {
     #[must_use]
     pub fn loop_region(&self) -> Option<LoopRegion> {
         self.loop_region
+    }
+
+    /// The global launch quantisation and its switch.
+    #[must_use]
+    pub fn launch(&self) -> LaunchSettings {
+        self.launch
     }
 
     /// The scheduled commands waiting to fire, in the order they arrived.
@@ -201,6 +211,13 @@ pub struct Processor {
     scheduled: Vec<Scheduled>,
     seq: u64,
     swaps: u64,
+    /// The Session View's slots and the launch quantisation (WP-3.2).
+    session: SessionLauncher,
+    /// What the tracks' players play this block, rebuilt when the launcher
+    /// changes.
+    session_playback: Vec<SessionPlayback>,
+    /// The slots' states, published after each block.
+    session_status: Vec<SlotStatus>,
     counters: EngineCounters,
     cpu_load_max: f32,
     log: Writer,
@@ -236,6 +253,9 @@ impl Processor {
             scheduled: Vec::with_capacity(config.max_scheduled),
             seq: 0,
             swaps: 0,
+            session: SessionLauncher::new(config.max_slots),
+            session_playback: Vec::with_capacity(config.max_slots),
+            session_status: Vec::with_capacity(config.max_slots),
             counters: EngineCounters::default(),
             cpu_load_max: 0.0,
             log: Writer::new(),
@@ -313,6 +333,8 @@ impl Processor {
         let mut done = 0;
         while done < frames {
             self.apply_due_transport(done);
+            self.apply_due_session();
+            self.session.playback(&mut self.session_playback);
             self.fire_due(done);
             let length = self.until_next_event(done, frames - done);
             self.render(done, length);
@@ -344,6 +366,9 @@ impl Processor {
         // Spec: device-changes R1
         self.playing = false;
         self.metronome.stop();
+        // The song stopped with the stream, so the Session View is at rest
+        // too: nothing plays until a person launches again.
+        self.session.clear();
         self.silence_meters();
         self.publish(0.0);
         carry
@@ -385,6 +410,7 @@ impl Processor {
             loop_region: self.loop_region,
             scheduled: self.scheduled.iter().map(|entry| entry.command).collect(),
             timed,
+            launch: self.session.settings(),
         }
     }
 
@@ -401,6 +427,7 @@ impl Processor {
         self.clock = carry.clock;
         self.playing = false;
         self.metronome.stop();
+        self.session.set_settings(carry.launch);
         self.position = self.frames_at(carry.position);
         self.insert_marker = carry.insert_marker;
         self.loop_region = carry.loop_region;
@@ -442,6 +469,7 @@ impl Processor {
                     self.queue_transport(command, frame);
                 }
                 Message::Schedule(command) => self.schedule(command),
+                Message::Session(command) => self.session_command(command),
                 Message::Cancel(id) => self.scheduled.retain(|s| s.command.id != id),
             }
         }
@@ -667,6 +695,109 @@ impl Processor {
         }
     }
 
+
+    /// Runs a Session View command (WP-3.2): a launch, a stop, or the
+    /// global launch quantisation.
+    fn session_command(&mut self, command: SessionCommand) {
+        match command {
+            SessionCommand::Launch { track, scene } => self.launch_slot(track, scene),
+            SessionCommand::LaunchScene(scene) => self.launch_scene(scene),
+            SessionCommand::StopTrack(track) => self.stop_session(Some(track)),
+            SessionCommand::StopAll => self.stop_session(None),
+            SessionCommand::SetQuantization(settings) => self.session.set_settings(settings),
+        }
+    }
+
+    /// Launches a slot's clip: on the next grid line while the song plays,
+    /// and at once from the Arrangement position while it's stopped, which
+    /// also starts the transport (the launch quantisation spec, R5).
+    fn launch_slot(&mut self, track: TrackId, scene: SceneId) {
+        let was_playing = self.playing;
+        if !was_playing {
+            // Spec: launch-quantisation R5. A launch with the transport
+            // stopped starts it at once, from the Arrangement position, and
+            // the clip starts with it.
+            self.play_from_insert_marker();
+        }
+        let playhead = Self::playhead(
+            self.program.as_ref().map(Program::get),
+            &self.fallback_tempo,
+            &self.fallback_time_signatures,
+            was_playing,
+            self.position,
+            self.config.sample_rate,
+        );
+        self.session.launch(track, scene, playhead);
+    }
+
+    /// Launches every clip of a scene, all on one frame (R7).
+    fn launch_scene(&mut self, scene: SceneId) {
+        let was_playing = self.playing;
+        if !was_playing {
+            self.play_from_insert_marker();
+        }
+        let slots = self
+            .program
+            .as_ref()
+            .map_or(&[][..], |program| program.get().scene_slots(scene));
+        let playhead = Self::playhead(
+            self.program.as_ref().map(Program::get),
+            &self.fallback_tempo,
+            &self.fallback_time_signatures,
+            was_playing,
+            self.position,
+            self.config.sample_rate,
+        );
+        self.session.launch_scene(scene, slots, playhead);
+    }
+
+    /// Stops one track's or every track's playing clip on the next grid
+    /// line (R6).
+    fn stop_session(&mut self, track: Option<TrackId>) {
+        let playhead = Self::playhead(
+            self.program.as_ref().map(Program::get),
+            &self.fallback_tempo,
+            &self.fallback_time_signatures,
+            self.playing,
+            self.position,
+            self.config.sample_rate,
+        );
+        self.session.stop(track, playhead);
+    }
+
+    /// The transport as the launcher reads it. The maps are borrowed from
+    /// the running program, which is a different field of the processor
+    /// from the launcher, so both can be borrowed at once.
+    fn playhead<'a>(
+        program: Option<&'a EngineProgram>,
+        fallback_tempo: &'a TempoMap,
+        fallback_signatures: &'a TimeSignatureMap,
+        wait_for_grid: bool,
+        position: Frames,
+        rate: SampleRate,
+    ) -> Playhead<'a> {
+        let (tempo, signatures) = match program {
+            Some(program) => (&program.tempo, &program.time_signatures),
+            None => (fallback_tempo, fallback_signatures),
+        };
+        Playhead {
+            wait_for_grid,
+            position: tempo.frames_to_ticks(position, rate),
+            tempo,
+            signatures,
+            rate,
+        }
+    }
+
+    /// Applies the Session View changes due at the playhead, which is where
+    /// a block part starts. While the song is stopped the playhead stands
+    /// still, so a change queued for a frame waits for it (R4).
+    fn apply_due_session(&mut self) {
+        if self.playing {
+            self.session.apply_due(self.position);
+        }
+    }
+
     fn schedule(&mut self, command: ScheduledCommand) {
         if self.scheduled.len() == self.scheduled.capacity() {
             self.counters.scheduled_rejected += 1;
@@ -791,6 +922,11 @@ impl Processor {
         for entry in &self.scheduled {
             song(entry.frame);
         }
+        // Spec: launch-quantisation R2. A launch or a stop lands on its
+        // grid frame, so the block splits there.
+        if let Some(due) = self.session.next_due(self.position) {
+            song(due);
+        }
         // Spec: transport R13
         if let Some(region) = self.loop_frames {
             song(region.end);
@@ -835,6 +971,7 @@ impl Processor {
                     &self.resolved,
                     &mut self.scratch,
                     transport,
+                    &self.session_playback,
                 );
                 for c in 0..self.config.channels {
                     let to = c * stride + offset;
@@ -914,6 +1051,9 @@ impl Processor {
         state.cpu_load = cpu_load;
         state.cpu_load_max = self.cpu_load_max;
         state.counters = self.counters;
+        self.session.status(&mut self.session_status);
+        state.session.clear();
+        state.session.extend_from_slice(&self.session_status);
         state.meters.clear();
         state.meters_truncated = false;
         if let Some(program) = &self.program {

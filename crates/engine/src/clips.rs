@@ -33,7 +33,7 @@ use std::sync::Arc;
 use bl_core::time::{SampleRate, TempoMap};
 use bl_media::stream::{AudioSource, MemorySource, PlanarMut, Source, StreamConfig, Transition};
 use bl_media::{MediaStore, SampleData, StreamId, Streamer, StreamerStats, convert_sample_rate};
-use bl_model::{AudioData, Clip, ClipData, ClipId, ContentHash, Track};
+use bl_model::{AudioData, Clip, ClipData, ClipId, ContentHash, SceneId, Track, TrackId};
 
 use crate::mixer::{Ramp, scale, smoothing_frames};
 use crate::node::{Block, Node, NodeConfig, NodeData, NodeEvent, ParamValue, segments};
@@ -391,6 +391,10 @@ impl Geometry {
 /// engine's rate.
 pub(crate) struct PlacedClip {
     id: ClipId,
+    /// The Session slot the clip sits in, or `None` for an Arrangement clip
+    /// (WP-3.2): a slot clip plays only when it is launched, from its launch
+    /// frame.
+    scene: Option<SceneId>,
     geometry: Geometry,
     /// Whether the player carries this clip's source over from its last
     /// list, rather than find it in this list's bank.
@@ -403,6 +407,18 @@ pub(crate) struct PlacedClip {
 impl PlacedClip {
     fn run_at(&self, elapsed: u64, want: usize) -> (Option<u64>, usize) {
         self.geometry.run_at(elapsed, want)
+    }
+
+    /// The clip's gain with its fade-in, `elapsed` frames after its launch
+    /// (WP-3.2): a launched clip has no end in time, so only its start
+    /// fades. (What a stop does is to observe; Beatlayer cuts.)
+    fn launch_level(&self, elapsed: u64) -> f64 {
+        let fade = if elapsed < self.fade_in && self.fade_in > 0 {
+            elapsed as f64 / self.fade_in as f64
+        } else {
+            1.0
+        };
+        self.gain * fade
     }
 
     /// The clip's gain with its fades, `elapsed` frames after its start.
@@ -425,6 +441,10 @@ impl PlacedClip {
 /// player finds the clips under a block by binary search; and their
 /// sources, which the player takes out of the list when it arrives.
 pub(crate) struct ClipList {
+    /// The track the list is for.
+    track: TrackId,
+    /// The track's Arrangement clips, sorted by start, and its Session slot
+    /// clips, which have no position in the Arrangement.
     clips: Vec<PlacedClip>,
     reach: Vec<i64>,
     /// Each clip's index, by clip ID, so a new list finds a clip's source
@@ -495,6 +515,52 @@ impl ClipList {
             placed.push((
                 PlacedClip {
                     id: clip.id,
+                    scene: None,
+                    geometry,
+                    carry,
+                    gain: audio.gain,
+                    fade_in: frames(audio.fade_in),
+                    fade_out: frames(audio.fade_out),
+                },
+                source,
+            ));
+        }
+        // The track's Session slot clips (WP-3.2): they play only when the
+        // engine launches them, so they carry no Arrangement position.
+        for (scene, clip) in track.slots() {
+            let ClipData::Audio(audio) = &clip.data else {
+                continue;
+            };
+            if clip.mute {
+                continue;
+            }
+            let at = Geometry::of(clip, audio, tempo, rate, None);
+            if at.end <= at.start {
+                continue;
+            }
+            let Some(sourced) = sources.source(
+                track.id(),
+                clip.id,
+                audio.media,
+                rate,
+                at.region_start,
+                media,
+                &mut missing,
+            ) else {
+                continue;
+            };
+            let geometry = Geometry::of(clip, audio, tempo, rate, sourced.frames);
+            sources.cue(clip.id, &geometry, loop_start);
+            let frames =
+                |seconds: f64| u64::try_from(rate.seconds_to_frames(seconds).get()).unwrap_or(0);
+            let (carry, source) = match sourced.supply {
+                Supply::Carry => (true, None),
+                Supply::Fresh(source) => (false, Some(source)),
+            };
+            placed.push((
+                PlacedClip {
+                    id: clip.id,
+                    scene: Some(scene),
                     geometry,
                     carry,
                     gain: audio.gain,
@@ -505,6 +571,8 @@ impl ClipList {
             ));
         }
         sources.finish(track.id());
+        // Only the Arrangement's clips are ordered: the session path finds
+        // a slot by its scene.
         placed.sort_by_key(|(clip, _)| (clip.geometry.start, clip.geometry.end, clip.id));
         let (clips, bank): (Vec<PlacedClip>, Vec<_>) = placed.into_iter().unzip();
         let mut reach = Vec::with_capacity(clips.len());
@@ -523,6 +591,7 @@ impl ClipList {
         missing.dedup();
         Built {
             list: Self {
+                track: track.id(),
                 clips,
                 reach,
                 ids,
@@ -673,6 +742,9 @@ impl ClipPlayer {
         };
         let first = list.reach.partition_point(|&reach| reach <= position);
         for (clip, slot) in list.clips[first..].iter().zip(&mut bank[first..]) {
+            if clip.scene.is_some() {
+                continue;
+            }
             if clip.geometry.start > position {
                 break;
             }
@@ -704,6 +776,7 @@ fn render(
     elapsed: u64,
     scratch: &mut [f32],
     stride: usize,
+    level: impl Fn(&PlacedClip, u64) -> f64,
 ) {
     let channels = block.channels();
     let source_channels = source.channels().clamp(1, channels.max(1));
@@ -727,7 +800,7 @@ fn render(
                 let read = &scratch[c * stride..c * stride + run];
                 let out = &mut block.channel_mut(c)[at..at + run];
                 for (i, (sum, &sample)) in out.iter_mut().zip(read).enumerate() {
-                    *sum += (f64::from(sample) * clip.level(elapsed + i as u64)) as f32;
+                    *sum += (f64::from(sample) * level(clip, elapsed + i as u64)) as f32;
                 }
             }
         }
@@ -753,6 +826,37 @@ impl Node for ClipPlayer {
         }
         self.sounding = true;
         self.readied = None;
+        // Spec: launch-quantisation R9. The launched slot clip plays from
+        // its launch frame, over the Arrangement's clips (WP-3.6 makes it
+        // take the track over from them).
+        if let (Some(list), Some(bank)) = (
+            self.clips
+                .as_ref()
+                .and_then(|d| d.downcast_ref::<ClipList>()),
+            self.bank.as_mut(),
+        ) && let Some(entry) = block
+            .session()
+            .iter()
+            .find(|entry| entry.track == list.track)
+            && let Some(at) = list
+                .clips
+                .iter()
+                .position(|clip| clip.scene == Some(entry.scene))
+            && let Some(source) = bank[at].as_mut()
+        {
+            let from = transport.position.get();
+            let elapsed = u64::try_from(from - entry.frame.get()).unwrap_or(0);
+            render(
+                &list.clips[at],
+                source.as_mut(),
+                block,
+                0..block.frames(),
+                elapsed,
+                &mut self.scratch,
+                self.max_frames,
+                PlacedClip::launch_level,
+            );
+        }
         let Self {
             clips,
             bank,
@@ -771,6 +875,9 @@ impl Node for ClipPlayer {
         let to = from + block.frames() as i64;
         let first = list.reach.partition_point(|&reach| reach <= from);
         for (clip, slot) in list.clips[first..].iter().zip(&mut bank[first..]) {
+            if clip.scene.is_some() {
+                continue;
+            }
             if clip.geometry.start >= to {
                 break;
             }
@@ -792,6 +899,7 @@ impl Node for ClipPlayer {
                 elapsed,
                 scratch,
                 *max_frames,
+                PlacedClip::level,
             );
         }
         self.apply_gate(block);

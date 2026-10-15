@@ -257,6 +257,10 @@ struct Instance {
     controller: ComPtr<IEditController>,
     /// Whether the component and controller are connected.
     connected: bool,
+    /// Whether its controller is a class of its own. A single-component
+    /// effect is its own controller: the component is initialized and
+    /// terminated once, as VST3's own host does.
+    separate: bool,
     /// Its parameters.
     params: Vec<describe::Parameter>,
     /// The values to send it at the first frame of its next block,
@@ -804,6 +808,7 @@ fn new_instance(main: &Main, module: &Module, cid: &TUID) -> Result<Instance, Vs
             None
         }
     };
+    let separate = controller_cid.is_some();
     let controller = match controller_cid {
         Some(cid) => create_instance::<IEditController>(module, &cid)?,
         // A single-component effect is its own controller.
@@ -811,28 +816,36 @@ fn new_instance(main: &Main, module: &Module, cid: &TUID) -> Result<Instance, Vs
             .cast::<IEditController>()
             .ok_or_else(|| Vst3Error::Refused("to say what its controller is".to_owned()))?,
     };
-    // SAFETY: the controller is a live object and gets the host's
-    // application, which outlives it.
-    if unsafe { controller.initialize(host) } != kResultOk {
-        return Err(Vst3Error::Refused(
-            "to initialize its controller".to_owned(),
-        ));
+    if separate {
+        // SAFETY: the controller is a live object of its own and gets the
+        // host's application, which outlives it. A single-component
+        // effect's controller is its component, already initialized once,
+        // so it isn't initialized again.
+        if unsafe { controller.initialize(host) } != kResultOk {
+            return Err(Vst3Error::Refused(
+                "to initialize its controller".to_owned(),
+            ));
+        }
     }
     if let Some(handler) = main.handler.as_com_ref::<IComponentHandler>() {
         // SAFETY: the handler is the host's own object, which outlives the
         // controller.
         unsafe { controller.setComponentHandler(handler.as_ptr()) };
     }
-    let connected = match (
-        component.cast::<IConnectionPoint>(),
-        controller.cast::<IConnectionPoint>(),
-    ) {
-        (Some(component_side), Some(controller_side)) => {
-            // SAFETY: both are live objects of the interface.
-            (unsafe { component_side.connect(controller_side.as_ptr()) }) == kResultOk
-        }
-        _ => false,
-    };
+    // A single-component effect is its own controller, so there is nothing
+    // to connect: an object connected to itself isn't the two ends VST3's
+    // connection points are for.
+    let connected = separate
+        && match (
+            component.cast::<IConnectionPoint>(),
+            controller.cast::<IConnectionPoint>(),
+        ) {
+            (Some(component_side), Some(controller_side)) => {
+                // SAFETY: both are live objects of the interface.
+                (unsafe { component_side.connect(controller_side.as_ptr()) }) == kResultOk
+            }
+            _ => false,
+        };
     let params = describe::parameters(&controller);
     let processor = component
         .cast::<IAudioProcessor>()
@@ -844,6 +857,7 @@ fn new_instance(main: &Main, module: &Module, cid: &TUID) -> Result<Instance, Vs
         processor,
         controller,
         connected,
+        separate,
         params,
         pending: Vec::new(),
         ends: None,
@@ -893,10 +907,14 @@ fn teardown(instance: &mut Instance) {
         instance.connected = false;
     }
     // SAFETY: the controller and component are live objects, and their
-    // termination runs on the main thread, as VST3 asks.
+    // termination runs on the main thread, as VST3 asks. A single-component
+    // effect is its own controller, so it terminates once, as its
+    // component.
     unsafe {
-        instance.controller.terminate();
         instance.component.terminate();
+        if instance.separate {
+            instance.controller.terminate();
+        }
     }
 }
 

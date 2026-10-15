@@ -765,13 +765,13 @@ pub extern "system" fn ExitDll() -> bool {
 
 #[cfg(target_os = "macos")]
 #[unsafe(no_mangle)]
-pub extern "system" fn BundleEntry(_bundle_ref: *mut c_void) -> bool {
+pub extern "system" fn bundleEntry(_bundle_ref: *mut c_void) -> bool {
     true
 }
 
 #[cfg(target_os = "macos")]
 #[unsafe(no_mangle)]
-pub extern "system" fn BundleExit() -> bool {
+pub extern "system" fn bundleExit() -> bool {
     true
 }
 

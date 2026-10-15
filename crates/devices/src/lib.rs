@@ -22,10 +22,11 @@
 //! the parametric EQ ([`eq`], WP-2.18a), the algorithmic reverb
 //! ([`reverb`]), the limiter ([`limiter`]), the tempo-synced delay
 //! ([`delay`]) and the Utility device ([`utility`], WP-2.18b); [`register`]
-//! adds them to the engine. The first instruments and the rest of the core
-//! effects ship with WP-2.16 to 2.18. [`testing`] has the devices the
-//! framework's tests use. The kit's two example plug-ins join the device
-//! list with the `kit-examples` feature, off by default.
+//! adds them to the engine. The polysynth ([`polysynth`], WP-2.17) is the
+//! first instrument. The rest of the instruments and core effects ship with
+//! WP-2.16 to 2.18. [`testing`] has the devices the framework's tests use.
+//! The kit's two example plug-ins join the device list with the
+//! `kit-examples` feature, off by default.
 
 pub mod compressor;
 pub mod delay;
@@ -33,6 +34,7 @@ pub mod eq;
 mod framework;
 pub mod kit;
 pub mod limiter;
+pub mod polysynth;
 pub mod reverb;
 pub mod testing;
 pub mod utility;
@@ -43,14 +45,16 @@ pub use eq::{Contour, EQ, eq_type};
 pub use framework::{Audio, NativeDevice, NativeNode, ParamBank, add};
 pub use kit::{KitFactory, KitHost};
 pub use limiter::{Brickwall, limiter_type};
+pub use polysynth::{POLYSYNTH, PolySynth, polysynth_type};
 pub use reverb::{REVERB, reverb_type};
 
 use bl_engine::{DeviceType, Registry};
 
-/// Adds Beatlayer's native devices to `registry`: the compressor, the EQ,
-/// the reverb, the limiter, the delay and Utility.
+/// Adds Beatlayer's native devices to `registry`: the compressor, the
+/// polysynth, the limiter, the delay, the reverb, Utility and the EQ.
 pub fn register(registry: &mut Registry) {
     compressor::register(registry);
+    polysynth::register(registry);
     limiter::register(registry);
     delay::register(registry);
     reverb::register(registry);
@@ -59,7 +63,8 @@ pub fn register(registry: &mut Registry) {
 }
 
 /// The native device types Beatlayer ships, for the browser and the shell:
-/// the compressor, the EQ, the reverb, the limiter, the delay and Utility.
+/// the compressor, the polysynth, the limiter, the delay, the reverb,
+/// Utility and the EQ.
 #[must_use]
 pub fn device_types() -> Vec<DeviceType> {
     let mut registry = Registry::empty();

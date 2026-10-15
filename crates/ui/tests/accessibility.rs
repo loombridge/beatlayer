@@ -975,6 +975,12 @@ fn paths() -> BTreeMap<&'static str, Path> {
         "the device's context menu, from its Show Options button (Enter, then the arrows), as \
          in Live",
     );
+    let metronome_menu = Equivalent(
+        "the Metronome settings menu, from its pop-up arrow or context menu, as in Live \
+         (manual 19.4.1)",
+    );
+    let recording =
+        LaterView("the Record button and transport recording (milestone M2, S-TRANS-006)");
     let editing = Equivalent(
         "the Arrangement's editing keys run it: paste, Delete, Left and Right, and Enter then \
          Left or Right (arrangement-editing R12)",
@@ -993,6 +999,13 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "transport.set_loop_enabled",
             main(nothing, control_bar, "Arrangement Loop", Key::Enter),
         ),
+        (
+            "transport.set_metronome_count_in",
+            Exception(metronome_menu),
+        ),
+        ("transport.set_metronome_sound", Exception(metronome_menu)),
+        ("transport.set_metronome_rhythm", Exception(metronome_menu)),
+        ("transport.set_recording", Exception(recording)),
         // Tempo breakpoints and time-signature markers (WP-2.20): the
         // arrangement's tempo envelope and marker lane aren't drawn yet, so
         // agents reach these through the agent API until they are.

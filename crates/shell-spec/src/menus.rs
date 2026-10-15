@@ -463,7 +463,7 @@ const PLAYBACK: &[Row] = &[
     (
         "M-PLAY-011",
         "Hear Metronome Only While Recording",
-        Pending(None),
+        Cmd(crate::transport::SET_METRONOME_ONLY_WHILE_RECORDING),
     ),
     SEPARATOR,
     ("M-PLAY-012", "Back to Arrangement", Key(&["S-TRANS-009"])),

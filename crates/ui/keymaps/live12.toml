@@ -3233,7 +3233,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["O"]
 win = ["O"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "transport.set_metronome_enabled", contexts = ["global"], toggles = "enabled" },
+]
 
 [[shortcut]]
 id = "S-ENGINE-001"

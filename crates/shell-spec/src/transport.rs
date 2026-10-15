@@ -12,6 +12,7 @@
 use bl_commands::Context::Global;
 use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_core::time::Ticks;
+use bl_model::MetronomeSettings;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -36,6 +37,18 @@ pub const RETURN_TO_START: &str = "transport.return_to_start";
 pub const SET_LOOP: &str = "transport.set_loop";
 /// `transport.set_loop_enabled` (`bl-model`): the Arrangement Loop switch.
 pub const SET_LOOP_ENABLED: &str = "transport.set_loop_enabled";
+/// `transport.set_metronome_enabled` (`bl-model`): the Metronome switch.
+pub const SET_METRONOME_ENABLED: &str = "transport.set_metronome_enabled";
+/// `transport.set_metronome_count_in` (`bl-model`): Count-In in Metronome Settings.
+pub const SET_METRONOME_COUNT_IN: &str = "transport.set_metronome_count_in";
+/// `transport.set_metronome_sound` (`bl-model`): Sound in Metronome Settings.
+pub const SET_METRONOME_SOUND: &str = "transport.set_metronome_sound";
+/// `transport.set_metronome_rhythm` (`bl-model`): Rhythm in Metronome Settings.
+pub const SET_METRONOME_RHYTHM: &str = "transport.set_metronome_rhythm";
+/// `transport.set_metronome_only_while_recording` (`bl-model`): Hear Metronome Only While Recording.
+pub const SET_METRONOME_ONLY_WHILE_RECORDING: &str = "transport.set_metronome_only_while_recording";
+/// `transport.set_recording` (`bl-engine`): whether transport is recording.
+pub const SET_RECORDING: &str = "transport.set_recording";
 /// `song.set_tempo` (`bl-model`): the Tempo field.
 pub const SET_TEMPO: &str = "song.set_tempo";
 /// `song.set_time_signatures` (`bl-model`): the time-signature fields.
@@ -94,6 +107,9 @@ pub struct TransportState {
     /// Whether the song has one time signature throughout, so the
     /// time-signature fields can set it.
     pub time_signature_editable: bool,
+    /// The metronome settings: enabled, count-in, sound, rhythm, and only
+    /// while recording (WP-2.15).
+    pub metronome: MetronomeSettings,
 }
 
 /// Adds the transport query to a registry.

@@ -2119,6 +2119,16 @@ impl Shell {
             ids::FOCUS_TOGGLE_TAB_NAVIGATION => Some(self.prefs.tab_navigation),
             ids::FOCUS_TOGGLE_WRAP_NAVIGATION => Some(self.prefs.wrap_navigation.0),
             SOLO_IN_PLACE => Some(self.editor.document().settings().solo_in_place),
+            "transport.set_metronome_enabled" => {
+                Some(self.editor.document().settings().metronome.enabled)
+            }
+            "transport.set_metronome_only_while_recording" => Some(
+                self.editor
+                    .document()
+                    .settings()
+                    .metronome
+                    .only_while_recording,
+            ),
             ids::AUDIO_TOGGLE_ENGINE => Some(self.audio.engine_on()),
             browser_ids::SET_PREVIEW => Some(self.browser_view.preview_on()),
             "device.set_show_preset_name" => self
@@ -2476,6 +2486,21 @@ impl Shell {
             let on = self.editor.document().settings().solo_in_place;
             fields.insert("enabled".to_owned(), json!(!on));
         }
+        if id == "transport.set_metronome_enabled" && !fields.contains_key("enabled") {
+            let on = self.editor.document().settings().metronome.enabled;
+            fields.insert("enabled".to_owned(), json!(!on));
+        }
+        if id == "transport.set_metronome_only_while_recording"
+            && !fields.contains_key("only_while_recording")
+        {
+            let on = self
+                .editor
+                .document()
+                .settings()
+                .metronome
+                .only_while_recording;
+            fields.insert("only_while_recording".to_owned(), json!(!on));
+        }
         if let Some(switch) = Switch::of_command(id)
             && !fields.contains_key("track")
         {
@@ -2623,6 +2648,14 @@ impl Shell {
                 self.run(id, args)
             }
             SOLO_IN_PLACE if !has("enabled") => {
+                let args = self.filled_args(id, args)?;
+                self.run(id, args)
+            }
+            "transport.set_metronome_enabled" if !has("enabled") => {
+                let args = self.filled_args(id, args)?;
+                self.run(id, args)
+            }
+            "transport.set_metronome_only_while_recording" if !has("only_while_recording") => {
                 let args = self.filled_args(id, args)?;
                 self.run(id, args)
             }

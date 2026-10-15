@@ -63,6 +63,7 @@ const TRANSPORT: &[(&str, &str)] = &[
     ("transport.locate", "{\"position\": 2822400}"),
     ("transport.return_to_start", "{}"),
     ("transport.insert_marker_to_playhead", "{}"),
+    ("transport.set_recording", "{\"recording\": true}"),
 ];
 
 #[test]
@@ -81,6 +82,11 @@ fn the_shell_registers_the_transport_and_runs_it_on_the_engine() {
     expected.extend([
         "transport.set_loop",
         "transport.set_loop_enabled",
+        "transport.set_metronome_count_in",
+        "transport.set_metronome_enabled",
+        "transport.set_metronome_only_while_recording",
+        "transport.set_metronome_rhythm",
+        "transport.set_metronome_sound",
         "transport.state",
     ]);
     expected.sort_unstable();

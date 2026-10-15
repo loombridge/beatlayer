@@ -108,6 +108,7 @@ pub fn command(element: Element) -> Option<&'static str> {
 #[must_use]
 pub fn click(element: Element, shell: &Shell) -> Option<Invocation> {
     match element {
+        Element::ReEnableAutomation => Some(Invocation::new(RE_ENABLE_AUTOMATION, json!({}))),
         Element::Play => Some(Invocation::new(ids::PLAY, json!({}))),
         Element::Stop => Some(Invocation::new(ids::STOP, json!({}))),
         Element::Loop => Some(Invocation::new(
@@ -121,6 +122,21 @@ pub fn click(element: Element, shell: &Shell) -> Option<Invocation> {
         _ => None,
     }
 }
+
+/// Whether any of the set's automated controls is overridden: the Control
+/// Bar's Re-Enable Automation button lights while one is (the automation
+/// spec, R5).
+#[must_use]
+pub fn automation_overridden(shell: &Shell) -> bool {
+    shell
+        .editor()
+        .document()
+        .tracks()
+        .any(bl_model::Track::automation_overridden)
+}
+
+/// The Re-Enable Automation command (the automation spec, R5).
+pub const RE_ENABLE_AUTOMATION: &str = bl_model::registry::RE_ENABLE_AUTOMATION;
 
 fn loop_on(shell: &Shell) -> bool {
     shell
@@ -202,6 +218,29 @@ impl TransportFields {
                 return Some(Look {
                     on,
                     value: Some(if on { "on" } else { "off" }.to_owned()),
+                    ..Look::default()
+                });
+            }
+            Element::ReEnableAutomation => {
+                // Spec: automation R5. It lights while any of the set's
+                // automated controls is overridden: the Re-Enable Automation
+                // button of the manual's Overriding Automation.
+                let overridden = automation_overridden(shell);
+                return Some(Look {
+                    on: overridden,
+                    value: Some(
+                        if overridden {
+                            "some automation is off"
+                        } else {
+                            "every envelope drives its control"
+                        }
+                        .to_owned(),
+                    ),
+                    description: Some(
+                        "Puts every control whose automation a hand move turned off \
+                         back under its envelope."
+                            .to_owned(),
+                    ),
                     ..Look::default()
                 });
             }

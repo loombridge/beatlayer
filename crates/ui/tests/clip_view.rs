@@ -8,9 +8,11 @@ use bl_core::time::Ticks;
 use bl_model::{Clip, ClipData, ClipId, Command, Document, MidiData, Note, TrackId};
 use bl_shell::clip_view::notes_in_order;
 use bl_shell::files::factory_default_set;
+use bl_shell::note_commands::NoteField;
 use bl_ui::arrangement::benchmark;
 use bl_ui::clip_view::{
-    KEY_HEIGHT, grid_rect, note_rect, strip_rect, tick_at, x_of_tick, y_of_key,
+    KEY_HEIGHT, grid_rect, lane_rect, note_rect, shown_keys, strip_rect, tick_at, x_of_tick,
+    y_of_key, y_of_value,
 };
 use common::{Harness, Window, command};
 use egui::{Event, Modifiers, MouseWheelUnit, PointerButton, Pos2, Rect, TouchPhase, pos2, vec2};
@@ -109,17 +111,51 @@ impl Notes {
         self.h.shell.editor().undo_history().len()
     }
 
-    /// The note area's rectangle, from the Clip View's accessible node.
-    fn grid(&mut self) -> Rect {
+    /// The Clip View's rectangle, from its accessible node.
+    fn view(&mut self) -> Rect {
         let output = self.h.settle();
         let nodes = Harness::nodes(&output);
         let node = Harness::node(&nodes, "Clip View");
         let bounds = node.bounds.expect("the Clip View has bounds");
-        let view = Rect::from_min_max(
+        Rect::from_min_max(
             pos2(bounds.x0 as f32, bounds.y0 as f32),
             pos2(bounds.x1 as f32, bounds.y1 as f32),
-        );
-        grid_rect(view)
+        )
+    }
+
+    /// The note area's rectangle.
+    fn grid(&mut self) -> Rect {
+        grid_rect(self.view())
+    }
+
+    /// The lane's rectangle under the note area.
+    fn lane(&mut self) -> Rect {
+        lane_rect(self.view())
+    }
+
+    /// A point in the lane at `tick`'s x — a note's stem when the tick is
+    /// its start — and the height of `value` of `field`.
+    fn lane_at(&mut self, tick: Ticks, field: NoteField, value: f64) -> Pos2 {
+        let grid = self.grid();
+        let lane = self.lane();
+        pos2(
+            x_of_tick(grid, self.marker(), self.length(), tick) + 1.0,
+            y_of_value(lane, field, value),
+        )
+    }
+
+    /// A point on a note's row while folded (F), where only the rows that
+    /// hold notes show.
+    fn at_folded(&mut self, key: u8, tick: Ticks) -> Pos2 {
+        let keys = shown_keys(true, &self.notes());
+        let row = keys
+            .iter()
+            .position(|shown| *shown == key)
+            .expect("a shown row");
+        let grid = self.grid();
+        let first = self.h.main.clip_view().first_row();
+        let y = grid.top() + (row as f32 - first) * KEY_HEIGHT + KEY_HEIGHT / 2.0;
+        pos2(x_of_tick(grid, self.marker(), self.length(), tick), y)
     }
 
     /// The marker strip's rectangle, from the Clip View's accessible node.
@@ -559,6 +595,108 @@ fn dragging_the_start_marker_edits_the_clips_region_in_one_step() {
     n.drag(from, to, Modifiers::NONE);
     assert_eq!(n.marker(), 4 * step, "the Start marker moved");
     n.one_step(&before, "Change clip region");
+}
+
+#[test]
+fn dragging_a_stem_sets_that_notes_velocity_and_nothing_else() {
+    // Spec: piano-roll R14. A drag on a note's stem in the lane sets that
+    // note's velocity — the lane's default value — and the whole drag is
+    // one undo step.
+    let step = n_step();
+    let mut n = set(vec![
+        Note::new(60, Ticks::ZERO, step, 100),
+        Note::new(64, 4 * step, step, 40),
+    ]);
+    let before = n.doc().clone();
+    // Press on the first note's stem at its own velocity and draw down to
+    // 20: only that note changes.
+    let from = n.lane_at(Ticks::ZERO, NoteField::Velocity, 100.0);
+    let to = n.lane_at(Ticks::ZERO, NoteField::Velocity, 20.0);
+    n.drag(from, to, Modifiers::NONE);
+    assert_eq!(n.notes()[0].velocity, 20);
+    assert_eq!(n.notes()[1].velocity, 40, "the other note is untouched");
+    n.one_step(&before, "Set note values");
+    // The same drag in the chance lane sets chances.
+    n.h.shell
+        .run(bl_shell::commands::VIEW_LANE, json!({ "lane": "chance" }))
+        .unwrap();
+    let before = n.doc().clone();
+    let from = n.lane_at(Ticks::ZERO, NoteField::Chance, 1.0);
+    let to = n.lane_at(Ticks::ZERO, NoteField::Chance, 0.25);
+    n.drag(from, to, Modifiers::NONE);
+    let chance = n.notes()[0].probability;
+    assert!(
+        (chance - 0.25).abs() < 0.05,
+        "the chance follows the pointer, {chance}"
+    );
+    assert_eq!(n.notes()[1].probability, 1.0, "and nothing else");
+    n.one_step(&before, "Set note values");
+}
+
+#[test]
+fn dragging_across_notes_draws_a_ramp() {
+    // Spec: piano-roll R14. A drag across several notes ramps their values
+    // evenly, from where it began to the pointer, as one undo step.
+    let step = n_step();
+    let mut n = set(vec![
+        Note::new(60, Ticks::ZERO, step, 20),
+        Note::new(62, 4 * step, step, 20),
+        Note::new(64, 8 * step, step, 20),
+    ]);
+    let before = n.doc().clone();
+    let from = n.lane_at(Ticks::ZERO, NoteField::Velocity, 20.0);
+    let to = n.lane_at(8 * step, NoteField::Velocity, 120.0);
+    n.drag(from, to, Modifiers::NONE);
+    assert_eq!(
+        n.notes()
+            .iter()
+            .map(|note| note.velocity)
+            .collect::<Vec<_>>(),
+        [20, 70, 120],
+        "evenly spaced from the first note to the last"
+    );
+    n.one_step(&before, "Ramp note values");
+}
+
+#[test]
+fn folding_shows_only_the_rows_that_hold_notes() {
+    // Spec: piano-roll R15. Fold (F) hides every row without a note, so the
+    // notes sit on neighbouring rows; folding is view state and isn't an
+    // undo step.
+    let step = n_step();
+    let mut n = set(vec![
+        Note::new(60, Ticks::ZERO, step, 100),
+        Note::new(64, 4 * step, step, 100),
+    ]);
+    assert_eq!(
+        shown_keys(true, &n.notes()),
+        [64, 60],
+        "only the rows that hold notes"
+    );
+    assert_eq!(
+        shown_keys(false, &n.notes()).len(),
+        128,
+        "unfolded, every row shows"
+    );
+    let steps = n.steps();
+    n.h.shell.set_focused_area(bl_shell::Area::Detail);
+    n.h.key(egui::Key::F, Modifiers::NONE);
+    n.h.settle();
+    assert!(
+        n.h.shell.clip_view().is_folded(n.clip),
+        "F folds the editor"
+    );
+    assert_eq!(n.steps(), steps, "folding isn't an undo step");
+    assert!(!n.h.shell.is_dirty(), "and doesn't dirty the set");
+    // The notes sit on neighbouring rows now: dragging the lower one up a
+    // single row reaches the higher one's key, four semitones away.
+    let before = n.doc().clone();
+    let from = n.at_folded(60, step / 2);
+    let to = n.at_folded(64, step / 2);
+    n.drag(from, to, Modifiers::NONE);
+    assert_eq!(n.notes()[0].key, 64, "one row up is four semitones");
+    assert_eq!(n.notes()[0].start, Ticks::ZERO, "and the note stayed put");
+    n.one_step(&before, "Move notes");
 }
 
 /// The default editing grid's step, for a test that builds its clip with

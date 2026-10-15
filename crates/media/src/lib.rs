@@ -10,7 +10,8 @@
 //!   and timing of what was encoded.
 //! - [`AudioWriter`] writes WAV, AIFF, and FLAC at 16, 24, or 32 bits, a
 //!   block at a time, with a [`Quantiser`] that dithers and rounds below 32
-//!   bits (WP-1.12, the export spec). See [`encode`].
+//!   bits, and MP3 at 320 kbps CBR (WP-1.12, WP-2.26, the export spec). See
+//!   [`encode`].
 //! - [`RateConverter`] and [`convert_sample_rate`] convert between sample
 //!   rates with aliasing below -100 dB in the passband, through rubato.
 //! - [`ContentHash`] names media by the BLAKE3 hash of the file's bytes.
@@ -42,7 +43,9 @@ mod store;
 pub mod stream;
 
 pub use decode::{Codec, Container, Decoder, MediaInfo, decode_file, probe};
-pub use encode::{AudioWriter, BitDepth, Dither, EncodeSpec, FileType, Quantiser, wav_bytes};
+pub use encode::{
+    AudioWriter, BitDepth, Dither, EncodeSpec, FileType, MP3_RATES, Quantiser, wav_bytes,
+};
 pub use error::MediaError;
 pub use hash::{ContentHash, ParseContentHashError};
 pub use peaks::{PeakCache, PeakCacheOptions, PeakEvent, PeakStatus, Peaks};

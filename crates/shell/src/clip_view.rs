@@ -19,11 +19,11 @@
 use std::collections::BTreeSet;
 
 use bl_core::time::{Ticks, TimeSignature, TimeSignatureMap};
-use bl_model::{ClipData, ClipId, Command, Document, Editor, MidiData, Note};
+use bl_model::{ClipData, ClipFolds, ClipId, Command, Document, Editor, MidiData, Note};
 use bl_shell_spec::notes::{
     self as ids, AddNoteArgs, ClipViewState, DeleteNotesArgs, MoveNotesArgs, NoteEditResult,
-    NoteSelectMode, QuantizeNotesArgs, QuantizeSettings, QuantizeSettingsArgs, QuantizeTarget,
-    ResizeNotesArgs, SelectNotesArgs,
+    NoteField, NoteSelectMode, QuantizeNotesArgs, QuantizeSettings, QuantizeSettingsArgs,
+    QuantizeTarget, RampValueArgs, ResizeNotesArgs, SelectNotesArgs, SetValueArgs,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -97,15 +97,63 @@ pub fn resize_limit(notes: &[Note], shortest: Ticks) -> Ticks {
     -room
 }
 
-/// What the Clip View shows: whether it's open, Draw Mode, the notes
-/// selected in the clip its note editor shows (WP-2.3), and its Quantize
-/// settings.
+/// The evenly spaced values a ramp gives `count` notes: `from` at the first,
+/// `to` at the last, and those between spread evenly, whole numbers for the
+/// whole-number fields. One note takes `from`.
+#[must_use]
+pub fn ramp_values(field: NoteField, from: f64, to: f64, count: usize) -> Vec<f64> {
+    match count {
+        0 => Vec::new(),
+        1 => vec![from],
+        n => (0..n)
+            .map(|i| {
+                let at = from + (to - from) * i as f64 / (n - 1) as f64;
+                if field.whole() { at.round() } else { at }
+            })
+            .collect(),
+    }
+}
+
+/// A value for `field`, checked against the field's range and its
+/// whole-number rule.
+fn value_of(field: NoteField, value: f64) -> Result<f64, EditFailure> {
+    let (low, high) = field.range();
+    if !(low..=high).contains(&value) {
+        return Err(invalid(format!(
+            "`{}` must be from {low} to {high}",
+            field.name()
+        )));
+    }
+    if field.whole() && value.fract() != 0.0 {
+        return Err(invalid(format!("`{}` takes whole numbers", field.name())));
+    }
+    Ok(value)
+}
+
+/// Sets a note's `field` to `value`, which [`value_of`] checked.
+fn set_note_value(note: &mut Note, field: NoteField, value: f64) {
+    match field {
+        NoteField::Velocity => note.velocity = value as u8,
+        NoteField::ReleaseVelocity => note.release_velocity = value as u8,
+        NoteField::Chance => note.probability = value,
+        NoteField::VelocityDeviation => note.velocity_deviation = value as i8,
+    }
+}
+
+/// What the Clip View shows: whether it's open, Draw Mode, the lane's value,
+/// the folded editors, the notes selected in the clip its note editor shows
+/// (WP-2.3), and its Quantize settings.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ClipView {
     /// Whether the Clip View shows in the detail area.
     visible: bool,
     /// Whether Draw Mode is on (B).
     draw_mode: bool,
+    /// Which value the lane under the note editor shows and edits.
+    lane: NoteField,
+    /// The clips whose note editor is folded to the rows that hold notes
+    /// (F). Saved with the set, like the floating devices' windows.
+    folds: ClipFolds,
     /// The clip whose notes are selected, and their places in its notes in
     /// order. The selection holds only while the note editor shows that
     /// clip.
@@ -127,6 +175,44 @@ impl ClipView {
     #[must_use]
     pub fn draw_mode(&self) -> bool {
         self.draw_mode
+    }
+
+    /// Which value the lane under the note editor shows and edits.
+    #[must_use]
+    pub fn lane(&self) -> NoteField {
+        self.lane
+    }
+
+    /// Chooses the value the lane shows and edits.
+    pub fn set_lane(&mut self, lane: NoteField) {
+        self.lane = lane;
+    }
+
+    /// The clips whose note editor is folded to the rows that hold notes.
+    #[must_use]
+    pub fn folds(&self) -> &ClipFolds {
+        &self.folds
+    }
+
+    /// Replaces the folded editors, as opening a set does.
+    pub fn set_folds(&mut self, folds: ClipFolds) {
+        self.folds = folds;
+    }
+
+    /// Whether the note editor shows only the rows that hold notes for
+    /// `clip`.
+    #[must_use]
+    pub fn is_folded(&self, clip: ClipId) -> bool {
+        self.folds.contains(&clip)
+    }
+
+    /// Folds the note editor to the rows that hold notes, or unfolds it.
+    pub fn set_folded(&mut self, clip: ClipId, folded: bool) {
+        if folded {
+            self.folds.insert(clip);
+        } else {
+            self.folds.remove(&clip);
+        }
     }
 
     /// Shows the Clip View, or hides it.
@@ -194,11 +280,14 @@ impl ClipView {
     /// What the view shows, as a command reports it.
     #[must_use]
     pub fn state(&self, doc: &Document, arrangement: &ArrangementView) -> ClipViewState {
+        let clip = self.shown_clip(doc, arrangement);
         ClipViewState {
             visible: self.visible,
             draw_mode: self.draw_mode,
-            clip: self.shown_clip(doc, arrangement),
+            clip,
             selected: self.selected_notes(doc, arrangement).to_vec(),
+            lane: self.lane,
+            folded: clip.is_some_and(|clip| self.is_folded(clip)),
         }
     }
 
@@ -298,6 +387,8 @@ pub fn label(id: &str) -> &'static str {
         ids::MOVE_NOTES => "Move notes",
         ids::RESIZE_NOTES => "Resize notes",
         ids::QUANTIZE_NOTES => "Quantize notes",
+        ids::SET_VALUE => "Set note values",
+        ids::RAMP_VALUE => "Ramp note values",
         _ => "Select notes",
     }
 }
@@ -528,6 +619,65 @@ pub fn run(
                     .collect();
                 set_notes(editor, clip, &midi, quantized)?;
                 Ok(places_after)
+            })?;
+            view.select(clip, after.clone());
+            Ok(to_value(&NoteEditResult {
+                notes: after.clone(),
+                selected: after,
+                undo_step: recorded,
+            }))
+        }
+        ids::SET_VALUE => {
+            let SetValueArgs {
+                clip,
+                notes,
+                field,
+                value,
+            } = parse(args)?;
+            let (clip, midi) = clip_and_data(doc, view, arrangement, clip)?;
+            let ordered = notes_in_order(&midi);
+            let places = places_or_selected(view, doc, arrangement, clip, notes, ordered.len())?;
+            let value = value_of(field, value)?;
+            let (after, recorded) = transaction(editor, label(ids::SET_VALUE), |editor| {
+                let mut edited = ordered.clone();
+                for place in &places {
+                    set_note_value(&mut edited[*place as usize], field, value);
+                }
+                set_notes(editor, clip, &midi, edited)?;
+                Ok(places.clone())
+            })?;
+            view.select(clip, after.clone());
+            Ok(to_value(&NoteEditResult {
+                notes: after.clone(),
+                selected: after,
+                undo_step: recorded,
+            }))
+        }
+        ids::RAMP_VALUE => {
+            let RampValueArgs {
+                clip,
+                notes,
+                field,
+                from,
+                to,
+            } = parse(args)?;
+            let (clip, midi) = clip_and_data(doc, view, arrangement, clip)?;
+            let ordered = notes_in_order(&midi);
+            let places = places_or_selected(view, doc, arrangement, clip, notes, ordered.len())?;
+            let from = value_of(field, from)?;
+            let to = value_of(field, to)?;
+            // The ramp runs in the clip's note order, whatever order the
+            // places came in.
+            let mut places = places;
+            places.sort_unstable();
+            let values = ramp_values(field, from, to, places.len());
+            let (after, recorded) = transaction(editor, label(ids::RAMP_VALUE), |editor| {
+                let mut edited = ordered.clone();
+                for (place, value) in places.iter().zip(&values) {
+                    set_note_value(&mut edited[*place as usize], field, *value);
+                }
+                set_notes(editor, clip, &midi, edited)?;
+                Ok(places.clone())
             })?;
             view.select(clip, after.clone());
             Ok(to_value(&NoteEditResult {

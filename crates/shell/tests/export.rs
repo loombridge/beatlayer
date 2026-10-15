@@ -203,8 +203,12 @@ fn an_empty_set_or_a_bad_range_is_refused() {
             "extension",
         ),
         (
-            json!({ "path": ok("a.mp3"), "bit_depth": 24, "sample_rate": 48000 }),
+            json!({ "path": ok("a.ogg"), "bit_depth": 24, "sample_rate": 48000 }),
             "extension",
+        ),
+        (
+            json!({ "path": ok("a.mp3"), "bit_depth": 24, "sample_rate": 96000 }),
+            "MP3 holds",
         ),
         (
             json!({ "path": ok("a.wav"), "bit_depth": 8, "sample_rate": 48000 }),
@@ -238,6 +242,35 @@ fn an_empty_set_or_a_bad_range_is_refused() {
         assert!(error.to_string().contains(says), "{args}: {error}");
     }
     assert_eq!(scratch.names(), ["Tone.wav"], "nothing written");
+}
+
+/// Spec: export R23 (WP-2.26). An MP3 export takes the extension, writes a
+/// file Beatlayer's decoder reads back at the export's rate, and refuses a
+/// `file_type` that disagrees with the extension.
+#[test]
+fn an_mp3_export_takes_the_extension() {
+    let scratch = Scratch::new("mp3");
+    let mut shell = shell_with_a_clip(&scratch);
+    let written = export(
+        &mut shell,
+        json!({ "path": text(&scratch.path("mix.mp3")), "bit_depth": 16,
+                "sample_rate": 44100 }),
+    );
+    assert_eq!(written.file_type, ids::FileType::Mp3);
+    assert_eq!(written.dither, ids::Dither::None, "MP3 has no dither");
+    let decoder = bl_media::Decoder::open(&written.path).unwrap();
+    assert_eq!(decoder.info().sample_rate, 44_100);
+    assert_eq!(
+        decoder.decode_to_end().unwrap().frames() as u64,
+        written.frames
+    );
+
+    let error = refused(
+        &mut shell,
+        json!({ "path": text(&scratch.path("mix.mp3")), "bit_depth": 16,
+                "sample_rate": 48000, "file_type": "wav" }),
+    );
+    assert!(error.to_string().contains("extension"), "{error}");
 }
 
 /// Spec: export R11.

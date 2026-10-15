@@ -10,6 +10,9 @@ publish.workspace = true
 [dependencies]
 # Measures the agent API's previews (WP-1.16).
 bl-analysis.workspace = true
+# The built-in assistant (WP-2.23): the API keys in the OS keychain, and the
+# agent loop the panel runs (parts 1-2), whose tool calls the shell hosts.
+bl-assistant.workspace = true
 bl-audio-io.workspace = true
 bl-commands.workspace = true
 # IDs for objects a command will create, which the agent API hands out.
@@ -44,8 +47,9 @@ serde_json = "1"
 rtrb = "0.4.0"
 
 [dev-dependencies]
-# The test plug-in, built from source, which the plug-in tests load.
+# The test plug-ins, built from source, which the plug-in tests load.
 bl-test-clap = { path = "../test-clap" }
+bl-test-vst3 = { path = "../test-vst3" }
 # Standard MIDI Files the import tests generate (WP-2.21).
 midly = "0.5.3"
 # The allocation trap, so tests can show the audio callback stays off the

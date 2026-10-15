@@ -4066,7 +4066,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["F"]
 win = ["F"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "view.fold_notes", contexts = ["note-editor"] },
+]
 
 [[shortcut]]
 id = "S-NOTE-039"

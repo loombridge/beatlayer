@@ -864,6 +864,34 @@ fn session_main(h: &mut Harness) {
     h.settle();
 }
 
+/// The shell runs audio on a four-channel null device, so the In/Out
+/// choosers list two output pairs and four inputs, as an interface does
+/// (WP-2.13).
+fn four_channel_interface(h: &mut Harness) {
+    use bl_audio_io::{BackendKind, NullBackend, NullOptions};
+    use bl_shell::audio::{AudioHost, AudioSettings};
+    use bl_shell::files::ProjectFiles;
+    use bl_shell::settings::Preferences;
+
+    let backend = NullBackend::with_options(NullOptions {
+        channels: 4,
+        ..NullOptions::default()
+    });
+    let audio = AudioHost::with_backends(
+        vec![BackendKind::Null],
+        Box::new(move |_| Ok(Box::new(backend.clone()))),
+        AudioSettings::default(),
+    );
+    let mut shell = Shell::new(
+        Preferences::default(),
+        None,
+        audio,
+        Box::new(ProjectFiles::new()),
+    );
+    shell.start_audio();
+    h.shell = shell;
+}
+
 /// A Test Gain on audio track 3, the selected track, with no device
 /// selected (WP-2.4).
 fn a_device(h: &mut Harness) {
@@ -944,6 +972,14 @@ fn an_agent(h: &mut Harness) {
 fn server_and_agent(h: &mut Harness) {
     server_on(h);
     an_agent(h);
+}
+
+/// An assistant API key stored in the headless keychain, so the Agents
+/// page shows its Forget button.
+fn assistant_key_set(h: &mut Harness) {
+    h.shell
+        .run("assistant.set_key", json!({ "key": "sk-headless-test" }))
+        .unwrap();
 }
 
 /// Every command without a key or a menu item, and how it's reached.
@@ -1044,6 +1080,37 @@ fn paths() -> BTreeMap<&'static str, Path> {
                 "the arrangement's time-signature marker lane (WP-2.20)",
             )),
         ),
+        // Automation (WP-2.12): the Control Bar's Re-Enable Automation
+        // button, and the arrangement's automation lanes, which aren't
+        // drawn yet.
+        (
+            "automation.re_enable",
+            main(nothing, control_bar, "Re-Enable Automation", Key::Enter),
+        ),
+        (
+            "automation.set_breakpoint",
+            Exception(LaterView("the arrangement's automation lanes (WP-2.12)")),
+        ),
+        (
+            "automation.set_curve",
+            Exception(LaterView("the arrangement's automation lanes (WP-2.12)")),
+        ),
+        (
+            "automation.move_breakpoint",
+            Exception(LaterView("the arrangement's automation lanes (WP-2.12)")),
+        ),
+        (
+            "automation.delete_breakpoint",
+            Exception(LaterView("the arrangement's automation lanes (WP-2.12)")),
+        ),
+        (
+            "automation.delete",
+            Exception(LaterView("the arrangement's automation lanes (WP-2.12)")),
+        ),
+        (
+            "automation.re_enable_for",
+            Exception(LaterView("the arrangement's automation lanes (WP-2.12)")),
+        ),
         // A track's switches (mixer-view R7): Enter on Solo or Arm.
         (
             "mixer.solo_exclusive",
@@ -1078,6 +1145,40 @@ fn paths() -> BTreeMap<&'static str, Path> {
         (
             "agent.new_client_token",
             settings("agents", server_and_agent, "New Token: Tester", Key::Enter),
+        ),
+        // The built-in assistant's settings on the Agents page (WP-2.23,
+        // part 4).
+        (
+            "assistant.set_provider",
+            settings("agents", nothing, "Assistant Provider", Key::ArrowDown),
+        ),
+        (
+            "assistant.set_base_url",
+            settings("agents", nothing, "Assistant Base URL", Key::K),
+        ),
+        (
+            "assistant.set_model",
+            settings("agents", nothing, "Assistant Model", Key::K),
+        ),
+        (
+            "assistant.set_key",
+            Exception(Equivalent(
+                "the API key field, typed into and then stored with Set: the key has no one \
+                 key of its own, since it changes the keychain",
+            )),
+        ),
+        (
+            "assistant.forget_key",
+            settings(
+                "agents",
+                assistant_key_set,
+                "Forget Assistant API Key",
+                Key::Enter,
+            ),
+        ),
+        (
+            "assistant.toggle_activity_log",
+            settings("agents", nothing, "Open Assistant Activity Log", Key::Enter),
         ),
         (
             "audio.configure",
@@ -1242,6 +1343,9 @@ fn paths() -> BTreeMap<&'static str, Path> {
                 "the Quantize Settings dialog (M-EDIT-036, milestone M2)",
             )),
         ),
+        ("note.set_value", Exception(note_editor)),
+        ("note.ramp_value", Exception(note_editor)),
+        ("view.lane", Exception(note_editor)),
         // The Device View (WP-2.4): Enter on a title bar's controls.
         (
             "device.select",
@@ -1364,6 +1468,13 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "plugin.load",
             Exception(LaterView("the browser's plug-ins (WP-2.9)")),
         ),
+        // Audio Units (WP-2.8) load by component description until the
+        // browser lists them (WP-2.8's second part) and the scanner finds
+        // them.
+        (
+            "plugin.load_au",
+            Exception(LaterView("the browser's Audio Units (WP-2.8)")),
+        ),
         (
             "plugin.show_window",
             Exception(LaterView("the plug-in device panel (WP-2.10)")),
@@ -1425,6 +1536,27 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "routing.set_monitor",
             main(nothing, arrangement_track_3, "Monitoring", Key::ArrowRight),
         ),
+        // Main's Cue Out and Main Out (WP-2.13): Up and Down on them step
+        // through the interface's output pairs, which need more than one
+        // pair to step to.
+        (
+            "routing.set_cue_out",
+            main(
+                four_channel_interface,
+                session_main,
+                "Cue Output",
+                Key::ArrowDown,
+            ),
+        ),
+        (
+            "routing.set_main_out",
+            main(
+                four_channel_interface,
+                session_main,
+                "Main Output",
+                Key::ArrowDown,
+            ),
+        ),
         // A return's Pre/Post switch, in Main's column: Enter switches it.
         (
             "mixer.set_send_tap",
@@ -1454,6 +1586,36 @@ fn paths() -> BTreeMap<&'static str, Path> {
                 "the File menu's Export MIDI Clip... dialog, which waits on the file dialogs \
                  (midi-clips R19)",
             )),
+        ),
+        // The Session View's scenes and slots (WP-3.1): the grid, its
+        // context menus, and their keys are WP-3.7's.
+        (
+            "scene.create",
+            Exception(LaterView("the Session grid and its menus (WP-3.7)")),
+        ),
+        (
+            "scene.delete",
+            Exception(LaterView("the Session grid and its menus (WP-3.7)")),
+        ),
+        (
+            "scene.move",
+            Exception(LaterView("the Session grid and its menus (WP-3.7)")),
+        ),
+        (
+            "scene.duplicate",
+            Exception(LaterView("the Session grid and its menus (WP-3.7)")),
+        ),
+        (
+            "scene.rename",
+            Exception(LaterView("the Session grid and its menus (WP-3.7)")),
+        ),
+        (
+            "clip.create_in_slot",
+            Exception(LaterView("the Session grid and its menus (WP-3.7)")),
+        ),
+        (
+            "clip.move_to_slot",
+            Exception(LaterView("the Session grid and its menus (WP-3.7)")),
         ),
         // Gaps.
         (

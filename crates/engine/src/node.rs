@@ -40,6 +40,11 @@ pub enum NodeKey {
     /// Resampling (the routing spec). Its parameters are
     /// [`mixer::route`](crate::mixer::route).
     Input(TrackId),
+    /// A track's own input taken from the audio interface, Ext. In
+    /// (WP-2.13). Its parameters are
+    /// [`mixer::route`](crate::mixer::route); its source is the device
+    /// input the processor was given.
+    DeviceInput(TrackId),
     /// The track a device's sidechain takes as its Source (WP-2.19b). Its
     /// parameters are [`mixer::route`](crate::mixer::route).
     SidechainInput(DeviceId),
@@ -58,6 +63,7 @@ impl fmt::Display for NodeKey {
             Self::Output(track) => write!(f, "the output of {track}"),
             Self::Send { track, to } => write!(f, "the send from {track} to {to}"),
             Self::Input(track) => write!(f, "the input of {track}"),
+            Self::DeviceInput(track) => write!(f, "the interface input of {track}"),
             Self::SidechainInput(device) => write!(f, "the sidechain input of {device}"),
             Self::Sidechain(device) => write!(f, "the sidechain of {device}"),
         }
@@ -86,7 +92,7 @@ pub struct NodeEvent {
 }
 
 /// What a note event does (WP-2.6).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum NoteKind {
     /// A key goes down.
     On,
@@ -94,6 +100,29 @@ pub enum NoteKind {
     Off,
     /// A voice stops at once, as a hi-hat's choke group stops it.
     Choke,
+    /// A per-note expression takes a new value (WP-2.17): the note the
+    /// event names bends, presses or slides while it sounds, and no other
+    /// note moves.
+    Expression {
+        /// Which expression.
+        expression: NoteExpression,
+        /// Its new value, in the expression's own units.
+        value: f32,
+    },
+}
+
+/// A per-note expression an MPE controller changes, on the note its
+/// [`NoteEvent`] names; the note's own [`NoteEvent::note_id`] tells notes
+/// on one key apart.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum NoteExpression {
+    /// Per-note pitch bend, from −1 to +1: the note moves by that fraction
+    /// of the instrument's pitch-bend range.
+    Bend,
+    /// Per-note pressure, from 0 to 1.
+    Pressure,
+    /// Per-note slide (MPE's timbre, controller 74), from 0 to 1.
+    Slide,
 }
 
 /// A note for a node, at a frame within the block (WP-2.6): what an

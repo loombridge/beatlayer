@@ -17,7 +17,7 @@
 //!
 //! [`Clip::part`] and [`Clip::with_start`] make those changes.
 
-use bl_core::time::{TempoMap, Ticks};
+use bl_core::time::{TempoMap, Ticks, TimeSignature};
 use imbl::Vector;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -415,6 +415,10 @@ pub struct MidiData {
     /// be before it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub loop_end: Option<Ticks>,
+    /// The clip's time signature, the Clip View's Signature fields. `null`
+    /// (or nothing) means the song's signature at the clip's position.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature: Option<TimeSignature>,
 }
 
 impl MidiData {
@@ -428,6 +432,7 @@ impl MidiData {
             looping: false,
             loop_start: Ticks::ZERO,
             loop_end: None,
+            signature: None,
         }
     }
 

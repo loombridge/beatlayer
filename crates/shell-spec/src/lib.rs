@@ -30,6 +30,8 @@
 //!   (`transport.state`), and the IDs of the transport's commands, which
 //!   `bl-engine` and `bl-model` register (WP-1.18).
 //! - [`export`]: exporting audio (`export.audio`, WP-1.12).
+//! - [`midi_files`]: importing and exporting Standard MIDI Files
+//!   (`midi.import_file`, `midi.export_clip`, WP-2.21).
 //! - [`perception`]: how agents hear and see the set (`perception.*`,
 //!   WP-1.16): audio previews, analysis, and view captures.
 //!
@@ -48,6 +50,7 @@ pub mod devices;
 pub mod editing;
 pub mod export;
 pub mod menus;
+pub mod midi_files;
 pub mod mixer_view;
 pub mod perception;
 pub mod plugins;
@@ -72,6 +75,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     mixer_view::register(registry)?;
     browser::register(registry)?;
     export::register(registry)?;
+    midi_files::register(registry)?;
     devices::register(registry)?;
     tracks::register(registry)?;
     plugins::register(registry)?;

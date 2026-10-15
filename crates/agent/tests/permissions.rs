@@ -315,6 +315,52 @@ fn a_drop_from_the_browser_over_clips_is_destructive_as_well_as_external() {
 }
 
 #[test]
+fn a_midi_import_over_clips_is_destructive_as_well_as_external() {
+    // Spec: agent-permissions R1, R3. The file isn't read before the person
+    // allows it, so an import is destructive when a clip on its track ends
+    // after where it lands.
+    let mut client = app();
+    let midi = track(&mut client, "1 MIDI");
+    let held = clip(&mut client, midi, "Held", 4, 2);
+    let path = std::env::temp_dir().join("bl-agent-permissions-never-read.mid");
+    let import = |at: u64, track: Option<u64>| {
+        let mut args = json!({ "path": path.to_string_lossy(), "at": at * BAR });
+        if let Some(track) = track {
+            args["track"] = json!(track);
+        }
+        args
+    };
+    let went = attempt(&mut client, "midi.import_file", &import(5, Some(midi)));
+    assert_eq!(
+        went,
+        Went {
+            asked: true,
+            permission: "destructive and external".to_owned()
+        }
+    );
+    let asked = client.transport().asked.last().unwrap().clone();
+    assert!(
+        asked.contains("Import MIDI File (destructive and external)"),
+        "{asked}"
+    );
+    let dry = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "midi.import_file",
+                               "args": import(5, Some(midi)) }], "dry_run": true }),
+    );
+    assert_eq!(dry["results"][0]["replaces"], json!([held]));
+
+    // After every clip on the track, or with no track (new tracks), it's
+    // external only.
+    for args in [import(7, Some(midi)), import(0, None)] {
+        let went = attempt(&mut client, "midi.import_file", &args);
+        assert!(went.asked, "external still asks");
+        assert_eq!(went.permission, "external", "{args}");
+    }
+}
+
+#[test]
 fn an_autonomous_agent_s_move_over_clips_runs_without_asking() {
     // Spec: agent-permissions R2, R8.
     let (mut client, _, a, b) = two_clips(4);

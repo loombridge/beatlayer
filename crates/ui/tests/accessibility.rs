@@ -1418,6 +1418,22 @@ fn paths() -> BTreeMap<&'static str, Path> {
                  S-ARR-009), aren't bound yet",
             )),
         ),
+        // MIDI file import and export (WP-2.21): the menus show them, and a
+        // person reaches them once the file dialogs are built.
+        (
+            "midi.import_file",
+            Exception(Equivalent(
+                "the Create menu's Import MIDI File... dialog, which waits on the file dialogs \
+                 (midi-clips R16)",
+            )),
+        ),
+        (
+            "midi.export_clip",
+            Exception(Equivalent(
+                "the File menu's Export MIDI Clip... dialog, which waits on the file dialogs \
+                 (midi-clips R19)",
+            )),
+        ),
         // Gaps.
         (
             "export.audio",

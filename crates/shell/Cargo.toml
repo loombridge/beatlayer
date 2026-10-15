@@ -22,6 +22,8 @@ bl-devices.workspace = true
 # drop thread that frees what it lets go of (WP-1.10). It depends on no UI
 # crate.
 bl-engine.workspace = true
+# Standard MIDI File import and export (WP-2.21).
+bl-interop.workspace = true
 # The browser decodes previews and registers the files it adds to the set
 # in the media store (WP-1.10).
 bl-media.workspace = true
@@ -44,6 +46,8 @@ rtrb = "0.4.0"
 [dev-dependencies]
 # The test plug-in, built from source, which the plug-in tests load.
 bl-test-clap = { path = "../test-clap" }
+# Standard MIDI Files the import tests generate (WP-2.21).
+midly = "0.5.3"
 # The allocation trap, so tests can show the audio callback stays off the
 # heap (the real-time rules).
 bl-rt.workspace = true

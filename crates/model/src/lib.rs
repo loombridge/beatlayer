@@ -79,9 +79,12 @@ mod track;
 
 pub use automation::{
     Automation, AutomationTarget, Breakpoint, Envelope, MixerParam, TrackAutomation, curve_value,
+    envelope_value,
 };
 pub use changes::{Change, ChangeSet};
-pub use clip::{AudioData, Clip, ClipData, ClipFolds, EDGE_FADE_SECONDS, MidiData, Note};
+pub use clip::{
+    AudioData, Clip, ClipData, ClipEnvelope, ClipFolds, EDGE_FADE_SECONDS, MidiData, Note,
+};
 pub use command::Command;
 pub use device::{
     Device, DeviceKind, DeviceRole, DeviceWindows, PluginFormat, PluginState, Sidechain,

@@ -1008,6 +1008,10 @@ fn paths() -> BTreeMap<&'static str, Path> {
     // keys (shortcuts.md, `note-editor` and `note-selection`) come with a
     // later package.
     let note_editor = LaterView("the note editor's keys (the note-editor shortcuts, milestone M2)");
+    let clip_envelopes = LaterView(
+        "the Clip View's Envelope editor: the Envelopes tab's breakpoint edits and its Linked \
+         switch (the clip envelopes package, milestone M3)",
+    );
     let device_params = Equivalent(
         "a described device's parameter controls in the Device View: Tab to one, then Up and \
          Down step it and Delete sets its default (the device framework spec, R17)",
@@ -1327,6 +1331,12 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("clip.set_midi_region", Exception(clip_view)),
         ("clip.set_region", Exception(clip_view)),
         ("clip.set_data", Exception(clip_view)),
+        ("clip.set_envelope_breakpoint", Exception(clip_envelopes)),
+        ("clip.set_envelope_curve", Exception(clip_envelopes)),
+        ("clip.move_envelope_breakpoint", Exception(clip_envelopes)),
+        ("clip.delete_envelope_breakpoint", Exception(clip_envelopes)),
+        ("clip.delete_envelope", Exception(clip_envelopes)),
+        ("clip.set_envelope_linked", Exception(clip_envelopes)),
         ("clip_view.select_notes", Exception(note_editor)),
         ("note.add", Exception(note_editor)),
         ("note.delete", Exception(note_editor)),

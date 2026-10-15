@@ -239,8 +239,9 @@ impl ParamBank {
 
     /// Works out every parameter's value for the next `frames` frames: an
     /// automated one from its envelope, on the exact frame, when the song
-    /// plays at song frame `from`; the rest gliding toward their values as
-    /// always.
+    /// plays at song frame `from`; the clips' modulation added on top
+    /// (WP-3.15), clamped to the parameter's range; the rest gliding toward
+    /// their values as always.
     fn advance(&mut self, frames: usize, from: Option<i64>) {
         self.frames = frames;
         let automation = from.and_then(|_| self.automation.clone());
@@ -249,15 +250,35 @@ impl ParamBank {
             .and_then(|data| data.downcast_ref::<AutomationList>());
         for slot in &mut self.slots {
             let frames = frames.min(slot.ramp.len());
-            let envelope = automation.and_then(|list| list.envelope(slot.descriptor.id));
+            let id = slot.descriptor.id;
+            let descriptor = &slot.descriptor;
+            let modulation = |frame: i64| {
+                automation
+                    .and_then(|list| list.modulation(id, frame))
+                    .unwrap_or(0.0)
+            };
+            let envelope = automation.and_then(|list| list.envelope(id));
+            let modulated = automation.is_some_and(|list| list.modulates(id));
+            // Spec: clip-envelopes R3. The clips' modulation is added on the
+            // frame, clamped to the parameter's range; the control (or the
+            // track's envelope) is the value underneath.
             if let (Some(envelope), Some(from)) = (envelope, from) {
                 for (i, value) in slot.ramp[..frames].iter_mut().enumerate() {
-                    *value = slot.descriptor.clamp(envelope.value_at(from + i as i64)) as f32;
+                    let frame = from + i as i64;
+                    *value = descriptor.clamp(envelope.value_at(frame) + modulation(frame)) as f32;
                 }
-                slot.smoother.snap(
-                    slot.descriptor
-                        .clamp(envelope.value_at(from + frames as i64 - 1)),
-                );
+                let last = from + frames as i64 - 1;
+                slot.smoother
+                    .snap(descriptor.clamp(envelope.value_at(last) + modulation(last)));
+            } else if let (true, Some(from)) = (modulated, from) {
+                // The control glides as it always does; the modulation is
+                // added on the frame. When the modulation goes, the value
+                // steps back to the control, which is where the smoother
+                // still is.
+                for (i, value) in slot.ramp[..frames].iter_mut().enumerate() {
+                    let frame = from + i as i64;
+                    *value = descriptor.clamp(slot.smoother.step() + modulation(frame)) as f32;
+                }
             } else if slot.smoother.is_settled() {
                 slot.ramp[..frames].fill(slot.smoother.value() as f32);
             } else {

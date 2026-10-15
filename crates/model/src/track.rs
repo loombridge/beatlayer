@@ -521,6 +521,22 @@ impl Track {
             .map(|clip| &**clip)
     }
 
+    /// The clip with this ID, to change in place, whether it sits on the
+    /// Arrangement lane or in a Session slot. The track's share of the clip
+    /// is copied out of the document it came from first, so editing it
+    /// leaves that version as it was.
+    pub(crate) fn clip_mut(&mut self, id: ClipId) -> Option<&mut Clip> {
+        if let Some(clip) = self.clips.get_mut(&id) {
+            return Some(Shared::make_mut(clip));
+        }
+        let scene = self
+            .slots
+            .iter()
+            .find(|(_, clip)| clip.id == id)
+            .map(|(&scene, _)| scene)?;
+        self.slots.get_mut(&scene).map(Shared::make_mut)
+    }
+
     /// The tracks directly inside this one, in order. Only groups have them.
     pub fn children(&self) -> impl ExactSizeIterator<Item = TrackId> + DoubleEndedIterator + '_ {
         self.children.iter().copied()

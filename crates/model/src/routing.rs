@@ -4,6 +4,8 @@
 
 use std::collections::BTreeSet;
 
+use crate::automation::AutomationTarget;
+use crate::clip::Clip;
 use crate::document::Document;
 use crate::error::ModelError;
 use crate::ids::TrackId;
@@ -60,6 +62,23 @@ impl Document {
         let track = self.track_ref(id)?;
         for target in track.automation.keys() {
             self.check_automation_target(id, *target)?;
+        }
+        Ok(())
+    }
+
+    /// Checks every envelope the clips on `id` carry (WP-3.15): each names a
+    /// parameter of the track — one envelope per parameter — and its
+    /// breakpoints follow the automation rules. What a loaded document, and
+    /// a clip put on the track, must pass.
+    pub(crate) fn check_clip_envelopes(&self, id: TrackId, clip: &Clip) -> Result<(), ModelError> {
+        self.track_ref(id)?;
+        let mut seen: BTreeSet<AutomationTarget> = BTreeSet::new();
+        for envelope in clip.envelopes() {
+            if !seen.insert(envelope.target) {
+                return Err(ModelError::DuplicateEnvelope { clip: clip.id });
+            }
+            self.check_automation_target(id, envelope.target)?;
+            envelope.envelope.check()?;
         }
         Ok(())
     }

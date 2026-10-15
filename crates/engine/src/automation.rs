@@ -16,8 +16,11 @@
 
 use std::collections::BTreeMap;
 
-use bl_core::time::{SampleRate, TempoMap};
-use bl_model::{AutomationTarget, MixerParam, ParamId, TrackId, curve_value};
+use bl_core::time::{SampleRate, TempoMap, Ticks};
+use bl_model::{
+    AutomationTarget, Breakpoint, ClipData, MidiData, MixerParam, ParamId, TrackId, curve_value,
+    envelope_value,
+};
 
 use crate::mixer;
 use crate::node::NodeKey;
@@ -87,10 +90,152 @@ impl PlacedEnvelope {
     }
 }
 
-/// One node's automation: an envelope per automated parameter.
+/// One clip's envelope, placed in song frames (WP-3.15): the stretches of
+/// song time its clip plays, and where along the clip's contents each frame
+/// sits. Its value is read frame by frame, the way a track envelope's is.
+struct PlacedClipEnvelope {
+    /// The stretches the clip plays, in frame order, in song frames.
+    segments: Vec<PlacedSegment>,
+    /// The envelope's breakpoints: content positions, values, and the bends
+    /// of the segments starting at them.
+    points: Vec<Breakpoint>,
+}
+
+/// One stretch of a clip's playback: `tick = first_tick + (frame −
+/// first_frame) · per_frame` for the frames in `first_frame..end_frame`.
+struct PlacedSegment {
+    first_frame: i64,
+    end_frame: i64,
+    first_tick: f64,
+    per_frame: f64,
+}
+
+impl PlacedClipEnvelope {
+    /// `envelope` placed for `clip` under `tempo` at `rate`, with every
+    /// frame shifted on by `shift` (the node's delay, WP-2.11), the way a
+    /// track envelope is. `None` for a clip that plays nothing, or an
+    /// envelope with no breakpoints: neither modulates anything.
+    fn placed(
+        clip: &bl_model::Clip,
+        envelope: &bl_model::ClipEnvelope,
+        tempo: &TempoMap,
+        rate: SampleRate,
+        shift: i64,
+    ) -> Option<Self> {
+        let ClipData::Midi(midi) = &clip.data else {
+            return None;
+        };
+        let points: Vec<Breakpoint> = envelope.envelope.points().collect();
+        if points.is_empty() {
+            return None;
+        }
+        let mut segments = Vec::new();
+        for (song_from, song_to, content_from, content_to) in played_regions(clip, midi, envelope) {
+            let first_frame = tempo
+                .ticks_to_frames(song_from, rate)
+                .get()
+                .saturating_add(shift);
+            let end_frame = tempo
+                .ticks_to_frames(song_to, rate)
+                .get()
+                .saturating_add(shift);
+            if end_frame <= first_frame {
+                continue;
+            }
+            segments.push(PlacedSegment {
+                first_frame,
+                end_frame,
+                first_tick: content_from.get() as f64,
+                per_frame: (content_to.get() - content_from.get()) as f64
+                    / (end_frame - first_frame) as f64,
+            });
+        }
+        if segments.is_empty() {
+            return None;
+        }
+        Some(Self { segments, points })
+    }
+
+    /// The value it holds at `frame`: the envelope's own value at the
+    /// content position that frame sits at, `None` while the clip doesn't
+    /// play. Reading allocates nothing and is the same whatever the block
+    /// size: the value depends on the frame alone.
+    // Spec: clip-envelopes R4
+    fn value_at(&self, frame: i64) -> Option<f64> {
+        let index = self
+            .segments
+            .partition_point(|segment| segment.first_frame <= frame);
+        let segment = self.segments.get(index.checked_sub(1)?)?;
+        if frame >= segment.end_frame {
+            return None;
+        }
+        let tick = segment.first_tick + (frame - segment.first_frame) as f64 * segment.per_frame;
+        envelope_value(&self.points, tick)
+    }
+}
+
+/// The stretches of song time a clip plays, each with the part of its
+/// contents that plays there, in ticks: `(song start, song end, content
+/// start, content end)`, in order. A linked envelope (WP-3.15) runs over
+/// what the clip's contents play, which is this mapping, and the player's
+/// notes play by the same one (`crate::midi_clips`). An unlinked one runs
+/// once from the clip's start, one tick per tick, for as long as the clip
+/// lasts.
+// Spec: clip-envelopes R2
+fn played_regions(
+    clip: &bl_model::Clip,
+    midi: &MidiData,
+    envelope: &bl_model::ClipEnvelope,
+) -> Vec<(Ticks, Ticks, Ticks, Ticks)> {
+    let (start, length) = (clip.start, clip.length);
+    if length <= Ticks::ZERO || start < Ticks::ZERO {
+        return Vec::new();
+    }
+    if !envelope.linked {
+        return vec![(start, start + length, Ticks::ZERO, length)];
+    }
+    let mut regions = Vec::new();
+    if !midi.looping {
+        let end_marker = midi.end.unwrap_or(midi.start + length);
+        if end_marker > midi.start {
+            let active = length.min(end_marker - midi.start);
+            regions.push((start, start + active, midi.start, midi.start + active));
+        }
+        return regions;
+    }
+    let loop_end = midi
+        .loop_end
+        .unwrap_or_else(|| (midi.loop_start + length).max(midi.loop_start + Ticks::QUARTER));
+    if loop_end <= midi.loop_start || midi.start >= loop_end {
+        return regions;
+    }
+    let loop_len = loop_end - midi.loop_start;
+    // Repetition 0: from the start marker to the brace's end, cut off where
+    // the clip ends. Then the brace repeats.
+    let first = (loop_end - midi.start).min(length);
+    regions.push((start, start + first, midi.start, midi.start + first));
+    let mut at = first;
+    while at < length {
+        let repeat = loop_len.min(length - at);
+        regions.push((
+            start + at,
+            start + at + repeat,
+            midi.loop_start,
+            midi.loop_start + repeat,
+        ));
+        at += repeat;
+    }
+    regions
+}
+
+/// One node's automation: an envelope per automated parameter, and the
+/// clips' envelopes modulating them.
 pub struct AutomationList {
     /// One envelope per parameter, ordered by parameter.
     envelopes: Vec<(ParamId, PlacedEnvelope)>,
+    /// The clips' envelopes (WP-3.15), one entry per parameter they
+    /// modulate, ordered by parameter.
+    modulation: Vec<(ParamId, Vec<PlacedClipEnvelope>)>,
 }
 
 impl AutomationList {
@@ -104,11 +249,42 @@ impl AutomationList {
         Some(&self.envelopes[index].1)
     }
 
-    /// Whether no parameter of the node is automated: what a node whose
-    /// envelopes all went is sent, so it follows its controls again.
+    /// The modulation the node's `param` takes at `frame`: the sum of the
+    /// clips' envelopes playing there (WP-3.15). `None` when no clip
+    /// envelope modulates the parameter, and `Some(0.0)` while they exist
+    /// but none of their clips plays at this frame; a node adds what it
+    /// gets to the parameter's own value and clamps.
+    #[must_use]
+    pub fn modulation(&self, param: ParamId, frame: i64) -> Option<f64> {
+        let index = self
+            .modulation
+            .binary_search_by_key(&param, |&(param, _)| param)
+            .ok()?;
+        Some(
+            self.modulation[index]
+                .1
+                .iter()
+                .filter_map(|envelope| envelope.value_at(frame))
+                .sum(),
+        )
+    }
+
+    /// Whether any clip envelope modulates `param`: what a node checks
+    /// before its fast paths, since a parameter with neither a track
+    /// envelope nor clip modulation follows its control alone.
+    #[must_use]
+    pub fn modulates(&self, param: ParamId) -> bool {
+        self.modulation
+            .binary_search_by_key(&param, |&(param, _)| param)
+            .is_ok()
+    }
+
+    /// Whether neither a track envelope nor a clip envelope drives any of
+    /// the node's parameters: what a node whose envelopes all went is sent,
+    /// so it follows its controls again.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.envelopes.is_empty()
+        self.envelopes.is_empty() && self.modulation.is_empty()
     }
 }
 
@@ -128,8 +304,8 @@ pub(crate) fn lists(
         return Vec::new();
     };
     let tempo = &document.settings().tempo;
-    let mut lists: BTreeMap<NodeKey, Vec<(ParamId, PlacedEnvelope)>> = BTreeMap::new();
-    lists.insert(NodeKey::Mixer(track.id()), Vec::new());
+    let mut lists: BTreeMap<NodeKey, Entries> = BTreeMap::new();
+    lists.insert(NodeKey::Mixer(track.id()), Entries::default());
     if track.kind().has_sends() {
         for to in document.returns() {
             lists.insert(
@@ -137,47 +313,96 @@ pub(crate) fn lists(
                     track: track.id(),
                     to,
                 },
-                Vec::new(),
+                Entries::default(),
             );
         }
     }
     for device in track.devices() {
-        lists.insert(NodeKey::Device(device.id), Vec::new());
+        lists.insert(NodeKey::Device(device.id), Entries::default());
     }
     for (target, automation) in track.automation() {
         if !automation.enabled {
             continue;
         }
-        let (key, param) = match *target {
-            AutomationTarget::Mixer { param } => (
-                NodeKey::Mixer(track.id()),
-                match param {
-                    MixerParam::Volume => mixer::track::VOLUME,
-                    MixerParam::Pan => mixer::track::PAN,
-                    MixerParam::Mute => mixer::track::MUTE,
-                },
-            ),
-            AutomationTarget::Send { to } => (
-                NodeKey::Send {
-                    track: track.id(),
-                    to,
-                },
-                mixer::route::LEVEL,
-            ),
-            AutomationTarget::Device { device, param } => (NodeKey::Device(device), param),
-        };
+        let (key, param) = target_node(track.id(), target);
         let envelope = PlacedEnvelope::placed(&automation.envelope, tempo, rate, delay(key));
         if !envelope.is_empty() {
-            lists.entry(key).or_default().push((param, envelope));
+            lists
+                .entry(key)
+                .or_default()
+                .envelopes
+                .push((param, envelope));
+        }
+    }
+    // The clips' envelopes (WP-3.15): every clip on the track's Arrangement
+    // lane that plays and carries one modulates the parameter it names
+    // while the clip plays.
+    for clip in track.clips() {
+        if clip.mute {
+            continue;
+        }
+        for envelope in clip.envelopes() {
+            let (key, param) = target_node(track.id(), &envelope.target);
+            let placed = PlacedClipEnvelope::placed(clip, envelope, tempo, rate, delay(key));
+            if let Some(placed) = placed {
+                lists
+                    .entry(key)
+                    .or_default()
+                    .modulation
+                    .push((param, placed));
+            }
         }
     }
     lists
         .into_iter()
-        .map(|(key, mut envelopes)| {
-            envelopes.sort_by_key(|&(param, _)| param);
-            (key, AutomationList { envelopes })
+        .map(|(key, mut entries)| {
+            entries.envelopes.sort_by_key(|&(param, _)| param);
+            entries.modulation.sort_by_key(|&(param, _)| param);
+            // However many clips modulate one parameter, the node reads
+            // them together.
+            let mut modulation: Vec<(ParamId, Vec<PlacedClipEnvelope>)> = Vec::new();
+            for (param, envelope) in entries.modulation {
+                match modulation.last_mut() {
+                    Some((last, envelopes)) if *last == param => envelopes.push(envelope),
+                    _ => modulation.push((param, vec![envelope])),
+                }
+            }
+            (
+                key,
+                AutomationList {
+                    envelopes: entries.envelopes,
+                    modulation,
+                },
+            )
         })
         .collect()
+}
+
+/// The node and parameter an automation target names on `track`: its mixer
+/// for a mixer control, its send to a return track, or a device in its
+/// chain.
+fn target_node(track: TrackId, target: &AutomationTarget) -> (NodeKey, ParamId) {
+    match *target {
+        AutomationTarget::Mixer { param } => (
+            NodeKey::Mixer(track),
+            match param {
+                MixerParam::Volume => mixer::track::VOLUME,
+                MixerParam::Pan => mixer::track::PAN,
+                MixerParam::Mute => mixer::track::MUTE,
+            },
+        ),
+        AutomationTarget::Send { to } => (NodeKey::Send { track, to }, mixer::route::LEVEL),
+        AutomationTarget::Device { device, param } => (NodeKey::Device(device), param),
+    }
+}
+
+/// What one node is sent: the track envelopes driving its parameters and
+/// the clips' envelopes modulating them, each to sort by parameter before
+/// they're sent.
+#[derive(Default)]
+struct Entries {
+    envelopes: Vec<(ParamId, PlacedEnvelope)>,
+    modulation: Vec<(ParamId, PlacedClipEnvelope)>,
 }
 
 #[cfg(test)]

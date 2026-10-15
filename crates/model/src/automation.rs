@@ -77,7 +77,7 @@ pub enum AutomationTarget {
 /// One breakpoint of an envelope: a position, the value there, and the bend
 /// of the segment starting at it. The last breakpoint has no segment after
 /// it, so its bend shapes nothing.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Breakpoint {
     /// Where it sits.
     pub at: Ticks,
@@ -149,7 +149,7 @@ pub(crate) fn check_points(points: &[Breakpoint]) -> Result<(), ModelError> {
 
 /// A parameter's envelope: breakpoints joined by straight or curved
 /// segments, in position order.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Envelope {
     /// Its breakpoints, in order; no two share a position.
     points: Vec<Breakpoint>,
@@ -164,6 +164,29 @@ pub(crate) enum PointError {
     Taken(Ticks),
     /// No segment starts at this position: it's the last breakpoint.
     NoSegment(Ticks),
+}
+
+/// The value a list of breakpoints holds at `at`: the shape of the segment
+/// between the breakpoints around it, the first one's value before it, and
+/// the last one's after it. `None` for no breakpoints. The position is a
+/// number of ticks, so a clip envelope (WP-3.15) can be read at a position
+/// between two ticks; the read path calls this frame by frame, so it
+/// allocates nothing.
+#[must_use]
+pub fn envelope_value(points: &[Breakpoint], at: f64) -> Option<f64> {
+    let first = *points.first()?;
+    let last = *points.last().expect("checked");
+    if at <= first.at.0 as f64 {
+        return Some(first.value);
+    }
+    if at >= last.at.0 as f64 {
+        return Some(last.value);
+    }
+    let index = points.partition_point(|point| (point.at.0 as f64) <= at) - 1;
+    let start = points[index];
+    let end = points[index + 1];
+    let along = (at - start.at.0 as f64) / (end.at.0 - start.at.0) as f64;
+    Some(curve_value(start.value, end.value, along, start.bend))
 }
 
 impl Envelope {
@@ -193,19 +216,7 @@ impl Envelope {
     /// one's after it. `None` for an empty envelope.
     #[must_use]
     pub fn value_at(&self, at: Ticks) -> Option<f64> {
-        let first = *self.points.first()?;
-        let last = *self.points.last().expect("checked");
-        if at <= first.at {
-            return Some(first.value);
-        }
-        if at >= last.at {
-            return Some(last.value);
-        }
-        let index = self.points.partition_point(|point| point.at <= at) - 1;
-        let start = self.points[index];
-        let end = self.points[index + 1];
-        let along = (at.0 - start.at.0) as f64 / (end.at.0 - start.at.0) as f64;
-        Some(curve_value(start.value, end.value, along, start.bend))
+        envelope_value(&self.points, at.0 as f64)
     }
 
     /// The envelope `points` make, or why they don't: they must be in
@@ -214,6 +225,13 @@ impl Envelope {
     pub fn from_points(points: Vec<Breakpoint>) -> Result<Self, ModelError> {
         check_points(&points)?;
         Ok(Self { points })
+    }
+
+    /// Why its breakpoints aren't valid: one before zero, one that isn't
+    /// after the one before it, a value or a bend that isn't in range. What
+    /// a loaded envelope must pass (WP-3.15).
+    pub(crate) fn check(&self) -> Result<(), ModelError> {
+        check_points(&self.points)
     }
 
     /// Adds a breakpoint at `at`, or replaces the value of the one already

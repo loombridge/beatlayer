@@ -765,7 +765,9 @@ fn restart_with(
             }
             Held::Schedule(command) => sender.schedule(command),
             Held::Cancel(id) => sender.cancel(id),
-            Held::Quantization(settings) => sender.session(SessionCommand::SetQuantization(settings)),
+            Held::Quantization(settings) => {
+                sender.session(SessionCommand::SetQuantization(settings))
+            }
         }
     }
     deliver(&mut sender, &mut processor);

@@ -473,8 +473,7 @@ impl EngineProgram {
     /// track order: what a scene launch queues.
     pub(crate) fn scene_slots(&self, scene: SceneId) -> &[(SceneId, TrackId)] {
         let start = self.scene_slots.partition_point(|&(s, _)| s < scene);
-        let end = start
-            + self.scene_slots[start..].partition_point(|&(s, _)| s == scene);
+        let end = start + self.scene_slots[start..].partition_point(|&(s, _)| s == scene);
         &self.scene_slots[start..end]
     }
 

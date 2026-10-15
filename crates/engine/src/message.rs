@@ -175,7 +175,10 @@ pub enum Report {
 pub(crate) enum Message {
     Program(Program),
     Param(ParamEvent),
-    Data { key: NodeKey, data: NodeData },
+    Data {
+        key: NodeKey,
+        data: NodeData,
+    },
     Transport(TransportCommand, When),
     /// A Session View command (WP-3.2): a launch, a stop, or the global
     /// launch quantisation.

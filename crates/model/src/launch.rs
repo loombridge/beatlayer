@@ -159,7 +159,11 @@ impl LaunchQuantization {
             return from;
         };
         let into = from.rem_euclid(unit);
-        from + if into == Ticks::ZERO { unit } else { unit - into }
+        from + if into == Ticks::ZERO {
+            unit
+        } else {
+            unit - into
+        }
     }
 
     /// This step's place in the menu.
@@ -271,10 +275,7 @@ mod tests {
             "a sixteenth triplet after the position"
         );
         // Exactly on a line waits for the next one.
-        assert_eq!(
-            LaunchQuantization::Bar.next_line(bar * 3, &sigs),
-            bar * 4
-        );
+        assert_eq!(LaunchQuantization::Bar.next_line(bar * 3, &sigs), bar * 4);
         assert_eq!(
             LaunchQuantization::None.next_line(at, &sigs),
             at,

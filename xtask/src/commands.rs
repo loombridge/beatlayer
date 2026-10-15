@@ -24,6 +24,7 @@ const PROVIDERS: &[(&str, Register)] = &[
     ("bl-model", bl_model::registry::register),
     ("bl-project", bl_project::registry::register),
     ("bl-engine", bl_engine::transport::register),
+    ("bl-engine", bl_engine::session::register),
     ("bl-shell-spec", bl_shell_spec::register),
 ];
 

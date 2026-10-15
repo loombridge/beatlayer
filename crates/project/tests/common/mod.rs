@@ -71,6 +71,9 @@ enum Step {
         volume: f64,
         pan: f64,
         switches: (bool, bool, bool),
+        /// Whether its first slot's Clip Stop button was removed
+        /// (WP-3.2).
+        no_stop_button: bool,
     },
     Clip {
         track: Index,
@@ -174,10 +177,26 @@ fn plugin() -> impl Strategy<Value = Option<(PluginFormat, String)>> {
 fn step() -> impl Strategy<Value = Step> {
     let ticks = |max: i64| prop_oneof![3 => 0..max, 1 => 0..i64::MAX / 4];
     prop_oneof![
-        3 => (kind(), any::<Index>(), name(), volume(), pan(), any::<(bool, bool, bool)>())
-            .prop_map(|(kind, parent, name, volume, pan, switches)| Step::Track {
-                kind, parent, name, volume, pan, switches,
-            }),
+        3 => (
+            kind(),
+            any::<Index>(),
+            name(),
+            volume(),
+            pan(),
+            any::<(bool, bool, bool)>(),
+            any::<bool>(),
+        )
+            .prop_map(
+                |(kind, parent, name, volume, pan, switches, no_stop_button)| Step::Track {
+                    kind,
+                    parent,
+                    name,
+                    volume,
+                    pan,
+                    switches,
+                    no_stop_button,
+                },
+            ),
         5 => (
             any::<Index>(),
             ticks(1 << 32),
@@ -340,6 +359,16 @@ impl Recipe {
             media,
             windows: bl_model::DeviceWindows::new(),
             folds: bl_model::ClipFolds::new(),
+            // WP-3.2: the global launch quantisation and its switch save
+            // beside the song.
+            launch: bl_model::LaunchSettings {
+                quantization: if self.id_skip.is_multiple_of(2) {
+                    bl_model::LaunchQuantization::EighthTriplet
+                } else {
+                    bl_model::LaunchQuantization::Bars2
+                },
+                enabled: !self.id_skip.is_multiple_of(3),
+            },
         }
     }
 
@@ -401,6 +430,7 @@ fn apply(editor: &mut Editor, step: &Step) {
             volume,
             pan,
             switches: (mute, solo, arm),
+            no_stop_button,
         } => {
             let parent = match (kind, parent.index(groups.len() + 1)) {
                 (TrackKind::Return, _) | (_, 0) => None,
@@ -443,6 +473,21 @@ fn apply(editor: &mut Editor, step: &Step) {
                     },
                 ] {
                     let _ = editor.apply(command);
+                }
+                // WP-3.2: some sets carry a slot whose Clip Stop button was
+                // removed.
+                if *no_stop_button && matches!(*kind, TrackKind::Audio | TrackKind::Midi) {
+                    let scene = editor
+                        .document()
+                        .scenes()
+                        .next()
+                        .expect("a new set has scenes")
+                        .id;
+                    let _ = editor.apply(Command::SetSlotStopButton {
+                        track: id,
+                        scene,
+                        stop_button: false,
+                    });
                 }
             }
         }

@@ -57,11 +57,7 @@ fn slot_clip(editor: &mut Editor, track: TrackId, scene: SceneId, notes: &[Note]
         ClipData::Midi(MidiData::new(notes.to_vec())),
     );
     editor
-        .apply(Command::CreateSlotClip {
-            track,
-            scene,
-            clip,
-        })
+        .apply(Command::CreateSlotClip { track, scene, clip })
         .unwrap();
 }
 
@@ -123,7 +119,9 @@ fn a_launch_lands_on_its_grid_frame_at_any_block_size_and_value() {
     for block in [1, 100, 512, 4096] {
         for (value, expected) in cases {
             let mut rig = Rig::new(4096);
-            rig.editor.apply(Command::SetTempo { tempo: tempo() }).unwrap();
+            rig.editor
+                .apply(Command::SetTempo { tempo: tempo() })
+                .unwrap();
             let track = midi_track(&mut rig);
             let scene = scene(&rig);
             slot_clip(
@@ -133,10 +131,11 @@ fn a_launch_lands_on_its_grid_frame_at_any_block_size_and_value() {
                 &[Note::new(60, Ticks::ZERO, Ticks::QUARTER, 100)],
             );
             rig.sync();
-            rig.sender.session(SessionCommand::SetQuantization(LaunchSettings {
-                quantization: value,
-                enabled: true,
-            }));
+            rig.sender
+                .session(SessionCommand::SetQuantization(LaunchSettings {
+                    quantization: value,
+                    enabled: true,
+                }));
             rig.sender.transport(TransportCommand::Play);
             at_frame(&mut rig, at, block, |rig| {
                 rig.sender.session(SessionCommand::Launch { track, scene });
@@ -179,7 +178,9 @@ fn a_launch_lands_on_its_grid_frame_at_any_block_size_and_value() {
 #[test]
 fn a_launch_while_stopped_starts_the_transport_at_once() {
     let mut rig = Rig::new(256);
-    rig.editor.apply(Command::SetTempo { tempo: tempo() }).unwrap();
+    rig.editor
+        .apply(Command::SetTempo { tempo: tempo() })
+        .unwrap();
     let track = midi_track(&mut rig);
     let scene = scene(&rig);
     slot_clip(
@@ -201,7 +202,9 @@ fn a_launch_while_stopped_starts_the_transport_at_once() {
 #[test]
 fn a_queued_stop_lands_on_its_grid_frame() {
     let mut rig = Rig::new(256);
-    rig.editor.apply(Command::SetTempo { tempo: tempo() }).unwrap();
+    rig.editor
+        .apply(Command::SetTempo { tempo: tempo() })
+        .unwrap();
     let track = midi_track(&mut rig);
     let scene = scene(&rig);
     slot_clip(
@@ -224,17 +227,16 @@ fn a_queued_stop_lands_on_its_grid_frame() {
         vec![(0, 60, true), (BAR_FRAMES, 60, false)],
         "the note plays from the launch and stops on the grid frame"
     );
-    assert!(
-        rig.monitor.state().session.is_empty(),
-        "the slot stopped"
-    );
+    assert!(rig.monitor.state().session.is_empty(), "the slot stopped");
 }
 
 // Spec: launch-quantisation R5
 #[test]
 fn two_launches_on_a_track_act_in_order() {
     let mut rig = Rig::new(256);
-    rig.editor.apply(Command::SetTempo { tempo: tempo() }).unwrap();
+    rig.editor
+        .apply(Command::SetTempo { tempo: tempo() })
+        .unwrap();
     let track = midi_track(&mut rig);
     let first = scene(&rig);
     let second = rig.editor.document().scenes().nth(1).unwrap().id;
@@ -299,7 +301,9 @@ fn two_launches_on_a_track_act_in_order() {
 #[test]
 fn a_scene_launch_starts_its_clips_together() {
     let mut rig = Rig::new(512);
-    rig.editor.apply(Command::SetTempo { tempo: tempo() }).unwrap();
+    rig.editor
+        .apply(Command::SetTempo { tempo: tempo() })
+        .unwrap();
     let first = midi_track(&mut rig);
     let second = midi_track(&mut rig);
     let scene = scene(&rig);
@@ -337,7 +341,9 @@ fn a_scene_launch_starts_its_clips_together() {
 #[test]
 fn every_slot_stops_together_and_stop_all_clears_the_state() {
     let mut rig = Rig::new(256);
-    rig.editor.apply(Command::SetTempo { tempo: tempo() }).unwrap();
+    rig.editor
+        .apply(Command::SetTempo { tempo: tempo() })
+        .unwrap();
     let first = midi_track(&mut rig);
     let second = midi_track(&mut rig);
     let scene = scene(&rig);
@@ -418,11 +424,7 @@ fn render_session_audio(
         ClipData::Audio(AudioData::new(ContentHash([7; 32]))),
     );
     editor
-        .apply(Command::CreateSlotClip {
-            track,
-            scene,
-            clip,
-        })
+        .apply(Command::CreateSlotClip { track, scene, clip })
         .unwrap();
     offline.sync(editor.document());
     assert!(offline.missing_media().is_empty());
@@ -441,7 +443,9 @@ fn render_session_audio(
         }
         // Stop the block at the next cue, so it arrives on its own frame.
         let until = cues.get(next).map_or(frames, |&(frame, _)| frame);
-        let n = block.min((frames - done) as usize).min((until - done) as usize);
+        let n = block
+            .min((frames - done) as usize)
+            .min((until - done) as usize);
         offline.render(n as u64, |output| out.extend_from_slice(output.channel(0)));
         done += n as u64;
     }
@@ -457,8 +461,8 @@ fn a_launched_audio_slot_clip_plays_its_file_from_the_launch_frame() {
     let out = render_session_audio(2_000, 512, |track, scene| {
         vec![(0, Cue::Session(SessionCommand::Launch { track, scene }))]
     });
-    for i in 0..600 {
-        assert_eq!(out[i], at(i as i64), "frame {i}");
+    for (i, sample) in out.iter().enumerate().take(600) {
+        assert_eq!(*sample, at(i as i64), "frame {i}");
     }
     // While playing it waits for the grid: with the default one-bar grid,
     // the clip starts on the 2.1.1 line.
@@ -473,7 +477,7 @@ fn a_launched_audio_slot_clip_plays_its_file_from_the_launch_frame() {
     });
     assert_eq!(out[24_000], 0.0, "nothing plays before the grid");
     assert_eq!(out[95_999], 0.0);
-    for i in 0..600 {
-        assert_eq!(out[96_000 + i], at(i as i64), "frame {i} of the launch");
+    for (i, sample) in out[96_000..].iter().enumerate().take(600) {
+        assert_eq!(*sample, at(i as i64), "frame {i} of the launch");
     }
 }

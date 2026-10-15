@@ -104,6 +104,9 @@ pub use bl_shell_spec::notes as note_commands;
 pub use bl_shell_spec::perception as perception_commands;
 /// The plug-in command IDs and their argument and result types (WP-2.6).
 pub use bl_shell_spec::plugins as plugin_commands;
+/// The Session View's launch quantisation command IDs and their argument and
+/// result types (WP-3.2).
+pub use bl_shell_spec::session_launch as session_launch_commands;
 /// The Session View grid's command IDs and their argument and result types
 /// (WP-3.7).
 pub use bl_shell_spec::session_view as session_view_commands;

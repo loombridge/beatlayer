@@ -216,7 +216,12 @@ fn play_session_clip(
             sounding,
         );
         if from_frame <= end_frame && end_frame < to_frame {
-            stop_clip_sounding(clip.id, (end_frame - from_frame) as u32, sounding, scratch_notes);
+            stop_clip_sounding(
+                clip.id,
+                (end_frame - from_frame) as u32,
+                sounding,
+                scratch_notes,
+            );
         }
         return;
     }

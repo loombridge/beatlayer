@@ -53,6 +53,9 @@ fn registry() -> Registry {
     bl_shell::register(&mut registry).unwrap();
     // The transport's commands (WP-1.5), which the playback keys bind.
     bl_engine::transport::register(&mut registry).unwrap();
+    // The Session View's launching and stopping (WP-3.2), which its grid
+    // runs and its keys reach.
+    bl_engine::session::register(&mut registry).unwrap();
     registry
 }
 

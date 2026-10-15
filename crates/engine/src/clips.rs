@@ -767,7 +767,9 @@ impl std::fmt::Debug for ClipPlayer {
 }
 
 /// Adds the frames `range` of the block, which are `elapsed` frames into
-/// `clip`, read from `source`, to the block.
+/// `clip`, read from `source`, to the block, through `level`, which says the
+/// clip's gain there.
+#[allow(clippy::too_many_arguments)]
 fn render(
     clip: &PlacedClip,
     source: &mut dyn AudioSource,
@@ -975,6 +977,7 @@ mod tests {
     fn clip(looping: bool) -> PlacedClip {
         PlacedClip {
             id: ClipId(bl_core::id::Id::new(1).unwrap()),
+            scene: None,
             geometry: Geometry {
                 start: 100,
                 end: 1100,

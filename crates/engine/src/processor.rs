@@ -695,7 +695,6 @@ impl Processor {
         }
     }
 
-
     /// Runs a Session View command (WP-3.2): a launch, a stop, or the
     /// global launch quantisation.
     fn session_command(&mut self, command: SessionCommand) {
@@ -730,8 +729,18 @@ impl Processor {
         self.session.launch(track, scene, playhead);
     }
 
-    /// Launches every clip of a scene, all on one frame (R7).
+    /// The launch scene's clips: a scene with nothing in it doesn't start the
+    /// transport, so launching an empty scene does nothing (observed in Live
+    /// 12.4.3; what a scene with a clip does while stopped is in the spec's
+    /// "To observe in Live").
     fn launch_scene(&mut self, scene: SceneId) {
+        let holds_a_clip = self
+            .program
+            .as_ref()
+            .is_some_and(|program| !program.get().scene_slots(scene).is_empty());
+        if !holds_a_clip {
+            return;
+        }
         let was_playing = self.playing;
         if !was_playing {
             self.play_from_insert_marker();

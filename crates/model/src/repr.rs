@@ -265,7 +265,9 @@ impl Loader {
     fn add(&mut self, repr: TrackRepr, parent: Option<TrackId>) -> Result<TrackId, ModelError> {
         let id = repr.id;
         self.claim(id.0)?;
-        if (!repr.clips.is_empty() || !repr.slots.is_empty() || !repr.removed_stop_buttons.is_empty())
+        if (!repr.clips.is_empty()
+            || !repr.slots.is_empty()
+            || !repr.removed_stop_buttons.is_empty())
             && !repr.kind.holds_clips()
         {
             return Err(wrong_kind(&repr, "an audio or MIDI track"));

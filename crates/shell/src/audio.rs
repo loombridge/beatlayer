@@ -46,10 +46,10 @@ use bl_engine::preview::{
 };
 use bl_engine::{
     Collector, DROP_PERIOD, DropThread, Engine, EngineConfig, MediaLibrary, MediaStreams,
-    Processor, Registry, Report, ScheduledCommand, TransportCommand,
+    Processor, Registry, Report, ScheduledCommand, SessionCommand, SlotStatus, TransportCommand,
 };
 use bl_media::{MediaStore, StreamerStats};
-use bl_model::{Channel, Document};
+use bl_model::{Channel, Document, LaunchSettings};
 pub use bl_shell_spec::audio::{
     AudioDevices, AudioSettings, AudioStatus, ConfigureAudio, DeviceListing, DeviceRef, DriverInfo,
     TONE_DEFAULT_DBFS, TONE_DEFAULT_HZ, TONE_MAX_DBFS, TONE_MAX_HZ, TONE_MIN_DBFS, TONE_MIN_HZ,
@@ -335,6 +335,9 @@ pub struct AudioHost {
     /// The transport as the engine last showed it, to restore when the next
     /// engine starts.
     memory: EngineTransport,
+    /// The global launch quantisation and its enabled switch (WP-3.2): the
+    /// set's, sent to the engine, so launching waits for the right grid.
+    launch: LaunchSettings,
     shared: Arc<EngineShared>,
     error: Option<String>,
     /// The counters at the last CPU sample, and the load measured then.
@@ -424,6 +427,7 @@ impl AudioHost {
             engine: None,
             document: None,
             memory: EngineTransport::default(),
+            launch: LaunchSettings::default(),
             shared: Arc::new(EngineShared::default()),
             error: None,
             last_sample: (0, 0),
@@ -585,6 +589,44 @@ impl AudioHost {
     pub fn send_transport(&mut self, command: TransportCommand) -> Result<(), String> {
         self.running_engine()?.transport(command);
         Ok(())
+    }
+
+    /// Sends a Session View command (WP-3.2): a slot or a scene launch, or
+    /// a stop, which the engine runs at the start of its next block and
+    /// lands on the launch quantisation grid.
+    ///
+    /// # Errors
+    ///
+    /// Why nothing can play, while no engine runs, as
+    /// [`AudioHost::send_transport`] says.
+    pub fn send_session(&mut self, command: SessionCommand) -> Result<(), String> {
+        self.running_engine()?.session(command);
+        Ok(())
+    }
+
+    /// Keeps the global launch quantisation and its switch (WP-3.2), telling
+    /// the engine that runs and the engine that starts next: launching and
+    /// stopping wait for the grid it sets. The set saves it beside the song.
+    pub fn set_launch_settings(&mut self, settings: LaunchSettings) {
+        self.launch = settings;
+        let _ = self.send_session(SessionCommand::SetQuantization(settings));
+    }
+
+    /// The global launch quantisation and its switch, as last set.
+    #[must_use]
+    pub fn launch_settings(&self) -> LaunchSettings {
+        self.launch
+    }
+
+    /// The Session slots' states the engine last published (WP-3.2): one
+    /// entry per queued, playing, or stopping slot, which the UI draws the
+    /// launch buttons from. Empty once every slot has stopped, and while no
+    /// engine runs.
+    pub fn session_into(&mut self, out: &mut Vec<SlotStatus>) {
+        out.clear();
+        if let Some(engine) = self.engine.as_mut() {
+            out.extend_from_slice(&engine.state().session);
+        }
     }
 
     /// Schedules a command at a musical position on the engine's queue,
@@ -961,6 +1003,9 @@ impl AudioHost {
             engine.transport(TransportCommand::Stop);
         }
         engine.transport(TransportCommand::SetInsertMarker(memory.insert_marker));
+        // Spec: launch-quantisation R1. The set's global quantisation, so
+        // launching waits for the right grid from the first block.
+        engine.session(SessionCommand::SetQuantization(self.launch));
         let _ = engine.flush(ENGINE_START_TIMEOUT);
         handoff
             .push(processor)

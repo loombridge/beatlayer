@@ -4,8 +4,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use bl_model::{
-    Change, ChangeSet, ContentHash, DeviceId, DeviceKind, Document, Mixer, OrdMap, ParamId, SceneId,
-    Tap, Track, TrackId, TrackKind,
+    Change, ChangeSet, ContentHash, DeviceId, DeviceKind, Document, Mixer, OrdMap, ParamId,
+    SceneId, Tap, Track, TrackId, TrackKind,
 };
 
 use crate::EngineConfig;
@@ -1175,8 +1175,10 @@ fn needs_program(
         }
     }
     // Clip changes never recompile: `Compiler::sync` sends the track's clip
-    // player its clips as node data (the audio clips spec, R12).
-    recompile
+    // player its clips as node data (the audio clips spec, R12). The Session
+    // View's slots are the exception: which slots hold a clip travels in the
+    // program's scene table, which a scene launch reads (WP-3.2).
+    recompile || scene_slots(old) != scene_slots(new)
 }
 
 /// A switch as a parameter value.
@@ -1689,7 +1691,7 @@ mod tests {
                 assert_ne!(program.order, (0..5).collect::<Vec<_>>());
             }
             let mut scratch = Vec::new();
-            program.run(64, 0, &[], &mut scratch, TransportInfo::default());
+            program.run(64, 0, &[], &mut scratch, TransportInfo::default(), &[]);
             program.output(0, 64).to_vec()
         };
         let in_order = render(&mut f, false);

@@ -15,8 +15,15 @@
 //! clip playing on it ([`SessionPlayback`]) so the player sounds the
 //! launched clip from its launch frame.
 
+use core::fmt;
+
+use bl_commands::Context::{self, Session};
+use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_core::time::{Frames, SampleRate, TempoMap, Ticks, TimeSignatureMap};
 use bl_model::{LaunchSettings, SceneId, TrackId};
+use schemars::JsonSchema;
+use serde::Deserialize;
+use serde_json::Value;
 
 /// What a slot is doing (WP-3.2). Recording waits for WP-3.11.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -170,7 +177,10 @@ impl SessionLauncher {
         if !playhead.wait_for_grid {
             return playhead.frames(playhead.position);
         }
-        playhead.frames(self.settings.next_line(playhead.position, playhead.signatures))
+        playhead.frames(
+            self.settings
+                .next_line(playhead.position, playhead.signatures),
+        )
     }
 
     /// Launches the clip in `(track, scene)`. While the song plays it plays
@@ -339,6 +349,205 @@ impl SessionLauncher {
     }
 }
 
+/// The arguments of `session.launch`: the slot whose clip launches.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LaunchArgs {
+    /// The track whose slot it is.
+    pub track: TrackId,
+    /// The scene whose slot it is.
+    pub scene: SceneId,
+}
+
+/// The arguments of `session.launch_scene`: the scene to launch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LaunchSceneArgs {
+    /// The scene.
+    pub scene: SceneId,
+}
+
+/// The arguments of `session.stop_track`: the track whose clip stops.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct StopTrackArgs {
+    /// The track.
+    pub track: TrackId,
+}
+
+/// Adds the Session View's launch commands to a registry.
+///
+/// # Errors
+///
+/// [`RegisterError`] if one of their IDs is already registered.
+pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
+    for entry in ENTRIES {
+        registry.register(entry.spec())?;
+    }
+    Ok(())
+}
+
+/// Whether `id` is one of the commands [`register`] adds, so a host knows
+/// to send it to [`command_from_args`].
+#[must_use]
+pub fn handles(id: &str) -> bool {
+    ENTRIES.iter().any(|entry| entry.id == id)
+}
+
+/// The [`SessionCommand`] a launch command's ID and JSON arguments
+/// describe, for the host to send to the engine.
+///
+/// # Errors
+///
+/// [`RunError::UnknownCommand`] if `id` isn't a launch command, and
+/// [`RunError::InvalidArgs`] if the arguments don't fit its schema.
+pub fn command_from_args(id: &str, args: Value) -> Result<SessionCommand, RunError> {
+    let entry = ENTRIES
+        .iter()
+        .find(|entry| entry.id == id)
+        .ok_or_else(|| RunError::UnknownCommand(id.to_owned()))?;
+    let invalid = |error: serde_json::Error| RunError::InvalidArgs {
+        command: entry.id,
+        message: error.to_string(),
+    };
+    match entry.action {
+        Action::Launch => {
+            let LaunchArgs { track, scene } = serde_json::from_value(args).map_err(invalid)?;
+            Ok(SessionCommand::Launch { track, scene })
+        }
+        Action::LaunchScene => {
+            let LaunchSceneArgs { scene } = serde_json::from_value(args).map_err(invalid)?;
+            Ok(SessionCommand::LaunchScene(scene))
+        }
+        Action::StopTrack => {
+            let StopTrackArgs { track } = serde_json::from_value(args).map_err(invalid)?;
+            Ok(SessionCommand::StopTrack(track))
+        }
+        Action::StopAll => {
+            serde_json::from_value::<NoArgs>(args).map_err(invalid)?;
+            Ok(SessionCommand::StopAll)
+        }
+    }
+}
+
+/// Why [`command_from_args`] refused a command.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum RunError {
+    /// No Session View launch command has this ID.
+    UnknownCommand(String),
+    /// The arguments don't fit the command's schema.
+    InvalidArgs {
+        /// The command.
+        command: &'static str,
+        /// What's wrong, from the deserialiser.
+        message: String,
+    },
+}
+
+impl fmt::Display for RunError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnknownCommand(id) => write!(f, "no Session View command is called `{id}`"),
+            Self::InvalidArgs { command, message } => {
+                write!(f, "invalid arguments for `{command}`: {message}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for RunError {}
+
+/// What running a registered command sends.
+#[derive(Clone, Copy)]
+enum Action {
+    /// [`SessionCommand::Launch`].
+    Launch,
+    /// [`SessionCommand::LaunchScene`].
+    LaunchScene,
+    /// [`SessionCommand::StopTrack`].
+    StopTrack,
+    /// [`SessionCommand::StopAll`].
+    StopAll,
+}
+
+/// One registered command.
+struct Entry {
+    id: &'static str,
+    action: Action,
+    label: &'static str,
+    contexts: &'static [Context],
+    description: &'static str,
+}
+
+impl Entry {
+    fn spec(&self) -> CommandSpec {
+        // Launching and stopping change nothing in the set, so they're
+        // `read` (D17's permission classes), as the transport's playback
+        // commands are.
+        let mut spec = CommandSpec::new(self.id, self.label)
+            .description(self.description)
+            .permission(Permission::Read)
+            .contexts(self.contexts.iter().copied())
+            .result::<()>();
+        spec = match self.action {
+            Action::Launch => spec.args::<LaunchArgs>(),
+            Action::LaunchScene => spec.args::<LaunchSceneArgs>(),
+            Action::StopTrack => spec.args::<StopTrackArgs>(),
+            Action::StopAll => spec.args::<NoArgs>(),
+        };
+        spec
+    }
+}
+
+/// Every Session View launch command this crate registers. The rules behind
+/// them are in the launch quantisation spec.
+const ENTRIES: &[Entry] = &[
+    Entry {
+        id: "session.launch",
+        action: Action::Launch,
+        label: "Launch Clip",
+        contexts: &[Session],
+        description: "Launches the clip in a track's Session slot at `scene`, as clicking the \
+            slot's launch button does. While the song plays the clip starts on the next line of \
+            the global launch quantisation grid, and until then the slot reads `queued`; while \
+            it's stopped the transport starts at once from the Arrangement position and the \
+            clip starts with it. A clip already playing on that track stops where the new one \
+            starts. The engine publishes the slots' states with the playhead, so the UI can \
+            draw them. It changes nothing in the set.",
+    },
+    Entry {
+        id: "session.launch_scene",
+        action: Action::LaunchScene,
+        label: "Launch Scene",
+        contexts: &[Session],
+        description: "Launches every clip of the scene at `scene`, as clicking the scene's \
+            launch button does: all of them start on one line of the launch quantisation grid, \
+            as one launch, so a scene's clips play together. While the song is stopped the \
+            transport starts at once. It changes nothing in the set.",
+    },
+    Entry {
+        id: "session.stop_track",
+        action: Action::StopTrack,
+        label: "Stop Track",
+        contexts: &[Session],
+        description: "Stops the clip the track plays, as the track's stop button in the status \
+            row does: it stops on the next line of the launch quantisation grid, and until then \
+            the slot reads `queued to stop`. A launch still queued on the track is dropped, and \
+            the transport keeps playing. It changes nothing in the set.",
+    },
+    Entry {
+        id: "session.stop_all",
+        action: Action::StopAll,
+        label: "Stop All Clips",
+        contexts: &[Session],
+        description: "Stops every track's playing clip, as Stop All Clips at the Main column's \
+            left does: all of them stop on the next line of the launch quantisation grid, as \
+            one stop. Launches still queued are dropped, and the transport keeps playing. It \
+            changes nothing in the set.",
+    },
+];
+
 #[cfg(test)]
 mod tests {
     use bl_core::time::Bpm;
@@ -347,8 +556,15 @@ mod tests {
     use super::*;
 
     fn ids() -> (TrackId, SceneId) {
-        let mut alloc = bl_core::id::IdAllocator::new();
-        (TrackId(alloc.allocate()), SceneId(alloc.allocate()))
+        use std::sync::atomic::{AtomicU64, Ordering};
+        // `IdAllocator::new` hands out the same IDs to every caller, so a
+        // counter shared by the binary's tests is what keeps two calls apart.
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        let next = NEXT.fetch_add(2, Ordering::Relaxed);
+        (
+            TrackId(bl_core::id::Id::new(next).unwrap()),
+            SceneId(bl_core::id::Id::new(next + 1).unwrap()),
+        )
     }
 
     fn tempo() -> TempoMap {
@@ -385,6 +601,16 @@ mod tests {
         assert_eq!(launcher.next_due(Frames::ZERO), Some(due));
         launcher.apply_due(due);
         assert_eq!(launcher.state_of(track, scene), Some(SlotState::Playing));
+        // Spec: launch-quantisation R12. A second launch of the slot that
+        // plays changes nothing: what a second press does is the launch
+        // mode's business (WP-3.3).
+        launcher.launch(
+            track,
+            scene,
+            playhead(&tempo, &sigs, true, Ticks::WHOLE * 3),
+        );
+        assert_eq!(launcher.state_of(track, scene), Some(SlotState::Playing));
+        assert_eq!(launcher.next_due(Frames::ZERO), None);
         let mut playing = Vec::with_capacity(4);
         launcher.playback(&mut playing);
         assert_eq!(
@@ -417,7 +643,11 @@ mod tests {
         let mut launcher = SessionLauncher::new(16);
         launcher.launch(track, scene, playhead(&tempo, &sigs, true, Ticks::ZERO));
         launcher.launch(track, other, playhead(&tempo, &sigs, true, Ticks::QUARTER));
-        assert_eq!(launcher.state_of(track, scene), None, "the queued one is dropped");
+        assert_eq!(
+            launcher.state_of(track, scene),
+            None,
+            "the queued one is dropped"
+        );
         assert_eq!(launcher.state_of(track, other), Some(SlotState::Queued));
         // And launching a third while the second plays queues the third and
         // makes the second stop where the third starts.
@@ -426,7 +656,10 @@ mod tests {
         launcher.apply_due(bar);
         assert_eq!(launcher.state_of(track, other), Some(SlotState::Playing));
         launcher.launch(track, third, playhead(&tempo, &sigs, true, Ticks::WHOLE));
-        assert_eq!(launcher.state_of(track, other), Some(SlotState::QueuedToStop));
+        assert_eq!(
+            launcher.state_of(track, other),
+            Some(SlotState::QueuedToStop)
+        );
         let next = tempo.ticks_to_frames(Ticks::WHOLE * 2, SampleRate::HZ_48000);
         launcher.apply_due(next);
         assert_eq!(launcher.state_of(track, other), None);
@@ -449,8 +682,15 @@ mod tests {
         let at = Ticks::WHOLE + Ticks::QUARTER;
         launcher.launch(track, other, playhead(&tempo, &sigs, true, at));
         launcher.stop(Some(track), playhead(&tempo, &sigs, true, at));
-        assert_eq!(launcher.state_of(track, other), None, "the queued launch is dropped");
-        assert_eq!(launcher.state_of(track, scene), Some(SlotState::QueuedToStop));
+        assert_eq!(
+            launcher.state_of(track, other),
+            None,
+            "the queued launch is dropped"
+        );
+        assert_eq!(
+            launcher.state_of(track, scene),
+            Some(SlotState::QueuedToStop)
+        );
         let next = tempo.ticks_to_frames(Ticks::WHOLE * 2, SampleRate::HZ_48000);
         launcher.apply_due(next);
         assert_eq!(launcher.state_of(track, scene), None);
@@ -473,7 +713,11 @@ mod tests {
         launcher.stop(None, playhead(&tempo, &sigs, true, Ticks::QUARTER));
         let next = tempo.ticks_to_frames(Ticks::WHOLE * 2, SampleRate::HZ_48000);
         launcher.apply_due(next);
-        assert!(slots.iter().all(|&(t, s)| launcher.state_of(t, s).is_none()));
+        assert!(
+            slots
+                .iter()
+                .all(|&(t, s)| launcher.state_of(t, s).is_none())
+        );
         let mut status = Vec::with_capacity(8);
         launcher.status(&mut status);
         assert!(status.is_empty());
@@ -487,9 +731,8 @@ mod tests {
         let mut launcher = SessionLauncher::new(16);
         let mut alloc = bl_core::id::IdAllocator::new();
         let scene = SceneId(alloc.allocate());
-        let slots: Vec<(SceneId, TrackId)> = (0..3)
-            .map(|_| (scene, TrackId(alloc.allocate())))
-            .collect();
+        let slots: Vec<(SceneId, TrackId)> =
+            (0..3).map(|_| (scene, TrackId(alloc.allocate()))).collect();
         launcher.launch_scene(scene, &slots, playhead(&tempo, &sigs, true, Ticks::QUARTER));
         let mut playing = Vec::with_capacity(8);
         launcher.playback(&mut playing);
@@ -498,7 +741,10 @@ mod tests {
         launcher.apply_due(bar);
         launcher.playback(&mut playing);
         assert_eq!(playing.len(), 3);
-        assert!(playing.iter().all(|entry| entry.frame == bar), "{playing:?}");
+        assert!(
+            playing.iter().all(|entry| entry.frame == bar),
+            "{playing:?}"
+        );
         assert!(playing.iter().all(|entry| entry.scene == scene));
     }
 
@@ -535,6 +781,52 @@ mod tests {
             launcher.next_due(Frames::ZERO),
             Some(due),
             "the queued launch keeps its frame"
+        );
+    }
+
+    #[test]
+    fn every_entry_registers_complete() {
+        let mut registry = Registry::new();
+        register(&mut registry).unwrap();
+        assert_eq!(registry.len(), ENTRIES.len());
+        assert_eq!(registry.problems(), Vec::new());
+        assert!(ENTRIES.iter().all(|entry| handles(entry.id)));
+        assert!(!handles("session.set_quantization"), "a shell command");
+    }
+
+    #[test]
+    fn arguments_are_checked() {
+        // Spec: launch-quantisation R9
+        let (track, scene) = ids();
+        assert_eq!(
+            command_from_args(
+                "session.launch",
+                serde_json::json!({ "track": track, "scene": scene })
+            ),
+            Ok(SessionCommand::Launch { track, scene })
+        );
+        assert_eq!(
+            command_from_args(
+                "session.launch_scene",
+                serde_json::json!({ "scene": scene })
+            ),
+            Ok(SessionCommand::LaunchScene(scene))
+        );
+        assert_eq!(
+            command_from_args("session.stop_track", serde_json::json!({ "track": track })),
+            Ok(SessionCommand::StopTrack(track))
+        );
+        assert_eq!(
+            command_from_args("session.stop_all", serde_json::json!({})),
+            Ok(SessionCommand::StopAll)
+        );
+        assert!(matches!(
+            command_from_args("session.launch", serde_json::json!({})),
+            Err(RunError::InvalidArgs { .. })
+        ));
+        assert_eq!(
+            command_from_args("session.stop", serde_json::json!({})),
+            Err(RunError::UnknownCommand("session.stop".to_owned()))
         );
     }
 }

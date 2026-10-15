@@ -5,9 +5,9 @@ use bl_model::TrackId;
 use rtrb::Consumer;
 
 use crate::message::{LoopRegion, Report};
-use crate::session::SlotStatus;
 #[cfg(doc)]
 use crate::mixer::{METER_RELEASE_DB_PER_SECOND, RMS_SECONDS};
+use crate::session::SlotStatus;
 
 /// One track's meters: its peak and RMS levels per channel, as linear
 /// amplitude, measured after its mixer (pan, volume, and the Track

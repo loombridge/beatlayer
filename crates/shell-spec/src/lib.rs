@@ -29,6 +29,8 @@
 //!   presets, and hot-swapping; [`context_menus`] holds the device title
 //!   bar's menu.
 //! - [`tracks`]: Duplicate Track Without Clips (WP-2.19b, IMP-12).
+//! - [`session_launch`]: the global launch quantisation and its enabled
+//!   switch (WP-3.2), which the Control Bar's Quantization Menu shows.
 //! - [`transport`]: what the Control Bar's transport section shows
 //!   (`transport.state`), and the IDs of the transport's commands, which
 //!   `bl-engine` and `bl-model` register (WP-1.18).
@@ -59,6 +61,7 @@ pub mod mixer_view;
 pub mod notes;
 pub mod perception;
 pub mod plugins;
+pub mod session_launch;
 pub mod session_view;
 pub mod settings;
 pub mod tracks;
@@ -86,6 +89,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     devices::register(registry)?;
     tracks::register(registry)?;
     session_view::register(registry)?;
+    session_launch::register(registry)?;
     plugins::register(registry)?;
     perception::register(registry)
 }

@@ -65,6 +65,9 @@ pub struct Harness {
     /// The menu bar the main window draws itself, as on Linux, if any
     /// (WP-1.14).
     pub menu_bar: Option<Vec<bl_shell::menus::Menu>>,
+    /// Files dropped into this window at the next frame, as a drag and
+    /// drop from Finder or Explorer gives them.
+    pub dropped: Vec<egui::DroppedFileHandle>,
 }
 
 impl Harness {
@@ -102,6 +105,7 @@ impl Harness {
             title_bar: false,
             engine: bl_shell::audio::EngineTransport::default(),
             menu_bar: None,
+            dropped: Vec::new(),
         }
     }
 
@@ -134,6 +138,7 @@ impl Harness {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, self.size / self.zoom)),
             time: Some(self.time),
             events,
+            dropped_files: std::mem::take(&mut self.dropped),
             ..Default::default()
         };
         // As the app does: the keys go to a value being typed as to a text

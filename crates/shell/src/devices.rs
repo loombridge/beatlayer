@@ -430,6 +430,10 @@ impl DeviceView {
             kind: d.kind.clone(),
             role: d.role,
             enabled: d.enabled,
+            takes_sample: matches!(
+                &d.kind,
+                DeviceKind::Native { device_type } if device_type == bl_devices::sampler::SAMPLER
+            ),
             show_preset_name: d.show_preset_name,
             folded: self.folded.contains(&d.id),
             floating: d.floating,

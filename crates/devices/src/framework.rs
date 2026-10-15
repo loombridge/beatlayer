@@ -8,7 +8,8 @@ use bl_core::time::{Frames, SampleRate, TempoMap};
 use bl_dsp::LinearSmoother;
 use bl_dsp::smooth::DEFAULT_SMOOTHING_SECONDS;
 use bl_engine::{
-    Block, DeviceType, Node, NodeConfig, NodeEvent, NoteEvent, ParamValue, Registry, segments,
+    Block, DeviceType, Node, NodeConfig, NodeData, NodeEvent, NoteEvent, ParamValue, Registry,
+    segments,
 };
 use bl_model::{Device, DeviceDescription, DeviceKind, ParamDescriptor, ParamId};
 
@@ -30,6 +31,15 @@ pub trait NativeDevice: Send + 'static {
     /// here. The default does nothing.
     fn flush(&mut self, events: &[NodeEvent], params: &ParamBank) {
         let _ = (events, params);
+    }
+
+    /// Takes data the compiler made for the device off the audio thread:
+    /// the decoded audio of a device that plays media (a sampler's sample,
+    /// WP-2.16). The default drops it. Dropping a [`NodeData`] here is
+    /// real-time safe: it only lets go of it, and the engine's drop thread
+    /// frees what it held.
+    fn receive_data(&mut self, data: NodeData) {
+        drop(data);
     }
 
     /// How many frames it delays its input by, for delay compensation
@@ -373,6 +383,10 @@ impl<D: NativeDevice> Node for NativeNode<D> {
             self.params.apply_now(event);
         }
         self.device.flush(events, &self.params);
+    }
+
+    fn receive_data(&mut self, data: NodeData) {
+        self.device.receive_data(data);
     }
 
     fn latency(&self) -> u32 {

@@ -735,6 +735,7 @@ dependencies = [
  "bl-core",
  "bl-dsp",
  "bl-engine",
+ "bl-media",
  "bl-model",
  "bl-rt",
  "lspk-dsp",

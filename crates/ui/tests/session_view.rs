@@ -14,7 +14,7 @@ use bl_model::{SceneId, TrackId};
 use bl_ui::layout::mixer::{MixerLayout, SceneRow, Sections, SessionLayout};
 use bl_ui::layout::{REFERENCE, ShellLayout, TITLE_BAR};
 use bl_ui::session_view::slot_id;
-use common::{Harness, Node, Window};
+use common::{Harness, Node, Window, command};
 use egui::accesskit::Role;
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, Rect, pos2, vec2};
 use serde_json::json;
@@ -172,6 +172,50 @@ fn drag(h: &mut Harness, from: Pos2, to: Pos2, modifiers: Modifiers) {
     h.settle();
 }
 
+/// The modifier that copies while dragging: Option on macOS, Ctrl
+/// elsewhere (I-DRAG-002).
+fn copy_key() -> Modifiers {
+    if cfg!(target_os = "macos") {
+        Modifiers::ALT
+    } else {
+        Modifiers::CTRL | Modifiers::COMMAND
+    }
+}
+
+/// Drops `files` at `at` with `modifiers` held, as Finder or the browser
+/// does.
+fn drop_files(h: &mut Harness, at: Pos2, modifiers: Modifiers, files: &[std::path::PathBuf]) {
+    h.frame(vec![
+        Event::PointerMoved(at),
+        Event::ModifiersChanged(modifiers),
+    ]);
+    for file in files {
+        h.dropped
+            .push(std::sync::Arc::new(DroppedFile(file.clone())));
+    }
+    h.frame(Vec::new());
+    h.frame(vec![Event::ModifiersChanged(Modifiers::NONE)]);
+    h.settle();
+}
+
+/// A short audio file to drop, as one dragged from the browser or Finder.
+fn wav_file(tag: &str) -> std::path::PathBuf {
+    let file = std::env::temp_dir().join(format!("bl-ui-session-{}-{tag}.wav", std::process::id()));
+    let samples: Vec<f32> = (0..4_800)
+        .map(|i| (i as f32 * 440.0 / 48_000.0 * std::f32::consts::TAU).sin() * 0.25)
+        .collect();
+    let bytes = bl_media::wav_bytes(
+        &samples,
+        1,
+        48_000,
+        bl_media::BitDepth::Int16,
+        bl_media::Dither::None,
+    )
+    .unwrap();
+    std::fs::write(&file, bytes).unwrap();
+    file
+}
+
 fn rect_of(node: &Node) -> Rect {
     let b = node.bounds.expect("a node with bounds");
     Rect::from_min_max(
@@ -320,7 +364,7 @@ fn double_clicking_an_empty_midi_slot_makes_a_clip() {
 }
 
 // Spec: session-view R10 (I-DRAG-001, I-DRAG-002, S-SES-004). A drag moves
-// a clip to another slot through the command layer; the command modifier
+// a clip to another slot through the command layer; the copy modifier
 // copies it.
 #[test]
 fn dragging_moves_a_clip_and_the_command_modifier_copies_it() {
@@ -345,7 +389,7 @@ fn dragging_moves_a_clip_and_the_command_modifier_copies_it() {
         "it moved to the slot it was dropped on"
     );
     // Option-drag (Ctrl on Windows and Linux) copies it back.
-    drag(&mut h, g.centre(0, 1), g.centre(0, 0), Modifiers::ALT);
+    drag(&mut h, g.centre(0, 1), g.centre(0, 0), copy_key());
     assert!(
         h.shell.editor().document().slot(track, scene1).is_some(),
         "the source stays"
@@ -364,31 +408,53 @@ fn dropping_a_file_places_a_clip_in_the_slot() {
     let track = g.columns[audio];
     let scene = g.scenes[0];
     // A real audio file, as one dragged from the browser or Finder.
-    let file = std::env::temp_dir().join(format!("bl-ui-session-{}.wav", std::process::id()));
-    let samples: Vec<f32> = (0..4_800)
-        .map(|i| (i as f32 * 440.0 / 48_000.0 * std::f32::consts::TAU).sin() * 0.25)
-        .collect();
-    let bytes = bl_media::wav_bytes(
-        &samples,
-        1,
-        48_000,
-        bl_media::BitDepth::Int16,
-        bl_media::Dither::None,
-    )
-    .unwrap();
-    std::fs::write(&file, bytes).unwrap();
-
-    let at = g.centre(audio, 0);
-    h.frame(vec![Event::PointerMoved(at)]);
-    h.dropped
-        .push(std::sync::Arc::new(DroppedFile(file.clone())));
-    h.frame(Vec::new());
-    h.settle();
+    let file = wav_file("single");
+    drop_files(
+        &mut h,
+        g.centre(audio, 0),
+        Modifiers::NONE,
+        std::slice::from_ref(&file),
+    );
     assert!(
         h.shell.editor().document().slot(track, scene).is_some(),
         "the drop placed a clip in the slot"
     );
     let _ = std::fs::remove_file(&file);
+}
+
+// Spec: interactions I-DROP-003. Several files dropped on a slot lie down
+// that track's scenes; with the command key held they spread across the
+// tracks at the scene instead.
+#[test]
+fn dropping_several_files_spreads_them_across_the_tracks_with_the_command_key() {
+    let mut h = harness();
+    let g = Grid::new(&h);
+    let audio = g.audio_column(&h);
+    let (track, next) = (g.columns[audio], g.columns[audio + 1]);
+    let (scene0, scene1, scene2) = (g.scenes[0], g.scenes[1], g.scenes[2]);
+    let files = [wav_file("a"), wav_file("b"), wav_file("c"), wav_file("d")];
+    // Without a modifier, one after another down the track's scenes.
+    drop_files(&mut h, g.centre(audio, 0), Modifiers::NONE, &files[0..2]);
+    {
+        let doc = h.shell.editor().document();
+        assert!(
+            doc.slot(track, scene0).is_some() && doc.slot(track, scene1).is_some(),
+            "the files lie down one track"
+        );
+    }
+    // With the command key (Cmd; Ctrl on Windows and Linux) held: across
+    // the tracks at the scene.
+    drop_files(&mut h, g.centre(audio, 2), command(), &files[2..4]);
+    {
+        let doc = h.shell.editor().document();
+        assert!(
+            doc.slot(track, scene2).is_some() && doc.slot(next, scene2).is_some(),
+            "the command key spread them across the tracks"
+        );
+    }
+    for file in &files {
+        let _ = std::fs::remove_file(file);
+    }
 }
 
 /// A file dropped into the window, as the app's drag and drop gives egui.

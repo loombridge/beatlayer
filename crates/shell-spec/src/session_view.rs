@@ -210,7 +210,8 @@ pub struct DropFilesArgs {
     pub track: TrackId,
     /// The scene whose slot the first one goes in.
     pub scene: SceneId,
-    /// With the command modifier held, spread them down the scenes.
+    /// With the command modifier (Cmd, Ctrl on Windows and Linux) held,
+    /// spread them across the tracks instead of down the scenes.
     #[serde(default)]
     pub spread: bool,
 }
@@ -355,11 +356,14 @@ fn specs() -> Vec<CommandSpec> {
         CommandSpec::new(DROP_FILES, "Drop Files into a Slot")
             .description(
                 "Puts audio files dropped from the browser, Finder, or Explorer into the Session \
-             slot at `track` and `scene`, as dropping them on a slot does. Each becomes a \
-             Session clip of the file's length, starting at the clip's beginning; with \
-             `spread` the files go down the scenes of that track. One undo step.",
+             slot at `track` and `scene`, as dropping them on a slot does: one after another \
+             down that track's scenes, or, with `spread` (Cmd, Ctrl on Windows and Linux, held \
+             while dropping), across the tracks at `scene`. Each target slot must be empty. \
+             Each file becomes a Session clip of its length, starting at the clip's beginning. \
+             One undo step. Reads the files, outside the project, and registers them so the set \
+             keeps them.",
             )
-            .permission(Permission::Edit)
+            .permission(Permission::External)
             .context(Session)
             .args::<DropFilesArgs>()
             .result::<ChangeSet>(),

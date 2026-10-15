@@ -211,7 +211,7 @@ impl GridUi {
         self.keys(&grid, shell, &columns, &scenes, events);
         self.take_drop(&grid, shell, session, &layout, &columns, &scenes, events);
         // A clip drag that ended: move it to the slot it was released on, or
-        // copy it with the command modifier held (I-DRAG-001, I-DRAG-002).
+        // copy it with the copy modifier held (I-DRAG-001, I-DRAG-002).
         if let Some((clip, from)) = self.released.take() {
             let (pos, modifiers) = ui.input(|i| (i.pointer.interact_pos(), i.modifiers));
             if let Some(pos) = pos
@@ -219,7 +219,7 @@ impl GridUi {
                     slot_at(session, &layout, &columns, &scenes, scroll_y, pos)
                 && (to_track, to_scene) != from
             {
-                let command = if command_modifier(modifiers) {
+                let command = if copy_modifier(modifiers) {
                     ids::COPY_CLIP_TO_SLOT
                 } else {
                     "clip.move_to_slot"
@@ -580,7 +580,9 @@ impl GridUi {
         else {
             return;
         };
-        let spread = command_modifier(modifiers);
+        // Several files spread across the tracks with the command modifier
+        // held (I-DROP-003), as the Arrangement's drop overlay does.
+        let spread = spread_modifier(modifiers);
         if let Some(payload) = payload
             && released
         {
@@ -634,10 +636,20 @@ fn click_mode(modifiers: egui::Modifiers) -> &'static str {
 }
 
 /// Whether the copy modifier is held: Option on macOS, Ctrl elsewhere
-/// (S-SES-004).
-fn command_modifier(modifiers: egui::Modifiers) -> bool {
+/// (S-SES-004, I-DRAG-002).
+fn copy_modifier(modifiers: egui::Modifiers) -> bool {
     if cfg!(target_os = "macos") {
         modifiers.alt
+    } else {
+        modifiers.ctrl
+    }
+}
+
+/// Whether the command modifier is held: Cmd on macOS, Ctrl elsewhere.
+/// Several files dropped with it spread across the tracks (I-DROP-003).
+fn spread_modifier(modifiers: egui::Modifiers) -> bool {
+    if cfg!(target_os = "macos") {
+        modifiers.mac_cmd
     } else {
         modifiers.ctrl
     }

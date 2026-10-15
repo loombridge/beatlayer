@@ -605,8 +605,9 @@ impl SessionView {
                 })?;
             prepared.push((media, name, seconds));
         }
-        // The slot each file goes in: down the scenes of `track`, or across
-        // the tracks at `scene` with the command modifier held.
+        // The slot each file goes in: down the scenes of `track`, or, with
+        // `spread` (the command modifier held), across the tracks at
+        // `scene`.
         let targets: Vec<(TrackId, SceneId)> = (0..prepared.len())
             .filter_map(|index| {
                 if args.spread {

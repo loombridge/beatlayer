@@ -7,6 +7,7 @@ use imbl::{OrdMap, Vector};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::automation::{Automation, AutomationTarget, TrackAutomation};
 use crate::clip::Clip;
 use crate::device::Device;
 use crate::ids::{ClipId, DeviceId, SceneId, TrackId};
@@ -391,8 +392,8 @@ impl Default for Mixer {
     }
 }
 
-/// A track: its mixer and sends, its device chain, and either its clips
-/// (audio and MIDI tracks) or the tracks inside it (groups).
+/// A track: its mixer, sends, and automation, its device chain, and either
+/// its clips (audio and MIDI tracks) or the tracks inside it (groups).
 ///
 /// Tracks change only through commands, so this type has no setters.
 #[derive(Clone, Debug, PartialEq)]
@@ -417,6 +418,10 @@ pub struct Track {
     /// group, and Main tracks have none.
     pub(crate) removed_stop_buttons: BTreeSet<SceneId>,
     pub(crate) children: Vector<TrackId>,
+    /// One envelope per automated parameter of this track (WP-2.12): a
+    /// control of its mixer, one of its sends, or a parameter of a device in
+    /// its chain.
+    pub(crate) automation: TrackAutomation,
 }
 
 impl Track {
@@ -433,6 +438,7 @@ impl Track {
             slots: OrdMap::new(),
             removed_stop_buttons: BTreeSet::new(),
             children: Vector::new(),
+            automation: TrackAutomation::new(),
         }
     }
 
@@ -538,9 +544,38 @@ impl Track {
         self.children.iter().copied()
     }
 
+    /// The track's automation: one entry per automated parameter, in target
+    /// order.
+    pub fn automation(
+        &self,
+    ) -> impl ExactSizeIterator<Item = (&AutomationTarget, &Automation)> + '_ {
+        self.automation.iter()
+    }
+
+    /// The track's automation, keyed by the parameter it drives.
+    #[must_use]
+    pub fn automation_map(&self) -> &TrackAutomation {
+        &self.automation
+    }
+
+    /// The automation of one parameter of the track, if it has any.
+    #[must_use]
+    pub fn automation_for(&self, target: &AutomationTarget) -> Option<&Automation> {
+        self.automation.get(target)
+    }
+
+    /// Whether any of the track's envelopes is turned off: a control was
+    /// moved by hand and Re-Enable Automation hasn't run since.
+    #[must_use]
+    pub fn automation_overridden(&self) -> bool {
+        self.automation
+            .values()
+            .any(|automation| !automation.enabled)
+    }
+
     /// Whether the track's own settings differ from another version's:
-    /// its name, mixer, sends, routing, children, or the order of its device chain,
-    /// but not the clips or devices themselves.
+    /// its name, mixer, sends, routing, children, automation, or the order
+    /// of its device chain, but not the clips or devices themselves.
     pub(crate) fn own_settings_differ(&self, other: &Self) -> bool {
         self.kind != other.kind
             || self.name != other.name
@@ -549,6 +584,7 @@ impl Track {
             || self.removed_stop_buttons != other.removed_stop_buttons
             || !(self.sends.ptr_eq(&other.sends) || self.sends == other.sends)
             || !(self.children.ptr_eq(&other.children) || self.children == other.children)
+            || !(self.automation.ptr_eq(&other.automation) || self.automation == other.automation)
             || !(self.devices.ptr_eq(&other.devices)
                 || self
                     .devices

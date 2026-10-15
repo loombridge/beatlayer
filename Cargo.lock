@@ -954,6 +954,7 @@ name = "bl-shell"
 version = "0.0.0"
 dependencies = [
  "bl-analysis",
+ "bl-assistant",
  "bl-audio-io",
  "bl-commands",
  "bl-core",
@@ -1014,6 +1015,7 @@ dependencies = [
 name = "bl-ui"
 version = "0.0.0"
 dependencies = [
+ "bl-assistant",
  "bl-audio-io",
  "bl-commands",
  "bl-core",

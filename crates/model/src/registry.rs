@@ -55,8 +55,15 @@ use crate::editor::{EditError, Editor};
 
 /// The ID of the command that undoes the newest step.
 pub const UNDO: &str = "edit.undo";
+/// The ID of the command that turns every overridden envelope in the song
+/// back on: the Control Bar's Re-Enable Automation button.
+pub const RE_ENABLE_AUTOMATION: &str = "automation.re_enable";
 /// The ID of the command that redoes the newest undone step.
 pub const REDO: &str = "edit.redo";
+/// The ID of `clip.set_midi_region`: a MIDI clip's Start and End markers.
+pub const SET_MIDI_REGION: &str = "clip.set_midi_region";
+/// The ID of `clip.set_midi_loop`: a MIDI clip's loop brace.
+pub const SET_MIDI_LOOP: &str = "clip.set_midi_loop";
 
 /// Adds every document command, and undo and redo, to a registry.
 ///
@@ -638,6 +645,107 @@ const ENTRIES: &[Entry] = &[
             setting is saved with the set.",
     },
     Entry {
+        id: "automation.set_breakpoint",
+        action: Action::Apply("set_automation_breakpoint"),
+        label: "Set Automation Breakpoint",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Sets one of a track's automatable parameters at `at` on its envelope, \
+            adding a breakpoint there or replacing the value of the one that's there, as \
+            clicking or dragging a breakpoint on an automation lane does. `target` names the \
+            parameter: `{\"type\": \"mixer\", \"param\": \"volume\"}`, `{\"type\": \"send\", \
+            \"to\": <return track>}`, or `{\"type\": \"device\", \"device\": <device>, \
+            \"param\": <parameter>}`. A parameter with no envelope yet gets its first \
+            breakpoint and its envelope drives it from then on. Values are in the parameter's \
+            own units: volume as linear gain, pan from -1 to 1, the Track Activator 1 for \
+            muted, and a device parameter as the device's own value. `at` is 0 (1.1.1) or \
+            later. The value between two breakpoints follows the segment's shape: the straight \
+            line unless `automation.set_curve` bent it; before the first and after the last \
+            the nearest one's value holds.",
+    },
+    Entry {
+        id: "automation.set_curve",
+        action: Action::Apply("set_automation_curve"),
+        label: "Curve Automation Segment",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Curves one of a track's automation segments, as holding Alt (Windows) or \
+            Option (macOS) while dragging a line segment on an automation lane does. `track` \
+            and `target` name the parameter as `automation.set_breakpoint` does, and `at` is \
+            the position of the breakpoint the segment starts at. `bend` is a signed number \
+            from -1 to 1: 0 is the straight line, the sign chooses which side the segment bows \
+            to, and its size how far. Between the two breakpoints the value is `from + (to - \
+            from) * t^(2^bend)`, `t` running from 0 at the segment's start to 1 at its end, so \
+            the value stays between the two breakpoints' values. A bend of 0 straightens the \
+            segment again, as the same drag with a double-click does. Refused when no \
+            breakpoint is at `at`, or when `at` is the last breakpoint, with no segment after \
+            it. Beatlayer's own law: Live's curved shape isn't measured yet.",
+    },
+    Entry {
+        id: "automation.move_breakpoint",
+        action: Action::Apply("move_automation_breakpoint"),
+        label: "Move Automation Breakpoint",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Moves one of a track's automation breakpoints from `at` to `to` and, with \
+            `value`, to that value, as dragging it on an automation lane does. `to` is 0 (1.1.1) \
+            or later and mustn't land on another breakpoint of the same envelope, and `value` is \
+            in the parameter's own units. Without `value` the breakpoint keeps its value. A \
+            position with no breakpoint is refused.",
+    },
+    Entry {
+        id: "automation.delete_breakpoint",
+        action: Action::Apply("delete_automation_breakpoint"),
+        label: "Delete Automation Breakpoint",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Deletes one of a track's automation breakpoints, so the segments either \
+            side of it become the one starting at the breakpoint before it, as clicking a \
+            breakpoint on an automation lane does. Deleting the last one takes the parameter's \
+            envelope with it, so the parameter follows its control again. A position with no \
+            breakpoint is refused.",
+    },
+    Entry {
+        id: "automation.delete",
+        action: Action::Apply("delete_automation"),
+        label: "Delete Automation",
+        permission: Permission::Destructive,
+        contexts: &[Global],
+        keys: &[],
+        description: "Deletes all of one of a track's parameters' automation: its envelope and \
+            every breakpoint on it, as Delete Automation in the control's context menu does. \
+            The control's value stays where it is and the parameter follows it again. Nothing \
+            changes if the parameter has no automation.",
+    },
+    Entry {
+        id: RE_ENABLE_AUTOMATION,
+        action: Action::Apply("re_enable_automation"),
+        label: "Re-Enable Automation",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Turns every overridden envelope in the song back on, as the Control Bar's \
+            Re-Enable Automation button does: every automated control that a hand move turned \
+            off follows its envelope again. It's one undo step, and nothing changes when no \
+            envelope is overridden. Use `automation.re_enable_for` for one parameter.",
+    },
+    Entry {
+        id: "automation.re_enable_for",
+        action: Action::Apply("re_enable_automation_for"),
+        label: "Re-Enable Automation for a Parameter",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Turns one parameter's overridden envelope back on, as Re-Enable \
+            Automation in that control's context menu does. `track` and `target` name the \
+            parameter the same way `automation.set_breakpoint` does. Nothing changes if the \
+            parameter's envelope isn't overridden.",
+    },
+    Entry {
         id: "routing.set_input",
         action: Action::Apply("set_input"),
         label: "Set Input",
@@ -851,7 +959,7 @@ const ENTRIES: &[Entry] = &[
             new clip's brace is the whole file.",
     },
     Entry {
-        id: "clip.set_midi_region",
+        id: SET_MIDI_REGION,
         action: Action::Apply("set_midi_clip_region"),
         label: "Set MIDI Clip Start and End",
         permission: Permission::Edit,
@@ -865,7 +973,7 @@ const ENTRIES: &[Entry] = &[
             `clip.set_length` to change how long the clip lasts in the arrangement.",
     },
     Entry {
-        id: "clip.set_midi_loop",
+        id: SET_MIDI_LOOP,
         action: Action::Apply("set_midi_clip_loop"),
         label: "Set MIDI Clip Loop",
         permission: Permission::Edit,

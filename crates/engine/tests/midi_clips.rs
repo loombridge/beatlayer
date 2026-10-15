@@ -11,8 +11,10 @@ use bl_core::time::{Bpm, TICKS_PER_QUARTER, TempoMap, Ticks};
 use bl_engine::NoteKind;
 use bl_engine::TransportCommand;
 use bl_engine::testing;
+use bl_model::registry as model;
 use bl_model::{Clip, ClipData, ClipId, Command, Editor, MidiData, Note, TrackId, TrackKind};
 use common::{RATE, Rig, device, track};
+use serde_json::json;
 
 const BEAT: Ticks = Ticks(TICKS_PER_QUARTER);
 const BAR: Ticks = Ticks(TICKS_PER_QUARTER * 4);
@@ -552,4 +554,87 @@ fn midi_clip_commands() {
         panic!("Expected Midi clip");
     };
     assert!(!m.looping, "Undo restored loop switch to false");
+}
+
+// Acceptance 10 (WP-2.3 part 3): loop-brace and marker edits play back as
+// edited, through the same registered commands the Clip View's strip runs.
+#[test]
+fn clip_region_and_loop_edits_play_back_as_edited() {
+    // The brace: a one-bar loop starting half a bar into a four-bar clip
+    // whose notes start at 0 and at 1 bar. The moved brace wraps on its own
+    // frames, so the second note sounds again one bar after each wrap.
+    let mut rig = Rig::new(256);
+    let trk = midi_track(&mut rig.editor);
+    instrument(&mut rig.editor, trk);
+    let clip = midi_clip(
+        &mut rig.editor,
+        trk,
+        Ticks::ZERO,
+        BAR * 4,
+        MidiData::new([
+            Note::new(60, Ticks::ZERO, BEAT, 100),
+            Note::new(67, BAR, BEAT, 100),
+        ]),
+    );
+    model::run(
+        &mut rig.editor,
+        "clip.set_midi_loop",
+        json!({ "clip": clip, "start": BAR / 2, "end": BAR + BEAT * 2 }),
+    )
+    .unwrap();
+    model::run(
+        &mut rig.editor,
+        "clip.set_loop_enabled",
+        json!({ "clip": clip, "enabled": true }),
+    )
+    .unwrap();
+    rig.sync();
+    rig.sender.transport(TransportCommand::Play);
+    play(&mut rig, 96_000 * 4, 256);
+    let ons: Vec<(i64, u8)> = rig
+        .probe
+        .recorded_notes()
+        .iter()
+        .filter(|note| note.event.kind == NoteKind::On)
+        .map(|note| (note.frame, note.event.key))
+        .collect();
+    assert_eq!(
+        ons,
+        [(0, 60), (96_000, 67), (192_000, 67), (288_000, 67)],
+        "the notes follow the moved brace: into it at 1.5 bars, then back \
+         from 0.5 bars one bar each time"
+    );
+
+    // The markers: with the loop off and the End marker at one bar, the
+    // note past it never sounds and the first one still does.
+    let mut rig = Rig::new(256);
+    let trk = midi_track(&mut rig.editor);
+    instrument(&mut rig.editor, trk);
+    let clip = midi_clip(
+        &mut rig.editor,
+        trk,
+        Ticks::ZERO,
+        BAR * 4,
+        MidiData::new([
+            Note::new(60, Ticks::ZERO, BEAT, 100),
+            Note::new(67, BAR + BEAT, BEAT, 100),
+        ]),
+    );
+    model::run(
+        &mut rig.editor,
+        "clip.set_midi_region",
+        json!({ "clip": clip, "start": 0, "end": BAR }),
+    )
+    .unwrap();
+    rig.sync();
+    rig.sender.transport(TransportCommand::Play);
+    play(&mut rig, 96_000 * 2, 256);
+    let ons: Vec<(i64, u8)> = rig
+        .probe
+        .recorded_notes()
+        .iter()
+        .filter(|note| note.event.kind == NoteKind::On)
+        .map(|note| (note.frame, note.event.key))
+        .collect();
+    assert_eq!(ons, [(0, 60)], "the End marker silences the note past it");
 }

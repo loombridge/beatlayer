@@ -342,7 +342,7 @@ fn layout() -> DeviceLayout {
 
 /// Adds Rotunda to `registry`.
 pub fn register(registry: &mut Registry) {
-    add(registry, reverb_type(), Reverb::new);
+    add(registry, reverb_type(), |_, config| Reverb::new(config));
 }
 
 /// The tail's damping: the shelves' amounts and their one-poles'

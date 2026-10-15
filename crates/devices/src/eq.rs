@@ -319,7 +319,7 @@ fn layout() -> DeviceLayout {
 
 /// Adds Contour to `registry`.
 pub fn register(registry: &mut Registry) {
-    add(registry, eq_type(), make);
+    add(registry, eq_type(), |_, config| make(config));
 }
 
 /// Makes a Contour for `config`'s rate, channels, and block size. Every

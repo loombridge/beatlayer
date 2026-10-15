@@ -1318,6 +1318,13 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "plugin.load",
             Exception(LaterView("the browser's plug-ins (WP-2.9)")),
         ),
+        // Audio Units (WP-2.8) load by component description until the
+        // browser lists them (WP-2.8's second part) and the scanner finds
+        // them.
+        (
+            "plugin.load_au",
+            Exception(LaterView("the browser's Audio Units (WP-2.8)")),
+        ),
         (
             "plugin.show_window",
             Exception(LaterView("the plug-in device panel (WP-2.10)")),

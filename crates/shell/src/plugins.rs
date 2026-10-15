@@ -17,6 +17,7 @@ use bl_commands::schemars::Schema;
 use bl_commands::{CommandSpec, Context, Permission};
 use bl_devices::KitHost;
 use bl_model::{Command, Device, DeviceId, DeviceKind, Document, Editor, ParamId, PluginFormat};
+use bl_plugin_host::au::AuHost;
 use bl_plugin_host::clap::ClapHost;
 use bl_plugin_host::scan::Scanner;
 use bl_shell_spec::plugins::{
@@ -127,6 +128,20 @@ pub fn is_clap(doc: &Document, device: DeviceId) -> bool {
     })
 }
 
+/// Whether `device` is an Audio Unit device in `doc` (WP-2.8).
+#[must_use]
+pub fn is_au(doc: &Document, device: DeviceId) -> bool {
+    doc.device(device).is_some_and(|d| {
+        matches!(
+            d.kind,
+            DeviceKind::Plugin {
+                format: PluginFormat::AudioUnit,
+                ..
+            }
+        )
+    })
+}
+
 /// Whether the set has a CLAP device.
 #[must_use]
 pub fn has_clap(doc: &Document) -> bool {
@@ -135,19 +150,45 @@ pub fn has_clap(doc: &Document) -> bool {
 
 /// Every CLAP device in the set.
 fn clap_devices(doc: &Document) -> Vec<DeviceId> {
+    devices(doc, PluginFormat::Clap)
+}
+
+/// Every Audio Unit device in the set.
+fn au_devices(doc: &Document) -> Vec<DeviceId> {
+    devices(doc, PluginFormat::AudioUnit)
+}
+
+/// Every plug-in device of `format` in the set, in track order.
+fn devices(doc: &Document, format: PluginFormat) -> Vec<DeviceId> {
     doc.tracks()
         .flat_map(|track| track.devices().map(|d| d.id).collect::<Vec<_>>())
-        .filter(|device| is_clap(doc, *device))
+        .filter(|device| {
+            doc.device(*device).is_some_and(|d| {
+                matches!(
+                    d.kind,
+                    DeviceKind::Plugin {
+                        format: found,
+                        ..
+                    } if found == format
+                )
+            })
+        })
         .collect()
 }
 
-/// Spec: clap-hosting R8. Takes each running plug-in's state into the set,
-/// without an undo step, so saving or copying the device keeps it: CLAP
-/// plug-ins' and kit plug-ins' compiled in. A device whose plug-in isn't
-/// running keeps the state it had.
-pub fn capture_states(plugins: &ClapHost, kit: &KitHost, editor: &mut Editor) {
+/// Spec: clap-hosting R8, au-hosting R8. Takes each running plug-in's
+/// state into the set, without an undo step, so saving or copying the
+/// device keeps it: CLAP plug-ins', Audio Units', and kit plug-ins'
+/// compiled in. A device whose plug-in isn't running keeps the state it
+/// had.
+pub fn capture_states(plugins: &ClapHost, au: &AuHost, kit: &KitHost, editor: &mut Editor) {
     for device in clap_devices(editor.document()) {
         if let Ok(state) = plugins.save_state(device) {
+            let _ = editor.amend_plugin_state(device, Some(state));
+        }
+    }
+    for device in au_devices(editor.document()) {
+        if let Ok(state) = au.save_state(device) {
             let _ = editor.amend_plugin_state(device, Some(state));
         }
     }
@@ -203,10 +244,11 @@ pub fn apply_param_changes(
     changed
 }
 
-/// What `plugin.info` reports for `device`.
+/// What `plugin.info` reports for `device`: the CLAP host's report for a
+/// CLAP device, or the AU host's for an Audio Unit.
 #[must_use]
-pub fn info(plugins: &ClapHost, device: DeviceId) -> Option<PluginInfo> {
-    let status = plugins.status(device)?;
+pub fn info(plugins: &ClapHost, au: &AuHost, device: DeviceId) -> Option<PluginInfo> {
+    let status = plugins.status(device).or_else(|| au.status(device))?;
     Some(PluginInfo {
         device,
         plugin: status.plugin_id,

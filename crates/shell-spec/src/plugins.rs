@@ -16,6 +16,9 @@ use serde::{Deserialize, Serialize};
 
 /// `plugin.load`: load a CLAP plug-in from its file and add it as a device.
 pub const LOAD: &str = "plugin.load";
+/// `plugin.load_au`: load an Audio Unit, by its component description, and
+/// add it as a device (WP-2.8, macOS only).
+pub const LOAD_AU: &str = "plugin.load_au";
 /// `plugin.show_window`: open or close a plug-in device's editor window.
 pub const SHOW_WINDOW: &str = "plugin.show_window";
 /// `plugin.info`: what a plug-in device's plug-in is doing.
@@ -32,7 +35,16 @@ pub const SETTINGS: &str = "plugin.settings";
 
 /// Every command [`register`] adds, so a host knows which IDs to send to
 /// `bl-shell`'s `Shell::run`.
-pub const IDS: &[&str] = &[LOAD, SHOW_WINDOW, INFO, SCAN, RESCAN, LIST, SETTINGS];
+pub const IDS: &[&str] = &[
+    LOAD,
+    LOAD_AU,
+    SHOW_WINDOW,
+    INFO,
+    SCAN,
+    RESCAN,
+    LIST,
+    SETTINGS,
+];
 
 /// Whether `id` is one of the plug-in commands.
 #[must_use]
@@ -49,6 +61,28 @@ pub struct LoadPluginArgs {
     /// Which of the file's plug-ins, by its CLAP ID; the first if left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin: Option<String>,
+    /// The track; the selected track if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track: Option<TrackId>,
+    /// Where it goes in the chain; as `device.add` places it if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<usize>,
+}
+
+/// Arguments of `plugin.load_au`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LoadAudioUnitArgs {
+    /// The component's type, four characters: `aufx` for an effect, `aumu`
+    /// or `augn` for an instrument, `aumi` for a MIDI effect.
+    #[serde(rename = "type")]
+    pub component_type: String,
+    /// The component's subtype, four characters, such as `dely` for Apple's
+    /// AUDelay.
+    pub subtype: String,
+    /// The component's manufacturer, four characters, such as `appl` for
+    /// Apple's units.
+    pub manufacturer: String,
     /// The track; the selected track if left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub track: Option<TrackId>,
@@ -273,6 +307,26 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .permission(Permission::External)
             .contexts([Global, DeviceView])
             .args::<LoadPluginArgs>()
+            .result::<PluginLoaded>(),
+    )?;
+    registry.register(
+        CommandSpec::new(LOAD_AU, "Load Audio Unit")
+            .description(
+                "Loads the Audio Unit with the given component description — its `type`, \
+                 `subtype`, and `manufacturer`, four characters each, such as Apple's \
+                 `aufx`, `dely`, `appl` for AUDelay — and adds it as a device, as \
+                 `device.add` adds one: to the selected track (or `track`), at `index` or \
+                 where its role goes, selected, one undo step (Insert Device). Its \
+                 parameters become the device's, which `device.parameters` lists and \
+                 `device.set_param` and automation change; its own state is saved with the \
+                 set. Audio Units are macOS only: on Windows and Linux this fails with \
+                 that reason. Its own editor window arrives with the Audio Unit scanner; \
+                 `plugin.show_window` says so until then. The unit's code runs inside \
+                 Beatlayer, so load only units you trust.",
+            )
+            .permission(Permission::External)
+            .contexts([Global, DeviceView])
+            .args::<LoadAudioUnitArgs>()
             .result::<PluginLoaded>(),
     )?;
     registry.register(

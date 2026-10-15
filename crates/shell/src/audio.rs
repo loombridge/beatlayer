@@ -303,6 +303,9 @@ pub struct AudioHost {
     /// The CLAP host whose factory makes each engine's plug-in nodes
     /// (WP-2.6).
     plugins: Option<bl_plugin_host::clap::ClapHost>,
+    /// The Audio Unit host (WP-2.8), when the shell has one: this platform
+    /// may not host them.
+    au: Option<bl_plugin_host::au::AuHost>,
     kit: Option<bl_devices::KitHost>,
 }
 
@@ -375,6 +378,7 @@ impl AudioHost {
             engines: 0,
             held_reports: Vec::new(),
             plugins: None,
+            au: None,
             kit: None,
         }
     }
@@ -389,6 +393,12 @@ impl AudioHost {
     /// Gives every engine from now on the CLAP host's plug-ins (WP-2.6).
     pub fn set_plugins(&mut self, plugins: bl_plugin_host::clap::ClapHost) {
         self.plugins = Some(plugins);
+    }
+
+    /// Gives the Audio Unit host, whose units the engine's registry asks
+    /// for nodes (WP-2.8).
+    pub fn set_au(&mut self, au: bl_plugin_host::au::AuHost) {
+        self.au = Some(au);
     }
 
     /// Gives every engine from now on the kit plug-ins compiled in.
@@ -850,6 +860,9 @@ impl AudioHost {
         bl_devices::register(&mut registry);
         if let Some(plugins) = &self.plugins {
             registry.add(plugins.factory());
+        }
+        if let Some(au) = &self.au {
+            registry.add(au.factory());
         }
         if let Some(kit) = &self.kit {
             registry.add(kit.factory());

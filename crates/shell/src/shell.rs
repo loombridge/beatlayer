@@ -37,6 +37,7 @@ use crate::settings::{
     zoom_factor, zoom_percent, zoom_step,
 };
 use bl_devices::KitHost;
+use bl_plugin_host::au::AuHost;
 use bl_plugin_host::clap::ClapHost;
 use bl_plugin_host::scan::Scanner;
 use bl_shell_spec::arrangement as view_ids;
@@ -336,6 +337,9 @@ pub struct Shell {
     native_types: Vec<bl_engine::DeviceType>,
     /// The CLAP host: plug-in devices' instances, on this thread (WP-2.6).
     plugins: ClapHost,
+    /// The Audio Unit host: AU devices' units, on this thread, macOS only
+    /// (WP-2.8).
+    au: AuHost,
     /// The plug-in scanner (WP-2.9): the plug-ins found on this machine,
     /// their blocklist, and their cache.
     scanner: Scanner,
@@ -441,6 +445,9 @@ impl Shell {
         // CLAP plug-ins (WP-2.6): this thread is their main thread.
         let plugins = ClapHost::new();
         audio.set_plugins(plugins.clone());
+        // Audio Units (WP-2.8): their units live with this thread too.
+        let au = AuHost::new();
+        audio.set_au(au.clone());
         // The plug-in scanner (WP-2.9): finds the plug-ins on this machine
         // in a child process, caching and blocklisting what it finds. Its
         // cache lives with the preferences.
@@ -486,6 +493,7 @@ impl Shell {
             document_revision: 0,
             clipboard: None,
             edit_gesture: None,
+            au,
             seen_insert_marker: None,
             gesture: false,
             mixer: MixerView::new(),
@@ -1108,6 +1116,7 @@ impl Shell {
         let mut types = self.native_types.clone();
         types.extend(self.kit.device_types());
         types.extend(self.plugins.types().into_iter().map(|t| t.device_type));
+        types.extend(self.au.types().into_iter().map(|t| t.device_type));
         self.devices.set_device_types(types);
     }
 
@@ -1122,6 +1131,7 @@ impl Shell {
     /// set's plug-in devices load their plug-ins from their saved state.
     fn set_replaced(&mut self) {
         self.plugins.clear();
+        self.au.clear();
         self.kit.clear();
     }
 
@@ -1141,17 +1151,19 @@ impl Shell {
             let device = device
                 .or(shell.devices.selected())
                 .ok_or_else(|| unavailable("select a plug-in device first".to_owned()))?;
-            if crate::plugins::is_clap(shell.editor.document(), device) {
+            if crate::plugins::is_clap(shell.editor.document(), device)
+                || crate::plugins::is_au(shell.editor.document(), device)
+            {
                 Ok(device)
             } else {
                 Err(ShellError::InvalidArgs {
                     command: id.to_owned(),
-                    message: format!("{device} isn't a CLAP plug-in device"),
+                    message: format!("{device} isn't a plug-in device"),
                 })
             }
         };
         let info = |shell: &Self, device| {
-            crate::plugins::info(&shell.plugins, device)
+            crate::plugins::info(&shell.plugins, &shell.au, device)
                 .map(|info| to_value(&info))
                 .ok_or_else(|| unavailable(format!("{device}'s plug-in hasn't started yet")))
         };
@@ -1222,11 +1234,76 @@ impl Shell {
                     name: device_type.name,
                 }))
             }
+            plugin_ids::LOAD_AU => {
+                let plugin_ids::LoadAudioUnitArgs {
+                    component_type,
+                    subtype,
+                    manufacturer,
+                    track,
+                    index,
+                } = Self::args(id, args)?;
+                let found = self
+                    .au
+                    .load(&component_type, &subtype, &manufacturer)
+                    .map_err(|error| match error {
+                        bl_plugin_host::au::AuError::Unavailable => unavailable(error.to_string()),
+                        error => ShellError::Failed {
+                            command: id.to_owned(),
+                            message: error.to_string(),
+                        },
+                    })?;
+                self.refresh_device_types();
+                let device_type = found.device_type;
+                let added: device_ids::DeviceAdded = serde_json::from_value(self.run_devices(
+                    device_ids::ADD,
+                    to_value(&device_ids::AddDeviceArgs {
+                        device: device_ids::NewDevice {
+                            kind: device_type.kind.clone(),
+                            name: device_type.name.clone(),
+                            role: device_type.role,
+                            sidechain: false,
+                        },
+                        track,
+                        index,
+                    }),
+                )?)
+                .map_err(|e| ShellError::Failed {
+                    command: id.to_owned(),
+                    message: e.to_string(),
+                })?;
+                // Spec: au-hosting R8. An Audio Unit has no file: the set
+                // keeps its own state from the start.
+                let _ = self.editor.amend_plugin_state(
+                    added.device,
+                    Some(bl_model::PluginState {
+                        path: String::new(),
+                        data: Vec::new(),
+                    }),
+                );
+                let plugin_id = match &device_type.kind {
+                    bl_model::DeviceKind::Plugin { plugin_id, .. } => plugin_id.clone(),
+                    bl_model::DeviceKind::Native { device_type } => device_type.clone(),
+                };
+                Ok(to_value(&plugin_ids::PluginLoaded {
+                    device: added.device,
+                    track: added.track,
+                    new_track: added.new_track,
+                    plugin: plugin_id,
+                    name: device_type.name,
+                }))
+            }
             plugin_ids::SHOW_WINDOW => {
                 let plugin_ids::ShowWindowArgs { device, shown } = Self::args(id, args)?;
                 let device = target(self, device)?;
+                if crate::plugins::is_au(self.editor.document(), device) {
+                    // Spec: au-hosting R13. A unit's own editor arrives with
+                    // WP-2.8's second part.
+                    return Err(unavailable(
+                        "Audio Units' own editor windows aren't hosted yet".to_owned(),
+                    ));
+                }
                 self.plugins.idle();
-                let open = crate::plugins::info(&self.plugins, device)
+                let open = crate::plugins::info(&self.plugins, &self.au, device)
                     .is_some_and(|info| info.window_open);
                 let failed = |e: bl_plugin_host::clap::ClapError| ShellError::Failed {
                     command: id.to_owned(),
@@ -1383,7 +1460,7 @@ impl Shell {
         ) {
             // Spec: clap-hosting R8. A copy of a plug-in device starts
             // from its plug-in's state now.
-            crate::plugins::capture_states(&self.plugins, &self.kit, &mut self.editor);
+            crate::plugins::capture_states(&self.plugins, &self.au, &self.kit, &mut self.editor);
         }
         let user_library = self.browser_view.user_library().map(Path::to_path_buf);
         let zoom = self.zoom();
@@ -1638,7 +1715,7 @@ impl Shell {
         let mut changed = polled.changed;
         // Plug-ins' main-thread work (WP-2.6), and the changes they made
         // themselves.
-        let plugins_changed = self.plugins.idle();
+        let plugins_changed = self.plugins.idle() | self.au.idle();
         if plugins_changed {
             self.refresh_device_types();
             changed = true;
@@ -3083,7 +3160,12 @@ impl Shell {
                 let path = self.set_path.clone().ok_or_else(|| {
                     unavailable("the set has never been saved; use `set.save_as` to give it a file")
                 })?;
-                crate::plugins::capture_states(&self.plugins, &self.kit, &mut self.editor);
+                crate::plugins::capture_states(
+                    &self.plugins,
+                    &self.au,
+                    &self.kit,
+                    &mut self.editor,
+                );
                 self.store.set_windows(self.devices.windows().clone());
                 let warnings = self.store.save(&path, &self.editor).map_err(failed)?;
                 self.saved_as(path, &warnings);
@@ -3093,7 +3175,12 @@ impl Shell {
                 // Spec: app-shell R17 to R21. The store decides where in a
                 // project folder the set goes; the result says where.
                 let SaveAsArgs { path } = Self::args(id, args)?;
-                crate::plugins::capture_states(&self.plugins, &self.kit, &mut self.editor);
+                crate::plugins::capture_states(
+                    &self.plugins,
+                    &self.au,
+                    &self.kit,
+                    &mut self.editor,
+                );
                 self.store.set_windows(self.devices.windows().clone());
                 let (path, warnings) = self
                     .store
@@ -3127,7 +3214,12 @@ impl Shell {
                         )
                     })?,
                 };
-                crate::plugins::capture_states(&self.plugins, &self.kit, &mut self.editor);
+                crate::plugins::capture_states(
+                    &self.plugins,
+                    &self.au,
+                    &self.kit,
+                    &mut self.editor,
+                );
                 let warnings = self.store.save_copy(&path, &self.editor).map_err(failed)?;
                 self.prefs.default_set = Some(path.clone());
                 self.save_preferences();
@@ -3157,7 +3249,12 @@ impl Shell {
                     });
                 }
                 let path = folder.join(format!("{name}.{}", bl_project::SET_EXTENSION));
-                crate::plugins::capture_states(&self.plugins, &self.kit, &mut self.editor);
+                crate::plugins::capture_states(
+                    &self.plugins,
+                    &self.au,
+                    &self.kit,
+                    &mut self.editor,
+                );
                 let warnings = self.store.save_copy(&path, &self.editor).map_err(failed)?;
                 self.message = (!warnings.is_empty()).then(|| Message {
                     text: format!("The template was saved, but: {}", warnings.join("; ")),
@@ -3177,7 +3274,12 @@ impl Shell {
                          folder to collect into",
                     )
                 })?;
-                crate::plugins::capture_states(&self.plugins, &self.kit, &mut self.editor);
+                crate::plugins::capture_states(
+                    &self.plugins,
+                    &self.au,
+                    &self.kit,
+                    &mut self.editor,
+                );
                 self.store.set_windows(self.devices.windows().clone());
                 let files = self.store.collect().map_err(failed)?;
                 let warnings = self.store.save(&path, &self.editor).map_err(failed)?;

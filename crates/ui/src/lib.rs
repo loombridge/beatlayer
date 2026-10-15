@@ -51,6 +51,7 @@ pub mod layout;
 pub mod main_window;
 pub mod menus;
 pub mod mixer;
+pub mod session_view;
 pub mod settings_window;
 pub mod sidechain;
 pub mod theme;

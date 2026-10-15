@@ -440,10 +440,18 @@ fn tab_goes_round_a_session_strip_in_live_s_order() {
     let strip = |switch| switch_id(session, switch, tracks[2]);
     let in_out = |track, slot| control_id(session, track, slot, 0);
     let returns: Vec<TrackId> = h.shell.editor().document().returns().collect();
-    // The first Tab goes past the title bar (Live's went to Clip Stop,
-    // which comes with the clip slots in M3), then the strip in Live's
-    // order: the In/Out choosers, the sends, and the mixer.
+    let scene = h
+        .shell
+        .editor()
+        .document()
+        .scenes()
+        .next()
+        .expect("the default scenes")
+        .id;
+    // The first Tab goes past the title bar to the clip slot, then the
+    // strip in Live's order: the In/Out choosers, the sends, and the mixer.
     let expected = [
+        bl_ui::session_view::slot_id(tracks[2], scene),
         in_out(tracks[2], Slot::InputType),
         in_out(tracks[2], Slot::InputChannel),
         in_out(tracks[2], Slot::Monitoring),
@@ -458,7 +466,7 @@ fn tab_goes_round_a_session_strip_in_live_s_order() {
         strip(Switch::Arm),
         fader_id(session, tracks[2]),
         column_id(MixerOf::Session, tracks[2]),
-        in_out(tracks[2], Slot::InputType),
+        bl_ui::session_view::slot_id(tracks[2], scene),
     ];
     for want in expected {
         press(&mut h, Key::Tab, Modifiers::NONE);
@@ -482,6 +490,7 @@ fn tab_goes_round_a_session_strip_in_live_s_order() {
     h.settle();
     let midi = |switch| switch_id(session, switch, tracks[0]);
     for want in [
+        bl_ui::session_view::slot_id(tracks[0], scene),
         in_out(tracks[0], Slot::InputType),
         in_out(tracks[0], Slot::InputChannel),
         in_out(tracks[0], Slot::Monitoring),
@@ -512,17 +521,24 @@ fn the_neighbour_keys_bring_a_column_out_of_view_into_it() {
     h.settle();
     // The audio tracks' columns, from 3 Audio on.
     let columns = h.shell.mixer_columns()[2..].to_vec();
-    let session = Place::Mixer(MixerOf::Session);
     h.ctx
         .memory_mut(|m| m.request_focus(column_id(MixerOf::Session, columns[0])));
     h.settle();
-    let input = |track| control_id(session, track, Slot::InputType, 0);
+    let scene = h
+        .shell
+        .editor()
+        .document()
+        .scenes()
+        .next()
+        .expect("the default scenes")
+        .id;
+    let slot = |track| bl_ui::session_view::slot_id(track, scene);
     press(&mut h, Key::Tab, Modifiers::NONE);
-    assert_eq!(focused_id(&h), Some(input(columns[0])));
+    assert_eq!(focused_id(&h), Some(slot(columns[0])));
     for want in &columns[1..16] {
         press(&mut h, Key::Tab, neighbour());
         h.settle();
-        assert_eq!(focused_id(&h), Some(input(*want)));
+        assert_eq!(focused_id(&h), Some(slot(*want)));
     }
     let scroll = h.shell.mixer_view().of(MixerOf::Session).scroll;
     assert!(scroll > 0.0, "the mixer scrolled the column into view");
@@ -864,6 +880,34 @@ fn session_main(h: &mut Harness) {
     h.settle();
 }
 
+/// The shell runs audio on a four-channel null device, so the In/Out
+/// choosers list two output pairs and four inputs, as an interface does
+/// (WP-2.13).
+fn four_channel_interface(h: &mut Harness) {
+    use bl_audio_io::{BackendKind, NullBackend, NullOptions};
+    use bl_shell::audio::{AudioHost, AudioSettings};
+    use bl_shell::files::ProjectFiles;
+    use bl_shell::settings::Preferences;
+
+    let backend = NullBackend::with_options(NullOptions {
+        channels: 4,
+        ..NullOptions::default()
+    });
+    let audio = AudioHost::with_backends(
+        vec![BackendKind::Null],
+        Box::new(move |_| Ok(Box::new(backend.clone()))),
+        AudioSettings::default(),
+    );
+    let mut shell = Shell::new(
+        Preferences::default(),
+        None,
+        audio,
+        Box::new(ProjectFiles::new()),
+    );
+    shell.start_audio();
+    h.shell = shell;
+}
+
 /// A Test Gain on audio track 3, the selected track, with no device
 /// selected (WP-2.4).
 fn a_device(h: &mut Harness) {
@@ -944,6 +988,14 @@ fn an_agent(h: &mut Harness) {
 fn server_and_agent(h: &mut Harness) {
     server_on(h);
     an_agent(h);
+}
+
+/// An assistant API key stored in the headless keychain, so the Agents
+/// page shows its Forget button.
+fn assistant_key_set(h: &mut Harness) {
+    h.shell
+        .run("assistant.set_key", json!({ "key": "sk-headless-test" }))
+        .unwrap();
 }
 
 /// Every command without a key or a menu item, and how it's reached.
@@ -1044,6 +1096,37 @@ fn paths() -> BTreeMap<&'static str, Path> {
                 "the arrangement's time-signature marker lane (WP-2.20)",
             )),
         ),
+        // Automation (WP-2.12): the Control Bar's Re-Enable Automation
+        // button, and the arrangement's automation lanes, which aren't
+        // drawn yet.
+        (
+            "automation.re_enable",
+            main(nothing, control_bar, "Re-Enable Automation", Key::Enter),
+        ),
+        (
+            "automation.set_breakpoint",
+            Exception(LaterView("the arrangement's automation lanes (WP-2.12)")),
+        ),
+        (
+            "automation.set_curve",
+            Exception(LaterView("the arrangement's automation lanes (WP-2.12)")),
+        ),
+        (
+            "automation.move_breakpoint",
+            Exception(LaterView("the arrangement's automation lanes (WP-2.12)")),
+        ),
+        (
+            "automation.delete_breakpoint",
+            Exception(LaterView("the arrangement's automation lanes (WP-2.12)")),
+        ),
+        (
+            "automation.delete",
+            Exception(LaterView("the arrangement's automation lanes (WP-2.12)")),
+        ),
+        (
+            "automation.re_enable_for",
+            Exception(LaterView("the arrangement's automation lanes (WP-2.12)")),
+        ),
         // A track's switches (mixer-view R7): Enter on Solo or Arm.
         (
             "mixer.solo_exclusive",
@@ -1078,6 +1161,40 @@ fn paths() -> BTreeMap<&'static str, Path> {
         (
             "agent.new_client_token",
             settings("agents", server_and_agent, "New Token: Tester", Key::Enter),
+        ),
+        // The built-in assistant's settings on the Agents page (WP-2.23,
+        // part 4).
+        (
+            "assistant.set_provider",
+            settings("agents", nothing, "Assistant Provider", Key::ArrowDown),
+        ),
+        (
+            "assistant.set_base_url",
+            settings("agents", nothing, "Assistant Base URL", Key::K),
+        ),
+        (
+            "assistant.set_model",
+            settings("agents", nothing, "Assistant Model", Key::K),
+        ),
+        (
+            "assistant.set_key",
+            Exception(Equivalent(
+                "the API key field, typed into and then stored with Set: the key has no one \
+                 key of its own, since it changes the keychain",
+            )),
+        ),
+        (
+            "assistant.forget_key",
+            settings(
+                "agents",
+                assistant_key_set,
+                "Forget Assistant API Key",
+                Key::Enter,
+            ),
+        ),
+        (
+            "assistant.toggle_activity_log",
+            settings("agents", nothing, "Open Assistant Activity Log", Key::Enter),
         ),
         (
             "audio.configure",
@@ -1180,6 +1297,42 @@ fn paths() -> BTreeMap<&'static str, Path> {
                  focused column into view",
             )),
         ),
+        // The Session View's grid (WP-3.7): the pointer's selection, drags,
+        // drops, and the key the view reads itself.
+        ("session.state", Exception(Query)),
+        (
+            "session.scroll",
+            Exception(Equivalent(
+                "the wheel; the arrows and Page Up and Page Down bring the scenes into view",
+            )),
+        ),
+        (
+            "session.delete",
+            Exception(Equivalent(
+                "the Delete key with the grid focused; the slot and scene context menus arrive \
+                 with the Session View's menus",
+            )),
+        ),
+        (
+            "session.copy_clip_to_slot",
+            Exception(Equivalent(
+                "Option-dragging (Ctrl-dragging) a clip to another slot; dragging moves it \
+                 (`clip.move_to_slot`)",
+            )),
+        ),
+        (
+            "session.drop_files",
+            Exception(Equivalent(
+                "dropping files from the browser, Finder, or Explorer on a slot",
+            )),
+        ),
+        (
+            "session.duplicate_scene",
+            Exception(Equivalent(
+                "the scene's context menu, Edit ▸ Duplicate (the menu arrives with a later \
+                 package)",
+            )),
+        ),
         (
             "browser.add_to_arrangement",
             Exception(Equivalent(
@@ -1229,8 +1382,22 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("clip_view.select_notes", Exception(note_editor)),
         ("note.add", Exception(note_editor)),
         ("note.delete", Exception(note_editor)),
-        ("note.move", Exception(note_editor)),
+        // `note.move` has its own path now: the note-selection keys
+        // transpose the selected notes (S-A11Y-008, S-A11Y-009).
         ("note.resize", Exception(note_editor)),
+        // The Quantize settings are the Quantize Settings dialog's values
+        // (M-EDIT-036, Cmd-Shift-U): its controls aren't recorded yet, so
+        // the menu item shows disabled and agents reach the command until
+        // the dialog is built (the piano-roll spec, part 3).
+        (
+            "clip_view.quantize_settings",
+            Exception(LaterView(
+                "the Quantize Settings dialog (M-EDIT-036, milestone M2)",
+            )),
+        ),
+        ("note.set_value", Exception(note_editor)),
+        ("note.ramp_value", Exception(note_editor)),
+        ("view.lane", Exception(note_editor)),
         // The Device View (WP-2.4): Enter on a title bar's controls.
         (
             "device.select",
@@ -1421,6 +1588,27 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "routing.set_monitor",
             main(nothing, arrangement_track_3, "Monitoring", Key::ArrowRight),
         ),
+        // Main's Cue Out and Main Out (WP-2.13): Up and Down on them step
+        // through the interface's output pairs, which need more than one
+        // pair to step to.
+        (
+            "routing.set_cue_out",
+            main(
+                four_channel_interface,
+                session_main,
+                "Cue Output",
+                Key::ArrowDown,
+            ),
+        ),
+        (
+            "routing.set_main_out",
+            main(
+                four_channel_interface,
+                session_main,
+                "Main Output",
+                Key::ArrowDown,
+            ),
+        ),
         // A return's Pre/Post switch, in Main's column: Enter switches it.
         (
             "mixer.set_send_tap",
@@ -1450,6 +1638,36 @@ fn paths() -> BTreeMap<&'static str, Path> {
                 "the File menu's Export MIDI Clip... dialog, which waits on the file dialogs \
                  (midi-clips R19)",
             )),
+        ),
+        // The Session View's scenes and slots (WP-3.1): the grid, its
+        // context menus, and their keys are WP-3.7's.
+        (
+            "scene.create",
+            Exception(LaterView("the Session grid and its menus (WP-3.7)")),
+        ),
+        (
+            "scene.delete",
+            Exception(LaterView("the Session grid and its menus (WP-3.7)")),
+        ),
+        (
+            "scene.move",
+            Exception(LaterView("the Session grid and its menus (WP-3.7)")),
+        ),
+        (
+            "scene.duplicate",
+            Exception(LaterView("the Session grid and its menus (WP-3.7)")),
+        ),
+        (
+            "scene.rename",
+            Exception(LaterView("the Session grid and its menus (WP-3.7)")),
+        ),
+        (
+            "clip.create_in_slot",
+            Exception(LaterView("the Session grid and its menus (WP-3.7)")),
+        ),
+        (
+            "clip.move_to_slot",
+            Exception(LaterView("the Session grid and its menus (WP-3.7)")),
         ),
         // Gaps.
         (
@@ -1714,8 +1932,10 @@ fn alt_and_a_letter_open_the_drawn_menu_bar_s_menus() {
         "Control Bar Alt+0",
         "its first item"
     );
-    // Down moves to the next item that can be chosen (Session View waits
-    // for milestone M3); Enter chooses it.
+    // Down moves to the next item that can be chosen; Enter chooses it.
+    // Navigate's Session View (Option-1) is live now (WP-3.7).
+    let output = press(&mut h, Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(focused_label(&output), "Session View Alt+1");
     let output = press(&mut h, Key::ArrowDown, Modifiers::NONE);
     assert_eq!(focused_label(&output), "Arrangement View Alt+2");
     h.shell.set_focused_area(Area::ControlBar);

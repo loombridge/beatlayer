@@ -705,6 +705,7 @@ name = "bl-assistant"
 version = "0.0.0"
 dependencies = [
  "bl-commands",
+ "bl-model",
  "keyring",
  "rustls",
  "rustls-native-certs",
@@ -924,6 +925,8 @@ dependencies = [
  "serde",
  "serde_json",
  "vst3",
+ "windows-sys 0.52.0",
+ "x11rb",
 ]
 
 [[package]]
@@ -952,6 +955,7 @@ name = "bl-shell"
 version = "0.0.0"
 dependencies = [
  "bl-analysis",
+ "bl-assistant",
  "bl-audio-io",
  "bl-commands",
  "bl-core",
@@ -1012,6 +1016,8 @@ dependencies = [
 name = "bl-ui"
 version = "0.0.0"
 dependencies = [
+ "bl-assistant",
+ "bl-audio-io",
  "bl-commands",
  "bl-core",
  "bl-devices",

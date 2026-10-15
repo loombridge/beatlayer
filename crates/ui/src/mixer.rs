@@ -160,6 +160,8 @@ pub struct MixerUi {
     /// A track to scroll into view in a mixer, for a keyboard focus move to
     /// one of its controls (the accessibility spec, R4).
     reveal: Option<(MixerOf, TrackId)>,
+    /// The Session View grid's slots (WP-3.7).
+    grid: crate::session_view::GridUi,
 }
 
 impl MixerUi {
@@ -198,14 +200,8 @@ impl MixerUi {
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, 0.0, theme.colors.panel.0);
         title_bars(ui, shell, theme, layout.title_bars, MixerOf::Session);
-        // The slots and the status row arrive with the Session View (M3).
-        painter.text(
-            layout.slots.center(),
-            Align2::CENTER_CENTER,
-            "The Session View's clip slots and scenes arrive in milestone M3.",
-            theme.small_font(),
-            theme.colors.pending.0,
-        );
+        // The clip slots and scenes (M3, WP-3.7).
+        self.grid.show(ui, shell, theme, &layout, events);
         painter.line_segment(
             [layout.status_row.left_top(), layout.status_row.right_top()],
             Stroke::new(1.0, theme.colors.separator.0),
@@ -344,7 +340,7 @@ impl MixerUi {
             );
             let label = activator_label(column);
             if let Some(span) = layout.in_out
-                && let Some(section) = bl_shell::routing::in_out(doc, track)
+                && let Some(section) = bl_shell::routing::in_out(doc, track, shell.interface())
             {
                 let parts = crate::in_out::InOutParts {
                     theme,

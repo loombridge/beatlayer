@@ -5,8 +5,8 @@
 //! A plug-in device is otherwise a device like any other: `device.set_param`
 //! changes its parameters, `device.parameters` lists them, and saving the
 //! set keeps its state. Finding plug-ins by scanning the system's plug-in
-//! folders is WP-2.9's; embedding editors in Beatlayer's own windows is
-//! WP-2.10's.
+//! folders is WP-2.9's; an editor embeds into a window of Beatlayer's own
+//! (WP-2.10) on Windows and Linux, where the host builds one.
 
 use bl_commands::Context::{DeviceView, Global};
 use bl_commands::{CommandSpec, Permission, RegisterError, Registry};
@@ -159,7 +159,9 @@ pub struct PluginInfo {
     /// failed while processing (the device is silent).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub failure: Option<String>,
-    /// Whether it has an editor that opens in a window of its own.
+    /// Whether it has an editor that can open: embedded in a window of
+    /// Beatlayer's own on Windows and Linux (WP-2.10), or in a floating
+    /// window of the plug-in's own.
     pub has_window: bool,
     /// Whether its window is open.
     pub window_open: bool,
@@ -220,8 +222,8 @@ pub type SetPanelParamResult = crate::devices::DeviceViewState;
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ScanArgs {
-    /// The files or folders to scan; the system's plug-in folders if left
-    /// out.
+    /// The files or folders to scan; each format's system plug-in folders
+    /// if left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub paths: Option<Vec<String>>,
 }
@@ -389,12 +391,13 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     registry.register(
         CommandSpec::new(SHOW_WINDOW, "Show Plug-In Window")
             .description(
-                "Opens or closes a plug-in device's own editor in a window of its own, as the \
-                 device's title bar button does; switches unless `shown` says which. Only \
-                 plug-ins whose editor opens in its own window can show one yet. An open \
-                 window follows View ▸ Plug-In Windows and Auto-Hide Plug-In Windows, which \
-                 hide and show it without closing it. It changes only the view: it isn't an \
-                 undo step. Returns `plugin.info`'s report.",
+                "Opens or closes a plug-in device's editor, as the device's title bar button \
+                 does; switches unless `shown` says which. On Windows and Linux the editor \
+                 opens in a window Beatlayer owns, with the plug-in's own view embedded into \
+                 it; on macOS, and for a plug-in that won't embed, in a floating window of the \
+                 plug-in's own. An open window follows View ▸ Plug-In Windows and Auto-Hide \
+                 Plug-In Windows, which hide and show it without closing it. It changes only \
+                 the view: it isn't an undo step. Returns `plugin.info`'s report.",
             )
             .permission(Permission::Read)
             .context(DeviceView)
@@ -448,13 +451,13 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .description(
                 "Finds the plug-ins installed on this machine and describes each one: its \
                  format, its file, its identifier, name, vendor, version, and role in a chain. \
-                 Scans the files or folders in `paths`, or the system's plug-in folders when \
-                 `paths` is left out. Each plug-in is loaded in a separate process with a \
-                 timeout, so a plug-in that crashes or hangs is put on a blocklist with the \
-                 reason instead of taking Beatlayer down; a file whose size and modification \
-                 time are unchanged is answered from the cache. CLAP and, on macOS, Apple's \
-                 Audio Units are scanned so far. Reads plug-in files outside the project, so \
-                 an agent asks first.",
+                 Scans the files or folders in `paths`, or each format's own system plug-in \
+                 folders (CLAP's and VST3's conventions, and on macOS Apple's Audio Units') \
+                 when `paths` is left out. Plug-ins of every hosted format are scanned. Each \
+                 one is loaded in a separate process with a timeout, so a plug-in that crashes \
+                 or hangs is put on a blocklist with the reason instead of taking Beatlayer \
+                 down; a file whose size and modification time are unchanged is answered from \
+                 the cache. Reads plug-in files outside the project, so an agent asks first.",
             )
             .permission(Permission::External)
             .contexts([Global, DeviceView])
@@ -464,9 +467,9 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     registry.register(
         CommandSpec::new(RESCAN, "Rescan Plug-Ins")
             .description(
-                "Scans the plug-ins in `paths` (or the system's plug-in folders) again, \
-                 ignoring the cache and clearing the blocklist for them, as the Rescan button \
-                 does. Returns `plugin.scan`'s report.",
+                "Scans the plug-ins in `paths` (or each format's system plug-in folders) \
+                 again, ignoring the cache and clearing the blocklist for them, as the Rescan \
+                 button does. Returns `plugin.scan`'s report.",
             )
             .permission(Permission::External)
             .contexts([Global, DeviceView])

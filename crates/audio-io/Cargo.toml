@@ -16,7 +16,8 @@ asio = ["dep:azo"]
 [dependencies]
 bl-rt.workspace = true
 # Core Audio, WASAPI shared, and ALSA. Pinned to 0.18 until its duplex streams
-# land (see the architecture's audio I/O section).
+# land (see the architecture's audio I/O section); until then a stream with
+# input opens two streams and a lock-free ring between them (WP-2.13).
 cpal = "0.18.2"
 # Hands a supervised stream its callback once the stream has opened, without
 # a lock on the audio thread (WP-1.13; decision D14).

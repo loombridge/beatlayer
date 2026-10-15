@@ -87,6 +87,9 @@ impl InputList {
             NoteKind::On => In::On(NoteOnEvent::new(note.offset, pckn, velocity)),
             NoteKind::Off => In::Off(NoteOffEvent::new(note.offset, pckn, velocity)),
             NoteKind::Choke => In::Choke(NoteChokeEvent::new(note.offset, pckn)),
+            // Per-note expressions wait for MPE hosting (the parity
+            // matrix's note): a plug-in's note port takes them then.
+            NoteKind::Expression { .. } => return,
         });
     }
 

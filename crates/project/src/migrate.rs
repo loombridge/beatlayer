@@ -18,7 +18,7 @@ use serde_json::{Map, Value};
 use crate::error::LoadError;
 
 /// The schema version this build writes, and the newest it can read.
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 /// The oldest schema version this build can read, through [`MIGRATIONS`].
 pub const OLDEST_SCHEMA_VERSION: u32 = SCHEMA_VERSION - MIGRATIONS.len() as u32;
@@ -29,12 +29,22 @@ const _: () = assert!(OLDEST_SCHEMA_VERSION >= 1);
 
 /// Every migration, oldest first: the one at index `i` reads version
 /// [`OLDEST_SCHEMA_VERSION`]` + i`.
-pub const MIGRATIONS: &[Migration] = &[Migration {
-    from: 1,
-    summary: "an audio clip's offset into its file becomes part of its Start marker, as Live \
-              moves the marker when a clip is split or its left edge trimmed",
-    apply: audio_offsets_to_start_markers,
-}];
+pub const MIGRATIONS: &[Migration] = &[
+    Migration {
+        from: 1,
+        summary: "an audio clip's offset into its file becomes part of its Start marker, as Live \
+                  moves the marker when a clip is split or its left edge trimmed",
+        apply: audio_offsets_to_start_markers,
+    },
+    Migration {
+        from: 2,
+        summary: "the document gains the Session View's scenes and the clips in their slots; a \
+                  set saved without scenes opens with the default eight, whose IDs the \
+                  document's loader hands out after the set's largest (the session view spec, \
+                  R14), so the saved JSON itself needs nothing",
+        apply: Ok,
+    },
+];
 
 /// One step from a schema version to the next.
 #[derive(Clone, Copy, Debug)]

@@ -45,6 +45,21 @@ lspk-plugin = { workspace = true, features = ["clap-host"] }
 serde = { version = "1.0.228", default-features = false, features = ["std", "derive"] }
 serde_json = "1"
 
+# A plug-in editor's host window (WP-2.10): an HWND on Windows, and an X11
+# window on Linux and the other X11 Unixes (a Wayland session serves it
+# through XWayland). macOS builds no host window yet.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.52", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_HiDpi",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+x11rb = { version = "0.13", default-features = false }
+
 [dev-dependencies]
 # The test plug-ins, built from source; their cdylibs are what the tests
 # load.

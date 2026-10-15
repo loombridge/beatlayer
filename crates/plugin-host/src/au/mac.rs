@@ -514,6 +514,8 @@ impl AuHost {
                 has_editor: false,
                 editor_open: false,
                 editor_hidden: false,
+                editor_scale: None,
+                editor_size: None,
                 values: Vec::new(),
             });
         }
@@ -544,6 +546,8 @@ impl AuHost {
             has_editor,
             editor_open: instance.editor.is_some(),
             editor_hidden: instance.editor_hidden,
+            editor_scale: None,
+            editor_size: None,
             values,
         })
     }

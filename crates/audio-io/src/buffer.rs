@@ -189,6 +189,11 @@ impl PlanarScratch {
         self.capacity
     }
 
+    /// How many channels each view has.
+    pub(crate) fn channels(&self) -> usize {
+        self.channels
+    }
+
     /// The first `frames` frames of every channel.
     ///
     /// # Panics

@@ -9,10 +9,12 @@ use bl_core::id::Id;
 use bl_core::time::Ticks;
 use bl_engine::transport as engine_transport;
 use bl_media::MediaStore;
-use bl_model::{ChangeSet, Editor, TrackId, TrackKind, registry as model};
+use bl_model::{ChangeSet, ClipData, Editor, TrackId, TrackKind, registry as model};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
+
+use bl_assistant::keychain::{Keychain, MemoryKeychain, OsKeychain};
 
 use crate::agent::{
     self as agent, AgentServerState, AgentServerStatus, AgentSettings, AutonomousArgs, ClientArgs,
@@ -20,19 +22,24 @@ use crate::agent::{
 };
 use crate::arrangement::editing::{self, Clipboard, EditFailure};
 use crate::arrangement::{ArrangementView, TransportView, ViewError, Viewport};
+use crate::assistant::{
+    self as assistant_ids, ActivityEntry, AssistantSettings, AssistantState, Outcome,
+    SetBaseUrlArgs, SetKeyArgs, SetModelArgs, SetProviderArgs, keychain_account,
+};
 use crate::audio::{AudioHost, ConfigureAudio, EngineTransport, ToneSettings};
 use crate::browser::{self, BrowserError, BrowserView, Waker};
 use crate::clip_view::{self, ClipView};
 use crate::commands::{
-    self as ids, DefaultSetArgs, FileReport, PathArgs, RelinkArgs, SaveAsArgs, SetResult,
-    SettingsArgs, SwitchArgs, SwitchResult, TemplateArgs, TestToneArgs, TestToneState, ThemeArgs,
-    ViewResult, ZoomArgs,
+    self as ids, DefaultSetArgs, FileReport, FoldNotesArgs, LaneArgs, PathArgs, RelinkArgs,
+    SaveAsArgs, SetResult, SettingsArgs, SwitchArgs, SwitchResult, TemplateArgs, TestToneArgs,
+    TestToneState, ThemeArgs, ViewResult, ZoomArgs,
 };
 use crate::devices::{self, DeviceError, DeviceView};
 use crate::files::{ProjectFiles, SetStore, new_set_from};
 use crate::mixer_controls::{self, Switch};
 use crate::mixer_view::{MixerOf, MixerView, MixerViewError};
 use crate::permission::CallPermission;
+use crate::session_view::{SessionView, SessionViewError};
 use crate::settings::{
     OnByDefault, Preferences, SettingsPage, ThemeChoice, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT,
     zoom_factor, zoom_percent, zoom_step,
@@ -52,6 +59,7 @@ use bl_shell_spec::mixer_view as mixer_ids;
 use bl_shell_spec::notes as note_ids;
 use bl_shell_spec::perception as perception_ids;
 use bl_shell_spec::plugins as plugin_ids;
+use bl_shell_spec::session_view as session_ids;
 use bl_shell_spec::tracks as track_ids;
 use bl_shell_spec::transport as transport_ids;
 
@@ -302,6 +310,18 @@ pub struct Shell {
     message: Option<Message>,
     revision: u64,
     agent_status: AgentServerStatus,
+    /// The built-in assistant's API keys (WP-2.23): the OS keychain, or an
+    /// in-memory stand-in in tests and headless runs. The keys are never in
+    /// the preferences.
+    keychain: Arc<dyn Keychain>,
+    /// Whether a key is stored for the assistant's current provider, so the
+    /// Settings window doesn't read the keychain every frame.
+    assistant_key_set: bool,
+    /// Every command the assistant ran this session, in order (WP-2.23,
+    /// part 4).
+    assistant_log: Vec<ActivityEntry>,
+    /// Whether the activity log is open in the Settings window.
+    assistant_log_open: bool,
     /// What the Arrangement View shows (WP-1.8a).
     arrangement: ArrangementView,
     /// What the Clip View shows (WP-2.3): whether it's open, Draw Mode, and
@@ -327,6 +347,9 @@ pub struct Shell {
     gesture: bool,
     /// What the mixers show (WP-1.9).
     mixer: MixerView,
+    /// What the Session View grid has selected and how far it's scrolled
+    /// (WP-3.7).
+    session: SessionView,
     /// The meters the engine last published, one per track (WP-1.9).
     meters: Vec<bl_engine::TrackMeter>,
     /// Whether the meters were the engine's when last polled.
@@ -393,6 +416,22 @@ fn edit_error(id: &str, failure: EditFailure) -> ShellError {
             command: id.to_owned(),
             message,
         },
+    }
+}
+
+/// Whether `id` is one of the clip marker commands the Clip View's marker
+/// strip drags (`clip.set_midi_region`, `clip.set_midi_loop`). They are
+/// document commands, but the strip's drags run them as gestures, so moving
+/// a marker or the loop brace however far is one undo step (piano-roll R11).
+fn clip_marker_command(id: &str) -> bool {
+    matches!(id, model::SET_MIDI_REGION | model::SET_MIDI_LOOP)
+}
+
+/// The name of the undo step a marker-strip gesture makes.
+fn marker_label(id: &str) -> &'static str {
+    match id {
+        model::SET_MIDI_REGION => "Change clip region",
+        _ => "Change clip loop",
     }
 }
 
@@ -517,6 +556,10 @@ impl Shell {
             message: None,
             revision: 0,
             agent_status: AgentServerStatus::default(),
+            keychain: Arc::new(OsKeychain::new()),
+            assistant_key_set: false,
+            assistant_log: Vec::new(),
+            assistant_log_open: false,
             arrangement: ArrangementView::new(),
             clip_view: ClipView::default(),
             document_revision: 0,
@@ -526,6 +569,7 @@ impl Shell {
             seen_insert_marker: None,
             gesture: false,
             mixer: MixerView::new(),
+            session: SessionView::new(),
             meters: Vec::new(),
             metering: false,
             previews: crate::perception::Previews::default(),
@@ -584,12 +628,15 @@ impl Shell {
     /// nowhere, the null audio device, and Beatlayer's set files.
     #[must_use]
     pub fn headless() -> Self {
-        Self::new(
+        let mut shell = Self::new(
             Preferences::default(),
             None,
             AudioHost::null(Default::default()),
             Box::new(ProjectFiles::new()),
-        )
+        );
+        // Headless runs and tests touch no real keychain.
+        shell.keychain = Arc::new(MemoryKeychain::new());
+        shell
     }
 
     /// Opens the audio device, if the engine is on. A failure shows in the
@@ -676,6 +723,107 @@ impl Shell {
         }
     }
 
+    /// The built-in assistant's provider, base URL and model (WP-2.23,
+    /// part 4). Its API key is in the keychain, not here.
+    #[must_use]
+    pub fn assistant_settings(&self) -> &AssistantSettings {
+        &self.prefs.assistant
+    }
+
+    /// The assistant's settings and whether a key is stored, for the
+    /// Settings window and the settings' commands. The key itself is never
+    /// here.
+    #[must_use]
+    pub fn assistant_state(&self) -> AssistantState {
+        AssistantState {
+            provider: self.prefs.assistant.provider,
+            base_url: self.prefs.assistant.base_url.clone(),
+            model: self.prefs.assistant.model.clone(),
+            key_set: self.assistant_key_set,
+            activity_log_open: self.assistant_log_open,
+        }
+    }
+
+    /// Every command the assistant ran this session, in order (WP-2.23,
+    /// part 4).
+    #[must_use]
+    pub fn assistant_log(&self) -> &[ActivityEntry] {
+        &self.assistant_log
+    }
+
+    /// Whether the activity log is open.
+    #[must_use]
+    pub fn assistant_log_open(&self) -> bool {
+        self.assistant_log_open
+    }
+
+    /// Whether an API key is stored for the assistant's current provider.
+    /// Refreshed by [`Shell::refresh_assistant_key`], after a key changes,
+    /// and when the Settings window opens.
+    #[must_use]
+    pub fn assistant_key_set(&self) -> bool {
+        self.assistant_key_set
+    }
+
+    /// Runs the assistant's keychain operations through `keychain`, such as
+    /// an in-memory one in tests, and refreshes whether a key is stored.
+    pub fn use_keychain(&mut self, keychain: Arc<dyn Keychain>) {
+        self.keychain = keychain;
+        self.refresh_assistant_key();
+    }
+
+    /// Reads whether an API key is stored for the assistant's current
+    /// provider, so the Settings window can show it without reading the
+    /// keychain every frame.
+    pub fn refresh_assistant_key(&mut self) {
+        let account = keychain_account(self.prefs.assistant.provider);
+        self.assistant_key_set = matches!(self.keychain.read(account), Ok(Some(_)));
+    }
+
+    /// Opens a turn's changes as one undo step named `label`, which the
+    /// assistant loop closes with [`Shell::end_assistant_turn`]
+    /// (WP-2.23, part 2).
+    pub(crate) fn begin_assistant_turn(&mut self, label: &str) {
+        self.editor.begin(label.to_owned());
+    }
+
+    /// Closes the turn's undo step, keeping whatever ran.
+    pub(crate) fn end_assistant_turn(&mut self) {
+        if self.editor.commit().unwrap_or(false) {
+            self.dirty = true;
+        }
+        self.document_changed();
+        self.touch();
+    }
+
+    /// Whether the person has chosen "always allow" for `command`.
+    pub(crate) fn assistant_always_allows(&self, command: &str) -> bool {
+        self.prefs.assistant_always.contains(command)
+    }
+
+    /// Remembers "always allow" for `command`, so later calls don't ask.
+    pub(crate) fn assistant_remember_command(&mut self, command: &str) {
+        if self.prefs.assistant_always.insert(command.to_owned()) {
+            self.save_preferences();
+        }
+    }
+
+    /// Records one command the assistant ran in the activity log.
+    pub(crate) fn assistant_record(&mut self, entry: ActivityEntry) {
+        self.assistant_log.push(entry);
+        self.touch();
+    }
+
+    /// Records one command the assistant was refused, in the activity log.
+    pub(crate) fn assistant_record_denied(&mut self, command: &str, message: String) {
+        self.assistant_log.push(ActivityEntry {
+            command: command.to_owned(),
+            at: std::time::SystemTime::now(),
+            outcome: Outcome::Denied(message),
+        });
+        self.touch();
+    }
+
     /// The audio device.
     #[must_use]
     pub fn audio(&self) -> &AudioHost {
@@ -685,6 +833,14 @@ impl Shell {
     /// The audio device, to sample its CPU load.
     pub fn audio_mut(&mut self) -> &mut AudioHost {
         &mut self.audio
+    }
+
+    /// The audio interface the In/Out choosers list: the open device's
+    /// channels, or none while no stream is open.
+    #[must_use]
+    pub fn interface(&self) -> crate::routing::Interface {
+        let (inputs, outputs) = self.audio.channels();
+        crate::routing::Interface { inputs, outputs }
     }
 
     /// The preferences.
@@ -1837,6 +1993,13 @@ impl Shell {
         &self.mixer
     }
 
+    /// What the Session View grid has selected and how far it's scrolled
+    /// (WP-3.7).
+    #[must_use]
+    pub fn session(&self) -> &SessionView {
+        &self.session
+    }
+
     /// The mixer of the view in front.
     #[must_use]
     pub fn front_mixer(&self) -> MixerOf {
@@ -2164,6 +2327,7 @@ impl Shell {
                 || device_ids::handles(id)
                 || self.is_device_command(id)
                 || track_ids::handles(id)
+                || note_ids::handles(id)
                 || midi_ids::handles(id)
                 || matches!(
                     id,
@@ -2244,7 +2408,10 @@ impl Shell {
         }
         let mut outcome = Ok(Value::Null);
         if let Some(invocation) = invocation {
-            if !edit_ids::handles(&invocation.id) && !note_ids::handles(&invocation.id) {
+            if !edit_ids::handles(&invocation.id)
+                && !note_ids::handles(&invocation.id)
+                && !clip_marker_command(&invocation.id)
+            {
                 return Err(ShellError::Unavailable {
                     command: invocation.id.clone(),
                     reason: "only the Arrangement's and the Clip View's editing commands run as \
@@ -2268,6 +2435,8 @@ impl Shell {
     fn gesture_step(&mut self, invocation: &Invocation) -> Result<Value, ShellError> {
         let label = if note_ids::handles(&invocation.id) {
             clip_view::label(&invocation.id)
+        } else if clip_marker_command(&invocation.id) {
+            marker_label(&invocation.id)
         } else {
             editing::label(&invocation.id, &invocation.args)
         };
@@ -2294,7 +2463,13 @@ impl Shell {
                    clip_view: &mut ClipView,
                    clipboard: &mut Option<Clipboard>,
                    invocation: &Invocation| {
-            if note_ids::handles(&invocation.id) {
+            if clip_marker_command(&invocation.id) {
+                // The document's own clip commands, run per frame like the
+                // Clip View's note commands.
+                model::run(editor, &invocation.id, invocation.args.clone())
+                    .map(|changes| to_value(&changes))
+                    .map_err(|error| EditFailure::Refused(error.to_string()))
+            } else if note_ids::handles(&invocation.id) {
                 clip_view::run(
                     &invocation.id,
                     invocation.args.clone(),
@@ -2484,6 +2659,11 @@ impl Shell {
             ids::VIEW_TOGGLE_BROWSER => Some(self.browser),
             ids::VIEW_TOGGLE_CLIP_VIEW => Some(self.clip_view.visible()),
             ids::VIEW_DRAW_MODE => Some(self.clip_view.draw_mode()),
+            ids::VIEW_FOLD_NOTES => Some(
+                self.clip_view
+                    .shown_clip(self.editor.document(), &self.arrangement)
+                    .is_some_and(|clip| self.clip_view.is_folded(clip)),
+            ),
             ids::VIEW_TOGGLE_INFO_VIEW => Some(self.info_view),
             ids::VIEW_TOGGLE_PLUG_IN_WINDOWS => Some(self.plug_in_windows),
             ids::FOCUS_TOGGLE_TAB_NAVIGATION => Some(self.prefs.tab_navigation),
@@ -3238,6 +3418,65 @@ impl Shell {
             }
             return result.map(|state| to_value(&state));
         }
+        if session_ids::handles(id) {
+            // Spec: session-view. The grid's selection and scroll are view
+            // state; its edits run the set's scene and slot commands as one
+            // undo step.
+            let columns = crate::mixer_view::columns(self.editor.document(), &self.arrangement);
+            let scenes: Vec<bl_model::SceneId> = self
+                .editor
+                .document()
+                .scenes()
+                .map(|scene| scene.id)
+                .collect();
+            let edge_fades = self.prefs.create_fades_on_clip_edges.0;
+            let outcome = self
+                .session
+                .run(
+                    id,
+                    args,
+                    crate::session_view::Context {
+                        editor: &mut self.editor,
+                        media: &self.media,
+                        columns: &columns,
+                        scenes: &scenes,
+                        edge_fades,
+                    },
+                )
+                .map_err(|error| match error {
+                    SessionViewError::InvalidArgs(message) => ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message,
+                    },
+                    SessionViewError::Unavailable(reason) => ShellError::Unavailable {
+                        command: id.to_owned(),
+                        reason,
+                    },
+                    SessionViewError::Failed(message) => ShellError::Failed {
+                        command: id.to_owned(),
+                        message,
+                    },
+                })?;
+            for file in &outcome.media {
+                self.store.add_media(file.hash, &file.path, file.size);
+            }
+            if outcome.document_changed {
+                self.dirty = true;
+                self.document_changed();
+            }
+            if id == session_ids::FOCUS {
+                // Spec: session-view. Navigate ▸ Session View shows it and
+                // moves the focus into it.
+                self.main_view = MainView::Session;
+                self.focused_window = WindowKind::Main;
+                self.focused_area = Area::MainView;
+                self.effects.push(Effect::FocusArea(Area::MainView));
+            }
+            if id != session_ids::STATE {
+                self.touch();
+            }
+            return Ok(outcome.value);
+        }
         if id == browser_ids::LOAD_SELECTED
             && let Some(path) = self.hot_swap_preset()
         {
@@ -3468,6 +3707,7 @@ impl Shell {
                 self.editor = editor;
                 self.store.close();
                 self.devices.set_windows(bl_model::DeviceWindows::new());
+                self.clip_view.set_folds(bl_model::ClipFolds::new());
                 self.set_path = None;
                 self.dirty = false;
                 self.main_view = MainView::Arrangement;
@@ -3475,6 +3715,7 @@ impl Shell {
                 self.arrangement.reset();
                 self.clip_view.forget_selection();
                 self.mixer.reset();
+                self.session.reset();
                 self.new_set_transport();
                 self.document_changed();
                 self.set_file_changed();
@@ -3492,6 +3733,8 @@ impl Shell {
                 // Spec: device-chains R29. Floating windows reopen where
                 // they were saved.
                 self.devices.set_windows(self.store.windows());
+                // Spec: piano-roll. Folded note editors too.
+                self.clip_view.set_folds(self.store.folds());
                 self.saved = snapshot(&editor);
                 self.set_replaced();
                 self.editor = editor;
@@ -3501,6 +3744,7 @@ impl Shell {
                 self.arrangement.reset();
                 self.clip_view.forget_selection();
                 self.mixer.reset();
+                self.session.reset();
                 // The set's files go into the media store, so its clips'
                 // waveforms build (browser R15) and the engine finds their
                 // audio when the set reaches it.
@@ -3538,6 +3782,7 @@ impl Shell {
                     &mut self.editor,
                 );
                 self.store.set_windows(self.devices.windows().clone());
+                self.store.set_folds(self.clip_view.folds().clone());
                 let warnings = self.store.save(&path, &self.editor).map_err(failed)?;
                 self.saved_as(path, &warnings);
                 Ok(self.set_result())
@@ -3553,6 +3798,7 @@ impl Shell {
                     &mut self.editor,
                 );
                 self.store.set_windows(self.devices.windows().clone());
+                self.store.set_folds(self.clip_view.folds().clone());
                 let (path, warnings) = self
                     .store
                     .save_as(Path::new(&path), &self.editor)
@@ -3652,6 +3898,7 @@ impl Shell {
                     &mut self.editor,
                 );
                 self.store.set_windows(self.devices.windows().clone());
+                self.store.set_folds(self.clip_view.folds().clone());
                 let files = self.store.collect().map_err(failed)?;
                 let warnings = self.store.save(&path, &self.editor).map_err(failed)?;
                 self.saved_as(path.clone(), &warnings);
@@ -3756,6 +4003,44 @@ impl Shell {
                 // Spec: piano-roll R2; S-GRID-001, M-OPT-017. View state only.
                 Self::args::<NoArgs>(id, args)?;
                 self.clip_view.toggle_draw_mode();
+                Ok(to_value(
+                    &self
+                        .clip_view
+                        .state(self.editor.document(), &self.arrangement),
+                ))
+            }
+            ids::VIEW_FOLD_NOTES => {
+                // Spec: piano-roll; M-VIEW-039, S-NOTE-038. View state only,
+                // saved with the set.
+                let FoldNotesArgs { clip, folded } = Self::args(id, args)?;
+                let clip = match clip {
+                    Some(clip) => clip,
+                    None => self
+                        .clip_view
+                        .shown_clip(self.editor.document(), &self.arrangement)
+                        .ok_or_else(|| unavailable("no MIDI clip is shown in the Clip View"))?,
+                };
+                match self.editor.document().clip(clip) {
+                    None => {
+                        return Err(failed(format!("no clip has the ID {}", clip.0)));
+                    }
+                    Some(value) if !matches!(value.data, ClipData::Midi(_)) => {
+                        return Err(failed("the clip isn't a MIDI clip".to_owned()));
+                    }
+                    Some(_) => {}
+                }
+                let folded = folded.unwrap_or(!self.clip_view.is_folded(clip));
+                self.clip_view.set_folded(clip, folded);
+                Ok(to_value(
+                    &self
+                        .clip_view
+                        .state(self.editor.document(), &self.arrangement),
+                ))
+            }
+            ids::VIEW_LANE => {
+                // Spec: piano-roll; the lane shows one of a note's values.
+                let LaneArgs { lane } = Self::args(id, args)?;
+                self.clip_view.set_lane(lane);
                 Ok(to_value(
                     &self
                         .clip_view
@@ -4034,6 +4319,57 @@ impl Shell {
                 entry.token = token.into();
                 self.save_preferences();
                 Ok(to_value(&AgentServerState::from(&self.prefs.agent)))
+            }
+            assistant_ids::ASSISTANT_SET_PROVIDER => {
+                let SetProviderArgs { provider } = Self::args(id, args)?;
+                self.prefs.assistant.provider = provider;
+                self.save_preferences();
+                self.refresh_assistant_key();
+                Ok(to_value(&self.assistant_state()))
+            }
+            assistant_ids::ASSISTANT_SET_BASE_URL => {
+                let SetBaseUrlArgs { base_url } = Self::args(id, args)?;
+                self.prefs.assistant.base_url = base_url.trim().to_owned();
+                self.save_preferences();
+                Ok(to_value(&self.assistant_state()))
+            }
+            assistant_ids::ASSISTANT_SET_MODEL => {
+                let SetModelArgs { model } = Self::args(id, args)?;
+                self.prefs.assistant.model = model.trim().to_owned();
+                self.save_preferences();
+                Ok(to_value(&self.assistant_state()))
+            }
+            assistant_ids::ASSISTANT_SET_KEY => {
+                // Spec: agent-permissions R7, by analogy. The key is written
+                // to the keychain and never returned or logged.
+                let SetKeyArgs { key } = Self::args(id, args)?;
+                if key.trim().is_empty() {
+                    return Err(ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message: "the API key is empty".to_owned(),
+                    });
+                }
+                let account = keychain_account(self.prefs.assistant.provider);
+                self.keychain
+                    .write(account, key.trim())
+                    .map_err(|error| failed(error.to_string()))?;
+                self.refresh_assistant_key();
+                Ok(to_value(&self.assistant_state()))
+            }
+            assistant_ids::ASSISTANT_FORGET_KEY => {
+                Self::args::<NoArgs>(id, args)?;
+                let account = keychain_account(self.prefs.assistant.provider);
+                self.keychain
+                    .delete(account)
+                    .map_err(|error| failed(error.to_string()))?;
+                self.refresh_assistant_key();
+                Ok(to_value(&self.assistant_state()))
+            }
+            assistant_ids::ASSISTANT_TOGGLE_ACTIVITY_LOG => {
+                Self::args::<NoArgs>(id, args)?;
+                self.assistant_log_open = !self.assistant_log_open;
+                self.touch();
+                Ok(to_value(&self.assistant_state()))
             }
             _ => Err(ShellError::UnknownCommand(id.to_owned())),
         }

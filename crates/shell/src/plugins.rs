@@ -19,7 +19,7 @@ use bl_devices::KitHost;
 use bl_model::{Command, Device, DeviceId, DeviceKind, Document, Editor, ParamId, PluginFormat};
 use bl_plugin_host::au::AuHost;
 use bl_plugin_host::clap::ClapHost;
-use bl_plugin_host::scan::Scanner;
+use bl_plugin_host::scan::{SCANNED_FORMATS, ScanReport, Scanner, system_paths};
 use bl_plugin_host::vst3::Vst3Host;
 use bl_shell_spec::plugins::{
     BlockedItem, PluginInfo, PluginScan, ScannedItem, SetPlugin, SetPluginList,
@@ -317,20 +317,9 @@ pub fn info(
     })
 }
 
-/// The formats the scanner describes: CLAP everywhere, and Audio Units on
-/// macOS (WP-2.8's second part). VST3 and LV2 join when they have hosting.
-#[must_use]
-pub fn scanned_formats() -> &'static [PluginFormat] {
-    if cfg!(target_os = "macos") {
-        &[PluginFormat::Clap, PluginFormat::AudioUnit]
-    } else {
-        &[PluginFormat::Clap]
-    }
-}
-
 /// Runs a scan (or a rescan) over every format the scanner describes and
-/// reports it for `plugin.scan` / `plugin.rescan` (WP-2.9). With no `paths`,
-/// each format's own system folders are scanned; with `paths`, all of them
+/// reports it for `plugin.scan` / `plugin.rescan` (WP-2.9). With no paths,
+/// each format's own system folders are scanned; with paths, all of them
 /// are searched for each format's files.
 #[must_use]
 pub fn scan_report(
@@ -339,11 +328,11 @@ pub fn scan_report(
     fresh: bool,
     hidden: &BTreeSet<String>,
 ) -> PluginScan {
-    let mut report = PluginScan::default();
-    for &format in scanned_formats() {
+    let mut report = ScanReport::default();
+    for &format in SCANNED_FORMATS {
         let format_paths: Vec<PathBuf> = match paths {
             Some(paths) => paths.to_vec(),
-            None => bl_plugin_host::scan::system_paths(format),
+            None => system_paths(format),
         };
         let found = if fresh {
             scanner.rescan(format, &format_paths)
@@ -352,9 +341,17 @@ pub fn scan_report(
         };
         report.scanned += found.scanned;
         report.cached += found.cached;
-        report
+        report.plugins.extend(found.plugins);
+        report.blocked.extend(found.blocked);
+    }
+    report
+        .plugins
+        .sort_by(|a, b| a.name.cmp(&b.name).then(a.path.cmp(&b.path)));
+    PluginScan {
+        plugins: report
             .plugins
-            .extend(found.plugins.into_iter().map(|p| ScannedItem {
+            .into_iter()
+            .map(|p| ScannedItem {
                 hidden: hidden.contains(&p.key()),
                 format: p.format,
                 path: p.path.to_string_lossy().into_owned(),
@@ -363,19 +360,20 @@ pub fn scan_report(
                 vendor: p.vendor,
                 version: p.version,
                 role: p.role,
-            }));
-        report
+            })
+            .collect(),
+        blocked: report
             .blocked
-            .extend(found.blocked.into_iter().map(|b| BlockedItem {
+            .into_iter()
+            .map(|b| BlockedItem {
                 format: b.format,
                 path: b.path.to_string_lossy().into_owned(),
                 reason: b.reason,
-            }));
+            })
+            .collect(),
+        scanned: report.scanned,
+        cached: report.cached,
     }
-    report
-        .plugins
-        .sort_by(|a, b| a.name.cmp(&b.name).then(a.path.cmp(&b.path)));
-    report
 }
 
 /// Every plug-in `doc` uses, grouped by format and ID, for `plugin.list`

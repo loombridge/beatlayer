@@ -14,7 +14,7 @@
 
 use std::collections::BTreeMap;
 
-use bl_commands::CommandSpec;
+use bl_commands::{CommandSpec, Permission};
 use serde_json::{Value, json};
 
 use crate::provider::Error;
@@ -30,6 +30,11 @@ pub struct ToolSpec {
     /// What the command does, when to use it, and what it changes: the
     /// registry's description, written for a model.
     pub description: String,
+    /// The command's registered permission class, which the agent loop
+    /// passes to its [`Commands`](crate::agent::Commands) when it asks
+    /// whether the call may run. A command that names none is external,
+    /// the most a command can need, as the agent API reads it.
+    pub permission: Permission,
     /// The JSON Schema of the command's arguments.
     pub input: Value,
 }
@@ -42,6 +47,7 @@ impl ToolSpec {
             name: tool_name(&spec.id),
             command: spec.id.to_string(),
             description: spec.description.to_string(),
+            permission: spec.permission.unwrap_or(Permission::External),
             input: spec
                 .args
                 .as_ref()

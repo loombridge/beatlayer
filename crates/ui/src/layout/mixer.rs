@@ -24,6 +24,59 @@ pub const TITLE_BAR_HEIGHT: f32 = 17.0;
 /// mixer (L-SES-008).
 pub const STATUS_ROW: f32 = 17.0;
 
+/// One clip slot row's height (L-SES-003: 18 points per scene).
+pub const SLOT_ROW: f32 = 18.0;
+
+/// The Main column's scene row parts (L-SES-006), measured from its edges:
+/// the scene launch button at its left, the scene's name across the middle,
+/// and its number at its right edge.
+pub mod scene_controls {
+    /// The scene launch button's width, at the column's left edge.
+    pub const LAUNCH: f32 = 18.0;
+    /// The scene's number's width, at the column's right edge.
+    pub const NUMBER: f32 = 22.0;
+}
+
+/// One scene's row (L-SES-003, L-SES-006): the whole row across the grid,
+/// the Main column's launch button, and where its name and number sit.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SceneRow {
+    /// The row across the grid, 18 points tall.
+    pub row: Rect,
+    /// The scene launch button in the Main column (I-CLICK-009).
+    pub launch: Rect,
+    /// Where the scene's name is drawn, between the button and the number.
+    pub name: Rect,
+    /// Where the scene's number is drawn, at the Main column's right edge.
+    pub number: Rect,
+}
+
+impl SceneRow {
+    /// Places a scene's row against the Main column.
+    #[must_use]
+    pub fn compute(row: Rect, main: Rect) -> Self {
+        use scene_controls::{LAUNCH, NUMBER};
+        let launch = Rect::from_min_max(
+            pos2(main.left(), row.top()),
+            pos2(main.left() + LAUNCH, row.bottom()),
+        );
+        let number = Rect::from_min_max(
+            pos2(main.right() - NUMBER, row.top()),
+            pos2(main.right(), row.bottom()),
+        );
+        let name = Rect::from_min_max(
+            pos2(launch.right(), row.top()),
+            pos2(number.left(), row.bottom()),
+        );
+        Self {
+            row,
+            launch,
+            name,
+            number,
+        }
+    }
+}
+
 /// The In/Out section's height (L-MIX-001).
 pub const IN_OUT_HEIGHT: f32 = 115.0;
 
@@ -333,6 +386,25 @@ impl SessionLayout {
             status_row,
             mixer,
         }
+    }
+
+    /// The rectangle of scene `index` (counting from 0) across the slots,
+    /// scrolled `scroll_y` points down (L-SES-003): 18 points tall, cut to
+    /// the slots area.
+    #[must_use]
+    pub fn scene_row(&self, index: usize, scroll_y: f32) -> Rect {
+        let top = self.slots.top() + SLOT_ROW * index as f32 - scroll_y;
+        Rect::from_min_max(
+            pos2(self.slots.left(), top),
+            pos2(self.slots.right(), top + SLOT_ROW),
+        )
+    }
+
+    /// The first scene whose row is in view at `scroll_y`, so a frame builds
+    /// only the rows on screen.
+    #[must_use]
+    pub fn first_scene(&self, scroll_y: f32) -> usize {
+        (scroll_y / SLOT_ROW).floor().max(0.0) as usize
     }
 
     /// Every layout.md row it places.

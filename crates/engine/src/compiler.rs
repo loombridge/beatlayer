@@ -9,6 +9,7 @@ use bl_model::{
 };
 
 use crate::EngineConfig;
+use crate::automation;
 use crate::clips::{ClipList, ClipPlayer};
 use crate::gc::{GcHandle, Program};
 use crate::message::{LoopRegion, ParamEvent, TransportCommand};
@@ -16,8 +17,8 @@ use crate::midi_clips::{MidiClipList, MidiClipPlayer};
 use crate::mixer::{self, Route, Solo, TrackMixer, route};
 use crate::node::{NodeData, NodeKey, NoteBuffer, ParamValue};
 use crate::program::{
-    DeviceSidechain, EngineProgram, Input, Instance, Migration, NO_DELAY, NodeSlot, Span, Task,
-    delay_storage,
+    DeviceInput, DeviceSidechain, EngineProgram, Input, Instance, Migration, NO_DELAY, NodeSlot,
+    Span, Task, delay_storage,
 };
 use crate::registry::Registry;
 use crate::routing::{Edge, Graph, Via};
@@ -100,6 +101,10 @@ struct Placed {
     /// The frames the node's own processing adds, as it reported when it was
     /// made, so a migrated node keeps its latency (WP-2.11).
     latency: u32,
+    /// The frames a parameter change aimed at the node is held back, so
+    /// automation acts on the audio it is meant for (WP-2.11): its slot's
+    /// delay, worked out when the program is compiled.
+    delay: u32,
 }
 
 /// Turns documents into engine programs, off the audio thread.
@@ -247,6 +252,25 @@ impl Compiler {
         };
         // A new program's restatement of migrated nodes goes first.
         update.params.extend(params);
+        // A track whose envelopes changed sends its nodes their lists again,
+        // empty ones included, which clear the envelopes a node had. A new
+        // tempo map moved every envelope, so every track's goes again.
+        let all = old.settings().tempo != document.settings().tempo;
+        for track in document.tracks() {
+            let id = track.id();
+            let differs = match (old.track(id), document.track(id)) {
+                (Some(before), Some(after)) => before.automation_map() != after.automation_map(),
+                // A new track's nodes are new, with no envelopes to clear,
+                // and a deleted track's nodes are gone with the track.
+                _ => false,
+            };
+            if all || differs {
+                // The track whose envelopes changed gets every list, so an
+                // empty one clears what a node had; a tempo map that moved
+                // them only sends the ones that drive something.
+                self.send_automation(document, id, !differs, &mut update);
+            }
+        }
         update
     }
 
@@ -379,6 +403,13 @@ impl Compiler {
         let size = self.config.channels * self.config.max_frames;
         let (order, dependents) = run_order(&build);
         compensate(&mut build, &order);
+        // Automation is placed with each node's delay in it (WP-2.11), so
+        // remember what every node's turned out to be.
+        for slot in &build.slots {
+            if let Some(placed) = build.layout.get_mut(&slot.key) {
+                placed.delay = slot.delay;
+            }
+        }
         let (delay_lines, delay_pool) = delay_storage(&build.delays, self.config.channels);
         let program = EngineProgram {
             generation,
@@ -399,6 +430,9 @@ impl Compiler {
             delay_lines,
             delay_pool,
             delay_scratch: vec![0.0; size],
+            device_input: vec![0.0; self.config.input_channels * self.config.max_frames],
+            device_input_channels: self.config.input_channels,
+            device_scratch: vec![0.0; size],
             channels: self.config.channels,
             max_frames: self.config.max_frames,
             output: task_of[&document.main_id()],
@@ -461,8 +495,39 @@ impl Compiler {
             if send {
                 self.send_clips(document, id, &mut update);
             }
+            // Every node is new in a new program, so each is sent the
+            // automation that drives its parameters: a node with none is
+            // new too, and has none anyway.
+            self.send_automation(document, id, true, &mut update);
         }
         update
+    }
+
+    /// Sends each of `track`'s nodes the automation driving its parameters
+    /// (WP-2.12): the track's mixer, each of its sends, and each device in
+    /// its chain, each held back by the node's delay. An empty list clears
+    /// the envelopes a node had, so a node whose envelopes all went follows
+    /// its controls again; `driving_only` leaves those out, for a new
+    /// program, where a node without envelopes is new and has none.
+    fn send_automation(
+        &self,
+        document: &Document,
+        track: TrackId,
+        driving_only: bool,
+        update: &mut Update,
+    ) {
+        let Some(track) = document.track(track) else {
+            return;
+        };
+        let rate = self.config.sample_rate;
+        for (key, list) in automation::lists(document, track.id(), rate, |key| {
+            i64::from(self.layout.get(&key).map_or(0, |placed| placed.delay))
+        }) {
+            if driving_only && list.is_empty() {
+                continue;
+            }
+            update.data.push((key, self.gc.data(list)));
+        }
     }
 
     /// Keeps `document` as the latest without compiling it, for an engine
@@ -565,6 +630,29 @@ impl Compiler {
             end: build.inputs.len() as u32,
         };
         let config = self.config.node_config();
+        // The track's own input from the audio interface, Ext. In
+        // (WP-2.13): its own route, whose Monitor gate opens and closes it
+        // like any other input.
+        let device_input = match track.routing().input {
+            bl_model::Input::External { channel } if track.kind() == TrackKind::Audio => {
+                let key = NodeKey::DeviceInput(track.id());
+                let closed = !track.routing().monitoring(track.mixer().arm);
+                if self.previous(key, &Identity::Route).is_some() {
+                    for (param, value) in [
+                        (route::LEVEL, 1.0),
+                        (route::SOLO_MUTE, switch(false)),
+                        (route::CLOSED, switch(closed)),
+                    ] {
+                        build.restate.push(ParamEvent::now(key, param, value));
+                    }
+                }
+                let route = self.place(build, key, Identity::Route, 0, || {
+                    Instance::Route(Box::new(Route::new(1.0, false, &config).closed(closed)))
+                });
+                Some(DeviceInput { route, channel })
+            }
+            _ => None,
+        };
         // An audio or MIDI track's clip player runs first.
         let player = match track.kind() {
             TrackKind::Audio => Some({
@@ -649,6 +737,7 @@ impl Compiler {
         build.tasks.push(Task {
             track: track.id(),
             inputs,
+            device_input,
             player,
             nodes,
             sidechains,
@@ -766,6 +855,7 @@ fn claim(
             slot,
             identity,
             latency,
+            delay: 0,
         },
     );
     slot
@@ -1170,6 +1260,18 @@ fn route_events(changes: &ChangeSet, old: &Document, new: &Document, params: &mu
                 switch(clips_audible(track)),
             ));
         }
+        // Ext. In hears the interface while the track monitors it; Monitor
+        // or Arm alone doesn't recompile (WP-2.13).
+        if matches!(track.routing().input, bl_model::Input::External { .. }) {
+            let closed = |t: &Track| !t.routing().monitoring(t.mixer().arm);
+            if closed(then) != closed(track) {
+                params.push(ParamEvent::now(
+                    NodeKey::DeviceInput(track.id()),
+                    route::CLOSED,
+                    switch(closed(track)),
+                ));
+            }
+        }
     }
 }
 
@@ -1500,13 +1602,14 @@ mod tests {
         assert!(program.slots[slot as usize].bypass);
         let before = program.node_count();
 
-        // A new audio track brings a clip player, a mixer, an output, and a
-        // send to the return; the rest migrate. With no clips, the player
+        // A new audio track brings a clip player, a mixer, an output, a
+        // send to the return, and the interface input its Audio From (Ext.
+        // In) opens (WP-2.13); the rest migrate. With no clips, the player
         // needs no data.
         let new = track(&mut f.editor, TrackKind::Audio, None);
         let update = f.sync();
         let program = update.program.as_ref().unwrap().get();
-        assert_eq!(program.node_count(), before + 4);
+        assert_eq!(program.node_count(), before + 5);
         assert_eq!(program.migration_count(), before);
         assert!(update.data.is_empty());
         for key in [
@@ -1517,6 +1620,7 @@ mod tests {
                 track: new,
                 to: f.ret,
             },
+            NodeKey::DeviceInput(new),
         ] {
             assert!(program.slot_of(key).is_some(), "{key}");
         }

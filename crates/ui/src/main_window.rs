@@ -7,7 +7,10 @@
 
 use std::time::Duration;
 
-use bl_shell::{Area, Effect, GesturePhase, Invocation, MainView, Shell, commands as ids};
+use bl_model::{CountIn, MetronomeRhythm, MetronomeSound};
+use bl_shell::{
+    Area, Effect, GesturePhase, Invocation, MainView, Shell, commands as ids, transport_commands,
+};
 use egui::accesskit::Role;
 use egui::{
     Align2, CentralPanel, Context, Frame, Id, Rect, Sense, Stroke, StrokeKind, Ui, UiBuilder,
@@ -112,6 +115,8 @@ pub struct MainWindowUi {
     mixer: MixerUi,
     /// The Device View (WP-2.4).
     devices: crate::device_view::DeviceViewUi,
+    /// The Clip View's note editor (WP-2.3): its scroll and drags.
+    clip_view: crate::clip_view::ClipViewUi,
     /// The keymap, read the first time something shows a key from it (the
     /// Info View, the Mixer Config Menu's items).
     keymap: Option<crate::keymap::Keymap>,
@@ -194,6 +199,7 @@ impl MainWindowUi {
             transport: TransportFields::new(),
             mixer: MixerUi::new(),
             devices: crate::device_view::DeviceViewUi::new(),
+            clip_view: crate::clip_view::ClipViewUi::default(),
             keymap: None,
             info: InfoViewContent::default(),
             mixer_typing: false,
@@ -234,6 +240,12 @@ impl MainWindowUi {
     #[must_use]
     pub fn info_view_content(&self) -> &InfoViewContent {
         &self.info
+    }
+
+    /// The Clip View's note editor, to read what it drew.
+    #[must_use]
+    pub fn clip_view(&self) -> &crate::clip_view::ClipViewUi {
+        &self.clip_view
     }
 
     /// The browser, to read what it drew.
@@ -367,8 +379,15 @@ impl MainWindowUi {
             // under the pointer are known by the time it reads them.
             self.status_bar(ui, shell, theme, &layout, &mut events);
             self.info_view(ui, theme, shell, layout.info_view);
-            self.devices
-                .show(ui, shell, theme, layout.device_view, &mut events);
+            if shell.clip_view().visible() {
+                // Spec: piano-roll. The Clip View takes the detail area in
+                // place of the Device View.
+                self.clip_view
+                    .show(ui, shell, theme, layout.device_view, &mut events);
+            } else {
+                self.devices
+                    .show(ui, shell, theme, layout.device_view, &mut events);
+            }
             self.device_titles = shell
                 .device_view_state()
                 .devices
@@ -639,9 +658,127 @@ impl MainWindowUi {
             {
                 events.push(UiEvent::Invoke(invocation));
             }
+            if *el == Element::Metronome {
+                response.context_menu(|ui| {
+                    Self::metronome_menu_content(ui, shell, events);
+                });
+            }
+            if *el == Element::MetronomeMenu {
+                Self::metronome_menu(&response, shell, events);
+            }
             if *el == Element::MixerMenu {
                 self.mixer_menu(&response, shell, events);
             }
+        }
+    }
+
+    /// The Metronome Settings menu (L-CTRL-009).
+    fn metronome_menu(response: &egui::Response, shell: &Shell, events: &mut Vec<UiEvent>) {
+        egui::Popup::menu(response).show(|ui| {
+            Self::metronome_menu_content(ui, shell, events);
+        });
+    }
+
+    fn metronome_menu_content(ui: &mut Ui, shell: &Shell, events: &mut Vec<UiEvent>) {
+        let document = shell.editor().document();
+        let settings = document.settings().metronome;
+        // A rhythm that doesn't fit one bar of the current time signature
+        // shows disabled, as Live's menu does (manual 19.4.1).
+        let signature = document
+            .settings()
+            .time_signatures
+            .signature_at(shell.arrangement().transport().position);
+
+        // Count-In
+        ui.label(egui::RichText::new("Count-In").strong());
+        for (label, val) in [
+            ("None", CountIn::None),
+            ("1 Bar", CountIn::Bars1),
+            ("2 Bars", CountIn::Bars2),
+            ("4 Bars", CountIn::Bars4),
+        ] {
+            let checked = settings.count_in == val;
+            let mut text = label.to_string();
+            if checked {
+                text = format!("✔ {text}");
+            }
+            if ui.button(text).clicked() {
+                events.push(UiEvent::Invoke(Invocation::new(
+                    transport_commands::SET_METRONOME_COUNT_IN,
+                    json!({ "count_in": val }),
+                )));
+                ui.close();
+            }
+        }
+
+        ui.separator();
+
+        // Sound
+        ui.label(egui::RichText::new("Sound").strong());
+        for (label, val) in [
+            ("Classic", MetronomeSound::Classic),
+            ("Click", MetronomeSound::Click),
+            ("Wood", MetronomeSound::Wood),
+        ] {
+            let checked = settings.sound == val;
+            let mut text = label.to_string();
+            if checked {
+                text = format!("✔ {text}");
+            }
+            if ui.button(text).clicked() {
+                events.push(UiEvent::Invoke(Invocation::new(
+                    transport_commands::SET_METRONOME_SOUND,
+                    json!({ "sound": val }),
+                )));
+                ui.close();
+            }
+        }
+
+        ui.separator();
+
+        // Rhythm
+        ui.label(egui::RichText::new("Rhythm").strong());
+        for (label, val) in [
+            ("Auto", MetronomeRhythm::Auto),
+            ("1 Bar", MetronomeRhythm::Bar1),
+            ("1/2", MetronomeRhythm::Half),
+            ("1/2T", MetronomeRhythm::HalfTriplet),
+            ("1/4", MetronomeRhythm::Quarter),
+            ("1/4T", MetronomeRhythm::QuarterTriplet),
+            ("1/8", MetronomeRhythm::Eighth),
+            ("1/8T", MetronomeRhythm::EighthTriplet),
+            ("1/16", MetronomeRhythm::Sixteenth),
+            ("1/16T", MetronomeRhythm::SixteenthTriplet),
+        ] {
+            let checked = settings.rhythm == val;
+            let mut text = label.to_string();
+            if checked {
+                text = format!("✔ {text}");
+            }
+            let fits = val.fits_in_bar(signature);
+            if ui.add_enabled(fits, egui::Button::new(text)).clicked() {
+                events.push(UiEvent::Invoke(Invocation::new(
+                    transport_commands::SET_METRONOME_RHYTHM,
+                    json!({ "rhythm": val }),
+                )));
+                ui.close();
+            }
+        }
+
+        ui.separator();
+
+        // Enable Only While Recording
+        let checked = settings.only_while_recording;
+        let mut text = "Enable Only While Recording".to_string();
+        if checked {
+            text = format!("✔ {text}");
+        }
+        if ui.button(text).clicked() {
+            events.push(UiEvent::Invoke(Invocation::new(
+                transport_commands::SET_METRONOME_ONLY_WHILE_RECORDING,
+                json!({ "only_while_recording": !checked }),
+            )));
+            ui.close();
         }
     }
 
@@ -1006,6 +1143,30 @@ fn look(element: Element, shell: &Shell) -> Look {
             ),
             ..Look::default()
         },
+        Element::ClipViewToggle => Look {
+            on: shell.clip_view().visible(),
+            value: Some(
+                if shell.clip_view().visible() {
+                    "shown"
+                } else {
+                    "hidden"
+                }
+                .to_owned(),
+            ),
+            ..Look::default()
+        },
+        Element::DrawMode => Look {
+            on: shell.clip_view().draw_mode(),
+            value: Some(
+                if shell.clip_view().draw_mode() {
+                    "on"
+                } else {
+                    "off"
+                }
+                .to_owned(),
+            ),
+            ..Look::default()
+        },
         Element::TapTempo => text("TAP"),
         // The transport section's values come from `control_bar`.
         Element::Quantization => text("1 Bar"),
@@ -1103,6 +1264,8 @@ fn command_of(element: Element) -> Option<&'static str> {
     match element {
         Element::BrowserToggle => Some(ids::VIEW_TOGGLE_BROWSER),
         Element::InfoToggle => Some(ids::VIEW_TOGGLE_INFO_VIEW),
+        Element::ClipViewToggle => Some(ids::VIEW_TOGGLE_CLIP_VIEW),
+        Element::DrawMode => Some(ids::VIEW_DRAW_MODE),
         Element::SessionView | Element::ArrangementView => {
             Some(ids::VIEW_TOGGLE_SESSION_ARRANGEMENT)
         }
@@ -1116,6 +1279,8 @@ fn click(element: Element, shell: &Shell) -> Option<Invocation> {
     match element {
         Element::BrowserToggle => Some(Invocation::new(ids::VIEW_TOGGLE_BROWSER, json!({}))),
         Element::InfoToggle => Some(Invocation::new(ids::VIEW_TOGGLE_INFO_VIEW, json!({}))),
+        Element::ClipViewToggle => Some(Invocation::new(ids::VIEW_TOGGLE_CLIP_VIEW, json!({}))),
+        Element::DrawMode => Some(Invocation::new(ids::VIEW_DRAW_MODE, json!({}))),
         Element::Follow => Some(Invocation::new(
             bl_shell::arrangement_commands::FOLLOW,
             json!({}),

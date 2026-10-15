@@ -15,6 +15,7 @@ use crate::device::{Device, DeviceRole};
 use crate::document::Document;
 use crate::error::ModelError;
 use crate::ids::{ClipId, ContentHash, DeviceId, ParamId, TrackId};
+use crate::metronome::{CountIn, MetronomeRhythm, MetronomeSound};
 use crate::shared::Shared;
 use crate::track::{Channel, Input, Mixer, Monitor, Output, SendTap, Track, TrackKind};
 
@@ -108,6 +109,32 @@ pub enum Command {
     SetLoopEnabled {
         /// Whether playback loops between the brace's start and end.
         enabled: bool,
+    },
+    /// Switches the metronome on or off.
+    SetMetronomeEnabled {
+        /// Whether the metronome clicks during playback.
+        enabled: bool,
+    },
+    /// Sets the metronome count-in length before playback or recording starts.
+    SetMetronomeCountIn {
+        /// The count-in duration in bars: none, 1 bar, 2 bars, or 4 bars.
+        count_in: CountIn,
+    },
+    /// Chooses the metronome sound character: Classic, Click, or Wood.
+    SetMetronomeSound {
+        /// The synthesised sound character.
+        sound: MetronomeSound,
+    },
+    /// Sets the rhythmic division the metronome clicks at: Auto, 1 Bar,
+    /// 1/2, 1/2T, 1/4, 1/4T, 1/8, 1/8T, 1/16, or 1/16T.
+    SetMetronomeRhythm {
+        /// The rhythm division.
+        rhythm: MetronomeRhythm,
+    },
+    /// Sets whether the metronome only clicks while recording.
+    SetMetronomeOnlyWhileRecording {
+        /// When on, clicks only sound while recording.
+        only_while_recording: bool,
     },
 
     /// Creates an empty track with default mixer settings.
@@ -568,6 +595,11 @@ impl Command {
             Self::DeleteTimeSignatureChange { .. } => "Delete time signature change",
             Self::SetLoop { .. } => "Change loop",
             Self::SetLoopEnabled { .. } => "Switch loop",
+            Self::SetMetronomeEnabled { .. } => "Metronome",
+            Self::SetMetronomeCountIn { .. } => "Metronome Count-In",
+            Self::SetMetronomeSound { .. } => "Metronome Sound",
+            Self::SetMetronomeRhythm { .. } => "Metronome Rhythm",
+            Self::SetMetronomeOnlyWhileRecording { .. } => "Hear Metronome Only While Recording",
             Self::CreateTrack { .. } => "Create track",
             Self::DeleteTrack { .. } => "Delete track",
             Self::MoveTrack { .. } => "Move track",
@@ -695,6 +727,28 @@ impl Document {
             }
             Command::SetLoopEnabled { enabled } => {
                 self.settings.arrangement_loop.enabled = *enabled;
+                Ok(())
+            }
+            Command::SetMetronomeEnabled { enabled } => {
+                self.settings.metronome.enabled = *enabled;
+                Ok(())
+            }
+            Command::SetMetronomeCountIn { count_in } => {
+                self.settings.metronome.count_in = *count_in;
+                Ok(())
+            }
+            Command::SetMetronomeSound { sound } => {
+                self.settings.metronome.sound = *sound;
+                Ok(())
+            }
+            Command::SetMetronomeRhythm { rhythm } => {
+                self.settings.metronome.rhythm = *rhythm;
+                Ok(())
+            }
+            Command::SetMetronomeOnlyWhileRecording {
+                only_while_recording,
+            } => {
+                self.settings.metronome.only_while_recording = *only_while_recording;
                 Ok(())
             }
             Command::CreateTrack {

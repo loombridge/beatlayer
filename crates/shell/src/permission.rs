@@ -5,9 +5,10 @@
 //! is always destructive and `track.rename` always an edit. But in the
 //! Arrangement a clip placed over part of another replaces the part it
 //! covers, as in Live (the arrangement editing spec, R6), so moving,
-//! resizing, nudging, duplicating, or pasting clips, and dropping files from
-//! the browser, can delete or shorten clips the call doesn't name. Such a
-//! call is destructive as well as its registered class; the same call into
+//! resizing, nudging, duplicating, or pasting clips, dropping files from the
+//! browser, or importing a MIDI file, can delete or shorten clips the call
+//! doesn't name. Such a call is destructive as well as its registered class;
+//! the same call into
 //! empty space isn't. Likewise `clip.set_data` that would leave a MIDI
 //! clip fewer notes than it has deletes notes (WP-1.15c). [`assess`] decides
 //! which, and the agent API asks the person first when the answer is
@@ -21,6 +22,7 @@ use bl_core::time::Ticks;
 use bl_model::{ClipData, ClipId, Document, Editor, TrackId, TrackKind};
 use bl_shell_spec::browser::{self as browser_ids, AddToArrangementArgs};
 use bl_shell_spec::editing as edit_ids;
+use bl_shell_spec::midi_files::{self as midi_ids, MidiImportArgs};
 use serde_json::Value;
 
 use crate::arrangement::ArrangementView;
@@ -42,6 +44,7 @@ pub const RAISED_BY_ARGUMENTS: &[&str] = &[
     edit_ids::PASTE,
     browser_ids::ADD_TO_ARRANGEMENT,
     browser_ids::LOAD_SELECTED,
+    midi_ids::IMPORT,
     SET_CLIP_DATA,
 ];
 
@@ -137,9 +140,9 @@ pub(crate) struct Scene<'a> {
 
 /// Decides what calling `id` with `args` needs, against the document as it
 /// is. An Arrangement edit, or `clip.set_data`, is tried in a transaction
-/// that's then cancelled, so nothing changes; a drop from the browser is
-/// judged without reading its files. A call that would fail needs only its
-/// registered class: it changes nothing.
+/// that's then cancelled, so nothing changes; a drop from the browser or a
+/// MIDI file import is judged without reading its files. A call that would
+/// fail needs only its registered class: it changes nothing.
 pub(crate) fn assess(
     id: &str,
     args: &Value,
@@ -166,6 +169,13 @@ pub(crate) fn assess(
                     .is_some_and(|t| t.kind() == TrackKind::Audio)
             });
             dropped(doc, track, scene.insert_marker, registered)
+        }
+        midi_ids::IMPORT => {
+            let Ok(import) = serde_json::from_value::<MidiImportArgs>(args.clone()) else {
+                return CallPermission::registered(registered);
+            };
+            let at = import.at.unwrap_or(scene.insert_marker);
+            dropped(scene.editor.document(), import.track, at, registered)
         }
         SET_CLIP_DATA => notes_set(args, registered, scene.editor),
         _ => tried(id, args, registered, scene),
@@ -342,6 +352,7 @@ mod tests {
             edit_ids::DELETE,
             edit_ids::COPY,
             "clip.create",
+            midi_ids::EXPORT,
             "song.set_tempo",
             "song.set_time_signatures",
         ] {

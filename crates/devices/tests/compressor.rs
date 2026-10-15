@@ -12,11 +12,11 @@ use bl_devices::compressor::{
     ATTACK, AUTO_RELEASE, COMPRESSOR, DRY_WET, ENVELOPE, KNEE, LOOKAHEAD, MAKEUP, MODE, OUT, RATIO,
     RELEASE, SC_FILTER, SC_FREQ, SC_RES, SC_TYPE, THRESHOLD, compressor_type,
 };
-use bl_engine::{Block, DeviceType, Node, Registry, TransportInfo};
+use bl_engine::{Block, DeviceType, Node, NodeEvent, Registry, TransportInfo};
 use bl_model::ParamId;
 use bl_model::param::db_to_gain;
 
-use common::{RATE, device, node};
+use common::{RATE, device, node, set};
 
 /// A registry with the compressor alone.
 fn registry() -> Registry {
@@ -49,6 +49,32 @@ fn run(node: &mut dyn Node, input: &[f32], key: Option<&[f32]>) -> Vec<Vec<f32>>
     if let Some(keyed) = &keyed {
         block = block.with_sidechain(keyed);
     }
+    bl_rt::rt_test!({ node.process(&mut block) });
+    data.chunks(frames).map(<[f32]>::to_vec).collect()
+}
+
+/// Runs one block of `input` with `key` as the device's sidechain and
+/// `events`, whose offsets split the block into stretches, under the
+/// allocation trap.
+fn run_with_events(
+    node: &mut dyn Node,
+    input: &[f32],
+    key: &[f32],
+    events: &[NodeEvent],
+) -> Vec<Vec<f32>> {
+    let frames = input.len();
+    let mut data: Vec<f32> = (0..2).flat_map(|_| input.iter().copied()).collect();
+    let keyed: Vec<f32> = (0..2).flat_map(|_| key.iter().copied()).collect();
+    let mut block = Block::new(
+        &mut data,
+        2,
+        frames,
+        frames,
+        events,
+        TransportInfo::default(),
+        RATE,
+    )
+    .with_sidechain(&keyed);
     bl_rt::rt_test!({ node.process(&mut block) });
     data.chunks(frames).map(<[f32]>::to_vec).collect()
 }
@@ -413,4 +439,42 @@ fn the_sc_filter_hears_only_its_band() {
     );
     let open = keyed_level(&params(1.0), &input, &key);
     assert!((open - f64::from(quiet)).abs() < 0.001, "{open}");
+}
+
+// Spec: compressor R12
+#[test]
+fn the_detector_hears_the_keys_own_stretch() {
+    // A key that is loud over the block's first half and silent over the
+    // second, with a parameter change at the half, splits the block into
+    // two stretches. The second stretch's detector must hear the key's
+    // second half, so the gain recovers; hearing the block's first frames
+    // again would leave it ducked.
+    const HALF: usize = 512;
+    let quiet = db_to_gain(-30.0) as f32;
+    let input = vec![quiet; 2 * HALF];
+    let mut key = vec![0.0f32; 2 * HALF];
+    key[..HALF].fill(1.0);
+    let params = [
+        (THRESHOLD, -20.0),
+        (RATIO, 4.0),
+        (KNEE, 0.0),
+        (ATTACK, 0.01),
+        (RELEASE, 1.0),
+    ];
+    let mut node = squeeze(&params, 2 * HALF);
+    // A change of one of its own parameters at the half splits the block
+    // into two stretches; the knee's value doesn't move.
+    let events = [set(HALF as u32, KNEE, 0.0)];
+    let out = run_with_events(node.as_mut(), &input, &key, &events);
+    let gain = |i: usize| f64::from(out[0][i]) / f64::from(quiet);
+    assert!(
+        gain(HALF - 1) < 0.5,
+        "the first half ducks: {}",
+        gain(HALF - 1)
+    );
+    assert!(
+        gain(2 * HALF - 1) > 0.9,
+        "the second half recovers: {}",
+        gain(2 * HALF - 1)
+    );
 }

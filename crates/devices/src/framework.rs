@@ -120,18 +120,19 @@ impl<'a> Audio<'_, 'a> {
         &mut self.block.channel_mut(channel)[range]
     }
 
-    /// What the device's detector hears on `channel`, if the device has a
-    /// sidechain input and its sidechain is on (WP-2.19b): the source
-    /// track's signal through the sidechain's gain and mix, with the
-    /// device's own input, or `None` while it's off: then the detector
-    /// hears the block's own audio ([`Self::channel_mut`]).
+    /// What the device's detector hears over the stretch on `channel`, if
+    /// the device has a sidechain input and its sidechain is on (WP-2.19b):
+    /// the source track's signal through the sidechain's gain and mix, with
+    /// the device's own input, or `None` while it's off: then the detector
+    /// hears the stretch's own audio ([`Self::channel_mut`]).
     ///
     /// # Panics
     ///
     /// If `channel` isn't less than [`channels`](Self::channels).
     #[must_use]
     pub fn sidechain(&self, channel: usize) -> Option<&[f32]> {
-        self.block.sidechain(channel)
+        let range = self.range.clone();
+        self.block.sidechain(channel).map(|data| &data[range])
     }
 }
 

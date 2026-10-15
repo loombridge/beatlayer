@@ -86,6 +86,102 @@ fn a_ramp_reaches_its_target_on_the_exact_sample() {
     assert_eq!(small, out[..2_000], "one-frame blocks give the same values");
 }
 
+// Spec: automation R12
+#[test]
+fn a_curved_segment_follows_its_shape() {
+    let mut rig = Rig::new(64);
+    let a = track(&mut rig.editor, TrackKind::Midi, None);
+    dc(&mut rig.editor, a, 1.0);
+    // The fader rests silent, so only the envelope brings the signal up: a
+    // segment from 0 at 1.1.1 to 1 at beat 2, curved by a bend of -1.
+    rig.apply(Command::SetVolume {
+        track: a,
+        volume: 0.0,
+    });
+    rig.apply(Command::SetAutomationBreakpoint {
+        track: a,
+        target: volume(),
+        at: Ticks::ZERO,
+        value: 0.0,
+    });
+    rig.apply(Command::SetAutomationBreakpoint {
+        track: a,
+        target: volume(),
+        at: Ticks::QUARTER,
+        value: 1.0,
+    });
+    let synced = rig.apply(Command::SetAutomationCurve {
+        track: a,
+        target: volume(),
+        at: Ticks::ZERO,
+        bend: -1.0,
+    });
+    assert!(!synced.program, "a curve needs no new program");
+    rig.sender.transport(TransportCommand::Play);
+    let total = QUARTER + 256;
+    let out = rig.render(total, 64);
+    assert_eq!(out.len(), total);
+    // Every frame is the bend's own power curve, to the bit: at a bend of
+    // -1 it's √t, which leads the straight line, and it reaches the target
+    // on the frame its breakpoint falls on.
+    for (frame, &sample) in out.iter().enumerate() {
+        let along = (frame as f64 / QUARTER as f64).min(1.0);
+        let want = along.powf(2f64.powf(-1.0)) as f32;
+        assert_eq!(sample, want, "frame {frame} follows the bend");
+    }
+    assert!(out[QUARTER / 2] > 0.5, "the curve bows away from the line");
+    assert_eq!(out[QUARTER], 1.0, "the target on its exact sample");
+
+    // The value depends on the frame alone, whatever the blocks: a run in
+    // one-frame blocks gives the same samples. A bend of 0 straightens the
+    // segment again, as the double-click does, and the value is the line
+    // again.
+    let mut fine = Rig::new(1);
+    let b = track(&mut fine.editor, TrackKind::Midi, None);
+    dc(&mut fine.editor, b, 1.0);
+    fine.apply(Command::SetVolume {
+        track: b,
+        volume: 0.0,
+    });
+    fine.apply(Command::SetAutomationBreakpoint {
+        track: b,
+        target: volume(),
+        at: Ticks::ZERO,
+        value: 0.0,
+    });
+    fine.apply(Command::SetAutomationBreakpoint {
+        track: b,
+        target: volume(),
+        at: Ticks::QUARTER,
+        value: 1.0,
+    });
+    fine.apply(Command::SetAutomationCurve {
+        track: b,
+        target: volume(),
+        at: Ticks::ZERO,
+        bend: -1.0,
+    });
+    fine.sender.transport(TransportCommand::Play);
+    let small = fine.render(2_000, 1);
+    assert_eq!(small, out[..2_000], "one-frame blocks give the same values");
+    fine.apply(Command::SetAutomationCurve {
+        track: b,
+        target: volume(),
+        at: Ticks::ZERO,
+        bend: 0.0,
+    });
+    let straight = fine.render(2_000, 1);
+    for (frame, &sample) in straight.iter().enumerate() {
+        let along = (2_000 + frame) as f64 / QUARTER as f64;
+        assert_eq!(
+            sample,
+            along as f32,
+            "frame {} is the line again",
+            2_000 + frame
+        );
+    }
+}
+
 // Spec: automation R4, R5
 #[test]
 fn a_hand_move_takes_the_parameter_back_and_re_enable_returns_it() {

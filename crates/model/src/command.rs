@@ -11,7 +11,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::automation::{
-    AutomationTarget, MixerParam, PointError, drop_device, entry, override_target,
+    AutomationTarget, MixerParam, PointError, check_bend, drop_device, entry, override_target,
 };
 use crate::clip::{AudioData, Clip, ClipData, MidiData};
 use crate::device::{Device, DeviceRole};
@@ -241,6 +241,23 @@ pub enum Command {
         /// The value there, in the parameter's own units.
         value: f64,
     },
+    /// Curves the segment starting at one of a track's automation
+    /// breakpoints, as holding Alt (Windows) or Option (macOS) while
+    /// dragging a line segment on an automation lane does: the value between
+    /// that breakpoint and the next follows a power curve shaped by `bend`.
+    /// A bend of 0 makes the segment a straight line again, as the same drag
+    /// with a double-click does.
+    SetAutomationCurve {
+        /// The track the parameter belongs to.
+        track: TrackId,
+        /// The parameter.
+        target: AutomationTarget,
+        /// Where the segment starts: the breakpoint there.
+        at: Ticks,
+        /// The bend, from −1 to 1: 0 is the straight line, and the sign
+        /// chooses which side the segment bows to.
+        bend: f64,
+    },
     /// Moves one of a track's automation breakpoints, keeping its value.
     MoveAutomationBreakpoint {
         /// The track the parameter belongs to.
@@ -253,9 +270,9 @@ pub enum Command {
         /// breakpoint of the same envelope already is.
         to: Ticks,
     },
-    /// Deletes one of a track's automation breakpoints, joining its
-    /// neighbours with a straight segment. Deleting the last one takes the
-    /// parameter's envelope with it.
+    /// Deletes one of a track's automation breakpoints, so the segments
+    /// either side of it become the one starting at the breakpoint before
+    /// it. Deleting the last one takes the parameter's envelope with it.
     DeleteAutomationBreakpoint {
         /// The track the parameter belongs to.
         track: TrackId,
@@ -621,6 +638,7 @@ impl Command {
             Self::SetSend { .. } => "Change send",
             Self::SetSendTap { .. } => "Switch Pre/Post",
             Self::SetAutomationBreakpoint { .. } => "Add Automation Breakpoint",
+            Self::SetAutomationCurve { .. } => "Curve Automation Segment",
             Self::MoveAutomationBreakpoint { .. } => "Move Automation Breakpoint",
             Self::DeleteAutomationBreakpoint { .. } => "Delete Automation Breakpoint",
             Self::DeleteAutomation { .. } => "Delete Automation",
@@ -858,6 +876,12 @@ impl Document {
                 at,
                 value,
             } => self.set_automation_breakpoint(*track, *target, *at, *value),
+            Command::SetAutomationCurve {
+                track,
+                target,
+                at,
+                bend,
+            } => self.set_automation_curve(*track, *target, *at, *bend),
             Command::MoveAutomationBreakpoint {
                 track,
                 target,
@@ -1561,6 +1585,31 @@ impl Document {
         Ok(())
     }
 
+    /// Sets the bend of the segment starting at `at` on `target`'s envelope:
+    /// 0 makes the segment a straight line again.
+    fn set_automation_curve(
+        &mut self,
+        track: TrackId,
+        target: AutomationTarget,
+        at: Ticks,
+        bend: f64,
+    ) -> Result<(), ModelError> {
+        check_bend(bend)?;
+        self.check_automation_target(track, target)?;
+        let automation =
+            self.track_mut(track)?
+                .automation
+                .get_mut(&target)
+                .ok_or(ModelError::NoChange {
+                    what: "breakpoint",
+                    at,
+                })?;
+        automation
+            .envelope
+            .set_bend(at, bend)
+            .map_err(automation_point_error)
+    }
+
     /// Moves the breakpoint at `at` on `target`'s envelope to `to`, keeping
     /// its value.
     fn move_automation_breakpoint(
@@ -1838,6 +1887,10 @@ fn automation_point_error(error: PointError) -> ModelError {
         },
         PointError::Taken(at) => ModelError::ChangeInUse {
             what: "breakpoint",
+            at,
+        },
+        PointError::NoSegment(at) => ModelError::NoChange {
+            what: "segment",
             at,
         },
     }
@@ -2127,6 +2180,7 @@ mod tests {
     use bl_core::time::{Bpm, TempoMap, TimeSignature};
 
     use super::*;
+    use crate::automation::Breakpoint;
     use crate::clip::{EDGE_FADE_SECONDS as EDGE_FADE, MidiData, Note};
     use crate::device::{DeviceKind, DeviceRole, PluginFormat};
     use crate::ids::ContentHash;
@@ -3657,7 +3711,18 @@ mod tests {
         assert!(automation.enabled);
         assert_eq!(
             automation.envelope.points().collect::<Vec<_>>(),
-            vec![(Ticks::ZERO, 1.0), (Ticks::WHOLE, 0.5)]
+            vec![
+                Breakpoint {
+                    at: Ticks::ZERO,
+                    value: 1.0,
+                    bend: 0.0
+                },
+                Breakpoint {
+                    at: Ticks::WHOLE,
+                    value: 0.5,
+                    bend: 0.0
+                }
+            ]
         );
         // Between two breakpoints the line, and before the first and after
         // the last the nearest one's value.
@@ -3718,7 +3783,18 @@ mod tests {
                 .envelope
                 .points()
                 .collect::<Vec<_>>(),
-            vec![(Ticks::ZERO, 1.0), (Ticks::WHOLE * 2, 0.25)]
+            vec![
+                Breakpoint {
+                    at: Ticks::ZERO,
+                    value: 1.0,
+                    bend: 0.0
+                },
+                Breakpoint {
+                    at: Ticks::WHOLE * 2,
+                    value: 0.25,
+                    bend: 0.0
+                }
+            ]
         );
         assert_eq!(
             song.reject(Command::MoveAutomationBreakpoint {
@@ -3925,6 +4001,127 @@ mod tests {
                 .unwrap()
                 .automation_for(&param)
                 .is_none()
+        );
+        song.doc.check_invariants().unwrap();
+    }
+
+    /// Spec: automation R12. A segment's bend lives on the breakpoint at
+    /// its start; 0 straightens the segment again, and a bend outside −1 to
+    /// 1, a position with no breakpoint, and the last breakpoint are
+    /// refused.
+    #[test]
+    fn curving_a_segment_stores_its_bend_and_straightens_again() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        let volume = AutomationTarget::Mixer {
+            param: MixerParam::Volume,
+        };
+        for (at, value) in [(Ticks::ZERO, 0.0), (Ticks::WHOLE, 1.0)] {
+            song.apply(Command::SetAutomationBreakpoint {
+                track,
+                target: volume,
+                at,
+                value,
+            })
+            .unwrap();
+        }
+        song.apply(Command::SetAutomationCurve {
+            track,
+            target: volume,
+            at: Ticks::ZERO,
+            bend: -1.0,
+        })
+        .unwrap();
+        let automation = song
+            .doc
+            .track(track)
+            .unwrap()
+            .automation_for(&volume)
+            .unwrap();
+        assert_eq!(
+            automation.envelope.points().collect::<Vec<_>>(),
+            vec![
+                Breakpoint {
+                    at: Ticks::ZERO,
+                    value: 0.0,
+                    bend: -1.0
+                },
+                Breakpoint {
+                    at: Ticks::WHOLE,
+                    value: 1.0,
+                    bend: 0.0
+                }
+            ]
+        );
+        let half = automation.envelope.value_at(Ticks::WHOLE / 2).unwrap();
+        assert!((half - 0.5f64.sqrt()).abs() < 1e-12, "{half}");
+
+        // A bend of 0 straightens the segment again, as the same drag with
+        // a double-click does, and the breakpoints stay where they are.
+        song.apply(Command::SetAutomationCurve {
+            track,
+            target: volume,
+            at: Ticks::ZERO,
+            bend: 0.0,
+        })
+        .unwrap();
+        let automation = song
+            .doc
+            .track(track)
+            .unwrap()
+            .automation_for(&volume)
+            .unwrap();
+        assert_eq!(automation.envelope.point(Ticks::ZERO).unwrap().bend, 0.0);
+        assert_eq!(automation.envelope.value_at(Ticks::WHOLE / 2), Some(0.5));
+
+        // Refusals: a bend outside −1 to 1, a position with no breakpoint,
+        // and the last breakpoint, with no segment after it.
+        assert_eq!(
+            song.reject(Command::SetAutomationCurve {
+                track,
+                target: volume,
+                at: Ticks::ZERO,
+                bend: 1.5,
+            }),
+            ModelError::InvalidValue {
+                what: "automation bend",
+                value: 1.5,
+            }
+        );
+        assert_eq!(
+            song.reject(Command::SetAutomationCurve {
+                track,
+                target: volume,
+                at: Ticks::QUARTER,
+                bend: 0.5,
+            }),
+            ModelError::NoChange {
+                what: "breakpoint",
+                at: Ticks::QUARTER,
+            }
+        );
+        assert_eq!(
+            song.reject(Command::SetAutomationCurve {
+                track,
+                target: volume,
+                at: Ticks::WHOLE,
+                bend: 0.5,
+            }),
+            ModelError::NoChange {
+                what: "segment",
+                at: Ticks::WHOLE,
+            }
+        );
+        assert!(
+            song.doc
+                .track(track)
+                .unwrap()
+                .automation_for(&volume)
+                .unwrap()
+                .envelope
+                .points()
+                .all(|point| point.bend == 0.0),
+            "the refusals changed nothing"
         );
         song.doc.check_invariants().unwrap();
     }

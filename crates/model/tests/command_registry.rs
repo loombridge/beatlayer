@@ -49,12 +49,12 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        64,
+        65,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
          set_device_floating, WP-2.20 six for tempo breakpoints and time-signature markers, \
-         WP-2.1 two for MIDI clips, and WP-2.12 six for automation"
+         WP-2.1 two for MIDI clips, and WP-2.12 seven for automation"
     );
 
     for op in &ops {
@@ -533,6 +533,10 @@ fn every_command_runs_by_id() {
         json!({ "track": drums, "target": volume, "at": bar, "value": 0.25 }),
     );
     agent.run(
+        "automation.set_curve",
+        json!({ "track": drums, "target": volume, "at": 0, "bend": -0.5 }),
+    );
+    agent.run(
         "automation.set_breakpoint",
         json!({ "track": group, "target": send, "at": 0, "value": 0.5 }),
     );
@@ -552,7 +556,18 @@ fn every_command_runs_by_id() {
     assert!(automation.enabled);
     assert_eq!(
         automation.envelope.points().collect::<Vec<_>>(),
-        vec![(Ticks::ZERO, 1.0), (Ticks(bar), 0.25)]
+        vec![
+            bl_model::Breakpoint {
+                at: Ticks::ZERO,
+                value: 1.0,
+                bend: -0.5,
+            },
+            bl_model::Breakpoint {
+                at: Ticks(bar),
+                value: 0.25,
+                bend: 0.0,
+            }
+        ]
     );
     assert!(
         document
@@ -806,6 +821,17 @@ fn schemas_match_what_commands_serialise() {
                 },
                 at: Ticks::QUARTER,
                 value: 1.0,
+            },
+        ),
+        (
+            "automation.set_curve",
+            Command::SetAutomationCurve {
+                track,
+                target: AutomationTarget::Mixer {
+                    param: MixerParam::Pan,
+                },
+                at: Ticks::QUARTER,
+                bend: -0.5,
             },
         ),
         (

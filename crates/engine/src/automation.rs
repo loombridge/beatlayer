@@ -17,7 +17,7 @@
 use std::collections::BTreeMap;
 
 use bl_core::time::{SampleRate, TempoMap};
-use bl_model::{AutomationTarget, MixerParam, ParamId, TrackId};
+use bl_model::{AutomationTarget, MixerParam, ParamId, TrackId, curve_value};
 
 use crate::mixer;
 use crate::node::NodeKey;
@@ -25,8 +25,9 @@ use crate::node::NodeKey;
 /// One parameter's envelope, placed in engine frames. Its values are
 /// read by the node whose parameter it drives.
 pub struct PlacedEnvelope {
-    /// Its points, in frame order, none at one frame.
-    points: Vec<(i64, f64)>,
+    /// Its points, in frame order, none at one frame, each with the bend of
+    /// the segment that starts at it.
+    points: Vec<(i64, f64, f64)>,
 }
 
 impl PlacedEnvelope {
@@ -40,10 +41,14 @@ impl PlacedEnvelope {
     ) -> Self {
         let points = envelope
             .points()
-            .map(|(at, value)| {
+            .map(|point| {
                 (
-                    tempo.ticks_to_frames(at, rate).get().saturating_add(shift),
-                    value,
+                    tempo
+                        .ticks_to_frames(point.at, rate)
+                        .get()
+                        .saturating_add(shift),
+                    point.value,
+                    point.bend,
                 )
             })
             .collect();
@@ -56,10 +61,11 @@ impl PlacedEnvelope {
     }
 
     /// The value it holds at `frame`: exactly the point's own value on the
-    /// frames its points fall on, the straight line between the two around
-    /// it, and the nearest point's value before the first and after the
-    /// last. Reading allocates nothing and is the same whatever the block
-    /// size: the value depends on the frame alone.
+    /// frames its points fall on, the shape of the segment between the two
+    /// around it (a bent one follows its curve), and the nearest point's
+    /// value before the first and after the last. Reading allocates nothing
+    /// and is the same whatever the block size: the value depends on the
+    /// frame alone.
     ///
     /// # Panics
     ///
@@ -73,11 +79,11 @@ impl PlacedEnvelope {
         if frame >= last.0 {
             return last.1;
         }
-        let index = self.points.partition_point(|&(at, _)| at <= frame) - 1;
-        let (start, from) = self.points[index];
-        let (end, to) = self.points[index + 1];
+        let index = self.points.partition_point(|&(at, _, _)| at <= frame) - 1;
+        let (start, from, bend) = self.points[index];
+        let (end, to, _) = self.points[index + 1];
         let along = (frame - start) as f64 / (end - start) as f64;
-        from + (to - from) * along
+        curve_value(from, to, along, bend)
     }
 }
 
@@ -181,7 +187,52 @@ mod tests {
     use super::*;
 
     fn envelope(points: &[(Ticks, f64)]) -> bl_model::Envelope {
-        bl_model::Envelope::from_points(points.to_vec()).unwrap()
+        bl_model::Envelope::from_points(
+            points
+                .iter()
+                .map(|&(at, value)| bl_model::Breakpoint {
+                    at,
+                    value,
+                    bend: 0.0,
+                })
+                .collect(),
+        )
+        .unwrap()
+    }
+
+    fn curved(points: &[(Ticks, f64, f64)]) -> bl_model::Envelope {
+        bl_model::Envelope::from_points(
+            points
+                .iter()
+                .map(|&(at, value, bend)| bl_model::Breakpoint { at, value, bend })
+                .collect(),
+        )
+        .unwrap()
+    }
+
+    // Spec: automation R12
+    #[test]
+    fn a_curved_segment_follows_its_bend() {
+        let bent = curved(&[(Ticks::ZERO, 0.0, -1.0), (Ticks::QUARTER, 1.0, 0.0)]);
+        let placed = PlacedEnvelope::placed(&bent, &TempoMap::default(), SampleRate::HZ_48000, 0);
+        assert_eq!(placed.value_at(0), 0.0, "the breakpoint's own value");
+        assert_eq!(placed.value_at(24_000), 1.0, "the far breakpoint's");
+        let half = placed.value_at(12_000);
+        assert!((half - 0.5f64.sqrt()).abs() < 1e-12, "{half}");
+        assert!(half > 0.5, "the curve leads the straight line");
+        // The other sign bows the other way, and 0 is the exact straight
+        // line.
+        let mirrored = curved(&[(Ticks::ZERO, 0.0, 1.0), (Ticks::QUARTER, 1.0, 0.0)]);
+        let placed =
+            PlacedEnvelope::placed(&mirrored, &TempoMap::default(), SampleRate::HZ_48000, 0);
+        assert!((placed.value_at(12_000) - 0.25).abs() < 1e-12);
+        let straight = PlacedEnvelope::placed(
+            &envelope(&[(Ticks::ZERO, 0.0), (Ticks::QUARTER, 1.0)]),
+            &TempoMap::default(),
+            SampleRate::HZ_48000,
+            0,
+        );
+        assert_eq!(straight.value_at(12_000), 0.5);
     }
 
     // Spec: automation R2

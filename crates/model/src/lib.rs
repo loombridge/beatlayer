@@ -75,7 +75,9 @@ mod routing;
 mod shared;
 mod track;
 
-pub use automation::{Automation, AutomationTarget, Envelope, MixerParam, TrackAutomation};
+pub use automation::{
+    Automation, AutomationTarget, Breakpoint, Envelope, MixerParam, TrackAutomation, curve_value,
+};
 pub use changes::{Change, ChangeSet};
 pub use clip::{AudioData, Clip, ClipData, EDGE_FADE_SECONDS, MidiData, Note};
 pub use command::Command;

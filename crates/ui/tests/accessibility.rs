@@ -1038,6 +1038,10 @@ fn paths() -> BTreeMap<&'static str, Path> {
             Exception(LaterView("the arrangement's automation lanes (WP-2.12)")),
         ),
         (
+            "automation.set_curve",
+            Exception(LaterView("the arrangement's automation lanes (WP-2.12)")),
+        ),
+        (
             "automation.move_breakpoint",
             Exception(LaterView("the arrangement's automation lanes (WP-2.12)")),
         ),

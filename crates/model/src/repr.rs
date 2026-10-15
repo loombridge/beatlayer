@@ -7,11 +7,10 @@
 use std::collections::BTreeSet;
 
 use bl_core::id::Id;
-use bl_core::time::Ticks;
 use imbl::{OrdMap, Vector};
 use serde::{Deserialize, Serialize};
 
-use crate::automation::{AutomationTarget, Envelope};
+use crate::automation::{AutomationTarget, Breakpoint, Envelope};
 use crate::clip::Clip;
 use crate::command::{
     check_chain, check_clip, check_clip_fits, check_device, check_extent, check_mixer,
@@ -76,7 +75,7 @@ struct AutomationRepr {
     target: AutomationTarget,
     /// Its envelope's breakpoints, in position order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    points: Vec<(Ticks, f64)>,
+    points: Vec<Breakpoint>,
     /// Whether the envelope drives the parameter; left out while it does,
     /// so a set that overrode none reads the same as before.
     #[serde(default = "on", skip_serializing_if = "is_on")]
@@ -562,6 +561,15 @@ mod tests {
             volume: 0.5,
         })
         .unwrap();
+        // The volume's segment is curved: its bend saves with the breakpoint
+        // at the segment's start.
+        doc.apply(&Command::SetAutomationCurve {
+            track: audio,
+            target: volume,
+            at: Ticks::ZERO,
+            bend: -0.5,
+        })
+        .unwrap();
         let value = serde_json::to_value(&doc).unwrap();
         let saved = value["tracks"][0]["children"][0]["automation"]
             .as_array()
@@ -583,7 +591,10 @@ mod tests {
         );
         assert_eq!(
             entry("volume")["points"],
-            json!([[0, 1.0], [Ticks::WHOLE.0, 0.25]])
+            json!([
+                { "at": 0, "value": 1.0, "bend": -0.5 },
+                { "at": Ticks::WHOLE.0, "value": 0.25 }
+            ])
         );
         assert_eq!(entry("volume")["enabled"], json!(false));
         assert_eq!(
@@ -598,7 +609,7 @@ mod tests {
                 .iter()
                 .find(|entry| entry["target"]["type"] == json!("device"))
                 .unwrap()["points"],
-            json!([[0, -6.0]])
+            json!([{ "at": 0, "value": -6.0 }])
         );
         let loaded = load(value).unwrap();
         assert_eq!(loaded, doc);
@@ -618,15 +629,21 @@ mod tests {
                 .unwrap()
         }
         let error = broken(&|value| {
-            first_entry(value)["points"] = json!([[10, 0.0], [5, 1.0]]);
+            first_entry(value)["points"] = json!([
+                { "at": 10, "value": 0.0 },
+                { "at": 5, "value": 1.0 }
+            ]);
         });
         assert!(error.contains("already a breakpoint"), "{error}");
         let error = broken(&|value| {
-            first_entry(value)["points"] = json!([[0, 0.0], [0, 1.0]]);
+            first_entry(value)["points"] = json!([
+                { "at": 0, "value": 0.0 },
+                { "at": 0, "value": 1.0 }
+            ]);
         });
         assert!(error.contains("already a breakpoint"), "{error}");
         let error = broken(&|value| {
-            first_entry(value)["points"] = json!([[0, true]]);
+            first_entry(value)["points"] = json!([{ "at": 0, "value": true }]);
         });
         assert!(!error.is_empty());
         let error = broken(&|value| {
@@ -634,9 +651,19 @@ mod tests {
         });
         assert!(!error.is_empty());
         let error = broken(&|value| {
-            first_entry(value)["points"] = json!([[-5, 0.0]]);
+            first_entry(value)["points"] = json!([{ "at": -5, "value": 0.0 }]);
         });
         assert!(error.contains("before zero"), "{error}");
+        let error = broken(&|value| {
+            first_entry(value)["points"] = json!([
+                { "at": 0, "value": 0.0, "bend": 2.0 },
+                { "at": 1_000, "value": 1.0 }
+            ]);
+        });
+        assert!(
+            error.contains("automation bend 2 is out of range"),
+            "{error}"
+        );
     }
 
     #[test]

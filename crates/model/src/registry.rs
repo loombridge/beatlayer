@@ -601,8 +601,28 @@ const ENTRIES: &[Entry] = &[
             breakpoint and its envelope drives it from then on. Values are in the parameter's \
             own units: volume as linear gain, pan from -1 to 1, the Track Activator 1 for \
             muted, and a device parameter as the device's own value. `at` is 0 (1.1.1) or \
-            later. The value between two breakpoints follows the straight line, and before the \
-            first and after the last the nearest one's value holds.",
+            later. The value between two breakpoints follows the segment's shape: the straight \
+            line unless `automation.set_curve` bent it; before the first and after the last \
+            the nearest one's value holds.",
+    },
+    Entry {
+        id: "automation.set_curve",
+        action: Action::Apply("set_automation_curve"),
+        label: "Curve Automation Segment",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Curves one of a track's automation segments, as holding Alt (Windows) or \
+            Option (macOS) while dragging a line segment on an automation lane does. `track` \
+            and `target` name the parameter as `automation.set_breakpoint` does, and `at` is \
+            the position of the breakpoint the segment starts at. `bend` is a signed number \
+            from -1 to 1: 0 is the straight line, the sign chooses which side the segment bows \
+            to, and its size how far. Between the two breakpoints the value is `from + (to - \
+            from) * t^(2^bend)`, `t` running from 0 at the segment's start to 1 at its end, so \
+            the value stays between the two breakpoints' values. A bend of 0 straightens the \
+            segment again, as the same drag with a double-click does. Refused when no \
+            breakpoint is at `at`, or when `at` is the last breakpoint, with no segment after \
+            it. Beatlayer's own law: Live's curved shape isn't measured yet.",
     },
     Entry {
         id: "automation.move_breakpoint",
@@ -623,10 +643,11 @@ const ENTRIES: &[Entry] = &[
         permission: Permission::Edit,
         contexts: &[Global],
         keys: &[],
-        description: "Deletes one of a track's automation breakpoints, joining its neighbours \
-            with a straight segment, as clicking a breakpoint on an automation lane does. \
-            Deleting the last one takes the parameter's envelope with it, so the parameter \
-            follows its control again. A position with no breakpoint is refused.",
+        description: "Deletes one of a track's automation breakpoints, so the segments either \
+            side of it become the one starting at the breakpoint before it, as clicking a \
+            breakpoint on an automation lane does. Deleting the last one takes the parameter's \
+            envelope with it, so the parameter follows its control again. A position with no \
+            breakpoint is refused.",
     },
     Entry {
         id: "automation.delete",

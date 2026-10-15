@@ -1,0 +1,21 @@
+[package]
+name = "bl-test-vst3"
+description = "A VST3 plug-in for the plug-in host's tests (WP-2.7): a gain that echoes notes, built from source. Never shipped."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+# The cdylib is the plug-in the tests load by path; the rlib lets a test
+# crate depend on this one, so Cargo builds the cdylib beside its tests.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Pure-Rust VST3 bindings (MIT OR Apache-2.0), generated from the VST3
+# SDK's headers by com-scrape; the C++ SDK is not compiled.
+vst3 = "0.3.0"
+
+[lints]
+workspace = true

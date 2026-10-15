@@ -40,6 +40,7 @@ use crate::settings::{
 use bl_devices::KitHost;
 use bl_plugin_host::clap::ClapHost;
 use bl_plugin_host::scan::Scanner;
+use bl_plugin_host::vst3::Vst3Host;
 use bl_shell_spec::arrangement as view_ids;
 use bl_shell_spec::browser as browser_ids;
 use bl_shell_spec::devices as device_ids;
@@ -341,8 +342,10 @@ pub struct Shell {
     /// The native device types the engine offers, which the plug-ins'
     /// join in the Device View (WP-2.6).
     native_types: Vec<bl_engine::DeviceType>,
-    /// The CLAP host: plug-in devices' instances, on this thread (WP-2.6).
+    /// The CLAP host: CLAP devices' instances, on this thread (WP-2.6).
     plugins: ClapHost,
+    /// The VST3 host: VST3 devices' instances, on this thread (WP-2.7).
+    vst3: Vst3Host,
     /// The plug-in scanner (WP-2.9): the plug-ins found on this machine,
     /// their blocklist, and their cache.
     scanner: Scanner,
@@ -462,6 +465,9 @@ impl Shell {
         // CLAP plug-ins (WP-2.6): this thread is their main thread.
         let plugins = ClapHost::new();
         audio.set_plugins(plugins.clone());
+        // VST3 plug-ins (WP-2.7): this thread is their main thread too.
+        let vst3 = Vst3Host::new();
+        audio.set_vst3(vst3.clone());
         // The plug-in scanner (WP-2.9): finds the plug-ins on this machine
         // in a child process, caching and blocklisting what it finds. Its
         // cache lives with the preferences.
@@ -525,6 +531,7 @@ impl Shell {
             },
             native_types,
             plugins,
+            vst3,
             scanner,
             kit,
             device_commands: std::collections::BTreeMap::new(),
@@ -1132,20 +1139,28 @@ impl Shell {
         let mut types = self.native_types.clone();
         types.extend(self.kit.device_types());
         types.extend(self.plugins.types().into_iter().map(|t| t.device_type));
+        types.extend(self.vst3.types().into_iter().map(|t| t.device_type));
         self.devices.set_device_types(types);
     }
 
-    /// The CLAP host, whose plug-ins are the set's plug-in devices
+    /// The CLAP host, whose plug-ins are the set's CLAP devices
     /// (WP-2.6).
     #[must_use]
     pub fn plugins(&self) -> &ClapHost {
         &self.plugins
     }
 
+    /// The VST3 host, whose plug-ins are the set's VST3 devices (WP-2.7).
+    #[must_use]
+    pub fn vst3(&self) -> &Vst3Host {
+        &self.vst3
+    }
+
     /// Lets go of the plug-ins of the set being replaced (WP-2.6): the new
     /// set's plug-in devices load their plug-ins from their saved state.
     fn set_replaced(&mut self) {
         self.plugins.clear();
+        self.vst3.clear();
         self.kit.clear();
     }
 
@@ -1165,17 +1180,17 @@ impl Shell {
             let device = device
                 .or(shell.devices.selected())
                 .ok_or_else(|| unavailable("select a plug-in device first".to_owned()))?;
-            if crate::plugins::is_clap(shell.editor.document(), device) {
+            if crate::plugins::is_plugin(shell.editor.document(), device) {
                 Ok(device)
             } else {
                 Err(ShellError::InvalidArgs {
                     command: id.to_owned(),
-                    message: format!("{device} isn't a CLAP plug-in device"),
+                    message: format!("{device} isn't a plug-in device"),
                 })
             }
         };
         let info = |shell: &Self, device| {
-            crate::plugins::info(&shell.plugins, device)
+            crate::plugins::info(&shell.plugins, &shell.vst3, device)
                 .map(|mut info| {
                     // WP-2.10: where the window sits, from the frame store
                     // the set keeps.
@@ -1192,27 +1207,44 @@ impl Shell {
                     track,
                     index,
                 } = Self::args(id, args)?;
-                let found =
-                    self.plugins
-                        .load(Path::new(&path))
-                        .map_err(|e| ShellError::Failed {
-                            command: id.to_owned(),
-                            message: e.to_string(),
-                        })?;
-                let chosen = match &plugin {
-                    Some(wanted) => found.iter().find(|t| {
-                        matches!(&t.device_type.kind,
+                let path = std::path::PathBuf::from(path);
+                let failed = |e: String| ShellError::Failed {
+                    command: id.to_owned(),
+                    message: e,
+                };
+                let found: Vec<(bl_engine::DeviceType, std::path::PathBuf)> =
+                    if crate::plugins::is_vst3_path(&path) {
+                        self.vst3
+                            .load(&path)
+                            .map_err(|e| failed(e.to_string()))?
+                            .into_iter()
+                            .map(|t| (t.device_type, t.path))
+                            .collect()
+                    } else {
+                        self.plugins
+                            .load(&path)
+                            .map_err(|e| failed(e.to_string()))?
+                            .into_iter()
+                            .map(|t| (t.device_type, t.path))
+                            .collect()
+                    };
+                let (device_type, loaded_path) = match &plugin {
+                    Some(wanted) => found.iter().find(|(t, _)| {
+                        matches!(&t.kind,
                             bl_model::DeviceKind::Plugin { plugin_id, .. } if plugin_id == wanted)
                     }),
                     None => found.first(),
                 }
                 .ok_or_else(|| ShellError::InvalidArgs {
                     command: id.to_owned(),
-                    message: format!("{path} has no plug-in {}", plugin.unwrap_or_default()),
+                    message: format!(
+                        "{} has no plug-in {}",
+                        path.display(),
+                        plugin.unwrap_or_default()
+                    ),
                 })?
                 .clone();
                 self.refresh_device_types();
-                let device_type = chosen.device_type;
                 let added: device_ids::DeviceAdded = serde_json::from_value(self.run_devices(
                     device_ids::ADD,
                     to_value(&device_ids::AddDeviceArgs {
@@ -1235,7 +1267,7 @@ impl Shell {
                 let _ = self.editor.amend_plugin_state(
                     added.device,
                     Some(bl_model::PluginState {
-                        path: chosen.path.to_string_lossy().into_owned(),
+                        path: loaded_path.to_string_lossy().into_owned(),
                         data: Vec::new(),
                     }),
                 );
@@ -1254,8 +1286,13 @@ impl Shell {
             plugin_ids::SHOW_WINDOW => {
                 let plugin_ids::ShowWindowArgs { device, shown } = Self::args(id, args)?;
                 let device = target(self, device)?;
+                if crate::plugins::is_vst3(self.editor.document(), device) {
+                    return Err(unavailable(
+                        "a VST3 plug-in's editor is a later part of VST3 hosting".to_owned(),
+                    ));
+                }
                 self.plugins.idle();
-                let open = crate::plugins::info(&self.plugins, device)
+                let open = crate::plugins::info(&self.plugins, &self.vst3, device)
                     .is_some_and(|info| info.window_open);
                 let failed = |e: bl_plugin_host::clap::ClapError| ShellError::Failed {
                     command: id.to_owned(),
@@ -1289,6 +1326,7 @@ impl Shell {
                 let plugin_ids::PluginInfoArgs { device } = Self::args(id, args)?;
                 let device = target(self, device)?;
                 self.plugins.idle();
+                self.vst3.idle();
                 info(self, device)
             }
             plugin_ids::SET_WINDOW => {
@@ -1804,9 +1842,9 @@ impl Shell {
             self.set_message(error, true);
         }
         let mut changed = polled.changed;
-        // Plug-ins' main-thread work (WP-2.6), and the changes they made
-        // themselves.
-        let plugins_changed = self.plugins.idle();
+        // Plug-ins' main-thread work (WP-2.6, WP-2.7), and the changes
+        // they made themselves.
+        let plugins_changed = self.plugins.idle() | self.vst3.idle();
         if plugins_changed {
             self.refresh_device_types();
             changed = true;

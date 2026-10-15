@@ -1,6 +1,6 @@
 //! Plug-in commands in the command registry (WP-2.6; the CLAP hosting
-//! spec): loading a CLAP plug-in from its file as a device, its editor
-//! window, and what it's doing.
+//! spec, and WP-2.7 for VST3): loading a plug-in from its file as a
+//! device, its editor window, and what it's doing.
 //!
 //! A plug-in device is otherwise a device like any other: `device.set_param`
 //! changes its parameters, `device.parameters` lists them, and saving the
@@ -14,7 +14,7 @@ use bl_model::{DeviceId, DeviceRole, ParamId, PluginFormat, TrackId, WindowFrame
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// `plugin.load`: load a CLAP plug-in from its file and add it as a device.
+/// `plugin.load`: load a plug-in from its file and add it as a device.
 pub const LOAD: &str = "plugin.load";
 /// `plugin.show_window`: open or close a plug-in device's editor window.
 pub const SHOW_WINDOW: &str = "plugin.show_window";
@@ -64,9 +64,9 @@ pub fn handles(id: &str) -> bool {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LoadPluginArgs {
-    /// The CLAP plug-in's file or bundle (`.clap`).
+    /// The plug-in's file or bundle (`.clap`, or `.vst3` for VST3).
     pub path: String,
-    /// Which of the file's plug-ins, by its CLAP ID; the first if left out.
+    /// Which of the file's plug-ins, by its ID; the first if left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin: Option<String>,
     /// The track; the selected track if left out.
@@ -87,7 +87,7 @@ pub struct PluginLoaded {
     /// Whether a new MIDI track was made for it, as `device.add` does for
     /// an instrument or MIDI effect.
     pub new_track: bool,
-    /// The plug-in's CLAP ID.
+    /// The plug-in's ID: a CLAP ID, or a VST3 class ID.
     pub plugin: String,
     /// Its name.
     pub name: String,
@@ -119,7 +119,7 @@ pub struct PluginInfoArgs {
 pub struct PluginInfo {
     /// The device.
     pub device: DeviceId,
-    /// The plug-in's CLAP ID.
+    /// The plug-in's ID: a CLAP ID, or a VST3 class ID.
     pub plugin: String,
     /// The file it was loaded from.
     pub path: String,
@@ -207,7 +207,7 @@ pub struct ScannedItem {
     pub format: PluginFormat,
     /// The file or bundle it's in.
     pub path: String,
-    /// Its identifier within its format (its CLAP ID).
+    /// Its identifier within its format (a CLAP ID, or a VST3 class ID).
     pub plugin_id: String,
     /// Its name.
     pub name: String,
@@ -324,15 +324,16 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     registry.register(
         CommandSpec::new(LOAD, "Load Plug-In")
             .description(
-                "Loads a CLAP plug-in from its file or bundle (`path`, a `.clap`) and adds it \
-                 as a device, as `device.add` adds one: to the selected track (or `track`), at \
-                 `index` or where its role goes, selected, one undo step (Insert Device). \
-                 `plugin` picks one of the file's plug-ins by its CLAP ID; the first if left \
-                 out. Its parameters become the device's, which `device.parameters` lists and \
-                 `device.set_param` and automation change; its own state is saved with the \
-                 set. The plug-in's code runs inside Beatlayer, so load only plug-ins you \
-                 trust. The scanner (`plugin.scan`) lists the plug-ins on this machine; this \
-                 command still loads one by its path.",
+                "Loads a plug-in from its file or bundle (`path`: a `.clap` file, or a \
+                 `.vst3` bundle or module) and adds it as a device, as `device.add` adds one: \
+                 to the selected track (or `track`), at `index` or where its role goes, \
+                 selected, one undo step (Insert Device). `plugin` picks one of the file's \
+                 plug-ins by its ID (CLAP's, or a VST3 class ID); the first if left out. Its \
+                 parameters become the device's, which `device.parameters` lists and \
+                 `device.set_param` and automation change. The plug-in's code runs inside \
+                 Beatlayer, so load only plug-ins you trust. The scanner (`plugin.scan`) \
+                 lists the plug-ins on this machine; this command still loads one by its \
+                 path.",
             )
             .permission(Permission::External)
             .contexts([Global, DeviceView])
@@ -357,11 +358,11 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     registry.register(
         CommandSpec::new(INFO, "Plug-In Info")
             .description(
-                "Reports what a plug-in device's plug-in is doing: its CLAP ID and file, \
-                 whether it's running, the latency it reports in frames, what went wrong if \
-                 anything, whether its editor window can open, is open, and is shown (a \
-                 hidden window stays open), and its parameters' values as it reports them. \
-                 Changes nothing.",
+                "Reports what a plug-in device's plug-in is doing: its ID and file, whether \
+                 it's running, the latency it reports in frames, what went wrong if anything, \
+                 whether its editor window can open, is open, and is shown (a hidden window \
+                 stays open), and its parameters' values as it reports them. Changes \
+                 nothing.",
             )
             .permission(Permission::Read)
             .context(DeviceView)

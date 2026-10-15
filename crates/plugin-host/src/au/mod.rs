@@ -13,6 +13,7 @@
 //! device from a Mac passes its input through, as an unhosted device does.
 
 use std::fmt;
+use std::path::Path;
 
 use bl_model::DeviceId;
 
@@ -23,8 +24,22 @@ mod imp;
 #[path = "stub.rs"]
 mod imp;
 
-pub use crate::clap::PluginStatus;
+pub use crate::clap::{ParamChange, PluginStatus};
 pub use imp::{AuFactory, AuHost, AuType};
+
+/// Describes the Audio Units a `.component` bundle declares, for the
+/// scanner's child process (WP-2.8's second part): one `ScannedPlugin` per
+/// unit, with the bundle's path and its component description as the ID.
+/// Loading each unit runs its code, so the scanner calls this only in
+/// `beatlayer-scan`.
+///
+/// # Errors
+///
+/// [`AuError::Unavailable`] on Windows and Linux; on macOS, why the bundle
+/// couldn't be read or a unit wouldn't start.
+pub fn scan_file(path: &Path) -> Result<Vec<crate::scan::ScannedPlugin>, AuError> {
+    imp::scan_file(path)
+}
 
 /// Why an Audio Unit host call failed. Nothing changed.
 #[derive(Clone, Debug, PartialEq, Eq)]

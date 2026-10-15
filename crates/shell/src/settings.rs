@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use bl_model::ParamId;
 use bl_model::PluginFormat;
 
 pub use bl_shell_spec::settings::{
@@ -70,6 +71,12 @@ pub struct Preferences {
     /// The format to prefer when a plug-in exists in several formats
     /// (WP-2.9, IMP-07).
     pub plugin_format_preference: Option<PluginFormat>,
+    /// Which parameter each knob of a plug-in device's panel shows
+    /// (WP-2.10, D19), by `format/plugin_id` and then by knob: absent
+    /// entries keep the plug-in's own parameter at that place. Remembered
+    /// per plug-in, so a device of a known plug-in keeps its mapping.
+    pub plugin_panels:
+        std::collections::BTreeMap<String, std::collections::BTreeMap<usize, ParamId>>,
     /// The saved default set (File ▸ Save Beatlayer Set As Default Set),
     /// which a new set starts from (WP-2.25). `None` uses the factory
     /// default set.

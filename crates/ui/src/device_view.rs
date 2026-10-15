@@ -132,6 +132,45 @@ fn invoke(events: &mut Vec<UiEvent>, id: &str, args: serde_json::Value) {
     events.push(UiEvent::Invoke(Invocation::new(id, args)));
 }
 
+/// A sample dropped from Finder or Explorer onto a device that plays one
+/// loads into it, as Live's Simpler takes one (`device.load_sample`; the
+/// sampler spec, R11).
+fn sample_drop(
+    ui: &Ui,
+    state: &DeviceViewState,
+    placed: &[(DeviceId, Rect)],
+    events: &mut Vec<UiEvent>,
+) {
+    let (dropped, pointer) = ui.input(|i| {
+        let dropped: Vec<String> = i
+            .raw
+            .dropped_files
+            .iter()
+            .map(|file| file.path().to_string_lossy().into_owned())
+            .collect();
+        (dropped, i.pointer.latest_pos())
+    });
+    let (Some(path), Some(pointer)) = (dropped.into_iter().next(), pointer) else {
+        return;
+    };
+    let Some((device, _)) = placed.iter().find(|(_, rect)| rect.contains(pointer)) else {
+        return;
+    };
+    let takes = state
+        .devices
+        .iter()
+        .find(|frame| frame.id == *device)
+        .is_some_and(|frame| frame.takes_sample);
+    if !takes {
+        return;
+    }
+    invoke(
+        events,
+        ids::LOAD_SAMPLE,
+        json!({ "device": device, "path": path }),
+    );
+}
+
 impl DeviceViewUi {
     /// A Device View with nothing being typed.
     #[must_use]
@@ -221,6 +260,7 @@ impl DeviceViewUi {
             },
         );
         self.drop_target(ui, shell, theme, &state, &placed, rect, events);
+        sample_drop(ui, &state, &placed, events);
     }
 
     /// Draws a floating device's window (WP-2.5b): the device's frame at

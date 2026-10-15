@@ -40,6 +40,11 @@ pub enum NodeKey {
     /// Resampling (the routing spec). Its parameters are
     /// [`mixer::route`](crate::mixer::route).
     Input(TrackId),
+    /// A track's own input taken from the audio interface, Ext. In
+    /// (WP-2.13). Its parameters are
+    /// [`mixer::route`](crate::mixer::route); its source is the device
+    /// input the processor was given.
+    DeviceInput(TrackId),
     /// The track a device's sidechain takes as its Source (WP-2.19b). Its
     /// parameters are [`mixer::route`](crate::mixer::route).
     SidechainInput(DeviceId),
@@ -58,6 +63,7 @@ impl fmt::Display for NodeKey {
             Self::Output(track) => write!(f, "the output of {track}"),
             Self::Send { track, to } => write!(f, "the send from {track} to {to}"),
             Self::Input(track) => write!(f, "the input of {track}"),
+            Self::DeviceInput(track) => write!(f, "the interface input of {track}"),
             Self::SidechainInput(device) => write!(f, "the sidechain input of {device}"),
             Self::Sidechain(device) => write!(f, "the sidechain of {device}"),
         }

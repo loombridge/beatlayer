@@ -90,6 +90,7 @@ fn a_thousand_recompiles_during_playback_touch_no_heap_and_drop_no_audio() {
     let backend = NullBackend::with_options(NullOptions {
         pacing: Pacing::RealTime,
         frame_limit: None,
+        channels: 2,
     });
     let request = StreamRequest {
         output: Some(PortRequest::default()),
@@ -178,7 +179,13 @@ fn a_thousand_recompiles_during_playback_touch_no_heap_and_drop_no_audio() {
     // The audio thread ran under the trap, which saw nothing.
     assert!(stats.audio_thread.unwrap().trap_installed);
     assert_eq!(stats.heap_operations, 0);
-    assert_eq!(stats.dropouts, 0, "{stats:?}");
+    // A dropout is a block whose callback took longer than the block lasts:
+    // a wall-clock result that other processes on a busy machine can cause.
+    // It's judged at full depth (pushes to main and the nightly run), which
+    // runs this test with the runner to itself; every run checks the rest.
+    if common::full_depth() {
+        assert_eq!(stats.dropouts, 0, "{stats:?}");
+    }
     assert_eq!(wrong_samples.load(Relaxed), 0, "a swap glitched the audio");
 
     // 1,000 programs swapped in, each taking over the last one's nodes.

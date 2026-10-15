@@ -16,8 +16,8 @@ use crate::midi_clips::{MidiClipList, MidiClipPlayer};
 use crate::mixer::{self, Route, Solo, TrackMixer, route};
 use crate::node::{NodeData, NodeKey, NoteBuffer, ParamValue};
 use crate::program::{
-    DeviceSidechain, EngineProgram, Input, Instance, Migration, NO_DELAY, NodeSlot, Span, Task,
-    delay_storage,
+    DeviceInput, DeviceSidechain, EngineProgram, Input, Instance, Migration, NO_DELAY, NodeSlot,
+    Span, Task, delay_storage,
 };
 use crate::registry::Registry;
 use crate::routing::{Edge, Graph, Via};
@@ -70,7 +70,10 @@ impl Update {
 /// What a node is, beyond its key: a node migrates only if this matches.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Identity {
-    Device(DeviceKind),
+    /// A device. Its media is part of what it is (WP-2.16): a device whose
+    /// sample changed is a new node, and one the set keeps gets its audio
+    /// sent again.
+    Device(DeviceKind, Option<ContentHash>),
     Player,
     MidiPlayer,
     Mixer,
@@ -232,6 +235,11 @@ impl Compiler {
                     .push(TransportCommand::SetLoop(loop_region(document)));
                 self.sources.cue_loop(self.loop_start_frame(document));
             }
+            if old.settings().metronome != document.settings().metronome {
+                update.transport.push(TransportCommand::SetMetronome(
+                    document.settings().metronome,
+                ));
+            }
             for track in tracks {
                 self.send_clips(document, track, &mut update);
             }
@@ -391,10 +399,14 @@ impl Compiler {
             delay_lines,
             delay_pool,
             delay_scratch: vec![0.0; size],
+            device_input: vec![0.0; self.config.input_channels * self.config.max_frames],
+            device_input_channels: self.config.input_channels,
+            device_scratch: vec![0.0; size],
             channels: self.config.channels,
             max_frames: self.config.max_frames,
             output: task_of[&document.main_id()],
             tempo: document.settings().tempo.clone(),
+            time_signatures: document.settings().time_signatures.clone(),
             sample_rate: self.config.sample_rate,
             note_buffers: [
                 NoteBuffer::with_capacity(1024),
@@ -406,11 +418,33 @@ impl Compiler {
         self.synced = Some(document.clone());
         let mut update = Update {
             program: Some(self.gc.program(program)),
-            transport: vec![TransportCommand::SetLoop(loop_region(document))],
+            transport: vec![
+                TransportCommand::SetLoop(loop_region(document)),
+                TransportCommand::SetMetronome(document.settings().metronome),
+            ],
             params: build.restate,
             unhosted: build.unhosted,
             ..Update::default()
         };
+        // Devices new in this program that play media get their decoded
+        // audio: the sampler's sample, decoded by the media library here,
+        // on the compiler's thread, and shared with the set's other readers
+        // (WP-2.16). The update reaches the node after the program that
+        // made it; a device whose media the library doesn't hold plays
+        // silence and is reported missing.
+        let rate = self.config.sample_rate;
+        for &(device, media) in &build.media {
+            match self
+                .registry
+                .media()
+                .and_then(|library| library.sample(media, rate))
+            {
+                Some(sample) => update
+                    .data
+                    .push((NodeKey::Device(device), self.gc.data(sample))),
+                None => update.missing.push(media),
+            }
+        }
         // Players that went hold no sources now, nor do new ones yet; open
         // sources of clips that went are closed.
         self.sources.retain(
@@ -534,6 +568,29 @@ impl Compiler {
             end: build.inputs.len() as u32,
         };
         let config = self.config.node_config();
+        // The track's own input from the audio interface, Ext. In
+        // (WP-2.13): its own route, whose Monitor gate opens and closes it
+        // like any other input.
+        let device_input = match track.routing().input {
+            bl_model::Input::External { channel } if track.kind() == TrackKind::Audio => {
+                let key = NodeKey::DeviceInput(track.id());
+                let closed = !track.routing().monitoring(track.mixer().arm);
+                if self.previous(key, &Identity::Route).is_some() {
+                    for (param, value) in [
+                        (route::LEVEL, 1.0),
+                        (route::SOLO_MUTE, switch(false)),
+                        (route::CLOSED, switch(closed)),
+                    ] {
+                        build.restate.push(ParamEvent::now(key, param, value));
+                    }
+                }
+                let route = self.place(build, key, Identity::Route, 0, || {
+                    Instance::Route(Box::new(Route::new(1.0, false, &config).closed(closed)))
+                });
+                Some(DeviceInput { route, channel })
+            }
+            _ => None,
+        };
         // An audio or MIDI track's clip player runs first.
         let player = match track.kind() {
             TrackKind::Audio => Some({
@@ -572,11 +629,16 @@ impl Compiler {
         let sidechain_start = build.sidechains.len() as u32;
         for device in track.devices() {
             let key = NodeKey::Device(device.id);
-            let identity = Identity::Device(device.kind.clone());
+            let identity = Identity::Device(device.kind.clone(), device.media);
             let (node, latency) = match self.previous(key, &identity) {
                 Some(from) => (Err(from), self.previous_latency(key, &identity)),
                 None => match self.registry.create(device, &config) {
                     Some(node) => {
+                        // A new node that plays media gets its decoded audio
+                        // with this compile's update (WP-2.16).
+                        if let Some(media) = device.media {
+                            build.media.push((device.id, media));
+                        }
                         let latency = node.latency();
                         (Ok(Instance::Device(node)), latency)
                     }
@@ -613,6 +675,7 @@ impl Compiler {
         build.tasks.push(Task {
             track: track.id(),
             inputs,
+            device_input,
             player,
             nodes,
             sidechains,
@@ -757,6 +820,9 @@ struct Build {
     sidechains: Vec<DeviceSidechain>,
     sidechain_inputs: Vec<Input>,
     unhosted: Vec<DeviceId>,
+    /// Devices new in this program that play media, with the media they
+    /// name: their decoded audio goes with this compile's update (WP-2.16).
+    media: Vec<(DeviceId, ContentHash)>,
     /// Tracks whose clip player is new in this program.
     new_players: BTreeSet<TrackId>,
     /// The state of routes and players that migrate in, which an edit may
@@ -1010,6 +1076,7 @@ fn needs_program(
                 let (was, is) = (before.sidechain, after.sidechain);
                 if before.kind != after.kind
                     || before.enabled != after.enabled
+                    || before.media != after.media
                     || was.map(|s| s.input) != is.map(|s| s.input)
                 {
                     recompile = true;
@@ -1129,6 +1196,18 @@ fn route_events(changes: &ChangeSet, old: &Document, new: &Document, params: &mu
                 crate::clips::player::AUDIBLE,
                 switch(clips_audible(track)),
             ));
+        }
+        // Ext. In hears the interface while the track monitors it; Monitor
+        // or Arm alone doesn't recompile (WP-2.13).
+        if matches!(track.routing().input, bl_model::Input::External { .. }) {
+            let closed = |t: &Track| !t.routing().monitoring(t.mixer().arm);
+            if closed(then) != closed(track) {
+                params.push(ParamEvent::now(
+                    NodeKey::DeviceInput(track.id()),
+                    route::CLOSED,
+                    switch(closed(track)),
+                ));
+            }
         }
     }
 }
@@ -1460,13 +1539,14 @@ mod tests {
         assert!(program.slots[slot as usize].bypass);
         let before = program.node_count();
 
-        // A new audio track brings a clip player, a mixer, an output, and a
-        // send to the return; the rest migrate. With no clips, the player
+        // A new audio track brings a clip player, a mixer, an output, a
+        // send to the return, and the interface input its Audio From (Ext.
+        // In) opens (WP-2.13); the rest migrate. With no clips, the player
         // needs no data.
         let new = track(&mut f.editor, TrackKind::Audio, None);
         let update = f.sync();
         let program = update.program.as_ref().unwrap().get();
-        assert_eq!(program.node_count(), before + 4);
+        assert_eq!(program.node_count(), before + 5);
         assert_eq!(program.migration_count(), before);
         assert!(update.data.is_empty());
         for key in [
@@ -1477,6 +1557,7 @@ mod tests {
                 track: new,
                 to: f.ret,
             },
+            NodeKey::DeviceInput(new),
         ] {
             assert!(program.slot_of(key).is_some(), "{key}");
         }

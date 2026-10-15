@@ -609,7 +609,7 @@ pub fn polysynth_type() -> DeviceType {
 
 /// Adds Cascade to `registry`.
 pub fn register(registry: &mut Registry) {
-    add(registry, polysynth_type(), make);
+    add(registry, polysynth_type(), |_, config| make(config));
 }
 
 /// Makes a Cascade for `config`'s rate, channels, and block size. Every

@@ -231,6 +231,7 @@ fn play(callback: impl AudioCallback, seconds: f64) -> bl_audio_io::StreamStats 
     let backend = NullBackend::with_options(NullOptions {
         pacing: Pacing::RealTime,
         frame_limit: Some((seconds * 48_000.0) as u64),
+        channels: 2,
     });
     let mut stream = backend
         .open_stream(&request(64), Box::new(callback))

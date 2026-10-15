@@ -14,9 +14,10 @@ use crate::clip::{AudioData, Clip, ClipData, MidiData};
 use crate::device::{Device, DeviceRole};
 use crate::document::Document;
 use crate::error::ModelError;
-use crate::ids::{ClipId, DeviceId, ParamId, TrackId};
+use crate::ids::{ClipId, ContentHash, DeviceId, ParamId, TrackId};
+use crate::metronome::{CountIn, MetronomeRhythm, MetronomeSound};
 use crate::shared::Shared;
-use crate::track::{Input, Mixer, Monitor, Output, SendTap, Track, TrackKind};
+use crate::track::{Channel, Input, Mixer, Monitor, Output, SendTap, Track, TrackKind};
 
 /// One edit to a document.
 ///
@@ -108,6 +109,32 @@ pub enum Command {
     SetLoopEnabled {
         /// Whether playback loops between the brace's start and end.
         enabled: bool,
+    },
+    /// Switches the metronome on or off.
+    SetMetronomeEnabled {
+        /// Whether the metronome clicks during playback.
+        enabled: bool,
+    },
+    /// Sets the metronome count-in length before playback or recording starts.
+    SetMetronomeCountIn {
+        /// The count-in duration in bars: none, 1 bar, 2 bars, or 4 bars.
+        count_in: CountIn,
+    },
+    /// Chooses the metronome sound character: Classic, Click, or Wood.
+    SetMetronomeSound {
+        /// The synthesised sound character.
+        sound: MetronomeSound,
+    },
+    /// Sets the rhythmic division the metronome clicks at: Auto, 1 Bar,
+    /// 1/2, 1/2T, 1/4, 1/4T, 1/8, 1/8T, 1/16, or 1/16T.
+    SetMetronomeRhythm {
+        /// The rhythm division.
+        rhythm: MetronomeRhythm,
+    },
+    /// Sets whether the metronome only clicks while recording.
+    SetMetronomeOnlyWhileRecording {
+        /// When on, clicks only sound while recording.
+        only_while_recording: bool,
     },
 
     /// Creates an empty track with default mixer settings.
@@ -256,6 +283,19 @@ pub enum Command {
         track: TrackId,
         /// Another MIDI track, or `null` (or nothing) for No Output.
         to: Option<TrackId>,
+    },
+    /// Sets Main's Main Out: the audio interface's output channels the Main
+    /// mix goes to, as a stereo pair.
+    SetMainOut {
+        /// The pair: its first channel, counted from 1 (`{ "type": "pair",
+        /// "channel": 3 }` is 3/4).
+        channel: Channel,
+    },
+    /// Sets Main's Cue Out: the audio interface's output channels the cue
+    /// mix goes to, as a stereo pair.
+    SetCueOut {
+        /// The pair: its first channel, counted from 1.
+        channel: Channel,
     },
 
     /// Puts a new clip on an audio or MIDI track. Its data must match the
@@ -485,6 +525,16 @@ pub enum Command {
         /// The value, in the parameter's own units.
         value: f64,
     },
+    /// Sets the media a device plays, by content hash (WP-2.16): the
+    /// sampler's sample, which the media store holds like a clip's audio.
+    SetDeviceSample {
+        /// The device.
+        device: DeviceId,
+        /// The media, by content hash, or `null` to play none. The media
+        /// store is where the audio comes from; a device given media the
+        /// store doesn't hold is silent.
+        media: Option<ContentHash>,
+    },
     /// Sets where a device's sidechain listens: its sidechain section's
     /// Source, with its channel. The device must have a sidechain input.
     SetSidechainInput {
@@ -545,6 +595,11 @@ impl Command {
             Self::DeleteTimeSignatureChange { .. } => "Delete time signature change",
             Self::SetLoop { .. } => "Change loop",
             Self::SetLoopEnabled { .. } => "Switch loop",
+            Self::SetMetronomeEnabled { .. } => "Metronome",
+            Self::SetMetronomeCountIn { .. } => "Metronome Count-In",
+            Self::SetMetronomeSound { .. } => "Metronome Sound",
+            Self::SetMetronomeRhythm { .. } => "Metronome Rhythm",
+            Self::SetMetronomeOnlyWhileRecording { .. } => "Hear Metronome Only While Recording",
             Self::CreateTrack { .. } => "Create track",
             Self::DeleteTrack { .. } => "Delete track",
             Self::MoveTrack { .. } => "Move track",
@@ -559,9 +614,11 @@ impl Command {
             Self::SetSend { .. } => "Change send",
             Self::SetSendTap { .. } => "Switch Pre/Post",
             Self::SetSoloInPlace { .. } => "Switch Solo in Place",
-            Self::SetInput { .. } | Self::SetOutput { .. } | Self::SetMidiOutput { .. } => {
-                "Change \"Routing\""
-            }
+            Self::SetInput { .. }
+            | Self::SetOutput { .. }
+            | Self::SetMidiOutput { .. }
+            | Self::SetMainOut { .. }
+            | Self::SetCueOut { .. } => "Change \"Routing\"",
             Self::SetMonitor { .. } => "Change monitoring",
             Self::CreateClip { .. } => "Create clip",
             Self::DeleteClip { .. } => "Delete clip",
@@ -593,6 +650,10 @@ impl Command {
                 floating: false, ..
             } => "Dock Device",
             Self::SetDeviceParam { .. } => "Change parameter",
+            // WP-2.16. Live's undo name for loading a Simpler sample is to
+            // observe; Beatlayer's names the edit.
+            Self::SetDeviceSample { media: Some(_), .. } => "Load Sample",
+            Self::SetDeviceSample { media: None, .. } => "Clear Sample",
             // WP-2.19b, as Live 12.4.6 names them (observed); Listen's is to
             // observe.
             Self::SetSidechainInput { .. } => "Change \"Routing\"",
@@ -666,6 +727,28 @@ impl Document {
             }
             Command::SetLoopEnabled { enabled } => {
                 self.settings.arrangement_loop.enabled = *enabled;
+                Ok(())
+            }
+            Command::SetMetronomeEnabled { enabled } => {
+                self.settings.metronome.enabled = *enabled;
+                Ok(())
+            }
+            Command::SetMetronomeCountIn { count_in } => {
+                self.settings.metronome.count_in = *count_in;
+                Ok(())
+            }
+            Command::SetMetronomeSound { sound } => {
+                self.settings.metronome.sound = *sound;
+                Ok(())
+            }
+            Command::SetMetronomeRhythm { rhythm } => {
+                self.settings.metronome.rhythm = *rhythm;
+                Ok(())
+            }
+            Command::SetMetronomeOnlyWhileRecording {
+                only_while_recording,
+            } => {
+                self.settings.metronome.only_while_recording = *only_while_recording;
                 Ok(())
             }
             Command::CreateTrack {
@@ -787,6 +870,12 @@ impl Document {
             }
             Command::SetMidiOutput { track, to } => {
                 self.edit_routing(*track, |routing| routing.midi_output = *to)
+            }
+            Command::SetMainOut { channel } => {
+                self.set_main_channel(*channel, |routing| &mut routing.main_out)
+            }
+            Command::SetCueOut { channel } => {
+                self.set_main_channel(*channel, |routing| &mut routing.cue_out)
             }
             Command::CreateClip { track, clip } => self.create_clip(*track, clip),
             Command::DeleteClip { clip } => {
@@ -936,6 +1025,12 @@ impl Document {
                 }
                 Ok(())
             }
+            Command::SetDeviceSample { device, media } => {
+                if self.device_ref(*device)?.media != *media {
+                    self.device_mut(*device)?.media = *media;
+                }
+                Ok(())
+            }
             Command::SetSidechainInput { device, input } => {
                 self.edit_sidechain(*device, |s| s.input = *input)?;
                 self.check_routing(self.device_owner(*device)?)
@@ -1057,6 +1152,22 @@ impl Document {
         }
         self.track_mut(id)?.routing = routing;
         self.check_routing(id)
+    }
+
+    /// Sets Main's Main Out or Cue Out, as `slot` names it, one of the two.
+    fn set_main_channel(
+        &mut self,
+        channel: Channel,
+        slot: fn(&mut crate::track::Routing) -> &mut Channel,
+    ) -> Result<(), ModelError> {
+        let main = self.main_id();
+        let mut routing = self.track_ref(main)?.routing;
+        *slot(&mut routing) = channel;
+        if routing == self.track_ref(main)?.routing {
+            return Ok(());
+        }
+        self.track_mut(main)?.routing = routing;
+        self.check_routing(main)
     }
 
     /// Turns a mixer switch (solo or arm) on for `track` and off on every

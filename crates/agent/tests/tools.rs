@@ -6,6 +6,7 @@ use bl_agent::client::{Client, InProcess};
 use bl_agent::{Agent, EngineMessage, QuestionKind, guide};
 use bl_core::time::Ticks;
 use bl_engine::{Action, ScheduledCommand, TransportCommand};
+use bl_model::{CountIn, MetronomeRhythm, MetronomeSound};
 use bl_shell::Shell;
 use serde_json::{Value, json};
 
@@ -722,7 +723,7 @@ fn checkpoints_save_restore_as_one_undo_step_and_ask_before_removing() {
 /// Every transport command, the engine's and the loop's, by ID.
 /// The transport's commands: the engine's playback commands, the loop's
 /// (the document's), and the shell's Return to Start and state (WP-1.18).
-const TRANSPORT_COMMANDS: [&str; 11] = [
+const TRANSPORT_COMMANDS: [&str; 17] = [
     "transport.continue",
     "transport.insert_marker_to_playhead",
     "transport.locate",
@@ -732,6 +733,12 @@ const TRANSPORT_COMMANDS: [&str; 11] = [
     "transport.return_to_start",
     "transport.set_loop",
     "transport.set_loop_enabled",
+    "transport.set_metronome_count_in",
+    "transport.set_metronome_enabled",
+    "transport.set_metronome_only_while_recording",
+    "transport.set_metronome_rhythm",
+    "transport.set_metronome_sound",
+    "transport.set_recording",
     "transport.state",
     "transport.stop",
 ];
@@ -914,6 +921,41 @@ fn with_an_engine_transport_commands_go_to_its_queue_in_order() {
     // Nothing the transport did is in the undo history.
     let history = call(&mut client, "query", json!({ "path": "history" }));
     assert_eq!(history["undo"]["items"], json!([]));
+}
+
+#[test]
+fn the_metronome_settings_run_through_the_agent_api() {
+    // Spec: metronome R8
+    let mut client = headless(true);
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "transport.set_metronome_enabled", "args": { "enabled": true } },
+            { "command": "transport.set_metronome_count_in", "args": { "count_in": "2_bars" } },
+            { "command": "transport.set_metronome_sound", "args": { "sound": "wood" } },
+            { "command": "transport.set_metronome_rhythm", "args": { "rhythm": "1/8" } },
+            { "command": "transport.set_metronome_only_while_recording",
+              "args": { "only_while_recording": true } },
+        ] }),
+    );
+    let settings = client
+        .transport()
+        .shell
+        .editor()
+        .document()
+        .settings()
+        .metronome;
+    assert_eq!(
+        settings,
+        bl_model::MetronomeSettings {
+            enabled: true,
+            count_in: CountIn::Bars2,
+            sound: MetronomeSound::Wood,
+            rhythm: MetronomeRhythm::Eighth,
+            only_while_recording: true,
+        }
+    );
 }
 
 #[test]

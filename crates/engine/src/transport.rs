@@ -53,6 +53,14 @@ pub struct LocateArgs {
     pub position: Ticks,
 }
 
+/// The arguments of `transport.set_recording`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetRecordingArgs {
+    /// Whether the transport is recording.
+    pub recording: bool,
+}
+
 /// Adds the transport's commands to a registry.
 ///
 /// # Errors
@@ -97,6 +105,10 @@ pub fn command_from_args(id: &str, args: Value) -> Result<TransportCommand, RunE
             let LocateArgs { position } = serde_json::from_value(args).map_err(invalid)?;
             Ok(TransportCommand::Locate(position))
         }
+        Action::SetRecording => {
+            let SetRecordingArgs { recording } = serde_json::from_value(args).map_err(invalid)?;
+            Ok(TransportCommand::SetRecording(recording))
+        }
     }
 }
 
@@ -135,6 +147,8 @@ enum Action {
     Run(TransportCommand),
     /// [`TransportCommand::Locate`], at the position in [`LocateArgs`].
     Locate,
+    /// [`TransportCommand::SetRecording`], with [`SetRecordingArgs`].
+    SetRecording,
 }
 
 /// One registered command.
@@ -162,6 +176,7 @@ impl Entry {
         spec = match self.action {
             Action::Run(_) => spec.args::<NoArgs>(),
             Action::Locate => spec.args::<LocateArgs>(),
+            Action::SetRecording => spec.args::<SetRecordingArgs>(),
         };
         for &(shortcut, position) in self.keys {
             let binding = Binding::new(shortcut);
@@ -266,6 +281,15 @@ const ENTRIES: &[Entry] = &[
         description: "Moves the insert marker to the playhead: where the song is playing now, \
             or where playback stopped. Use it to start again later from the current point. It \
             changes nothing in the project.",
+    },
+    Entry {
+        id: "transport.set_recording",
+        action: Action::SetRecording,
+        label: "Set Recording",
+        contexts: &[Global],
+        keys: &[],
+        description: "Sets whether the transport is recording, so features like Hear Metronome \
+            Only While Recording know whether to sound.",
     },
 ];
 

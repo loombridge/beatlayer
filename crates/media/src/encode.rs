@@ -237,8 +237,18 @@ impl Quantiser {
             let d = t - 2.0 * shaper.dithers[0] + shaper.dithers[1];
             shaper.dithers = [t, shaper.dithers[0]];
             let v = scaled + d + 2.0 * shaper.errors[0] - shaper.errors[1];
-            let y = v.round().clamp(-self.scale, self.scale - 1.0);
-            shaper.errors = [v - y, shaper.errors[0]];
+            let rounded = v.round();
+            let y = rounded.clamp(-self.scale, self.scale - 1.0);
+            // Only the rounding error is fed back. A clipped sample's whole
+            // overshoot must not be: a run of them would grow the error
+            // without bound and leave full-scale noise ringing on after the
+            // clipping ends. A non-finite sample keeps out of the loop too,
+            // so it stays the 0 it is without dither.
+            let error = v - rounded;
+            shaper.errors = [
+                if error.is_finite() { error } else { 0.0 },
+                shaper.errors[0],
+            ];
             return y as i32;
         }
         let noise = self.noise();
@@ -962,6 +972,32 @@ mod tests {
                 (f64::from(shaped) - f64::from(rounded)).abs() <= 6.5,
                 "at {i}: {shaped} against {rounded}"
             );
+        }
+    }
+
+    /// Spec: export R7 (WP-2.27). Samples past full scale clip; a run of
+    /// them must not grow the shaper's error, or the silence after it comes
+    /// out at full scale for hours. A non-finite sample, which quantises to
+    /// the same 0 it does without dither, must leave the loop clean too.
+    #[test]
+    fn a_clipped_run_leaves_the_noise_shaper_stable() {
+        let mut q = Quantiser::new(16, Dither::NoiseShaped, 1, DITHER_SEED);
+        for _ in 0..48_000 {
+            assert_eq!(q.quantise(1.5), i32::from(i16::MAX));
+        }
+        for i in 0..4_800 {
+            let sample = q.quantise(0.0);
+            assert!(
+                sample.abs() <= 8,
+                "silence {i} samples past the clipped run: {sample}"
+            );
+        }
+        // A non-finite sample quantises to the same 0 it does without
+        // dither, and it leaves the loop clean too.
+        assert_eq!(q.quantise(f32::NAN), 0);
+        for i in 0..100 {
+            let sample = q.quantise(0.0);
+            assert!(sample.abs() <= 8, "silence {i} after the NaN: {sample}");
         }
     }
 

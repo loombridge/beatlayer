@@ -353,7 +353,7 @@ impl MixerUi {
             );
             let label = activator_label(column);
             if let Some(span) = layout.in_out
-                && let Some(section) = bl_shell::routing::in_out(doc, track)
+                && let Some(section) = bl_shell::routing::in_out(doc, track, shell.interface())
             {
                 let parts = crate::in_out::InOutParts {
                     theme,

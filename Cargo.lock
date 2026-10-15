@@ -705,6 +705,7 @@ name = "bl-assistant"
 version = "0.0.0"
 dependencies = [
  "bl-commands",
+ "bl-model",
  "keyring",
  "rustls",
  "rustls-native-certs",
@@ -909,14 +910,22 @@ dependencies = [
  "bl-rt",
  "bl-test-clap",
  "bl-test-vst3",
+ "block2 0.6.2",
  "clack-extensions",
  "clack-host",
  "libloading 0.8.9",
  "lspk-plugin",
+ "objc2 0.6.5",
+ "objc2-audio-toolbox",
+ "objc2-avf-audio",
+ "objc2-core-audio-types",
+ "objc2-foundation 0.3.2",
  "rtrb",
  "serde",
  "serde_json",
  "vst3",
+ "windows-sys 0.52.0",
+ "x11rb",
 ]
 
 [[package]]
@@ -945,6 +954,7 @@ name = "bl-shell"
 version = "0.0.0"
 dependencies = [
  "bl-analysis",
+ "bl-assistant",
  "bl-audio-io",
  "bl-commands",
  "bl-core",
@@ -1005,6 +1015,8 @@ dependencies = [
 name = "bl-ui"
 version = "0.0.0"
 dependencies = [
+ "bl-assistant",
+ "bl-audio-io",
  "bl-commands",
  "bl-core",
  "bl-devices",
@@ -3100,6 +3112,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6948501a91121d6399b79abaa33a8aa4ea7857fe019f341b8c23ad6e81b79b08"
 dependencies = [
  "bitflags 2.13.2",
+ "block2 0.6.2",
  "libc",
  "objc2 0.6.5",
  "objc2-core-audio",

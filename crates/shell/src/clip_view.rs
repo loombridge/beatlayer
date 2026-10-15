@@ -1,6 +1,6 @@
 //! The Clip View's note editing (WP-2.3): the MIDI Note Editor's notes, the
-//! notes selected in it, and the commands that draw, delete, move and
-//! resize them.
+//! notes selected in it, the commands that draw, delete, move, resize and
+//! quantise them, and the view's Quantize settings.
 //!
 //! A note has no ID in the document, so the editor and the commands name one
 //! by its place in the clip's notes in order: by start, then pitch (see
@@ -18,11 +18,12 @@
 
 use std::collections::BTreeSet;
 
-use bl_core::time::Ticks;
-use bl_model::{ClipData, ClipId, Command, Document, Editor, MidiData, Note};
+use bl_core::time::{Ticks, TimeSignature, TimeSignatureMap};
+use bl_model::{ClipData, ClipFolds, ClipId, Command, Document, Editor, MidiData, Note};
 use bl_shell_spec::notes::{
     self as ids, AddNoteArgs, ClipViewState, DeleteNotesArgs, MoveNotesArgs, NoteEditResult,
-    NoteSelectMode, ResizeNotesArgs, SelectNotesArgs,
+    NoteField, NoteSelectMode, QuantizeNotesArgs, QuantizeSettings, QuantizeSettingsArgs,
+    QuantizeTarget, RampValueArgs, ResizeNotesArgs, SelectNotesArgs, SetValueArgs,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -30,6 +31,7 @@ use serde_json::Value;
 
 use crate::arrangement::ArrangementView;
 use crate::arrangement::editing::{EditFailure, transaction};
+use crate::arrangement::grid::{Step, snap};
 
 fn invalid(message: impl Into<String>) -> EditFailure {
     EditFailure::InvalidArgs(message.into())
@@ -95,19 +97,71 @@ pub fn resize_limit(notes: &[Note], shortest: Ticks) -> Ticks {
     -room
 }
 
-/// What the Clip View shows: whether it's open, Draw Mode, and the notes
-/// selected in the clip its note editor shows (WP-2.3).
+/// The evenly spaced values a ramp gives `count` notes: `from` at the first,
+/// `to` at the last, and those between spread evenly, whole numbers for the
+/// whole-number fields. One note takes `from`.
+#[must_use]
+pub fn ramp_values(field: NoteField, from: f64, to: f64, count: usize) -> Vec<f64> {
+    match count {
+        0 => Vec::new(),
+        1 => vec![from],
+        n => (0..n)
+            .map(|i| {
+                let at = from + (to - from) * i as f64 / (n - 1) as f64;
+                if field.whole() { at.round() } else { at }
+            })
+            .collect(),
+    }
+}
+
+/// A value for `field`, checked against the field's range and its
+/// whole-number rule.
+fn value_of(field: NoteField, value: f64) -> Result<f64, EditFailure> {
+    let (low, high) = field.range();
+    if !(low..=high).contains(&value) {
+        return Err(invalid(format!(
+            "`{}` must be from {low} to {high}",
+            field.name()
+        )));
+    }
+    if field.whole() && value.fract() != 0.0 {
+        return Err(invalid(format!("`{}` takes whole numbers", field.name())));
+    }
+    Ok(value)
+}
+
+/// Sets a note's `field` to `value`, which [`value_of`] checked.
+fn set_note_value(note: &mut Note, field: NoteField, value: f64) {
+    match field {
+        NoteField::Velocity => note.velocity = value as u8,
+        NoteField::ReleaseVelocity => note.release_velocity = value as u8,
+        NoteField::Chance => note.probability = value,
+        NoteField::VelocityDeviation => note.velocity_deviation = value as i8,
+    }
+}
+
+/// What the Clip View shows: whether it's open, Draw Mode, the lane's value,
+/// the folded editors, the notes selected in the clip its note editor shows
+/// (WP-2.3), and its Quantize settings.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ClipView {
     /// Whether the Clip View shows in the detail area.
     visible: bool,
     /// Whether Draw Mode is on (B).
     draw_mode: bool,
+    /// Which value the lane under the note editor shows and edits.
+    lane: NoteField,
+    /// The clips whose note editor is folded to the rows that hold notes
+    /// (F). Saved with the set, like the floating devices' windows.
+    folds: ClipFolds,
     /// The clip whose notes are selected, and their places in its notes in
     /// order. The selection holds only while the note editor shows that
     /// clip.
     selected_clip: Option<ClipId>,
     selected: Vec<u32>,
+    /// What Quantize uses when its arguments leave them out. View state,
+    /// like Draw Mode: not part of the set.
+    quantize: QuantizeSettings,
 }
 
 impl ClipView {
@@ -123,6 +177,44 @@ impl ClipView {
         self.draw_mode
     }
 
+    /// Which value the lane under the note editor shows and edits.
+    #[must_use]
+    pub fn lane(&self) -> NoteField {
+        self.lane
+    }
+
+    /// Chooses the value the lane shows and edits.
+    pub fn set_lane(&mut self, lane: NoteField) {
+        self.lane = lane;
+    }
+
+    /// The clips whose note editor is folded to the rows that hold notes.
+    #[must_use]
+    pub fn folds(&self) -> &ClipFolds {
+        &self.folds
+    }
+
+    /// Replaces the folded editors, as opening a set does.
+    pub fn set_folds(&mut self, folds: ClipFolds) {
+        self.folds = folds;
+    }
+
+    /// Whether the note editor shows only the rows that hold notes for
+    /// `clip`.
+    #[must_use]
+    pub fn is_folded(&self, clip: ClipId) -> bool {
+        self.folds.contains(&clip)
+    }
+
+    /// Folds the note editor to the rows that hold notes, or unfolds it.
+    pub fn set_folded(&mut self, clip: ClipId, folded: bool) {
+        if folded {
+            self.folds.insert(clip);
+        } else {
+            self.folds.remove(&clip);
+        }
+    }
+
     /// Shows the Clip View, or hides it.
     pub fn toggle(&mut self) {
         self.visible = !self.visible;
@@ -131,6 +223,31 @@ impl ClipView {
     /// Switches Draw Mode on or off.
     pub fn toggle_draw_mode(&mut self) {
         self.draw_mode = !self.draw_mode;
+    }
+
+    /// The Quantize settings `note.quantize` uses when its arguments leave
+    /// them out.
+    #[must_use]
+    pub fn quantize(&self) -> QuantizeSettings {
+        self.quantize
+    }
+
+    /// Changes the Quantize settings: the fields given, keeping the rest.
+    pub fn set_quantize(
+        &mut self,
+        grid: Option<Ticks>,
+        target: Option<QuantizeTarget>,
+        amount: Option<u8>,
+    ) {
+        if let Some(grid) = grid {
+            self.quantize.grid = Some(grid);
+        }
+        if let Some(target) = target {
+            self.quantize.target = target;
+        }
+        if let Some(amount) = amount {
+            self.quantize.amount = amount;
+        }
     }
 
     /// The clip the note editor shows: the Arrangement's first selected
@@ -163,11 +280,14 @@ impl ClipView {
     /// What the view shows, as a command reports it.
     #[must_use]
     pub fn state(&self, doc: &Document, arrangement: &ArrangementView) -> ClipViewState {
+        let clip = self.shown_clip(doc, arrangement);
         ClipViewState {
             visible: self.visible,
             draw_mode: self.draw_mode,
-            clip: self.shown_clip(doc, arrangement),
+            clip,
             selected: self.selected_notes(doc, arrangement).to_vec(),
+            lane: self.lane,
+            folded: clip.is_some_and(|clip| self.is_folded(clip)),
         }
     }
 
@@ -266,6 +386,9 @@ pub fn label(id: &str) -> &'static str {
         ids::DELETE_NOTES => "Delete notes",
         ids::MOVE_NOTES => "Move notes",
         ids::RESIZE_NOTES => "Resize notes",
+        ids::QUANTIZE_NOTES => "Quantize notes",
+        ids::SET_VALUE => "Set note values",
+        ids::RAMP_VALUE => "Ramp note values",
         _ => "Select notes",
     }
 }
@@ -442,8 +565,204 @@ pub fn run(
                 undo_step: recorded,
             }))
         }
+        ids::QUANTIZE_SETTINGS => {
+            let QuantizeSettingsArgs {
+                grid,
+                target,
+                amount,
+            } = parse(args)?;
+            check_grid(grid)?;
+            check_amount(amount)?;
+            view.set_quantize(grid, target, amount);
+            Ok(to_value(&view.quantize()))
+        }
+        ids::QUANTIZE_NOTES => {
+            let QuantizeNotesArgs {
+                clip,
+                notes,
+                grid,
+                target,
+                amount,
+            } = parse(args)?;
+            check_grid(grid)?;
+            check_amount(amount)?;
+            let (clip, midi) = clip_and_data(doc, view, arrangement, clip)?;
+            let ordered = notes_in_order(&midi);
+            let places = places_or_selected(view, doc, arrangement, clip, notes, ordered.len())?;
+            let settings = view.quantize();
+            let grid = grid
+                .or(settings.grid)
+                .unwrap_or_else(|| arrangement.grid_ticks(doc));
+            let target = target.unwrap_or(settings.target);
+            let amount = amount.unwrap_or(settings.amount);
+            let signatures = &doc.settings().time_signatures;
+            let clip_start = doc.clip(clip).map_or(Ticks::ZERO, |value| value.start);
+            let step = quantize_step(grid, signatures.signature_at(clip_start));
+            let (after, recorded) = transaction(editor, "Quantize notes", |editor| {
+                let mut quantized = ordered.clone();
+                let mut moved = Vec::with_capacity(places.len());
+                for place in &places {
+                    let note = quantize_note(
+                        quantized[*place as usize],
+                        target,
+                        step,
+                        signatures,
+                        amount,
+                    )?;
+                    quantized[*place as usize] = note;
+                    moved.push(note);
+                }
+                quantized.sort_by_key(|note| (note.start, note.key));
+                let places_after: Vec<u32> = moved
+                    .iter()
+                    .map(|note| place_of(&quantized, *note))
+                    .collect();
+                set_notes(editor, clip, &midi, quantized)?;
+                Ok(places_after)
+            })?;
+            view.select(clip, after.clone());
+            Ok(to_value(&NoteEditResult {
+                notes: after.clone(),
+                selected: after,
+                undo_step: recorded,
+            }))
+        }
+        ids::SET_VALUE => {
+            let SetValueArgs {
+                clip,
+                notes,
+                field,
+                value,
+            } = parse(args)?;
+            let (clip, midi) = clip_and_data(doc, view, arrangement, clip)?;
+            let ordered = notes_in_order(&midi);
+            let places = places_or_selected(view, doc, arrangement, clip, notes, ordered.len())?;
+            let value = value_of(field, value)?;
+            let (after, recorded) = transaction(editor, label(ids::SET_VALUE), |editor| {
+                let mut edited = ordered.clone();
+                for place in &places {
+                    set_note_value(&mut edited[*place as usize], field, value);
+                }
+                set_notes(editor, clip, &midi, edited)?;
+                Ok(places.clone())
+            })?;
+            view.select(clip, after.clone());
+            Ok(to_value(&NoteEditResult {
+                notes: after.clone(),
+                selected: after,
+                undo_step: recorded,
+            }))
+        }
+        ids::RAMP_VALUE => {
+            let RampValueArgs {
+                clip,
+                notes,
+                field,
+                from,
+                to,
+            } = parse(args)?;
+            let (clip, midi) = clip_and_data(doc, view, arrangement, clip)?;
+            let ordered = notes_in_order(&midi);
+            let places = places_or_selected(view, doc, arrangement, clip, notes, ordered.len())?;
+            let from = value_of(field, from)?;
+            let to = value_of(field, to)?;
+            // The ramp runs in the clip's note order, whatever order the
+            // places came in.
+            let mut places = places;
+            places.sort_unstable();
+            let values = ramp_values(field, from, to, places.len());
+            let (after, recorded) = transaction(editor, label(ids::RAMP_VALUE), |editor| {
+                let mut edited = ordered.clone();
+                for (place, value) in places.iter().zip(&values) {
+                    set_note_value(&mut edited[*place as usize], field, *value);
+                }
+                set_notes(editor, clip, &midi, edited)?;
+                Ok(places.clone())
+            })?;
+            view.select(clip, after.clone());
+            Ok(to_value(&NoteEditResult {
+                notes: after.clone(),
+                selected: after,
+                undo_step: recorded,
+            }))
+        }
         other => Err(invalid(format!("`{other}` isn't a note command"))),
     }
+}
+
+/// Checks a quantise grid: a spacing of ticks, always positive.
+fn check_grid(grid: Option<Ticks>) -> Result<(), EditFailure> {
+    match grid {
+        Some(grid) if grid <= Ticks::ZERO => {
+            Err(invalid("`grid` must be a positive number of ticks"))
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Checks a quantise amount: a percentage from 0 to 100.
+fn check_amount(amount: Option<u8>) -> Result<(), EditFailure> {
+    match amount {
+        Some(amount) if amount > 100 => Err(invalid("`amount` must be from 0 to 100 percent")),
+        _ => Ok(()),
+    }
+}
+
+/// The quantise grid's step for a spacing of `grid` ticks under
+/// `signature`: a spacing of whole bars counts bars from 1.1.1, as the
+/// editing grid's bar steps do; anything else is a spacing of ticks laid
+/// out inside each bar.
+fn quantize_step(grid: Ticks, signature: TimeSignature) -> Step {
+    let bar = signature.bar_length();
+    let bars =
+        (grid >= bar && grid.get().rem_euclid(bar.get()) == 0).then(|| grid.get() / bar.get());
+    Step {
+        ticks: grid,
+        bars,
+        note: None,
+        triplet: false,
+    }
+}
+
+/// One note quantised: its start, or its end with `target`
+/// [`QuantizeTarget::NoteEnd`], moves `amount` percent of the way to the
+/// nearest grid line. The other end stays where it is; an end that would
+/// leave a note shorter than a tick is refused.
+fn quantize_note(
+    note: Note,
+    target: QuantizeTarget,
+    step: Step,
+    signatures: &TimeSignatureMap,
+    amount: u8,
+) -> Result<Note, EditFailure> {
+    let mut quantized = note;
+    match target {
+        QuantizeTarget::NoteStart => {
+            quantized.start = toward(note.start, snap(signatures, step, note.start), amount);
+        }
+        QuantizeTarget::NoteEnd => {
+            let end = note.start + note.length;
+            let moved = toward(end, snap(signatures, step, end), amount);
+            quantized.length = moved - note.start;
+            if quantized.length <= Ticks::ZERO {
+                return Err(refused("a note would be shorter than a tick"));
+            }
+        }
+    }
+    Ok(quantized)
+}
+
+/// `at` moved `amount` percent of the way toward `to`, rounded to the
+/// nearest tick.
+fn toward(at: Ticks, to: Ticks, amount: u8) -> Ticks {
+    let distance = i128::from(to.get()) - i128::from(at.get());
+    let rounded = (distance * i128::from(amount) + 50).div_euclid(100);
+    let moved = i64::try_from(rounded).unwrap_or(if rounded.is_negative() {
+        i64::MIN
+    } else {
+        i64::MAX
+    });
+    Ticks(at.get().saturating_add(moved))
 }
 
 /// The note's start after moving `by` ticks, if it stays inside the clip's

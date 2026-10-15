@@ -223,6 +223,7 @@ fn play(
     let backend = NullBackend::with_options(NullOptions {
         pacing: Pacing::RealTime,
         frame_limit: Some(play_frames),
+        channels: 2,
     });
     let request = StreamRequest {
         output: Some(PortRequest::default()),

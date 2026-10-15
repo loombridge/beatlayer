@@ -36,6 +36,11 @@ pub const DELETE_NOTES: &str = "note.delete";
 pub const MOVE_NOTES: &str = "note.move";
 /// `note.resize`: move notes' ends.
 pub const RESIZE_NOTES: &str = "note.resize";
+/// `note.set_value`: set one value of notes (velocity, release velocity,
+/// chance, or velocity deviation).
+pub const SET_VALUE: &str = "note.set_value";
+/// `note.ramp_value`: spread evenly spaced values across notes.
+pub const RAMP_VALUE: &str = "note.ramp_value";
 
 /// Every command [`register`] adds, so a host knows which IDs to send to
 /// `bl-shell`'s `Shell::run`.
@@ -45,6 +50,8 @@ pub const IDS: &[&str] = &[
     DELETE_NOTES,
     MOVE_NOTES,
     RESIZE_NOTES,
+    SET_VALUE,
+    RAMP_VALUE,
 ];
 
 /// Whether `id` is one of the Clip View's note-editing commands.
@@ -66,6 +73,102 @@ pub enum NoteSelectMode {
     Replace,
     /// Select each note that isn't selected and deselect each that is.
     Toggle,
+}
+
+/// Which of a note's editable values the lane shows and the value commands
+/// (WP-2.3) set.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[schemars(
+    description = "Which of a note's values the Clip View's lane shows and edits: `velocity` \
+                   (1 to 127), `release_velocity` (1 to 127), `chance` (0 to 1), or \
+                   `velocity_deviation` (-127 to 127)."
+)]
+pub enum NoteField {
+    /// The velocity the note sounds at, 1 to 127.
+    #[default]
+    Velocity,
+    /// The note-off velocity, 1 to 127.
+    ReleaseVelocity,
+    /// The chance the note plays, 0 to 1.
+    Chance,
+    /// How far the velocity may deviate randomly, -127 to 127.
+    VelocityDeviation,
+}
+
+impl NoteField {
+    /// Every field, in the lane's menu's order.
+    pub const ALL: [Self; 4] = [
+        Self::Velocity,
+        Self::ReleaseVelocity,
+        Self::Chance,
+        Self::VelocityDeviation,
+    ];
+
+    /// The field's range: its lowest and highest value.
+    #[must_use]
+    pub const fn range(self) -> (f64, f64) {
+        match self {
+            Self::Velocity | Self::ReleaseVelocity => (1.0, 127.0),
+            Self::Chance => (0.0, 1.0),
+            Self::VelocityDeviation => (-127.0, 127.0),
+        }
+    }
+
+    /// Whether the field takes whole numbers only.
+    #[must_use]
+    pub const fn whole(self) -> bool {
+        !matches!(self, Self::Chance)
+    }
+
+    /// The field's name, as the commands and the lane call it.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Velocity => "velocity",
+            Self::ReleaseVelocity => "release velocity",
+            Self::Chance => "chance",
+            Self::VelocityDeviation => "velocity deviation",
+        }
+    }
+}
+
+/// Arguments of `note.set_value`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetValueArgs {
+    /// The MIDI clip. Left out, the one the Clip View shows (the
+    /// Arrangement's selected clip).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// The notes, by their place in the clip's notes in order (by start,
+    /// then pitch). Left out, the selected notes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<Vec<u32>>,
+    /// Which value to set.
+    pub field: NoteField,
+    /// The value, within the field's range.
+    pub value: f64,
+}
+
+/// Arguments of `note.ramp_value`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RampValueArgs {
+    /// The MIDI clip. Left out, the one the Clip View shows (the
+    /// Arrangement's selected clip).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// The notes, by their place in the clip's notes in order (by start,
+    /// then pitch). Left out, the selected notes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes: Option<Vec<u32>>,
+    /// Which value to ramp.
+    pub field: NoteField,
+    /// The value the first note takes.
+    pub from: f64,
+    /// The value the last note takes.
+    pub to: f64,
 }
 
 /// Arguments of `clip_view.select_notes`.
@@ -170,7 +273,7 @@ pub struct NoteEditResult {
 }
 
 /// What the Clip View shows: which clip its MIDI Note Editor is editing,
-/// and the notes selected in it.
+/// the notes selected in it, and the lane's setting.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ClipViewState {
     /// Whether the Clip View shows in the detail area.
@@ -183,6 +286,11 @@ pub struct ClipViewState {
     /// The selected notes, by their place in the clip's notes in order (by
     /// start, then pitch).
     pub selected: Vec<u32>,
+    /// Which value the lane under the note editor shows and edits.
+    pub lane: NoteField,
+    /// Whether the note editor shows only the rows that hold notes (Fold,
+    /// F).
+    pub folded: bool,
 }
 
 /// Adds the Clip View's note-editing commands to a registry.
@@ -267,6 +375,32 @@ fn specs() -> Vec<CommandSpec> {
              step.",
         )
         .args::<ResizeNotesArgs>(),
+        edit(
+            SET_VALUE,
+            "Set Note Value",
+            Permission::Edit,
+            "Sets one value of notes (`notes`, or the selected notes) to `value`, as dragging \
+             a note's stem in the Clip View's lane does: `field` is `velocity` (whole numbers \
+             1 to 127), `release_velocity` (whole numbers 1 to 127), `chance` (0 to 1), or \
+             `velocity_deviation` (whole numbers -127 to 127). Nothing changes if `value` is \
+             outside the field's range. The edited notes stay selected, and the whole drag is \
+             one undo step.",
+        )
+        .args::<SetValueArgs>(),
+        edit(
+            RAMP_VALUE,
+            "Ramp Note Values",
+            Permission::Edit,
+            "Sets one value of notes (`notes`, or the selected notes) as a ramp, as dragging \
+             across several notes in the Clip View's lane does: the first note in the clip's \
+             order takes `from`, the last takes `to`, and those between take values evenly \
+             spaced between them (whole numbers for the whole-number fields). `field` takes \
+             the same fields and ranges as `note.set_value`; nothing changes if `from` or `to` \
+             is out of range. \
+             One note takes `from`. The edited notes stay selected, and the whole drag is one \
+             undo step.",
+        )
+        .args::<RampValueArgs>(),
     ]
 }
 

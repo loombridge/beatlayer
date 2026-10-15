@@ -318,12 +318,233 @@ fn note_edits_are_registered_with_their_classes() {
     for id in ids::IDS {
         assert!(registry.contains(id), "{id}");
     }
+    for id in [
+        bl_shell::commands::VIEW_FOLD_NOTES,
+        bl_shell::commands::VIEW_LANE,
+    ] {
+        assert!(registry.contains(id), "{id}");
+    }
     let class = |id: &str| registry.get(id).unwrap().permission;
     assert_eq!(class(ids::ADD_NOTE), Some(Permission::Edit));
     assert_eq!(class(ids::MOVE_NOTES), Some(Permission::Edit));
     assert_eq!(class(ids::RESIZE_NOTES), Some(Permission::Edit));
+    assert_eq!(class(ids::SET_VALUE), Some(Permission::Edit));
+    assert_eq!(class(ids::RAMP_VALUE), Some(Permission::Edit));
     assert_eq!(class(ids::DELETE_NOTES), Some(Permission::Destructive));
     assert_eq!(class(ids::SELECT_NOTES), Some(Permission::Read));
+    assert_eq!(
+        class(bl_shell::commands::VIEW_FOLD_NOTES),
+        Some(Permission::Read)
+    );
+    assert_eq!(class(bl_shell::commands::VIEW_LANE), Some(Permission::Read));
+}
+
+#[test]
+fn setting_a_notes_values_is_one_step() {
+    // Spec: piano-roll R14. Dragging a stem in the lane sets that note's
+    // value, and the agent API runs the same command.
+    let mut song = song(vec![
+        song_note(48, 0, SIXTEENTH),
+        song_note(60, BAR, QUARTER),
+        song_note(64, 2 * BAR, QUARTER),
+    ]);
+    let result = song.one_step(
+        ids::SET_VALUE,
+        json!({ "notes": [0], "field": "velocity", "value": 64 }),
+    );
+    assert_eq!(song.notes()[0].velocity, 64);
+    assert_eq!(
+        song.notes()[1..]
+            .iter()
+            .map(|note| note.velocity)
+            .collect::<Vec<_>>(),
+        [100, 100],
+        "nothing else changed"
+    );
+    assert_eq!(result.notes, [0], "the note stays selected");
+    // With no `notes`, the command acts on the selection, as the lane's
+    // stem drag after a click does.
+    song.one_step(ids::SET_VALUE, json!({ "field": "chance", "value": 0.25 }));
+    assert_eq!(song.notes()[0].probability, 0.25);
+    assert_eq!(
+        song.notes()[1].probability,
+        1.0,
+        "the other notes keep their chance"
+    );
+    // Release velocity and velocity deviation take whole numbers.
+    song.one_step(
+        ids::SET_VALUE,
+        json!({ "notes": [1], "field": "release_velocity", "value": 32 }),
+    );
+    song.one_step(
+        ids::SET_VALUE,
+        json!({ "notes": [1], "field": "velocity_deviation", "value": -10 }),
+    );
+    assert_eq!(song.notes()[1].release_velocity, 32);
+    assert_eq!(song.notes()[1].velocity_deviation, -10);
+}
+
+#[test]
+fn a_ramp_sets_evenly_spaced_values() {
+    // Spec: piano-roll R14. Dragging across several notes ramps their
+    // values, from the first note to the last.
+    let mut song = song(vec![
+        song_note(48, 0, SIXTEENTH),
+        song_note(60, BAR, QUARTER),
+        song_note(64, 2 * BAR, QUARTER),
+    ]);
+    let result = song.one_step(
+        ids::RAMP_VALUE,
+        json!({ "notes": [0, 1, 2], "field": "velocity", "from": 20, "to": 120 }),
+    );
+    assert_eq!(
+        song.notes()
+            .iter()
+            .map(|note| note.velocity)
+            .collect::<Vec<_>>(),
+        [20, 70, 120],
+        "evenly spaced from the first note to the last"
+    );
+    assert_eq!(result.notes, [0, 1, 2], "all of them stay selected");
+    // Chance is a fraction, so its ramp is too.
+    let values = song.one_step(
+        ids::RAMP_VALUE,
+        json!({ "field": "chance", "from": 0.0, "to": 1.0 }),
+    );
+    assert_eq!(values.notes, [0, 1, 2]);
+    let chances: Vec<f64> = song.notes().iter().map(|note| note.probability).collect();
+    assert_eq!(chances, [0.0, 0.5, 1.0]);
+    // One note takes the ramp's first value.
+    song.one_step(
+        ids::RAMP_VALUE,
+        json!({ "notes": [1], "field": "velocity", "from": 33, "to": 99 }),
+    );
+    assert_eq!(song.notes()[1].velocity, 33);
+}
+
+#[test]
+fn a_value_out_of_range_or_fractional_changes_nothing() {
+    // Spec: piano-roll R14 (the invalid-argument rows).
+    let mut song = song(vec![song_note(60, 0, QUARTER), song_note(64, BAR, QUARTER)]);
+    let before = song.doc().clone();
+    let steps = song.steps();
+    for args in [
+        json!({ "notes": [0], "field": "velocity", "value": 0 }),
+        json!({ "notes": [0], "field": "velocity", "value": 128 }),
+        json!({ "notes": [0], "field": "velocity", "value": 99.5 }),
+        json!({ "notes": [0], "field": "release_velocity", "value": 0 }),
+        json!({ "notes": [0], "field": "chance", "value": 1.5 }),
+        json!({ "notes": [0], "field": "chance", "value": -0.1 }),
+        json!({ "notes": [0], "field": "velocity_deviation", "value": 128 }),
+        json!({ "notes": [0, 1], "field": "velocity", "from": 20, "to": 128 }),
+        json!({ "notes": [0], "field": "velocity", "value": 60, "nope": 1 }),
+    ] {
+        let id = if args.get("from").is_some() {
+            ids::RAMP_VALUE
+        } else {
+            ids::SET_VALUE
+        };
+        assert!(
+            song.shell.run(id, args.clone()).is_err(),
+            "{args} is refused"
+        );
+        assert_eq!(*song.doc(), before, "{args} changes nothing");
+        assert_eq!(song.steps(), steps, "{args} records no step");
+    }
+}
+
+#[test]
+fn the_lane_and_fold_are_view_switches() {
+    // Spec: piano-roll R14, R15. The lane's value and the fold are view
+    // state: no undo step, and the set isn't dirtied.
+    let mut song = song(vec![song_note(60, 0, QUARTER)]);
+    let steps = song.steps();
+    let state = song.view(bl_shell::commands::VIEW_LANE, json!({ "lane": "chance" }));
+    assert_eq!(state.lane, bl_shell::note_commands::NoteField::Chance);
+    assert_eq!(song.shell.clip_view().lane().name(), "chance");
+    // Fold (F, View ▸ Fold to Notes) folds the clip the editor shows.
+    let state = song.view(bl_shell::commands::VIEW_FOLD_NOTES, json!({}));
+    assert!(state.folded);
+    assert!(song.shell.clip_view().is_folded(song.clip));
+    // `folded` says which way, and left out it switches.
+    let state = song.view(
+        bl_shell::commands::VIEW_FOLD_NOTES,
+        json!({ "folded": true }),
+    );
+    assert!(state.folded, "asked for folded, stays folded");
+    let state = song.view(bl_shell::commands::VIEW_FOLD_NOTES, json!({}));
+    assert!(!state.folded, "and switches back");
+    assert_eq!(state.lane, bl_shell::note_commands::NoteField::Chance);
+    assert_eq!(song.steps(), steps, "neither is an undo step");
+    assert!(!song.shell.is_dirty(), "and neither dirties the set");
+}
+
+#[test]
+fn a_folded_editor_survives_a_set_round_trip() {
+    // Spec: piano-roll R15. Folding is saved with the set beside the song,
+    // like the floating devices' windows, and a new set starts unfolded.
+    let mut editor = factory_default_set();
+    let tracks: Vec<TrackId> = editor.document().top_level().collect();
+    let clip: ClipId = editor.new_id();
+    editor
+        .apply(Command::CreateClip {
+            track: tracks[0],
+            clip: Clip::new(
+                clip,
+                Ticks::ZERO,
+                Ticks(4 * BAR),
+                ClipData::Midi(MidiData::new([song_note(60, 0, QUARTER)])),
+            ),
+        })
+        .unwrap();
+    let dir = std::env::temp_dir().join(format!(
+        "bl-shell-folds-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("Folds.blset");
+    let mut set = bl_shell::files::ProjectFiles::new();
+    set.save(&path, &editor).unwrap();
+
+    let mut shell = Shell::new(
+        Preferences::default(),
+        None,
+        AudioHost::null(Default::default()),
+        Box::new(bl_shell::files::ProjectFiles::new()),
+    );
+    shell
+        .run("set.open", json!({ "path": path.to_string_lossy() }))
+        .unwrap();
+    assert!(
+        shell.editor().document().clip(clip).is_some(),
+        "the clip is there"
+    );
+    shell
+        .run(
+            bl_shell::commands::VIEW_FOLD_NOTES,
+            json!({ "clip": clip, "folded": true }),
+        )
+        .unwrap();
+    assert!(shell.clip_view().is_folded(clip));
+    assert!(!shell.is_dirty(), "folding doesn't dirty the set");
+    shell.run("set.save", json!({})).unwrap();
+    shell.run("set.new", json!({})).unwrap();
+    assert!(
+        shell.clip_view().folds().is_empty(),
+        "a new set starts unfolded"
+    );
+    shell
+        .run("set.open", json!({ "path": path.to_string_lossy() }))
+        .unwrap();
+    assert!(
+        shell.clip_view().is_folded(clip),
+        "the reopened set shows the folded editor"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 const QUARTER: i64 = Ticks::QUARTER.get();

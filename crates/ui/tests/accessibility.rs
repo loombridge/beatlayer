@@ -1231,6 +1231,9 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("note.delete", Exception(note_editor)),
         ("note.move", Exception(note_editor)),
         ("note.resize", Exception(note_editor)),
+        ("note.set_value", Exception(note_editor)),
+        ("note.ramp_value", Exception(note_editor)),
+        ("view.lane", Exception(note_editor)),
         // The Device View (WP-2.4): Enter on a title bar's controls.
         (
             "device.select",

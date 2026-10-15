@@ -18,11 +18,12 @@
 
 use bl_dsp::Oversampler;
 use bl_engine::{DeviceType, NodeConfig, Registry};
+use bl_model::Device;
 use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
 use bl_model::param::db_to_gain;
 use bl_model::{DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
 
-use crate::framework::{Audio, NativeDevice, ParamBank, add};
+use crate::framework::{Audio, DelayLine, NativeDevice, ParamBank, add};
 
 /// Brickwall's device type.
 pub const LIMITER: &str = "beatlayer.brickwall";
@@ -56,6 +57,9 @@ const LINK_INDEX: usize = 7;
 
 /// The look-ahead times the chooser offers, in seconds.
 const LOOKAHEAD_SECONDS: [f64; 3] = [0.0015, 0.003, 0.006];
+
+/// The Lookahead choice a device without a saved value starts at: 3 ms.
+const DEFAULT_LOOKAHEAD: usize = 1;
 
 /// The Ceiling Mode choices, by their indices.
 const MODE_SOFT_CLIP: usize = 1;
@@ -138,38 +142,13 @@ pub fn register(registry: &mut Registry) {
     add(registry, limiter_type(), make);
 }
 
-/// Makes a Brickwall for `config`'s rate, channels, and block size. Every
-/// buffer it needs is made here, off the audio thread.
+/// Makes a Brickwall for `device`'s values and `config`'s rate, channels,
+/// and block size. Every buffer it needs is made here, off the audio
+/// thread, and its look-ahead comes from the set's value, so it reports
+/// its latency before it first runs.
 #[must_use]
-pub fn make(config: &NodeConfig) -> Brickwall {
-    Brickwall::new(config)
-}
-
-/// A delay of a stretch of samples, read a whole number of samples back.
-struct DelayLine {
-    samples: Vec<f32>,
-    at: usize,
-}
-
-impl DelayLine {
-    fn new(max_delay: usize) -> Self {
-        Self {
-            samples: vec![0.0; max_delay + 1],
-            at: 0,
-        }
-    }
-
-    /// The sample `delay` writes ago.
-    fn read(&self, delay: usize) -> f32 {
-        let len = self.samples.len();
-        self.samples[(self.at + len - delay % len) % len]
-    }
-
-    fn write(&mut self, sample: f32) {
-        let len = self.samples.len();
-        self.samples[self.at] = sample;
-        self.at = (self.at + 1) % len;
-    }
+pub fn make(device: &Device, config: &NodeConfig) -> Brickwall {
+    Brickwall::new(device, config)
 }
 
 /// The least of the last `window + 1` values pushed, in a monotonic queue
@@ -248,16 +227,23 @@ pub struct Brickwall {
 }
 
 impl Brickwall {
-    fn new(config: &NodeConfig) -> Self {
+    fn new(device: &Device, config: &NodeConfig) -> Self {
         let rate = config.sample_rate.as_f64();
         let max_lookahead = (LOOKAHEAD_SECONDS[2] * rate).ceil() as usize + 1;
         let frames = config.max_frames.max(1);
         let buffer = || vec![0.0f32; frames];
         let detector = || Oversampler::new(TRUE_PEAK_STAGES, 1, frames);
+        let choice = device
+            .params
+            .get(&LOOKAHEAD)
+            .copied()
+            .unwrap_or(DEFAULT_LOOKAHEAD as f64);
+        let choice = (choice.max(0.0) as usize).min(LOOKAHEAD_SECONDS.len() - 1);
+        let lookahead = ((LOOKAHEAD_SECONDS[choice] * rate).ceil() as usize).min(max_lookahead);
         Self {
             rate,
             max_lookahead,
-            lookahead: (LOOKAHEAD_SECONDS[1] * rate).ceil() as u32,
+            lookahead: lookahead as u32,
             work: [buffer(), buffer()],
             peaks: [buffer(), buffer()],
             targets: [buffer(), buffer()],

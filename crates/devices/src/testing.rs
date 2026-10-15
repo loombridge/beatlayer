@@ -145,9 +145,9 @@ pub fn device_types() -> Vec<DeviceType> {
 
 /// Adds the test devices to `registry`.
 pub fn register(registry: &mut Registry) {
-    add(registry, utility_type(), |_| Utility);
-    add(registry, drive_type(), Drive::new);
-    add(registry, scope_type(), |_| Scope);
+    add(registry, utility_type(), |_, _| Utility);
+    add(registry, drive_type(), |_, config| Drive::new(config));
+    add(registry, scope_type(), |_, _| Scope);
 }
 
 /// The engine's own devices and the test devices.

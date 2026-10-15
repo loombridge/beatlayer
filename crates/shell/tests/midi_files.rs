@@ -460,3 +460,78 @@ fn a_bad_file_changes_nothing() {
     assert_eq!(editor.document(), &before);
     assert_eq!(editor.undo_history().count(), 0);
 }
+
+// Spec: arrangement-editing R6, midi-clips R16 (a clip placed over another
+// replaces what it covers, as a drop from the browser does, so a track never
+// plays two clips at once).
+#[test]
+fn an_import_over_a_clip_replaces_what_it_covers() {
+    let dir = TempDir::new("cover");
+    let bytes = generate(
+        Format::SingleTrack,
+        &[("Bass", &[note(0, 96, 36, 100)], &[])],
+    );
+    let path = dir.file("Bass.mid", &bytes);
+    let mut editor = Editor::new();
+    let track: bl_model::TrackId = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Midi,
+            name: "Bass".to_owned(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    // A clip on bars 1 to 4, so the import at bar 2 lands in its middle.
+    let held: bl_model::ClipId = editor.new_id();
+    let mut clip = bl_model::Clip::new(
+        held,
+        Ticks::ZERO,
+        Ticks::WHOLE * 3,
+        ClipData::Midi(bl_model::MidiData::new(std::iter::empty())),
+    );
+    clip.name = "Held".to_owned();
+    editor.apply(Command::CreateClip { track, clip }).unwrap();
+
+    let result = midi_files::import(&mut editor, &path, Some(track), Ticks::WHOLE, false).unwrap();
+    assert_eq!(result.clips.len(), 1);
+    let clips: Vec<(i64, i64, String)> = {
+        let mut clips: Vec<_> = editor
+            .document()
+            .track(track)
+            .unwrap()
+            .clips()
+            .map(|clip| (clip.start.get(), clip.end().get(), clip.name.clone()))
+            .collect();
+        clips.sort_unstable();
+        clips
+    };
+    // The covered middle is gone: what's left is the part before, the
+    // import, and the part after, none of them overlapping.
+    assert_eq!(
+        clips,
+        [
+            (0, Ticks::WHOLE.get(), "Held".to_owned()),
+            (
+                Ticks::WHOLE.get(),
+                2 * Ticks::WHOLE.get(),
+                "Bass".to_owned()
+            ),
+            (
+                2 * Ticks::WHOLE.get(),
+                3 * Ticks::WHOLE.get(),
+                "Held".to_owned()
+            ),
+        ]
+    );
+    assert!(clips.windows(2).all(|pair| pair[0].1 <= pair[1].0));
+    // The import is the clip in the middle, and the held clip's left part
+    // still has its ID.
+    let placed = editor.document().clip(result.clips[0].clip).unwrap();
+    assert_eq!(
+        (placed.start.get(), placed.end().get()),
+        (Ticks::WHOLE.get(), 2 * Ticks::WHOLE.get())
+    );
+    assert!(editor.document().clip(held).is_some());
+}

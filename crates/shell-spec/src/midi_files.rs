@@ -143,8 +143,10 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  writes Song Tempo automation over the clip and restores the tempo at its end, \
                  and a time-signature marker is written at the clip's start and one restoring \
                  the previous signature at its end. Off (the default), the song's tempo, \
-                 automation and markers are left alone. One undo step. Reads a file outside the \
-                 project.",
+                 automation and markers are left alone. A clip placed over part of another \
+                 replaces that part, so a track never plays two clips at once; when a clip on \
+                 `track` ends after `at`, it's destructive as well as external. One undo step. \
+                 Reads a file outside the project.",
             )
             .permission(Permission::External)
             .context(Global)

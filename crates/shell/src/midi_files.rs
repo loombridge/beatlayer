@@ -6,14 +6,17 @@
 //! when asked, the song's tempo and time-signature maps, as Live was observed
 //! to on 15 October 2026 (the MIDI clips spec, WP-2.21).
 
+use std::collections::BTreeSet;
 use std::path::Path;
 
 use bl_core::time::{
     TempoMap, TempoSegment, Ticks, TimeSignature, TimeSignatureChange, TimeSignatureMap,
 };
 use bl_interop::midi;
-use bl_model::{Clip, ClipData, Command, Document, Editor, MidiData, TrackId, TrackKind};
+use bl_model::{Clip, ClipData, ClipId, Command, Document, Editor, MidiData, TrackId, TrackKind};
 use bl_shell_spec::midi_files::{ImportedClip, MidiExportArgs, MidiExportResult, MidiImportResult};
+
+use crate::arrangement::placing;
 
 /// The undo step an import makes. Live's name for it isn't observed yet.
 pub const UNDO_LABEL: &str = "Import MIDI File";
@@ -28,7 +31,9 @@ pub enum MidiFileError {
 }
 
 /// Reads the Standard MIDI File at `path` into the Arrangement as one MIDI
-/// clip per track of the file that has notes, as one undo step.
+/// clip per track of the file that has notes, as one undo step. Each clip
+/// replaces what it covers of the clips already on its track, as a drop from
+/// the browser does.
 ///
 /// `at` is where every clip starts, `track` the MIDI track to put them on
 /// (only a file with a single track of notes can go on one track), and
@@ -98,6 +103,8 @@ pub fn import(
     let mut result = MidiImportResult::default();
     let applied = editor.transact(UNDO_LABEL, |editor| {
         let mut clip_end = at;
+        // The clips this import places, which a later one never clears.
+        let mut placed: BTreeSet<ClipId> = BTreeSet::new();
         for (index, chunk) in &chunks {
             let length = round_up(chunk.length, bar);
             let track = match target {
@@ -130,6 +137,10 @@ pub fn import(
             let id = editor.new_id();
             let mut clip = Clip::new(id, at, length, ClipData::Midi(data));
             clip.name.clone_from(&name);
+            // Spec: arrangement-editing R6. Placed over other clips, it
+            // replaces what it covers, as a drop from the browser does.
+            placing::clear(editor, track, at, at.saturating_add(length), &placed)?;
+            placed.insert(id);
             editor.apply(Command::CreateClip { track, clip })?;
             result.clips.push(ImportedClip {
                 clip: id,

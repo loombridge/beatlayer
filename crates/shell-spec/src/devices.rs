@@ -16,8 +16,8 @@ use bl_commands::Context::{Browser, DeviceView, Global};
 use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_model::device_layout::BODY_HEIGHT;
 use bl_model::{
-    DeviceDescription, DeviceId, DeviceKind, DeviceRole, ParamDescriptor, Tap, TrackId, TrackKind,
-    WindowFrame,
+    ContentHash, DeviceDescription, DeviceId, DeviceKind, DeviceRole, ParamDescriptor, Tap,
+    TrackId, TrackKind, WindowFrame,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -45,6 +45,9 @@ pub const SAVE_PRESET: &str = "device.save_preset";
 pub const SAVE_DEFAULT_PRESET: &str = "device.save_default_preset";
 /// `device.load_preset`: load a preset into a device.
 pub const LOAD_PRESET: &str = "device.load_preset";
+/// `device.load_sample`: load an audio file into a device that plays one
+/// sample (WP-2.16).
+pub const LOAD_SAMPLE: &str = "device.load_sample";
 /// `device.hot_swap`: start or end hot-swapping a device's presets.
 pub const HOT_SWAP: &str = "device.hot_swap";
 /// `device.parameters`: a device's parameters, described, with their values.
@@ -75,6 +78,7 @@ pub const IDS: &[&str] = &[
     SAVE_PRESET,
     SAVE_DEFAULT_PRESET,
     LOAD_PRESET,
+    LOAD_SAMPLE,
     HOT_SWAP,
     PARAMETERS,
     SHOW_SIDECHAIN,
@@ -254,6 +258,10 @@ pub struct DeviceFrame {
     pub role: DeviceRole,
     /// Whether it's switched on.
     pub enabled: bool,
+    /// Whether its type plays one sample, so a sample dropped on it loads
+    /// into it (`device.load_sample`, WP-2.16).
+    #[serde(default)]
+    pub takes_sample: bool,
     /// Whether its title shows its preset's or given name.
     pub show_preset_name: bool,
     /// Whether it's folded to its title bar.
@@ -509,6 +517,29 @@ pub struct PresetResult {
     pub name: String,
 }
 
+/// Arguments of `device.load_sample`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LoadSampleArgs {
+    /// The device; the selected one if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The audio file to load into the device.
+    pub path: String,
+}
+
+/// What `device.load_sample` returns.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct LoadSampleResult {
+    /// The device that took the sample.
+    pub device: DeviceId,
+    /// The sample's media, by content hash: what the device and the set
+    /// name it by.
+    pub media: ContentHash,
+    /// The file's name, for messages.
+    pub name: String,
+}
+
 /// Arguments of `device.hot_swap`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -680,6 +711,18 @@ fn specs() -> Vec<CommandSpec> {
             .context(DeviceView)
             .args::<LoadPresetArgs>()
             .result::<PresetResult>(),
+        CommandSpec::new(LOAD_SAMPLE, "Load Sample")
+            .description(
+                "Loads an audio file into a device that plays one sample (the sampler), as \
+                 dropping the file on the device does: the file goes into the set's media \
+                 store, named by its content hash, and the device keeps that reference, so the \
+                 set reopens playing it. One undo step, named Load Sample. Reads a file outside \
+                 the project. A device whose type doesn't play a sample is refused.",
+            )
+            .permission(Permission::External)
+            .context(DeviceView)
+            .args::<LoadSampleArgs>()
+            .result::<LoadSampleResult>(),
         CommandSpec::new(HOT_SWAP, "Hot-Swap Presets")
             .description(
                 "Starts or ends hot-swapping a device's presets, as the title bar's Hot-Swap \

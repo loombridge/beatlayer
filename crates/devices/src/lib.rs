@@ -19,9 +19,10 @@
 //! their instances and runs their commands.
 //!
 //! Beatlayer ships its first native devices: the limiter ([`limiter`]),
-//! the tempo-synced delay ([`delay`]) and the Utility device ([`utility`],
-//! WP-2.18b); [`register`] adds them to the engine. The first instruments
-//! and the rest of the core effects ship with WP-2.16 to 2.18. [`testing`]
+//! the tempo-synced delay ([`delay`]), the Utility device ([`utility`],
+//! WP-2.18b), and its first instrument, the sampler ([`sampler`],
+//! WP-2.16); [`register`] adds them to the engine. The rest of the core
+//! effects and the polysynth ship with WP-2.17 and 2.18. [`testing`]
 //! has the devices the framework's tests use. The kit's two example
 //! plug-ins join the device list with the
 //! `kit-examples` feature, off by default.
@@ -30,6 +31,7 @@ pub mod delay;
 mod framework;
 pub mod kit;
 pub mod limiter;
+pub mod sampler;
 pub mod testing;
 pub mod utility;
 
@@ -37,19 +39,21 @@ pub use delay::{DELAY, delay_type};
 pub use framework::{Audio, NativeDevice, NativeNode, ParamBank, add};
 pub use kit::{KitFactory, KitHost};
 pub use limiter::{Brickwall, limiter_type};
+pub use sampler::{Sampler, sampler_type};
 
 use bl_engine::{DeviceType, Registry};
 
-/// Adds Beatlayer's native devices to `registry`: the limiter, the delay
-/// and Utility.
+/// Adds Beatlayer's native devices to `registry`: the limiter, the delay,
+/// Utility and the sampler.
 pub fn register(registry: &mut Registry) {
     limiter::register(registry);
     delay::register(registry);
     utility::register(registry);
+    sampler::register(registry);
 }
 
 /// The native device types Beatlayer ships, for the browser and the shell:
-/// the limiter, the delay and Utility.
+/// the limiter, the delay, Utility and the sampler.
 #[must_use]
 pub fn device_types() -> Vec<DeviceType> {
     let mut registry = Registry::empty();

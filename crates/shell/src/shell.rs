@@ -1367,6 +1367,9 @@ impl Shell {
     /// Runs a Device View command and carries out what it asks of the rest
     /// of the shell.
     fn run_devices(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        if id == device_ids::LOAD_SAMPLE {
+            return self.load_sample(id, args);
+        }
         if matches!(
             id,
             device_ids::CUT | device_ids::COPY | device_ids::DUPLICATE
@@ -1414,6 +1417,77 @@ impl Shell {
         }
         self.touch();
         Ok(outcome.value)
+    }
+
+    /// Loads a file into a device that plays one sample
+    /// (`device.load_sample`, WP-2.16): the media store takes the file, the
+    /// set records where it is and the device names it by content hash, and
+    /// the engine plays it. One undo step.
+    fn load_sample(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        let device_ids::LoadSampleArgs { device, path } = Self::args(id, args)?;
+        let device =
+            device
+                .or_else(|| self.devices.selected())
+                .ok_or_else(|| ShellError::Unavailable {
+                    command: id.to_owned(),
+                    reason: "select a device first".to_owned(),
+                })?;
+        let kind = self
+            .editor
+            .document()
+            .device(device)
+            .map(|device| device.kind.clone())
+            .ok_or_else(|| ShellError::InvalidArgs {
+                command: id.to_owned(),
+                message: format!("no {device}"),
+            })?;
+        // Only the sampler plays a sample (the sampler spec, R11).
+        let sampler = bl_model::DeviceKind::Native {
+            device_type: bl_devices::sampler::SAMPLER.to_owned(),
+        };
+        if kind != sampler {
+            return Err(ShellError::Failed {
+                command: id.to_owned(),
+                message: format!("{device} doesn't play a sample"),
+            });
+        }
+        let path = PathBuf::from(path);
+        let hash = self
+            .media
+            .import(&path)
+            .map_err(|error| ShellError::Failed {
+                command: id.to_owned(),
+                message: format!("{}: {error}", path.display()),
+            })?;
+        let entry = self.media.entry(hash).ok_or_else(|| ShellError::Failed {
+            command: id.to_owned(),
+            message: "the media store lost the file".to_owned(),
+        })?;
+        // The set records where the file is, so it reopens playing it
+        // (WP-2.25's media table).
+        let media = bl_model::ContentHash(*hash.as_bytes());
+        self.store.add_media(media, &entry.path, entry.size);
+        self.editor
+            .apply(bl_model::Command::SetDeviceSample {
+                device,
+                media: Some(media),
+            })
+            .map_err(|error| ShellError::Failed {
+                command: id.to_owned(),
+                message: error.to_string(),
+            })?;
+        self.dirty = true;
+        self.document_changed();
+        self.touch();
+        let name = entry
+            .path
+            .file_name()
+            .map_or(String::new(), |name| name.to_string_lossy().into_owned());
+        Ok(to_value(&device_ids::LoadSampleResult {
+            device,
+            media,
+            name,
+        }))
     }
 
     /// Runs a track command that needs the shell: Duplicate Track Without

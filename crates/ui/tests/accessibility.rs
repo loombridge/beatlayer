@@ -1257,6 +1257,18 @@ fn paths() -> BTreeMap<&'static str, Path> {
             )),
         ),
         ("device.set_param", Exception(device_params)),
+        (
+            "device.load_sample",
+            Exception(Gap(
+                "loading a sample has no key or menu item yet: dropping the file on the \
+                 sampler's Device View frame is the only way, and where Live's own path (its \
+                 Hot-Swap control) goes is to observe (sampler R11)",
+            )),
+        ),
+        (
+            "device.set_sample",
+            Exception(Equivalent("loading a sample (`device.load_sample`)")),
+        ),
         // A device's sidechain strip and section (routing R29): Enter on
         // its buttons, Up and Down on its chooser and number boxes.
         (
@@ -1589,6 +1601,7 @@ fn every_m1_command_is_reachable_from_the_keyboard() {
     assert_eq!(
         gaps,
         [
+            "device.load_sample",
             "export.audio",
             "set.discard_recovery",
             "set.recover",

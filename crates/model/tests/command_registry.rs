@@ -9,8 +9,8 @@ use bl_commands::{Registry, args_schema, tagged_variant, validate};
 use bl_core::time::{Bpm, TempoMap, Ticks, TimeSignature, TimeSignatureMap};
 use bl_model::registry::{self, RunError};
 use bl_model::{
-    ArrangementLoop, AudioData, Change, ChangeSet, Clip, ClipData, ClipId, Command, ContentHash,
-    CountIn, Device, DeviceId, DeviceKind, EditError, Editor, Input, MetronomeRhythm,
+    ArrangementLoop, AudioData, Change, ChangeSet, Channel, Clip, ClipData, ClipId, Command,
+    ContentHash, CountIn, Device, DeviceId, DeviceKind, EditError, Editor, Input, MetronomeRhythm,
     MetronomeSound, MidiData, ModelError, Monitor, Note, Output, ParamId, PluginFormat, SendTap,
     Tap, TrackId, TrackKind,
 };
@@ -49,13 +49,13 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        64,
+        66,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
          set_device_floating, WP-2.20 six for tempo breakpoints and time-signature markers, \
-         WP-2.1 two for MIDI clips, WP-2.16 set_device_sample, and WP-2.15 five for the \
-         metronome"
+         WP-2.1 two for MIDI clips, WP-2.16 set_device_sample, WP-2.15 five for the metronome, \
+         and WP-2.13 the two for Main Out and Cue Out"
     );
 
     for op in &ops {
@@ -229,6 +229,43 @@ fn every_command_runs_by_id() {
     assert_eq!(
         document.track(keys).unwrap().routing().midi_output,
         Some(bass)
+    );
+    // Ext. In with a channel, and Main's Main Out (WP-2.13): the agent API
+    // sets both, as an agent recording from an interface would.
+    agent.run(
+        "routing.set_input",
+        json!({ "track": drums, "input": { "type": "external", "channel": { "type": "mono", "channel": 3 } } }),
+    );
+    agent.run(
+        "routing.set_main_out",
+        json!({ "channel": { "type": "pair", "channel": 3 } }),
+    );
+    agent.run(
+        "routing.set_cue_out",
+        json!({ "channel": { "type": "pair", "channel": 2 } }),
+    );
+    let document = agent.editor.document();
+    assert_eq!(
+        document.track(drums).unwrap().routing().input,
+        Input::External {
+            channel: Channel::Mono(3)
+        }
+    );
+    assert_eq!(
+        document
+            .track(document.main_id())
+            .unwrap()
+            .routing()
+            .main_out,
+        Channel::Pair(3)
+    );
+    assert_eq!(
+        document
+            .track(document.main_id())
+            .unwrap()
+            .routing()
+            .cue_out,
+        Channel::Pair(2)
     );
     assert_eq!(
         agent.editor.undo_history().next(),
@@ -754,6 +791,18 @@ fn schemas_match_what_commands_serialise() {
         (
             "routing.set_midi_output",
             Command::SetMidiOutput { track, to: None },
+        ),
+        (
+            "routing.set_main_out",
+            Command::SetMainOut {
+                channel: Channel::Pair(3),
+            },
+        ),
+        (
+            "routing.set_cue_out",
+            Command::SetCueOut {
+                channel: Channel::Pair(2),
+            },
         ),
         (
             "clip.create",

@@ -100,6 +100,7 @@ fn the_ui_thread_sees_the_playhead_the_engine_played() {
     let backend = NullBackend::with_options(NullOptions {
         pacing: Pacing::RealTime,
         frame_limit: None,
+        channels: 2,
     });
     let request = StreamRequest {
         output: Some(PortRequest::default()),

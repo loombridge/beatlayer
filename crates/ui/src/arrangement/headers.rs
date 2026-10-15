@@ -313,7 +313,9 @@ pub fn header(
     }
 
     // The In/Out column (L-ARR-008), as many rows as fit.
-    if let Some(section) = bl_shell::routing::in_out(shell.editor().document(), id) {
+    if let Some(section) =
+        bl_shell::routing::in_out(shell.editor().document(), id, shell.interface())
+    {
         let in_out = crate::in_out::InOutParts {
             theme,
             place: Place::Header,

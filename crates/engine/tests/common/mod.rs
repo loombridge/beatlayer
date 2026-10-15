@@ -93,9 +93,27 @@ impl Rig {
         Self::with_registry(max_frames, |_| {})
     }
 
-    /// A rig whose registry has the test nodes and whatever `extend` adds.
+    /// A rig whose engine has `input_channels` audio-device input channels,
+    /// for tracks whose Audio From is Ext. In (WP-2.13).
+    pub fn with_input(max_frames: usize, input_channels: usize) -> Self {
+        Self::configured(max_frames, input_channels, |_| {})
+    }
+
+    /// A rig with blocks of up to `max_frames` frames at 48 kHz.
     pub fn with_registry(max_frames: usize, extend: impl FnOnce(&mut Registry)) -> Self {
-        let config = EngineConfig::new(RATE, max_frames);
+        Self::configured(max_frames, 0, extend)
+    }
+
+    /// A rig whose registry has the test nodes and whatever `extend` adds.
+    fn configured(
+        max_frames: usize,
+        input_channels: usize,
+        extend: impl FnOnce(&mut Registry),
+    ) -> Self {
+        let config = EngineConfig {
+            input_channels,
+            ..EngineConfig::new(RATE, max_frames)
+        };
         let probe = Arc::new(Probe::default());
         let collector = Collector::new();
         let mut registry = testing::registry(&probe);
@@ -138,6 +156,33 @@ impl Rig {
         bl_rt::rt_test!({
             processor.process(frames);
         });
+    }
+
+    /// Processes one block with the audio device's input, as a real-time
+    /// section under the allocation trap, and fails the test if it touches
+    /// the heap.
+    pub fn block_with_input(&mut self, frames: usize, input: &dyn bl_engine::DeviceInput) {
+        let processor = &mut self.processor;
+        bl_rt::rt_test!({
+            processor.process_with_input(frames, input);
+        });
+    }
+
+    /// Processes `total` frames with a device input, in blocks of `frames`,
+    /// each a real-time section, and returns the first output channel.
+    pub fn render_with_input(
+        &mut self,
+        total: usize,
+        frames: usize,
+        input: &dyn bl_engine::DeviceInput,
+    ) -> Vec<f32> {
+        let mut out = Vec::with_capacity(total);
+        while out.len() < total {
+            let n = frames.min(total - out.len());
+            self.block_with_input(n, input);
+            out.extend_from_slice(self.processor.output().channel(0));
+        }
+        out
     }
 
     /// Processes `total` frames in blocks of `frames`, each a real-time

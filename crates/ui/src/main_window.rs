@@ -67,6 +67,21 @@ pub enum UiEvent {
     FocusValue(bool),
 }
 
+/// What the Info View is showing: the control under the pointer, the
+/// registered description of the command it runs, and its key (WP-2.24).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct InfoViewContent {
+    /// The control's name, in Live's words, or empty while the pointer is
+    /// over empty space.
+    pub title: String,
+    /// The command's registered description (D17), or the "not built yet"
+    /// note for a control a later package brings.
+    pub body: String,
+    /// The key the command runs on, where the default keymap has one
+    /// (L-INFO-002).
+    pub shortcut: Option<String>,
+}
+
 /// The main window's UI state between frames.
 #[derive(Debug)]
 pub struct MainWindowUi {
@@ -97,9 +112,11 @@ pub struct MainWindowUi {
     mixer: MixerUi,
     /// The Device View (WP-2.4).
     devices: crate::device_view::DeviceViewUi,
-    /// The keymap the Mixer Config Menu shows its items' keys from, read
-    /// when it first opens.
+    /// The keymap, read the first time something shows a key from it (the
+    /// Info View, the Mixer Config Menu's items).
     keymap: Option<crate::keymap::Keymap>,
+    /// What the Info View last showed, for headless reads (WP-2.24).
+    info: InfoViewContent,
     /// Whether a value was being typed into a track header's volume field
     /// when the last frame ended.
     mixer_typing: bool,
@@ -178,6 +195,7 @@ impl MainWindowUi {
             mixer: MixerUi::new(),
             devices: crate::device_view::DeviceViewUi::new(),
             keymap: None,
+            info: InfoViewContent::default(),
             mixer_typing: false,
             menu_open: false,
             drawn: None,
@@ -207,6 +225,15 @@ impl MainWindowUi {
     #[must_use]
     pub fn mixer(&self) -> &MixerUi {
         &self.mixer
+    }
+
+    /// What the Info View last showed: the hovered control's name, the
+    /// registered description of the command it runs, and its key
+    /// (WP-2.24). Empty while the pointer is over empty space, and cleared
+    /// while the Info View hides.
+    #[must_use]
+    pub fn info_view_content(&self) -> &InfoViewContent {
+        &self.info
     }
 
     /// The browser, to read what it drew.
@@ -316,8 +343,12 @@ impl MainWindowUi {
         let frame = Frame::NONE.fill(theme.colors.window.0);
         CentralPanel::default().frame(frame).show(root, |ui| {
             let area = ui.max_rect();
-            let layout = ShellLayout::compute(area.size(), shell.browser_visible())
-                .translate(area.min.to_vec2());
+            let layout = ShellLayout::compute(
+                area.size(),
+                shell.browser_visible(),
+                shell.info_view_visible(),
+            )
+            .translate(area.min.to_vec2());
             self.track_area_clicks(ctx, &layout, &mut events);
             self.control_bar(ui, shell, theme, &layout, &mut events);
             if let Some(browser) = layout.browser {
@@ -332,7 +363,10 @@ impl MainWindowUi {
             // land in the Arrangement (WP-1.10).
             self.browser
                 .drop_overlay(ui, shell, theme, layout.main_view, &mut events);
-            self.info_view(ui, theme, layout.info_view);
+            // The Status Bar draws before the Info View, so the elements
+            // under the pointer are known by the time it reads them.
+            self.status_bar(ui, shell, theme, &layout, &mut events);
+            self.info_view(ui, theme, shell, layout.info_view);
             self.devices
                 .show(ui, shell, theme, layout.device_view, &mut events);
             self.device_titles = shell
@@ -341,7 +375,6 @@ impl MainWindowUi {
                 .into_iter()
                 .map(|d| (d.id, d.title))
                 .collect();
-            self.status_bar(ui, shell, theme, &layout, &mut events);
             outline_focused_area(ui, shell, theme, &layout);
             self.drawn = Some(layout);
         });
@@ -744,47 +777,94 @@ impl MainWindowUi {
         });
     }
 
-    fn info_view(&self, ui: &mut Ui, theme: &Theme, rect: Rect) {
+    fn info_view(&mut self, ui: &mut Ui, theme: &Theme, shell: &Shell, rect: Option<Rect>) {
+        let Some(rect) = rect else {
+            // Hidden: nothing to show, and nothing left over from before.
+            self.info = InfoViewContent::default();
+            return;
+        };
         let id = region(ui, "region-info-view", rect, Role::Group, "Info View");
         let _ = id;
         ui.painter().rect_filled(rect, 0.0, theme.colors.panel.0);
-        // Like Live's Info View, it describes the element under the pointer
-        // (L-INFO-002, I-FOCUS-012).
-        let (title, body) = match self.hovered.map(crate::layout::placement) {
-            Some(placement) => (
-                placement.name.to_owned(),
-                match placement.pending {
-                    Some(package) => format!("Not built yet: arrives with {package}."),
-                    None => "Point at a control to read about it here.".to_owned(),
-                },
-            ),
-            None => (
-                "Info View".to_owned(),
-                "Point at a control to read about it here. The full Info View arrives in milestone M2."
-                    .to_owned(),
-            ),
-        };
+        // Like Live's Info View, it reads whatever the pointer is over
+        // (L-INFO-002, I-FOCUS-012): the control's name, the help text of
+        // the command it runs, and its key on a separate line; nothing
+        // while the pointer is over empty space.
+        let keymap = self
+            .keymap
+            .get_or_insert_with(crate::keymap::Keymap::live12);
+        self.info = info_content(self.hovered, shell, keymap);
+        if self.info.title.is_empty() {
+            return;
+        }
         let painter = ui.painter_at(rect);
         let mut y = rect.top() + 8.0;
         painter.text(
             egui::pos2(rect.left() + 8.0, y),
             Align2::LEFT_TOP,
-            title,
+            &self.info.title,
             egui::FontId::proportional(theme.sizes.heading),
             theme.colors.text.0,
         );
         y += 20.0;
-        let galley = painter.layout(
-            body,
-            theme.small_font(),
-            theme.colors.text_dim.0,
-            rect.width() - 16.0,
-        );
-        painter.galley(
-            egui::pos2(rect.left() + 8.0, y),
-            galley,
-            theme.colors.text_dim.0,
-        );
+        if !self.info.body.is_empty() {
+            let galley = painter.layout(
+                self.info.body.clone(),
+                theme.small_font(),
+                theme.colors.text_dim.0,
+                rect.width() - 16.0,
+            );
+            let height = galley.size().y;
+            painter.galley(
+                egui::pos2(rect.left() + 8.0, y),
+                galley,
+                theme.colors.text_dim.0,
+            );
+            y += height + 4.0;
+        }
+        if let Some(shortcut) = &self.info.shortcut {
+            painter.text(
+                egui::pos2(rect.left() + 8.0, y),
+                Align2::LEFT_TOP,
+                shortcut,
+                theme.small_font(),
+                theme.colors.text.0,
+            );
+        }
+    }
+}
+
+/// What the Info View shows for the element under the pointer
+/// (L-INFO-002): the control's name, the registered description of the
+/// command it runs (D17), or the note for a control a later package
+/// brings, and the command's key where the default keymap has one.
+fn info_content(
+    hovered: Option<Element>,
+    shell: &Shell,
+    keymap: &crate::keymap::Keymap,
+) -> InfoViewContent {
+    let Some(element) = hovered else {
+        return InfoViewContent::default();
+    };
+    let placement = crate::layout::placement(element);
+    let command = command_of(element);
+    let body = match placement.pending {
+        Some(package) => format!("Not built yet: arrives with {package}."),
+        None => command
+            .and_then(|command| shell.registry().get(command))
+            .map(|spec| spec.description.to_string())
+            .unwrap_or_default(),
+    };
+    let shortcut = command.and_then(|command| {
+        let platform = crate::keymap::Platform::current();
+        keymap
+            .chord_for_command(command, platform)
+            .map(|chord| crate::keymap::chord_text(chord, platform))
+    });
+    InfoViewContent {
+        title: placement.name.to_owned(),
+        body,
+        shortcut,
     }
 }
 
@@ -914,6 +994,18 @@ fn look(element: Element, shell: &Shell) -> Look {
             ),
             ..Look::default()
         },
+        Element::InfoToggle => Look {
+            on: shell.info_view_visible(),
+            value: Some(
+                if shell.info_view_visible() {
+                    "shown"
+                } else {
+                    "hidden"
+                }
+                .to_owned(),
+            ),
+            ..Look::default()
+        },
         Element::TapTempo => text("TAP"),
         // The transport section's values come from `control_bar`.
         Element::Quantization => text("1 Bar"),
@@ -1004,10 +1096,26 @@ pub fn sample_rate_text(rate: u32) -> String {
     }
 }
 
+/// The registered command a control of the main window runs, for the Info
+/// View to read its description from (WP-2.24): the transport section's
+/// command, then the panel toggles'.
+fn command_of(element: Element) -> Option<&'static str> {
+    match element {
+        Element::BrowserToggle => Some(ids::VIEW_TOGGLE_BROWSER),
+        Element::InfoToggle => Some(ids::VIEW_TOGGLE_INFO_VIEW),
+        Element::SessionView | Element::ArrangementView => {
+            Some(ids::VIEW_TOGGLE_SESSION_ARRANGEMENT)
+        }
+        Element::MixerToggle => Some(bl_shell::mixer_view_commands::TOGGLE),
+        _ => control_bar::command(element),
+    }
+}
+
 /// What clicking a live element runs.
 fn click(element: Element, shell: &Shell) -> Option<Invocation> {
     match element {
         Element::BrowserToggle => Some(Invocation::new(ids::VIEW_TOGGLE_BROWSER, json!({}))),
+        Element::InfoToggle => Some(Invocation::new(ids::VIEW_TOGGLE_INFO_VIEW, json!({}))),
         Element::Follow => Some(Invocation::new(
             bl_shell::arrangement_commands::FOLLOW,
             json!({}),

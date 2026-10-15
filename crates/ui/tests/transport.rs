@@ -51,7 +51,7 @@ fn state(shell: &mut Shell) -> TransportState {
 
 /// Where an element is drawn, in a harness without a drawn title bar.
 fn rect(element: Element) -> egui::Rect {
-    ShellLayout::compute(REFERENCE, true).rect(element)
+    ShellLayout::compute(REFERENCE, true, true).rect(element)
 }
 
 fn focus(h: &mut Harness, element: Element) {

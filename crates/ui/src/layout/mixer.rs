@@ -482,7 +482,7 @@ mod tests {
     use egui::vec2;
 
     fn main_view() -> Rect {
-        ShellLayout::compute(REFERENCE, true)
+        ShellLayout::compute(REFERENCE, true, true)
             .translate(vec2(0.0, TITLE_BAR))
             .main_view
     }

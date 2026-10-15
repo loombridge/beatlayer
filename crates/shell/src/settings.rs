@@ -15,6 +15,7 @@ pub use bl_shell_spec::settings::{
 };
 
 use crate::agent::AgentSettings;
+use crate::assistant::AssistantSettings;
 use crate::audio::{AudioSettings, ToneSettings};
 
 /// Everything the app keeps between starts, saved as JSON.
@@ -50,6 +51,13 @@ pub struct Preferences {
     /// The agent server: whether it runs, its port and token, and the
     /// agents allowed to connect (WP-1.15).
     pub agent: AgentSettings,
+    /// The built-in assistant's provider, base URL and model (WP-2.23,
+    /// part 4). Its API key is in the OS keychain, never here.
+    pub assistant: AssistantSettings,
+    /// The assistant commands the person chose "always allow" for, so a
+    /// destructive or external command it calls doesn't ask again
+    /// (WP-2.23, part 4).
+    pub assistant_always: BTreeSet<String>,
     /// The browser's places and preview (WP-1.10).
     pub browser: crate::browser::BrowserPrefs,
     /// Create Fades on Clip Edges (Record, Warp & Launch, L-SET-018): new

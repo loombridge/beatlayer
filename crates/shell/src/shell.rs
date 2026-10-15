@@ -14,12 +14,18 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
+use bl_assistant::keychain::{Keychain, MemoryKeychain, OsKeychain};
+
 use crate::agent::{
     self as agent, AgentServerState, AgentServerStatus, AgentSettings, AutonomousArgs, ClientArgs,
     SetServerArgs,
 };
 use crate::arrangement::editing::{self, Clipboard, EditFailure};
 use crate::arrangement::{ArrangementView, TransportView, ViewError, Viewport};
+use crate::assistant::{
+    self as assistant_ids, ActivityEntry, AssistantSettings, AssistantState, Outcome,
+    SetBaseUrlArgs, SetKeyArgs, SetModelArgs, SetProviderArgs, keychain_account,
+};
 use crate::audio::{AudioHost, ConfigureAudio, EngineTransport, ToneSettings};
 use crate::browser::{self, BrowserError, BrowserView, Waker};
 use crate::clip_view::{self, ClipView};
@@ -302,6 +308,18 @@ pub struct Shell {
     message: Option<Message>,
     revision: u64,
     agent_status: AgentServerStatus,
+    /// The built-in assistant's API keys (WP-2.23): the OS keychain, or an
+    /// in-memory stand-in in tests and headless runs. The keys are never in
+    /// the preferences.
+    keychain: Arc<dyn Keychain>,
+    /// Whether a key is stored for the assistant's current provider, so the
+    /// Settings window doesn't read the keychain every frame.
+    assistant_key_set: bool,
+    /// Every command the assistant ran this session, in order (WP-2.23,
+    /// part 4).
+    assistant_log: Vec<ActivityEntry>,
+    /// Whether the activity log is open in the Settings window.
+    assistant_log_open: bool,
     /// What the Arrangement View shows (WP-1.8a).
     arrangement: ArrangementView,
     /// What the Clip View shows (WP-2.3): whether it's open, Draw Mode, and
@@ -517,6 +535,10 @@ impl Shell {
             message: None,
             revision: 0,
             agent_status: AgentServerStatus::default(),
+            keychain: Arc::new(OsKeychain::new()),
+            assistant_key_set: false,
+            assistant_log: Vec::new(),
+            assistant_log_open: false,
             arrangement: ArrangementView::new(),
             clip_view: ClipView::default(),
             document_revision: 0,
@@ -584,12 +606,15 @@ impl Shell {
     /// nowhere, the null audio device, and Beatlayer's set files.
     #[must_use]
     pub fn headless() -> Self {
-        Self::new(
+        let mut shell = Self::new(
             Preferences::default(),
             None,
             AudioHost::null(Default::default()),
             Box::new(ProjectFiles::new()),
-        )
+        );
+        // Headless runs and tests touch no real keychain.
+        shell.keychain = Arc::new(MemoryKeychain::new());
+        shell
     }
 
     /// Opens the audio device, if the engine is on. A failure shows in the
@@ -674,6 +699,107 @@ impl Shell {
             self.agent_status = status;
             self.touch();
         }
+    }
+
+    /// The built-in assistant's provider, base URL and model (WP-2.23,
+    /// part 4). Its API key is in the keychain, not here.
+    #[must_use]
+    pub fn assistant_settings(&self) -> &AssistantSettings {
+        &self.prefs.assistant
+    }
+
+    /// The assistant's settings and whether a key is stored, for the
+    /// Settings window and the settings' commands. The key itself is never
+    /// here.
+    #[must_use]
+    pub fn assistant_state(&self) -> AssistantState {
+        AssistantState {
+            provider: self.prefs.assistant.provider,
+            base_url: self.prefs.assistant.base_url.clone(),
+            model: self.prefs.assistant.model.clone(),
+            key_set: self.assistant_key_set,
+            activity_log_open: self.assistant_log_open,
+        }
+    }
+
+    /// Every command the assistant ran this session, in order (WP-2.23,
+    /// part 4).
+    #[must_use]
+    pub fn assistant_log(&self) -> &[ActivityEntry] {
+        &self.assistant_log
+    }
+
+    /// Whether the activity log is open.
+    #[must_use]
+    pub fn assistant_log_open(&self) -> bool {
+        self.assistant_log_open
+    }
+
+    /// Whether an API key is stored for the assistant's current provider.
+    /// Refreshed by [`Shell::refresh_assistant_key`], after a key changes,
+    /// and when the Settings window opens.
+    #[must_use]
+    pub fn assistant_key_set(&self) -> bool {
+        self.assistant_key_set
+    }
+
+    /// Runs the assistant's keychain operations through `keychain`, such as
+    /// an in-memory one in tests, and refreshes whether a key is stored.
+    pub fn use_keychain(&mut self, keychain: Arc<dyn Keychain>) {
+        self.keychain = keychain;
+        self.refresh_assistant_key();
+    }
+
+    /// Reads whether an API key is stored for the assistant's current
+    /// provider, so the Settings window can show it without reading the
+    /// keychain every frame.
+    pub fn refresh_assistant_key(&mut self) {
+        let account = keychain_account(self.prefs.assistant.provider);
+        self.assistant_key_set = matches!(self.keychain.read(account), Ok(Some(_)));
+    }
+
+    /// Opens a turn's changes as one undo step named `label`, which the
+    /// assistant loop closes with [`Shell::end_assistant_turn`]
+    /// (WP-2.23, part 2).
+    pub(crate) fn begin_assistant_turn(&mut self, label: &str) {
+        self.editor.begin(label.to_owned());
+    }
+
+    /// Closes the turn's undo step, keeping whatever ran.
+    pub(crate) fn end_assistant_turn(&mut self) {
+        if self.editor.commit().unwrap_or(false) {
+            self.dirty = true;
+        }
+        self.document_changed();
+        self.touch();
+    }
+
+    /// Whether the person has chosen "always allow" for `command`.
+    pub(crate) fn assistant_always_allows(&self, command: &str) -> bool {
+        self.prefs.assistant_always.contains(command)
+    }
+
+    /// Remembers "always allow" for `command`, so later calls don't ask.
+    pub(crate) fn assistant_remember_command(&mut self, command: &str) {
+        if self.prefs.assistant_always.insert(command.to_owned()) {
+            self.save_preferences();
+        }
+    }
+
+    /// Records one command the assistant ran in the activity log.
+    pub(crate) fn assistant_record(&mut self, entry: ActivityEntry) {
+        self.assistant_log.push(entry);
+        self.touch();
+    }
+
+    /// Records one command the assistant was refused, in the activity log.
+    pub(crate) fn assistant_record_denied(&mut self, command: &str, message: String) {
+        self.assistant_log.push(ActivityEntry {
+            command: command.to_owned(),
+            at: std::time::SystemTime::now(),
+            outcome: Outcome::Denied(message),
+        });
+        self.touch();
     }
 
     /// The audio device.
@@ -4061,6 +4187,57 @@ impl Shell {
                 entry.token = token.into();
                 self.save_preferences();
                 Ok(to_value(&AgentServerState::from(&self.prefs.agent)))
+            }
+            assistant_ids::ASSISTANT_SET_PROVIDER => {
+                let SetProviderArgs { provider } = Self::args(id, args)?;
+                self.prefs.assistant.provider = provider;
+                self.save_preferences();
+                self.refresh_assistant_key();
+                Ok(to_value(&self.assistant_state()))
+            }
+            assistant_ids::ASSISTANT_SET_BASE_URL => {
+                let SetBaseUrlArgs { base_url } = Self::args(id, args)?;
+                self.prefs.assistant.base_url = base_url.trim().to_owned();
+                self.save_preferences();
+                Ok(to_value(&self.assistant_state()))
+            }
+            assistant_ids::ASSISTANT_SET_MODEL => {
+                let SetModelArgs { model } = Self::args(id, args)?;
+                self.prefs.assistant.model = model.trim().to_owned();
+                self.save_preferences();
+                Ok(to_value(&self.assistant_state()))
+            }
+            assistant_ids::ASSISTANT_SET_KEY => {
+                // Spec: agent-permissions R7, by analogy. The key is written
+                // to the keychain and never returned or logged.
+                let SetKeyArgs { key } = Self::args(id, args)?;
+                if key.trim().is_empty() {
+                    return Err(ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message: "the API key is empty".to_owned(),
+                    });
+                }
+                let account = keychain_account(self.prefs.assistant.provider);
+                self.keychain
+                    .write(account, key.trim())
+                    .map_err(|error| failed(error.to_string()))?;
+                self.refresh_assistant_key();
+                Ok(to_value(&self.assistant_state()))
+            }
+            assistant_ids::ASSISTANT_FORGET_KEY => {
+                Self::args::<NoArgs>(id, args)?;
+                let account = keychain_account(self.prefs.assistant.provider);
+                self.keychain
+                    .delete(account)
+                    .map_err(|error| failed(error.to_string()))?;
+                self.refresh_assistant_key();
+                Ok(to_value(&self.assistant_state()))
+            }
+            assistant_ids::ASSISTANT_TOGGLE_ACTIVITY_LOG => {
+                Self::args::<NoArgs>(id, args)?;
+                self.assistant_log_open = !self.assistant_log_open;
+                self.touch();
+                Ok(to_value(&self.assistant_state()))
             }
             _ => Err(ShellError::UnknownCommand(id.to_owned())),
         }

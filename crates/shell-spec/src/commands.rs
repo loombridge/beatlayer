@@ -118,9 +118,9 @@ pub const AUDIO_TOGGLE_ENGINE: &str = "audio.toggle_engine";
 /// `audio.set_test_tone`: switch the Audio settings' test tone.
 pub const AUDIO_SET_TEST_TONE: &str = "audio.set_test_tone";
 
-/// Every command [`register`] adds apart from the agent server's
-/// ([`crate::agent::IDS`]), so a host knows which IDs to send to
-/// `bl-shell`'s `Shell::run`.
+/// Every command [`register`] adds apart from the agent server's and the
+/// built-in assistant's ([`crate::agent::IDS`], [`crate::assistant::IDS`]),
+/// so a host knows which IDs to send to `bl-shell`'s `Shell::run`.
 pub const IDS: &[&str] = &[
     SET_NEW,
     SET_OPEN,
@@ -170,11 +170,12 @@ pub const IDS: &[&str] = &[
     AUDIO_SET_TEST_TONE,
 ];
 
-/// Whether `id` is one of the shell's commands: those in [`IDS`] and the
-/// agent server's ([`crate::agent::IDS`]).
+/// Whether `id` is one of the shell's commands: those in [`IDS`], the agent
+/// server's ([`crate::agent::IDS`]), and the built-in assistant's
+/// ([`crate::assistant::IDS`]).
 #[must_use]
 pub fn handles(id: &str) -> bool {
-    IDS.contains(&id) || crate::agent::handles(id)
+    IDS.contains(&id) || crate::agent::handles(id) || crate::assistant::handles(id)
 }
 
 /// Arguments of `set.open`: a set file's path.
@@ -378,7 +379,8 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     for spec in specs() {
         registry.register(spec)?;
     }
-    crate::agent::register(registry)
+    crate::agent::register(registry)?;
+    crate::assistant::register(registry)
 }
 
 #[expect(
@@ -972,7 +974,10 @@ mod tests {
     fn every_listed_id_is_registered_and_complete() {
         let mut registry = Registry::new();
         register(&mut registry).unwrap();
-        assert_eq!(registry.len(), IDS.len() + crate::agent::IDS.len());
+        assert_eq!(
+            registry.len(),
+            IDS.len() + crate::agent::IDS.len() + crate::assistant::IDS.len()
+        );
         for id in IDS {
             assert!(registry.contains(id), "{id}");
         }

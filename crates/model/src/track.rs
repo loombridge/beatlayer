@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::clip::Clip;
 use crate::device::Device;
-use crate::ids::{ClipId, DeviceId, TrackId};
+use crate::ids::{ClipId, DeviceId, SceneId, TrackId};
 use crate::shared::Shared;
 
 /// The kind of a track, fixed when the track is created.
@@ -406,6 +406,11 @@ pub struct Track {
     pub(crate) routing: Routing,
     pub(crate) devices: Vector<Shared<Device>>,
     pub(crate) clips: OrdMap<ClipId, Shared<Clip>>,
+    /// The clips in the track's Session slots, by scene. A slot that holds
+    /// nothing isn't listed: every audio and MIDI track has a slot in every
+    /// scene, and a slot with no entry is empty. Return, group, and Main
+    /// tracks have none.
+    pub(crate) slots: OrdMap<SceneId, Shared<Clip>>,
     pub(crate) children: Vector<TrackId>,
 }
 
@@ -420,6 +425,7 @@ impl Track {
             routing: Routing::new(kind),
             devices: Vector::new(),
             clips: OrdMap::new(),
+            slots: OrdMap::new(),
             children: Vector::new(),
         }
     }
@@ -481,10 +487,32 @@ impl Track {
         self.devices.iter().position(|d| d.id == device)
     }
 
-    /// The track's clips, ordered by ID. Only audio and MIDI tracks have
-    /// clips.
+    /// The track's clips, ordered by ID: those on its Arrangement lane.
+    /// Only audio and MIDI tracks have clips.
     pub fn clips(&self) -> impl ExactSizeIterator<Item = &Clip> + DoubleEndedIterator {
         self.clips.values().map(|clip| &**clip)
+    }
+
+    /// The clips in the track's Session slots, as `(scene, clip)` pairs
+    /// ordered by scene ID. Only audio and MIDI tracks hold them.
+    pub fn slots(&self) -> impl ExactSizeIterator<Item = (SceneId, &Clip)> + '_ {
+        self.slots.iter().map(|(&scene, clip)| (scene, &**clip))
+    }
+
+    /// The clip in the track's slot at `scene`, if the slot holds one.
+    #[must_use]
+    pub fn slot(&self, scene: SceneId) -> Option<&Clip> {
+        self.slots.get(&scene).map(|clip| &**clip)
+    }
+
+    /// The clip with this ID, whether it sits on the Arrangement lane or in
+    /// a Session slot.
+    #[must_use]
+    pub fn clip(&self, id: ClipId) -> Option<&Clip> {
+        self.clips
+            .get(&id)
+            .or_else(|| self.slots.values().find(|clip| clip.id == id))
+            .map(|clip| &**clip)
     }
 
     /// The tracks directly inside this one, in order. Only groups have them.

@@ -13,7 +13,11 @@ use std::ffi::OsStr;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
-use bl_model::{ClipFolds, ContentHash, DeviceWindows, Editor, TrackId, TrackKind, registry};
+use bl_core::id::IdAllocator;
+use bl_model::{
+    ClipFolds, ContentHash, DEFAULT_SCENE_COUNT, DeviceWindows, Document, Editor, SceneId, TrackId,
+    TrackKind, registry,
+};
 use bl_project::{
     Media, MediaPath, MediaRef, Project, ProjectFolder, SET_EXTENSION, SaveOptions, SetFile, is_set,
 };
@@ -656,9 +660,15 @@ fn lexical(path: &Path) -> PathBuf {
 /// return tracks, as a new set in Live has (layout.md, "Default state"),
 /// with an empty undo history. The shell shows it in the Arrangement View
 /// (IMP-04, D20).
+///
+/// The tracks come first and the default scenes after them, so the set's
+/// track IDs are the ones they have always been (the first track is 2); a
+/// new, empty set takes its scenes first instead ([`Editor::new`]).
 #[must_use]
 pub fn factory_default_set() -> Editor {
-    let mut editor = Editor::new();
+    let mut ids = IdAllocator::new();
+    let main = TrackId(ids.allocate());
+    let mut editor = Editor::from_document(Document::new(main, []), ids);
     let tracks = [
         (TrackKind::Midi, "1 MIDI"),
         (TrackKind::Midi, "2 MIDI"),
@@ -683,6 +693,15 @@ pub fn factory_default_set() -> Editor {
             json!({ "id": id, "kind": kind, "name": name, "index": index }),
         )
         .expect("the factory default set's tracks are valid");
+    }
+    for index in 0..DEFAULT_SCENE_COUNT {
+        let id: SceneId = editor.new_id();
+        registry::run(
+            &mut editor,
+            "scene.create",
+            json!({ "id": id, "index": index }),
+        )
+        .expect("the factory default set's scenes are valid");
     }
     editor
         .clear_history()
@@ -715,6 +734,7 @@ mod tests {
             .collect();
         assert_eq!(names, ["1 MIDI", "2 MIDI", "3 Audio", "4 Audio"]);
         assert_eq!(doc.returns().len(), 2);
+        assert_eq!(doc.scene_count(), DEFAULT_SCENE_COUNT);
         assert!(!editor.can_undo());
     }
 

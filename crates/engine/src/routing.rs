@@ -243,12 +243,14 @@ impl Graph {
                 continue;
             };
             for device in track.devices() {
-                if let Some(Input::Track { track: from, tap }) = device.sidechain.map(|s| s.input) {
+                if let Some(Input::Track { track: from, tap }) =
+                    device.sidechain.as_ref().map(|s| &s.input)
+                {
                     wanted.push(Edge {
-                        from,
+                        from: *from,
                         to: id,
                         via: Via::Sidechain(device.id),
-                        tap,
+                        tap: *tap,
                         monitored: false,
                     });
                 }
@@ -300,7 +302,10 @@ impl Graph {
 /// An audio or MIDI track's input; `None` for other kinds.
 fn input_of(document: &Document, id: TrackId) -> Option<Input> {
     let track = document.track(id)?;
-    track.kind().holds_clips().then_some(track.routing().input)
+    track
+        .kind()
+        .holds_clips()
+        .then(|| track.routing().input.clone())
 }
 
 /// Whether `to` can be reached from `from` along `edges`.

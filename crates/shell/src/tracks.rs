@@ -168,11 +168,12 @@ fn copy_track(
         copy_track(editor, child, Some(id), index, renames)?;
     }
     // The routing last, once the devices and the tracks inside are there.
-    let routing = *source.routing();
+    let routing = source.routing().clone();
     if source.kind().holds_clips() {
         editor.apply(Command::SetInput {
             track: id,
             input: routing.input,
+            channel: routing.channel,
         })?;
         editor.apply(Command::SetMonitor {
             track: id,

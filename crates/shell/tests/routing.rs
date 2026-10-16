@@ -313,7 +313,13 @@ fn the_interface_choosers_list_its_channels_and_the_agent_api_sets_them() {
             json!({ "channel": { "type": "pair", "channel": 2 } }),
         )
         .unwrap();
-    let routing = *shell.editor().document().track(main_id).unwrap().routing();
+    let routing = shell
+        .editor()
+        .document()
+        .track(main_id)
+        .unwrap()
+        .routing()
+        .clone();
     assert_eq!(routing.main_out, Channel::Pair(3));
     assert_eq!(routing.cue_out, Channel::Pair(2));
     assert_eq!(

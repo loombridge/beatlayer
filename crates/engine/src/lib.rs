@@ -90,6 +90,7 @@ mod gc;
 mod input;
 mod message;
 mod metronome;
+mod midi;
 pub mod midi_clips;
 pub mod mixer;
 mod node;
@@ -118,6 +119,9 @@ pub use gc::{Collector, DROP_PERIOD, DropThread, GcHandle, Program};
 pub use input::{DeviceInput, NoInput};
 pub use message::{
     Action, LoopRegion, ParamEvent, Report, ScheduledCommand, TransportCommand, When,
+};
+pub use midi::{
+    MIDI_EVENTS_PER_BLOCK, MIDI_EVENTS_PER_TRACK, MidiCounters, MidiEvent, TrackMidiInput,
 };
 pub use midi_clips::{MidiClipList, MidiClipPlayer};
 pub use mixer::METER_RELEASE_DB_PER_SECOND;

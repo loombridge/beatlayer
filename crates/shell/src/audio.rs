@@ -231,13 +231,20 @@ impl AudioCallback for EngineCallback {
             let mut done = 0;
             while done < ctx.frames {
                 let frames = (ctx.frames - done).min(processor.config().max_frames);
-                let block = processor.process_with_input(
+                // The block's callback time, on the clock MIDI input is
+                // stamped against: the callback's start, moved on by the
+                // blocks before it in this callback (docs/specs/midi-io.md,
+                // R15, R16).
+                let block_at = started
+                    + Duration::from_secs_f64(done as f64 / f64::from(ctx.sample_rate.max(1)));
+                let block = processor.process_at(
                     frames,
                     &InputPart {
                         input,
                         offset: done,
                         frames,
                     },
+                    block_at,
                 );
                 for c in 0..block.channels() {
                     let to = main_out + c;

@@ -723,7 +723,7 @@ fn checkpoints_save_restore_as_one_undo_step_and_ask_before_removing() {
 /// Every transport command, the engine's and the loop's, by ID.
 /// The transport's commands: the engine's playback commands, the loop's
 /// (the document's), and the shell's Return to Start and state (WP-1.18).
-const TRANSPORT_COMMANDS: [&str; 17] = [
+const TRANSPORT_COMMANDS: [&str; 18] = [
     "transport.continue",
     "transport.insert_marker_to_playhead",
     "transport.locate",
@@ -738,6 +738,7 @@ const TRANSPORT_COMMANDS: [&str; 17] = [
     "transport.set_metronome_only_while_recording",
     "transport.set_metronome_rhythm",
     "transport.set_metronome_sound",
+    "transport.set_midi_overdub",
     "transport.set_recording",
     "transport.state",
     "transport.stop",

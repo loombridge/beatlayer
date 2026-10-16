@@ -161,6 +161,12 @@ pub enum Command {
         /// When on, clicks only sound while recording.
         only_while_recording: bool,
     },
+    /// Switches MIDI Arrangement Overdub on or off.
+    SetMidiOverdub {
+        /// When on, MIDI recorded into the Arrangement merges into the clips
+        /// already there instead of replacing them.
+        enabled: bool,
+    },
 
     /// Creates an empty track with default mixer settings.
     ///
@@ -885,6 +891,7 @@ impl Command {
             Self::SetMetronomeSound { .. } => "Metronome Sound",
             Self::SetMetronomeRhythm { .. } => "Metronome Rhythm",
             Self::SetMetronomeOnlyWhileRecording { .. } => "Hear Metronome Only While Recording",
+            Self::SetMidiOverdub { .. } => "MIDI Arrangement Overdub",
             Self::CreateTrack { .. } => "Create track",
             Self::DeleteTrack { .. } => "Delete track",
             Self::MoveTrack { .. } => "Move track",
@@ -1077,6 +1084,10 @@ impl Document {
                 only_while_recording,
             } => {
                 self.settings.metronome.only_while_recording = *only_while_recording;
+                Ok(())
+            }
+            Command::SetMidiOverdub { enabled } => {
+                self.settings.midi_overdub = *enabled;
                 Ok(())
             }
             Command::CreateTrack {

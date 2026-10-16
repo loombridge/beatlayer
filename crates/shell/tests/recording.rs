@@ -316,3 +316,72 @@ fn a_recording_that_cannot_write_is_reported_and_makes_no_clip() {
     );
     std::fs::set_permissions(&recorded, std::fs::Permissions::from_mode(0o755)).unwrap();
 }
+
+// Spec: recording R3 (WP-2.14). An armed MIDI track needs no project
+// folder: a set that has never been saved refuses the audio track's file
+// and still records. With no notes played the track gets no clip, and the
+// MIDI path stays off the heap.
+#[test]
+fn an_armed_midi_track_records_without_a_folder_and_makes_no_clip_without_notes() {
+    let (mut shell, _control) = duplex_shell();
+    let audio = armed_track(&mut shell, 3, "Guitar");
+    shell
+        .invoke("track.create", json!({ "kind": "midi", "name": "Keys" }))
+        .unwrap();
+    let keys = shell.editor().document().top_level().last().unwrap();
+    shell
+        .run("mixer.set_arm", json!({ "track": keys, "arm": true }))
+        .unwrap();
+
+    shell
+        .run("transport.set_recording", json!({ "recording": true }))
+        .unwrap();
+    shell.run("transport.play", json!({})).unwrap();
+    play_for(&mut shell, 200);
+    shell.run("transport.stop", json!({})).unwrap();
+    for _ in 0..40 {
+        shell.poll_engine();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+
+    let message = shell.message().map(|message| message.text.clone());
+    assert!(
+        message
+            .as_deref()
+            .is_some_and(|text| text.starts_with("the set has never been saved")),
+        "{message:?}"
+    );
+    for track in [audio, keys] {
+        let clips = shell
+            .editor()
+            .document()
+            .track(track)
+            .unwrap()
+            .clips()
+            .len();
+        assert_eq!(clips, 0);
+    }
+    let stats = shell.audio().stats().expect("a stream is open");
+    assert!(stats.blocks > 0);
+    assert_eq!(stats.heap_operations, 0, "{stats:?}");
+}
+
+// Spec: WP-2.14. MIDI Arrangement Overdub is a command, saved with the set,
+// and one undo step.
+#[test]
+fn midi_arrangement_overdub_is_one_undo_step_saved_with_the_set() {
+    let dir = TestDir::new("overdub");
+    let (mut shell, _control) = duplex_shell();
+    assert!(!shell.editor().document().settings().midi_overdub);
+    shell
+        .run("transport.set_midi_overdub", json!({ "enabled": true }))
+        .unwrap();
+    assert!(shell.editor().document().settings().midi_overdub);
+    let saved: Value = shell
+        .run("set.save_as", json!({ "path": dir.arg("Dub.blset") }))
+        .unwrap();
+    let (project, _) = bl_project::load(Path::new(saved["path"].as_str().unwrap())).unwrap();
+    assert!(project.document.settings().midi_overdub);
+    shell.run("edit.undo", json!({})).unwrap();
+    assert!(!shell.editor().document().settings().midi_overdub);
+}

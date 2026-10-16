@@ -82,7 +82,14 @@ fn plan(
         });
         consumers.push(consumer);
     }
-    (RecordingPlan { tracks: planned }, consumers, dropped)
+    (
+        RecordingPlan {
+            tracks: planned,
+            midi: Vec::new(),
+        },
+        consumers,
+        dropped,
+    )
 }
 
 /// One block of the device's input: four channels, the third carrying the

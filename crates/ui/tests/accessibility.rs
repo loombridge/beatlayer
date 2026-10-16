@@ -1120,6 +1120,10 @@ fn paths() -> BTreeMap<&'static str, Path> {
             main(nothing, control_bar, "Re-Enable Automation", Key::Enter),
         ),
         (
+            "arrangement.automation_arm",
+            main(nothing, control_bar, "Automation Arm", Key::Enter),
+        ),
+        (
             "automation.set_breakpoint",
             Exception(LaterView("the arrangement's automation lanes (WP-2.12)")),
         ),

@@ -14,8 +14,8 @@ use serde::{Deserialize, Serialize};
 use crate::automation::{AutomationTarget, Breakpoint, Envelope};
 use crate::clip::Clip;
 use crate::command::{
-    check_chain, check_clip, check_clip_fits, check_device, check_extent, check_mixer,
-    check_send_level,
+    check_chain, check_clip, check_clip_fits, check_crossfader, check_device, check_extent,
+    check_mixer, check_send_level,
 };
 use crate::device::Device;
 use crate::document::{Document, Index, Settings};
@@ -176,6 +176,7 @@ impl TryFrom<DocumentRepr> for Document {
         if main.kind != TrackKind::Main {
             return Err(ModelError::MainTrack);
         }
+        check_crossfader(settings.crossfader)?;
         let main = loader.add(main, None)?;
         let returns = returns
             .into_iter()

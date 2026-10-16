@@ -375,6 +375,7 @@ impl Compiler {
             self.add_task(
                 &mut build,
                 track,
+                document.settings().crossfader,
                 inputs.remove(&id).unwrap_or_default(),
                 &mut sidechain_inputs,
                 clips_audible(track),
@@ -618,6 +619,7 @@ impl Compiler {
         &self,
         build: &mut Build,
         track: &Track,
+        crossfader: f64,
         inputs: Vec<Input>,
         sidechain_inputs: &mut BTreeMap<DeviceId, Vec<Input>>,
         audible: bool,
@@ -732,7 +734,13 @@ impl Compiler {
             NodeKey::Mixer(track.id()),
             Identity::Mixer,
             0,
-            || Instance::Mixer(Box::new(TrackMixer::new(track.mixer(), &config))),
+            || {
+                Instance::Mixer(Box::new(TrackMixer::new(
+                    track.mixer(),
+                    crossfader,
+                    &config,
+                )))
+            },
         );
         build.tasks.push(Task {
             track: track.id(),
@@ -1106,6 +1114,17 @@ fn needs_program(
     let (before, after) = (old.settings(), new.settings());
     let settings = changes.settings
         && (before.tempo != after.tempo || before.time_signatures != after.time_signatures);
+    // Every track's mixer node reads the crossfader, so a moved position
+    // reaches every one of them as a parameter change (R22).
+    if changes.settings && before.crossfader != after.crossfader {
+        for track in new.tracks() {
+            params.push(ParamEvent::now(
+                NodeKey::Mixer(track.id()),
+                mixer::track::CROSSFADER,
+                after.crossfader,
+            ));
+        }
+    }
     let mut recompile = settings || changes.layout;
     for (&id, &change) in &changes.tracks {
         match (change, old.track(id), new.track(id)) {
@@ -1178,6 +1197,13 @@ fn mixer_events(track: TrackId, before: &Mixer, after: &Mixer, params: &mut Vec<
     }
     if before.mute != after.mute {
         params.push(ParamEvent::now(key, mixer::track::MUTE, switch(after.mute)));
+    }
+    if before.crossfade != after.crossfade {
+        params.push(ParamEvent::now(
+            key,
+            mixer::track::CROSSFADE,
+            mixer::crossfade_value(after.crossfade),
+        ));
     }
 }
 

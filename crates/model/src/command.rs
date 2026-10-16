@@ -21,7 +21,9 @@ use crate::ids::{ClipId, ContentHash, DeviceId, ParamId, SceneId, TrackId};
 use crate::metronome::{CountIn, MetronomeRhythm, MetronomeSound};
 use crate::scene::Scene;
 use crate::shared::Shared;
-use crate::track::{Channel, Input, Mixer, Monitor, Output, SendTap, Track, TrackKind};
+use crate::track::{
+    Channel, CrossfadeAssign, Input, Mixer, Monitor, Output, SendTap, Track, TrackKind,
+};
 
 /// One edit to a document.
 ///
@@ -340,6 +342,20 @@ pub enum Command {
     SetSoloInPlace {
         /// Whether soloing a track keeps the return tracks audible.
         enabled: bool,
+    },
+    /// Sets the Main track's crossfader, from 0 (the A end) through 0.5
+    /// (the centre) to 1 (the B end).
+    SetCrossfader {
+        /// The position: 0 is the A end, 0.5 the centre, 1 the B end.
+        #[schemars(range(min = 0.0, max = 1.0))]
+        position: f64,
+    },
+    /// Assigns a track to the crossfader's A or B side, or to neither.
+    SetCrossfadeAssign {
+        /// The track; every track but Main.
+        track: TrackId,
+        /// `a`, `b`, or `none`.
+        assign: CrossfadeAssign,
     },
     /// Sets where an audio or MIDI track takes its input from: Audio From
     /// or MIDI From, with its channel.
@@ -778,6 +794,8 @@ impl Command {
             Self::ReEnableAutomation { .. } | Self::ReEnableAutomationFor { .. } => {
                 "Re-Enable Automation"
             }
+            Self::SetCrossfader { .. } => "Change crossfader",
+            Self::SetCrossfadeAssign { .. } => "Assign crossfade",
             Self::SetSoloInPlace { .. } => "Switch Solo in Place",
             Self::SetInput { .. }
             | Self::SetOutput { .. }
@@ -1109,6 +1127,19 @@ impl Document {
             }
             Command::SetSoloInPlace { enabled } => {
                 self.settings.solo_in_place = *enabled;
+                Ok(())
+            }
+            Command::SetCrossfader { position } => {
+                check_crossfader(*position)?;
+                self.settings.crossfader = *position;
+                Ok(())
+            }
+            Command::SetCrossfadeAssign { track, assign } => {
+                let current = self.track_ref(*track)?;
+                check_kind(current, TrackKind::has_crossfade_assign, NOT_MAIN)?;
+                if current.mixer.crossfade != *assign {
+                    self.track_mut(*track)?.mixer.crossfade = *assign;
+                }
                 Ok(())
             }
             Command::SetInput { track, input } => {
@@ -2594,7 +2625,16 @@ pub(crate) fn check_mixer(track: &Track) -> Result<(), ModelError> {
     if mixer.tap != SendTap::Post {
         check_kind(track, |kind| kind == TrackKind::Return, RETURN)?;
     }
+    if mixer.crossfade != CrossfadeAssign::None {
+        check_kind(track, TrackKind::has_crossfade_assign, NOT_MAIN)?;
+    }
     Ok(())
+}
+
+/// Checks a crossfader position: a finite number from 0 (the A end) to 1
+/// (the B end).
+pub(crate) fn check_crossfader(position: f64) -> Result<(), ModelError> {
+    check_value("crossfader", position, (0.0..=1.0).contains(&position))
 }
 
 /// Checks a send's level: above 0 (a send at 0 isn't stored) and at most 1.

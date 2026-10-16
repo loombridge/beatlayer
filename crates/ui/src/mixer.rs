@@ -11,7 +11,7 @@
 //! Showing, hiding, scrolling, and focusing the mixer are the
 //! `mixer_view.*` commands. Only the columns in view are built (R17).
 
-use bl_model::{Document, TrackId, TrackKind};
+use bl_model::{CrossfadeAssign, Document, TrackId, TrackKind};
 use bl_shell::arrangement_commands::SELECT_TRACKS;
 use bl_shell::mixer_controls::{
     self as controls, Control, FINE, Switch, meter_position, pan_text, volume_readout,
@@ -30,7 +30,7 @@ use serde_json::json;
 use crate::arrangement::scene::track_colour;
 use crate::layout::mixer::{
     ARRANGEMENT_TITLE_ROW, Column, ColumnKind, MixerLayout, SCALE_LABELS, Sections, SessionLayout,
-    StripLayout, in_out_row, send_knob,
+    StripLayout, crossfade_buttons, crossfader_slider, in_out_row, send_knob,
 };
 use crate::main_window::UiEvent;
 use crate::theme::Theme;
@@ -43,6 +43,7 @@ pub fn sections(shell: &Shell) -> Sections {
         in_out: view.in_out(),
         sends: view.sends(),
         volume: view.volume(),
+        crossfader: view.crossfader(),
         returns: view.return_tracks(),
     }
 }
@@ -145,6 +146,14 @@ pub enum Place {
 struct ValueDrag {
     starts: Vec<(TrackId, f64)>,
     moved: f64,
+}
+
+/// A drag on the crossfader: where it started, and how far the pointer has
+/// moved since, in points.
+#[derive(Clone, Copy, Debug, Default)]
+struct CrossfadeDrag {
+    start: f64,
+    moved: f32,
 }
 
 /// The Mixer view's state between frames: the focus requests it has
@@ -375,6 +384,16 @@ impl MixerUi {
                     activator: &label,
                 };
                 parts.strip(&mut column_ui, &strip, column.kind, events);
+            }
+            if let Some(span) = layout.crossfader {
+                let parts = StripParts {
+                    shell,
+                    theme,
+                    place,
+                    track,
+                    activator: &label,
+                };
+                parts.crossfade_section(&mut column_ui, column, span, events);
             }
         }
         self.scroll(&ui, sections_area, of, events);
@@ -848,6 +867,161 @@ impl StripParts<'_> {
                 }
             }
         }
+    }
+
+    /// The Crossfader section (L-MIX-006; the mixer spec, R23): a track's
+    /// or a return's A and B assign buttons under its strip, and the
+    /// crossfader itself in Main's column. A track without the buttons (a
+    /// MIDI track with no instrument, as observed) shows neither.
+    fn crossfade_section(
+        &self,
+        ui: &mut Ui,
+        column: &Column,
+        span: (f32, f32),
+        events: &mut Vec<UiEvent>,
+    ) {
+        let doc = self.doc();
+        if column.kind == ColumnKind::Main {
+            self.crossfader(ui, column.rect, span, events);
+            return;
+        }
+        if midi_only(doc, self.track) {
+            return;
+        }
+        let current = doc
+            .track(self.track)
+            .map_or(CrossfadeAssign::None, |t| t.mixer().crossfade);
+        let [a, b] = crossfade_buttons(column.rect, span);
+        for (side, rect) in [(CrossfadeAssign::A, a), (CrossfadeAssign::B, b)] {
+            self.assign_button(ui, rect, side, current, events);
+        }
+    }
+
+    /// One A or B assign button: lit while the track plays on that side. A
+    /// click assigns it, or releases the track when it's already lit; the
+    /// two sides are exclusive.
+    fn assign_button(
+        &self,
+        ui: &mut Ui,
+        rect: Rect,
+        side: CrossfadeAssign,
+        current: CrossfadeAssign,
+        events: &mut Vec<UiEvent>,
+    ) {
+        let on = current == side;
+        let id = Id::new(("mixer-crossfade-assign", self.place, self.track, side));
+        let response = ui.interact(rect, id, Sense::click());
+        self.escape_to_title(ui, &response);
+        let pressed =
+            response.clicked() || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter)));
+        if pressed
+            && let Some(invocation) = controls::crossfade_clicked(self.doc(), self.track, side)
+        {
+            events.push(UiEvent::Invoke(invocation));
+        }
+        let c = &self.theme.colors;
+        let face = if on {
+            c.accent.0
+        } else if response.hovered() {
+            c.control_hover.0
+        } else {
+            c.control.0
+        };
+        let painter = ui.painter_at(rect.expand(2.0));
+        painter.rect_filled(rect, self.theme.sizes.corner, face);
+        painter.text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            if side == CrossfadeAssign::A { "A" } else { "B" },
+            self.theme.small_font(),
+            if on { c.accent_text.0 } else { c.text.0 },
+        );
+        focus_ring(&painter, self.theme, rect, &response);
+        // Live's own name for the buttons isn't observed.
+        let name = format!(
+            "Crossfade {}",
+            if side == CrossfadeAssign::A { "A" } else { "B" }
+        );
+        response.widget_info(|| WidgetInfo::selected(WidgetType::Button, true, on, &name));
+        ui.ctx().accesskit_node_builder(id, |node| {
+            node.set_role(Role::Button);
+            node.set_label(name);
+            node.set_value(if on { "on" } else { "off" }.to_owned());
+            node.set_description("Assigns the track to this side of the crossfader".to_owned());
+        });
+    }
+
+    /// Main's crossfader (R23): a horizontal slider, 0 (the A end) at its
+    /// left and 1 (the B end) at its right, dragging relative to the
+    /// pointer like the mixer's other faders.
+    fn crossfader(&self, ui: &mut Ui, column: Rect, span: (f32, f32), events: &mut Vec<UiEvent>) {
+        let position = self.doc().settings().crossfader;
+        let rect = crossfader_slider(column, span);
+        let id = Id::new(("mixer-crossfader", self.place));
+        let response = ui.interact(rect, id, Sense::click_and_drag());
+        self.escape_to_title(ui, &response);
+        let drag_id = id.with("drag");
+        if response.drag_started() {
+            ui.data_mut(|d| {
+                d.insert_temp(
+                    drag_id,
+                    CrossfadeDrag {
+                        start: position,
+                        moved: 0.0,
+                    },
+                );
+            });
+            events.push(UiEvent::BeginGesture(controls::CROSSFADER_GESTURE));
+        }
+        if response.dragged() {
+            let dx = response.drag_delta().x;
+            let drag = ui.data_mut(|d| {
+                let drag = d.get_temp_mut_or_default::<CrossfadeDrag>(drag_id);
+                drag.moved += dx;
+                *drag
+            });
+            let at = controls::crossfader_moved(drag.start, drag.moved, rect.width());
+            ui.data_mut(|d| d.insert_temp(readout_id(), controls::crossfader_readout(at)));
+            if at != position {
+                events.push(UiEvent::Invoke(Invocation::new(
+                    "mixer.set_crossfader",
+                    json!({ "position": at }),
+                )));
+            }
+        }
+        if response.drag_stopped() {
+            ui.data_mut(|d| d.remove::<CrossfadeDrag>(drag_id));
+            events.push(UiEvent::EndGesture);
+        }
+        let c = &self.theme.colors;
+        let painter = ui.painter_at(rect.expand(3.0));
+        let y = rect.top() + rect.height() * 0.5;
+        painter.line_segment(
+            [pos2(rect.left(), y), pos2(rect.right(), y)],
+            Stroke::new(2.0, c.separator.0),
+        );
+        let x = rect.left() + rect.width() * position as f32;
+        let handle = Rect::from_center_size(pos2(x, y), vec2(5.0, rect.height()));
+        let face = if response.dragged() {
+            c.accent.0
+        } else if response.hovered() {
+            c.control_hover.0
+        } else {
+            c.text_dim.0
+        };
+        painter.rect_filled(handle, 1.0, face);
+        focus_ring(&painter, self.theme, rect, &response);
+        // A slider a screen reader can read. Live's own keyboard steps for
+        // the crossfader aren't observed, so it offers none.
+        response.widget_info(|| WidgetInfo::slider(true, position, "Crossfader"));
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_role(Role::Slider);
+            node.set_label("Crossfader".to_owned());
+            node.set_value(controls::crossfader_text(position));
+            node.set_numeric_value(position);
+            node.set_min_numeric_value(0.0);
+            node.set_max_numeric_value(1.0);
+        });
     }
 
     fn doc(&self) -> &Document {

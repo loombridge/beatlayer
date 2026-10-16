@@ -14,7 +14,7 @@
 //! bar-beat-sixteenth value, Enter to set it, and Esc to drop it. The
 //! rules are in the control bar transport spec.
 
-use bl_shell::arrangement_commands::FOLLOW;
+use bl_shell::arrangement_commands::{AUTOMATION_ARM, FOLLOW};
 use bl_shell::transport::{self, Field, Group};
 use bl_shell::transport_commands as ids;
 use bl_shell::{Invocation, Shell};
@@ -95,6 +95,7 @@ pub fn command(element: Element) -> Option<&'static str> {
         Element::Loop => Some(ids::SET_LOOP_ENABLED),
         Element::Metronome => Some(ids::SET_METRONOME_ENABLED),
         Element::Follow => Some(FOLLOW),
+        Element::AutomationArm => Some(AUTOMATION_ARM),
         element => Some(match field(element)?.group {
             Group::Position => ids::LOCATE,
             Group::LoopStart | Group::LoopLength => ids::SET_LOOP,
@@ -109,6 +110,7 @@ pub fn command(element: Element) -> Option<&'static str> {
 pub fn click(element: Element, shell: &Shell) -> Option<Invocation> {
     match element {
         Element::ReEnableAutomation => Some(Invocation::new(RE_ENABLE_AUTOMATION, json!({}))),
+        Element::AutomationArm => Some(Invocation::new(AUTOMATION_ARM, json!({}))),
         Element::Play => Some(Invocation::new(ids::PLAY, json!({}))),
         Element::Stop => Some(Invocation::new(ids::STOP, json!({}))),
         Element::Loop => Some(Invocation::new(
@@ -218,6 +220,20 @@ impl TransportFields {
                 return Some(Look {
                     on,
                     value: Some(if on { "on" } else { "off" }.to_owned()),
+                    ..Look::default()
+                });
+            }
+            Element::AutomationArm => {
+                // Spec: automation R17.
+                let on = shell.arrangement().automation_arm();
+                return Some(Look {
+                    on,
+                    value: Some(if on { "on" } else { "off" }.to_owned()),
+                    description: Some(
+                        "While Arrangement Record runs, moving a control writes its \
+                         values into its automation."
+                            .to_owned(),
+                    ),
                     ..Look::default()
                 });
             }

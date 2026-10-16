@@ -72,6 +72,9 @@ pub const FOCUS_TITLE_BAR: &str = "arrangement.focus_title_bar";
 /// `arrangement.automation_mode`: show or hide the tracks' automation lanes
 /// (A).
 pub const AUTOMATION_MODE: &str = "arrangement.automation_mode";
+/// `arrangement.automation_arm`: arm or disarm Automation Arm (the Control
+/// Bar's button).
+pub const AUTOMATION_ARM: &str = "arrangement.automation_arm";
 /// `arrangement.show_automation`: choose the parameter a track's automation
 /// lane shows, or hide the lane.
 pub const SHOW_AUTOMATION: &str = "arrangement.show_automation";
@@ -105,6 +108,7 @@ pub const IDS: &[&str] = &[
     SET_TRACK_HEIGHT,
     FOCUS_TITLE_BAR,
     AUTOMATION_MODE,
+    AUTOMATION_ARM,
     SHOW_AUTOMATION,
 ];
 
@@ -350,6 +354,9 @@ pub struct ArrangementState {
     /// Whether Automation Mode is on: each track shows its automation lane
     /// under its lane, with the device and parameter choosers.
     pub automation_mode: bool,
+    /// Whether Automation Arm is on: while Arrangement Record runs, moving a
+    /// control writes its values into the parameter's envelope.
+    pub automation_arm: bool,
     /// The parameter each track's automation lane shows, for the tracks whose
     /// lane isn't showing the default (their volume): the choosers' choice.
     /// `target` `null` means the lane draws no envelope.
@@ -840,6 +847,18 @@ fn specs() -> Vec<CommandSpec> {
         )
         .contexts([Global, Arrangement])
         .binding("S-ENV-001")
+        .args::<SwitchArgs>(),
+        view(
+            AUTOMATION_ARM,
+            "Automation Arm",
+            "Switches Automation Arm, the Control Bar's button beside Arrangement Record: while \
+             it's on and the transport records, moving a control (a track's volume, pan, mute, or \
+             send, or a device's parameter) writes its values into that parameter's envelope at \
+             the playback position, replacing what was there over the range written, and the \
+             envelope resumes where the control is released. The whole recording is one undo \
+             step, made when recording stops. Changes only the view until then.",
+        )
+        .contexts([Global, Arrangement])
         .args::<SwitchArgs>(),
         view(
             SHOW_AUTOMATION,

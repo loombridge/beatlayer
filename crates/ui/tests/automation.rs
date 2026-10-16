@@ -82,6 +82,28 @@ fn the_re_enable_automation_button_lights_and_re_enables() {
     );
 }
 
+// Spec: automation R17
+#[test]
+fn the_automation_arm_button_switches_the_arm() {
+    let mut h = Harness::new(common::Window::Main);
+    let output = h.settle();
+    let nodes = Harness::nodes(&output);
+    let node = Harness::node(&nodes, "Automation Arm");
+    assert!(!node.disabled, "it can be pressed");
+    assert_eq!(node.value, "off");
+    assert!(!h.shell.arrangement().automation_arm());
+
+    // Pressing it, as a screen reader does, arms it; pressing again disarms.
+    h.accesskit(element_id(Element::AutomationArm), Action::Click);
+    let output = h.settle();
+    assert!(h.shell.arrangement().automation_arm());
+    let nodes = Harness::nodes(&output);
+    assert_eq!(Harness::node(&nodes, "Automation Arm").value, "on");
+    h.accesskit(element_id(Element::AutomationArm), Action::Click);
+    h.settle();
+    assert!(!h.shell.arrangement().automation_arm());
+}
+
 const BAR: i64 = Ticks::WHOLE.get();
 
 /// A track with a pan envelope from −0.8 at 1.1.1 to 0.8 at bar 3, showing

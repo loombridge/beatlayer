@@ -99,6 +99,16 @@ impl Rig {
         Self::configured(max_frames, input_channels, |_| {})
     }
 
+    /// A rig with `input_channels` audio-device input channels and whatever
+    /// `extend` adds to the registry.
+    pub fn with_input_and_registry(
+        max_frames: usize,
+        input_channels: usize,
+        extend: impl FnOnce(&mut Registry),
+    ) -> Self {
+        Self::configured(max_frames, input_channels, extend)
+    }
+
     /// A rig with blocks of up to `max_frames` frames at 48 kHz.
     pub fn with_registry(max_frames: usize, extend: impl FnOnce(&mut Registry)) -> Self {
         Self::configured(max_frames, 0, extend)

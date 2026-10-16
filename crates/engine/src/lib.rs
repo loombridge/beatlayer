@@ -99,6 +99,7 @@ mod offline;
 pub mod preview;
 mod processor;
 mod program;
+pub mod recording;
 mod registry;
 pub mod routing;
 pub mod sidechain;
@@ -115,7 +116,7 @@ pub use automation::AutomationList;
 pub use clips::{ClipPlayer, MediaLibrary, MediaMap, MediaStreams, OpenedSource, SourceCues};
 pub use compiler::{Compiler, Update};
 pub use engine::{CompileCounts, Engine, Restarter, Sender, channel};
-pub use gc::{Collector, DROP_PERIOD, DropThread, GcHandle, Program};
+pub use gc::{Collector, DROP_PERIOD, DropThread, GcHandle, Owned, Program};
 pub use input::{DeviceInput, NoInput};
 pub use message::{
     Action, LoopRegion, ParamEvent, Report, ScheduledCommand, TransportCommand, When,
@@ -132,6 +133,7 @@ pub use node::{
 pub use offline::Offline;
 pub use processor::{Carry, Output, Processor};
 pub use program::EngineProgram;
+pub use recording::{RecordTrack, RecordingPlan, TakeBounds};
 pub use registry::{DeviceType, NodeFactory, Registry};
 pub use state::{EngineCounters, EngineState, Monitor, TrackMeter};
 

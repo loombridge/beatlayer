@@ -629,6 +629,16 @@ impl EngineProgram {
                 );
             }
 
+            // Spec: routing R11. Whether the track played a clip this block;
+            // under Monitor Auto its input routes close while one did. The
+            // player ran first, so it knows.
+            let playing_clip = match task.player {
+                Some(slot) => match self.slots[slot as usize].node.as_ref() {
+                    Some(Instance::Device(node)) => node.playing_clip(),
+                    _ => false,
+                },
+                None => false,
+            };
             // The interface's input, if the track takes Ext. In: its
             // channels, through the route whose Monitor gate opens and
             // closes it (WP-2.13).
@@ -648,6 +658,7 @@ impl EngineProgram {
                     .get_mut(device.route as usize)
                     .map(|slot| slot.node.as_mut())
                 {
+                    route.set_playing_clip(playing_clip);
                     route.mix(
                         &mut self.pool[own.clone()],
                         &self.device_scratch,
@@ -668,6 +679,7 @@ impl EngineProgram {
                 else {
                     continue;
                 };
+                route.set_playing_clip(playing_clip);
                 let source = input.from as usize;
                 let kept = match input.tap {
                     Tap::PreFx => self.tasks[source].pre_fx,

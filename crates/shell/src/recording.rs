@@ -498,8 +498,9 @@ pub fn place_midi(
         if played.is_empty() {
             continue;
         }
-        // The spans of the track's clips the take crosses, in order.
-        let clips: Vec<(ClipId, Ticks, Ticks, Ticks)> = editor
+        // The spans of the track's clips the take crosses, in order of
+        // start: the track holds them in order of ID.
+        let mut clips: Vec<(ClipId, Ticks, Ticks, Ticks)> = editor
             .document()
             .track(recorded.track)
             .map(|lane| {
@@ -510,6 +511,7 @@ pub fn place_midi(
                     .collect()
             })
             .unwrap_or_default();
+        clips.sort_unstable_by_key(|&(_, start, _, _)| start);
         // Each note goes to the clip it starts in.
         for (id, from, to, origin) in &clips {
             let (inside, rest): (Vec<_>, Vec<_>) = played
@@ -857,6 +859,26 @@ mod tests {
         assert_eq!(
             clips(&editor, track),
             vec![(0, 1, vec![60]), (1, 1, vec![40, 62]), (2, 1, vec![64])]
+        );
+    }
+
+    // Spec: WP-2.14. The gaps follow the clips' positions, not the order
+    // they were made in: a clip made later but placed earlier is kept.
+    #[test]
+    fn overdub_finds_the_gaps_whatever_order_the_clips_were_made_in() {
+        let (mut editor, track) = editor_with_track();
+        add_clip(&mut editor, track, 2, 1, 40);
+        add_clip(&mut editor, track, 0, 1, 42);
+        let takes = played(
+            track,
+            &[(96_000 + 48_000, MidiMessage::note_on(0, 60, 100))],
+        );
+        let mut placed = Default::default();
+        place_midi(&mut editor, &takes, take(0, 4), RATE, true, &mut placed).unwrap();
+
+        assert_eq!(
+            clips(&editor, track),
+            vec![(0, 1, vec![42]), (1, 1, vec![60]), (2, 1, vec![40])]
         );
     }
 

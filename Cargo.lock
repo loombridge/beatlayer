@@ -751,6 +751,7 @@ name = "bl-cli"
 version = "0.0.0"
 dependencies = [
  "bl-agent",
+ "bl-assistant",
  "bl-audio-engine",
  "bl-audio-io",
  "bl-core",

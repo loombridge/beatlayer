@@ -89,6 +89,16 @@ enum Command {
     /// the set --set names. Destructive and external commands are refused
     /// unless --autonomous is given, because there's no one to ask.
     Mcp(mcp::McpArgs),
+    /// Run one turn of the built-in assistant, with no window.
+    ///
+    /// The same loop the app's panel runs, against the factory default set
+    /// or the set --set names: the model's tool calls run as commands, and
+    /// the whole turn is one undo step. Destructive and external commands
+    /// are refused, and the refusal is told to the model, unless
+    /// --autonomous is given. A cloud provider's key is read from the OS
+    /// keychain, where the Agents page stores it, and from nowhere else.
+    /// --record writes the exchange as a JSON transcript.
+    Assistant(bl_cli::assistant::AssistantArgs),
 }
 
 fn main() -> ExitCode {
@@ -102,6 +112,7 @@ fn main() -> ExitCode {
         Command::Export(args) => export::run(args),
         Command::Golden(args) => bl_cli::golden::run(args),
         Command::Mcp(args) => mcp::run(args),
+        Command::Assistant(args) => bl_cli::assistant::run(args),
     };
     outcome.unwrap_or_else(|message| {
         eprintln!("error: {message}");
@@ -128,5 +139,21 @@ mod tests {
         };
         assert_eq!(args.level, -60.0);
         assert_eq!(args.seconds, 1.0);
+    }
+
+    #[test]
+    fn the_assistant_takes_no_api_key() {
+        // The key comes from the OS keychain alone: no option carries it.
+        for flag in ["--api-key", "--key", "--token"] {
+            let parsed =
+                Cli::try_parse_from(["bl-cli", "assistant", "--model", "m", flag, "sk-1", "Hi."]);
+            assert!(parsed.is_err(), "{flag} is accepted");
+        }
+        let help = Cli::command()
+            .find_subcommand_mut("assistant")
+            .unwrap()
+            .render_long_help()
+            .to_string();
+        assert!(!help.to_lowercase().contains("api-key"), "{help}");
     }
 }

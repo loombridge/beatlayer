@@ -15,6 +15,7 @@
 use std::collections::BTreeMap;
 
 use bl_commands::{CommandSpec, Permission};
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::provider::Error;
@@ -118,7 +119,7 @@ impl ToolSet {
 }
 
 /// A tool call the model made: a whole one, with its arguments parsed.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolCall {
     /// The call's ID, which its result names. Gemini's API gives its calls
     /// no ID, so the crate makes one.

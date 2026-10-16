@@ -82,6 +82,7 @@
 #[cfg(test)]
 bl_rt::install_trap!();
 
+mod automation;
 pub mod clips;
 mod compiler;
 mod engine;
@@ -110,6 +111,7 @@ pub mod testing;
 
 use bl_core::time::SampleRate;
 
+pub use automation::AutomationList;
 pub use clips::{ClipPlayer, MediaLibrary, MediaMap, MediaStreams, OpenedSource, SourceCues};
 pub use compiler::{Compiler, Update};
 pub use engine::{CompileCounts, Engine, Restarter, Sender, channel};
@@ -121,8 +123,8 @@ pub use message::{
 pub use midi_clips::{MidiClipList, MidiClipPlayer};
 pub use mixer::METER_RELEASE_DB_PER_SECOND;
 pub use node::{
-    Block, Node, NodeConfig, NodeData, NodeEvent, NodeKey, NoteBuffer, NoteEvent, NoteKind,
-    ParamValue, Segment, Segments, TransportInfo, segments,
+    Block, Node, NodeConfig, NodeData, NodeEvent, NodeKey, NoteBuffer, NoteEvent, NoteExpression,
+    NoteKind, ParamValue, Segment, Segments, TransportInfo, segments,
 };
 pub use offline::Offline;
 pub use processor::{Carry, Output, Processor};

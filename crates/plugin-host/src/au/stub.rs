@@ -7,13 +7,24 @@
 //! Mac is unhosted and passes its input through.
 
 use std::collections::BTreeSet;
+use std::path::Path;
 use std::thread::ThreadId;
 
 use bl_engine::{DeviceType, Node, NodeConfig, NodeFactory};
 use bl_model::{Device, DeviceId, PluginState};
 
 use super::AuError;
-pub use crate::clap::PluginStatus;
+pub use crate::clap::{ParamChange, PluginStatus};
+
+/// The Audio Units a `.component` bundle declares: none here, since this
+/// platform hosts none.
+///
+/// # Errors
+///
+/// [`AuError::Unavailable`] always.
+pub(super) fn scan_file(_path: &Path) -> Result<Vec<crate::scan::ScannedPlugin>, AuError> {
+    Err(AuError::Unavailable)
+}
 
 /// An Audio Unit Beatlayer can make devices of.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -115,6 +126,47 @@ impl AuHost {
     #[must_use]
     pub fn generation(&self) -> u64 {
         0
+    }
+
+    /// Opens a unit's own editor: there is none here.
+    ///
+    /// # Errors
+    ///
+    /// [`AuError::Unavailable`] on this platform.
+    pub fn open_editor(&self, _device: DeviceId, _title: &str) -> Result<(), AuError> {
+        Err(AuError::Unavailable)
+    }
+
+    /// Closes a unit's own editor, if it's open: there is none here.
+    ///
+    /// # Errors
+    ///
+    /// [`AuError::NoInstance`]: no device has a running unit here.
+    pub fn close_editor(&self, device: DeviceId) -> Result<(), AuError> {
+        Err(AuError::NoInstance(device))
+    }
+
+    /// Shows or hides a unit's editor window without closing it: there is
+    /// none here.
+    ///
+    /// # Errors
+    ///
+    /// [`AuError::NoInstance`]: no device has a running unit here.
+    pub fn set_editor_visible(&self, device: DeviceId, _shown: bool) -> Result<(), AuError> {
+        Err(AuError::NoInstance(device))
+    }
+
+    /// The devices whose unit's editor window is open: none here.
+    #[must_use]
+    pub fn open_editors(&self) -> Vec<DeviceId> {
+        Vec::new()
+    }
+
+    /// The parameter changes units made themselves since the last call:
+    /// none here.
+    #[must_use]
+    pub fn take_param_changes(&self) -> Vec<ParamChange> {
+        Vec::new()
     }
 }
 

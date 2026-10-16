@@ -572,14 +572,14 @@ impl Processor {
     }
 
     fn deliver(&mut self, key: NodeKey, data: NodeData) {
-        let node = self.program.as_mut().and_then(|program| {
+        let instance = self.program.as_mut().and_then(|program| {
             let program = program.get_mut();
             let slot = program.slot_of(key)?;
-            program.node_mut(slot)
+            program.instance_mut(slot)
         });
-        match node {
-            Some(node) => {
-                node.receive_data(data);
+        match instance {
+            Some(instance) => {
+                instance.receive_data(data);
                 self.counters.data_delivered += 1;
             }
             // Dropping the data only lets go of it.

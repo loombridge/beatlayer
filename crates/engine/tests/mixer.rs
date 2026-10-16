@@ -19,7 +19,9 @@ bl_rt::install_trap!();
 mod common;
 
 use bl_commands::Registry as Commands;
-use bl_engine::mixer::{METER_RELEASE_DB_PER_SECOND, Solo, db_from_gain, gain_from_db, pan_gains};
+use bl_engine::mixer::{
+    METER_RELEASE_DB_PER_SECOND, Solo, constant_power, db_from_gain, gain_from_db, pan_gains,
+};
 use bl_engine::nodes::{TEST_TONE, test_tone};
 use bl_model::{Command, Editor, TrackId, TrackKind, registry};
 use common::{Rig, dc, device, track};
@@ -533,6 +535,143 @@ fn every_track_has_peak_and_rms_meters_after_its_mixer() {
     );
 }
 
+// Spec: mixer R23
+#[test]
+fn a_track_on_a_or_b_follows_the_crossfader_and_one_on_neither_passes_through() {
+    for block in [64, 256, 480] {
+        let mut rig = Rig::new(block);
+        let a = track(&mut rig.editor, TrackKind::Audio, None);
+        dc(&mut rig.editor, a, 1.0);
+        rig.sync();
+        // On neither: through at the ends and the centre.
+        for position in [0.0, 0.5, 1.0] {
+            run(
+                &mut rig.editor,
+                "mixer.set_crossfader",
+                json!({ "position": position }),
+            );
+            assert!(!rig.sync().program, "a crossfader move needs no program");
+            rig.render(SETTLE, block);
+            assert!(
+                rig.last().iter().all(|&s| s == 1.0),
+                "neither at {position}"
+            );
+        }
+        // On A: unity at the A end, the curve's centre, silence at the B
+        // end.
+        run(
+            &mut rig.editor,
+            "mixer.set_crossfade_assign",
+            json!({ "track": a, "assign": "a" }),
+        );
+        for (position, expected) in [(0.0, 1.0), (0.5, constant_power(0.5)), (1.0, 0.0)] {
+            run(
+                &mut rig.editor,
+                "mixer.set_crossfader",
+                json!({ "position": position }),
+            );
+            assert!(!rig.sync().program);
+            rig.render(SETTLE, block);
+            let want = expected as f32;
+            assert!(
+                rig.last().iter().all(|&s| s == want),
+                "on A at {position}: {}",
+                rig.last()[0]
+            );
+        }
+        // On B: the mirror.
+        run(
+            &mut rig.editor,
+            "mixer.set_crossfade_assign",
+            json!({ "track": a, "assign": "b" }),
+        );
+        for (position, expected) in [(0.0, 0.0), (0.5, constant_power(0.5)), (1.0, 1.0)] {
+            run(
+                &mut rig.editor,
+                "mixer.set_crossfader",
+                json!({ "position": position }),
+            );
+            assert!(!rig.sync().program);
+            rig.render(SETTLE, block);
+            let want = expected as f32;
+            assert!(
+                rig.last().iter().all(|&s| s == want),
+                "on B at {position}: {}",
+                rig.last()[0]
+            );
+        }
+    }
+}
+
+/// Spec: mixer R23. The points measured in Live, from the crossfader's
+/// 50A (0.0) to 50B (1.0) on a track assigned A: a render's gain is within
+/// the readout's tolerance of each, at several block sizes. The B side's
+/// two measured points come through the mirror.
+#[test]
+fn the_crossfader_hits_live_s_measured_points_at_several_block_sizes() {
+    let on_a = [
+        ("50A", 0.00, 0.0),
+        ("28A", 0.22, -0.5),
+        ("20A", 0.30, -0.9),
+        ("2A", 0.48, -2.7),
+        ("centre", 0.50, -3.0),
+        ("7B", 0.57, -4.1),
+        ("25B", 0.75, -8.7),
+        ("33B", 0.83, -14.9),
+        ("42B", 0.92, -37.0),
+        ("45B", 0.95, -52.7),
+    ];
+    let on_b = [("28A on B", 0.22, -9.9), ("11B on B", 0.61, -1.7)];
+    for block in [64, 256, 480] {
+        let mut rig = Rig::new(block);
+        let a = track(&mut rig.editor, TrackKind::Audio, None);
+        dc(&mut rig.editor, a, 1.0);
+        rig.sync();
+        for (assign, points) in [("a", &on_a[..]), ("b", &on_b[..])] {
+            run(
+                &mut rig.editor,
+                "mixer.set_crossfade_assign",
+                json!({ "track": a, "assign": assign }),
+            );
+            for &(name, position, db) in points {
+                run(
+                    &mut rig.editor,
+                    "mixer.set_crossfader",
+                    json!({ "position": position }),
+                );
+                rig.sync();
+                rig.render(SETTLE, block);
+                let got = db_from_gain(f64::from(rig.last()[0]));
+                // The measured readout was coarser below -30 dB.
+                let tolerance = if db < -30.0 { 1.5 } else { 0.5 };
+                assert!(
+                    (got - db).abs() <= tolerance,
+                    "{name} in blocks of {block}: {got} for {db}"
+                );
+            }
+        }
+        // Silence from the 48th step to the B end, on an A track.
+        run(
+            &mut rig.editor,
+            "mixer.set_crossfade_assign",
+            json!({ "track": a, "assign": "a" }),
+        );
+        for position in [0.96, 0.98, 1.0] {
+            run(
+                &mut rig.editor,
+                "mixer.set_crossfader",
+                json!({ "position": position }),
+            );
+            rig.sync();
+            rig.render(SETTLE, block);
+            assert!(
+                rig.last().iter().all(|&s| s == 0.0),
+                "silent at {position} in blocks of {block}"
+            );
+        }
+    }
+}
+
 // Spec: mixer R22
 #[test]
 fn mixer_edits_need_no_program_and_keep_every_node() {
@@ -556,6 +695,11 @@ fn mixer_edits_need_no_program_and_keep_every_node() {
         ),
         ("mixer.set_solo_in_place", json!({ "enabled": false })),
         ("mixer.set_arm", json!({ "track": a, "arm": true })),
+        ("mixer.set_crossfader", json!({ "position": 0.25 })),
+        (
+            "mixer.set_crossfade_assign",
+            json!({ "track": a, "assign": "a" }),
+        ),
     ] {
         run(&mut song.rig.editor, id, args);
         assert!(!song.rig.sync().program, "{id}");

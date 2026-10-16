@@ -406,6 +406,9 @@ impl HostEvents {
             .note_id
             .map_or(-1, |id| i32::try_from(id).unwrap_or(-1));
         match note.kind {
+            // Per-note expressions wait for MPE hosting (the parity
+            // matrix's note): a plug-in's note port takes them then.
+            NoteKind::Expression { .. } => return false,
             NoteKind::On => {
                 event.r#type = Event_::EventTypes_::kNoteOnEvent as u16;
                 event.__field0 = Event__type0 {

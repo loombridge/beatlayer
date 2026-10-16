@@ -19,7 +19,7 @@ use bl_devices::KitHost;
 use bl_model::{Command, Device, DeviceId, DeviceKind, Document, Editor, ParamId, PluginFormat};
 use bl_plugin_host::au::AuHost;
 use bl_plugin_host::clap::ClapHost;
-use bl_plugin_host::scan::Scanner;
+use bl_plugin_host::scan::{SCANNED_FORMATS, ScanReport, Scanner, system_paths};
 use bl_plugin_host::vst3::Vst3Host;
 use bl_shell_spec::plugins::{
     BlockedItem, PluginInfo, PluginScan, ScannedItem, SetPlugin, SetPluginList,
@@ -317,21 +317,36 @@ pub fn info(
     })
 }
 
-/// Runs a scan (or a rescan) and reports it for `plugin.scan` /
-/// `plugin.rescan` (WP-2.9).
+/// Runs a scan (or a rescan) over every format the scanner describes and
+/// reports it for `plugin.scan` / `plugin.rescan` (WP-2.9). With no paths,
+/// each format's own system folders are scanned; with paths, all of them
+/// are searched for each format's files.
 #[must_use]
 pub fn scan_report(
     scanner: &Scanner,
-    format: PluginFormat,
-    paths: &[PathBuf],
+    paths: Option<&[PathBuf]>,
     fresh: bool,
     hidden: &BTreeSet<String>,
 ) -> PluginScan {
-    let report = if fresh {
-        scanner.rescan(format, paths)
-    } else {
-        scanner.scan(format, paths)
-    };
+    let mut report = ScanReport::default();
+    for &format in SCANNED_FORMATS {
+        let format_paths: Vec<PathBuf> = match paths {
+            Some(paths) => paths.to_vec(),
+            None => system_paths(format),
+        };
+        let found = if fresh {
+            scanner.rescan(format, &format_paths)
+        } else {
+            scanner.scan(format, &format_paths)
+        };
+        report.scanned += found.scanned;
+        report.cached += found.cached;
+        report.plugins.extend(found.plugins);
+        report.blocked.extend(found.blocked);
+    }
+    report
+        .plugins
+        .sort_by(|a, b| a.name.cmp(&b.name).then(a.path.cmp(&b.path)));
     PluginScan {
         plugins: report
             .plugins

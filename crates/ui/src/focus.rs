@@ -55,6 +55,9 @@ pub enum Slot {
     Volume,
     /// Pan.
     Pan,
+    /// The clip slot in the Session View's grid (WP-3.7), which a track's
+    /// strip holds after its title bar.
+    ClipSlot,
     /// The input type chooser (Audio From or MIDI From).
     InputType,
     /// The input channel chooser.
@@ -327,11 +330,12 @@ impl Slot {
         const SENDS: usize = 100;
         const AFTER_SENDS: usize = usize::MAX / 2;
         let in_out = match self {
-            Self::InputType => Some(1),
-            Self::InputChannel => Some(2),
-            Self::Monitoring => Some(3),
-            Self::OutputType => Some(4),
-            Self::OutputChannel => Some(5),
+            Self::ClipSlot => Some(1),
+            Self::InputType => Some(2),
+            Self::InputChannel => Some(3),
+            Self::Monitoring => Some(4),
+            Self::OutputType => Some(5),
+            Self::OutputChannel => Some(6),
             _ => None,
         };
         if let Some(rank) = in_out {
@@ -339,11 +343,11 @@ impl Slot {
         }
         match place {
             Place::Header => match self {
-                Self::Activator => 6,
-                Self::Solo => 7,
-                Self::Arm => 8,
-                Self::Volume => 9,
-                Self::Pan => 10,
+                Self::Activator => 7,
+                Self::Solo => 8,
+                Self::Arm => 9,
+                Self::Volume => 10,
+                Self::Pan => 11,
                 Self::Send(index) => SENDS + index,
                 Self::Peak => AFTER_SENDS,
                 _ => 0,
@@ -443,6 +447,21 @@ mod tests {
         }
         push("optimize", Area::MainView, None);
         order
+    }
+
+    // Spec: session-view; accessibility R4 (observed in Live 12.4.6). A
+    // Session strip runs Track Title Bar, Clip Slot, Clip Stop, the In/Out
+    // choosers, the sends, the peak level, pan, the activator, Solo, Arm,
+    // and volume: the clip slot follows the title bar.
+    #[test]
+    fn the_clip_slot_follows_the_title_bar_in_a_session_strip() {
+        let mixer = Place::Mixer(MixerOf::Session);
+        assert!(Slot::Column.rank(mixer) < Slot::ClipSlot.rank(mixer));
+        assert!(Slot::ClipSlot.rank(mixer) < Slot::InputType.rank(mixer));
+        assert!(Slot::InputType.rank(mixer) < Slot::Monitoring.rank(mixer));
+        assert!(Slot::OutputChannel.rank(mixer) < Slot::Send(0).rank(mixer));
+        assert!(Slot::Send(0).rank(mixer) < Slot::Peak.rank(mixer));
+        assert!(Slot::Peak.rank(mixer) < Slot::Volume.rank(mixer));
     }
 
     // Spec: accessibility R3, R5.

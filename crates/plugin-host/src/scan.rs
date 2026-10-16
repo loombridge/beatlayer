@@ -11,9 +11,8 @@
 //! [`beatlayer-scan`](../bin/beatlayer-scan.rs): it loads the file and prints
 //! what it found as JSON, and only it ever loads the plug-in's code.
 //!
-//! CLAP is the only format scanned so far; VST3, Audio Unit, and LV2 are the
-//! hooks [`PluginFormat`] and [`format_extension`] leave for WP-2.7 and
-//! WP-2.8.
+//! CLAP and VST3 are scanned everywhere, and Audio Units on macOS; LV2 is
+//! the hook [`PluginFormat`] and [`format_extension`] leave for its hosting.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
@@ -22,10 +21,26 @@ use std::process::{Command, Stdio};
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime};
 
+use bl_engine::DeviceType;
 use bl_model::{DeviceKind, DeviceRole, PluginFormat};
 use serde::{Deserialize, Serialize};
 
 use crate::clap::ClapType;
+use crate::vst3::Vst3Type;
+
+/// The formats the scanner can describe: CLAP and VST3 everywhere, and
+/// Audio Units on macOS (WP-2.8). LV2 waits for its hosting.
+#[cfg(target_os = "macos")]
+pub const SCANNED_FORMATS: &[PluginFormat] = &[
+    PluginFormat::Clap,
+    PluginFormat::Vst3,
+    PluginFormat::AudioUnit,
+];
+
+/// The formats the scanner can describe: CLAP and VST3 (Audio Units are
+/// macOS only). LV2 waits for its hosting.
+#[cfg(not(target_os = "macos"))]
+pub const SCANNED_FORMATS: &[PluginFormat] = &[PluginFormat::Clap, PluginFormat::Vst3];
 
 /// How long a plug-in may take to answer a scan before it's killed and
 /// blocklisted.
@@ -144,6 +159,8 @@ impl ChildReply {
     pub fn describe(format: PluginFormat, path: &Path) -> Result<Vec<ScannedPlugin>, String> {
         match format {
             PluginFormat::Clap => clap_plugins(path),
+            PluginFormat::Vst3 => vst3_plugins(path),
+            PluginFormat::AudioUnit => au_plugins(path),
             other => Err(format!(
                 "{} plug-ins aren't scanned yet",
                 format_name(other)
@@ -160,22 +177,67 @@ fn clap_plugins(path: &Path) -> Result<Vec<ScannedPlugin>, String> {
     Ok(found.into_iter().map(ScannedPlugin::from_clap).collect())
 }
 
+/// Describes the VST3 plug-ins in `path` by loading and probing them, as
+/// the scanner child process does.
+fn vst3_plugins(path: &Path) -> Result<Vec<ScannedPlugin>, String> {
+    let host = crate::vst3::Vst3Host::new();
+    let found = host.load(path).map_err(|e| e.to_string())?;
+    Ok(found.into_iter().map(ScannedPlugin::from_vst3).collect())
+}
+
+/// Describes the Audio Units a `.component` bundle declares, by loading each
+/// one in its own right, as the scanner child process does (WP-2.8's second
+/// part). On Windows and Linux this answers that Audio Units are macOS only.
+fn au_plugins(path: &Path) -> Result<Vec<ScannedPlugin>, String> {
+    crate::au::scan_file(path).map_err(|e| e.to_string())
+}
+
 impl ScannedPlugin {
     /// A scanned plug-in from a loaded CLAP type.
     #[must_use]
     pub fn from_clap(found: ClapType) -> Self {
-        let plugin_id = match found.device_type.kind {
+        Self::from_type(
+            PluginFormat::Clap,
+            found.path,
+            found.device_type,
+            found.vendor,
+            found.version,
+        )
+    }
+
+    /// A scanned plug-in from a loaded VST3 type.
+    #[must_use]
+    pub fn from_vst3(found: Vst3Type) -> Self {
+        Self::from_type(
+            PluginFormat::Vst3,
+            found.path,
+            found.device_type,
+            found.vendor,
+            found.version,
+        )
+    }
+
+    /// A scanned plug-in from a host's loaded type: its format, file, ID,
+    /// name, vendor, version and role.
+    fn from_type(
+        format: PluginFormat,
+        path: PathBuf,
+        device_type: DeviceType,
+        vendor: Option<String>,
+        version: Option<String>,
+    ) -> Self {
+        let plugin_id = match device_type.kind {
             DeviceKind::Plugin { plugin_id, .. } => plugin_id,
             DeviceKind::Native { device_type } => device_type,
         };
         Self {
-            format: PluginFormat::Clap,
-            path: found.path,
+            format,
+            path,
             plugin_id,
-            name: found.device_type.name,
-            vendor: found.vendor,
-            version: found.version,
-            role: found.device_type.role,
+            name: device_type.name,
+            vendor,
+            version,
+            role: device_type.role,
         }
     }
 }
@@ -504,8 +566,8 @@ pub fn scan_program() -> Option<PathBuf> {
 }
 
 /// The system's plug-in folders for `format`, as the format's conventions
-/// put them, plus the `CLAP_PATH` entries (the CLAP specification requires
-/// them).
+/// put them (the VST3 file format's own locations for VST3), plus the
+/// `CLAP_PATH` entries (the CLAP specification requires them).
 #[must_use]
 pub fn system_paths(format: PluginFormat) -> Vec<PathBuf> {
     let mut paths = Vec::new();
@@ -524,7 +586,10 @@ pub fn system_paths(format: PluginFormat) -> Vec<PathBuf> {
                 paths.push(home.join("Library/Audio/Plug-Ins/CLAP"));
                 paths.push(home.join(".clap"));
             }
-            PluginFormat::Vst3 => paths.push(home.join("Library/Audio/Plug-Ins/VST3")),
+            PluginFormat::Vst3 => {
+                paths.push(home.join("Library/Audio/Plug-Ins/VST3"));
+                paths.push(home.join(".vst3"));
+            }
             PluginFormat::AudioUnit => {
                 paths.push(home.join("Library/Audio/Plug-Ins/Components"));
             }
@@ -533,6 +598,26 @@ pub fn system_paths(format: PluginFormat) -> Vec<PathBuf> {
                 paths.push(home.join("Library/Audio/Plug-Ins/LV2"));
             }
         }
+    }
+    if format == PluginFormat::AudioUnit {
+        // Apple's own units live here, not in the user's or the system's
+        // plug-in folders; the scan is expected to find them (WP-2.8).
+        paths.push(PathBuf::from("/System/Library/Components"));
+    }
+    if format == PluginFormat::Vst3 {
+        // The rest of the VST3 format's plug-in locations (macOS' user and
+        // global folders and Windows' global folder are above): macOS'
+        // network folder, Windows' user folder and Linux' global folders.
+        // Folders this machine doesn't have are skipped when the paths are
+        // searched.
+        paths.push(PathBuf::from("/Network/Library/Audio/Plug-Ins/VST3"));
+        if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+            paths.push(PathBuf::from(local).join("Programs/Common/VST3"));
+        }
+        paths.push(PathBuf::from("/usr/lib64/vst3"));
+        paths.push(PathBuf::from("/usr/lib/vst3"));
+        paths.push(PathBuf::from("/usr/local/lib64/vst3"));
+        paths.push(PathBuf::from("/usr/local/lib/vst3"));
     }
     paths.push(PathBuf::from("/Library/Audio/Plug-Ins").join(format_folder(format)));
     paths
@@ -549,8 +634,8 @@ fn format_folder(format: PluginFormat) -> &'static str {
 }
 
 /// Every plug-in file in `paths` (files are taken as they are; folders are
-/// searched, and a bundle directory named `.clap` on macOS counts as one
-/// file). Missing paths are left out.
+/// searched, and a bundle directory named for the format — `.clap` or
+/// `.vst3` — counts as one file). Missing paths are left out.
 #[must_use]
 pub fn plugin_files(format: PluginFormat, paths: &[PathBuf]) -> Vec<PathBuf> {
     let extension = format_extension(format);

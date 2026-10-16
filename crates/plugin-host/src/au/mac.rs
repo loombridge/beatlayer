@@ -25,7 +25,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::ptr::NonNull;
 use std::sync::OnceLock;
 use std::sync::atomic::Ordering::Relaxed;
@@ -39,21 +39,25 @@ use bl_model::{
     Device, DeviceDescription, DeviceId, DeviceKind, DeviceRole, ParamDescriptor, ParamId,
     ParamKind, ParamUnit, PluginFormat, PluginState,
 };
+use block2::RcBlock;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
-use objc2::{AllocAnyThread, msg_send};
+use objc2::{AllocAnyThread, MainThreadMarker, MainThreadOnly, msg_send};
+use objc2_app_kit::{NSBackingStoreType, NSViewController, NSWindow, NSWindowStyleMask};
 use objc2_audio_toolbox::{
-    AUAudioUnit, AUAudioUnitBus, AUParameter, AudioComponentDescription, AudioComponentFindNext,
-    AudioComponentGetVersion, AudioComponentInstantiationOptions, AudioUnitParameterOptions,
-    AudioUnitParameterUnit,
+    AUAudioUnit, AUAudioUnitBus, AUParameter, AUParameterAutomationEvent,
+    AUParameterAutomationEventType, AUParameterObserverToken, AUParameterTree,
+    AudioComponentDescription, AudioComponentFindNext, AudioComponentGetVersion,
+    AudioComponentInstantiationOptions, AudioUnitParameterOptions, AudioUnitParameterUnit,
 };
 use objc2_avf_audio::AVAudioFormat;
 use objc2_foundation::{
-    NSData, NSDictionary, NSError, NSPropertyListFormat, NSPropertyListMutabilityOptions,
-    NSPropertyListSerialization, NSString,
+    NSArray, NSBundle, NSData, NSDate, NSDictionary, NSError, NSPropertyListFormat,
+    NSPropertyListMutabilityOptions, NSPropertyListSerialization, NSRunLoop, NSString,
 };
 
-pub use crate::clap::PluginStatus;
+pub use crate::clap::{ParamChange, PluginStatus};
+use crate::scan::ScannedPlugin;
 
 use super::{AuError, description_id};
 #[path = "node.rs"]
@@ -152,6 +156,106 @@ struct Instance {
     /// The settings it's active for.
     active_for: Option<NodeConfig>,
     latency: u32,
+    /// The unit's own editor, while it's open (WP-2.8's second part).
+    editor: Option<Editor>,
+    /// Its open editor is hidden: View ▸ Plug-In Windows or Auto-Hide
+    /// Plug-In Windows hid it. Hidden is not closed.
+    editor_hidden: bool,
+    /// Its editor was asked for and the unit's view controller hasn't come
+    /// back yet.
+    opening: bool,
+    /// The completion block, kept until it arrives.
+    pending: Option<Box<ViewControllerBlock>>,
+    /// Why the editor couldn't be opened, if it couldn't.
+    editor_failure: Option<String>,
+}
+
+/// How many parameter events one editor's observer holds for the main
+/// thread before more are dropped. The buffer is reserved when the editor
+/// opens, and the observer takes it with `try_lock`, so a callback the unit
+/// makes on the audio thread neither allocates nor blocks.
+const EDITOR_EVENTS: usize = 4096;
+
+/// A parameter event a unit's editor made, before the main thread turns it
+/// into an undo step.
+#[derive(Clone, Copy)]
+struct RawEvent {
+    /// The unit's 64-bit parameter address.
+    address: u64,
+    /// The value then.
+    value: f64,
+    /// Where in a gesture it sits.
+    kind: EventKind,
+}
+
+/// What part of a gesture a parameter event is.
+#[derive(Clone, Copy)]
+enum EventKind {
+    /// A gesture began (`AUParameterAutomationEventTypeTouch`).
+    Begin,
+    /// A value within (or outside) a gesture.
+    Value,
+    /// A gesture ended (`AUParameterAutomationEventTypeRelease`).
+    End,
+}
+
+/// The block a unit's view controller arrives through: Apple calls it on the
+/// main thread with the controller, or null when the unit has none.
+type ViewControllerBlock = RcBlock<dyn Fn(*mut NSViewController)>;
+
+/// A unit's open editor: its window, and the observer that brings the
+/// changes the unit's own controls make back into the set as one undo step
+/// per gesture (R6).
+struct Editor {
+    /// Its window, holding the unit's view controller.
+    window: Retained<NSWindow>,
+    /// The unit's parameter tree, and the token of the observer added to
+    /// it, so both can be let go of when the editor closes.
+    tree: Retained<AUParameterTree>,
+    token: AUParameterObserverToken,
+    /// The events the observer saw, from whatever thread it ran on; the
+    /// main thread drains them.
+    events: Arc<Mutex<Vec<RawEvent>>>,
+    /// The observer block, kept for as long as the token lives.
+    _observer: RcBlock<dyn Fn(isize, NonNull<AUParameterAutomationEvent>)>,
+    /// The gesture state, on the main thread only.
+    gestures: Gestures,
+}
+
+/// Turns a unit editor's parameter events into changes: one per gesture,
+/// with the value it ended on, or one for a value outside a gesture (spec:
+/// clap-hosting R6).
+#[derive(Default)]
+struct Gestures {
+    /// The parameter addresses whose gesture is open.
+    open: BTreeSet<u64>,
+    /// The value each open gesture last held.
+    held: BTreeMap<u64, f64>,
+}
+
+impl Gestures {
+    /// Feeds one event, returning the parameter and value to record, if the
+    /// event completes a change.
+    fn feed(&mut self, event: RawEvent) -> Option<(u64, f64)> {
+        match event.kind {
+            EventKind::Begin => {
+                self.open.insert(event.address);
+                None
+            }
+            EventKind::Value => {
+                if self.open.contains(&event.address) {
+                    self.held.insert(event.address, event.value);
+                    None
+                } else {
+                    Some((event.address, event.value))
+                }
+            }
+            EventKind::End => {
+                self.open.remove(&event.address);
+                self.held.remove(&event.address).map(|v| (event.address, v))
+            }
+        }
+    }
 }
 
 /// How long a unit keeps living after it's let go of, before its last
@@ -347,10 +451,19 @@ impl AuHost {
     /// deactivates units their nodes gave back, and records what failed.
     /// Returns whether anything a window shows may have changed.
     pub fn idle(&self) -> bool {
+        // A unit's view controller arrives on this thread's run loop; turn
+        // it, without the lock held, so `finish_editor` can take the lock
+        // when it arrives.
+        let opening = lock(&self.inner.main)
+            .get()
+            .is_ok_and(|main| main.instances.values().any(|instance| instance.opening));
+        if opening {
+            NSRunLoop::currentRunLoop().runUntilDate(&NSDate::dateWithTimeIntervalSinceNow(0.01));
+        }
         let requests = std::mem::take(&mut *lock(&self.inner.requests));
         let mut guard = lock(&self.inner.main);
         let Ok(main) = guard.get() else { return false };
-        let mut changed = !requests.is_empty();
+        let mut changed = !requests.is_empty() || opening;
         for request in requests {
             serve(main, request);
         }
@@ -401,6 +514,8 @@ impl AuHost {
                 has_editor: false,
                 editor_open: false,
                 editor_hidden: false,
+                editor_scale: None,
+                editor_size: None,
                 values: Vec::new(),
             });
         }
@@ -413,6 +528,11 @@ impl AuHost {
                 Some((*param, value))
             })
             .collect();
+        // SAFETY: reading a unit property is a read on the thread that owns
+        // the unit.
+        let provides_interface = unsafe { instance.unit.providesUserInterface() };
+        let has_editor =
+            instance.editor.is_some() || (instance.editor_failure.is_none() && provides_interface);
         Some(PluginStatus {
             plugin_id: instance.plugin_id.clone(),
             path: PathBuf::new(),
@@ -423,11 +543,148 @@ impl AuHost {
                 .failure
                 .clone()
                 .or_else(|| instance.refused.clone()),
-            has_editor: false,
-            editor_open: false,
-            editor_hidden: false,
+            has_editor,
+            editor_open: instance.editor.is_some(),
+            editor_hidden: instance.editor_hidden,
+            editor_scale: None,
+            editor_size: None,
             values,
         })
+    }
+
+    /// Opens the device's unit's own editor in a window of its own, titled
+    /// `title`, as a CLAP plug-in's editor opens (spec: clap-hosting R13,
+    /// au-hosting's second part). Apple makes a unit's view controller on
+    /// this thread and delivers it on the main thread's run loop, so the
+    /// window is made when it arrives, in [`AuHost::idle`]; asking again
+    /// while it's on its way does nothing.
+    ///
+    /// # Errors
+    ///
+    /// [`AuError::NoInstance`] without a unit, and [`AuError::WrongThread`]
+    /// off the thread that made the host.
+    pub fn open_editor(&self, device: DeviceId, title: &str) -> Result<(), AuError> {
+        // The unit is cloned out and the lock dropped before the unit is
+        // asked: Apple may call the completion synchronously, and
+        // `finish_editor` takes the lock.
+        let unit = {
+            let mut guard = lock(&self.inner.main);
+            let instance = instance(guard.get()?, device)?;
+            if instance.editor.is_some() || instance.opening {
+                return Ok(());
+            }
+            instance.opening = true;
+            instance.editor_failure = None;
+            instance.unit.clone()
+        };
+        let inner = Arc::clone(&self.inner);
+        let title = title.to_owned();
+        let block = RcBlock::new(move |controller: *mut NSViewController| {
+            finish_editor(&inner, device, &title, controller);
+        });
+        // SAFETY: the unit is alive for the call; its completion runs on the
+        // main thread, where `finish_editor` takes the lock.
+        let _: () =
+            unsafe { msg_send![&unit, requestViewControllerWithCompletionHandler: &*block] };
+        // Keep the block alive in case the completion is still on its way.
+        let mut guard = lock(&self.inner.main);
+        if let Ok(main) = guard.get()
+            && let Some(instance) = main.instances.get_mut(&device)
+            && instance.opening
+        {
+            instance.pending = Some(Box::new(block));
+        }
+        Ok(())
+    }
+
+    /// Closes the device's unit's own editor, if it's open.
+    ///
+    /// # Errors
+    ///
+    /// [`AuError::NoInstance`] without a unit.
+    pub fn close_editor(&self, device: DeviceId) -> Result<(), AuError> {
+        let mut guard = lock(&self.inner.main);
+        let instance = instance(guard.get()?, device)?;
+        // A view controller still on its way is dropped when it arrives:
+        // `finish_editor` leaves a closed editor closed.
+        instance.opening = false;
+        instance.pending = None;
+        instance.editor_failure = None;
+        if let Some(editor) = instance.editor.take() {
+            if let Some(ends) = &instance.ends {
+                ends.status.observer.store(std::ptr::null_mut(), Relaxed);
+            }
+            // SAFETY: the unit's tree is alive; removing an observer blocks
+            // until in-flight callbacks finish, and ours never blocks.
+            unsafe { editor.tree.removeParameterObserver(editor.token) };
+            editor.window.orderOut(None);
+            // The window was made with releasedWhenClosed false, so this
+            // only orders it out; our own reference drops with the editor.
+            editor.window.close();
+        }
+        instance.editor_hidden = false;
+        Ok(())
+    }
+
+    /// Shows or hides the device's unit's editor window without closing it:
+    /// View ▸ Plug-In Windows and Auto-Hide Plug-In Windows hide and show
+    /// it as they do a CLAP editor's. Does nothing while its editor is
+    /// closed.
+    ///
+    /// # Errors
+    ///
+    /// [`AuError::NoInstance`] without a unit, and [`AuError::WrongThread`]
+    /// off the main thread.
+    pub fn set_editor_visible(&self, device: DeviceId, shown: bool) -> Result<(), AuError> {
+        let mut guard = lock(&self.inner.main);
+        let instance = instance(guard.get()?, device)?;
+        let hidden = match &instance.editor {
+            Some(editor) => {
+                if editor.window.isVisible() != shown {
+                    if shown {
+                        editor.window.makeKeyAndOrderFront(None);
+                    } else {
+                        editor.window.orderOut(None);
+                    }
+                }
+                !shown
+            }
+            None => return Ok(()),
+        };
+        instance.editor_hidden = hidden;
+        Ok(())
+    }
+
+    /// The devices whose unit's editor window is open, hidden or shown.
+    #[must_use]
+    pub fn open_editors(&self) -> Vec<DeviceId> {
+        let mut guard = lock(&self.inner.main);
+        guard
+            .get()
+            .map(|main| {
+                main.instances
+                    .iter()
+                    .filter(|(_, instance)| instance.editor.is_some())
+                    .map(|(device, _)| *device)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// The parameter changes the units made themselves since the last call,
+    /// such as from their editors, each gesture as one change with its final
+    /// value (spec: clap-hosting R6).
+    #[must_use]
+    pub fn take_param_changes(&self) -> Vec<ParamChange> {
+        let mut guard = lock(&self.inner.main);
+        let Ok(main) = guard.get() else {
+            return Vec::new();
+        };
+        let mut changes = Vec::new();
+        for (device, instance) in &mut main.instances {
+            pump_editor_changes(*device, instance, &mut changes);
+        }
+        changes
     }
 
     /// Lets go of every unit whose device isn't in `keep`, as when a set
@@ -533,6 +790,262 @@ fn description_of(id: &str) -> Option<AudioComponentDescription> {
     })
 }
 
+/// Describes the Audio Units the `.component` bundle at `path` declares,
+/// for the scanner's child process (WP-2.8's second part): each unit is
+/// loaded by its component description so a bundle that crashes or hangs is
+/// caught by the scanner's timeout, not Beatlayer.
+///
+/// # Errors
+///
+/// [`AuError::Load`] if the bundle isn't one or its `AudioComponents` list
+/// can't be read, or a unit it declares won't start.
+pub(super) fn scan_file(path: &Path) -> Result<Vec<ScannedPlugin>, AuError> {
+    let host = AuHost::new();
+    let mut found = Vec::new();
+    for (kind, subtype, manufacturer) in component_descriptions(path)? {
+        if role_text(&kind).is_none() {
+            continue;
+        }
+        let unit = host.load(&kind, &subtype, &manufacturer)?;
+        let plugin_id = description_id(&kind, &subtype, &manufacturer).ok_or_else(|| {
+            AuError::Load("its type, subtype, and manufacturer are four characters each".to_owned())
+        })?;
+        found.push(ScannedPlugin {
+            format: PluginFormat::AudioUnit,
+            path: path.to_path_buf(),
+            plugin_id,
+            name: unit.device_type.name,
+            vendor: unit.vendor,
+            version: unit.version,
+            role: unit.device_type.role,
+        });
+    }
+    Ok(found)
+}
+
+/// The component descriptions an Audio Unit bundle declares, from its
+/// `Info.plist`'s `AudioComponents` list: its type, subtype, and
+/// manufacturer, four characters each. Reading the list doesn't load the
+/// unit's code.
+fn component_descriptions(path: &Path) -> Result<Vec<(String, String, String)>, AuError> {
+    let path = path.to_string_lossy().into_owned();
+    let bundle = NSBundle::bundleWithPath(&NSString::from_str(&path))
+        .ok_or_else(|| AuError::Load("it isn't an Audio Unit bundle".to_owned()))?;
+    let Some(list) = bundle.objectForInfoDictionaryKey(&NSString::from_str("AudioComponents"))
+    else {
+        return Err(AuError::Load("it declares no Audio Components".to_owned()));
+    };
+    // SAFETY: an Audio Unit's Info.plist holds AudioComponents as an array
+    // of dictionaries of strings.
+    let list: &NSArray = list
+        .downcast_ref()
+        .ok_or_else(|| AuError::Load("its Audio Components list isn't an array".to_owned()))?;
+    let field = |entry: &AnyObject, key: &str| -> Option<String> {
+        let key = NSString::from_str(key);
+        // SAFETY: the entry is a dictionary and the key a string; a
+        // value that isn't a string is ignored.
+        let value: *mut AnyObject = unsafe { msg_send![entry, valueForKey: &*key] };
+        if value.is_null() {
+            return None;
+        }
+        // SAFETY: the value is a live object from the dictionary.
+        let value = unsafe { Retained::retain(value) }?;
+        // SAFETY: the fields are strings.
+        let string = value.downcast_ref::<NSString>()?;
+        Some(string.to_string())
+    };
+    let mut descriptions = Vec::new();
+    for index in 0..list.count() {
+        let entry = list.objectAtIndex(index);
+        let (Some(kind), Some(subtype), Some(manufacturer)) = (
+            field(&entry, "type"),
+            field(&entry, "subtype"),
+            field(&entry, "manufacturer"),
+        ) else {
+            continue;
+        };
+        descriptions.push((kind, subtype, manufacturer));
+    }
+    Ok(descriptions)
+}
+
+/// What an automation event is: the start or end of a gesture, or a value
+/// within one (or on its own).
+fn event_kind(kind: AUParameterAutomationEventType) -> EventKind {
+    if kind.0 == AUParameterAutomationEventType::Touch.0 {
+        EventKind::Begin
+    } else if kind.0 == AUParameterAutomationEventType::Release.0 {
+        EventKind::End
+    } else {
+        EventKind::Value
+    }
+}
+
+/// Completes an editor's opening, on the main thread: makes the window and
+/// the parameter observer for the view controller that arrived, or records
+/// why there is none. Does nothing if the editor was closed meanwhile.
+fn finish_editor(
+    inner: &Arc<Inner>,
+    device: DeviceId,
+    title: &str,
+    controller: *mut NSViewController,
+) {
+    let mut guard = lock(&inner.main);
+    let Ok(main) = guard.get() else { return };
+    let Some(instance) = main.instances.get_mut(&device) else {
+        return;
+    };
+    if !instance.opening {
+        return;
+    }
+    instance.opening = false;
+    instance.pending = None;
+    // SAFETY: reading the parameter tree is a property read on the thread
+    // that owns the unit.
+    let Some(tree) = (unsafe { instance.unit.parameterTree() }) else {
+        instance.editor_failure = Some("the unit has no parameter tree".to_owned());
+        return;
+    };
+    if controller.is_null() {
+        instance.editor_failure = Some("the unit has no editor".to_owned());
+        return;
+    }
+    // SAFETY: the completion runs on the main thread with a view controller
+    // the unit still owns; take our own reference.
+    let Some(controller) = (unsafe { Retained::retain(controller) }) else {
+        instance.editor_failure = Some("the unit has no editor".to_owned());
+        return;
+    };
+    let window = make_window(&controller, title);
+    let events: Arc<Mutex<Vec<RawEvent>>> = Arc::new(Mutex::new(Vec::with_capacity(EDITOR_EVENTS)));
+    let sink = Arc::clone(&events);
+    let observer = RcBlock::new(
+        move |count: isize, list: NonNull<AUParameterAutomationEvent>| {
+            // Never block or allocate here: this may run on the audio
+            // thread. Events past the buffer's room are dropped.
+            let Ok(mut out) = sink.try_lock() else { return };
+            let count = usize::try_from(count).unwrap_or(0);
+            // SAFETY: the unit lends the callback `count` events for the
+            // call; it holds at least that many.
+            let events = unsafe { std::slice::from_raw_parts(list.as_ptr(), count) };
+            for event in events {
+                if out.len() >= EDITOR_EVENTS {
+                    break;
+                }
+                out.push(RawEvent {
+                    address: event.address,
+                    value: f64::from(event.value),
+                    kind: event_kind(event.eventType),
+                });
+            }
+        },
+    );
+    // SAFETY: the tree belongs to the unit, alive on this thread; the block
+    // is kept alive by the editor below.
+    let token =
+        unsafe { tree.tokenByAddingParameterAutomationObserver(RcBlock::as_ptr(&observer)) };
+    instance.editor = Some(Editor {
+        window,
+        tree,
+        token,
+        events,
+        _observer: observer,
+        gestures: Gestures::default(),
+    });
+    instance.editor_hidden = false;
+    instance.editor_failure = None;
+    // The host's own parameter changes must not come back as the unit's:
+    // the node passes this token to setValue:originator:.
+    if let Some(ends) = &instance.ends {
+        ends.status.observer.store(token, Relaxed);
+    }
+}
+
+/// A window of its own holding `controller`, titled `title`, shown and made
+/// key; the unit's own controls are in it.
+fn make_window(controller: &NSViewController, title: &str) -> Retained<NSWindow> {
+    let mut size = controller.view().frame().size;
+    if size.width <= 0.0 || size.height <= 0.0 {
+        size = objc2_foundation::NSSize {
+            width: 480.0,
+            height: 360.0,
+        };
+    }
+    let rect = objc2_foundation::NSRect {
+        origin: objc2_foundation::NSPoint { x: 0.0, y: 0.0 },
+        size,
+    };
+    let style =
+        NSWindowStyleMask::Titled | NSWindowStyleMask::Closable | NSWindowStyleMask::Miniaturizable;
+    let mtm = MainThreadMarker::new().expect("a unit's editor opens on the main thread");
+    // SAFETY: the window is made on the main thread, as AppKit requires.
+    let window = unsafe {
+        NSWindow::initWithContentRect_styleMask_backing_defer(
+            NSWindow::alloc(mtm),
+            rect,
+            style,
+            NSBackingStoreType::Buffered,
+            false,
+        )
+    };
+    // SAFETY: the window is released when we let our own reference go, not
+    // when it's closed, so `close_editor` may close and then drop it.
+    unsafe { window.setReleasedWhenClosed(false) };
+    window.setTitle(&NSString::from_str(title));
+    window.setContentViewController(Some(controller));
+    window.center();
+    window.makeKeyAndOrderFront(None);
+    window
+}
+
+/// Turns the events an editor's observer saw into the set's changes, one
+/// per gesture with its final value (spec: clap-hosting R6).
+fn pump_editor_changes(device: DeviceId, instance: &mut Instance, changes: &mut Vec<ParamChange>) {
+    let Some(editor) = &mut instance.editor else {
+        return;
+    };
+    let events: Vec<RawEvent> = match editor.events.try_lock() {
+        Ok(mut events) => std::mem::take(&mut *events),
+        Err(_) => return,
+    };
+    if events.is_empty() {
+        return;
+    }
+    // Every parameter's address, to find the position a change names.
+    let positions: BTreeMap<u64, u32> = instance
+        .params
+        .iter()
+        .enumerate()
+        .filter_map(|(index, (parameter, _))| {
+            let param = u32::try_from(index).ok()?;
+            // SAFETY: reading a parameter's address is a property read on
+            // the thread that owns the unit.
+            Some((unsafe { parameter.address() }, param))
+        })
+        .collect();
+    for event in events {
+        let Some((address, value)) = editor.gestures.feed(event) else {
+            continue;
+        };
+        let Some(param) = positions.get(&address).copied() else {
+            continue;
+        };
+        emit_change(device, param, value, changes);
+    }
+}
+
+/// Records one change, replacing an earlier one for the same parameter so a
+/// gesture ends as a single change.
+fn emit_change(device: DeviceId, param: u32, value: f64, changes: &mut Vec<ParamChange>) {
+    let param = ParamId(param);
+    changes.retain(|change| !(change.device == device && change.param == param));
+    changes.push(ParamChange {
+        device,
+        param,
+        value,
+    });
+}
+
 /// A unit's device kind.
 fn kind(id: &str) -> DeviceKind {
     DeviceKind::Plugin {
@@ -545,7 +1058,12 @@ fn kind(id: &str) -> DeviceKind {
 /// audio effect, or a MIDI effect. `None` for anything else the system
 /// registers (format converters, codecs, and the like).
 fn role(component_type: u32) -> Option<DeviceRole> {
-    match super::field(component_type).as_str() {
+    role_text(&super::field(component_type))
+}
+
+/// Where a unit goes in a chain, from its component type's four characters.
+fn role_text(component_type: &str) -> Option<DeviceRole> {
+    match component_type {
         "aufx" => Some(DeviceRole::AudioEffect),
         "aumu" | "augn" => Some(DeviceRole::Instrument),
         "aumi" => Some(DeviceRole::MidiEffect),
@@ -872,6 +1390,11 @@ fn ensure_instance(main: &mut Main, device: &Device) -> bool {
         silenced: false,
         active_for: None,
         latency: 0,
+        editor: None,
+        editor_hidden: false,
+        opening: false,
+        pending: None,
+        editor_failure: None,
     };
     // Spec: au-hosting R9, R11. The saved state first, then the set's
     // parameter values over it.
@@ -1139,5 +1662,33 @@ mod tests {
         assert!(matches!(refused, Err(AuError::Load(_))), "{refused:?}");
         let refused = host.load("auf", "dely", "appl");
         assert!(matches!(refused, Err(AuError::Load(_))), "{refused:?}");
+    }
+
+    /// Spec: clap-hosting R6. A gesture makes one change, with the value it
+    /// ended on; a value outside a gesture is a change of its own.
+    #[test]
+    fn a_gesture_makes_one_change_with_its_final_value() {
+        let event = |kind, value| RawEvent {
+            address: 7,
+            value,
+            kind,
+        };
+        let mut gestures = Gestures::default();
+        assert_eq!(gestures.feed(event(EventKind::Begin, 1.0)), None);
+        assert_eq!(gestures.feed(event(EventKind::Value, 2.0)), None);
+        assert_eq!(gestures.feed(event(EventKind::Value, 3.0)), None);
+        assert_eq!(
+            gestures.feed(event(EventKind::End, 3.0)),
+            Some((7, 3.0)),
+            "one change, on the value it ended with"
+        );
+        assert_eq!(
+            gestures.feed(event(EventKind::Value, 9.0)),
+            Some((7, 9.0)),
+            "outside a gesture, a value is a change of its own"
+        );
+        // A gesture that ends without a value changes nothing.
+        assert_eq!(gestures.feed(event(EventKind::Begin, 0.0)), None);
+        assert_eq!(gestures.feed(event(EventKind::End, 0.0)), None);
     }
 }

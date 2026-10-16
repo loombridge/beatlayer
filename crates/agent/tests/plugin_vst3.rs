@@ -1,7 +1,8 @@
 //! VST3 hosting, part 1 (WP-2.7; the VST3 hosting spec, R1 and R6):
 //! `plugin.load` loads a `.vst3` bundle by path through the agent API, the
 //! set holds it as a VST3 device, an engine starts its plug-in, and
-//! `plugin.info` reports it.
+//! `plugin.info` reports it. The scanner describes VST3 plug-ins too
+//! (WP-2.9; the plug-in scanning spec).
 
 use std::time::{Duration, Instant};
 
@@ -113,4 +114,24 @@ fn a_vst3_plugin_loads_by_path_through_the_agent_api() {
         values.iter().any(|value| value[0] == 0 && value[1] == 1.0),
         "the Gain is 1 by default: {values:?}"
     );
+}
+
+// Spec: plugin-scanning R1, R9. The scanner describes VST3 plug-ins through
+// the agent API (WP-2.7).
+#[test]
+fn a_scan_lists_vst3_plug_ins_through_the_agent_api() {
+    // Scanning reads plug-in files outside the project, so this agent is
+    // autonomous.
+    let mut client = client(true);
+    let scanned = run(
+        &mut client,
+        "plugin.scan",
+        json!({ "paths": [bl_test_vst3::bundle()] }),
+    );
+    let result = &scanned["results"][0]["result"];
+    let plugins = result["plugins"].as_array().expect("the plug-ins");
+    assert_eq!(plugins.len(), 1, "{plugins:?}");
+    assert_eq!(plugins[0]["format"], "vst3");
+    assert_eq!(plugins[0]["plugin_id"], bl_test_vst3::plugin_id());
+    assert_eq!(plugins[0]["name"], bl_test_vst3::PLUGIN_NAME);
 }

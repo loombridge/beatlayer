@@ -7,7 +7,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::document::Document;
-use crate::ids::{ClipId, DeviceId, TrackId};
+use crate::ids::{ClipId, DeviceId, SceneId, TrackId};
 use crate::track::Track;
 
 /// How one object differs between two versions.
@@ -34,14 +34,14 @@ pub enum Change {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[schemars(
     description = "What a command changed: whether the song settings (the tempo map, the \
-                   time-signature map, the Arrangement loop, or Solo in Place) changed, whether \
-                   the track list changed, and which tracks, clips, and devices were added, \
-                   removed, or modified, keyed by ID. Every field is empty or false if nothing \
-                   changed."
+                   time-signature map, the crossfader, the Arrangement loop, or Solo in Place) \
+                   changed, whether the track list changed, and which tracks, scenes, clips, and \
+                   devices were added, removed, or modified, keyed by ID. Every field is empty or \
+                   false if nothing changed."
 )]
 pub struct ChangeSet {
     /// The song settings changed: the tempo map, the time-signature map, the
-    /// Arrangement loop, or Solo in Place.
+    /// crossfader, the Arrangement loop, or Solo in Place.
     pub settings: bool,
     /// The track tree changed: a track was added, removed, or moved, so
     /// routing may have changed.
@@ -51,7 +51,11 @@ pub struct ChangeSet {
     /// clips or to its devices' settings are listed under `clips` and
     /// `devices` instead.
     pub tracks: BTreeMap<TrackId, Change>,
-    /// Clips that changed, including clips moved to another track.
+    /// Scenes that were added, removed, renamed, or moved. A scene whose
+    /// clips changed only is listed under `clips`, not here.
+    pub scenes: BTreeMap<SceneId, Change>,
+    /// Clips that changed, including clips moved to another track or
+    /// between the Arrangement and a Session slot.
     pub clips: BTreeMap<ClipId, Change>,
     /// Devices whose settings changed, including devices moved to another
     /// track.
@@ -69,6 +73,7 @@ impl ChangeSet {
                 || !(old.returns.ptr_eq(&new.returns) || old.returns == new.returns),
             ..Self::default()
         };
+        scene_changes(old, new, &mut changes);
         for item in old.tracks.diff(&new.tracks) {
             match item {
                 DiffItem::Add(id, track) => {
@@ -94,6 +99,7 @@ impl ChangeSet {
         !self.settings
             && !self.layout
             && self.tracks.is_empty()
+            && self.scenes.is_empty()
             && self.clips.is_empty()
             && self.devices.is_empty()
     }
@@ -102,6 +108,9 @@ impl ChangeSet {
         record(&mut self.tracks, id, change);
         for clip in track.clips.keys() {
             record(&mut self.clips, *clip, change);
+        }
+        for clip in track.slots.values() {
+            record(&mut self.clips, clip.id, change);
         }
         for device in &track.devices {
             record(&mut self.devices, device.id, change);
@@ -121,6 +130,20 @@ impl ChangeSet {
                 DiffItem::Remove(clip, _) => record(&mut self.clips, *clip, Change::Removed),
                 DiffItem::Update { old: (clip, _), .. } => {
                     record(&mut self.clips, *clip, Change::Modified);
+                }
+            }
+        }
+        for item in old.slots.diff(&new.slots) {
+            match item {
+                DiffItem::Add(_, clip) => record(&mut self.clips, clip.id, Change::Added),
+                DiffItem::Remove(_, clip) => record(&mut self.clips, clip.id, Change::Removed),
+                DiffItem::Update {
+                    old: (_, before),
+                    new: (_, after),
+                } => {
+                    if before != after {
+                        record(&mut self.clips, before.id, Change::Modified);
+                    }
                 }
             }
         }
@@ -158,6 +181,26 @@ fn record<K: Ord>(changes: &mut BTreeMap<K, Change>, id: K, change: Change) {
         .or_insert(change);
 }
 
+/// Records scenes that were added, removed, renamed, or moved. A scene's
+/// clips are compared with the tracks', so a scene with one more or fewer
+/// clips isn't a scene change.
+fn scene_changes(old: &Document, new: &Document, changes: &mut ChangeSet) {
+    for (position, scene) in new.scenes().enumerate() {
+        match old.scene(scene.id) {
+            None => record(&mut changes.scenes, scene.id, Change::Added),
+            Some(before) if before != scene || old.scene_position(scene.id) != Some(position) => {
+                record(&mut changes.scenes, scene.id, Change::Modified);
+            }
+            Some(_) => {}
+        }
+    }
+    for scene in old.scenes() {
+        if new.scene(scene.id).is_none() {
+            record(&mut changes.scenes, scene.id, Change::Removed);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use bl_core::time::{Bpm, TempoMap, Ticks};
@@ -167,7 +210,7 @@ mod tests {
     use crate::command::Command;
     use crate::device::{Device, DeviceKind};
     use crate::editor::Editor;
-    use crate::ids::{ClipId, ParamId};
+    use crate::ids::{ClipId, ParamId, SceneId};
     use crate::track::TrackKind;
 
     struct Fixture {
@@ -341,6 +384,90 @@ mod tests {
         let changes = f.editor.undo().unwrap();
         assert_eq!(changes.clips, only(f.clip, Change::Added));
         assert_eq!(changes.tracks.len(), 2);
+    }
+
+    // Spec: session-view R4, R6, R8, R12
+    #[test]
+    fn scene_and_slot_edits() {
+        let mut f = Fixture::new();
+        let scene = f.editor.document().scenes().next().unwrap().id;
+
+        // Renaming and moving a scene are scene changes, not track or clip
+        // changes.
+        let changes = f.change(Command::RenameScene {
+            scene,
+            name: "Verse".to_owned(),
+        });
+        assert_eq!(
+            changes,
+            ChangeSet {
+                scenes: only(scene, Change::Modified),
+                ..ChangeSet::default()
+            }
+        );
+        let order: Vec<SceneId> = f.editor.document().scenes().map(|scene| scene.id).collect();
+        let changes = f.change(Command::MoveScene { scene, index: 3 });
+        // Its number, and the numbers of the scenes it passed, change.
+        let expected: BTreeMap<SceneId, Change> = order[..4]
+            .iter()
+            .map(|&id| (id, Change::Modified))
+            .collect();
+        assert_eq!(changes.scenes, expected);
+
+        // Inserting a scene renumbers the ones below it, as observed in
+        // Live; deleting it renumbers them back.
+        let before: Vec<SceneId> = f.editor.document().scenes().map(|scene| scene.id).collect();
+        let new: SceneId = f.editor.new_id();
+        let changes = f.change(Command::CreateScene { id: new, index: 0 });
+        let expected: BTreeMap<SceneId, Change> = before
+            .iter()
+            .map(|&id| (id, Change::Modified))
+            .chain(std::iter::once((new, Change::Added)))
+            .collect();
+        assert_eq!(changes.scenes, expected);
+        assert!(changes.clips.is_empty());
+        let changes = f.change(Command::DeleteScene { scene: new });
+        let expected: BTreeMap<SceneId, Change> = before
+            .iter()
+            .map(|&id| (id, Change::Modified))
+            .chain(std::iter::once((new, Change::Removed)))
+            .collect();
+        assert_eq!(changes.scenes, expected);
+
+        // A clip in a slot is listed under clips; the scene it sits in
+        // doesn't change.
+        let clip: ClipId = f.editor.new_id();
+        let changes = f.change(Command::CreateSlotClip {
+            track: f.first,
+            scene,
+            clip: Clip::new(
+                clip,
+                Ticks::ZERO,
+                Ticks::WHOLE,
+                ClipData::Midi(MidiData::default()),
+            ),
+        });
+        assert_eq!(changes.clips, only(clip, Change::Added));
+        assert!(changes.scenes.is_empty());
+
+        // Duplicating adds the scene and the copies of its clips.
+        let copy: SceneId = f.editor.new_id();
+        let copy_clip: ClipId = f.editor.new_id();
+        let changes = f.change(Command::DuplicateScene {
+            scene,
+            id: copy,
+            clips: vec![(f.first, copy_clip)],
+        });
+        // The copy goes straight after the scene, so the scenes after it
+        // are renumbered too.
+        assert_eq!(changes.scenes.get(&copy), Some(&Change::Added));
+        assert_eq!(changes.clips, only(copy_clip, Change::Added));
+
+        // Deleting a scene removes the clips in its slots with it, and
+        // counts as a scene change.
+        let changes = f.change(Command::DeleteScene { scene });
+        assert_eq!(changes.scenes.get(&scene), Some(&Change::Removed));
+        assert_eq!(changes.clips, only(clip, Change::Removed));
     }
 
     #[test]

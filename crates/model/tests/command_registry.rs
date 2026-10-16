@@ -9,10 +9,10 @@ use bl_commands::{Registry, args_schema, tagged_variant, validate};
 use bl_core::time::{Bpm, TempoMap, Ticks, TimeSignature, TimeSignatureMap};
 use bl_model::registry::{self, RunError};
 use bl_model::{
-    ArrangementLoop, AudioData, Change, ChangeSet, Channel, Clip, ClipData, ClipId, Command,
-    ContentHash, CountIn, Device, DeviceId, DeviceKind, EditError, Editor, Input, MetronomeRhythm,
-    MetronomeSound, MidiData, ModelError, Monitor, Note, Output, ParamId, PluginFormat, SendTap,
-    Tap, TrackId, TrackKind,
+    ArrangementLoop, AudioData, AutomationTarget, Change, ChangeSet, Channel, Clip, ClipData,
+    ClipId, Command, ContentHash, CountIn, CrossfadeAssign, Device, DeviceId, DeviceKind,
+    EditError, Editor, Input, MetronomeRhythm, MetronomeSound, MidiData, MixerParam, ModelError,
+    Monitor, Note, Output, ParamId, PluginFormat, SceneId, SendTap, Tap, TrackId, TrackKind,
 };
 use serde_json::{Value, json};
 
@@ -27,7 +27,7 @@ fn document_registry() -> Registry {
 /// label, or has a malformed ID or binding.
 #[test]
 fn every_command_is_complete() {
-    // Spec: mixer R21; routing R20
+    // Spec: mixer R21; routing R20; session-view R12
     let commands = document_registry();
     if let Err(problems) = commands.check() {
         panic!("{problems}");
@@ -38,6 +38,7 @@ fn every_command_is_complete() {
 /// schema as its arguments, and so are undo and redo.
 #[test]
 fn every_document_command_is_registered() {
+    // Spec: session-view R12
     let commands = document_registry();
     let enum_schema = args_schema::<Command>();
     let ops: Vec<&str> = enum_schema
@@ -49,13 +50,14 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        66,
+        82,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
          set_device_floating, WP-2.20 six for tempo breakpoints and time-signature markers, \
          WP-2.1 two for MIDI clips, WP-2.16 set_device_sample, WP-2.15 five for the metronome, \
-         and WP-2.13 the two for Main Out and Cue Out"
+         WP-2.13 the two for Main Out and Cue Out, WP-3.1 five for scenes and two for slot \
+         clips, WP-2.12 seven for automation, and WP-3.17 two for the crossfader"
     );
 
     for op in &ops {
@@ -121,7 +123,7 @@ impl Agent {
 /// each run is one undo step.
 #[test]
 fn every_command_runs_by_id() {
-    // Spec: mixer R21; routing R20
+    // Spec: mixer R21; routing R20; session-view R12
     let mut agent = Agent::new();
     let quarter = Ticks::QUARTER.0;
     let bar = Ticks::WHOLE.0;
@@ -177,9 +179,17 @@ fn every_command_runs_by_id() {
     );
     let changes = agent.run("mixer.set_solo_in_place", json!({ "enabled": false }));
     assert!(changes.settings);
+    agent.run("mixer.set_crossfader", json!({ "position": 0.75 }));
+    let changes = agent.run(
+        "mixer.set_crossfade_assign",
+        json!({ "track": drums, "assign": "a" }),
+    );
+    assert_eq!(changes.tracks.get(&drums), Some(&Change::Modified));
     let document = agent.editor.document();
     let mixer = *document.track(drums).unwrap().mixer();
     assert_eq!((mixer.volume, mixer.pan, mixer.mute), (0.5, -0.25, true));
+    assert_eq!(mixer.crossfade, CrossfadeAssign::A);
+    assert_eq!(document.settings().crossfader, 0.75);
     assert!(
         !mixer.solo && !mixer.arm,
         "released by the exclusive switches"
@@ -444,6 +454,73 @@ fn every_command_runs_by_id() {
     agent.run("clip.delete", json!({ "clip": loop_clip }));
     assert!(agent.editor.document().clip(loop_clip).is_none());
 
+    // Session: scenes and the clips in their slots (WP-3.1).
+    let scenes: Vec<SceneId> = agent
+        .editor
+        .document()
+        .scenes()
+        .map(|scene| scene.id)
+        .collect();
+    let (first, second) = (scenes[0], scenes[1]);
+    let slot_riff: ClipId = agent.new_id();
+    agent.run(
+        "clip.create_in_slot",
+        json!({ "track": bass, "scene": first, "clip": {
+            "id": slot_riff, "name": "", "start": 0, "length": bar, "mute": false,
+            "data": { "midi": { "notes": [
+                { "key": 40, "velocity": 100, "start": 0, "length": quarter },
+            ] } },
+        } }),
+    );
+    let slot_loop: ClipId = agent.new_id();
+    agent.run(
+        "clip.create_in_slot",
+        json!({ "track": drums, "scene": first, "clip": {
+            "id": slot_loop, "name": "Loop", "start": 0, "length": bar, "mute": false,
+            "data": { "audio": { "media": "cd".repeat(32) } },
+        } }),
+    );
+    agent.run(
+        "clip.move_to_slot",
+        json!({ "clip": slot_riff, "track": bass, "scene": second }),
+    );
+    let document = agent.editor.document();
+    assert_eq!(
+        document.slot(bass, second).map(|clip| clip.id),
+        Some(slot_riff)
+    );
+    assert!(document.slot(bass, first).is_none());
+    assert_eq!(document.clip_track(slot_loop), Some(drums));
+
+    // The scene commands: rename, move, duplicate, insert, delete.
+    agent.run("scene.rename", json!({ "scene": first, "name": "Verse" }));
+    assert_eq!(agent.editor.document().scene(first).unwrap().name, "Verse");
+    agent.run("scene.move", json!({ "scene": first, "index": 4 }));
+    assert_eq!(agent.editor.document().scene_position(first), Some(4));
+    let copy: SceneId = agent.new_id();
+    let copy_clip: ClipId = agent.new_id();
+    agent.run(
+        "scene.duplicate",
+        json!({ "scene": first, "id": copy, "clips": [[drums, copy_clip]] }),
+    );
+    let document = agent.editor.document();
+    assert_eq!(document.scene_position(copy), Some(5));
+    assert_eq!(
+        document.slot(drums, copy).map(|clip| clip.id),
+        Some(copy_clip)
+    );
+    let new_scene: SceneId = agent.new_id();
+    agent.run("scene.create", json!({ "id": new_scene, "index": 0 }));
+    assert_eq!(agent.editor.document().scene_position(new_scene), Some(0));
+    // Deleting the scene takes the clips in its slots with it; the copies
+    // stay.
+    agent.run("scene.delete", json!({ "scene": second }));
+    assert!(agent.editor.document().slot(bass, second).is_none());
+    assert!(agent.editor.document().clip(slot_riff).is_none());
+    assert!(agent.editor.document().clip(copy_clip).is_some());
+    agent.run("clip.delete", json!({ "clip": slot_loop }));
+    assert!(agent.editor.document().clip(slot_loop).is_none());
+
     // Devices.
     let eq: DeviceId = agent.new_id();
     agent.run(
@@ -562,6 +639,137 @@ fn every_command_runs_by_id() {
         }
     );
 
+    // Automation, one envelope per parameter (WP-2.12): a mixer control, a
+    // send, and a device parameter; the hand move that overrides an
+    // envelope; and the two Re-Enable commands.
+    let volume = json!({ "type": "mixer", "param": "volume" });
+    let send = json!({ "type": "send", "to": reverb });
+    let changes = agent.run(
+        "automation.set_breakpoint",
+        json!({ "track": drums, "target": volume, "at": 0, "value": 1.0 }),
+    );
+    assert_eq!(changes.tracks.get(&drums), Some(&Change::Modified));
+    agent.run(
+        "automation.set_breakpoint",
+        json!({ "track": drums, "target": volume, "at": bar, "value": 0.25 }),
+    );
+    agent.run(
+        "automation.set_curve",
+        json!({ "track": drums, "target": volume, "at": 0, "bend": -0.5 }),
+    );
+    agent.run(
+        "automation.set_breakpoint",
+        json!({ "track": group, "target": send, "at": 0, "value": 0.5 }),
+    );
+    agent.run(
+        "automation.set_breakpoint",
+        json!({ "track": reverb, "target": { "type": "device", "device": eq, "param": 3 },
+                "at": 0, "value": -6.0 }),
+    );
+    let document = agent.editor.document();
+    let automation = document
+        .track(drums)
+        .unwrap()
+        .automation_for(&AutomationTarget::Mixer {
+            param: MixerParam::Volume,
+        })
+        .expect("an envelope");
+    assert!(automation.enabled);
+    assert_eq!(
+        automation.envelope.points().collect::<Vec<_>>(),
+        vec![
+            bl_model::Breakpoint {
+                at: Ticks::ZERO,
+                value: 1.0,
+                bend: -0.5,
+            },
+            bl_model::Breakpoint {
+                at: Ticks(bar),
+                value: 0.25,
+                bend: 0.0,
+            }
+        ]
+    );
+    assert!(
+        document
+            .track(reverb)
+            .unwrap()
+            .automation_for(&AutomationTarget::Device {
+                device: eq,
+                param: ParamId(3)
+            })
+            .is_some()
+    );
+    // A hand move overrides the envelope: the control's value wins until
+    // Re-Enable Automation.
+    agent.run(
+        "mixer.set_volume",
+        json!({ "track": drums, "volume": 0.75 }),
+    );
+    let document = agent.editor.document();
+    assert!(document.track(drums).unwrap().automation_overridden());
+    assert_eq!(document.track(drums).unwrap().mixer().volume, 0.75);
+    agent.run(
+        "automation.re_enable_for",
+        json!({ "track": drums, "target": volume }),
+    );
+    assert!(
+        !agent
+            .editor
+            .document()
+            .track(drums)
+            .unwrap()
+            .automation_overridden()
+    );
+    agent.run("mixer.set_volume", json!({ "track": drums, "volume": 0.5 }));
+    agent.run("automation.re_enable", json!({}));
+    assert!(
+        !agent
+            .editor
+            .document()
+            .track(drums)
+            .unwrap()
+            .automation_overridden()
+    );
+    // Moving and deleting breakpoints, and deleting a whole envelope.
+    agent.run(
+        "automation.move_breakpoint",
+        json!({ "track": drums, "target": volume, "at": bar, "to": bar * 2 }),
+    );
+    agent.run(
+        "automation.delete_breakpoint",
+        json!({ "track": drums, "target": volume, "at": bar * 2 }),
+    );
+    agent.run(
+        "automation.delete",
+        json!({ "track": group, "target": send }),
+    );
+    assert!(
+        agent
+            .editor
+            .document()
+            .track(group)
+            .unwrap()
+            .automation_for(&AutomationTarget::Send { to: reverb })
+            .is_none()
+    );
+    // Deleting the last breakpoint takes the envelope with it.
+    agent.run(
+        "automation.delete_breakpoint",
+        json!({ "track": drums, "target": volume, "at": 0 }),
+    );
+    assert!(
+        agent
+            .editor
+            .document()
+            .track(drums)
+            .unwrap()
+            .automation_for(&AutomationTarget::Mixer {
+                param: MixerParam::Volume
+            })
+            .is_none()
+    );
+
     // Metronome (WP-2.15).
     agent.run(
         "transport.set_metronome_enabled",
@@ -626,13 +834,15 @@ fn every_command_runs_by_id() {
 /// registered schema, and reads back as the same command through its ID.
 #[test]
 fn schemas_match_what_commands_serialise() {
-    // Spec: mixer R21; routing R20
+    // Spec: mixer R21; routing R20; session-view R12
     let commands = document_registry();
     let mut ids = bl_core::id::IdAllocator::new();
     let mut fresh = || ids.allocate();
     let track = TrackId(fresh());
     let clip = ClipId(fresh());
     let device = DeviceId(fresh());
+    let scene = SceneId(fresh());
+    let scene_copy = SceneId(fresh());
     let notes = MidiData::new([Note::new(127, Ticks::ZERO, Ticks::QUARTER, 1)]);
     let mut plugin = Device::new(
         device,
@@ -761,6 +971,81 @@ fn schemas_match_what_commands_serialise() {
         (
             "mixer.set_solo_in_place",
             Command::SetSoloInPlace { enabled: false },
+        ),
+        (
+            "mixer.set_crossfader",
+            Command::SetCrossfader { position: 0.25 },
+        ),
+        (
+            "mixer.set_crossfade_assign",
+            Command::SetCrossfadeAssign {
+                track,
+                assign: CrossfadeAssign::B,
+            },
+        ),
+        (
+            "automation.set_breakpoint",
+            Command::SetAutomationBreakpoint {
+                track,
+                target: AutomationTarget::Mixer {
+                    param: MixerParam::Volume,
+                },
+                at: Ticks::QUARTER,
+                value: 1.0,
+            },
+        ),
+        (
+            "automation.set_curve",
+            Command::SetAutomationCurve {
+                track,
+                target: AutomationTarget::Mixer {
+                    param: MixerParam::Pan,
+                },
+                at: Ticks::QUARTER,
+                bend: -0.5,
+            },
+        ),
+        (
+            "automation.move_breakpoint",
+            Command::MoveAutomationBreakpoint {
+                track,
+                target: AutomationTarget::Device {
+                    device,
+                    param: ParamId(7),
+                },
+                at: Ticks::QUARTER,
+                to: Ticks::WHOLE,
+                value: Some(0.5),
+            },
+        ),
+        (
+            "automation.delete_breakpoint",
+            Command::DeleteAutomationBreakpoint {
+                track,
+                target: AutomationTarget::Send {
+                    to: TrackId(fresh()),
+                },
+                at: Ticks::QUARTER,
+            },
+        ),
+        (
+            "automation.delete",
+            Command::DeleteAutomation {
+                track,
+                target: AutomationTarget::Mixer {
+                    param: MixerParam::Mute,
+                },
+            },
+        ),
+        ("automation.re_enable", Command::ReEnableAutomation {}),
+        (
+            "automation.re_enable_for",
+            Command::ReEnableAutomationFor {
+                track,
+                target: AutomationTarget::Send {
+                    to: TrackId(fresh()),
+                },
+            },
         ),
         (
             "routing.set_input",
@@ -1041,6 +1326,47 @@ fn schemas_match_what_commands_serialise() {
                 only_while_recording: true,
             },
         ),
+        (
+            "clip.create_in_slot",
+            Command::CreateSlotClip {
+                track,
+                scene,
+                clip: Clip::new(
+                    clip,
+                    Ticks::ZERO,
+                    Ticks::WHOLE,
+                    ClipData::Midi(notes.clone()),
+                ),
+            },
+        ),
+        (
+            "clip.move_to_slot",
+            Command::MoveSlotClip { clip, track, scene },
+        ),
+        (
+            "scene.create",
+            Command::CreateScene {
+                id: scene,
+                index: 1,
+            },
+        ),
+        ("scene.delete", Command::DeleteScene { scene }),
+        ("scene.move", Command::MoveScene { scene, index: 0 }),
+        (
+            "scene.duplicate",
+            Command::DuplicateScene {
+                scene,
+                id: scene_copy,
+                clips: vec![(track, clip)],
+            },
+        ),
+        (
+            "scene.rename",
+            Command::RenameScene {
+                scene,
+                name: "Verse".to_owned(),
+            },
+        ),
     ];
     let covered: BTreeSet<&str> = examples.iter().map(|(id, _)| *id).collect();
     let document_commands: BTreeSet<&str> = commands
@@ -1083,10 +1409,11 @@ fn bad_requests_change_nothing() {
     .unwrap();
     let before = editor.document().clone();
     let steps = editor.undo_history().len();
+    let main = editor.document().main_id();
 
     type Expected<'a> = &'a dyn Fn(RunError) -> bool;
     let invalid = |error: RunError| matches!(error, RunError::InvalidArgs { .. });
-    let cases: [(&str, Value, Expected<'_>); 11] = [
+    let cases: [(&str, Value, Expected<'_>); 13] = [
         ("track.explode", json!({}), &|e| {
             e == RunError::UnknownCommand("track.explode".to_owned())
         }),
@@ -1138,6 +1465,22 @@ fn bad_requests_change_nothing() {
                 )
             },
         ),
+        ("mixer.set_crossfader", json!({ "position": 2.0 }), &|e| {
+            matches!(
+                e,
+                RunError::Edit(EditError::Command(ModelError::InvalidValue { .. }))
+            )
+        }),
+        (
+            "mixer.set_crossfade_assign",
+            json!({ "track": main, "assign": "a" }),
+            &|e| {
+                matches!(
+                    e,
+                    RunError::Edit(EditError::Command(ModelError::WrongTrackKind { .. }))
+                )
+            },
+        ),
     ];
     for (id, args, expected) in cases {
         let error = registry::run(&mut editor, id, args.clone()).unwrap_err();
@@ -1155,6 +1498,13 @@ fn bad_requests_change_nothing() {
         .as_ref()
         .unwrap();
     assert!(validate(schema, &json!({ "track": track, "volume": -1.0 })).is_err());
+    let schema = commands
+        .get("mixer.set_crossfader")
+        .unwrap()
+        .args
+        .as_ref()
+        .unwrap();
+    assert!(validate(schema, &json!({ "position": 2.0 })).is_err());
     assert_eq!(
         registry::command_from_args(registry::UNDO, json!({})),
         Err(RunError::NotADocumentEdit(registry::UNDO))

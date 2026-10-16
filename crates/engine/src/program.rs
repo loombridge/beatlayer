@@ -8,7 +8,9 @@ use bl_core::time::{SampleRate, TempoMap, TimeSignatureMap};
 use bl_model::{Channel, ParamId, Tap, TrackId};
 
 use crate::mixer::{MeterReading, Route, TrackMixer};
-use crate::node::{Block, Node, NodeEvent, NodeKey, NoteBuffer, ParamValue, TransportInfo};
+use crate::node::{
+    Block, Node, NodeData, NodeEvent, NodeKey, NoteBuffer, ParamValue, TransportInfo,
+};
 use crate::sidechain::SidechainKey;
 
 /// A compiled song, ready to run on the audio thread: a flat array of
@@ -124,6 +126,17 @@ impl Instance {
             Self::Device(node) => Some(node.as_mut()),
             Self::Mixer(mixer) => Some(mixer.as_mut()),
             Self::Route(_) | Self::Sidechain(_) => None,
+        }
+    }
+
+    /// Hands the instance node data, whatever it is: a route takes the
+    /// envelope driving its level (WP-2.12) the way a node does.
+    pub(crate) fn receive_data(&mut self, data: NodeData) {
+        match self {
+            Self::Device(node) => node.receive_data(data),
+            Self::Mixer(mixer) => mixer.receive_data(data),
+            Self::Route(route) => route.receive_data(data),
+            Self::Sidechain(_) => drop(data),
         }
     }
 }
@@ -459,12 +472,11 @@ impl EngineProgram {
             .map(|i| self.index[i].1)
     }
 
-    /// The node in `slot`, if it has one that processes a track's buffer.
-    pub(crate) fn node_mut(&mut self, slot: u32) -> Option<&mut (dyn Node + 'static)> {
+    /// The instance in `slot`, if one is there.
+    pub(crate) fn instance_mut(&mut self, slot: u32) -> Option<&mut Instance> {
         self.slots
             .get_mut(slot as usize)
             .and_then(|slot| slot.node.as_mut())
-            .and_then(Instance::as_node)
     }
 
     /// Drops every track's meters to silence at once. Real-time safe: it
@@ -546,6 +558,14 @@ impl EngineProgram {
         let (channels, stride) = (self.channels, self.max_frames);
         let size = channels * stride;
         let until = from + frames as u32;
+        // Where the block sits in the song, for the automation a route plays
+        // (WP-2.12): no time while the song is stopped.
+        let song = transport.playing.then(|| transport.position.get());
+        let shape = crate::mixer::Planar {
+            channels,
+            stride,
+            frames,
+        };
         let mut delivered = 0;
         for position in 0..self.order.len() {
             let t = self.order[position] as usize;
@@ -630,9 +650,8 @@ impl EngineProgram {
                     route.mix(
                         &mut self.pool[own.clone()],
                         &self.device_scratch,
-                        channels,
-                        stride,
-                        frames,
+                        shape,
+                        None,
                         scratch,
                     );
                 }
@@ -678,9 +697,8 @@ impl EngineProgram {
                     route.mix(
                         &mut self.pool[own.clone()],
                         &self.delay_scratch[..size],
-                        channels,
-                        stride,
-                        frames,
+                        shape,
+                        song,
                         scratch,
                     );
                 } else {
@@ -692,16 +710,15 @@ impl EngineProgram {
                             else {
                                 continue;
                             };
-                            route.mix(mine, theirs, channels, stride, frames, scratch);
+                            route.mix(mine, theirs, shape, song, scratch);
                         }
                         (_, Some(buffer)) => {
                             let theirs = buffer as usize * size..(buffer as usize + 1) * size;
                             route.mix(
                                 &mut self.pool[own.clone()],
                                 &self.tap_pool[theirs],
-                                channels,
-                                stride,
-                                frames,
+                                shape,
+                                song,
                                 scratch,
                             );
                         }
@@ -846,7 +863,13 @@ impl EngineProgram {
         events: &[Resolved],
         scratch: &mut Vec<NodeEvent>,
     ) -> u64 {
+        // A sidechain's route has no level to automate, so it plays none.
         let (channels, stride) = (self.channels, self.max_frames);
+        let shape = crate::mixer::Planar {
+            channels,
+            stride,
+            frames,
+        };
         let size = channels * stride;
         let sidechain = self.sidechains[s];
         let at = sidechain.buffer as usize * size..(sidechain.buffer as usize + 1) * size;
@@ -887,18 +910,16 @@ impl EngineProgram {
                 route.mix(
                     &mut self.sidechain_pool[at.clone()],
                     &self.delay_scratch[..size],
-                    channels,
-                    stride,
-                    frames,
+                    shape,
+                    None,
                     scratch,
                 );
             } else {
                 route.mix(
                     &mut self.sidechain_pool[at.clone()],
                     theirs,
-                    channels,
-                    stride,
-                    frames,
+                    shape,
+                    None,
                     scratch,
                 );
             }

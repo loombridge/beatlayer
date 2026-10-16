@@ -7,8 +7,9 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use bl_model::PluginFormat;
-use bl_plugin_host::scan::{BlockedPlugin, ScanReport, Scanner};
+use bl_plugin_host::scan::{BlockedPlugin, ScanReport, Scanner, plugin_files, system_paths};
 use bl_test_clap::{PLUGIN_ID, PLUGIN_NAME, TEST_SCAN_VAR, bundle};
+use bl_test_vst3 as test_vst3;
 
 /// The scanner binary Cargo built beside these tests.
 const SCANNER: &str = env!("CARGO_BIN_EXE_beatlayer-scan");
@@ -19,6 +20,10 @@ fn scanner() -> Scanner {
 
 fn clap() -> PluginFormat {
     PluginFormat::Clap
+}
+
+fn vst3() -> PluginFormat {
+    PluginFormat::Vst3
 }
 
 // Spec: plugin-scanning R1, R3.
@@ -158,6 +163,40 @@ fn a_folder_is_searched_for_plugin_files() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+// Spec: plugin-scanning R1; au-hosting's second part. Apple's built-in
+// units, which need no third-party binaries, are found in
+// /System/Library/Components and described by their component descriptions.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_scan_finds_apples_built_in_audio_units() {
+    let scanner = scanner();
+    let report = scanner.scan(
+        PluginFormat::AudioUnit,
+        &[PathBuf::from("/System/Library/Components")],
+    );
+    assert!(report.scanned > 0, "{report:?}");
+    let found: Vec<&str> = report
+        .plugins
+        .iter()
+        .map(|p| p.plugin_id.as_str())
+        .collect();
+    let delay = report
+        .plugins
+        .iter()
+        .find(|p| p.plugin_id == "aufx/dely/appl")
+        .unwrap_or_else(|| panic!("AUDelay among {found:?}"));
+    assert_eq!(delay.name, "AUDelay");
+    assert_eq!(delay.format, PluginFormat::AudioUnit);
+    assert_eq!(delay.role, bl_model::DeviceRole::AudioEffect);
+    assert!(delay.vendor.is_some(), "a vendor");
+    assert_eq!(delay.key(), "au/aufx/dely/appl");
+    assert!(
+        delay.path.to_string_lossy().ends_with(".component"),
+        "{:?}",
+        delay.path
+    );
+}
+
 /// Copies the test bundle to `to`, which is a folder on macOS and a file
 /// elsewhere.
 fn copy_bundle(from: &std::path::Path, to: &std::path::Path) {
@@ -185,4 +224,117 @@ fn copy_dir(from: &std::path::Path, to: &std::path::Path) {
             let _ = std::fs::copy(entry.path(), to.join(entry.file_name()));
         }
     }
+}
+
+// Spec: plugin-scanning R1, R2, R6. The scanner learns VST3 (WP-2.7).
+#[test]
+fn a_scan_describes_the_test_vst3_plugin_and_caches_it() {
+    let scanner = scanner();
+    let paths = [test_vst3::bundle().to_path_buf()];
+    let first = scanner.scan(vst3(), &paths);
+    assert_eq!(first.scanned, 1);
+    assert_eq!(first.cached, 0);
+    assert!(first.blocked.is_empty(), "{:?}", first.blocked);
+    assert_eq!(first.plugins.len(), 1);
+    let plugin = &first.plugins[0];
+    assert_eq!(plugin.plugin_id, test_vst3::plugin_id());
+    assert_eq!(plugin.name, test_vst3::PLUGIN_NAME);
+    assert_eq!(plugin.vendor.as_deref(), Some("Beatlayer tests"));
+    assert_eq!(plugin.version.as_deref(), Some("1.0.0"));
+    assert_eq!(plugin.format, vst3());
+
+    // Spec: plugin-scanning R2. An unchanged file is answered from the cache.
+    let second = scanner.scan(vst3(), &paths);
+    assert_eq!(second.scanned, 0);
+    assert_eq!(second.cached, 1);
+    assert_eq!(second.plugins, first.plugins);
+
+    // Spec: plugin-scanning R6. Rescan ignores the cache.
+    let again = scanner.rescan(vst3(), &paths);
+    assert_eq!(again.scanned, 1);
+    assert_eq!(again.cached, 0);
+    assert_eq!(again.plugins, first.plugins);
+}
+
+// Spec: plugin-scanning R1, R3. A folder of VST3 plug-ins is searched.
+#[test]
+fn a_folder_is_searched_for_vst3_plug_ins() {
+    let dir = std::env::temp_dir().join(format!("bl-scan-vst3-folder-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let copied = dir.join("Test Gain Echo.vst3");
+    copy_bundle(test_vst3::bundle(), &copied);
+    let scanner = scanner();
+    let report = scanner.scan(vst3(), &[PathBuf::from(&dir)]);
+    assert_eq!(report.scanned, 1, "{:?}", report.blocked);
+    assert_eq!(report.plugins.len(), 1);
+    assert_eq!(report.plugins[0].plugin_id, test_vst3::plugin_id());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// Spec: plugin-scanning R3, R4.
+#[test]
+fn a_vst3_module_that_hangs_on_scan_times_out_and_is_blocklisted() {
+    let scanner = scanner()
+        .with_env(test_vst3::TEST_SCAN_VAR, "hang")
+        .with_timeout(Duration::from_millis(500));
+    let report = scanner.scan(vst3(), &[test_vst3::bundle().to_path_buf()]);
+    assert!(report.plugins.is_empty());
+    assert_eq!(report.blocked.len(), 1);
+    let reason = &report.blocked[0].reason;
+    assert!(reason.contains("didn't answer"), "{reason}");
+    assert!(scanner.is_blocked(test_vst3::bundle()));
+}
+
+// Spec: plugin-scanning R4.
+#[test]
+fn a_vst3_module_that_crashes_on_scan_is_blocklisted() {
+    let scanner = scanner().with_env(test_vst3::TEST_SCAN_VAR, "crash");
+    let report = scanner.scan(vst3(), &[test_vst3::bundle().to_path_buf()]);
+    assert!(report.plugins.is_empty());
+    assert_eq!(report.blocked.len(), 1);
+    let reason = &report.blocked[0].reason;
+    assert!(
+        reason.contains("crashed") || reason.contains("readable"),
+        "{reason}"
+    );
+}
+
+// Spec: plugin-scanning R1, R10. The VST3 folders are the format's own
+// locations for this platform.
+#[test]
+fn the_vst3_folders_follow_the_formats_locations() {
+    let paths = system_paths(vst3());
+    let ends_with = |name: &str| paths.iter().any(|p| p.ends_with(name));
+    #[cfg(target_os = "macos")]
+    {
+        assert!(paths.contains(&PathBuf::from("/Library/Audio/Plug-Ins/VST3")));
+        assert!(paths.contains(&PathBuf::from("/Network/Library/Audio/Plug-Ins/VST3")));
+        assert!(ends_with("Library/Audio/Plug-Ins/VST3"));
+    }
+    #[cfg(target_os = "linux")]
+    {
+        assert!(paths.contains(&PathBuf::from("/usr/lib/vst3")));
+        assert!(paths.contains(&PathBuf::from("/usr/local/lib/vst3")));
+        assert!(ends_with(".vst3"));
+    }
+    #[cfg(target_os = "windows")]
+    {
+        assert!(ends_with("VST3"));
+    }
+}
+
+// Spec: plugin-scanning R10. A `.vst3` bundle folder counts as one file.
+#[test]
+fn vst3_bundles_are_taken_by_extension_and_name() {
+    let dir = std::env::temp_dir().join(format!("bl-scan-vst3-files-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("a.vst3"), b"").unwrap();
+    std::fs::write(dir.join("b.txt"), b"").unwrap();
+    let bundle = dir.join("Synth.vst3");
+    std::fs::create_dir_all(&bundle).unwrap();
+    let files = plugin_files(vst3(), std::slice::from_ref(&dir));
+    assert_eq!(files, vec![bundle, dir.join("a.vst3")]);
+    let _ = std::fs::remove_dir_all(&dir);
 }

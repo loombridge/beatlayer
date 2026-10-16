@@ -57,6 +57,7 @@
 //!
 //! The rules taken from Live are in the tracks and undo spec.
 
+pub mod automation;
 mod base64;
 mod changes;
 mod clip;
@@ -72,9 +73,13 @@ pub mod param;
 pub mod registry;
 mod repr;
 mod routing;
+mod scene;
 mod shared;
 mod track;
 
+pub use automation::{
+    Automation, AutomationTarget, Breakpoint, Envelope, MixerParam, TrackAutomation, curve_value,
+};
 pub use changes::{Change, ChangeSet};
 pub use clip::{AudioData, Clip, ClipData, ClipFolds, EDGE_FADE_SECONDS, MidiData, Note};
 pub use command::Command;
@@ -86,9 +91,13 @@ pub use device_layout::DeviceLayout;
 pub use document::{ArrangementLoop, Document, Settings};
 pub use editor::{EditError, Editor};
 pub use error::ModelError;
-pub use ids::{ClipId, ContentHash, DeviceId, ParamId, ParseContentHashError, TrackId};
+pub use ids::{ClipId, ContentHash, DeviceId, ParamId, ParseContentHashError, SceneId, TrackId};
 /// The persistent collections the document's public types hold.
 pub use imbl::{OrdMap, Vector};
 pub use metronome::{CountIn, MetronomeRhythm, MetronomeSettings, MetronomeSound};
 pub use param::{DeviceDescription, ParamDescriptor, ParamKind, ParamUnit};
-pub use track::{Channel, Input, Mixer, Monitor, Output, Routing, SendTap, Tap, Track, TrackKind};
+pub use scene::{DEFAULT_SCENE_COUNT, Scene};
+pub use track::{
+    Channel, CrossfadeAssign, Input, Mixer, Monitor, Output, Routing, SendTap, Tap, Track,
+    TrackKind,
+};

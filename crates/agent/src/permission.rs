@@ -31,10 +31,16 @@ pub use lspk_agent::permission::{Decision, Mode};
 /// the headless server is `bl-cli mcp`.
 fn rules() -> lspk_agent::permission::Rules<'static> {
     lspk_agent::permission::Rules {
-        person_only: &bl_shell::agent::handles,
+        person_only: &person_only,
         settings: "Beatlayer's Settings window (Agents)",
         headless: "bl-cli mcp",
     }
+}
+
+/// Whether an agent may never run `id`: the agent server's own commands and
+/// the built-in assistant's settings, both the person's alone.
+fn person_only(id: &str) -> bool {
+    bl_shell::agent::handles(id) || bl_shell::assistant::handles(id)
 }
 
 /// Decides whether an agent may run commands whose most far-reaching

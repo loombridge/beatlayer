@@ -21,7 +21,9 @@ use crate::ids::{ClipId, ContentHash, DeviceId, ParamId, SceneId, TrackId};
 use crate::metronome::{CountIn, MetronomeRhythm, MetronomeSound};
 use crate::scene::Scene;
 use crate::shared::Shared;
-use crate::track::{Channel, Input, Mixer, Monitor, Output, SendTap, Track, TrackKind};
+use crate::track::{
+    Channel, CrossfadeAssign, Input, Mixer, Monitor, Output, SendTap, Track, TrackKind,
+};
 
 /// One edit to a document.
 ///
@@ -286,7 +288,9 @@ pub enum Command {
         /// chooses which side the segment bows to.
         bend: f64,
     },
-    /// Moves one of a track's automation breakpoints, keeping its value.
+    /// Moves one of a track's automation breakpoints to `to` and, with
+    /// `value`, to that value: what dragging a breakpoint on an automation
+    /// lane does. Without `value` its value stays.
     MoveAutomationBreakpoint {
         /// The track the parameter belongs to.
         track: TrackId,
@@ -297,6 +301,10 @@ pub enum Command {
         /// Where it goes: 0 (1.1.1) or later, and not where another
         /// breakpoint of the same envelope already is.
         to: Ticks,
+        /// The value it takes there, in the parameter's own units, or `null`
+        /// (or nothing) to keep the value it has.
+        #[serde(default)]
+        value: Option<f64>,
     },
     /// Deletes one of a track's automation breakpoints, so the segments
     /// either side of it become the one starting at the breakpoint before
@@ -334,6 +342,20 @@ pub enum Command {
     SetSoloInPlace {
         /// Whether soloing a track keeps the return tracks audible.
         enabled: bool,
+    },
+    /// Sets the Main track's crossfader, from 0 (the A end) through 0.5
+    /// (the centre) to 1 (the B end).
+    SetCrossfader {
+        /// The position: 0 is the A end, 0.5 the centre, 1 the B end.
+        #[schemars(range(min = 0.0, max = 1.0))]
+        position: f64,
+    },
+    /// Assigns a track to the crossfader's A or B side, or to neither.
+    SetCrossfadeAssign {
+        /// The track; every track but Main.
+        track: TrackId,
+        /// `a`, `b`, or `none`.
+        assign: CrossfadeAssign,
     },
     /// Sets where an audio or MIDI track takes its input from: Audio From
     /// or MIDI From, with its channel.
@@ -777,6 +799,8 @@ impl Command {
             Self::ReEnableAutomation { .. } | Self::ReEnableAutomationFor { .. } => {
                 "Re-Enable Automation"
             }
+            Self::SetCrossfader { .. } => "Change crossfader",
+            Self::SetCrossfadeAssign { .. } => "Assign crossfade",
             Self::SetSoloInPlace { .. } => "Switch Solo in Place",
             Self::SetInput { .. }
             | Self::SetOutput { .. }
@@ -1064,7 +1088,8 @@ impl Document {
                 target,
                 at,
                 to,
-            } => self.move_automation_breakpoint(*track, *target, *at, *to),
+                value,
+            } => self.move_automation_breakpoint(*track, *target, *at, *to, *value),
             Command::DeleteAutomationBreakpoint { track, target, at } => {
                 self.delete_automation_breakpoint(*track, *target, *at)
             }
@@ -1107,6 +1132,19 @@ impl Document {
             }
             Command::SetSoloInPlace { enabled } => {
                 self.settings.solo_in_place = *enabled;
+                Ok(())
+            }
+            Command::SetCrossfader { position } => {
+                check_crossfader(*position)?;
+                self.settings.crossfader = *position;
+                Ok(())
+            }
+            Command::SetCrossfadeAssign { track, assign } => {
+                let current = self.track_ref(*track)?;
+                check_kind(current, TrackKind::has_crossfade_assign, NOT_MAIN)?;
+                if current.mixer.crossfade != *assign {
+                    self.track_mut(*track)?.mixer.crossfade = *assign;
+                }
                 Ok(())
             }
             Command::SetInput {
@@ -2031,17 +2069,21 @@ impl Document {
             .map_err(automation_point_error)
     }
 
-    /// Moves the breakpoint at `at` on `target`'s envelope to `to`, keeping
-    /// its value.
+    /// Moves the breakpoint at `at` on `target`'s envelope to `to`, and to
+    /// `value` when one is given.
     fn move_automation_breakpoint(
         &mut self,
         track: TrackId,
         target: AutomationTarget,
         at: Ticks,
         to: Ticks,
+        value: Option<f64>,
     ) -> Result<(), ModelError> {
         if to < Ticks::ZERO {
             return Err(ModelError::NegativePosition(to));
+        }
+        if let Some(value) = value {
+            check_value("automation value", value, value.is_finite())?;
         }
         self.check_automation_target(track, target)?;
         let automation =
@@ -2055,7 +2097,11 @@ impl Document {
         automation
             .envelope
             .move_point(at, to)
-            .map_err(automation_point_error)
+            .map_err(automation_point_error)?;
+        if let Some(value) = value {
+            automation.envelope.set(to, value);
+        }
+        Ok(())
     }
 
     /// Deletes the breakpoint at `at` on `target`'s envelope, joining its
@@ -2595,7 +2641,16 @@ pub(crate) fn check_mixer(track: &Track) -> Result<(), ModelError> {
     if mixer.tap != SendTap::Post {
         check_kind(track, |kind| kind == TrackKind::Return, RETURN)?;
     }
+    if mixer.crossfade != CrossfadeAssign::None {
+        check_kind(track, TrackKind::has_crossfade_assign, NOT_MAIN)?;
+    }
     Ok(())
+}
+
+/// Checks a crossfader position: a finite number from 0 (the A end) to 1
+/// (the B end).
+pub(crate) fn check_crossfader(position: f64) -> Result<(), ModelError> {
+    check_value("crossfader", position, (0.0..=1.0).contains(&position))
 }
 
 /// Checks a send's level: above 0 (a send at 0 isn't stored) and at most 1.
@@ -4220,6 +4275,7 @@ mod tests {
             target: volume,
             at: Ticks::WHOLE,
             to: Ticks::WHOLE * 2,
+            value: None,
         })
         .unwrap();
         assert_eq!(
@@ -4250,6 +4306,7 @@ mod tests {
                 target: volume,
                 at: Ticks::WHOLE,
                 to: Ticks::WHOLE * 4,
+                value: None,
             }),
             ModelError::NoChange {
                 what: "breakpoint",
@@ -4262,6 +4319,7 @@ mod tests {
                 target: volume,
                 at: Ticks::ZERO,
                 to: Ticks::WHOLE * 2,
+                value: None,
             }),
             ModelError::ChangeInUse {
                 what: "breakpoint",
@@ -4449,6 +4507,68 @@ mod tests {
                 .unwrap()
                 .automation_for(&param)
                 .is_none()
+        );
+        song.doc.check_invariants().unwrap();
+    }
+
+    /// Spec: automation R7. A drag moves a breakpoint in time and, with a
+    /// value, to that value; without one its value stays.
+    #[test]
+    fn moving_a_breakpoint_can_change_its_value() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        let volume = AutomationTarget::Mixer {
+            param: MixerParam::Volume,
+        };
+        song.apply(Command::SetAutomationBreakpoint {
+            track,
+            target: volume,
+            at: Ticks::ZERO,
+            value: 1.0,
+        })
+        .unwrap();
+        song.apply(Command::SetAutomationBreakpoint {
+            track,
+            target: volume,
+            at: Ticks::WHOLE,
+            value: 0.25,
+        })
+        .unwrap();
+        song.apply(Command::MoveAutomationBreakpoint {
+            track,
+            target: volume,
+            at: Ticks::WHOLE,
+            to: Ticks::WHOLE * 2,
+            value: Some(0.5),
+        })
+        .unwrap();
+        let envelope = &song
+            .doc
+            .track(track)
+            .unwrap()
+            .automation_for(&volume)
+            .unwrap()
+            .envelope;
+        assert_eq!(
+            envelope.point(Ticks::WHOLE * 2),
+            Some(Breakpoint {
+                at: Ticks::WHOLE * 2,
+                value: 0.5,
+                bend: 0.0,
+            })
+        );
+        assert_eq!(envelope.point(Ticks::WHOLE), None);
+        // A value that isn't a number is refused.
+        assert!(
+            song.reject(Command::MoveAutomationBreakpoint {
+                track,
+                target: volume,
+                at: Ticks::WHOLE * 2,
+                to: Ticks::WHOLE * 3,
+                value: Some(f64::NAN),
+            })
+            .to_string()
+            .contains("automation value")
         );
         song.doc.check_invariants().unwrap();
     }

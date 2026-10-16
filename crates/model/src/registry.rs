@@ -60,6 +60,10 @@ pub const UNDO: &str = "edit.undo";
 pub const RE_ENABLE_AUTOMATION: &str = "automation.re_enable";
 /// The ID of the command that redoes the newest undone step.
 pub const REDO: &str = "edit.redo";
+/// The ID of `clip.set_midi_region`: a MIDI clip's Start and End markers.
+pub const SET_MIDI_REGION: &str = "clip.set_midi_region";
+/// The ID of `clip.set_midi_loop`: a MIDI clip's loop brace.
+pub const SET_MIDI_LOOP: &str = "clip.set_midi_loop";
 
 /// Adds every document command, and undo and redo, to a registry.
 ///
@@ -641,6 +645,36 @@ const ENTRIES: &[Entry] = &[
             setting is saved with the set.",
     },
     Entry {
+        id: "mixer.set_crossfader",
+        action: Action::Apply("set_crossfader"),
+        label: "Set Crossfader",
+        permission: Permission::Edit,
+        contexts: &[Session, Arrangement],
+        keys: &[],
+        description: "Sets the Main track's crossfader, as the Crossfader section's fader does. \
+            `position` runs from 0 (the A end) through 0.5 (the centre, where a new set starts) \
+            to 1 (the B end). Tracks assigned to A and B fade between the two ends on the \
+            default Constant Power curve: at the centre each side plays at -3 dB, at either end \
+            the near side plays at 0 dB, the far side is silent, and a track assigned to \
+            neither plays through at every position. The engine glides to the new position over \
+            20 ms, so a move never clicks. The position is saved with the set.",
+    },
+    Entry {
+        id: "mixer.set_crossfade_assign",
+        action: Action::Apply("set_crossfade_assign"),
+        label: "Assign Crossfade",
+        permission: Permission::Edit,
+        contexts: MIXER,
+        keys: &[],
+        description: "Assigns a track to a side of the crossfader, as its A and B buttons under \
+            the mixer's Crossfader section do: `a`, `b`, or `none` (neither, where every track \
+            starts). A track's sides are exclusive, so assigning one releases the other; a \
+            track assigned to neither plays through at every crossfader position. Every track \
+            but Main can be assigned, and Main carries the crossfader itself \
+            (`mixer.set_crossfader`). The assignment is saved with the set, and undo releases \
+            it.",
+    },
+    Entry {
         id: "automation.set_breakpoint",
         action: Action::Apply("set_automation_breakpoint"),
         label: "Set Automation Breakpoint",
@@ -686,10 +720,11 @@ const ENTRIES: &[Entry] = &[
         permission: Permission::Edit,
         contexts: &[Global],
         keys: &[],
-        description: "Moves one of a track's automation breakpoints from `at` to `to`, keeping \
-            its value, as dragging it along an automation lane does. `to` is 0 (1.1.1) or \
-            later and mustn't land on another breakpoint of the same envelope. A position with \
-            no breakpoint is refused.",
+        description: "Moves one of a track's automation breakpoints from `at` to `to` and, with \
+            `value`, to that value, as dragging it on an automation lane does. `to` is 0 (1.1.1) \
+            or later and mustn't land on another breakpoint of the same envelope, and `value` is \
+            in the parameter's own units. Without `value` the breakpoint keeps its value. A \
+            position with no breakpoint is refused.",
     },
     Entry {
         id: "automation.delete_breakpoint",
@@ -956,7 +991,7 @@ const ENTRIES: &[Entry] = &[
             new clip's brace is the whole file.",
     },
     Entry {
-        id: "clip.set_midi_region",
+        id: SET_MIDI_REGION,
         action: Action::Apply("set_midi_clip_region"),
         label: "Set MIDI Clip Start and End",
         permission: Permission::Edit,
@@ -970,7 +1005,7 @@ const ENTRIES: &[Entry] = &[
             `clip.set_length` to change how long the clip lasts in the arrangement.",
     },
     Entry {
-        id: "clip.set_midi_loop",
+        id: SET_MIDI_LOOP,
         action: Action::Apply("set_midi_clip_loop"),
         label: "Set MIDI Clip Loop",
         permission: Permission::Edit,

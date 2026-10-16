@@ -24,6 +24,59 @@ pub const TITLE_BAR_HEIGHT: f32 = 17.0;
 /// mixer (L-SES-008).
 pub const STATUS_ROW: f32 = 17.0;
 
+/// One clip slot row's height (L-SES-003: 18 points per scene).
+pub const SLOT_ROW: f32 = 18.0;
+
+/// The Main column's scene row parts (L-SES-006), measured from its edges:
+/// the scene launch button at its left, the scene's name across the middle,
+/// and its number at its right edge.
+pub mod scene_controls {
+    /// The scene launch button's width, at the column's left edge.
+    pub const LAUNCH: f32 = 18.0;
+    /// The scene's number's width, at the column's right edge.
+    pub const NUMBER: f32 = 22.0;
+}
+
+/// One scene's row (L-SES-003, L-SES-006): the whole row across the grid,
+/// the Main column's launch button, and where its name and number sit.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SceneRow {
+    /// The row across the grid, 18 points tall.
+    pub row: Rect,
+    /// The scene launch button in the Main column (I-CLICK-009).
+    pub launch: Rect,
+    /// Where the scene's name is drawn, between the button and the number.
+    pub name: Rect,
+    /// Where the scene's number is drawn, at the Main column's right edge.
+    pub number: Rect,
+}
+
+impl SceneRow {
+    /// Places a scene's row against the Main column.
+    #[must_use]
+    pub fn compute(row: Rect, main: Rect) -> Self {
+        use scene_controls::{LAUNCH, NUMBER};
+        let launch = Rect::from_min_max(
+            pos2(main.left(), row.top()),
+            pos2(main.left() + LAUNCH, row.bottom()),
+        );
+        let number = Rect::from_min_max(
+            pos2(main.right() - NUMBER, row.top()),
+            pos2(main.right(), row.bottom()),
+        );
+        let name = Rect::from_min_max(
+            pos2(launch.right(), row.top()),
+            pos2(number.left(), row.bottom()),
+        );
+        Self {
+            row,
+            launch,
+            name,
+            number,
+        }
+    }
+}
+
 /// The In/Out section's height (L-MIX-001).
 pub const IN_OUT_HEIGHT: f32 = 115.0;
 
@@ -32,6 +85,10 @@ pub const SENDS_HEIGHT: f32 = 56.0;
 
 /// The mixer strip's height (L-MIX-003).
 pub const STRIP_HEIGHT: f32 = 123.0;
+
+/// The Crossfader section's height under the strip (L-MIX-006; its
+/// controls' sizes are [`unmeasured`]).
+pub const CROSSFADER_HEIGHT: f32 = 28.0;
 
 /// The Main track's column width (L-SES-006: 1487 to 1591).
 pub const MAIN_COLUMN: f32 = 104.0;
@@ -51,6 +108,12 @@ pub mod unmeasured {
     pub const PAD: f32 = 4.0;
     /// An In/Out row's pitch: seven rows over the section.
     pub const IN_OUT_ROW: f32 = 16.0;
+    /// A crossfader assign button's width and height, and the gap between
+    /// the two.
+    pub const CROSSFADE_BUTTON: (f32, f32) = (20.0, 14.0);
+    pub const CROSSFADE_GAP: f32 = 4.0;
+    /// The crossfader's height in its section.
+    pub const CROSSFADE_FADER: f32 = 12.0;
 }
 
 /// The meter's width (observed: 11 points, as L-ARR-006's meter column).
@@ -65,6 +128,9 @@ pub struct Sections {
     pub sends: bool,
     /// The strips (Volume).
     pub volume: bool,
+    /// The Crossfader section: the tracks' A/B assign buttons and Main's
+    /// crossfader. Hidden by default (observed).
+    pub crossfader: bool,
     /// The return tracks' columns.
     pub returns: bool,
 }
@@ -75,6 +141,7 @@ impl Sections {
         in_out: true,
         sends: true,
         volume: true,
+        crossfader: false,
         returns: true,
     };
 
@@ -91,6 +158,9 @@ impl Sections {
         }
         if self.volume {
             height += STRIP_HEIGHT;
+        }
+        if self.crossfader {
+            height += CROSSFADER_HEIGHT;
         }
         height
     }
@@ -142,6 +212,8 @@ pub struct MixerLayout {
     pub in_out: Option<(f32, f32)>,
     /// The Sends section's, if it shows.
     pub sends: Option<(f32, f32)>,
+    /// The Crossfader section's, if it shows.
+    pub crossfader: Option<(f32, f32)>,
     /// The strip's, if it shows.
     pub strip: Option<(f32, f32)>,
     /// The colour strip's, at the bottom (L-MIX-009).
@@ -217,6 +289,10 @@ impl MixerLayout {
                 span
             })
         };
+        // L-SES-009's order from the bottom: the colour strip, then the
+        // Crossfader section under the strips (L-MIX-006), then the strips,
+        // Sends, and In/Out above them.
+        let crossfader = stack(sections.crossfader, CROSSFADER_HEIGHT);
         let strip = stack(sections.volume, STRIP_HEIGHT);
         let sends = stack(sections.sends, SENDS_HEIGHT);
         let in_out = stack(sections.in_out, IN_OUT_HEIGHT);
@@ -233,6 +309,7 @@ impl MixerLayout {
             },
             in_out,
             sends,
+            crossfader,
             strip,
             colour,
             scroll,
@@ -279,6 +356,13 @@ impl MixerLayout {
         }
         if let Some(span) = self.sends {
             rows.push(super::row("L-MIX-002", "Sends", across(span)));
+        }
+        if let Some(span) = self.crossfader {
+            rows.push(super::row(
+                "L-MIX-006",
+                "Crossfader and Assign Buttons",
+                across(span),
+            ));
         }
         if let Some(span) = self.strip {
             rows.push(super::row("L-MIX-003", "Mixer Strip", across(span)));
@@ -333,6 +417,25 @@ impl SessionLayout {
             status_row,
             mixer,
         }
+    }
+
+    /// The rectangle of scene `index` (counting from 0) across the slots,
+    /// scrolled `scroll_y` points down (L-SES-003): 18 points tall, cut to
+    /// the slots area.
+    #[must_use]
+    pub fn scene_row(&self, index: usize, scroll_y: f32) -> Rect {
+        let top = self.slots.top() + SLOT_ROW * index as f32 - scroll_y;
+        Rect::from_min_max(
+            pos2(self.slots.left(), top),
+            pos2(self.slots.right(), top + SLOT_ROW),
+        )
+    }
+
+    /// The first scene whose row is in view at `scroll_y`, so a frame builds
+    /// only the rows on screen.
+    #[must_use]
+    pub fn first_scene(&self, scroll_y: f32) -> usize {
+        (scroll_y / SLOT_ROW).floor().max(0.0) as usize
     }
 
     /// Every layout.md row it places.
@@ -472,6 +575,35 @@ pub fn send_knob(column: Rect, span: (f32, f32), index: usize, returns: usize) -
     Rect::from_min_max(
         pos2(left + 1.0, top + 2.0),
         pos2(left + width - 1.0, top + row_height - 2.0),
+    )
+}
+
+/// The Crossfader section's A and B assign buttons in a track's or a
+/// return's column (L-MIX-006), left to right. Both off, the track plays on
+/// neither side.
+#[must_use]
+pub fn crossfade_buttons(column: Rect, span: (f32, f32)) -> [Rect; 2] {
+    use unmeasured::{CROSSFADE_BUTTON, CROSSFADE_GAP, PAD};
+    let (width, height) = CROSSFADE_BUTTON;
+    let top = span.0 + (span.1 - span.0 - height) / 2.0;
+    [0.0, width + CROSSFADE_GAP].map(|offset| {
+        Rect::from_min_max(
+            pos2(column.left() + PAD + offset, top),
+            pos2(column.left() + PAD + offset + width, top + height),
+        )
+    })
+}
+
+/// The Crossfader section's crossfader in Main's column (L-MIX-006): a
+/// horizontal slider across the column, 0 (the A end) at its left and 1
+/// (the B end) at its right.
+#[must_use]
+pub fn crossfader_slider(column: Rect, span: (f32, f32)) -> Rect {
+    use unmeasured::{CROSSFADE_FADER, PAD};
+    let top = span.0 + (span.1 - span.0 - CROSSFADE_FADER) / 2.0;
+    Rect::from_min_max(
+        pos2(column.left() + PAD, top),
+        pos2(column.right() - PAD, top + CROSSFADE_FADER),
     )
 }
 

@@ -379,9 +379,9 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  parameters become the device's, which `device.parameters` lists and \
                  `device.set_param` and automation change; its own state is saved with the \
                  set. Audio Units are macOS only: on Windows and Linux this fails with \
-                 that reason. Its own editor window arrives with the Audio Unit scanner; \
-                 `plugin.show_window` says so until then. The unit's code runs inside \
-                 Beatlayer, so load only units you trust.",
+                 that reason. Its own editor window opens from `plugin.show_window`, as a \
+                 CLAP plug-in's does, and a change made in it is one undo step. The unit's \
+                 code runs inside Beatlayer, so load only units you trust.",
             )
             .permission(Permission::External)
             .contexts([Global, DeviceView])
@@ -452,12 +452,12 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                 "Finds the plug-ins installed on this machine and describes each one: its \
                  format, its file, its identifier, name, vendor, version, and role in a chain. \
                  Scans the files or folders in `paths`, or each format's own system plug-in \
-                 folders (CLAP's and VST3's conventions) when `paths` is left out. Plug-ins \
-                 of every hosted format are scanned. Each one is loaded in a separate process \
-                 with a timeout, so a plug-in that crashes or hangs is put on a blocklist with \
-                 the reason instead of taking Beatlayer down; a file whose size and \
-                 modification time are unchanged is answered from the cache. Reads plug-in \
-                 files outside the project, so an agent asks first.",
+                 folders (CLAP's and VST3's conventions, and on macOS Apple's Audio Units') \
+                 when `paths` is left out. Plug-ins of every hosted format are scanned. Each \
+                 one is loaded in a separate process with a timeout, so a plug-in that crashes \
+                 or hangs is put on a blocklist with the reason instead of taking Beatlayer \
+                 down; a file whose size and modification time are unchanged is answered from \
+                 the cache. Reads plug-in files outside the project, so an agent asks first.",
             )
             .permission(Permission::External)
             .contexts([Global, DeviceView])

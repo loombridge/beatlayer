@@ -77,6 +77,25 @@ fn mixer_edits_reach_the_mixer_without_a_recompile() {
     });
     rig.render(1024, 64);
     assert!(rig.last().iter().all(|&s| s == 0.125));
+    // A crossfader move reaches every track's mixer node, and an assignment
+    // reaches the one track's, both without a new program (R22, R23).
+    let synced = rig.apply(Command::SetCrossfader { position: 0.75 });
+    assert!(!synced.program);
+    assert_eq!(synced.params, 2, "the track's mixer and Main's");
+    let synced = rig.apply(Command::SetCrossfadeAssign {
+        track: a,
+        assign: bl_model::CrossfadeAssign::A,
+    });
+    assert!(!synced.program);
+    assert_eq!(synced.params, 1);
+    // At 0.75 on an A track, the gain is the curve's -8.3 dB or so, from
+    // the first frame of the next block.
+    rig.render(1024, 64);
+    let gain = f64::from(rig.last()[0]) / 0.125;
+    assert!(
+        (20.0 * gain.log10() + 8.7).abs() <= 0.5,
+        "{gain} against the measured -8.7 dB at 25B"
+    );
     assert_eq!(rig.monitor.state().swaps, 1);
 }
 

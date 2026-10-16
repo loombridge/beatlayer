@@ -59,5 +59,12 @@ bl-rt.workspace = true
 bl-devices = { workspace = true, features = ["kit-examples"] }
 lspk-example-gain.workspace = true
 
+# `au_editor` runs on the process's main thread, where Apple makes a unit's
+# view controller; the test harness runs a `#[test]` on a worker thread, so
+# it is a binary with the harness off instead.
+[[test]]
+name = "au_editor"
+harness = false
+
 [lints]
 workspace = true

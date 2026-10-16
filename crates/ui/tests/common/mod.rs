@@ -33,6 +33,8 @@ pub struct Node {
     pub disabled: bool,
     /// Whether it's selected, for items that can be (WP-1.8b).
     pub selected: Option<bool>,
+    /// Whether it's toggled, for switches (a switch's on state).
+    pub toggled: Option<bool>,
     pub numeric: Option<f64>,
     pub children: Vec<accesskit::NodeId>,
     pub bounds: Option<accesskit::Rect>,
@@ -251,6 +253,9 @@ impl Harness {
                 description: node.description().unwrap_or_default().to_owned(),
                 disabled: node.is_disabled(),
                 selected: node.is_selected(),
+                toggled: node
+                    .toggled()
+                    .map(|toggled| toggled == accesskit::Toggled::True),
                 numeric: node.numeric_value(),
                 bounds: node.bounds(),
                 children: node.children().to_vec(),

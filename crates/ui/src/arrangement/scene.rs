@@ -328,7 +328,12 @@ pub fn build_lanes(
             let y = row_y(row);
             rect(
                 out,
-                [lanes.left(), y, lanes.right(), y + row.height],
+                [
+                    lanes.left(),
+                    y,
+                    lanes.right(),
+                    y + row.height + row.automation,
+                ],
                 colors.lane_selected.0,
             );
         }
@@ -372,7 +377,7 @@ pub fn build_lanes(
 
     // Lines between tracks.
     for row in &rows[visible.clone()] {
-        let bottom = row_y(row) + row.height;
+        let bottom = row_y(row) + row.height + row.automation;
         if row.height >= 3.0 {
             rect(
                 out,

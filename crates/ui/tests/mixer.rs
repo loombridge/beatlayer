@@ -12,7 +12,7 @@ mod common;
 use std::path::PathBuf;
 
 use bl_engine::TrackMeter;
-use bl_model::TrackId;
+use bl_model::{CrossfadeAssign, TrackId};
 use bl_shell::menus::{MenuPlatform, menu_bar};
 use bl_shell::mixer_controls::{self as controls, Control};
 use bl_shell::mixer_view::{MixerOf, MixerViewState};
@@ -373,6 +373,130 @@ fn hiding_sections_and_the_mixer_gives_the_slots_their_height() {
     h.shell.run(ids::TOGGLE, json!({})).unwrap();
     let nodes = tree(&mut h);
     assert!(nodes.iter().all(|n| n.label != "Session Mixer"));
+}
+
+// Spec: mixer-view R12, R23.
+#[test]
+fn the_crossfader_section_shows_the_assign_buttons_and_main_s_fader() {
+    let mut h = session();
+    // Hidden by default (observed): no buttons, no fader.
+    let nodes = tree(&mut h);
+    assert!(nodes.iter().all(|n| n.label != "Crossfade A"));
+    assert!(nodes.iter().all(|n| n.label != "Crossfader"));
+    assert!(!state(&mut h.shell).crossfader);
+
+    h.shell.run(ids::CROSSFADER, json!({})).unwrap();
+    let nodes = tree(&mut h);
+    // The 28-point section under the strips, over the colour strip.
+    let mixer_rect = rect_of(Harness::node(&nodes, "Session Mixer"));
+    assert_eq!(mixer_rect.top(), 766.0 - 300.5 - 28.0);
+    // A track and a return have A and B buttons, both off in a new set.
+    for column in ["3 Audio", "4 Audio", "A Return"] {
+        for side in ["A", "B"] {
+            let label = format!("Crossfade {side}");
+            let button = inside(&nodes, column, &label).unwrap_or_else(|| panic!("{column}"));
+            assert_eq!((button.role, button.value.as_str()), (Role::Button, "off"));
+            let column_rect = rect_of(inside(&nodes, "Session Mixer", column).unwrap());
+            assert!(column_rect.contains_rect(rect_of(button)));
+        }
+    }
+    // A MIDI track without an instrument gets none (observed), and Main
+    // has the crossfader instead, centred in a new set.
+    assert!(inside(&nodes, "1 MIDI", "Crossfade A").is_none());
+    assert!(inside(&nodes, "Main", "Crossfade A").is_none());
+    let fader = inside(&nodes, "Main", "Crossfader").unwrap();
+    assert_eq!((fader.role, fader.value.as_str()), (Role::Slider, "C"));
+
+    // A click assigns the clicked side; the sides are exclusive; clicking
+    // the lit side releases the track (observed).
+    let t = tracks(&h.shell);
+    let a = control(&mut h, "3 Audio", "Crossfade A");
+    click(&mut h, a.center(), Modifiers::NONE);
+    assert_eq!(mixer(&h.shell, t[2]).crossfade, CrossfadeAssign::A);
+    assert_eq!(
+        h.shell.editor().undo_history().next(),
+        Some("Assign crossfade")
+    );
+    assert_eq!(
+        inside(&tree(&mut h), "3 Audio", "Crossfade A")
+            .unwrap()
+            .value,
+        "on"
+    );
+    let b = control(&mut h, "3 Audio", "Crossfade B");
+    click(&mut h, b.center(), Modifiers::NONE);
+    assert_eq!(mixer(&h.shell, t[2]).crossfade, CrossfadeAssign::B);
+    click(&mut h, b.center(), Modifiers::NONE);
+    assert_eq!(mixer(&h.shell, t[2]).crossfade, CrossfadeAssign::None);
+
+    // A drag moves the crossfader relative to the pointer, as one undo
+    // step, and the Status Bar reads its position while it moves.
+    let before = h.shell.editor().undo_history().len();
+    let fader = control(&mut h, "Main", "Crossfader");
+    let positions = drag(
+        &mut h,
+        fader.center(),
+        &[vec2(10.0, 0.0); 4],
+        Modifiers::NONE,
+        |h| h.shell.editor().document().settings().crossfader,
+    );
+    assert_eq!(positions[0], 0.5, "a press doesn't move it");
+    assert!(*positions.last().unwrap() > 0.5, "{positions:?}");
+    assert_eq!(h.shell.editor().undo_history().len(), before + 1);
+    assert_eq!(
+        h.shell.editor().undo_history().next(),
+        Some(controls::CROSSFADER_GESTURE)
+    );
+    // And the fader shows where it now is: the same drag's readout.
+    let held = Event::ModifiersChanged(Modifiers::NONE);
+    h.frame(vec![held.clone(), Event::PointerMoved(fader.center())]);
+    h.frame(vec![Event::PointerButton {
+        pos: fader.center(),
+        button: PointerButton::Primary,
+        pressed: true,
+        modifiers: Modifiers::NONE,
+    }]);
+    let mut readouts = Vec::new();
+    let mut x = fader.center().x;
+    for _ in 0..4 {
+        x += 6.0;
+        let output = h.frame(vec![Event::PointerMoved(pos2(x, fader.center().y))]);
+        readouts.push(
+            Harness::node(&Harness::nodes(&output), "Status")
+                .value
+                .clone(),
+        );
+    }
+    let now = h.shell.editor().document().settings().crossfader;
+    assert!(
+        readouts
+            .last()
+            .is_some_and(|r| *r == controls::crossfader_readout(now)),
+        "{readouts:?}"
+    );
+    assert!(
+        readouts
+            .iter()
+            .skip_while(|r| r.is_empty())
+            .all(|r| r.starts_with("Crossfade: ")),
+        "{readouts:?}"
+    );
+    h.frame(vec![Event::PointerButton {
+        pos: pos2(x, fader.center().y),
+        button: PointerButton::Primary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    }]);
+
+    // Hiding the section again takes the buttons and the fader away.
+    h.shell.run(ids::CROSSFADER, json!({})).unwrap();
+    let nodes = tree(&mut h);
+    assert!(
+        nodes
+            .iter()
+            .all(|n| n.label != "Crossfade A" && n.label != "Crossfader")
+    );
+    assert!(!state(&mut h.shell).crossfader);
 }
 
 // Spec: mixer-view R2.
@@ -843,8 +967,9 @@ fn the_status_bar_toggle_and_its_menu_show_and_hide_the_mixer() {
     items.sort_by(|a, b| a.0.total_cmp(&b.0));
     let labels: Vec<&str> = items.iter().map(|(_, l, _)| *l).collect();
     assert_eq!(labels, MIXER_CONTROLS);
-    // Track Options, Crossfader, and Performance Impact wait.
-    assert!(items[3].2 && items[4].2 && items[5].2 && !items[1].2);
+    // Track Options and Performance Impact wait; the Crossfader section is
+    // built now (WP-3.17).
+    assert!(items[3].2 && !items[4].2 && items[5].2 && !items[1].2);
     let at = nodes
         .iter()
         .find(|n| n.role == Role::Button && name(&n.label) == Some("Sends"))
@@ -883,7 +1008,14 @@ fn the_view_menu_and_keys_show_and_hide_the_mixer_and_its_sections() {
     }
     let volume = menu_item(&h, "M-VIEW-032c");
     assert!(volume.enabled && volume.checked == Some(true) && volume.chord.is_none());
-    for row in ["M-VIEW-032d", "M-VIEW-032e", "M-VIEW-032f", "M-VIEW-033a"] {
+    // The Crossfader section: built, unticked in a new set (observed:
+    // hidden by default), with no key.
+    let crossfader = menu_item(&h, "M-VIEW-032e");
+    assert!(crossfader.enabled && crossfader.checked == Some(false) && crossfader.chord.is_none());
+    h.shell.run(ids::CROSSFADER, json!({})).unwrap();
+    assert_eq!(menu_item(&h, "M-VIEW-032e").checked, Some(true));
+    h.shell.run(ids::CROSSFADER, json!({})).unwrap();
+    for row in ["M-VIEW-032d", "M-VIEW-032f", "M-VIEW-033a"] {
         assert!(!menu_item(&h, row).enabled, "{row} waits");
     }
     let shown = state(&mut h.shell);
@@ -1094,6 +1226,19 @@ fn every_mixer_control_reaches_assistive_technology() {
     h.settle();
     assert!(controls::gain_db(mixer(&h.shell, t[2]).volume).abs() < 1e-9);
     let _ = volume_field_id(Place::Header, t[2]);
+    // The Crossfader section's controls (WP-3.17): a track's A and B
+    // buttons and Main's crossfader, each named and readable.
+    h.shell.run(ids::CROSSFADER, json!({})).unwrap();
+    let nodes = tree(&mut h);
+    for side in ["A", "B"] {
+        let label = format!("Crossfade {side}");
+        let button = inside(&nodes, "3 Audio", &label).unwrap();
+        assert_eq!((button.role, button.value.as_str()), (Role::Button, "off"));
+        assert!(inside(&nodes, "A Return", &label).is_some());
+    }
+    let fader = inside(&nodes, "Main", "Crossfader").unwrap();
+    assert_eq!((fader.role, fader.value.as_str()), (Role::Slider, "C"));
+    assert!(!fader.disabled);
 }
 
 // Spec: mixer-view R16.
@@ -1109,6 +1254,8 @@ fn every_mixer_control_is_reachable_from_the_agent_api() {
         "mixer.solo_exclusive",
         "mixer.set_arm",
         "mixer.arm_exclusive",
+        "mixer.set_crossfader",
+        "mixer.set_crossfade_assign",
     ]
     .iter()
     .chain(ids::IDS)
@@ -1126,6 +1273,12 @@ fn every_mixer_control_is_reachable_from_the_agent_api() {
         ("mixer.arm_exclusive", json!({ "track": t[3] })),
         ("mixer.set_mute", json!({ "track": t[3], "mute": true })),
         (ids::IN_OUT, json!({ "shown": false })),
+        (ids::CROSSFADER, json!({})),
+        (
+            "mixer.set_crossfade_assign",
+            json!({ "track": t[2], "assign": "a" }),
+        ),
+        ("mixer.set_crossfader", json!({ "position": 0.75 })),
     ] {
         h.shell
             .run(id, args)
@@ -1147,6 +1300,16 @@ fn every_mixer_control_is_reachable_from_the_agent_api() {
         "off"
     );
     assert!(inside(&nodes, "3 Audio", "Input Type").is_none());
+    // The section's controls follow the commands: the A button lit, and
+    // the fader 25 of 50 steps towards B.
+    assert_eq!(
+        inside(&nodes, "3 Audio", "Crossfade A").unwrap().value,
+        "on"
+    );
+    assert_eq!(
+        inside(&nodes, "Main", "Crossfader").unwrap().value,
+        controls::crossfader_text(0.75)
+    );
     let doc = h.shell.editor().document().clone();
     let change = controls::moved(Control::Volume, &[(t[2], 0.5)], 1.0);
     assert_eq!(change[0].id, "mixer.set_volume");

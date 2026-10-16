@@ -930,6 +930,7 @@ dependencies = [
  "libloading 0.8.9",
  "lspk-plugin",
  "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
  "objc2-audio-toolbox",
  "objc2-avf-audio",
  "objc2-core-audio-types",

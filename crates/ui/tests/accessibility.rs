@@ -1360,6 +1360,33 @@ fn paths() -> BTreeMap<&'static str, Path> {
                  package)",
             )),
         ),
+        // The Session View's launching (WP-3.2): the launch button on a slot
+        // with a clip, the scene launch buttons, and the status row arrive
+        // with the launching UI (WP-3.8); the commands are the engine's.
+        (
+            "session.launch",
+            Exception(LaterView(
+                "the Session View's launch buttons and status row (WP-3.8)",
+            )),
+        ),
+        (
+            "session.launch_scene",
+            Exception(LaterView(
+                "the Session View's scene launch buttons (WP-3.8)",
+            )),
+        ),
+        (
+            "session.stop_track",
+            Exception(LaterView(
+                "the Session View's stop buttons and status row (WP-3.8)",
+            )),
+        ),
+        (
+            "session.stop_all",
+            Exception(LaterView(
+                "the Session View's Stop All Clips button (WP-3.8)",
+            )),
+        ),
         (
             "browser.add_to_arrangement",
             Exception(Equivalent(
@@ -1759,6 +1786,7 @@ fn registry() -> bl_commands::Registry {
     bl_model::registry::register(&mut registry).unwrap();
     bl_project::registry::register(&mut registry).unwrap();
     bl_engine::transport::register(&mut registry).unwrap();
+    bl_engine::session::register(&mut registry).unwrap();
     bl_shell::register(&mut registry).unwrap();
     registry
 }

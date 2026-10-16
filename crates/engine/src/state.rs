@@ -8,6 +8,7 @@ use crate::message::{LoopRegion, Report};
 #[cfg(doc)]
 use crate::mixer::{METER_RELEASE_DB_PER_SECOND, RMS_SECONDS};
 use crate::recording::TakeBounds;
+use crate::session::SlotStatus;
 
 /// One track's meters: its peak and RMS levels per channel, as linear
 /// amplitude, measured after its mixer (pan, volume, and the Track
@@ -97,6 +98,10 @@ pub struct EngineState {
     pub cpu_load: f32,
     /// The highest `cpu_load` so far.
     pub cpu_load_max: f32,
+    /// The Session slots the engine is doing something with (WP-3.2), one
+    /// entry per queued, playing, or stopping slot; a slot that stopped
+    /// isn't listed, so an empty list is a Session View at rest.
+    pub session: Vec<SlotStatus>,
     /// Every track's meter, in the order the tracks run.
     pub meters: Vec<TrackMeter>,
     /// Whether some tracks have no meter because there are more than
@@ -108,8 +113,8 @@ pub struct EngineState {
 
 impl EngineState {
     /// A state before the first block at `sample_rate`, with room for
-    /// `tracks` meters.
-    pub(crate) fn with_capacity(tracks: usize, sample_rate: SampleRate) -> Self {
+    /// `tracks` meters and `slots` Session slots.
+    pub(crate) fn with_capacity(tracks: usize, slots: usize, sample_rate: SampleRate) -> Self {
         Self {
             sample_rate,
             clock: 0,
@@ -124,6 +129,7 @@ impl EngineState {
             swaps: 0,
             cpu_load: 0.0,
             cpu_load_max: 0.0,
+            session: Vec::with_capacity(slots),
             meters: Vec::with_capacity(tracks),
             meters_truncated: false,
             counters: EngineCounters::default(),
@@ -155,6 +161,8 @@ impl Clone for EngineState {
     fn clone(&self) -> Self {
         let mut meters = Vec::with_capacity(self.meters.capacity());
         meters.extend_from_slice(&self.meters);
+        let mut session = Vec::with_capacity(self.session.capacity());
+        session.extend_from_slice(&self.session);
         Self {
             sample_rate: self.sample_rate,
             clock: self.clock,
@@ -169,6 +177,7 @@ impl Clone for EngineState {
             swaps: self.swaps,
             cpu_load: self.cpu_load,
             cpu_load_max: self.cpu_load_max,
+            session,
             meters,
             meters_truncated: self.meters_truncated,
             counters: self.counters,

@@ -30,9 +30,12 @@ use bl_cli::golden::{self, Render, SAMPLE_RATE};
 use bl_cli::render::{Cue, Settings, interleave, render_with};
 use bl_core::time::{Bpm, Frames, TempoMap, Ticks};
 use bl_engine::nodes::{BEAT_TONE, BeatTone};
-use bl_engine::{EngineConfig, MediaMap, Offline, Registry, Report, TransportCommand};
+use bl_engine::{
+    EngineConfig, MediaMap, Offline, Registry, Report, SessionCommand, SlotState, TransportCommand,
+};
 use bl_model::{
-    AudioData, Clip, ClipData, Command as Edit, ContentHash, Document, Editor, TrackId, TrackKind,
+    AudioData, Clip, ClipData, Command as Edit, ContentHash, Document, Editor, LaunchQuantization,
+    LaunchSettings, TrackId, TrackKind,
 };
 use bl_shell::Shell;
 use serde_json::{Value, json};
@@ -640,6 +643,7 @@ fn scheduled_commands_fire_on_their_exact_frames_and_render_as_the_golden_fixtur
     for message in transport.agent.take_engine_messages() {
         match message {
             EngineMessage::Transport(command) => offline.sender().transport(command),
+            EngineMessage::Session(command) => offline.sender().session(command),
             EngineMessage::Schedule(command) => offline.sender().schedule(command),
             EngineMessage::Cancel(id) => offline.sender().cancel(id),
         }
@@ -752,6 +756,7 @@ impl EngineHost {
                     self.sent.push((self.clock, command));
                     self.offline.sender().transport(command);
                 }
+                EngineMessage::Session(command) => self.offline.sender().session(command),
                 EngineMessage::Schedule(command) => self.offline.sender().schedule(command),
                 EngineMessage::Cancel(id) => self.offline.sender().cancel(id),
             }
@@ -1088,4 +1093,99 @@ fn an_autonomous_agent_can_quit_bl_cli_mcp() {
     // The server has stopped: the next request finds its output closed.
     assert!(client.request("ping", json!({})).is_err());
     assert!(client.into_transport().finish().unwrap().success());
+}
+
+/// An agent launches a slot's clip, stops its track, launches the whole
+/// scene, and stops every clip, by command ID through the engine's queue; the
+/// engine's published slot states follow each command (WP-3.2).
+#[test]
+fn an_agent_launches_and_stops_session_clips_by_command_id() {
+    // Spec: launch-quantisation R9
+    let block = 512u64;
+    let mut host = EngineHost::new(block as usize);
+    // A MIDI track with an empty clip in the first scene's slot.
+    host.call(
+        "run",
+        json!({ "label": "Add a slot", "commands": [
+            { "command": "track.create",
+              "args": { "id": {"$new": "Slots"}, "kind": "midi", "name": "Slots", "index": 0 } },
+        ] }),
+    );
+    let (track, scene) = {
+        let document = host.client.transport().shell.editor().document();
+        let track = document
+            .tracks()
+            .find(|track| track.name() == "Slots")
+            .expect("the track was made")
+            .id();
+        let scene = document.scenes().next().expect("a new set has scenes").id;
+        (track, scene)
+    };
+    host.call(
+        "run",
+        json!({ "commands": [
+            { "command": "session.insert_empty_midi_clip",
+              "args": { "track": track, "scene": scene } },
+        ] }),
+    );
+    // The set's quantisation off, as a set saved with it off: the launches
+    // and stops land at once, so a block's frames show each one.
+    host.offline
+        .sender()
+        .session(SessionCommand::SetQuantization(LaunchSettings {
+            quantization: LaunchQuantization::None,
+            enabled: true,
+        }));
+
+    // Launch the slot's clip by ID. With the transport stopped the launch
+    // starts it, and the slot plays from the Arrangement position.
+    let launched = host.call(
+        "run",
+        json!({ "commands": [
+            { "command": "session.launch", "args": { "track": track, "scene": scene } },
+        ] }),
+    );
+    assert_eq!(launched["results"][0]["command"], "session.launch");
+    host.play_to(2 * block);
+    assert_eq!(host.status()["playing"], true);
+    let states = host.offline.state().session.clone();
+    assert_eq!(states.len(), 1, "{states:?}");
+    assert_eq!(states[0].track, track);
+    assert_eq!(states[0].scene, scene);
+    assert_eq!(states[0].state, SlotState::Playing);
+
+    // Stop its track by ID: its clip stops, and so does the slot.
+    host.call(
+        "run",
+        json!({ "commands": [
+            { "command": "session.stop_track", "args": { "track": track } },
+        ] }),
+    );
+    host.play_to(4 * block);
+    assert!(host.offline.state().session.is_empty());
+
+    // Launch the scene by ID: its clips start together.
+    host.call(
+        "run",
+        json!({ "commands": [
+            { "command": "session.launch_scene", "args": { "scene": scene } },
+        ] }),
+    );
+    host.play_to(6 * block);
+    let states = host.offline.state().session.clone();
+    assert_eq!(states.len(), 1, "{states:?}");
+    assert_eq!(states[0].state, SlotState::Playing);
+
+    // Stop All Clips by ID: every track stops.
+    host.call(
+        "run",
+        json!({ "commands": [{ "command": "session.stop_all" }] }),
+    );
+    host.play_to(8 * block);
+    assert!(host.offline.state().session.is_empty());
+    assert_eq!(
+        host.offline.heap_operations(),
+        0,
+        "the engine's blocks stay off the heap"
+    );
 }

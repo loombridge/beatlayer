@@ -18,7 +18,7 @@ use serde_json::{Map, Value};
 use crate::error::LoadError;
 
 /// The schema version this build writes, and the newest it can read.
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 
 /// The oldest schema version this build can read, through [`MIGRATIONS`].
 pub const OLDEST_SCHEMA_VERSION: u32 = SCHEMA_VERSION - MIGRATIONS.len() as u32;
@@ -42,6 +42,14 @@ pub const MIGRATIONS: &[Migration] = &[
                   set saved without scenes opens with the default eight, whose IDs the \
                   document's loader hands out after the set's largest (the session view spec, \
                   R14), so the saved JSON itself needs nothing",
+        apply: Ok,
+    },
+    Migration {
+        from: 3,
+        summary: "the set gains the global launch quantisation and its enabled switch, and each \
+                  track's removed Clip Stop buttons; a set saved before them opens with a new \
+                  set's quantisation and with a stop button in every slot (the launch \
+                  quantisation spec, R1 and R8), so the saved JSON itself needs nothing",
         apply: Ok,
     },
 ];

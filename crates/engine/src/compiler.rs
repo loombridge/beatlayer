@@ -4,8 +4,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use bl_model::{
-    Change, ChangeSet, ContentHash, DeviceId, DeviceKind, Document, Mixer, OrdMap, ParamId, Tap,
-    Track, TrackId, TrackKind,
+    Change, ChangeSet, ContentHash, DeviceId, DeviceKind, Document, Mixer, OrdMap, ParamId,
+    SceneId, Tap, Track, TrackId, TrackKind,
 };
 
 use crate::EngineConfig;
@@ -140,6 +140,22 @@ pub struct Compiler {
     synced: Option<Document>,
     layout: BTreeMap<NodeKey, Placed>,
     sources: ClipSources,
+}
+
+/// Every audio and MIDI slot that holds a clip, as `(scene, track)` pairs
+/// sorted by scene and then track: what a scene launch queues (WP-3.2).
+fn scene_slots(document: &Document) -> Vec<(SceneId, TrackId)> {
+    let mut slots = Vec::new();
+    for track in document.track_order() {
+        let Some(track) = document.track(track) else {
+            continue;
+        };
+        for (scene, _) in track.slots() {
+            slots.push((scene, track.id()));
+        }
+    }
+    slots.sort_unstable();
+    slots
 }
 
 impl Compiler {
@@ -465,6 +481,7 @@ impl Compiler {
             tempo: document.settings().tempo.clone(),
             time_signatures: document.settings().time_signatures.clone(),
             sample_rate: self.config.sample_rate,
+            scene_slots: scene_slots(document),
             note_buffers: [
                 NoteBuffer::with_capacity(1024),
                 NoteBuffer::with_capacity(1024),
@@ -509,13 +526,13 @@ impl Compiler {
             |track| document.track(track).is_some() && !build.new_players.contains(&track),
             |clip| document.clip_track(clip).is_some(),
         );
-        // A new player gets its track's clips if it has any; a player that
-        // migrated keeps its own unless they changed, or the tempo map
-        // moved them.
+        // A new player gets its track's clips if it has any, in the
+        // Arrangement or in a Session slot; a player that migrated keeps its
+        // own unless they changed, or the tempo map moved them.
         for track in document.tracks() {
             let id = track.id();
             let send = if build.new_players.contains(&id) {
-                track.clips().next().is_some()
+                track.clips().next().is_some() || track.slots().next().is_some()
             } else {
                 resend.all || resend.tracks.contains(&id)
             };
@@ -1222,8 +1239,10 @@ fn needs_program(
         }
     }
     // Clip changes never recompile: `Compiler::sync` sends the track's clip
-    // player its clips as node data (the audio clips spec, R12).
-    recompile
+    // player its clips as node data (the audio clips spec, R12). The Session
+    // View's slots are the exception: which slots hold a clip travels in the
+    // program's scene table, which a scene launch reads (WP-3.2).
+    recompile || scene_slots(old) != scene_slots(new)
 }
 
 /// A switch as a parameter value.
@@ -1759,7 +1778,7 @@ mod tests {
                 assert_ne!(program.order, (0..5).collect::<Vec<_>>());
             }
             let mut scratch = Vec::new();
-            program.run(64, 0, &[], &mut scratch, TransportInfo::default());
+            program.run(64, 0, &[], &mut scratch, TransportInfo::default(), &[]);
             program.output(0, 64).to_vec()
         };
         let in_order = render(&mut f, false);

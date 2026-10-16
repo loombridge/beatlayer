@@ -15,8 +15,8 @@ use std::path::{Component, Path, PathBuf};
 
 use bl_core::id::IdAllocator;
 use bl_model::{
-    ClipFolds, ContentHash, DEFAULT_SCENE_COUNT, DeviceWindows, Document, Editor, SceneId, TrackId,
-    TrackKind, registry,
+    ClipFolds, ContentHash, DEFAULT_SCENE_COUNT, DeviceWindows, Document, Editor, LaunchSettings,
+    SceneId, TrackId, TrackKind, registry,
 };
 use bl_project::{
     Media, MediaPath, MediaRef, Project, ProjectFolder, SET_EXTENSION, SaveOptions, SetFile, is_set,
@@ -105,6 +105,19 @@ pub trait SetStore {
         ClipFolds::new()
     }
 
+    /// Gives the store the global launch quantisation and its switch
+    /// (WP-3.2), for the next save to write beside the document. A store
+    /// that keeps no launch settings ignores it.
+    fn set_launch(&mut self, launch: LaunchSettings) {
+        let _ = launch;
+    }
+
+    /// The open set's global launch quantisation and its switch, as it was
+    /// saved.
+    fn launch(&self) -> LaunchSettings {
+        LaunchSettings::default()
+    }
+
     /// Writes `editor` to `path` as a copy without making it the open set:
     /// the default set and templates (WP-2.25). Returns warnings about
     /// things that went wrong without stopping the write. A store that
@@ -158,6 +171,9 @@ pub struct ProjectFiles {
     /// Folded MIDI Note Editors (WP-2.3): the open set's, then the shell's
     /// for the next save.
     folds: ClipFolds,
+    /// The global launch quantisation and its switch (WP-3.2): the open
+    /// set's, then the shell's for the next save.
+    launch: LaunchSettings,
 }
 
 impl ProjectFiles {
@@ -184,6 +200,7 @@ impl SetStore for ProjectFiles {
         self.media = project.media;
         self.windows = project.windows;
         self.folds = project.folds;
+        self.launch = project.launch;
         self.added.clear();
         Ok((editor, opened))
     }
@@ -228,6 +245,7 @@ impl SetStore for ProjectFiles {
         self.media = Media::new();
         self.windows = DeviceWindows::new();
         self.folds = ClipFolds::new();
+        self.launch = LaunchSettings::default();
         self.added.clear();
     }
 
@@ -245,6 +263,14 @@ impl SetStore for ProjectFiles {
 
     fn folds(&self) -> ClipFolds {
         self.folds.clone()
+    }
+
+    fn set_launch(&mut self, launch: LaunchSettings) {
+        self.launch = launch;
+    }
+
+    fn launch(&self) -> LaunchSettings {
+        self.launch
     }
 
     fn add_media(&mut self, hash: ContentHash, path: &Path, size: u64) {
@@ -291,7 +317,8 @@ impl SetStore for ProjectFiles {
         }
         let project = Project::from_editor(editor, media)
             .with_windows(&self.windows)
-            .with_folds(&self.folds);
+            .with_folds(&self.folds)
+            .with_launch(self.launch);
         let mut set = SetFile::open(path)
             .map(|(set, _)| set)
             .unwrap_or_else(|_| SetFile::new(path.to_owned()));
@@ -401,7 +428,8 @@ impl ProjectFiles {
         let warnings = self.add_media_to(&mut media, path);
         let project = Project::from_editor(editor, media)
             .with_windows(&self.windows)
-            .with_folds(&self.folds);
+            .with_folds(&self.folds)
+            .with_launch(self.launch);
         let mut set = self
             .set
             .clone()

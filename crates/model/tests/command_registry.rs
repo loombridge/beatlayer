@@ -50,15 +50,15 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        88,
+        89,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
          set_device_floating, WP-2.20 six for tempo breakpoints and time-signature markers, \
          WP-2.1 two for MIDI clips, WP-2.16 set_device_sample, WP-2.15 five for the metronome, \
          WP-2.13 the two for Main Out and Cue Out, WP-3.1 five for scenes and two for slot \
-         clips, WP-2.12 seven for automation, WP-3.15 six for clip envelopes, and WP-3.17 two \
-         for the crossfader"
+         clips, WP-3.2 set_slot_stop_button, WP-2.12 seven for automation, WP-3.15 six for clip \
+         envelopes, and WP-3.17 two for the crossfader"
     );
 
     for op in &ops {
@@ -492,6 +492,33 @@ fn every_command_runs_by_id() {
     );
     assert!(document.slot(bass, first).is_none());
     assert_eq!(document.clip_track(slot_loop), Some(drums));
+
+    // WP-3.2: a slot's Clip Stop button comes and goes.
+    let changes = agent.run(
+        "slot.set_stop_button",
+        json!({ "track": bass, "scene": second, "stop_button": false }),
+    );
+    assert_eq!(changes.tracks.get(&bass), Some(&Change::Modified));
+    assert!(
+        !agent
+            .editor
+            .document()
+            .track(bass)
+            .unwrap()
+            .has_stop_button(second)
+    );
+    agent.run(
+        "slot.set_stop_button",
+        json!({ "track": bass, "scene": second, "stop_button": true }),
+    );
+    assert!(
+        agent
+            .editor
+            .document()
+            .track(bass)
+            .unwrap()
+            .has_stop_button(second)
+    );
 
     // The scene commands: rename, move, duplicate, insert, delete.
     agent.run("scene.rename", json!({ "scene": first, "name": "Verse" }));
@@ -1478,6 +1505,14 @@ fn schemas_match_what_commands_serialise() {
             Command::MoveSlotClip { clip, track, scene },
         ),
         (
+            "slot.set_stop_button",
+            Command::SetSlotStopButton {
+                track,
+                scene,
+                stop_button: false,
+            },
+        ),
+        (
             "scene.create",
             Command::CreateScene {
                 id: scene,
@@ -1755,6 +1790,8 @@ fn bindings_follow_the_spec() {
         "mixer.set_solo",
         "mixer.set_arm",
         "clip.set_mute",
+        // WP-3.2: a slot's Clip Stop button, Cmd-E (M-EDIT-032).
+        "slot.set_stop_button",
         // Beatlayer's own key, Option-F on macOS (IMP-14, S-DEV-015).
         "device.set_floating",
         "transport.set_metronome_enabled",

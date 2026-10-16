@@ -607,10 +607,12 @@ impl Agent {
         if !running {
             // A transport command sent as the engine stopped has nothing to
             // move; scheduled commands wait for the next engine.
-            program
-                .state
-                .outbox
-                .retain(|message| !matches!(message, EngineMessage::Transport(_)));
+            program.state.outbox.retain(|message| {
+                !matches!(
+                    message,
+                    EngineMessage::Transport(_) | EngineMessage::Session(_)
+                )
+            });
             return;
         }
         let generation = shell.audio().engine_generation();
@@ -618,10 +620,12 @@ impl Agent {
             program.engine_generation = Some(generation);
             // The new engine holds none of the scheduled commands: send
             // every one still waiting, once.
-            program
-                .state
-                .outbox
-                .retain(|message| matches!(message, EngineMessage::Transport(_)));
+            program.state.outbox.retain(|message| {
+                matches!(
+                    message,
+                    EngineMessage::Transport(_) | EngineMessage::Session(_)
+                )
+            });
             let waiting = program.state.schedule.waiting_commands();
             program
                 .state
@@ -634,6 +638,7 @@ impl Agent {
             // stopped, there's nothing to send to.
             let _ = match message {
                 EngineMessage::Transport(command) => audio.send_transport(command),
+                EngineMessage::Session(command) => audio.send_session(command),
                 EngineMessage::Schedule(command) => audio.schedule(command),
                 EngineMessage::Cancel(id) => audio.cancel(id),
             };

@@ -1181,6 +1181,21 @@ const ENTRIES: &[Entry] = &[
             start at 0.",
     },
     Entry {
+        id: "slot.set_stop_button",
+        action: Action::Apply("set_slot_stop_button"),
+        label: "Add Stop Button",
+        permission: Permission::Edit,
+        contexts: &[Session],
+        keys: &[Key::Toggles("S-SES-005", "stop_button")],
+        description: "Adds or removes a Session slot's Clip Stop button, which the person \
+            reaches through Edit ▸ Remove Stop Button (Cmd+E on macOS, Ctrl+E on Windows) and \
+            the slot's and Session clip's context menus. The button stops the track's playing \
+            clip; the track's own stop button (its status row) and Stop All Clips do the same \
+            for one or every track. A slot has one until it's removed, so a set saved before \
+            this command loads with one in every slot of every audio and MIDI track. The \
+            switch is saved with the set, and undo adds or removes the button again.",
+    },
+    Entry {
         id: "scene.create",
         action: Action::Apply("create_scene"),
         label: "Insert Scene",

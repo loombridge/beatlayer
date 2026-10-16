@@ -254,6 +254,7 @@ fn fixture_project() -> Project {
         media,
         windows: bl_model::DeviceWindows::new(),
         folds: bl_model::ClipFolds::new(),
+        launch: bl_model::LaunchSettings::default(),
     }
 }
 
@@ -458,6 +459,7 @@ static FAKE_MIGRATIONS: &[Migration] = &[
     // Then the real chain from version 1.
     MIGRATIONS[0],
     MIGRATIONS[1],
+    MIGRATIONS[2],
 ];
 
 /// The scaffold migrates an old file: the invented version 0 fixture loads

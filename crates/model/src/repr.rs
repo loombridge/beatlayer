@@ -63,6 +63,10 @@ struct TrackRepr {
     /// have none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     slots: Vec<SlotRepr>,
+    /// The scenes whose slot's Clip Stop button was removed (WP-3.2). Sets
+    /// saved before WP-3.2 have none: every slot has one.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    removed_stop_buttons: Vec<SceneId>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     children: Vec<TrackRepr>,
 }
@@ -148,6 +152,7 @@ impl TrackRepr {
                     clip: clip.clone(),
                 })
                 .collect(),
+            removed_stop_buttons: track.removed_stop_buttons().collect(),
             children: track
                 .children
                 .iter()
@@ -220,6 +225,11 @@ impl TryFrom<DocumentRepr> for Document {
                     return Err(ModelError::NoSuchScene(*scene));
                 }
             }
+            for scene in &track.removed_stop_buttons {
+                if document.scene(*scene).is_none() {
+                    return Err(ModelError::NoSuchScene(*scene));
+                }
+            }
         }
         // Routing, automation, and clips' envelopes name tracks and devices
         // anywhere in the tree, so they're checked once every track is in.
@@ -260,7 +270,11 @@ impl Loader {
     fn add(&mut self, repr: TrackRepr, parent: Option<TrackId>) -> Result<TrackId, ModelError> {
         let id = repr.id;
         self.claim(id.0)?;
-        if (!repr.clips.is_empty() || !repr.slots.is_empty()) && !repr.kind.holds_clips() {
+        if (!repr.clips.is_empty()
+            || !repr.slots.is_empty()
+            || !repr.removed_stop_buttons.is_empty())
+            && !repr.kind.holds_clips()
+        {
             return Err(wrong_kind(&repr, "an audio or MIDI track"));
         }
         if !repr.children.is_empty() && repr.kind != TrackKind::Group {
@@ -335,6 +349,11 @@ impl Loader {
         for child in repr.children {
             let child = self.add_grouped(child, Some(id))?;
             track.children.push_back(child);
+        }
+        for scene in repr.removed_stop_buttons {
+            if !track.removed_stop_buttons.insert(scene) {
+                return Err(ModelError::DuplicateId(scene.0));
+            }
         }
         if let Some(parent) = parent {
             self.index.parent.insert(id, parent);

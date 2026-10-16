@@ -2048,7 +2048,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Cmd+6"]
 win = ["Ctrl+6"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.set_quantization", contexts = ["global"], args = { quantization = "sixteenth" } },
+]
 
 [[shortcut]]
 id = "S-GQ-002"
@@ -2059,7 +2062,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Cmd+7"]
 win = ["Ctrl+7"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.set_quantization", contexts = ["global"], args = { quantization = "eighth" } },
+]
 
 [[shortcut]]
 id = "S-GQ-003"
@@ -2070,7 +2076,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Cmd+8"]
 win = ["Ctrl+8"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.set_quantization", contexts = ["global"], args = { quantization = "quarter" } },
+]
 
 [[shortcut]]
 id = "S-GQ-004"
@@ -2081,7 +2090,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Cmd+9"]
 win = ["Ctrl+9"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.set_quantization", contexts = ["global"], args = { quantization = "1_bar" } },
+]
 
 [[shortcut]]
 id = "S-GQ-005"
@@ -2092,7 +2104,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Cmd+0"]
 win = ["Ctrl+0"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.set_quantization", contexts = ["global"], args = { quantization = "none" } },
+]
 
 [[shortcut]]
 id = "S-SES-001"
@@ -2151,7 +2166,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Cmd+E"]
 win = ["Ctrl+E"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "slot.set_stop_button", contexts = ["session"], toggles = "stop_button" },
+]
 
 [[shortcut]]
 id = "S-SES-006"
@@ -2162,7 +2180,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Cmd+Enter"]
 win = ["Ctrl+Enter"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.stop_selected", contexts = ["session"] },
+]
 
 [[shortcut]]
 id = "S-SES-007"
@@ -4275,7 +4296,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Cmd+1"]
 win = ["Ctrl+1"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.smaller_quantization", contexts = ["session"] },
+]
 
 [[shortcut]]
 id = "S-SES-025"
@@ -4286,7 +4310,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Cmd+2"]
 win = ["Ctrl+2"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.larger_quantization", contexts = ["session"] },
+]
 
 [[shortcut]]
 id = "S-SES-026"
@@ -4297,7 +4324,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Cmd+3"]
 win = ["Ctrl+3"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.triplet_quantization", contexts = ["session"] },
+]
 
 [[shortcut]]
 id = "S-SES-027"
@@ -4308,7 +4338,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Cmd+4"]
 win = ["Ctrl+4"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.set_quantization_enabled", contexts = ["session"], toggles = "enabled" },
+]
 
 [[shortcut]]
 id = "S-SES-028"

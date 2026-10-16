@@ -716,6 +716,17 @@ pub enum Command {
         /// The scene whose slot it goes in.
         scene: SceneId,
     },
+    /// Adds or removes a slot's Clip Stop button (WP-3.2): the square that
+    /// stops the track's playing clip (S-SES-005, M-EDIT-032).
+    SetSlotStopButton {
+        /// The track whose slot it is.
+        track: TrackId,
+        /// The scene whose slot it is.
+        scene: SceneId,
+        /// Whether the slot keeps its Clip Stop button: `true` adds it, and
+        /// `false` removes it.
+        stop_button: bool,
+    },
 
     /// Inserts a new device at `index` in a track's chain, keeping the
     /// chain in order: MIDI effects, then the instrument, then audio
@@ -937,6 +948,14 @@ impl Command {
             Self::RenameScene { .. } => "Rename scene",
             Self::CreateSlotClip { .. } => "Create clip",
             Self::MoveSlotClip { .. } => "Move clip",
+            // Spec: launch-quantisation R8. Live 12.4.6's names, from its
+            // Edit menu (M-EDIT-032).
+            Self::SetSlotStopButton {
+                stop_button: true, ..
+            } => "Add Stop Button",
+            Self::SetSlotStopButton {
+                stop_button: false, ..
+            } => "Remove Stop Button",
             // Spec: device-chains R14. Live 12.4.6's names, where observed.
             Self::InsertDevice { .. } => "Insert Device",
             Self::RemoveDevice { .. } => "Delete Device(s)",
@@ -1395,6 +1414,11 @@ impl Document {
             Command::MoveSlotClip { clip, track, scene } => {
                 self.move_slot_clip(*clip, *track, *scene)
             }
+            Command::SetSlotStopButton {
+                track,
+                scene,
+                stop_button,
+            } => self.set_slot_stop_button(*track, *scene, *stop_button),
             Command::InsertDevice {
                 track,
                 index,
@@ -1781,6 +1805,18 @@ impl Document {
                 .expect("just checked the slot holds a clip");
             self.index.clip_track.remove(&clip.id);
         }
+        // A slot's removed Clip Stop button goes with its scene too (WP-3.2):
+        // a set names no stop-button state for a scene that's gone, so the
+        // tracks that only remember a removal change as well.
+        let buttons: Vec<TrackId> = self
+            .tracks
+            .iter()
+            .filter(|(_, track)| track.removed_stop_buttons.contains(&id))
+            .map(|(&track, _)| track)
+            .collect();
+        for track in buttons {
+            self.track_mut(track)?.removed_stop_buttons.remove(&id);
+        }
         Ok(())
     }
 
@@ -1924,6 +1960,28 @@ impl Document {
             .slots
             .insert(scene, Shared::new(moved));
         self.index.clip_track.insert(id, track);
+        Ok(())
+    }
+
+    /// Adds or removes a slot's Clip Stop button (WP-3.2, S-SES-005): the
+    /// square that stops the track's playing clip. Only audio and MIDI
+    /// tracks hold clips, so only they have slots with stop buttons.
+    fn set_slot_stop_button(
+        &mut self,
+        track: TrackId,
+        scene: SceneId,
+        stop_button: bool,
+    ) -> Result<(), ModelError> {
+        let target = self.track_ref(track)?;
+        check_kind(target, TrackKind::holds_clips, AUDIO_OR_MIDI)?;
+        self.scene_position(scene)
+            .ok_or(ModelError::NoSuchScene(scene))?;
+        let removed = &mut self.track_mut(track)?.removed_stop_buttons;
+        if stop_button {
+            removed.remove(&scene);
+        } else {
+            removed.insert(scene);
+        }
         Ok(())
     }
 

@@ -7,11 +7,12 @@ use std::sync::Arc;
 use bl_commands::{Context, NoArgs, Registry};
 use bl_core::id::Id;
 use bl_core::time::{SampleRate, Ticks};
+use bl_engine::session as engine_session;
 use bl_engine::transport as engine_transport;
 use bl_media::MediaStore;
 use bl_model::{
-    AudioData, ChangeSet, Clip, ClipData, ContentHash, Editor, Input, TrackId, TrackKind,
-    registry as model,
+    AudioData, ChangeSet, Clip, ClipData, ContentHash, Editor, Input, LaunchSettings, TrackId,
+    TrackKind, registry as model,
 };
 use bl_project::ProjectFolder;
 use serde::Serialize;
@@ -63,6 +64,7 @@ use bl_shell_spec::mixer_view as mixer_ids;
 use bl_shell_spec::notes as note_ids;
 use bl_shell_spec::perception as perception_ids;
 use bl_shell_spec::plugins as plugin_ids;
+use bl_shell_spec::session_launch as session_launch_ids;
 use bl_shell_spec::session_view as session_ids;
 use bl_shell_spec::tracks as track_ids;
 use bl_shell_spec::transport as transport_ids;
@@ -354,6 +356,9 @@ pub struct Shell {
     /// What the Session View grid has selected and how far it's scrolled
     /// (WP-3.7).
     session: SessionView,
+    /// The Session slots' states the engine last published (WP-3.2), which
+    /// the grid's launch buttons draw from.
+    session_states: Vec<bl_engine::SlotStatus>,
     /// The meters the engine last published, one per track (WP-1.9).
     meters: Vec<bl_engine::TrackMeter>,
     /// Whether the meters were the engine's when last polled.
@@ -528,6 +533,9 @@ impl Shell {
         // The transport's commands (WP-1.5), which the shell sends to the
         // engine it plays the set through (WP-1.18).
         engine_transport::register(&mut registry).expect("the transport's command IDs are unique");
+        // The Session View's launching and stopping (WP-3.2), which the
+        // shell sends to the engine too.
+        engine_session::register(&mut registry).expect("the Session View's command IDs are unique");
         debug_assert!(registry.problems().is_empty(), "{:?}", registry.problems());
         audio.set_tone(prefs.tone);
         let browser_view = BrowserView::new(&prefs.browser, Waker::default());
@@ -603,6 +611,7 @@ impl Shell {
             gesture: false,
             mixer: MixerView::new(),
             session: SessionView::new(),
+            session_states: Vec::new(),
             meters: Vec::new(),
             metering: false,
             previews: crate::perception::Previews::default(),
@@ -2602,6 +2611,9 @@ impl Shell {
             // level, and nothing else depends on them.
             self.audio.meters_into(&mut self.meters);
         }
+        // Spec: launch-quantisation R10. The slots the engine is launching
+        // or stopping, which the grid's launch buttons draw.
+        self.audio.session_into(&mut self.session_states);
         let brace = self.editor.document().settings().arrangement_loop;
         self.set_transport(TransportView {
             playing: engine.playing,
@@ -2627,6 +2639,22 @@ impl Shell {
     #[must_use]
     pub fn playing(&self) -> bool {
         self.arrangement.transport().playing
+    }
+
+    /// The global launch quantisation and its enabled switch (WP-3.2), which
+    /// the Control Bar's Quantization Menu shows and the Options items
+    /// change. It's saved with the set.
+    #[must_use]
+    pub fn launch_settings(&self) -> bl_model::LaunchSettings {
+        self.store.launch()
+    }
+
+    /// The Session slots' states the engine last published (WP-3.2), which
+    /// the grid's launch buttons draw: one entry per queued, playing, or
+    /// stopping slot, and nothing once every slot has stopped.
+    #[must_use]
+    pub fn session_states(&self) -> &[bl_engine::SlotStatus] {
+        &self.session_states
     }
 
     /// Starts a recording (WP-2.13): a ring for every armed audio track
@@ -2911,6 +2939,7 @@ impl Shell {
             ids::VIEW_TOGGLE_PLUG_IN_WINDOWS => Some(self.plug_in_windows),
             ids::FOCUS_TOGGLE_TAB_NAVIGATION => Some(self.prefs.tab_navigation),
             ids::FOCUS_TOGGLE_WRAP_NAVIGATION => Some(self.prefs.wrap_navigation.0),
+            session_launch_ids::SET_QUANTIZATION_ENABLED => Some(self.store.launch().enabled),
             SOLO_IN_PLACE => Some(self.editor.document().settings().solo_in_place),
             "transport.set_metronome_enabled" => {
                 Some(self.editor.document().settings().metronome.enabled)
@@ -3131,6 +3160,25 @@ impl Shell {
             return self.audio.engine_running()
                 && engine_transport::command_from_args(id, Self::object(args.clone())).is_ok();
         }
+        if engine_session::handles(id) {
+            // The Session View launches only while an engine runs on a
+            // device, as the transport plays.
+            return self.audio.engine_running()
+                && engine_session::command_from_args(id, Self::object(args.clone())).is_ok();
+        }
+        if session_launch_ids::handles(id) {
+            let args = if args.is_null() {
+                json!({})
+            } else {
+                args.clone()
+            };
+            return spec
+                .args
+                .as_ref()
+                .is_some_and(|schema| bl_commands::validate(schema, &args).is_ok())
+                && (id != session_launch_ids::STOP_SELECTED
+                    || !self.session.selected_slots().is_empty());
+        }
         if view_ids::handles(id) {
             let args = if args.is_null() {
                 json!({})
@@ -3277,6 +3325,12 @@ impl Shell {
             // Spec: accessibility R9. Options ▸ Solo in Place switches the
             // setting to the other state.
             let on = self.editor.document().settings().solo_in_place;
+            fields.insert("enabled".to_owned(), json!(!on));
+        }
+        if id == session_launch_ids::SET_QUANTIZATION_ENABLED && !fields.contains_key("enabled") {
+            // Spec: launch-quantisation R3. Options ▸ Launch Quantization
+            // Enabled switches the setting to the other state.
+            let on = self.store.launch().enabled;
             fields.insert("enabled".to_owned(), json!(!on));
         }
         if id == "transport.set_metronome_enabled" && !fields.contains_key("enabled") {
@@ -3452,6 +3506,10 @@ impl Shell {
                 let args = self.filled_args(id, args)?;
                 self.run(id, args)
             }
+            _ if id == session_launch_ids::SET_QUANTIZATION_ENABLED && !has("enabled") => {
+                let args = self.filled_args(id, args)?;
+                self.run(id, args)
+            }
             "track.create" if !has("id") => {
                 let mut args = self.filled_args(id, args)?;
                 let new: TrackId = self.editor.new_id();
@@ -3609,6 +3667,30 @@ impl Shell {
                     reason,
                 })?;
             return Ok(Value::Null);
+        }
+        if engine_session::handles(id) {
+            // Spec: launch-quantisation R9. The grid's launch buttons, the
+            // status row, and agents all reach the engine's launching here.
+            let command =
+                engine_session::command_from_args(id, Self::object(args)).map_err(|error| {
+                    ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message: error.to_string(),
+                    }
+                })?;
+            self.audio
+                .send_session(command)
+                .map_err(|reason| ShellError::Unavailable {
+                    command: id.to_owned(),
+                    reason,
+                })?;
+            return Ok(Value::Null);
+        }
+        if session_launch_ids::handles(id) {
+            // Spec: launch-quantisation R1, R3, R6, R10. The Control Bar's
+            // Quantization Menu and the Options items run here, with the
+            // value saved beside the song.
+            return self.run_session_launch(id, args);
         }
         if transport_ids::handles(id) {
             Self::args::<NoArgs>(id, args)?;
@@ -3934,6 +4016,84 @@ impl Shell {
                 .map(|path| path.to_string_lossy().into_owned()),
             name: self.set_name(),
         })
+    }
+
+    /// Runs one of the launch quantisation's commands (WP-3.2) and the
+    /// Session View's Cmd+Enter stop: the quantisation and its switch are
+    /// saved with the set, beside the song, and the engine that plays the
+    /// set hears every change.
+    fn run_session_launch(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        let current = self.store.launch();
+        let settings = match id {
+            session_launch_ids::SET_QUANTIZATION => {
+                let session_launch_ids::SetQuantizationArgs { quantization } =
+                    Self::args(id, args)?;
+                LaunchSettings {
+                    quantization,
+                    ..current
+                }
+            }
+            session_launch_ids::SMALLER_QUANTIZATION => {
+                Self::args::<NoArgs>(id, args)?;
+                LaunchSettings {
+                    quantization: current.quantization.smaller(),
+                    ..current
+                }
+            }
+            session_launch_ids::LARGER_QUANTIZATION => {
+                Self::args::<NoArgs>(id, args)?;
+                LaunchSettings {
+                    quantization: current.quantization.larger(),
+                    ..current
+                }
+            }
+            session_launch_ids::TRIPLET_QUANTIZATION => {
+                Self::args::<NoArgs>(id, args)?;
+                LaunchSettings {
+                    quantization: current.quantization.triplet(),
+                    ..current
+                }
+            }
+            session_launch_ids::SET_QUANTIZATION_ENABLED => {
+                let session_launch_ids::SetQuantizationEnabledArgs { enabled } =
+                    Self::args(id, args)?;
+                LaunchSettings {
+                    enabled: enabled.unwrap_or(!current.enabled),
+                    ..current
+                }
+            }
+            session_launch_ids::STOP_SELECTED => {
+                Self::args::<NoArgs>(id, args)?;
+                // Spec: launch-quantisation R6. Every track with a selected
+                // slot stops on the grid, as Cmd+Enter does.
+                let mut tracks: Vec<TrackId> = Vec::new();
+                for slot in self.session.selected_slots() {
+                    if !tracks.contains(&slot.track) {
+                        tracks.push(slot.track);
+                    }
+                }
+                if tracks.is_empty() {
+                    return Err(ShellError::Unavailable {
+                        command: id.to_owned(),
+                        reason: "select a clip slot first".to_owned(),
+                    });
+                }
+                for track in tracks {
+                    self.audio
+                        .send_session(engine_session::SessionCommand::StopTrack(track))
+                        .map_err(|reason| ShellError::Unavailable {
+                            command: id.to_owned(),
+                            reason,
+                        })?;
+                }
+                return Ok(Value::Null);
+            }
+            _ => return Err(ShellError::UnknownCommand(id.to_owned())),
+        };
+        self.store.set_launch(settings);
+        self.audio.set_launch_settings(settings);
+        self.touch();
+        Ok(to_value(&settings))
     }
 
     #[expect(
@@ -4639,6 +4799,10 @@ impl Shell {
     fn new_set_transport(&mut self) {
         self.gesture = false;
         self.audio.reset_transport();
+        // Spec: launch-quantisation R1. The set's global quantisation, so
+        // launching waits for the right grid (the engine defaults to it too,
+        // so this only matters for a set that was saved with another).
+        self.audio.set_launch_settings(self.store.launch());
     }
 
     /// Records a save to `path`: it's the set's file, the set is clean, and

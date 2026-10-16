@@ -62,28 +62,31 @@ pub(crate) struct State {
     pub(crate) playhead: Option<Playhead>,
 }
 
-/// The transport's playback commands (WP-1.5): play, stop, continue,
-/// locate, and the rest that `bl_engine::transport` registers. They act in
-/// the engine rather than on the document, so the shell doesn't run them;
-/// the agent API sends them to the engine through the host
-/// ([`EngineMessage::Transport`]).
+/// The transport's playback commands (WP-1.5) and the Session View's
+/// launching and stopping (WP-3.2): the commands that act in the engine
+/// rather than on the document, so the shell doesn't run them; the agent API
+/// sends them to the engine through the host ([`EngineMessage::Transport`]
+/// and [`EngineMessage::Session`]).
 fn engine_commands() -> &'static Registry {
     static COMMANDS: OnceLock<Registry> = OnceLock::new();
     COMMANDS.get_or_init(|| {
         let mut registry = Registry::new();
         bl_engine::transport::register(&mut registry)
             .expect("the transport's command IDs are unique");
+        bl_engine::session::register(&mut registry)
+            .expect("the Session View's command IDs are unique");
         registry
     })
 }
 
-/// Whether `id` is a transport command the engine runs (a playback command,
-/// not the loop, which belongs to the set), which the agent API sends to the
-/// engine its host attached rather than to the shell. The shell registers
-/// the same commands for its menus and keys (WP-1.18), so the registry
-/// can't tell them apart.
+/// Whether `id` is a command the engine runs (a playback command, not the
+/// loop, which belongs to the set; or one of the Session View's launch and
+/// stop commands), which the agent API sends to the engine its host
+/// attached rather than to the shell. The shell registers the same commands
+/// for its menus and keys (WP-1.18), so the registry can't tell them apart.
 pub(crate) fn is_engine_command(_shell: &Shell, id: &str) -> bool {
-    bl_engine::transport::handles(id) && !bl_model::registry::handles(id)
+    (bl_engine::transport::handles(id) || bl_engine::session::handles(id))
+        && !bl_model::registry::handles(id)
 }
 
 /// The command called `id`: the shell's, or one of the transport's.

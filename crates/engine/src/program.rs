@@ -5,13 +5,14 @@ use core::fmt;
 use core::ops::Range;
 
 use bl_core::time::{SampleRate, TempoMap, TimeSignatureMap};
-use bl_model::{Channel, ParamId, Tap, TrackId};
+use bl_model::{Channel, ParamId, SceneId, Tap, TrackId};
 
 use crate::midi::{MidiRoutes, TrackMidiInput};
 use crate::mixer::{MeterReading, Route, TrackMixer};
 use crate::node::{
     Block, Node, NodeData, NodeEvent, NodeKey, NoteBuffer, ParamValue, TransportInfo,
 };
+use crate::session::SessionPlayback;
 use crate::sidechain::SidechainKey;
 
 /// A compiled song, ready to run on the audio thread: a flat array of
@@ -104,6 +105,10 @@ pub struct EngineProgram {
     pub(crate) tempo: TempoMap,
     pub(crate) time_signatures: TimeSignatureMap,
     pub(crate) sample_rate: SampleRate,
+    /// Every audio and MIDI slot that holds a clip, as `(scene, track)`
+    /// pairs sorted by scene and then track: what a scene launch queues
+    /// (WP-3.2).
+    pub(crate) scene_slots: Vec<(SceneId, TrackId)>,
     pub(crate) note_buffers: [NoteBuffer; 2],
     /// The MIDI tracks' inputs, and what each received in the last block
     /// (WP-2.2).
@@ -468,6 +473,14 @@ impl EngineProgram {
         &self.tempo
     }
 
+    /// The slots of `scene` that hold a clip, as `(scene, track)` pairs in
+    /// track order: what a scene launch queues.
+    pub(crate) fn scene_slots(&self, scene: SceneId) -> &[(SceneId, TrackId)] {
+        let start = self.scene_slots.partition_point(|&(s, _)| s < scene);
+        let end = start + self.scene_slots[start..].partition_point(|&(s, _)| s == scene);
+        &self.scene_slots[start..end]
+    }
+
     /// What a MIDI track's input received in the last block, and whether
     /// the track monitors (`docs/specs/midi-io.md`, R12). `None` if `track`
     /// isn't a MIDI track in this program.
@@ -565,6 +578,7 @@ impl EngineProgram {
         events: &[Resolved],
         scratch: &mut Vec<NodeEvent>,
         transport: TransportInfo,
+        session: &[SessionPlayback],
     ) -> u64 {
         let frames = frames.min(self.max_frames);
         let (channels, stride) = (self.channels, self.max_frames);
@@ -612,6 +626,7 @@ impl EngineProgram {
                         sidechain: None,
                         notes: &[],
                         notes_out: Some(&mut self.note_buffers[0]),
+                        session,
                     });
                 }
             }
@@ -820,6 +835,7 @@ impl EngineProgram {
                         .map(|(at, _)| &self.sidechain_pool[at.clone()]),
                     notes: in_buf.notes(),
                     notes_out: Some(out_buf),
+                    session,
                 });
                 note_idx = next_note_idx;
                 // Sidechain Listen: the device's output is what it heard.
@@ -857,6 +873,7 @@ impl EngineProgram {
                     sidechain: None,
                     notes: &[],
                     notes_out: None,
+                    session,
                 });
             }
         }

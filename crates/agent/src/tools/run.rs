@@ -362,9 +362,15 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
     // Run them.
     let outcome: Result<(Vec<Value>, Option<String>), String> =
         if ready.len() == 1 && super::is_engine_command(ctx.shell, &ready[0].id) {
-            // A transport command goes to the engine, through the host.
+            // A transport or Session View command goes to the engine,
+            // through the host.
             let step = &ready[0];
-            super::time::send_transport(ctx, &step.id, step.args.clone())
+            let result = if bl_engine::transport::handles(&step.id) {
+                super::time::send_transport(ctx, &step.id, step.args.clone())
+            } else {
+                super::time::send_session(ctx, &step.id, step.args.clone())
+            };
+            result
                 .map(|()| {
                     let sent = json!({
                         "command": step.id,

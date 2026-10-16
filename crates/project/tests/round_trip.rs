@@ -14,8 +14,10 @@ mod common;
 
 use std::process::Command;
 
+use bl_model::{Command as Edit, Editor, TrackKind};
 use bl_project::{
-    LoadOptions, Project, SCHEMA_VERSION, SaveOptions, SetFile, decode, encode, encode_json, load,
+    LoadOptions, Media, Project, SCHEMA_VERSION, SaveOptions, SetFile, decode, decode_json, encode,
+    encode_json, load,
 };
 use common::{TestDir, depth, recipe};
 use proptest::prelude::*;
@@ -90,6 +92,50 @@ proptest! {
             .map_or(0, Iterator::count);
         prop_assert_eq!(backups, recipes.len() - 1);
     }
+}
+
+/// A scene whose Clip Stop button was removed can be deleted, and the set
+/// still saves and loads (WP-3.2): the removal goes with its scene.
+#[test]
+fn a_deleted_scene_takes_its_removed_stop_button_with_it() {
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Edit::CreateTrack {
+            id: track,
+            kind: TrackKind::Midi,
+            name: "Slots".to_owned(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let scene = editor
+        .document()
+        .scenes()
+        .next()
+        .expect("a new set opens with scenes")
+        .id;
+    editor
+        .apply(Edit::SetSlotStopButton {
+            track,
+            scene,
+            stop_button: false,
+        })
+        .unwrap();
+    editor.apply(Edit::DeleteScene { scene }).unwrap();
+    assert_eq!(
+        editor
+            .document()
+            .track(track)
+            .expect("the track stays")
+            .removed_stop_buttons()
+            .count(),
+        0,
+        "the removed button goes with the scene"
+    );
+    let project = Project::from_editor(&editor, Media::new());
+    let json = encode_json(&project, 1).unwrap();
+    decode_json(&json, &LoadOptions::default()).expect("the set opens again");
 }
 
 /// A song the size of the UI benchmark (200 tracks, 5,000 clips) saves and

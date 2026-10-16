@@ -9,7 +9,7 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use bl_model::{DeviceId, Document};
+use bl_model::{DeviceId, Document, LaunchSettings};
 use rtrb::{Producer, PushError, RingBuffer};
 
 use crate::EngineConfig;
@@ -20,6 +20,7 @@ use crate::node::{NodeData, NodeKey};
 use crate::processor::{Carry, Processor, starts_playback};
 use crate::recording::RecordingPlan;
 use crate::registry::Registry;
+use crate::session::SessionCommand;
 use crate::sources::Loaded;
 use crate::state::{EngineState, Monitor};
 
@@ -36,6 +37,7 @@ pub fn channel(config: &EngineConfig) -> (Sender, Processor, Monitor) {
     let (report_producer, report_consumer) = RingBuffer::new(config.report_capacity);
     let (state_input, state_output) = triple_buffer::triple_buffer(&EngineState::with_capacity(
         config.max_tracks,
+        config.max_slots,
         config.sample_rate,
     ));
     let sender = Sender {
@@ -121,6 +123,13 @@ impl Sender {
         self.push(Message::Schedule(command));
     }
 
+    /// Sends a Session View command (WP-3.2): a launch, a stop, or the
+    /// global launch quantisation. It takes effect at the start of the next
+    /// block; a launch or a stop lands on its quantisation frame.
+    pub fn session(&mut self, command: SessionCommand) {
+        self.push(Message::Session(command));
+    }
+
     /// Cancels a scheduled command that hasn't fired.
     pub fn cancel(&mut self, id: u64) {
         self.push(Message::Cancel(id));
@@ -200,6 +209,8 @@ enum Request {
     Transport(TransportCommand, When),
     Schedule(ScheduledCommand),
     Cancel(u64),
+    /// A Session View command (WP-3.2).
+    Session(SessionCommand),
     Flush(mpsc::Sender<()>),
     /// What to record while the transport records (WP-2.13).
     Record(Box<Owned<RecordingPlan>>),
@@ -237,6 +248,9 @@ enum Held {
     Schedule(ScheduledCommand),
     /// A cancellation, perhaps of a carried command.
     Cancel(u64),
+    /// The launch quantisation, which nothing else carries to the processor
+    /// that takes over (a launch or a stop while nothing plays is dropped).
+    Quantization(LaunchSettings),
 }
 
 /// Restarts the engine from another thread: the hook a device supervisor
@@ -295,6 +309,7 @@ impl std::fmt::Debug for Request {
             Self::Transport(..) => "Transport",
             Self::Schedule(_) => "Schedule",
             Self::Cancel(_) => "Cancel",
+            Self::Session(_) => "Session",
             Self::Flush(_) => "Flush",
             Self::Record(_) => "Record",
             Self::Detach => "Detach",
@@ -516,6 +531,11 @@ impl Engine {
         self.request(Request::Cancel(id));
     }
 
+    /// Sends a Session View command (WP-3.2).
+    pub fn session(&self, command: SessionCommand) {
+        self.request(Request::Session(command));
+    }
+
     /// Waits, up to `timeout`, until everything sent so far is on the queue
     /// to the audio thread. Returns whether it got there. (The audio thread
     /// takes it at its next block.) While no device runs the engine, it
@@ -690,6 +710,17 @@ fn compile_loop(
                     Some(sender) => sender.cancel(id),
                     None => detached.push(Held::Cancel(id)),
                 },
+                Request::Session(command) => match sender.as_mut() {
+                    Some(sender) => sender.session(command),
+                    // Spec: device-changes R7. Nothing plays while no device
+                    // runs the engine, so only the quantisation waits; a
+                    // launch or a stop for the stopped song is dropped.
+                    None => {
+                        if let SessionCommand::SetQuantization(settings) = command {
+                            detached.push(Held::Quantization(settings));
+                        }
+                    }
+                },
                 Request::Flush(ack) => flushes.push(ack),
                 Request::Record(plan) => {
                     // While no processor runs, nothing records it.
@@ -784,6 +815,9 @@ fn restart_with(
             }
             Held::Schedule(command) => sender.schedule(command),
             Held::Cancel(id) => sender.cancel(id),
+            Held::Quantization(settings) => {
+                sender.session(SessionCommand::SetQuantization(settings))
+            }
         }
     }
     deliver(&mut sender, &mut processor);

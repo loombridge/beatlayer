@@ -33,7 +33,7 @@
 use std::io::Read;
 
 use bl_core::id::IdAllocator;
-use bl_model::{ClipFolds, DeviceWindows, Document, Editor};
+use bl_model::{ClipFolds, DeviceWindows, Document, Editor, LaunchSettings};
 use ruzstd::decoding::StreamingDecoder;
 use ruzstd::encoding::{CompressionLevel, compress_to_vec};
 use serde::{Deserialize, Serialize};
@@ -69,6 +69,10 @@ pub struct Project {
     /// (WP-2.3): saved with the set, but not part of the document, so
     /// folding is no undo step.
     pub folds: ClipFolds,
+    /// The global launch quantisation and its enabled switch (WP-3.2),
+    /// saved with the set but not part of the document, so changing them is
+    /// no undo step (the launch quantisation spec, R1).
+    pub launch: LaunchSettings,
 }
 
 impl Project {
@@ -88,6 +92,7 @@ impl Project {
             media,
             windows: DeviceWindows::new(),
             folds: ClipFolds::new(),
+            launch: LaunchSettings::default(),
         }
     }
 
@@ -119,6 +124,13 @@ impl Project {
     #[must_use]
     pub fn editor(&self) -> Editor {
         Editor::from_document(self.document.clone(), self.ids)
+    }
+
+    /// The same project with this launch quantisation.
+    #[must_use]
+    pub fn with_launch(mut self, launch: LaunchSettings) -> Self {
+        self.launch = launch;
+        self
     }
 }
 
@@ -181,6 +193,8 @@ struct Saving<'a> {
     windows: &'a DeviceWindows,
     #[serde(skip_serializing_if = "ClipFolds::is_empty")]
     folds: &'a ClipFolds,
+    /// The global launch quantisation and its switch (WP-3.2).
+    launch: LaunchSettings,
     document: &'a Document,
 }
 
@@ -195,6 +209,7 @@ impl<'a> Saving<'a> {
             media: &project.media,
             windows: &project.windows,
             folds: &project.folds,
+            launch: project.launch,
             document: &project.document,
         }
     }
@@ -217,6 +232,10 @@ struct Saved {
     windows: DeviceWindows,
     #[serde(default)]
     folds: ClipFolds,
+    /// The global launch quantisation and its switch (WP-3.2). Sets saved
+    /// before WP-3.2 load with a new set's.
+    #[serde(default)]
+    launch: LaunchSettings,
     document: Document,
 }
 
@@ -318,6 +337,7 @@ pub fn decode_json(json: &[u8], options: &LoadOptions) -> Result<(Project, SetIn
         media,
         windows,
         folds,
+        launch,
         document,
         ..
     } = saved;
@@ -342,6 +362,7 @@ pub fn decode_json(json: &[u8], options: &LoadOptions) -> Result<(Project, SetIn
         media,
         windows: DeviceWindows::new(),
         folds: ClipFolds::new(),
+        launch,
     }
     .with_windows(&windows)
     .with_folds(&folds);

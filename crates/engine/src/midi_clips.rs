@@ -13,7 +13,7 @@
 //! when stopping, looping, or deleting a clip.
 
 use bl_core::time::{Frames, SampleRate, TempoMap, Ticks};
-use bl_model::{ClipData, ClipId, Note, Track};
+use bl_model::{ClipData, ClipId, Note, SceneId, Track, TrackId};
 
 use crate::node::{Block, Node, NodeConfig, NodeData, NodeEvent, NoteEvent, NoteKind, ParamValue};
 
@@ -74,6 +74,10 @@ struct ActiveNote {
 #[derive(Clone, Debug)]
 pub struct PlacedMidiClip {
     pub id: ClipId,
+    /// The Session slot the clip sits in, or `None` for an Arrangement clip
+    /// (WP-3.2): a slot clip plays only when it is launched, from its launch
+    /// frame.
+    pub scene: Option<SceneId>,
     pub start: Ticks,
     pub length: Ticks,
     pub mute: bool,
@@ -86,8 +90,12 @@ pub struct PlacedMidiClip {
 }
 
 /// The list of MIDI clips for a track, sent to [`MidiClipPlayer`] as [`NodeData`].
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct MidiClipList {
+    /// The track the list is for.
+    pub track: TrackId,
+    /// The track's Arrangement clips, sorted by start, and its Session slot
+    /// clips, which have no position in the Arrangement.
     pub clips: Vec<PlacedMidiClip>,
 }
 
@@ -110,6 +118,32 @@ impl MidiClipList {
             notes.sort_by_key(|n| n.start);
             clips.push(PlacedMidiClip {
                 id: clip.id,
+                scene: None,
+                start: clip.start,
+                length: clip.length,
+                mute: clip.mute,
+                start_marker: midi.start,
+                end_marker: midi.end,
+                looping: midi.looping,
+                loop_start: midi.loop_start,
+                loop_end: midi.loop_end,
+                notes,
+            });
+        }
+        // The track's Session slot clips (WP-3.2): they play only when the
+        // engine launches them, so they carry no Arrangement position.
+        for (scene, clip) in track.slots() {
+            let ClipData::Midi(midi) = &clip.data else {
+                continue;
+            };
+            if clip.mute || clip.length <= Ticks::ZERO {
+                continue;
+            }
+            let mut notes: Vec<Note> = midi.notes.iter().filter(|n| !n.mute).copied().collect();
+            notes.sort_by_key(|n| n.start);
+            clips.push(PlacedMidiClip {
+                id: clip.id,
+                scene: Some(scene),
                 start: clip.start,
                 length: clip.length,
                 mute: clip.mute,
@@ -122,7 +156,124 @@ impl MidiClipList {
             });
         }
         clips.sort_by_key(|c| c.start);
-        Self { clips }
+        Self {
+            track: track.id(),
+            clips,
+        }
+    }
+}
+
+/// The most times round a launched clip's loop one block plays. A block is
+/// a few thousand frames at most, so this only bounds a loop shorter than a
+/// frame, which no clip holds for long.
+///
+/// `shortcut:` a loop a 128th of a frame long would drop the rest of the
+/// block's notes; raise it if a real clip ever needs more.
+const MAX_SESSION_REPEATS: usize = 128;
+
+/// Plays a launched Session clip for `from_frame..to_frame`: as if the clip
+/// sat at its launch frame, so it plays from its Start marker, repeats its
+/// loop brace while its Loop switch is on, and plays once while it's off
+/// (WP-3.2). What a non-looping clip does when it reaches its end is to
+/// observe; Beatlayer leaves the slot playing.
+#[allow(clippy::too_many_arguments)]
+fn play_session_clip(
+    clip: &PlacedMidiClip,
+    launch_tick: Ticks,
+    from_frame: i64,
+    to_frame: i64,
+    tempo: &TempoMap,
+    sample_rate: SampleRate,
+    rng: &mut Rng,
+    next_note_id: &mut u32,
+    scratch_notes: &mut Vec<NoteEvent>,
+    sounding: &mut Vec<ActiveNote>,
+) {
+    let start_marker = clip.start_marker;
+    if !clip.looping {
+        let end_marker = clip.end_marker.unwrap_or(start_marker + clip.length);
+        if end_marker <= start_marker {
+            return;
+        }
+        let active_ticks = clip.length.min(end_marker - start_marker);
+        let end = launch_tick + active_ticks;
+        let end_frame = tempo.ticks_to_frames(end, sample_rate).get();
+        if end_frame <= from_frame {
+            return;
+        }
+        process_clip_segment(
+            clip,
+            start_marker,
+            launch_tick,
+            end,
+            from_frame,
+            to_frame,
+            tempo,
+            sample_rate,
+            rng,
+            next_note_id,
+            scratch_notes,
+            sounding,
+        );
+        if from_frame <= end_frame && end_frame < to_frame {
+            stop_clip_sounding(
+                clip.id,
+                (end_frame - from_frame) as u32,
+                sounding,
+                scratch_notes,
+            );
+        }
+        return;
+    }
+    let loop_start = clip.loop_start;
+    let loop_end = clip
+        .loop_end
+        .unwrap_or_else(|| (loop_start + clip.length).max(loop_start + Ticks::QUARTER));
+    if loop_end <= loop_start || start_marker >= loop_end {
+        return;
+    }
+    let loop_len = loop_end - loop_start;
+    let first_len = loop_end - start_marker;
+    let mut start = launch_tick;
+    let mut first = true;
+    for _ in 0..MAX_SESSION_REPEATS {
+        let (clip_start, repeat_len) = if first {
+            (start_marker, first_len)
+        } else {
+            (loop_start, loop_len)
+        };
+        let end = start + repeat_len;
+        let start_frame = tempo.ticks_to_frames(start, sample_rate).get();
+        let end_frame = tempo.ticks_to_frames(end, sample_rate).get();
+        if start_frame >= to_frame {
+            break;
+        }
+        if end_frame > from_frame {
+            process_clip_segment(
+                clip,
+                clip_start,
+                start,
+                end,
+                from_frame,
+                to_frame,
+                tempo,
+                sample_rate,
+                rng,
+                next_note_id,
+                scratch_notes,
+                sounding,
+            );
+            if from_frame <= end_frame && end_frame < to_frame {
+                stop_clip_sounding(
+                    clip.id,
+                    (end_frame - from_frame) as u32,
+                    sounding,
+                    scratch_notes,
+                );
+            }
+        }
+        start = end;
+        first = false;
     }
 }
 
@@ -133,6 +284,9 @@ pub struct MidiClipPlayer {
     scratch_notes: Vec<NoteEvent>,
     audible: bool,
     last_position: Option<i64>,
+    /// The Session slot clip sounding in the last block: when the engine
+    /// stops it or another slot takes over, its notes are let go.
+    session: Option<ClipId>,
     rng: Rng,
     next_note_id: u32,
 }
@@ -147,6 +301,7 @@ impl MidiClipPlayer {
             scratch_notes: Vec::with_capacity(512),
             audible: true,
             last_position: None,
+            session: None,
             rng: Rng::new(0x853c_49e6_748f_ea9b),
             next_note_id: 1,
         }
@@ -457,7 +612,47 @@ impl Node for MidiClipPlayer {
         let sample_rate = block.sample_rate();
         let tempo = block.tempo();
 
+        // Spec: launch-quantisation R9. A launched slot clip plays from its
+        // launch frame, over the Arrangement's clips (WP-3.6 makes it take
+        // the track over from them). When the engine stops it or another
+        // slot takes over, its notes are let go at once.
+        let launched = block
+            .session()
+            .iter()
+            .find(|entry| entry.track == list.track)
+            .and_then(|entry| {
+                list.clips
+                    .iter()
+                    .find(|clip| clip.scene == Some(entry.scene))
+                    .map(|clip| (entry, clip))
+            });
+        let launched_id = launched.map(|(_, clip)| clip.id);
+        if self.session != launched_id {
+            if let Some(old) = self.session {
+                stop_clip_sounding(old, 0, &mut self.sounding, &mut self.scratch_notes);
+            }
+            self.session = launched_id;
+        }
+        if let Some((entry, clip)) = launched {
+            let launch_tick = tempo.frames_to_ticks(Frames(entry.frame.get()), sample_rate);
+            play_session_clip(
+                clip,
+                launch_tick,
+                from_frame,
+                to_frame,
+                tempo,
+                sample_rate,
+                &mut self.rng,
+                &mut self.next_note_id,
+                &mut self.scratch_notes,
+                &mut self.sounding,
+            );
+        }
+
         for clip in &list.clips {
+            if clip.scene.is_some() {
+                continue;
+            }
             let clip_start_frame = tempo.ticks_to_frames(clip.start, sample_rate).get();
             let clip_end_frame = tempo
                 .ticks_to_frames(clip.start + clip.length, sample_rate)

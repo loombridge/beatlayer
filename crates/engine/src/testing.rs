@@ -105,16 +105,19 @@ pub struct Probe {
     /// Which counter published `counted`: 1 for the first one made, and so
     /// on.
     pub counter: AtomicU64,
-    /// The consumer of recorded notes from the test instrument.
-    pub note_consumer: std::sync::Mutex<Option<rtrb::Consumer<RecordedNote>>>,
+    /// The consumers of recorded notes, one per test instrument made, in
+    /// that order.
+    pub note_consumers: std::sync::Mutex<Vec<rtrb::Consumer<RecordedNote>>>,
 }
 
 impl Probe {
-    /// Drains all recorded notes from the test instrument.
+    /// Drains all recorded notes, from every test instrument in the order
+    /// they were made: a song with one instrument reads its notes in the
+    /// order it played them.
     #[must_use]
     pub fn recorded_notes(&self) -> Vec<RecordedNote> {
         let mut notes = Vec::new();
-        if let Some(consumer) = self.note_consumer.lock().unwrap().as_mut() {
+        for consumer in self.note_consumers.lock().unwrap().iter_mut() {
             while let Ok(note) = consumer.pop() {
                 notes.push(note);
             }
@@ -169,7 +172,7 @@ pub fn registry(probe: &Arc<Probe>) -> Registry {
     let p = Arc::clone(probe);
     registry.add_device(instrument_type(), move |_, _| {
         let (producer, consumer) = rtrb::RingBuffer::new(4096);
-        *p.note_consumer.lock().unwrap() = Some(consumer);
+        p.note_consumers.lock().unwrap().push(consumer);
         Box::new(TestInstrument {
             producer,
             _tracked: Tracked::new(&p),

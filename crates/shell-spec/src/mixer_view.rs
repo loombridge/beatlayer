@@ -24,6 +24,8 @@ pub const IN_OUT: &str = "mixer_view.in_out";
 pub const SENDS: &str = "mixer_view.sends";
 /// `mixer_view.volume`: show or hide the mixer strips (Volume).
 pub const VOLUME: &str = "mixer_view.volume";
+/// `mixer_view.crossfader`: show or hide the Crossfader section.
+pub const CROSSFADER: &str = "mixer_view.crossfader";
 /// `mixer_view.return_tracks`: show or hide the return tracks' columns.
 pub const RETURN_TRACKS: &str = "mixer_view.return_tracks";
 /// `mixer_view.scroll`: scroll a mixer's columns sideways.
@@ -39,6 +41,7 @@ pub const IDS: &[&str] = &[
     IN_OUT,
     SENDS,
     VOLUME,
+    CROSSFADER,
     RETURN_TRACKS,
     SCROLL,
     FOCUS,
@@ -89,6 +92,9 @@ pub struct MixerViewState {
     /// Whether the mixer strips (volume, pan, the meter, the activator,
     /// Solo, Arm) show.
     pub volume: bool,
+    /// Whether the Crossfader section shows: the tracks' A/B assign buttons
+    /// and Main's crossfader. Hidden in a new set.
+    pub crossfader: bool,
     /// Whether the return tracks' columns show.
     pub return_tracks: bool,
 }
@@ -197,6 +203,17 @@ fn specs() -> Vec<CommandSpec> {
              the volume fader, and the meter), as View > Mixer Controls > Volume does. Switches unless \
              `shown` says which. Changes only the view; the Arrangement's track headers keep \
              their controls.",
+        )
+        .context(Global)
+        .args::<SectionArgs>(),
+        view(
+            CROSSFADER,
+            "Mixer Crossfader",
+            "Shows or hides the mixers' Crossfader section, as View > Mixer Controls > \
+             Crossfader does: under the strips, a track's A and B assign buttons and, in \
+             Main's column, the crossfader itself. Hidden in a new set. Switches unless \
+             `shown` says which. Changes only the view; the assign and the position are in \
+             the set (`mixer.set_crossfade_assign`, `mixer.set_crossfader`).",
         )
         .context(Global)
         .args::<SectionArgs>(),

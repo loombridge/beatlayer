@@ -20,6 +20,11 @@ pub const MAX_TRACK_HEIGHT: f32 = 800.0;
 /// list still draws.
 pub const MIN_OPTIMIZED_HEIGHT: f32 = 0.5;
 
+/// How tall a track's automation lane is, added under its lane while
+/// Automation Mode is on (WP-2.12). Live's own height hasn't been measured
+/// (arrangement-view, "To observe in Live").
+pub const AUTOMATION_LANE_HEIGHT: f32 = 43.0;
+
 /// The drop area under the last track ("Drop Files and Devices Here",
 /// L-ARR-013): the lanes scroll this far past the last track.
 pub const DROP_AREA: f32 = 44.0;
@@ -35,17 +40,22 @@ pub struct Row {
     pub depth: u16,
     /// Its top, in points from the top of the first row.
     pub top: f32,
-    /// Its height in points.
+    /// The height of its own lane, in points (the clips' area).
     pub height: f32,
+    /// The height of its automation lane, added under its lane, in points:
+    /// 0 while Automation Mode is off, the track is folded, or its lane is
+    /// hidden (WP-2.12).
+    pub automation: f32,
     /// Whether it's folded.
     pub folded: bool,
 }
 
 impl Row {
-    /// Its bottom, in points from the top of the first row.
+    /// Its bottom, in points from the top of the first row: its lane and its
+    /// automation lane.
     #[must_use]
     pub fn bottom(&self) -> f32 {
-        self.top + self.height
+        self.top + self.height + self.automation
     }
 }
 

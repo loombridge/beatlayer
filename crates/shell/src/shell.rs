@@ -419,6 +419,29 @@ fn edit_error(id: &str, failure: EditFailure) -> ShellError {
     }
 }
 
+/// Whether `id` is an automation edit a drag on an automation lane runs as
+/// one undo step (WP-2.12).
+fn is_automation_edit(id: &str) -> bool {
+    matches!(
+        id,
+        "automation.set_breakpoint"
+            | "automation.set_curve"
+            | "automation.move_breakpoint"
+            | "automation.delete_breakpoint"
+    )
+}
+
+/// The undo step a drag on an automation lane records, named as Live's undo
+/// history names that work.
+fn automation_label(id: &str) -> &'static str {
+    match id {
+        "automation.set_curve" => "Curve Automation Segment",
+        "automation.move_breakpoint" => "Move Automation Breakpoint",
+        "automation.delete_breakpoint" => "Delete Automation Breakpoint",
+        _ => "Add Automation Breakpoint",
+    }
+}
+
 /// Whether `id` is one of the clip marker commands the Clip View's marker
 /// strip drags (`clip.set_midi_region`, `clip.set_midi_loop`). They are
 /// document commands, but the strip's drags run them as gestures, so moving
@@ -1512,28 +1535,20 @@ impl Shell {
             plugin_ids::SHOW_WINDOW => {
                 let plugin_ids::ShowWindowArgs { device, shown } = Self::args(id, args)?;
                 let device = target(self, device)?;
-                if crate::plugins::is_au(self.editor.document(), device) {
-                    // Spec: au-hosting R13. A unit's own editor arrives with
-                    // WP-2.8's second part.
-                    return Err(unavailable(
-                        "Audio Units' own editor windows aren't hosted yet".to_owned(),
-                    ));
-                }
                 if crate::plugins::is_vst3(self.editor.document(), device) {
                     return Err(unavailable(
                         "a VST3 plug-in's editor is a later part of VST3 hosting".to_owned(),
                     ));
                 }
+                let is_au = crate::plugins::is_au(self.editor.document(), device);
                 self.plugins.idle();
+                self.au.idle();
                 let open = crate::plugins::info(&self.plugins, &self.au, &self.vst3, device)
                     .is_some_and(|info| info.window_open);
-                let failed = |e: bl_plugin_host::clap::ClapError| ShellError::Failed {
-                    command: id.to_owned(),
-                    message: e.to_string(),
-                };
                 if shown.unwrap_or(!open) {
-                    // Spec: clap-hosting R13. Titled "<device>/<track>", as
-                    // Live titles a plug-in's window.
+                    // Spec: clap-hosting R13 and au-hosting's second part.
+                    // Titled "<device>/<track>", as Live titles a plug-in's
+                    // window.
                     let doc = self.editor.document();
                     let title = doc
                         .device_track(device)
@@ -1543,14 +1558,39 @@ impl Shell {
                         .device(device)
                         .map(|d| d.title().to_owned())
                         .unwrap_or_default();
-                    self.plugins
-                        .open_editor(device, &format!("{name}/{title}"))
-                        .map_err(failed)?;
+                    let title = format!("{name}/{title}");
+                    if is_au {
+                        self.au
+                            .open_editor(device, &title)
+                            .map_err(|e| ShellError::Failed {
+                                command: id.to_owned(),
+                                message: e.to_string(),
+                            })?;
+                    } else {
+                        self.plugins.open_editor(device, &title).map_err(|e| {
+                            ShellError::Failed {
+                                command: id.to_owned(),
+                                message: e.to_string(),
+                            }
+                        })?;
+                    }
                     // Its window follows View ▸ Plug-In Windows and
                     // Auto-Hide Plug-In Windows (R31, R33).
                     self.apply_plug_in_windows();
+                } else if is_au {
+                    self.au
+                        .close_editor(device)
+                        .map_err(|e| ShellError::Failed {
+                            command: id.to_owned(),
+                            message: e.to_string(),
+                        })?;
                 } else {
-                    self.plugins.close_editor(device).map_err(failed)?;
+                    self.plugins
+                        .close_editor(device)
+                        .map_err(|e| ShellError::Failed {
+                            command: id.to_owned(),
+                            message: e.to_string(),
+                        })?;
                 }
                 self.touch();
                 info(self, device)
@@ -1559,6 +1599,7 @@ impl Shell {
                 let plugin_ids::PluginInfoArgs { device } = Self::args(id, args)?;
                 let device = target(self, device)?;
                 self.plugins.idle();
+                self.au.idle();
                 self.vst3.idle();
                 info(self, device)
             }
@@ -1705,7 +1746,9 @@ impl Shell {
     /// Whether any window View ▸ Plug-In Windows shows and hides: a
     /// floating device's, or a plug-in's editor (R33).
     fn any_plug_in_window(&self) -> bool {
-        self.any_floating() || !self.plugins.open_editors().is_empty()
+        self.any_floating()
+            || !self.plugins.open_editors().is_empty()
+            || !self.au.open_editors().is_empty()
     }
 
     /// Hides and shows the open plug-in editor windows to follow View ▸
@@ -1715,10 +1758,14 @@ impl Shell {
         let doc = self.editor.document();
         let shown_track = devices::shown_track(&self.arrangement, doc);
         let auto_hide = self.prefs.auto_hide_plug_in_windows.0;
+        let plug_in_windows = self.plug_in_windows;
+        let shown =
+            |device| plug_in_windows && (!auto_hide || doc.device_track(device) == shown_track);
         for device in self.plugins.open_editors() {
-            let shown =
-                self.plug_in_windows && (!auto_hide || doc.device_track(device) == shown_track);
-            let _ = self.plugins.set_editor_visible(device, shown);
+            let _ = self.plugins.set_editor_visible(device, shown(device));
+        }
+        for device in self.au.open_editors() {
+            let _ = self.au.set_editor_visible(device, shown(device));
         }
     }
 
@@ -2105,6 +2152,12 @@ impl Shell {
             .into_iter()
             .map(|c| (c.device, c.param, c.value))
             .chain(
+                self.au
+                    .take_param_changes()
+                    .into_iter()
+                    .map(|c| (c.device, c.param, c.value)),
+            )
+            .chain(
                 self.kit
                     .take_param_changes()
                     .into_iter()
@@ -2380,6 +2433,7 @@ impl Shell {
         if let Some(invocation) = invocation {
             if !edit_ids::handles(&invocation.id)
                 && !note_ids::handles(&invocation.id)
+                && !is_automation_edit(&invocation.id)
                 && !clip_marker_command(&invocation.id)
             {
                 return Err(ShellError::Unavailable {
@@ -2405,6 +2459,8 @@ impl Shell {
     fn gesture_step(&mut self, invocation: &Invocation) -> Result<Value, ShellError> {
         let label = if note_ids::handles(&invocation.id) {
             clip_view::label(&invocation.id)
+        } else if is_automation_edit(&invocation.id) {
+            automation_label(&invocation.id)
         } else if clip_marker_command(&invocation.id) {
             marker_label(&invocation.id)
         } else {
@@ -2447,6 +2503,14 @@ impl Shell {
                     clip_view,
                     arrangement,
                 )
+            } else if is_automation_edit(&invocation.id) {
+                // WP-2.12: a drag on an automation lane moves, curves, or
+                // deletes breakpoints, as one undo step.
+                model::run(editor, &invocation.id, invocation.args.clone())
+                    .map(|changes| to_value(&changes))
+                    .map_err(|error| {
+                        crate::arrangement::editing::EditFailure::Refused(error.to_string())
+                    })
             } else {
                 editing::run(
                     &invocation.id,

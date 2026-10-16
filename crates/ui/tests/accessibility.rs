@@ -847,11 +847,23 @@ enum Reason {
     LaterView(&'static str),
     /// Live itself has no keyboard path for it.
     Live(&'static str),
+    /// Live's own keyboard path for it isn't observed yet, named in the
+    /// text: its place in the mixers' Tab order and its key, which the next
+    /// observation session records.
+    Unobserved(&'static str),
     /// A gap in M1: what's missing, and what closes it.
     Gap(&'static str),
 }
 
 fn nothing(_: &mut Harness) {}
+
+/// Shows the tracks' automation lanes, so their choosers are drawn.
+fn automation_mode_on(h: &mut Harness) {
+    h.shell
+        .run("arrangement.automation_mode", json!({ "on": true }))
+        .unwrap();
+    h.settle();
+}
 
 fn arrangement_track_3(h: &mut Harness) {
     h.key(Key::Num2, Modifiers::ALT);
@@ -1001,7 +1013,7 @@ fn assistant_key_set(h: &mut Harness) {
 /// Every command without a key or a menu item, and how it's reached.
 fn paths() -> BTreeMap<&'static str, Path> {
     use Path::{Control, Exception};
-    use Reason::{AgentOnly, Equivalent, Gap, LaterView, Live, Query};
+    use Reason::{AgentOnly, Equivalent, Gap, LaterView, Live, Query, Unobserved};
     let main = |setup: fn(&mut Harness), start: fn(&mut Harness), label, key| Control {
         window: Window::Main,
         page: "",
@@ -1259,6 +1271,17 @@ fn paths() -> BTreeMap<&'static str, Path> {
         (
             "perception.capture_view",
             Exception(AgentOnly("an agent's capture of a view as an image")),
+        ),
+        // The automation lane's choosers (WP-2.12): Tab to the device
+        // chooser, then Up or Down steps the parameter the lane shows.
+        (
+            "arrangement.show_automation",
+            main(
+                automation_mode_on,
+                nothing,
+                "Automation Device",
+                Key::ArrowDown,
+            ),
         ),
         // Agents' forms of gestures and dialogs.
         (
@@ -1623,6 +1646,22 @@ fn paths() -> BTreeMap<&'static str, Path> {
         (
             "mixer.set_send_tap",
             main(nothing, session_main, "Return A Pre/Post", Key::Enter),
+        ),
+        // The Crossfader section (WP-3.17): Main's crossfader and each
+        // track's A and B buttons. Live's own key for them and their place
+        // in the mixers' Tab order, with the section shown, aren't observed
+        // yet; the next observation session records them.
+        (
+            "mixer.set_crossfader",
+            Exception(Unobserved(
+                "a drag on Main's crossfader in the Crossfader section",
+            )),
+        ),
+        (
+            "mixer.set_crossfade_assign",
+            Exception(Unobserved(
+                "a click on a track's A or B button in the Crossfader section",
+            )),
         ),
         // Live's own exception.
         (

@@ -100,12 +100,29 @@ objc2-avf-audio = { version = "0.3.2", default-features = false, features = [
     "AVAudioFormat",
     "AVAudioTypes",
 ] }
-# A unit's state is a property list before it becomes the set's bytes.
+# A unit's own editor is a view controller in an AppKit window of its own
+# (WP-2.8's second part). AppKit is already built for this app's windows.
+objc2-app-kit = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "NSApplication",
+    "NSGraphics",
+    "NSResponder",
+    "NSView",
+    "NSViewController",
+    "NSWindow",
+] }
+# A unit's state is a property list before it becomes the set's bytes, and
+# its editor's view controller arrives from a run loop source.
 objc2-foundation = { version = "0.3.2", default-features = false, features = [
     "std",
+    "NSArray",
+    "NSBundle",
     "NSData",
+    "NSDate",
     "NSDictionary",
     "NSError",
+    "NSGeometry",
+    "NSRunLoop",
     "NSString",
     "NSPropertyList",
 ] }

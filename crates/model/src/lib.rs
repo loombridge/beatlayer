@@ -100,4 +100,7 @@ pub use imbl::{OrdMap, Vector};
 pub use metronome::{CountIn, MetronomeRhythm, MetronomeSettings, MetronomeSound};
 pub use param::{DeviceDescription, ParamDescriptor, ParamKind, ParamUnit};
 pub use scene::{DEFAULT_SCENE_COUNT, Scene};
-pub use track::{Channel, Input, Mixer, Monitor, Output, Routing, SendTap, Tap, Track, TrackKind};
+pub use track::{
+    Channel, CrossfadeAssign, Input, Mixer, Monitor, Output, Routing, SendTap, Tap, Track,
+    TrackKind,
+};

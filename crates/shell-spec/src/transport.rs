@@ -47,6 +47,8 @@ pub const SET_METRONOME_SOUND: &str = "transport.set_metronome_sound";
 pub const SET_METRONOME_RHYTHM: &str = "transport.set_metronome_rhythm";
 /// `transport.set_metronome_only_while_recording` (`bl-model`): Hear Metronome Only While Recording.
 pub const SET_METRONOME_ONLY_WHILE_RECORDING: &str = "transport.set_metronome_only_while_recording";
+/// `transport.set_midi_overdub` (`bl-model`): Options ▸ MIDI Arrangement Overdub.
+pub const SET_MIDI_OVERDUB: &str = "transport.set_midi_overdub";
 /// `transport.set_recording` (`bl-engine`): whether transport is recording.
 pub const SET_RECORDING: &str = "transport.set_recording";
 /// `song.set_tempo` (`bl-model`): the Tempo field.

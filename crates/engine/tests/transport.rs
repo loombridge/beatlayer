@@ -597,6 +597,11 @@ fn every_transport_command_runs_by_id() {
     );
     run(
         &mut rig,
+        "transport.set_midi_overdub",
+        json!({ "enabled": true }),
+    );
+    run(
+        &mut rig,
         "transport.set_recording",
         json!({ "recording": true }),
     );

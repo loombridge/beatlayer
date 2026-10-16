@@ -403,6 +403,11 @@ pub struct Shell {
     /// How many recordings this session has started: the take number in
     /// their files' names, so two in one second don't share a file.
     recorded_takes: u32,
+    /// The control moves of the automation recording under way (WP-2.12).
+    automation_take: crate::automation_record::Take,
+    /// Whether automation was recording when the engine was last polled:
+    /// the transport records and plays.
+    automation_recording: bool,
 }
 
 impl fmt::Debug for Shell {
@@ -617,6 +622,8 @@ impl Shell {
             previews: crate::perception::Previews::default(),
             recording: None,
             recorded_takes: 0,
+            automation_take: crate::automation_record::Take::default(),
+            automation_recording: false,
             plug_in_windows: true,
             devices: {
                 // Beatlayer's native devices (WP-2.5; none ship yet).
@@ -2601,6 +2608,7 @@ impl Shell {
         // WP-2.13. A recording's take reaches the shell with the engine's
         // state; the clips are made from it once the writer has finished.
         self.poll_recording(&engine);
+        self.poll_automation_record(&engine);
         // Spec: mixer-view R10. The meters the strips and headers draw: the
         // engine's while one runs, and none once it stops. Without an
         // engine, meters set with `set_meters` stay.
@@ -2720,6 +2728,26 @@ impl Shell {
         if let Some(outcome) = recording.poll(engine.running) {
             self.recording = None;
             self.finish_recording(outcome);
+        }
+    }
+
+    /// Writes the control moves of an automation recording into the set
+    /// when the transport stops recording (automation R17).
+    fn poll_automation_record(&mut self, engine: &EngineTransport) {
+        let recording = engine.recording && engine.playing;
+        let was = std::mem::replace(&mut self.automation_recording, recording);
+        if recording || !was {
+            return;
+        }
+        let take = std::mem::take(&mut self.automation_take);
+        match take.commit(&mut self.editor, engine.position) {
+            Ok(true) => {
+                self.dirty = true;
+                self.document_changed();
+                self.touch();
+            }
+            Ok(false) => {}
+            Err(error) => self.set_message(format!("Automation recording failed: {error}"), true),
         }
     }
 
@@ -2851,6 +2879,9 @@ impl Shell {
             let _ = self.editor.commit();
             self.touch();
         }
+        // The control a drag moved is let go (automation R17).
+        self.automation_take
+            .release(self.arrangement.transport().position);
     }
 
     /// The effects commands have asked for since the last call.
@@ -3625,11 +3656,27 @@ impl Shell {
         }
         if model::handles(id) {
             let args_floating = args.get("floating") == Some(&Value::Bool(true));
+            // Spec: automation R17. With Automation Arm on and the transport
+            // recording, a control move is noted for the envelope too.
+            let moved = (self.arrangement.automation_arm() && self.automation_recording)
+                .then(|| model::command_from_args(id, args.clone()).ok())
+                .flatten()
+                .and_then(|command| {
+                    crate::automation_record::moved(self.editor.document(), &command)
+                });
             let changes =
                 model::run(&mut self.editor, id, args).map_err(|error| ShellError::Failed {
                     command: id.to_owned(),
                     message: error.to_string(),
                 })?;
+            if let Some((track, target, value)) = moved {
+                self.automation_take.write(
+                    track,
+                    target,
+                    self.arrangement.transport().position,
+                    value,
+                );
+            }
             if id == device_ids::SET_FLOATING && args_floating {
                 // A device floated shows the windows again (R33).
                 self.plug_in_windows = true;

@@ -219,6 +219,35 @@ impl Envelope {
         envelope_value(&self.points, at.0 as f64)
     }
 
+    /// What recording a touch changes (WP-2.12): `written` is what the
+    /// control was moved to, as positions and values in position order, and
+    /// `end` is where it was released. Returns the positions of the
+    /// breakpoints the touch replaces, which are the envelope's from the
+    /// first written position up to `end`, and the breakpoints to set. When
+    /// the envelope has points and `end` is past the last written position,
+    /// a breakpoint at `end` takes the envelope back to the value it had
+    /// there, so the old envelope resumes; with none, the last value written
+    /// holds.
+    #[must_use]
+    pub fn touch(&self, written: &[(Ticks, f64)], end: Ticks) -> (Vec<Ticks>, Vec<(Ticks, f64)>) {
+        let (Some(first), Some(last)) = (written.first(), written.last()) else {
+            return (Vec::new(), Vec::new());
+        };
+        let removed = self
+            .points()
+            .map(|point| point.at)
+            .filter(|at| *at >= first.0 && *at < end)
+            .collect();
+        let mut set = written.to_vec();
+        if end > last.0
+            && self.point(end).is_none()
+            && let Some(value) = self.value_at(end)
+        {
+            set.push((end, value));
+        }
+        (removed, set)
+    }
+
     /// The envelope `points` make, or why they don't: they must be in
     /// position order, no two at one position, each value finite, and each
     /// bend from −1 to 1. What a loaded envelope must pass.
@@ -374,6 +403,26 @@ mod tests {
         assert!(envelope.is_empty());
         assert_eq!(envelope.value_at(Ticks::ZERO), None);
         assert_eq!(envelope.points().len(), 0);
+    }
+
+    #[test]
+    fn a_touch_replaces_the_old_points_it_covers_and_the_old_envelope_resumes_at_its_end() {
+        let mut old = Envelope::default();
+        old.set(Ticks::ZERO, 0.0);
+        old.set(Ticks::WHOLE * 2, 1.0);
+        old.set(Ticks::WHOLE * 4, 0.0);
+        let written = [(Ticks::WHOLE, 0.9), (Ticks::WHOLE + Ticks::QUARTER, 0.8)];
+        let (removed, set) = old.touch(&written, Ticks::WHOLE * 3);
+        // The point at 2 wholes is inside the touch; the ones outside stay.
+        assert_eq!(removed, vec![Ticks::WHOLE * 2]);
+        // The release goes back to what the old envelope had there: half way
+        // down the segment from 1.0 at 2 wholes to 0.0 at 4.
+        assert_eq!(set, [written[0], written[1], (Ticks::WHOLE * 3, 0.5)]);
+        // With no old envelope the last value written holds: no release point.
+        let (removed, set) = Envelope::default().touch(&written, Ticks::WHOLE * 3);
+        assert!(removed.is_empty());
+        assert_eq!(set, written);
+        assert_eq!(old.touch(&[], Ticks::WHOLE), (vec![], vec![]));
     }
 
     #[test]

@@ -53,14 +53,30 @@ fn engine_smoke_recompiles_during_playback_without_dropouts() {
         text.contains("counter node:    instance 1 counted"),
         "{text}"
     );
-    // A program per edit, give or take the last few in flight.
-    let swapped: u64 = text
-        .lines()
-        .find_map(|line| line.trim().strip_prefix("programs:"))
-        .and_then(|rest| rest.split_whitespace().next())
-        .and_then(|n| n.parse().ok())
-        .expect("a programs line");
-    assert!(swapped > 100, "{text}");
+    // The engine folds edits that arrive faster than it takes programs into
+    // the next one, so a slow machine swaps fewer programs. Every recompile
+    // asked for still shows up as a program (the first isn't one of them),
+    // an edit synced without one, or an edit folded into a later program,
+    // give or take the few in flight when the run ends.
+    let line = |prefix: &str| -> Vec<&str> {
+        text.lines()
+            .find_map(|line| line.trim().strip_prefix(prefix))
+            .unwrap_or_else(|| panic!("a `{prefix}` line: {text}"))
+            .split_whitespace()
+            .collect()
+    };
+    let number = |words: &[&str], at: usize| -> u64 { words[at].parse().expect("a number") };
+    let swapped = number(&line("programs:"), 0);
+    let mixer = line("mixer edits:");
+    let synced = number(&mixer, 0);
+    let folded = number(
+        &mixer,
+        mixer.iter().position(|w| *w == "folded").unwrap() - 1,
+    );
+    assert!(
+        swapped.saturating_sub(1) + synced + folded >= 150,
+        "swapped {swapped}, synced {synced}, folded {folded} of 200 recompiles: {text}"
+    );
     // Two tones at −60 dBFS through faders at −6 dB.
     let peak: f64 = text
         .lines()

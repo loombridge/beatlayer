@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use vst3::Steinberg::*;
 use vst3::{Class, ComWrapper};
 
-use super::Vst3Error;
+use super::{Vst3Error, int32_of};
 
 /// A state's bytes, and where the plug-in is in them.
 #[derive(Default)]
@@ -96,12 +96,16 @@ impl IBStreamTrait for HostStream {
 
     unsafe fn seek(&self, pos: int64, mode: int32, result: *mut int64) -> tresult {
         use IBStream_::IStreamSeekMode_ as Mode;
-        let mode = u32::from_ne_bytes(mode.to_ne_bytes());
         let mut bytes = lock(&self.bytes);
+        // The seek modes are the platform's default enum type (`int` on
+        // Windows, `unsigned int` elsewhere), while the argument is `int32`:
+        // the modes are compared as one, as the plug-in's calls are.
         let base = match mode {
-            x if x == Mode::kIBSeekSet => 0i64,
-            x if x == Mode::kIBSeekCur => i64::try_from(bytes.pos).unwrap_or(i64::MAX),
-            x if x == Mode::kIBSeekEnd => i64::try_from(bytes.data.len()).unwrap_or(i64::MAX),
+            x if x == int32_of(Mode::kIBSeekSet) => 0i64,
+            x if x == int32_of(Mode::kIBSeekCur) => i64::try_from(bytes.pos).unwrap_or(i64::MAX),
+            x if x == int32_of(Mode::kIBSeekEnd) => {
+                i64::try_from(bytes.data.len()).unwrap_or(i64::MAX)
+            }
             _ => return kInvalidArgument,
         };
         let target = base.saturating_add(pos).max(0);

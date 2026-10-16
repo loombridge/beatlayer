@@ -192,13 +192,6 @@ pub fn run_turn(
                         }
                     }
                 }
-                for row in &mut conversation.rows {
-                    if let Row::Call { result, .. } = row
-                        && result.is_none()
-                    {
-                        *result = Some(Err("Not run.".to_owned()));
-                    }
-                }
                 if let Some(stopped) = turn.stopped {
                     let why = match stopped {
                         bl_assistant::agent::Stopped::Cancelled => "Stopped.",
@@ -213,6 +206,14 @@ pub fn run_turn(
             Err(error) => conversation.rows.push(Row::Notice(format!(
                 "The assistant couldn't answer: {error}"
             ))),
+        }
+        // Whatever ended the turn, no call it left behind is still running.
+        for row in &mut conversation.rows {
+            if let Row::Call { result, .. } = row
+                && result.is_none()
+            {
+                *result = Some(Err("Not run.".to_owned()));
+            }
         }
     }
     shell.assistant_touch();

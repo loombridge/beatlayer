@@ -395,3 +395,50 @@ fn the_view_menu_has_an_assistant_item_that_runs_the_toggle() {
     shell.invoke("view.toggle_assistant", json!({})).unwrap();
     assert!(shell.assistant_panel_state().open);
 }
+
+#[test]
+fn closing_or_floating_the_pane_gives_the_focus_back_to_the_main_view() {
+    let dir = temp_dir("focus");
+    let mut shell = shell_saving_to(&dir);
+    shell.run("view.toggle_assistant", json!({})).unwrap();
+    assert_eq!(shell.focused_area(), bl_shell::Area::Assistant);
+    shell.run("view.toggle_assistant", json!({})).unwrap();
+    assert_eq!(shell.focused_area(), bl_shell::Area::MainView, "closed");
+
+    shell.run("view.toggle_assistant", json!({})).unwrap();
+    shell.run("assistant.toggle_floating", json!({})).unwrap();
+    assert_eq!(shell.focused_area(), bl_shell::Area::MainView, "floated");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A provider that streams a tool call and then loses the connection.
+struct CutOff;
+
+impl Provider for CutOff {
+    fn stream(&self, _request: &Request, on_event: &mut dyn FnMut(Event)) -> Result<Reply, Error> {
+        on_event(Event::ToolCall(ToolCall {
+            id: "c1".to_owned(),
+            name: "track_create".to_owned(),
+            arguments: json!({}),
+        }));
+        Err(Error::Transport("the connection closed".to_owned()))
+    }
+}
+
+#[test]
+fn a_failed_turn_leaves_no_call_running() {
+    let mut shell = Shell::headless();
+    assert!(run_turn(&mut shell, &CutOff, &mut Quiet, "Add a track").is_err());
+    let rows = shell.assistant_rows();
+    assert!(
+        matches!(
+            &rows[1],
+            Row::Call {
+                result: Some(Err(_)),
+                ..
+            }
+        ),
+        "{rows:?}"
+    );
+    assert!(matches!(rows.last(), Some(Row::Notice(_))), "{rows:?}");
+}

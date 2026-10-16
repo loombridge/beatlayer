@@ -890,6 +890,14 @@ impl Shell {
         Ok(())
     }
 
+    /// Moves the keyboard focus to the main view when the pane that had it
+    /// closed or floated away, as closing the browser does.
+    fn leave_hidden_assistant(&mut self) {
+        if self.focused_area == Area::Assistant && self.assistant_docked_width().is_none() {
+            self.focused_area = Area::MainView;
+        }
+    }
+
     /// Asks the running turn to stop between two calls; a message no turn
     /// has taken yet is withdrawn instead.
     pub(crate) fn assistant_stop(&self) {
@@ -4981,6 +4989,7 @@ impl Shell {
                     self.focused_area = Area::Assistant;
                     self.effects.push(Effect::FocusArea(Area::Assistant));
                 }
+                self.leave_hidden_assistant();
                 self.touch();
                 Ok(to_value(&self.assistant_panel_state()))
             }
@@ -4995,6 +5004,7 @@ impl Shell {
                 Self::args::<NoArgs>(id, args)?;
                 self.prefs.assistant_panel.floating = !self.prefs.assistant_panel.floating;
                 self.save_preferences();
+                self.leave_hidden_assistant();
                 self.touch();
                 Ok(to_value(&self.assistant_panel_state()))
             }

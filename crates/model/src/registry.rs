@@ -405,6 +405,35 @@ const ENTRIES: &[Entry] = &[
             saved with the set, and undo switches it back.",
     },
     Entry {
+        id: "transport.set_punch_in",
+        action: Action::Apply("set_punch_in"),
+        label: "Punch-In",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Switches Punch-In on or off, as the Control Bar's Punch-In switch does. \
+            With it on, recording into the Arrangement starts at the Arrangement loop brace's \
+            start, whether or not the Loop switch is on: playback that starts before the brace \
+            records nothing until it reaches the brace, and playback that starts inside the \
+            brace records from where it starts. The metronome's \"only while recording\" setting \
+            sounds from the punch-in point. Use `transport.set_loop` to move the brace. The \
+            switch is saved with the set, and undo switches it back.",
+    },
+    Entry {
+        id: "transport.set_punch_out",
+        action: Action::Apply("set_punch_out"),
+        label: "Punch-Out",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Switches Punch-Out on or off, as the Control Bar's Punch-Out switch does. \
+            With it on, recording into the Arrangement ends at the Arrangement loop brace's \
+            end, whether or not the Loop switch is on: the recording stops there, playback \
+            carries on, and Arrangement Record stays on but writes nothing more. Use \
+            `transport.set_loop` to move the brace. The switch is saved with the set, and undo \
+            switches it back.",
+    },
+    Entry {
         id: "transport.set_metronome_enabled",
         action: Action::Apply("set_metronome_enabled"),
         label: "Metronome",

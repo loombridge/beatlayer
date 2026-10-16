@@ -652,7 +652,7 @@ fn compile_loop(
                     let Some(sender) = sender.as_mut() else {
                         // A loop edit still reaches the next processor, after
                         // the loop it carries over.
-                        if let Some(command) = compiler.remember(&document) {
+                        for command in compiler.remember(&document) {
                             detached.push(Held::Transport(command, When::Now));
                         }
                         counts.deferred.fetch_add(1, Relaxed);

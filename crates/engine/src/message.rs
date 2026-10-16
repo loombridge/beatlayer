@@ -99,6 +99,20 @@ pub enum TransportCommand {
     SetMetronome(bl_model::MetronomeSettings),
     /// Sets whether the transport is recording.
     SetRecording(bool),
+    /// Sets where recording punches in and out (WP-2.13).
+    SetPunch(Punch),
+}
+
+/// Where recording starts and stops, as the Arrangement loop brace and the
+/// Punch-In and Punch-Out switches give it, whether or not the Loop switch is
+/// on (WP-2.13). A side whose switch is off is `None`: recording starts
+/// when playback does, or runs until it stops.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Punch {
+    /// The punch-in point: the brace's start.
+    pub start: Option<Ticks>,
+    /// The punch-out point: the brace's end, the first position not recorded.
+    pub end: Option<Ticks>,
 }
 
 /// The part of the song the Arrangement loop repeats: playback that reaches

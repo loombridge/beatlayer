@@ -66,6 +66,10 @@ pub struct RecordingPlan {
     pub tracks: Vec<RecordTrack>,
     /// The MIDI tracks, in the order the shell listed them (WP-2.14).
     pub midi: Vec<MidiRecordTrack>,
+    /// Frames the audio is moved earlier: the device's input and output
+    /// latency plus the Driver Error Compensation setting. Negative moves
+    /// it later (WP-2.13).
+    pub delay: i64,
 }
 
 /// The song frames a finished take covers: `start` to `end`, playback that
@@ -84,7 +88,9 @@ impl RecordingPlan {
     /// holds `device` channels `stride` frames apart; a track whose Audio
     /// From names a channel the device doesn't have records silence, as it
     /// hears), and for MIDI tracks, the note messages their input received
-    /// in that part, stamped `position` for the part's first frame.
+    /// in that part, stamped `position` for the part's first frame. The
+    /// audio tracks leave out the part's first `skip` frames, which the
+    /// recording's delay moves it past (WP-2.13).
     ///
     /// Returns whether every track took the whole part. When a ring is too
     /// full for it, nothing of the part goes in, each short ring's frames
@@ -96,6 +102,7 @@ impl RecordingPlan {
         position: Frames,
         offset: usize,
         frames: usize,
+        skip: usize,
     ) -> bool {
         let (planar, device, stride) = (
             &program.device_input,
@@ -108,8 +115,8 @@ impl RecordingPlan {
         };
         let mut fits = true;
         for track in &mut self.tracks {
-            if track.producer.slots() < frames * track.channels() {
-                track.dropped.fetch_add(frames as u64, Relaxed);
+            if track.producer.slots() < (frames - skip) * track.channels() {
+                track.dropped.fetch_add((frames - skip) as u64, Relaxed);
                 fits = false;
             }
         }
@@ -140,13 +147,13 @@ impl RecordingPlan {
             };
             match right {
                 Some(right) => {
-                    for i in 0..frames {
+                    for i in skip..frames {
                         let _ = track.producer.push(at(left, i));
                         let _ = track.producer.push(at(right, i));
                     }
                 }
                 None => {
-                    for i in 0..frames {
+                    for i in skip..frames {
                         let _ = track.producer.push(at(left, i));
                     }
                 }
@@ -189,6 +196,7 @@ impl std::fmt::Debug for RecordingPlan {
         f.debug_struct("RecordingPlan")
             .field("tracks", &self.tracks.len())
             .field("midi", &self.midi.len())
+            .field("delay", &self.delay)
             .finish_non_exhaustive()
     }
 }

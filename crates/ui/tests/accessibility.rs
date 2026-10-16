@@ -1093,6 +1093,14 @@ fn paths() -> BTreeMap<&'static str, Path> {
             main(nothing, control_bar, "Arrangement Loop", Key::Enter),
         ),
         (
+            "transport.set_punch_in",
+            main(nothing, control_bar, "Punch-In", Key::Enter),
+        ),
+        (
+            "transport.set_punch_out",
+            main(nothing, control_bar, "Punch-Out", Key::Enter),
+        ),
+        (
             "transport.set_metronome_count_in",
             Exception(metronome_menu),
         ),

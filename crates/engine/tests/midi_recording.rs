@@ -79,6 +79,7 @@ impl Midi {
                 producer,
                 dropped: Arc::clone(&dropped),
             }],
+            delay: 0,
         };
         self.rig
             .sender

@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use bl_commands::{Context, NoArgs, Registry};
 use bl_core::id::Id;
-use bl_core::time::{SampleRate, Ticks};
+use bl_core::time::{Frames, SampleRate, Ticks};
 use bl_engine::session as engine_session;
 use bl_engine::transport as engine_transport;
 use bl_media::MediaStore;
@@ -2913,7 +2913,14 @@ impl Shell {
             );
             tracks.clear();
         }
-        let (plan, recording) = crate::recording::start(folder.as_deref(), rate, &tracks, &midi)?;
+        let (mut plan, mut recording) =
+            crate::recording::start(folder.as_deref(), rate, &tracks, &midi)?;
+        let delay = self
+            .audio
+            .recording_delay()
+            .ok_or("no audio device is open")?;
+        plan.delay = delay;
+        recording.delay = delay;
         self.audio.record(plan)?;
         self.recording = Some(recording);
         Ok(())
@@ -2967,6 +2974,7 @@ impl Shell {
     fn finish_recording(&mut self, outcome: crate::recording::Outcome) {
         let crate::recording::Outcome {
             take,
+            delay,
             files,
             midi,
             dropped,
@@ -2993,8 +3001,10 @@ impl Shell {
             return;
         };
         let tempo = self.editor.document().settings().tempo.clone();
-        let start = tempo.frames_to_ticks(take.start, rate);
-        let end = tempo.frames_to_ticks(take.end, rate);
+        // Spec: recording R7. The audio is moved `delay` frames earlier; a
+        // negative delay starts it later, where the file's first sample is.
+        let start = tempo.frames_to_ticks(take.start + Frames((-delay).max(0)), rate);
+        let end = tempo.frames_to_ticks(take.end - Frames(delay), rate);
         let edge_fades = self.create_fades_on_clip_edges();
         let overdub = self.editor.document().settings().midi_overdub;
         let mut imported = Vec::with_capacity(files.len());

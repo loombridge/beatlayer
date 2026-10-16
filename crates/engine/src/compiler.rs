@@ -12,7 +12,7 @@ use crate::EngineConfig;
 use crate::automation;
 use crate::clips::{ClipList, ClipPlayer};
 use crate::gc::{GcHandle, Program};
-use crate::message::{LoopRegion, ParamEvent, TransportCommand};
+use crate::message::{LoopRegion, ParamEvent, Punch, TransportCommand};
 use crate::midi_clips::{MidiClipList, MidiClipPlayer};
 use crate::mixer::{self, Route, Solo, TrackMixer, route};
 use crate::node::{NodeData, NodeKey, NoteBuffer, ParamValue};
@@ -259,6 +259,11 @@ impl Compiler {
                     .push(TransportCommand::SetLoop(loop_region(document)));
                 self.sources.cue_loop(self.loop_start_frame(document));
             }
+            if punch(&old) != punch(document) {
+                update
+                    .transport
+                    .push(TransportCommand::SetPunch(punch(document)));
+            }
             if old.settings().metronome != document.settings().metronome {
                 update.transport.push(TransportCommand::SetMetronome(
                     document.settings().metronome,
@@ -495,6 +500,7 @@ impl Compiler {
             program: Some(self.gc.program(program)),
             transport: vec![
                 TransportCommand::SetLoop(loop_region(document)),
+                TransportCommand::SetPunch(punch(document)),
                 TransportCommand::SetMetronome(document.settings().metronome),
             ],
             params: build.restate,
@@ -578,18 +584,25 @@ impl Compiler {
     /// with no device running it: [`reconfigure`](Self::reconfigure)
     /// compiles it when one runs again. Only for that case: the next
     /// [`sync`](Self::sync) compares with it as if its program had been
-    /// sent. Returns the [`TransportCommand::SetLoop`] a sync would have
-    /// sent if `document` changed the Arrangement loop: the program
-    /// compiled at the restart sets the loop too, but the processor that
-    /// takes over carries the loop it played, so a loop edit made meanwhile
-    /// must reach it after that.
+    /// sent. Returns the [`TransportCommand::SetLoop`] and
+    /// [`TransportCommand::SetPunch`] a sync would have sent if `document`
+    /// changed the Arrangement loop or the punch points: the program
+    /// compiled at the restart sets them too, but the processor that takes
+    /// over carries the ones it played, so an edit made meanwhile must reach
+    /// it after that.
     #[must_use]
-    pub fn remember(&mut self, document: &Document) -> Option<TransportCommand> {
-        let changed = self.synced.as_ref().is_none_or(|old| {
+    pub fn remember(&mut self, document: &Document) -> Vec<TransportCommand> {
+        let old = self.synced.replace(document.clone());
+        let mut commands = Vec::new();
+        if old.as_ref().is_none_or(|old| {
             old.settings().arrangement_loop != document.settings().arrangement_loop
-        });
-        self.synced = Some(document.clone());
-        changed.then(|| TransportCommand::SetLoop(loop_region(document)))
+        }) {
+            commands.push(TransportCommand::SetLoop(loop_region(document)));
+        }
+        if old.as_ref().is_none_or(|old| punch(old) != punch(document)) {
+            commands.push(TransportCommand::SetPunch(punch(document)));
+        }
+        commands
     }
 
     /// Switches to `config` (a device's new sample rate or block size) and
@@ -1152,6 +1165,19 @@ pub(crate) fn loop_region(document: &Document) -> Option<LoopRegion> {
         start: brace.start,
         end: brace.end(),
     })
+}
+
+/// Where recording punches in and out for `document`: its loop brace's
+/// ends, for the Punch-In and Punch-Out switches that are on, whether or not
+/// the Loop switch is.
+#[must_use]
+pub(crate) fn punch(document: &Document) -> Punch {
+    let settings = document.settings();
+    let brace = settings.arrangement_loop;
+    Punch {
+        start: settings.punch_in.then_some(brace.start),
+        end: settings.punch_out.then(|| brace.end()),
+    }
 }
 
 /// Whether a change set needs a new program; collects parameter changes for

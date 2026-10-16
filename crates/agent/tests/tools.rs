@@ -723,7 +723,7 @@ fn checkpoints_save_restore_as_one_undo_step_and_ask_before_removing() {
 /// Every transport command, the engine's and the loop's, by ID.
 /// The transport's commands: the engine's playback commands, the loop's
 /// (the document's), and the shell's Return to Start and state (WP-1.18).
-const TRANSPORT_COMMANDS: [&str; 18] = [
+const TRANSPORT_COMMANDS: [&str; 20] = [
     "transport.continue",
     "transport.insert_marker_to_playhead",
     "transport.locate",
@@ -739,6 +739,8 @@ const TRANSPORT_COMMANDS: [&str; 18] = [
     "transport.set_metronome_rhythm",
     "transport.set_metronome_sound",
     "transport.set_midi_overdub",
+    "transport.set_punch_in",
+    "transport.set_punch_out",
     "transport.set_recording",
     "transport.state",
     "transport.stop",
@@ -956,6 +958,58 @@ fn the_metronome_settings_run_through_the_agent_api() {
             rhythm: MetronomeRhythm::Eighth,
             only_while_recording: true,
         }
+    );
+}
+
+#[test]
+fn the_punch_switches_and_the_compensation_run_through_the_agent_api() {
+    // Spec: recording R6, R7; WP-2.13
+    let mut client = headless(true);
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "transport.set_punch_in", "args": { "enabled": true } },
+            { "command": "transport.set_punch_out", "args": { "enabled": true } },
+        ] }),
+    );
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "audio.configure",
+              "args": { "driver_error_compensation_ms": 12.345 } },
+        ] }),
+    );
+    let transport = client.transport();
+    let settings = transport.shell.editor().document().settings();
+    assert!(settings.punch_in && settings.punch_out);
+    assert!(
+        !settings.arrangement_loop.enabled,
+        "punch needs no Loop switch"
+    );
+    assert_eq!(
+        transport
+            .shell
+            .audio()
+            .settings()
+            .driver_error_compensation_ms,
+        12.35
+    );
+    // The switches are saved with the set and undo switches them back.
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "edit.undo" }] }),
+    );
+    assert!(
+        !client
+            .transport()
+            .shell
+            .editor()
+            .document()
+            .settings()
+            .punch_out
     );
 }
 

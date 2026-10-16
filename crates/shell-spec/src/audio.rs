@@ -20,6 +20,18 @@ pub const TONE_MIN_HZ: f64 = 20.0;
 /// The highest frequency the Tone Frequency control offers, in hertz.
 pub const TONE_MAX_HZ: f64 = 20_000.0;
 
+/// The furthest the Driver Error Compensation goes from zero either way, in
+/// milliseconds. Live's range isn't recorded, so this is Beatlayer's own
+/// bound (WP-2.13).
+pub const COMPENSATION_LIMIT_MS: f64 = 1000.0;
+
+/// Driver Error Compensation brought to the Audio page's two decimals and
+/// within [`COMPENSATION_LIMIT_MS`].
+#[must_use]
+pub fn clamped_compensation_ms(ms: f64) -> f64 {
+    ((ms * 100.0).round() / 100.0).clamp(-COMPENSATION_LIMIT_MS, COMPENSATION_LIMIT_MS)
+}
+
 /// The test tone's level and frequency, as the Audio page's Tone Volume and
 /// Tone Frequency set them (D23) and the preferences keep them.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -73,7 +85,7 @@ impl ToneSettings {
 /// The audio device settings, as the Settings window's Audio page sets them
 /// and the preferences file keeps them. `None` means the platform's or the
 /// device's own choice.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct AudioSettings {
     /// The driver type's ID (`coreaudio`, `wasapi`, `asio`, `jack`, `alsa`,
@@ -91,11 +103,16 @@ pub struct AudioSettings {
     pub buffer_size: Option<u32>,
     /// Output channels to open, or nothing for all the device has.
     pub output_channels: Option<u16>,
+    /// Driver Error Compensation in milliseconds, two decimals, from -1000
+    /// to 1000: added to the device's reported latency when a recording is
+    /// moved earlier to line up with what was played (WP-2.13). It changes
+    /// recording only, and one value serves every device.
+    pub driver_error_compensation_ms: f64,
 }
 
 /// Arguments of `audio.configure`: the settings to change. Fields left out
 /// keep their values.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ConfigureAudio {
     /// The driver type: an ID from `audio.devices`, such as `coreaudio`,
@@ -119,6 +136,11 @@ pub struct ConfigureAudio {
     /// Output channels to open, or 0 for all the device has.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_channels: Option<u16>,
+    /// Driver Error Compensation in milliseconds: kept to two decimals and
+    /// within -1000 to 1000. A positive value moves new recordings earlier.
+    /// Changing it doesn't restart the audio stream.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub driver_error_compensation_ms: Option<f64>,
 }
 
 /// A device in use, by ID and name.
@@ -158,6 +180,16 @@ pub struct AudioStatus {
     pub input_channels: u16,
     /// The output buffer's length in milliseconds.
     pub buffer_ms: Option<f64>,
+    /// The input latency the device reports, in milliseconds, while a stream
+    /// is open. Zero for a device that reports none.
+    pub input_latency_ms: Option<f64>,
+    /// The output latency the device reports, in milliseconds, while a stream
+    /// is open. Zero for a device that reports none.
+    pub output_latency_ms: Option<f64>,
+    /// The Audio page's Overall Latency, in milliseconds, while a stream is
+    /// open: input latency plus output latency plus Driver Error
+    /// Compensation, which is how far a recording is moved earlier.
+    pub overall_latency_ms: Option<f64>,
     /// The share of each buffer's time spent processing audio, in percent,
     /// averaged over the last measurement; nothing while the engine is off.
     pub cpu_load: Option<f32>,

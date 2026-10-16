@@ -50,7 +50,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        90,
+        92,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -58,7 +58,8 @@ fn every_document_command_is_registered() {
          WP-2.1 two for MIDI clips, WP-2.16 set_device_sample, WP-2.15 five for the metronome, \
          WP-2.13 the two for Main Out and Cue Out, WP-3.1 five for scenes and two for slot \
          clips, WP-3.2 set_slot_stop_button, WP-2.12 seven for automation, WP-3.15 six for clip \
-         envelopes, and WP-3.17 two for the crossfader, and WP-2.14 set_midi_overdub"
+         envelopes, WP-3.17 two for the crossfader, WP-2.14 set_midi_overdub, and WP-2.13 the \
+         two punch switches"
     );
 
     for op in &ops {
@@ -867,6 +868,13 @@ fn every_command_runs_by_id() {
         1
     );
 
+    // Punch-In and Punch-Out (WP-2.13): saved with the set, off in a new one.
+    assert!(!agent.editor.document().settings().punch_in);
+    agent.run("transport.set_punch_in", json!({ "enabled": true }));
+    agent.run("transport.set_punch_out", json!({ "enabled": true }));
+    let settings = agent.editor.document().settings();
+    assert!(settings.punch_in && settings.punch_out);
+
     // Metronome (WP-2.15).
     agent.run(
         "transport.set_metronome_enabled",
@@ -1460,6 +1468,14 @@ fn schemas_match_what_commands_serialise() {
                 device,
                 listen: true,
             },
+        ),
+        (
+            "transport.set_punch_in",
+            Command::SetPunchIn { enabled: true },
+        ),
+        (
+            "transport.set_punch_out",
+            Command::SetPunchOut { enabled: true },
         ),
         (
             "transport.set_metronome_enabled",

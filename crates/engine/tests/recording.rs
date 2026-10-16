@@ -5,6 +5,11 @@
 //! - A take starts on the frame playback started on, holds exactly the
 //!   frames played, and ends when the transport stops; its rings are closed
 //!   for the writer.
+//! - A recording is moved earlier by the plan's delay: the frames that
+//!   moves it past aren't written (WP-2.13).
+//! - Punch-In and Punch-Out write only between the loop brace's ends,
+//!   whether or not the Loop switch is on, and playback carries on past
+//!   the punch-out point.
 //! - A ring too full for a block's samples ends the take before them and
 //!   counts them as dropped: nothing is dropped silently.
 //! - Under Monitor Auto a track's input closes while its clips play and
@@ -86,6 +91,7 @@ fn plan(
         RecordingPlan {
             tracks: planned,
             midi: Vec::new(),
+            delay: 0,
         },
         consumers,
         dropped,
@@ -276,4 +282,173 @@ fn an_auto_tracks_input_closes_while_its_clips_play_and_opens_after_them() {
         last.iter().all(|&s| s == 0.5),
         "the input is heard when no clip plays: {last:?}"
     );
+}
+
+/// Plays `blocks` blocks of `block` frames of the ramp from song frame 0,
+/// recording the third input channel into one track's ring, and returns
+/// that ring and the rig.
+fn record_ramp(rig: &mut Rig, delay: i64, block: usize, blocks: usize) -> Consumer<f32> {
+    let a = armed(rig, 3);
+    rig.sync();
+    let (mut plan, mut rings, _) = plan(&[(a, Channel::Mono(3))], 1 << 17);
+    plan.delay = delay;
+    rig.sender.record(rig.collector.handle().wrap(plan));
+    rig.sender.transport(TransportCommand::SetRecording(true));
+    rig.sender.transport(TransportCommand::Play);
+    let mut next = 0;
+    for _ in 0..blocks {
+        let input = Input::ramp(&mut next, block);
+        rig.block_with_input(block, &input);
+    }
+    rings.remove(0)
+}
+
+// Spec: recording R7 (WP-2.13). A recording moved earlier by `delay` frames
+// leaves out the first `delay` frames of input, across blocks too, while the
+// take still covers every frame played: the file's first sample is the input
+// that sounded when the take began.
+#[test]
+fn a_delay_moves_the_recording_earlier_by_leaving_out_its_first_frames() {
+    for delay in [100, 300] {
+        let mut rig = Rig::with_input(256, 4);
+        let mut ring = record_ramp(&mut rig, delay, 256, 4);
+        rig.sender.transport(TransportCommand::Stop);
+        rig.block(256);
+        let take = rig.monitor.state().take.unwrap();
+        let samples = drain(&mut ring);
+        assert_eq!(take.start, Frames::ZERO);
+        assert_eq!(take.end, Frames(1024), "the take covers the frames played");
+        assert_eq!(samples.len(), 1024 - delay as usize);
+        for (i, sample) in samples.iter().enumerate() {
+            assert_eq!(
+                *sample,
+                (i as i64 + delay) as f32,
+                "delay {delay}, frame {i}"
+            );
+        }
+    }
+}
+
+// Spec: recording R7 (WP-2.13). A delay below zero leaves the input whole; the
+// shell starts the clip later.
+#[test]
+fn a_negative_delay_leaves_the_input_whole() {
+    let mut rig = Rig::with_input(256, 4);
+    let mut ring = record_ramp(&mut rig, -100, 256, 4);
+    rig.sender.transport(TransportCommand::Stop);
+    rig.block(256);
+    let take = rig.monitor.state().take.unwrap();
+    assert_eq!((take.start, take.end), (Frames::ZERO, Frames(1024)));
+    let samples = drain(&mut ring);
+    assert_eq!(samples.len(), 1024);
+    assert_eq!(samples[0], 0.0);
+    assert_eq!(samples[1023], 1023.0);
+}
+
+/// Sets the loop brace to the second quarter note, 24,000 to 48,000 at
+/// 120 BPM and 48 kHz, with the Loop switch off, and the punch switches.
+fn punch_rig(punch_in: bool, punch_out: bool) -> Rig {
+    let mut rig = Rig::with_input(256, 4);
+    run(
+        &mut rig.editor,
+        "transport.set_loop",
+        json!({ "start": Ticks::QUARTER.get(), "length": Ticks::QUARTER.get() }),
+    );
+    run(
+        &mut rig.editor,
+        "transport.set_punch_in",
+        json!({ "enabled": punch_in }),
+    );
+    run(
+        &mut rig.editor,
+        "transport.set_punch_out",
+        json!({ "enabled": punch_out }),
+    );
+    rig
+}
+
+// Spec: recording R6 (WP-2.13). Playing from before the brace with both
+// switches on, the take is exactly the brace, and the Loop switch stays off.
+// Playback carries on past the punch-out point with Arrangement Record
+// still on, and nothing more is written.
+#[test]
+fn punch_records_only_between_the_brace_ends_and_playback_carries_on() {
+    let mut rig = punch_rig(true, true);
+    let mut ring = record_ramp(&mut rig, 0, 256, 300);
+    let state = rig.monitor.state();
+    assert!(state.playing && state.recording, "recording stays on");
+    assert!(state.position > Frames(48_000), "playback carried on");
+    assert_eq!(
+        state.take,
+        Some(TakeBounds {
+            start: Frames(24_000),
+            end: Frames(48_000),
+        })
+    );
+    rig.collector.collect();
+    assert!(
+        ring.is_abandoned(),
+        "the take closed its ring at the punch-out"
+    );
+    let samples = drain(&mut ring);
+    assert_eq!(samples.len(), 24_000);
+    assert_eq!(samples[0], 24_000.0, "the brace's first frame");
+    assert_eq!(samples[23_999], 47_999.0, "the brace's last frame");
+}
+
+// Spec: recording R6 (WP-2.13). With Punch-In alone the take runs from the
+// brace's start until Stop; with Punch-Out alone, from play start to the
+// brace's end.
+#[test]
+fn each_punch_switch_alone_moves_only_its_own_end() {
+    let mut rig = punch_rig(true, false);
+    let mut ring = record_ramp(&mut rig, 0, 256, 300);
+    rig.sender.transport(TransportCommand::Stop);
+    rig.block(256);
+    let take = rig.monitor.state().take.unwrap();
+    assert_eq!(take.start, Frames(24_000));
+    assert_eq!(take.end, Frames(300 * 256));
+    assert_eq!(drain(&mut ring)[0], 24_000.0);
+
+    let mut rig = punch_rig(false, true);
+    let mut ring = record_ramp(&mut rig, 0, 256, 300);
+    let take = rig.monitor.state().take.unwrap();
+    assert_eq!(
+        take,
+        TakeBounds {
+            start: Frames::ZERO,
+            end: Frames(48_000)
+        }
+    );
+    assert_eq!(drain(&mut ring).len(), 48_000);
+}
+
+// Spec: recording R6 (WP-2.13). Playing from inside the brace records from
+// play start.
+#[test]
+fn playing_from_inside_the_brace_records_from_play_start() {
+    let mut rig = punch_rig(true, true);
+    let a = armed(&mut rig, 3);
+    rig.sync();
+    let (plan, mut rings, _) = plan(&[(a, Channel::Mono(3))], 1 << 17);
+    rig.sender.record(rig.collector.handle().wrap(plan));
+    rig.sender.transport(TransportCommand::SetInsertMarker(
+        Ticks::QUARTER + Ticks::QUARTER / 2,
+    ));
+    rig.sender.transport(TransportCommand::SetRecording(true));
+    rig.sender.transport(TransportCommand::Play);
+    let mut next = 0;
+    for _ in 0..100 {
+        let input = Input::ramp(&mut next, 256);
+        rig.block_with_input(256, &input);
+    }
+    // The brace ends at 48,000 and play started at 36,000.
+    assert_eq!(
+        rig.monitor.state().take,
+        Some(TakeBounds {
+            start: Frames(36_000),
+            end: Frames(48_000),
+        })
+    );
+    assert_eq!(drain(&mut rings[0]).len(), 12_000);
 }

@@ -359,3 +359,33 @@ fn a_locate_that_ends_the_take_ends_the_recording_only_clicks() {
         "silent once the take ends at a locate"
     );
 }
+
+#[test]
+fn with_punch_in_the_recording_only_clicks_start_at_the_punch_in_point() {
+    // Spec: metronome R7; WP-2.13. Recording from before the brace with
+    // Punch-In on, the clicks wait for the brace's start (bar 2, frame
+    // 96,000 at 120 BPM), not for play start.
+    let mut rig = metronome_rig(
+        512,
+        MetronomeSettings {
+            sound: MetronomeSound::Click,
+            only_while_recording: true,
+            ..on()
+        },
+        TempoMap::constant(bpm(120.0)),
+    );
+    rig.editor
+        .apply(Command::SetLoop {
+            start: Ticks(BAR),
+            length: Ticks(BAR),
+        })
+        .unwrap();
+    rig.editor
+        .apply(Command::SetPunchIn { enabled: true })
+        .unwrap();
+    rig.sync();
+    rig.sender.transport(TransportCommand::SetRecording(true));
+    rig.sender.transport(TransportCommand::Play);
+    let out = rig.render(192_000, 512);
+    assert_eq!(onsets(&out).first(), Some(&96_000));
+}

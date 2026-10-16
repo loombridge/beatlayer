@@ -6,6 +6,10 @@
 //! - The clip lands where recording started, and undo removes it while the
 //!   file stays.
 //! - A recording that can't be written is reported, and makes no clip.
+//! - Over a loopback of known delay, a recording lines up to the sample once
+//!   the device's latency and Driver Error Compensation add up to the delay,
+//!   and changing the compensation moves new recordings by exactly that much.
+//! - Punch-In and Punch-Out at the loop brace record only between its ends.
 //! - The whole path allocates nothing on the audio thread.
 
 bl_rt::install_trap!();
@@ -55,13 +59,22 @@ impl Drop for TestDir {
 /// A shell on a four-channel null device, with its input open, and the
 /// control over the device.
 fn duplex_shell() -> (Shell, NullControl) {
-    let (backend, control) = NullBackend::with_devices(
+    let (backend, control) = four_channel_backend();
+    (shell_on(backend), control)
+}
+
+fn four_channel_backend() -> (NullBackend, NullControl) {
+    NullBackend::with_devices(
         NullOptions {
             channels: 4,
             ..NullOptions::default()
         },
         &[("null", "Null")],
-    );
+    )
+}
+
+/// A shell on `backend`, with its input open.
+fn shell_on(backend: NullBackend) -> Shell {
     let devices = backend.clone();
     let audio = AudioHost::with_backends(
         vec![BackendKind::Null],
@@ -78,7 +91,7 @@ fn duplex_shell() -> (Shell, NullControl) {
         .run("audio.configure", json!({ "input_device": "null:null" }))
         .unwrap();
     shell.start_audio();
-    (shell, control)
+    shell
 }
 
 /// An armed audio track whose Audio From is Ext. In `channel`.
@@ -384,4 +397,224 @@ fn midi_arrangement_overdub_is_one_undo_step_saved_with_the_set() {
     assert!(project.document.settings().midi_overdub);
     shell.run("edit.undo", json!({})).unwrap();
     assert!(!shell.editor().document().settings().midi_overdub);
+}
+
+/// A 16-bit mono WAV of `frames` frames at 48 kHz that is silent except for
+/// one loud sample at `at`.
+fn impulse_wav(path: &Path, frames: u32, at: u32) {
+    let data = frames * 2;
+    let mut bytes = Vec::with_capacity(44 + data as usize);
+    bytes.extend_from_slice(b"RIFF");
+    bytes.extend_from_slice(&(36 + data).to_le_bytes());
+    bytes.extend_from_slice(b"WAVEfmt ");
+    bytes.extend_from_slice(&16u32.to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&48_000u32.to_le_bytes());
+    bytes.extend_from_slice(&96_000u32.to_le_bytes());
+    bytes.extend_from_slice(&2u16.to_le_bytes());
+    bytes.extend_from_slice(&16u16.to_le_bytes());
+    bytes.extend_from_slice(b"data");
+    bytes.extend_from_slice(&data.to_le_bytes());
+    for i in 0..frames {
+        let sample: i16 = if i == at { 30_000 } else { 0 };
+        bytes.extend_from_slice(&sample.to_le_bytes());
+    }
+    std::fs::write(path, bytes).unwrap();
+}
+
+/// Records over a loopback of 1,480 frames, on a device reporting 400 frames
+/// of input latency and 600 of output latency, with Driver Error
+/// Compensation `compensation_ms`, and returns the clip's start in ticks
+/// and the frame of the file at which the loud sample of a clip that plays
+/// it at song frame 5,000 is found.
+fn impulse_in_recording(compensation_ms: f64) -> (Ticks, usize, Value) {
+    let dir = TestDir::new("loopback");
+    let (backend, _) = four_channel_backend();
+    let mut shell = shell_on(backend.with_latency(400, 600).with_loopback(1_480));
+    let saved: Value = shell
+        .run("set.save_as", json!({ "path": dir.arg("Take.blset") }))
+        .unwrap();
+    let set = PathBuf::from(saved["path"].as_str().unwrap());
+    let folder = set.parent().unwrap().to_path_buf();
+    assert_eq!(shell.audio().status().sample_rate, Some(48_000));
+    shell
+        .run(
+            "audio.configure",
+            json!({ "driver_error_compensation_ms": compensation_ms }),
+        )
+        .unwrap();
+
+    // A track plays the impulse; the recorded track hears the interface's
+    // first input channel, which the loopback fills from its first output
+    // channel. Its Monitor is off, so it doesn't feed back into the loop.
+    let file = dir.0.join("Impulse.wav");
+    impulse_wav(&file, 24_000, 5_000);
+    shell
+        .run(
+            bl_shell::commands::SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES,
+            json!({ "on": false }),
+        )
+        .unwrap();
+    shell
+        .invoke(
+            "track.create",
+            json!({ "kind": "audio", "name": "Impulse" }),
+        )
+        .unwrap();
+    let player = shell.editor().document().top_level().last().unwrap();
+    shell
+        .run(
+            "browser.add_to_arrangement",
+            json!({ "paths": [file.display().to_string()], "track": player, "at": 0 }),
+        )
+        .unwrap();
+    let track = armed_track(&mut shell, 1, "Loopback");
+    shell
+        .run(
+            "routing.set_monitor",
+            json!({ "track": track, "monitor": "off" }),
+        )
+        .unwrap();
+    // Let the clip's stream cue before playback starts.
+    play_for(&mut shell, 300);
+
+    shell
+        .run("transport.set_recording", json!({ "recording": true }))
+        .unwrap();
+    shell.run("transport.play", json!({})).unwrap();
+    play_for(&mut shell, 500);
+    shell.run("transport.stop", json!({})).unwrap();
+    let clip = wait_for_clip(&mut shell, track);
+
+    let media = MediaStore::new();
+    let hash = media.import(recorded_file(&folder)).unwrap();
+    let audio = media.load(hash).unwrap();
+    let samples = audio.channel(0).unwrap();
+    let loudest = (0..samples.len())
+        .max_by(|&a, &b| samples[a].abs().total_cmp(&samples[b].abs()))
+        .unwrap();
+    let status = shell.run("audio.status", json!({})).unwrap();
+    (clip.start, loudest, status)
+}
+
+// Spec: recording R7; WP-2.13. A sound played at song frame 5,000 comes back
+// from a loopback 1,480 frames later; the device reports 1,000 of them and
+// Driver Error Compensation of 10 ms (480 frames) the rest, so the recording
+// is moved earlier by exactly the loop's delay and the sound is back at frame
+// 5,000 of the file. Each 10 ms more moves new recordings 480 frames earlier,
+// and the compensation counts in the Audio page's Overall Latency.
+#[test]
+fn a_loopback_records_aligned_and_the_compensation_moves_recordings_by_exactly_its_value() {
+    let (start, at, status) = impulse_in_recording(10.0);
+    assert_eq!(start, Ticks::ZERO, "the clip starts where recording did");
+    assert_eq!(at, 5_000, "aligned to the sample");
+    let overall = status["overall_latency_ms"].as_f64().unwrap();
+    assert!((overall - 1_480.0 / 48.0).abs() < 1e-9, "{overall}");
+    assert_eq!(status["input_latency_ms"].as_f64().unwrap(), 400.0 / 48.0);
+    assert_eq!(status["settings"]["driver_error_compensation_ms"], 10.0);
+
+    assert_eq!(impulse_in_recording(0.0).1, 5_480, "480 frames late");
+    assert_eq!(impulse_in_recording(20.0).1, 4_520, "480 frames earlier");
+    assert_eq!(
+        impulse_in_recording(-10.0).1,
+        5_960,
+        "negative moves it later"
+    );
+}
+
+// Spec: recording R7; WP-2.13. The compensation keeps to two decimals and to
+// 1,000 ms either way, doesn't restart the stream, and a value that isn't a
+// number is refused.
+#[test]
+fn driver_error_compensation_is_kept_within_its_bounds_without_restarting_the_stream() {
+    let (mut shell, _) = duplex_shell();
+    let engines = shell.audio().engine_generation();
+    for (asked, kept) in [(12.3456, 12.35), (5000.0, 1000.0), (-5000.0, -1000.0)] {
+        shell
+            .run(
+                "audio.configure",
+                json!({ "driver_error_compensation_ms": asked }),
+            )
+            .unwrap();
+        assert_eq!(
+            shell.audio().status().settings.driver_error_compensation_ms,
+            kept
+        );
+    }
+    assert_eq!(
+        shell.audio().engine_generation(),
+        engines,
+        "the stream kept running"
+    );
+    assert_eq!(
+        shell.preferences().audio.driver_error_compensation_ms,
+        -1000.0,
+        "kept with the Audio page's other settings"
+    );
+    assert!(
+        shell
+            .run(
+                "audio.configure",
+                json!({ "driver_error_compensation_ms": null })
+            )
+            .is_ok(),
+        "null leaves it as it is"
+    );
+}
+
+// Spec: recording R6; WP-2.13. With Punch-In and Punch-Out on and the Loop
+// switch off, a recording started before the brace holds exactly the brace,
+// and the clip lands on it.
+#[test]
+fn punch_records_only_between_the_brace_ends() {
+    let dir = TestDir::new("punch");
+    let (mut shell, control) = duplex_shell();
+    let saved: Value = shell
+        .run("set.save_as", json!({ "path": dir.arg("Take.blset") }))
+        .unwrap();
+    let set = PathBuf::from(saved["path"].as_str().unwrap());
+    let folder = set.parent().unwrap().to_path_buf();
+    let track = armed_track(&mut shell, 3, "Guitar");
+    control.set_input_tone(2, 12_000.0, 0.5);
+
+    // The brace is 6,000 to 12,000 frames at 120 BPM and 48 kHz.
+    let start = Ticks::QUARTER / 4;
+    shell
+        .run(
+            "transport.set_loop",
+            json!({ "start": start.get(), "length": start.get() }),
+        )
+        .unwrap();
+    for id in ["transport.set_punch_in", "transport.set_punch_out"] {
+        shell.run(id, json!({ "enabled": true })).unwrap();
+    }
+    assert!(shell.editor().document().settings().punch_in);
+    assert!(
+        !shell
+            .editor()
+            .document()
+            .settings()
+            .arrangement_loop
+            .enabled
+    );
+
+    shell
+        .run("transport.set_recording", json!({ "recording": true }))
+        .unwrap();
+    shell.run("transport.play", json!({})).unwrap();
+    play_for(&mut shell, 600);
+    shell.run("transport.stop", json!({})).unwrap();
+
+    let clip = wait_for_clip(&mut shell, track);
+    let tempo = shell.editor().document().settings().tempo.clone();
+    let rate = SampleRate::new(48_000).unwrap();
+    assert_eq!(clip.start, start, "the clip starts at the punch-in point");
+    let media = MediaStore::new();
+    let hash = media.import(recorded_file(&folder)).unwrap();
+    let frames = media.load(hash).unwrap().channel(0).unwrap().len() as i64;
+    assert_eq!(frames, 6_000, "the file holds the brace and no more");
+    let clip_frames = tempo.ticks_to_frames(clip.end(), rate).get()
+        - tempo.ticks_to_frames(clip.start, rate).get();
+    assert!((clip_frames - frames).abs() <= 2, "{clip_frames}");
 }

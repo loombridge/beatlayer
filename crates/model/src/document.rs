@@ -43,6 +43,16 @@ pub struct Settings {
     /// recording (WP-2.15). A set whose metronome is default doesn't write it.
     #[serde(default, skip_serializing_if = "MetronomeSettings::is_default")]
     pub metronome: MetronomeSettings,
+    /// Punch-In: whether recording into the Arrangement starts at the loop
+    /// brace's start (WP-2.13). Off in a new set; a set with it off doesn't
+    /// write it.
+    #[serde(default, skip_serializing_if = "is_off")]
+    pub punch_in: bool,
+    /// Punch-Out: whether recording into the Arrangement ends at the loop
+    /// brace's end (WP-2.13). Off in a new set; a set with it off doesn't
+    /// write it.
+    #[serde(default, skip_serializing_if = "is_off")]
+    pub punch_out: bool,
     /// MIDI Arrangement Overdub: whether notes recorded into the
     /// Arrangement merge into the MIDI clips already there instead of
     /// replacing them (WP-2.14). Off in a new set, and not written when off.
@@ -62,6 +72,8 @@ impl Default for Settings {
             arrangement_loop: ArrangementLoop::default(),
             solo_in_place: true,
             metronome: MetronomeSettings::default(),
+            punch_in: false,
+            punch_out: false,
             midi_overdub: false,
         }
     }

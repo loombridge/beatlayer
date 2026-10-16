@@ -450,6 +450,12 @@ pub struct StreamInfo {
     pub buffer_size: Option<u32>,
     /// The largest block [`AudioCallback::process`] receives.
     pub max_block_frames: u32,
+    /// Frames between a sound arriving at the device's input and the stream
+    /// getting it, as the device reports. Zero when it reports none.
+    pub input_latency: u32,
+    /// Frames between the stream handing the device a sound and it coming
+    /// out, as the device reports. Zero when it reports none.
+    pub output_latency: u32,
     /// The macOS audio workgroup the stream's audio thread works in, as it
     /// was when the stream opened. `None` on other platforms.
     pub workgroup: Option<WorkgroupInfo>,

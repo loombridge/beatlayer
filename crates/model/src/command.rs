@@ -135,6 +135,20 @@ pub enum Command {
         /// Whether playback loops between the brace's start and end.
         enabled: bool,
     },
+    /// Switches Punch-In on or off: with it on, recording into the
+    /// Arrangement starts at the loop brace's start, whether or not the Loop
+    /// switch is on.
+    SetPunchIn {
+        /// Whether recording starts at the brace's start.
+        enabled: bool,
+    },
+    /// Switches Punch-Out on or off: with it on, recording into the
+    /// Arrangement ends at the loop brace's end, whether or not the Loop
+    /// switch is on.
+    SetPunchOut {
+        /// Whether recording ends at the brace's end.
+        enabled: bool,
+    },
     /// Switches the metronome on or off.
     SetMetronomeEnabled {
         /// Whether the metronome clicks during playback.
@@ -886,6 +900,8 @@ impl Command {
             Self::DeleteTimeSignatureChange { .. } => "Delete time signature change",
             Self::SetLoop { .. } => "Change loop",
             Self::SetLoopEnabled { .. } => "Switch loop",
+            Self::SetPunchIn { .. } => "Punch-In",
+            Self::SetPunchOut { .. } => "Punch-Out",
             Self::SetMetronomeEnabled { .. } => "Metronome",
             Self::SetMetronomeCountIn { .. } => "Metronome Count-In",
             Self::SetMetronomeSound { .. } => "Metronome Sound",
@@ -1062,6 +1078,14 @@ impl Document {
             }
             Command::SetLoopEnabled { enabled } => {
                 self.settings.arrangement_loop.enabled = *enabled;
+                Ok(())
+            }
+            Command::SetPunchIn { enabled } => {
+                self.settings.punch_in = *enabled;
+                Ok(())
+            }
+            Command::SetPunchOut { enabled } => {
+                self.settings.punch_out = *enabled;
                 Ok(())
             }
             Command::SetMetronomeEnabled { enabled } => {

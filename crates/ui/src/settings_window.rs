@@ -12,8 +12,8 @@
 
 use bl_shell::assistant::AssistantProvider;
 use bl_shell::audio::{
-    AudioDevices, AudioStatus, DeviceListing, TONE_MAX_DBFS, TONE_MAX_HZ, TONE_MIN_DBFS,
-    TONE_MIN_HZ,
+    AudioDevices, AudioStatus, COMPENSATION_LIMIT_MS, DeviceListing, TONE_MAX_DBFS, TONE_MAX_HZ,
+    TONE_MIN_DBFS, TONE_MIN_HZ,
 };
 use bl_shell::midi_io_commands as midi_ids;
 use bl_shell::settings::{
@@ -376,6 +376,28 @@ impl SettingsUi {
             _ => "No device open.".to_owned(),
         };
         rows.text_row(ui, "Running At", &running);
+        // Spec: recording R7. The compensation is added to the device's
+        // reported latency when a recording is moved earlier; it changes
+        // recording only.
+        let rect = rows.row(ui, "Driver Error Compensation", SettingsLayout::NUMBER);
+        let compensation = status.settings.driver_error_compensation_ms;
+        if let Some(ms) = number_box(
+            ui,
+            theme,
+            "driver-error-compensation",
+            "Driver Error Compensation",
+            rect,
+            compensation,
+            (-COMPENSATION_LIMIT_MS, COMPENSATION_LIMIT_MS),
+            &|ms, steps| ms + f64::from(steps),
+            &format!("{compensation:.2} ms"),
+        ) {
+            configure(events, json!({ "driver_error_compensation_ms": ms }));
+        }
+        let overall = status
+            .overall_latency_ms
+            .map_or_else(|| "No device open.".to_owned(), |ms| format!("{ms:.2} ms"));
+        rows.text_row(ui, "Overall Latency", &overall);
 
         // The test section (D23): Live's tone switch, Tone Volume, and Tone
         // Frequency.

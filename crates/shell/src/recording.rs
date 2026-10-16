@@ -161,6 +161,7 @@ pub fn start(
         RecordingPlan {
             tracks: plan,
             midi: midi_plan,
+            delay: 0,
         },
         Recording {
             finished,
@@ -168,6 +169,7 @@ pub fn start(
             dropped,
             midi: midi_reading,
             take: None,
+            delay: 0,
         },
     ))
 }
@@ -194,6 +196,9 @@ pub struct Recording {
     /// The MIDI tracks' rings, drained at every poll.
     midi: Vec<MidiReading>,
     take: Option<TakeBounds>,
+    /// Frames the audio is moved earlier (WP-2.13): the plan's `delay`,
+    /// which the shell sets once it knows the device.
+    pub delay: i64,
 }
 
 /// One MIDI track's ring, with what has been drained from it.
@@ -219,6 +224,10 @@ pub struct Outcome {
     /// The take the engine published, if it saw one: the song frames the
     /// clips are placed from. `None` when nothing was played.
     pub take: Option<TakeBounds>,
+    /// Frames the audio was moved earlier: its clips start and end that much
+    /// earlier than the take, and its files leave out the take's first
+    /// frames up to the delay.
+    pub delay: i64,
     /// The finished files, or why the writer gave up.
     pub files: Result<Vec<RecordedFile>, String>,
     /// What each MIDI track that received a note recorded.
@@ -298,6 +307,7 @@ impl Recording {
             .collect();
         Some(Outcome {
             take: self.take,
+            delay: self.delay,
             files: self.files.take().expect("set above"),
             midi,
             dropped,

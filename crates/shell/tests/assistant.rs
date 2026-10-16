@@ -324,6 +324,43 @@ fn an_edit_call_runs_without_a_prompt_and_is_recorded() {
 }
 
 #[test]
+fn a_new_id_placeholder_is_issued_and_a_later_call_refers_to_it() {
+    let mut shell = Shell::headless();
+    let before = shell.editor().document().tracks().count();
+    let provider = Script::new(vec![
+        calls(vec![
+            call(
+                "c1",
+                "track_create",
+                json!({ "id": { "$new": "lead" }, "kind": "midi", "name": "Lead", "index": 0 }),
+            ),
+            call(
+                "c2",
+                "track_rename",
+                json!({ "track": { "$ref": "lead" }, "name": "Lead synth" }),
+            ),
+            call(
+                "c3",
+                "track_rename",
+                json!({ "track": { "$ref": "nobody" }, "name": "x" }),
+            ),
+        ]),
+        answer("Made a lead track."),
+    ]);
+    let mut prompter = ScriptedPrompter::new(Vec::new());
+
+    let turn = one_turn(&mut shell, &provider, &mut prompter);
+
+    assert!(prompter.asked.is_empty(), "creating a track doesn't ask");
+    let document = shell.editor().document();
+    assert_eq!(document.tracks().count(), before + 1);
+    assert!(document.tracks().any(|track| track.name() == "Lead synth"));
+    // A reference to a name nothing made is the call's result, not a crash.
+    let refused = turn.steps[2].result.clone().unwrap_err();
+    assert!(refused.contains("nobody"), "{refused}");
+}
+
+#[test]
 fn a_command_only_a_person_runs_is_refused_and_recorded() {
     let mut shell = Shell::headless();
     let provider = Script::new(vec![

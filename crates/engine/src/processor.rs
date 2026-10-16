@@ -681,6 +681,10 @@ impl Processor {
             });
         }
         self.recording = false;
+        // Spec: metronome R7. The transport isn't recording any more, so
+        // "only while recording" clicks stop with it, however it ended
+        // (Stop, recording off, a locate, or a ring that filled).
+        self.metronome.set_recording(false);
         self.plan = None;
     }
 

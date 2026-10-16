@@ -269,14 +269,14 @@ pub fn in_out(doc: &Document, track: TrackId, interface: Interface) -> Option<In
     Some(match t.kind() {
         TrackKind::Audio => InOut::Clips {
             input: audio_from(doc, track),
-            input_channel: input_channel(track, t.routing().input, false, interface),
+            input_channel: input_channel(track, t.routing().input.clone(), false, interface),
             monitor: monitor(track, t.routing().monitor),
             output: audio_to(doc, track),
             output_channel: output_channel(t.routing().output),
         },
         TrackKind::Midi => InOut::Clips {
             input: midi_from(doc, track),
-            input_channel: input_channel(track, t.routing().input, true, interface),
+            input_channel: input_channel(track, t.routing().input.clone(), true, interface),
             monitor: monitor(track, t.routing().monitor),
             output: midi_to(doc, track),
             output_channel: Chooser {
@@ -389,7 +389,7 @@ fn interface_inputs(track: TrackId, chosen: Channel, inputs: u16) -> Vec<Entry> 
 /// audio, and return tracks and Main, in display order, without the track
 /// itself ─ No Input.
 fn audio_from(doc: &Document, track: TrackId) -> Chooser {
-    let input = doc.track(track).map(|t| t.routing().input);
+    let input = doc.track(track).map(|t| t.routing().input.clone());
     let current_from = match input {
         Some(Input::Track { track, .. }) => Some(track),
         _ => None,
@@ -446,7 +446,7 @@ fn audio_from(doc: &Document, track: TrackId) -> Chooser {
 /// other MIDI tracks ─ No Input. All Ins and the computer keyboard come
 /// with MIDI input (WP-2.2).
 fn midi_from(doc: &Document, track: TrackId) -> Chooser {
-    let input = doc.track(track).map(|t| t.routing().input);
+    let input = doc.track(track).map(|t| t.routing().input.clone());
     let current_from = match input {
         Some(Input::Track { track, .. }) => Some(track),
         _ => None,
@@ -689,7 +689,7 @@ const fn tap_name(tap: Tap) -> &'static str {
 /// Post FX. `None` for a device without a sidechain input.
 #[must_use]
 pub fn sidechain_source(doc: &Document, device: DeviceId) -> Option<Chooser> {
-    let input = doc.device(device)?.sidechain?.input;
+    let input = doc.device(device)?.sidechain.as_ref()?.input.clone();
     let current = match input {
         Input::Track { track, .. } => Some(track),
         _ => None,
@@ -731,7 +731,7 @@ pub fn sidechain_source(doc: &Document, device: DeviceId) -> Option<Chooser> {
 /// device without a sidechain input.
 #[must_use]
 pub fn sidechain_channel(doc: &Document, device: DeviceId) -> Option<Chooser> {
-    let input = doc.device(device)?.sidechain?.input;
+    let input = doc.device(device)?.sidechain.as_ref()?.input.clone();
     Some(match input {
         Input::Track { track, tap } => Chooser {
             name: "Sidechain Source Channel",

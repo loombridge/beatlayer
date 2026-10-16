@@ -4,6 +4,8 @@
 
 use std::collections::BTreeSet;
 
+use crate::automation::AutomationTarget;
+use crate::clip::Clip;
 use crate::document::Document;
 use crate::error::ModelError;
 use crate::ids::TrackId;
@@ -47,7 +49,7 @@ impl Document {
         }
         for device in track.devices() {
             if let Some(sidechain) = &device.sidechain {
-                check_sidechain_input(self, track, sidechain.input)?;
+                check_sidechain_input(self, track, sidechain.input.clone())?;
             }
         }
         Ok(())
@@ -60,6 +62,23 @@ impl Document {
         let track = self.track_ref(id)?;
         for target in track.automation.keys() {
             self.check_automation_target(id, *target)?;
+        }
+        Ok(())
+    }
+
+    /// Checks every envelope the clips on `id` carry (WP-3.15): each names a
+    /// parameter of the track — one envelope per parameter — and its
+    /// breakpoints follow the automation rules. What a loaded document, and
+    /// a clip put on the track, must pass.
+    pub(crate) fn check_clip_envelopes(&self, id: TrackId, clip: &Clip) -> Result<(), ModelError> {
+        self.track_ref(id)?;
+        let mut seen: BTreeSet<AutomationTarget> = BTreeSet::new();
+        for envelope in clip.envelopes() {
+            if !seen.insert(envelope.target) {
+                return Err(ModelError::DuplicateEnvelope { clip: clip.id });
+            }
+            self.check_automation_target(id, envelope.target)?;
+            envelope.envelope.check()?;
         }
         Ok(())
     }
@@ -111,8 +130,8 @@ impl Document {
                 {
                     routing.output = Output::SendsOnly;
                 }
-                if let Input::Track { track, .. } = routing.input
-                    && gone.contains(&track)
+                if let Input::Track { track, .. } = &routing.input
+                    && gone.contains(track)
                 {
                     routing.input = Input::None;
                 }
@@ -160,12 +179,13 @@ impl Document {
 fn listens_to(device: &crate::Device, gone: &BTreeSet<TrackId>) -> bool {
     device
         .sidechain
-        .is_some_and(|s| matches!(s.input, Input::Track { track, .. } if gone.contains(&track)))
+        .as_ref()
+        .is_some_and(|s| matches!(&s.input, Input::Track { track, .. } if gone.contains(track)))
 }
 
 fn names_any(routing: &Routing, gone: &BTreeSet<TrackId>) -> bool {
     matches!(routing.output, Output::Track { track } if gone.contains(&track))
-        || matches!(routing.input, Input::Track { track, .. } if gone.contains(&track))
+        || matches!(&routing.input, Input::Track { track, .. } if gone.contains(track))
         || routing.midi_output.is_some_and(|to| gone.contains(&to))
 }
 
@@ -179,16 +199,30 @@ fn wrong_kind(track: &Track, needs: &'static str) -> ModelError {
 
 /// An audio track takes Ext. In (one channel or a stereo pair), Resampling,
 /// another audio or group track, a return, Main, or nothing; a MIDI track
-/// All Ins, the computer keyboard, another MIDI track, or nothing; other
-/// kinds take no input.
+/// All Ins, the computer keyboard, a port, another MIDI track, or nothing;
+/// other kinds take no input. A port needs a name, and a channel belongs to
+/// a port (the routing spec, R2, R16).
 fn check_input(doc: &Document, track: &Track) -> Result<(), ModelError> {
-    let input = track.routing.input;
+    let input = &track.routing.input;
+    if let Input::Port { name } = input
+        && name.is_empty()
+    {
+        return Err(ModelError::InvalidInput("a port needs a name"));
+    }
+    if let Some(channel) = track.routing.channel {
+        if !matches!(input, Input::Port { .. }) {
+            return Err(ModelError::InvalidInput("only a port input has a channel"));
+        }
+        if !(1..=16).contains(&channel) {
+            return Err(ModelError::InvalidInput("the MIDI channel must be 1 to 16"));
+        }
+    }
     match (track.kind, input) {
         (TrackKind::Audio | TrackKind::Midi, Input::None)
         | (TrackKind::Audio, Input::External { .. } | Input::Resampling)
-        | (TrackKind::Midi, Input::AllIns | Input::ComputerKeyboard) => Ok(()),
+        | (TrackKind::Midi, Input::AllIns | Input::ComputerKeyboard | Input::Port { .. }) => Ok(()),
         (TrackKind::Audio, Input::Track { track: from, .. }) => {
-            doc.check_target(track, from, |kind| {
+            doc.check_target(track, *from, |kind| {
                 matches!(
                     kind,
                     TrackKind::Audio | TrackKind::Group | TrackKind::Return | TrackKind::Main
@@ -196,7 +230,7 @@ fn check_input(doc: &Document, track: &Track) -> Result<(), ModelError> {
             })
         }
         (TrackKind::Midi, Input::Track { track: from, .. }) => {
-            doc.check_target(track, from, |kind| kind == TrackKind::Midi)
+            doc.check_target(track, *from, |kind| kind == TrackKind::Midi)
         }
         (TrackKind::Audio, _) => Err(wrong_kind(track, "a MIDI track")),
         (TrackKind::Midi, _) => Err(wrong_kind(track, "an audio track")),
@@ -309,7 +343,11 @@ mod tests {
 
     fn input(editor: &mut Editor, track: TrackId, input: Input) -> Result<(), ModelError> {
         editor
-            .apply(Command::SetInput { track, input })
+            .apply(Command::SetInput {
+                track,
+                input,
+                channel: None,
+            })
             .map(|_| ())
             .map_err(|e| match e {
                 crate::EditError::Command(e) => e,
@@ -334,7 +372,7 @@ mod tests {
         let audio = add(&mut editor, TrackKind::Audio, None);
         let midi = add(&mut editor, TrackKind::Midi, None);
         let doc = editor.document();
-        let routing = *doc.track(audio).unwrap().routing();
+        let routing = doc.track(audio).unwrap().routing().clone();
         assert_eq!(
             routing.input,
             Input::External {
@@ -343,7 +381,7 @@ mod tests {
         );
         assert_eq!(routing.monitor, Monitor::Auto);
         assert_eq!(routing.output, Output::Default);
-        let routing = *doc.track(midi).unwrap().routing();
+        let routing = doc.track(midi).unwrap().routing().clone();
         assert_eq!(routing.input, Input::AllIns);
         assert_eq!(routing.monitor, Monitor::Auto);
         assert_eq!(routing.midi_output, None);
@@ -501,7 +539,7 @@ mod tests {
                 channel: Channel::Pair(2),
             })
             .unwrap();
-        let routing = *editor.document().track(main).unwrap().routing();
+        let routing = editor.document().track(main).unwrap().routing().clone();
         assert_eq!(routing.main_out, Channel::Pair(3));
         assert_eq!(routing.cue_out, Channel::Pair(2));
         assert_eq!(
@@ -647,7 +685,7 @@ mod tests {
         let loaded: Document = serde_json::from_value(saved.clone()).unwrap();
         assert_eq!(&loaded, editor.document());
         assert_eq!(
-            *loaded.track(m).unwrap().routing(),
+            loaded.track(m).unwrap().routing().clone(),
             Routing::new(TrackKind::Midi)
         );
         // A routing that breaks a rule doesn't load.
@@ -723,7 +761,13 @@ mod tests {
 
         // A new device's sidechain: External off, No Input, Mix 100 %, SC
         // Gain 0 dB, and nothing of it saved.
-        let new = editor.document().device(key).unwrap().sidechain.unwrap();
+        let new = editor
+            .document()
+            .device(key)
+            .unwrap()
+            .sidechain
+            .clone()
+            .unwrap();
         assert_eq!(
             (new.enabled, new.input, new.gain, new.mix, new.listen),
             (false, Input::None, 1.0, 1.0, false)
@@ -822,7 +866,13 @@ mod tests {
         // brings both back.
         let before = editor.document().clone();
         editor.apply(Command::DeleteTrack { track: c }).unwrap();
-        let sidechain = editor.document().device(key).unwrap().sidechain.unwrap();
+        let sidechain = editor
+            .document()
+            .device(key)
+            .unwrap()
+            .sidechain
+            .clone()
+            .unwrap();
         assert_eq!(sidechain.input, Input::None);
         assert!(sidechain.enabled);
         editor.document().check_invariants().unwrap();

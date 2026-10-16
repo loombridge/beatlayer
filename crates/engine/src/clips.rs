@@ -633,6 +633,10 @@ pub struct ClipPlayer {
     /// Whether the clips sounded in the last block, so a stop stops their
     /// sources.
     sounding: bool,
+    /// Whether a clip of the track played in the last block (WP-2.13):
+    /// the track's input routes close under Monitor Auto while one does
+    /// (the routing spec, R11).
+    playing_clip: bool,
     /// The song position the sources were made ready to play from while
     /// the song was stopped.
     readied: Option<i64>,
@@ -662,6 +666,7 @@ impl ClipPlayer {
             scratch: vec![0.0; config.channels * config.max_frames],
             max_frames: config.max_frames,
             sounding: false,
+            playing_clip: false,
             readied: None,
             audible: true,
             gate: Ramp::at(1.0),
@@ -823,6 +828,7 @@ impl Node for ClipPlayer {
             if self.sounding {
                 self.stop();
             }
+            self.playing_clip = false;
             self.ready_at(transport.position.get());
             return;
         }
@@ -870,12 +876,19 @@ impl Node for ClipPlayer {
             clips.as_ref().and_then(|d| d.downcast_ref::<ClipList>()),
             bank.as_mut(),
         ) else {
+            self.playing_clip = false;
             self.apply_gate(block);
             return;
         };
         let from = transport.position.get();
         let to = from + block.frames() as i64;
         let first = list.reach.partition_point(|&reach| reach <= from);
+        // Spec: routing R11. A clip that covers this block is playing, so
+        // the track's input closes under Monitor Auto.
+        self.playing_clip = list.clips[first..]
+            .iter()
+            .take_while(|clip| clip.geometry.start < to)
+            .any(|clip| clip.geometry.end > from);
         for (clip, slot) in list.clips[first..].iter().zip(&mut bank[first..]) {
             if clip.scene.is_some() {
                 continue;
@@ -967,6 +980,10 @@ impl Node for ClipPlayer {
         }
         self.bank = bank;
         drop(self.clips.replace(data));
+    }
+
+    fn playing_clip(&self) -> bool {
+        self.playing_clip
     }
 }
 

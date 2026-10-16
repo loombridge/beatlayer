@@ -20,8 +20,8 @@ use bl_core::id::Id;
 use bl_core::time::{Bpm, TempoMap, Ticks, TimeSignature, TimeSignatureMap};
 use bl_model::{
     AudioData, Change, ChangeSet, Clip, ClipData, ClipId, Command, ContentHash, Device, DeviceId,
-    DeviceKind, Document, EditError, Editor, MidiData, Mixer, Note, ParamId, PluginFormat, SceneId,
-    SendTap, TrackId, TrackKind,
+    DeviceKind, Document, EditError, Editor, Input, MidiData, Mixer, Monitor, Note, ParamId,
+    PluginFormat, Routing, SceneId, SendTap, TrackId, TrackKind,
 };
 use proptest::prelude::*;
 use proptest::sample::Index;
@@ -70,6 +70,11 @@ enum Op {
     SetMute(Index, bool),
     SetSolo(Index, bool),
     SetArm(Index, bool),
+    /// A track's input (WP-2.2): the first byte chooses the source (0 a
+    /// port, 1 All Ins, 2 the computer keyboard, 3 No Input) and the second
+    /// the channel (0 All Channels, 1 to 16, past that refused).
+    SetInput(Index, u8, u8),
+    SetMonitor(Index, u8),
     SoloExclusive(Index),
     ArmExclusive(Index),
     /// A send from one track to another, usually a return.
@@ -193,6 +198,8 @@ fn op() -> impl Strategy<Value = Op> {
         1 => (i(), any::<bool>()).prop_map(|(t, b)| Op::SetMute(t, b)),
         1 => (i(), any::<bool>()).prop_map(|(t, b)| Op::SetSolo(t, b)),
         1 => (i(), any::<bool>()).prop_map(|(t, b)| Op::SetArm(t, b)),
+        1 => (i(), 0u8..4, 0u8..18).prop_map(|(t, s, c)| Op::SetInput(t, s, c)),
+        1 => (i(), 0u8..3).prop_map(|(t, m)| Op::SetMonitor(t, m)),
         1 => i().prop_map(Op::SoloExclusive),
         1 => i().prop_map(Op::ArmExclusive),
         3 => (i(), i(), value(0.0..1.0)).prop_map(|(t, to, v)| Op::SetSend(t, to, v)),
@@ -501,6 +508,26 @@ impl Op {
                 track: at.track(t),
                 arm: *arm,
             },
+            Self::SetInput(t, source, channel) => Command::SetInput {
+                track: at.track(t),
+                input: match source {
+                    0 => Input::Port {
+                        name: format!("Port {channel}"),
+                    },
+                    1 => Input::AllIns,
+                    2 => Input::ComputerKeyboard,
+                    _ => Input::None,
+                },
+                channel: (*channel > 0).then_some(*channel),
+            },
+            Self::SetMonitor(t, monitor) => Command::SetMonitor {
+                track: at.track(t),
+                monitor: match monitor {
+                    0 => Monitor::In,
+                    1 => Monitor::Auto,
+                    _ => Monitor::Off,
+                },
+            },
             Self::CreateClip {
                 track,
                 start,
@@ -804,13 +831,15 @@ fn starting_song() -> Editor {
     editor
 }
 
-/// A track's own settings: name, mixer, sends, children, and chain order.
+/// A track's own settings: name, mixer, sends, children, chain order, and
+/// routing.
 type OwnSettings = (
     String,
     Mixer,
     Vec<(TrackId, f64)>,
     Vec<TrackId>,
     Vec<DeviceId>,
+    Routing,
 );
 
 /// A song flattened into plain maps, for working out change sets the slow
@@ -850,6 +879,7 @@ impl Flat {
                 track.sends().collect(),
                 track.children().collect(),
                 devices,
+                track.routing().clone(),
             );
             flat.tracks.insert(track.id(), own);
             for clip in track.clips() {

@@ -2,6 +2,7 @@
 
 use std::time::Instant;
 
+use bl_core::midi::MidiInputEvent;
 use bl_core::time::{Frames, SampleRate, TempoMap, Ticks, TimeSignatureMap};
 use bl_model::{LaunchSettings, ParamId, SceneId, TrackId};
 use bl_rt::log::{Level, Writer};
@@ -9,13 +10,15 @@ use bl_rt::rt_log;
 use rtrb::{Consumer, Producer};
 
 use crate::EngineConfig;
-use crate::gc::Program;
+use crate::gc::{Owned, Program};
 use crate::message::{
     Action, LoopRegion, Message, ParamEvent, Report, ScheduledCommand, TransportCommand, When,
 };
 use crate::metronome::{Block, MetronomeEngine};
+use crate::midi::{MidiCounters, MidiIn, TrackMidiInput};
 use crate::node::{NodeData, NodeEvent, NodeKey, ParamValue, TransportInfo};
 use crate::program::{EngineProgram, Resolved};
+use crate::recording::{RecordingPlan, TakeBounds};
 use crate::session::{Playhead, SessionCommand, SessionLauncher, SessionPlayback, SlotStatus};
 use crate::state::{EngineCounters, EngineState, TrackMeter};
 
@@ -52,6 +55,14 @@ struct LoopFrames {
     end: Frames,
 }
 
+/// The take being recorded (WP-2.13): the song frame it started at and how
+/// many frames its rings hold.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Take {
+    start: Frames,
+    written: u64,
+}
+
 /// What one processor hands the next when the engine restarts on a device
 /// (WP-1.13): the engine clock, the transport (the song position and the
 /// insert marker, in beats, and the Arrangement loop), and the commands
@@ -73,6 +84,8 @@ pub struct Carry {
     insert_marker: Ticks,
     /// The Arrangement loop, if it was on.
     loop_region: Option<LoopRegion>,
+    /// The take that last ended (WP-2.13), not yet handled by the shell.
+    take: Option<TakeBounds>,
     /// Scheduled commands waiting to fire, in the order they arrived.
     scheduled: Vec<ScheduledCommand>,
     /// Transport commands waiting for their frames, in the order they came.
@@ -201,6 +214,15 @@ pub struct Processor {
     loop_region: Option<LoopRegion>,
     /// `loop_region` in frames, if it's at least a frame long.
     loop_frames: Option<LoopFrames>,
+    /// Whether the transport records (WP-2.13).
+    recording: bool,
+    /// What to record: the shell's plan, whose rings close when it goes.
+    plan: Option<Owned<RecordingPlan>>,
+    /// The take being captured, if playback is running under recording.
+    take: Option<Take>,
+    /// The take that last ended, kept for the shell to make its clips,
+    /// until the next one starts.
+    last_take: Option<TakeBounds>,
     /// Transport commands waiting for their frames, in the order they came.
     timed: Vec<Timed>,
     pending: Vec<Pending>,
@@ -221,6 +243,8 @@ pub struct Processor {
     counters: EngineCounters,
     cpu_load_max: f32,
     log: Writer,
+    /// MIDI input from the MIDI threads (WP-2.2).
+    midi: MidiIn,
 }
 
 impl Processor {
@@ -246,6 +270,10 @@ impl Processor {
             insert_marker: Ticks::ZERO,
             loop_region: None,
             loop_frames: None,
+            recording: false,
+            plan: None,
+            take: None,
+            last_take: None,
             timed: Vec::with_capacity(config.max_scheduled),
             pending: Vec::with_capacity(config.max_pending_events),
             resolved: Vec::with_capacity(config.max_pending_events),
@@ -259,6 +287,7 @@ impl Processor {
             counters: EngineCounters::default(),
             cpu_load_max: 0.0,
             log: Writer::new(),
+            midi: MidiIn::new(config.sample_rate),
             config,
         }
     }
@@ -305,12 +334,40 @@ impl Processor {
         self.program.as_ref().map(Program::get)
     }
 
+    /// Gives the processor the consuming end of the MIDI input queue, which
+    /// the MIDI device layer (`bl-midi-io`) and the computer MIDI keyboard
+    /// fill (`docs/specs/midi-io.md`, R14). Call it before the processor
+    /// runs on the audio thread: it returns the queue it had, if any, to be
+    /// dropped there.
+    pub fn set_midi_input(
+        &mut self,
+        queue: rtrb::Consumer<MidiInputEvent>,
+    ) -> Option<rtrb::Consumer<MidiInputEvent>> {
+        self.midi.set_queue(queue)
+    }
+
+    /// What a MIDI track's input received in the last block, and whether the
+    /// track monitors. `None` before a program arrives, or if `track` isn't
+    /// a MIDI track in it.
+    #[must_use]
+    pub fn midi_input(&self, track: bl_model::TrackId) -> Option<TrackMidiInput<'_>> {
+        self.program()?.midi_input(track)
+    }
+
+    /// What the MIDI input stage has counted.
+    #[must_use]
+    pub fn midi_counters(&self) -> MidiCounters {
+        self.midi.counters
+    }
+
     /// Processes one block of `frames` frames (at most
     /// [`EngineConfig::max_frames`]; more are cut to that) and returns its
-    /// output. Real-time safe. A device's input is not seen: pass it through
-    /// [`process_with_input`](Self::process_with_input).
+    /// output. Real-time safe. No device input is seen, and the block is
+    /// timed from now: a device's callback goes through
+    /// [`process_at`](Self::process_at), which takes its input and the time
+    /// its callback ran.
     pub fn process(&mut self, frames: usize) -> Output<'_> {
-        self.process_with_input(frames, &crate::NoInput)
+        self.process_at(frames, &crate::NoInput, Instant::now())
     }
 
     /// Processes one block with the audio device's input, for tracks whose
@@ -323,12 +380,32 @@ impl Processor {
         frames: usize,
         input: &dyn crate::DeviceInput,
     ) -> Output<'_> {
+        self.process_at(frames, input, Instant::now())
+    }
+
+    /// Processes one block, as [`Processor::process`] does, with the audio
+    /// device's `input` and timed at `now`, the time the audio callback
+    /// started the block. `now` is the clock MIDI input is placed against
+    /// (`docs/specs/midi-io.md`, R15, R16): a device's callback passes the
+    /// time it was called, so the block clock's delay-locked loop can smooth
+    /// the jitter in when it runs, and a test passes times of its own.
+    /// Real-time safe: the input is copied into the program's own buffers,
+    /// which were made when the engine was.
+    pub fn process_at(
+        &mut self,
+        frames: usize,
+        input: &dyn crate::DeviceInput,
+        now: Instant,
+    ) -> Output<'_> {
         let began = Instant::now();
         let frames = frames.min(self.config.max_frames);
         self.drain();
         if let Some(program) = self.program.as_mut() {
             program.get_mut().copy_device_input(input, frames);
         }
+        // Spec: midi-io R12, R14, R15
+        let routes = self.program.as_mut().map(|p| &mut p.get_mut().midi);
+        self.midi.take(now, self.clock, frames, routes);
         self.resolve_due(frames);
         let mut done = 0;
         while done < frames {
@@ -337,6 +414,7 @@ impl Processor {
             self.session.playback(&mut self.session_playback);
             self.fire_due(done);
             let length = self.until_next_event(done, frames - done);
+            self.capture(done, length);
             self.render(done, length);
             done += length;
         }
@@ -362,6 +440,9 @@ impl Processor {
     /// thread, once the stream is gone.
     #[must_use]
     pub fn park(&mut self) -> Carry {
+        // A stream that closes ends the take, like a stop (WP-2.13); the
+        // carry hands it to the next processor and the shell.
+        self.end_recording();
         let carry = self.carry();
         // Spec: device-changes R1
         self.playing = false;
@@ -408,6 +489,7 @@ impl Processor {
             position: self.tempo().frames_to_ticks(self.position, rate),
             insert_marker: self.insert_marker,
             loop_region: self.loop_region,
+            take: self.last_take,
             scheduled: self.scheduled.iter().map(|entry| entry.command).collect(),
             timed,
             launch: self.session.settings(),
@@ -431,6 +513,7 @@ impl Processor {
         self.position = self.frames_at(carry.position);
         self.insert_marker = carry.insert_marker;
         self.loop_region = carry.loop_region;
+        self.last_take = carry.take;
         self.update_loop_frames();
         for &command in &carry.scheduled {
             self.schedule(command);
@@ -471,6 +554,10 @@ impl Processor {
                 Message::Schedule(command) => self.schedule(command),
                 Message::Session(command) => self.session_command(command),
                 Message::Cancel(id) => self.scheduled.retain(|s| s.command.id != id),
+                Message::Record(plan) => {
+                    self.last_take = None;
+                    self.plan = Some(plan);
+                }
             }
         }
     }
@@ -600,6 +687,9 @@ impl Processor {
             // Spec: transport R3, R4
             TransportCommand::Stop => {
                 self.metronome.stop();
+                // Spec: routing R11; WP-2.13. Stop ends the take, as Live's
+                // Stop ends a recording.
+                self.end_recording();
                 if self.playing {
                     self.playing = false;
                 } else {
@@ -614,6 +704,7 @@ impl Processor {
                 if self.playing {
                     self.playing = false;
                     self.metronome.stop();
+                    self.end_recording();
                 } else {
                     self.play_from_insert_marker();
                 }
@@ -624,6 +715,9 @@ impl Processor {
                 if self.playing {
                     self.position = self.frames_at(self.insert_marker);
                     self.metronome.stop();
+                    // Playback jumps away from the take; it ends here
+                    // (WP-2.13).
+                    self.end_recording();
                 }
             }
             // Spec: transport R9
@@ -642,8 +736,37 @@ impl Processor {
                 self.update_loop_frames();
             }
             TransportCommand::SetMetronome(settings) => self.metronome.set_settings(settings),
-            TransportCommand::SetRecording(recording) => self.metronome.set_recording(recording),
+            TransportCommand::SetRecording(recording) => {
+                self.metronome.set_recording(recording);
+                if recording {
+                    self.recording = true;
+                } else {
+                    self.end_recording();
+                }
+            }
         }
+    }
+
+    /// Ends the take being captured, publishing what it covers for the
+    /// shell, and stops recording: what turning recording off, Stop, and a
+    /// jump while recording do (WP-2.13). Dropping the plan closes the
+    /// rings, so the writer thread knows the take is over.
+    fn end_recording(&mut self) {
+        if !self.recording {
+            return;
+        }
+        if let Some(take) = self.take.take() {
+            self.last_take = Some(TakeBounds {
+                start: take.start,
+                end: take.start + Frames(take.written as i64),
+            });
+        }
+        self.recording = false;
+        // Spec: metronome R7. The transport isn't recording any more, so
+        // "only while recording" clicks stop with it, however it ended
+        // (Stop, recording off, a locate, or a ring that filled).
+        self.metronome.set_recording(false);
+        self.plan = None;
     }
 
     fn play_from_insert_marker(&mut self) {
@@ -1029,6 +1152,47 @@ impl Processor {
         }
     }
 
+    /// Copies this part of the block's device input into the recording
+    /// rings, when the transport records (WP-2.13). The take starts at the
+    /// first played part, so its first sample is the frame playback started
+    /// on; a part the rings can't take in full, or playback jumping away
+    /// from the take's next frame, ends the take before the part, so every
+    /// file holds exactly the take's frames. Real-time safe: copies into
+    /// rings made when the engine was, no locks.
+    fn capture(&mut self, offset: usize, frames: usize) {
+        if !self.recording || !self.playing || self.metronome.is_counting_in() || frames == 0 {
+            return;
+        }
+        if self.plan.is_none() || self.program.is_none() {
+            return;
+        }
+        let expected = self.take.map_or(self.position, |take| {
+            take.start + Frames(take.written as i64)
+        });
+        if self.take.is_some() && expected != self.position {
+            self.end_recording();
+            return;
+        }
+        if self.take.is_none() {
+            self.last_take = None;
+            self.take = Some(Take {
+                start: self.position,
+                written: 0,
+            });
+        }
+        let captured = match (self.program.as_ref(), self.plan.as_mut()) {
+            (Some(program), Some(plan)) => plan.get_mut().capture(program.get(), offset, frames),
+            _ => false,
+        };
+        if !captured {
+            self.end_recording();
+            return;
+        }
+        if let Some(take) = &mut self.take {
+            take.written += frames as u64;
+        }
+    }
+
     /// Ends the block: CPU load, and the state for the UI.
     fn finish(&mut self, began: Instant, frames: usize) {
         let rate = self.config.sample_rate.as_f64();
@@ -1055,6 +1219,8 @@ impl Processor {
         state.position_ticks = position_ticks;
         state.insert_marker = self.insert_marker;
         state.loop_region = self.loop_region;
+        state.recording = self.recording;
+        state.take = self.last_take;
         state.program = self.program.as_ref().map(|p| p.get().generation);
         state.swaps = self.swaps;
         state.cpu_load = cpu_load;

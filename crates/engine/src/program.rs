@@ -7,6 +7,7 @@ use core::ops::Range;
 use bl_core::time::{SampleRate, TempoMap, TimeSignatureMap};
 use bl_model::{Channel, ParamId, SceneId, Tap, TrackId};
 
+use crate::midi::{MidiRoutes, TrackMidiInput};
 use crate::mixer::{MeterReading, Route, TrackMixer};
 use crate::node::{
     Block, Node, NodeData, NodeEvent, NodeKey, NoteBuffer, ParamValue, TransportInfo,
@@ -109,6 +110,9 @@ pub struct EngineProgram {
     /// (WP-3.2).
     pub(crate) scene_slots: Vec<(SceneId, TrackId)>,
     pub(crate) note_buffers: [NoteBuffer; 2],
+    /// The MIDI tracks' inputs, and what each received in the last block
+    /// (WP-2.2).
+    pub(crate) midi: MidiRoutes,
 }
 
 /// What can sit in a program's slot.
@@ -477,6 +481,14 @@ impl EngineProgram {
         &self.scene_slots[start..end]
     }
 
+    /// What a MIDI track's input received in the last block, and whether
+    /// the track monitors (`docs/specs/midi-io.md`, R12). `None` if `track`
+    /// isn't a MIDI track in this program.
+    #[must_use]
+    pub fn midi_input(&self, track: TrackId) -> Option<TrackMidiInput<'_>> {
+        self.midi.input(track)
+    }
+
     /// The slot holding `key`'s node.
     pub(crate) fn slot_of(&self, key: NodeKey) -> Option<u32> {
         self.index
@@ -632,6 +644,16 @@ impl EngineProgram {
                 );
             }
 
+            // Spec: routing R11. Whether the track played a clip this block;
+            // under Monitor Auto its input routes close while one did. The
+            // player ran first, so it knows.
+            let playing_clip = match task.player {
+                Some(slot) => match self.slots[slot as usize].node.as_ref() {
+                    Some(Instance::Device(node)) => node.playing_clip(),
+                    _ => false,
+                },
+                None => false,
+            };
             // The interface's input, if the track takes Ext. In: its
             // channels, through the route whose Monitor gate opens and
             // closes it (WP-2.13).
@@ -651,6 +673,7 @@ impl EngineProgram {
                     .get_mut(device.route as usize)
                     .map(|slot| slot.node.as_mut())
                 {
+                    route.set_playing_clip(playing_clip);
                     route.mix(
                         &mut self.pool[own.clone()],
                         &self.device_scratch,
@@ -671,6 +694,7 @@ impl EngineProgram {
                 else {
                     continue;
                 };
+                route.set_playing_clip(playing_clip);
                 let source = input.from as usize;
                 let kept = match input.tap {
                     Tap::PreFx => self.tasks[source].pre_fx,

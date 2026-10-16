@@ -90,6 +90,7 @@ mod gc;
 mod input;
 mod message;
 mod metronome;
+mod midi;
 pub mod midi_clips;
 pub mod mixer;
 mod node;
@@ -98,6 +99,7 @@ mod offline;
 pub mod preview;
 mod processor;
 mod program;
+pub mod recording;
 mod registry;
 pub mod routing;
 pub mod session;
@@ -115,10 +117,13 @@ pub use automation::AutomationList;
 pub use clips::{ClipPlayer, MediaLibrary, MediaMap, MediaStreams, OpenedSource, SourceCues};
 pub use compiler::{Compiler, Update};
 pub use engine::{CompileCounts, Engine, Restarter, Sender, channel};
-pub use gc::{Collector, DROP_PERIOD, DropThread, GcHandle, Program};
+pub use gc::{Collector, DROP_PERIOD, DropThread, GcHandle, Owned, Program};
 pub use input::{DeviceInput, NoInput};
 pub use message::{
     Action, LoopRegion, ParamEvent, Report, ScheduledCommand, TransportCommand, When,
+};
+pub use midi::{
+    MIDI_EVENTS_PER_BLOCK, MIDI_EVENTS_PER_TRACK, MidiCounters, MidiEvent, TrackMidiInput,
 };
 pub use midi_clips::{MidiClipList, MidiClipPlayer};
 pub use mixer::METER_RELEASE_DB_PER_SECOND;
@@ -129,6 +134,7 @@ pub use node::{
 pub use offline::Offline;
 pub use processor::{Carry, Output, Processor};
 pub use program::EngineProgram;
+pub use recording::{RecordTrack, RecordingPlan, TakeBounds};
 pub use registry::{DeviceType, NodeFactory, Registry};
 pub use session::{SessionCommand, SessionPlayback, SlotState, SlotStatus};
 pub use state::{EngineCounters, EngineState, Monitor, TrackMeter};

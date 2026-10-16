@@ -78,6 +78,10 @@ pub mod route {
     /// Closed when not 0: the route feeds a track's input, and the track
     /// isn't monitoring it (the routing spec).
     pub const CLOSED: ParamId = ParamId(2);
+    /// Whether the track whose input this route feeds monitors with Auto
+    /// (the routing spec, R11): while its clips play, the route closes,
+    /// which the audio thread sets each block.
+    pub const AUTO: ParamId = ParamId(3);
 }
 
 /// The gains of Live's constant-power pan law for `pan` from −1 (left) to 1
@@ -606,10 +610,9 @@ impl TrackMixer {
         let channels = block.channels();
         let controls = [self.volume, self.pan, f64::from(u8::from(self.mute))];
         // A pan the envelopes don't move keeps its gains over the whole
-        // range; only an automated pan works out the law frame by frame.
-        let fixed_pan = list
-            .envelope(track::PAN)
-            .is_none()
+        // range; only an automated or modulated pan works out the law frame
+        // by frame.
+        let fixed_pan = (list.envelope(track::PAN).is_none() && !list.modulates(track::PAN))
             .then(|| pan_gains(self.pan));
         // The crossfade isn't automated: it glides on top of the envelopes,
         // the same gliding position for every channel (the mixer spec, R23).
@@ -645,7 +648,8 @@ impl TrackMixer {
 }
 
 /// The gain of channel `index` at `frame`: an automated parameter from its
-/// envelope, and a control where it is for the rest.
+/// envelope, the clips' modulation added on top (WP-3.15, clamped to the
+/// control's range), and a control where it is for the rest.
 fn gain_at(
     list: &AutomationList,
     frame: i64,
@@ -654,21 +658,17 @@ fn gain_at(
     fixed_pan: Option<[f64; 2]>,
 ) -> f64 {
     let [volume, pan, mute] = controls;
-    let muted = list
-        .envelope(track::MUTE)
-        .map_or(mute != 0.0, |envelope| envelope.value_at(frame) != 0.0);
-    if muted {
+    let base = |param, control: f64| {
+        list.envelope(param)
+            .map_or(control, |envelope| envelope.value_at(frame))
+            + list.modulation(param, frame).unwrap_or(0.0)
+    };
+    if base(track::MUTE, mute) != 0.0 {
         return 0.0;
     }
-    let level = list
-        .envelope(track::VOLUME)
-        .map_or(volume, |envelope| envelope.value_at(frame));
-    let [left, right] = fixed_pan.unwrap_or_else(|| {
-        pan_gains(
-            list.envelope(track::PAN)
-                .map_or(pan, |envelope| envelope.value_at(frame)),
-        )
-    });
+    let level = base(track::VOLUME, volume).max(0.0);
+    let [left, right] =
+        fixed_pan.unwrap_or_else(|| pan_gains(base(track::PAN, pan).clamp(-1.0, 1.0)));
     match index {
         0 => level * left,
         1 => level * right,
@@ -697,6 +697,12 @@ pub struct Route {
     level: f64,
     solo_mute: bool,
     closed: bool,
+    /// The track this route feeds monitors with Auto: while its clips play,
+    /// the route closes (the routing spec, R11).
+    auto: bool,
+    /// Whether the track's clips played in the last block, set by the
+    /// program before it sums the track's inputs.
+    playing_clip: bool,
     gain: Ramp,
     smoothing: u32,
     /// The envelope driving its level while the song plays (WP-2.12).
@@ -711,6 +717,8 @@ impl Route {
             level: 0.0,
             solo_mute,
             closed: false,
+            auto: false,
+            playing_clip: false,
             gain: Ramp::at(0.0),
             smoothing: smoothing_frames(config.sample_rate),
             automation: None,
@@ -729,6 +737,26 @@ impl Route {
         self
     }
 
+    /// The same route, closing while its track's clips play or not,
+    /// resting there.
+    #[must_use]
+    pub fn auto(mut self, auto: bool) -> Self {
+        self.auto = auto;
+        self.gain = Ramp::at(self.target());
+        self
+    }
+
+    /// Sets whether the track's clips played in the last block: under
+    /// Monitor Auto the route closes while they do (the routing spec, R11).
+    /// The gain glides like any other change; the program calls it once per
+    /// block, before it sums the track's inputs.
+    pub(crate) fn set_playing_clip(&mut self, playing: bool) {
+        if self.playing_clip != playing {
+            self.playing_clip = playing;
+            self.gain.toward(self.target(), self.smoothing);
+        }
+    }
+
     /// The gain now.
     #[must_use]
     pub fn gain(&self) -> f64 {
@@ -743,7 +771,7 @@ impl Route {
     }
 
     fn target(&self) -> f64 {
-        if self.solo_mute || self.closed {
+        if self.solo_mute || self.closed || (self.auto && self.playing_clip) {
             0.0
         } else {
             self.level
@@ -760,6 +788,8 @@ impl Route {
             (route::SOLO_MUTE, ParamValue::Default) => self.solo_mute = false,
             (route::CLOSED, ParamValue::Set(closed)) => self.closed = closed != 0.0,
             (route::CLOSED, ParamValue::Default) => self.closed = false,
+            (route::AUTO, ParamValue::Set(auto)) => self.auto = auto != 0.0,
+            (route::AUTO, ParamValue::Default) => self.auto = false,
             _ => {}
         }
     }
@@ -780,21 +810,24 @@ impl Route {
             stride,
             frames,
         } = shape;
-        // Spec: automation R2. While the song plays, a send with an envelope
-        // takes its level from it on each frame; solo and a closed route
+        // Spec: automation R2; clip envelopes R3. While the song plays, a
+        // send with an envelope takes its level from it on each frame, and
+        // the clips' modulation is added on top; solo and a closed route
         // still silence it, and a hand move still glides.
         let automation = song.and_then(|_| self.automation.clone());
-        let envelope = automation
+        let list = automation
             .as_ref()
             .and_then(|data| data.downcast_ref::<AutomationList>())
-            .filter(|list| !list.is_empty())
-            .and_then(|list| list.envelope(route::LEVEL));
-        if envelope.is_none() && events.is_empty() && self.is_silent() {
+            .filter(|list| !list.is_empty());
+        let envelope = list.and_then(|list| list.envelope(route::LEVEL));
+        let modulated = list.is_some_and(|list| list.modulates(route::LEVEL));
+        let follows = song.is_some() && (envelope.is_some() || modulated);
+        if !follows && events.is_empty() && self.is_silent() {
             return;
         }
         // A send whose envelope is gone heads back to its control's level
         // from where the automation left it.
-        if envelope.is_none() {
+        if !follows {
             self.gain.toward(self.target(), self.smoothing);
         }
         for segment in segments(events, frames) {
@@ -804,20 +837,21 @@ impl Route {
                 }
                 self.gain.toward(self.target(), self.smoothing);
             }
-            match (envelope, song) {
-                (Some(envelope), Some(now)) => {
+            match if follows { song } else { None } {
+                Some(now) => {
+                    let list = list.expect("a route that follows has a list");
                     for c in 0..channels {
                         let at = c * stride + segment.range.start..c * stride + segment.range.end;
                         for (i, sample) in to[at.clone()].iter_mut().enumerate() {
                             let frame = now + (segment.range.start + i) as i64;
-                            let gain = self.envelope_gain(envelope, frame);
+                            let gain = self.envelope_gain(list, envelope, frame);
                             *sample += (f64::from(from[at.start + i]) * gain) as f32;
                         }
                     }
-                    self.gain =
-                        Ramp::at(self.envelope_gain(envelope, now + segment.range.end as i64 - 1));
+                    let last = now + segment.range.end as i64 - 1;
+                    self.gain = Ramp::at(self.envelope_gain(list, envelope, last));
                 }
-                _ => {
+                None => {
                     let mut after = self.gain;
                     for c in 0..channels {
                         let at = c * stride + segment.range.start..c * stride + segment.range.end;
@@ -839,14 +873,20 @@ impl Route {
         }
     }
 
-    /// The route's gain at `frame`: its envelope's level, unless solo
-    /// silences it or it's closed.
-    fn envelope_gain(&self, envelope: &PlacedEnvelope, frame: i64) -> f64 {
+    /// The route's gain at `frame`: its envelope's level, or its control's
+    /// where the level isn't automated, with the clips' modulation added on
+    /// top (WP-3.15) and clamped, unless solo silences it or it's closed.
+    fn envelope_gain(
+        &self,
+        list: &AutomationList,
+        envelope: Option<&PlacedEnvelope>,
+        frame: i64,
+    ) -> f64 {
         if self.solo_mute || self.closed {
-            0.0
-        } else {
-            envelope.value_at(frame)
+            return 0.0;
         }
+        let level = envelope.map_or(self.level, |envelope| envelope.value_at(frame));
+        (level + list.modulation(route::LEVEL, frame).unwrap_or(0.0)).max(0.0)
     }
 }
 

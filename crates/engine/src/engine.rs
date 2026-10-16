@@ -14,10 +14,11 @@ use rtrb::{Producer, PushError, RingBuffer};
 
 use crate::EngineConfig;
 use crate::compiler::{Compiler, Update};
-use crate::gc::{Collector, DROP_PERIOD, DropThread, GcHandle};
+use crate::gc::{Collector, DROP_PERIOD, DropThread, GcHandle, Owned};
 use crate::message::{Message, ParamEvent, Report, ScheduledCommand, TransportCommand, When};
 use crate::node::{NodeData, NodeKey};
 use crate::processor::{Carry, Processor, starts_playback};
+use crate::recording::RecordingPlan;
 use crate::registry::Registry;
 use crate::session::SessionCommand;
 use crate::sources::Loaded;
@@ -91,6 +92,12 @@ impl Sender {
     /// program doesn't have is dropped.
     pub fn send_data(&mut self, key: NodeKey, data: NodeData) {
         self.push(Message::Data { key, data });
+    }
+
+    /// Sends what the audio thread records while the transport records
+    /// (WP-2.13), wrapped so dropping it there frees nothing.
+    pub fn record(&mut self, plan: Owned<RecordingPlan>) {
+        self.push(Message::Record(plan));
     }
 
     /// Sends a transport command, which takes effect at the start of the
@@ -205,6 +212,8 @@ enum Request {
     /// A Session View command (WP-3.2).
     Session(SessionCommand),
     Flush(mpsc::Sender<()>),
+    /// What to record while the transport records (WP-2.13).
+    Record(Box<Owned<RecordingPlan>>),
     /// No processor runs any more: stop sending to it.
     Detach,
     /// Make a processor for these settings.
@@ -302,6 +311,7 @@ impl std::fmt::Debug for Request {
             Self::Cancel(_) => "Cancel",
             Self::Session(_) => "Session",
             Self::Flush(_) => "Flush",
+            Self::Record(_) => "Record",
             Self::Detach => "Detach",
             Self::Restart(_) => "Restart",
             Self::Loaded(_) => "Loaded",
@@ -459,6 +469,14 @@ impl Engine {
     /// Sends data to a node (see [`Sender::send_data`]).
     pub fn send_data(&self, key: NodeKey, data: NodeData) {
         self.request(Request::Data(key, data));
+    }
+
+    /// Sets what the engine records while the transport records (WP-2.13):
+    /// the armed tracks' inputs and the rings their samples go to. The plan
+    /// replaces any earlier one; the audio thread drops it when the take
+    /// ends, which closes the rings and tells the writer the take is over.
+    pub fn record(&self, plan: crate::recording::RecordingPlan) {
+        self.request(Request::Record(Box::new(self.gc.wrap(plan))));
     }
 
     /// Reports `device`'s node's latency now, as a plug-in that restarted
@@ -704,6 +722,12 @@ fn compile_loop(
                     }
                 },
                 Request::Flush(ack) => flushes.push(ack),
+                Request::Record(plan) => {
+                    // While no processor runs, nothing records it.
+                    if let Some(sender) = sender.as_mut() {
+                        sender.record(*plan);
+                    }
+                }
                 Request::Detach => {
                     // Frees the queue to the processor that stopped, and
                     // anything still waiting for room in it. What's held

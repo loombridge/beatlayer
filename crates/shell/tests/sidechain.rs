@@ -111,7 +111,7 @@ fn the_sidechain_section_lists_its_sources_as_live_does() {
     choose(&mut shell, &source, "3-Audio");
     assert_eq!(last_step(&shell), "Change \"Routing\"");
     let doc = shell.editor().document();
-    let sidechain = doc.device(device).unwrap().sidechain.unwrap();
+    let sidechain = doc.device(device).unwrap().sidechain.clone().unwrap();
     assert_eq!(
         sidechain.input,
         Input::Track {
@@ -323,8 +323,8 @@ fn duplicate_track_without_clips_copies_all_but_the_clips() {
     );
     assert_ne!(c.id, d.id, "a new device");
     assert_eq!(
-        (&c.name, &c.kind, c.sidechain),
-        (&d.name, &d.kind, d.sidechain)
+        (&c.name, &c.kind, c.sidechain.clone()),
+        (&d.name, &d.kind, d.sidechain.clone())
     );
 
     // An agent names the tracks; Main can't be duplicated.

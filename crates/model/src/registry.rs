@@ -786,16 +786,18 @@ const ENTRIES: &[Entry] = &[
             section's Audio From or MIDI From chooser and its channel do. An audio track can \
             take `external` (Ext. In, the audio interface's inputs, with a `channel`: a single \
             channel (`{ \"type\": \"mono\", \"channel\": 3 }`) or a stereo pair (`{ \"type\": \
-            \"pair\", \"channel\": 3 }`, the pair 3/4), counted from 1; silent until the \
-            interface has input), `resampling` (the Main output, for recording the mix; the \
-            track's own output and sends are then silent so it can't feed back), `none`, or \
-            `track` with another audio track, a group, a return track, or Main and a `tap`: \
-            `pre_fx` (before its devices), `post_fx` (after its devices, before its mixer), or \
-            `post_mixer` (its output, the default). A MIDI track can take `all_ins`, \
-            `computer_keyboard`, `none`, or another MIDI track (MIDI reaches tracks once MIDI \
-            playback is built). The input is heard only while the track monitors it \
-            (`routing.set_monitor`). A routing may make a loop, as in Live; the engine plays \
-            the routing that closes it as silence.",
+            \"pair\", \"channel\": 3 }`, the pair 3/4), counted from 1), `resampling` (the Main \
+            output, for recording the mix; the track's own output and sends are then silent so \
+            it can't feed back), `none`, or `track` with another audio track, a group, a return \
+            track, or Main and a `tap`: `pre_fx` (before its devices), `post_fx` (after its \
+            devices, before its mixer), or `post_mixer` (its output, the default). A MIDI track \
+            can take `all_ins` (every MIDI input whose Track switch is on in the settings, and \
+            the computer MIDI keyboard), `computer_keyboard`, `port` with the port's `name` as \
+            the MIDI settings list it, `none`, or another MIDI track (which carries MIDI once \
+            MIDI playback is built). `channel` is 1 to 16 to take only that channel, or null \
+            (the default) for All Channels; only a port input has one. The input is heard only \
+            while the track monitors it (`routing.set_monitor`). A routing may make a loop, as \
+            in Live; the engine plays the routing that closes it as silence.",
     },
     Entry {
         id: "routing.set_monitor",
@@ -1054,6 +1056,87 @@ const ENTRIES: &[Entry] = &[
             that starts or ends mid-waveform from clicking: 0.004 (4 ms) is the length that \
             Create Fades on Clip Edges gives new clips. Lengths must be finite and at least \
             0.",
+    },
+    Entry {
+        id: "clip.set_envelope_breakpoint",
+        action: Action::Apply("set_clip_envelope_breakpoint"),
+        label: "Add Envelope Breakpoint",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Sets the value of one of a clip's envelopes at a position, adding a \
+            breakpoint there or replacing the one that's there, as clicking or dragging a \
+            breakpoint in the Envelopes tab does. `clip` is the clip, `target` the parameter of \
+            the clip's track the envelope modulates (a control of its mixer, one of its sends, \
+            or a parameter of a device in its chain), `at` the position in ticks from the \
+            beginning of the clip's contents, and `value` the value there, in the parameter's \
+            own units. A parameter with no clip envelope gets one, linked to the clip, with \
+            this breakpoint as its first.",
+    },
+    Entry {
+        id: "clip.set_envelope_curve",
+        action: Action::Apply("set_clip_envelope_curve"),
+        label: "Curve Envelope Segment",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Curves the segment starting at one of a clip envelope's breakpoints, as \
+            holding Alt (Windows) or Option (macOS) while dragging a segment in the Envelopes \
+            tab does. `clip` and `target` name the envelope as `clip.set_envelope_breakpoint` \
+            does, `at` is the breakpoint the segment starts at, and `bend` is from -1 to 1: 0 \
+            makes the segment a straight line again, and the sign chooses which side it bows \
+            to.",
+    },
+    Entry {
+        id: "clip.move_envelope_breakpoint",
+        action: Action::Apply("move_clip_envelope_breakpoint"),
+        label: "Move Envelope Breakpoint",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Moves one of a clip envelope's breakpoints from `at` to `to`, keeping its \
+            value, as dragging it in the Envelopes tab does. `clip` and `target` name the \
+            envelope as `clip.set_envelope_breakpoint` does. `to` is 0 or later, and not where \
+            another breakpoint of the same envelope already is.",
+    },
+    Entry {
+        id: "clip.delete_envelope_breakpoint",
+        action: Action::Apply("delete_clip_envelope_breakpoint"),
+        label: "Delete Envelope Breakpoint",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Deletes one of a clip envelope's breakpoints, so the segments either side \
+            of it become the one starting at the breakpoint before it, as clicking a breakpoint \
+            in the Envelopes tab does. `clip` and `target` name the envelope as \
+            `clip.set_envelope_breakpoint` does, and `at` is where the breakpoint is. Deleting \
+            the last one takes the envelope with it.",
+    },
+    Entry {
+        id: "clip.delete_envelope",
+        action: Action::Apply("delete_clip_envelope"),
+        label: "Clear Envelope",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Deletes a clip's envelope for a parameter, as Clear Envelope in the \
+            Envelopes tab does: the parameter goes back to what it does without the clip \
+            envelope. `clip` and `target` name the envelope as `clip.set_envelope_breakpoint` \
+            does. Nothing changes if the clip has no envelope for it.",
+    },
+    Entry {
+        id: "clip.set_envelope_linked",
+        action: Action::Apply("set_clip_envelope_linked"),
+        label: "Link Envelope",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Switches a clip envelope's Linked switch: linked (`true`, the default), it \
+            follows the clip's region and loop, playing what the clip's contents play; \
+            unlinked, it plays once from the clip's start, one tick per tick, for as long as the \
+            clip lasts. `clip` and `target` name the envelope as \
+            `clip.set_envelope_breakpoint` does; a target with no envelope gets an empty linked \
+            one, so a switch thrown before anything is drawn sets what drawing will use.",
     },
     Entry {
         id: "clip.trim_start",

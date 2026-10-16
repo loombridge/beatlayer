@@ -114,6 +114,7 @@ fn routing_and_sidechains_pass_under_rtsan() {
         .apply(Command::SetInput {
             track: resampler,
             input: Input::Resampling,
+            channel: None,
         })
         .unwrap();
     editor
@@ -182,6 +183,7 @@ fn routing_and_sidechains_pass_under_rtsan() {
                     track: a,
                     tap: Tap::PreFx,
                 },
+                channel: None,
             }),
             16 => Some(Command::SetMonitor {
                 track: b,
@@ -212,6 +214,7 @@ fn routing_and_sidechains_pass_under_rtsan() {
                     track: a,
                     tap: Tap::PostMixer,
                 },
+                channel: None,
             }),
             28 => Some(Command::SetMonitor {
                 track: b,
@@ -263,6 +266,7 @@ fn routing_and_sidechains_pass_under_rtsan() {
                     track: b,
                     tap: Tap::PostMixer,
                 },
+                channel: None,
             }),
             52 => Some(Command::SetOutput {
                 track: group,
@@ -275,6 +279,7 @@ fn routing_and_sidechains_pass_under_rtsan() {
             56 => Some(Command::SetInput {
                 track: a,
                 input: Input::None,
+                channel: None,
             }),
             58 => Some(Command::SetSidechainInput {
                 device: gate_c,
@@ -302,6 +307,7 @@ fn routing_and_sidechains_pass_under_rtsan() {
             68 => Some(Command::SetInput {
                 track: b,
                 input: Input::None,
+                channel: None,
             }),
             70 => Some(Command::SetSidechainInput {
                 device: gate_d,

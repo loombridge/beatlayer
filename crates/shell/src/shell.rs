@@ -6,13 +6,15 @@ use std::sync::Arc;
 
 use bl_commands::{Context, NoArgs, Registry};
 use bl_core::id::Id;
-use bl_core::time::Ticks;
+use bl_core::time::{SampleRate, Ticks};
 use bl_engine::session as engine_session;
 use bl_engine::transport as engine_transport;
 use bl_media::MediaStore;
 use bl_model::{
-    ChangeSet, ClipData, Editor, LaunchSettings, TrackId, TrackKind, registry as model,
+    AudioData, ChangeSet, Clip, ClipData, ContentHash, Editor, Input, LaunchSettings, TrackId,
+    TrackKind, registry as model,
 };
+use bl_project::ProjectFolder;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -395,6 +397,12 @@ pub struct Shell {
     /// The CLAP host's generation when the shell last looked for plug-ins'
     /// commands.
     plugins_generation: u64,
+    /// The recording under way, or the one whose take just ended
+    /// (WP-2.13): its writer's report and the frames the engine dropped.
+    recording: Option<crate::recording::Recording>,
+    /// How many recordings this session has started: the take number in
+    /// their files' names, so two in one second don't share a file.
+    recorded_takes: u32,
 }
 
 impl fmt::Debug for Shell {
@@ -607,6 +615,8 @@ impl Shell {
             meters: Vec::new(),
             metering: false,
             previews: crate::perception::Previews::default(),
+            recording: None,
+            recorded_takes: 0,
             plug_in_windows: true,
             devices: {
                 // Beatlayer's native devices (WP-2.5; none ship yet).
@@ -2588,6 +2598,9 @@ impl Shell {
     /// R14). Returns the transport it took.
     pub fn poll_engine(&mut self) -> EngineTransport {
         let engine = self.audio.transport_state();
+        // WP-2.13. A recording's take reaches the shell with the engine's
+        // state; the clips are made from it once the writer has finished.
+        self.poll_recording(&engine);
         // Spec: mixer-view R10. The meters the strips and headers draw: the
         // engine's while one runs, and none once it stops. Without an
         // engine, meters set with `set_meters` stay.
@@ -2642,6 +2655,182 @@ impl Shell {
     #[must_use]
     pub fn session_states(&self) -> &[bl_engine::SlotStatus] {
         &self.session_states
+    }
+
+    /// Starts a recording (WP-2.13): a ring for every armed audio track
+    /// whose Audio From is Ext. In, and a writer thread draining them into
+    /// the project's `Samples/Recorded/`. The engine is given the rings
+    /// before the transport is told it records.
+    fn begin_recording(&mut self) -> Result<(), String> {
+        let Some(set) = self.set_path.clone() else {
+            return Err(
+                "the set has never been saved; use `set.save_as` to give it a project folder, \
+                 where its recordings go"
+                    .to_owned(),
+            );
+        };
+        let rate = self
+            .audio
+            .sample_rate()
+            .and_then(SampleRate::new)
+            .ok_or("no audio device is open")?;
+        let folder = ProjectFolder::of_set(&set).root().to_path_buf();
+        let stamp = crate::recording::stamp();
+        self.recorded_takes += 1;
+        let take = self.recorded_takes;
+        let document = self.editor.document();
+        let mut tracks = Vec::new();
+        for id in document.track_order() {
+            let Some(track) = document.track(id) else {
+                continue;
+            };
+            if track.kind() != TrackKind::Audio || !track.mixer().arm {
+                continue;
+            }
+            let Input::External { channel } = track.routing().input else {
+                continue;
+            };
+            tracks.push(crate::recording::Track {
+                track: id,
+                channel,
+                name: crate::recording::file_name(
+                    &crate::routing::track_label(document, id),
+                    take,
+                    &stamp,
+                ),
+            });
+        }
+        let (plan, recording) = crate::recording::start(&folder, rate, &tracks)?;
+        self.audio.record(plan)?;
+        self.recording = Some(recording);
+        Ok(())
+    }
+
+    /// Follows the recording under way (WP-2.13): notes the take the engine
+    /// published, and, once the writer has finished draining the rings,
+    /// makes its clips. Called with every engine poll, so the clips appear
+    /// a frame or two after the take ends.
+    fn poll_recording(&mut self, engine: &EngineTransport) {
+        let Some(recording) = self.recording.as_mut() else {
+            return;
+        };
+        if let Some(take) = engine.take {
+            recording.note_take(take);
+        }
+        if let Some(outcome) = recording.poll(engine.running) {
+            self.recording = None;
+            self.finish_recording(outcome);
+        }
+    }
+
+    /// Makes the clips of a finished recording, one undo step (WP-2.13):
+    /// each file becomes an audio clip on its track, from the song frame
+    /// the take started on to the one it ended on. Undo removes the clips;
+    /// the files stay, as Live keeps recorded files. A report the writer
+    /// sent (a failed file) makes no clips and shows in the Status Bar, and
+    /// frames the engine dropped because the disk fell behind are reported
+    /// there too.
+    fn finish_recording(&mut self, outcome: crate::recording::Outcome) {
+        let crate::recording::Outcome {
+            take,
+            files,
+            dropped,
+        } = outcome;
+        let files = match files {
+            Ok(files) => files,
+            Err(error) => {
+                self.set_message(format!("Recording failed: {error}"), true);
+                return;
+            }
+        };
+        if files.is_empty() {
+            return;
+        }
+        let Some(take) = take else {
+            self.set_message(
+                "Recording stopped without a position, so its clips weren't made",
+                true,
+            );
+            return;
+        };
+        let Some(rate) = self.audio.sample_rate().and_then(SampleRate::new) else {
+            self.set_message("Recording stopped: the audio device closed", true);
+            return;
+        };
+        let tempo = self.editor.document().settings().tempo.clone();
+        let start = tempo.frames_to_ticks(take.start, rate);
+        let end = tempo.frames_to_ticks(take.end, rate);
+        let edge_fades = self.create_fades_on_clip_edges();
+        let mut imported = Vec::with_capacity(files.len());
+        for file in &files {
+            match self.media.import(&file.path) {
+                Ok(hash) => {
+                    let size = std::fs::metadata(&file.path).map_or(0, |data| data.len());
+                    imported.push((
+                        file.track,
+                        ContentHash(*hash.as_bytes()),
+                        file.path.clone(),
+                        size,
+                    ));
+                }
+                Err(error) => {
+                    self.set_message(
+                        format!("Recording failed: {}: {error}", file.path.display()),
+                        true,
+                    );
+                    return;
+                }
+            }
+        }
+        let mut placed = std::collections::BTreeSet::new();
+        let applied = self
+            .editor
+            .transact(crate::recording::UNDO_LABEL, |editor| {
+                for (track, hash, path, _) in &imported {
+                    let id = editor.new_id();
+                    // Spec: audio-clips R7. With Create Fades on Clip Edges on,
+                    // a new recorded clip's edges fade over 4 ms, like a
+                    // dropped file's.
+                    let audio = AudioData::new(*hash);
+                    let audio = if edge_fades {
+                        audio.with_edge_fades()
+                    } else {
+                        audio
+                    };
+                    let mut clip =
+                        Clip::new(id, start, end.saturating_sub(start), ClipData::Audio(audio));
+                    clip.name = path
+                        .file_stem()
+                        .map(|stem| stem.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    crate::arrangement::placing::clear(editor, *track, start, end, &placed)?;
+                    placed.insert(id);
+                    editor.apply(bl_model::Command::CreateClip {
+                        track: *track,
+                        clip,
+                    })?;
+                }
+                Ok::<(), bl_model::EditError>(())
+            });
+        if let Err(error) = applied {
+            self.set_message(format!("Recording failed: {error}"), true);
+            return;
+        }
+        for (_, hash, path, size) in imported {
+            self.store.add_media(hash, &path, size);
+        }
+        self.dirty = true;
+        self.document_changed();
+        self.touch();
+        if dropped > 0 {
+            self.set_message(
+                format!(
+                    "Recording ended early: {dropped} frames were dropped because the disk \
+                     couldn't keep up"
+                ),
+                true,
+            );
+        }
     }
 
     /// Opens a gesture, such as a drag on a value field: the document
@@ -3461,6 +3650,16 @@ impl Shell {
                         message: error.to_string(),
                     }
                 })?;
+            // WP-2.13. Recording gives the engine what to write before it
+            // knows the transport records. A reason no files can come of it
+            // (a set with no project folder, say) is reported in the Status
+            // Bar; the transport still records, as the metronome's "only
+            // while recording" follows it.
+            if command == bl_engine::TransportCommand::SetRecording(true)
+                && let Err(reason) = self.begin_recording()
+            {
+                self.set_message(reason, true);
+            }
             self.audio
                 .send_transport(command)
                 .map_err(|reason| ShellError::Unavailable {

@@ -198,6 +198,7 @@ fn deleting_the_source_leaves_no_input_and_the_device_its_own_input() {
         .device(gate)
         .unwrap()
         .sidechain
+        .clone()
         .unwrap();
     assert!(sidechain.enabled);
     // Deleting the device takes its sidechain with it.

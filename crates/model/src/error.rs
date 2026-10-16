@@ -33,6 +33,12 @@ pub enum ModelError {
         /// The track.
         track: TrackId,
     },
+    /// A clip carries two envelopes for one parameter (WP-3.15). Every
+    /// parameter has one envelope, or none.
+    DuplicateEnvelope {
+        /// The clip.
+        clip: ClipId,
+    },
     /// The device is a plug-in, which opens its own editor window rather
     /// than floating (IMP-14).
     CannotFloat(DeviceId),
@@ -128,6 +134,8 @@ pub enum ModelError {
         /// The note's index in the clip's note list.
         index: usize,
     },
+    /// A track's input isn't valid; the text says why.
+    InvalidInput(&'static str),
     /// The command changes an audio clip's settings, and this clip is a MIDI
     /// clip.
     NotAudioClip(ClipId),
@@ -220,6 +228,9 @@ impl fmt::Display for ModelError {
             ),
             Self::IdInUse(id) => write!(f, "ID {id} is already in use"),
             Self::DuplicateId(id) => write!(f, "ID {id} appears more than once"),
+            Self::DuplicateEnvelope { clip } => {
+                write!(f, "{clip} carries two envelopes for one parameter")
+            }
             Self::WrongTrackKind { track, kind, needs } => {
                 write!(f, "{track} is a {kind} track; this needs {needs}")
             }
@@ -258,6 +269,7 @@ impl fmt::Display for ModelError {
             Self::InvalidNote { index } => {
                 write!(f, "note {index} has a key or velocity out of range")
             }
+            Self::InvalidInput(why) => write!(f, "invalid input: {why}"),
             Self::NotAudioClip(id) => write!(f, "{id} is a MIDI clip; this needs an audio clip"),
             Self::NotMidiClip(id) => write!(f, "{id} is an audio clip; this needs a MIDI clip"),
             Self::CannotRoute { track, to } => write!(

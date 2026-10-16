@@ -16,6 +16,10 @@
 //!   [`Clip::offset`] before the clip starts, and the offset changes.
 //!
 //! [`Clip::part`] and [`Clip::with_start`] make those changes.
+//!
+//! A clip can also carry envelopes of its own ([`ClipEnvelope`], WP-3.15),
+//! one per parameter of its track they modulate; they play while the clip
+//! plays, and the rules are in the clip envelopes spec.
 
 use std::collections::BTreeSet;
 
@@ -24,6 +28,7 @@ use imbl::Vector;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::automation::{AutomationTarget, Envelope};
 use crate::error::ModelError;
 use crate::ids::{ClipId, ContentHash};
 
@@ -56,6 +61,11 @@ pub struct Clip {
     pub mute: bool,
     /// What the clip plays.
     pub data: ClipData,
+    /// The clip's envelopes (WP-3.15): one per parameter of its track it
+    /// modulates, in target order. Empty for a clip with none, which is what
+    /// a set saved before this package holds.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub envelopes: Vec<ClipEnvelope>,
 }
 
 impl Clip {
@@ -70,7 +80,21 @@ impl Clip {
             offset: Ticks::ZERO,
             mute: false,
             data,
+            envelopes: Vec::new(),
         }
+    }
+
+    /// The clip's envelopes, in target order.
+    pub fn envelopes(&self) -> impl ExactSizeIterator<Item = &ClipEnvelope> + '_ {
+        self.envelopes.iter()
+    }
+
+    /// The envelope the clip carries for `target`, if it has one.
+    #[must_use]
+    pub fn envelope(&self, target: &AutomationTarget) -> Option<&ClipEnvelope> {
+        self.envelopes
+            .iter()
+            .find(|envelope| envelope.target == *target)
     }
 
     /// Where the clip ends: its start plus its length.
@@ -191,6 +215,75 @@ impl Clip {
         }
         Ok(moved)
     }
+}
+
+/// A clip's envelope for one of its track's parameters (WP-3.15): the
+/// breakpoints it holds and whether it follows the clip's timeline.
+///
+/// A linked envelope (the Envelopes tab's Linked switch, on as a clip gets
+/// it) runs over the clip's own timeline: it plays what the clip's contents
+/// play, repeating with the clip's loop. An unlinked one plays once from the
+/// clip's start, one tick per tick, for as long as the clip lasts. The rules
+/// are in the clip envelopes spec.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[schemars(
+    description = "An envelope a clip carries for a parameter of its track: the parameter it \
+                   modulates, its breakpoints, and whether it follows the clip's timeline \
+                   (`linked`, the default) or runs once from the clip's start (`false`)."
+)]
+pub struct ClipEnvelope {
+    /// The parameter it modulates: a control of the clip's track's mixer, a
+    /// send, or a parameter of a device in its chain.
+    pub target: AutomationTarget,
+    /// Its breakpoints, in position order: positions are ticks from the
+    /// beginning of the clip's contents, like a note's start.
+    pub envelope: Envelope,
+    /// Whether it follows the clip's region and loop (`true`, the Linked
+    /// switch's default) or plays once from the clip's start (`false`).
+    #[serde(default = "linked_default", skip_serializing_if = "is_linked")]
+    pub linked: bool,
+}
+
+impl ClipEnvelope {
+    /// An envelope driving `target`, linked to its clip.
+    #[must_use]
+    pub fn new(target: AutomationTarget, envelope: Envelope) -> Self {
+        Self {
+            target,
+            envelope,
+            linked: true,
+        }
+    }
+}
+
+/// The `linked` a clip envelope gets when a set doesn't say.
+fn linked_default() -> bool {
+    true
+}
+
+/// The clip's entry for `target`, adding an empty linked one if there's
+/// none: for an edit that gives a parameter its first breakpoint.
+pub(crate) fn clip_entry(
+    envelopes: &mut Vec<ClipEnvelope>,
+    target: AutomationTarget,
+) -> &mut ClipEnvelope {
+    let index = envelopes
+        .iter()
+        .position(|envelope| envelope.target == target)
+        .unwrap_or_else(|| {
+            envelopes.push(ClipEnvelope::new(target, Envelope::default()));
+            envelopes.len() - 1
+        });
+    &mut envelopes[index]
+}
+
+/// Whether a clip envelope is linked, so serde leaves the default out.
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's skip_serializing_if passes a reference"
+)]
+fn is_linked(linked: &bool) -> bool {
+    *linked
 }
 
 /// How far a moved Start marker may land before the file's start and still

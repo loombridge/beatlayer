@@ -329,3 +329,33 @@ fn only_while_recording_silences_playback_unless_recording() {
         "audible once recording"
     );
 }
+
+#[test]
+fn a_locate_that_ends_the_take_ends_the_recording_only_clicks() {
+    // Spec: metronome R7; WP-2.13. A jump while recording ends the take and
+    // the transport's recording state with it, so the clicks go silent.
+    let mut rig = metronome_rig(
+        512,
+        MetronomeSettings {
+            sound: MetronomeSound::Click,
+            only_while_recording: true,
+            ..on()
+        },
+        TempoMap::constant(bpm(120.0)),
+    );
+    rig.sender.transport(TransportCommand::Play);
+    rig.sender.transport(TransportCommand::SetRecording(true));
+    let recording = rig.render(96_000, 512);
+    assert!(
+        recording.iter().any(|&s| s.abs() > 0.1),
+        "audible once recording"
+    );
+
+    rig.sender
+        .transport(TransportCommand::Locate(Ticks::QUARTER * 8));
+    let after = rig.render(96_000, 512);
+    assert!(
+        after.iter().all(|&s| s == 0.0),
+        "silent once the take ends at a locate"
+    );
+}

@@ -46,7 +46,8 @@ use bl_engine::preview::{
 };
 use bl_engine::{
     Collector, DROP_PERIOD, DropThread, Engine, EngineConfig, MediaLibrary, MediaStreams,
-    Processor, Registry, Report, ScheduledCommand, SessionCommand, SlotStatus, TransportCommand,
+    Processor, RecordingPlan, Registry, Report, ScheduledCommand, SessionCommand, SlotStatus,
+    TakeBounds, TransportCommand,
 };
 use bl_media::{MediaStore, StreamerStats};
 use bl_model::{Channel, Document, LaunchSettings};
@@ -231,13 +232,20 @@ impl AudioCallback for EngineCallback {
             let mut done = 0;
             while done < ctx.frames {
                 let frames = (ctx.frames - done).min(processor.config().max_frames);
-                let block = processor.process_with_input(
+                // The block's callback time, on the clock MIDI input is
+                // stamped against: the callback's start, moved on by the
+                // blocks before it in this callback (docs/specs/midi-io.md,
+                // R15, R16).
+                let block_at = started
+                    + Duration::from_secs_f64(done as f64 / f64::from(ctx.sample_rate.max(1)));
+                let block = processor.process_at(
                     frames,
                     &InputPart {
                         input,
                         offset: done,
                         frames,
                     },
+                    block_at,
                 );
                 for c in 0..block.channels() {
                     let to = main_out + c;
@@ -315,6 +323,11 @@ pub struct EngineTransport {
     pub insert_marker: Ticks,
     /// Frames the running engine has processed (its clock); 0 without one.
     pub clock: u64,
+    /// Whether the transport records (WP-2.13).
+    pub recording: bool,
+    /// The take that last ended, until the next recording starts: the song
+    /// frames it covers, which the recorded clips are made from.
+    pub take: Option<TakeBounds>,
 }
 
 /// The audio device the app plays through, the engine that plays the set
@@ -647,6 +660,20 @@ impl AudioHost {
         }
     }
 
+    /// Gives the engine what to record while the transport records
+    /// (WP-2.13): the armed tracks' inputs and the rings their samples go
+    /// to. It replaces any earlier plan; the take that ends drops it, which
+    /// closes the rings.
+    ///
+    /// # Errors
+    ///
+    /// Why nothing can record, while no engine runs: the audio engine is
+    /// off, or no device is open.
+    pub fn record(&mut self, plan: RecordingPlan) -> Result<(), String> {
+        self.running_engine()?.record(plan);
+        Ok(())
+    }
+
     /// Schedules a command at a musical position on the engine's queue,
     /// the queue the transport's commands take, so they arrive in the order
     /// they were sent (the agent API's scheduled commands, WP-1.15b).
@@ -754,6 +781,8 @@ impl AudioHost {
             position: state.position_ticks,
             insert_marker: state.insert_marker,
             clock: state.clock,
+            recording: state.recording,
+            take: state.take,
         };
         self.memory
     }

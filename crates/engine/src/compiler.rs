@@ -234,7 +234,10 @@ impl Compiler {
         let mut params = Vec::new();
         let recompile = needs_program(&changes, &old, document, &mut params);
         route_events(&changes, &old, document, &mut params);
-        // Tracks that held or hold a clip that changed.
+        // Tracks that held or hold a clip that changed: their players get
+        // their clips again, and their nodes their envelopes again, since a
+        // clip's envelopes modulate those and where the clip sits decides
+        // when it plays (WP-3.15).
         let tracks: BTreeSet<TrackId> = changes
             .clips
             .keys()
@@ -244,7 +247,7 @@ impl Compiler {
         let mut update = if recompile {
             let resend = Resend {
                 all: old.settings().tempo != document.settings().tempo,
-                tracks,
+                tracks: tracks.clone(),
             };
             self.compile_with(document, &resend)
         } else {
@@ -261,7 +264,7 @@ impl Compiler {
                     document.settings().metronome,
                 ));
             }
-            for track in tracks {
+            for &track in &tracks {
                 self.send_clips(document, track, &mut update);
             }
             update
@@ -269,8 +272,10 @@ impl Compiler {
         // A new program's restatement of migrated nodes goes first.
         update.params.extend(params);
         // A track whose envelopes changed sends its nodes their lists again,
-        // empty ones included, which clear the envelopes a node had. A new
-        // tempo map moved every envelope, so every track's goes again.
+        // empty ones included, which clear the envelopes a node had; so does
+        // a track whose clips changed, whose clip envelopes (WP-3.15) may
+        // have gone the same way. A new tempo map moved every envelope, so
+        // every track's goes again.
         let all = old.settings().tempo != document.settings().tempo;
         for track in document.tracks() {
             let id = track.id();
@@ -280,11 +285,12 @@ impl Compiler {
                 // and a deleted track's nodes are gone with the track.
                 _ => false,
             };
-            if all || differs {
-                // The track whose envelopes changed gets every list, so an
-                // empty one clears what a node had; a tempo map that moved
-                // them only sends the ones that drive something.
-                self.send_automation(document, id, !differs, &mut update);
+            let clips_changed = tracks.contains(&id);
+            if all || differs || clips_changed {
+                // The track whose envelopes or clips changed gets every
+                // list, so an empty one clears what a node had; a tempo map
+                // that moved them only sends the ones that drive something.
+                self.send_automation(document, id, !differs && !clips_changed, &mut update);
             }
         }
         update
@@ -435,6 +441,7 @@ impl Compiler {
         let generation = self.generation + 1;
         let base = (self.generation > 0).then_some(self.generation);
         let tasks = build.tasks.len();
+        let midi = crate::midi::MidiRoutes::compile(document, &build.tasks);
         let size = self.config.channels * self.config.max_frames;
         let (order, dependents) = run_order(&build);
         compensate(&mut build, &order);
@@ -479,6 +486,7 @@ impl Compiler {
                 NoteBuffer::with_capacity(1024),
                 NoteBuffer::with_capacity(1024),
             ],
+            midi,
         };
         self.generation = generation;
         self.layout = build.layout;
@@ -633,17 +641,23 @@ impl Compiler {
         };
         let muted = solo.edge_muted(edge);
         let closed = edge.monitored && !to.routing().monitoring(to.mixer().arm);
+        // Spec: routing R11. Under Monitor Auto the route also closes while
+        // the track's clips play, which the program sets each block.
+        let auto = edge.monitored && to.routing().monitor == bl_model::Monitor::Auto;
         if self.previous(key, &Identity::Route).is_some() {
             for (param, value) in [
                 (route::LEVEL, level),
                 (route::SOLO_MUTE, switch(muted)),
                 (route::CLOSED, switch(closed)),
+                (route::AUTO, switch(auto)),
             ] {
                 build.restate.push(ParamEvent::now(key, param, value));
             }
         }
         self.place(build, key, Identity::Route, 0, || {
-            Instance::Route(Box::new(Route::new(level, muted, &config).closed(closed)))
+            Instance::Route(Box::new(
+                Route::new(level, muted, &config).closed(closed).auto(auto),
+            ))
         })
     }
 
@@ -674,17 +688,21 @@ impl Compiler {
             bl_model::Input::External { channel } if track.kind() == TrackKind::Audio => {
                 let key = NodeKey::DeviceInput(track.id());
                 let closed = !track.routing().monitoring(track.mixer().arm);
+                let auto = track.routing().monitor == bl_model::Monitor::Auto;
                 if self.previous(key, &Identity::Route).is_some() {
                     for (param, value) in [
                         (route::LEVEL, 1.0),
                         (route::SOLO_MUTE, switch(false)),
                         (route::CLOSED, switch(closed)),
+                        (route::AUTO, switch(auto)),
                     ] {
                         build.restate.push(ParamEvent::now(key, param, value));
                     }
                 }
                 let route = self.place(build, key, Identity::Route, 0, || {
-                    Instance::Route(Box::new(Route::new(1.0, false, &config).closed(closed)))
+                    Instance::Route(Box::new(
+                        Route::new(1.0, false, &config).closed(closed).auto(auto),
+                    ))
                 });
                 Some(DeviceInput { route, channel })
             }
@@ -1176,8 +1194,17 @@ fn needs_program(
                     || !before.children().eq(after.children())
                     || before.mixer().tap != after.mixer().tap
                     || was.input != is.input
+                    || was.channel != is.channel
                     || was.output != is.output
                     || was.midi_output != is.midi_output
+                {
+                    recompile = true;
+                }
+                // A MIDI track's routes travel in the program (WP-2.2),
+                // with whether it monitors; an audio track's monitor change
+                // opens and closes routes instead.
+                if after.kind() == TrackKind::Midi
+                    && (was.monitor != is.monitor || before.mixer().arm != after.mixer().arm)
                 {
                     recompile = true;
                 }
@@ -1190,17 +1217,17 @@ fn needs_program(
     for (&id, &change) in &changes.devices {
         match (change, old.device(id), new.device(id)) {
             (Change::Modified, Some(before), Some(after)) => {
-                let (was, is) = (before.sidechain, after.sidechain);
+                let (was, is) = (before.sidechain.as_ref(), after.sidechain.as_ref());
                 if before.kind != after.kind
                     || before.enabled != after.enabled
                     || before.media != after.media
-                    || was.map(|s| s.input) != is.map(|s| s.input)
+                    || was.map(|s| &s.input) != is.map(|s| &s.input)
                 {
                     recompile = true;
                 }
                 if let (Some(was), Some(is)) = (was, is) {
-                    let then: Vec<_> = sidechain_settings(&was).collect();
-                    for (param, value) in sidechain_settings(&is) {
+                    let then: Vec<_> = sidechain_settings(was).collect();
+                    for (param, value) in sidechain_settings(is) {
                         if !then.contains(&(param, value)) {
                             params.push(ParamEvent::now(NodeKey::Sidechain(id), param, value));
                         }
@@ -1296,20 +1323,27 @@ fn route_events(changes: &ChangeSet, old: &Document, new: &Document, params: &mu
             && document
                 .track(edge.to)
                 .is_some_and(|to| !to.routing().monitoring(to.mixer().arm));
-        (solo.edge_muted(edge), closed)
+        let auto = edge.monitored
+            && document
+                .track(edge.to)
+                .is_some_and(|to| to.routing().monitor == bl_model::Monitor::Auto);
+        (solo.edge_muted(edge), closed, auto)
     };
     for edge in &is.edges {
         let key = route_key(edge);
         let Some(old_edge) = was.edges.iter().find(|e| route_key(e) == key) else {
             continue;
         };
-        let (muted_then, closed_then) = state(old, &before, old_edge);
-        let (muted, closed) = state(new, &after, edge);
+        let (muted_then, closed_then, auto_then) = state(old, &before, old_edge);
+        let (muted, closed, auto) = state(new, &after, edge);
         if muted_then != muted {
             params.push(ParamEvent::now(key, route::SOLO_MUTE, switch(muted)));
         }
         if closed_then != closed {
             params.push(ParamEvent::now(key, route::CLOSED, switch(closed)));
+        }
+        if auto_then != auto {
+            params.push(ParamEvent::now(key, route::AUTO, switch(auto)));
         }
     }
     for track in new.tracks().filter(|t| t.kind() == TrackKind::Audio) {
@@ -1324,7 +1358,8 @@ fn route_events(changes: &ChangeSet, old: &Document, new: &Document, params: &mu
             ));
         }
         // Ext. In hears the interface while the track monitors it; Monitor
-        // or Arm alone doesn't recompile (WP-2.13).
+        // or Arm alone doesn't recompile (WP-2.13). Under Monitor Auto it
+        // also closes while the track's clips play (the routing spec, R11).
         if matches!(track.routing().input, bl_model::Input::External { .. }) {
             let closed = |t: &Track| !t.routing().monitoring(t.mixer().arm);
             if closed(then) != closed(track) {
@@ -1332,6 +1367,14 @@ fn route_events(changes: &ChangeSet, old: &Document, new: &Document, params: &mu
                     NodeKey::DeviceInput(track.id()),
                     route::CLOSED,
                     switch(closed(track)),
+                ));
+            }
+            let auto = |t: &Track| t.routing().monitor == bl_model::Monitor::Auto;
+            if auto(then) != auto(track) {
+                params.push(ParamEvent::now(
+                    NodeKey::DeviceInput(track.id()),
+                    route::AUTO,
+                    switch(auto(track)),
                 ));
             }
         }
@@ -1791,7 +1834,18 @@ mod tests {
         };
         let update = new_clip(&mut f, 1);
         assert!(update.program.is_none());
-        assert_eq!(update.data.len(), 1);
+        // The clip edit sends the track's player its clips, and its nodes
+        // their envelopes again (WP-3.15: a clip's envelopes modulate those,
+        // so an empty list clears what the track had). Only the changed
+        // track's player is sent.
+        assert_eq!(
+            update
+                .data
+                .iter()
+                .filter(|(key, _)| matches!(key, NodeKey::Player(id) if *id == audio))
+                .count(),
+            1
+        );
         assert_eq!(clips_in(&update, audio), Some(1));
         assert!(update.missing.is_empty());
         // A clip whose media the library doesn't have is reported, and its

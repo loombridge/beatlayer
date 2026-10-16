@@ -7,6 +7,7 @@ use rtrb::Consumer;
 use crate::message::{LoopRegion, Report};
 #[cfg(doc)]
 use crate::mixer::{METER_RELEASE_DB_PER_SECOND, RMS_SECONDS};
+use crate::recording::TakeBounds;
 use crate::session::SlotStatus;
 
 /// One track's meters: its peak and RMS levels per channel, as linear
@@ -84,6 +85,11 @@ pub struct EngineState {
     pub insert_marker: Ticks,
     /// The Arrangement loop the engine plays, if it's on.
     pub loop_region: Option<LoopRegion>,
+    /// Whether the transport is recording (WP-2.13).
+    pub recording: bool,
+    /// The take that last ended, until the next recording starts: the song
+    /// frames it covers. The shell makes the recorded clips from it.
+    pub take: Option<TakeBounds>,
     /// The running program's generation, if one has arrived.
     pub program: Option<u64>,
     /// Programs swapped in.
@@ -117,6 +123,8 @@ impl EngineState {
             position_ticks: Ticks::ZERO,
             insert_marker: Ticks::ZERO,
             loop_region: None,
+            recording: false,
+            take: None,
             program: None,
             swaps: 0,
             cpu_load: 0.0,
@@ -163,6 +171,8 @@ impl Clone for EngineState {
             position_ticks: self.position_ticks,
             insert_marker: self.insert_marker,
             loop_region: self.loop_region,
+            recording: self.recording,
+            take: self.take,
             program: self.program,
             swaps: self.swaps,
             cpu_load: self.cpu_load,

@@ -1181,7 +1181,10 @@ impl Processor {
             });
         }
         let captured = match (self.program.as_ref(), self.plan.as_mut()) {
-            (Some(program), Some(plan)) => plan.get_mut().capture(program.get(), offset, frames),
+            (Some(program), Some(plan)) => {
+                plan.get_mut()
+                    .capture(program.get(), self.position, offset, frames)
+            }
             _ => false,
         };
         if !captured {

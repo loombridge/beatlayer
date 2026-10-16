@@ -87,6 +87,7 @@ fn the_shell_registers_the_transport_and_runs_it_on_the_engine() {
         "transport.set_metronome_only_while_recording",
         "transport.set_metronome_rhythm",
         "transport.set_metronome_sound",
+        "transport.set_midi_overdub",
         "transport.state",
     ]);
     expected.sort_unstable();

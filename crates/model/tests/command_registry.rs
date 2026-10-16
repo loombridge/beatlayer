@@ -50,7 +50,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        89,
+        90,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -58,7 +58,7 @@ fn every_document_command_is_registered() {
          WP-2.1 two for MIDI clips, WP-2.16 set_device_sample, WP-2.15 five for the metronome, \
          WP-2.13 the two for Main Out and Cue Out, WP-3.1 five for scenes and two for slot \
          clips, WP-3.2 set_slot_stop_button, WP-2.12 seven for automation, WP-3.15 six for clip \
-         envelopes, and WP-3.17 two for the crossfader"
+         envelopes, and WP-3.17 two for the crossfader, and WP-2.14 set_midi_overdub"
     );
 
     for op in &ops {
@@ -895,6 +895,8 @@ fn every_command_runs_by_id() {
         "transport.set_metronome_only_while_recording",
         json!({ "only_while_recording": true }),
     );
+    agent.run("transport.set_midi_overdub", json!({ "enabled": true }));
+    assert!(agent.editor.document().settings().midi_overdub);
     assert!(
         agent
             .editor
@@ -1486,6 +1488,10 @@ fn schemas_match_what_commands_serialise() {
             Command::SetMetronomeOnlyWhileRecording {
                 only_while_recording: true,
             },
+        ),
+        (
+            "transport.set_midi_overdub",
+            Command::SetMidiOverdub { enabled: true },
         ),
         (
             "clip.create_in_slot",

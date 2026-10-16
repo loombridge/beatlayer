@@ -2804,50 +2804,60 @@ impl Shell {
         &self.session_states
     }
 
-    /// Starts a recording (WP-2.13): a ring for every armed audio track
-    /// whose Audio From is Ext. In, and a writer thread draining them into
-    /// the project's `Samples/Recorded/`. The engine is given the rings
+    /// Starts a recording (WP-2.13, WP-2.14): a ring for every armed audio
+    /// track whose Audio From is Ext. In, and a writer thread draining them
+    /// into the project's `Samples/Recorded/`; and a ring for every armed
+    /// MIDI track, which needs no folder. The engine is given the rings
     /// before the transport is told it records.
     fn begin_recording(&mut self) -> Result<(), String> {
-        let Some(set) = self.set_path.clone() else {
-            return Err(
-                "the set has never been saved; use `set.save_as` to give it a project folder, \
-                 where its recordings go"
-                    .to_owned(),
-            );
-        };
         let rate = self
             .audio
             .sample_rate()
             .and_then(SampleRate::new)
             .ok_or("no audio device is open")?;
-        let folder = ProjectFolder::of_set(&set).root().to_path_buf();
+        let folder = self
+            .set_path
+            .as_ref()
+            .map(|set| ProjectFolder::of_set(set).root().to_path_buf());
         let stamp = crate::recording::stamp();
         self.recorded_takes += 1;
         let take = self.recorded_takes;
         let document = self.editor.document();
         let mut tracks = Vec::new();
+        let mut midi = Vec::new();
         for id in document.track_order() {
             let Some(track) = document.track(id) else {
                 continue;
             };
-            if track.kind() != TrackKind::Audio || !track.mixer().arm {
+            if !track.mixer().arm {
                 continue;
             }
-            let Input::External { channel } = track.routing().input else {
-                continue;
-            };
-            tracks.push(crate::recording::Track {
-                track: id,
-                channel,
-                name: crate::recording::file_name(
-                    &crate::routing::track_label(document, id),
-                    take,
-                    &stamp,
-                ),
-            });
+            match (track.kind(), &track.routing().input) {
+                (TrackKind::Midi, _) => midi.push(id),
+                (TrackKind::Audio, Input::External { channel }) => {
+                    tracks.push(crate::recording::Track {
+                        track: id,
+                        channel: *channel,
+                        name: crate::recording::file_name(
+                            &crate::routing::track_label(document, id),
+                            take,
+                            &stamp,
+                        ),
+                    });
+                }
+                _ => {}
+            }
         }
-        let (plan, recording) = crate::recording::start(&folder, rate, &tracks)?;
+        if folder.is_none() && !tracks.is_empty() {
+            // The audio has nowhere to go; the MIDI still records.
+            self.set_message(
+                "the set has never been saved; use `set.save_as` to give it a project folder, \
+                 where its recordings go",
+                true,
+            );
+            tracks.clear();
+        }
+        let (plan, recording) = crate::recording::start(folder.as_deref(), rate, &tracks, &midi)?;
         self.audio.record(plan)?;
         self.recording = Some(recording);
         Ok(())
@@ -2890,10 +2900,11 @@ impl Shell {
         }
     }
 
-    /// Makes the clips of a finished recording, one undo step (WP-2.13):
-    /// each file becomes an audio clip on its track, from the song frame
-    /// the take started on to the one it ended on. Undo removes the clips;
-    /// the files stay, as Live keeps recorded files. A report the writer
+    /// Makes the clips of a finished recording, one undo step (WP-2.13,
+    /// WP-2.14): each file becomes an audio clip on its track, and each
+    /// armed MIDI track's notes a MIDI clip, from the song frame the take
+    /// started on to the one it ended on. Undo removes the clips; the files
+    /// stay, as Live keeps recorded files. A report the writer
     /// sent (a failed file) makes no clips and shows in the Status Bar, and
     /// frames the engine dropped because the disk fell behind are reported
     /// there too.
@@ -2901,6 +2912,7 @@ impl Shell {
         let crate::recording::Outcome {
             take,
             files,
+            midi,
             dropped,
         } = outcome;
         let files = match files {
@@ -2910,7 +2922,7 @@ impl Shell {
                 return;
             }
         };
-        if files.is_empty() {
+        if files.is_empty() && midi.is_empty() {
             return;
         }
         let Some(take) = take else {
@@ -2928,6 +2940,7 @@ impl Shell {
         let start = tempo.frames_to_ticks(take.start, rate);
         let end = tempo.frames_to_ticks(take.end, rate);
         let edge_fades = self.create_fades_on_clip_edges();
+        let overdub = self.editor.document().settings().midi_overdub;
         let mut imported = Vec::with_capacity(files.len());
         for file in &files {
             match self.media.import(&file.path) {
@@ -2977,7 +2990,7 @@ impl Shell {
                         clip,
                     })?;
                 }
-                Ok::<(), bl_model::EditError>(())
+                crate::recording::place_midi(editor, &midi, take, rate, overdub, &mut placed)
             });
         if let Err(error) = applied {
             self.set_message(format!("Recording failed: {error}"), true);
@@ -3117,6 +3130,7 @@ impl Shell {
             "transport.set_metronome_enabled" => {
                 Some(self.editor.document().settings().metronome.enabled)
             }
+            "transport.set_midi_overdub" => Some(self.editor.document().settings().midi_overdub),
             "transport.set_metronome_only_while_recording" => Some(
                 self.editor
                     .document()
@@ -3496,6 +3510,12 @@ impl Shell {
                 fields.insert("enabled".to_owned(), json!(!on));
             }
         }
+        if id == "transport.set_midi_overdub" && !fields.contains_key("enabled") {
+            // Options ▸ MIDI Arrangement Overdub switches the setting to the
+            // other state.
+            let on = self.editor.document().settings().midi_overdub;
+            fields.insert("enabled".to_owned(), json!(!on));
+        }
         if id == SOLO_IN_PLACE && !fields.contains_key("enabled") {
             // Spec: accessibility R9. Options ▸ Solo in Place switches the
             // setting to the other state.
@@ -3670,6 +3690,10 @@ impl Shell {
                 self.run(id, args)
             }
             SOLO_IN_PLACE if !has("enabled") => {
+                let args = self.filled_args(id, args)?;
+                self.run(id, args)
+            }
+            "transport.set_midi_overdub" if !has("enabled") => {
                 let args = self.filled_args(id, args)?;
                 self.run(id, args)
             }

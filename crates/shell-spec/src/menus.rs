@@ -724,7 +724,11 @@ const OPTIONS: &[Row] = &[
     ("M-OPT-025", "Solo in Place", Cmd("mixer.set_solo_in_place")),
     SEPARATOR,
     ("M-OPT-026", "Lock Envelopes", Pending(None)),
-    ("M-OPT-027", "MIDI Arrangement Overdub", Pending(None)),
+    (
+        "M-OPT-027",
+        "MIDI Arrangement Overdub",
+        Cmd(crate::transport::SET_MIDI_OVERDUB),
+    ),
     SEPARATOR,
     (
         "M-OPT-028",

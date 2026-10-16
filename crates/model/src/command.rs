@@ -1638,6 +1638,18 @@ impl Document {
                 .expect("just checked the slot holds a clip");
             self.index.clip_track.remove(&clip.id);
         }
+        // A slot's removed Clip Stop button goes with its scene too (WP-3.2):
+        // a set names no stop-button state for a scene that's gone, so the
+        // tracks that only remember a removal change as well.
+        let buttons: Vec<TrackId> = self
+            .tracks
+            .iter()
+            .filter(|(_, track)| track.removed_stop_buttons.contains(&id))
+            .map(|(&track, _)| track)
+            .collect();
+        for track in buttons {
+            self.track_mut(track)?.removed_stop_buttons.remove(&id);
+        }
         Ok(())
     }
 

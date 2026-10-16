@@ -209,12 +209,11 @@ impl SessionLauncher {
     /// Launches `(track, scene)` to play from `at` (already worked out, so
     /// a scene's slots share one frame).
     fn launch_at(&mut self, track: TrackId, scene: SceneId, at: Frames) {
-        // Already playing: a second launch of the same slot is the launch
-        // modes' business (WP-3.3).
-        if self
-            .find_mut(track, scene)
-            .is_some_and(|slot| slot.started.is_some())
-        {
+        // A slot that is already queued or playing is left alone: a second
+        // launch of the same slot changes nothing, for now (the launch modes,
+        // WP-3.3, decide what a second press means), and a queued slot keeps
+        // the frame it was queued for (R4). One entry per slot.
+        if self.find_mut(track, scene).is_some() {
             return;
         }
         self.clear_way_for(track, scene, at);
@@ -664,6 +663,33 @@ mod tests {
         launcher.apply_due(next);
         assert_eq!(launcher.state_of(track, other), None);
         assert_eq!(launcher.state_of(track, third), Some(SlotState::Playing));
+    }
+
+    #[test]
+    fn a_second_launch_of_the_same_slot_leaves_one_entry() {
+        // Spec: launch-quantisation R12. A second launch of a slot that is
+        // queued or playing changes nothing, so the launcher holds one entry
+        // per slot.
+        let (track, scene) = ids();
+        let tempo = tempo();
+        let sigs = TimeSignatureMap::default();
+        let mut launcher = SessionLauncher::new(16);
+        launcher.launch(track, scene, playhead(&tempo, &sigs, true, Ticks::QUARTER));
+        let due = tempo.ticks_to_frames(Ticks::WHOLE, SampleRate::HZ_48000);
+        launcher.launch(track, scene, playhead(&tempo, &sigs, true, Ticks::QUARTER));
+        let mut status = Vec::with_capacity(8);
+        launcher.status(&mut status);
+        assert_eq!(status.len(), 1, "{status:?}");
+        assert_eq!(
+            launcher.next_due(Frames::ZERO),
+            Some(due),
+            "the frame it was queued for stays"
+        );
+        launcher.apply_due(due);
+        launcher.launch(track, scene, playhead(&tempo, &sigs, true, Ticks::WHOLE * 3));
+        launcher.status(&mut status);
+        assert_eq!(status.len(), 1, "{status:?}");
+        assert_eq!(launcher.state_of(track, scene), Some(SlotState::Playing));
     }
 
     #[test]

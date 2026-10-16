@@ -38,6 +38,7 @@
 //! `egui::Context` and synthetic input.
 
 pub mod arrangement;
+pub mod assistant_panel;
 pub mod browser;
 pub mod clip_view;
 pub mod control_bar;

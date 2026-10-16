@@ -28,8 +28,8 @@ use crate::agent::{
 use crate::arrangement::editing::{self, Clipboard, EditFailure};
 use crate::arrangement::{ArrangementView, TransportView, ViewError, Viewport};
 use crate::assistant::{
-    self as assistant_ids, ActivityEntry, AssistantSettings, AssistantState, Outcome,
-    SetBaseUrlArgs, SetKeyArgs, SetModelArgs, SetProviderArgs, keychain_account,
+    self as assistant_ids, ActivityEntry, AssistantSettings, AssistantState, Outcome, SendArgs,
+    SetBaseUrlArgs, SetKeyArgs, SetModelArgs, SetPanelWidthArgs, SetProviderArgs, keychain_account,
 };
 use crate::audio::{AudioHost, ConfigureAudio, EngineTransport, ToneSettings};
 use crate::browser::{self, BrowserError, BrowserView, Waker};
@@ -103,6 +103,8 @@ pub enum WindowKind {
     Settings,
     /// A floating device's window (WP-2.5b, IMP-14).
     Device(bl_model::DeviceId),
+    /// The assistant's panel in a window of its own (WP-2.23, part 3; D24).
+    Assistant,
 }
 
 /// An area of the main window that can hold the keyboard focus.
@@ -118,6 +120,8 @@ pub enum Area {
     Detail,
     /// The Status Bar (L-WIN-007).
     StatusBar,
+    /// The assistant's pane at the right edge (D24).
+    Assistant,
 }
 
 /// `mixer.set_solo_in_place`, which Options ▸ Solo in Place runs as a
@@ -328,6 +332,15 @@ pub struct Shell {
     assistant_log: Vec<ActivityEntry>,
     /// Whether the activity log is open in the Settings window.
     assistant_log_open: bool,
+    /// Whether the assistant's panel is open (WP-2.23, part 3): view state,
+    /// never part of the set, like the browser's. Where it sits and how
+    /// wide are in the preferences.
+    assistant_open: bool,
+    /// The panel's conversation, which a turn fills while it runs.
+    assistant_conversation: crate::assistant::SharedConversation,
+    /// The panel's Stop button, which the turn running looks at between
+    /// calls.
+    assistant_stop_flag: crate::assistant::StopFlag,
     /// What the Arrangement View shows (WP-1.8a).
     arrangement: ArrangementView,
     /// What the Clip View shows (WP-2.3): whether it's open, Draw Mode, and
@@ -606,6 +619,9 @@ impl Shell {
             assistant_key_set: false,
             assistant_log: Vec::new(),
             assistant_log_open: false,
+            assistant_open: false,
+            assistant_conversation: Arc::default(),
+            assistant_stop_flag: Arc::default(),
             arrangement: ArrangementView::new(),
             clip_view: ClipView::default(),
             document_revision: 0,
@@ -829,6 +845,129 @@ impl Shell {
     pub fn refresh_assistant_key(&mut self) {
         let account = keychain_account(self.prefs.assistant.provider);
         self.assistant_key_set = matches!(self.keychain.read(account), Ok(Some(_)));
+    }
+
+    /// The panel's conversation, oldest first.
+    #[must_use]
+    pub fn assistant_rows(&self) -> Vec<assistant_ids::Row> {
+        crate::assistant::lock(&self.assistant_conversation)
+            .rows
+            .clone()
+    }
+
+    /// Whether an assistant turn is running.
+    #[must_use]
+    pub fn assistant_running(&self) -> bool {
+        crate::assistant::lock(&self.assistant_conversation).running
+    }
+
+    /// The message the person sent that no turn has taken yet, which the
+    /// host answers by running a turn ([`run_turn`]).
+    pub fn take_assistant_prompt(&mut self) -> Option<String> {
+        crate::assistant::lock(&self.assistant_conversation)
+            .pending
+            .take()
+    }
+
+    /// Adds the person's message to the conversation, to be taken by
+    /// [`Shell::take_assistant_prompt`].
+    pub(crate) fn assistant_send(&mut self, text: &str) -> Result<(), String> {
+        let text = text.trim();
+        if text.is_empty() {
+            return Err("the message is empty".to_owned());
+        }
+        let mut conversation = crate::assistant::lock(&self.assistant_conversation);
+        if conversation.running || conversation.pending.is_some() {
+            return Err("the assistant is still answering the last message".to_owned());
+        }
+        conversation
+            .rows
+            .push(assistant_ids::Row::You(text.to_owned()));
+        conversation.pending = Some(text.to_owned());
+        // The assistant is at work from the message on, so the panel shows
+        // Stop until the turn ends.
+        conversation.running = true;
+        Ok(())
+    }
+
+    /// Moves the keyboard focus to the main view when the pane that had it
+    /// closed or floated away, as closing the browser does.
+    fn leave_hidden_assistant(&mut self) {
+        if self.focused_area == Area::Assistant && self.assistant_docked_width().is_none() {
+            self.focused_area = Area::MainView;
+        }
+    }
+
+    /// Asks the running turn to stop between two calls; a message no turn
+    /// has taken yet is withdrawn instead.
+    pub(crate) fn assistant_stop(&self) {
+        let mut conversation = crate::assistant::lock(&self.assistant_conversation);
+        if conversation.pending.take().is_some() {
+            conversation.running = false;
+            conversation
+                .rows
+                .push(assistant_ids::Row::Notice("Stopped.".to_owned()));
+        } else if conversation.running {
+            self.assistant_stop_flag
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    /// The docked panel's width in points while it is open and docked: the
+    /// main window lays itself out beside it (D24).
+    #[must_use]
+    pub fn assistant_docked_width(&self) -> Option<f32> {
+        (self.assistant_open && !self.prefs.assistant_panel.floating)
+            .then(|| assistant_ids::clamp_panel_width(self.prefs.assistant_panel.width))
+    }
+
+    /// Whether the panel is open in a window of its own.
+    #[must_use]
+    pub fn assistant_window_open(&self) -> bool {
+        self.assistant_open && self.prefs.assistant_panel.floating
+    }
+
+    /// The panel's state, for the commands' results.
+    #[must_use]
+    pub fn assistant_panel_state(&self) -> assistant_ids::AssistantPanelState {
+        assistant_ids::AssistantPanelState {
+            open: self.assistant_open,
+            floating: self.prefs.assistant_panel.floating,
+            width: assistant_ids::clamp_panel_width(self.prefs.assistant_panel.width),
+            running: self.assistant_running(),
+        }
+    }
+
+    /// The flag Stop sets, for a host that runs a turn while it also takes
+    /// the person's clicks: setting it ends the turn between two calls, as
+    /// `assistant.stop` does.
+    #[must_use]
+    pub fn assistant_stop_flag(&self) -> Arc<std::sync::atomic::AtomicBool> {
+        Arc::clone(&self.assistant_stop_flag)
+    }
+
+    /// The conversation and the Stop flag, for [`crate::assistant::run_turn`]
+    /// to hold while the shell runs the turn's calls.
+    pub(crate) fn assistant_handles(
+        &self,
+    ) -> (
+        crate::assistant::SharedConversation,
+        crate::assistant::StopFlag,
+    ) {
+        (
+            Arc::clone(&self.assistant_conversation),
+            Arc::clone(&self.assistant_stop_flag),
+        )
+    }
+
+    /// Tells the window the panel changed.
+    pub(crate) fn assistant_touch(&mut self) {
+        self.touch();
+    }
+
+    /// Gives the call that waits for `command` its result in the panel.
+    pub(crate) fn assistant_finish_call(&self, command: &str, outcome: Result<Value, String>) {
+        crate::assistant::lock(&self.assistant_conversation).finish_call(command, outcome);
     }
 
     /// Opens a turn's changes as one undo step named `label`, which the
@@ -2907,6 +3046,8 @@ impl Shell {
     pub fn active_contexts(&self) -> Vec<Context> {
         match self.focused_window {
             WindowKind::Settings => vec![Context::Settings, Context::Dialog, Context::Global],
+            // The floating assistant: only the global keys work in it.
+            WindowKind::Assistant => vec![Context::Global],
             // A floating device's window: its device is selected, so the
             // Device View's keys act on it (Float's among them), and the
             // global ones work.
@@ -2941,7 +3082,7 @@ impl Shell {
                         }
                     }
                     Area::Detail => contexts.push(Context::DeviceView),
-                    Area::ControlBar | Area::StatusBar => {}
+                    Area::ControlBar | Area::StatusBar | Area::Assistant => {}
                 }
                 if self.prefs.tab_navigation {
                     contexts.push(Context::TabFocus);
@@ -2967,6 +3108,7 @@ impl Shell {
                     .is_some_and(|clip| self.clip_view.is_folded(clip)),
             ),
             ids::VIEW_TOGGLE_INFO_VIEW => Some(self.info_view),
+            assistant_ids::VIEW_TOGGLE_ASSISTANT => Some(self.assistant_open),
             ids::VIEW_TOGGLE_PLUG_IN_WINDOWS => Some(self.plug_in_windows),
             ids::FOCUS_TOGGLE_TAB_NAVIGATION => Some(self.prefs.tab_navigation),
             ids::FOCUS_TOGGLE_WRAP_NAVIGATION => Some(self.prefs.wrap_navigation.0),
@@ -3071,6 +3213,8 @@ impl Shell {
             ids::WINDOW_CLOSE => {
                 return match self.focused_window {
                     WindowKind::Settings => self.settings_open,
+                    // Closing the floating assistant closes the panel.
+                    WindowKind::Assistant => self.assistant_window_open(),
                     // Closing a floating device's window docks it.
                     WindowKind::Device(device) => self
                         .editor
@@ -4422,6 +4566,12 @@ impl Shell {
                         json!({ "device": device, "floating": false }),
                     );
                 }
+                if self.focused_window == WindowKind::Assistant {
+                    self.focused_window = WindowKind::Main;
+                    self.assistant_open = false;
+                    self.touch();
+                    return Ok(Value::Null);
+                }
                 if !self.settings_open {
                     return Err(unavailable("no secondary window is open"));
                 }
@@ -4829,6 +4979,45 @@ impl Shell {
                     .map_err(|error| failed(error.to_string()))?;
                 self.refresh_assistant_key();
                 Ok(to_value(&self.assistant_state()))
+            }
+            assistant_ids::VIEW_TOGGLE_ASSISTANT => {
+                Self::args::<NoArgs>(id, args)?;
+                self.assistant_open = !self.assistant_open;
+                if self.assistant_open && !self.prefs.assistant_panel.floating {
+                    // The keyboard goes to the pane's prompt field, as
+                    // the browser's focus command takes it into the browser.
+                    self.focused_area = Area::Assistant;
+                    self.effects.push(Effect::FocusArea(Area::Assistant));
+                }
+                self.leave_hidden_assistant();
+                self.touch();
+                Ok(to_value(&self.assistant_panel_state()))
+            }
+            assistant_ids::ASSISTANT_SET_PANEL_WIDTH => {
+                let SetPanelWidthArgs { width } = Self::args(id, args)?;
+                self.prefs.assistant_panel.width = assistant_ids::clamp_panel_width(width);
+                self.save_preferences();
+                self.touch();
+                Ok(to_value(&self.assistant_panel_state()))
+            }
+            assistant_ids::ASSISTANT_TOGGLE_FLOATING => {
+                Self::args::<NoArgs>(id, args)?;
+                self.prefs.assistant_panel.floating = !self.prefs.assistant_panel.floating;
+                self.save_preferences();
+                self.leave_hidden_assistant();
+                self.touch();
+                Ok(to_value(&self.assistant_panel_state()))
+            }
+            assistant_ids::ASSISTANT_SEND => {
+                let SendArgs { text } = Self::args(id, args)?;
+                self.assistant_send(&text).map_err(failed)?;
+                self.touch();
+                Ok(to_value(&self.assistant_panel_state()))
+            }
+            assistant_ids::ASSISTANT_STOP => {
+                Self::args::<NoArgs>(id, args)?;
+                self.assistant_stop();
+                Ok(to_value(&self.assistant_panel_state()))
             }
             assistant_ids::ASSISTANT_TOGGLE_ACTIVITY_LOG => {
                 Self::args::<NoArgs>(id, args)?;

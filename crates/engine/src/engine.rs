@@ -9,7 +9,7 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use bl_model::Document;
+use bl_model::{DeviceId, Document};
 use rtrb::{Producer, PushError, RingBuffer};
 
 use crate::EngineConfig;
@@ -187,6 +187,9 @@ enum Request {
     Sync(Box<Document>),
     Param(ParamEvent),
     Data(NodeKey, NodeData),
+    /// The latency a device's node reports now, from a plug-in that
+    /// changed its own (WP-2.7).
+    Latency(DeviceId, u32),
     Transport(TransportCommand, When),
     Schedule(ScheduledCommand),
     Cancel(u64),
@@ -279,6 +282,7 @@ impl std::fmt::Debug for Request {
             Self::Sync(_) => "Sync",
             Self::Param(_) => "Param",
             Self::Data(..) => "Data",
+            Self::Latency(..) => "Latency",
             Self::Transport(..) => "Transport",
             Self::Schedule(_) => "Schedule",
             Self::Cancel(_) => "Cancel",
@@ -440,6 +444,14 @@ impl Engine {
     /// Sends data to a node (see [`Sender::send_data`]).
     pub fn send_data(&self, key: NodeKey, data: NodeData) {
         self.request(Request::Data(key, data));
+    }
+
+    /// Reports `device`'s node's latency now, as a plug-in that restarted
+    /// for a new one does: the compiler compiles a program whose delay
+    /// compensation uses it, so a latency change reaches the running song
+    /// (WP-2.7; delay-compensation R6).
+    pub fn set_device_latency(&self, device: DeviceId, frames: u32) {
+        self.request(Request::Latency(device, frames));
     }
 
     /// Wraps a value as node data, to send with [`Engine::send_data`].
@@ -625,6 +637,20 @@ fn compile_loop(
                 Request::Data(key, data) => {
                     if let Some(sender) = sender.as_mut() {
                         sender.send_data(key, data);
+                    }
+                }
+                Request::Latency(device, frames) => {
+                    // While no processor runs, the next restart compiles
+                    // every node anew, and they read their plug-ins'
+                    // latency themselves.
+                    if let Some(sender) = sender.as_mut() {
+                        let update = compiler.latency(device, frames);
+                        if update.program.is_some() {
+                            counts.programs.fetch_add(1, Relaxed);
+                        } else {
+                            counts.without_program.fetch_add(1, Relaxed);
+                        }
+                        sender.send_update(update);
                     }
                 }
                 Request::Transport(command, at) => match sender.as_mut() {

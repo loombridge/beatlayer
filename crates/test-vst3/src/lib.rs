@@ -2,27 +2,38 @@
 //! It's never shipped; the tests load its bundle by path.
 //!
 //! "Test Gain Echo" (`bl-test-vst3`) is an audio effect that also takes
-//! notes, so one plug-in exercises everything the host does in part 1:
+//! notes, so one plug-in exercises everything the host does:
 //!
 //! - **Audio.** One stereo bus in and out: each sample is its input times
-//!   the gain, as of the frame of the last parameter change before it.
-//! - **Parameters in.** The host sends the gain through the process block's
-//!   `IParameterChanges`, so a change lands on its exact frame: the gain is
-//!   a normalized parameter of the controller, whose plain range is 0 to 2
-//!   (1 by default).
+//!   the gain, as of the frame of the last parameter change before it,
+//!   delayed by the latency it reported when it was activated.
+//! - **Parameters in.** The host sends the gain, the latency and the last
+//!   note through the process block's `IParameterChanges`, so a change lands
+//!   on its exact frame (the gain), or takes effect at the plug-in's next
+//!   activation (the latency).
+//! - **Parameters out.** The controller performs a gesture on [`LAST_NOTE`]
+//!   — `beginEdit`, two `performEdit`s, `endEdit` — when a test hands it a
+//!   [`gesture_state`], standing in for its editor; and a change of
+//!   [`LATENCY`] asks the host for a restart, as its editor would.
+//! - **Latency.** It reports [`LATENCY`]'s value, as of its last activation,
+//!   and delays its audio by exactly that.
+//! - **State.** The component saves its gain and latency, the controller its
+//!   gain, latency and last note; two states make it fail on purpose:
+//!   [`FAIL_PROCESS`] makes every process call fail, and [`FAIL_ACTIVATE`]
+//!   its next activation.
 //! - **Notes in and out.** A note-on adds its velocity to the output on its
 //!   frame (an impulse), and every note-on and note-off goes back out an
 //!   octave up on the same frame, through the block's `IEventList`.
 //!
-//! State, latency and an editor are the next part's (WP-2.7, T65).
+//! The editor itself is the next part's (WP-2.10).
 
-use std::cell::Cell;
+use std::cell::{Cell, UnsafeCell};
 use std::ffi::{CString, c_char, c_void};
 use std::path::{Path, PathBuf};
 use std::ptr;
 use std::slice;
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU32, AtomicU64, Ordering};
 
 use vst3::Steinberg::Vst::*;
 use vst3::Steinberg::*;
@@ -30,12 +41,40 @@ use vst3::{Class, ComPtr, ComRef, ComWrapper, uid};
 
 /// The plug-in's name, as its classes carry it.
 pub const PLUGIN_NAME: &str = "Test Gain Echo";
-/// The gain parameter's ID.
+/// The gain parameter's ID. A linear factor from 0 to 2, 1 by default.
 pub const GAIN: u32 = 0;
+/// The latency parameter's ID: the frames it reports and delays by, 0 to
+/// [`MAX_LATENCY`], stepped. A change asks the host for a restart.
+pub const LATENCY: u32 = 1;
+/// The last-note parameter's ID: the key of the last note the controller
+/// was told, 0 to 127, stepped. The controller sets it itself, in a
+/// gesture, as its editor would.
+pub const LAST_NOTE: u32 = 2;
 /// The gain's plain range: 0 to this, 1 by default.
 pub const GAIN_MAX: f64 = 2.0;
+/// The most frames the plug-in's latency can be, and the length of its
+/// delay line.
+pub const MAX_LATENCY: usize = 4096;
 /// How far the echoed notes are transposed, in semitones.
 pub const ECHO_TRANSPOSE: i16 = 12;
+/// What a saved component state starts with.
+pub const COMPONENT_MAGIC: &[u8; 4] = b"BLTC";
+/// What a saved controller state starts with.
+pub const CONTROLLER_MAGIC: &[u8; 4] = b"BLTU";
+/// A component state that makes every process call fail.
+pub const FAIL_PROCESS: &[u8] = b"FAIL:PROCESS";
+/// A component state that makes the next activation fail.
+pub const FAIL_ACTIVATE: &[u8] = b"FAIL:ACTIVATE";
+/// What a controller state that makes the controller perform one gesture
+/// on [`LAST_NOTE`] starts with: its two performed values follow.
+pub const GESTURE: &[u8] = b"GESTURE";
+
+const NO_FAILURE: u8 = 0;
+const PROCESS_FAILS: u8 = 1;
+const ACTIVATE_FAILS: u8 = 2;
+
+/// How many channels the plug-in delays, at most.
+const MAX_CHANNELS: usize = 2;
 
 /// The environment variable a test sets so a scan crashes (`crash`) or hangs
 /// (`hang`) on purpose, as `bl-test-clap` does for CLAP. Only the scanner's
@@ -46,6 +85,18 @@ pub const TEST_SCAN_VAR: &str = "BL_TEST_VST3_SCAN";
 /// the rest of the block is dropped, as it is in the host.
 const MAX_QUEUES: usize = 8;
 const MAX_POINTS: usize = 64;
+
+/// A controller state that performs one gesture on [`LAST_NOTE`], beginning
+/// with `first` and settling on `second`: what the host's undo step should
+/// carry. The tests hand it to the host as the controller's part of a
+/// state.
+#[must_use]
+pub fn gesture_state(first: u8, second: u8) -> Vec<u8> {
+    let mut bytes = GESTURE.to_vec();
+    bytes.push(first);
+    bytes.push(second);
+    bytes
+}
 
 fn copy_cstring(src: &str, dst: &mut [c_char]) {
     let c_string = CString::new(src).unwrap_or_default();
@@ -95,11 +146,129 @@ pub fn plugin_id() -> String {
     format_fuid(&Processor::CID)
 }
 
-/// The processor: the component and its audio processing. The gain is what
-/// the process block's parameter changes set.
+/// One of the plug-in's parameters' plain range.
+fn plain_range(id: u32) -> Option<(f64, f64)> {
+    match id {
+        GAIN => Some((0.0, GAIN_MAX)),
+        LATENCY => Some((0.0, MAX_LATENCY as f64)),
+        LAST_NOTE => Some((0.0, 127.0)),
+        _ => None,
+    }
+}
+
+/// A normalized value as the plain value the parameter means: whole numbers
+/// for the stepped ones.
+fn to_plain(id: u32, value_normalized: f64) -> f64 {
+    let Some((min, max)) = plain_range(id) else {
+        return value_normalized;
+    };
+    let plain = min + value_normalized.clamp(0.0, 1.0) * (max - min);
+    match id {
+        LATENCY | LAST_NOTE => plain.round(),
+        _ => plain,
+    }
+}
+
+/// A plain value as its normalized value over the parameter's range.
+fn to_normalized(id: u32, plain: f64) -> f64 {
+    let Some((min, max)) = plain_range(id) else {
+        return plain;
+    };
+    if max <= min {
+        return 0.0;
+    }
+    ((plain.clamp(min, max) - min) / (max - min)).clamp(0.0, 1.0)
+}
+
+/// Every byte the host's stream holds, as a state.
+fn read_state(state: *mut IBStream) -> Vec<u8> {
+    // SAFETY: the host passes a live stream for the call.
+    let Some(stream) = (unsafe { ComRef::from_raw(state) }) else {
+        return Vec::new();
+    };
+    let mut bytes = Vec::new();
+    let mut chunk = [0u8; 256];
+    loop {
+        let mut read = 0i32;
+        // SAFETY: a live stream, read into a buffer that lives through the
+        // call.
+        let result = unsafe {
+            stream.read(
+                chunk.as_mut_ptr().cast::<c_void>(),
+                i32::try_from(chunk.len()).unwrap_or(i32::MAX),
+                &mut read,
+            )
+        };
+        if result != kResultOk || read <= 0 {
+            break;
+        }
+        let end = usize::try_from(read).unwrap_or(0).min(chunk.len());
+        bytes.extend_from_slice(&chunk[..end]);
+    }
+    bytes
+}
+
+/// Writes `bytes` into the host's stream. False if the stream refused.
+fn write_state(state: *mut IBStream, bytes: &[u8]) -> bool {
+    // SAFETY: the host passes a live stream for the call.
+    let Some(stream) = (unsafe { ComRef::from_raw(state) }) else {
+        return false;
+    };
+    let mut written = 0usize;
+    while written < bytes.len() {
+        let rest = &bytes[written..];
+        let mut wrote = 0i32;
+        // SAFETY: a live stream, written from a buffer that lives through
+        // the call.
+        let result = unsafe {
+            stream.write(
+                rest.as_ptr().cast_mut().cast::<c_void>(),
+                i32::try_from(rest.len()).unwrap_or(i32::MAX),
+                &mut wrote,
+            )
+        };
+        if result != kResultOk || wrote <= 0 {
+            return false;
+        }
+        written += usize::try_from(wrote).unwrap_or(0).min(rest.len());
+    }
+    true
+}
+
+/// The `f64` a state's bytes hold at `range`, little-endian.
+fn f64_at(bytes: &[u8], range: core::ops::Range<usize>) -> Option<f64> {
+    Some(f64::from_le_bytes(bytes.get(range)?.try_into().ok()?))
+}
+
+/// The `u32` a state's bytes hold at `range`, little-endian.
+fn u32_at(bytes: &[u8], range: core::ops::Range<usize>) -> Option<u32> {
+    Some(u32::from_le_bytes(bytes.get(range)?.try_into().ok()?))
+}
+
+/// The processor: the component and its audio processing. The gain and the
+/// latency are what the process block's parameter changes set; the delay
+/// line is as long as the reported latency, and is preallocated, so no
+/// block allocates.
 struct Processor {
     gain: AtomicU64,
+    latency: AtomicU32,
+    /// The latency in force since the last activation, which its delay
+    /// line and `getLatencySamples` follow.
+    active_latency: AtomicU32,
+    failure: AtomicU8,
+    /// The delay ring's write cursor, shared by its channels.
+    at: Cell<usize>,
+    /// One ring of [`MAX_LATENCY`] frames per channel.
+    delay: UnsafeCell<Vec<f32>>,
 }
+
+// SAFETY: the fields are atomics and `Cell`s the host's threads reach
+// through VST3's COM contract: the delay ring and its cursor are touched
+// only by the process call, on one thread at a time, and the state calls
+// touch only the atomics.
+unsafe impl Send for Processor {}
+// SAFETY: as above.
+unsafe impl Sync for Processor {}
 
 impl Processor {
     const CID: TUID = uid(0x6E332252, 0x54224B00, 0xAA69301A, 0xF318797E);
@@ -107,6 +276,11 @@ impl Processor {
     fn new() -> Self {
         Self {
             gain: AtomicU64::new(1.0f64.to_bits()),
+            latency: AtomicU32::new(0),
+            active_latency: AtomicU32::new(0),
+            failure: AtomicU8::new(NO_FAILURE),
+            at: Cell::new(0),
+            delay: UnsafeCell::new(vec![0.0; MAX_CHANNELS * MAX_LATENCY]),
         }
     }
 
@@ -117,6 +291,30 @@ impl Processor {
     fn set_gain_normalized(&self, value: f64) {
         let plain = (value * GAIN_MAX).clamp(0.0, GAIN_MAX);
         self.gain.store(plain.to_bits(), Ordering::Relaxed);
+    }
+
+    fn set_latency_normalized(&self, value: f64) {
+        let frames = to_plain(LATENCY, value).clamp(0.0, MAX_LATENCY as f64);
+        self.latency.store(frames as u32, Ordering::Relaxed);
+    }
+
+    /// One frame through the delay ring, at the latency in force.
+    fn delayed(&self, channel: usize, input: f32) -> f32 {
+        let frames = self.active_latency.load(Ordering::Relaxed) as usize;
+        let channel = channel.min(MAX_CHANNELS - 1);
+        if frames == 0 || frames > MAX_LATENCY {
+            return input;
+        }
+        let at = self.at.get();
+        let read = (at + MAX_LATENCY - frames) % MAX_LATENCY;
+        // SAFETY: one process call at a time touches the ring, and the
+        // cursor's frame is each channel's own slot.
+        unsafe {
+            let ring = &mut *self.delay.get();
+            let held = ring[channel * MAX_LATENCY + read];
+            ring[channel * MAX_LATENCY + at] = input;
+            held
+        }
     }
 }
 
@@ -235,12 +433,49 @@ impl IComponentTrait for Processor {
         kResultOk
     }
 
-    unsafe fn setState(&self, _state: *mut IBStream) -> tresult {
-        kNotImplemented
+    unsafe fn setState(&self, state: *mut IBStream) -> tresult {
+        let bytes = read_state(state);
+        if bytes == FAIL_PROCESS {
+            self.failure.store(PROCESS_FAILS, Ordering::Relaxed);
+            return kResultOk;
+        }
+        if bytes == FAIL_ACTIVATE {
+            self.failure.store(ACTIVATE_FAILS, Ordering::Relaxed);
+            return kResultOk;
+        }
+        // An empty chunk carries no state, which is what a test's gesture
+        // state has for its component part.
+        if bytes.is_empty() {
+            self.failure.store(NO_FAILURE, Ordering::Relaxed);
+            return kResultOk;
+        }
+        let (Some(gain), Some(latency), true) = (
+            f64_at(&bytes, 4..12),
+            u32_at(&bytes, 12..16),
+            bytes.get(..4) == Some(COMPONENT_MAGIC.as_slice()),
+        ) else {
+            return kResultFalse;
+        };
+        self.gain
+            .store(gain.clamp(0.0, GAIN_MAX).to_bits(), Ordering::Relaxed);
+        self.latency.store(
+            latency.min(u32::try_from(MAX_LATENCY).unwrap_or(u32::MAX)),
+            Ordering::Relaxed,
+        );
+        self.failure.store(NO_FAILURE, Ordering::Relaxed);
+        kResultOk
     }
 
-    unsafe fn getState(&self, _state: *mut IBStream) -> tresult {
-        kNotImplemented
+    unsafe fn getState(&self, state: *mut IBStream) -> tresult {
+        let mut bytes = Vec::with_capacity(16);
+        bytes.extend_from_slice(COMPONENT_MAGIC);
+        bytes.extend_from_slice(&f64::from_bits(self.gain.load(Ordering::Relaxed)).to_le_bytes());
+        bytes.extend_from_slice(&self.latency.load(Ordering::Relaxed).to_le_bytes());
+        if write_state(state, &bytes) {
+            kResultOk
+        } else {
+            kResultFalse
+        }
     }
 }
 
@@ -289,18 +524,34 @@ impl IAudioProcessorTrait for Processor {
     }
 
     unsafe fn getLatencySamples(&self) -> u32 {
-        0
+        self.active_latency.load(Ordering::Relaxed)
     }
 
     unsafe fn setupProcessing(&self, _setup: *mut ProcessSetup) -> tresult {
         kResultOk
     }
 
-    unsafe fn setProcessing(&self, _state: TBool) -> tresult {
+    unsafe fn setProcessing(&self, state: TBool) -> tresult {
+        if state == 0 {
+            return kResultOk;
+        }
+        if self.failure.load(Ordering::Relaxed) == ACTIVATE_FAILS {
+            return kResultFalse;
+        }
+        // The latency in force, which the host reads next and compensates
+        // for, is the one this activation starts with.
+        let frames = self
+            .latency
+            .load(Ordering::Relaxed)
+            .min(u32::try_from(MAX_LATENCY).unwrap_or(u32::MAX));
+        self.active_latency.store(frames, Ordering::Relaxed);
         kResultOk
     }
 
     unsafe fn process(&self, data: *mut ProcessData) -> tresult {
+        if self.failure.load(Ordering::Relaxed) == PROCESS_FAILS {
+            return kResultFalse;
+        }
         // SAFETY: the host passes a valid ProcessData for this call, with
         // its buses and event lists valid for the duration of it.
         let data = unsafe { &*data };
@@ -399,7 +650,9 @@ impl IAudioProcessorTrait for Processor {
                         )
                     };
                     for frame in start..end {
-                        output[frame] = input[frame] * gain;
+                        let held = self.delayed(pair, input[frame]);
+                        output[frame] = held * gain;
+                        self.at.set((self.at.get() + 1) % MAX_LATENCY);
                     }
                 }
             }
@@ -424,8 +677,13 @@ impl IAudioProcessorTrait for Processor {
                         break;
                     }
                     read[index] += 1;
-                    if ids[index] == GAIN && value.is_finite() {
-                        self.set_gain_normalized(value);
+                    if !value.is_finite() {
+                        continue;
+                    }
+                    match ids[index] {
+                        GAIN => self.set_gain_normalized(value),
+                        LATENCY => self.set_latency_normalized(value),
+                        _ => {}
                     }
                 }
             }
@@ -519,10 +777,16 @@ impl IAudioProcessorTrait for Processor {
     }
 }
 
-/// The controller: the gain parameter as a person or an agent sees it. Its
-/// value is normalized, as VST3 parameters are; the plain value is 0 to 2.
+/// The controller: the plug-in's parameters as a person or an agent sees
+/// them, and the gestures a change makes, as its editor's would. Its values
+/// are plain; VST3's are normalized.
 struct Controller {
     gain: Cell<f64>,
+    latency: Cell<f64>,
+    last_note: Cell<f64>,
+    /// The host's component handler, which it set and keeps alive for as
+    /// long as this controller lives.
+    handler: Cell<*mut IComponentHandler>,
 }
 
 impl Controller {
@@ -530,8 +794,72 @@ impl Controller {
 
     fn new() -> Self {
         Self {
-            gain: Cell::new(0.5),
+            gain: Cell::new(1.0),
+            latency: Cell::new(0.0),
+            last_note: Cell::new(0.0),
+            handler: Cell::new(ptr::null_mut()),
         }
+    }
+
+    fn plain(&self, id: u32) -> Option<f64> {
+        match id {
+            GAIN => Some(self.gain.get()),
+            LATENCY => Some(self.latency.get()),
+            LAST_NOTE => Some(self.last_note.get()),
+            _ => None,
+        }
+    }
+
+    fn set_plain(&self, id: u32, plain: f64) {
+        match id {
+            GAIN => self.gain.set(plain.clamp(0.0, GAIN_MAX)),
+            LATENCY => self.latency.set(plain.clamp(0.0, MAX_LATENCY as f64)),
+            LAST_NOTE => self.last_note.set(plain.clamp(0.0, 127.0)),
+            _ => {}
+        }
+    }
+
+    /// Calls the host's handler, if the host set one.
+    fn call(&self, f: impl FnOnce(ComRef<'_, IComponentHandler>) -> tresult) {
+        let raw = self.handler.get();
+        if raw.is_null() {
+            return;
+        }
+        // SAFETY: the host set this handler and keeps it alive while the
+        // controller lives.
+        if let Some(handler) = unsafe { ComRef::from_raw(raw) } {
+            let _ = f(handler);
+        }
+    }
+
+    /// One gesture on `id`, as the plug-in's editor would make it: a begin,
+    /// the performed values, and an end.
+    fn gesture(&self, id: u32, values: &[f64]) {
+        self.call(|handler| {
+            // SAFETY: the handler is a live object of the interface.
+            unsafe { handler.beginEdit(id) }
+        });
+        for value in values {
+            let normalized = to_normalized(id, *value);
+            self.call(|handler| {
+                // SAFETY: as above.
+                unsafe { handler.performEdit(id, normalized) }
+            });
+            self.set_plain(id, *value);
+        }
+        self.call(|handler| {
+            // SAFETY: as above.
+            unsafe { handler.endEdit(id) }
+        });
+    }
+
+    /// Asks the host to restart the plug-in, as an editor would when its
+    /// latency changes.
+    fn ask_restart(&self, flags: int32) {
+        self.call(|handler| {
+            // SAFETY: the handler is a live object of the interface.
+            unsafe { handler.restartComponent(flags) }
+        });
     }
 }
 
@@ -550,34 +878,88 @@ impl IPluginBaseTrait for Controller {
 }
 
 impl IEditControllerTrait for Controller {
-    unsafe fn setComponentState(&self, _state: *mut IBStream) -> tresult {
-        kNotImplemented
+    unsafe fn setComponentState(&self, state: *mut IBStream) -> tresult {
+        let bytes = read_state(state);
+        // The host told it "the component's state is none": nothing to follow.
+        if bytes.is_empty() {
+            return kResultOk;
+        }
+        let (Some(gain), Some(latency), true) = (
+            f64_at(&bytes, 4..12),
+            u32_at(&bytes, 12..16),
+            bytes.get(..4) == Some(COMPONENT_MAGIC.as_slice()),
+        ) else {
+            return kResultFalse;
+        };
+        self.gain.set(gain.clamp(0.0, GAIN_MAX));
+        self.latency.set(f64::from(latency));
+        kResultOk
     }
 
-    unsafe fn setState(&self, _state: *mut IBStream) -> tresult {
-        kNotImplemented
+    unsafe fn setState(&self, state: *mut IBStream) -> tresult {
+        let bytes = read_state(state);
+        if bytes.len() == GESTURE.len() + 2 && bytes.starts_with(GESTURE) {
+            // The tests' stand-in for its editor: one gesture on Last Note
+            // that begins with the first value and ends with the second,
+            // which the host's undo step should carry.
+            let first = f64::from(bytes[GESTURE.len()]);
+            let second = f64::from(bytes[GESTURE.len() + 1]);
+            self.gesture(LAST_NOTE, &[first, second]);
+            return kResultOk;
+        }
+        if bytes.is_empty() {
+            return kResultOk;
+        }
+        let (Some(gain), Some(latency), Some(last), true) = (
+            f64_at(&bytes, 4..12),
+            u32_at(&bytes, 12..16),
+            f64_at(&bytes, 16..24),
+            bytes.get(..4) == Some(CONTROLLER_MAGIC.as_slice()),
+        ) else {
+            return kResultFalse;
+        };
+        self.gain.set(gain.clamp(0.0, GAIN_MAX));
+        self.latency.set(f64::from(latency));
+        self.last_note.set(last.clamp(0.0, 127.0));
+        kResultOk
     }
 
-    unsafe fn getState(&self, _state: *mut IBStream) -> tresult {
-        kNotImplemented
+    unsafe fn getState(&self, state: *mut IBStream) -> tresult {
+        let mut bytes = Vec::with_capacity(24);
+        bytes.extend_from_slice(CONTROLLER_MAGIC);
+        bytes.extend_from_slice(&self.gain.get().to_le_bytes());
+        bytes.extend_from_slice(
+            &u32::try_from(self.latency.get().clamp(0.0, MAX_LATENCY as f64) as usize)
+                .unwrap_or(0)
+                .to_le_bytes(),
+        );
+        bytes.extend_from_slice(&self.last_note.get().to_le_bytes());
+        if write_state(state, &bytes) {
+            kResultOk
+        } else {
+            kResultFalse
+        }
     }
 
     unsafe fn getParameterCount(&self) -> i32 {
-        1
+        3
     }
 
     unsafe fn getParameterInfo(&self, param_index: i32, info: *mut ParameterInfo) -> tresult {
-        if param_index != 0 {
-            return kInvalidArgument;
-        }
+        let (id, title, steps, default): (u32, &str, i32, f64) = match param_index {
+            0 => (GAIN, "Gain", 0, 1.0),
+            1 => (LATENCY, "Latency", 4096, 0.0),
+            2 => (LAST_NOTE, "Last Note", 127, 0.0),
+            _ => return kInvalidArgument,
+        };
         // SAFETY: the host passes a valid pointer for the call.
         let info = unsafe { &mut *info };
-        info.id = GAIN;
-        copy_wstring("Gain", &mut info.title);
-        copy_wstring("Gain", &mut info.shortTitle);
+        info.id = id;
+        copy_wstring(title, &mut info.title);
+        copy_wstring(title, &mut info.shortTitle);
         copy_wstring("", &mut info.units);
-        info.stepCount = 0;
-        info.defaultNormalizedValue = 0.5;
+        info.stepCount = steps;
+        info.defaultNormalizedValue = to_normalized(id, default);
         info.unitId = 0;
         info.flags = ParameterInfo_::ParameterFlags_::kCanAutomate;
         kResultOk
@@ -589,15 +971,16 @@ impl IEditControllerTrait for Controller {
         value_normalized: ParamValue,
         string: *mut String128,
     ) -> tresult {
-        if id != GAIN {
+        let Some(plain) = plain_range(id).map(|_| to_plain(id, value_normalized)) else {
             return kInvalidArgument;
-        }
+        };
         // SAFETY: the host passes a valid pointer for the call.
         let string = unsafe { &mut *string };
-        copy_wstring(
-            &format!("{:.2}", (value_normalized * GAIN_MAX).clamp(0.0, GAIN_MAX)),
-            string,
-        );
+        let text = match id {
+            LATENCY | LAST_NOTE => format!("{plain:.0}"),
+            _ => format!("{plain:.2}"),
+        };
+        copy_wstring(&text, string);
         kResultOk
     }
 
@@ -607,7 +990,7 @@ impl IEditControllerTrait for Controller {
         string: *mut TChar,
         value_normalized: *mut ParamValue,
     ) -> tresult {
-        if id != GAIN {
+        if plain_range(id).is_none() {
             return kInvalidArgument;
         }
         let mut len = 0isize;
@@ -627,7 +1010,7 @@ impl IEditControllerTrait for Controller {
             return kInvalidArgument;
         };
         // SAFETY: the host passes a valid pointer for the call.
-        unsafe { *value_normalized = (value / GAIN_MAX).clamp(0.0, 1.0) };
+        unsafe { *value_normalized = to_normalized(id, value) };
         kResultOk
     }
 
@@ -636,34 +1019,33 @@ impl IEditControllerTrait for Controller {
         id: ParamID,
         value_normalized: ParamValue,
     ) -> ParamValue {
-        if id == GAIN {
-            value_normalized * GAIN_MAX
-        } else {
-            value_normalized
-        }
+        to_plain(id, value_normalized)
     }
 
     unsafe fn plainParamToNormalized(&self, id: ParamID, plain_value: ParamValue) -> ParamValue {
-        if id == GAIN {
-            (plain_value / GAIN_MAX).clamp(0.0, 1.0)
-        } else {
-            plain_value
-        }
+        to_normalized(id, plain_value)
     }
 
     unsafe fn getParamNormalized(&self, id: ParamID) -> ParamValue {
-        if id == GAIN { self.gain.get() } else { 0.0 }
+        self.plain(id).map_or(0.0, |plain| to_normalized(id, plain))
     }
 
     unsafe fn setParamNormalized(&self, id: ParamID, value: ParamValue) -> tresult {
-        if id != GAIN {
+        let plain = to_plain(id, value);
+        let Some(before) = self.plain(id) else {
             return kInvalidArgument;
+        };
+        self.set_plain(id, plain);
+        if id == LATENCY && plain != before {
+            // As its editor would: the latency changed, so ask the host to
+            // deactivate and activate the plug-in again.
+            self.ask_restart(RestartFlags_::kLatencyChanged as int32);
         }
-        self.gain.set(value.clamp(0.0, 1.0));
         kResultOk
     }
 
-    unsafe fn setComponentHandler(&self, _handler: *mut IComponentHandler) -> tresult {
+    unsafe fn setComponentHandler(&self, handler: *mut IComponentHandler) -> tresult {
+        self.handler.set(handler);
         kResultOk
     }
 

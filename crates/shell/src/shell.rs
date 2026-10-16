@@ -1789,7 +1789,13 @@ impl Shell {
         ) {
             // Spec: clap-hosting R8. A copy of a plug-in device starts
             // from its plug-in's state now.
-            crate::plugins::capture_states(&self.plugins, &self.au, &self.kit, &mut self.editor);
+            crate::plugins::capture_states(
+                &self.plugins,
+                &self.au,
+                &self.vst3,
+                &self.kit,
+                &mut self.editor,
+            );
         }
         let user_library = self.browser_view.user_library().map(Path::to_path_buf);
         let zoom = self.zoom();
@@ -2133,6 +2139,12 @@ impl Shell {
             self.refresh_device_types();
             changed = true;
         }
+        // A plug-in that changed its latency: the engine recompiles with
+        // it, so delay compensation follows it (WP-2.7, WP-2.11).
+        for (device, frames) in self.vst3.take_latency_changes() {
+            self.audio.set_device_latency(device, frames);
+            changed = true;
+        }
         // The open plug-in editors follow View ▸ Plug-In Windows and
         // Auto-Hide Plug-In Windows, as the tracks' floating windows do.
         self.apply_plug_in_windows();
@@ -2153,6 +2165,12 @@ impl Shell {
             .map(|c| (c.device, c.param, c.value))
             .chain(
                 self.au
+                    .take_param_changes()
+                    .into_iter()
+                    .map(|c| (c.device, c.param, c.value)),
+            )
+            .chain(
+                self.vst3
                     .take_param_changes()
                     .into_iter()
                     .map(|c| (c.device, c.param, c.value)),
@@ -3812,6 +3830,7 @@ impl Shell {
                 crate::plugins::capture_states(
                     &self.plugins,
                     &self.au,
+                    &self.vst3,
                     &self.kit,
                     &mut self.editor,
                 );
@@ -3828,6 +3847,7 @@ impl Shell {
                 crate::plugins::capture_states(
                     &self.plugins,
                     &self.au,
+                    &self.vst3,
                     &self.kit,
                     &mut self.editor,
                 );
@@ -3868,6 +3888,7 @@ impl Shell {
                 crate::plugins::capture_states(
                     &self.plugins,
                     &self.au,
+                    &self.vst3,
                     &self.kit,
                     &mut self.editor,
                 );
@@ -3903,6 +3924,7 @@ impl Shell {
                 crate::plugins::capture_states(
                     &self.plugins,
                     &self.au,
+                    &self.vst3,
                     &self.kit,
                     &mut self.editor,
                 );
@@ -3928,6 +3950,7 @@ impl Shell {
                 crate::plugins::capture_states(
                     &self.plugins,
                     &self.au,
+                    &self.vst3,
                     &self.kit,
                     &mut self.editor,
                 );

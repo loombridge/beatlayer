@@ -285,6 +285,24 @@ impl Compiler {
         self.compile_with(document, &resend)
     }
 
+    /// Reports `device`'s node's latency now, as a plug-in that restarted
+    /// for a new one does (WP-2.7): the last document is compiled again,
+    /// with the device's node kept and the new latency in its slot, so
+    /// delay compensation follows the change (delay-compensation R6).
+    /// Nothing if the device's node isn't in the last program, or its
+    /// latency is unchanged.
+    pub fn latency(&mut self, device: DeviceId, frames: u32) -> Update {
+        match self.layout.get_mut(&NodeKey::Device(device)) {
+            Some(placed) if placed.latency != frames => placed.latency = frames,
+            _ => return Update::default(),
+        }
+        let Some(document) = self.synced.clone() else {
+            return Update::default();
+        };
+        // The clips stay with their players: nothing about them changed.
+        self.compile_with(&document, &Resend::default())
+    }
+
     /// Sends `track`'s clip player its clips: a list placed under `document`'s
     /// tempo map. An empty list clears the player's.
     fn send_clips(&mut self, document: &Document, track: TrackId, update: &mut Update) {

@@ -208,12 +208,18 @@ fn devices(doc: &Document, format: PluginFormat) -> Vec<DeviceId> {
         .collect()
 }
 
-/// Spec: clap-hosting R8, au-hosting R8. Takes each running plug-in's
-/// state into the set, without an undo step, so saving or copying the
-/// device keeps it: CLAP plug-ins', Audio Units', and kit plug-ins'
-/// compiled in. A device whose plug-in isn't running keeps the state it
-/// had.
-pub fn capture_states(plugins: &ClapHost, au: &AuHost, kit: &KitHost, editor: &mut Editor) {
+/// Spec: clap-hosting R8, au-hosting R8, which vst3-hosting's state rules
+/// mirror. Takes each running plug-in's state into the set, without an undo
+/// step, so saving or copying the device keeps it: CLAP plug-ins', Audio
+/// Units', VST3 plug-ins', and kit plug-ins' compiled in. A device whose
+/// plug-in isn't running keeps the state it had.
+pub fn capture_states(
+    plugins: &ClapHost,
+    au: &AuHost,
+    vst3: &Vst3Host,
+    kit: &KitHost,
+    editor: &mut Editor,
+) {
     for device in clap_devices(editor.document()) {
         if let Ok(state) = plugins.save_state(device) {
             let _ = editor.amend_plugin_state(device, Some(state));
@@ -221,6 +227,11 @@ pub fn capture_states(plugins: &ClapHost, au: &AuHost, kit: &KitHost, editor: &m
     }
     for device in au_devices(editor.document()) {
         if let Ok(state) = au.save_state(device) {
+            let _ = editor.amend_plugin_state(device, Some(state));
+        }
+    }
+    for device in devices(editor.document(), PluginFormat::Vst3) {
+        if let Ok(state) = vst3.save_state(device) {
             let _ = editor.amend_plugin_state(device, Some(state));
         }
     }

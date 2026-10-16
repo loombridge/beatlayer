@@ -44,9 +44,10 @@ pub const REFERENCE: Vec2 = vec2(1600.0, 1000.0 - TITLE_BAR);
 
 /// The smallest content area the shell lays out without overlapping, in
 /// layout points ([`minimum_window`] scales it by the zoom): the Control
-/// Bar's stretching gaps (280 points at the reference width) close up at
-/// 1320 points.
-pub const MINIMUM: Vec2 = vec2(1320.0, 640.0);
+/// Bar's stretching gaps (260 points at the reference width, 20 fewer than
+/// Live's since the assistant's toggle takes the Control Bar's far right,
+/// D24) close up at 1340 points.
+pub const MINIMUM: Vec2 = vec2(1340.0, 640.0);
 
 /// The margin between panes and at the window's left and right edges
 /// (L-WIN-009).
@@ -290,6 +291,7 @@ pub enum Element {
     MidiIndicators,
     SessionView,
     ArrangementView,
+    AssistantToggle,
     InfoToggle,
     Message,
     ClipViewToggle,
@@ -358,8 +360,15 @@ use Element as E;
 use Kind::{Button, Chooser, Display, Indicator, MenuArrow, Meter, Switch, Value};
 use Strip::{ControlBar as CB, StatusBar as SB};
 
+/// The row of Beatlayer's own assistant: the Control Bar's toggle and the
+/// pane (D24). Live has no assistant, so these are no rows of layout.md.
+pub const D24: &str = "D24";
+
 /// Every element, in on-screen order, with its row and its measurement in
-/// Live at 1600 × 1000 points (layout.md, Control Bar and Status Bar). The
+/// Live at 1600 × 1000 points (layout.md, Control Bar and Status Bar), except
+/// that the assistant's toggle (D24) takes the Control Bar's far right, so
+/// the right group, the view selector included, sits 20 points (the toggle's
+/// width and a gap) left of Live's measurements. The
 /// Link toggle, the Tempo Follower toggle, and the Global Groove Amount
 /// (L-CTRL-002, 003, 008) are hidden in Live's default state and come with
 /// the packages that build them. Widths not measured in layout.md run to the
@@ -391,7 +400,7 @@ pub const ELEMENTS: &[Placement] = &[
     p(E::Stop, "L-CTRL-014", "Stop", CB, 701.0, 18.0, Middle, Button, None),
     p(E::Record, "L-CTRL-014", "Arrangement Record", CB, 725.0, 18.0, Middle, Switch, Some("WP-2.13")),
     p(E::Overdub, "L-CTRL-015", "MIDI Arrangement Overdub", CB, 758.0, 18.0, Middle, Switch, Some("WP-2.14")),
-    p(E::AutomationArm, "L-CTRL-015", "Automation Arm", CB, 778.0, 16.0, Middle, Switch, Some("WP-2.12")),
+    p(E::AutomationArm, "L-CTRL-015", "Automation Arm", CB, 778.0, 16.0, Middle, Switch, None),
     p(E::ReEnableAutomation, "L-CTRL-015", "Re-Enable Automation", CB, 796.0, 18.0, Middle, Button, None),
     p(E::CaptureMidi, "L-CTRL-015", "Capture MIDI", CB, 816.0, 16.0, Middle, Button, Some("M3")),
     p(E::SessionRecord, "L-CTRL-015", "Session Record", CB, 834.0, 18.0, Middle, Switch, Some("M3")),
@@ -404,18 +413,19 @@ pub const ELEMENTS: &[Placement] = &[
     p(E::LoopLengthBars, "L-CTRL-018", "Loop Length Bars", CB, 1029.0, 26.0, Middle, Value, None),
     p(E::LoopLengthBeats, "L-CTRL-018", "Loop Length Beats", CB, 1055.0, 25.0, Middle, Value, None),
     p(E::LoopLengthSixteenths, "L-CTRL-018", "Loop Length Sixteenths", CB, 1080.0, 26.0, Middle, Value, None),
-    p(E::DrawMode, "L-CTRL-019", "Draw Mode", CB, 1283.0, 17.0, Right, Switch, None),
-    p(E::ComputerKeyboard, "L-CTRL-020", "Computer MIDI Keyboard", CB, 1302.0, 17.0, Right, Switch, Some("WP-2.2")),
-    p(E::KeyMap, "L-CTRL-021", "Key Map Mode", CB, 1321.0, 27.0, Right, Switch, Some("M7")),
-    p(E::KeyIndicators, "L-CTRL-021", "Key Input and Output Indicators", CB, 1350.0, 7.0, Right, Indicator, Some("M7")),
-    p(E::MidiMap, "L-CTRL-022", "MIDI Map Mode", CB, 1359.0, 28.0, Right, Switch, Some("M7")),
-    p(E::SampleRate, "L-CTRL-023", "Sample Rate", CB, 1389.0, 50.0, Right, Display, None),
-    p(E::Cpu, "L-CTRL-024", "CPU Load", CB, 1439.0, 49.0, Right, Meter, None),
-    p(E::CpuMenu, "L-CTRL-024", "CPU Meter Options", CB, 1488.0, 8.0, Right, MenuArrow, Some("M5")),
-    p(E::Overload, "L-CTRL-025", "Disk Overload", CB, 1498.0, 18.0, Right, Indicator, Some("WP-1.3")),
-    p(E::MidiIndicators, "L-CTRL-026", "MIDI Track Input and Output Indicators", CB, 1527.0, 14.0, Right, Indicator, Some("WP-2.2")),
-    p(E::SessionView, "L-CTRL-027", "Session View", CB, 1549.0, 20.0, Right, Switch, None),
-    p(E::ArrangementView, "L-CTRL-027", "Arrangement View", CB, 1570.0, 20.0, Right, Switch, None),
+    p(E::DrawMode, "L-CTRL-019", "Draw Mode", CB, 1263.0, 17.0, Right, Switch, None),
+    p(E::ComputerKeyboard, "L-CTRL-020", "Computer MIDI Keyboard", CB, 1282.0, 17.0, Right, Switch, Some("WP-2.2")),
+    p(E::KeyMap, "L-CTRL-021", "Key Map Mode", CB, 1301.0, 27.0, Right, Switch, Some("M7")),
+    p(E::KeyIndicators, "L-CTRL-021", "Key Input and Output Indicators", CB, 1330.0, 7.0, Right, Indicator, Some("M7")),
+    p(E::MidiMap, "L-CTRL-022", "MIDI Map Mode", CB, 1339.0, 28.0, Right, Switch, Some("M7")),
+    p(E::SampleRate, "L-CTRL-023", "Sample Rate", CB, 1369.0, 50.0, Right, Display, None),
+    p(E::Cpu, "L-CTRL-024", "CPU Load", CB, 1419.0, 49.0, Right, Meter, None),
+    p(E::CpuMenu, "L-CTRL-024", "CPU Meter Options", CB, 1468.0, 8.0, Right, MenuArrow, Some("M5")),
+    p(E::Overload, "L-CTRL-025", "Disk Overload", CB, 1478.0, 18.0, Right, Indicator, Some("WP-1.3")),
+    p(E::MidiIndicators, "L-CTRL-026", "MIDI Track Input and Output Indicators", CB, 1507.0, 14.0, Right, Indicator, Some("WP-2.2")),
+    p(E::SessionView, "L-CTRL-027", "Session View", CB, 1529.0, 20.0, Right, Switch, None),
+    p(E::ArrangementView, "L-CTRL-027", "Arrangement View", CB, 1550.0, 20.0, Right, Switch, None),
+    p(E::AssistantToggle, D24, "Show/Hide Assistant", CB, 1572.0, 18.0, Right, Switch, None),
     p(E::InfoToggle, "L-STAT-001", "Show/Hide Info View", SB, 17.0, 16.0, Left, Switch, None),
     p(E::Message, "L-STAT-002", "Status", SB, 44.0, 1196.0, Left, Display, None),
     p(E::ClipViewToggle, "L-STAT-004", "Show/Hide Clip View", SB, 1259.0, 10.0, Right, Switch, None),
@@ -437,8 +447,9 @@ pub fn placement(element: Element) -> &'static Placement {
 
 /// The share of extra width that goes to the gap left of the Control Bar's
 /// middle groups: Live's two stretching gaps are 103 points (after the scale
-/// controls) and 177 points (before Draw Mode) at the reference width.
-const MIDDLE_SHARE: f32 = 103.0 / (103.0 + 177.0);
+/// controls) and 177 points (before Draw Mode) at the reference width; the
+/// second is 157 points here, the assistant's toggle having taken 20 (D24).
+const MIDDLE_SHARE: f32 = 103.0 / (103.0 + 157.0);
 
 /// The rectangles of the main window's panes and controls for a content
 /// area of a given size.
@@ -463,6 +474,11 @@ pub struct ShellLayout {
     pub device_view: Rect,
     /// The Status Bar strip (L-WIN-007).
     pub status_bar: Rect,
+    /// The assistant's pane, at the right edge, while it's docked and open
+    /// (D24). Like Live's Learn View (L-WIN-008) it runs from the Control
+    /// Bar's bottom to the window's bottom, and the main view, the detail
+    /// area and the Status Bar stop at its left edge.
+    pub assistant: Option<Rect>,
     /// Every element's rectangle, in [`ELEMENTS`] order.
     pub elements: Vec<(Element, Rect)>,
 }
@@ -473,17 +489,40 @@ impl ShellLayout {
     /// are laid out as [`MINIMUM`].
     #[must_use]
     pub fn compute(size: Vec2, browser: bool, info_view: bool) -> Self {
+        Self::compute_with_assistant(size, browser, info_view, None)
+    }
+
+    /// The same, with the assistant's pane docked at the right edge when
+    /// `assistant` gives its width in points.
+    #[must_use]
+    pub fn compute_with_assistant(
+        size: Vec2,
+        browser: bool,
+        info_view: bool,
+        assistant: Option<f32>,
+    ) -> Self {
         let size = size.max(MINIMUM);
         let (w, h) = (size.x, size.y);
         let extra = w - REFERENCE.x;
-        let right = w - MARGIN;
+        // What the pane takes from the panes and the Status Bar beside it:
+        // its width and the margin between.
+        let taken = assistant.map_or(0.0, |width| width + MARGIN);
+        let right = w - MARGIN - taken;
 
         // Rows measured from the top keep their place; the detail area and
         // the Status Bar keep their distance from the bottom.
         let control_bar = Rect::from_min_max(Pos2::ZERO, pos2(w, y(61.0)));
         let status_bottom = h - (REFERENCE.y - y(993.0));
-        let status_bar =
-            Rect::from_min_max(pos2(0.0, status_bottom - 25.0), pos2(w, status_bottom));
+        let status_bar = Rect::from_min_max(
+            pos2(0.0, status_bottom - 25.0),
+            pos2(w - taken, status_bottom),
+        );
+        let assistant = assistant.map(|width| {
+            Rect::from_min_max(
+                pos2(w - MARGIN - width, y(61.0)),
+                pos2(w - MARGIN, h - (REFERENCE.y - y(988.0))),
+            )
+        });
         let detail_bottom = status_bar.top() - (y(968.0) - y(962.0));
         let detail = Rect::from_min_max(
             pos2(MARGIN, detail_bottom - 188.0),
@@ -507,12 +546,14 @@ impl ShellLayout {
                 let shift = match placement.anchor {
                     Left => 0.0,
                     Middle => extra * MIDDLE_SHARE,
+                    // The Status Bar's right edge is the pane's left edge.
+                    Right if placement.strip == Strip::StatusBar => extra - taken,
                     Right => extra,
                 };
                 let mut width = placement.width;
                 if placement.element == Element::Message {
                     // The message area stretches to the Clip View toggle.
-                    width += extra;
+                    width += extra - taken;
                 }
                 let x = placement.x + shift;
                 let rect = match placement.strip {
@@ -535,6 +576,7 @@ impl ShellLayout {
             info_view,
             device_view,
             status_bar,
+            assistant,
             elements,
         }
     }
@@ -556,6 +598,9 @@ impl ShellLayout {
         }
         if let Some(browser) = &mut self.browser {
             move_rect(browser);
+        }
+        if let Some(assistant) = &mut self.assistant {
+            move_rect(assistant);
         }
         if let Some(info_view) = &mut self.info_view {
             move_rect(info_view);
@@ -584,6 +629,9 @@ impl ShellLayout {
         if let Some(browser) = &mut self.browser {
             scale(browser);
         }
+        if let Some(assistant) = &mut self.assistant {
+            scale(assistant);
+        }
         if let Some(info_view) = &mut self.info_view {
             scale(info_view);
         }
@@ -609,6 +657,9 @@ impl ShellLayout {
         }
         if let Some(browser) = self.browser {
             rows.insert(1, row("L-WIN-004", "Browser", browser));
+        }
+        if let Some(assistant) = self.assistant {
+            rows.push(row(D24, "Assistant", assistant));
         }
         rows.extend(
             ELEMENTS

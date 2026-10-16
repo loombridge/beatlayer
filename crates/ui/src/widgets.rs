@@ -295,6 +295,13 @@ fn icon(painter: &egui::Painter, element: Element, rect: Rect, ink: Color32, the
         Element::InfoToggle => {
             painter.text(c, Align2::CENTER_CENTER, "i", theme.small_font(), ink);
         }
+        Element::AssistantToggle => {
+            // A window with its right-hand pane marked off.
+            let window = Rect::from_center_size(c, vec2(12.0, 9.0));
+            painter.rect_stroke(window, 1.0, stroke, StrokeKind::Inside);
+            let x = window.right() - 4.0;
+            painter.line_segment([pos2(x, window.top()), pos2(x, window.bottom())], stroke);
+        }
         Element::PunchIn => {
             painter.text(c, Align2::CENTER_CENTER, "[", theme.font(), ink);
         }

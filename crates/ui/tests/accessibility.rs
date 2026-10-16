@@ -981,6 +981,19 @@ fn control_bar(h: &mut Harness) {
     h.key(Key::Num0, Modifiers::ALT);
 }
 
+/// The assistant's pane open.
+fn assistant_open(h: &mut Harness) {
+    h.shell.run("view.toggle_assistant", json!({})).unwrap();
+}
+
+/// The pane open with a message sent and no turn taking it, so Stop shows.
+fn assistant_working(h: &mut Harness) {
+    assistant_open(h);
+    h.shell
+        .run("assistant.send", json!({ "text": "Hello" }))
+        .unwrap();
+}
+
 fn browser_search(h: &mut Harness) {
     h.key(Key::F, command());
 }
@@ -1211,6 +1224,26 @@ fn paths() -> BTreeMap<&'static str, Path> {
         (
             "assistant.toggle_activity_log",
             settings("agents", nothing, "Open Assistant Activity Log", Key::Enter),
+        ),
+        // The built-in assistant's panel (WP-2.23, part 3; D24): the pane's
+        // controls, reached from the Control Bar with Tab.
+        (
+            "assistant.toggle_floating",
+            main(assistant_open, nothing, "Float Assistant", Key::Enter),
+        ),
+        (
+            "assistant.stop",
+            main(assistant_working, nothing, "Stop Assistant", Key::Enter),
+        ),
+        (
+            "assistant.set_panel_width",
+            main(assistant_open, nothing, "Assistant Width", Key::ArrowLeft),
+        ),
+        (
+            "assistant.send",
+            Exception(Equivalent(
+                "the prompt field, typed into and then sent with Enter, or with the Send button                  after it: sending needs a message, so there is no one key",
+            )),
         ),
         (
             "audio.configure",
@@ -1865,7 +1898,9 @@ fn reach(command_id: &str, path: &Path) -> Result<(), String> {
             h
         }
         Window::Settings => open_settings(page),
-        Window::Device(_) => unreachable!("no keyboard path starts in a device's window"),
+        Window::Device(_) | Window::Assistant => {
+            unreachable!("no keyboard path starts in a floating window")
+        }
     };
     setup(&mut h);
     if *window == Window::Main {

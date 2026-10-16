@@ -12,19 +12,212 @@
 //! returned to the model as that call's result, and every command is
 //! recorded in the activity log ([`ActivityEntry`]).
 //!
-//! The panel (a later package) drives a turn by making an
-//! [`AssistantCommands`] host with its prompter and calling
-//! [`bl_assistant::agent::Agent::run`].
+//! The panel (part 3) shows the conversation this module keeps in the shell
+//! ([`Row`]): what the person sent, what the model said as it streamed,
+//! and each tool call with its result. [`run_turn`] drives one turn of the
+//! loop and fills the rows as the turn goes; the panel's Stop is
+//! `assistant.stop`, which the loop sees between two calls.
 
 pub use bl_shell_spec::assistant::*;
 
+use std::ops::RangeInclusive;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::SystemTime;
 
-use bl_assistant::agent::Commands;
+use bl_assistant::agent::{Agent, Commands, Turn};
+use bl_assistant::message::{Event, Message, Request};
+use bl_assistant::provider::{Error, Provider};
+use bl_assistant::tools::ToolSet;
 use bl_commands::Permission;
 use serde_json::Value;
 
 use crate::Shell;
+
+/// The widths the docked panel may take, in points.
+pub const WIDTH_RANGE: RangeInclusive<f32> = PANEL_MIN_WIDTH..=PANEL_MAX_WIDTH;
+
+/// What the model is told about the app it is in.
+const SYSTEM_PROMPT: &str = "You are the assistant built into Beatlayer, a digital audio \
+    workstation. Use the tools to look at and change the person's set, and say briefly what you \
+    did. Everything you change in one turn is one undo step.";
+
+/// One line of the panel's conversation.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Row {
+    /// What the person sent.
+    You(String),
+    /// What the model said, as far as it has streamed.
+    Assistant(String),
+    /// A tool call the model made, shown while it runs and then with its
+    /// result.
+    Call {
+        /// The call's ID, which its result answers.
+        id: String,
+        /// The tool the model named, such as `track_create`.
+        name: String,
+        /// The registry command the tool is, such as `track.create`.
+        command: Option<String>,
+        /// The arguments the model gave.
+        arguments: Value,
+        /// What came of it: `None` while it waits or runs, then the
+        /// command's result, or why it didn't run.
+        result: Option<Result<Value, String>>,
+    },
+    /// Something the person should know that isn't the model's: why a turn
+    /// ended early or failed.
+    Notice(String),
+}
+
+/// The conversation the panel shows, and the state of the turn running.
+#[derive(Debug, Default)]
+pub struct Conversation {
+    pub(crate) rows: Vec<Row>,
+    /// The conversation in the providers' terms, which the next turn
+    /// continues.
+    history: Vec<Message>,
+    pub(crate) running: bool,
+    /// What the person sent that no turn has taken yet.
+    pub(crate) pending: Option<String>,
+}
+
+impl Conversation {
+    fn push_text(&mut self, text: &str) {
+        match self.rows.last_mut() {
+            Some(Row::Assistant(said)) => said.push_str(text),
+            _ => self.rows.push(Row::Assistant(text.to_owned())),
+        }
+    }
+
+    /// Gives the first call that waits for `command` its result.
+    pub(crate) fn finish_call(&mut self, command: &str, outcome: Result<Value, String>) {
+        let waiting = self.rows.iter_mut().find_map(|row| match row {
+            Row::Call {
+                command: Some(called),
+                result: result @ None,
+                ..
+            } if called == command => Some(result),
+            _ => None,
+        });
+        if let Some(result) = waiting {
+            *result = Some(outcome);
+        }
+    }
+}
+
+/// The conversation, shared between the shell, which the panel reads it
+/// from, and the turn that fills it while the shell runs the turn's calls.
+pub(crate) type SharedConversation = Arc<Mutex<Conversation>>;
+
+/// The shell's end of a turn's Stop button.
+pub(crate) type StopFlag = Arc<AtomicBool>;
+
+pub(crate) fn lock(conversation: &SharedConversation) -> MutexGuard<'_, Conversation> {
+    conversation.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Runs the assistant's turn for `text` on `shell`: one turn of the loop
+/// with `provider`, asking `prompter` before a command that needs consent.
+/// The panel's rows fill as the turn goes, and Stop (`assistant.stop`) ends
+/// the turn between two calls.
+///
+/// The person's message is `text`; when it came from
+/// [`Shell::take_assistant_prompt`] its row is already there, otherwise it
+/// is added.
+///
+/// # Errors
+///
+/// [`Error`] if the provider failed. The turn's changes so far are still
+/// one undo step, and the panel shows why the turn ended.
+pub fn run_turn(
+    shell: &mut Shell,
+    provider: &dyn Provider,
+    prompter: &mut dyn Prompter,
+    text: &str,
+) -> Result<Turn, Error> {
+    let (conversation, stop) = shell.assistant_handles();
+    let tools = ToolSet::new(shell.registry().iter());
+    let agent = Agent::new(shell.registry().iter());
+    let mut request = Request::new(shell.assistant_settings().model.clone());
+    SYSTEM_PROMPT.clone_into(&mut request.system);
+    {
+        let mut conversation = lock(&conversation);
+        if !matches!(conversation.rows.last(), Some(Row::You(said)) if said == text) {
+            conversation.rows.push(Row::You(text.to_owned()));
+        }
+        conversation.running = true;
+        request.messages.clone_from(&conversation.history);
+    }
+    request.messages.push(Message::user(text));
+    stop.store(false, Ordering::SeqCst);
+    shell.assistant_touch();
+
+    let outcome = {
+        let mut commands = AssistantCommands::new(shell, prompter);
+        agent.run(
+            provider,
+            &mut request,
+            &mut commands,
+            &|| stop.load(Ordering::SeqCst),
+            &mut |event| {
+                let mut conversation = lock(&conversation);
+                match event {
+                    Event::Text(text) => conversation.push_text(&text),
+                    Event::ToolCall(call) => conversation.rows.push(Row::Call {
+                        command: call.command(&tools).ok().map(|command| command.command),
+                        id: call.id,
+                        name: call.name,
+                        arguments: call.arguments,
+                        result: None,
+                    }),
+                }
+            },
+        )
+    };
+
+    {
+        let mut conversation = lock(&conversation);
+        conversation.running = false;
+        match &outcome {
+            Ok(turn) => {
+                // A call the loop answered without running it (an unknown
+                // tool, or the turn stopped before it) hasn't a result yet.
+                for step in &turn.steps {
+                    for row in &mut conversation.rows {
+                        if let Row::Call { id, result, .. } = row
+                            && result.is_none()
+                            && *id == step.call.id
+                        {
+                            *result = Some(step.result.clone());
+                        }
+                    }
+                }
+                for row in &mut conversation.rows {
+                    if let Row::Call { result, .. } = row
+                        && result.is_none()
+                    {
+                        *result = Some(Err("Not run.".to_owned()));
+                    }
+                }
+                if let Some(stopped) = turn.stopped {
+                    let why = match stopped {
+                        bl_assistant::agent::Stopped::Cancelled => "Stopped.",
+                        bl_assistant::agent::Stopped::Cap => {
+                            "Stopped: the turn reached its limit on commands."
+                        }
+                    };
+                    conversation.rows.push(Row::Notice(why.to_owned()));
+                }
+                conversation.history = request.messages;
+            }
+            Err(error) => conversation.rows.push(Row::Notice(format!(
+                "The assistant couldn't answer: {error}"
+            ))),
+        }
+    }
+    shell.assistant_touch();
+    outcome
+}
 
 /// One command the assistant ran, or tried to: its ID, when, and what came
 /// of it.
@@ -132,6 +325,8 @@ impl Commands for AssistantCommands<'_> {
             let message =
                 format!("`{command}` is the person's own setting; the assistant never changes it.");
             self.shell.assistant_record_denied(command, message.clone());
+            self.shell
+                .assistant_finish_call(command, Err(message.clone()));
             return Err(message);
         }
         // The class is decided from the arguments against the set as it is,
@@ -153,6 +348,8 @@ impl Commands for AssistantCommands<'_> {
             Decision::Deny => {
                 let denial = request.denial();
                 self.shell.assistant_record_denied(command, denial.clone());
+                self.shell
+                    .assistant_finish_call(command, Err(denial.clone()));
                 Err(denial)
             }
         }
@@ -173,6 +370,7 @@ impl Commands for AssistantCommands<'_> {
             at,
             outcome,
         });
+        self.shell.assistant_finish_call(command, result.clone());
         result
     }
 }

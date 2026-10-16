@@ -292,16 +292,20 @@ fn the_window_grows_to_its_minimum_as_far_as_the_screen_allows() {
     // under the new minimum; it's never shrunk; a screen too small for the
     // minimum caps both.
     let reference = vec2(1600.0, 1000.0);
-    // Live's reference window holds every zoom up to 120% as it is.
-    for zoom in [0.5, 1.0, 1.2] {
+    // Live's reference window holds every zoom up to 110% as it is; the
+    // assistant's toggle (D24) grew the minimum by 20 points, so at 120% (a
+    // minimum of 1608 points) it grows by 8.
+    for zoom in [0.5, 1.0, 1.1] {
         let (minimum, size) = fit_main_window(reference, zoom, true, false, None);
         assert_eq!(size, reference, "{zoom}");
         assert!((minimum - minimum_window(zoom, true, false)).length() < EPS);
     }
-    // At 150% the minimum is 1980 × 983 points: it grows wider and keeps
+    let (_, size) = fit_main_window(reference, 1.2, true, false, None);
+    assert!((size - vec2(1608.0, 1000.0)).length() < EPS, "{size:?}");
+    // At 150% the minimum is 2010 × 983 points: it grows wider and keeps
     // its height.
     let (_, size) = fit_main_window(reference, 1.5, true, false, None);
-    assert!((size - vec2(1980.0, 1000.0)).length() < EPS, "{size:?}");
+    assert!((size - vec2(2010.0, 1000.0)).length() < EPS, "{size:?}");
     // On a 1728 × 1117-point screen (95% × 90% of it usable) at 200%, the
     // minimum and the window are as big as the screen allows.
     let screen = vec2(1728.0 * 0.95, 1117.0 * 0.9);
@@ -615,7 +619,12 @@ fn every_row_the_zoom_tests_check_is_a_layout_md_row() {
     }
     let layout_md = std::fs::read_to_string(docs.join("ui-parity/layout.md")).unwrap();
     let settings = SettingsLayout::compute(SETTINGS_WINDOW).rows(SettingsPage::ALL.len());
-    for row in main_window_rows(REFERENCE, true).iter().chain(&settings) {
+    // Beatlayer's own rows (D24) aren't Live's.
+    for row in main_window_rows(REFERENCE, true)
+        .iter()
+        .chain(&settings)
+        .filter(|row| row.id != bl_ui::layout::D24)
+    {
         assert!(
             layout_md.contains(&format!("| {} |", row.id)),
             "{} ({}) isn't in layout.md",

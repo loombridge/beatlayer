@@ -20,6 +20,8 @@ pub enum Window {
     Settings,
     /// A floating device's window (WP-2.5b).
     Device(bl_model::DeviceId),
+    /// The assistant's panel in a window of its own (WP-2.23, part 3).
+    Assistant,
 }
 
 /// One accessible node: role, label, value, and whether it's disabled.
@@ -50,6 +52,8 @@ pub struct Harness {
     pub settings: SettingsUi,
     /// What a floating device's window draws (WP-2.5b).
     pub device_window: bl_ui::device_view::DeviceViewUi,
+    /// What the floating assistant's window draws.
+    pub assistant_window: bl_ui::assistant_panel::AssistantPanelUi,
     pub window: Window,
     pub time: f64,
     /// The window's size in window points: at a zoom other than 100%, egui
@@ -89,6 +93,7 @@ impl Harness {
                 bl_ui::layout::SETTINGS_WINDOW - vec2(0.0, bl_ui::layout::TITLE_BAR)
             }
             Window::Device(_) => vec2(400.0, 300.0),
+            Window::Assistant => vec2(380.0, 600.0),
         };
         Self {
             ctx,
@@ -99,6 +104,7 @@ impl Harness {
             main: MainWindowUi::new(),
             settings: SettingsUi::new(),
             device_window: bl_ui::device_view::DeviceViewUi::new(),
+            assistant_window: bl_ui::assistant_panel::AssistantPanelUi::default(),
             window,
             time: 0.0,
             size,
@@ -130,7 +136,7 @@ impl Harness {
         // once, the Settings window's once no mouse button is down in it.
         let zoom = self.shell.zoom();
         self.zoom = match self.window {
-            Window::Main | Window::Device(_) => {
+            Window::Main | Window::Device(_) | Window::Assistant => {
                 apply_zoom(&self.ctx, zoom);
                 zoom
             }
@@ -158,6 +164,7 @@ impl Harness {
         let main = &mut self.main;
         let settings = &mut self.settings;
         let device_window = &mut self.device_window;
+        let assistant_window = &mut self.assistant_window;
         let window = self.window;
         let title_bar = self.title_bar;
         let drawn = self
@@ -173,6 +180,12 @@ impl Harness {
             ui_events = match window {
                 Window::Main => main.show(ui, shell, theme, title_bar, drawn),
                 Window::Settings => settings.show(ui, shell, theme, title_bar),
+                Window::Assistant => {
+                    let mut events = Vec::new();
+                    let rect = ui.max_rect();
+                    assistant_window.show(ui, shell, theme, rect, false, &mut events);
+                    events
+                }
                 Window::Device(device) => {
                     let mut events = Vec::new();
                     if let Some(floating) = shell
@@ -216,7 +229,7 @@ impl Harness {
             match self.window {
                 Window::Main => self.main.apply_effect(&self.ctx, &effect),
                 Window::Settings => self.settings.apply_effect(&effect),
-                Window::Device(_) => {}
+                Window::Device(_) | Window::Assistant => {}
             }
             if matches!(effect, Effect::OpenSettings) {
                 self.settings.refresh();

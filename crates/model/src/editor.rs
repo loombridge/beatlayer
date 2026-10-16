@@ -10,7 +10,8 @@ use crate::changes::ChangeSet;
 use crate::command::Command;
 use crate::document::Document;
 use crate::error::ModelError;
-use crate::ids::TrackId;
+use crate::ids::{SceneId, TrackId};
+use crate::scene::DEFAULT_SCENE_COUNT;
 
 /// Owns the current document, its undo history, and the project's ID
 /// allocator. Every edit on the main thread goes through it.
@@ -118,13 +119,14 @@ impl From<ModelError> for EditError {
 }
 
 impl Editor {
-    /// An editor for a new, empty song (just the Main track) with an empty
-    /// history.
+    /// An editor for a new, empty song (the Main track and the default
+    /// scenes) with an empty history.
     #[must_use]
     pub fn new() -> Self {
         let mut ids = IdAllocator::new();
         let main = TrackId(ids.allocate());
-        Self::from_document(Document::new(main), ids)
+        let scenes = (0..DEFAULT_SCENE_COUNT).map(|_| SceneId(ids.allocate()));
+        Self::from_document(Document::new(main, scenes), ids)
     }
 
     /// An editor for a loaded document, with an empty history.
@@ -175,15 +177,15 @@ impl Editor {
     /// [`Editor::new_id`] didn't hand out or that's been used. Either way the
     /// document is as it was and any open transaction stays open.
     pub fn apply(&mut self, command: Command) -> Result<ChangeSet, EditError> {
-        let created = command.created_id();
-        if let Some(id) = created
-            && !self.unused_ids.contains(&id)
-        {
-            return Err(EditError::IdNotIssued(id));
+        let created = command.created_ids();
+        for id in &created {
+            if !self.unused_ids.contains(id) {
+                return Err(EditError::IdNotIssued(*id));
+            }
         }
         let before = self.document.clone();
         self.document.apply(&command)?;
-        if let Some(id) = created {
+        for id in created {
             self.unused_ids.remove(&id);
         }
         let changes = ChangeSet::between(&before, &self.document);

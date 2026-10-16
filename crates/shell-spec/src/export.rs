@@ -34,7 +34,7 @@ pub fn handles(id: &str) -> bool {
     IDS.contains(&id)
 }
 
-/// A file type the export writes (the export spec, R5).
+/// A file type the export writes (the export spec, R5; MP3, WP-2.26).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum FileType {
@@ -44,6 +44,8 @@ pub enum FileType {
     Aiff,
     /// FLAC: lossless, 16 or 24 bits.
     Flac,
+    /// MP3: lossy, 320 kbps CBR, at one of MP3's sample rates.
+    Mp3,
 }
 
 impl FileType {
@@ -54,6 +56,7 @@ impl FileType {
             Self::Wav => "WAV",
             Self::Aiff => "AIFF",
             Self::Flac => "FLAC",
+            Self::Mp3 => "MP3",
         }
     }
 }
@@ -104,18 +107,20 @@ pub struct ExportArgs {
     /// directory, such as `/Music/Mix.wav`. Its folder must exist.
     pub path: String,
     /// The file type. Left out, the path's extension decides: `.wav`;
-    /// `.aif` or `.aiff`; `.flac`. Given, it must agree with the extension.
+    /// `.aif` or `.aiff`; `.flac`; `.mp3`. Given, it must agree with the
+    /// extension.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file_type: Option<FileType>,
     /// Bits per sample: 16 or 24 (integers), or 32 (floating point; WAV
-    /// and AIFF only).
+    /// and AIFF only). MP3 has no bit depth, so it ignores this.
     #[schemars(extend("enum" = [16, 24, 32]))]
     pub bit_depth: u8,
     /// The file's sample rate in hertz, from 8,000 to 384,000, such as
-    /// 44100 or 48000.
+    /// 44100 or 48000. MP3 holds 8,000, 11,025, 12,000, 16,000, 22,050,
+    /// 24,000, 32,000, 44,100, or 48,000 Hz.
     #[schemars(range(min = 8000, max = 384_000))]
     pub sample_rate: u32,
-    /// The dither below 32 bits. Left out, `triangular`.
+    /// The dither below 32 bits. Left out, `triangular`. MP3 ignores it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dither: Option<Dither>,
     /// Normalize: raise or lower the whole export so its highest peak is at
@@ -220,7 +225,9 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  `selected_tracks`, or a single track `{ \"track\": <id> }`. With an individual track, \
                  `include_return_and_main_effects` includes return tracks and Main devices (unavailable \
                  for `main`). Multi-track exports write one file per track beside `path`. The file type \
-                 follows the extension (`.wav`, `.aif`/`.aiff`, `.flac`; FLAC holds 16 or 24 bits only). \
+                 follows the extension (`.wav`, `.aif`/`.aiff`, `.flac`, `.mp3`; FLAC holds 16 or 24 \
+                 bits only) or `file_type`. MP3 writes 320 kbps CBR at one of MP3's sample rates, and \
+                 ignores `bit_depth` and `dither`. \
                  The range is `start` and `length` if given, otherwise the Arrangement's time \
                  selection, otherwise the whole set from 1.1.1 to the end of the last clip; it \
                  plays straight through, without the Arrangement loop. Below 32 bits, `dither` adds \
@@ -290,6 +297,16 @@ mod tests {
             );
         }
 
+        // MP3 joins the file types (WP-2.26).
+        for file_type in ["wav", "aiff", "flac", "mp3"] {
+            let mut with_type = ok.clone();
+            with_type["file_type"] = json!(file_type);
+            assert!(
+                bl_commands::validate(schema, &with_type).is_ok(),
+                "{with_type}"
+            );
+        }
+
         for bad in [
             json!({ "path": "/a/b.wav", "bit_depth": 8, "sample_rate": 48000 }),
             json!({ "path": "/a/b.wav", "bit_depth": 24 }),
@@ -297,6 +314,7 @@ mod tests {
             json!({ "path": "/a/b.wav", "bit_depth": 24, "sample_rate": 48000, "dither": "pow_r" }),
             json!({ "path": "/a/b.wav", "bit_depth": 24, "sample_rate": 48000, "rendered_track": "invalid" }),
             json!({ "path": "/a/b.wav", "bit_depth": 24, "sample_rate": 48000, "track": 1 }),
+            json!({ "path": "/a/b.wav", "bit_depth": 24, "sample_rate": 48000, "file_type": "ogg" }),
         ] {
             assert!(bl_commands::validate(schema, &bad).is_err(), "{bad}");
         }

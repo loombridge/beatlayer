@@ -14,8 +14,8 @@ use bl_engine::{Node, NodeFactory, NoteEvent, NoteKind};
 use bl_model::{DeviceKind, DeviceRole, ParamId, ParamKind, PluginFormat};
 use bl_plugin_host::clap::{ClapError, ClapHost, ParamChange};
 use common::{
-    CHANNELS, FRAMES, GAIN, LAST_NOTE, LATENCY, PLUGIN_ID, PLUGIN_NAME, bundle, config, device,
-    run, set,
+    CHANNELS, EDITOR_HEIGHT, EDITOR_SCALE, EDITOR_WIDTH, FRAMES, GAIN, LAST_NOTE, LATENCY,
+    PLUGIN_ID, PLUGIN_NAME, bundle, config, device, run, set,
 };
 
 fn note(offset: u32, kind: NoteKind, key: u8, velocity: f32) -> NoteEvent {
@@ -64,7 +64,10 @@ fn a_plugin_loads_by_path_with_its_parameters() {
         [
             (ParamId(GAIN), "Gain"),
             (ParamId(LATENCY), "Latency"),
-            (ParamId(LAST_NOTE), "Last Note")
+            (ParamId(LAST_NOTE), "Last Note"),
+            (ParamId(EDITOR_SCALE), "Editor Scale"),
+            (ParamId(EDITOR_WIDTH), "Editor Width"),
+            (ParamId(EDITOR_HEIGHT), "Editor Height")
         ]
     );
     assert!(params.iter().all(|p| p.automatable));

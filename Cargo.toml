@@ -37,6 +37,7 @@ bl-ui = { path = "crates/ui" }
 bl-shell = { path = "crates/shell" }
 bl-shell-spec = { path = "crates/shell-spec" }
 bl-agent = { path = "crates/agent" }
+bl-assistant = { path = "crates/assistant" }
 # The plug-in kit, by git revision until its API settles: a merge commit on
 # its main branch, so the revision stays reachable.
 lspk-rt = { git = "https://github.com/loombridge/plugin-kit", rev = "31d44c3c7d074b61c8e21bfd8c2577930e4b1703" }

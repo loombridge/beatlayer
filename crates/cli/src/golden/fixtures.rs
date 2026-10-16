@@ -27,8 +27,8 @@ use bl_engine::mixer::{gain_from_db, track as mixer};
 use bl_engine::nodes::{BEAT_TONE, TEST_TONE, beat_tone, test_tone};
 use bl_engine::{Action, MediaMap, NodeKey, ParamValue, ScheduledCommand, TransportCommand};
 use bl_model::{
-    AudioData, Clip, ClipData, ClipId, Command, ContentHash, Device, DeviceId, DeviceKind, Editor,
-    ParamId, SendTap, TrackId, TrackKind,
+    AudioData, Clip, ClipData, ClipId, Command, ContentHash, CrossfadeAssign, Device, DeviceId,
+    DeviceKind, Editor, ParamId, SendTap, TrackId, TrackKind,
 };
 
 use super::{Fixture, MediaFile, SAMPLE_RATE, Scene};
@@ -118,6 +118,14 @@ pub(super) const FIXTURES: &[Fixture] = &[
                 mute and an unmute, and a pan sweep from left to right in steps, each gliding \
                 to its value over 20 ms, so the render has no zipper noise or clicks.",
         build: fader_move,
+    },
+    Fixture {
+        name: "crossfade",
+        about: "Two tracks, one assigned to the crossfader's A side and one to B, swept from \
+                the A end to the B end in 1/16 steps every 1/32 beat, closer than the 20 ms a \
+                move takes so the glides run into each other, with a third track assigned to \
+                neither playing through.",
+        build: crossfade,
     },
     Fixture {
         name: "clip-mid-bar",
@@ -707,6 +715,39 @@ fn fader_move() -> Scene {
         song.schedule(at, key, mixer::PAN, pan);
     }
     song.finish(3.25)
+}
+
+/// Spec: mixer R23. The crossfader swept from the A end to the B end with
+/// a track on each side and one on neither: every move is a parameter
+/// change on its exact frame, as a UI drag sends one, and the steps are
+/// 1/32 beat (15.625 ms at 120 BPM) apart, closer than the 20 ms a change
+/// takes, so the glides run into each other. The position reaches every
+/// track's mixer node, as the engine's does.
+fn crossfade() -> Scene {
+    let mut song = Song::new();
+    let left = song.track(TrackKind::Midi, "Left", None);
+    song.tone(left, 220.0, -24.0);
+    song.apply(Command::SetCrossfadeAssign {
+        track: left,
+        assign: CrossfadeAssign::A,
+    });
+    let right = song.track(TrackKind::Midi, "Right", None);
+    song.tone(right, 330.0, -24.0);
+    song.apply(Command::SetCrossfadeAssign {
+        track: right,
+        assign: CrossfadeAssign::B,
+    });
+    let through = song.track(TrackKind::Midi, "Through", None);
+    song.tone(through, 660.0, -30.0);
+    let step = Ticks::QUARTER / 32;
+    for n in 0..=32i32 {
+        let position = f64::from(n) / 32.0;
+        let at = Ticks::QUARTER + step * i64::from(n);
+        for track in [left, right, through] {
+            song.schedule(at, NodeKey::Mixer(track), mixer::CROSSFADER, position);
+        }
+    }
+    song.finish(2.0)
 }
 
 /// The fader drag bl-ui's mixer test makes through the window and the

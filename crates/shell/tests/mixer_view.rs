@@ -61,6 +61,7 @@ fn a_new_set_shows_the_session_mixer_and_hides_the_arrangement_s() {
     assert!(shown.session.shown);
     assert!(!shown.arrangement.shown);
     assert!(shown.in_out && shown.sends && shown.volume && shown.return_tracks);
+    assert!(!shown.crossfader, "the Crossfader section starts hidden");
     // The Arrangement is in front in a new set: the Mixer item is
     // unticked there, and ticked in the Session View.
     assert_eq!(shell.switch_state(ids::TOGGLE), Some(false));
@@ -93,22 +94,30 @@ fn mixer_and_section_commands_switch_and_tick_their_items() {
         .invoke(ids::TOGGLE, json!({ "view": "session", "shown": false }))
         .unwrap();
     assert!(!state(&mut shell).session.shown);
-    for (id, read) in [
+    for (id, read, initial) in [
         (
             ids::IN_OUT,
             (|s: &MixerViewState| s.in_out) as fn(&MixerViewState) -> bool,
+            true,
         ),
-        (ids::SENDS, |s| s.sends),
-        (ids::VOLUME, |s| s.volume),
-        (ids::RETURN_TRACKS, |s| s.return_tracks),
+        (ids::SENDS, |s| s.sends, true),
+        (ids::VOLUME, |s| s.volume, true),
+        (ids::CROSSFADER, |s| s.crossfader, false),
+        (ids::RETURN_TRACKS, |s| s.return_tracks, true),
     ] {
         assert!(shell.can_invoke(id, &json!({})), "{id}");
-        assert_eq!(shell.switch_state(id), Some(true), "{id}");
+        assert_eq!(shell.switch_state(id), Some(initial), "{id}");
         shell.invoke(id, json!({})).unwrap();
-        assert!(!read(&state(&mut shell)), "{id}");
-        assert_eq!(shell.switch_state(id), Some(false), "{id}");
-        shell.invoke(id, json!({ "shown": true })).unwrap();
-        assert!(read(&state(&mut shell)), "{id}");
+        assert_eq!(read(&state(&mut shell)), !initial, "{id}");
+        assert_eq!(shell.switch_state(id), Some(!initial), "{id}");
+        shell.invoke(id, json!({ "shown": !initial })).unwrap();
+        assert_eq!(
+            read(&state(&mut shell)),
+            !initial,
+            "{id}: shown stays shown"
+        );
+        shell.invoke(id, json!({ "shown": initial })).unwrap();
+        assert_eq!(read(&state(&mut shell)), initial, "{id}");
     }
     // None of them is an undo step or touches the set.
     assert!(!shell.is_dirty());
@@ -130,6 +139,7 @@ fn every_mixer_view_command_is_registered_read_only_and_reachable() {
         (ids::IN_OUT, json!({ "shown": false })),
         (ids::SENDS, json!({})),
         (ids::VOLUME, json!({})),
+        (ids::CROSSFADER, json!({})),
         (ids::RETURN_TRACKS, json!({})),
         (ids::SCROLL, json!({ "view": "session", "x": 10.0 })),
         (ids::FOCUS, json!({})),

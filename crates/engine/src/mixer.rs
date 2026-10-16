@@ -10,8 +10,8 @@
 //!    tracks and returns for Main, or the sends to a return. Each input is a
 //!    [`Route`], a gain that solo and the send's level set;
 //! 2. its device chain;
-//! 3. its [`TrackMixer`]: pan, volume, and the Track Activator, then the
-//!    track's meters.
+//! 3. its [`TrackMixer`]: pan, volume, the Track Activator, and its
+//!    crossfade assignment, then the track's meters.
 //!
 //! A send taps its track's signal after step 3 (post-fader, the default) or
 //! after step 2 (pre-fader), as the return's Pre/Post switch says. A track's
@@ -24,12 +24,13 @@
 //! mixer passes audio through to the bit.
 
 use std::collections::BTreeSet;
-use std::f64::consts::{FRAC_PI_4, SQRT_2};
+use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, SQRT_2};
 
 use bl_core::time::SampleRate;
-use bl_model::{Document, Mixer, ParamId, Tap, TrackId, TrackKind};
+use bl_model::{CrossfadeAssign, Document, Mixer, ParamId, Tap, TrackId, TrackKind};
 
-use crate::node::{Block, Node, NodeConfig, NodeEvent, ParamValue, segments};
+use crate::automation::{AutomationList, PlacedEnvelope};
+use crate::node::{Block, Node, NodeConfig, NodeData, NodeEvent, ParamValue, segments};
 use crate::routing::{Edge, Graph, Via};
 
 /// How long a mixer gain takes to reach a new value: 20 ms, along a straight
@@ -56,6 +57,11 @@ pub mod track {
     pub const PAN: ParamId = ParamId(1);
     /// The Track Activator: muted (deactivated) when not 0.
     pub const MUTE: ParamId = ParamId(2);
+    /// The crossfade assignment: 0 neither, 1 A, 2 B
+    /// ([`crossfade_value`](super::crossfade_value) builds it).
+    pub const CROSSFADE: ParamId = ParamId(3);
+    /// The crossfader's position, from 0 (the A end) to 1 (the B end).
+    pub const CROSSFADER: ParamId = ParamId(4);
 }
 
 /// A route's parameters: a track's output into its group or Main
@@ -119,6 +125,87 @@ pub fn db_from_gain(gain: f64) -> f64 {
     20.0 * libm::log10(gain)
 }
 
+/// Where the Constant Power curve's cosine ends and its measured tail
+/// begins (the mixer spec, R23).
+const CROSSFADE_JOIN: f64 = 0.75;
+
+/// Where the crossfade curve reaches silence: at and past it, a track on
+/// the far side is silent (measured at 48 of 50) (the mixer spec, R23).
+const CROSSFADE_SILENCE: f64 = 0.96;
+
+/// The measured points of the Constant Power curve's tail, as (position,
+/// decibels); between them the curve is a straight line in decibels (the
+/// mixer spec, R23). The point at 0.78 is the mirror of the measurement
+/// with the fader at 28A on a track assigned B.
+const CROSSFADE_TAIL_DB: [(f64, f64); 4] =
+    [(0.78, -9.9), (0.83, -14.9), (0.92, -37.0), (0.95, -52.7)];
+
+/// The default crossfade curve, Constant Power, fitted to the measurements
+/// in the mixer spec (R23): `cos(π/2·p)` up to 0.75, then through the
+/// measured points, a straight line in decibels between them, and a
+/// straight line in amplitude to silence at 0.96, where it stays. `position`
+/// runs from 0 (the A end) to 1 (the B end); one outside that is taken as
+/// the nearest end, and one that isn't a number as the centre.
+#[must_use]
+pub fn constant_power(position: f64) -> f64 {
+    let position = if position.is_nan() {
+        0.5
+    } else {
+        position.clamp(0.0, 1.0)
+    };
+    if position <= CROSSFADE_JOIN {
+        return libm::cos(FRAC_PI_2 * position);
+    }
+    if position >= CROSSFADE_SILENCE {
+        return 0.0;
+    }
+    let join = (
+        CROSSFADE_JOIN,
+        db_from_gain(libm::cos(FRAC_PI_2 * CROSSFADE_JOIN)),
+    );
+    let points = [
+        join,
+        CROSSFADE_TAIL_DB[0],
+        CROSSFADE_TAIL_DB[1],
+        CROSSFADE_TAIL_DB[2],
+        CROSSFADE_TAIL_DB[3],
+    ];
+    for pair in points.windows(2) {
+        let (from, to) = (pair[0], pair[1]);
+        if position <= to.0 {
+            let t = (position - from.0) / (to.0 - from.0);
+            return gain_from_db(from.1 + (to.1 - from.1) * t);
+        }
+    }
+    let last = points[points.len() - 1];
+    let fade = (CROSSFADE_SILENCE - position) / (CROSSFADE_SILENCE - last.0);
+    gain_from_db(last.1) * fade
+}
+
+/// The crossfade's gain for a track assigned `assign` with the crossfader
+/// at `position` (0 at the A end, 1 at the B end): a track on A takes the
+/// curve's own value, a track on B its mirror, and one on neither 1, so it
+/// plays through at every position (the mixer spec, R23).
+#[must_use]
+pub fn crossfade_gain(position: f64, assign: CrossfadeAssign) -> f64 {
+    match assign {
+        CrossfadeAssign::None => 1.0,
+        CrossfadeAssign::A => constant_power(position),
+        CrossfadeAssign::B => constant_power(1.0 - position),
+    }
+}
+
+/// The [`track::CROSSFADE`] parameter value that names `assign`: 0 neither,
+/// 1 A, 2 B.
+#[must_use]
+pub fn crossfade_value(assign: CrossfadeAssign) -> f64 {
+    match assign {
+        CrossfadeAssign::None => 0.0,
+        CrossfadeAssign::A => 1.0,
+        CrossfadeAssign::B => 2.0,
+    }
+}
+
 /// Frames a gain takes to reach a new value at `rate`.
 pub(crate) fn smoothing_frames(rate: SampleRate) -> u32 {
     (SMOOTHING_SECONDS * rate.as_f64()).round().max(1.0) as u32
@@ -151,9 +238,10 @@ impl Ramp {
     }
 
     /// Starts moving to `target` from where the gain is now, to reach it in
-    /// `frames` frames. A gain already heading for `target` carries on.
+    /// `frames` frames. A gain already heading for `target` carries on; one
+    /// that automation moved off it starts moving again.
     pub(crate) fn toward(&mut self, target: f64, frames: u32) {
-        if target == self.target {
+        if target == self.target && (self.left > 0 || self.value == self.target) {
             return;
         }
         self.target = target;
@@ -270,15 +358,10 @@ impl Meters {
         }
     }
 
-    fn measure(&mut self, channel: usize, samples: &[f32]) {
-        let (mut peak, mut square) = (self.peak[channel], self.square[channel]);
-        for &sample in samples {
-            let sample = f64::from(sample);
-            peak = (peak * self.fall).max(sample.abs());
-            square += (sample * sample - square) * self.smooth;
-        }
-        self.peak[channel] = peak;
-        self.square[channel] = square;
+    fn measure_one(&mut self, channel: usize, sample: f32) {
+        let sample = f64::from(sample);
+        self.peak[channel] = (self.peak[channel] * self.fall).max(sample.abs());
+        self.square[channel] += (sample * sample - self.square[channel]) * self.smooth;
     }
 
     /// Drops every reading to silence at once.
@@ -304,38 +387,53 @@ impl Meters {
     }
 }
 
-/// A track's mixer: pan, volume, and the Track Activator, applied in place
-/// after the track's device chain, then the track's meters. It takes the
-/// [`track`] parameters.
+/// A track's mixer: pan, volume, the Track Activator, and the crossfade
+/// assignment, applied in place after the track's device chain, then the
+/// track's meters. It takes the [`track`] parameters.
 ///
 /// The left channel takes the pan law's left gain ([`pan_gains`]) and the
 /// right channel its right gain; in an engine with other than two channels,
 /// channels past the first two (or a mono engine's one) take the volume
 /// alone. Each channel's gain glides to every new value
-/// ([`SMOOTHING_SECONDS`]). The meters measure the result: after pan,
-/// volume, and the activator, before solo.
+/// ([`SMOOTHING_SECONDS`]), and the crossfade's position glides the same
+/// way, the curve ([`crossfade_gain`]) following it frame by frame. The
+/// meters measure the result: after pan, volume, the activator, and the
+/// crossfade, before solo.
 #[derive(Debug, Clone)]
 pub struct TrackMixer {
     volume: f64,
     pan: f64,
     mute: bool,
+    crossfade: CrossfadeAssign,
+    /// The crossfader's position the node heads for: 0 (the A end) to 1
+    /// (the B end).
+    position: f64,
+    /// The position now, gliding like the other gains.
+    crossfader: Ramp,
     /// The left gain, the right gain, and the gain of any other channel.
     gains: [Ramp; 3],
     smoothing: u32,
     meters: Meters,
+    /// The envelopes driving its parameters while the song plays (WP-2.12).
+    automation: Option<NodeData>,
 }
 
 impl TrackMixer {
-    /// A mixer set to a track's mixer settings, resting at them.
+    /// A mixer set to a track's mixer settings and to the Main track's
+    /// crossfader at `crossfader`, resting at them.
     #[must_use]
-    pub fn new(mixer: &Mixer, config: &NodeConfig) -> Self {
+    pub fn new(mixer: &Mixer, crossfader: f64, config: &NodeConfig) -> Self {
         let mut node = Self {
             volume: 1.0,
             pan: 0.0,
             mute: false,
+            crossfade: CrossfadeAssign::None,
+            position: 0.5,
+            crossfader: Ramp::at(0.5),
             gains: [Ramp::at(1.0); 3],
             smoothing: smoothing_frames(config.sample_rate),
             meters: Meters::new(config),
+            automation: None,
         };
         node.set(track::VOLUME, ParamValue::Set(mixer.volume));
         node.set(track::PAN, ParamValue::Set(mixer.pan));
@@ -343,11 +441,18 @@ impl TrackMixer {
             track::MUTE,
             ParamValue::Set(f64::from(u8::from(mixer.mute))),
         );
+        node.set(
+            track::CROSSFADE,
+            ParamValue::Set(crossfade_value(mixer.crossfade)),
+        );
+        node.set(track::CROSSFADER, ParamValue::Set(crossfader));
         node.gains = node.targets().map(Ramp::at);
+        node.crossfader = Ramp::at(node.position);
         node
     }
 
     /// The gains the mixer is heading for: left, right, and other channels.
+    /// The crossfade is applied frame by frame, from its gliding position.
     fn targets(&self) -> [f64; 3] {
         let level = if self.mute { 0.0 } else { self.volume };
         let [left, right] = pan_gains(self.pan);
@@ -385,6 +490,18 @@ impl TrackMixer {
             (track::PAN, _) => self.pan = defaults.pan,
             (track::MUTE, ParamValue::Set(mute)) => self.mute = mute != 0.0,
             (track::MUTE, ParamValue::Default) => self.mute = defaults.mute,
+            (track::CROSSFADE, ParamValue::Set(assign)) => {
+                self.crossfade = match assign {
+                    1.0 => CrossfadeAssign::A,
+                    2.0 => CrossfadeAssign::B,
+                    _ => CrossfadeAssign::None,
+                };
+            }
+            (track::CROSSFADE, ParamValue::Default) => self.crossfade = defaults.crossfade,
+            (track::CROSSFADER, ParamValue::Set(position)) if position.is_finite() => {
+                self.position = position.clamp(0.0, 1.0);
+            }
+            (track::CROSSFADER, _) => self.position = 0.5,
             _ => {}
         }
     }
@@ -400,6 +517,7 @@ impl TrackMixer {
         for (ramp, target) in self.gains.iter_mut().zip(targets) {
             ramp.toward(target, smoothing);
         }
+        self.crossfader.toward(self.position, smoothing);
     }
 }
 
@@ -411,26 +529,160 @@ fn gain_index(c: usize, channels: usize) -> usize {
 impl Node for TrackMixer {
     fn process(&mut self, block: &mut Block<'_>) {
         let channels = block.channels();
+        let transport = block.transport();
+        // Spec: automation R2. While the song plays, an automated parameter
+        // follows its envelope exactly; a change the song's playhead doesn't
+        // drive (a control move) glides as the mixer spec says.
+        let automation = self.automation.clone();
+        let automation = automation
+            .as_ref()
+            .and_then(|d| d.downcast_ref::<AutomationList>())
+            .filter(|list| !list.is_empty());
+        let playing = transport.playing.then_some(automation).flatten();
+        // A control whose envelopes are gone heads back to what it asks for
+        // from where the automation left it.
+        if automation.is_none() {
+            let (targets, smoothing) = (self.targets(), self.smoothing);
+            for (ramp, target) in self.gains.iter_mut().zip(targets) {
+                ramp.toward(target, smoothing);
+            }
+        }
         for segment in segments(block.events(), block.frames()) {
             self.apply(segment.events);
-            let mut after = self.gains;
-            for c in 0..channels {
-                let index = gain_index(c, channels);
-                let mut ramp = self.gains[index];
-                let samples = &mut block.channel_mut(c)[segment.range.clone()];
-                scale(samples, &mut ramp);
-                after[index] = ramp;
-                if c < 2 {
-                    self.meters.measure(c, samples);
+            match playing {
+                Some(list) => self.scale_envelopes(
+                    block,
+                    segment.range.clone(),
+                    transport.position.get(),
+                    list,
+                ),
+                None => {
+                    let (mut after, mut crossfader) = (self.gains, self.crossfader);
+                    for frame in segment.range.clone() {
+                        let fade = crossfade_gain(crossfader.next(), self.crossfade) as f32;
+                        for c in 0..channels {
+                            let index = gain_index(c, channels);
+                            let mut ramp = after[index];
+                            let sample = &mut block.channel_mut(c)[frame];
+                            *sample *= ramp.next() as f32 * fade;
+                            after[index] = ramp;
+                            if c < 2 {
+                                self.meters.measure_one(c, *sample);
+                            }
+                        }
+                    }
+                    self.gains = after;
+                    self.crossfader = crossfader;
                 }
             }
-            self.gains = after;
         }
     }
 
     fn flush(&mut self, events: &[NodeEvent]) {
         self.apply(events);
     }
+
+    fn receive_data(&mut self, data: NodeData) {
+        if data.downcast_ref::<AutomationList>().is_some() {
+            self.automation = Some(data);
+        }
+    }
+}
+
+impl TrackMixer {
+    /// Scales `range`, a frame at a time, by the gains the envelopes ask
+    /// for: an automated parameter's own value on the exact frame, at the
+    /// pan law, and the controls where they are for the rest. The mixer
+    /// comes to rest at the last frame's gains, so a stop carries on from
+    /// where the automation left off, and a control whose envelopes are
+    /// gone heads back to what it asks for from there.
+    fn scale_envelopes(
+        &mut self,
+        block: &mut Block<'_>,
+        range: core::ops::Range<usize>,
+        from: i64,
+        list: &AutomationList,
+    ) {
+        let channels = block.channels();
+        let controls = [self.volume, self.pan, f64::from(u8::from(self.mute))];
+        // A pan the envelopes don't move keeps its gains over the whole
+        // range; only an automated pan works out the law frame by frame.
+        let fixed_pan = list
+            .envelope(track::PAN)
+            .is_none()
+            .then(|| pan_gains(self.pan));
+        // The crossfade isn't automated: it glides on top of the envelopes,
+        // the same gliding position for every channel (the mixer spec, R23).
+        let (crossfade, start) = (self.crossfade, self.crossfader);
+        for c in 0..channels {
+            let index = gain_index(c, channels);
+            let mut crossfader = start;
+            let meter = c < 2;
+            let samples = &mut block.channel_mut(c)[range.clone()];
+            for (i, sample) in samples.iter_mut().enumerate() {
+                let frame = from + (range.start + i) as i64;
+                let fade = crossfade_gain(crossfader.next(), crossfade);
+                *sample = (f64::from(*sample)
+                    * gain_at(list, frame, index, controls, fixed_pan)
+                    * fade) as f32;
+                if meter {
+                    self.meters.measure_one(c, *sample);
+                }
+            }
+        }
+        // Leave the crossfader where its glide reached over the range, once,
+        // whatever the channel count.
+        let mut crossfader = start;
+        for _ in range.clone() {
+            crossfader.next();
+        }
+        self.crossfader = crossfader;
+        let last = from + range.end as i64 - 1;
+        for (index, ramp) in self.gains.iter_mut().enumerate() {
+            *ramp = Ramp::at(gain_at(list, last, index, controls, fixed_pan));
+        }
+    }
+}
+
+/// The gain of channel `index` at `frame`: an automated parameter from its
+/// envelope, and a control where it is for the rest.
+fn gain_at(
+    list: &AutomationList,
+    frame: i64,
+    index: usize,
+    controls: [f64; 3],
+    fixed_pan: Option<[f64; 2]>,
+) -> f64 {
+    let [volume, pan, mute] = controls;
+    let muted = list
+        .envelope(track::MUTE)
+        .map_or(mute != 0.0, |envelope| envelope.value_at(frame) != 0.0);
+    if muted {
+        return 0.0;
+    }
+    let level = list
+        .envelope(track::VOLUME)
+        .map_or(volume, |envelope| envelope.value_at(frame));
+    let [left, right] = fixed_pan.unwrap_or_else(|| {
+        pan_gains(
+            list.envelope(track::PAN)
+                .map_or(pan, |envelope| envelope.value_at(frame)),
+        )
+    });
+    match index {
+        0 => level * left,
+        1 => level * right,
+        _ => level,
+    }
+}
+
+/// The shape of the planar buffers a route mixes: `channels` channels
+/// `stride` apart, of which the block uses `frames`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Planar {
+    pub(crate) channels: usize,
+    pub(crate) stride: usize,
+    pub(crate) frames: usize,
 }
 
 /// A route into a track: another track's output into its group, Main, or
@@ -447,6 +699,8 @@ pub struct Route {
     closed: bool,
     gain: Ramp,
     smoothing: u32,
+    /// The envelope driving its level while the song plays (WP-2.12).
+    automation: Option<NodeData>,
 }
 
 impl Route {
@@ -459,6 +713,7 @@ impl Route {
             closed: false,
             gain: Ramp::at(0.0),
             smoothing: smoothing_frames(config.sample_rate),
+            automation: None,
         };
         route.set(route::LEVEL, ParamValue::Set(level));
         route.gain = Ramp::at(route.target());
@@ -516,13 +771,31 @@ impl Route {
         &mut self,
         to: &mut [f32],
         from: &[f32],
-        channels: usize,
-        stride: usize,
-        frames: usize,
+        shape: Planar,
+        song: Option<i64>,
         events: &[NodeEvent],
     ) {
-        if events.is_empty() && self.is_silent() {
+        let Planar {
+            channels,
+            stride,
+            frames,
+        } = shape;
+        // Spec: automation R2. While the song plays, a send with an envelope
+        // takes its level from it on each frame; solo and a closed route
+        // still silence it, and a hand move still glides.
+        let automation = song.and_then(|_| self.automation.clone());
+        let envelope = automation
+            .as_ref()
+            .and_then(|data| data.downcast_ref::<AutomationList>())
+            .filter(|list| !list.is_empty())
+            .and_then(|list| list.envelope(route::LEVEL));
+        if envelope.is_none() && events.is_empty() && self.is_silent() {
             return;
+        }
+        // A send whose envelope is gone heads back to its control's level
+        // from where the automation left it.
+        if envelope.is_none() {
+            self.gain.toward(self.target(), self.smoothing);
         }
         for segment in segments(events, frames) {
             if !segment.events.is_empty() {
@@ -531,14 +804,48 @@ impl Route {
                 }
                 self.gain.toward(self.target(), self.smoothing);
             }
-            let mut after = self.gain;
-            for c in 0..channels {
-                let at = c * stride + segment.range.start..c * stride + segment.range.end;
-                let mut ramp = self.gain;
-                add_scaled(&mut to[at.clone()], &from[at], &mut ramp);
-                after = ramp;
+            match (envelope, song) {
+                (Some(envelope), Some(now)) => {
+                    for c in 0..channels {
+                        let at = c * stride + segment.range.start..c * stride + segment.range.end;
+                        for (i, sample) in to[at.clone()].iter_mut().enumerate() {
+                            let frame = now + (segment.range.start + i) as i64;
+                            let gain = self.envelope_gain(envelope, frame);
+                            *sample += (f64::from(from[at.start + i]) * gain) as f32;
+                        }
+                    }
+                    self.gain =
+                        Ramp::at(self.envelope_gain(envelope, now + segment.range.end as i64 - 1));
+                }
+                _ => {
+                    let mut after = self.gain;
+                    for c in 0..channels {
+                        let at = c * stride + segment.range.start..c * stride + segment.range.end;
+                        let mut ramp = self.gain;
+                        add_scaled(&mut to[at.clone()], &from[at], &mut ramp);
+                        after = ramp;
+                    }
+                    self.gain = after;
+                }
             }
-            self.gain = after;
+        }
+    }
+
+    /// Takes the envelope driving its level (WP-2.12), if that's what the
+    /// data holds; anything else is let go of.
+    pub(crate) fn receive_data(&mut self, data: NodeData) {
+        if data.downcast_ref::<AutomationList>().is_some() {
+            self.automation = Some(data);
+        }
+    }
+
+    /// The route's gain at `frame`: its envelope's level, unless solo
+    /// silences it or it's closed.
+    fn envelope_gain(&self, envelope: &PlacedEnvelope, frame: i64) -> f64 {
+        if self.solo_mute || self.closed {
+            0.0
+        } else {
+            envelope.value_at(frame)
         }
     }
 }
@@ -706,6 +1013,15 @@ impl Solo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A buffer shape for the tests.
+    fn planar(channels: usize, stride: usize, frames: usize) -> Planar {
+        Planar {
+            channels,
+            stride,
+            frames,
+        }
+    }
     use crate::node::TransportInfo;
 
     fn config() -> NodeConfig {
@@ -735,6 +1051,100 @@ mod tests {
         }
         assert_eq!(pan_gains(f64::NAN), [1.0, 1.0]);
         assert_eq!(pan_gains(7.0), pan_gains(1.0));
+    }
+
+    // Spec: mixer R23
+    #[test]
+    fn the_crossfade_curve_hits_the_measured_points() {
+        // The default Constant Power curve's measured points (the mixer
+        // spec, R23): the crossfader's position from 0 (50A) to 1 (50B),
+        // and the gain of a track assigned A, in decibels.
+        let measured = [
+            (0.00, 0.0),
+            (0.22, -0.5),
+            (0.30, -0.9),
+            (0.48, -2.7),
+            (0.50, -3.0),
+            (0.57, -4.1),
+            (0.75, -8.7),
+            (0.83, -14.9),
+            (0.92, -37.0),
+            (0.95, -52.7),
+        ];
+        for (position, db) in measured {
+            let got = db_from_gain(constant_power(position));
+            // Below -30 dB the readout was coarser, so the tolerance is
+            // wider there.
+            let tolerance = if db < -30.0 { 1.5 } else { 0.5 };
+            assert!((got - db).abs() <= tolerance, "{position}: {got} for {db}");
+        }
+        // The B side's own measurements, through the mirror.
+        for (position, db) in [(0.61, -1.7), (0.22, -9.9)] {
+            let got = db_from_gain(crossfade_gain(position, CrossfadeAssign::B));
+            let tolerance = if db < -30.0 { 1.5 } else { 0.5 };
+            assert!((got - db).abs() <= tolerance, "{position}: {got} for {db}");
+        }
+        // Continuous at the join between the cosine and the tail.
+        let step = 1e-9;
+        assert!(
+            (constant_power(CROSSFADE_JOIN - step) - constant_power(CROSSFADE_JOIN + step)).abs()
+                < 1e-6
+        );
+        // Unity at the near end, silence from 0.96 to the far end.
+        assert_eq!(constant_power(0.0), 1.0);
+        assert_eq!(constant_power(0.96), 0.0);
+        assert_eq!(constant_power(1.0), 0.0);
+        // A track assigned to neither passes at every position.
+        for position in [0.0, 0.3, 0.5, 0.75, 0.9, 1.0] {
+            assert_eq!(crossfade_gain(position, CrossfadeAssign::None), 1.0);
+        }
+        // Mirrored positions give mirrored gains.
+        for i in 0..=8 {
+            let p = f64::from(i) / 8.0;
+            assert_eq!(
+                crossfade_gain(p, CrossfadeAssign::A),
+                crossfade_gain(1.0 - p, CrossfadeAssign::B),
+                "{p}"
+            );
+        }
+        // Ends hold, and a position that isn't a number takes the centre.
+        assert_eq!(constant_power(-1.0), 1.0);
+        assert_eq!(constant_power(7.0), 0.0);
+        assert_eq!(constant_power(f64::NAN), constant_power(0.5));
+    }
+
+    // Spec: mixer R18, R23
+    #[test]
+    fn the_crossfader_glides_over_20_ms_and_the_gain_follows_the_curve() {
+        let mixer = Mixer {
+            crossfade: CrossfadeAssign::A,
+            ..Mixer::default()
+        };
+        let mut node = TrackMixer::new(&mixer, 0.0, &config());
+        // The A end: the assigned track at unity.
+        assert_eq!(node.gains(), [1.0, 1.0]);
+        let events = [NodeEvent {
+            offset: 0,
+            param: track::CROSSFADER,
+            value: ParamValue::Set(0.5),
+        }];
+        let out = render(&mut node, [1.0, 1.0], 2000, &events);
+        let left = &out[..2000];
+        // 960 frames at 48 kHz: the position moves in a straight line to
+        // the centre, the gain follows the curve frame by frame, and it
+        // lands exactly on the law's value there.
+        for (frame, &sample) in left[..960].iter().enumerate() {
+            let position = (frame + 1) as f64 / 960.0 * 0.5;
+            let expected = f64::from(constant_power(position) as f32);
+            assert!(
+                (f64::from(sample) - expected).abs() < 1e-5,
+                "{frame}: {sample} for {expected}"
+            );
+        }
+        let centre = constant_power(0.5) as f32;
+        assert_eq!(left[959], centre);
+        assert!(left[960..].iter().all(|&s| s == centre));
+        assert_eq!(&out[..2000], &out[2000..]);
     }
 
     #[test]
@@ -791,7 +1201,7 @@ mod tests {
     // Spec: mixer R4
     #[test]
     fn a_track_mixer_at_rest_passes_audio_through_to_the_bit() {
-        let mut node = TrackMixer::new(&Mixer::default(), &config());
+        let mut node = TrackMixer::new(&Mixer::default(), 0.5, &config());
         let mut data: Vec<f32> = (0..256).map(|i| (i as f32 * 0.37).sin() * 0.3).collect();
         let original = data.clone();
         let mut block = Block::new(
@@ -810,7 +1220,7 @@ mod tests {
     // Spec: mixer R18
     #[test]
     fn a_volume_change_glides_over_20_ms_from_its_frame() {
-        let mut node = TrackMixer::new(&Mixer::default(), &config());
+        let mut node = TrackMixer::new(&Mixer::default(), 0.5, &config());
         let events = [NodeEvent {
             offset: 100,
             param: track::VOLUME,
@@ -836,20 +1246,20 @@ mod tests {
             volume: 0.5,
             ..Mixer::default()
         };
-        let mut node = TrackMixer::new(&mixer, &config());
+        let mut node = TrackMixer::new(&mixer, 0.5, &config());
         assert_eq!(node.gains(), [0.5 * SQRT_2, 0.0]);
         let out = render(&mut node, [1.0, 1.0], 64, &[]);
         assert!(out[..64].iter().all(|&s| s == (0.5 * SQRT_2) as f32));
         assert!(out[64..].iter().all(|&s| s == 0.0));
         mixer.mute = true;
-        let node = TrackMixer::new(&mixer, &config());
+        let node = TrackMixer::new(&mixer, 0.5, &config());
         assert_eq!(node.gains(), [0.0, 0.0]);
     }
 
     // Spec: mixer R19
     #[test]
     fn meters_show_peaks_at_once_and_rms_as_a_slow_average() {
-        let mut node = TrackMixer::new(&Mixer::default(), &config());
+        let mut node = TrackMixer::new(&Mixer::default(), 0.5, &config());
         render(&mut node, [0.5, 0.25], 64, &[]);
         let reading = node.meters();
         assert_eq!(reading.peak, [0.5, 0.25]);
@@ -886,7 +1296,7 @@ mod tests {
         let mut route = Route::new(1.0, false, &config);
         let from = vec![0.25f32; 2 * 1000];
         let mut to = vec![0.5f32; 2 * 1000];
-        route.mix(&mut to, &from, 2, 1000, 1000, &[]);
+        route.mix(&mut to, &from, planar(2, 1000, 1000), None, &[]);
         assert!(to.iter().all(|&s| s == 0.75));
 
         let events = [NodeEvent {
@@ -895,7 +1305,7 @@ mod tests {
             value: ParamValue::Set(1.0),
         }];
         let mut to = vec![0.0f32; 2 * 1000];
-        route.mix(&mut to, &from, 2, 1000, 1000, &events);
+        route.mix(&mut to, &from, planar(2, 1000, 1000), None, &events);
         assert!(to[..10].iter().all(|&s| s == 0.25));
         assert!(to[10..970].windows(2).all(|w| w[1] < w[0]), "a glide down");
         assert!(to[969..1000].iter().all(|&s| s == 0.0));
@@ -905,7 +1315,7 @@ mod tests {
         // A silent send adds nothing, and doesn't look at its input.
         let mut send = Route::new(0.0, false, &config);
         let mut to = vec![0.5f32; 2 * 8];
-        send.mix(&mut to, &[1.0; 16], 2, 8, 8, &[]);
+        send.mix(&mut to, &[1.0; 16], planar(2, 8, 8), None, &[]);
         assert!(to.iter().all(|&s| s == 0.5));
     }
 }

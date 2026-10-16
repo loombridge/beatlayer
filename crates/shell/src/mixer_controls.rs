@@ -10,7 +10,7 @@
 //! sources). Shift with a fader drag is assumed to match pan's until it's
 //! observed.
 
-use bl_model::{Document, TrackId};
+use bl_model::{CrossfadeAssign, Document, TrackId};
 use serde_json::json;
 
 use crate::Invocation;
@@ -76,6 +76,10 @@ pub const PAN_GESTURE: &str = "Change \"Track Panning\"";
 
 /// The undo step a send drag makes. (Live's name for it isn't observed.)
 pub const SEND_GESTURE: &str = "Change \"Send\"";
+
+/// The undo step a crossfader drag makes. (Live's name for it isn't
+/// observed; it matches the command's own.)
+pub const CROSSFADER_GESTURE: &str = "Change crossfader";
 
 /// The lowest finite send level, in dB: below it a send is at −∞. Live's
 /// send knob's range isn't observed; Beatlayer's runs from −∞ to 0 dB
@@ -618,6 +622,62 @@ pub fn toggled(doc: &Document, switch: Switch, tracks: &[TrackId]) -> Vec<Invoca
     tracks.iter().map(|t| switch.set(*t, on)).collect()
 }
 
+/// The crossfader's position as the Status Bar reads it while it's dragged
+/// (observed: `Crossfade: 25A`), from 50A (0, the A end) through the centre
+/// to 50B (1, the B end), counting steps from the centre. Live's own text
+/// for the centre isn't observed; Beatlayer shows `C`, as pan's.
+#[must_use]
+pub fn crossfader_text(position: f64) -> String {
+    let steps = (position.clamp(0.0, 1.0) * 100.0).round() as i64;
+    match steps {
+        50 => "C".to_owned(),
+        n if n < 50 => format!("{}A", 50 - n),
+        n => format!("{}B", n - 50),
+    }
+}
+
+/// What the Status Bar shows while the crossfader is dragged (observed:
+/// `Crossfade: 25A`).
+#[must_use]
+pub fn crossfader_readout(position: f64) -> String {
+    format!("Crossfade: {}", crossfader_text(position))
+}
+
+/// The command a click on a track's crossfader A or B button runs (the
+/// mixer spec, R23): the clicked side, or neither when that side is already
+/// assigned, as the button toggles. The two sides are exclusive, so
+/// assigning one releases the other. Nothing for a track without the
+/// buttons, Main.
+#[must_use]
+pub fn crossfade_clicked(
+    doc: &Document,
+    track: TrackId,
+    side: CrossfadeAssign,
+) -> Option<Invocation> {
+    let t = doc.track(track)?;
+    if !t.kind().has_crossfade_assign() {
+        return None;
+    }
+    let assign = if t.mixer().crossfade == side {
+        CrossfadeAssign::None
+    } else {
+        side
+    };
+    Some(Invocation::new(
+        "mixer.set_crossfade_assign",
+        json!({ "track": track, "assign": assign }),
+    ))
+}
+
+/// The crossfader's position after a drag of `dx` points on a fader `width`
+/// points wide, from `start`: one point of drag per point of travel, within
+/// 0 to 1. (Live's own crossfader drag isn't observed; this follows the
+/// mixer's other faders, which drag relative to the pointer.)
+#[must_use]
+pub fn crossfader_moved(start: f64, dx: f32, width: f32) -> f64 {
+    (start + f64::from(dx) / f64::from(width.max(1.0))).clamp(0.0, 1.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -750,6 +810,54 @@ mod tests {
         assert_eq!(step_pan(0.0, 1), 0.02);
         assert_eq!(step_pan(0.99, 5), 1.0);
         assert_eq!(step_pan(-1.0, -1), -1.0);
+    }
+
+    // Spec: mixer-view R6, R23.
+    #[test]
+    fn the_crossfader_reads_as_live_writes_it_and_a_click_toggles_a_side() {
+        assert_eq!(crossfader_text(0.0), "50A");
+        assert_eq!(crossfader_text(1.0), "50B");
+        assert_eq!(crossfader_text(0.5), "C");
+        assert_eq!(crossfader_text(0.75), "25B");
+        assert_eq!(crossfader_text(0.22), "28A");
+        assert_eq!(crossfader_readout(0.25), "Crossfade: 25A");
+        // One point of drag is one step of 50, and the ends hold.
+        let moved = crossfader_moved(0.0, 20.0, 100.0);
+        assert!((moved - 0.2).abs() < 1e-9);
+        assert_eq!(crossfader_moved(0.5, 1e9, 100.0), 1.0);
+        assert_eq!(crossfader_moved(0.5, -1e9, 100.0), 0.0);
+
+        // A click on a side assigns it; on the lit side it releases the
+        // track; the sides are exclusive, so the assignment is one value.
+        let mut editor = bl_model::Editor::new();
+        let id: TrackId = editor.new_id();
+        editor
+            .apply(bl_model::Command::CreateTrack {
+                id,
+                kind: bl_model::TrackKind::Audio,
+                name: String::new(),
+                parent: None,
+                index: 0,
+            })
+            .unwrap();
+        let assign =
+            |doc: &Document, side| crossfade_clicked(doc, id, side).unwrap().args["assign"].clone();
+        assert_eq!(assign(editor.document(), CrossfadeAssign::A), json!("a"));
+        editor
+            .apply(bl_model::Command::SetCrossfadeAssign {
+                track: id,
+                assign: CrossfadeAssign::A,
+            })
+            .unwrap();
+        assert_eq!(
+            assign(editor.document(), CrossfadeAssign::A),
+            json!("none"),
+            "the lit side releases the track"
+        );
+        assert_eq!(assign(editor.document(), CrossfadeAssign::B), json!("b"));
+        // Main has no buttons.
+        let main = editor.document().main_id();
+        assert!(crossfade_clicked(editor.document(), main, CrossfadeAssign::A).is_none());
     }
 
     // Spec: mixer-view R8.

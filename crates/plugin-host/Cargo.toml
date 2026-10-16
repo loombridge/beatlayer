@@ -45,6 +45,21 @@ lspk-plugin = { workspace = true, features = ["clap-host"] }
 serde = { version = "1.0.228", default-features = false, features = ["std", "derive"] }
 serde_json = "1"
 
+# A plug-in editor's host window (WP-2.10): an HWND on Windows, and an X11
+# window on Linux and the other X11 Unixes (a Wayland session serves it
+# through XWayland). macOS builds no host window yet.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.52", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_HiDpi",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+x11rb = { version = "0.13", default-features = false }
+
 [dev-dependencies]
 # The test plug-ins, built from source; their cdylibs are what the tests
 # load.
@@ -53,6 +68,65 @@ bl-test-vst3 = { path = "../test-vst3" }
 # Every block in the tests runs as a real-time section under the
 # allocation trap.
 bl-rt.workspace = true
+
+# Audio Unit hosting on macOS only (WP-2.8); on Windows and Linux the
+# `au` module is a stub and none of this is built.
+[target.'cfg(target_os = "macos")'.dependencies]
+# The AudioToolbox bindings cpal already brings in (objc2-audio-toolbox),
+# so nothing new enters the build: `AUAudioUnit` hosts v2 and v3 units,
+# `AUParameter` is their parameter tree, `AudioComponentFindNext` finds one
+# by description, and `block2` is how its render block is called.
+objc2 = "0.6.5"
+objc2-audio-toolbox = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "AUAudioUnit",
+    "AUComponent",
+    "AUParameters",
+    "AudioComponent",
+    "AudioUnit",
+    "AudioUnitParameters",
+    "AudioUnitProperties",
+    "block2",
+    "objc2-core-audio-types",
+] }
+objc2-core-audio-types = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "CoreAudioBaseTypes",
+    "bitflags",
+] }
+# A bus's format, and so its channel count.
+objc2-avf-audio = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "AVAudioFormat",
+    "AVAudioTypes",
+] }
+# A unit's own editor is a view controller in an AppKit window of its own
+# (WP-2.8's second part). AppKit is already built for this app's windows.
+objc2-app-kit = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "NSApplication",
+    "NSGraphics",
+    "NSResponder",
+    "NSView",
+    "NSViewController",
+    "NSWindow",
+] }
+# A unit's state is a property list before it becomes the set's bytes, and
+# its editor's view controller arrives from a run loop source.
+objc2-foundation = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "NSArray",
+    "NSBundle",
+    "NSData",
+    "NSDate",
+    "NSDictionary",
+    "NSError",
+    "NSGeometry",
+    "NSRunLoop",
+    "NSString",
+    "NSPropertyList",
+] }
+block2 = "0.6.2"
 
 [lints]
 workspace = true

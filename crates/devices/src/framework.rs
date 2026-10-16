@@ -8,8 +8,8 @@ use bl_core::time::{Frames, SampleRate, TempoMap};
 use bl_dsp::LinearSmoother;
 use bl_dsp::smooth::DEFAULT_SMOOTHING_SECONDS;
 use bl_engine::{
-    Block, DeviceType, Node, NodeConfig, NodeData, NodeEvent, NoteEvent, ParamValue, Registry,
-    segments,
+    AutomationList, Block, DeviceType, Node, NodeConfig, NodeData, NodeEvent, NoteEvent,
+    ParamValue, Registry, segments,
 };
 use bl_model::{Device, DeviceDescription, DeviceKind, ParamDescriptor, ParamId};
 
@@ -163,6 +163,9 @@ struct Slot {
 pub struct ParamBank {
     slots: Vec<Slot>,
     frames: usize,
+    /// The envelopes driving the device's parameters while the song plays
+    /// (WP-2.12).
+    automation: Option<NodeData>,
 }
 
 impl ParamBank {
@@ -187,7 +190,19 @@ impl ParamBank {
                 }
             })
             .collect();
-        Self { slots, frames: 0 }
+        Self {
+            slots,
+            frames: 0,
+            automation: None,
+        }
+    }
+
+    /// Takes the envelopes driving the device's parameters (WP-2.12), if
+    /// that's what the data holds; anything else is let go of.
+    pub fn receive_data(&mut self, data: NodeData) {
+        if data.downcast_ref::<AutomationList>().is_some() {
+            self.automation = Some(data);
+        }
     }
 
     /// Where parameter `id` is in the bank: its place in the description.
@@ -222,12 +237,28 @@ impl ParamBank {
         }
     }
 
-    /// Works out every parameter's value for the next `frames` frames.
-    fn advance(&mut self, frames: usize) {
+    /// Works out every parameter's value for the next `frames` frames: an
+    /// automated one from its envelope, on the exact frame, when the song
+    /// plays at song frame `from`; the rest gliding toward their values as
+    /// always.
+    fn advance(&mut self, frames: usize, from: Option<i64>) {
         self.frames = frames;
+        let automation = from.and_then(|_| self.automation.clone());
+        let automation = automation
+            .as_ref()
+            .and_then(|data| data.downcast_ref::<AutomationList>());
         for slot in &mut self.slots {
             let frames = frames.min(slot.ramp.len());
-            if slot.smoother.is_settled() {
+            let envelope = automation.and_then(|list| list.envelope(slot.descriptor.id));
+            if let (Some(envelope), Some(from)) = (envelope, from) {
+                for (i, value) in slot.ramp[..frames].iter_mut().enumerate() {
+                    *value = slot.descriptor.clamp(envelope.value_at(from + i as i64)) as f32;
+                }
+                slot.smoother.snap(
+                    slot.descriptor
+                        .clamp(envelope.value_at(from + frames as i64 - 1)),
+                );
+            } else if slot.smoother.is_settled() {
                 slot.ramp[..frames].fill(slot.smoother.value() as f32);
             } else {
                 for value in &mut slot.ramp[..frames] {
@@ -362,11 +393,18 @@ impl<D: NativeDevice> NativeNode<D> {
 impl<D: NativeDevice> Node for NativeNode<D> {
     fn process(&mut self, block: &mut Block<'_>) {
         let frames = block.frames();
+        let transport = block.transport();
         for segment in segments(block.events(), frames) {
             for event in segment.events {
                 self.params.apply(event);
             }
-            self.params.advance(segment.range.len());
+            // Spec: automation R2. While the song plays, an automated
+            // parameter takes its value from its envelope on the exact
+            // frame.
+            let from = transport
+                .playing
+                .then(|| transport.position.get() + segment.range.start as i64);
+            self.params.advance(segment.range.len(), from);
             let last = segment.range.end >= frames;
             let mut audio = Audio {
                 block,
@@ -386,7 +424,13 @@ impl<D: NativeDevice> Node for NativeNode<D> {
     }
 
     fn receive_data(&mut self, data: NodeData) {
-        self.device.receive_data(data);
+        // Automation (WP-2.12) goes to the parameter bank; anything else is
+        // the device's own data (WP-2.16).
+        if data.downcast_ref::<AutomationList>().is_some() {
+            self.params.receive_data(data);
+        } else {
+            self.device.receive_data(data);
+        }
     }
 
     fn latency(&self) -> u32 {

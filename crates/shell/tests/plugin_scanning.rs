@@ -5,6 +5,7 @@
 //! preferences come from `plugin.settings` (IMP-07), all through registered
 //! commands as an agent runs them.
 
+use bl_model::PluginFormat;
 use bl_shell::Shell;
 use bl_shell::browser_commands as browser_ids;
 use bl_shell::plugin_commands::{self as ids, PluginScan, PluginSettings, SetPluginList};
@@ -75,6 +76,52 @@ fn scanning_rescanning_and_the_set_list_work_through_commands() {
     assert!(list.plugins[0].blocked.is_none());
 }
 
+// Spec: plugin-scanning R1, R7, R10. The scanner learns VST3 (WP-2.7):
+// `plugin.scan` finds VST3 plug-ins beside CLAP's, and the format
+// preference (IMP-07) keeps one when a plug-in is offered as both.
+#[test]
+fn a_scan_finds_vst3_plug_ins_and_the_format_preference_chooses() {
+    if !ready() {
+        eprintln!("beatlayer-scan wasn't built; skipping (build the workspace's bins)");
+        return;
+    }
+    let mut shell = Shell::headless();
+    let clap = bl_test_clap::bundle().to_string_lossy().into_owned();
+    let vst3 = bl_test_vst3::bundle().to_string_lossy().into_owned();
+
+    let scan: PluginScan = serde_json::from_value(
+        shell
+            .run(ids::SCAN, json!({ "paths": [clap, vst3] }))
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(scan.plugins.len(), 2, "{:?}", scan.plugins);
+    assert!(
+        scan.plugins
+            .iter()
+            .any(|p| p.format == PluginFormat::Vst3 && p.plugin_id == bl_test_vst3::plugin_id()),
+        "{:?}",
+        scan.plugins
+    );
+
+    // Spec: plugin-scanning R7. Both test plug-ins share a name, so the
+    // format preference leaves one in the browser.
+    let settings: PluginSettings = serde_json::from_value(
+        shell
+            .run(ids::SETTINGS, json!({ "format_preference": "vst3" }))
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(settings.format_preference, Some(PluginFormat::Vst3));
+    shell
+        .run(browser_ids::OPEN_PLACE, json!({ "label": "plug_ins" }))
+        .unwrap();
+    let state = |shell: &mut Shell| -> bl_shell::browser_commands::BrowserState {
+        serde_json::from_value(shell.run(browser_ids::STATE, json!({})).unwrap()).unwrap()
+    };
+    assert_eq!(state(&mut shell).total_rows, 1);
+}
+
 #[test]
 fn a_plugin_that_fails_a_scan_is_blocklisted_and_reported() {
     if !ready() {
@@ -99,6 +146,42 @@ fn a_plugin_that_fails_a_scan_is_blocklisted_and_reported() {
     assert_eq!(scan.blocked.len(), 1);
     assert!(!scan.blocked[0].reason.is_empty());
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// Spec: plugin-scanning R1, R7; au-hosting's second part. The commands list
+// Apple's built-in Audio Units, and they join the browser's Plug-Ins label.
+#[cfg(target_os = "macos")]
+#[test]
+fn scanning_finds_audio_units_and_they_join_the_browser() {
+    if !ready() {
+        eprintln!("beatlayer-scan wasn't built; skipping (build the workspace's bins)");
+        return;
+    }
+    let mut shell = Shell::headless();
+    let scan: PluginScan = serde_json::from_value(
+        shell
+            .run(
+                ids::SCAN,
+                json!({ "paths": ["/System/Library/Components"] }),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    let delay = scan
+        .plugins
+        .iter()
+        .find(|p| p.plugin_id == "aufx/dely/appl")
+        .expect("AUDelay among Apple's built-in units");
+    assert_eq!(delay.format, bl_model::PluginFormat::AudioUnit);
+    assert!(delay.path.ends_with(".component"), "{:?}", delay.path);
+
+    // Spec: plugin-scanning R7. The Plug-Ins label lists it.
+    shell
+        .run(browser_ids::OPEN_PLACE, json!({ "label": "plug_ins" }))
+        .unwrap();
+    let state: bl_shell::browser_commands::BrowserState =
+        serde_json::from_value(shell.run(browser_ids::STATE, json!({})).unwrap()).unwrap();
+    assert!(state.total_rows >= 1, "{state:?}");
 }
 
 #[test]

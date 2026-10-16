@@ -285,6 +285,7 @@ fn eight_long_stems_stream_in_bounded_memory_and_loading_them_never_delays_play_
     let backend = NullBackend::with_options(NullOptions {
         pacing: Pacing::RealTime,
         frame_limit: None,
+        channels: 2,
     });
     let request = StreamRequest {
         output: Some(PortRequest::default()),

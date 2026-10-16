@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use serde_json::{Map, Value, json};
 
-use crate::keychain::Keychain;
+use crate::keychain::{Keychain, KeychainError};
 use crate::message::{Event, Part, Reply, Request, Role, Stop};
 use crate::provider::{self, Error, Provider};
 use crate::tools::{ToolCall, ToolSpec};
@@ -63,10 +63,13 @@ impl Provider for OpenAi {
         if !request.tools.is_empty() {
             body["tools"] = tools(request);
         }
-        let authorization = self
-            .keychain
-            .read(Self::ACCOUNT)?
-            .map(|key| format!("Bearer {key}"));
+        // With no keychain at all (Linux without a Secret Service) no key is
+        // stored either, and a local server needs none.
+        let key = match self.keychain.read(Self::ACCOUNT) {
+            Err(KeychainError::Unavailable(_)) => None,
+            read => read?,
+        };
+        let authorization = key.map(|key| format!("Bearer {key}"));
         let mut headers = Vec::new();
         if let Some(authorization) = &authorization {
             headers.push(("authorization", authorization.as_str()));

@@ -17,10 +17,7 @@
 use std::collections::BTreeMap;
 
 use bl_core::time::{SampleRate, TempoMap, Ticks};
-use bl_model::{
-    AutomationTarget, Breakpoint, ClipData, MidiData, MixerParam, ParamId, TrackId, curve_value,
-    envelope_value,
-};
+use bl_model::{AutomationTarget, ClipData, MidiData, MixerParam, ParamId, TrackId, curve_value};
 
 use crate::mixer;
 use crate::node::NodeKey;
@@ -91,23 +88,21 @@ impl PlacedEnvelope {
 }
 
 /// One clip's envelope, placed in song frames (WP-3.15): the stretches of
-/// song time its clip plays, and where along the clip's contents each frame
-/// sits. Its value is read frame by frame, the way a track envelope's is.
+/// song time its clip plays, with the envelope's breakpoints placed in the
+/// frames the clip's contents reach their positions at. Its value is read
+/// frame by frame, the way a track envelope's is.
 struct PlacedClipEnvelope {
     /// The stretches the clip plays, in frame order, in song frames.
     segments: Vec<PlacedSegment>,
-    /// The envelope's breakpoints: content positions, values, and the bends
-    /// of the segments starting at them.
-    points: Vec<Breakpoint>,
 }
 
-/// One stretch of a clip's playback: `tick = first_tick + (frame −
-/// first_frame) · per_frame` for the frames in `first_frame..end_frame`.
+/// One stretch of a clip's playback: the frames it runs between, and the
+/// envelope's breakpoints placed in song frames, each with the bend of the
+/// segment starting at it.
 struct PlacedSegment {
     first_frame: i64,
     end_frame: i64,
-    first_tick: f64,
-    per_frame: f64,
+    points: Vec<(i64, f64, f64)>,
 }
 
 impl PlacedClipEnvelope {
@@ -125,12 +120,11 @@ impl PlacedClipEnvelope {
         let ClipData::Midi(midi) = &clip.data else {
             return None;
         };
-        let points: Vec<Breakpoint> = envelope.envelope.points().collect();
-        if points.is_empty() {
+        if envelope.envelope.is_empty() {
             return None;
         }
         let mut segments = Vec::new();
-        for (song_from, song_to, content_from, content_to) in played_regions(clip, midi, envelope) {
+        for (song_from, song_to, content_from, _) in played_regions(clip, midi, envelope) {
             let first_frame = tempo
                 .ticks_to_frames(song_from, rate)
                 .get()
@@ -142,18 +136,35 @@ impl PlacedClipEnvelope {
             if end_frame <= first_frame {
                 continue;
             }
+            // Each breakpoint's own frame: its content position maps one
+            // tick per tick onto the song, and the tempo map places that
+            // frame exactly, so a breakpoint lands where the note beside it
+            // plays.
+            let points = envelope
+                .envelope
+                .points()
+                .map(|point| {
+                    let song = song_from + (point.at - content_from);
+                    (
+                        tempo
+                            .ticks_to_frames(song, rate)
+                            .get()
+                            .saturating_add(shift),
+                        point.value,
+                        point.bend,
+                    )
+                })
+                .collect();
             segments.push(PlacedSegment {
                 first_frame,
                 end_frame,
-                first_tick: content_from.get() as f64,
-                per_frame: (content_to.get() - content_from.get()) as f64
-                    / (end_frame - first_frame) as f64,
+                points,
             });
         }
         if segments.is_empty() {
             return None;
         }
-        Some(Self { segments, points })
+        Some(Self { segments })
     }
 
     /// The value it holds at `frame`: the envelope's own value at the
@@ -169,8 +180,20 @@ impl PlacedClipEnvelope {
         if frame >= segment.end_frame {
             return None;
         }
-        let tick = segment.first_tick + (frame - segment.first_frame) as f64 * segment.per_frame;
-        envelope_value(&self.points, tick)
+        let points = &segment.points;
+        let first = points[0];
+        let last = points[points.len() - 1];
+        if frame <= first.0 {
+            return Some(first.1);
+        }
+        if frame >= last.0 {
+            return Some(last.1);
+        }
+        let index = points.partition_point(|&(at, _, _)| at <= frame) - 1;
+        let (start, from, bend) = points[index];
+        let (end, to, _) = points[index + 1];
+        let along = (frame - start) as f64 / (end - start) as f64;
+        Some(curve_value(from, to, along, bend))
     }
 }
 

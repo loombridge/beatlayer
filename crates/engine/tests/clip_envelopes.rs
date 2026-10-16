@@ -7,13 +7,13 @@ bl_rt::install_trap!();
 
 mod common;
 
-use bl_core::time::Ticks;
+use bl_core::time::{Bpm, TempoMap, Ticks};
 use bl_engine::TransportCommand;
 use bl_model::{
     AutomationTarget, Clip, ClipData, ClipId, Command, MidiData, MixerParam, TrackId, TrackKind,
     Vector,
 };
-use common::{Rig, dc, track};
+use common::{RATE, Rig, dc, track};
 
 /// At 120 BPM and 48 kHz a quarter note is 24,000 frames and a 4/4 bar
 /// 96,000; the same bar is a whole note of ticks.
@@ -265,5 +265,65 @@ fn clearing_an_envelope_hands_the_parameter_back() {
     assert!(
         out[960..].iter().all(|&s| s == want(0.0)),
         "and rests at the control again"
+    );
+}
+
+// Spec: clip-envelopes R2
+#[test]
+fn a_linked_clip_envelope_lands_where_the_tempo_map_places_it() {
+    let (mut rig, a) = rig_at(64, 0.5);
+    // The tempo ramps from 120 to 240 BPM over the bar's first quarter, so
+    // the envelope's middle breakpoint — the bar's half — doesn't sit at the
+    // segment's frame midpoint: each breakpoint lands on the frame the tempo
+    // map gives its position, the frame a note at the same position plays
+    // on.
+    let tempo = TempoMap::from_breakpoints([
+        (Ticks::ZERO, Bpm::new(120.0).unwrap()),
+        (Ticks::WHOLE / 4, Bpm::new(240.0).unwrap()),
+    ])
+    .unwrap();
+    rig.apply(Command::SetTempo {
+        tempo: tempo.clone(),
+    });
+    let clip = looping_clip(&mut rig, a, Ticks::ZERO, 1);
+    for (at, value) in [
+        (Ticks::ZERO, 0.0),
+        (Ticks::WHOLE / 2, 0.5),
+        (Ticks::WHOLE, 1.0),
+    ] {
+        rig.apply(Command::SetClipEnvelopeBreakpoint {
+            clip,
+            target: volume(),
+            at,
+            value,
+        });
+    }
+    rig.sender.transport(TransportCommand::Play);
+    let end = tempo.ticks_to_frames(Ticks::WHOLE, RATE).get() as usize;
+    let out = rig.render(end + 64, 64);
+    assert!(
+        out[..end].windows(2).all(|w| w[1] >= w[0]),
+        "the envelope climbs from the clip's start to its end"
+    );
+    let middle = tempo.ticks_to_frames(Ticks::WHOLE / 2, RATE).get() as usize;
+    assert!(
+        (out[middle] - want(0.5)).abs() < 1e-6,
+        "the breakpoint lands on the frame the tempo map gives it: {} isn't {}",
+        out[middle],
+        want(0.5)
+    );
+    // Between the breakpoints the line runs between the frames they were
+    // placed on, the way a track envelope's does.
+    let quarter = tempo.ticks_to_frames(Ticks::WHOLE / 4, RATE).get() as usize;
+    let line = 0.5 * quarter as f64 / middle as f64;
+    assert!(
+        (out[quarter] - want(line)).abs() < 1e-6,
+        "frame {quarter}: {} isn't {}",
+        out[quarter],
+        want(line)
+    );
+    assert!(
+        out[end..].iter().all(|&s| s == want(0.0)),
+        "after the clip the fader plays alone"
     );
 }

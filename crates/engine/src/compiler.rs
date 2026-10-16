@@ -301,6 +301,24 @@ impl Compiler {
         self.compile_with(document, &resend)
     }
 
+    /// Reports `device`'s node's latency now, as a plug-in that restarted
+    /// for a new one does (WP-2.7): the last document is compiled again,
+    /// with the device's node kept and the new latency in its slot, so
+    /// delay compensation follows the change (delay-compensation R6).
+    /// Nothing if the device's node isn't in the last program, or its
+    /// latency is unchanged.
+    pub fn latency(&mut self, device: DeviceId, frames: u32) -> Update {
+        match self.layout.get_mut(&NodeKey::Device(device)) {
+            Some(placed) if placed.latency != frames => placed.latency = frames,
+            _ => return Update::default(),
+        }
+        let Some(document) = self.synced.clone() else {
+            return Update::default();
+        };
+        // The clips stay with their players: nothing about them changed.
+        self.compile_with(&document, &Resend::default())
+    }
+
     /// Sends `track`'s clip player its clips: a list placed under `document`'s
     /// tempo map. An empty list clears the player's.
     fn send_clips(&mut self, document: &Document, track: TrackId, update: &mut Update) {
@@ -391,6 +409,7 @@ impl Compiler {
             self.add_task(
                 &mut build,
                 track,
+                document.settings().crossfader,
                 inputs.remove(&id).unwrap_or_default(),
                 &mut sidechain_inputs,
                 clips_audible(track),
@@ -635,6 +654,7 @@ impl Compiler {
         &self,
         build: &mut Build,
         track: &Track,
+        crossfader: f64,
         inputs: Vec<Input>,
         sidechain_inputs: &mut BTreeMap<DeviceId, Vec<Input>>,
         audible: bool,
@@ -749,7 +769,13 @@ impl Compiler {
             NodeKey::Mixer(track.id()),
             Identity::Mixer,
             0,
-            || Instance::Mixer(Box::new(TrackMixer::new(track.mixer(), &config))),
+            || {
+                Instance::Mixer(Box::new(TrackMixer::new(
+                    track.mixer(),
+                    crossfader,
+                    &config,
+                )))
+            },
         );
         build.tasks.push(Task {
             track: track.id(),
@@ -1123,6 +1149,17 @@ fn needs_program(
     let (before, after) = (old.settings(), new.settings());
     let settings = changes.settings
         && (before.tempo != after.tempo || before.time_signatures != after.time_signatures);
+    // Every track's mixer node reads the crossfader, so a moved position
+    // reaches every one of them as a parameter change (R22).
+    if changes.settings && before.crossfader != after.crossfader {
+        for track in new.tracks() {
+            params.push(ParamEvent::now(
+                NodeKey::Mixer(track.id()),
+                mixer::track::CROSSFADER,
+                after.crossfader,
+            ));
+        }
+    }
     let mut recompile = settings || changes.layout;
     for (&id, &change) in &changes.tracks {
         match (change, old.track(id), new.track(id)) {
@@ -1197,6 +1234,13 @@ fn mixer_events(track: TrackId, before: &Mixer, after: &Mixer, params: &mut Vec<
     }
     if before.mute != after.mute {
         params.push(ParamEvent::now(key, mixer::track::MUTE, switch(after.mute)));
+    }
+    if before.crossfade != after.crossfade {
+        params.push(ParamEvent::now(
+            key,
+            mixer::track::CROSSFADE,
+            mixer::crossfade_value(after.crossfade),
+        ));
     }
 }
 

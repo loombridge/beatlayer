@@ -11,8 +11,8 @@
 //! [`beatlayer-scan`](../bin/beatlayer-scan.rs): it loads the file and prints
 //! what it found as JSON, and only it ever loads the plug-in's code.
 //!
-//! CLAP and VST3 are scanned; Audio Unit and LV2 are the hooks
-//! [`PluginFormat`] and [`format_extension`] leave for WP-2.8.
+//! CLAP and VST3 are scanned everywhere, and Audio Units on macOS; LV2 is
+//! the hook [`PluginFormat`] and [`format_extension`] leave for its hosting.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
@@ -28,8 +28,18 @@ use serde::{Deserialize, Serialize};
 use crate::clap::ClapType;
 use crate::vst3::Vst3Type;
 
-/// The formats the scanner can describe: CLAP and VST3 so far. Audio Unit
-/// and LV2 wait for their hosting (WP-2.8).
+/// The formats the scanner can describe: CLAP and VST3 everywhere, and
+/// Audio Units on macOS (WP-2.8). LV2 waits for its hosting.
+#[cfg(target_os = "macos")]
+pub const SCANNED_FORMATS: &[PluginFormat] = &[
+    PluginFormat::Clap,
+    PluginFormat::Vst3,
+    PluginFormat::AudioUnit,
+];
+
+/// The formats the scanner can describe: CLAP and VST3 (Audio Units are
+/// macOS only). LV2 waits for its hosting.
+#[cfg(not(target_os = "macos"))]
 pub const SCANNED_FORMATS: &[PluginFormat] = &[PluginFormat::Clap, PluginFormat::Vst3];
 
 /// How long a plug-in may take to answer a scan before it's killed and
@@ -150,6 +160,7 @@ impl ChildReply {
         match format {
             PluginFormat::Clap => clap_plugins(path),
             PluginFormat::Vst3 => vst3_plugins(path),
+            PluginFormat::AudioUnit => au_plugins(path),
             other => Err(format!(
                 "{} plug-ins aren't scanned yet",
                 format_name(other)
@@ -172,6 +183,13 @@ fn vst3_plugins(path: &Path) -> Result<Vec<ScannedPlugin>, String> {
     let host = crate::vst3::Vst3Host::new();
     let found = host.load(path).map_err(|e| e.to_string())?;
     Ok(found.into_iter().map(ScannedPlugin::from_vst3).collect())
+}
+
+/// Describes the Audio Units a `.component` bundle declares, by loading each
+/// one in its own right, as the scanner child process does (WP-2.8's second
+/// part). On Windows and Linux this answers that Audio Units are macOS only.
+fn au_plugins(path: &Path) -> Result<Vec<ScannedPlugin>, String> {
+    crate::au::scan_file(path).map_err(|e| e.to_string())
 }
 
 impl ScannedPlugin {
@@ -580,6 +598,11 @@ pub fn system_paths(format: PluginFormat) -> Vec<PathBuf> {
                 paths.push(home.join("Library/Audio/Plug-Ins/LV2"));
             }
         }
+    }
+    if format == PluginFormat::AudioUnit {
+        // Apple's own units live here, not in the user's or the system's
+        // plug-in folders; the scan is expected to find them (WP-2.8).
+        paths.push(PathBuf::from("/System/Library/Components"));
     }
     if format == PluginFormat::Vst3 {
         // The rest of the VST3 format's plug-in locations (macOS' user and

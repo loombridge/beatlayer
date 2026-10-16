@@ -70,6 +70,42 @@ impl TrackKind {
     pub const fn has_sends(self) -> bool {
         matches!(self, Self::Audio | Self::Midi | Self::Group)
     }
+
+    /// Whether tracks of this kind have the crossfader's A/B assign
+    /// buttons: every kind but Main, which carries the crossfader itself
+    /// (the mixer spec, R23).
+    #[must_use]
+    pub const fn has_crossfade_assign(self) -> bool {
+        !matches!(self, Self::Main)
+    }
+}
+
+/// Which side of the crossfader a track is assigned to, through its A and B
+/// assign buttons (the mixer spec, R23). The two sides are exclusive: a
+/// track is on A, on B, or on neither, and one assigned to neither plays
+/// through at every crossfader position.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[schemars(
+    description = "Which side of the crossfader a track is assigned to: `a`, `b`, or `none` \
+                   (the default), where the track plays through at every crossfader position."
+)]
+pub enum CrossfadeAssign {
+    /// On neither side: the crossfader doesn't change the track's level.
+    #[default]
+    None,
+    /// On the crossfader's A side.
+    A,
+    /// On the crossfader's B side.
+    B,
+}
+
+impl CrossfadeAssign {
+    /// Whether this is [`CrossfadeAssign::None`], the default.
+    #[must_use]
+    pub fn is_none(&self) -> bool {
+        *self == Self::None
+    }
 }
 
 impl fmt::Display for TrackKind {
@@ -370,6 +406,13 @@ pub struct Mixer {
     /// Whether the track is armed for recording. Only audio and MIDI tracks
     /// can be armed.
     pub arm: bool,
+    /// Which side of the crossfader the track plays on, set by its A and B
+    /// assign buttons; [`CrossfadeAssign::None`] (the default) plays through
+    /// at every position. Always `None` on the Main track, which carries
+    /// the crossfader itself (the mixer spec, R23). Saved only when it's
+    /// assigned, so a set saved before WP-3.17 loads unchanged.
+    #[serde(default, skip_serializing_if = "CrossfadeAssign::is_none")]
+    pub crossfade: CrossfadeAssign,
     /// Where sends to this track take their signal from: only a return
     /// track's can be [`SendTap::Pre`]. Saved only when it's `Pre`, so a set
     /// saved before WP-1.6 loads unchanged.
@@ -378,8 +421,8 @@ pub struct Mixer {
 }
 
 impl Default for Mixer {
-    /// Unity gain, centred, every switch off, and sends taken after the
-    /// mixer.
+    /// Unity gain, centred, every switch off, unassigned on the crossfader,
+    /// and sends taken after the mixer.
     fn default() -> Self {
         Self {
             volume: 1.0,
@@ -387,6 +430,7 @@ impl Default for Mixer {
             mute: false,
             solo: false,
             arm: false,
+            crossfade: CrossfadeAssign::None,
             tap: SendTap::Post,
         }
     }

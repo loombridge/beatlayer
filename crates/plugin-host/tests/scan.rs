@@ -163,6 +163,40 @@ fn a_folder_is_searched_for_plugin_files() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+// Spec: plugin-scanning R1; au-hosting's second part. Apple's built-in
+// units, which need no third-party binaries, are found in
+// /System/Library/Components and described by their component descriptions.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_scan_finds_apples_built_in_audio_units() {
+    let scanner = scanner();
+    let report = scanner.scan(
+        PluginFormat::AudioUnit,
+        &[PathBuf::from("/System/Library/Components")],
+    );
+    assert!(report.scanned > 0, "{report:?}");
+    let found: Vec<&str> = report
+        .plugins
+        .iter()
+        .map(|p| p.plugin_id.as_str())
+        .collect();
+    let delay = report
+        .plugins
+        .iter()
+        .find(|p| p.plugin_id == "aufx/dely/appl")
+        .unwrap_or_else(|| panic!("AUDelay among {found:?}"));
+    assert_eq!(delay.name, "AUDelay");
+    assert_eq!(delay.format, PluginFormat::AudioUnit);
+    assert_eq!(delay.role, bl_model::DeviceRole::AudioEffect);
+    assert!(delay.vendor.is_some(), "a vendor");
+    assert_eq!(delay.key(), "au/aufx/dely/appl");
+    assert!(
+        delay.path.to_string_lossy().ends_with(".component"),
+        "{:?}",
+        delay.path
+    );
+}
+
 /// Copies the test bundle to `to`, which is a folder on macOS and a file
 /// elsewhere.
 fn copy_bundle(from: &std::path::Path, to: &std::path::Path) {

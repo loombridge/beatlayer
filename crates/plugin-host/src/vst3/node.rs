@@ -37,6 +37,9 @@ const MAX_EVENTS: usize = 1024;
 /// How many parameter changes made while the plug-in isn't running are
 /// kept for it; past that they're dropped and counted.
 const PENDING_CAPACITY: usize = 512;
+/// How many values the node reports to the main thread at a time: what it
+/// applied to its component, so the controller's are the device's.
+const APPLIED_CAPACITY: usize = 256;
 
 /// What a node and the main thread both see.
 #[derive(Debug, Default)]
@@ -55,6 +58,9 @@ pub(crate) struct Status {
 pub(crate) struct HostEnds {
     pub(crate) to_node: Producer<Active>,
     pub(crate) from_node: Consumer<Active>,
+    /// The values the node applied to its component, which the main thread
+    /// gives the controller so its parameters are the device's (R5).
+    pub(crate) applied: Consumer<(u32, f64)>,
     pub(crate) status: Arc<Status>,
 }
 
@@ -491,6 +497,9 @@ pub struct Vst3Node {
     /// The block's notes to the plug-in, and its own notes out.
     events_in: ComWrapper<HostEvents>,
     events_out: ComWrapper<HostEvents>,
+    /// The values applied to the component, for the main thread to give the
+    /// controller.
+    applied: Producer<(u32, f64)>,
     /// The block's channels, in lanes of `max_frames`.
     ins: Vec<f32>,
     outs: Vec<f32>,
@@ -507,11 +516,16 @@ pub struct Vst3Node {
 }
 
 impl Vst3Node {
-    /// A node for `config`, with the main thread's ends of its queues.
-    pub(crate) fn new(config: &bl_engine::NodeConfig) -> (Self, HostEnds) {
+    /// A node for `config`, with the main thread's ends of its queues. The
+    /// plug-in's `latency` is the last one it reported, if the host knows
+    /// it: a node made after a restart reads it at once, so the compiler's
+    /// delay compensation doesn't wait for the first block.
+    pub(crate) fn new(config: &bl_engine::NodeConfig, latency: u32) -> (Self, HostEnds) {
         let (to_node, from_host) = RingBuffer::new(1);
         let (to_host, from_node) = RingBuffer::new(2);
+        let (applied, reported) = RingBuffer::new(APPLIED_CAPACITY);
         let status = Arc::new(Status::default());
+        status.latency.store(latency, Relaxed);
         let max_frames = config.max_frames.max(1);
         let node = Self {
             active: None,
@@ -523,6 +537,7 @@ impl Vst3Node {
             outgoing: ComWrapper::new(HostParams::new()),
             events_in: ComWrapper::new(HostEvents::new()),
             events_out: ComWrapper::new(HostEvents::new()),
+            applied,
             ins: vec![0.0; MAX_CHANNELS * max_frames],
             outs: vec![0.0; MAX_CHANNELS * max_frames],
             in_ptrs: vec![ptr::null_mut(); MAX_CHANNELS],
@@ -542,6 +557,7 @@ impl Vst3Node {
         let ends = HostEnds {
             to_node,
             from_node,
+            applied: reported,
             status,
         };
         (node, ends)
@@ -694,11 +710,14 @@ unsafe impl Send for Vst3Node {}
 
 /// Fills a block's parameter changes for the plug-in: the values kept while
 /// it wasn't running at the first frame, then the block's changes on
-/// theirs, as normalized values over each parameter's plain range. Free of
-/// the node so it borrows only what it needs, and allocates nothing.
+/// theirs, as normalized values over each parameter's plain range, with
+/// each value applied kept for `applied`, so the main thread can give the
+/// controller the same values (R5). Free of the node so it borrows only
+/// what it needs, and allocates nothing.
 fn fill_params(
     incoming: &ComWrapper<HostParams>,
     pending: &mut Vec<(u32, ParamValue)>,
+    applied: &mut Producer<(u32, f64)>,
     params: &[ParamMap],
     block: &Block<'_>,
     status: &Status,
@@ -712,7 +731,9 @@ fn fill_params(
             ParamValue::Set(value) => value,
             ParamValue::Default => map.default,
         };
-        incoming.push(id, 0, map.normalized(plain));
+        let normalized = map.normalized(plain);
+        incoming.push(id, 0, normalized);
+        report(applied, status, id, normalized);
     }
     pending.clear();
     for event in block.events() {
@@ -724,11 +745,21 @@ fn fill_params(
             ParamValue::Default => map.default,
         };
         let offset = i32::try_from(event.offset).unwrap_or(i32::MAX);
-        incoming.push(event.param.0, offset, map.normalized(plain));
+        let normalized = map.normalized(plain);
+        incoming.push(event.param.0, offset, normalized);
+        report(applied, status, event.param.0, normalized);
     }
     let dropped = incoming.dropped();
     if dropped > 0 {
         status.dropped.fetch_add(dropped, Relaxed);
+    }
+}
+
+/// Reports an applied value to the main thread; past the queue's room it's
+/// dropped and counted.
+fn report(applied: &mut Producer<(u32, f64)>, status: &Status, id: u32, value: f64) {
+    if applied.push((id, value)).is_err() {
+        status.dropped.fetch_add(1, Relaxed);
     }
 }
 
@@ -776,6 +807,7 @@ impl Node for Vst3Node {
             fill_params(
                 &self.incoming,
                 &mut self.pending,
+                &mut self.applied,
                 &active.params,
                 block,
                 &self.status,

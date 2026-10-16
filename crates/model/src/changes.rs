@@ -34,14 +34,14 @@ pub enum Change {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[schemars(
     description = "What a command changed: whether the song settings (the tempo map, the \
-                   time-signature map, the Arrangement loop, or Solo in Place) changed, whether \
-                   the track list changed, and which tracks, scenes, clips, and devices were \
-                   added, removed, or modified, keyed by ID. Every field is empty or false if \
-                   nothing changed."
+                   time-signature map, the crossfader, the Arrangement loop, or Solo in Place) \
+                   changed, whether the track list changed, and which tracks, scenes, clips, and \
+                   devices were added, removed, or modified, keyed by ID. Every field is empty or \
+                   false if nothing changed."
 )]
 pub struct ChangeSet {
     /// The song settings changed: the tempo map, the time-signature map, the
-    /// Arrangement loop, or Solo in Place.
+    /// crossfader, the Arrangement loop, or Solo in Place.
     pub settings: bool,
     /// The track tree changed: a track was added, removed, or moved, so
     /// routing may have changed.

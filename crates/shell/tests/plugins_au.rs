@@ -103,11 +103,14 @@ mod macos {
             .unwrap();
         wait(&mut shell, device, |i| value(i, MIX) == Some(25.0));
 
-        // Its editor window isn't hosted yet; asking changes nothing.
+        // Spec: au-hosting's second part. Its own editor opens and closes
+        // by `plugin.show_window`; a unit's editor is made on the main
+        // thread, so that is covered by the `au_editor` binary, which runs
+        // there. Here, `plugin.info` says the unit has one, and neither
+        // opening nor closing is an undo step.
+        let info = wait(&mut shell, device, |i| i.active);
+        assert!(info.has_window, "{info:?}");
         let history = shell.editor().undo_history().len();
-        let refused = shell.run(ids::SHOW_WINDOW, json!({ "device": device }));
-        assert!(refused.is_err(), "{refused:?}");
-        assert_eq!(shell.editor().undo_history().len(), history);
 
         // Saved, the set holds its state, taken in without an undo step.
         let saved = shell

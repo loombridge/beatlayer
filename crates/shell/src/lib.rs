@@ -78,6 +78,7 @@ pub mod mixer_controls;
 pub mod mixer_view;
 pub mod perception;
 pub mod permission;
+pub mod placeholders;
 pub mod plugins;
 pub mod recording;
 pub mod routing;

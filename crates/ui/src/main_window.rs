@@ -8,6 +8,7 @@
 use std::time::Duration;
 
 use bl_model::{CountIn, MetronomeRhythm, MetronomeSound};
+use bl_shell::midi_io_commands as midi_ids;
 use bl_shell::{
     Area, Effect, GesturePhase, Invocation, MainView, Shell, commands as ids, transport_commands,
 };
@@ -1191,6 +1192,14 @@ fn look(element: Element, shell: &Shell) -> Look {
             ),
             ..Look::default()
         },
+        Element::ComputerKeyboard => {
+            let on = shell.computer_keyboard_on();
+            Look {
+                on,
+                value: Some(if on { "on" } else { "off" }.to_owned()),
+                ..Look::default()
+            }
+        }
         Element::TapTempo => text("TAP"),
         // The transport section's values come from `control_bar`.
         Element::Quantization => text("1 Bar"),
@@ -1291,6 +1300,7 @@ fn command_of(element: Element) -> Option<&'static str> {
         Element::AssistantToggle => Some(bl_shell::assistant::VIEW_TOGGLE_ASSISTANT),
         Element::ClipViewToggle => Some(ids::VIEW_TOGGLE_CLIP_VIEW),
         Element::DrawMode => Some(ids::VIEW_DRAW_MODE),
+        Element::ComputerKeyboard => Some(midi_ids::TOGGLE_COMPUTER_KEYBOARD),
         Element::SessionView | Element::ArrangementView => {
             Some(ids::VIEW_TOGGLE_SESSION_ARRANGEMENT)
         }
@@ -1310,6 +1320,10 @@ fn click(element: Element, shell: &Shell) -> Option<Invocation> {
         )),
         Element::ClipViewToggle => Some(Invocation::new(ids::VIEW_TOGGLE_CLIP_VIEW, json!({}))),
         Element::DrawMode => Some(Invocation::new(ids::VIEW_DRAW_MODE, json!({}))),
+        Element::ComputerKeyboard => Some(Invocation::new(
+            midi_ids::TOGGLE_COMPUTER_KEYBOARD,
+            json!({}),
+        )),
         Element::Follow => Some(Invocation::new(
             bl_shell::arrangement_commands::FOLLOW,
             json!({}),

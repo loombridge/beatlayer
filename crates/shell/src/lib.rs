@@ -37,6 +37,9 @@
 //!   Session and Arrangement Views (shown, scrolled, which sections),
 //!   changed by the `mixer_view.*` commands, and what a strip's controls
 //!   show and the `mixer.*` commands each change runs (WP-1.9).
+//! - [`midi`]: the MIDI ports, their switches, and the computer MIDI
+//!   keyboard (WP-2.2), which the `midi.*` commands and the Settings
+//!   window's MIDI ports table run.
 //! - [`perception`]: audio previews of a range or a track, rendered
 //!   through the export's offline render, and their analysis, which the
 //!   `perception.*` commands run for the agent API (WP-1.16).
@@ -69,6 +72,7 @@ pub mod clip_view;
 pub mod devices;
 pub mod export;
 pub mod files;
+pub mod midi;
 pub mod midi_files;
 pub mod mixer_controls;
 pub mod mixer_view;
@@ -95,6 +99,9 @@ pub use bl_shell_spec::devices as device_commands;
 pub use bl_shell_spec::editing as editing_commands;
 /// The export command's ID and its argument and result types (WP-1.12).
 pub use bl_shell_spec::export as export_commands;
+/// The MIDI ports' and the computer MIDI keyboard's command IDs and their
+/// argument and result types (WP-2.2).
+pub use bl_shell_spec::midi_io as midi_io_commands;
 /// The Mixer view's command IDs and their argument and result types
 /// (WP-1.9).
 pub use bl_shell_spec::mixer_view as mixer_view_commands;

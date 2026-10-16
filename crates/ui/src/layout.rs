@@ -414,7 +414,7 @@ pub const ELEMENTS: &[Placement] = &[
     p(E::LoopLengthBeats, "L-CTRL-018", "Loop Length Beats", CB, 1055.0, 25.0, Middle, Value, None),
     p(E::LoopLengthSixteenths, "L-CTRL-018", "Loop Length Sixteenths", CB, 1080.0, 26.0, Middle, Value, None),
     p(E::DrawMode, "L-CTRL-019", "Draw Mode", CB, 1263.0, 17.0, Right, Switch, None),
-    p(E::ComputerKeyboard, "L-CTRL-020", "Computer MIDI Keyboard", CB, 1282.0, 17.0, Right, Switch, Some("WP-2.2")),
+    p(E::ComputerKeyboard, "L-CTRL-020", "Computer MIDI Keyboard", CB, 1282.0, 17.0, Right, Switch, None),
     p(E::KeyMap, "L-CTRL-021", "Key Map Mode", CB, 1301.0, 27.0, Right, Switch, Some("M7")),
     p(E::KeyIndicators, "L-CTRL-021", "Key Input and Output Indicators", CB, 1330.0, 7.0, Right, Indicator, Some("M7")),
     p(E::MidiMap, "L-CTRL-022", "MIDI Map Mode", CB, 1339.0, 28.0, Right, Switch, Some("M7")),

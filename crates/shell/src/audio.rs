@@ -308,6 +308,10 @@ impl bl_engine::DeviceInput for InputPart<'_> {
 /// takes them all at once.
 const ENGINE_START_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// How many MIDI messages can wait for the engine's next block; the engine
+/// takes at most `MIDI_EVENTS_PER_BLOCK` of them a block.
+const MIDI_QUEUE_MESSAGES: usize = 4096;
+
 /// The transport as the engine last published it: what the Control Bar's
 /// transport section and the Arrangement show. While no engine runs, it's
 /// the transport as the last one left it, stopped.
@@ -381,6 +385,9 @@ pub struct AudioHost {
     /// (WP-2.7).
     vst3: Option<bl_plugin_host::vst3::Vst3Host>,
     kit: Option<bl_devices::KitHost>,
+    /// Where MIDI input arrives (WP-2.2): each engine's processor gets a
+    /// fresh queue from it.
+    midi: Option<bl_midi_io::InputSender>,
 }
 
 impl std::fmt::Debug for AudioHost {
@@ -456,7 +463,14 @@ impl AudioHost {
             au: None,
             vst3: None,
             kit: None,
+            midi: None,
         }
+    }
+
+    /// Gives every engine from now on the queue `sender` fills with MIDI
+    /// input (WP-2.2; the MIDI I/O spec, R14).
+    pub fn set_midi(&mut self, sender: bl_midi_io::InputSender) {
+        self.midi = Some(sender);
     }
 
     /// Plays clips' audio from `media`, streaming long files from disk, from
@@ -1034,8 +1048,12 @@ impl AudioHost {
             registry.set_media(Arc::clone(&streams) as Arc<dyn MediaLibrary>);
             self.streams = Some(streams);
         }
-        let (engine, processor) = Engine::start(config, registry)
+        let (engine, mut processor) = Engine::start(config, registry)
             .map_err(|e| format!("couldn't start the engine's threads: {e}"))?;
+        if let Some(midi) = &self.midi {
+            // The processor has no queue yet, so nothing comes back to drop.
+            processor.set_midi_input(midi.attach(MIDI_QUEUE_MESSAGES));
+        }
         if let Some(document) = &self.document {
             engine.sync(document);
         }

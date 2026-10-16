@@ -865,6 +865,13 @@ fn automation_mode_on(h: &mut Harness) {
     h.settle();
 }
 
+/// A MIDI input port for the Tempo & MIDI page's table to list (WP-2.2).
+fn a_midi_port(h: &mut Harness) {
+    let test = bl_midi_io::TestBackend::new();
+    test.add_port(bl_midi_io::Direction::Input, "Keys");
+    h.shell.use_midi_backend(Box::new(test));
+}
+
 fn arrangement_track_3(h: &mut Harness) {
     h.key(Key::Num2, Modifiers::ALT);
     let track = h.shell.editor().document().top_level().nth(2).unwrap();
@@ -1287,6 +1294,10 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "view.set_zoom",
             settings("display-input", nothing, "Zoom", Key::ArrowUp),
         ),
+        (
+            "midi.set_port",
+            settings("tempo-midi", a_midi_port, "In: Keys Track", Key::Enter),
+        ),
         // Queries.
         ("arrangement.state", Exception(Query)),
         ("browser.state", Exception(Query)),
@@ -1294,6 +1305,7 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("transport.state", Exception(Query)),
         ("audio.status", Exception(Query)),
         ("audio.devices", Exception(Query)),
+        ("midi.ports", Exception(Query)),
         ("set.list_recoverable", Exception(Query)),
         // Agent perception (WP-1.16): how an agent hears and sees the set,
         // which a person does with their own ears and eyes.

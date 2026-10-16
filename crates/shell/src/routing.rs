@@ -5,9 +5,9 @@
 //!
 //! The lists, their order, and their defaults were observed in Live 12.4.6
 //! on macOS on 12 October 2026 (the routing spec, sources). Entries for
-//! what other packages bring (the audio interface's channels, MIDI ports,
-//! the computer keyboard) are listed where Live lists them, disabled, and
-//! name the package.
+//! what another package brings (the audio interface's outputs) are listed
+//! where Live lists them, disabled, and name the package. MIDI From lists the
+//! MIDI input ports the computer offers (WP-2.2).
 
 use bl_model::{Channel, DeviceId, Document, Input, Monitor, Output, Tap, TrackId, TrackKind};
 use bl_shell_spec::commands::APP_SETTINGS;
@@ -19,18 +19,19 @@ use crate::Invocation;
 /// Ext. Out (the interface's inputs and Main's outputs are built).
 pub const DUPLEX_AUDIO: &str = "WP-2.13";
 
-/// The audio interface the In/Out choosers list: how many input and output
-/// channels the open device has. Zero channels while none is open.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// What the In/Out choosers list from outside the set: how many input and
+/// output channels the open audio device has (zero while none is open), and
+/// the MIDI input ports the computer offers.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Interface {
     /// The device's input channels.
     pub inputs: u16,
     /// The device's output channels.
     pub outputs: u16,
+    /// The names of the MIDI input ports, in the order the Settings window
+    /// lists them (the MIDI I/O spec, R7).
+    pub midi_inputs: Vec<String>,
 }
-
-/// The package that brings MIDI ports and the computer MIDI keyboard.
-pub const MIDI_IO: &str = "WP-2.2";
 
 /// One line of a chooser's list.
 #[derive(Clone, Debug, PartialEq)]
@@ -264,19 +265,25 @@ const fn tap_label(tap: Tap) -> &'static str {
 /// interface's channels come from `interface`, so the Ext. In channel and
 /// Main Out choosers list what the open device has.
 #[must_use]
-pub fn in_out(doc: &Document, track: TrackId, interface: Interface) -> Option<InOut> {
+pub fn in_out(doc: &Document, track: TrackId, interface: &Interface) -> Option<InOut> {
     let t = doc.track(track)?;
     Some(match t.kind() {
         TrackKind::Audio => InOut::Clips {
             input: audio_from(doc, track),
-            input_channel: input_channel(track, t.routing().input.clone(), false, interface),
+            input_channel: input_channel(track, t.routing().input.clone(), None, false, interface),
             monitor: monitor(track, t.routing().monitor),
             output: audio_to(doc, track),
             output_channel: output_channel(t.routing().output),
         },
         TrackKind::Midi => InOut::Clips {
-            input: midi_from(doc, track),
-            input_channel: input_channel(track, t.routing().input.clone(), true, interface),
+            input: midi_from(doc, track, &interface.midi_inputs),
+            input_channel: input_channel(
+                track,
+                t.routing().input.clone(),
+                t.routing().channel,
+                true,
+                interface,
+            ),
             monitor: monitor(track, t.routing().monitor),
             output: midi_to(doc, track),
             output_channel: Chooser {
@@ -442,25 +449,42 @@ fn audio_from(doc: &Document, track: TrackId) -> Chooser {
     chooser("Input Type", entries)
 }
 
-/// MIDI From (observed): All Ins · Computer Keyboard · Configure… ─ the
-/// other MIDI tracks ─ No Input. All Ins and the computer keyboard come
-/// with MIDI input (WP-2.2).
-fn midi_from(doc: &Document, track: TrackId) -> Chooser {
+/// MIDI From (observed): All Ins · Computer Keyboard · the input ports ·
+/// Configure… ─ the other MIDI tracks ─ No Input (the MIDI I/O spec, R7). A
+/// port the track names that the computer doesn't offer now is listed too,
+/// chosen, because the track keeps the name (R8).
+fn midi_from(doc: &Document, track: TrackId, ports: &[String]) -> Chooser {
     let input = doc.track(track).map(|t| t.routing().input.clone());
     let current_from = match input {
         Some(Input::Track { track, .. }) => Some(track),
         _ => None,
     };
+    let chosen_port = match &input {
+        Some(Input::Port { name }) => Some(name.as_str()),
+        _ => None,
+    };
     let mut entries = vec![
-        Entry::pending("All Ins", input == Some(Input::AllIns), MIDI_IO),
-        Entry::pending(
-            "Computer Keyboard",
-            input == Some(Input::ComputerKeyboard),
-            MIDI_IO,
+        Entry::choice(
+            "All Ins",
+            set_input(track, json!({ "type": "all_ins" })),
+            input == Some(Input::AllIns),
         ),
-        configure("tempo-midi"),
-        Entry::Separator,
+        Entry::choice(
+            "Computer Keyboard",
+            set_input(track, json!({ "type": "computer_keyboard" })),
+            input == Some(Input::ComputerKeyboard),
+        ),
     ];
+    let absent = chosen_port.filter(|name| !ports.iter().any(|p| p == name));
+    for name in ports.iter().map(String::as_str).chain(absent) {
+        entries.push(Entry::choice(
+            name,
+            set_input(track, json!({ "type": "port", "name": name })),
+            chosen_port == Some(name),
+        ));
+    }
+    entries.push(configure("tempo-midi"));
+    entries.push(Entry::Separator);
     for id in doc.track_order() {
         if id != track && doc.track(id).map(bl_model::Track::kind) == Some(TrackKind::Midi) {
             entries.push(Entry::choice(
@@ -481,9 +505,16 @@ fn midi_from(doc: &Document, track: TrackId) -> Chooser {
 
 /// The input channel: Pre FX · Post FX · Post Mixer with a track chosen
 /// (observed, Post Mixer the default); the interface's inputs with Ext. In
-/// (the single channels, then the pairs); All Channels with a MIDI port
-/// (WP-2.2); nothing otherwise.
-fn input_channel(track: TrackId, input: Input, midi: bool, interface: Interface) -> Chooser {
+/// (the single channels, then the pairs); All Channels, then 1 to 16, with a
+/// MIDI port (the MIDI I/O spec, R7); All Channels, fixed, with All Ins or the
+/// computer keyboard; nothing otherwise.
+fn input_channel(
+    track: TrackId,
+    input: Input,
+    channel: Option<u8>,
+    midi: bool,
+    interface: &Interface,
+) -> Chooser {
     match input {
         Input::Track { track: from, tap } => Chooser {
             name: "Input Channel",
@@ -509,11 +540,30 @@ fn input_channel(track: TrackId, input: Input, midi: bool, interface: Interface)
             entries: interface_inputs(track, channel, interface.inputs),
             pending: None,
         },
+        Input::Port { name } if midi => {
+            let set = |channel: Option<u8>| {
+                Invocation::new(
+                    "routing.set_input",
+                    json!({ "track": track, "input": { "type": "port", "name": name },
+                            "channel": channel }),
+                )
+            };
+            let mut entries = vec![Entry::choice("All Channels", set(None), channel.is_none())];
+            entries.extend(
+                (1..=16).map(|n| Entry::choice(n.to_string(), set(Some(n)), channel == Some(n))),
+            );
+            Chooser {
+                name: "Input Channel",
+                text: channel.map_or_else(|| "All Channels".to_owned(), |n| n.to_string()),
+                entries,
+                pending: None,
+            }
+        }
         Input::AllIns | Input::ComputerKeyboard if midi => Chooser {
             name: "Input Channel",
             text: "All Channels".to_owned(),
             entries: Vec::new(),
-            pending: Some(MIDI_IO),
+            pending: None,
         },
         _ => Chooser {
             name: "Input Channel",

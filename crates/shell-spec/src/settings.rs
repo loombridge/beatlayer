@@ -91,7 +91,8 @@ impl SettingsPage {
     /// in the chooser. The shell (WP-1.7) builds Audio and the theme choice,
     /// WP-1.17 Display & Input's Zoom, WP-1.4b Record, Warp & Launch's
     /// Create Fades on Clip Edges, WP-2.5b Plug-Ins' Auto-Hide Plug-In
-    /// Windows, and WP-1.15 the Agents page's agent server settings.
+    /// Windows, WP-1.15 the Agents page's agent server settings, and WP-2.2 the
+    /// Tempo & MIDI page's MIDI ports table.
     #[must_use]
     pub const fn is_built(self) -> bool {
         matches!(
@@ -102,6 +103,7 @@ impl SettingsPage {
                 | Self::RecordWarpLaunch
                 | Self::PlugIns
                 | Self::Agents
+                | Self::TempoMidi
         )
     }
 

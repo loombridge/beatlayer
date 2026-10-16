@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use bl_model::ParamId;
 use bl_model::PluginFormat;
 
+pub use bl_shell_spec::midi_io::PortDirection;
 pub use bl_shell_spec::settings::{
     SettingsPage, ThemeChoice, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, ZOOM_STEPS, zoom_factor,
     zoom_percent, zoom_step,
@@ -92,6 +93,35 @@ pub struct Preferences {
     /// which a new set starts from (WP-2.25). `None` uses the factory
     /// default set.
     pub default_set: Option<PathBuf>,
+    /// The MIDI ports' switches and the computer MIDI keyboard (WP-2.2).
+    pub midi: MidiPrefs,
+}
+
+/// What the app keeps of MIDI input between starts (the MIDI I/O spec, R3
+/// and R17).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MidiPrefs {
+    /// Each port's switches, by direction and name, so they apply again
+    /// whenever the port is seen.
+    pub ports: Vec<PortPrefs>,
+    /// Whether the computer MIDI keyboard is on.
+    pub keyboard_on: bool,
+}
+
+/// One MIDI port's switches in the preferences.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PortPrefs {
+    /// Input or output.
+    pub direction: PortDirection,
+    /// The name the MIDI system gives the port.
+    pub name: String,
+    /// Track.
+    pub track: bool,
+    /// Sync.
+    pub sync: bool,
+    /// Remote.
+    pub remote: bool,
 }
 
 /// A switch that's on unless the preferences say otherwise, read and

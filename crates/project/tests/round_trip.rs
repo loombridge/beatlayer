@@ -16,8 +16,8 @@ use std::process::Command;
 
 use bl_model::{Command as Edit, Editor, TrackKind};
 use bl_project::{
-    LoadOptions, Media, Project, SCHEMA_VERSION, SaveOptions, SetFile, decode, encode, encode_json,
-    load,
+    LoadOptions, Media, Project, SCHEMA_VERSION, SaveOptions, SetFile, decode, decode_json, encode,
+    encode_json, load,
 };
 use common::{TestDir, depth, recipe};
 use proptest::prelude::*;
@@ -135,7 +135,7 @@ fn a_deleted_scene_takes_its_removed_stop_button_with_it() {
     );
     let project = Project::from_editor(&editor, Media::new());
     let json = encode_json(&project, 1).unwrap();
-    decode(&json, &LoadOptions::default()).expect("the set opens again");
+    decode_json(&json, &LoadOptions::default()).expect("the set opens again");
 }
 
 /// A song the size of the UI benchmark (200 tracks, 5,000 clips) saves and

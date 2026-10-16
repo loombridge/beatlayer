@@ -686,7 +686,11 @@ mod tests {
             "the frame it was queued for stays"
         );
         launcher.apply_due(due);
-        launcher.launch(track, scene, playhead(&tempo, &sigs, true, Ticks::WHOLE * 3));
+        launcher.launch(
+            track,
+            scene,
+            playhead(&tempo, &sigs, true, Ticks::WHOLE * 3),
+        );
         launcher.status(&mut status);
         assert_eq!(status.len(), 1, "{status:?}");
         assert_eq!(launcher.state_of(track, scene), Some(SlotState::Playing));

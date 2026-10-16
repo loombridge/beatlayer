@@ -210,6 +210,31 @@ fn non_empty(value: Option<String>) -> Option<String> {
     value.filter(|value| !value.trim().is_empty())
 }
 
+/// `cargo xtask release-check <tag>`: fails unless the tag is `v` followed by
+/// the workspace version, so a tag push can't build a release named for
+/// another version than the one the binaries print.
+pub fn release_check(root: &Path, tag: &str) -> Result<(), String> {
+    let metadata = cargo_metadata(root)?;
+    let version = metadata["packages"]
+        .as_array()
+        .and_then(|packages| packages.iter().find(|p| p["name"] == APP))
+        .and_then(|app| app["version"].as_str())
+        .ok_or_else(|| format!("`cargo metadata` lists no `{APP}` version"))?;
+    check_tag(tag, version)?;
+    eprintln!("{tag} matches the workspace version {version}");
+    Ok(())
+}
+
+fn check_tag(tag: &str, version: &str) -> Result<(), String> {
+    if tag.strip_prefix('v') == Some(version) {
+        Ok(())
+    } else {
+        Err(format!(
+            "the tag `{tag}` must be `v{version}`, the workspace version in Cargo.toml"
+        ))
+    }
+}
+
 /// Builds the packages for this platform and smoke-tests them.
 pub fn package(root: &Path) -> Result<(), String> {
     let platform = Platform::current()?;
@@ -1055,6 +1080,14 @@ fn run(command: &mut Command, what: &str) -> Result<(), String> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn the_tag_must_be_v_and_the_workspace_version() {
+        assert_eq!(check_tag("v0.1.0", "0.1.0"), Ok(()));
+        for tag in ["v0.0.9", "0.1.0", "v0.1", "v0.1.0-rc1", "vv0.1.0", ""] {
+            assert!(check_tag(tag, "0.1.0").is_err(), "{tag} passed");
+        }
+    }
 
     fn table() -> Value {
         json!({

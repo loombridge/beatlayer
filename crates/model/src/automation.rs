@@ -227,12 +227,15 @@ impl Envelope {
     /// the envelope has points and `end` is past the last written position,
     /// a breakpoint at `end` takes the envelope back to the value it had
     /// there, so the old envelope resumes; with none, the last value written
-    /// holds.
+    /// holds. An `end` before the last written position (the playhead
+    /// wrapped round the loop before recording stopped) ends the touch at
+    /// its last move.
     #[must_use]
     pub fn touch(&self, written: &[(Ticks, f64)], end: Ticks) -> (Vec<Ticks>, Vec<(Ticks, f64)>) {
         let (Some(first), Some(last)) = (written.first(), written.last()) else {
             return (Vec::new(), Vec::new());
         };
+        let end = end.max(last.0);
         let removed = self
             .points()
             .map(|point| point.at)
@@ -423,6 +426,12 @@ mod tests {
         assert!(removed.is_empty());
         assert_eq!(set, written);
         assert_eq!(old.touch(&[], Ticks::WHOLE), (vec![], vec![]));
+        // An end before the last move (the loop wrapped) ends the touch at
+        // its last move: the old points it covers still go.
+        let written = [(Ticks::WHOLE, 0.9), (Ticks::WHOLE * 3, 0.8)];
+        let (removed, set) = old.touch(&written, Ticks::ZERO);
+        assert_eq!(removed, vec![Ticks::WHOLE * 2]);
+        assert_eq!(set, written);
     }
 
     #[test]

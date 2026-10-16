@@ -1058,6 +1058,87 @@ const ENTRIES: &[Entry] = &[
             0.",
     },
     Entry {
+        id: "clip.set_envelope_breakpoint",
+        action: Action::Apply("set_clip_envelope_breakpoint"),
+        label: "Add Envelope Breakpoint",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Sets the value of one of a clip's envelopes at a position, adding a \
+            breakpoint there or replacing the one that's there, as clicking or dragging a \
+            breakpoint in the Envelopes tab does. `clip` is the clip, `target` the parameter of \
+            the clip's track the envelope modulates (a control of its mixer, one of its sends, \
+            or a parameter of a device in its chain), `at` the position in ticks from the \
+            beginning of the clip's contents, and `value` the value there, in the parameter's \
+            own units. A parameter with no clip envelope gets one, linked to the clip, with \
+            this breakpoint as its first.",
+    },
+    Entry {
+        id: "clip.set_envelope_curve",
+        action: Action::Apply("set_clip_envelope_curve"),
+        label: "Curve Envelope Segment",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Curves the segment starting at one of a clip envelope's breakpoints, as \
+            holding Alt (Windows) or Option (macOS) while dragging a segment in the Envelopes \
+            tab does. `clip` and `target` name the envelope as `clip.set_envelope_breakpoint` \
+            does, `at` is the breakpoint the segment starts at, and `bend` is from -1 to 1: 0 \
+            makes the segment a straight line again, and the sign chooses which side it bows \
+            to.",
+    },
+    Entry {
+        id: "clip.move_envelope_breakpoint",
+        action: Action::Apply("move_clip_envelope_breakpoint"),
+        label: "Move Envelope Breakpoint",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Moves one of a clip envelope's breakpoints from `at` to `to`, keeping its \
+            value, as dragging it in the Envelopes tab does. `clip` and `target` name the \
+            envelope as `clip.set_envelope_breakpoint` does. `to` is 0 or later, and not where \
+            another breakpoint of the same envelope already is.",
+    },
+    Entry {
+        id: "clip.delete_envelope_breakpoint",
+        action: Action::Apply("delete_clip_envelope_breakpoint"),
+        label: "Delete Envelope Breakpoint",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Deletes one of a clip envelope's breakpoints, so the segments either side \
+            of it become the one starting at the breakpoint before it, as clicking a breakpoint \
+            in the Envelopes tab does. `clip` and `target` name the envelope as \
+            `clip.set_envelope_breakpoint` does, and `at` is where the breakpoint is. Deleting \
+            the last one takes the envelope with it.",
+    },
+    Entry {
+        id: "clip.delete_envelope",
+        action: Action::Apply("delete_clip_envelope"),
+        label: "Clear Envelope",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Deletes a clip's envelope for a parameter, as Clear Envelope in the \
+            Envelopes tab does: the parameter goes back to what it does without the clip \
+            envelope. `clip` and `target` name the envelope as `clip.set_envelope_breakpoint` \
+            does. Nothing changes if the clip has no envelope for it.",
+    },
+    Entry {
+        id: "clip.set_envelope_linked",
+        action: Action::Apply("set_clip_envelope_linked"),
+        label: "Link Envelope",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Switches a clip envelope's Linked switch: linked (`true`, the default), it \
+            follows the clip's region and loop, playing what the clip's contents play; \
+            unlinked, it plays once from the clip's start, one tick per tick, for as long as the \
+            clip lasts. `clip` and `target` name the envelope as \
+            `clip.set_envelope_breakpoint` does; a target with no envelope gets an empty linked \
+            one, so a switch thrown before anything is drawn sets what drawing will use.",
+    },
+    Entry {
         id: "clip.trim_start",
         action: Action::Apply("trim_clip_start"),
         label: "Trim Clip Start",

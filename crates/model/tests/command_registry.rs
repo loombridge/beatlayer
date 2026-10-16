@@ -50,14 +50,15 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        82,
+        88,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
          set_device_floating, WP-2.20 six for tempo breakpoints and time-signature markers, \
          WP-2.1 two for MIDI clips, WP-2.16 set_device_sample, WP-2.15 five for the metronome, \
          WP-2.13 the two for Main Out and Cue Out, WP-3.1 five for scenes and two for slot \
-         clips, WP-2.12 seven for automation, and WP-3.17 two for the crossfader"
+         clips, WP-2.12 seven for automation, WP-3.15 six for clip envelopes, and WP-3.17 two \
+         for the crossfader"
     );
 
     for op in &ops {
@@ -771,6 +772,74 @@ fn every_command_runs_by_id() {
             .is_none()
     );
 
+    // Clip envelopes (WP-3.15): a clip carries envelopes for its track's
+    // parameters, linked to the clip unless the Linked switch says
+    // otherwise.
+    agent.run(
+        "clip.set_envelope_breakpoint",
+        json!({ "clip": riff, "target": volume, "at": 0, "value": 1.0 }),
+    );
+    agent.run(
+        "clip.set_envelope_breakpoint",
+        json!({ "clip": riff, "target": volume, "at": bar, "value": 0.25 }),
+    );
+    agent.run(
+        "clip.set_envelope_curve",
+        json!({ "clip": riff, "target": volume, "at": 0, "bend": -0.5 }),
+    );
+    agent.run(
+        "clip.set_envelope_linked",
+        json!({ "clip": riff, "target": volume, "linked": false }),
+    );
+    assert!(
+        !agent
+            .editor
+            .document()
+            .clip(riff)
+            .unwrap()
+            .envelope(&AutomationTarget::Mixer {
+                param: MixerParam::Volume
+            })
+            .unwrap()
+            .linked
+    );
+    agent.run(
+        "clip.move_envelope_breakpoint",
+        json!({ "clip": riff, "target": volume, "at": bar, "to": bar * 2 }),
+    );
+    agent.run(
+        "clip.delete_envelope_breakpoint",
+        json!({ "clip": riff, "target": volume, "at": bar * 2 }),
+    );
+    agent.run(
+        "clip.set_envelope_breakpoint",
+        json!({ "clip": riff, "target": send, "at": 0, "value": 0.5 }),
+    );
+    assert_eq!(
+        agent
+            .editor
+            .document()
+            .clip(riff)
+            .unwrap()
+            .envelopes()
+            .count(),
+        2
+    );
+    agent.run(
+        "clip.delete_envelope",
+        json!({ "clip": riff, "target": send }),
+    );
+    assert_eq!(
+        agent
+            .editor
+            .document()
+            .clip(riff)
+            .unwrap()
+            .envelopes()
+            .count(),
+        1
+    );
+
     // Metronome (WP-2.15).
     agent.run(
         "transport.set_metronome_enabled",
@@ -1046,6 +1115,69 @@ fn schemas_match_what_commands_serialise() {
                 target: AutomationTarget::Send {
                     to: TrackId(fresh()),
                 },
+            },
+        ),
+        (
+            "clip.set_envelope_breakpoint",
+            Command::SetClipEnvelopeBreakpoint {
+                clip,
+                target: AutomationTarget::Mixer {
+                    param: MixerParam::Volume,
+                },
+                at: Ticks::QUARTER,
+                value: 0.5,
+            },
+        ),
+        (
+            "clip.set_envelope_curve",
+            Command::SetClipEnvelopeCurve {
+                clip,
+                target: AutomationTarget::Device {
+                    device,
+                    param: ParamId(3),
+                },
+                at: Ticks::QUARTER,
+                bend: 0.25,
+            },
+        ),
+        (
+            "clip.move_envelope_breakpoint",
+            Command::MoveClipEnvelopeBreakpoint {
+                clip,
+                target: AutomationTarget::Mixer {
+                    param: MixerParam::Pan,
+                },
+                at: Ticks::QUARTER,
+                to: Ticks::WHOLE,
+            },
+        ),
+        (
+            "clip.delete_envelope_breakpoint",
+            Command::DeleteClipEnvelopeBreakpoint {
+                clip,
+                target: AutomationTarget::Mixer {
+                    param: MixerParam::Mute,
+                },
+                at: Ticks::QUARTER,
+            },
+        ),
+        (
+            "clip.delete_envelope",
+            Command::DeleteClipEnvelope {
+                clip,
+                target: AutomationTarget::Send {
+                    to: TrackId(fresh()),
+                },
+            },
+        ),
+        (
+            "clip.set_envelope_linked",
+            Command::SetClipEnvelopeLinked {
+                clip,
+                target: AutomationTarget::Mixer {
+                    param: MixerParam::Volume,
+                },
+                linked: false,
             },
         ),
         (

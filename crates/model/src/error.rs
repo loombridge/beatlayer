@@ -33,6 +33,12 @@ pub enum ModelError {
         /// The track.
         track: TrackId,
     },
+    /// A clip carries two envelopes for one parameter (WP-3.15). Every
+    /// parameter has one envelope, or none.
+    DuplicateEnvelope {
+        /// The clip.
+        clip: ClipId,
+    },
     /// The device is a plug-in, which opens its own editor window rather
     /// than floating (IMP-14).
     CannotFloat(DeviceId),
@@ -222,6 +228,9 @@ impl fmt::Display for ModelError {
             ),
             Self::IdInUse(id) => write!(f, "ID {id} is already in use"),
             Self::DuplicateId(id) => write!(f, "ID {id} appears more than once"),
+            Self::DuplicateEnvelope { clip } => {
+                write!(f, "{clip} carries two envelopes for one parameter")
+            }
             Self::WrongTrackKind { track, kind, needs } => {
                 write!(f, "{track} is a {kind} track; this needs {needs}")
             }

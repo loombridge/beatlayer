@@ -221,11 +221,15 @@ impl TryFrom<DocumentRepr> for Document {
                 }
             }
         }
-        // Routing and automation name tracks and devices anywhere in the
-        // tree, so they're checked once every track is in.
+        // Routing, automation, and clips' envelopes name tracks and devices
+        // anywhere in the tree, so they're checked once every track is in.
         for id in document.track_order() {
             document.check_routing(id)?;
             document.check_automation(id)?;
+            let track = document.track_ref(id)?;
+            for clip in track.clips().chain(track.slots().map(|(_, clip)| clip)) {
+                document.check_clip_envelopes(id, clip)?;
+            }
         }
         Ok(document)
     }
@@ -845,6 +849,156 @@ mod tests {
             error.contains("automation bend 2 is out of range"),
             "{error}"
         );
+    }
+
+    // Spec: clip-envelopes R6
+    #[test]
+    fn clip_envelopes_save_with_the_set_and_load_back() {
+        let (mut doc, [_, audio, _]) = song();
+        let clip = doc.track(audio).unwrap().clips().next().unwrap().id;
+        let device = doc.track(audio).unwrap().devices().next().unwrap().id;
+        let volume = AutomationTarget::Mixer {
+            param: crate::MixerParam::Volume,
+        };
+        let param = AutomationTarget::Device {
+            device,
+            param: ParamId(4),
+        };
+        for (target, at, value) in [(volume, Ticks::ZERO, 1.0), (volume, Ticks::WHOLE, 0.25)] {
+            doc.apply(&Command::SetClipEnvelopeBreakpoint {
+                clip,
+                target,
+                at,
+                value,
+            })
+            .unwrap();
+        }
+        doc.apply(&Command::SetClipEnvelopeBreakpoint {
+            clip,
+            target: param,
+            at: Ticks::ZERO,
+            value: -6.0,
+        })
+        .unwrap();
+        // The volume's segment is curved and the envelope is unlinked: both
+        // save.
+        doc.apply(&Command::SetClipEnvelopeCurve {
+            clip,
+            target: volume,
+            at: Ticks::ZERO,
+            bend: -0.5,
+        })
+        .unwrap();
+        doc.apply(&Command::SetClipEnvelopeLinked {
+            clip,
+            target: volume,
+            linked: false,
+        })
+        .unwrap();
+        let value = serde_json::to_value(&doc).unwrap();
+        let saved = value["tracks"][0]["children"][0]["clips"][0]["envelopes"]
+            .as_array()
+            .unwrap();
+        assert_eq!(
+            saved.len(),
+            2,
+            "one entry per parameter, not per breakpoint"
+        );
+        let volume_entry = saved
+            .iter()
+            .find(|entry| entry["target"]["param"] == json!("volume"))
+            .unwrap();
+        assert_eq!(
+            volume_entry["target"],
+            json!({ "type": "mixer", "param": "volume" })
+        );
+        assert_eq!(volume_entry["linked"], json!(false));
+        assert_eq!(
+            volume_entry["envelope"]["points"],
+            json!([
+                { "at": 0, "value": 1.0, "bend": -0.5 },
+                { "at": Ticks::WHOLE.0, "value": 0.25 }
+            ])
+        );
+        let device_entry = saved
+            .iter()
+            .find(|entry| entry["target"]["type"] == json!("device"))
+            .unwrap();
+        assert!(
+            device_entry.get("linked").is_none(),
+            "a linked envelope leaves its default out"
+        );
+        assert_eq!(
+            device_entry["envelope"]["points"],
+            json!([{ "at": 0, "value": -6.0 }])
+        );
+        let loaded = load(value).unwrap();
+        assert_eq!(loaded, doc);
+        loaded.check_invariants().unwrap();
+
+        // A set saved before clip envelopes loads with none: the flag isn't
+        // there at all.
+        let mut old = serde_json::to_value(&doc).unwrap();
+        old["tracks"][0]["children"][0]["clips"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("envelopes");
+        let back = load(old).unwrap();
+        assert_eq!(back.clip(clip).unwrap().envelopes().count(), 0);
+        back.check_invariants().unwrap();
+
+        // Broken saved envelopes don't load: breakpoints out of order, a
+        // position before zero, a bend outside −1 to 1, and a target the
+        // clip's track doesn't have.
+        let broken = |edit: &dyn Fn(&mut Value)| {
+            let mut value = serde_json::to_value(&doc).unwrap();
+            edit(&mut value);
+            load(value).unwrap_err()
+        };
+        fn first_envelope(value: &mut Value) -> &mut Value {
+            value["tracks"][0]["children"][0]["clips"][0]["envelopes"]
+                .as_array_mut()
+                .unwrap()
+                .first_mut()
+                .unwrap()
+        }
+        let error = broken(&|value| {
+            first_envelope(value)["envelope"]["points"] = json!([
+                { "at": 10, "value": 0.0 },
+                { "at": 5, "value": 1.0 }
+            ]);
+        });
+        assert!(error.contains("already a breakpoint"), "{error}");
+        let error = broken(&|value| {
+            first_envelope(value)["envelope"]["points"] = json!([{ "at": -5, "value": 0.0 }]);
+        });
+        assert!(error.contains("before zero"), "{error}");
+        let error = broken(&|value| {
+            first_envelope(value)["envelope"]["points"] = json!([
+                { "at": 0, "value": 0.0, "bend": 2.0 },
+                { "at": 1_000, "value": 1.0 }
+            ]);
+        });
+        assert!(
+            error.contains("automation bend 2 is out of range"),
+            "{error}"
+        );
+        let error = broken(&|value| {
+            first_envelope(value)["target"] = json!({
+                "type": "device",
+                "device": 9_999,
+                "param": 0
+            });
+        });
+        assert!(error.contains("isn't in"), "{error}");
+        let error = broken(&|value| {
+            let first = first_envelope(value).clone();
+            value["tracks"][0]["children"][0]["clips"][0]["envelopes"]
+                .as_array_mut()
+                .unwrap()
+                .push(first);
+        });
+        assert!(error.contains("two envelopes"), "{error}");
     }
 
     #[test]

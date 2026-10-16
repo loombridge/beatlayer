@@ -218,7 +218,10 @@ impl Compiler {
         let mut params = Vec::new();
         let recompile = needs_program(&changes, &old, document, &mut params);
         route_events(&changes, &old, document, &mut params);
-        // Tracks that held or hold a clip that changed.
+        // Tracks that held or hold a clip that changed: their players get
+        // their clips again, and their nodes their envelopes again, since a
+        // clip's envelopes modulate those and where the clip sits decides
+        // when it plays (WP-3.15).
         let tracks: BTreeSet<TrackId> = changes
             .clips
             .keys()
@@ -228,7 +231,7 @@ impl Compiler {
         let mut update = if recompile {
             let resend = Resend {
                 all: old.settings().tempo != document.settings().tempo,
-                tracks,
+                tracks: tracks.clone(),
             };
             self.compile_with(document, &resend)
         } else {
@@ -245,7 +248,7 @@ impl Compiler {
                     document.settings().metronome,
                 ));
             }
-            for track in tracks {
+            for &track in &tracks {
                 self.send_clips(document, track, &mut update);
             }
             update
@@ -253,8 +256,10 @@ impl Compiler {
         // A new program's restatement of migrated nodes goes first.
         update.params.extend(params);
         // A track whose envelopes changed sends its nodes their lists again,
-        // empty ones included, which clear the envelopes a node had. A new
-        // tempo map moved every envelope, so every track's goes again.
+        // empty ones included, which clear the envelopes a node had; so does
+        // a track whose clips changed, whose clip envelopes (WP-3.15) may
+        // have gone the same way. A new tempo map moved every envelope, so
+        // every track's goes again.
         let all = old.settings().tempo != document.settings().tempo;
         for track in document.tracks() {
             let id = track.id();
@@ -264,11 +269,12 @@ impl Compiler {
                 // and a deleted track's nodes are gone with the track.
                 _ => false,
             };
-            if all || differs {
-                // The track whose envelopes changed gets every list, so an
-                // empty one clears what a node had; a tempo map that moved
-                // them only sends the ones that drive something.
-                self.send_automation(document, id, !differs, &mut update);
+            let clips_changed = tracks.contains(&id);
+            if all || differs || clips_changed {
+                // The track whose envelopes or clips changed gets every
+                // list, so an empty one clears what a node had; a tempo map
+                // that moved them only sends the ones that drive something.
+                self.send_automation(document, id, !differs && !clips_changed, &mut update);
             }
         }
         update
@@ -1783,7 +1789,18 @@ mod tests {
         };
         let update = new_clip(&mut f, 1);
         assert!(update.program.is_none());
-        assert_eq!(update.data.len(), 1);
+        // The clip edit sends the track's player its clips, and its nodes
+        // their envelopes again (WP-3.15: a clip's envelopes modulate those,
+        // so an empty list clears what the track had). Only the changed
+        // track's player is sent.
+        assert_eq!(
+            update
+                .data
+                .iter()
+                .filter(|(key, _)| matches!(key, NodeKey::Player(id) if *id == audio))
+                .count(),
+            1
+        );
         assert_eq!(clips_in(&update, audio), Some(1));
         assert!(update.missing.is_empty());
         // A clip whose media the library doesn't have is reported, and its

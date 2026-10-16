@@ -41,6 +41,7 @@ use crate::commands::{
 };
 use crate::devices::{self, DeviceError, DeviceView};
 use crate::files::{ProjectFiles, SetStore, new_set_from};
+use crate::midi::MidiHost;
 use crate::mixer_controls::{self, Switch};
 use crate::mixer_view::{MixerOf, MixerView, MixerViewError};
 use crate::permission::CallPermission;
@@ -60,6 +61,7 @@ use bl_shell_spec::devices as device_ids;
 use bl_shell_spec::editing as edit_ids;
 use bl_shell_spec::export as export_ids;
 use bl_shell_spec::midi_files as midi_ids;
+use bl_shell_spec::midi_io as midi_io_ids;
 use bl_shell_spec::mixer_view as mixer_ids;
 use bl_shell_spec::notes as note_ids;
 use bl_shell_spec::perception as perception_ids;
@@ -296,6 +298,11 @@ pub struct Shell {
     dirty: bool,
     store: Box<dyn SetStore>,
     audio: AudioHost,
+    /// The MIDI ports and the computer MIDI keyboard (WP-2.2).
+    midi: MidiHost,
+    /// When the MIDI ports were last listed, so [`Shell::poll`] lists them
+    /// again every few seconds and a replugged device shows.
+    midi_listed: std::time::Instant,
     prefs: Preferences,
     config_dir: Option<PathBuf>,
     main_view: MainView,
@@ -515,6 +522,9 @@ fn snapshot(editor: &Editor) -> Editor {
     Editor::from_document(editor.document().clone(), editor.ids())
 }
 
+/// How often [`Shell::poll`] lists the MIDI ports again.
+const MIDI_RELIST: std::time::Duration = std::time::Duration::from_secs(2);
+
 impl Shell {
     /// A shell with these preferences, saving them to `config_dir` (or
     /// nowhere), playing through `audio`, and opening and saving sets
@@ -538,6 +548,12 @@ impl Shell {
         engine_session::register(&mut registry).expect("the Session View's command IDs are unique");
         debug_assert!(registry.problems().is_empty(), "{:?}", registry.problems());
         audio.set_tone(prefs.tone);
+        // MIDI input (WP-2.2). No MIDI system until the app gives one
+        // ([`Shell::use_midi_backend`]), so a headless shell touches no
+        // hardware. The queue has no engine yet; each engine attaches its own.
+        let (midi_sender, _) = bl_midi_io::input_queue(1);
+        audio.set_midi(midi_sender.clone());
+        let midi = MidiHost::new(Box::new(bl_midi_io::NullBackend), midi_sender, &prefs.midi);
         let browser_view = BrowserView::new(&prefs.browser, Waker::default());
         audio.set_preview_gain(prefs.browser.preview_volume as f32);
         // Spec: file-management R1. A saved default set is what a new set
@@ -582,6 +598,8 @@ impl Shell {
             dirty: false,
             store,
             audio,
+            midi,
+            midi_listed: std::time::Instant::now(),
             settings_open: false,
             prefs,
             config_dir,
@@ -884,7 +902,41 @@ impl Shell {
     #[must_use]
     pub fn interface(&self) -> crate::routing::Interface {
         let (inputs, outputs) = self.audio.channels();
-        crate::routing::Interface { inputs, outputs }
+        crate::routing::Interface {
+            inputs,
+            outputs,
+            midi_inputs: self.midi.input_names(),
+        }
+    }
+
+    /// Plays MIDI through `backend` from now on: the platform's MIDI system
+    /// in the app, the test backend in tests. The ports keep the switches
+    /// the preferences hold.
+    pub fn use_midi_backend(&mut self, backend: Box<dyn bl_midi_io::MidiBackend>) {
+        let sender = self.midi.sender().clone();
+        self.midi = MidiHost::new(backend, sender, &self.prefs.midi);
+    }
+
+    /// The MIDI ports and the computer MIDI keyboard.
+    #[must_use]
+    pub fn midi(&self) -> &MidiHost {
+        &self.midi
+    }
+
+    /// Whether the computer MIDI keyboard is on, so its letter keys play
+    /// notes instead of running shortcuts.
+    #[must_use]
+    pub fn computer_keyboard_on(&self) -> bool {
+        self.midi.keyboard_info().on
+    }
+
+    /// Lists the MIDI ports again, so a device plugged in or removed shows.
+    /// Returns whether the list changed.
+    pub fn refresh_midi(&mut self) -> bool {
+        let before = self.midi.ports();
+        self.midi.refresh();
+        self.midi_listed = std::time::Instant::now();
+        before != self.midi.ports()
     }
 
     /// The preferences.
@@ -2153,6 +2205,10 @@ impl Shell {
             self.set_message(error, true);
         }
         let mut changed = polled.changed;
+        // A MIDI device plugged in or removed (WP-2.2).
+        if self.midi_listed.elapsed() >= MIDI_RELIST {
+            changed |= self.refresh_midi();
+        }
         // Plug-ins' main-thread work (WP-2.6 to WP-2.8), and the changes
         // they made themselves.
         let plugins_changed = self.plugins.idle() | self.au.idle() | self.vst3.idle();
@@ -3862,6 +3918,9 @@ impl Shell {
         if midi_ids::handles(id) {
             return self.run_midi_files(id, args);
         }
+        if midi_io_ids::handles(id) {
+            return self.run_midi_io(id, args);
+        }
         if !ids::handles(id) {
             return Err(ShellError::UnknownCommand(id.to_owned()));
         }
@@ -3878,6 +3937,63 @@ impl Shell {
             .sample_rate()
             .or(self.audio.settings().sample_rate)
             .unwrap_or(crate::export::DEFAULT_ENGINE_RATE)
+    }
+
+    /// Runs a MIDI port or computer MIDI keyboard command (WP-2.2).
+    fn run_midi_io(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        let failed = |message: String| ShellError::Failed {
+            command: id.to_owned(),
+            message,
+        };
+        let result = match id {
+            midi_io_ids::PORTS => {
+                Self::args::<NoArgs>(id, args)?;
+                self.refresh_midi();
+                to_value(&self.midi.report())
+            }
+            midi_io_ids::SET_PORT => {
+                let args = Self::args::<midi_io_ids::SetPortArgs>(id, args)?;
+                self.refresh_midi();
+                let port = self
+                    .midi
+                    .set_port(
+                        args.direction,
+                        &args.name,
+                        args.track,
+                        args.sync,
+                        args.remote,
+                    )
+                    .map_err(failed)?;
+                self.prefs.midi = self.midi.prefs();
+                self.save_preferences();
+                to_value(&port)
+            }
+            midi_io_ids::TOGGLE_COMPUTER_KEYBOARD => {
+                let args = Self::args::<midi_io_ids::ToggleKeyboardArgs>(id, args)?;
+                self.midi.set_keyboard_on(args.on);
+                self.prefs.midi = self.midi.prefs();
+                self.save_preferences();
+                to_value(&self.midi.keyboard_info())
+            }
+            midi_io_ids::COMPUTER_KEYBOARD_OCTAVE => {
+                let args = Self::args::<midi_io_ids::StepArgs>(id, args)?;
+                self.midi.shift_octave(args.steps);
+                to_value(&self.midi.keyboard_info())
+            }
+            midi_io_ids::COMPUTER_KEYBOARD_VELOCITY => {
+                let args = Self::args::<midi_io_ids::StepArgs>(id, args)?;
+                self.midi.step_velocity(args.steps);
+                to_value(&self.midi.keyboard_info())
+            }
+            midi_io_ids::COMPUTER_KEYBOARD_KEY => {
+                let args = Self::args::<midi_io_ids::KeyArgs>(id, args)?;
+                let result = self.midi.key(&args.key, args.pressed).map_err(failed)?;
+                to_value(&result)
+            }
+            _ => return Err(ShellError::UnknownCommand(id.to_owned())),
+        };
+        self.touch();
+        Ok(result)
     }
 
     /// Runs a Standard MIDI File command (WP-2.21): importing a file into the

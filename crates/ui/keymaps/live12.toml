@@ -3569,7 +3569,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["M"]
 win = ["M"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "midi.toggle_computer_keyboard", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-MAP-004"
@@ -3580,7 +3583,8 @@ trigger = "press"
 milestone = "M2"
 mac = ["Z", "X"]
 win = ["Z", "X"]
-status = "pending"
+status = "widget"
+handler = "while the computer MIDI keyboard is on, Z and X move its octave (`midi.computer_keyboard_octave`)"
 
 [[shortcut]]
 id = "S-MAP-005"
@@ -3591,7 +3595,8 @@ trigger = "press"
 milestone = "M2"
 mac = ["C", "V"]
 win = ["C", "V"]
-status = "pending"
+status = "widget"
+handler = "while the computer MIDI keyboard is on, C and V step its velocity (`midi.computer_keyboard_velocity`)"
 
 [[shortcut]]
 id = "S-MAP-006"
@@ -3602,7 +3607,8 @@ trigger = "held"
 milestone = "M2"
 mac = ["A", "W", "S", "E", "D", "F", "T", "G", "Y", "H", "U", "J", "K", "O", "L", "P"]
 win = ["A", "W", "S", "E", "D", "F", "T", "G", "Y", "H", "U", "J", "K", "O", "L", "P"]
-status = "pending"
+status = "widget"
+handler = "while the computer MIDI keyboard is on, its note keys play and release notes (`midi.computer_keyboard_key`)"
 
 [[shortcut]]
 id = "S-MAP-007"
@@ -3613,7 +3619,8 @@ trigger = "held"
 milestone = "M2"
 mac = ["Shift (with the letter)"]
 win = ["Shift (with the letter)"]
-status = "pending"
+status = "widget"
+handler = "while the computer MIDI keyboard is on, a letter with Shift runs its shortcut as it would with the keyboard off"
 
 [[shortcut]]
 id = "S-SET-001"

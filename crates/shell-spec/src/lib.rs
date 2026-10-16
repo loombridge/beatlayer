@@ -37,6 +37,8 @@
 //! - [`export`]: exporting audio (`export.audio`, WP-1.12).
 //! - [`midi_files`]: importing and exporting Standard MIDI Files
 //!   (`midi.import_file`, `midi.export_clip`, WP-2.21).
+//! - [`midi_io`]: MIDI ports and the computer MIDI keyboard (`midi.ports`,
+//!   `midi.set_port`, `midi.computer_keyboard_*`, WP-2.2).
 //! - [`perception`]: how agents hear and see the set (`perception.*`,
 //!   WP-1.16): audio previews, analysis, and view captures.
 //!
@@ -57,6 +59,7 @@ pub mod editing;
 pub mod export;
 pub mod menus;
 pub mod midi_files;
+pub mod midi_io;
 pub mod mixer_view;
 pub mod notes;
 pub mod perception;
@@ -86,6 +89,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     browser::register(registry)?;
     export::register(registry)?;
     midi_files::register(registry)?;
+    midi_io::register(registry)?;
     devices::register(registry)?;
     tracks::register(registry)?;
     session_view::register(registry)?;

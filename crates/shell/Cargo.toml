@@ -30,6 +30,9 @@ bl-interop.workspace = true
 # The browser decodes previews and registers the files it adds to the set
 # in the media store (WP-1.10).
 bl-media.workspace = true
+# MIDI ports and the computer MIDI keyboard (WP-2.2), and the queue they send
+# the engine's processor.
+bl-midi-io.workspace = true
 bl-model.workspace = true
 # CLAP plug-ins as devices (WP-2.6): the host, whose factory goes into each
 # engine's registry and whose main-thread work runs in the shell's poll.

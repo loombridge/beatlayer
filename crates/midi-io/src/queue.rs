@@ -64,6 +64,17 @@ impl InputSender {
         pushed
     }
 
+    /// Starts a fresh queue of `capacity` messages and returns its consuming
+    /// end, for the next engine's processor. What the old queue held, and
+    /// anything sent before the engine takes this end, goes with the old
+    /// processor: a new engine starts with an empty queue.
+    #[must_use]
+    pub fn attach(&self, capacity: usize) -> Consumer<MidiInputEvent> {
+        let (producer, consumer) = RingBuffer::new(capacity);
+        *self.producer.lock().unwrap_or_else(PoisonError::into_inner) = producer;
+        consumer
+    }
+
     /// The counts for everything that came through.
     #[must_use]
     pub fn stats(&self) -> &Arc<MidiStats> {
@@ -122,5 +133,26 @@ impl MidiStats {
             to_sync: self.to_sync.load(Relaxed),
             ignored: self.ignored.load(Relaxed),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bl_core::midi::{MidiMessage, MidiSource};
+    use std::time::Instant;
+
+    #[test]
+    fn attaching_again_sends_to_the_new_end_only() {
+        let (sender, mut first) = input_queue(4);
+        let mut second = sender.attach(4);
+        let event = MidiInputEvent {
+            source: MidiSource::ComputerKeyboard,
+            time: Instant::now(),
+            message: MidiMessage::note_on(0, 60, 100),
+        };
+        assert!(sender.send(event));
+        assert!(first.pop().is_err());
+        assert_eq!(second.pop(), Ok(event));
     }
 }

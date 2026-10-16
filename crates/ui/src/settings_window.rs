@@ -15,6 +15,7 @@ use bl_shell::audio::{
     AudioDevices, AudioStatus, DeviceListing, TONE_MAX_DBFS, TONE_MAX_HZ, TONE_MIN_DBFS,
     TONE_MIN_HZ,
 };
+use bl_shell::midi_io_commands as midi_ids;
 use bl_shell::settings::{
     SettingsPage, ThemeChoice, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, zoom_step,
 };
@@ -133,11 +134,7 @@ impl SettingsUi {
                     );
                 }
                 SettingsPage::TempoMidi => {
-                    rows.note(
-                        ui,
-                        "The Tempo Follower, control surface, and MIDI port settings come with \
-                         later packages.",
-                    );
+                    tempo_midi_page(ui, shell, theme, &mut rows, &mut events);
                 }
                 other => rows.note(
                     ui,
@@ -750,6 +747,50 @@ fn theme_page(
     );
 }
 
+/// Tempo & MIDI (L-SET-014): the MIDI ports table (WP-2.2), each input and
+/// output with its Track, Sync, and Remote switches, as the MIDI I/O spec
+/// R2 gives it. The Tempo Follower, control surfaces, and Takeover Mode come
+/// with later packages. Sync and Remote are kept and act when sync and MIDI
+/// mapping are built (R5).
+fn tempo_midi_page(
+    ui: &mut Ui,
+    shell: &Shell,
+    theme: &Theme,
+    rows: &mut Rows<'_>,
+    events: &mut Vec<UiEvent>,
+) {
+    rows.heading(ui, "MIDI");
+    rows.note(
+        ui,
+        "The Tempo Follower, control surface, and Takeover Mode settings come with later \
+         packages.",
+    );
+    rows.heading(ui, "MIDI Ports");
+    let ports = shell.midi().ports();
+    if ports.is_empty() {
+        rows.note(ui, "The computer offers no MIDI ports.");
+    }
+    for port in ports {
+        let label = format!("{}: {}", port.direction.label(), port.name);
+        let rects = rows.row_of(ui, &label, &[SettingsLayout::SWITCH; 3]);
+        for (rect, (name, on)) in rects.into_iter().zip([
+            ("Track", port.track),
+            ("Sync", port.sync),
+            ("Remote", port.remote),
+        ]) {
+            let salt = format!("midi-port-{}-{}-{name}", port.direction as u8, port.name);
+            if let Some(on) = switch(ui, theme, &salt, &format!("{label} {name}"), rect, on) {
+                let mut args = json!({ "direction": port.direction, "name": port.name });
+                args[name.to_lowercase()] = json!(on);
+                events.push(UiEvent::Invoke(Invocation::new(midi_ids::SET_PORT, args)));
+            }
+        }
+        if let Some(error) = &port.error {
+            rows.note(ui, &format!("{label} couldn't be opened: {error}"));
+        }
+    }
+}
+
 /// The Agents page (L-SET-020, WP-1.15): the switch, where agents connect,
 /// the server's token, and the agents the person has allowed, each with its
 /// autonomous switch and its own token (WP-1.15c). Beatlayer's own page,
@@ -1209,6 +1250,23 @@ impl<'a> Rows<'a> {
         let rect = Rect::from_min_size(pos2(self.layout.control_x, self.y), vec2(width, 18.0));
         self.y += SettingsLayout::OPTION_ROW;
         rect
+    }
+
+    /// A row with a label and controls of these widths side by side, as
+    /// Live's Exclusive Arm and Solo are; returns their rectangles.
+    fn row_of(&mut self, ui: &Ui, label: &str, widths: &[f32]) -> Vec<Rect> {
+        self.label(ui, label);
+        let mut x = self.layout.control_x;
+        let rects = widths
+            .iter()
+            .map(|&width| {
+                let rect = Rect::from_min_size(pos2(x, self.y), vec2(width, 18.0));
+                x += width + 4.0;
+                rect
+            })
+            .collect();
+        self.y += SettingsLayout::OPTION_ROW;
+        rects
     }
 
     /// A row that shows a value as text, read by assistive technology as a

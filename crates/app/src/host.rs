@@ -423,6 +423,10 @@ pub fn run(args: Args) -> Result<(), String> {
     } else {
         Shell::new(prefs, config_dir, audio, Box::new(ProjectFiles::new()))
     };
+    // A headless run (`--null-audio`) opens no MIDI device either.
+    if !args.null_audio {
+        shell.use_midi_backend(Box::new(bl_midi_io::MidirBackend::new()));
+    }
     shell.start_audio();
     if let Some(error) = prefs_error {
         shell.set_message(error, true);

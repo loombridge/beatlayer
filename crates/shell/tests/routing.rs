@@ -38,12 +38,12 @@ fn observed_set() -> Set {
 }
 
 fn section(shell: &Shell, track: TrackId) -> InOut {
-    routing::in_out(shell.editor().document(), track, shell.interface()).unwrap()
+    routing::in_out(shell.editor().document(), track, &shell.interface()).unwrap()
 }
 
 /// The In/Out section with an interface whose channels `interface` names,
 /// for the choosers that list the device's channels.
-fn section_with(shell: &Shell, track: TrackId, interface: routing::Interface) -> InOut {
+fn section_with(shell: &Shell, track: TrackId, interface: &routing::Interface) -> InOut {
     routing::in_out(shell.editor().document(), track, interface).unwrap()
 }
 
@@ -156,7 +156,7 @@ fn every_chooser_lists_what_lives_lists_in_the_same_order() {
         Some("Change \"Routing\"")
     );
 
-    // A MIDI track: All Ins (disabled until MIDI input), and No Output.
+    // A MIDI track: All Ins, and No Output.
     let (input, channel, monitor, output, _) = clips(&shell, midi[0]);
     assert_eq!(
         input.labels(),
@@ -171,8 +171,9 @@ fn every_chooser_lists_what_lives_lists_in_the_same_order() {
         ]
     );
     assert_eq!(input.text, "All Ins");
-    assert!(input.run_for("All Ins").is_none(), "MIDI input is WP-2.2's");
-    assert_eq!(channel.pending, Some(routing::MIDI_IO));
+    assert!(input.run_for("All Ins").is_some());
+    assert_eq!(channel.text, "All Channels");
+    assert_eq!(channel.pending, None);
     assert_eq!(monitor, Monitor::Auto);
     assert_eq!(
         output.labels(),
@@ -234,10 +235,11 @@ fn the_interface_choosers_list_its_channels_and_the_agent_api_sets_them() {
     let interface = routing::Interface {
         inputs: 4,
         outputs: 4,
+        ..routing::Interface::default()
     };
 
     // Ext. In's channel: the single channels, then the pairs.
-    let channel_of = |shell: &Shell| match section_with(shell, audio[0], interface) {
+    let channel_of = |shell: &Shell| match section_with(shell, audio[0], &interface) {
         InOut::Clips { input_channel, .. } => input_channel,
         other => panic!("{other:?}"),
     };
@@ -294,7 +296,7 @@ fn the_interface_choosers_list_its_channels_and_the_agent_api_sets_them() {
 
     // Main Out and Cue Out: the interface's output pairs, set by command.
     let main_id = shell.editor().document().main_id();
-    let (cue, main) = match section_with(&shell, main_id, interface) {
+    let (cue, main) = match section_with(&shell, main_id, &interface) {
         InOut::Main { cue, main } => (cue, main),
         other => panic!("{other:?}"),
     };
@@ -326,7 +328,7 @@ fn the_interface_choosers_list_its_channels_and_the_agent_api_sets_them() {
         shell.editor().undo_history().next(),
         Some("Change \"Routing\"")
     );
-    let (cue, main) = match section_with(&shell, main_id, interface) {
+    let (cue, main) = match section_with(&shell, main_id, &interface) {
         InOut::Main { cue, main } => (cue, main),
         other => panic!("{other:?}"),
     };

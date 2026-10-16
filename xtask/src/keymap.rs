@@ -110,6 +110,31 @@ const WIDGET: &[(&str, &str)] = &[
         "the browser: Right moves from the sidebar to the list, and Left at the list's top \
          level back (`focus.browser`)",
     ),
+    // WP-2.2: while the computer MIDI keyboard is on, its letters play notes
+    // and step its octave and velocity, with Shift (or Cmd, Ctrl, Option)
+    // leaving them their shortcuts. The key dispatcher reads them itself
+    // because a note goes down and up with its key; each runs a registered
+    // command.
+    (
+        "S-MAP-004",
+        "while the computer MIDI keyboard is on, Z and X move its octave \
+         (`midi.computer_keyboard_octave`)",
+    ),
+    (
+        "S-MAP-005",
+        "while the computer MIDI keyboard is on, C and V step its velocity \
+         (`midi.computer_keyboard_velocity`)",
+    ),
+    (
+        "S-MAP-006",
+        "while the computer MIDI keyboard is on, its note keys play and release notes \
+         (`midi.computer_keyboard_key`)",
+    ),
+    (
+        "S-MAP-007",
+        "while the computer MIDI keyboard is on, a letter with Shift runs its shortcut as it \
+         would with the keyboard off",
+    ),
     // WP-1.8b: keys with two directions, and modifiers a drag reads as it
     // goes, each running a registered command.
     (

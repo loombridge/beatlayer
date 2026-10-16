@@ -226,6 +226,30 @@ impl View<'_> {
         value["clips"] = self.page.slice(clips);
         value["devices"] = json!(devices);
         value["tracks_inside"] = json!(children);
+        // Take lanes show only on a track that has some, so a track without
+        // them reads as it did.
+        if track.take_lanes().len() > 0 {
+            let lanes: Vec<Value> = track
+                .take_lanes()
+                .map(|lane| {
+                    let clips: Vec<Value> = lane
+                        .clips
+                        .iter()
+                        .map(|clip| {
+                            json!({
+                                "name": clip.name,
+                                "start": self.position(clip.start),
+                                "end": self.position(clip.start.saturating_add(clip.length)),
+                                "length": Self::length(clip.length),
+                                "media": clip.data.media,
+                            })
+                        })
+                        .collect();
+                    json!({ "name": lane.name, "clips": clips })
+                })
+                .collect();
+            value["take_lanes"] = json!(lanes);
+        }
         value
     }
 

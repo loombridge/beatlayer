@@ -63,12 +63,15 @@ struct PunchFrames {
     end: Option<Frames>,
 }
 
-/// The take being recorded (WP-2.13): the song frame it started at and how
-/// many frames of playback it has covered.
+/// The take being recorded (WP-2.13): the song frame it started at, how
+/// many frames its rings hold, the song frame its next sample has, and the
+/// loop it went round, if it has.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Take {
     start: Frames,
     written: u64,
+    next: Frames,
+    wrap: Option<LoopFrames>,
 }
 
 /// What one processor hands the next when the engine restarts on a device
@@ -792,7 +795,8 @@ impl Processor {
         if let Some(take) = self.take.take() {
             self.last_take = Some(TakeBounds {
                 start: take.start,
-                end: take.start + Frames(take.written as i64),
+                end: take.next,
+                wrap: take.wrap.map(|region| (region.start, region.end)),
             });
         }
         self.plan = None;
@@ -1218,7 +1222,7 @@ impl Processor {
         if self.plan.is_none() || self.program.is_none() {
             return;
         }
-        // Spec: recording R6. Nothing is written before the punch-in point,
+        // Spec: recording R9. Nothing is written before the punch-in point,
         // and the take ends at the punch-out point; the transport carries on.
         if self.punch_frames.start.is_some_and(|at| self.position < at) {
             return;
@@ -1227,12 +1231,25 @@ impl Processor {
             self.end_take();
             return;
         }
-        let expected = self.take.map_or(self.position, |take| {
-            take.start + Frames(take.written as i64)
-        });
-        if self.take.is_some() && expected != self.position {
-            self.end_recording();
-            return;
+        if let Some(take) = &mut self.take
+            && take.next != self.position
+        {
+            // Spec: recording R11. The loop's wrap is no jump away: the take
+            // goes on into the next pass, unless Punch-Out is on, when the
+            // wrap ends it (R9). Any other jump ends it.
+            let wrapped = self.loop_frames.filter(|region| {
+                self.punch_frames.end.is_none()
+                    && take.wrap.is_none_or(|seen| seen == *region)
+                    && take.next == region.end
+                    && self.position == region.start
+            });
+            match wrapped {
+                Some(region) => take.wrap = Some(region),
+                None => {
+                    self.end_recording();
+                    return;
+                }
+            }
         }
         // Spec: recording R7. The recording is moved `delay` frames earlier:
         // the audio that arrived in the take's first `delay` frames sounds
@@ -1247,6 +1264,8 @@ impl Processor {
             self.take = Some(Take {
                 start: self.position,
                 written: 0,
+                next: self.position,
+                wrap: None,
             });
         }
         let written = self.take.map_or(0, |take| take.written);
@@ -1266,6 +1285,7 @@ impl Processor {
         }
         if let Some(take) = &mut self.take {
             take.written += frames as u64;
+            take.next = self.position + Frames(frames as i64);
         }
     }
 

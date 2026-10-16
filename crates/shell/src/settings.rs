@@ -69,6 +69,12 @@ pub struct Preferences {
     /// spec, R7 and R22). On by default, as observed in Live 12.4.6, and on
     /// for preferences saved before the setting existed.
     pub create_fades_on_clip_edges: OnByDefault,
+    /// Warp recorded audio (Record, Warp & Launch, Warp/Fades; IMP-02, the
+    /// recording spec, R13): whether a recorded clip will be warped, once
+    /// warping arrives; clips have no warp fields until then. On by default,
+    /// as Live warps its recordings, and on for preferences saved before the
+    /// setting existed.
+    pub warp_recorded_audio: OnByDefault,
     /// Auto-Hide Plug-In Windows (Plug-Ins, Plug-In Windows, L-SET-017):
     /// a floating device's window or a plug-in's editor hides while
     /// another track is selected and comes back with its track (WP-2.5b),
@@ -244,6 +250,18 @@ mod tests {
         let off: Preferences =
             serde_json::from_str(r#"{"auto_hide_plug_in_windows": false}"#).unwrap();
         assert!(!off.auto_hide_plug_in_windows.0);
+    }
+
+    #[test]
+    fn warp_recorded_audio_is_on_unless_saved_off() {
+        // Spec: recording R13.
+        assert!(Preferences::default().warp_recorded_audio.0);
+        let older: Preferences = serde_json::from_str(r#"{"tab_navigation": true}"#).unwrap();
+        assert!(older.warp_recorded_audio.0);
+        let off: Preferences = serde_json::from_str(r#"{"warp_recorded_audio": false}"#).unwrap();
+        assert!(!off.warp_recorded_audio.0);
+        let saved = serde_json::to_value(&off).unwrap();
+        assert_eq!(saved["warp_recorded_audio"], false);
     }
 
     #[test]

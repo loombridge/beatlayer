@@ -73,13 +73,18 @@ pub struct RecordingPlan {
 }
 
 /// The song frames a finished take covers: `start` to `end`, playback that
-/// ran on without a jump.
+/// ran on without a jump, but for the Arrangement loop's wraps.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TakeBounds {
     /// The song frame the take's first sample has.
     pub start: Frames,
-    /// The song frame past its last sample.
+    /// The song frame past its last sample, or, for a take that wrapped, the
+    /// frame in the loop the last pass reached.
     pub end: Frames,
+    /// The loop's start and end frames, if the take went round it at least
+    /// once: the file holds the audio from `start` to the loop's end, then
+    /// the loop's passes one after another (the recording spec, R11).
+    pub wrap: Option<(Frames, Frames)>,
 }
 
 impl RecordingPlan {

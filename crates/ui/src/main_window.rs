@@ -133,6 +133,9 @@ pub struct MainWindowUi {
     drawn: Option<ShellLayout>,
     /// The titles the last frame's Device View showed, for Rename.
     device_titles: Vec<(bl_model::DeviceId, String)>,
+    /// The assistant's pane (WP-2.23, part 3): the prompt being typed and a
+    /// drag on its edge.
+    assistant: crate::assistant_panel::AssistantPanelUi,
 }
 
 /// A move of the keyboard focus asked for by `focus.next`,
@@ -206,6 +209,7 @@ impl MainWindowUi {
             menu_open: false,
             drawn: None,
             device_titles: Vec::new(),
+            assistant: crate::assistant_panel::AssistantPanelUi::default(),
         }
     }
 
@@ -285,6 +289,7 @@ impl MainWindowUi {
                 self.focus_request = Some(FocusRequest::Element(self.last_control));
             }
             Effect::FocusArea(Area::MainView) => self.focus_request = Some(FocusRequest::MainView),
+            Effect::FocusArea(Area::Assistant) => self.assistant.focus_prompt(),
             Effect::RenameDevice(device) => {
                 // Spec: device-chains R10. Rename types the name in the
                 // title bar.
@@ -355,10 +360,15 @@ impl MainWindowUi {
         let frame = Frame::NONE.fill(theme.colors.window.0);
         CentralPanel::default().frame(frame).show(root, |ui| {
             let area = ui.max_rect();
-            let layout = ShellLayout::compute(
+            // The pane follows the pointer while its edge is dragged.
+            let assistant = shell
+                .assistant_docked_width()
+                .map(|width| self.assistant.drag_width().unwrap_or(width));
+            let layout = ShellLayout::compute_with_assistant(
                 area.size(),
                 shell.browser_visible(),
                 shell.info_view_visible(),
+                assistant,
             )
             .translate(area.min.to_vec2());
             self.track_area_clicks(ctx, &layout, &mut events);
@@ -394,6 +404,10 @@ impl MainWindowUi {
                 .into_iter()
                 .map(|d| (d.id, d.title))
                 .collect();
+            if let Some(pane) = layout.assistant {
+                self.assistant
+                    .show(ui, shell, theme, pane, true, &mut events);
+            }
             outline_focused_area(ui, shell, theme, &layout);
             self.drawn = Some(layout);
         });
@@ -594,6 +608,7 @@ impl MainWindowUi {
             (Area::MainView, Some(layout.main_view)),
             (Area::Detail, Some(layout.detail)),
             (Area::StatusBar, Some(layout.status_bar)),
+            (Area::Assistant, layout.assistant),
         ];
         if let Some((area, _)) = areas
             .iter()
@@ -1038,6 +1053,7 @@ fn outline_focused_area(ui: &Ui, shell: &Shell, theme: &Theme, layout: &ShellLay
         Area::MainView => Some(layout.main_view),
         Area::Detail => Some(layout.detail),
         Area::StatusBar => Some(layout.status_bar),
+        Area::Assistant => layout.assistant,
     };
     if let Some(rect) = rect {
         ui.painter().rect_stroke(
@@ -1143,6 +1159,14 @@ fn look(element: Element, shell: &Shell) -> Look {
             ),
             ..Look::default()
         },
+        Element::AssistantToggle => {
+            let open = shell.assistant_panel_state().open;
+            Look {
+                on: open,
+                value: Some(if open { "shown" } else { "hidden" }.to_owned()),
+                ..Look::default()
+            }
+        }
         Element::ClipViewToggle => Look {
             on: shell.clip_view().visible(),
             value: Some(
@@ -1264,6 +1288,7 @@ fn command_of(element: Element) -> Option<&'static str> {
     match element {
         Element::BrowserToggle => Some(ids::VIEW_TOGGLE_BROWSER),
         Element::InfoToggle => Some(ids::VIEW_TOGGLE_INFO_VIEW),
+        Element::AssistantToggle => Some(bl_shell::assistant::VIEW_TOGGLE_ASSISTANT),
         Element::ClipViewToggle => Some(ids::VIEW_TOGGLE_CLIP_VIEW),
         Element::DrawMode => Some(ids::VIEW_DRAW_MODE),
         Element::SessionView | Element::ArrangementView => {
@@ -1279,6 +1304,10 @@ fn click(element: Element, shell: &Shell) -> Option<Invocation> {
     match element {
         Element::BrowserToggle => Some(Invocation::new(ids::VIEW_TOGGLE_BROWSER, json!({}))),
         Element::InfoToggle => Some(Invocation::new(ids::VIEW_TOGGLE_INFO_VIEW, json!({}))),
+        Element::AssistantToggle => Some(Invocation::new(
+            bl_shell::assistant::VIEW_TOGGLE_ASSISTANT,
+            json!({}),
+        )),
         Element::ClipViewToggle => Some(Invocation::new(ids::VIEW_TOGGLE_CLIP_VIEW, json!({}))),
         Element::DrawMode => Some(Invocation::new(ids::VIEW_DRAW_MODE, json!({}))),
         Element::Follow => Some(Invocation::new(

@@ -134,7 +134,7 @@ pub use node::{
 pub use offline::Offline;
 pub use processor::{Carry, Output, Processor};
 pub use program::EngineProgram;
-pub use recording::{RecordTrack, RecordingPlan, TakeBounds};
+pub use recording::{MidiRecordTrack, RecordTrack, RecordedMidi, RecordingPlan, TakeBounds};
 pub use registry::{DeviceType, NodeFactory, Registry};
 pub use session::{SessionCommand, SessionPlayback, SlotState, SlotStatus};
 pub use state::{EngineCounters, EngineState, Monitor, TrackMeter};

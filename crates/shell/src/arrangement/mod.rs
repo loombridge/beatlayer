@@ -181,6 +181,9 @@ pub struct ArrangementView {
     /// Whether Automation Mode is on (WP-2.12): every track shows its
     /// automation lane under its lane.
     automation_mode: bool,
+    /// Whether Automation Arm is on (WP-2.12): moving a control while the
+    /// transport records writes it into the parameter's envelope.
+    automation_arm: bool,
     /// The parameter each track's automation lane shows, where the choosers
     /// have picked one; `None` hides that track's lane. A track with no
     /// entry shows its volume.
@@ -223,6 +226,7 @@ impl ArrangementView {
             zoomed_to_selection: None,
             transport: TransportView::default(),
             automation_mode: false,
+            automation_arm: false,
             automation_lanes: BTreeMap::new(),
         }
     }
@@ -354,6 +358,12 @@ impl ArrangementView {
     #[must_use]
     pub fn automation_mode(&self) -> bool {
         self.automation_mode
+    }
+
+    /// Whether Automation Arm is on.
+    #[must_use]
+    pub fn automation_arm(&self) -> bool {
+        self.automation_arm
     }
 
     /// The parameter a track's automation lane shows: the choosers' last
@@ -1037,6 +1047,10 @@ impl ArrangementView {
                 self.automation_mode = on.unwrap_or(!self.automation_mode);
                 self.clamp_scroll(doc);
             }
+            ids::AUTOMATION_ARM => {
+                let SwitchArgs { on } = parse(args)?;
+                self.automation_arm = on.unwrap_or(!self.automation_arm);
+            }
             ids::SHOW_AUTOMATION => {
                 let ShowAutomationArgs { track, target } = parse(args)?;
                 self.targets(doc, Some(vec![track]))?;
@@ -1089,6 +1103,7 @@ impl ArrangementView {
             folded_tracks: self.folded.iter().copied().collect(),
             zoom_back_steps: self.history.len(),
             automation_mode: self.automation_mode,
+            automation_arm: self.automation_arm,
             automation_lanes: self
                 .automation_lanes
                 .iter()
@@ -1113,6 +1128,7 @@ impl ArrangementView {
             ids::SNAP_TO_GRID => Some(self.grid.snap),
             ids::FIXED_GRID => Some(self.grid.fixed_on),
             ids::AUTOMATION_MODE => Some(self.automation_mode),
+            ids::AUTOMATION_ARM => Some(self.automation_arm),
             _ => None,
         }
     }

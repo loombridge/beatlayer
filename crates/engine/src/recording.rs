@@ -8,14 +8,21 @@
 //! [`Engine::record`](crate::Engine::record); when the take ends, the audio
 //! thread drops it, which closes the rings and is how the writer learns the
 //! take is over.
+//!
+//! An armed MIDI track records the same way, without a file: the audio
+//! thread copies the note messages its input received into a ring of
+//! [`RecordedMidi`] stamped with the song frame they landed on, and the
+//! shell makes the clip from them when the take ends (WP-2.14).
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 
+use bl_core::midi::MidiMessage;
 use bl_core::time::Frames;
 use bl_model::{Channel, TrackId};
 use rtrb::Producer;
 
+use crate::midi::MidiEvent;
 use crate::program::EngineProgram;
 
 /// One recorded track: the interface channels its input names and the ring
@@ -33,11 +40,33 @@ pub struct RecordTrack {
     pub dropped: Arc<AtomicU64>,
 }
 
+/// A note message an armed MIDI track received, and the song frame it
+/// landed on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RecordedMidi {
+    /// The song frame, to the sample the input placed the message on.
+    pub frame: Frames,
+    /// A note-on or a note-off.
+    pub message: MidiMessage,
+}
+
+/// One recorded MIDI track: the ring its note messages go to.
+pub struct MidiRecordTrack {
+    /// The track, for the report.
+    pub track: TrackId,
+    /// The messages, in order, for the shell to drain.
+    pub producer: Producer<RecordedMidi>,
+    /// Messages the ring was too full to take, for the shell to report.
+    pub dropped: Arc<AtomicU64>,
+}
+
 /// What the audio thread records: every armed track's input and its ring.
 pub struct RecordingPlan {
-    /// The tracks, in the order the shell listed them.
+    /// The audio tracks, in the order the shell listed them.
     pub tracks: Vec<RecordTrack>,
-    /// Frames the recording is moved earlier: the device's input and output
+    /// The MIDI tracks, in the order the shell listed them (WP-2.14).
+    pub midi: Vec<MidiRecordTrack>,
+    /// Frames the audio is moved earlier: the device's input and output
     /// latency plus the Driver Error Compensation setting. Negative moves
     /// it later (WP-2.13).
     pub delay: i64,
@@ -54,30 +83,49 @@ pub struct TakeBounds {
 }
 
 impl RecordingPlan {
-    /// Copies one part of the device's input into every track's ring:
-    /// `offset..offset + frames` of `planar`, which holds `device` channels
-    /// `stride` frames apart. A track whose Audio From names a channel the
-    /// device doesn't have records silence, as it hears.
+    /// Copies one part of the block into every track's ring: for audio
+    /// tracks, `offset..offset + frames` of the device's input (`planar`
+    /// holds `device` channels `stride` frames apart; a track whose Audio
+    /// From names a channel the device doesn't have records silence, as it
+    /// hears), and for MIDI tracks, the note messages their input received
+    /// in that part, stamped `position` for the part's first frame. The
+    /// audio tracks leave out the part's first `skip` frames, which the
+    /// recording's delay moves it past (WP-2.13).
     ///
     /// Returns whether every track took the whole part. When a ring is too
     /// full for it, nothing of the part goes in, each short ring's frames
-    /// are counted as dropped, and the caller ends the take, so every file
-    /// holds exactly the take's frames.
+    /// (or messages) are counted as dropped, and the caller ends the take,
+    /// so every file holds exactly the take's frames.
     pub(crate) fn capture(
         &mut self,
         program: &EngineProgram,
+        position: Frames,
         offset: usize,
         frames: usize,
+        skip: usize,
     ) -> bool {
         let (planar, device, stride) = (
             &program.device_input,
             program.device_input_channels,
             program.max_frames,
         );
+        let in_part = |event: &&MidiEvent| {
+            let at = event.offset as usize;
+            at >= offset && at < offset + frames && is_note(&event.message)
+        };
         let mut fits = true;
         for track in &mut self.tracks {
-            if track.producer.slots() < frames * track.channels() {
-                track.dropped.fetch_add(frames as u64, Relaxed);
+            if track.producer.slots() < (frames - skip) * track.channels() {
+                track.dropped.fetch_add((frames - skip) as u64, Relaxed);
+                fits = false;
+            }
+        }
+        for track in &mut self.midi {
+            let wanted = program
+                .midi_input(track.track)
+                .map_or(0, |input| input.events.iter().filter(in_part).count());
+            if track.producer.slots() < wanted {
+                track.dropped.fetch_add(wanted as u64, Relaxed);
                 fits = false;
             }
         }
@@ -99,20 +147,36 @@ impl RecordingPlan {
             };
             match right {
                 Some(right) => {
-                    for i in 0..frames {
+                    for i in skip..frames {
                         let _ = track.producer.push(at(left, i));
                         let _ = track.producer.push(at(right, i));
                     }
                 }
                 None => {
-                    for i in 0..frames {
+                    for i in skip..frames {
                         let _ = track.producer.push(at(left, i));
                     }
                 }
             }
         }
+        for track in &mut self.midi {
+            let Some(input) = program.midi_input(track.track) else {
+                continue;
+            };
+            for event in input.events.iter().filter(in_part) {
+                let _ = track.producer.push(RecordedMidi {
+                    frame: position + Frames((event.offset as usize - offset) as i64),
+                    message: event.message,
+                });
+            }
+        }
         true
     }
+}
+
+/// Whether a message is one a recorded clip keeps: a note-on or a note-off.
+fn is_note(message: &MidiMessage) -> bool {
+    message.is_note_on() || message.is_note_off()
 }
 
 impl RecordTrack {
@@ -131,6 +195,7 @@ impl std::fmt::Debug for RecordingPlan {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RecordingPlan")
             .field("tracks", &self.tracks.len())
+            .field("midi", &self.midi.len())
             .field("delay", &self.delay)
             .finish_non_exhaustive()
     }

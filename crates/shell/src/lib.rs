@@ -63,6 +63,7 @@ pub mod agent;
 pub mod arrangement;
 pub mod assistant;
 pub mod audio;
+mod automation_record;
 pub mod browser;
 pub mod clip_view;
 pub mod devices;

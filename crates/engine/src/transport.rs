@@ -289,9 +289,11 @@ const ENTRIES: &[Entry] = &[
         contexts: &[Global],
         keys: &[],
         description: "Sets whether the transport is recording: while it is, each armed audio \
-            track records its input into the project's Samples/Recorded/ and the recording \
-            becomes a clip on its track when it ends. Features like Hear Metronome Only While \
-            Recording follow it too.",
+            track records its input into the project's Samples/Recorded/, each armed MIDI track \
+            records the notes it receives, and the recording becomes a clip on its track when \
+            it ends; a count-in starts it a bar or more later. With MIDI Arrangement Overdub on, \
+            recorded notes merge into the MIDI clips already there. Features like Hear \
+            Metronome Only While Recording follow it too.",
     },
 ];
 

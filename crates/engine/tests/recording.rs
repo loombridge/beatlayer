@@ -90,6 +90,7 @@ fn plan(
     (
         RecordingPlan {
             tracks: planned,
+            midi: Vec::new(),
             delay: 0,
         },
         consumers,
@@ -303,9 +304,9 @@ fn record_ramp(rig: &mut Rig, delay: i64, block: usize, blocks: usize) -> Consum
 }
 
 // Spec: recording R7 (WP-2.13). A recording moved earlier by `delay` frames
-// leaves out the first `delay` frames of input, across blocks too, and its
-// clip starts where the take did: the file's first sample is the input that
-// sounded when the take began.
+// leaves out the first `delay` frames of input, across blocks too, while the
+// take still covers every frame played: the file's first sample is the input
+// that sounded when the take began.
 #[test]
 fn a_delay_moves_the_recording_earlier_by_leaving_out_its_first_frames() {
     for delay in [100, 300] {
@@ -315,9 +316,9 @@ fn a_delay_moves_the_recording_earlier_by_leaving_out_its_first_frames() {
         rig.block(256);
         let take = rig.monitor.state().take.unwrap();
         let samples = drain(&mut ring);
-        assert_eq!(take.start, Frames::ZERO, "the clip starts with the take");
+        assert_eq!(take.start, Frames::ZERO);
+        assert_eq!(take.end, Frames(1024), "the take covers the frames played");
         assert_eq!(samples.len(), 1024 - delay as usize);
-        assert_eq!(take.end, Frames(1024 - delay));
         for (i, sample) in samples.iter().enumerate() {
             assert_eq!(
                 *sample,
@@ -328,17 +329,16 @@ fn a_delay_moves_the_recording_earlier_by_leaving_out_its_first_frames() {
     }
 }
 
-// Spec: recording R7 (WP-2.13). A delay below zero starts the clip later and
-// leaves the input whole.
+// Spec: recording R7 (WP-2.13). A delay below zero leaves the input whole; the
+// shell starts the clip later.
 #[test]
-fn a_negative_delay_moves_the_recording_later() {
+fn a_negative_delay_leaves_the_input_whole() {
     let mut rig = Rig::with_input(256, 4);
     let mut ring = record_ramp(&mut rig, -100, 256, 4);
     rig.sender.transport(TransportCommand::Stop);
     rig.block(256);
     let take = rig.monitor.state().take.unwrap();
-    assert_eq!(take.start, Frames(100));
-    assert_eq!(take.end, Frames(1124));
+    assert_eq!((take.start, take.end), (Frames::ZERO, Frames(1024)));
     let samples = drain(&mut ring);
     assert_eq!(samples.len(), 1024);
     assert_eq!(samples[0], 0.0);

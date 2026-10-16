@@ -53,6 +53,11 @@ pub struct Settings {
     /// write it.
     #[serde(default, skip_serializing_if = "is_off")]
     pub punch_out: bool,
+    /// MIDI Arrangement Overdub: whether notes recorded into the
+    /// Arrangement merge into the MIDI clips already there instead of
+    /// replacing them (WP-2.14). Off in a new set, and not written when off.
+    #[serde(default, skip_serializing_if = "is_off")]
+    pub midi_overdub: bool,
 }
 
 impl Default for Settings {
@@ -69,6 +74,7 @@ impl Default for Settings {
             metronome: MetronomeSettings::default(),
             punch_in: false,
             punch_out: false,
+            midi_overdub: false,
         }
     }
 }

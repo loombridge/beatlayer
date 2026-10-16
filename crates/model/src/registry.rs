@@ -489,6 +489,18 @@ const ENTRIES: &[Entry] = &[
             set, and undo switches it back.",
     },
     Entry {
+        id: "transport.set_midi_overdub",
+        action: Action::Apply("set_midi_overdub"),
+        label: "MIDI Arrangement Overdub",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Switches MIDI Arrangement Overdub on or off, as the Control Bar's overdub \
+            switch does. With it on, notes recorded into the Arrangement merge into the MIDI \
+            clips already on the track instead of replacing them. The switch is saved with the \
+            set, and undo switches it back.",
+    },
+    Entry {
         id: "track.create",
         action: Action::Apply("create_track"),
         label: "Insert Track",

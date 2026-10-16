@@ -4,7 +4,9 @@
 
 use std::path::PathBuf;
 
-use bl_ui::layout::{ELEMENTS, Element, REFERENCE, ShellLayout, Strip, TITLE_BAR};
+use bl_ui::layout::{
+    D24, ELEMENTS, Element, MINIMUM, REFERENCE, ShellLayout, Strip, TITLE_BAR, placement,
+};
 use egui::vec2;
 
 /// layout.md, or `None` in a checkout without the planning documents (they
@@ -71,7 +73,9 @@ fn the_panes_sit_where_live_puts_them() {
 fn each_control_starts_where_layout_md_measured_it() {
     let layout = ShellLayout::compute(REFERENCE, true, true);
     // The left edges layout.md gives, at 1600 × 1000 with the Learn View
-    // closed. Each comes straight from the row's text.
+    // closed. Each comes straight from the row's text, except that the
+    // Control Bar's right group sits 20 points left of Live's: the
+    // assistant's toggle takes the far right (D24).
     let expected: &[(Element, f32)] = &[
         (Element::BrowserToggle, 9.0),
         (Element::TapTempo, 54.0),
@@ -101,16 +105,17 @@ fn each_control_starts_where_layout_md_measured_it() {
         (Element::Loop, 979.0),
         (Element::PunchOut, 1002.0),
         (Element::LoopLengthBars, 1029.0),
-        (Element::DrawMode, 1283.0),
-        (Element::ComputerKeyboard, 1302.0),
-        (Element::KeyMap, 1321.0),
-        (Element::KeyIndicators, 1350.0),
-        (Element::MidiMap, 1359.0),
-        (Element::SampleRate, 1389.0),
-        (Element::Cpu, 1439.0),
-        (Element::Overload, 1498.0),
-        (Element::MidiIndicators, 1527.0),
-        (Element::SessionView, 1549.0),
+        (Element::DrawMode, 1263.0),
+        (Element::ComputerKeyboard, 1282.0),
+        (Element::KeyMap, 1301.0),
+        (Element::KeyIndicators, 1330.0),
+        (Element::MidiMap, 1339.0),
+        (Element::SampleRate, 1369.0),
+        (Element::Cpu, 1419.0),
+        (Element::Overload, 1478.0),
+        (Element::MidiIndicators, 1507.0),
+        (Element::SessionView, 1529.0),
+        (Element::AssistantToggle, 1572.0),
         (Element::InfoToggle, 17.0),
         (Element::Message, 44.0),
         (Element::ClipViewToggle, 1259.0),
@@ -130,9 +135,10 @@ fn each_control_starts_where_layout_md_measured_it() {
         (Element::PositionSixteenths, 659.0),
         (Element::LoopStartSixteenths, 953.0),
         (Element::LoopLengthSixteenths, 1106.0),
-        (Element::SampleRate, 1439.0),
-        (Element::CpuMenu, 1496.0),
-        (Element::ArrangementView, 1590.0),
+        (Element::SampleRate, 1419.0),
+        (Element::CpuMenu, 1476.0),
+        (Element::ArrangementView, 1570.0),
+        (Element::AssistantToggle, 1590.0),
         (Element::Message, 1240.0),
         (Element::ClipSelector, 1468.0),
         (Element::DeviceSelector, 1538.0),
@@ -149,8 +155,14 @@ fn groups_stretch_with_the_window_and_controls_keep_their_size() {
     // The left groups stay; the right groups follow the right edge; the
     // middle groups take their share of the extra width.
     assert_eq!(wide.rect(Element::Tempo), reference.rect(Element::Tempo));
-    assert_eq!(wide.rect(Element::Cpu).left(), 1439.0 + 280.0);
-    assert_eq!(wide.rect(Element::Play).left(), 678.0 + 103.0);
+    assert_eq!(wide.rect(Element::Cpu).left(), 1419.0 + 280.0);
+    // The stretching gaps are 103 and 157 points (D24): the middle takes
+    // 103/260 of the extra 280.
+    let play = wide.rect(Element::Play).left();
+    assert!(
+        (play - (678.0 + 280.0 * 103.0 / 260.0)).abs() < 1e-3,
+        "{play}"
+    );
     for (placement, (_, rect)) in ELEMENTS.iter().zip(&wide.elements) {
         if placement.element != Element::Message {
             assert_eq!(rect.width(), placement.width, "{:?}", placement.element);
@@ -171,7 +183,7 @@ fn every_cited_row_exists_and_every_control_bar_row_is_placed() {
     let Some(text) = layout_md() else {
         return;
     };
-    for placement in ELEMENTS {
+    for placement in ELEMENTS.iter().filter(|p| p.row != D24) {
         assert!(
             text.contains(&format!("| {} |", placement.row)),
             "{}",
@@ -195,4 +207,23 @@ fn every_cited_row_exists_and_every_control_bar_row_is_placed() {
     }
     let strips: Vec<Strip> = ELEMENTS.iter().map(|p| p.strip).collect();
     assert!(strips.contains(&Strip::ControlBar) && strips.contains(&Strip::StatusBar));
+}
+
+#[test]
+fn the_widest_assistant_pane_leaves_the_minimum_window_without_overlaps() {
+    // D24: the pane takes its width from the main view, the detail area and
+    // the Status Bar; at the smallest window and the widest pane the Status
+    // Bar's message area still ends before the controls to its right.
+    let layout = ShellLayout::compute_with_assistant(MINIMUM, true, true, Some(640.0));
+    let pane = layout.assistant.expect("the pane shows");
+    assert!(layout.main_view.width() > 0.0 && layout.main_view.right() < pane.left());
+    assert!(layout.device_view.width() > 0.0 && layout.device_view.right() < pane.left());
+    let message = layout.rect(Element::Message);
+    let clip = layout.rect(Element::ClipViewToggle);
+    assert!(message.right() <= clip.left(), "{message:?} {clip:?}");
+    for (element, rect) in &layout.elements {
+        if placement(*element).strip == Strip::StatusBar {
+            assert!(rect.right() <= pane.left(), "{element:?}");
+        }
+    }
 }

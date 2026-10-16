@@ -15,7 +15,7 @@ pub use bl_shell_spec::settings::{
 };
 
 use crate::agent::AgentSettings;
-use crate::assistant::AssistantSettings;
+use crate::assistant::{AssistantPanelPrefs, AssistantSettings};
 use crate::audio::{AudioSettings, ToneSettings};
 
 /// Everything the app keeps between starts, saved as JSON.
@@ -54,6 +54,9 @@ pub struct Preferences {
     /// The built-in assistant's provider, base URL and model (WP-2.23,
     /// part 4). Its API key is in the OS keychain, never here.
     pub assistant: AssistantSettings,
+    /// Where the assistant's panel is: its docked width, and whether it
+    /// floats in a window of its own (WP-2.23, part 3; D24).
+    pub assistant_panel: AssistantPanelPrefs,
     /// The assistant commands the person chose "always allow" for, so a
     /// destructive or external command it calls doesn't ask again
     /// (WP-2.23, part 4).

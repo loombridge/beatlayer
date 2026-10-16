@@ -550,7 +550,6 @@ fn the_section_reaches_assistive_technology() {
     for (name, package) in [
         ("Arrangement Record", "WP-2.13"),
         ("MIDI Arrangement Overdub", "WP-2.14"),
-        ("Automation Arm", "WP-2.12"),
         ("Tap Tempo", "M2"),
     ] {
         let node = Harness::node(&nodes, name);

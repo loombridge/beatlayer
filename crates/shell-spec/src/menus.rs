@@ -16,6 +16,7 @@
 //! website, account, store, pack service, and Max for Live) are left out
 //! ([`Action::Omitted`]). Decision D21 records the rule.
 
+use crate::assistant::VIEW_TOGGLE_ASSISTANT;
 use crate::browser::{ADD_FOLDER as BROWSER_ADD_FOLDER, SET_PREVIEW as BROWSER_PREVIEW};
 use crate::commands::{
     APP_ABOUT, APP_HIDE, APP_QUIT, APP_SETTINGS, AUDIO_TOGGLE_ENGINE, FOCUS_ARRANGEMENT,
@@ -90,6 +91,10 @@ pub enum Action {
     /// A line between groups of items, where Live draws one.
     Separator,
 }
+
+/// The row of Beatlayer's own Assistant item in the View menu (D24): Live
+/// has no assistant, so it is no row of menus.md.
+pub const D24: &str = "D24";
 
 /// The row of Beatlayer's own Duplicate Track Without Clips (IMP-12),
 /// next to Duplicate: an improvement, so not a row of menus.md, which
@@ -488,6 +493,7 @@ const VIEW: &[Row] = &[
     ),
     ("M-VIEW-007", "File Manager", Pending(None)),
     ("M-VIEW-008", "Undo History", Key(&["S-VIEW-021"])),
+    (D24, "Assistant", Cmd(VIEW_TOGGLE_ASSISTANT)),
     SEPARATOR,
     (
         "M-VIEW-009",
@@ -718,7 +724,11 @@ const OPTIONS: &[Row] = &[
     ("M-OPT-025", "Solo in Place", Cmd("mixer.set_solo_in_place")),
     SEPARATOR,
     ("M-OPT-026", "Lock Envelopes", Pending(None)),
-    ("M-OPT-027", "MIDI Arrangement Overdub", Pending(None)),
+    (
+        "M-OPT-027",
+        "MIDI Arrangement Overdub",
+        Cmd(crate::transport::SET_MIDI_OVERDUB),
+    ),
     SEPARATOR,
     (
         "M-OPT-028",

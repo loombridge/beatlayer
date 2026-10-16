@@ -63,15 +63,11 @@ struct PunchFrames {
     end: Option<Frames>,
 }
 
-/// The take being recorded (WP-2.13): the song frame its first captured
-/// part began on, the song frame its clip starts at, how many frames of
-/// input it has passed, and how many its rings hold. The first `delay`
-/// frames of a recording latency aren't written, so the two differ.
+/// The take being recorded (WP-2.13): the song frame it started at and how
+/// many frames of playback it has covered.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Take {
-    from: Frames,
     start: Frames,
-    seen: u64,
     written: u64,
 }
 
@@ -1231,48 +1227,45 @@ impl Processor {
             self.end_take();
             return;
         }
-        let expected = self
-            .take
-            .map_or(self.position, |take| take.from + Frames(take.seen as i64));
+        let expected = self.take.map_or(self.position, |take| {
+            take.start + Frames(take.written as i64)
+        });
         if self.take.is_some() && expected != self.position {
             self.end_recording();
             return;
         }
         // Spec: recording R7. The recording is moved `delay` frames earlier:
-        // the input that arrived in the take's first `delay` frames sounds
-        // before it started, so it isn't written. A negative delay moves the
-        // clip later instead.
+        // the audio that arrived in the take's first `delay` frames sounds
+        // before it started, so it isn't written. The shell places the
+        // clips from the delay and the take.
         // shortcut: the take ends when playback does, so its last `delay`
         // frames of sound are never heard back and the clip is that much
         // shorter; upgrade by recording on past the end for `delay` frames.
         let delay = self.plan.as_mut().map_or(0, |plan| plan.get_mut().delay);
-        let take = *self.take.get_or_insert(Take {
-            from: self.position,
-            start: self.position + Frames((-delay).max(0)),
-            seen: 0,
-            written: 0,
-        });
-        if take.seen == 0 {
+        if self.take.is_none() {
             self.last_take = None;
+            self.take = Some(Take {
+                start: self.position,
+                written: 0,
+            });
         }
+        let written = self.take.map_or(0, |take| take.written);
         let skip = (delay.max(0) as u64)
-            .saturating_sub(take.seen)
+            .saturating_sub(written)
             .min(frames as u64) as usize;
-        let captured = skip == frames
-            || match (self.program.as_ref(), self.plan.as_mut()) {
-                (Some(program), Some(plan)) => {
-                    plan.get_mut()
-                        .capture(program.get(), offset + skip, frames - skip)
-                }
-                _ => false,
-            };
+        let captured = match (self.program.as_ref(), self.plan.as_mut()) {
+            (Some(program), Some(plan)) => {
+                plan.get_mut()
+                    .capture(program.get(), self.position, offset, frames, skip)
+            }
+            _ => false,
+        };
         if !captured {
             self.end_recording();
             return;
         }
         if let Some(take) = &mut self.take {
-            take.seen += frames as u64;
-            take.written += (frames - skip) as u64;
+            take.written += frames as u64;
         }
     }
 

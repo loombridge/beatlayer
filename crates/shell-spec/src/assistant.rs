@@ -14,8 +14,14 @@
 //! These commands change how the assistant works, so only a person runs
 //! them: the agent API refuses every command in this module, whatever the
 //! agent's permissions, as it does the agent server's own.
+//!
+//! The assistant's panel (part 3) is Beatlayer's own too: Live has no
+//! assistant, so its place is a decision of Beatlayer's (D24) rather than a
+//! row of the UI parity reference. The panel is a full-height pane on the
+//! right of the main window, or a window of its own; its commands are in
+//! this module as well, so agents never open, resize or drive it.
 
-use bl_commands::Context::Settings;
+use bl_commands::Context::{Global, Settings};
 use bl_commands::{CommandSpec, Permission, RegisterError, Registry};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -32,6 +38,17 @@ pub const ASSISTANT_SET_KEY: &str = "assistant.set_key";
 pub const ASSISTANT_FORGET_KEY: &str = "assistant.forget_key";
 /// `assistant.toggle_activity_log`: open or close the activity log.
 pub const ASSISTANT_TOGGLE_ACTIVITY_LOG: &str = "assistant.toggle_activity_log";
+/// `view.toggle_assistant`: open or close the assistant's panel.
+pub const VIEW_TOGGLE_ASSISTANT: &str = "view.toggle_assistant";
+/// `assistant.set_panel_width`: set the docked panel's width.
+pub const ASSISTANT_SET_PANEL_WIDTH: &str = "assistant.set_panel_width";
+/// `assistant.toggle_floating`: float the panel into its own window, or dock
+/// it back.
+pub const ASSISTANT_TOGGLE_FLOATING: &str = "assistant.toggle_floating";
+/// `assistant.send`: send the person's message to the assistant.
+pub const ASSISTANT_SEND: &str = "assistant.send";
+/// `assistant.stop`: stop the assistant's turn that is running.
+pub const ASSISTANT_STOP: &str = "assistant.stop";
 
 /// Every command [`register`] adds.
 pub const IDS: &[&str] = &[
@@ -41,6 +58,11 @@ pub const IDS: &[&str] = &[
     ASSISTANT_SET_KEY,
     ASSISTANT_FORGET_KEY,
     ASSISTANT_TOGGLE_ACTIVITY_LOG,
+    VIEW_TOGGLE_ASSISTANT,
+    ASSISTANT_SET_PANEL_WIDTH,
+    ASSISTANT_TOGGLE_FLOATING,
+    ASSISTANT_SEND,
+    ASSISTANT_STOP,
 ];
 
 /// Whether `id` is one of the assistant settings' commands, which agents
@@ -114,6 +136,77 @@ pub struct AssistantSettings {
     pub model: String,
 }
 
+/// The panel's narrowest docked width, in points.
+pub const PANEL_MIN_WIDTH: f32 = 240.0;
+/// The panel's widest docked width, in points.
+pub const PANEL_MAX_WIDTH: f32 = 640.0;
+/// The panel's docked width until the person drags its edge, in points.
+pub const PANEL_DEFAULT_WIDTH: f32 = 320.0;
+
+/// Where the assistant's panel is, kept in the preferences so it comes
+/// back the way the person left it (D24). Whether it is open is not kept:
+/// the panel starts closed, as the browser's and the Info View's state
+/// starts from the set's defaults.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AssistantPanelPrefs {
+    /// The docked panel's width in points, within [`PANEL_MIN_WIDTH`] and
+    /// [`PANEL_MAX_WIDTH`].
+    pub width: f32,
+    /// Whether the panel floats in a window of its own rather than docking
+    /// at the main window's right edge.
+    pub floating: bool,
+}
+
+impl Default for AssistantPanelPrefs {
+    fn default() -> Self {
+        Self {
+            width: PANEL_DEFAULT_WIDTH,
+            floating: false,
+        }
+    }
+}
+
+/// A docked width brought within the limits.
+#[must_use]
+pub fn clamp_panel_width(width: f32) -> f32 {
+    if width.is_finite() {
+        width.clamp(PANEL_MIN_WIDTH, PANEL_MAX_WIDTH)
+    } else {
+        PANEL_DEFAULT_WIDTH
+    }
+}
+
+/// What the panel's commands return: its state afterwards.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct AssistantPanelState {
+    /// Whether the panel is open.
+    pub open: bool,
+    /// Whether it floats in a window of its own.
+    pub floating: bool,
+    /// The docked width in points.
+    pub width: f32,
+    /// Whether an assistant turn is running.
+    pub running: bool,
+}
+
+/// Arguments of `assistant.set_panel_width`.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetPanelWidthArgs {
+    /// The width in points. A width outside the limits is brought within
+    /// them.
+    pub width: f32,
+}
+
+/// Arguments of `assistant.send`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SendArgs {
+    /// The message.
+    pub text: String,
+}
+
 /// What the assistant settings' commands return: the settings afterwards,
 /// without the API key, which only its presence reports.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -172,6 +265,16 @@ macro_rules! person_only {
             $text,
             " It changes how the assistant works, so only a person can run it, in the Settings \
              window's Agents page: the agent API refuses it."
+        )
+    };
+}
+
+/// The sentence the panel commands' descriptions end with.
+macro_rules! panel_only {
+    ($text:literal) => {
+        concat!(
+            $text,
+            " It belongs to the person using the app, so the agent API refuses it."
         )
     };
 }
@@ -246,6 +349,61 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .context(Settings)
             .args::<bl_commands::NoArgs>()
             .result::<AssistantState>(),
+        CommandSpec::new(VIEW_TOGGLE_ASSISTANT, "Assistant")
+            .description(panel_only!(
+                "Opens or closes the built-in assistant's panel: a full-height pane at the \
+                 main window's right edge, beside the main view, the detail area and the \
+                 Status Bar, or a window of its own while the person has floated it. The \
+                 Control Bar's last control and the View menu's Assistant item do the same. \
+                 A new session starts with it closed. Changes nothing in the set and isn't an \
+                 undo step."
+            ))
+            .permission(Permission::Read)
+            .context(Global)
+            .args::<bl_commands::NoArgs>()
+            .result::<AssistantPanelState>(),
+        CommandSpec::new(ASSISTANT_SET_PANEL_WIDTH, "Assistant Panel Width")
+            .description(panel_only!(
+                "Sets the width in points of the assistant's panel while it is docked, as \
+                 dragging its left edge does. A width outside 240 to 640 points is brought \
+                 within them. The width is kept for the next start. Changes nothing in the \
+                 set and isn't an undo step."
+            ))
+            .permission(Permission::Read)
+            .context(Global)
+            .args::<SetPanelWidthArgs>()
+            .result::<AssistantPanelState>(),
+        CommandSpec::new(ASSISTANT_TOGGLE_FLOATING, "Float Assistant")
+            .description(panel_only!(
+                "Floats the assistant's panel into a window of its own, or docks it back at \
+                 the main window's right edge. The choice is kept for the next start. \
+                 Changes nothing in the set and isn't an undo step."
+            ))
+            .permission(Permission::Read)
+            .context(Global)
+            .args::<bl_commands::NoArgs>()
+            .result::<AssistantPanelState>(),
+        CommandSpec::new(ASSISTANT_SEND, "Send to Assistant")
+            .description(panel_only!(
+                "Sends the person's message to the built-in assistant: it joins the \
+                 conversation in the panel, and the assistant answers it as one turn, whose \
+                 changes to the set are one undo step. Refused while a turn is running or \
+                 when the message is empty."
+            ))
+            .permission(Permission::Read)
+            .context(Global)
+            .args::<SendArgs>()
+            .result::<AssistantPanelState>(),
+        CommandSpec::new(ASSISTANT_STOP, "Stop Assistant")
+            .description(panel_only!(
+                "Stops the assistant's turn that is running, between two of its commands. \
+                 What it already did stays done, and is the turn's one undo step. Does \
+                 nothing while no turn is running."
+            ))
+            .permission(Permission::Read)
+            .context(Global)
+            .args::<bl_commands::NoArgs>()
+            .result::<AssistantPanelState>(),
     ];
     for spec in specs {
         registry.register(spec)?;

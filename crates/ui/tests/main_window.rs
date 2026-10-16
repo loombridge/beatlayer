@@ -361,7 +361,9 @@ fn with_live_s_title_bar_drawn_top_anchored_rows_sit_at_layout_md_s_positions() 
         "Tap Tempo",
     );
     let cpu = bounds_of(&nodes, Role::Meter, "CPU Load");
-    assert_near(cpu, [1439.0, 1488.0, 28.0, 46.0], "CPU Load");
+    // The Control Bar's right group is 20 points left of Live's, the
+    // assistant's toggle having taken the far right (D24).
+    assert_near(cpu, [1419.0, 1468.0, 28.0, 46.0], "CPU Load");
     // L-WIN-005: the main view from 61 pt down to the detail area.
     let main = bounds_of(&nodes, Role::Pane, "Arrangement View");
     assert_near(main, [320.0, 1591.0, 61.0, 766.0], "main view");

@@ -39,6 +39,7 @@ use bl_shell::menus::{Menu, MenuPlatform, menu_bar};
 use bl_shell::perception_commands::View;
 use bl_shell::settings::{Preferences, ThemeChoice, default_config_dir};
 use bl_shell::{Effect, Invocation, Shell, WindowKind, commands as ids};
+use bl_ui::assistant_panel::AssistantPanelUi;
 use bl_ui::device_view::DeviceViewUi;
 use bl_ui::input::KeyDispatcher;
 use bl_ui::keymap::{Keymap, Platform};
@@ -334,12 +335,17 @@ struct Host {
     proxy: EventLoopProxy<UserEvent>,
     main: Option<Surface>,
     settings: Option<Surface>,
+    /// The assistant's panel in a window of its own, while it floats open
+    /// (WP-2.23, part 3; D24), with what it draws.
+    assistant: Option<Surface>,
+    assistant_ui: AssistantPanelUi,
     /// Floating devices' windows (WP-2.5b), each with what it draws.
     devices: BTreeMap<bl_model::DeviceId, (Option<Surface>, DeviceViewUi)>,
     /// Always `None`: what [`Host::surface`] gives for a device window
     /// that isn't open.
     no_surface: Option<Surface>,
     device_keys: KeyDispatcher,
+    assistant_keys: KeyDispatcher,
     main_ui: MainWindowUi,
     settings_ui: SettingsUi,
     main_keys: KeyDispatcher,
@@ -507,9 +513,12 @@ pub fn run(args: Args) -> Result<(), String> {
         proxy,
         main: None,
         settings: None,
+        assistant: None,
+        assistant_ui: AssistantPanelUi::default(),
         devices: BTreeMap::new(),
         no_surface: None,
         device_keys: KeyDispatcher::new(platform),
+        assistant_keys: KeyDispatcher::new(platform),
         main_ui,
         settings_ui: SettingsUi::new(),
         main_keys: KeyDispatcher::new(platform),
@@ -779,6 +788,7 @@ impl Host {
         match kind {
             WindowKind::Main => &mut self.main,
             WindowKind::Settings => &mut self.settings,
+            WindowKind::Assistant => &mut self.assistant,
             WindowKind::Device(device) => match self.devices.get_mut(&device) {
                 Some((surface, _)) => surface,
                 None => {
@@ -794,6 +804,8 @@ impl Host {
             Some(WindowKind::Main)
         } else if self.settings.as_ref().is_some_and(|s| s.window.id() == id) {
             Some(WindowKind::Settings)
+        } else if self.assistant.as_ref().is_some_and(|s| s.window.id() == id) {
+            Some(WindowKind::Assistant)
         } else {
             self.devices
                 .iter()
@@ -804,7 +816,7 @@ impl Host {
 
     /// Every open window's surface.
     fn surfaces(&self) -> impl Iterator<Item = &Surface> {
-        [&self.main, &self.settings]
+        [&self.main, &self.settings, &self.assistant]
             .into_iter()
             .flatten()
             .chain(self.devices.values().filter_map(|(s, _)| s.as_ref()))
@@ -915,6 +927,30 @@ impl Host {
         }
     }
 
+    /// Opens and closes the assistant's own window to match the shell's: it
+    /// is open while the panel is open and floating (D24).
+    fn sync_assistant_window(&mut self, event_loop: &ActiveEventLoop) {
+        if !self.shell.assistant_window_open() {
+            if self.assistant.take().is_some()
+                && self.shell.focused_window() == WindowKind::Assistant
+            {
+                self.shell.set_focused_window(WindowKind::Main);
+            }
+            return;
+        }
+        if self.assistant.is_some() {
+            return;
+        }
+        let attributes = Window::default_attributes()
+            .with_title("Assistant")
+            .with_inner_size(LogicalSize::new(380.0, 600.0))
+            .with_min_inner_size(LogicalSize::new(240.0, 240.0));
+        match self.create_surface(event_loop, attributes, self.main.as_ref()) {
+            Ok(surface) => self.assistant = Some(surface),
+            Err(error) => self.shell.set_message(error, true),
+        }
+    }
+
     /// Records where a floating device's window sits, for the set to save
     /// (`device.set_window`: no undo step).
     fn record_device_frame(&mut self, device: bl_model::DeviceId, window: &Window) {
@@ -960,6 +996,7 @@ impl Host {
         let keys = match kind {
             WindowKind::Main => &mut self.main_keys,
             WindowKind::Settings => &mut self.settings_keys,
+            WindowKind::Assistant => &mut self.assistant_keys,
             WindowKind::Device(_) => &mut self.device_keys,
         };
         let invocations = keys.take_bound_keys(&mut input, &self.keymap, &self.shell, text_focused);
@@ -977,11 +1014,13 @@ impl Host {
             platform: self.platform,
         });
         // A floating device's window keeps the system's title bar.
-        let title_bar = !matches!(kind, WindowKind::Device(_)) && draws_title_bar(&surface.window);
+        let title_bar = !matches!(kind, WindowKind::Device(_) | WindowKind::Assistant)
+            && draws_title_bar(&surface.window);
         let shell = &self.shell;
         let theme = &self.theme;
         let main_ui = &mut self.main_ui;
         let settings_ui = &mut self.settings_ui;
+        let assistant_ui = &mut self.assistant_ui;
         let mut device_ui = match kind {
             WindowKind::Device(device) => self.devices.get_mut(&device).map(|(_, ui)| ui),
             _ => None,
@@ -1000,6 +1039,12 @@ impl Host {
             ui_events = match kind {
                 WindowKind::Main => main_ui.show(ui, shell, theme, title_bar, drawn),
                 WindowKind::Settings => settings_ui.show(ui, shell, theme, title_bar),
+                WindowKind::Assistant => {
+                    let mut events = Vec::new();
+                    let rect = ui.max_rect();
+                    assistant_ui.show(ui, shell, theme, rect, false, &mut events);
+                    events
+                }
                 WindowKind::Device(_) => {
                     let mut events = Vec::new();
                     if let (Some(device_ui), Some(floating)) =
@@ -1121,7 +1166,12 @@ impl Host {
             main.window.request_redraw();
         }
         let mut rezoomed = false;
-        for surface in self.devices.values_mut().filter_map(|(s, _)| s.as_mut()) {
+        for surface in self
+            .devices
+            .values_mut()
+            .filter_map(|(s, _)| s.as_mut())
+            .chain(self.assistant.as_mut())
+        {
             if (surface.zoom - zoom).abs() > 1e-6 {
                 apply_zoom(&surface.ctx, zoom);
                 surface.zoom = zoom;
@@ -1148,6 +1198,7 @@ impl Host {
         self.agent.sync_engine(&mut self.shell);
         if self.shown_revision != Some(self.shell.revision()) {
             self.sync_device_windows(event_loop);
+            self.sync_assistant_window(event_loop);
             self.shown_revision = Some(self.shell.revision());
             #[cfg(any(target_os = "macos", windows))]
             if let Some(menu) = &self.native_menu {
@@ -1292,7 +1343,7 @@ impl Host {
                         settings.window.request_redraw();
                     }
                 }
-                WindowKind::Device(_) => {}
+                WindowKind::Device(_) | WindowKind::Assistant => {}
             },
         }
     }
@@ -1424,6 +1475,7 @@ impl Host {
                         let surface = match window {
                             WindowKind::Main => self.main.as_ref(),
                             WindowKind::Settings => self.settings.as_ref(),
+                            WindowKind::Assistant => self.assistant.as_ref(),
                             WindowKind::Device(device) => {
                                 self.devices.get(&device).and_then(|(s, _)| s.as_ref())
                             }
@@ -1718,7 +1770,7 @@ impl ApplicationHandler<UserEvent> for Host {
                 // leaving full screen.
                 if matches!(kind, WindowKind::Device(_)) {
                     fit_device_title_bar(&surface.window);
-                } else {
+                } else if kind != WindowKind::Assistant {
                     fit_title_bar(&surface.window);
                 }
             }
@@ -1729,6 +1781,11 @@ impl ApplicationHandler<UserEvent> for Host {
                 match kind {
                     WindowKind::Main => self.invoke(&Invocation::new(ids::APP_QUIT, json!({}))),
                     WindowKind::Settings => self.shell.close_settings(),
+                    // Closing the floating assistant closes the panel.
+                    WindowKind::Assistant => self.invoke(&Invocation::new(
+                        bl_shell::assistant::VIEW_TOGGLE_ASSISTANT,
+                        json!({}),
+                    )),
                     // Closing a floating device's window docks the device
                     // (IMP-14): one undo step.
                     WindowKind::Device(device) => self.invoke(&Invocation::new(
@@ -1879,6 +1936,7 @@ impl ApplicationHandler<UserEvent> for Host {
                 let surface = match capture.window {
                     WindowKind::Main => self.main.as_ref(),
                     WindowKind::Settings => self.settings.as_ref(),
+                    WindowKind::Assistant => self.assistant.as_ref(),
                     WindowKind::Device(device) => {
                         self.devices.get(&device).and_then(|(s, _)| s.as_ref())
                     }

@@ -130,7 +130,7 @@ impl TrackRepr {
             name: track.name.clone(),
             mixer: track.mixer,
             sends: track.sends().collect(),
-            routing: (track.routing != Routing::new(track.kind)).then_some(track.routing),
+            routing: (track.routing != Routing::new(track.kind)).then(|| track.routing.clone()),
             automation: track
                 .automation()
                 .map(|(target, automation)| AutomationRepr {
@@ -883,6 +883,19 @@ mod tests {
             v["tracks"][0]["children"][0]["devices"][0]["params"] = json!([[1, 0.0], [1, 1.0]]);
         });
         assert!(error.contains("listed twice"), "{error}");
+        let error = broken(&|v| {
+            v["returns"][0]["routing"] =
+                json!({ "input": { "type": "all_ins" }, "monitor": "auto" });
+        });
+        assert!(error.contains("audio or MIDI"), "{error}");
+        let error = broken(&|v| {
+            v["tracks"][0]["children"][0]["routing"] = json!({
+                "input": { "type": "external" },
+                "channel": 3,
+                "monitor": "auto",
+            });
+        });
+        assert!(error.contains("only a port"), "{error}");
         let error = broken(&|v| v["tracks"][0]["children"][0]["clips"][0]["id"] = json!(0));
         assert!(
             error.contains("nonzero") || error.contains("zero"),

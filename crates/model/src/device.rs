@@ -156,7 +156,7 @@ pub type DeviceWindows = std::collections::BTreeMap<DeviceId, WindowFrame>;
 /// To (observed). While External is on, the device's detector hears that
 /// signal scaled by SC Gain, mixed with the device's own input by Mix;
 /// while it's off, its own input.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[schemars(
     description = "A device's sidechain input: `enabled` (the External switch), `input` \
                    (Source: `none`, or `track` with a track and a `tap`), `gain` (SC Gain, \

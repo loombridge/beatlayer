@@ -285,6 +285,24 @@ impl Compiler {
         self.compile_with(document, &resend)
     }
 
+    /// Reports `device`'s node's latency now, as a plug-in that restarted
+    /// for a new one does (WP-2.7): the last document is compiled again,
+    /// with the device's node kept and the new latency in its slot, so
+    /// delay compensation follows the change (delay-compensation R6).
+    /// Nothing if the device's node isn't in the last program, or its
+    /// latency is unchanged.
+    pub fn latency(&mut self, device: DeviceId, frames: u32) -> Update {
+        match self.layout.get_mut(&NodeKey::Device(device)) {
+            Some(placed) if placed.latency != frames => placed.latency = frames,
+            _ => return Update::default(),
+        }
+        let Some(document) = self.synced.clone() else {
+            return Update::default();
+        };
+        // The clips stay with their players: nothing about them changed.
+        self.compile_with(&document, &Resend::default())
+    }
+
     /// Sends `track`'s clip player its clips: a list placed under `document`'s
     /// tempo map. An empty list clears the player's.
     fn send_clips(&mut self, document: &Document, track: TrackId, update: &mut Update) {
@@ -401,6 +419,7 @@ impl Compiler {
         let generation = self.generation + 1;
         let base = (self.generation > 0).then_some(self.generation);
         let tasks = build.tasks.len();
+        let midi = crate::midi::MidiRoutes::compile(document, &build.tasks);
         let size = self.config.channels * self.config.max_frames;
         let (order, dependents) = run_order(&build);
         compensate(&mut build, &order);
@@ -444,6 +463,7 @@ impl Compiler {
                 NoteBuffer::with_capacity(1024),
                 NoteBuffer::with_capacity(1024),
             ],
+            midi,
         };
         self.generation = generation;
         self.layout = build.layout;
@@ -1151,8 +1171,17 @@ fn needs_program(
                     || !before.children().eq(after.children())
                     || before.mixer().tap != after.mixer().tap
                     || was.input != is.input
+                    || was.channel != is.channel
                     || was.output != is.output
                     || was.midi_output != is.midi_output
+                {
+                    recompile = true;
+                }
+                // A MIDI track's routes travel in the program (WP-2.2),
+                // with whether it monitors; an audio track's monitor change
+                // opens and closes routes instead.
+                if after.kind() == TrackKind::Midi
+                    && (was.monitor != is.monitor || before.mixer().arm != after.mixer().arm)
                 {
                     recompile = true;
                 }
@@ -1165,17 +1194,17 @@ fn needs_program(
     for (&id, &change) in &changes.devices {
         match (change, old.device(id), new.device(id)) {
             (Change::Modified, Some(before), Some(after)) => {
-                let (was, is) = (before.sidechain, after.sidechain);
+                let (was, is) = (before.sidechain.as_ref(), after.sidechain.as_ref());
                 if before.kind != after.kind
                     || before.enabled != after.enabled
                     || before.media != after.media
-                    || was.map(|s| s.input) != is.map(|s| s.input)
+                    || was.map(|s| &s.input) != is.map(|s| &s.input)
                 {
                     recompile = true;
                 }
                 if let (Some(was), Some(is)) = (was, is) {
-                    let then: Vec<_> = sidechain_settings(&was).collect();
-                    for (param, value) in sidechain_settings(&is) {
+                    let then: Vec<_> = sidechain_settings(was).collect();
+                    for (param, value) in sidechain_settings(is) {
                         if !then.contains(&(param, value)) {
                             params.push(ParamEvent::now(NodeKey::Sidechain(id), param, value));
                         }

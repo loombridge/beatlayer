@@ -2,6 +2,7 @@
 
 use std::time::Instant;
 
+use bl_core::midi::MidiInputEvent;
 use bl_core::time::{Frames, SampleRate, TempoMap, Ticks, TimeSignatureMap};
 use bl_model::ParamId;
 use bl_rt::log::{Level, Writer};
@@ -14,6 +15,7 @@ use crate::message::{
     Action, LoopRegion, Message, ParamEvent, Report, ScheduledCommand, TransportCommand, When,
 };
 use crate::metronome::{Block, MetronomeEngine};
+use crate::midi::{MidiCounters, MidiIn, TrackMidiInput};
 use crate::node::{NodeData, NodeEvent, NodeKey, ParamValue, TransportInfo};
 use crate::program::{EngineProgram, Resolved};
 use crate::recording::{RecordingPlan, TakeBounds};
@@ -224,6 +226,8 @@ pub struct Processor {
     counters: EngineCounters,
     cpu_load_max: f32,
     log: Writer,
+    /// MIDI input from the MIDI threads (WP-2.2).
+    midi: MidiIn,
 }
 
 impl Processor {
@@ -263,6 +267,7 @@ impl Processor {
             counters: EngineCounters::default(),
             cpu_load_max: 0.0,
             log: Writer::new(),
+            midi: MidiIn::new(config.sample_rate),
             config,
         }
     }
@@ -309,12 +314,40 @@ impl Processor {
         self.program.as_ref().map(Program::get)
     }
 
+    /// Gives the processor the consuming end of the MIDI input queue, which
+    /// the MIDI device layer (`bl-midi-io`) and the computer MIDI keyboard
+    /// fill (`docs/specs/midi-io.md`, R14). Call it before the processor
+    /// runs on the audio thread: it returns the queue it had, if any, to be
+    /// dropped there.
+    pub fn set_midi_input(
+        &mut self,
+        queue: rtrb::Consumer<MidiInputEvent>,
+    ) -> Option<rtrb::Consumer<MidiInputEvent>> {
+        self.midi.set_queue(queue)
+    }
+
+    /// What a MIDI track's input received in the last block, and whether the
+    /// track monitors. `None` before a program arrives, or if `track` isn't
+    /// a MIDI track in it.
+    #[must_use]
+    pub fn midi_input(&self, track: bl_model::TrackId) -> Option<TrackMidiInput<'_>> {
+        self.program()?.midi_input(track)
+    }
+
+    /// What the MIDI input stage has counted.
+    #[must_use]
+    pub fn midi_counters(&self) -> MidiCounters {
+        self.midi.counters
+    }
+
     /// Processes one block of `frames` frames (at most
     /// [`EngineConfig::max_frames`]; more are cut to that) and returns its
-    /// output. Real-time safe. A device's input is not seen: pass it through
-    /// [`process_with_input`](Self::process_with_input).
+    /// output. Real-time safe. No device input is seen, and the block is
+    /// timed from now: a device's callback goes through
+    /// [`process_at`](Self::process_at), which takes its input and the time
+    /// its callback ran.
     pub fn process(&mut self, frames: usize) -> Output<'_> {
-        self.process_with_input(frames, &crate::NoInput)
+        self.process_at(frames, &crate::NoInput, Instant::now())
     }
 
     /// Processes one block with the audio device's input, for tracks whose
@@ -327,12 +360,32 @@ impl Processor {
         frames: usize,
         input: &dyn crate::DeviceInput,
     ) -> Output<'_> {
+        self.process_at(frames, input, Instant::now())
+    }
+
+    /// Processes one block, as [`Processor::process`] does, with the audio
+    /// device's `input` and timed at `now`, the time the audio callback
+    /// started the block. `now` is the clock MIDI input is placed against
+    /// (`docs/specs/midi-io.md`, R15, R16): a device's callback passes the
+    /// time it was called, so the block clock's delay-locked loop can smooth
+    /// the jitter in when it runs, and a test passes times of its own.
+    /// Real-time safe: the input is copied into the program's own buffers,
+    /// which were made when the engine was.
+    pub fn process_at(
+        &mut self,
+        frames: usize,
+        input: &dyn crate::DeviceInput,
+        now: Instant,
+    ) -> Output<'_> {
         let began = Instant::now();
         let frames = frames.min(self.config.max_frames);
         self.drain();
         if let Some(program) = self.program.as_mut() {
             program.get_mut().copy_device_input(input, frames);
         }
+        // Spec: midi-io R12, R14, R15
+        let routes = self.program.as_mut().map(|p| &mut p.get_mut().midi);
+        self.midi.take(now, self.clock, frames, routes);
         self.resolve_due(frames);
         let mut done = 0;
         while done < frames {

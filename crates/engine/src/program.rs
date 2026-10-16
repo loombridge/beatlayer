@@ -7,6 +7,7 @@ use core::ops::Range;
 use bl_core::time::{SampleRate, TempoMap, TimeSignatureMap};
 use bl_model::{Channel, ParamId, Tap, TrackId};
 
+use crate::midi::{MidiRoutes, TrackMidiInput};
 use crate::mixer::{MeterReading, Route, TrackMixer};
 use crate::node::{
     Block, Node, NodeData, NodeEvent, NodeKey, NoteBuffer, ParamValue, TransportInfo,
@@ -104,6 +105,9 @@ pub struct EngineProgram {
     pub(crate) time_signatures: TimeSignatureMap,
     pub(crate) sample_rate: SampleRate,
     pub(crate) note_buffers: [NoteBuffer; 2],
+    /// The MIDI tracks' inputs, and what each received in the last block
+    /// (WP-2.2).
+    pub(crate) midi: MidiRoutes,
 }
 
 /// What can sit in a program's slot.
@@ -462,6 +466,14 @@ impl EngineProgram {
     #[must_use]
     pub fn tempo(&self) -> &TempoMap {
         &self.tempo
+    }
+
+    /// What a MIDI track's input received in the last block, and whether
+    /// the track monitors (`docs/specs/midi-io.md`, R12). `None` if `track`
+    /// isn't a MIDI track in this program.
+    #[must_use]
+    pub fn midi_input(&self, track: TrackId) -> Option<TrackMidiInput<'_>> {
+        self.midi.input(track)
     }
 
     /// The slot holding `key`'s node.

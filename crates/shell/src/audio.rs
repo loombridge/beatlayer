@@ -231,13 +231,20 @@ impl AudioCallback for EngineCallback {
             let mut done = 0;
             while done < ctx.frames {
                 let frames = (ctx.frames - done).min(processor.config().max_frames);
-                let block = processor.process_with_input(
+                // The block's callback time, on the clock MIDI input is
+                // stamped against: the callback's start, moved on by the
+                // blocks before it in this callback (docs/specs/midi-io.md,
+                // R15, R16).
+                let block_at = started
+                    + Duration::from_secs_f64(done as f64 / f64::from(ctx.sample_rate.max(1)));
+                let block = processor.process_at(
                     frames,
                     &InputPart {
                         input,
                         offset: done,
                         frames,
                     },
+                    block_at,
                 );
                 for c in 0..block.channels() {
                     let to = main_out + c;
@@ -569,6 +576,13 @@ impl AudioHost {
         self.stream.is_some() && self.engine.is_some()
     }
 
+    /// The engine's compiler counters — how many programs it compiled, and
+    /// so on — for diagnostics and tests. `None` while no engine runs.
+    #[must_use]
+    pub fn compile_counts(&self) -> Option<bl_engine::CompileCounts> {
+        self.engine.as_ref().map(Engine::counts)
+    }
+
     /// Gives the engine the newest document: its compiler brings the
     /// running program up to date (tracks, devices, the tempo map, the
     /// loop). The host keeps it for the next engine too.
@@ -577,6 +591,17 @@ impl AudioHost {
         self.shared.set_main_out(main_out_left(document));
         if let Some(engine) = &self.engine {
             engine.sync(document);
+        }
+    }
+
+    /// Tells the engine the node of `device` now reports `frames` of
+    /// latency, as a plug-in that restarted for a new one does: the
+    /// compiler compiles a program whose delay compensation uses it
+    /// (WP-2.7; delay-compensation R6). Nothing while no engine runs: the
+    /// nodes the next one makes read their plug-ins' latency themselves.
+    pub fn set_device_latency(&mut self, device: bl_model::DeviceId, frames: u32) {
+        if let Some(engine) = &self.engine {
+            engine.set_device_latency(device, frames);
         }
     }
 

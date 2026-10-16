@@ -1501,7 +1501,15 @@ fn a_fader_drag_runs_the_recorded_gesture() {
 fn the_in_out_choosers_and_monitor_route_the_track() {
     let mut h = session();
     let t = tracks(&h.shell);
-    let routing = |h: &Harness| *h.shell.editor().document().track(t[2]).unwrap().routing();
+    let routing = |h: &Harness| {
+        h.shell
+            .editor()
+            .document()
+            .track(t[2])
+            .unwrap()
+            .routing()
+            .clone()
+    };
     // Audio From: open the list, choose 4-Audio.
     let input = control(&mut h, "3 Audio", "Input Type");
     h.click(input.center());

@@ -333,6 +333,11 @@ impl Backend for CpalBackend {
             requested_buffer_size: request.buffer_size,
             buffer_size: stream.buffer_size().ok(),
             max_block_frames,
+            // shortcut: the device's latency isn't read yet (cpal has no query
+            // for it), so the Driver Error Compensation setting carries all of
+            // it; upgrade by reading the platform's device properties.
+            input_latency: 0,
+            output_latency: 0,
             workgroup: workgroup.as_ref().map(WorkgroupInfo::of),
         };
         Ok(Box::new(CpalStream {

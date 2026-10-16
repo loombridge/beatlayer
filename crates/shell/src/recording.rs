@@ -124,7 +124,10 @@ pub fn start(
         .map_err(|e| format!("couldn't start the recording writer: {e}"))?;
     drop(thread);
     Ok((
-        RecordingPlan { tracks: plan },
+        RecordingPlan {
+            tracks: plan,
+            delay: 0,
+        },
         Recording {
             finished,
             files: None,

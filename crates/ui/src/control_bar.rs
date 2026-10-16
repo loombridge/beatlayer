@@ -48,7 +48,9 @@ pub const SECTION: &[Element] = &[
     Element::LoopStartBars,
     Element::LoopStartBeats,
     Element::LoopStartSixteenths,
+    Element::PunchIn,
     Element::Loop,
+    Element::PunchOut,
     Element::LoopLengthBars,
     Element::LoopLengthBeats,
     Element::LoopLengthSixteenths,
@@ -93,6 +95,8 @@ pub fn command(element: Element) -> Option<&'static str> {
         Element::Play => Some(ids::PLAY),
         Element::Stop => Some(ids::STOP),
         Element::Loop => Some(ids::SET_LOOP_ENABLED),
+        Element::PunchIn => Some(ids::SET_PUNCH_IN),
+        Element::PunchOut => Some(ids::SET_PUNCH_OUT),
         Element::Metronome => Some(ids::SET_METRONOME_ENABLED),
         Element::Follow => Some(FOLLOW),
         element => Some(match field(element)?.group {
@@ -114,6 +118,14 @@ pub fn click(element: Element, shell: &Shell) -> Option<Invocation> {
         Element::Loop => Some(Invocation::new(
             ids::SET_LOOP_ENABLED,
             json!({ "enabled": !loop_on(shell) }),
+        )),
+        Element::PunchIn => Some(Invocation::new(
+            ids::SET_PUNCH_IN,
+            json!({ "enabled": !punch_in_on(shell) }),
+        )),
+        Element::PunchOut => Some(Invocation::new(
+            ids::SET_PUNCH_OUT,
+            json!({ "enabled": !punch_out_on(shell) }),
         )),
         Element::Metronome => Some(Invocation::new(
             ids::SET_METRONOME_ENABLED,
@@ -145,6 +157,14 @@ fn loop_on(shell: &Shell) -> bool {
         .settings()
         .arrangement_loop
         .enabled
+}
+
+fn punch_in_on(shell: &Shell) -> bool {
+    shell.editor().document().settings().punch_in
+}
+
+fn punch_out_on(shell: &Shell) -> bool {
+    shell.editor().document().settings().punch_out
 }
 
 fn metronome_on(shell: &Shell) -> bool {
@@ -213,8 +233,12 @@ impl TransportFields {
                     ..Look::default()
                 });
             }
-            Element::Loop => {
-                let on = loop_on(shell);
+            Element::Loop | Element::PunchIn | Element::PunchOut => {
+                let on = match element {
+                    Element::PunchIn => punch_in_on(shell),
+                    Element::PunchOut => punch_out_on(shell),
+                    _ => loop_on(shell),
+                };
                 return Some(Look {
                     on,
                     value: Some(if on { "on" } else { "off" }.to_owned()),

@@ -37,6 +37,10 @@ pub const RETURN_TO_START: &str = "transport.return_to_start";
 pub const SET_LOOP: &str = "transport.set_loop";
 /// `transport.set_loop_enabled` (`bl-model`): the Arrangement Loop switch.
 pub const SET_LOOP_ENABLED: &str = "transport.set_loop_enabled";
+/// `transport.set_punch_in` (`bl-model`): the Punch-In switch.
+pub const SET_PUNCH_IN: &str = "transport.set_punch_in";
+/// `transport.set_punch_out` (`bl-model`): the Punch-Out switch.
+pub const SET_PUNCH_OUT: &str = "transport.set_punch_out";
 /// `transport.set_metronome_enabled` (`bl-model`): the Metronome switch.
 pub const SET_METRONOME_ENABLED: &str = "transport.set_metronome_enabled";
 /// `transport.set_metronome_count_in` (`bl-model`): Count-In in Metronome Settings.

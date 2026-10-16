@@ -595,6 +595,10 @@ fn every_transport_command_runs_by_id() {
         "transport.set_metronome_only_while_recording",
         json!({ "only_while_recording": true }),
     );
+    // Punch-In and Punch-Out (WP-2.13).
+    for id in ["transport.set_punch_in", "transport.set_punch_out"] {
+        run(&mut rig, id, json!({ "enabled": true }));
+    }
     run(
         &mut rig,
         "transport.set_recording",

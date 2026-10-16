@@ -120,7 +120,7 @@ pub use engine::{CompileCounts, Engine, Restarter, Sender, channel};
 pub use gc::{Collector, DROP_PERIOD, DropThread, GcHandle, Owned, Program};
 pub use input::{DeviceInput, NoInput};
 pub use message::{
-    Action, LoopRegion, ParamEvent, Report, ScheduledCommand, TransportCommand, When,
+    Action, LoopRegion, ParamEvent, Punch, Report, ScheduledCommand, TransportCommand, When,
 };
 pub use midi::{
     MIDI_EVENTS_PER_BLOCK, MIDI_EVENTS_PER_TRACK, MidiCounters, MidiEvent, TrackMidiInput,

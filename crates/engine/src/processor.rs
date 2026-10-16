@@ -12,7 +12,8 @@ use rtrb::{Consumer, Producer};
 use crate::EngineConfig;
 use crate::gc::{Owned, Program};
 use crate::message::{
-    Action, LoopRegion, Message, ParamEvent, Report, ScheduledCommand, TransportCommand, When,
+    Action, LoopRegion, Message, ParamEvent, Punch, Report, ScheduledCommand, TransportCommand,
+    When,
 };
 use crate::metronome::{Block, MetronomeEngine};
 use crate::midi::{MidiCounters, MidiIn, TrackMidiInput};
@@ -55,11 +56,22 @@ struct LoopFrames {
     end: Frames,
 }
 
-/// The take being recorded (WP-2.13): the song frame it started at and how
-/// many frames its rings hold.
+/// [`Punch`] in song frames, under the running program's tempo map.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct PunchFrames {
+    start: Option<Frames>,
+    end: Option<Frames>,
+}
+
+/// The take being recorded (WP-2.13): the song frame its first captured
+/// part began on, the song frame its clip starts at, how many frames of
+/// input it has passed, and how many its rings hold. The first `delay`
+/// frames of a recording latency aren't written, so the two differ.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Take {
+    from: Frames,
     start: Frames,
+    seen: u64,
     written: u64,
 }
 
@@ -84,6 +96,8 @@ pub struct Carry {
     insert_marker: Ticks,
     /// The Arrangement loop, if it was on.
     loop_region: Option<LoopRegion>,
+    /// Where recording punches in and out (WP-2.13).
+    punch: Punch,
     /// The take that last ended (WP-2.13), not yet handled by the shell.
     take: Option<TakeBounds>,
     /// Scheduled commands waiting to fire, in the order they arrived.
@@ -214,6 +228,10 @@ pub struct Processor {
     loop_region: Option<LoopRegion>,
     /// `loop_region` in frames, if it's at least a frame long.
     loop_frames: Option<LoopFrames>,
+    /// Where recording punches in and out (WP-2.13).
+    punch: Punch,
+    /// `punch` in frames.
+    punch_frames: PunchFrames,
     /// Whether the transport records (WP-2.13).
     recording: bool,
     /// What to record: the shell's plan, whose rings close when it goes.
@@ -270,6 +288,8 @@ impl Processor {
             insert_marker: Ticks::ZERO,
             loop_region: None,
             loop_frames: None,
+            punch: Punch::default(),
+            punch_frames: PunchFrames::default(),
             recording: false,
             plan: None,
             take: None,
@@ -489,6 +509,7 @@ impl Processor {
             position: self.tempo().frames_to_ticks(self.position, rate),
             insert_marker: self.insert_marker,
             loop_region: self.loop_region,
+            punch: self.punch,
             take: self.last_take,
             scheduled: self.scheduled.iter().map(|entry| entry.command).collect(),
             timed,
@@ -513,6 +534,7 @@ impl Processor {
         self.position = self.frames_at(carry.position);
         self.insert_marker = carry.insert_marker;
         self.loop_region = carry.loop_region;
+        self.punch = carry.punch;
         self.last_take = carry.take;
         self.update_loop_frames();
         for &command in &carry.scheduled {
@@ -736,6 +758,10 @@ impl Processor {
                 self.update_loop_frames();
             }
             TransportCommand::SetMetronome(settings) => self.metronome.set_settings(settings),
+            TransportCommand::SetPunch(punch) => {
+                self.punch = punch;
+                self.update_loop_frames();
+            }
             TransportCommand::SetRecording(recording) => {
                 self.metronome.set_recording(recording);
                 if recording {
@@ -755,17 +781,24 @@ impl Processor {
         if !self.recording {
             return;
         }
+        self.end_take();
+        self.recording = false;
+        // Spec: metronome R7. The transport isn't recording any more, so
+        // "only while recording" clicks stop with it, however it ended
+        // (Stop, recording off, a locate, or a ring that filled).
+        self.metronome.set_recording(false);
+    }
+
+    /// Ends the take being captured, publishing what it covers, and drops the
+    /// plan, so nothing more is written; the transport keeps recording.
+    /// What reaching the punch-out point does (WP-2.13).
+    fn end_take(&mut self) {
         if let Some(take) = self.take.take() {
             self.last_take = Some(TakeBounds {
                 start: take.start,
                 end: take.start + Frames(take.written as i64),
             });
         }
-        self.recording = false;
-        // Spec: metronome R7. The transport isn't recording any more, so
-        // "only while recording" clicks stop with it, however it ended
-        // (Stop, recording off, a locate, or a ring that filled).
-        self.metronome.set_recording(false);
         self.plan = None;
     }
 
@@ -780,9 +813,16 @@ impl Processor {
         self.playing = true;
     }
 
-    /// Works out the loop's frames from its ticks, under the running tempo
-    /// map. A loop shorter than a frame isn't played.
+    /// Works out the loop's and the punch points' frames from their ticks,
+    /// under the running tempo map. A loop shorter than a frame isn't played.
     fn update_loop_frames(&mut self) {
+        self.punch_frames = PunchFrames {
+            start: self
+                .punch
+                .start
+                .map(|ticks| self.frames_at(ticks.max(Ticks::ZERO))),
+            end: self.punch.end.map(|ticks| self.frames_at(ticks)),
+        };
         self.loop_frames = self.loop_region.and_then(|region| {
             let start = self.frames_at(region.start.max(Ticks::ZERO));
             let end = self.frames_at(region.end);
@@ -1063,6 +1103,17 @@ impl Processor {
         if let Some(region) = self.loop_frames {
             song(region.end);
         }
+        // Spec: recording R6. A part of a block lies wholly inside the punch
+        // points or wholly outside them, so the take starts and ends on the
+        // frame.
+        if self.recording {
+            for frame in [self.punch_frames.start, self.punch_frames.end]
+                .into_iter()
+                .flatten()
+            {
+                song(frame);
+            }
+        }
         next
     }
 
@@ -1123,6 +1174,11 @@ impl Processor {
                 Some(p) => (&p.get().tempo, &p.get().time_signatures),
                 None => (&self.fallback_tempo, &self.fallback_time_signatures),
             };
+            // Spec: metronome R7. With Punch-In on, "only while recording"
+            // clicks start at the punch-in point, not at play start.
+            self.metronome.set_recording(
+                self.recording && self.punch_frames.start.is_none_or(|at| self.position >= at),
+            );
             self.metronome.render_active(
                 Block {
                     output: &mut self.output,
@@ -1166,30 +1222,57 @@ impl Processor {
         if self.plan.is_none() || self.program.is_none() {
             return;
         }
-        let expected = self.take.map_or(self.position, |take| {
-            take.start + Frames(take.written as i64)
-        });
+        // Spec: recording R6. Nothing is written before the punch-in point,
+        // and the take ends at the punch-out point; the transport carries on.
+        if self.punch_frames.start.is_some_and(|at| self.position < at) {
+            return;
+        }
+        if self.punch_frames.end.is_some_and(|at| self.position >= at) {
+            self.end_take();
+            return;
+        }
+        let expected = self
+            .take
+            .map_or(self.position, |take| take.from + Frames(take.seen as i64));
         if self.take.is_some() && expected != self.position {
             self.end_recording();
             return;
         }
-        if self.take.is_none() {
+        // Spec: recording R7. The recording is moved `delay` frames earlier:
+        // the input that arrived in the take's first `delay` frames sounds
+        // before it started, so it isn't written. A negative delay moves the
+        // clip later instead.
+        // shortcut: the take ends when playback does, so its last `delay`
+        // frames of sound are never heard back and the clip is that much
+        // shorter; upgrade by recording on past the end for `delay` frames.
+        let delay = self.plan.as_mut().map_or(0, |plan| plan.get_mut().delay);
+        let take = *self.take.get_or_insert(Take {
+            from: self.position,
+            start: self.position + Frames((-delay).max(0)),
+            seen: 0,
+            written: 0,
+        });
+        if take.seen == 0 {
             self.last_take = None;
-            self.take = Some(Take {
-                start: self.position,
-                written: 0,
-            });
         }
-        let captured = match (self.program.as_ref(), self.plan.as_mut()) {
-            (Some(program), Some(plan)) => plan.get_mut().capture(program.get(), offset, frames),
-            _ => false,
-        };
+        let skip = (delay.max(0) as u64)
+            .saturating_sub(take.seen)
+            .min(frames as u64) as usize;
+        let captured = skip == frames
+            || match (self.program.as_ref(), self.plan.as_mut()) {
+                (Some(program), Some(plan)) => {
+                    plan.get_mut()
+                        .capture(program.get(), offset + skip, frames - skip)
+                }
+                _ => false,
+            };
         if !captured {
             self.end_recording();
             return;
         }
         if let Some(take) = &mut self.take {
-            take.written += frames as u64;
+            take.seen += frames as u64;
+            take.written += (frames - skip) as u64;
         }
     }
 

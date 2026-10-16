@@ -52,9 +52,9 @@ use bl_engine::{
 use bl_media::{MediaStore, StreamerStats};
 use bl_model::{Channel, Document, LaunchSettings};
 pub use bl_shell_spec::audio::{
-    AudioDevices, AudioSettings, AudioStatus, ConfigureAudio, DeviceListing, DeviceRef, DriverInfo,
-    TONE_DEFAULT_DBFS, TONE_DEFAULT_HZ, TONE_MAX_DBFS, TONE_MAX_HZ, TONE_MIN_DBFS, TONE_MIN_HZ,
-    ToneSettings,
+    AudioDevices, AudioSettings, AudioStatus, COMPENSATION_LIMIT_MS, ConfigureAudio, DeviceListing,
+    DeviceRef, DriverInfo, TONE_DEFAULT_DBFS, TONE_DEFAULT_HZ, TONE_MAX_DBFS, TONE_MAX_HZ,
+    TONE_MIN_DBFS, TONE_MIN_HZ, ToneSettings, clamped_compensation_ms,
 };
 use rtrb::{Consumer, Producer, RingBuffer};
 
@@ -861,7 +861,15 @@ impl AudioHost {
     /// on as before.
     pub fn configure(&mut self, change: &ConfigureAudio) -> Result<(), String> {
         let next = self.merged(change)?;
-        if !self.engine_on {
+        // Driver Error Compensation changes where new recordings fall, not
+        // the stream, which keeps running.
+        let compensation_only = change.driver_error_compensation_ms.is_some()
+            && *change
+                == ConfigureAudio {
+                    driver_error_compensation_ms: change.driver_error_compensation_ms,
+                    ..ConfigureAudio::default()
+                };
+        if !self.engine_on || compensation_only {
             self.settings = next;
             return Ok(());
         }
@@ -923,6 +931,14 @@ impl AudioHost {
         }
         if let Some(channels) = change.output_channels {
             next.output_channels = (channels != 0).then_some(channels);
+        }
+        if let Some(ms) = change.driver_error_compensation_ms {
+            if !ms.is_finite() {
+                return Err(format!(
+                    "{ms} isn't a Driver Error Compensation in milliseconds"
+                ));
+            }
+            next.driver_error_compensation_ms = clamped_compensation_ms(ms);
         }
         Ok(next)
     }
@@ -1132,6 +1148,23 @@ impl AudioHost {
         bl_engine::preview::status(&self.preview_shared)
     }
 
+    /// How many frames a recording is moved earlier: the open device's
+    /// reported input and output latency plus the Driver Error Compensation
+    /// setting, which moves it further when positive and back when negative
+    /// (WP-2.13). `None` while no stream is open.
+    #[must_use]
+    pub fn recording_delay(&self) -> Option<i64> {
+        let info = self.stream.as_ref()?.info();
+        let compensation = clamped_compensation_ms(self.settings.driver_error_compensation_ms)
+            * f64::from(info.sample_rate)
+            / 1000.0;
+        Some(
+            i64::from(info.input_latency)
+                + i64::from(info.output_latency)
+                + compensation.round() as i64,
+        )
+    }
+
     /// What the device runs at now.
     #[must_use]
     pub fn status(&self) -> AudioStatus {
@@ -1144,6 +1177,11 @@ impl AudioHost {
         let device = |device: &bl_audio_io::OpenDevice| DeviceRef {
             id: device.id.to_string(),
             name: device.name.clone(),
+        };
+        let ms = |frames: u32| {
+            sample_rate.map_or(0.0, |rate| {
+                f64::from(frames) * 1000.0 / f64::from(rate.max(1))
+            })
         };
         AudioStatus {
             engine_on: self.engine_on,
@@ -1160,6 +1198,12 @@ impl AudioHost {
             buffer_ms: buffer_size
                 .zip(sample_rate)
                 .map(|(frames, rate)| f64::from(frames) * 1000.0 / f64::from(rate.max(1))),
+            input_latency_ms: info.map(|info| ms(info.input_latency)),
+            output_latency_ms: info.map(|info| ms(info.output_latency)),
+            overall_latency_ms: self
+                .recording_delay()
+                .zip(sample_rate)
+                .map(|(frames, rate)| frames as f64 * 1000.0 / f64::from(rate.max(1))),
             cpu_load: self.cpu_load,
             dropouts: stats.map_or(0, |stats| stats.dropouts),
             test_tone: self.test_tone(),

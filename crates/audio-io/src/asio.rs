@@ -404,6 +404,11 @@ impl Backend for AsioBackend {
             requested_buffer_size: request.buffer_size,
             buffer_size: Some(frames),
             max_block_frames: frames,
+            // shortcut: the driver's latency isn't read yet, so the Driver
+            // Error Compensation setting carries all of it; upgrade by
+            // reading ASIOGetLatencies.
+            input_latency: 0,
+            output_latency: 0,
             workgroup: None,
         };
         // From here, dropping `stream` releases the slot and the buffers.

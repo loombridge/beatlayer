@@ -2700,7 +2700,11 @@ impl Shell {
                 ),
             });
         }
-        let (plan, recording) = crate::recording::start(&folder, rate, &tracks)?;
+        let (mut plan, recording) = crate::recording::start(&folder, rate, &tracks)?;
+        plan.delay = self
+            .audio
+            .recording_delay()
+            .ok_or("no audio device is open")?;
         self.audio.record(plan)?;
         self.recording = Some(recording);
         Ok(())

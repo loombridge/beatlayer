@@ -207,6 +207,15 @@ impl World {
 pub struct NullBackend {
     options: NullOptions,
     world: Arc<World>,
+    /// The input and output latency, in frames, that a stream reports in its
+    /// [`StreamInfo`] (WP-2.13).
+    latency: (u32, u32),
+    /// If set, each input channel carries the output channel of the same
+    /// index this many frames late instead of its test tone, as a cable from
+    /// the interface's output to its input does (WP-2.13). It can't be less
+    /// than a block, because a block's input is read before its output is
+    /// made; a stream with a bigger buffer is refused.
+    loopback_delay: Option<u32>,
 }
 
 impl Default for NullBackend {
@@ -219,6 +228,22 @@ impl NullBackend {
     /// A null backend paced in real time.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// This backend with streams that report `input` and `output` frames of
+    /// latency (WP-2.13).
+    #[must_use]
+    pub fn with_latency(mut self, input: u32, output: u32) -> Self {
+        self.latency = (input, output);
+        self
+    }
+
+    /// This backend with each input channel carrying the output channel of
+    /// the same index `delay` frames late (WP-2.13).
+    #[must_use]
+    pub fn with_loopback(mut self, delay: u32) -> Self {
+        self.loopback_delay = Some(delay);
+        self
     }
 
     /// A null backend with these settings.
@@ -238,7 +263,15 @@ impl NullBackend {
         let control = NullControl {
             world: Arc::clone(&world),
         };
-        (Self { options, world }, control)
+        (
+            Self {
+                options,
+                world,
+                latency: (0, 0),
+                loopback_delay: None,
+            },
+            control,
+        )
     }
 
     /// The ID of the device a plain null backend has.
@@ -358,6 +391,14 @@ impl Backend for NullBackend {
             ));
         }
         let frames = request.buffer_size.unwrap_or(DEFAULT_BUFFER);
+        if let Some(delay) = self.loopback_delay
+            && delay < frames
+        {
+            return Err(Error::new(
+                ErrorKind::UnsupportedConfig,
+                format!("a loopback of {delay} frames is shorter than the {frames}-frame buffer"),
+            ));
+        }
         if !(MIN_BUFFER..=MAX_BUFFER).contains(&frames) {
             return Err(Error::new(
                 ErrorKind::UnsupportedConfig,
@@ -403,6 +444,11 @@ impl Backend for NullBackend {
             input: PlanarScratch::new(input_channels.into(), frames as usize),
             output: PlanarScratch::new(output_channels.into(), frames as usize),
             input_phases: vec![0.0; input_channels.into()],
+            loopback: self.loopback_delay.map(|delay| {
+                (0..input_channels.min(output_channels))
+                    .map(|_| VecDeque::from(vec![0.0; delay as usize]))
+                    .collect()
+            }),
             frames: frames as usize,
             sample_rate,
             options: self.options,
@@ -431,6 +477,8 @@ impl Backend for NullBackend {
             requested_buffer_size: request.buffer_size,
             buffer_size: Some(frames),
             max_block_frames: frames,
+            input_latency: self.latency.0,
+            output_latency: self.latency.1,
             workgroup: workgroup.as_ref().map(WorkgroupInfo::of),
         };
         Ok(Box::new(NullStream {
@@ -605,6 +653,9 @@ struct NullEngine {
     output: PlanarScratch,
     /// Each input channel's test tone phase, carried across blocks.
     input_phases: Vec<f64>,
+    /// With a loopback, the last `delay` frames each output channel played,
+    /// oldest first, which the same input channel reads.
+    loopback: Option<Vec<VecDeque<f32>>>,
     frames: usize,
     sample_rate: u32,
     options: NullOptions,
@@ -679,6 +730,11 @@ impl NullEngine {
             let input = self.input.view(self.frames);
             let mut output = self.output.view_mut(self.frames);
             self.runner.run(Some(timestamp), &input, &mut output);
+            if let Some(lines) = &mut self.loopback {
+                for (line, played) in lines.iter_mut().zip(output.as_buffer().iter()) {
+                    line.extend(played);
+                }
+            }
             if let Some(interval) = &self.interval {
                 let _ = interval.finish();
             }
@@ -697,6 +753,17 @@ impl NullEngine {
         let rate = f64::from(self.sample_rate.max(1));
         let frames = self.frames;
         let mut view = self.input.view_mut(frames);
+        if let Some(lines) = &mut self.loopback {
+            for (index, channel) in view.iter_mut().enumerate() {
+                match lines.get_mut(index) {
+                    Some(line) => channel
+                        .iter_mut()
+                        .for_each(|s| *s = line.pop_front().unwrap_or(0.0)),
+                    None => channel.fill(0.0),
+                }
+            }
+            return;
+        }
         for (index, channel) in view.iter_mut().enumerate() {
             let tone = &self.world.input[index];
             let hz = f64::from(f32::from_bits(tone.hz.load(Ordering::Relaxed)));

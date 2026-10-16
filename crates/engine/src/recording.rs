@@ -37,6 +37,10 @@ pub struct RecordTrack {
 pub struct RecordingPlan {
     /// The tracks, in the order the shell listed them.
     pub tracks: Vec<RecordTrack>,
+    /// Frames the recording is moved earlier: the device's input and output
+    /// latency plus the Driver Error Compensation setting. Negative moves
+    /// it later (WP-2.13).
+    pub delay: i64,
 }
 
 /// The song frames a finished take covers: `start` to `end`, playback that
@@ -127,6 +131,7 @@ impl std::fmt::Debug for RecordingPlan {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RecordingPlan")
             .field("tracks", &self.tracks.len())
+            .field("delay", &self.delay)
             .finish_non_exhaustive()
     }
 }

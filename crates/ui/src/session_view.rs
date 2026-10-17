@@ -515,7 +515,9 @@ impl GridUi {
         }
 
         let main = MainStatusCells::compute(layout.main.rect, session.status_row);
-        stop_square(main.stop_all, colours.separator.0);
+        // Main lies right of the tracks, outside the painter above.
+        let painter = ui.painter_at(main.stop_all.union(main.back));
+        painter.rect_filled(main.stop_all.shrink(5.0), 0.0, colours.separator.0);
         let press = ui.interact(main.stop_all, stop_all_id(), Sense::click());
         self.button(
             &press,

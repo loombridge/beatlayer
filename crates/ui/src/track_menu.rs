@@ -181,6 +181,9 @@ struct Renaming {
     /// The text, once it has been taken from the track's name.
     text: Option<String>,
     focused: bool,
+    /// The pass that last drew it, so a title bar that isn't drawn doesn't
+    /// keep the keys.
+    drawn: Option<u64>,
 }
 
 fn renaming_id() -> Id {
@@ -202,15 +205,24 @@ pub fn start_rename(ctx: &Context, track: TrackId) {
                 track,
                 text: None,
                 focused: false,
+                drawn: None,
             }),
         );
     });
 }
 
-/// Whether a track's name is being typed, so keys go to it.
-#[must_use]
+/// Whether a track's name is being typed, so keys go to it. Called after
+/// the pass has drawn: a name whose title bar wasn't drawn (scrolled out of
+/// view, or in a folded group) is dropped, as Esc would.
 pub fn is_renaming(ctx: &Context) -> bool {
-    renaming(ctx).is_some()
+    let Some(renaming) = renaming(ctx) else {
+        return false;
+    };
+    if renaming.drawn == Some(ctx.cumulative_pass_nr()) {
+        return true;
+    }
+    ctx.data_mut(|d| d.insert_temp(renaming_id(), None::<Renaming>));
+    false
 }
 
 /// Draws the name being typed over `rect` if it's `track`'s, and says so;
@@ -226,6 +238,7 @@ pub fn rename_edit(
     let Some(mut renaming) = renaming(ui.ctx()).filter(|r| r.track == track) else {
         return false;
     };
+    renaming.drawn = Some(ui.ctx().cumulative_pass_nr());
     let text = renaming.text.get_or_insert_with(|| name.to_owned());
     let edit = ui.put(
         rect,

@@ -271,6 +271,35 @@ fn delete_and_rename_act_on_the_selected_track() {
     assert_eq!(last_step(&h), "Delete Track(s)");
 }
 
+// Spec: track-context-menu R5 (a title bar that isn't drawn)
+#[test]
+fn renaming_a_track_out_of_view_leaves_the_keys_to_shortcuts() {
+    let mut h = arrangement();
+    let all = tracks(&h);
+    h.shell
+        .run(
+            "arrangement.select_tracks",
+            json!({ "tracks": [all[2], all[3]], "title_bars": true }),
+        )
+        .unwrap();
+    h.shell.run("track.group", json!({})).unwrap();
+    h.shell
+        .run("arrangement.fold_groups", json!({ "fold": true }))
+        .unwrap();
+    h.shell
+        .run(
+            "arrangement.select_tracks",
+            json!({ "tracks": [all[2]], "title_bars": true }),
+        )
+        .unwrap();
+    h.settle();
+    // Cmd-R on a track hidden in its folded group: there's no title bar to
+    // type in, so the keys stay with the shortcuts.
+    h.shell.invoke("track.rename", json!({})).unwrap();
+    h.settle();
+    assert!(!h.main.is_typing());
+}
+
 // Spec: track-context-menu R2 (several tracks)
 #[test]
 fn with_several_tracks_selected_each_item_acts_on_all_of_them() {

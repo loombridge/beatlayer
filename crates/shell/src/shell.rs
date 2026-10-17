@@ -2129,6 +2129,26 @@ impl Shell {
             .state(doc, devices::shown_track(&self.arrangement, doc))
     }
 
+    /// Sets the display data a device's display draws, as
+    /// [`Shell::poll_engine`] does with the engine's (for a shell without an
+    /// engine, as in tests; while one runs, the next poll takes its data
+    /// instead).
+    pub fn set_device_display_data(&mut self, device: bl_model::DeviceId, values: &[f32]) {
+        let data = self.devices.displays_mut().entry(device).or_default();
+        data.published += 1;
+        data.values.clear();
+        data.values.extend_from_slice(values);
+    }
+
+    /// What `device`'s display shows, as the engine last published it
+    /// (the device framework spec, R36): the cell draws it, a screen reader
+    /// says it. `None` if the set has no such device.
+    #[must_use]
+    pub fn device_display(&self, device: bl_model::DeviceId) -> Option<bl_model::DeviceDisplay> {
+        let device = self.editor.document().device(device)?;
+        Some(self.devices.display(device))
+    }
+
     /// Every floating device's window, on any track (WP-2.5b), for the
     /// app to open, close, and place.
     #[must_use]
@@ -2204,6 +2224,11 @@ impl Shell {
                 &self.kit,
                 &mut self.editor,
             );
+        }
+        if id == device_ids::DISPLAY && self.audio.engine_running() {
+            // Spec: device-framework R37. The newest the nodes published,
+            // for an agent that never polls the engine.
+            self.audio.displays_into(self.devices.displays_mut());
         }
         let user_library = self.browser_view.user_library().map(Path::to_path_buf);
         let zoom = self.zoom();
@@ -3003,6 +3028,10 @@ impl Shell {
             // Not a revision: the window redraws while a meter shows a
             // level, and nothing else depends on them.
             self.audio.meters_into(&mut self.meters);
+            // Spec: device-framework R35. The display data the devices'
+            // nodes published, which the device displays draw. Not a
+            // revision either.
+            self.audio.displays_into(self.devices.displays_mut());
         }
         // Spec: launch-quantisation R10. The slots the engine is launching
         // or stopping, which the grid's launch buttons draw.

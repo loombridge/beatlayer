@@ -21,7 +21,7 @@
 use std::f32::consts::PI;
 
 use bl_model::device_layout::{Size, Widget};
-use bl_model::{DeviceId, ParamDescriptor, ParamId, ParamKind};
+use bl_model::{DeviceDisplay, DeviceId, ParamDescriptor, ParamId, ParamKind};
 use bl_shell::Invocation;
 use bl_shell::device_commands::{DeviceFrame, DevicePanel};
 use egui::accesskit::{Action, Role};
@@ -137,17 +137,21 @@ struct Drag {
 }
 
 /// Draws a device's panel in `body`, and turns what the person does into
-/// `device.set_param` invocations. `played` gives the base and the played
+/// `device.set_param` invocations. `display` is what the device's display
+/// shows now, if its type draws one. `played` gives the base and the played
 /// value of a parameter while a clip modulates it.
 pub fn show(
     ui: &mut Ui,
     theme: &Theme,
     frame: &DeviceFrame,
-    panel: &DevicePanel,
+    display: Option<&DeviceDisplay>,
     body: Rect,
     played: &dyn Fn(ParamId) -> Option<(f64, f64)>,
     events: &mut Vec<UiEvent>,
 ) {
+    let Some(panel) = frame.panel.as_ref() else {
+        return;
+    };
     let c = &theme.colors;
     let (controls, cells) = place_shown(panel, frame.expanded, body);
     for (index, (name, rect)) in cells.into_iter().enumerate() {
@@ -163,9 +167,27 @@ pub fn show(
         );
         let id = cell_id(frame.id, index);
         let _ = ui.interact(rect, id, Sense::hover());
+        // Spec: device-framework R36. The device's own drawing fills its
+        // first cell, and a screen reader hears its readings.
+        let shown = display.filter(|d| index == 0 && has_drawing(d));
+        if let Some(display) = shown {
+            crate::device_display::draw(
+                ui,
+                theme,
+                rect,
+                id,
+                frame.enabled,
+                display,
+                &panel.description.views,
+                events,
+            );
+        }
         ui.ctx().accesskit_node_builder(id, |node| {
             node.set_role(Role::Image);
             node.set_label(name);
+            if let Some(display) = shown {
+                node.set_value(display.text());
+            }
         });
     }
     for (param, widget, rect) in controls {
@@ -189,6 +211,11 @@ pub fn show(
             Widget::Chooser => control.chooser(ui, theme, events),
         }
     }
+}
+
+/// Whether a display has anything to draw.
+fn has_drawing(display: &DeviceDisplay) -> bool {
+    !(display.series.is_empty() && display.readings.is_empty())
 }
 
 /// One control being drawn.

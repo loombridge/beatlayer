@@ -167,6 +167,13 @@ impl Offline {
         self.monitor.state()
     }
 
+    /// The display data the devices' nodes publish after each block, as the
+    /// engine on a device offers it.
+    #[must_use]
+    pub fn displays(&self) -> crate::Displays {
+        self.compiler.displays()
+    }
+
     /// Reports since the last call, oldest first: scheduled commands that
     /// fired or were rejected.
     pub fn reports(&mut self) -> Vec<Report> {

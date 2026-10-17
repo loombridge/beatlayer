@@ -94,3 +94,42 @@ fn the_record_warp_and_launch_page_switches_create_fades_on_clip_edges() {
     h.settle();
     assert!(h.shell.create_fades_on_clip_edges());
 }
+
+// Spec: recording R13. Warp recorded audio is a switch after Create Fades on
+// Clip Edges, on the Record, Warp & Launch page, and runs its command.
+#[test]
+fn the_record_warp_and_launch_page_switches_warp_recorded_audio() {
+    let mut h = Harness::new(Window::Settings);
+    h.shell
+        .invoke("app.settings", json!({ "page": "record-warp-launch" }))
+        .unwrap();
+    h.shell.take_effects();
+    h.settle();
+
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    let switch = Harness::node(&nodes, "Warp recorded audio");
+    assert_eq!(switch.role, Role::Button);
+    assert!(!switch.disabled);
+    let fades = Harness::node(&nodes, "Create Fades on Clip Edges");
+    let launch = Harness::node(&nodes, "Default Launch Mode");
+    assert!(
+        fades.bounds.unwrap().y0 < switch.bounds.unwrap().y0
+            && switch.bounds.unwrap().y0 < launch.bounds.unwrap().y0,
+        "after the Warp/Fades rows, before Launch"
+    );
+    // On, as Live warps its recordings.
+    assert!(h.shell.warp_recorded_audio());
+
+    h.accesskit(Id::new(("switch", "warp-recorded-audio")), Action::Click);
+    h.settle();
+    assert!(!h.shell.warp_recorded_audio());
+    assert!(h.events.iter().any(|e| matches!(
+        e,
+        bl_ui::main_window::UiEvent::Invoke(i)
+            if i.id == "settings.set_warp_recorded_audio" && i.args == json!({ "on": false })
+    )));
+
+    h.accesskit(Id::new(("switch", "warp-recorded-audio")), Action::Click);
+    h.settle();
+    assert!(h.shell.warp_recorded_audio());
+}

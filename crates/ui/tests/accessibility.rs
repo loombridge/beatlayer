@@ -1107,6 +1107,7 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("transport.set_metronome_sound", Exception(metronome_menu)),
         ("transport.set_metronome_rhythm", Exception(metronome_menu)),
         ("transport.set_recording", Exception(recording)),
+        ("transport.stop_recording", Exception(recording)),
         // Tempo breakpoints and time-signature markers (WP-2.20): the
         // arrangement's tempo envelope and marker lane aren't drawn yet, so
         // agents reach these through the agent API until they are.
@@ -1282,6 +1283,15 @@ fn paths() -> BTreeMap<&'static str, Path> {
                 "record-warp-launch",
                 nothing,
                 "Create Fades on Clip Edges",
+                Key::Enter,
+            ),
+        ),
+        (
+            "settings.set_warp_recorded_audio",
+            settings(
+                "record-warp-launch",
+                nothing,
+                "Warp recorded audio",
                 Key::Enter,
             ),
         ),
@@ -1477,6 +1487,12 @@ fn paths() -> BTreeMap<&'static str, Path> {
             )),
         ),
         ("clip.create", Exception(editing)),
+        (
+            "track.add_take_lane",
+            Exception(LaterView(
+                "the take lanes' view and comping (milestone M6); loop recording makes the lanes",
+            )),
+        ),
         ("clip.delete", Exception(editing)),
         ("clip.move", Exception(editing)),
         ("clip.move_by", Exception(editing)),

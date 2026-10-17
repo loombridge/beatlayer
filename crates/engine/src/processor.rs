@@ -63,12 +63,15 @@ struct PunchFrames {
     end: Option<Frames>,
 }
 
-/// The take being recorded (WP-2.13): the song frame it started at and how
-/// many frames of playback it has covered.
+/// The take being recorded (WP-2.13): the song frame it started at, how
+/// many frames its rings hold, the song frame its next sample has, and the
+/// loop it went round, if it has.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Take {
     start: Frames,
     written: u64,
+    next: Frames,
+    wrap: Option<LoopFrames>,
 }
 
 /// What one processor hands the next when the engine restarts on a device
@@ -213,6 +216,11 @@ pub struct Processor {
     metronome: MetronomeEngine,
     /// `channels` channels of `max_frames` frames.
     output: Vec<f32>,
+    /// The device's output channels of `max_frames` frames each, holding
+    /// what the tracks on Ext. Out play (WP-2.13): `ext_width` of them are
+    /// in use.
+    ext_output: Vec<f32>,
+    ext_width: usize,
     /// Frames in the last block.
     last: usize,
     clock: u64,
@@ -277,6 +285,8 @@ impl Processor {
             fallback_time_signatures: TimeSignatureMap::default(),
             metronome: MetronomeEngine::new(),
             output: vec![0.0; config.channels * config.max_frames],
+            ext_output: vec![0.0; config.output_channels * config.max_frames],
+            ext_width: 0,
             last: 0,
             clock: 0,
             playing: false,
@@ -550,6 +560,8 @@ impl Processor {
             channels: self.config.channels,
             frames: self.last,
             stride: self.config.max_frames,
+            ext: &self.ext_output,
+            ext_channels: self.ext_width,
         }
     }
 
@@ -792,7 +804,8 @@ impl Processor {
         if let Some(take) = self.take.take() {
             self.last_take = Some(TakeBounds {
                 start: take.start,
-                end: take.start + Frames(take.written as i64),
+                end: take.next,
+                wrap: take.wrap.map(|region| (region.start, region.end)),
             });
         }
         self.plan = None;
@@ -1119,6 +1132,12 @@ impl Processor {
     /// there, so the next part starts at the loop's start.
     fn render(&mut self, offset: usize, length: usize) {
         let stride = self.config.max_frames;
+        // Every device channel, so a count-in or a part that plays fewer
+        // of them leaves no earlier block's Ext. Out behind.
+        for c in 0..self.config.output_channels {
+            let to = c * stride + offset;
+            self.ext_output[to..to + length].fill(0.0);
+        }
         if self.metronome.is_counting_in() {
             for c in 0..self.config.channels {
                 let to = c * stride + offset;
@@ -1157,8 +1176,12 @@ impl Processor {
                     let from = c.min(program.channels - 1);
                     self.output[to..to + length].copy_from_slice(program.output(from, length));
                 }
+                // Spec: routing R3. A channel the device lacks plays nothing.
+                self.ext_width = program.ext_width().min(self.config.output_channels);
+                program.mix_external(&mut self.ext_output, self.ext_width, stride, offset, length);
             }
             None => {
+                self.ext_width = 0;
                 for c in 0..self.config.channels {
                     let to = c * stride + offset;
                     self.output[to..to + length].fill(0.0);
@@ -1218,7 +1241,7 @@ impl Processor {
         if self.plan.is_none() || self.program.is_none() {
             return;
         }
-        // Spec: recording R6. Nothing is written before the punch-in point,
+        // Spec: recording R9. Nothing is written before the punch-in point,
         // and the take ends at the punch-out point; the transport carries on.
         if self.punch_frames.start.is_some_and(|at| self.position < at) {
             return;
@@ -1227,12 +1250,25 @@ impl Processor {
             self.end_take();
             return;
         }
-        let expected = self.take.map_or(self.position, |take| {
-            take.start + Frames(take.written as i64)
-        });
-        if self.take.is_some() && expected != self.position {
-            self.end_recording();
-            return;
+        if let Some(take) = &mut self.take
+            && take.next != self.position
+        {
+            // Spec: recording R11. The loop's wrap is no jump away: the take
+            // goes on into the next pass, unless Punch-Out is on, when the
+            // wrap ends it (R9). Any other jump ends it.
+            let wrapped = self.loop_frames.filter(|region| {
+                self.punch_frames.end.is_none()
+                    && take.wrap.is_none_or(|seen| seen == *region)
+                    && take.next == region.end
+                    && self.position == region.start
+            });
+            match wrapped {
+                Some(region) => take.wrap = Some(region),
+                None => {
+                    self.end_recording();
+                    return;
+                }
+            }
         }
         // Spec: recording R7. The recording is moved `delay` frames earlier:
         // the audio that arrived in the take's first `delay` frames sounds
@@ -1247,6 +1283,8 @@ impl Processor {
             self.take = Some(Take {
                 start: self.position,
                 written: 0,
+                next: self.position,
+                wrap: None,
             });
         }
         let written = self.take.map_or(0, |take| take.written);
@@ -1266,6 +1304,7 @@ impl Processor {
         }
         if let Some(take) = &mut self.take {
             take.written += frames as u64;
+            take.next = self.position + Frames(frames as i64);
         }
     }
 
@@ -1347,6 +1386,8 @@ pub struct Output<'a> {
     channels: usize,
     frames: usize,
     stride: usize,
+    ext: &'a [f32],
+    ext_channels: usize,
 }
 
 impl Output<'_> {
@@ -1372,5 +1413,25 @@ impl Output<'_> {
         assert!(index < self.channels, "channel {index} out of range");
         let start = index * self.stride;
         &self.data[start..start + self.frames]
+    }
+
+    /// Device channels the tracks on Ext. Out play on: channel 0 up to
+    /// this many, counted from the device's first.
+    #[must_use]
+    pub fn ext_channels(&self) -> usize {
+        self.ext_channels
+    }
+
+    /// Device channel `index` of what the Ext. Out tracks play. It is added
+    /// to the device's channel, which Main Out may share.
+    ///
+    /// # Panics
+    ///
+    /// If `index` isn't less than [`ext_channels`](Self::ext_channels).
+    #[must_use]
+    pub fn ext_channel(&self, index: usize) -> &[f32] {
+        assert!(index < self.ext_channels, "channel {index} out of range");
+        let start = index * self.stride;
+        &self.ext[start..start + self.frames]
     }
 }

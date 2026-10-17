@@ -85,6 +85,7 @@ pub use automation::{
 pub use changes::{Change, ChangeSet};
 pub use clip::{
     AudioData, Clip, ClipData, ClipEnvelope, ClipFolds, EDGE_FADE_SECONDS, MidiData, Note,
+    TakeClip, TakeLane,
 };
 pub use command::Command;
 pub use device::{

@@ -20,6 +20,7 @@
 
 pub use bl_shell_spec::assistant::*;
 
+use std::collections::BTreeMap;
 use std::ops::RangeInclusive;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
@@ -30,9 +31,11 @@ use bl_assistant::message::{Event, Message, Request};
 use bl_assistant::provider::{Error, Provider};
 use bl_assistant::tools::ToolSet;
 use bl_commands::Permission;
+use bl_core::id::Id;
 use serde_json::Value;
 
 use crate::Shell;
+use crate::placeholders::resolve_placeholders;
 
 /// The widths the docked panel may take, in points.
 pub const WIDTH_RANGE: RangeInclusive<f32> = PANEL_MIN_WIDTH..=PANEL_MAX_WIDTH;
@@ -40,7 +43,10 @@ pub const WIDTH_RANGE: RangeInclusive<f32> = PANEL_MIN_WIDTH..=PANEL_MAX_WIDTH;
 /// What the model is told about the app it is in.
 const SYSTEM_PROMPT: &str = "You are the assistant built into Beatlayer, a digital audio \
     workstation. Use the tools to look at and change the person's set, and say briefly what you \
-    did. Everything you change in one turn is one undo step.";
+    did. Everything you change in one turn is one undo step. A command that creates something \
+    needs a new ID: write {\"$new\": \"name\"} where the ID goes, and {\"$ref\": \"name\"} wherever a \
+    later call in the turn refers to it. Positions and lengths are in ticks, 705600 to the \
+    quarter note.";
 
 /// One line of the panel's conversation.
 #[derive(Clone, Debug, PartialEq)]
@@ -300,13 +306,22 @@ pub trait Prompter {
 pub struct AssistantCommands<'a> {
     shell: &'a mut Shell,
     prompter: &'a mut dyn Prompter,
+    /// The IDs the turn's `$new` placeholders have been given.
+    names: BTreeMap<String, u64>,
+    /// The call about to run, with its placeholders resolved by `permit`.
+    resolved: Option<Value>,
 }
 
 impl<'a> AssistantCommands<'a> {
     /// A host running the assistant's calls on `shell`, asking `prompter`
     /// before a destructive or external call the person hasn't allowed.
     pub fn new(shell: &'a mut Shell, prompter: &'a mut dyn Prompter) -> Self {
-        Self { shell, prompter }
+        Self {
+            shell,
+            prompter,
+            names: BTreeMap::new(),
+            resolved: None,
+        }
     }
 }
 
@@ -320,6 +335,7 @@ impl Commands for AssistantCommands<'_> {
     }
 
     fn permit(&mut self, command: &str, args: &Value, _class: Permission) -> Result<(), String> {
+        self.resolved = None;
         // The assistant is the person's own, but it never changes what the
         // person allows, any more than an agent may (agent-permissions R9).
         if bl_shell_spec::agent::handles(command) || handles(command) {
@@ -330,9 +346,17 @@ impl Commands for AssistantCommands<'_> {
                 .assistant_finish_call(command, Err(message.clone()));
             return Err(message);
         }
+        // New IDs are issued here, once, so the class is decided from the
+        // arguments that will run.
+        let mut args = args.clone();
+        let shell = &mut *self.shell;
+        resolve_placeholders(&mut args, &mut self.names, &mut || {
+            shell.new_id::<Id>().get()
+        })?;
         // The class is decided from the arguments against the set as it is,
         // as the agent API decides it (agent-permissions R1).
-        let class = self.shell.call_permission(command, args).class();
+        let class = self.shell.call_permission(command, &args).class();
+        self.resolved = Some(args);
         if !class.asks_first() || self.shell.assistant_always_allows(command) {
             return Ok(());
         }
@@ -357,6 +381,7 @@ impl Commands for AssistantCommands<'_> {
     }
 
     fn run(&mut self, command: &str, args: Value) -> Result<Value, String> {
+        let args = self.resolved.take().unwrap_or(args);
         let at = SystemTime::now();
         let result = self
             .shell

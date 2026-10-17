@@ -15,6 +15,9 @@ asio = ["bl-audio-io/asio"]
 # `bl-cli mcp`: the agent API over stdio, on a headless shell (WP-1.15).
 bl-agent.workspace = true
 bl-shell.workspace = true
+# `bl-cli assistant`: one assistant turn, headless, with its key from the
+# OS keychain (WP-2.23, T107).
+bl-assistant.workspace = true
 bl-project.workspace = true
 bl-engine.workspace = true
 # `bl-cli device-changes`: the engine on a device through device changes.

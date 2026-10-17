@@ -63,6 +63,7 @@ const TRANSPORT: &[(&str, &str)] = &[
     ("transport.locate", "{\"position\": 2822400}"),
     ("transport.return_to_start", "{}"),
     ("transport.insert_marker_to_playhead", "{}"),
+    ("transport.stop_recording", "{}"),
     ("transport.set_recording", "{\"recording\": true}"),
 ];
 
@@ -96,7 +97,13 @@ fn the_shell_registers_the_transport_and_runs_it_on_the_engine() {
     assert_eq!(registered, expected);
     for (id, args) in TRANSPORT {
         let spec = shell.registry().get(id).unwrap();
-        assert_eq!(spec.permission, Some(Permission::Read), "{id}");
+        // Recording captures input devices, so it asks first.
+        let class = if *id == "transport.set_recording" {
+            Permission::External
+        } else {
+            Permission::Read
+        };
+        assert_eq!(spec.permission, Some(class), "{id}");
         let args: Value = serde_json::from_str(args).unwrap();
         assert!(shell.can_invoke(id, &args), "{id}");
         shell.run(id, args).unwrap_or_else(|e| panic!("{id}: {e}"));

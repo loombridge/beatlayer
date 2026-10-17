@@ -9,8 +9,9 @@
 //! spec.
 
 use bl_agent::client::{Client, InProcess};
-use bl_agent::{Agent, Credential, Outcome, QuestionKind};
+use bl_agent::{Agent, Credential, EngineMessage, Outcome, QuestionKind};
 use bl_commands::Permission;
+use bl_engine::TransportCommand;
 use bl_shell::{GesturePhase, Invocation, Shell};
 use serde_json::{Value, json};
 
@@ -428,6 +429,71 @@ fn a_scheduled_move_over_clips_asks_when_it_s_scheduled() {
         asked.contains("At 2.1.1: Move Clips (destructive)"),
         "{asked}"
     );
+}
+
+#[test]
+fn starting_a_recording_asks_first_and_stopping_never_does() {
+    // Recording captures an input device, so it is `external`.
+    let start = json!({ "commands": [{ "command": "transport.set_recording",
+                                       "args": { "recording": true } }] });
+    let stop = json!({ "commands": [{ "command": "transport.stop_recording" }] });
+
+    // The person declines: nothing reaches the engine.
+    let mut client = app();
+    client.transport().agent.set_engine_attached(true);
+    let connected = client.transport().asked.len();
+    let result = client.call("run", start.clone()).unwrap();
+    assert!(
+        result.is_error && result.text.contains("declined"),
+        "{result:?}"
+    );
+    assert_eq!(client.transport().asked.len(), connected + 1);
+    assert!(client.transport().agent.take_engine_messages().is_empty());
+
+    // Stopping runs without asking.
+    call(&mut client, "run", stop.clone());
+    assert_eq!(client.transport().asked.len(), connected + 1);
+    assert_eq!(
+        client.transport().agent.take_engine_messages(),
+        [EngineMessage::Transport(TransportCommand::SetRecording(
+            false
+        ))]
+    );
+
+    // Autonomous, it records.
+    client
+        .transport()
+        .shell
+        .run(
+            "agent.set_autonomous",
+            json!({ "client": "editor", "on": true }),
+        )
+        .unwrap();
+    call(&mut client, "run", start.clone());
+    assert_eq!(client.transport().asked.len(), connected + 1);
+    assert_eq!(
+        client.transport().agent.take_engine_messages(),
+        [EngineMessage::Transport(TransportCommand::SetRecording(
+            true
+        ))]
+    );
+
+    // Headless, it is refused unless the server was started autonomous.
+    for autonomous in [false, true] {
+        let mut client = Client::new(InProcess::new(
+            Agent::headless(autonomous),
+            Shell::headless(),
+        ));
+        client.initialize("script").unwrap();
+        client.transport().agent.set_engine_attached(true);
+        let result = client.call("run", start.clone()).unwrap();
+        assert_eq!(result.is_error, !autonomous, "{}", result.text);
+        assert_eq!(
+            client.transport().agent.take_engine_messages().len(),
+            usize::from(autonomous)
+        );
+        call(&mut client, "run", stop.clone());
+    }
 }
 
 #[test]

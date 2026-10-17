@@ -11,8 +11,8 @@ use bl_engine::session as engine_session;
 use bl_engine::transport as engine_transport;
 use bl_media::MediaStore;
 use bl_model::{
-    AudioData, ChangeSet, Clip, ClipData, ContentHash, Editor, Input, LaunchSettings, TrackId,
-    TrackKind, registry as model,
+    AudioData, ChangeSet, Clip, ClipData, ContentHash, Editor, Input, LaunchSettings, TakeClip,
+    TakeLane, TrackId, TrackKind, registry as model,
 };
 use bl_project::ProjectFolder;
 use serde::Serialize;
@@ -531,6 +531,13 @@ fn device_error(id: &str, error: DeviceError) -> ShellError {
 }
 
 /// Converts a command's result to JSON.
+/// A recorded file's name without its extension: its clips' name.
+fn file_stem(path: &Path) -> String {
+    path.file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
 fn to_value<T: Serialize>(value: &T) -> Value {
     serde_json::to_value(value).unwrap_or(Value::Null)
 }
@@ -1195,6 +1202,13 @@ impl Shell {
             self.save_preferences();
             self.touch();
         }
+    }
+
+    /// Whether Warp recorded audio is on (IMP-02). Clips have no warp fields
+    /// yet, so recorded clips play unwarped either way.
+    #[must_use]
+    pub fn warp_recorded_audio(&self) -> bool {
+        self.prefs.warp_recorded_audio.0
     }
 
     /// Whether Create Fades on Clip Edges is on: new audio clips get 4 ms
@@ -3047,36 +3061,53 @@ impl Shell {
                 }
             }
         }
-        let mut placed = std::collections::BTreeSet::new();
-        let applied = self
-            .editor
-            .transact(crate::recording::UNDO_LABEL, |editor| {
-                for (track, hash, path, _) in &imported {
-                    let id = editor.new_id();
-                    // Spec: audio-clips R7. With Create Fades on Clip Edges on,
-                    // a new recorded clip's edges fade over 4 ms, like a
-                    // dropped file's.
-                    let audio = AudioData::new(*hash);
-                    let audio = if edge_fades {
-                        audio.with_edge_fades()
-                    } else {
-                        audio
-                    };
-                    let mut clip =
-                        Clip::new(id, start, end.saturating_sub(start), ClipData::Audio(audio));
-                    clip.name = path
-                        .file_stem()
-                        .map(|stem| stem.to_string_lossy().into_owned())
-                        .unwrap_or_default();
-                    crate::arrangement::placing::clear(editor, *track, start, end, &placed)?;
-                    placed.insert(id);
-                    editor.apply(bl_model::Command::CreateClip {
-                        track: *track,
-                        clip,
-                    })?;
-                }
-                crate::recording::place_midi(editor, &midi, take, rate, overdub, &mut placed)
-            });
+        let applied = match take.wrap {
+            None => {
+                let mut placed = std::collections::BTreeSet::new();
+                self.editor
+                    .transact(crate::recording::UNDO_LABEL, |editor| {
+                        for (track, hash, path, _) in &imported {
+                            let id = editor.new_id();
+                            // Spec: audio-clips R7. With Create Fades on Clip Edges
+                            // on, a new recorded clip's edges fade over 4 ms, like a
+                            // dropped file's.
+                            let audio = AudioData::new(*hash);
+                            let audio = if edge_fades {
+                                audio.with_edge_fades()
+                            } else {
+                                audio
+                            };
+                            let mut clip = Clip::new(
+                                id,
+                                start,
+                                end.saturating_sub(start),
+                                ClipData::Audio(audio),
+                            );
+                            clip.name = file_stem(path);
+                            crate::arrangement::placing::clear(
+                                editor, *track, start, end, &placed,
+                            )?;
+                            placed.insert(id);
+                            editor.apply(bl_model::Command::CreateClip {
+                                track: *track,
+                                clip,
+                            })?;
+                        }
+                        crate::recording::place_midi(
+                            editor,
+                            &midi,
+                            take,
+                            rate,
+                            overdub,
+                            &mut placed,
+                        )
+                    })
+            }
+            Some(_) => {
+                let frames = files.first().map_or(0, |file| file.frames);
+                self.place_loop_passes(frames, &imported, &midi, take, rate)
+            }
+        };
         if let Err(error) = applied {
             self.set_message(format!("Recording failed: {error}"), true);
             return;
@@ -3096,6 +3127,128 @@ impl Shell {
                 true,
             );
         }
+    }
+
+    /// Puts a take that went round the loop on its tracks (the recording
+    /// spec, R12): the lead-in before the loop is a clip on the main lane,
+    /// and each pass is an undo step that adds a take lane holding the pass
+    /// and copies the pass to the main lane over what was there, so Undo run
+    /// again and again unrolls the passes from the last. Every clip plays its
+    /// pass of the one recorded file, which holds all of them. `frames` is
+    /// how many frames each track's file holds: the rings fill together. MIDI
+    /// has no take lanes yet: what the passes played merges into one clip over
+    /// the first pass, in the first step.
+    fn place_loop_passes(
+        &mut self,
+        frames: u64,
+        imported: &[(TrackId, ContentHash, PathBuf, u64)],
+        midi: &[crate::recording::MidiTake],
+        take: bl_engine::TakeBounds,
+        rate: SampleRate,
+    ) -> Result<(), bl_model::EditError> {
+        // shortcut: a negative recording delay, which starts a plain take's
+        // clip later, doesn't shift the passes, so they sit up to that much
+        // early; upgrade by moving each pass by it.
+        let tempo = self.editor.document().settings().tempo.clone();
+        let edge_fades = self.create_fades_on_clip_edges();
+        let overdub = self.editor.document().settings().midi_overdub;
+        let (lead_in, passes) = crate::recording::passes(take, frames);
+        let seconds = |frames: u64| frames as f64 / rate.as_f64();
+        let ticks = |frame: Frames| tempo.frames_to_ticks(frame, rate);
+        let audio = |hash: ContentHash, pass: &crate::recording::Pass| {
+            let (from, to) = (
+                seconds(pass.file_from),
+                seconds(pass.file_from + pass.frames),
+            );
+            let audio = AudioData {
+                start: from,
+                end: Some(to),
+                loop_start: from,
+                loop_end: Some(to),
+                ..AudioData::new(hash)
+            };
+            if edge_fades {
+                audio.with_edge_fades()
+            } else {
+                audio
+            }
+        };
+        let place = |editor: &mut Editor,
+                     track: TrackId,
+                     name: &str,
+                     pass: &crate::recording::Pass,
+                     data: AudioData|
+         -> Result<(), bl_model::EditError> {
+            let start = ticks(pass.song_start);
+            let end = ticks(pass.song_start + Frames(pass.frames as i64));
+            let mut clip = Clip::new(
+                editor.new_id(),
+                start,
+                end.saturating_sub(start),
+                ClipData::Audio(data),
+            );
+            clip.name = name.to_owned();
+            crate::arrangement::placing::clear(
+                editor,
+                track,
+                start,
+                end,
+                &std::collections::BTreeSet::new(),
+            )?;
+            editor.apply(bl_model::Command::CreateClip { track, clip })?;
+            Ok(())
+        };
+        for step in 0..passes.len().max(1) {
+            self.editor
+                .transact(crate::recording::LOOP_UNDO_LABEL, |editor| {
+                    for (track, hash, path, _) in imported {
+                        let name = file_stem(path);
+                        if let (0, Some(pass)) = (step, &lead_in) {
+                            place(editor, *track, &name, pass, audio(*hash, pass))?;
+                        }
+                        let Some(pass) = passes.get(step) else {
+                            continue;
+                        };
+                        let data = audio(*hash, pass);
+                        let lanes = editor
+                            .document()
+                            .track(*track)
+                            .map_or(0, |track| track.take_lanes().len());
+                        let start = ticks(pass.song_start);
+                        editor.apply(bl_model::Command::AddTakeLane {
+                            track: *track,
+                            lane: TakeLane {
+                                name: format!("Take {}", lanes + 1),
+                                clips: vec![TakeClip {
+                                    name: name.clone(),
+                                    start,
+                                    length: ticks(pass.song_start + Frames(pass.frames as i64))
+                                        .saturating_sub(start),
+                                    data,
+                                }],
+                            },
+                        })?;
+                        place(editor, *track, &name, pass, data)?;
+                    }
+                    if step == 0 {
+                        let first_pass = bl_engine::TakeBounds {
+                            end: take.wrap.map_or(take.end, |(_, end)| end),
+                            wrap: None,
+                            ..take
+                        };
+                        crate::recording::place_midi(
+                            editor,
+                            midi,
+                            first_pass,
+                            rate,
+                            overdub,
+                            &mut std::collections::BTreeSet::new(),
+                        )?;
+                    }
+                    Ok::<(), bl_model::EditError>(())
+                })?;
+        }
+        Ok(())
     }
 
     /// Opens a gesture, such as a drag on a value field: the document
@@ -4925,6 +5078,12 @@ impl Shell {
             ids::SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES => {
                 let SwitchArgs { on } = Self::args(id, args)?;
                 self.prefs.create_fades_on_clip_edges = OnByDefault(on);
+                self.save_preferences();
+                Ok(to_value(&SwitchResult { on }))
+            }
+            ids::SETTINGS_SET_WARP_RECORDED_AUDIO => {
+                let SwitchArgs { on } = Self::args(id, args)?;
+                self.prefs.warp_recorded_audio = OnByDefault(on);
                 self.save_preferences();
                 Ok(to_value(&SwitchResult { on }))
             }

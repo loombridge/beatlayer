@@ -159,8 +159,9 @@ fn specs() -> Vec<CommandSpec> {
             "Reports what the mixers show: whether the Session View's and the Arrangement \
              View's mixers are shown and how far each is scrolled, and which sections (In/Out, \
              Sends, the volume strips, the return tracks) show. Track values (volume, pan, the \
-             activator, Solo, Arm) are in the set; read them with the query tool. Changes \
-             nothing.",
+             activator, Solo, Arm, routing, sends, the crossfader assignment) are in the set; \
+             read them with the query tool: a track with `detail: \"full\"` returns them as \
+             the set saves them. Changes nothing.",
         )
         .context(Global)
         .args::<NoArgs>(),

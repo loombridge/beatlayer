@@ -23,13 +23,13 @@ impl Document {
             TrackKind::Return => match t.routing.output {
                 Output::Default | Output::Main => Some(self.main),
                 Output::Track { track } => Some(track),
-                Output::External | Output::SendsOnly => None,
+                Output::External { .. } | Output::SendsOnly => None,
             },
             _ => match t.routing.output {
                 Output::Default => Some(self.parent(track).unwrap_or(self.main)),
                 Output::Main => Some(self.main),
                 Output::Track { track } => Some(track),
-                Output::External | Output::SendsOnly => None,
+                Output::External { .. } | Output::SendsOnly => None,
             },
         }
     }
@@ -250,7 +250,7 @@ fn check_output(doc: &Document, track: &Track) -> Result<(), ModelError> {
     );
     match (track.kind, output) {
         (_, Output::Default) => Ok(()),
-        (_, Output::Main | Output::External | Output::SendsOnly) if routed => Ok(()),
+        (_, Output::Main | Output::External { .. } | Output::SendsOnly) if routed => Ok(()),
         (_, Output::Track { track: to }) if routed => {
             let parent = doc.parent(track.id);
             doc.check_target(track, to, |kind| kind == TrackKind::Audio)
@@ -452,7 +452,12 @@ mod tests {
             Output::Main,
             Output::Track { track: b },
             Output::SendsOnly,
-            Output::External,
+            Output::External {
+                channel: Channel::Pair(3),
+            },
+            Output::External {
+                channel: Channel::Mono(2),
+            },
         ] {
             output(&mut editor, a, to).unwrap();
             output(&mut editor, r, to).unwrap();
@@ -692,6 +697,39 @@ mod tests {
         let mut broken = saved;
         broken["tracks"][0]["routing"]["input"] = serde_json::json!({ "type": "all_ins" });
         assert!(serde_json::from_value::<Document>(broken).is_err());
+    }
+
+    // Spec: routing R3, R8 (WP-2.13)
+    #[test]
+    fn ext_out_and_its_channel_save_and_load() {
+        let mut editor = Editor::new();
+        let a = add(&mut editor, TrackKind::Audio, None);
+        let b = add(&mut editor, TrackKind::Audio, None);
+        let c = add(&mut editor, TrackKind::Audio, None);
+        for (track, channel) in [
+            (a, Channel::Pair(1)),
+            (b, Channel::Pair(3)),
+            (c, Channel::Mono(3)),
+        ] {
+            output(&mut editor, track, Output::External { channel }).unwrap();
+        }
+        let saved = serde_json::to_value(editor.document()).unwrap();
+        // The first pair is a new choice's, so it's left out.
+        assert_eq!(
+            saved["tracks"][0]["routing"]["output"],
+            serde_json::json!({ "type": "external" })
+        );
+        assert_eq!(
+            saved["tracks"][2]["routing"]["output"],
+            serde_json::json!({ "type": "external", "channel": { "type": "mono", "channel": 3 } })
+        );
+        let loaded: Document = serde_json::from_value(saved).unwrap();
+        assert_eq!(&loaded, editor.document());
+        assert_eq!(
+            loaded.output_of(b),
+            None,
+            "Ext. Out goes nowhere in the set"
+        );
     }
 
     // Spec: routing R9 (IMP-01)

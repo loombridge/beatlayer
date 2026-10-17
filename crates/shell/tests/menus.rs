@@ -86,6 +86,9 @@ fn every_shell_command_is_on_a_menu_or_a_control() {
         // The Record, Warp & Launch page's switch (the audio clips spec,
         // R22).
         commands::SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES,
+        // The same page's Warp recorded audio switch (the recording spec,
+        // R13).
+        commands::SETTINGS_SET_WARP_RECORDED_AUDIO,
         // The Plug-Ins page's switch (the device chains spec, R31).
         commands::SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS,
         // The Display & Input page's Zoom (interface-zoom R4).

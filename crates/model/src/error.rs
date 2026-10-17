@@ -7,6 +7,7 @@ use bl_core::time::Ticks;
 
 use crate::device::DeviceRole;
 use crate::ids::{ClipId, DeviceId, SceneId, TrackId};
+use crate::layers::LayerId;
 use crate::track::TrackKind;
 
 /// Why a command was rejected, or why a loaded document isn't valid.
@@ -23,6 +24,10 @@ pub enum ModelError {
     NoSuchDevice(DeviceId),
     /// No scene has this ID.
     NoSuchScene(SceneId),
+    /// The device has no layer with this ID (WP-5.13).
+    NoSuchLayer(LayerId),
+    /// The device isn't a multisampler, so it holds no layers.
+    NoLayers(DeviceId),
     /// The device has no sidechain input to set.
     NoSidechain(DeviceId),
     /// The device isn't in this track's chain, so the track has no such
@@ -203,6 +208,8 @@ impl fmt::Display for ModelError {
             Self::NoSuchClip(id) => write!(f, "no {id}"),
             Self::NoSuchDevice(id) => write!(f, "no {id}"),
             Self::NoSuchScene(id) => write!(f, "no {id}"),
+            Self::NoSuchLayer(id) => write!(f, "no layer {}", id.0),
+            Self::NoLayers(id) => write!(f, "{id} holds no layers: it isn't a multisampler"),
             Self::SlotOccupied { track, scene } => {
                 write!(f, "{track}'s slot in {scene} already holds a clip")
             }

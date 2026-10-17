@@ -11,6 +11,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{ContentHash, DeviceId, ParamId};
+use crate::layers::Layers;
 use crate::track::Input;
 
 /// A device in a track's chain: a native instrument or effect, or a plug-in.
@@ -71,6 +72,11 @@ pub struct Device {
     /// spec, R11). Left out of the saved set for a device that plays none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub media: Option<ContentHash>,
+    /// A multisampler's layers and the options of its layer list (WP-5.13,
+    /// the multisampler spec, R2). Left out of the saved set for a device
+    /// that holds none.
+    #[serde(default, skip_serializing_if = "Layers::is_default")]
+    pub layers: Layers,
 }
 
 /// A plug-in device's own state, as the set file keeps it (WP-2.6).
@@ -256,6 +262,7 @@ impl Device {
             floating: false,
             plugin: None,
             media: None,
+            layers: Layers::default(),
         }
     }
 

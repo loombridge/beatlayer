@@ -69,6 +69,7 @@ mod editor;
 mod error;
 mod ids;
 mod launch;
+mod layers;
 mod metronome;
 pub mod param;
 pub mod registry;
@@ -100,6 +101,10 @@ pub use ids::{ClipId, ContentHash, DeviceId, ParamId, ParseContentHashError, Sce
 /// The persistent collections the document's public types hold.
 pub use imbl::{OrdMap, Vector};
 pub use launch::{ClipLaunch, LaunchMode, LaunchQuantization, LaunchSettings};
+pub use layers::{
+    DEFAULT_ROOT_KEY, Distribution, FadeMode, LAYER_GAIN_MAX, Layer, LayerId, LayerSettings,
+    LayerSort, LayerZone, Layers, ReleaseMode, SustainMode, Zone, ZoneKind, snap_to_zero_crossing,
+};
 pub use metronome::{CountIn, MetronomeRhythm, MetronomeSettings, MetronomeSound};
 pub use param::{DeviceDescription, ParamDescriptor, ParamKind, ParamUnit};
 pub use repr::{SavedSong, saved_schema};

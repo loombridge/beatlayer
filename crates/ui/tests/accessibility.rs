@@ -1457,6 +1457,12 @@ fn paths() -> BTreeMap<&'static str, Path> {
             )),
         ),
         (
+            "session.back_to_arrangement_track",
+            Exception(LaterView(
+                "the Arrangement's per-track Back to Arrangement buttons (WP-3.8)",
+            )),
+        ),
+        (
             "browser.add_to_arrangement",
             Exception(Equivalent(
                 "a drag; Enter adds the selected files (`browser.load_selected`)",

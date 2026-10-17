@@ -384,6 +384,7 @@ pub struct Shell {
     /// The Session slots' states the engine last published (WP-3.2), which
     /// the grid's launch buttons draw from.
     session_states: Vec<bl_engine::SlotStatus>,
+    session_over: Vec<TrackId>,
     /// The meters the engine last published, one per track (WP-1.9).
     meters: Vec<bl_engine::TrackMeter>,
     /// Whether the meters were the engine's when last polled.
@@ -665,6 +666,7 @@ impl Shell {
             mixer: MixerView::new(),
             session: SessionView::new(),
             session_states: Vec::new(),
+            session_over: Vec::new(),
             meters: Vec::new(),
             metering: false,
             previews: crate::perception::Previews::default(),
@@ -2879,6 +2881,9 @@ impl Shell {
         // Spec: launch-quantisation R10. The slots the engine is launching
         // or stopping, which the grid's launch buttons draw.
         self.audio.session_into(&mut self.session_states);
+        // Spec: session-view R24. The tracks a Session clip has taken over,
+        // which the Back to Arrangement buttons light from.
+        self.audio.session_over_into(&mut self.session_over);
         let brace = self.editor.document().settings().arrangement_loop;
         self.set_transport(TransportView {
             playing: engine.playing,
@@ -2920,6 +2925,15 @@ impl Shell {
     #[must_use]
     pub fn session_states(&self) -> &[bl_engine::SlotStatus] {
         &self.session_states
+    }
+
+    /// The tracks a Session clip has taken over from the Arrangement
+    /// (WP-3.6): the Main column's and the Arrangement's Back to Arrangement
+    /// buttons light while it lists any, and a track's own button while it
+    /// lists the track.
+    #[must_use]
+    pub fn session_over(&self) -> &[TrackId] {
+        &self.session_over
     }
 
     /// Sends a transport command to the engine, as menus, keys, the Control
@@ -3685,7 +3699,10 @@ impl Shell {
         if engine_session::handles(id) {
             // The Session View launches only while an engine runs on a
             // device, as the transport plays.
+            // Back to Arrangement is off in a set no clip has taken over
+            // (M-PLAY-012).
             return self.audio.engine_running()
+                && (id != "session.back_to_arrangement" || !self.session_over.is_empty())
                 && engine_session::command_from_args(id, Self::object(args.clone())).is_ok();
         }
         if session_launch_ids::handles(id) {

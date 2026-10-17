@@ -1183,6 +1183,34 @@ fn an_agent_launches_and_stops_session_clips_by_command_id() {
     );
     host.play_to(8 * block);
     assert!(host.offline.state().session.is_empty());
+
+    // Spec: session-view R21 to R23. The clip played and Stop All Clips
+    // pressed every stop button, so the tracks stay taken over from the
+    // Arrangement until a return, by ID.
+    assert!(host.offline.state().session_over.contains(&track));
+    host.call(
+        "run",
+        json!({ "commands": [{ "command": "session.back_to_arrangement" }] }),
+    );
+    host.play_to(10 * block);
+    assert!(host.offline.state().session_over.is_empty());
+    host.call(
+        "run",
+        json!({ "commands": [
+            { "command": "session.launch", "args": { "track": track, "scene": scene } },
+        ] }),
+    );
+    host.play_to(12 * block);
+    assert_eq!(host.offline.state().session_over, [track]);
+    host.call(
+        "run",
+        json!({ "commands": [
+            { "command": "session.back_to_arrangement_track", "args": { "track": track } },
+        ] }),
+    );
+    host.play_to(14 * block);
+    assert!(host.offline.state().session_over.is_empty());
+    assert!(host.offline.state().session.is_empty(), "its clip stopped");
     assert_eq!(
         host.offline.heap_operations(),
         0,

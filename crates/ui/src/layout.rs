@@ -402,7 +402,7 @@ pub const ELEMENTS: &[Placement] = &[
     p(E::Overdub, "L-CTRL-015", "MIDI Arrangement Overdub", CB, 758.0, 18.0, Middle, Switch, Some("WP-2.14")),
     p(E::AutomationArm, "L-CTRL-015", "Automation Arm", CB, 778.0, 16.0, Middle, Switch, None),
     p(E::ReEnableAutomation, "L-CTRL-015", "Re-Enable Automation", CB, 796.0, 18.0, Middle, Button, None),
-    p(E::CaptureMidi, "L-CTRL-015", "Capture MIDI", CB, 816.0, 16.0, Middle, Button, Some("M3")),
+    p(E::CaptureMidi, "L-CTRL-015", "Capture MIDI", CB, 816.0, 16.0, Middle, Button, None),
     p(E::SessionRecord, "L-CTRL-015", "Session Record", CB, 834.0, 18.0, Middle, Switch, Some("M3")),
     p(E::LoopStartBars, "L-CTRL-016", "Loop Start Bars", CB, 875.0, 26.0, Middle, Value, None),
     p(E::LoopStartBeats, "L-CTRL-016", "Loop Start Beats", CB, 901.0, 26.0, Middle, Value, None),

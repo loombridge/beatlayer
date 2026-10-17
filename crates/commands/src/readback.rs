@@ -253,6 +253,7 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("edit.undo", query(Song, "undo.next_undo")),
     ("export.audio", nothing(FILE)),
     ("midi.export_clip", nothing(FILE)),
+    ("midi.capture", query(Track, "slots")),
     ("midi.import_file", query(Track, "clips")),
     ("midi.set_port", read("midi.ports", "ports")),
     ("midi.toggle_computer_keyboard", read("midi.ports", "keyboard.on")),

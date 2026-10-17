@@ -632,18 +632,18 @@ impl Agent {
                 .outbox
                 .extend(waiting.into_iter().map(EngineMessage::Schedule));
         }
-        let audio = shell.audio_mut();
         for message in std::mem::take(&mut program.state.outbox) {
             // The engine ran while the call was handled; if it has just
-            // stopped, there's nothing to send to.
+            // stopped, there's nothing to send to. A transport command goes
+            // through the shell, so recording is set up as the UI's is.
             let _ = match message {
-                EngineMessage::Transport(command) => audio.send_transport(command),
-                EngineMessage::Session(command) => audio.send_session(command),
-                EngineMessage::Schedule(command) => audio.schedule(command),
-                EngineMessage::Cancel(id) => audio.cancel(id),
+                EngineMessage::Transport(command) => shell.send_transport(command),
+                EngineMessage::Session(command) => shell.audio_mut().send_session(command),
+                EngineMessage::Schedule(command) => shell.audio_mut().schedule(command),
+                EngineMessage::Cancel(id) => shell.audio_mut().cancel(id),
             };
         }
-        let transport = audio.transport_state();
+        let transport = shell.audio_mut().transport_state();
         program.state.playhead = Some(Playhead::new(
             transport.playing,
             transport.position,

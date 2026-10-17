@@ -53,6 +53,12 @@ bl-media.workspace = true
 # The test plug-in, built from source, which `bl-cli export` renders with
 # (WP-2.6b).
 bl-test-clap = { path = "../test-clap" }
+# The M2 song test (T108) loads the VST3 test plug-in too, plays the test
+# MIDI backend as the keyboard, and decodes the audio it exports.
+bl-test-vst3 = { path = "../test-vst3" }
+bl-midi-io.workspace = true
+# The sweeps' spectral centroids come from the octave bands.
+bl-analysis.workspace = true
 # The agent API's MIDI file tests write and read Standard MIDI Files
 # (WP-2.21).
 bl-interop.workspace = true

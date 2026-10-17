@@ -5,8 +5,13 @@
 //! Everything here is plain arithmetic on numbers, so the audio thread reads
 //! it frame by frame without allocating.
 
+use crate::automation::AutomationTarget;
+use crate::device::Device;
+use crate::document::Document;
 use crate::fader::{LOWEST_DB, db_gain, fader_gain, fader_position, gain_db};
+use crate::ids::{ParamId, TrackId};
 use crate::param::ParamDescriptor;
+use crate::shared::Shared;
 
 /// The travel a parameter's control moves along, from 0 to 1.
 #[derive(Clone, Copy, Debug)]
@@ -96,6 +101,42 @@ impl Travel<'_> {
         }
     }
 
+    /// The share a clip's modulation envelope holds (R4) that plays, over
+    /// `control`, the value an envelope of `old` played before relative
+    /// modulation, which added `old` to the control's value in the
+    /// parameter's own units and clamped (R5). The share is clamped to the
+    /// envelope's range.
+    // Spec: modulation R5
+    #[must_use]
+    pub fn legacy_share(self, control: f64, old: f64) -> f64 {
+        let (low, high) = self.clip_range();
+        let played = self.position(control + old);
+        let at = self.position(control);
+        let share = match self {
+            Self::Fader | Self::Send => {
+                if at > 0.0 {
+                    played / at
+                } else {
+                    0.0
+                }
+            }
+            Self::Pan => {
+                let base = control.clamp(-1.0, 1.0);
+                if base.abs() < 1.0 {
+                    ((control + old).clamp(-1.0, 1.0) - base) / (1.0 - base.abs())
+                } else {
+                    0.0
+                }
+            }
+            Self::Switch | Self::Param(_) => played - at,
+        };
+        if share.is_nan() {
+            0.0
+        } else {
+            share.clamp(low, high)
+        }
+    }
+
     /// The value played with `sum`, the contributions added, moving the
     /// base's position on the travel, clamped to the travel's ends (R3). No
     /// contribution gives the base itself, to the bit.
@@ -106,6 +147,73 @@ impl Travel<'_> {
             return base;
         }
         self.value(self.position(base) + sum)
+    }
+}
+
+impl Document {
+    /// Turns the clip envelopes of a set saved before relative modulation
+    /// into the modulation that plays what they played, at the control
+    /// values the set holds (R5). `descriptor` gives a device's parameter
+    /// its description; a parameter it doesn't know keeps its values,
+    /// clamped to the envelope's range.
+    pub fn relative_clip_envelopes(
+        &mut self,
+        descriptor: &dyn Fn(&Device, ParamId) -> Option<ParamDescriptor>,
+    ) {
+        let ids: Vec<TrackId> = self.tracks.keys().copied().collect();
+        for id in ids {
+            let Some(track) = self.tracks.get_mut(&id).map(Shared::make_mut) else {
+                continue;
+            };
+            let clips: Vec<_> = track
+                .clips()
+                .chain(track.slots().map(|(_, clip)| clip))
+                .filter(|clip| clip.envelopes().len() > 0)
+                .map(|clip| clip.id)
+                .collect();
+            for clip in clips {
+                let Some(mut envelopes) = track.clip(clip).map(|clip| clip.envelopes.clone())
+                else {
+                    continue;
+                };
+                for envelope in &mut envelopes {
+                    envelope.envelope.map_values(|old| match envelope.target {
+                        AutomationTarget::Mixer { param } => {
+                            let mixer = &track.mixer;
+                            match param {
+                                crate::MixerParam::Volume => {
+                                    Travel::Fader.legacy_share(mixer.volume, old)
+                                }
+                                crate::MixerParam::Pan => Travel::Pan.legacy_share(mixer.pan, old),
+                                crate::MixerParam::Mute => Travel::Switch
+                                    .legacy_share(f64::from(u8::from(mixer.mute)), old),
+                            }
+                        }
+                        AutomationTarget::Send { to } => {
+                            Travel::Send.legacy_share(track.send(to), old)
+                        }
+                        AutomationTarget::Device { device, param } => track
+                            .devices()
+                            .find(|d| d.id == device)
+                            .and_then(|d| Some((d, descriptor(d, param)?)))
+                            .map_or_else(
+                                || old.clamp(-1.0, 1.0),
+                                |(d, description)| {
+                                    let control = d
+                                        .params
+                                        .get(&param)
+                                        .copied()
+                                        .unwrap_or(description.default);
+                                    Travel::Param(&description).legacy_share(control, old)
+                                },
+                            ),
+                    });
+                }
+                if let Some(clip) = track.clip_mut(clip) {
+                    clip.envelopes = envelopes;
+                }
+            }
+        }
     }
 }
 
@@ -131,7 +239,8 @@ mod tests {
     // Spec: modulation R3
     #[test]
     fn contributions_add_in_the_travel_and_clamp() {
-        let descriptor = ParamDescriptor::continuous(ParamId(0), "Mix", (0.0, 1.0), 0.5, ParamUnit::None);
+        let descriptor =
+            ParamDescriptor::continuous(ParamId(0), "Mix", (0.0, 1.0), 0.5, ParamUnit::None);
         let travel = Travel::Param(&descriptor);
         assert_eq!(travel.played(0.5, 0.25 + 0.125), 0.875);
         assert_eq!(travel.played(0.5, 0.25 - 0.25), 0.5, "they cancel");
@@ -165,7 +274,10 @@ mod tests {
             assert!(at(0.5) < base && at(0.5) > 0.0);
             assert_eq!(at(7.0), base, "a share past 100 % never raises it");
             let position = travel.position(at(0.5));
-            assert!((position - 0.4).abs() < 0.01, "half the position: {position}");
+            assert!(
+                (position - 0.4).abs() < 0.01,
+                "half the position: {position}"
+            );
         }
     }
 
@@ -178,7 +290,10 @@ mod tests {
         assert_eq!(at(0.0, 1.0), 1.0, "from the centre it reaches hard right");
         assert_eq!(at(0.0, -1.0), -1.0, "and hard left");
         assert!((at(0.5, 1.0) - 1.0).abs() < 1e-12);
-        assert!((at(0.5, 0.5) - 0.75).abs() < 1e-12, "half the way to the end");
+        assert!(
+            (at(0.5, 0.5) - 0.75).abs() < 1e-12,
+            "half the way to the end"
+        );
         assert_eq!(at(1.0, 1.0), 1.0, "at the end it doesn't move");
         assert_eq!(at(-1.0, -1.0), -1.0);
     }
@@ -189,11 +304,53 @@ mod tests {
         let descriptor = cutoff();
         let travel = Travel::Param(&descriptor);
         let base = 1_000.0;
-        assert_eq!(travel.played(base, travel.clip_contribution(base, 0.0)), base);
+        assert_eq!(
+            travel.played(base, travel.clip_contribution(base, 0.0)),
+            base
+        );
         let up = travel.played(base, travel.clip_contribution(base, 1.0));
         assert!(up > base);
         assert_eq!(up, 20_000.0, "a full share clamps at the top");
         assert_eq!(travel.clip_contribution(base, 3.0), 1.0, "clamped to 100 %");
+    }
+
+    // Spec: modulation R5
+    #[test]
+    fn clip_envelopes_from_before_relative_modulation_play_as_they_did() {
+        let played = |travel: Travel<'_>, control: f64, old: f64| {
+            let share = travel.legacy_share(control, old);
+            travel.played(control, travel.clip_contribution(control, share))
+        };
+        let close = |a: f64, b: f64| (a - b).abs() < 1e-3;
+        assert!(
+            close(played(Travel::Fader, 0.5, -0.25), 0.25),
+            "a fader lowered"
+        );
+        assert!(close(played(Travel::Send, 0.5, -0.25), 0.25));
+        assert!(close(played(Travel::Pan, 0.2, 0.5), 0.7));
+        assert!(close(played(Travel::Pan, -0.4, -0.3), -0.7));
+        let descriptor = cutoff();
+        let travel = Travel::Param(&descriptor);
+        assert!((played(travel, 1_000.0, 500.0) - 1_500.0).abs() < 1e-6);
+        assert!((played(travel, 1_000.0, -500.0) - 500.0).abs() < 1e-6);
+        // What the new range can't hold is clamped to it: a level can only
+        // be brought down, so an old raise plays the control.
+        assert_eq!(Travel::Fader.legacy_share(0.5, 0.0), 1.0);
+        assert_eq!(
+            Travel::Fader.legacy_share(0.5, 3.0),
+            1.0,
+            "a raise plays the control"
+        );
+        assert_eq!(
+            Travel::Fader.legacy_share(0.0, 0.5),
+            0.0,
+            "a closed fader stays closed"
+        );
+        assert_eq!(
+            Travel::Pan.legacy_share(1.0, -0.5),
+            0.0,
+            "an end pan doesn't move"
+        );
     }
 
     proptest! {

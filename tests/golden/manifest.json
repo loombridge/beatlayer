@@ -33,6 +33,14 @@
       "bits": 24,
       "render_hash": "fnv1a64:953624a4115faf85"
     },
+    "device-modulation": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 204000,
+      "bits": 24,
+      "render_hash": "fnv1a64:efcbe9b1174036c1"
+    },
     "fader-gesture": {
       "made_on": "macos-aarch64",
       "sample_rate": 48000,
@@ -160,6 +168,14 @@
       "frames": 216000,
       "bits": 24,
       "render_hash": "fnv1a64:5c64fa15b51bc1d1"
+    },
+    "volume-modulation": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 204000,
+      "bits": 24,
+      "render_hash": "fnv1a64:bccff9f00f3060c9"
     }
   }
 }

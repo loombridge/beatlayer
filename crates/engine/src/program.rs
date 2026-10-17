@@ -13,8 +13,8 @@ use crate::node::{
     Block, Node, NodeData, NodeEvent, NodeKey, NoteBuffer, ParamValue, TransportInfo,
 };
 use crate::session::{SceneMaps, SessionPlayback};
-use crate::state::PlayedParam;
 use crate::sidechain::SidechainKey;
+use crate::state::PlayedParam;
 
 /// A compiled song, ready to run on the audio thread: a flat array of
 /// nodes, the tasks that run them, the buffers they work in, and the order

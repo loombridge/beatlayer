@@ -75,6 +75,7 @@ pub mod files;
 pub mod midi;
 pub mod midi_files;
 pub mod mixer_controls;
+mod modulation;
 pub mod mixer_view;
 pub mod perception;
 pub mod permission;

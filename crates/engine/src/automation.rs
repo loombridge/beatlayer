@@ -442,7 +442,7 @@ pub(crate) fn lists(
 /// The node and parameter an automation target names on `track`: its mixer
 /// for a mixer control, its send to a return track, or a device in its
 /// chain.
-fn target_node(track: TrackId, target: &AutomationTarget) -> (NodeKey, ParamId) {
+pub fn target_node(track: TrackId, target: &AutomationTarget) -> (NodeKey, ParamId) {
     match *target {
         AutomationTarget::Mixer { param } => (
             NodeKey::Mixer(track),
@@ -455,6 +455,25 @@ fn target_node(track: TrackId, target: &AutomationTarget) -> (NodeKey, ParamId) 
         AutomationTarget::Send { to } => (NodeKey::Send { track, to }, mixer::route::LEVEL),
         AutomationTarget::Device { device, param } => (NodeKey::Device(device), param),
     }
+}
+
+/// The value `clip`'s `envelope` holds at song position `at`, in the
+/// envelope's own units, if the clip plays there (the modulation spec, R11):
+/// what a reader that has no engine frame asks for, by the same mapping of
+/// the clip's contents onto the song as the engine's read path.
+#[must_use]
+pub fn clip_envelope_value_at(
+    clip: &bl_model::Clip,
+    envelope: &bl_model::ClipEnvelope,
+    at: Ticks,
+) -> Option<f64> {
+    let ClipData::Midi(midi) = &clip.data else {
+        return None;
+    };
+    played_regions(clip, midi, envelope)
+        .into_iter()
+        .find(|&(from, to, ..)| at >= from && at < to)
+        .and_then(|(from, _, content, _)| envelope.envelope.value_at(content + (at - from)))
 }
 
 /// What one node is sent: the track envelopes driving its parameters and

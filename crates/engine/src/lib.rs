@@ -113,7 +113,7 @@ pub mod testing;
 
 use bl_core::time::SampleRate;
 
-pub use automation::AutomationList;
+pub use automation::{AutomationList, clip_envelope_value_at, target_node};
 pub use clips::{ClipPlayer, MediaLibrary, MediaMap, MediaStreams, OpenedSource, SourceCues};
 pub use compiler::{Compiler, Update};
 pub use engine::{CompileCounts, Engine, Restarter, Sender, channel};

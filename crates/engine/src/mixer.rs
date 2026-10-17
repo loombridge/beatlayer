@@ -671,7 +671,8 @@ impl TrackMixer {
         {
             *entry = list
                 .modulates(param)
-                .then(|| played(list, last, param, control));
+                .then(|| played(list, last, param, control))
+                .filter(|(base, played)| played != base);
         }
     }
 }
@@ -894,7 +895,9 @@ impl Route {
                     }
                     let last = now + segment.range.end as i64 - 1;
                     self.gain = Ramp::at(self.envelope_gain(list, envelope, last));
-                    self.modulated = modulated.then(|| self.level_at(list, envelope, last));
+                    self.modulated = modulated
+                        .then(|| self.level_at(list, envelope, last))
+                        .filter(|(base, played)| played != base);
                 }
                 None => {
                     let mut after = self.gain;
@@ -943,10 +946,7 @@ impl Route {
         frame: i64,
     ) -> (f64, f64) {
         let base = envelope.map_or(self.level, |envelope| envelope.value_at(frame));
-        (
-            base,
-            list.played(Travel::Send, route::LEVEL, frame, base),
-        )
+        (base, list.played(Travel::Send, route::LEVEL, frame, base))
     }
 
     /// Reports the level when the last block played it under modulation

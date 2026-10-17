@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-337 commands in 31 areas.
+338 commands in 32 areas.
 
 ## Permission classes
 
@@ -220,6 +220,7 @@ Each command has:
 | [`mixer_view.state`](#mixer_viewstate) | Mixer View State | `read` |  |  |
 | [`mixer_view.toggle`](#mixer_viewtoggle) | Mixer | `read` | `Cmd+Option+M` | `Ctrl+Alt+M` |
 | [`mixer_view.volume`](#mixer_viewvolume) | Mixer Volume | `read` |  |  |
+| [`modulation.state`](#modulationstate) | Modulation State | `read` |  |  |
 | [`note.add`](#noteadd) | Add Note | `edit` |  |  |
 | [`note.delete`](#notedelete) | Delete Notes | `destructive` |  |  |
 | [`note.move`](#notemove) | Move Notes | `edit` |  |  |
@@ -3735,6 +3736,24 @@ Arguments:
 | `shown` | boolean or null | no | Show it (true) or hide it (false); switches it if left out. |
 
 Result: [`MixerViewState`](#mixerviewstate).
+
+### Area `modulation`
+
+#### `modulation.state`
+
+**Modulation State**. Permission: `read`. Contexts: `global`.
+
+Reports the parameters a track's clips modulate (all tracks' when `track` is left out): for each, the track and the parameter (a mixer control, a send, or a device's parameter), its base (what its automation or its control sets), the value it played in the last block, and the clip envelopes modulating it, each with its value at the play position and what it contributes, as a share of the parameter's travel. A clip envelope modulates by a share: 0 to 1 for a volume or a send, which brings its level down to that share, and −1 to 1 for the rest. It reads back `clip.set_envelope_breakpoint` and the other clip envelope commands. Changes nothing.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) or null | no | The track, or every track when left out. |
+
+Result: [`ModulationState`](#modulationstate).
 
 ### Area `note`
 
@@ -12350,6 +12369,139 @@ What `mixer_view.state` and the other view commands return.
     "crossfader",
     "scene_tempo",
     "return_tracks"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ModulatedParameter`
+
+A parameter a track's clips modulate.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track whose parameter it is. |
+| `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter: a mixer control, a send, or a device's parameter. |
+| `base` | number | yes | Its base, in the parameter's own units: its automation envelope's value or its control's, as the last block played it while the song plays under modulation, and its control's otherwise. |
+| `played` | number | yes | The value it played in the last block; the base while nothing modulates it now. |
+| `sources` | array of [`ModulationSource`](#modulationsource) | yes | The clip envelopes modulating it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A parameter a track's clips modulate.",
+  "properties": {
+    "base": {
+      "description": "Its base, in the parameter's own units: its automation envelope's value or its control's, as the last block played it while the song plays under modulation, and its control's otherwise.",
+      "format": "double",
+      "type": "number"
+    },
+    "played": {
+      "description": "The value it played in the last block; the base while nothing modulates it now.",
+      "format": "double",
+      "type": "number"
+    },
+    "sources": {
+      "description": "The clip envelopes modulating it.",
+      "items": {
+        "$ref": "#/$defs/ModulationSource"
+      },
+      "type": "array"
+    },
+    "target": {
+      "$ref": "#/$defs/AutomationTarget",
+      "description": "The parameter: a mixer control, a send, or a device's parameter."
+    },
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "The track whose parameter it is."
+    }
+  },
+  "required": [
+    "track",
+    "target",
+    "base",
+    "played",
+    "sources"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ModulationSource`
+
+One source modulating a parameter: a clip's envelope.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The clip whose modulation envelope it is. |
+| `share` | number or null | yes | The envelope's value at the play position: a share, from 0 to 1 for a volume or a send's level and from −1 to 1 for the rest; `null` while the clip doesn't play there. |
+| `contribution` | number | yes | What it contributes at the play position, as a share of the parameter's travel; 0 while the clip doesn't play there. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One source modulating a parameter: a clip's envelope.",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The clip whose modulation envelope it is."
+    },
+    "contribution": {
+      "description": "What it contributes at the play position, as a share of the parameter's travel; 0 while the clip doesn't play there.",
+      "format": "double",
+      "type": "number"
+    },
+    "share": {
+      "description": "The envelope's value at the play position: a share, from 0 to 1 for a volume or a send's level and from −1 to 1 for the rest; `null` while the clip doesn't play there.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "clip",
+    "share",
+    "contribution"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ModulationState`
+
+What `modulation.state` reports.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `parameters` | array of [`ModulatedParameter`](#modulatedparameter) | yes | Every parameter a clip's envelope modulates, track by track. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `modulation.state` reports.",
+  "properties": {
+    "parameters": {
+      "description": "Every parameter a clip's envelope modulates, track by track.",
+      "items": {
+        "$ref": "#/$defs/ModulatedParameter"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "parameters"
   ],
   "type": "object"
 }

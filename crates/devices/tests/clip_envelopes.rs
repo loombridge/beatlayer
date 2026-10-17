@@ -137,7 +137,11 @@ fn a_devices_parameter_takes_the_clip_envelopes_modulation_on_the_exact_frame() 
     };
     // A block from the middle of the ramp: the gain is the control's position
     // plus the envelope's share of the travel, one frame at a time.
-    let gain = testing::utility_type().description.param(UTILITY_GAIN).unwrap().clone();
+    let gain = testing::utility_type()
+        .description
+        .param(UTILITY_GAIN)
+        .unwrap()
+        .clone();
     let out = run(utility.as_mut(), (BAR / 2) as i64);
     for (i, &sample) in out[0].iter().enumerate() {
         let frame = BAR / 2 + i;

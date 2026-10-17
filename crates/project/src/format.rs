@@ -154,6 +154,17 @@ pub struct SetInfo {
     pub schema: u32,
 }
 
+impl SetInfo {
+    /// Whether the set was saved before relative modulation, so its clip
+    /// envelopes hold parameter units that
+    /// [`Document::relative_clip_envelopes`](bl_model::Document::relative_clip_envelopes)
+    /// turns into modulation (the modulation spec, R5).
+    #[must_use]
+    pub fn before_relative_modulation(&self) -> bool {
+        self.schema < 5
+    }
+}
+
 /// Limits and settings for loading a set.
 #[derive(Clone, Copy, Debug)]
 pub struct LoadOptions {

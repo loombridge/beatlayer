@@ -13,6 +13,7 @@ pub const SET_EXTENSION: &str = "blset";
 ///   My Song.blset        the set: zstd-compressed JSON
 ///   Samples/Recorded/    audio recorded into the project
 ///   Samples/Imported/    files copied in by Collect All and Save
+///   Samples/Processed/   files that edits write, one folder for each kind
 ///   Backup/              the sets that the last 10 saves replaced
 /// ```
 ///
@@ -69,6 +70,14 @@ impl ProjectFolder {
     #[must_use]
     pub fn imported(&self) -> PathBuf {
         self.root.join("Samples").join("Imported")
+    }
+
+    /// `Samples/Processed/<kind>`, where the files an edit writes go
+    /// (Reverse, Crop, Consolidate, Freeze, Bounce). It isn't made with the
+    /// project: the writer makes it the first time it needs it.
+    #[must_use]
+    pub fn processed(&self, kind: &str) -> PathBuf {
+        self.root.join("Samples").join("Processed").join(kind)
     }
 
     /// `Backup`, which keeps the sets that recent saves replaced.
@@ -137,6 +146,10 @@ mod tests {
         assert_eq!(folder.set_path("My Song"), root.join("My Song.blset"));
         assert_eq!(folder.recorded(), root.join("Samples").join("Recorded"));
         assert_eq!(folder.imported(), root.join("Samples").join("Imported"));
+        assert_eq!(
+            folder.processed("Reverse"),
+            root.join("Samples").join("Processed").join("Reverse")
+        );
         assert_eq!(folder.backup(), root.join("Backup"));
         assert_eq!(ProjectFolder::of_set(&folder.set_path("Other")), folder);
         assert_eq!(

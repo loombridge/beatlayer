@@ -1454,6 +1454,10 @@ fn paths() -> BTreeMap<&'static str, Path> {
             ),
         ),
         (
+            "settings.set_temporary_folder",
+            settings("file-folder", nothing, "Browse", Key::Enter),
+        ),
+        (
             "settings.set_warp_recorded_audio",
             settings(
                 "record-warp-launch",

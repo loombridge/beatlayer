@@ -46,6 +46,7 @@ use serde_json::{Value, json};
 
 use crate::arrangement::editing::EditKeys;
 use crate::clip_envelope::{self, EnvelopeEditor};
+use crate::launch_panel;
 use crate::main_window::UiEvent;
 use crate::theme::Theme;
 use crate::widgets::{self, Choice, NO_LEDS};
@@ -815,6 +816,24 @@ impl ClipViewUi {
             self.marquee = None;
             self.envelope.reset();
             return;
+        };
+        // A Session clip's Launch Properties panel takes the left of the view.
+        let rect = if shell
+            .clip_view()
+            .shown_session_clip(doc, shell.arrangement())
+            .is_some()
+        {
+            launch_panel::show(
+                ui,
+                shell,
+                theme,
+                launch_panel::panel_rect(rect),
+                clip,
+                events,
+            );
+            launch_panel::editor_rect(rect)
+        } else {
+            rect
         };
         let folded = shell.clip_view().is_folded(clip);
         if self.shown != Some(clip) || self.folded != folded {

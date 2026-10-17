@@ -176,6 +176,25 @@ impl NoteBuffer {
         }
     }
 
+    /// Adds a note in order of offset, after the notes at its offset, but
+    /// before any note-on there if it ends a note, or drops and counts it if
+    /// the buffer is full. Never allocates.
+    pub fn insert(&mut self, note: NoteEvent) {
+        if self.notes.len() == self.notes.capacity() {
+            self.dropped += 1;
+            return;
+        }
+        let ons = |n: &NoteEvent| n.kind == NoteKind::On;
+        let at = self
+            .notes
+            .iter()
+            .rposition(|n| {
+                n.offset < note.offset || (n.offset == note.offset && !(ons(n) && !ons(&note)))
+            })
+            .map_or(0, |i| i + 1);
+        self.notes.insert(at, note);
+    }
+
     /// The notes, in the order they were written.
     #[must_use]
     pub fn notes(&self) -> &[NoteEvent] {

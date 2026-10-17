@@ -81,6 +81,13 @@ pub trait SetStore {
         Vec::new()
     }
 
+    /// Tells the store where an unsaved set's processed files are written
+    /// (the Temporary Folder, WP-4.20), so the first save can move them into
+    /// the project. A store that keeps no media table ignores it.
+    fn set_temporary_folder(&mut self, folder: PathBuf) {
+        let _ = folder;
+    }
+
     /// Gives the store where floating devices' windows sit (WP-2.5b), for
     /// the next save to write beside the document. A store that keeps no
     /// window frames ignores it.
@@ -166,6 +173,9 @@ pub struct ProjectFiles {
     /// Files added since the set was opened (WP-1.10), by their paths on
     /// disk, for the next save's media table.
     added: BTreeMap<ContentHash, (PathBuf, u64)>,
+    /// The Temporary Folder, where a set never saved has its processed
+    /// files (WP-4.20).
+    temporary: Option<PathBuf>,
     /// Floating devices' window frames (WP-2.5b): the open set's, then the
     /// shell's for the next save.
     windows: DeviceWindows,
@@ -219,6 +229,13 @@ impl SetStore for ProjectFiles {
         editor: &Editor,
     ) -> Result<(PathBuf, Vec<String>), String> {
         let placement = place_set(chosen)?;
+        // Spec: audio-clip-editing R5. A set never saved has its processed
+        // files in the Temporary Folder; they move into the new project.
+        let moved = if self.set.is_none() {
+            self.move_processed(ProjectFolder::of_set(&placement.path).root())?
+        } else {
+            Vec::new()
+        };
         let mut media = self.media.clone();
         let note = match &self.set {
             Some(set) => repoint_media(
@@ -234,6 +251,7 @@ impl SetStore for ProjectFiles {
                 Ok((placement.path, warnings))
             }
             Err(error) => {
+                self.move_back(moved);
                 if let Some(folder) = &placement.new_folder {
                     // Spec: app-shell R20. Only an empty folder can go, so
                     // this never removes anything but what the save made.
@@ -279,6 +297,10 @@ impl SetStore for ProjectFiles {
 
     fn add_media(&mut self, hash: ContentHash, path: &Path, size: u64) {
         self.added.insert(hash, (path.to_path_buf(), size));
+    }
+
+    fn set_temporary_folder(&mut self, folder: PathBuf) {
+        self.temporary = Some(folder);
     }
 
     fn media_files(&self) -> Vec<(ContentHash, PathBuf, u64)> {
@@ -414,6 +436,58 @@ impl SetStore for ProjectFiles {
 }
 
 impl ProjectFiles {
+    /// Moves each file the set wrote into the Temporary Folder into
+    /// `Samples/Processed/<kind>/` of the project folder `project`, under a
+    /// free name, and points `added` at it. Returns where each came from, to
+    /// put back if the save fails.
+    fn move_processed(&mut self, project: &Path) -> Result<Vec<(ContentHash, PathBuf)>, String> {
+        let Some(temporary) = self.temporary.clone() else {
+            return Ok(Vec::new());
+        };
+        let project = ProjectFolder::new(project);
+        let mut moved = Vec::new();
+        for (hash, (path, size)) in self.added.clone() {
+            let Some(rest) = path.strip_prefix(&temporary).ok() else {
+                continue;
+            };
+            // `<kind>/<name>`, as the shell writes them.
+            let mut parts = rest.components();
+            let (Some(Component::Normal(kind)), Some(Component::Normal(name)), None) =
+                (parts.next(), parts.next(), parts.next())
+            else {
+                continue;
+            };
+            let folder = project.processed(&kind.to_string_lossy());
+            let placed = std::fs::create_dir_all(&folder)
+                .map_err(|e| format!("couldn't create {}: {e}", folder.display()))
+                .and_then(|()| free_import(&folder, &name.to_string_lossy()))
+                .and_then(|destination| move_file(&path, &destination).map(|()| destination));
+            match placed {
+                Ok(destination) => {
+                    self.added.insert(hash, (destination, size));
+                    moved.push((hash, path));
+                }
+                Err(error) => {
+                    self.move_back(moved);
+                    return Err(error);
+                }
+            }
+        }
+        Ok(moved)
+    }
+
+    /// Puts files [`ProjectFiles::move_processed`] moved back where they
+    /// were, after a save that failed.
+    fn move_back(&mut self, moved: Vec<(ContentHash, PathBuf)>) {
+        for (hash, from) in moved {
+            if let Some((now, size)) = self.added.get(&hash).cloned()
+                && move_file(&now, &from).is_ok()
+            {
+                self.added.insert(hash, (from, size));
+            }
+        }
+    }
+
     /// The open set's project folder, the folder its file is in, if it has
     /// a file.
     fn folder(&self) -> Option<PathBuf> {
@@ -588,7 +662,7 @@ const MOST_IMPORT_COPIES: u32 = 1_000;
 /// A free path in `folder` for a copy of a file called `name`: the name
 /// itself, or `<stem> 2.<ext>` and so on when something already has it, so
 /// collecting never writes over a file (WP-2.25).
-fn free_import(folder: &Path, name: &str) -> Result<PathBuf, String> {
+pub(crate) fn free_import(folder: &Path, name: &str) -> Result<PathBuf, String> {
     let path = Path::new(name);
     let stem = path
         .file_stem()
@@ -619,6 +693,15 @@ fn free_import(folder: &Path, name: &str) -> Result<PathBuf, String> {
         "every name for {name} up to \"{stem} {MOST_IMPORT_COPIES}{extension}\" is taken in {}",
         folder.display()
     ))
+}
+
+/// Moves a file, copying it when `from` and `to` are on different volumes.
+fn move_file(from: &Path, to: &Path) -> Result<(), String> {
+    std::fs::rename(from, to).or_else(|_| {
+        std::fs::copy(from, to)
+            .and_then(|_| std::fs::remove_file(from))
+            .map_err(|e| format!("couldn't move {} to {}: {e}", from.display(), to.display()))
+    })
 }
 
 /// Re-points the media table's paths, relative to the project folder

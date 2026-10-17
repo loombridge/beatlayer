@@ -341,17 +341,11 @@ impl MidiClipPlayer {
                 note.offset = frames.saturating_sub(1);
             }
         }
-        self.scratch_notes.sort_by(|a, b| {
-            a.offset
-                .cmp(&b.offset)
-                .then_with(|| match (a.kind, b.kind) {
-                    (NoteKind::Off, NoteKind::On) => std::cmp::Ordering::Less,
-                    (NoteKind::On, NoteKind::Off) => std::cmp::Ordering::Greater,
-                    _ => std::cmp::Ordering::Equal,
-                })
-        });
+        // In order of offset, note-offs before note-ons on one frame. The
+        // buffer puts each note in its place without allocating, where a
+        // stable sort would take heap scratch for a long run of notes.
         for &note in &self.scratch_notes {
-            block.send_note(note);
+            block.insert_note(note);
         }
         self.scratch_notes.clear();
     }

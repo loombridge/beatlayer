@@ -24,6 +24,15 @@ fn option_shift() -> Modifiers {
     Modifiers::ALT | Modifiers::SHIFT
 }
 
+/// Option+Tab on macOS, Ctrl+Tab on Windows and Linux (S-CLIPMODE-002).
+fn next_tab() -> Modifiers {
+    if cfg!(target_os = "macos") {
+        Modifiers::ALT
+    } else {
+        Modifiers::CTRL
+    }
+}
+
 struct Env {
     h: Harness,
     clip: ClipId,
@@ -220,11 +229,11 @@ fn the_tab_keys_show_and_cycle_the_tabs() {
     assert_eq!(e.h.shell.clip_view().tab(), ClipTab::Envelopes);
     e.h.key(egui::Key::Num1, option_shift());
     assert_eq!(e.h.shell.clip_view().tab(), ClipTab::Notes);
-    e.h.key(egui::Key::Tab, Modifiers::ALT);
+    e.h.key(egui::Key::Tab, next_tab());
     assert_eq!(e.h.shell.clip_view().tab(), ClipTab::Envelopes);
     // The reference records Option+Tab for the note editor and the sample
     // editor only, so from the Envelopes tab the other tab keys go back.
-    e.h.key(egui::Key::Tab, Modifiers::ALT);
+    e.h.key(egui::Key::Tab, next_tab());
     assert_eq!(e.h.shell.clip_view().tab(), ClipTab::Envelopes);
     e.h.key(egui::Key::Num1, option_shift());
     assert_eq!(e.h.shell.clip_view().tab(), ClipTab::Notes);

@@ -557,7 +557,10 @@ trigger = "press"
 milestone = "M5"
 mac = ["Cmd+G"]
 win = ["Ctrl+G"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "device.group", contexts = ["device-view"] },
+]
 
 [[shortcut]]
 id = "S-DEV-002"
@@ -568,7 +571,10 @@ trigger = "press"
 milestone = "M5"
 mac = ["Cmd+Shift+G"]
 win = ["Ctrl+Shift+G"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "device.ungroup", contexts = ["device-view"] },
+]
 
 [[shortcut]]
 id = "S-DEV-003"
@@ -579,7 +585,10 @@ trigger = "press"
 milestone = "M5"
 mac = ["Option+click a device activator"]
 win = ["Alt+click a device activator"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "device.set_enabled_all", contexts = ["device-view"], toggles = "enabled" },
+]
 
 [[shortcut]]
 id = "S-DEV-004"

@@ -28,6 +28,7 @@
 //! the framework's tests use. The kit's two example plug-ins join the
 //! device list with the `kit-examples` feature, off by default.
 
+pub mod bus_compressor;
 pub mod channel_eq;
 pub mod compressor;
 pub mod delay;
@@ -35,6 +36,7 @@ pub mod dice;
 mod dynamics;
 pub mod eq;
 mod framework;
+pub mod gate;
 pub mod hold;
 pub mod kit;
 pub mod lfo;
@@ -52,12 +54,14 @@ pub mod three_band_eq;
 pub mod touch;
 pub mod utility;
 
+pub use bus_compressor::{BUS_COMPRESSOR, Bond, bus_compressor_type};
 pub use channel_eq::{CHANNEL_EQ, Strip, channel_eq_type};
 pub use compressor::{COMPRESSOR, Squeeze, compressor_type};
 pub use delay::{DELAY, delay_type};
 pub use dice::{DICE, dice_type};
 pub use eq::{Contour, EQ, eq_type};
 pub use framework::{Audio, NativeDevice, NativeNode, ParamBank, add};
+pub use gate::{GATE, Shutter, gate_type};
 pub use hold::{HOLD, hold_type};
 pub use kit::{KitFactory, KitHost};
 pub use lfo::{Lfo, Rate, Shape, Stereo, Wave};
@@ -90,6 +94,8 @@ pub fn display(
         EQ => Some(eq::display(device, description, values, data)),
         COMPRESSOR => Some(compressor::display(device, description, values, data)),
         CHANNEL_EQ => Some(channel_eq::display(device, description, values, data)),
+        BUS_COMPRESSOR => Some(bus_compressor::display(device, description, values, data)),
+        GATE => Some(gate::display(device, description, values, data)),
         THREE_BAND_EQ => Some(three_band_eq::display(device, description, values, data)),
         _ => None,
     }
@@ -108,6 +114,8 @@ pub fn register(registry: &mut Registry) {
     eq::register(registry);
     channel_eq::register(registry);
     three_band_eq::register(registry);
+    gate::register(registry);
+    bus_compressor::register(registry);
     sampler::register(registry);
     lift::register(registry);
     touch::register(registry);

@@ -823,6 +823,7 @@ pub fn display(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sections::{ANALYSER_MAX_HZ, ANALYSER_MIN_HZ, ANALYSER_WINDOW};
 
     // Spec: eq R5
     #[test]

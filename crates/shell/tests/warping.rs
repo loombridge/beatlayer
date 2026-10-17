@@ -158,6 +158,11 @@ fn a_marker_edit_on_several_clips_of_one_length_is_one_step() {
             "clip.shift_warp_marker",
             json!({ "clips": [a], "marker": 0, "by": 1.5 }),
         ),
+        // Four quarter notes at 120 BPM are two seconds into the file.
+        (
+            "clip.insert_warp_marker",
+            json!({ "clips": [a], "beat": 4 * Ticks::QUARTER.get() }),
+        ),
     ] {
         let error = shell.run(command, args).unwrap_err().to_string();
         assert!(error.contains("leave the file"), "{error}");

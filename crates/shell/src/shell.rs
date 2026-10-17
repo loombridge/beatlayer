@@ -4308,14 +4308,14 @@ impl Shell {
                 .ok()?;
             Some(info.frames? as f64 / f64::from(info.sample_rate))
         };
-        let (clips, time) = match &command {
-            Command::InsertWarpMarker { clips, time, .. } => (clips, time.map(|t| (0, t))),
-            Command::ShiftWarpMarker { clips, marker, by } => (clips, Some((*marker, *by))),
-            Command::MoveWarpMarkers { clips, .. } | Command::DeleteWarpMarkers { clips, .. } => {
-                (clips, None)
-            }
-            _ => return Ok(()),
-        };
+        let (clips, places) =
+            match &command {
+                Command::InsertWarpMarker { clips, .. }
+                | Command::ShiftWarpMarker { clips, .. } => (clips, true),
+                Command::MoveWarpMarkers { clips, .. }
+                | Command::DeleteWarpMarkers { clips, .. } => (clips, false),
+                _ => return Ok(()),
+            };
         let lengths: Vec<Option<f64>> = clips.iter().map(length).collect();
         let known: Vec<f64> = lengths.iter().flatten().copied().collect();
         if known.len() == clips.len()
@@ -4327,20 +4327,30 @@ impl Shell {
                 "the clips' files aren't all as long as each other's".to_owned(),
             ));
         }
-        let Some((marker, time)) = time else {
+        if !places {
             return Ok(());
-        };
+        }
         for (&clip, length) in clips.iter().zip(lengths) {
+            let Some(bl_model::ClipData::Audio(audio)) = document.clip(clip).map(|c| &c.data)
+            else {
+                continue;
+            };
             let at = match &command {
                 // A shift moves a marker from where it is.
-                Command::ShiftWarpMarker { .. } => document
-                    .clip(clip)
-                    .and_then(|c| match &c.data {
-                        bl_model::ClipData::Audio(audio) => audio.warp_markers.get(marker),
-                        bl_model::ClipData::Midi(_) => None,
-                    })
-                    .map(|m| m.time + time),
-                _ => Some(time),
+                Command::ShiftWarpMarker { marker, by, .. } => {
+                    audio.warp_markers.get(*marker).map(|m| m.time + by)
+                }
+                Command::InsertWarpMarker {
+                    time: Some(time), ..
+                } => Some(*time),
+                // A marker put on a beat goes at the time the map places it.
+                Command::InsertWarpMarker {
+                    beat: Some(beat), ..
+                } => audio
+                    .warp_map()
+                    .ok()
+                    .map(|map| map.beat_to_time(beat.get() as f64)),
+                _ => None,
             };
             if let (Some(at), Some(length)) = (at, length)
                 && at > length + 1e-9

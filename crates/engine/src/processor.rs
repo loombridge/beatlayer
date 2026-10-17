@@ -216,6 +216,11 @@ pub struct Processor {
     metronome: MetronomeEngine,
     /// `channels` channels of `max_frames` frames.
     output: Vec<f32>,
+    /// The device's output channels of `max_frames` frames each, holding
+    /// what the tracks on Ext. Out play (WP-2.13): `ext_width` of them are
+    /// in use.
+    ext_output: Vec<f32>,
+    ext_width: usize,
     /// Frames in the last block.
     last: usize,
     clock: u64,
@@ -280,6 +285,8 @@ impl Processor {
             fallback_time_signatures: TimeSignatureMap::default(),
             metronome: MetronomeEngine::new(),
             output: vec![0.0; config.channels * config.max_frames],
+            ext_output: vec![0.0; config.output_channels * config.max_frames],
+            ext_width: 0,
             last: 0,
             clock: 0,
             playing: false,
@@ -553,6 +560,8 @@ impl Processor {
             channels: self.config.channels,
             frames: self.last,
             stride: self.config.max_frames,
+            ext: &self.ext_output,
+            ext_channels: self.ext_width,
         }
     }
 
@@ -1123,6 +1132,12 @@ impl Processor {
     /// there, so the next part starts at the loop's start.
     fn render(&mut self, offset: usize, length: usize) {
         let stride = self.config.max_frames;
+        // Every device channel, so a count-in or a part that plays fewer
+        // of them leaves no earlier block's Ext. Out behind.
+        for c in 0..self.config.output_channels {
+            let to = c * stride + offset;
+            self.ext_output[to..to + length].fill(0.0);
+        }
         if self.metronome.is_counting_in() {
             for c in 0..self.config.channels {
                 let to = c * stride + offset;
@@ -1161,8 +1176,12 @@ impl Processor {
                     let from = c.min(program.channels - 1);
                     self.output[to..to + length].copy_from_slice(program.output(from, length));
                 }
+                // Spec: routing R3. A channel the device lacks plays nothing.
+                self.ext_width = program.ext_width().min(self.config.output_channels);
+                program.mix_external(&mut self.ext_output, self.ext_width, stride, offset, length);
             }
             None => {
+                self.ext_width = 0;
                 for c in 0..self.config.channels {
                     let to = c * stride + offset;
                     self.output[to..to + length].fill(0.0);
@@ -1367,6 +1386,8 @@ pub struct Output<'a> {
     channels: usize,
     frames: usize,
     stride: usize,
+    ext: &'a [f32],
+    ext_channels: usize,
 }
 
 impl Output<'_> {
@@ -1392,5 +1413,25 @@ impl Output<'_> {
         assert!(index < self.channels, "channel {index} out of range");
         let start = index * self.stride;
         &self.data[start..start + self.frames]
+    }
+
+    /// Device channels the tracks on Ext. Out play on: channel 0 up to
+    /// this many, counted from the device's first.
+    #[must_use]
+    pub fn ext_channels(&self) -> usize {
+        self.ext_channels
+    }
+
+    /// Device channel `index` of what the Ext. Out tracks play. It is added
+    /// to the device's channel, which Main Out may share.
+    ///
+    /// # Panics
+    ///
+    /// If `index` isn't less than [`ext_channels`](Self::ext_channels).
+    #[must_use]
+    pub fn ext_channel(&self, index: usize) -> &[f32] {
+        assert!(index < self.ext_channels, "channel {index} out of range");
+        let start = index * self.stride;
+        &self.ext[start..start + self.frames]
     }
 }

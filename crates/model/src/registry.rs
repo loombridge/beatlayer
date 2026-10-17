@@ -862,8 +862,9 @@ const ENTRIES: &[Entry] = &[
             does: `default` (Main, or the group the track is in), `main` (Main, even from \
             inside a group), `track` with another audio track (its input, heard while that \
             track monitors it) or the track's own group, `sends_only` (only through its sends \
-            to the return tracks), or `external` (Ext. Out, which carries nothing until audio \
-            outputs are built). Audio, group, and return tracks take any of these. A routing \
+            to the return tracks), or `external` (Ext. Out: the track plays on the audio \
+            interface's output channels, a single channel or a stereo pair, the first pair by \
+            default, and not into Main). Audio, group, and return tracks take any of these. A routing \
             may make a loop, as in Live; the engine then plays the routing that closes the \
             loop as silence.",
     },

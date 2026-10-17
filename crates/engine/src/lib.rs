@@ -154,6 +154,9 @@ pub struct EngineConfig {
     /// Ext. In (WP-2.13). Zero — no input — until a device with input
     /// opens.
     pub input_channels: usize,
+    /// The audio device's output channels, for tracks whose Audio To is
+    /// Ext. Out (WP-2.13). Zero — no Ext. Out plays — until a device opens.
+    pub output_channels: usize,
     /// Messages the queue to the audio thread holds. More wait on the
     /// sending side ([`Sender::backlog`]).
     pub queue_capacity: usize,
@@ -192,6 +195,7 @@ impl EngineConfig {
             max_frames,
             channels: 2,
             input_channels: 0,
+            output_channels: 0,
             queue_capacity: 4096,
             max_pending_events: 4096,
             max_scheduled: 256,

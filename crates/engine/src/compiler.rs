@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use bl_model::{
-    Change, ChangeSet, ContentHash, DeviceId, DeviceKind, Document, Mixer, OrdMap, ParamId,
+    Change, ChangeSet, ContentHash, DeviceId, DeviceKind, Document, Mixer, OrdMap, Output, ParamId,
     SceneId, Tap, Track, TrackId, TrackKind,
 };
 
@@ -17,8 +17,8 @@ use crate::midi_clips::{MidiClipList, MidiClipPlayer};
 use crate::mixer::{self, Route, Solo, TrackMixer, route};
 use crate::node::{NodeData, NodeKey, NoteBuffer, ParamValue};
 use crate::program::{
-    DeviceInput, DeviceSidechain, EngineProgram, Input, Instance, Migration, NO_DELAY, NodeSlot,
-    Span, Task, delay_storage,
+    DeviceInput, DeviceSidechain, EngineProgram, ExtOut, Input, Instance, Migration, NO_DELAY,
+    NodeSlot, Span, Task, delay_storage,
 };
 use crate::registry::Registry;
 use crate::routing::{Edge, Graph, Via};
@@ -448,6 +448,18 @@ impl Compiler {
         let tasks = build.tasks.len();
         let midi = crate::midi::MidiRoutes::compile(document, &build.tasks);
         let size = self.config.channels * self.config.max_frames;
+        let ext_outs = document
+            .track_order()
+            .into_iter()
+            .filter_map(|id| match document.track(id)?.routing().output {
+                // A track that hears Main is silent (R14), Ext. Out too.
+                Output::External { channel } if !graph.hears_main.contains(&id) => Some(ExtOut {
+                    task: task_of[&id],
+                    channel,
+                }),
+                _ => None,
+            })
+            .collect();
         let (order, dependents) = run_order(&build);
         compensate(&mut build, &order);
         // Automation is placed with each node's delay in it (WP-2.11), so
@@ -483,6 +495,7 @@ impl Compiler {
             channels: self.config.channels,
             max_frames: self.config.max_frames,
             output: task_of[&document.main_id()],
+            ext_outs,
             tempo: document.settings().tempo.clone(),
             time_signatures: document.settings().time_signatures.clone(),
             sample_rate: self.config.sample_rate,

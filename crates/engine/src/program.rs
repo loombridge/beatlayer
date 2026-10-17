@@ -102,6 +102,9 @@ pub struct EngineProgram {
     pub(crate) max_frames: usize,
     /// The task whose buffer is the engine's output: Main's.
     pub(crate) output: u32,
+    /// The tracks that play on the device's channels instead of into Main
+    /// (Audio To set to Ext. Out), in display order.
+    pub(crate) ext_outs: Vec<ExtOut>,
     pub(crate) tempo: TempoMap,
     pub(crate) time_signatures: TimeSignatureMap,
     pub(crate) sample_rate: SampleRate,
@@ -113,6 +116,14 @@ pub struct EngineProgram {
     /// The MIDI tracks' inputs, and what each received in the last block
     /// (WP-2.2).
     pub(crate) midi: MidiRoutes,
+}
+
+/// A track whose Audio To is Ext. Out: its task, and the device channels it
+/// plays on (the routing spec, R3, R16).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ExtOut {
+    pub(crate) task: u32,
+    pub(crate) channel: Channel,
 }
 
 /// What can sit in a program's slot.
@@ -970,8 +981,62 @@ impl EngineProgram {
 
     /// The output's channel `c` from the last run, `frames` long.
     pub(crate) fn output(&self, c: usize, frames: usize) -> &[f32] {
-        let start = self.output as usize * self.channels * self.max_frames + c * self.max_frames;
+        self.task_output(self.output, c, frames)
+    }
+
+    /// Task `task`'s channel `c` from the last run, `frames` long.
+    fn task_output(&self, task: u32, c: usize, frames: usize) -> &[f32] {
+        let start = task as usize * self.channels * self.max_frames + c * self.max_frames;
         &self.pool[start..start + frames.min(self.max_frames)]
+    }
+
+    /// How many device channels the Ext. Out tracks reach: one past the
+    /// highest.
+    pub(crate) fn ext_width(&self) -> usize {
+        self.ext_outs
+            .iter()
+            .map(|e| match e.channel {
+                Channel::Mono(c) => usize::from(c),
+                Channel::Pair(c) => usize::from(c) + 1,
+            })
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// Adds the Ext. Out tracks from the last run onto `out`, which holds
+    /// `width` device channels `stride` apart, `length` frames from
+    /// `offset`. A pair plays left and right on its two channels, a single
+    /// channel takes both added and 6 dB down (the manual, 17.2.1); a
+    /// channel past `width` is the device's absence and plays nothing.
+    pub(crate) fn mix_external(
+        &self,
+        out: &mut [f32],
+        width: usize,
+        stride: usize,
+        offset: usize,
+        length: usize,
+    ) {
+        for ext in &self.ext_outs {
+            let left = self.task_output(ext.task, 0, length);
+            let right = self.task_output(ext.task, 1.min(self.channels - 1), length);
+            let mut add = |channel: usize, gain_l: f32, gain_r: f32| {
+                // Channels count from 1; 0 names nothing.
+                let Some(channel) = channel.checked_sub(1).filter(|&c| c < width) else {
+                    return;
+                };
+                let to = channel * stride + offset;
+                for (i, sample) in out[to..to + length].iter_mut().enumerate() {
+                    *sample += left[i] * gain_l + right[i] * gain_r;
+                }
+            };
+            match ext.channel {
+                Channel::Mono(c) => add(usize::from(c), 0.5, 0.5),
+                Channel::Pair(c) => {
+                    add(usize::from(c), 1.0, 0.0);
+                    add(usize::from(c) + 1, 0.0, 1.0);
+                }
+            }
+        }
     }
 
     /// The order a pool of workers would finish the tasks in if each took

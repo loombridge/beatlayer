@@ -183,7 +183,7 @@ impl Channel {
     pub fn label(self) -> String {
         match self {
             Self::Mono(channel) => channel.to_string(),
-            Self::Pair(channel) => format!("{channel}/{}", channel + 1),
+            Self::Pair(channel) => format!("{channel}/{}", u32::from(channel) + 1),
         }
     }
 }
@@ -303,7 +303,8 @@ pub enum Monitor {
     description = "Where a track's audio goes: `default` (Main, or the group the track is \
                    in), `main` (Main, even from inside a group), `track` (another audio \
                    track's input, or the group the track is in), `sends_only` (only through \
-                   its sends), or `external` (Ext. Out)."
+                   its sends), or `external` (Ext. Out, the audio interface's outputs, with its \
+                   `channel`: a single channel or a stereo pair, the first pair by default)."
 )]
 pub enum Output {
     /// Main, or the group the track is in: where a new track's audio goes.
@@ -311,9 +312,14 @@ pub enum Output {
     Default,
     /// Main, even from a track inside a group.
     Main,
-    /// Ext. Out: the audio interface's outputs. It carries nothing until
-    /// external outputs arrive (WP-2.13).
-    External,
+    /// Ext. Out: the audio interface's outputs. The track plays on those
+    /// device channels and not into Main (WP-2.13).
+    External {
+        /// Which of the interface's outputs, counted from 1: a single
+        /// channel or a stereo pair. The first pair (1/2) by default.
+        #[serde(default, skip_serializing_if = "Channel::is_first_pair")]
+        channel: Channel,
+    },
     /// Nowhere but the track's sends.
     SendsOnly,
     /// Another track: an audio track's input (Track In), or the group the

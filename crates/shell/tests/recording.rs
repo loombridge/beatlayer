@@ -429,6 +429,18 @@ fn impulse_wav(path: &Path, frames: u32, at: u32) {
 /// and the frame of the file at which the loud sample of a clip that plays
 /// it at song frame 5,000 is found.
 fn impulse_in_recording(compensation_ms: f64) -> (Ticks, usize, Value) {
+    let (start, loudest, status, _) = impulse_through(compensation_ms, None, 1);
+    (start, loudest, status)
+}
+
+/// The same, with the impulse's track on Ext. Out `ext_out` (Main otherwise)
+/// and the recorded track on Ext. In `listen`; also returns the recording's
+/// peak.
+fn impulse_through(
+    compensation_ms: f64,
+    ext_out: Option<Value>,
+    listen: u16,
+) -> (Ticks, usize, Value, f32) {
     let dir = TestDir::new("loopback");
     let (backend, _) = four_channel_backend();
     let mut shell = shell_on(backend.with_latency(400, 600).with_loopback(1_480));
@@ -463,13 +475,21 @@ fn impulse_in_recording(compensation_ms: f64) -> (Ticks, usize, Value) {
         )
         .unwrap();
     let player = shell.editor().document().top_level().last().unwrap();
+    if let Some(channel) = ext_out {
+        shell
+            .run(
+                "routing.set_output",
+                json!({ "track": player, "output": { "type": "external", "channel": channel } }),
+            )
+            .unwrap();
+    }
     shell
         .run(
             "browser.add_to_arrangement",
             json!({ "paths": [file.display().to_string()], "track": player, "at": 0 }),
         )
         .unwrap();
-    let track = armed_track(&mut shell, 1, "Loopback");
+    let track = armed_track(&mut shell, listen, "Loopback");
     shell
         .run(
             "routing.set_monitor",
@@ -495,7 +515,7 @@ fn impulse_in_recording(compensation_ms: f64) -> (Ticks, usize, Value) {
         .max_by(|&a, &b| samples[a].abs().total_cmp(&samples[b].abs()))
         .unwrap();
     let status = shell.run("audio.status", json!({})).unwrap();
-    (clip.start, loudest, status)
+    (clip.start, loudest, status, samples[loudest].abs())
 }
 
 // Spec: recording R7; WP-2.13. A sound played at song frame 5,000 comes back
@@ -521,6 +541,22 @@ fn a_loopback_records_aligned_and_the_compensation_moves_recordings_by_exactly_i
         5_960,
         "negative moves it later"
     );
+}
+
+// Spec: routing R3; WP-2.13. Over the loopback, which carries each output
+// channel to the input of the same number, a clip on a track set to Ext. Out
+// 3/4 is heard on input channels 3 and 4 and not on 1 or 2, so Main doesn't
+// carry it.
+#[test]
+fn a_track_on_ext_out_reaches_its_device_channels_and_not_the_first_pair() {
+    let pair_3_4 = json!({ "type": "pair", "channel": 3 });
+    let (_, at, _, peak) = impulse_through(10.0, Some(pair_3_4.clone()), 3);
+    assert_eq!(at, 5_000, "the impulse is on channel 3");
+    assert!(peak > 0.5, "{peak}");
+    let (_, _, _, peak) = impulse_through(10.0, Some(pair_3_4.clone()), 4);
+    assert!(peak > 0.5, "the pair's right side is on channel 4: {peak}");
+    let (_, _, _, peak) = impulse_through(10.0, Some(pair_3_4), 1);
+    assert_eq!(peak, 0.0, "not on channel 1, so not in Main");
 }
 
 // Spec: recording R7; WP-2.13. The compensation keeps to two decimals and to

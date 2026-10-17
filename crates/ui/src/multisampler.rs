@@ -800,7 +800,10 @@ impl MultisamplerUi {
                     ((wave.first + (px as f64 + 1.0) * frames_per_point) as usize).max(from + 1);
                 let (mut low, mut high) = (0.0f32, 0.0f32);
                 let sum = wave.channels == Channels::Mono;
-                for frame_index in from..to.min(wave.audio.frames()) {
+                // A long stretch per pixel is sampled, not read in full: at
+                // most 64 frames a column keep a big file's drawing quick.
+                let stride = ((to - from) / 64).max(1);
+                for frame_index in (from..to.min(wave.audio.frames())).step_by(stride) {
                     let value = if sum {
                         channel_data.iter().map(|d| d[frame_index]).sum::<f32>()
                             / channel_data.len() as f32
@@ -1326,7 +1329,7 @@ impl MultisamplerUi {
         let mut inner = ui.new_child(UiBuilder::new().max_rect(body).accessibility_parent(region));
         inner.set_clip_rect(body);
         let layers = &device.layers.list;
-        egui::ScrollArea::vertical()
+        let scrolled = egui::ScrollArea::vertical()
             .id_salt(("zone-rows", frame.id))
             .auto_shrink([false, false])
             .show_rows(&mut inner, row_h, layers.len(), |ui, range| {
@@ -1355,7 +1358,15 @@ impl MultisamplerUi {
             );
         }
         self.update_drag(ui, frame, parts.bars, events);
-        self.drop_files(ui, frame, layers.len(), parts, row_h, rect, events);
+        let offset = scrolled.state.offset.y;
+        self.drop_files(
+            ui,
+            frame,
+            layers.len(),
+            (parts, row_h, offset),
+            rect,
+            events,
+        );
     }
 
     /// Carries a drag on zones on: the zones follow the pointer, each as the
@@ -1398,8 +1409,7 @@ impl MultisamplerUi {
         ui: &Ui,
         frame: &DeviceFrame,
         count: usize,
-        parts: Areas,
-        row_h: f32,
+        (parts, row_h, offset): (Areas, f32, f32),
         rect: Rect,
         events: &mut Vec<UiEvent>,
     ) {
@@ -1421,7 +1431,8 @@ impl MultisamplerUi {
         }
         // The row the pointer is over, counted in rows from the top of the
         // list as scrolled (the first row sits at the list's top).
-        let index = (((pointer.y - parts.bars.top()) / row_h).max(0.0) as usize).min(count);
+        let index =
+            (((pointer.y - parts.bars.top() + offset) / row_h).max(0.0) as usize).min(count);
         invoke(
             events,
             bl_shell::multisampler_commands::ADD_LAYERS,

@@ -1,7 +1,7 @@
 //! The Session View's launch quantisation and stop commands (WP-3.2): the
 //! global launch quantisation the Control Bar's Quantization Menu shows
 //! (L-CTRL-010), its enabled switch, and stopping the clips of the tracks
-//! with a selected slot (S-SES-006).
+//! with a selected slot (S-SES-006), and launching the selection (S-SES-001).
 //!
 //! The global launch quantisation is saved with the set beside the song,
 //! like the view settings, and changing it is no undo step; `bl-shell` runs
@@ -34,6 +34,10 @@ pub const SET_QUANTIZATION_ENABLED: &str = "session.set_quantization_enabled";
 /// slot (S-SES-006).
 pub const STOP_SELECTED: &str = "session.stop_selected";
 
+/// `session.launch_selected`: launch the selected clips and scenes
+/// (S-SES-001).
+pub const LAUNCH_SELECTED: &str = "session.launch_selected";
+
 /// Every command [`register`] adds, so a host knows which IDs to send to
 /// `bl-shell`'s `Shell::run`.
 pub const IDS: &[&str] = &[
@@ -43,6 +47,7 @@ pub const IDS: &[&str] = &[
     TRIPLET_QUANTIZATION,
     SET_QUANTIZATION_ENABLED,
     STOP_SELECTED,
+    LAUNCH_SELECTED,
 ];
 
 /// Whether `id` is one of the launch quantisation's commands.
@@ -168,6 +173,22 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .permission(Permission::Read)
             .context(Session)
             .binding("S-SES-006")
+            .args::<NoArgs>()
+            .result::<()>(),
+    )?;
+    registry.register(
+        CommandSpec::new(LAUNCH_SELECTED, "Launch the Selected Clips and Scenes")
+            .description(
+                "Launches every selected slot that holds a clip and every selected scene, as \
+                 Enter does in the Session View: each runs `session.launch` or \
+                 `session.launch_scene`, so it waits for the launch quantisation grid while the \
+                 song plays and starts the transport at once while it's stopped. A selected \
+                 empty slot is skipped. Select a slot or a scene first. It changes nothing in \
+                 the set.",
+            )
+            .permission(Permission::Read)
+            .context(Session)
+            .binding("S-SES-001")
             .args::<NoArgs>()
             .result::<()>(),
     )

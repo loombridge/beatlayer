@@ -3724,7 +3724,9 @@ impl Shell {
                 .as_ref()
                 .is_some_and(|schema| bl_commands::validate(schema, &args).is_ok())
                 && (id != session_launch_ids::STOP_SELECTED
-                    || !self.session.selected_slots().is_empty());
+                    || !self.session.selected_slots().is_empty())
+                && (id != session_launch_ids::LAUNCH_SELECTED
+                    || !self.launch_targets().is_empty());
         }
         if view_ids::handles(id) {
             let args = if args.is_null() {
@@ -4677,6 +4679,28 @@ impl Shell {
         let _ = self.run(session_ids::SELECT, target);
     }
 
+    /// The launch commands Enter runs: one for each selected slot that
+    /// holds a clip and one for each selected scene.
+    fn launch_targets(&self) -> Vec<(&'static str, Value)> {
+        let state = self.session.state();
+        let document = self.editor.document();
+        let slots = state
+            .slots
+            .iter()
+            .filter(|slot| document.slot(slot.track, slot.scene).is_some())
+            .map(|slot| {
+                (
+                    "session.launch",
+                    json!({ "track": slot.track, "scene": slot.scene }),
+                )
+            });
+        let scenes = state
+            .scenes
+            .iter()
+            .map(|scene| ("session.launch_scene", json!({ "scene": scene })));
+        slots.chain(scenes).collect()
+    }
+
     /// Runs one of the launch quantisation's commands (WP-3.2) and the
     /// Session View's Cmd+Enter stop: the quantisation and its switch are
     /// saved with the set, beside the song, and the engine that plays the
@@ -4744,6 +4768,22 @@ impl Shell {
                             command: id.to_owned(),
                             reason,
                         })?;
+                }
+                return Ok(Value::Null);
+            }
+            session_launch_ids::LAUNCH_SELECTED => {
+                Self::args::<NoArgs>(id, args)?;
+                // Spec: session-view R26. Enter launches what the grid has
+                // selected, one launch command each.
+                let targets = self.launch_targets();
+                if targets.is_empty() {
+                    return Err(ShellError::Unavailable {
+                        command: id.to_owned(),
+                        reason: "select a clip or a scene first".to_owned(),
+                    });
+                }
+                for (command, args) in targets {
+                    self.run(command, args)?;
                 }
                 return Ok(Value::Null);
             }

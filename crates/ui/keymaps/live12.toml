@@ -2118,7 +2118,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Enter"]
 win = ["Enter"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.launch_selected", contexts = ["session"] },
+]
 
 [[shortcut]]
 id = "S-SES-002"

@@ -500,3 +500,243 @@ fn every_slot_reaches_accesskit_with_its_track_and_scene() {
         "the clip slot is in the Tab order"
     );
 }
+
+// Launching from the grid (WP-3.8). The null device runs the engine on a
+// timer, so these wait for what it publishes.
+
+fn wait(h: &mut Harness, what: &str, mut done: impl FnMut(&Harness) -> bool) {
+    for _ in 0..500 {
+        h.settle();
+        if done(h) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    panic!("timed out waiting for {what}");
+}
+
+fn states(h: &Harness) -> Vec<bl_engine::SlotStatus> {
+    h.shell.session_states().to_vec()
+}
+
+fn slot_state(h: &Harness, track: TrackId, scene: SceneId) -> Option<bl_engine::SlotState> {
+    h.shell
+        .session_states()
+        .iter()
+        .find(|s| s.track == track && s.scene == scene)
+        .map(|s| s.state)
+}
+
+/// A MIDI clip in the slot, made through its command.
+fn clip_in(h: &mut Harness, track: TrackId, scene: SceneId) {
+    h.shell
+        .run(
+            "session.insert_empty_midi_clip",
+            json!({ "track": track, "scene": scene }),
+        )
+        .unwrap();
+}
+
+/// Where a slot's launch triangle or stop square is.
+fn mark(g: &Grid, track: usize, scene: usize) -> Pos2 {
+    let cell = g.cell(track, scene);
+    pos2(cell.left() + 5.5, cell.center().y)
+}
+
+fn status(g: &Grid, track: usize) -> bl_ui::layout::mixer::StatusCells {
+    bl_ui::layout::mixer::StatusCells::track(g.layout.columns[track].rect, g.session.status_row)
+}
+
+fn main_status(g: &Grid) -> bl_ui::layout::mixer::MainStatusCells {
+    bl_ui::layout::mixer::MainStatusCells::compute(g.layout.main.rect, g.session.status_row)
+}
+
+fn toggled(h: &mut Harness, label: &str) -> Option<bool> {
+    common::Harness::node(&common::Harness::nodes(&h.settle()), label).toggled
+}
+
+fn quantise_none(h: &mut Harness) {
+    h.shell
+        .run(
+            "session.set_quantization",
+            json!({ "quantization": "none" }),
+        )
+        .unwrap();
+}
+
+// Spec: session-view R25 (I-CLICK-001, I-CLICK-003). A launch triangle
+// queues its clip for the grid, the slot draws what the engine publishes,
+// and a track's stop button drops the queued launch.
+#[test]
+fn clicking_a_launch_triangle_queues_a_clip_and_a_stop_button_drops_it() {
+    let mut h = harness();
+    let g = Grid::new(&h);
+    let (track, scene) = (g.columns[0], g.scenes[0]);
+    clip_in(&mut h, track, scene);
+    // Eight bars is sixteen seconds at 120 beats a minute: the launch waits.
+    h.shell
+        .run(
+            "session.set_quantization",
+            json!({ "quantization": "8_bars" }),
+        )
+        .unwrap();
+    h.shell.run("transport.play", json!({})).unwrap();
+    wait(&mut h, "the transport", |h| h.shell.playing());
+    assert_eq!(toggled(&mut h, "Launch 1 MIDI: 1"), Some(false));
+
+    click(&mut h, mark(&g, 0, 0), Modifiers::NONE);
+    wait(&mut h, "the queued launch", |h| {
+        slot_state(h, track, scene) == Some(bl_engine::SlotState::Queued)
+    });
+    assert_eq!(toggled(&mut h, "Launch 1 MIDI: 1"), Some(true));
+
+    click(&mut h, status(&g, 0).stop.center(), Modifiers::NONE);
+    wait(&mut h, "the dropped launch", |h| states(h).is_empty());
+    assert_eq!(toggled(&mut h, "Launch 1 MIDI: 1"), Some(false));
+    h.shell.run("transport.stop", json!({})).unwrap();
+}
+
+// Spec: session-view R25 (I-CLICK-001, I-CLICK-003, L-SES-008). With the
+// transport stopped a click starts the clip at once; the stop square, a
+// track's stop button and Stop All Clips each stop the grid's clips.
+#[test]
+fn the_stop_square_a_stop_button_and_stop_all_clips_stop_the_grid() {
+    let mut h = harness();
+    let g = Grid::new(&h);
+    let (t0, t1, s0, s1) = (g.columns[0], g.columns[1], g.scenes[0], g.scenes[1]);
+    clip_in(&mut h, t0, s0);
+    clip_in(&mut h, t1, s0);
+    quantise_none(&mut h);
+
+    click(&mut h, mark(&g, 0, 0), Modifiers::NONE);
+    click(&mut h, mark(&g, 1, 0), Modifiers::NONE);
+    wait(&mut h, "both clips", |h| {
+        slot_state(h, t0, s0) == Some(bl_engine::SlotState::Playing)
+            && slot_state(h, t1, s0) == Some(bl_engine::SlotState::Playing)
+    });
+    assert_eq!(toggled(&mut h, "Launch 1 MIDI: 1"), Some(true));
+
+    // The track's stop button stops its clip and leaves the other track's.
+    click(&mut h, status(&g, 0).stop.center(), Modifiers::NONE);
+    wait(&mut h, "track 1 to stop", |h| {
+        slot_state(h, t0, s0).is_none() && slot_state(h, t1, s0).is_some()
+    });
+    // The stop square of an empty slot stops its track's clip.
+    click(&mut h, mark(&g, 1, 1), Modifiers::NONE);
+    wait(&mut h, "track 2 to stop", |h| states(h).is_empty());
+
+    // Stop All Clips stops every track.
+    click(&mut h, mark(&g, 0, 0), Modifiers::NONE);
+    click(&mut h, mark(&g, 1, 0), Modifiers::NONE);
+    wait(&mut h, "both clips again", |h| states(h).len() == 2);
+    click(&mut h, main_status(&g).stop_all.center(), Modifiers::NONE);
+    wait(&mut h, "every track to stop", |h| states(h).is_empty());
+    assert!(h.shell.editor().document().slot(t0, s1).is_none());
+    h.shell.run("transport.stop", json!({})).unwrap();
+}
+
+// Spec: session-view R25 (I-CLICK-009). A scene's launch button launches
+// every clip in the scene.
+#[test]
+fn a_scene_launch_button_launches_the_scene() {
+    let mut h = harness();
+    let g = Grid::new(&h);
+    let (t0, t1, scene) = (g.columns[0], g.columns[1], g.scenes[1]);
+    clip_in(&mut h, t0, scene);
+    clip_in(&mut h, t1, scene);
+    quantise_none(&mut h);
+
+    click(&mut h, g.scene_row(1).launch.center(), Modifiers::NONE);
+    wait(&mut h, "the scene's clips", |h| {
+        slot_state(h, t0, scene) == Some(bl_engine::SlotState::Playing)
+            && slot_state(h, t1, scene) == Some(bl_engine::SlotState::Playing)
+    });
+    h.shell.run("transport.stop", json!({})).unwrap();
+}
+
+// Spec: session-view R25 (L-SES-012, S-TRANS-009). Back to Arrangement
+// lights while a Session clip has taken a track over, a click on it and F10
+// each return the tracks, and it goes dark.
+#[test]
+fn back_to_arrangement_lights_while_a_clip_plays_over_the_arrangement() {
+    let mut h = harness();
+    let g = Grid::new(&h);
+    let (track, scene) = (g.columns[0], g.scenes[0]);
+    clip_in(&mut h, track, scene);
+    quantise_none(&mut h);
+    assert_eq!(toggled(&mut h, "Back to Arrangement"), Some(false));
+
+    for use_key in [false, true] {
+        click(&mut h, mark(&g, 0, 0), Modifiers::NONE);
+        wait(&mut h, "the button to light", |h| {
+            !h.shell.session_over().is_empty()
+        });
+        assert_eq!(toggled(&mut h, "Back to Arrangement"), Some(true));
+        if use_key {
+            h.key(Key::F10, Modifiers::NONE);
+        } else {
+            click(&mut h, main_status(&g).back.center(), Modifiers::NONE);
+        }
+        wait(&mut h, "the button to clear", |h| {
+            h.shell.session_over().is_empty()
+        });
+        assert_eq!(toggled(&mut h, "Back to Arrangement"), Some(false));
+        assert!(states(&h).is_empty(), "the Session clip stopped");
+    }
+    h.shell.run("transport.stop", json!({})).unwrap();
+}
+
+// Spec: session-view R26 (S-SES-001). Enter launches the selected clip, and
+// the selected scene.
+#[test]
+fn enter_launches_the_selected_clip_and_scene() {
+    let mut h = harness();
+    let g = Grid::new(&h);
+    let (track, s0, s1) = (g.columns[0], g.scenes[0], g.scenes[1]);
+    clip_in(&mut h, track, s0);
+    clip_in(&mut h, track, s1);
+    quantise_none(&mut h);
+
+    // The clip's body, not its triangle, selects it.
+    click(&mut h, g.centre(0, 0), Modifiers::NONE);
+    assert_eq!(state(&h).slots, [slotref(&g, 0, 0)]);
+    h.key(Key::Enter, Modifiers::NONE);
+    wait(&mut h, "the selected clip", |h| {
+        slot_state(h, track, s0) == Some(bl_engine::SlotState::Playing)
+    });
+
+    click(&mut h, g.scene_row(1).name.center(), Modifiers::NONE);
+    assert_eq!(state(&h).scenes, [s1]);
+    h.key(Key::Enter, Modifiers::NONE);
+    wait(&mut h, "the selected scene", |h| {
+        slot_state(h, track, s1) == Some(bl_engine::SlotState::Playing)
+            && slot_state(h, track, s0).is_none()
+    });
+    h.shell.run("transport.stop", json!({})).unwrap();
+}
+
+// Spec: session-view R25. The launch buttons reach AccessKit named with
+// their track and scene; the follow-action switch is there, disabled.
+#[test]
+fn the_launch_buttons_reach_accesskit_with_their_track_and_scene() {
+    let mut h = harness();
+    let g = Grid::new(&h);
+    clip_in(&mut h, g.columns[0], g.scenes[0]);
+    let nodes = common::Harness::nodes(&h.settle());
+    for label in [
+        "Launch 1 MIDI: 1",
+        "Stop 1 MIDI",
+        "Launch Scene 1",
+        "Stop Clips 1 MIDI",
+        "Stop All Clips",
+        "Back to Arrangement",
+    ] {
+        let node = common::Harness::node(&nodes, label);
+        assert_eq!(node.role, Role::Button, "{label}");
+        assert!(!node.disabled, "{label}");
+        assert!(node.bounds.is_some(), "{label}");
+    }
+    let follow = common::Harness::node(&nodes, "Enable Follow Actions Globally");
+    assert!(follow.disabled);
+    assert!(follow.description.contains("WP-3.10"));
+}

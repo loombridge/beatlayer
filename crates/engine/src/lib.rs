@@ -88,6 +88,7 @@ mod compiler;
 mod engine;
 mod gc;
 mod input;
+mod layers;
 mod message;
 mod metronome;
 mod midi;
@@ -119,6 +120,7 @@ pub use compiler::{Compiler, Update};
 pub use engine::{CompileCounts, Engine, Restarter, Sender, channel};
 pub use gc::{Collector, DROP_PERIOD, DropThread, GcHandle, Owned, Program};
 pub use input::{DeviceInput, NoInput};
+pub use layers::{DeviceLayers, Group, LayerAudio, RoundRobin};
 pub use message::{
     Action, LoopRegion, ParamEvent, Punch, Report, ScheduledCommand, TransportCommand, When,
 };

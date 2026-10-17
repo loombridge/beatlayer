@@ -16,6 +16,7 @@ use crate::gc::{GcHandle, Program};
 use crate::message::{LoopRegion, ParamEvent, Punch, TransportCommand};
 use crate::midi_clips::{MidiClipList, MidiClipPlayer};
 use crate::mixer::{self, Route, Solo, TrackMixer, route};
+use crate::layers::{DeviceLayers, LayerAudio};
 use crate::node::{NodeData, NodeKey, NoteBuffer, ParamValue};
 use crate::program::{
     DeviceInput, DeviceSidechain, EngineProgram, ExtOut, Input, Instance, Migration, NO_DELAY,
@@ -326,6 +327,16 @@ impl Compiler {
             }
             update
         };
+        // A multisampler whose layers changed gets them again as node data:
+        // a zone or layer edit never recompiles (WP-5.13, R31).
+        for (&id, &change) in &changes.devices {
+            if let (Change::Modified, Some(before), Some(after)) =
+                (change, old.device(id), document.device(id))
+                && before.layers != after.layers
+            {
+                self.send_layers(document, id, &mut update);
+            }
+        }
         // A new program's restatement of migrated nodes goes first.
         update.params.extend(params);
         // A track whose envelopes changed sends its nodes their lists again,
@@ -385,6 +396,44 @@ impl Compiler {
         };
         // The clips stay with their players: nothing about them changed.
         self.compile_with(&document, &Resend::default())
+    }
+
+    /// Sends a multisampler's node its layers, each with its decoded audio
+    /// (WP-5.13, R31): the media library decodes here, on the compiler's
+    /// thread, and shares each file with every other reader; a layer whose
+    /// media it can't supply plays silence and is reported missing. The data
+    /// reaches the node after the program, never as a new program.
+    fn send_layers(&mut self, document: &Document, device: DeviceId, update: &mut Update) {
+        let Some(device) = document.device(device) else {
+            return;
+        };
+        let rate = self.config.sample_rate;
+        let library = self.registry.media();
+        let layers = device
+            .layers
+            .list
+            .iter()
+            .map(|layer| {
+                let sample = library.and_then(|library| library.sample(layer.media, rate));
+                if sample.is_none() {
+                    update.missing.push(layer.media);
+                }
+                LayerAudio {
+                    layer: layer.clone(),
+                    sample,
+                }
+            })
+            .collect::<Vec<_>>();
+        update.missing.sort_unstable();
+        update.missing.dedup();
+        let data = DeviceLayers::new(
+            layers,
+            device.layers.ram_mode,
+            device.layers.linear_loop_fades,
+        );
+        update
+            .data
+            .push((NodeKey::Device(device.id), self.gc.data(data)));
     }
 
     /// Sends `track`'s clip player its clips: a list placed under `document`'s
@@ -639,6 +688,9 @@ impl Compiler {
                 None => update.missing.push(media),
             }
         }
+        for &device in &build.layered {
+            self.send_layers(document, device, &mut update);
+        }
         // Players that went hold no sources now, nor do new ones yet; open
         // sources of clips that went are closed.
         self.sources.retain(
@@ -886,6 +938,9 @@ impl Compiler {
                         if let Some(media) = device.media {
                             build.media.push((device.id, media));
                         }
+                        if !device.layers.is_default() {
+                            build.layered.push(device.id);
+                        }
                         let latency = node.latency();
                         (Ok(Instance::Device(node)), latency)
                     }
@@ -1077,6 +1132,9 @@ struct Build {
     /// Devices new in this program that play media, with the media they
     /// name: their decoded audio goes with this compile's update (WP-2.16).
     media: Vec<(DeviceId, ContentHash)>,
+    /// Devices new in this program that hold layers (WP-5.13): their layers,
+    /// with each one's decoded audio, go with this compile's update.
+    layered: Vec<DeviceId>,
     /// Tracks whose clip player is new in this program.
     new_players: BTreeSet<TrackId>,
     /// The state of routes and players that migrate in, which an edit may

@@ -114,6 +114,12 @@ impl<'a> Audio<'_, 'a> {
         self.block.tempo()
     }
 
+    /// Whether the song's transport is playing.
+    #[must_use]
+    pub fn playing(&self) -> bool {
+        self.block.transport().playing
+    }
+
     /// The song position of the stretch's first frame.
     #[must_use]
     pub fn song_position(&self) -> Frames {

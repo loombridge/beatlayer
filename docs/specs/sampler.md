@@ -1,7 +1,7 @@
 # The sampler
 
-- **Status:** partial (the warp controls, the sample display and the pitch envelope are later packages)
-- **Work packages:** WP-2.16 (parts 1 and 2: playback, envelopes and voices; slicing, the filter and the LFO)
+- **Status:** partial (the sample display is WP-5.15's; the warp controls, manual slicing and the pitch envelope are WP-5.15b's)
+- **Work packages:** WP-2.16 (parts 1 and 2: playback, envelopes and voices; slicing, the filter and the LFO), WP-5.15 (the sample display, IMP-28), WP-5.15b (the warp controls, manual slicing, and the pitch envelope)
 - **Parity-matrix row:** Devices: Simpler
 - **Checked against:** Live 12's reference manual, chapter 31 "Live Instrument Reference", section 31.11 "Simpler" (31.11.1 "Playback Modes", including 31.11.1.3 "Slicing Playback Mode"; 31.11.3 "Filter"; 31.11.4 "Envelopes"; 31.11.5 "LFO"; 31.11.6 "Global Parameters"), read October 2026
 
@@ -15,7 +15,7 @@ A voice's filter runs between the sample's Gain and the output's Volume: the man
 
 A Snapshot preset ([device chains](device-chains.md) R19) holds parameter values only; the sample is the set's. A sample is decoded where a node is made, on the compiler's thread (an offline render does it on its render thread), and whole, into memory: the media store's cache shares it with every reader of the same file, and the sample's memory follows its length. A clip's first source is opened by the loader thread instead, so it can't hold up the compile queue ([audio-clips](audio-clips.md) R17); moving a device's sample there too is later work.
 
-This spec covers the sampler's playback, envelopes, voices, slicing, filter and LFO. It leaves to [the device framework spec](device-framework.md) everything every native device has (parameters, smoothing, layout, automation, presets); the sample's display, and the warp controls a sample with its own rhythm needs, are later packages.
+This spec covers the sampler's playback, envelopes, voices, slicing, filter and LFO. It leaves to [the device framework spec](device-framework.md) everything every native device has (parameters, smoothing, layout, automation, presets); the sample's display (WP-5.15), and the warp controls a sample with its own rhythm needs (WP-5.15b), are later packages.
 
 ## Sources
 
@@ -76,6 +76,6 @@ This spec covers the sampler's playback, envelopes, voices, slicing, filter and 
 ## Not built yet
 
 - Simpler's sample display, and with it the flags that set the region's ends, cropping, reversing and normalising (IMP-28), are not built; the device's display cell is left for them.
-- The warp controls, the sample display with its slice editing (IMP-28) and the pitch envelope are later packages.
+- The sample display with its slice editing (IMP-28) is WP-5.15's; the warp controls, manual slicing and the pitch envelope are WP-5.15b's.
 - Slicing's Playback chooser (Mono, Poly and Thru), the Voices and Retrig controls Poly offers, and Thru's continuation through the region are not built: Beatlayer's slices play monophonically with One-Shot's Trigger.
 - The filter's circuit models and Morph type are not built (the kit's state-variable types stand in), and the manual's Drive and Velocity controls for it wait.

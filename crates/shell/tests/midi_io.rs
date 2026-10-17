@@ -94,8 +94,8 @@ impl Rig {
 
     /// Plays a message from a port, and processes the block it arrives in
     /// and the one after, where it lands.
-    fn play(&mut self, port: &str, message: [u8; 3]) -> usize {
-        self.test.send(port, Instant::now(), &message);
+    fn play(&mut self, port: &str, message: impl AsRef<[u8]>) -> usize {
+        self.test.send(port, Instant::now(), message.as_ref());
         self.blocks_run(2)
     }
 
@@ -473,7 +473,7 @@ fn midi_from_lists_the_ports_and_the_channel_chooser_follows_the_input() {
     rig.run("midi.ports", json!({}));
     rig.sync();
     let message = MidiMessage::note_on(4, 60, 100);
-    assert_eq!(rig.play("Keys B", message.bytes().try_into().unwrap()), 1);
+    assert_eq!(rig.play("Keys B", message.bytes()), 1);
 }
 
 /// The queue is attached to the engine the audio host starts, so a note
@@ -619,6 +619,86 @@ fn the_computer_keyboard_plays_through_a_midi_effect_into_an_instrument() {
         .collect();
     // The computer keyboard's A is middle C; Lift moves it up a fifth.
     assert_eq!(heard, [(NoteKind::On, 67), (NoteKind::Off, 67)]);
+}
+
+// Spec: midi-io R12, device-framework R35. A control change, pitch bend and
+// channel pressure from a port reach the instrument through a MIDI effect,
+// in order with the notes, and through the same effect switched off.
+#[test]
+fn a_ports_channel_messages_reach_the_instrument_through_a_midi_effect() {
+    use bl_devices::lift::{LIFT, PITCH};
+    use bl_engine::NoteKind;
+    use bl_engine::testing::{self, Probe};
+
+    let probe = Arc::new(Probe::default());
+    let mut registry = testing::registry(&probe);
+    bl_devices::register(&mut registry);
+    let mut rig = Rig::with_registry(registry);
+    let track = rig.track;
+    rig.run("arrangement.select_tracks", json!({ "tracks": [track] }));
+    let add = |rig: &mut Rig, device_type: &str, role: DeviceRole| {
+        rig.run(
+            "device.add",
+            json!({ "device": {
+                "kind": DeviceKind::Native { device_type: device_type.to_owned() },
+                "name": device_type,
+                "role": role,
+            } }),
+        )
+    };
+    add(&mut rig, testing::INSTRUMENT, DeviceRole::Instrument);
+    let lift = add(&mut rig, LIFT, DeviceRole::MidiEffect);
+    rig.run(
+        "device.set_param",
+        json!({ "device": lift["device"], "param": PITCH.0, "value": 7.0 }),
+    );
+    rig.input(json!({ "type": "port", "name": "Keys A" }));
+    rig.run(
+        "routing.set_monitor",
+        json!({ "track": track, "monitor": "in" }),
+    );
+    rig.sync();
+    rig.blocks_run(1);
+    let messages: [&[u8]; 4] = [
+        &[0x90, 60, 100],
+        &[0xB0, 1, 127],
+        &[0xE0, 127, 127],
+        &[0xD0, 64],
+    ];
+    for message in messages {
+        rig.play("Keys A", message);
+    }
+    let kinds = |probe: &Probe| -> Vec<NoteKind> {
+        probe
+            .recorded_notes()
+            .iter()
+            .map(|n| n.event.kind)
+            .collect()
+    };
+    let expected = [
+        NoteKind::On,
+        NoteKind::Control {
+            controller: 1,
+            value: 1.0,
+        },
+        NoteKind::PitchBend { value: 1.0 },
+        NoteKind::ChannelPressure {
+            value: 64.0 / 127.0,
+        },
+    ];
+    // Lift moves the note, and passes the messages as they came.
+    assert_eq!(kinds(&probe), expected);
+
+    // Switched off, it ends the note it started and passes all of them.
+    rig.run(
+        "device.set_enabled",
+        json!({ "device": lift["device"], "enabled": false }),
+    );
+    rig.sync();
+    for message in messages {
+        rig.play("Keys A", message);
+    }
+    assert_eq!(kinds(&probe), [&[NoteKind::Off][..], &expected].concat());
 }
 
 // Spec: midi-chord R13

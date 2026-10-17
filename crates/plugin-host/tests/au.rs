@@ -285,6 +285,43 @@ fn a_note_reaches_the_unit_on_its_frame() {
     assert!(energy > 0.1, "the note sounds: {energy}");
 }
 
+// Spec: au-hosting R18. A control change reaches the unit with its notes: the
+// DLS synth's channel volume (controller 7) at 0 silences the note after it.
+#[test]
+fn a_control_change_reaches_the_unit_with_its_notes() {
+    let host = AuHost::new();
+    host.load("aumu", "dls ", "appl").expect("the DLS synth");
+    let energy_of = |volume: Option<f32>| {
+        let device = device(1, "aumu/dls /appl", &[]);
+        let mut node = host
+            .factory()
+            .create(&device, &config())
+            .expect("a node for an instrument");
+        let mut notes = vec![note(100, NoteKind::On, 60, 0.8)];
+        if let Some(value) = volume {
+            notes.insert(
+                0,
+                NoteEvent {
+                    kind: NoteKind::Control {
+                        controller: 7,
+                        value,
+                    },
+                    ..note(10, NoteKind::On, 0, 0.0)
+                },
+            );
+        }
+        let out = run(node.as_mut(), &vec![0.0; FRAMES], &[], &notes);
+        out.channels[0].iter().map(|s| s.abs()).sum::<f32>()
+    };
+    let loud = energy_of(None);
+    let silent = energy_of(Some(0.0));
+    assert!(loud > 0.1, "the note sounds: {loud}");
+    assert!(
+        silent < loud * 0.01,
+        "volume 0 silences it: {silent} against {loud}"
+    );
+}
+
 // Spec: au-hosting R8, R9, R11
 #[test]
 fn a_set_round_trips_the_units_state() {

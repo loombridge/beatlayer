@@ -42,6 +42,7 @@ A unit's own editor window opens and closes through `plugin.show_window` (R13), 
 - **R15.** Every unit is held a moment past its last use before its last reference is released. Apple's `AUAudioUnitV2Bridge` rebuilds its parameter tree from an asynchronous CoreAudio event (`AUEventListener`), and a unit released while that event is in flight is deallocated mid-rebuild: a SIGSEGV inside AudioToolbox's `-[AUAudioUnitV2Bridge _createParameterTree]_block_invoke`, recorded on 15 October 2026 while the tests activated and let go of Apple's units in a loop (twice in 175 lifecycles without the grace). A short grace — a quarter of a second, on a thread of the host's own — lets the event finish against a live unit. (S2)
 - **R16.** `plugin.load_au`, and `plugin.info` and `plugin.show_window` for an AU device, are the registered commands agents run: `plugin.load_au` is External, like `plugin.load`; `plugin.info` is a read. (S1, S5)
 - **R17.** Nothing the node does on the audio thread allocates, locks, or blocks: its buffers are made with the node, and the unit is set and given notes at segment boundaries on that thread, as a host's automation and MIDI are; the unit's own code is its own. A node that fails a call is silent and reports it. (S1, S2)
+- **R18.** A control change, pitch bend or channel pressure reaches a unit through its MIDI block as the message's raw bytes (two for channel pressure), scheduled with the notes at its frame ([device framework](device-framework.md) R35). (S6)
 
 ## Tests
 
@@ -65,4 +66,5 @@ The units under test are Apple's built-in ones, which need no third-party binari
 | R14 | `crates/shell/tests/plugins_au.rs`, `loading_an_audio_unit_says_they_are_macos_only` | unit |
 | R16 | `crates/shell-spec/src/plugins.rs`, `every_listed_id_is_registered_and_complete`; `crates/ui/tests/accessibility.rs`, `every_m1_command_is_reachable_from_the_keyboard` | unit |
 | R17 | every block in `crates/plugin-host/tests/` runs as a real-time section under the allocation trap | real-time trap |
+| R18 | `crates/plugin-host/tests/au.rs`, `a_control_change_reaches_the_unit_with_its_notes` | unit, real-time trap |
 | — | The scanner lists the units: `crates/plugin-host/tests/scan.rs`, `a_scan_finds_apples_built_in_audio_units`; `crates/shell/tests/plugin_scanning.rs`, `scanning_finds_audio_units_and_they_join_the_browser` (plugin-scanning R1, R7) | unit |

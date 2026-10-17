@@ -489,7 +489,7 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 5.9 | done | 17 October 2026 | [#107](https://github.com/loombridge/beatlayer/pull/107); a clip's modulation acts on its parameter's base in the control's travel, on devices, mixer controls, sends and plug-ins, and shows on the control; the Session clip editor's switches wait on 3.12; [the spec](specs/modulation.md) |
 | 5.10 | todo |  |  |
 | 5.11 | todo |  |  |
-| 5.12 | todo |  |  |
+| 5.12 | done | 17 October 2026 | [#121](https://github.com/loombridge/beatlayer/pull/121); every native device holds A and B states, switched with P or the Edit and device menus' Compare items as one undo step that glides and overrides its envelopes, copied either way, and saved with the set; racks and plug-ins offer none; [the spec](specs/device-compare.md) |
 | 5.13 | todo |  |  |
 | 5.14 | todo |  |  |
 | 5.15 | todo |  |  |
@@ -526,5 +526,5 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 5.41 | todo |  | Waits on IMP-20's acceptance |
 | 5.42 | done | 17 October 2026 | [#103](https://github.com/loombridge/beatlayer/pull/103); the effects LFO, envelope follower and seeded randomness every effect device shares, the Show Options menu items and expand toggle (`device.expand`), with Reprise moved onto the shared LFO; [the spec](specs/device-framework.md) |
 | 5.43 | done | 17 October 2026 | [#117](https://github.com/loombridge/beatlayer/pull/117); devices publish display data after each block through a lock-free triple buffer, `device.display` reads it with Squeeze's views as view state, and Contour's spectrum, curves and band dots and Squeeze's gain reduction meter and views are drawn in their cells; [the spec](specs/device-framework.md) |
-| 5.44 | todo |  |  |
+| 5.44 | done | 17 October 2026 | [#124](https://github.com/loombridge/beatlayer/pull/124); control changes, channel pitch bend and channel pressure travel beside the notes from monitored input through MIDI effects, switched-off devices and MIDI effect racks, into CLAP plug-ins as MIDI events, VST3 plug-ins through their MIDI mapping, Audio Units through their MIDI block, and the polysynth's pitch wheel and mod wheel; [device framework](specs/device-framework.md) R39 |
 | 5.45 | todo |  |  |

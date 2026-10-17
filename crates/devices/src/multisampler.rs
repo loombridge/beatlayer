@@ -1010,7 +1010,11 @@ impl Multisampler {
                     }
                 }
             }
-            NoteKind::Expression { .. } => {}
+            // Channel messages are WP-5.14's MIDI tab.
+            NoteKind::Expression { .. }
+            | NoteKind::Control { .. }
+            | NoteKind::PitchBend { .. }
+            | NoteKind::ChannelPressure { .. } => {}
         }
     }
 

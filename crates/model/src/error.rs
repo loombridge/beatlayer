@@ -47,6 +47,9 @@ pub enum ModelError {
     /// The device is a plug-in, which opens its own editor window rather
     /// than floating (IMP-14).
     CannotFloat(DeviceId),
+    /// The device is a rack or a plug-in, which has no A and B states
+    /// (device compare R6).
+    NoCompare(DeviceId),
     /// Another object in the document already has this ID.
     IdInUse(Id),
     /// The same ID appears twice where each must be different.
@@ -298,6 +301,10 @@ impl fmt::Display for ModelError {
             Self::CannotFloat(id) => write!(
                 f,
                 "{id} is a plug-in, which opens its own editor window; only native devices float"
+            ),
+            Self::NoCompare(id) => write!(
+                f,
+                "{id} has no A and B states to compare: only native devices have them"
             ),
             Self::IdInUse(id) => write!(f, "ID {id} is already in use"),
             Self::DuplicateId(id) => write!(f, "ID {id} appears more than once"),

@@ -414,6 +414,25 @@ impl View<'_> {
                 "list": self.page.slice(layers),
             });
         }
+        if device.can_compare() {
+            // Spec: device-compare R11.
+            let pairs = |params: &bl_model::OrdMap<bl_model::ParamId, f64>| {
+                params
+                    .iter()
+                    .map(|(param, value)| json!({ "param": param, "value": value }))
+                    .collect::<Vec<_>>()
+            };
+            let (a, b) = if device.b_active {
+                (device.other_params(), &device.params)
+            } else {
+                (&device.params, device.other_params())
+            };
+            value["compare"] = json!({
+                "active": if device.b_active { "B" } else { "A" },
+                "a": pairs(a),
+                "b": pairs(b),
+            });
+        }
         if self.detail == Detail::Full {
             value["saved"] = self.saved(device);
         }

@@ -175,6 +175,67 @@ fn notes_reach_the_plugin_and_come_back_out_on_their_frames() {
     );
 }
 
+// Spec: vst3-hosting R18. The test plug-in's controller maps control change 1
+// on channel 1 and the pitch bend on channel 3 to its gain: a message sets it
+// on the message's frame; one the controller doesn't map does nothing.
+#[test]
+fn channel_messages_set_the_parameters_the_controller_maps_them_to() {
+    let (_host, mut node) = running(&[(bl_test_vst3::GAIN, 0.5)]);
+    let message = |offset, channel, kind| NoteEvent {
+        offset,
+        kind,
+        channel,
+        key: 0,
+        velocity: 0.0,
+        note_id: None,
+    };
+    let notes = [
+        // Gain 2 (the top of its range) from frame 10.
+        message(
+            10,
+            0,
+            NoteKind::Control {
+                controller: 1,
+                value: 1.0,
+            },
+        ),
+        // Not mapped: another channel, and another controller.
+        message(
+            15,
+            1,
+            NoteKind::Control {
+                controller: 1,
+                value: 0.0,
+            },
+        ),
+        message(
+            16,
+            0,
+            NoteKind::Control {
+                controller: 7,
+                value: 0.0,
+            },
+        ),
+        // The wheel at its bottom: gain 0 from frame 30.
+        message(30, 2, NoteKind::PitchBend { value: -1.0 }),
+        // A bend at its centre: half of 2.
+        message(50, 2, NoteKind::PitchBend { value: 0.0 }),
+    ];
+    let out = run(node.as_mut(), &[1.0; FRAMES], &[], &notes);
+    let channel = &out.channels[0];
+    assert!(channel[..10].iter().all(|s| *s == 0.5), "{channel:?}");
+    assert!(channel[10..30].iter().all(|s| *s == 2.0), "{channel:?}");
+    assert!(channel[30..50].iter().all(|s| *s == 0.0), "{channel:?}");
+    // 8192 of 16383 is just short of the middle.
+    let centre = 2.0 * 8192.0 / 16383.0;
+    assert!(
+        channel[50..]
+            .iter()
+            .all(|s| (f64::from(*s) - centre).abs() < 1e-6),
+        "{channel:?}"
+    );
+}
+
 // Spec: vst3-hosting R8. A switched-off device's changes wait for the
 // plug-in's next block, at its first frame.
 #[test]

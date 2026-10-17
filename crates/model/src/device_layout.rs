@@ -160,6 +160,16 @@ impl Control {
     }
 }
 
+/// The parameters of a device's sample slots: slot `k`'s copy of a
+/// parameter is the first slot's number plus `k` times `stride` (WP-5.17).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SlotGroup {
+    /// How far apart one slot's parameter numbers are from the next's.
+    pub stride: u32,
+    /// How many slots there are.
+    pub count: u32,
+}
+
 /// A band of controls, of a fixed size.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ControlBand {
@@ -169,6 +179,11 @@ pub struct ControlBand {
     pub height: f32,
     /// Its controls.
     pub controls: Vec<Control>,
+    /// Set for a band that shows the selected sample slot's controls: its
+    /// controls name the first slot's parameters, and the band is placed
+    /// for the selected slot ([`DeviceLayout::place_for`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slots: Option<SlotGroup>,
 }
 
 impl ControlBand {
@@ -199,7 +214,16 @@ impl ControlBand {
             width: x + column_width + PADDING,
             height,
             controls: placed,
+            slots: None,
         }
+    }
+
+    /// The same band, showing the selected slot's controls: its controls
+    /// are the first slot's, and `group` says where the others' are.
+    #[must_use]
+    pub fn for_slots(mut self, group: SlotGroup) -> Self {
+        self.slots = Some(group);
+        self
     }
 }
 
@@ -219,6 +243,11 @@ pub struct DisplayCell {
     pub height: f32,
     /// Its share of extra room, against the other cells it shares with.
     pub weight: f32,
+    /// The sample slot the cell stands for, if it does: it shows the slot
+    /// and takes a click that selects it, and a sample dropped on it
+    /// (WP-5.17).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot: Option<u32>,
     /// Controls inside its top edge, from its left.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub top: Option<ControlBand>,
@@ -237,9 +266,17 @@ impl DisplayCell {
             width,
             height,
             weight,
+            slot: None,
             top: None,
             bottom: None,
         }
+    }
+
+    /// The same cell, standing for sample slot `slot`.
+    #[must_use]
+    pub fn for_slot(mut self, slot: u32) -> Self {
+        self.slot = Some(slot);
+        self
     }
 
     /// The same, with `band` inside its top edge.
@@ -308,12 +345,12 @@ impl LayoutNode {
         }
     }
 
-    fn place(&self, at: Rect, placed: &mut Placed) {
+    fn place(&self, at: Rect, slot: u32, placed: &mut Placed) {
         match self {
             Self::Band(band) => {
                 // A band keeps its size, pinned to its slot's top-left; the
                 // parts before and after it pin it to its edges.
-                place_band(band, at.x, at.y, placed);
+                place_band(band, at.x, at.y, slot, placed);
             }
             Self::Cell(cell) => {
                 // A cell grows only where its weight earns it room.
@@ -330,13 +367,14 @@ impl LayoutNode {
                 let rect = Rect::new(at.x, at.y, width.max(cell.width), height.max(cell.height));
                 placed.cells.push(PlacedCell {
                     name: cell.name.clone(),
+                    slot: cell.slot,
                     rect,
                 });
                 if let Some(band) = &cell.top {
-                    place_band(band, rect.x, rect.y, placed);
+                    place_band(band, rect.x, rect.y, slot, placed);
                 }
                 if let Some(band) = &cell.bottom {
-                    place_band(band, rect.x, rect.bottom() - band.height, placed);
+                    place_band(band, rect.x, rect.bottom() - band.height, slot, placed);
                 }
             }
             Self::Row(children) => {
@@ -351,7 +389,7 @@ impl LayoutNode {
                         0.0
                     };
                     let width = child.natural().width + share;
-                    child.place(Rect::new(x, at.y, width, at.height), placed);
+                    child.place(Rect::new(x, at.y, width, at.height), slot, placed);
                     x += width;
                 }
             }
@@ -367,7 +405,7 @@ impl LayoutNode {
                         0.0
                     };
                     let height = child.natural().height + share;
-                    child.place(Rect::new(at.x, y, at.width, height), placed);
+                    child.place(Rect::new(at.x, y, at.width, height), slot, placed);
                     y += height;
                 }
             }
@@ -384,14 +422,16 @@ impl LayoutNode {
     }
 }
 
-/// Places a band at its size with its top-left corner at `x`, `y`.
-fn place_band(band: &ControlBand, x: f32, y: f32, placed: &mut Placed) {
+/// Places a band at its size with its top-left corner at `x`, `y`; a band
+/// of slot controls names the parameters of sample slot `slot`.
+fn place_band(band: &ControlBand, x: f32, y: f32, slot: u32, placed: &mut Placed) {
+    let offset = band.slots.map_or(0, |group| group.stride * slot);
     let rect = Rect::new(x, y, band.width, band.height);
     placed.bands.push(rect);
     placed
         .controls
         .extend(band.controls.iter().map(|control| PlacedControl {
-            param: control.param,
+            param: ParamId(control.param.0 + offset),
             widget: control.widget,
             rect: Rect::new(
                 rect.x + control.x,
@@ -437,6 +477,9 @@ pub struct PlacedControl {
 pub struct PlacedCell {
     /// What it shows.
     pub name: String,
+    /// The sample slot it stands for, if it does.
+    #[serde(default)]
+    pub slot: Option<u32>,
     /// Where, from the body's top-left corner.
     pub rect: Rect,
 }
@@ -517,6 +560,20 @@ impl DeviceLayout {
         self.root.natural()
     }
 
+    /// How many sample slots the layout shows: one more than the highest
+    /// slot a cell stands for, or the count of a band of slot controls;
+    /// 0 for a device with none (WP-5.17).
+    #[must_use]
+    pub fn slot_count(&self) -> u32 {
+        let mut count = 0;
+        self.root.visit(&mut |node| match node {
+            LayoutNode::Cell(cell) => count = count.max(cell.slot.map_or(0, |slot| slot + 1)),
+            LayoutNode::Band(band) => count = count.max(band.slots.map_or(0, |g| g.count)),
+            LayoutNode::Row(_) | LayoutNode::Column(_) => {}
+        });
+        count
+    }
+
     /// Whether it grows across and down: only if a display cell does.
     #[must_use]
     pub fn grows(&self) -> (bool, bool) {
@@ -546,13 +603,23 @@ impl DeviceLayout {
     /// offered `size` ([`fit`](Self::fit)).
     #[must_use]
     pub fn place(&self, size: Size) -> Placed {
+        self.place_for(size, 0)
+    }
+
+    /// As [`place`](Self::place), with the bands that show a sample slot's
+    /// controls showing slot `slot`'s (WP-5.17).
+    #[must_use]
+    pub fn place_for(&self, size: Size, slot: u32) -> Placed {
         let size = self.fit(size);
         let mut placed = Placed {
             size,
             ..Placed::default()
         };
-        self.root
-            .place(Rect::new(0.0, 0.0, size.width, size.height), &mut placed);
+        self.root.place(
+            Rect::new(0.0, 0.0, size.width, size.height),
+            slot,
+            &mut placed,
+        );
         placed
     }
 
@@ -632,17 +699,27 @@ fn check_band(
         if problem.is_some() {
             return;
         }
-        let n = control.param.0;
-        if !params.iter().any(|p| p.id == control.param) {
-            *problem = Some(format!(
-                "the layout has a control for parameter {n}, which the device doesn't have"
-            ));
-        } else if seen.contains(&control.param) {
-            *problem = Some(format!("the layout places parameter {n} twice"));
-        } else if !whole.contains(&control.rect()) {
-            *problem = Some(format!("parameter {n}'s control lies outside its band"));
+        // A band of slot controls places each slot's copy of its parameters.
+        let (stride, count) = band
+            .slots
+            .map_or((0, 1), |group| (group.stride, group.count));
+        for slot in 0..count {
+            if problem.is_some() {
+                return;
+            }
+            let param = ParamId(control.param.0 + stride * slot);
+            let n = param.0;
+            if !params.iter().any(|p| p.id == param) {
+                *problem = Some(format!(
+                    "the layout has a control for parameter {n}, which the device doesn't have"
+                ));
+            } else if seen.contains(&param) {
+                *problem = Some(format!("the layout places parameter {n} twice"));
+            } else if !whole.contains(&control.rect()) {
+                *problem = Some(format!("parameter {n}'s control lies outside its band"));
+            }
+            seen.push(param);
         }
-        seen.push(control.param);
     }
 }
 
@@ -833,6 +910,70 @@ mod tests {
         assert_eq!(layout.place(Size::new(2000.0, 900.0)).size, docked);
         // Two knobs fill a column of 158 points; seven make four columns.
         assert_eq!(docked.width, PADDING + 4.0 * (48.0 + PADDING));
+    }
+
+    // Spec: device-framework R40
+    #[test]
+    fn a_band_of_slot_controls_names_the_selected_slots_parameters() {
+        // Two slots of three parameters each, 10 apart, and a cell for each
+        // slot above the controls of the selected one.
+        let p: Vec<ParamDescriptor> = [0u32, 1, 2, 10, 11, 12]
+            .into_iter()
+            .map(|n| {
+                ParamDescriptor::continuous(
+                    ParamId(n),
+                    &format!("P{n}"),
+                    (0.0, 1.0),
+                    0.5,
+                    ParamUnit::None,
+                )
+            })
+            .collect();
+        let group = SlotGroup {
+            stride: 10,
+            count: 2,
+        };
+        let layout = DeviceLayout::new(LayoutNode::Column(vec![
+            LayoutNode::Row(vec![
+                LayoutNode::Cell(DisplayCell::new("Slot 1", 40.0, 30.0, 1.0).for_slot(0)),
+                LayoutNode::Cell(DisplayCell::new("Slot 2", 40.0, 30.0, 1.0).for_slot(1)),
+            ]),
+            LayoutNode::Band(ControlBand::stacked(100.0, &knobs(0, 3)).for_slots(group)),
+        ]));
+        layout.check(&p).unwrap();
+        assert_eq!(layout.slot_count(), 2);
+        let params_at = |slot| -> Vec<u32> {
+            layout
+                .place_for(layout.docked_size(), slot)
+                .controls
+                .iter()
+                .map(|c| c.param.0)
+                .collect()
+        };
+        assert_eq!(params_at(0), [0, 1, 2]);
+        assert_eq!(params_at(1), [10, 11, 12]);
+        assert_eq!(
+            layout.place(layout.docked_size()).controls,
+            layout.place_for(layout.docked_size(), 0).controls,
+            "the first slot's unless told"
+        );
+        let cells = layout.place(layout.docked_size()).cells;
+        assert_eq!(
+            cells.iter().map(|c| c.slot).collect::<Vec<_>>(),
+            [Some(0), Some(1)]
+        );
+        // A slot's parameter the band leaves out, or a slot the device
+        // doesn't have, is refused.
+        let missing: Vec<ParamDescriptor> = p[..5].to_vec();
+        assert!(layout.check(&missing).is_err());
+        let three = DeviceLayout::new(LayoutNode::Band(
+            ControlBand::stacked(100.0, &knobs(0, 3)).for_slots(SlotGroup {
+                stride: 10,
+                count: 3,
+            }),
+        ));
+        assert!(three.check(&p).is_err());
+        assert_eq!(DeviceLayout::generic(&p).slot_count(), 0);
     }
 
     // Spec: device-framework R10

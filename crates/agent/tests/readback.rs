@@ -265,7 +265,7 @@ fn fixture() -> Project {
     device.enabled = false;
     device.show_preset_name = false;
     device.floating = true;
-    device.media = Some(ContentHash([9; 32]));
+    device.set_media(0, Some(ContentHash([9; 32])));
     // A multisampler's layers and options (WP-5.13).
     device.layers = bl_model::Layers {
         list: vec![bl_model::Layer::new(

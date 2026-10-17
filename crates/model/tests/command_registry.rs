@@ -707,7 +707,7 @@ fn every_command_runs_by_id() {
     assert_eq!((device.name.as_str(), device.enabled), ("Tone", false));
     assert_eq!(device.params.get(&ParamId(3)), Some(&-12.5));
     assert_eq!(device.params.get(&ParamId(1)), Some(&0.25));
-    let media = device.media.expect("the sample it plays");
+    let media = device.media_at(0).expect("the sample it plays");
     assert_eq!(media, ContentHash([3u8; 32]));
     agent.run("device.remove", json!({ "device": synth }));
     assert!(agent.editor.document().device(synth).is_none());
@@ -1758,6 +1758,7 @@ fn schemas_match_what_commands_serialise() {
             Command::SetDeviceSample {
                 device,
                 media: Some(ContentHash([3u8; 32])),
+                slot: 0,
             },
         ),
         (

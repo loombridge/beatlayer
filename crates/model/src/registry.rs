@@ -1556,10 +1556,12 @@ const ENTRIES: &[Entry] = &[
         contexts: &[DeviceView],
         keys: &[],
         description: "Sets the audio a device plays (`media`, a content hash, or null to play \
-            none), which the media store holds like a clip's audio. A device whose type plays a \
-            sample plays that file; other devices ignore it. The set keeps the reference, so it \
-            reopens playing the same file. To load a file from disk as a person does, use \
-            `device.load_sample`.",
+            none), which the media store holds like a clip's audio, in sample slot `slot` \
+            (counted from 0, and 0 unless given: the sampler has the one, the eight-slot drum \
+            sampler eight). A device whose type plays samples plays that file; other devices \
+            ignore it. The set keeps the reference, so it reopens playing the same file. Null \
+            clears the slot, one undo step named Clear Sample. To load a file from disk as a \
+            person does, use `device.load_sample`.",
     },
     Entry {
         id: "device.insert_layers",

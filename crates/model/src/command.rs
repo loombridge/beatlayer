@@ -971,6 +971,10 @@ pub enum Command {
         /// store is where the audio comes from; a device given media the
         /// store doesn't hold is silent.
         media: Option<ContentHash>,
+        /// The sample slot to set: 0, the only one the sampler has, unless
+        /// given; the eight-slot drum sampler's are 0 to 7 (WP-5.17).
+        #[serde(default)]
+        slot: u8,
     },
     /// Adds layers to a multisampler (WP-5.13; the multisampler spec, R3), at
     /// `index` or at the end. Each layer's own `id` is ignored: the device
@@ -2032,9 +2036,19 @@ impl Document {
                 }
                 Ok(())
             }
-            Command::SetDeviceSample { device, media } => {
-                if self.device_ref(*device)?.media != *media {
-                    self.device_mut(*device)?.media = *media;
+            Command::SetDeviceSample {
+                device,
+                media,
+                slot,
+            } => {
+                check_value(
+                    "sample slot",
+                    f64::from(*slot),
+                    usize::from(*slot) < crate::device::MAX_MEDIA_SLOTS,
+                )?;
+                if self.device_ref(*device)?.media_at(usize::from(*slot)) != *media {
+                    self.device_mut(*device)?
+                        .set_media(usize::from(*slot), *media);
                 }
                 Ok(())
             }

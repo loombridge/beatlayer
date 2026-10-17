@@ -148,10 +148,22 @@ pub struct SetInfo {
     pub revision: u64,
     /// The program and version that saved it.
     pub saved_by: String,
-    /// The schema version the file was written in. If it's older than
+    /// The schema version the file was written in, or the Save Continuously
+    /// save point it opened at (the song's own form). If it's older than
     /// [`SCHEMA_VERSION`], the file was migrated as it loaded, and saving it
     /// writes the current version.
     pub schema: u32,
+}
+
+impl SetInfo {
+    /// Whether the set was saved before relative modulation, so its clip
+    /// envelopes hold parameter units that
+    /// [`Document::relative_clip_envelopes`](bl_model::Document::relative_clip_envelopes)
+    /// turns into modulation (the modulation spec, R5).
+    #[must_use]
+    pub fn before_relative_modulation(&self) -> bool {
+        self.schema < 5
+    }
 }
 
 /// Limits and settings for loading a set.

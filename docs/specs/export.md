@@ -11,7 +11,7 @@ Export Audio/Video, in the File menu (⇧⌘R, Ctrl-Shift-R), renders the set's 
 
 Beatlayer renders the range through the same engine code that plays the set on a device (`bl_engine::Offline`, the code behind `bl-cli render` and the golden tests), converts the sample rate where needed, normalises, dithers, quantises, and encodes, writing to a hidden file beside the destination that's moved into place only when it's complete. So a cancelled or failed export leaves nothing behind, and an export at the engine's rate holds exactly the samples a golden render holds.
 
-This spec covers the Main output to WAV, AIFF, and FLAC, the range, bit depth, sample rate, dither (the non-proprietary kinds), normalise, cancelling, and the commands that reach them (`export.audio`, `bl-cli export`). It leaves to other packages: exporting each track, the selected tracks, or one track, and Include Return and Main Effects (WP-2.26); MP3 (WP-2.26); Render as Loop (WP-4.17, R24 to R27); Convert to Mono and Create Analysis File (see "Not built yet" below); video (Phase 9); real-time rendering through external hardware (M5); and the dialog itself, whose controls the UI parity reference doesn't record yet (L-OTH-003 says only that it's modal; see R16).
+This spec covers the Main output to WAV, AIFF, and FLAC, the range, bit depth, sample rate, dither (the non-proprietary kinds), normalise, Render as Loop (WP-4.17), cancelling, and the commands that reach them (`export.audio`, `bl-cli export`). It leaves to other packages: exporting each track, the selected tracks, or one track, and Include Return and Main Effects (WP-2.26); MP3 (WP-2.26); Convert to Mono and Create Analysis File (see "Not built yet" below); video (Phase 9); real-time rendering through external hardware (M5); and the dialog itself, whose controls the UI parity reference doesn't record yet (L-OTH-003 says only that it's modal; see R16).
 
 ## Sources
 
@@ -83,10 +83,10 @@ This spec covers the Main output to WAV, AIFF, and FLAC, the range, bit depth, s
 | R21 | `crates/shell/tests/export.rs`, `multi_track_export_cancellation_and_failure_leave_no_partial_files` | unit |
 | R22 | not yet tested separately | |
 | R23 | `crates/media/src/encode.rs`, `an_mp3_decodes_to_the_frames_written`; `crates/shell/tests/export.rs`, `an_mp3_export_takes_the_extension`; `crates/cli/tests/export.rs`, `an_mp3_export_decodes_within_the_lossy_tolerance`; `crates/cli/tests/agent_export.rs`, `an_agent_exports_an_mp3_by_command` | unit, agent API |
-| R24 | `crates/shell/tests/export.rs`, `render_as_loop_adds_the_tail_onto_the_files_start`; `crates/cli/tests/export.rs`, `a_loop_render_nulls_against_its_two_pass_reference`, `a_tail_longer_than_the_range_wraps_round_again` | unit, golden render |
+| R24 | `crates/cli/tests/export.rs`, `a_loop_render_nulls_against_its_two_pass_reference`, `a_tail_longer_than_the_range_wraps_round_again`; `crates/cli/tests/agent_export.rs`, `an_agent_exports_a_loop_by_command` | golden render, agent API |
 | R25 | `crates/cli/tests/export.rs`, `the_tail_is_what_the_devices_sound_after_the_end_stops` (a reverb and a delay with feedback, the tail bounded at 60 s) | golden render |
-| R26 | `crates/shell/tests/export.rs`, `the_tail_is_added_after_conversion_and_before_normalize_and_dither`, `each_track_of_a_loop_render_adds_its_own_tail` | unit |
-| R27 | `crates/cli/tests/export.rs`, `the_same_export_is_the_same_bytes_at_any_block_size` (with `render_as_loop`), `cancelling_leaves_nothing_behind` (with `render_as_loop`) | unit |
+| R26 | `crates/cli/tests/export.rs`, `the_tail_is_added_after_conversion_and_before_normalize_and_dither`; `crates/shell/tests/export.rs`, `each_track_of_a_loop_render_adds_its_own_tail` | golden render, unit |
+| R27 | `crates/cli/tests/export.rs`, `a_loop_render_is_the_same_bytes_at_any_block_size` (blocks of 61, 512, and 4,096, with each dither), `cancelling_a_loop_render_leaves_nothing_behind` (while the range renders and while the tail does) | unit |
 
 The real-time rules hold throughout: every block of an export runs under the allocation trap in test builds, and an export that touched the heap inside a block fails its test.
 

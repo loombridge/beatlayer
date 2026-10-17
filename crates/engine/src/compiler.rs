@@ -146,11 +146,9 @@ pub struct Compiler {
     /// The last document as the person's set holds it, which a change of
     /// scene override compiles again (WP-3.5).
     original: Option<Document>,
-    /// What the audio thread says a launched scene has put in place.
+    /// What the audio thread says a launched scene has put in place. It
+    /// holds even when the scene's own fields change or the scene goes.
     scene_override: SceneOverride,
-    /// The part of it the last document still has: a scene whose tempo
-    /// went, or that was deleted, holds nothing.
-    applied: SceneOverride,
     layout: BTreeMap<NodeKey, Placed>,
     sources: ClipSources,
 }
@@ -184,7 +182,6 @@ impl Compiler {
             synced: None,
             original: None,
             scene_override: SceneOverride::default(),
-            applied: SceneOverride::default(),
             layout: BTreeMap::new(),
             sources: ClipSources::default(),
         }
@@ -248,26 +245,18 @@ impl Compiler {
     }
 
     /// The document as a program plays it: `document` with the tempo and
-    /// signature a launched scene put in place (WP-3.5), if the scene still
-    /// holds them. Remembers `document` for [`Compiler::set_override`].
+    /// signature a launched scene put in place (WP-3.5). Remembers
+    /// `document` for [`Compiler::set_override`].
     fn effective(&mut self, document: &Document) -> Document {
         self.original = Some(document.clone());
-        let holds = |scene: SceneId| document.scene(scene);
-        self.applied = SceneOverride {
-            tempo: self
-                .scene_override
-                .tempo
-                .filter(|&(scene, bpm)| holds(scene).is_some_and(|s| s.tempo == Some(bpm))),
-            signature: self.scene_override.signature.filter(|&(scene, signature)| {
-                holds(scene).is_some_and(|s| s.signature == Some(signature))
-            }),
-        };
-        if self.applied.is_none() {
+        if self.scene_override.is_none() {
             return document.clone();
         }
         document.with_maps(
-            self.applied.tempo.map(|(_, bpm)| TempoMap::constant(bpm)),
-            self.applied
+            self.scene_override
+                .tempo
+                .map(|(_, bpm)| TempoMap::constant(bpm)),
+            self.scene_override
                 .signature
                 .map(|(_, signature)| TimeSignatureMap::constant(signature)),
         )
@@ -537,9 +526,10 @@ impl Compiler {
             }
         }
         let (delay_lines, delay_pool) = delay_storage(&build.delays, self.config.channels);
-        // Spec: session-view R23. The set's own maps, the scenes' (made here
-        // so the audio thread allocates nothing to switch to them), and the
-        // ones the program plays under now.
+        // Spec: session-view R23. The set's own maps, the scenes' and the
+        // launched override's (made here so the audio thread allocates
+        // nothing to switch to them), and the ones the program plays under
+        // now.
         let own = self.original.as_ref().unwrap_or(document);
         let base_tempo = own.settings().tempo.clone();
         let base_signatures = own.settings().time_signatures.clone();
@@ -554,17 +544,21 @@ impl Compiler {
                     .map(|signature| (signature, TimeSignatureMap::constant(signature))),
             })
             .collect();
-        let held = |scene| scene_maps.iter().find(|maps| maps.scene == scene);
-        let tempo = self
-            .applied
+        let override_tempo = self
+            .scene_override
             .tempo
-            .and_then(|(scene, _)| held(scene)?.tempo.as_ref().map(|(_, map)| map.clone()))
-            .unwrap_or_else(|| document.settings().tempo.clone());
-        let time_signatures = self
-            .applied
+            .map(|(_, bpm)| (bpm, TempoMap::constant(bpm)));
+        let override_signatures = self
+            .scene_override
             .signature
-            .and_then(|(scene, _)| held(scene)?.signature.as_ref().map(|(_, map)| map.clone()))
-            .unwrap_or_else(|| document.settings().time_signatures.clone());
+            .map(|(_, signature)| (signature, TimeSignatureMap::constant(signature)));
+        let tempo = override_tempo
+            .as_ref()
+            .map_or_else(|| document.settings().tempo.clone(), |(_, map)| map.clone());
+        let time_signatures = override_signatures.as_ref().map_or_else(
+            || document.settings().time_signatures.clone(),
+            |(_, map)| map.clone(),
+        );
         let program = EngineProgram {
             generation,
             base,
@@ -596,6 +590,8 @@ impl Compiler {
             base_tempo,
             base_signatures,
             scene_maps,
+            override_tempo,
+            override_signatures,
             sample_rate: self.config.sample_rate,
             scene_slots: scene_slots(document),
             session_tracks: document

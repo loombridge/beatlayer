@@ -663,23 +663,29 @@ impl Processor {
     }
 
     /// Makes `program`'s tempo map and time-signature map what the audio
-    /// thread has put in place: the maps of the scene that launched them if
-    /// that scene still holds the same tempo and signature, else the set's.
-    /// Switching among maps the program already holds allocates nothing.
+    /// thread has put in place: the override's maps the compiler made for
+    /// it, or else those of the scene that launched them if it still holds
+    /// the same tempo and signature, else the set's. Switching among maps
+    /// the program already holds allocates nothing.
     fn align_with_override(&mut self, program: &mut EngineProgram) {
         let held = |scene: SceneId| program.scene_maps.iter().find(|maps| maps.scene == scene);
         let tempo = self.scene_override.tempo.and_then(|(scene, bpm)| {
-            let (held_bpm, map) = held(scene)?.tempo.as_ref()?;
-            (*held_bpm == bpm).then(|| map.clone())
+            let scene = held(scene).and_then(|maps| maps.tempo.as_ref());
+            let (_, map) = (program.override_tempo.iter().chain(scene))
+                .find(|(held_bpm, _)| *held_bpm == bpm)?;
+            Some(map.clone())
         });
         let signature = self
             .scene_override
             .signature
             .and_then(|(scene, signature)| {
-                let (held_signature, map) = held(scene)?.signature.as_ref()?;
-                (*held_signature == signature).then(|| map.clone())
+                let scene = held(scene).and_then(|maps| maps.signature.as_ref());
+                let (_, map) = (program.override_signatures.iter().chain(scene))
+                    .find(|(held_signature, _)| *held_signature == signature)?;
+                Some(map.clone())
             });
-        // A scene that lost its tempo or signature gives the override up.
+        // A program that holds no map for the override (compiled before the
+        // launch, from a scene changed since) gives it up.
         if tempo.is_none() {
             self.scene_override.tempo = None;
         }

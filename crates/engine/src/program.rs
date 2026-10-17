@@ -4,7 +4,7 @@
 use core::fmt;
 use core::ops::Range;
 
-use bl_core::time::{SampleRate, TempoMap, TimeSignatureMap};
+use bl_core::time::{Bpm, SampleRate, TempoMap, TimeSignature, TimeSignatureMap};
 use bl_model::{Channel, ParamId, SceneId, Tap, TrackId};
 
 use crate::midi::{MidiRoutes, TrackMidiInput};
@@ -117,6 +117,11 @@ pub struct EngineProgram {
     pub(crate) base_signatures: TimeSignatureMap,
     /// The tempo and signature of every scene that has its own (WP-3.5).
     pub(crate) scene_maps: Vec<SceneMaps>,
+    /// The maps of the tempo and signature a launched scene put in place, as
+    /// the compiler last heard of them: they hold after the scene's own
+    /// fields change or the scene goes.
+    pub(crate) override_tempo: Option<(Bpm, TempoMap)>,
+    pub(crate) override_signatures: Option<(TimeSignature, TimeSignatureMap)>,
     pub(crate) sample_rate: SampleRate,
     /// Every audio and MIDI slot that holds a clip, as `(scene, track)`
     /// pairs sorted by scene and then track: what a scene launch queues

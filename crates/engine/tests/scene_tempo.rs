@@ -259,13 +259,23 @@ fn a_program_compiled_before_the_launch_keeps_the_tempo_and_a_recompile_follows_
     assert!(rig.sender.flush());
     play(&mut rig, 256, 256);
     assert_eq!(rig.monitor.state().scene_override, override_);
-    // Taking the scene's tempo away gives the override up on the next swap.
-    rig.editor
-        .apply(Command::SetSceneTempo { scene, tempo: None })
-        .unwrap();
-    rig.sync();
-    play(&mut rig, 256, 256);
-    assert!(rig.monitor.state().scene_override.is_none());
+    // Taking the scene's tempo away, or deleting the scene, leaves the
+    // launched tempo in place: only Re-Enable Automation or Back to
+    // Arrangement gives the set's back. The playhead still moves at 60 BPM,
+    // a quarter note in 48,000 frames.
+    for edit in [
+        Command::SetSceneTempo { scene, tempo: None },
+        Command::DeleteScene { scene },
+    ] {
+        rig.editor.apply(edit).unwrap();
+        rig.sync();
+        play(&mut rig, 256, 256);
+        assert_eq!(rig.monitor.state().scene_override, override_);
+        let before = rig.monitor.state().position_ticks;
+        play(&mut rig, 48_000, 256);
+        let moved = rig.monitor.state().position_ticks.0 - before.0;
+        assert!((moved - Ticks::QUARTER.0).abs() <= 1, "moved {moved} ticks");
+    }
 }
 
 // Spec: session-view R22, R23

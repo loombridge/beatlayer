@@ -14,7 +14,9 @@
 use std::f64::consts::TAU;
 use std::sync::Arc;
 
-use bl_engine::{DeviceType, NodeConfig, NodeData, NoteEvent, NoteExpression, NoteKind, Registry};
+use bl_engine::{
+    DeviceType, NodeConfig, NodeData, NoteEvent, NoteExpression, NoteKind, Registry, SlotSample,
+};
 use bl_media::SampleData;
 use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
 use bl_model::{DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
@@ -1047,11 +1049,9 @@ fn voice_frame(voice: &mut Voice, s: &Settings, live: &Live, sample: &SampleData
             let depth = fx1 * FM_DEPTH_MS / 1000.0 * rate * fade;
             let hz = MOD_MIN_HZ * MOD_RATIO.powf(fx2) * note_ratio;
             voice.mod_phase = (voice.mod_phase + hz / rate).fract();
-            sound = tap(
-                sample,
-                region,
-                voice.position + depth * (TAU * voice.mod_phase).sin(),
-            );
+            // The bend never reads before the region, where `tap` is silent.
+            let bent = (voice.position + depth * (TAU * voice.mod_phase).sin()).max(region.0);
+            sound = tap(sample, region, bent);
             voice.position += ratio;
         }
         Effect::RingMod => {
@@ -1120,7 +1120,7 @@ fn voice_frame(voice: &mut Voice, s: &Settings, live: &Live, sample: &SampleData
             sound.1 += level;
         }
         Effect::NoiseOsc => {
-            let a = one_pole(NOISE_MIN_HZ * NOISE_RATIO.powf(fx2), rate);
+            let a = one_pole(NOISE_MIN_HZ * NOISE_RATIO.powf(fx2) * note_ratio, rate);
             voice.noise_low_pass += a * (white(&mut voice.noise) - voice.noise_low_pass);
             let level = voice.noise_low_pass * fx1 as f32 * NOISE_PEAK;
             sound.0 += level;
@@ -1220,9 +1220,9 @@ impl NativeDevice for DrumSampler {
         let sample = match self
             .data
             .as_ref()
-            .and_then(|data| data.downcast_ref::<Arc<SampleData>>())
+            .and_then(|data| data.downcast_ref::<SlotSample>())
         {
-            Some(sample) if sample.frames() > 0 => Arc::clone(sample),
+            Some(slot) if slot.sample.frames() > 0 => Arc::clone(&slot.sample),
             _ => {
                 for voice in &mut self.voices {
                     voice.active = false;
@@ -1259,6 +1259,12 @@ impl NativeDevice for DrumSampler {
     }
 
     fn receive_data(&mut self, data: NodeData) {
-        self.data = Some(data);
+        // Strike has one sample slot.
+        if data
+            .downcast_ref::<SlotSample>()
+            .is_some_and(|slot| slot.slot == 0)
+        {
+            self.data = Some(data);
+        }
     }
 }

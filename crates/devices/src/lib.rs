@@ -142,7 +142,10 @@ pub fn relative_clip_envelopes(document: &mut bl_model::Document) {
 /// samplers.
 #[must_use]
 pub fn plays_samples(device_type: &str) -> bool {
-    matches!(device_type, sampler::SAMPLER | kitbag::KITBAG | DRUM_SAMPLER)
+    matches!(
+        device_type,
+        sampler::SAMPLER | kitbag::KITBAG | DRUM_SAMPLER
+    )
 }
 
 /// A [`KitHost`] with the kit plug-ins compiled into Beatlayer: its

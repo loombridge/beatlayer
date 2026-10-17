@@ -21,7 +21,7 @@ use bl_devices::drum_sampler::{
 };
 use bl_engine::{
     Block, Collector, DeviceType, EngineConfig, MediaMap, Node, NodeEvent, NoteBuffer, NoteEvent,
-    NoteExpression, NoteKind, Offline, Registry, TransportCommand, TransportInfo,
+    NoteExpression, NoteKind, Offline, Registry, SlotSample, TransportCommand, TransportInfo,
 };
 use bl_model::param::db_to_gain;
 use bl_model::{
@@ -86,7 +86,10 @@ fn loaded(
 ) -> (Box<dyn Node>, Collector) {
     let collector = Collector::new();
     let mut node = strike(params);
-    node.receive_data(collector.handle().data(Arc::clone(data)));
+    node.receive_data(collector.handle().data(SlotSample {
+        slot: 0,
+        sample: Arc::clone(data),
+    }));
     (node, collector)
 }
 

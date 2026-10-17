@@ -198,7 +198,11 @@ fn swapping_to_snapshot_keeps_the_sample_start_and_length_in_one_undo_step() {
             device_type: SAMPLER.to_owned()
         }
     );
-    assert_eq!(device.media_at(0), Some(loaded.media), "the sample came along");
+    assert_eq!(
+        device.media_at(0),
+        Some(loaded.media),
+        "the sample came along"
+    );
     assert_eq!(device.params.get(&sampler::MODE), Some(&1.0), "One-Shot");
     assert_eq!(device.params.get(&sampler::START), Some(&20.0));
     assert_eq!(device.params.get(&sampler::LENGTH), Some(&50.0));

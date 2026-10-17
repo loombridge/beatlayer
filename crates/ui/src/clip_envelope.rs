@@ -18,7 +18,10 @@
 //! envelopes spec.
 
 use bl_core::time::Ticks;
-use bl_model::{AutomationTarget, Breakpoint, Clip, ClipId, Document, Envelope, MidiData};
+use bl_model::modulation::Travel;
+use bl_model::{
+    AutomationTarget, Breakpoint, Clip, ClipId, Document, Envelope, MidiData, MixerParam,
+};
 use bl_shell::{Area, GesturePhase, Invocation, Shell};
 use egui::{
     Align2, Id, Key, Modifiers, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Ui, WidgetInfo,
@@ -29,7 +32,7 @@ use serde_json::{Value, json};
 use crate::arrangement::automation::{
     AutomationDevice, BREAKPOINT_GRAB, BREAKPOINT_SIZE, CURVE_PER_POINT, FINE_VALUE, LaneScale,
     SEGMENT_GRAB, belongs_to, control_choices, default_target, device_choices, device_of,
-    lane_scale, target_label,
+    mark_controls, mark_devices, target_label,
 };
 use crate::arrangement::editing::EditKeys;
 use crate::clip_view::{grid_rect, paint_grid_lines, tick_at, x_of_tick};
@@ -48,6 +51,30 @@ const CONTROL_WIDTH: f32 = 150.0;
 const LINKED_WIDTH: f32 = 56.0;
 /// The gap between the footer's controls, in points.
 const GAP: f32 = 3.0;
+
+/// The scale a clip's modulation envelope is drawn and edited on: shares of
+/// the parameter's travel, 0 to 100 % for a level (Volume and sends) and
+/// −100 % to 100 % for the rest, not the parameter's own units.
+// Spec: modulation R9
+pub(crate) fn share_scale(target: AutomationTarget) -> LaneScale {
+    let travel = if is_level(target) {
+        Travel::Fader
+    } else {
+        Travel::Pan
+    };
+    let (min, max) = travel.clip_range();
+    LaneScale::Linear { min, max }
+}
+
+/// Whether a parameter is a level, whose modulation is a share of its base.
+fn is_level(target: AutomationTarget) -> bool {
+    matches!(
+        target,
+        AutomationTarget::Mixer {
+            param: MixerParam::Volume
+        } | AutomationTarget::Send { .. }
+    )
+}
 
 /// The editor's area: the note area's width, down to the footer.
 #[must_use]
@@ -124,6 +151,8 @@ struct Lane<'a> {
     start: Ticks,
     length: Ticks,
     scale: LaneScale,
+    /// The share that modulates nothing: 100 % for a level, 0 for the rest.
+    rest: f64,
     envelope: Option<&'a Envelope>,
 }
 
@@ -299,7 +328,8 @@ impl EnvelopeEditor {
                 rect,
                 start,
                 length: clip.length,
-                scale: lane_scale(shell, doc, target),
+                scale: share_scale(target),
+                rest: if is_level(target) { 1.0 } else { 0.0 },
                 envelope,
             };
             self.paint(ui, theme, &lane);
@@ -311,10 +341,24 @@ impl EnvelopeEditor {
     fn paint(&self, ui: &Ui, theme: &Theme, lane: &Lane<'_>) {
         let painter = ui.painter_at(lane.rect);
         let colours = &theme.colors;
+        // Spec: modulation R9: the left axis reads in percent.
+        let low = lane.scale.value(0.0);
+        let ticks = [(1.0, Align2::LEFT_TOP), (low, Align2::LEFT_BOTTOM)]
+            .into_iter()
+            .chain((low < 0.0).then_some((0.0, Align2::LEFT_CENTER)));
+        for (value, align) in ticks {
+            painter.text(
+                pos2(lane.rect.left() + 2.0, lane.y_of_value(value)),
+                align,
+                format!("{:.0}%", value * 100.0),
+                theme.small_font(),
+                colours.text_dim.0,
+            );
+        }
         let Some(envelope) = lane.envelope.filter(|envelope| !envelope.is_empty()) else {
             // With no envelope drawn the lane shows a dashed red line
-            // (L-CLIP-017).
-            let y = lane.y_of_value(0.0);
+            // (L-CLIP-017), where nothing modulates.
+            let y = lane.y_of_value(lane.rest);
             painter.add(Shape::dashed_line(
                 &[pos2(lane.rect.left(), y), pos2(lane.rect.right(), y)],
                 Stroke::new(1.0, colours.record.0),
@@ -333,7 +377,7 @@ impl EnvelopeEditor {
             x += 2.0;
         }
         if points.len() >= 2 {
-            painter.add(Shape::line(points, Stroke::new(1.5, colours.accent.0)));
+            painter.add(Shape::line(points, Stroke::new(1.5, colours.modulation.0)));
         }
         for point in envelope.points() {
             painter.rect_filled(
@@ -506,9 +550,13 @@ impl EnvelopeEditor {
         if let Some(mixer) = devices.first_mut() {
             mixer.label = "Mixer".to_owned();
         }
-        let controls = device
+        let mut controls = device
             .map(|device| control_choices(shell, doc, device))
             .unwrap_or_default();
+        if let Some(track) = track {
+            mark_devices(&mut devices, doc, track, theme);
+            mark_controls(&mut controls, doc, track, theme);
+        }
         let current_control = frame
             .target
             .filter(|target| device.is_some_and(|device| belongs_to(*target, device)));

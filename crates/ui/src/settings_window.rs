@@ -28,7 +28,7 @@ use serde_json::{Value, json};
 use crate::layout::SettingsLayout;
 use crate::main_window::{UiEvent, sample_rate_text};
 use crate::theme::Theme;
-use crate::widgets::{Choice, chooser, number_box, switch};
+use crate::widgets::{Choice, NO_LEDS, chooser, number_box, switch};
 
 /// The Settings window's state between frames.
 #[derive(Clone, Debug)]
@@ -177,6 +177,7 @@ impl SettingsUi {
             .map(|d| Choice {
                 label: d.name.clone(),
                 value: d.id.clone(),
+                leds: NO_LEDS,
             })
             .collect();
         let rect = rows.row(ui, "Driver Type", SettingsLayout::CHOOSER);
@@ -196,6 +197,7 @@ impl SettingsUi {
         let inputs: Vec<Choice<String>> = std::iter::once(Choice {
             label: "No Device".to_owned(),
             value: "none".to_owned(),
+            leds: NO_LEDS,
         })
         .chain(
             devices
@@ -205,6 +207,7 @@ impl SettingsUi {
                 .map(|d| Choice {
                     label: d.name.clone(),
                     value: d.id.clone(),
+                    leds: NO_LEDS,
                 }),
         )
         .collect();
@@ -238,6 +241,7 @@ impl SettingsUi {
         let outputs: Vec<Choice<String>> = std::iter::once(Choice {
             label: default_name,
             value: "default".to_owned(),
+            leds: NO_LEDS,
         })
         .chain(
             devices
@@ -247,6 +251,7 @@ impl SettingsUi {
                 .map(|d| Choice {
                     label: d.name.clone(),
                     value: d.id.clone(),
+                    leds: NO_LEDS,
                 }),
         )
         .collect();
@@ -284,10 +289,12 @@ impl SettingsUi {
         let channels: Vec<Choice<u16>> = std::iter::once(Choice {
             label: format!("All ({most})"),
             value: 0,
+            leds: NO_LEDS,
         })
         .chain((1..=most.min(64)).map(|n| Choice {
             label: n.to_string(),
             value: n,
+            leds: NO_LEDS,
         }))
         .collect();
         let rect = rows.row(ui, "Output Config", SettingsLayout::CHOOSER);
@@ -311,6 +318,7 @@ impl SettingsUi {
             label: current_rate
                 .map_or_else(|| "Device's Own".to_owned(), |r| format!("{r} (Device)")),
             value: 0,
+            leds: NO_LEDS,
         })
         .chain(
             device
@@ -319,6 +327,7 @@ impl SettingsUi {
                 .map(|r| Choice {
                     label: format!("{r} Hz"),
                     value: *r,
+                    leds: NO_LEDS,
                 }),
         )
         .collect();
@@ -343,6 +352,7 @@ impl SettingsUi {
             label: default_buffer
                 .map_or_else(|| "Device's Own".to_owned(), |b| format!("{b} (Device)")),
             value: 0,
+            leds: NO_LEDS,
         })
         .chain(
             device
@@ -352,6 +362,7 @@ impl SettingsUi {
                 .map(|b| Choice {
                     label: format!("{b} Samples"),
                     value: b,
+                    leds: NO_LEDS,
                 }),
         )
         .collect();
@@ -701,6 +712,7 @@ fn launch_rows(
         .map(|value| Choice {
             label: value.label().to_owned(),
             value,
+            leds: NO_LEDS,
         })
         .collect();
     let rect = rows.row(ui, "Default Launch Mode", SettingsLayout::CHOOSER);
@@ -722,10 +734,12 @@ fn launch_rows(
     let steps: Vec<Choice<Option<LaunchQuantization>>> = std::iter::once(Choice {
         label: "Global".to_owned(),
         value: None,
+        leds: NO_LEDS,
     })
     .chain(LaunchQuantization::ALL.into_iter().map(|step| Choice {
         label: step.label().to_owned(),
         value: Some(step),
+        leds: NO_LEDS,
     }))
     .collect();
     let rect = rows.row(ui, "Default Launch Quantization", SettingsLayout::CHOOSER);
@@ -843,6 +857,7 @@ fn theme_page(
         .map(|t| Choice {
             label: t.label().to_owned(),
             value: t,
+            leds: NO_LEDS,
         })
         .collect();
     let rect = rows.row(ui, "Theme", SettingsLayout::CHOOSER);
@@ -1057,6 +1072,7 @@ fn assistant_section(
         .map(|provider| Choice {
             label: provider.label().to_owned(),
             value: provider,
+            leds: NO_LEDS,
         })
         .collect();
     if let Some(provider) = chooser(

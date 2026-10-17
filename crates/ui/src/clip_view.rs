@@ -48,7 +48,7 @@ use crate::arrangement::editing::EditKeys;
 use crate::clip_envelope::{self, EnvelopeEditor};
 use crate::main_window::UiEvent;
 use crate::theme::Theme;
-use crate::widgets::{self, Choice};
+use crate::widgets::{self, Choice, NO_LEDS};
 
 /// How wide the key track is, at the note area's left (L-CLIP-012).
 pub const KEY_WIDTH: f32 = 27.0;
@@ -674,10 +674,12 @@ fn toolbar(ui: &mut Ui, shell: &Shell, theme: &Theme, view: Rect, events: &mut V
         .map(|choice| Choice {
             label: choice.label().to_owned(),
             value: GridChoice::Adaptive(*choice),
+            leds: NO_LEDS,
         })
         .chain(FixedGrid::ALL.iter().map(|choice| Choice {
             label: choice.label().to_owned(),
             value: GridChoice::Fixed(*choice),
+            leds: NO_LEDS,
         }))
         .collect();
     let current = if grid.fixed_on {

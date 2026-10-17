@@ -1,4 +1,4 @@
-//! The TOON trial's benchmark (T112): does a model read agent API results as
+//! The TOON trial's benchmark: does a model read agent API results as
 //! well in TOON as in compact JSON, and how many tokens does each cost?
 //!
 //! `tests/fixtures/toon-bench/` holds the results of the agent API's tools on

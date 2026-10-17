@@ -1728,6 +1728,94 @@ fn paths() -> BTreeMap<&'static str, Path> {
             )),
         ),
         ("device.set_param", Exception(device_params)),
+        // Racks (WP-5.1): Group and Ungroup are on Cmd-G and Cmd-Shift-G;
+        // the rack's chain list and its controls arrive with the Device
+        // View's rack (WP-5.2), until then agents reach them.
+        (
+            "device.wrap_in_rack",
+            Exception(Equivalent("Group (`device.group`, Cmd-G)")),
+        ),
+        (
+            "device.unwrap_rack",
+            Exception(Equivalent("Ungroup (`device.ungroup`, Cmd-Shift-G)")),
+        ),
+        (
+            "device.insert_in_chain",
+            Exception(Equivalent(
+                "adding a device as a person does (`device.add`)",
+            )),
+        ),
+        (
+            "device.move_to_chain",
+            Exception(Equivalent(
+                "Cmd-X on the selected device, then Cmd-V before another (`device.cut`, \
+                 `device.paste`)",
+            )),
+        ),
+        (
+            "device.set_enabled_all",
+            Exception(LaterView(
+                "the rack's Device Activator in the rack's title bar, Option-click (WP-5.2)",
+            )),
+        ),
+        (
+            "chain.add",
+            Exception(LaterView(
+                "the rack's chain list and its drop area (WP-5.2)",
+            )),
+        ),
+        (
+            "chain.remove",
+            Exception(LaterView("the rack's chain list, Delete (WP-5.2)")),
+        ),
+        (
+            "chain.move",
+            Exception(LaterView("dragging a chain in the chain list (WP-5.2)")),
+        ),
+        (
+            "chain.rename",
+            Exception(LaterView("the chain list's context menu, Rename (WP-5.2)")),
+        ),
+        (
+            "chain.set_colour",
+            Exception(LaterView("the chain list's context menu (WP-5.2)")),
+        ),
+        (
+            "chain.set_info",
+            Exception(LaterView("the chain list's context menu (WP-5.2)")),
+        ),
+        (
+            "chain.set_gain",
+            Exception(LaterView("the chain list's Volume slider (WP-5.2)")),
+        ),
+        (
+            "chain.set_pan",
+            Exception(LaterView("the chain list's Pan slider (WP-5.2)")),
+        ),
+        (
+            "chain.set_enabled",
+            Exception(LaterView("the chain list's activator (WP-5.2)")),
+        ),
+        (
+            "chain.set_solo",
+            Exception(LaterView("the chain list's Solo button (WP-5.2)")),
+        ),
+        (
+            "chain.copy",
+            Exception(LaterView("the chain list, Cmd-C (WP-5.2)")),
+        ),
+        (
+            "chain.cut",
+            Exception(LaterView("the chain list, Cmd-X (WP-5.2)")),
+        ),
+        (
+            "chain.paste",
+            Exception(LaterView("the chain list, Cmd-V (WP-5.2)")),
+        ),
+        (
+            "chain.duplicate",
+            Exception(LaterView("the chain list, Cmd-D (WP-5.2)")),
+        ),
         (
             "device.load_sample",
             Exception(Gap(

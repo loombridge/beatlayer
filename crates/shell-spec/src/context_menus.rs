@@ -125,7 +125,7 @@ const DEVICE: &[Row] = &[
     ("C-DEVICE-005", "Edit Info Text", Pending(None)),
     SEPARATOR,
     ("C-DEVICE-006", "Delete", Key(&["S-EDIT-005"])),
-    ("C-DEVICE-007", "Group", Pending(Some("S-DEV-001"))),
+    ("C-DEVICE-007", "Group", Key(&["S-DEV-001"])),
     ("C-DEVICE-008", "Fold", Key(&["S-DEV-014"])),
     (IMP_14, "Float", Cmd(SET_FLOATING)),
     (
@@ -162,7 +162,6 @@ pub fn device() -> Vec<MenuItem> {
 pub fn pending_package(row: &str) -> Option<&'static str> {
     match row {
         "C-DEVICE-005" | "C-CLIP-ARR-008" => Some("WP-2.24 (the Info View)"),
-        "C-DEVICE-007" => Some("milestone M5 (racks)"),
         "C-DEVICE-010" | "C-DEVICE-011" => Some("milestone M5 (A/B compare)"),
         _ => None,
     }

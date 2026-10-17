@@ -340,8 +340,11 @@ pub(crate) fn lists(
             );
         }
     }
-    for device in track.devices() {
+    for device in track.devices_deep() {
         lists.insert(NodeKey::Device(device.id), Entries::default());
+        for chain in &device.chains {
+            lists.insert(NodeKey::ChainMixer(chain.id), Entries::default());
+        }
     }
     for (target, automation) in track.automation() {
         if !automation.enabled {
@@ -416,6 +419,14 @@ fn target_node(track: TrackId, target: &AutomationTarget) -> (NodeKey, ParamId) 
         ),
         AutomationTarget::Send { to } => (NodeKey::Send { track, to }, mixer::route::LEVEL),
         AutomationTarget::Device { device, param } => (NodeKey::Device(device), param),
+        AutomationTarget::Chain { chain, param } => (
+            NodeKey::ChainMixer(chain),
+            match param {
+                MixerParam::Volume => mixer::track::VOLUME,
+                MixerParam::Pan => mixer::track::PAN,
+                MixerParam::Mute => mixer::track::MUTE,
+            },
+        ),
     }
 }
 

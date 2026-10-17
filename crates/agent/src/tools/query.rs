@@ -16,8 +16,8 @@
 use bl_core::time::{Ticks, TimeSignatureMap};
 use bl_model::automation::{Automation, AutomationTarget};
 use bl_model::{
-    Clip, ClipData, ClipId, Device, DeviceId, Document, SavedSong, Scene, SceneId, TakeLane, Track,
-    TrackId,
+    Chain, ChainId, Clip, ClipData, ClipId, Device, DeviceId, Document, SavedSong, Scene, SceneId,
+    TakeLane, Track, TrackId,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -48,7 +48,7 @@ pub(crate) struct QueryArgs {
     /// `tempo`. Leave it and `id` out for an overview of the whole song.
     #[serde(default)]
     path: Option<String>,
-    /// What to read, by its ID: any track, clip, or device.
+    /// What to read, by its ID: any track, clip, device, or rack chain.
     #[serde(default)]
     id: Option<u64>,
     /// How much to return.
@@ -69,7 +69,7 @@ pub(crate) fn definition() -> Value {
         "Query the project",
         "Reads the open project without changing it. With no arguments: an overview of the \
          song (its set, tempo, time signatures, counts, the tracks in order, and the undo \
-         history). With `id`: the track, clip, or device with that ID. With `path`: a readable \
+         history). With `id`: the track, clip, device, or rack chain with that ID (a rack's `chains`, each with its mixer and devices, read with the rack). With `path`: a readable \
          path such as `track \"Bass\"`, `track \"Bass\" / clip #1` (the first clip by start), \
          `track main`, `device \"EQ\" / param 0`, `clip \"Verse\"`, `tracks`, `tempo`, `time \
          signatures`, `history`, or `checkpoints`. Positions are given as bar.beat.sixteenth \
@@ -79,7 +79,7 @@ pub(crate) fn definition() -> Value {
          counted from 1), `track \"Bass\" / lane 1` (a take lane, with its \
          passes), and `track \"Bass\" / automation` (its envelopes; \
          `automation \"volume\"` reads one, with its points). With `detail: \"full\"` a \
-         track, clip, device, scene, and the song (`song`) also return `saved`: everything \
+         track, clip, device, chain, scene, and the song (`song`) also return `saved`: everything \
          the set file saves for it, in the file\'s own form, so a setting you can change is \
          readable there; a list inside a list shows only its length, which the item\'s own \
          path reads in full. The default `summary` stays compact.",
@@ -173,6 +173,8 @@ enum Found<'a> {
     Track(&'a Track),
     Clip(&'a Clip),
     Device(&'a Device),
+    /// A rack's chain (WP-5.1).
+    Chain(&'a Chain),
     Scene(&'a Scene),
     /// A track's Session slot at a scene.
     Slot(&'a Track, &'a Scene),
@@ -190,6 +192,8 @@ fn find_id(document: &Document, raw: u64) -> Option<Found<'_>> {
         Some(Found::Clip(clip))
     } else if let Some(device) = document.device(DeviceId(id)) {
         Some(Found::Device(device))
+    } else if let Some(chain) = document.chain(ChainId(id)) {
+        Some(Found::Chain(chain))
     } else {
         document.scene(SceneId(id)).map(Found::Scene)
     }
@@ -239,6 +243,7 @@ impl View<'_> {
             Found::Track(track) => self.track(track),
             Found::Clip(clip) => self.clip(clip),
             Found::Device(device) => self.device(device),
+            Found::Chain(chain) => self.chain(chain),
             Found::Scene(scene) => self.scene(scene),
             Found::Slot(track, scene) => self.slot(track, scene),
             Found::Lane(track, lane, number) => self.lane(track, lane, number),
@@ -340,13 +345,52 @@ impl View<'_> {
     }
 
     fn device_summary(&self, device: &Device) -> Value {
-        json!({
+        let mut value = json!({
             "id": device.id,
             "name": device.name,
             "kind": device.kind,
             "enabled": device.enabled,
             "params_set": device.params.len(),
+        });
+        // A rack's chains, each with its mixer and its devices, racks inside
+        // included (the racks spec, R17).
+        if device.rack_kind().is_some() {
+            let chains: Vec<Value> = device
+                .chains
+                .iter()
+                .map(|c| self.chain_summary(c))
+                .collect();
+            value["chains"] = json!(chains);
+        }
+        value
+    }
+
+    fn chain_summary(&self, chain: &Chain) -> Value {
+        let mixer = &chain.mixer;
+        json!({
+            "id": chain.id,
+            "name": chain.name,
+            "colour": chain.colour,
+            "info": chain.info,
+            "mixer": {
+                "volume": mixer.volume,
+                "volume_db": decibels(mixer.volume),
+                "pan": mixer.pan,
+                "enabled": mixer.enabled,
+                "solo": mixer.solo,
+            },
+            "devices": chain.devices.iter().map(|d| self.device_summary(d)).collect::<Vec<_>>(),
         })
+    }
+
+    fn chain(&self, chain: &Chain) -> Value {
+        let mut value = self.chain_summary(chain);
+        value["rack"] = json!(self.document.chain_rack(chain.id).map(|rack| rack.id));
+        value["track"] = json!(self.document.chain_track(chain.id));
+        if self.detail == Detail::Full {
+            value["saved"] = self.saved(chain);
+        }
+        value
     }
 
     fn device(&self, device: &Device) -> Value {
@@ -514,6 +558,14 @@ fn target_label(target: &AutomationTarget) -> String {
         AutomationTarget::Device { device, param } => {
             format!("device {} param {}", device.0.get(), param.0)
         }
+        AutomationTarget::Chain { chain, param } => format!(
+            "chain {} {}",
+            chain.0.get(),
+            serde_json::to_value(param)
+                .ok()
+                .and_then(|name| name.as_str().map(str::to_owned))
+                .unwrap_or_default()
+        ),
     }
 }
 

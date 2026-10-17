@@ -95,6 +95,11 @@ object_id!(
     DeviceId,
     "device"
 );
+object_id!(
+    /// The ID of a chain in a rack (WP-5.1).
+    ChainId,
+    "chain"
+);
 
 // A parameter of a device, numbered by the device: the plug-in kit's
 // `lspk-params` defines it, with the parameter descriptors.

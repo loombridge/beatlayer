@@ -6,7 +6,7 @@ use std::any::Any;
 use std::sync::LazyLock;
 
 use bl_core::time::{Frames, SampleRate, TempoMap};
-use bl_model::{DeviceId, ParamId, TrackId};
+use bl_model::{ChainId, DeviceId, ParamId, TrackId};
 use rtgc::{ArcGc, LocalRtGc};
 
 use crate::session::SessionPlayback;
@@ -54,6 +54,10 @@ pub enum NodeKey {
     /// which make what the device's detector hears. Its parameters are
     /// [`sidechain`](crate::sidechain).
     Sidechain(DeviceId),
+    /// The mixer of a rack's chain, after the chain's devices (WP-5.1): its
+    /// Volume, Pan, and Chain Activator, which solo mutes. Its parameters are
+    /// [`mixer::track`](crate::mixer::track).
+    ChainMixer(ChainId),
 }
 
 impl fmt::Display for NodeKey {
@@ -68,6 +72,7 @@ impl fmt::Display for NodeKey {
             Self::DeviceInput(track) => write!(f, "the interface input of {track}"),
             Self::SidechainInput(device) => write!(f, "the sidechain input of {device}"),
             Self::Sidechain(device) => write!(f, "the sidechain of {device}"),
+            Self::ChainMixer(chain) => write!(f, "the mixer of {chain}"),
         }
     }
 }

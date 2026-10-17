@@ -263,12 +263,24 @@ pub(crate) fn lane_scale(shell: &Shell, doc: &Document, target: AutomationTarget
     match target {
         AutomationTarget::Mixer {
             param: MixerParam::Volume,
+        }
+        | AutomationTarget::Chain {
+            param: MixerParam::Volume,
+            ..
         } => LaneScale::Volume,
         AutomationTarget::Mixer {
             param: MixerParam::Pan,
+        }
+        | AutomationTarget::Chain {
+            param: MixerParam::Pan,
+            ..
         } => LaneScale::Pan,
         AutomationTarget::Mixer {
             param: MixerParam::Mute,
+        }
+        | AutomationTarget::Chain {
+            param: MixerParam::Mute,
+            ..
         } => LaneScale::Switch,
         AutomationTarget::Send { .. } => LaneScale::Send,
         AutomationTarget::Device { device, param } => {
@@ -300,7 +312,10 @@ pub enum AutomationDevice {
 /// The device a target belongs to, as the device chooser sees it.
 pub(crate) fn device_of(target: AutomationTarget) -> AutomationDevice {
     match target {
-        AutomationTarget::Mixer { .. } | AutomationTarget::Send { .. } => AutomationDevice::Mixer,
+        AutomationTarget::Mixer { .. }
+        | AutomationTarget::Send { .. }
+        // The Device View's chain list picks chain controls (WP-5.2).
+        | AutomationTarget::Chain { .. } => AutomationDevice::Mixer,
         AutomationTarget::Device { device, .. } => AutomationDevice::Device(device),
     }
 }
@@ -821,6 +836,16 @@ pub(crate) fn target_label(shell: &Shell, doc: &Document, target: AutomationTarg
             || "Send".to_owned(),
             |track| format!("Send {}", track.name()),
         ),
+        AutomationTarget::Chain { chain, param } => {
+            let name = doc
+                .chain(chain)
+                .map_or("Chain", |chain| chain.name.as_str());
+            match param {
+                MixerParam::Volume => format!("{name} Volume"),
+                MixerParam::Pan => format!("{name} Pan"),
+                MixerParam::Mute => format!("{name} Activator"),
+            }
+        }
         AutomationTarget::Device { device, param } => doc
             .device(device)
             .and_then(|device| {

@@ -135,10 +135,12 @@ pub use offline::Offline;
 pub use processor::{Carry, Output, Processor};
 pub use program::EngineProgram;
 pub use recording::{
-    MidiRecordTrack, RecordTrack, RecordedMidi, RecordingPlan, SessionTarget, TakeBounds,
+    LaunchLog, MidiRecordTrack, RecordTrack, RecordedMidi, RecordingPlan, SessionTarget, TakeBounds,
 };
 pub use registry::{DeviceType, NodeFactory, Registry};
-pub use session::{SceneOverride, SessionCommand, SessionPlayback, SlotState, SlotStatus};
+pub use session::{
+    SceneOverride, SessionCommand, SessionEvent, SessionPlayback, SlotState, SlotStatus,
+};
 pub use state::{EngineCounters, EngineState, Monitor, TrackMeter};
 
 /// An engine's fixed sizes, chosen when it's made. The audio thread works

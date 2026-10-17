@@ -5,18 +5,76 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, AtomicU32, AtomicU64, Ordering::Relaxed};
 
-use bl_media::SampleData;
+use bl_media::{ProgressiveSample, SampleData};
 use bl_model::Layer;
 
-/// One layer and the audio it plays, at the engine's rate. A layer whose
-/// media the library can't supply plays silence.
+/// A layer's audio, at the engine's rate.
+#[derive(Clone, Debug)]
+pub enum LayerSample {
+    /// Decoded whole into memory.
+    Whole(Arc<SampleData>),
+    /// A long file whose start is in memory and whose rest is still being
+    /// read (R23).
+    Progressive(Arc<ProgressiveSample>),
+}
+
+impl LayerSample {
+    /// The number of frames.
+    #[must_use]
+    pub fn frames(&self) -> usize {
+        match self {
+            Self::Whole(data) => data.frames(),
+            Self::Progressive(data) => data.frames(),
+        }
+    }
+
+    /// The number of channels.
+    #[must_use]
+    pub fn channel_count(&self) -> usize {
+        match self {
+            Self::Whole(data) => data.channel_count(),
+            Self::Progressive(data) => data.channel_count(),
+        }
+    }
+
+    /// The sample of `channel` at `frame`: silence past the end and, for a
+    /// progressive sample, before the disk has delivered it. A mono sample
+    /// reads as the same on every channel. Real-time safe.
+    #[must_use]
+    pub fn at(&self, channel: usize, frame: usize) -> f32 {
+        match self {
+            Self::Whole(data) => data
+                .channel(channel)
+                .or_else(|| data.channel(0))
+                .and_then(|samples| samples.get(frame))
+                .copied()
+                .unwrap_or(0.0),
+            Self::Progressive(data) => {
+                let channel = if channel < data.channel_count() { channel } else { 0 };
+                data.get(channel, frame)
+            }
+        }
+    }
+
+    /// Whether `frame` is in the file but not decoded yet.
+    #[must_use]
+    pub fn pending(&self, frame: usize) -> bool {
+        match self {
+            Self::Whole(_) => false,
+            Self::Progressive(data) => frame < data.frames() && frame >= data.ready(),
+        }
+    }
+}
+
+/// One layer and the audio it plays. A layer whose media the library can't
+/// supply plays silence.
 #[derive(Clone, Debug)]
 pub struct LayerAudio {
     /// The layer as the document has it: zones, markers (in frames of the
     /// sample at its own rate) and settings.
     pub layer: Layer,
-    /// The sample decoded whole into memory, if the library had it.
-    pub sample: Option<Arc<SampleData>>,
+    /// Its audio, if the library had it.
+    pub sample: Option<LayerSample>,
 }
 
 /// Where Round Robin is in a group of layers with identical key zones (R8,
@@ -64,6 +122,9 @@ pub struct DeviceLayers {
     pub group_of: Vec<u32>,
     /// The groups of layers with identical key zones.
     pub groups: Vec<Group>,
+    /// How many frames voices read before the disk had delivered them (R23),
+    /// counted by the node and read by whoever shows the disk's load.
+    pub underruns: Arc<AtomicU64>,
 }
 
 impl DeviceLayers {
@@ -90,6 +151,7 @@ impl DeviceLayers {
             linear_loop_fades,
             group_of,
             groups,
+            underruns: Arc::default(),
         }
     }
 

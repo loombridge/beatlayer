@@ -13,8 +13,9 @@
 use std::sync::atomic::Ordering::Relaxed;
 
 use bl_core::time::{Frames, SampleRate, TempoMap, Ticks};
-use bl_engine::{DeviceLayers, DeviceType, NodeConfig, NodeData, NoteEvent, NoteKind, Registry};
-use bl_media::SampleData;
+use bl_engine::{
+    DeviceLayers, DeviceType, LayerSample, NodeConfig, NodeData, NoteEvent, NoteKind, Registry,
+};
 use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
 use bl_model::{
     DeviceDescription, DeviceLayout, DeviceRole, FadeMode, ParamDescriptor, ParamId, ParamUnit,
@@ -769,8 +770,8 @@ impl Sinc {
         Self { table }
     }
 
-    /// `samples` read at `position` through the kernel.
-    fn read(&self, samples: &[f32], position: f64) -> f32 {
+    /// The sample `at` gives, read at `position` through the kernel.
+    fn read(&self, at: impl Fn(usize) -> f32, position: f64) -> f32 {
         let index = position.floor();
         let frac = position - index;
         let first = index as i64 - (SINC_TAPS as i64 / 2 - 1);
@@ -781,11 +782,9 @@ impl Sinc {
         let b = &self.table[(phase + 1) * SINC_TAPS..(phase + 2) * SINC_TAPS];
         let mut sum = 0.0f32;
         for tap in 0..SINC_TAPS {
-            let at = first + tap as i64;
-            if at >= 0
-                && let Some(&value) = samples.get(at as usize)
-            {
-                sum += value * (a[tap] + (b[tap] - a[tap]) * blend);
+            let frame = first + tap as i64;
+            if frame >= 0 {
+                sum += at(frame as usize) * (a[tap] + (b[tap] - a[tap]) * blend);
             }
         }
         sum
@@ -807,10 +806,15 @@ fn bessel_i0(x: f64) -> f64 {
     sum
 }
 
-/// One channel of `samples` at `position`: the frame itself at a whole
+/// One channel of a sample at `position`: the frame itself at a whole
 /// position in every mode (R22), otherwise as `mode` reads between frames,
-/// silence outside the sample.
-fn read_channel(sinc: &Sinc, samples: &[f32], position: f64, mode: Interp) -> f32 {
+/// silence outside the sample. `frame` gives the channel's frames.
+fn read_channel(
+    sinc: &Sinc,
+    frame: impl Fn(usize) -> f32,
+    position: f64,
+    mode: Interp,
+) -> f32 {
     if position < 0.0 {
         return 0.0;
     }
@@ -820,7 +824,7 @@ fn read_channel(sinc: &Sinc, samples: &[f32], position: f64, mode: Interp) -> f3
         if i < 0 {
             0.0
         } else {
-            samples.get(i as usize).copied().unwrap_or(0.0)
+            frame(i as usize)
         }
     };
     if frac == 0.0 {
@@ -841,17 +845,15 @@ fn read_channel(sinc: &Sinc, samples: &[f32], position: f64, mode: Interp) -> f3
                 + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t * t
                 + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t * t * t)
         }
-        Interp::Best => sinc.read(samples, position),
+        Interp::Best => sinc.read(frame, position),
     }
 }
 
 /// A sample frame at `position` in each channel: a mono sample on both.
-fn read(sinc: &Sinc, sample: &SampleData, position: f64, mode: Interp) -> (f32, f32) {
-    let left = sample.channel(0).unwrap_or(&[]);
-    let right = sample.channel(1).unwrap_or(left);
+fn read(sinc: &Sinc, sample: &LayerSample, position: f64, mode: Interp) -> (f32, f32) {
     (
-        read_channel(sinc, left, position, mode),
-        read_channel(sinc, right, position, mode),
+        read_channel(sinc, |i| sample.at(0, i), position, mode),
+        read_channel(sinc, |i| sample.at(1, i), position, mode),
     )
 }
 
@@ -1108,7 +1110,7 @@ impl Multisampler {
             * (1.0 - s.time_vel * f64::from(velocity)).max(0.0);
         for &index in &chosen[..count] {
             let entry = &layers.layers[index as usize];
-            let (layer, Some(sample)) = (&entry.layer, entry.sample.as_deref()) else {
+            let (layer, Some(sample)) = (&entry.layer, entry.sample.as_ref()) else {
                 continue;
             };
             let gain = layer.key.gain(key, s.fade_mode)
@@ -1323,8 +1325,13 @@ impl NativeDevice for Multisampler {
                     } else if let Some(sample) = layers
                         .layers
                         .get(voice.layer as usize)
-                        .and_then(|entry| entry.sample.as_deref())
+                        .and_then(|entry| entry.sample.as_ref())
                     {
+                        // R23: a frame the disk hasn't delivered plays as
+                        // silence and counts as an underrun.
+                        if sample.pending(voice.position as usize) {
+                            layers.underruns.fetch_add(1, Relaxed);
+                        }
                         let mut value = read(sinc, sample, voice.position, s.interp);
                         // The loop's wrap: a crossfade from its end into its
                         // start (R19), constant-power unless the title bar
@@ -1398,7 +1405,13 @@ impl NativeDevice for Multisampler {
                     new.layers.iter().position(|now| {
                         now.layer.id == was.layer.id
                             && match (&now.sample, &was.sample) {
-                                (Some(a), Some(b)) => std::sync::Arc::ptr_eq(a, b),
+                                (Some(LayerSample::Whole(a)), Some(LayerSample::Whole(b))) => {
+                                    std::sync::Arc::ptr_eq(a, b)
+                                }
+                                (
+                                    Some(LayerSample::Progressive(a)),
+                                    Some(LayerSample::Progressive(b)),
+                                ) => std::sync::Arc::ptr_eq(a, b),
                                 (None, None) => true,
                                 _ => false,
                             }

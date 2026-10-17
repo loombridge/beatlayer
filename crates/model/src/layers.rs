@@ -477,6 +477,19 @@ impl LayerSettings {
             crossfade_ms,
             loop_detune
         );
+        // Markers the settings leave alone follow the ones they move: a loop
+        // that no longer fits inside the sample's new span is held to it.
+        if self.loop_end.is_none() {
+            next.loop_end = next.loop_end.clamp(next.start.saturating_add(1), next.end.max(1));
+        }
+        if self.loop_start.is_none() {
+            next.loop_start = next
+                .loop_start
+                .clamp(next.start, next.loop_end.saturating_sub(1).max(next.start));
+        }
+        if self.release_loop.is_none() {
+            next.release_loop = next.release_loop.clamp(next.loop_end, next.end.max(next.loop_end));
+        }
         if self.crossfade_ms.is_none() {
             next.crossfade_ms = next.crossfade_ms.min(next.crossfade_limit_ms());
         }
@@ -1049,6 +1062,36 @@ mod tests {
         assert_eq!(snap_to_zero_crossing(&left, 6), 5);
         assert_eq!(snap_to_zero_crossing(&left, 7), 7);
         assert_eq!(snap_to_zero_crossing(&[0.5, 0.5], 1), 1);
+    }
+
+    // Spec: multisampler R16
+    #[test]
+    fn markers_left_alone_follow_the_ones_that_move() {
+        let mut l = layers(&[60]);
+        let id = l.list[0].id;
+        // Sample End comes in: the loop that filled the sample follows it.
+        let settings = LayerSettings {
+            end: Some(30_000),
+            ..LayerSettings::default()
+        };
+        l.update(&[id], &settings).unwrap();
+        let layer = &l.list[0];
+        assert_eq!((layer.loop_start, layer.loop_end, layer.release_loop), (0, 30_000, 30_000));
+        // Markers set together must be in order, or nothing changes.
+        let out_of_order = LayerSettings {
+            loop_start: Some(20_000),
+            loop_end: Some(10_000),
+            ..LayerSettings::default()
+        };
+        assert!(l.update(&[id], &out_of_order).is_err());
+        assert_eq!(l.list[0].loop_end, 30_000);
+        // Sample Start past the loop's start takes it along.
+        let settings = LayerSettings {
+            start: Some(5_000),
+            ..LayerSettings::default()
+        };
+        l.update(&[id], &settings).unwrap();
+        assert_eq!(l.list[0].loop_start, 5_000);
     }
 
     #[test]

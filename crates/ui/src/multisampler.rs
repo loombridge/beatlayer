@@ -737,18 +737,13 @@ impl MultisamplerUi {
         let response = ui.interact(rect, id, Sense::hover());
         // Cmd or Ctrl with the wheel zooms the time, about the pointer.
         if response.hovered() {
-            let (scroll, zoom, pointer) = ui.input(|i| {
-                (
-                    i.smooth_scroll_delta.y,
-                    i.modifiers.command,
-                    i.pointer.latest_pos(),
-                )
-            });
-            if zoom && scroll != 0.0 {
+            // egui turns Cmd or Ctrl with the wheel (and a pinch) into a zoom.
+            let (zoom, pointer) = ui.input(|i| (i.zoom_delta(), i.pointer.latest_pos()));
+            if (zoom - 1.0).abs() > f32::EPSILON {
                 let total = wave.audio.frames().max(1) as f64;
                 let at = pointer.map_or(0.5, |p| f64::from((p.x - rect.left()) / rect.width()));
                 let anchor = wave.first + wave.span * at;
-                wave.span = (wave.span * (-f64::from(scroll) * 0.005).exp()).clamp(64.0, total);
+                wave.span = (wave.span / f64::from(zoom)).clamp(64.0, total);
                 wave.first = (anchor - wave.span * at).clamp(0.0, total - wave.span);
             }
             crate::mixer::show_readout(
@@ -853,6 +848,12 @@ impl MultisamplerUi {
                 node.set_role(Role::Slider);
                 node.set_label(marker.name().to_owned());
                 node.set_value(marker.frame(layer).to_string());
+                node.set_bounds(egui::accesskit::Rect {
+                    x0: handle.min.x.into(),
+                    y0: handle.min.y.into(),
+                    x1: handle.max.x.into(),
+                    y1: handle.max.y.into(),
+                });
             });
             if response.drag_started() {
                 self.marker = Some(MarkerDrag {

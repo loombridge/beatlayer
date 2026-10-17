@@ -16,7 +16,7 @@ use crate::gc::{GcHandle, Program};
 use crate::message::{LoopRegion, ParamEvent, Punch, TransportCommand};
 use crate::midi_clips::{MidiClipList, MidiClipPlayer};
 use crate::mixer::{self, Route, Solo, TrackMixer, route};
-use crate::layers::{DeviceLayers, LayerAudio};
+use crate::layers::{DeviceLayers, LayerAudio, LayerSample};
 use crate::node::{NodeData, NodeKey, NoteBuffer, ParamValue};
 use crate::program::{
     DeviceInput, DeviceSidechain, EngineProgram, ExtOut, Input, Instance, Migration, NO_DELAY,
@@ -70,6 +70,10 @@ impl Update {
             && self.data.is_empty()
     }
 }
+
+/// A layer longer than this many seconds is read in the background with its
+/// start held, unless RAM Mode is on (the multisampler spec, R23).
+const LONG_LAYER_SECONDS: u64 = 10;
 
 /// What a node is, beyond its key: a node migrates only if this matches.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -152,6 +156,10 @@ pub struct Compiler {
     scene_override: SceneOverride,
     layout: BTreeMap<NodeKey, Placed>,
     sources: ClipSources,
+    /// The long layers being read in the background (WP-5.13, R23), by
+    /// media, so an edit that sends the layers again shares them rather
+    /// than reading each file again. A sample goes when no node holds it.
+    progressive: BTreeMap<ContentHash, std::sync::Weak<bl_media::ProgressiveSample>>,
 }
 
 /// Every audio and MIDI slot that holds a clip, as `(scene, track, launch
@@ -186,6 +194,7 @@ impl Compiler {
             scene_override: SceneOverride::default(),
             layout: BTreeMap::new(),
             sources: ClipSources::default(),
+            progressive: BTreeMap::new(),
         }
     }
 
@@ -409,12 +418,36 @@ impl Compiler {
         };
         let rate = self.config.sample_rate;
         let library = self.registry.media();
+        let mut fresh = Vec::new();
         let layers = device
             .layers
             .list
             .iter()
             .map(|layer| {
-                let sample = library.and_then(|library| library.sample(layer.media, rate));
+                // R23: with RAM Mode off, a layer over ten seconds is read
+                // in the background behind its held start; the rest decode
+                // whole.
+                let long = !device.layers.ram_mode
+                    && layer.length > u64::from(layer.sample_rate) * LONG_LAYER_SECONDS;
+                let held = self
+                    .progressive
+                    .get(&layer.media)
+                    .and_then(std::sync::Weak::upgrade)
+                    .filter(|_| long);
+                let progressive = held.or_else(|| {
+                    let head = (LONG_LAYER_SECONDS * u64::from(rate.hz())) as usize;
+                    let made = library
+                        .filter(|_| long)
+                        .and_then(|library| library.progressive(layer.media, rate, head))?;
+                    fresh.push((layer.media, std::sync::Arc::downgrade(&made)));
+                    Some(made)
+                });
+                let sample = match progressive {
+                    Some(sample) => Some(LayerSample::Progressive(sample)),
+                    None => library
+                        .and_then(|library| library.sample(layer.media, rate))
+                        .map(LayerSample::Whole),
+                };
                 if sample.is_none() {
                     update.missing.push(layer.media);
                 }
@@ -424,6 +457,8 @@ impl Compiler {
                 }
             })
             .collect::<Vec<_>>();
+        self.progressive.retain(|_, held| held.strong_count() > 0);
+        self.progressive.extend(fresh);
         update.missing.sort_unstable();
         update.missing.dedup();
         let data = DeviceLayers::new(

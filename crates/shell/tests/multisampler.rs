@@ -546,3 +546,80 @@ fn the_title_shows_the_first_layers_name() {
     assert_eq!(title(&mut shell), "Strings");
     let _ = Arc::new(0);
 }
+
+// Spec: multisampler R10
+#[test]
+fn hot_swapping_a_layer_replaces_its_sample_and_keeps_its_zones() {
+    let scratch = Scratch::new("hot-swap");
+    let (old, new) = (scratch.path("Old.wav"), scratch.path("New.wav"));
+    wav(&old, 4800, 0.25, None);
+    wav(&new, 9600, 0.5, None);
+    let mut shell = shell(&scratch);
+    let device = add_multisampler(&mut shell);
+    add_layers(&mut shell, device, &[&old]);
+    let layer = layers(&shell, device)[0].clone();
+    shell
+        .run(
+            "device.update_layers",
+            json!({ "device": device, "layers": [layer.id],
+                    "settings": { "root_key": 55, "end": 2400 } }),
+        )
+        .unwrap();
+    shell
+        .run(
+            "device.set_layer_zone",
+            json!({ "device": device, "kind": "key",
+                    "zones": [{ "layer": layer.id, "zone": { "low": 40, "high": 70 } }] }),
+        )
+        .unwrap();
+    let state = shell
+        .run("device.hot_swap_layer", json!({ "device": device }))
+        .unwrap();
+    assert_eq!(state["hot_swap"], json!(layer.id));
+    let steps = shell.editor().undo_history().len();
+    // The sample chosen in the browser replaces the layer's.
+    shell
+        .run("browser.select", json!({ "paths": [new.to_string_lossy()] }))
+        .unwrap();
+    shell.run("browser.load_selected", json!({})).unwrap();
+    let swapped = layers(&shell, device)[0].clone();
+    assert_ne!(swapped.media, layer.media);
+    assert_eq!(swapped.length, 9600);
+    assert_eq!(swapped.root_key, 55, "its settings stay");
+    assert_eq!((swapped.key.low, swapped.key.high), (40, 70), "and its zones");
+    assert_eq!(swapped.end, 4800, "the end marker stays at the same share");
+    assert_eq!(shell.editor().undo_history().len(), steps + 1, "one undo step");
+    assert_eq!(
+        state_of(&mut shell, device)["hot_swap"],
+        Value::Null,
+        "hot-swapping ends with the load"
+    );
+}
+
+fn state_of(shell: &mut Shell, device: DeviceId) -> Value {
+    state(shell, device)
+}
+
+// Spec: multisampler R23
+#[test]
+fn a_long_layer_streams_with_ram_mode_off_and_never_waits() {
+    let scratch = Scratch::new("long");
+    let file = scratch.path("Long.wav");
+    // Twenty seconds of a constant: a note plays it from the held start.
+    wav(&file, 20 * 48_000, 0.5, None);
+    let mut shell = shell(&scratch);
+    let device = add_multisampler(&mut shell);
+    add_layers(&mut shell, device, &[&file]);
+    let layer = &layers(&shell, device)[0];
+    assert!(layer.length > 10 * 48_000, "over the ten seconds that stream");
+    // RAM Mode off, as a new device has it: the first nine seconds play from
+    // the held start at once, the same as they do with every layer whole.
+    let (streamed, missing) = play(&shell, device, 9 * 48_000);
+    assert_eq!(missing, 0);
+    assert!(streamed[2000..9 * 48_000 - 2000].iter().all(|s| (s - 0.5).abs() < 1e-3));
+    shell
+        .run("device.set_layer_options", json!({ "device": device, "ram_mode": true }))
+        .unwrap();
+    let (whole, _) = play(&shell, device, 9 * 48_000);
+    assert_eq!(streamed, whole, "both give the same audio");
+}

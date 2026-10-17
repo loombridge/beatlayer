@@ -19,7 +19,8 @@ use bl_devices::multisampler::{
     VOICES, VOLUME, multisampler_type,
 };
 use bl_engine::{
-    Block, Collector, DeviceLayers, LayerAudio, Node, NodeEvent, NoteBuffer, NoteEvent, NoteKind,
+    Block, Collector, DeviceLayers, LayerAudio, LayerSample, Node, NodeEvent, NoteBuffer, NoteEvent,
+    NoteKind,
     ParamValue, Registry, TransportInfo,
 };
 use bl_model::{ContentHash, DeviceRole, Layer, LayerId, ReleaseMode, SustainMode, Zone};
@@ -74,11 +75,19 @@ impl Rig {
             .into_iter()
             .map(|(layer, sample)| LayerAudio {
                 layer,
-                sample: Some(sample),
+                sample: Some(LayerSample::Whole(sample)),
             })
             .collect();
+        self.send(layers, linear);
+    }
+
+    /// Sends layers with their audio made, and says how many underruns the
+    /// node has counted.
+    fn send(&mut self, layers: Vec<LayerAudio>, linear: bool) -> Arc<std::sync::atomic::AtomicU64> {
         let data = DeviceLayers::new(layers, false, linear);
+        let underruns = Arc::clone(&data.underruns);
         self.node.receive_data(self.collector.handle().data(data));
+        underruns
     }
 
     /// Plays `frames` frames from where the last call stopped, `notes` at
@@ -939,4 +948,95 @@ fn a_layer_edit_keeps_sounding_notes_going() {
     rig.give(vec![(narrow, sb), (a, sa)], false);
     let second = rig.render(2000, &[]);
     assert!((second[0][1000] - 3.0).abs() < 1e-4, "{}", second[0][1000]);
+}
+
+/// A mono 16-bit WAV of `seconds` of a ramp that wraps, at 48 kHz, in a
+/// folder of its own.
+fn long_file(name: &str, seconds: usize) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("bl-multisampler-{name}-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let samples: Vec<f32> = (0..seconds * 48_000)
+        .map(|i| ((i % 20_000) as f32 / 20_000.0 - 0.5) * 0.8)
+        .collect();
+    let path = dir.join("Long.wav");
+    std::fs::write(
+        &path,
+        bl_media::wav_bytes(&samples, 1, 48_000, bl_media::BitDepth::Int16, bl_media::Dither::None)
+            .unwrap(),
+    )
+    .unwrap();
+    path
+}
+
+// Spec: multisampler R23
+#[test]
+fn a_long_layer_plays_from_its_held_start_while_the_rest_is_read() {
+    use std::sync::atomic::Ordering::Relaxed;
+    let path = long_file("progressive", 20);
+    let whole = bl_media::decode_file(&path).unwrap();
+    let frames = whole.frames();
+    for block in [100, 4096] {
+        let decoder = bl_media::Decoder::open(&path).unwrap();
+        let (sample, fill) = bl_media::ProgressiveSample::start(decoder, 10 * 48_000).unwrap();
+        assert_eq!(sample.ready(), 10 * 48_000, "the start is held before it plays");
+        let mut layer = Layer::new(
+            LayerId(1),
+            "Long",
+            ContentHash([9; 32]),
+            frames as u64,
+            48_000,
+            1,
+        );
+        layer.root_key = 60;
+        let mut rig = Rig::new(&[(ENV_RELEASE, 0.0)], block);
+        let underruns = rig.send(
+            vec![LayerAudio {
+                layer,
+                sample: Some(LayerSample::Progressive(Arc::clone(&sample))),
+            }],
+            false,
+        );
+        // The first half plays from the held start while nothing reads the
+        // rest.
+        let first = rig.render(5 * 48_000, &[on(0, 60, 1.0)]);
+        // Then the rest is read, in the background, and the note plays on.
+        fill.spawn().unwrap();
+        let waited = std::time::Instant::now();
+        while sample.ready() < frames {
+            assert!(waited.elapsed() < std::time::Duration::from_secs(20), "the read stalled");
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        let rest = rig.render(15 * 48_000, &[]);
+        let played: Vec<f32> = first[0].iter().chain(&rest[0]).copied().collect();
+        let expected = whole.channel(0).unwrap();
+        assert!(
+            played.iter().zip(expected).all(|(a, b)| (a - b).abs() < 1e-6),
+            "block {block}: it plays what decoding the whole file gives"
+        );
+        assert_eq!(underruns.load(Relaxed), 0, "never waited for the disk");
+    }
+}
+
+// Spec: multisampler R23
+#[test]
+fn a_frame_the_disk_hasnt_delivered_plays_as_silence_and_counts() {
+    use std::sync::atomic::Ordering::Relaxed;
+    let path = long_file("behind", 14);
+    let decoder = bl_media::Decoder::open(&path).unwrap();
+    // Nothing reads past the held start.
+    let (sample, _fill) = bl_media::ProgressiveSample::start(decoder, 10 * 48_000).unwrap();
+    let frames = sample.frames();
+    let layer = Layer::new(LayerId(1), "Long", ContentHash([9; 32]), frames as u64, 48_000, 1);
+    let mut rig = Rig::new(&[(ENV_RELEASE, 0.0)], 512);
+    let underruns = rig.send(
+        vec![LayerAudio {
+            layer,
+            sample: Some(LayerSample::Progressive(sample)),
+        }],
+        false,
+    );
+    let out = rig.render(12 * 48_000, &[on(0, 60, 1.0)]);
+    assert!(out[0][9 * 48_000..10 * 48_000].iter().any(|s| *s != 0.0), "the held start plays");
+    assert!(out[0][10 * 48_000 + 10..].iter().all(|s| *s == 0.0), "then silence");
+    assert!(underruns.load(Relaxed) > 0, "counted");
 }

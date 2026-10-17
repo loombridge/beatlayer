@@ -36,6 +36,7 @@ mod error;
 mod hash;
 mod mp4;
 pub mod peaks;
+mod progressive;
 mod resample;
 mod rf64;
 mod sample_data;
@@ -50,6 +51,7 @@ pub use encode::{
 pub use error::MediaError;
 pub use hash::{ContentHash, ParseContentHashError};
 pub use peaks::{PeakCache, PeakCacheOptions, PeakEvent, PeakStatus, Peaks};
+pub use progressive::{Fill, ProgressiveSample};
 pub use resample::{RateConverter, convert_sample_rate, converted_len};
 pub use sample_data::SampleData;
 pub use sampler_chunk::{SamplerInfo, read_sampler_info};

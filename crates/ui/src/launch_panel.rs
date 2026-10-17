@@ -20,7 +20,7 @@ use serde_json::json;
 
 use crate::main_window::UiEvent;
 use crate::theme::Theme;
-use crate::widgets::{self, Choice};
+use crate::widgets::{self, Choice, NO_LEDS};
 
 /// How wide the left group of panels is (L-CLIP-003: x 249 to 591).
 pub const WIDTH: f32 = 342.0;
@@ -209,6 +209,7 @@ pub fn show(
         .map(|mode| Choice {
             label: mode.label().to_owned(),
             value: mode,
+            leds: NO_LEDS,
         })
         .collect();
     crate::focus::register(
@@ -274,10 +275,12 @@ pub fn show(
     let steps: Vec<_> = std::iter::once(Choice {
         label: "Global".to_owned(),
         value: None,
+        leds: NO_LEDS,
     })
     .chain(LaunchQuantization::ALL.into_iter().map(|step| Choice {
         label: step.label().to_owned(),
         value: Some(step),
+        leds: NO_LEDS,
     }))
     .collect();
     crate::focus::register(

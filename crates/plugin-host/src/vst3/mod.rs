@@ -37,6 +37,7 @@ use vst3::Steinberg::Vst::*;
 use vst3::Steinberg::*;
 use vst3::{ComPtr, ComWrapper};
 
+use crate::drive::Driver;
 use handlers::{ComponentHandler, Gestures, HostApplication};
 use node::{HostEnds, MAX_BUSES};
 
@@ -1364,6 +1365,23 @@ fn activate(instance: &mut Instance, config: &NodeConfig) -> Result<node::Active
         out_channels,
         params: instance.params.iter().map(|p| p.map).collect(),
         pending: std::mem::take(&mut instance.pending),
+        drive: Driver::new(instance.params.iter().map(|p| {
+            // Each control starts where the controller is: the set's values
+            // and the plug-in's saved state are on it.
+            // SAFETY: the controller maps its own parameter's value, by ID.
+            let plain = unsafe {
+                instance.controller.normalizedParamToPlain(
+                    p.map.id,
+                    instance.controller.getParamNormalized(p.map.id),
+                )
+            };
+            let control = if plain.is_finite() {
+                plain.clamp(p.map.min, p.map.max)
+            } else {
+                p.map.default
+            };
+            (p.descriptor.clone(), false, control)
+        })),
     })
 }
 

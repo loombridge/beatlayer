@@ -23,9 +23,10 @@ use bl_project::preset::{self, Preset};
 use bl_shell_spec::arrangement as view_ids;
 use bl_shell_spec::devices::{
     self as ids, AddDeviceArgs, DeviceAdded, DeviceArgs, DeviceFrame, DevicePanel,
-    DeviceParameters, DeviceViewState, FloatingWindow, FloatingWindows, FoldDeviceArgs, HotSwap,
-    HotSwapArgs, LoadPresetArgs, ParameterState, PasteDeviceArgs, PresetResult, SavePresetArgs,
-    SelectDeviceArgs, SetWindowArgs, ShowSidechainArgs, SidechainSection,
+    DeviceParameters, DeviceViewState, ExpandDeviceArgs, FloatingWindow, FloatingWindows,
+    FoldDeviceArgs, HotSwap, HotSwapArgs, LoadPresetArgs, ParameterState, PasteDeviceArgs,
+    PresetResult, SavePresetArgs, SelectDeviceArgs, SetWindowArgs, ShowSidechainArgs,
+    SidechainSection,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -40,6 +41,8 @@ use crate::arrangement::ArrangementView;
 pub struct DeviceView {
     selected: Option<DeviceId>,
     folded: BTreeSet<DeviceId>,
+    /// Devices whose expanded part is shown (WP-5.42).
+    expanded: BTreeSet<DeviceId>,
     clipboard: Option<Device>,
     hot_swap: Option<DeviceId>,
     /// Devices whose sidechain section is shown (WP-2.19b).
@@ -250,6 +253,7 @@ impl DeviceView {
             description: DeviceDescription {
                 params: selected,
                 layout,
+                menu_options: Vec::new(),
             },
             plugin: true,
         }
@@ -269,6 +273,7 @@ impl DeviceView {
                             descriptor: p.clone(),
                             value,
                             text: p.format(value),
+                            menu_option: description.menu_options.contains(&p.id),
                             other: device.can_compare().then(|| {
                                 description
                                     .value(device.other_params(), p.id)
@@ -307,7 +312,14 @@ impl DeviceView {
         self.selected = self.selected.filter(exists);
         self.hot_swap = self.hot_swap.filter(exists);
         self.folded.retain(exists);
+        self.expanded.retain(exists);
         self.sidechains_shown.retain(exists);
+    }
+
+    /// Whether `device`'s type has an expanded part.
+    fn expandable(&self, device: &Device) -> bool {
+        self.description(&device.kind)
+            .is_some_and(|d| d.layout.has_expanded())
     }
 
     /// Whether a device's sidechain section is shown.
@@ -444,6 +456,8 @@ impl DeviceView {
             ),
             show_preset_name: d.show_preset_name,
             folded: self.folded.contains(&d.id),
+            expandable: self.expandable(d),
+            expanded: self.expandable(d) && self.expanded.contains(&d.id),
             floating: d.floating,
             b_active: d.b_active,
             selected: self.selected == Some(d.id),
@@ -491,6 +505,9 @@ impl DeviceView {
             ids::CUT | ids::COPY | ids::SAVE_PRESET | ids::SAVE_DEFAULT_PRESET | ids::FOLD => {
                 has_target()
             }
+            ids::EXPAND => self
+                .target(doc, named)
+                .is_ok_and(|device| doc.device(device).is_some_and(|d| self.expandable(d))),
             ids::SHOW_SIDECHAIN => self
                 .target(doc, named)
                 .is_ok_and(|device| doc.device(device).is_some_and(|d| d.sidechain.is_some())),
@@ -603,6 +620,25 @@ impl DeviceView {
                     self.folded.insert(device);
                 } else {
                     self.folded.remove(&device);
+                }
+            }
+            ids::EXPAND => {
+                let ExpandDeviceArgs { device, expanded } = parse(args)?;
+                let device = self.target(editor.document(), device)?;
+                if editor
+                    .document()
+                    .device(device)
+                    .is_none_or(|d| !self.expandable(d))
+                {
+                    return Err(DeviceError::Unavailable(format!(
+                        "{device} has no expanded part"
+                    )));
+                }
+                let expanded = expanded.unwrap_or(!self.expanded.contains(&device));
+                if expanded {
+                    self.expanded.insert(device);
+                } else {
+                    self.expanded.remove(&device);
                 }
             }
             ids::ADD => {

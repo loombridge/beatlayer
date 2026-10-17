@@ -8,6 +8,7 @@
 use std::cell::Cell;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
 
+use bl_engine::ParamValue;
 use clack_extensions::audio_ports::{AudioPortRescanFlags, HostAudioPorts, HostAudioPortsImpl};
 use clack_extensions::gui::{GuiSize, HostGui, HostGuiImpl};
 use clack_extensions::latency::{HostLatency, HostLatencyImpl};
@@ -18,6 +19,8 @@ use clack_extensions::params::{
 };
 use clack_extensions::state::{HostState, HostStateImpl};
 use clack_host::prelude::*;
+
+use crate::drive::Driver;
 
 /// Beatlayer as a CLAP host.
 pub(crate) struct Host;
@@ -177,6 +180,9 @@ pub(crate) struct ProcessorData {
     pub(crate) defaults: Vec<(u32, f64)>,
     /// The plug-in's parameters extension, for flushing while switched off.
     pub(crate) params: Option<PluginParams>,
+    /// Its parameters' automation and modulation, played into it (the
+    /// modulation spec, R10).
+    pub(crate) drive: Driver,
 }
 
 impl ProcessorData {
@@ -186,6 +192,24 @@ impl ProcessorData {
             .binary_search_by_key(&id, |(id, _)| *id)
             .ok()
             .map(|i| self.defaults[i].1)
+    }
+
+    /// Takes a change into the controls the drive follows, and returns the
+    /// value to send the plug-in.
+    pub(crate) fn resolve(&mut self, id: u32, value: ParamValue) -> Option<f64> {
+        let value = match value {
+            ParamValue::Set(value) => value,
+            ParamValue::Default => self.default_of(id)?,
+        };
+        self.drive.set_control(id, value);
+        Some(value)
+    }
+
+    /// The same, but nothing for a parameter the block drives: its values
+    /// come from automation and modulation, on top of the control.
+    pub(crate) fn resolve_undriven(&mut self, id: u32, value: ParamValue) -> Option<f64> {
+        let value = self.resolve(id, value)?;
+        (!self.drive.is_driven(id)).then_some(value)
     }
 }
 

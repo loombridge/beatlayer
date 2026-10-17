@@ -38,6 +38,7 @@ pub fn channel(config: &EngineConfig) -> (Sender, Processor, Monitor) {
     let (state_input, state_output) = triple_buffer::triple_buffer(&EngineState::with_capacity(
         config.max_tracks,
         config.max_slots,
+        config.max_modulated,
         config.sample_rate,
     ));
     let sender = Sender {

@@ -1295,3 +1295,99 @@ fn an_agent_launches_and_stops_session_clips_by_command_id() {
         "the engine's blocks stay off the heap"
     );
 }
+
+// Spec: device-chains R34 and R35, device-framework R14 (WP-5.42): an agent
+// adds the framework's test effects, shows and hides its expanded part,
+// switches its own menu option, and reads all of it back, by command ID.
+#[test]
+fn an_agent_expands_a_device_and_switches_its_menu_option_by_command_id() {
+    use bl_devices::testing::{self, EFFECTS_INVERT};
+
+    let mut shell = Shell::headless();
+    shell.set_device_types(testing::device_types());
+    let mut client = Client::new(InProcess::new(Agent::headless(true), shell));
+    client.initialize("effects-agent").unwrap();
+    let track = default_tracks(&mut client)[2];
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{
+            "command": "arrangement.select_tracks",
+            "args": { "tracks": [track] },
+        }] }),
+    );
+    let effects = testing::effects_type();
+    let added = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{
+            "command": "device.add",
+            "args": {
+                "track": track,
+                "device": { "kind": effects.kind, "name": effects.name, "role": effects.role },
+            },
+        }] }),
+    );
+    let device = added["results"][0]["result"]["device"].clone();
+
+    // The expanded part: hidden at first, shown and hidden by command, read
+    // back from the Device View's state.
+    let frame = |client: &mut Client<InProcess>| {
+        let state = call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": "device_view.state" }] }),
+        );
+        state["results"][0]["result"]["devices"][0].clone()
+    };
+    let hidden = frame(&mut client);
+    assert_eq!(
+        (hidden["expandable"].clone(), hidden["expanded"].clone()),
+        (json!(true), json!(false))
+    );
+    let shown = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "device.expand", "args": { "device": device } }] }),
+    );
+    assert_eq!(
+        shown["results"][0]["result"]["devices"][0]["expanded"],
+        json!(true)
+    );
+    assert_eq!(frame(&mut client)["expanded"], json!(true));
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{
+            "command": "device.expand",
+            "args": { "device": device, "expanded": false },
+        }] }),
+    );
+    assert_eq!(frame(&mut client)["expanded"], json!(false));
+
+    // The menu option is a parameter: set by ID, read back as one that
+    // lives in the menu.
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{
+            "command": "device.set_param",
+            "args": { "device": device, "param": EFFECTS_INVERT, "value": 1.0 },
+        }] }),
+    );
+    let read = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "device.parameters", "args": { "device": device } }] }),
+    );
+    let params = read["results"][0]["result"]["params"].as_array().unwrap();
+    let invert = params.iter().find(|p| p["name"] == "Invert LFO").unwrap();
+    assert_eq!(
+        (
+            invert["value"].clone(),
+            invert["menu_option"].clone(),
+            invert["automatable"].clone()
+        ),
+        (json!(1.0), json!(true), json!(true))
+    );
+}

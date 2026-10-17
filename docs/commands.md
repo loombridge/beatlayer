@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-337 commands in 31 areas.
+338 commands in 31 areas.
 
 ## Permission classes
 
@@ -150,6 +150,7 @@ Each command has:
 | [`device.copy`](#devicecopy) | Copy Device | `read` | `Cmd+C` | `Ctrl+C` |
 | [`device.cut`](#devicecut) | Cut Device | `destructive` | `Cmd+X` | `Ctrl+X` |
 | [`device.duplicate`](#deviceduplicate) | Duplicate Device | `edit` | `Cmd+D` | `Ctrl+D` |
+| [`device.expand`](#deviceexpand) | Expand Device | `read` |  |  |
 | [`device.fold`](#devicefold) | Fold Device | `read` | `Minus` | `Minus` |
 | [`device.hot_swap`](#devicehot_swap) | Hot-Swap Presets | `read` |  |  |
 | [`device.insert`](#deviceinsert) | Insert Device | `edit` |  |  |
@@ -2510,6 +2511,23 @@ Arguments:
 
 Result: [`DeviceAdded`](#deviceadded).
 
+#### `device.expand`
+
+**Expand Device**. Permission: `read`. Contexts: `device-view`.
+
+Shows or hides a device's expanded part, as the toggle in its title bar does: the extra controls (a modulation section, say) some devices keep out of sight until asked; switches unless `expanded` says which. Only devices with an expanded part (`expandable` in `device_view.state`) have one. Like folding, it changes only the view: it isn't an undo step, and isn't saved with the set. The device's width in the chain follows it.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) or null | no | The device; the selected one if left out. |
+| `expanded` | boolean or null | no | Show (true) or hide (false) the expanded part; switches if left out. |
+
+Result: [`DeviceViewState`](#deviceviewstate).
+
 #### `device.fold`
 
 **Fold Device**. Permission: `read`. Contexts: `device-view`.
@@ -2990,7 +3008,7 @@ Result: [`FloatingWindows`](#floatingwindows).
 
 **Device View State**. Permission: `read`. Contexts: `global`.
 
-Reports what the Device View shows: the selected track and its devices in signal order, each with its title, its own name, its kind and role, whether it's on, folded, selected, or being hot-swapped; the selected device; hot-swapping; and whether there's a device to paste. A native device also lists its parameters' descriptors, its layout, and its values (`panel`); `device.parameters` reports any device's. Changes nothing.
+Reports what the Device View shows: the selected track and its devices in signal order, each with its title, its own name, its kind and role, whether it's on, folded, selected, or being hot-swapped, and whether it has an expanded part (`expandable`) and shows it (`expanded`); the selected device; hot-swapping; and whether there's a device to paste. A native device also lists its parameters' descriptors, its layout, and its values (`panel`); `device.parameters` reports any device's. Changes nothing.
 
 Default keys: none.
 
@@ -9016,6 +9034,7 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
 |---|---|---|---|
 | `params` | array of [`ParamDescriptor`](#paramdescriptor) | yes | Its parameters. |
 | `layout` | [`DeviceLayout`](#devicelayout) | yes | Where its controls and display cells sit (IMP-14). |
+| `menu_options` | array of [`ParamId`](#paramid) | no | The switches the device lists as its own items in its Show Options menu, after Save as Default Preset (C-DEVICE-015), in this order. They are parameters like any other, but the layout places no control for them. |
 
 <details><summary>JSON Schema</summary>
 
@@ -9026,6 +9045,13 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
     "layout": {
       "$ref": "#/$defs/DeviceLayout",
       "description": "Where its controls and display cells sit (IMP-14)."
+    },
+    "menu_options": {
+      "description": "The switches the device lists as its own items in its Show Options menu, after Save as Default Preset (C-DEVICE-015), in this order. They are parameters like any other, but the layout places no control for them.",
+      "items": {
+        "$ref": "#/$defs/ParamId"
+      },
+      "type": "array"
     },
     "params": {
       "description": "Its parameters.",
@@ -9060,6 +9086,8 @@ One device as the Device View shows it.
 | `takes_sample` | boolean | yes | Whether its type plays one sample, so a sample dropped on it loads into it (`device.load_sample`, WP-2.16). |
 | `show_preset_name` | boolean | yes | Whether its title shows its preset's or given name. |
 | `folded` | boolean | yes | Whether it's folded to its title bar. |
+| `expandable` | boolean | yes | Whether it has an expanded part, which its title bar's expand toggle shows and hides (L-DEV-004; WP-5.42). |
+| `expanded` | boolean | yes | Whether its expanded part is shown. Never while it has none. |
 | `floating` | boolean | yes | Whether it floats in a window of its own, its place in the chain a strip (WP-2.5b). |
 | `selected` | boolean | yes | Whether it's the selected device. |
 | `hot_swap` | boolean | yes | Whether it's the device being hot-swapped. |
@@ -9074,6 +9102,16 @@ One device as the Device View shows it.
   "properties": {
     "enabled": {
       "description": "Whether it's switched on.",
+      "type": "boolean"
+    },
+    "expandable": {
+      "default": false,
+      "description": "Whether it has an expanded part, which its title bar's expand toggle shows and hides (L-DEV-004; WP-5.42).",
+      "type": "boolean"
+    },
+    "expanded": {
+      "default": false,
+      "description": "Whether its expanded part is shown. Never while it has none.",
       "type": "boolean"
     },
     "floating": {
@@ -9155,6 +9193,8 @@ One device as the Device View shows it.
     "takes_sample",
     "show_preset_name",
     "folded",
+    "expandable",
+    "expanded",
     "floating",
     "selected",
     "hot_swap",
@@ -9262,6 +9302,7 @@ A device's layout (IMP-14): bands of controls and display cells in rows and colu
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `root` | [`LayoutNode`](#layoutnode) | yes | The whole body. |
+| `expanded` | [`LayoutNode`](#layoutnode) or null | no | The part the device adds to its body while it is expanded (L-DEV-004, L-DEV-007), if it has one: placed to the right of [`root`](Self::root). It places its parameters' controls like the rest of the layout. |
 
 <details><summary>JSON Schema</summary>
 
@@ -9269,6 +9310,17 @@ A device's layout (IMP-14): bands of controls and display cells in rows and colu
 {
   "description": "A device's layout (IMP-14): bands of controls and display cells in rows and columns.",
   "properties": {
+    "expanded": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/LayoutNode"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The part the device adds to its body while it is expanded (L-DEV-004, L-DEV-007), if it has one: placed to the right of [`root`](Self::root). It places its parameters' controls like the rest of the layout."
+    },
     "root": {
       "$ref": "#/$defs/LayoutNode",
       "description": "The whole body."
@@ -13083,6 +13135,7 @@ One of a device's parameters as `device.parameters` reports it.
 | `automatable` | boolean | yes | Whether automation and modulation can move it. Always true (rule G2); [`check`](Self::check) refuses a descriptor without it. |
 | `value` | number | yes | Its value now, in its own units: what `device.set_param` takes. |
 | `text` | string | yes | How the value reads, as its control shows it, such as `-6.0 dB`. |
+| `menu_option` | boolean | yes | Whether it's one of the device's own items in its Show Options menu rather than a control in its body (C-DEVICE-015). |
 | `description` | string | no | What it does, for the Info View (WP-2.24) and agents. |
 
 <details><summary>JSON Schema</summary>
@@ -13112,6 +13165,11 @@ One of a device's parameters as `device.parameters` reports it.
       "$ref": "#/$defs/ParamKind",
       "description": "What kind of value it takes, and its range."
     },
+    "menu_option": {
+      "default": false,
+      "description": "Whether it's one of the device's own items in its Show Options menu rather than a control in its body (C-DEVICE-015).",
+      "type": "boolean"
+    },
     "name": {
       "description": "Its name, as its control's label and the Status Bar show it, such as `Gain`.",
       "type": "string"
@@ -13133,7 +13191,8 @@ One of a device's parameters as `device.parameters` reports it.
     "default",
     "automatable",
     "value",
-    "text"
+    "text",
+    "menu_option"
   ],
   "type": "object"
 }

@@ -148,6 +148,13 @@ pub struct ExportArgs {
     /// Unavailable (refused) when `rendered_track` is `main`.
     #[serde(default, skip_serializing_if = "is_false")]
     pub include_return_and_main_effects: bool,
+    /// Render as Loop: the song goes on past the range's end as if Stop were
+    /// pressed there, until the output has stayed below -120 dBFS for 100 ms
+    /// or 60 s have passed, and that tail is added onto the file's start,
+    /// wrapping round if it's longer than the range. The file is still
+    /// exactly the range long. Off unless given.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub render_as_loop: bool,
 }
 
 /// Where an export's range came from.
@@ -227,7 +234,8 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  for `main`). Multi-track exports write one file per track beside `path`. The file type \
                  follows the extension (`.wav`, `.aif`/`.aiff`, `.flac`, `.mp3`; FLAC holds 16 or 24 \
                  bits only) or `file_type`. MP3 writes 320 kbps CBR at one of MP3's sample rates, and \
-                 ignores `bit_depth` and `dither`. \
+                 ignores `bit_depth` and `dither`. `render_as_loop` adds the tail the song leaves \
+                 after the range's end onto the file's start, so the file loops without a cut tail. \
                  The range is `start` and `length` if given, otherwise the Arrangement's time \
                  selection, otherwise the whole set from 1.1.1 to the end of the last clip; it \
                  plays straight through, without the Arrangement loop. Below 32 bits, `dither` adds \

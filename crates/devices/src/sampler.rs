@@ -810,8 +810,11 @@ impl Sampler {
             NoteKind::Off => self.note_off(note.key, settings),
             NoteKind::Choke => self.choke(note.key, settings),
             // The sampler plays no per-note expression (MPE): today only
-            // Cascade does.
-            NoteKind::Expression { .. } => {}
+            // Cascade does. Nor does it answer a channel message yet.
+            NoteKind::Expression { .. }
+            | NoteKind::Control { .. }
+            | NoteKind::PitchBend { .. }
+            | NoteKind::ChannelPressure { .. } => {}
         }
     }
 

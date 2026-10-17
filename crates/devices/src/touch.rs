@@ -195,6 +195,8 @@ impl NativeDevice for Touch {
                     self.router.end(audio, &note, release);
                 }
                 NoteKind::Expression { .. } => self.router.expression(audio, &note),
+                // Spec: device-framework R39. A channel message passes through.
+                _ => audio.send(note),
             }
         }
         self.router.finish(audio);

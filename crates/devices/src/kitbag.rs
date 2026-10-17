@@ -603,7 +603,10 @@ impl Kitbag {
                 }
             }
             NoteKind::Choke => self.cut(slot),
-            NoteKind::Expression { .. } => {}
+            NoteKind::Expression { .. }
+            | NoteKind::Control { .. }
+            | NoteKind::PitchBend { .. }
+            | NoteKind::ChannelPressure { .. } => {}
         }
     }
 

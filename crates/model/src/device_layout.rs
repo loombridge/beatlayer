@@ -912,7 +912,7 @@ mod tests {
         assert_eq!(docked.width, PADDING + 4.0 * (48.0 + PADDING));
     }
 
-    // Spec: device-framework R39
+    // Spec: device-framework R40
     #[test]
     fn a_band_of_slot_controls_names_the_selected_slots_parameters() {
         // Two slots of three parameters each, 10 apart, and a cell for each

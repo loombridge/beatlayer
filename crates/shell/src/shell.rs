@@ -37,7 +37,7 @@ use crate::clip_view::{self, ClipView};
 use crate::commands::{
     self as ids, DefaultSetArgs, FileReport, FoldNotesArgs, LaneArgs, PathArgs, RelinkArgs,
     SaveAsArgs, SetResult, SettingsArgs, SwitchArgs, SwitchResult, TemplateArgs, TestToneArgs,
-    TestToneState, ThemeArgs, ViewResult, ZoomArgs,
+    TestToneState, ThemeArgs, ViewResult, ViewState, ZoomArgs,
 };
 use crate::devices::{self, DeviceError, DeviceView};
 use crate::files::{ProjectFiles, SetStore, new_set_from};
@@ -68,8 +68,13 @@ use bl_shell_spec::perception as perception_ids;
 use bl_shell_spec::plugins as plugin_ids;
 use bl_shell_spec::session_launch as session_launch_ids;
 use bl_shell_spec::session_view as session_ids;
+use bl_shell_spec::settings::{
+    AgentsPageSettings, AudioPageSettings, DisplayInputSettings, STATE as SETTINGS_STATE,
+    SettingsState,
+};
 use bl_shell_spec::tracks as track_ids;
 use bl_shell_spec::transport as transport_ids;
+use bl_shell_spec::transport::{RecordedFileReport, RecordingReport, RunningRecording};
 
 /// The argument a key in a range (F1 to F8) adds to a toggling mixer
 /// command for the track it numbers, counting the mixer's columns from 1;
@@ -420,6 +425,8 @@ pub struct Shell {
     /// The recording under way, or the one whose take just ended
     /// (WP-2.13): its writer's report and the frames the engine dropped.
     recording: Option<crate::recording::Recording>,
+    /// What the last recording that ended came to, for `transport.state`.
+    last_recording: Option<RecordingReport>,
     /// How many recordings this session has started: the take number in
     /// their files' names, so two in one second don't share a file.
     recorded_takes: u32,
@@ -655,6 +662,7 @@ impl Shell {
             metering: false,
             previews: crate::perception::Previews::default(),
             recording: None,
+            last_recording: None,
             recorded_takes: 0,
             automation_take: crate::automation_record::Take::default(),
             automation_recording: false,
@@ -1202,6 +1210,39 @@ impl Shell {
     #[must_use]
     pub fn create_fades_on_clip_edges(&self) -> bool {
         self.prefs.create_fades_on_clip_edges.0
+    }
+
+    /// What `settings.state` reports: the Settings window's preferences by
+    /// page.
+    fn settings_state(&mut self) -> SettingsState {
+        self.refresh_midi();
+        let agent = &self.prefs.agent;
+        let server = AgentServerState::from(agent);
+        SettingsState {
+            page: self.prefs.settings_page,
+            display_input: DisplayInputSettings {
+                zoom_percent: self.zoom_percent(),
+                outline_view_in_focus: self.outline_view_in_focus(),
+                use_tab_key_to_move_focus: self.tab_navigation(),
+                wrap_tab_navigation: self.wrap_navigation(),
+            },
+            theme: self.prefs.theme,
+            audio: AudioPageSettings {
+                device: self.audio.settings().clone(),
+                tone: self.audio.tone(),
+            },
+            tempo_midi: self.midi.report(),
+            create_fades_on_clip_edges: self.create_fades_on_clip_edges(),
+            auto_hide_plug_in_windows: self.auto_hide_plug_in_windows(),
+            agents: AgentsPageSettings {
+                server: server.server,
+                port: agent.port,
+                url: server.url,
+                token_stored: !agent.token.is_empty(),
+                clients: server.clients,
+            },
+            assistant: self.assistant_state(),
+        }
     }
 
     /// The theme in use.
@@ -2979,10 +3020,31 @@ impl Shell {
             midi,
             dropped,
         } = outcome;
+        self.last_recording = Some(RecordingReport {
+            error: None,
+            clips_made: false,
+            files: files.as_ref().map_or_else(
+                |_| Vec::new(),
+                |files| {
+                    files
+                        .iter()
+                        .map(|file| RecordedFileReport {
+                            track: file.track,
+                            path: file.path.display().to_string(),
+                            frames: file.frames,
+                            channels: file.channels,
+                        })
+                        .collect()
+                },
+            ),
+            midi_tracks: midi.iter().map(|take| take.track).collect(),
+            dropped_frames: dropped,
+            delay_frames: delay,
+        });
         let files = match files {
             Ok(files) => files,
             Err(error) => {
-                self.set_message(format!("Recording failed: {error}"), true);
+                self.fail_recording(format!("Recording failed: {error}"));
                 return;
             }
         };
@@ -2990,14 +3052,11 @@ impl Shell {
             return;
         }
         let Some(take) = take else {
-            self.set_message(
-                "Recording stopped without a position, so its clips weren't made",
-                true,
-            );
+            self.fail_recording("Recording stopped without a position, so its clips weren't made");
             return;
         };
         let Some(rate) = self.audio.sample_rate().and_then(SampleRate::new) else {
-            self.set_message("Recording stopped: the audio device closed", true);
+            self.fail_recording("Recording stopped: the audio device closed");
             return;
         };
         let tempo = self.editor.document().settings().tempo.clone();
@@ -3020,10 +3079,10 @@ impl Shell {
                     ));
                 }
                 Err(error) => {
-                    self.set_message(
-                        format!("Recording failed: {}: {error}", file.path.display()),
-                        true,
-                    );
+                    self.fail_recording(format!(
+                        "Recording failed: {}: {error}",
+                        file.path.display()
+                    ));
                     return;
                 }
             }
@@ -3059,8 +3118,11 @@ impl Shell {
                 crate::recording::place_midi(editor, &midi, take, rate, overdub, &mut placed)
             });
         if let Err(error) = applied {
-            self.set_message(format!("Recording failed: {error}"), true);
+            self.fail_recording(format!("Recording failed: {error}"));
             return;
+        }
+        if let Some(report) = &mut self.last_recording {
+            report.clips_made = true;
         }
         for (_, hash, path, size) in imported {
             self.store.add_media(hash, &path, size);
@@ -3077,6 +3139,32 @@ impl Shell {
                 true,
             );
         }
+    }
+
+    /// Shows why a finished recording made no clips, in the Status Bar and
+    /// in the last recording's report.
+    fn fail_recording(&mut self, message: impl Into<String>) {
+        let message = message.into();
+        if let Some(report) = &mut self.last_recording {
+            report.error = Some(message.clone());
+        }
+        self.set_message(message, true);
+    }
+
+    /// The recording under way, for `transport.state`: its armed tracks and
+    /// the frames dropped so far. `None` when no recording is under way.
+    #[must_use]
+    pub fn running_recording(&self) -> Option<RunningRecording> {
+        self.recording.as_ref().map(|recording| RunningRecording {
+            armed_tracks: recording.armed().to_vec(),
+            dropped_frames: recording.dropped(),
+        })
+    }
+
+    /// What the last recording that ended came to, for `transport.state`.
+    #[must_use]
+    pub fn last_recording(&self) -> Option<&RecordingReport> {
+        self.last_recording.as_ref()
     }
 
     /// Opens a gesture, such as a drag on a value field: the document
@@ -3973,6 +4061,10 @@ impl Shell {
             // value saved beside the song.
             return self.run_session_launch(id, args);
         }
+        if id == SETTINGS_STATE {
+            Self::args::<NoArgs>(id, args)?;
+            return Ok(to_value(&self.settings_state()));
+        }
         if transport_ids::handles(id) {
             Self::args::<NoArgs>(id, args)?;
             let engine = self.poll_engine();
@@ -4339,14 +4431,18 @@ impl Shell {
         })
     }
 
-    fn view_result(&self) -> Value {
-        to_value(&ViewResult {
+    fn view_window(&self) -> ViewResult {
+        ViewResult {
             main_view: self.main_view.id().to_owned(),
             browser: self.browser,
             info_view: self.info_view,
             full_screen: self.full_screen,
             zoom: self.zoom(),
-        })
+        }
+    }
+
+    fn view_result(&self) -> Value {
+        to_value(&self.view_window())
     }
 
     fn set_result(&self) -> Value {
@@ -4811,6 +4907,17 @@ impl Shell {
                         .clip_view
                         .state(self.editor.document(), &self.arrangement),
                 ))
+            }
+            ids::VIEW_STATE => {
+                Self::args::<NoArgs>(id, args)?;
+                Ok(to_value(&ViewState {
+                    window: self.view_window(),
+                    clip_view: self
+                        .clip_view
+                        .state(self.editor.document(), &self.arrangement),
+                    assistant: self.assistant_panel_state(),
+                    plug_in_windows: self.plug_in_windows,
+                }))
             }
             ids::VIEW_TOGGLE_INFO_VIEW => {
                 Self::args::<NoArgs>(id, args)?;

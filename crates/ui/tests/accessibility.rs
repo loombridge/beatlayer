@@ -1311,6 +1311,8 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("browser.state", Exception(Query)),
         ("mixer_view.state", Exception(Query)),
         ("transport.state", Exception(Query)),
+        ("settings.state", Exception(Query)),
+        ("view.state", Exception(Query)),
         ("audio.status", Exception(Query)),
         ("audio.devices", Exception(Query)),
         ("midi.ports", Exception(Query)),

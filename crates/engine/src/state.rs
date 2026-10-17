@@ -87,6 +87,12 @@ pub struct EngineState {
     pub loop_region: Option<LoopRegion>,
     /// Whether the transport is recording (WP-2.13).
     pub recording: bool,
+    /// Whether a take is running: the transport records and has begun to
+    /// write the armed tracks' input, so it's past the count-in and any
+    /// punch-in point. It ends at the punch-out point or when recording does.
+    pub take_running: bool,
+    /// Whether the count-in is sounding, before playback and recording start.
+    pub counting_in: bool,
     /// The take that last ended, until the next recording starts: the song
     /// frames it covers. The shell makes the recorded clips from it.
     pub take: Option<TakeBounds>,
@@ -124,6 +130,8 @@ impl EngineState {
             insert_marker: Ticks::ZERO,
             loop_region: None,
             recording: false,
+            take_running: false,
+            counting_in: false,
             take: None,
             program: None,
             swaps: 0,
@@ -172,6 +180,8 @@ impl Clone for EngineState {
             insert_marker: self.insert_marker,
             loop_region: self.loop_region,
             recording: self.recording,
+            take_running: self.take_running,
+            counting_in: self.counting_in,
             take: self.take,
             program: self.program,
             swaps: self.swaps,

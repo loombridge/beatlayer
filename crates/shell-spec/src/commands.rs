@@ -44,6 +44,8 @@ pub const APP_ABOUT: &str = "app.about";
 pub const APP_SETTINGS: &str = "app.settings";
 /// `window.close`: close the frontmost secondary window.
 pub const WINDOW_CLOSE: &str = "window.close";
+/// `view.state`: what the window's view toggles show.
+pub const VIEW_STATE: &str = "view.state";
 /// `view.full_screen`: toggle full-screen mode.
 pub const VIEW_FULL_SCREEN: &str = "view.full_screen";
 /// `view.toggle_browser`: show or hide the browser.
@@ -136,6 +138,7 @@ pub const IDS: &[&str] = &[
     APP_ABOUT,
     APP_SETTINGS,
     WINDOW_CLOSE,
+    VIEW_STATE,
     VIEW_FULL_SCREEN,
     VIEW_TOGGLE_BROWSER,
     VIEW_TOGGLE_CLIP_VIEW,
@@ -369,6 +372,23 @@ pub struct ViewResult {
     pub zoom: f32,
 }
 
+/// What `view.state` returns: what the view commands switch, without
+/// switching any of it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ViewState {
+    /// The main window: the main view, the browser, the Info View,
+    /// full-screen mode and the interface zoom.
+    pub window: ViewResult,
+    /// The Clip View and its note editor: whether it shows, Draw Mode, the
+    /// clip it holds, the selected notes, the lane and Fold.
+    pub clip_view: ClipViewState,
+    /// The assistant's panel.
+    pub assistant: crate::assistant::AssistantPanelState,
+    /// Whether floating devices' and plug-ins' windows are shown, as
+    /// `view.toggle_plug_in_windows` sets it.
+    pub plug_in_windows: bool,
+}
+
 /// Adds the shell's commands to a registry, the agent server's
 /// ([`crate::agent`]) among them.
 ///
@@ -599,6 +619,23 @@ fn specs() -> Vec<CommandSpec> {
             .binding("S-BRW-002")
             .args::<NoArgs>()
             .result::<ViewResult>(),
+        CommandSpec::new(VIEW_STATE, "View State")
+            .description(
+                "Reports what the view commands switch: the main view (Arrangement or \
+                 Session), whether the browser and the Info View show, full-screen mode and \
+                 the zoom (`view.toggle_session_arrangement`, `view.toggle_browser`, \
+                 `view.toggle_info_view`, `view.full_screen`, `view.set_zoom`), the Clip View \
+                 with Draw Mode, the lane, Fold and the selected notes (`view.toggle_clip_view`, \
+                 `view.draw_mode`, `view.lane`, `view.fold_notes`), the assistant's panel and \
+                 whether plug-in windows are shown (`view.toggle_plug_in_windows`). Changes \
+                 nothing. The Arrangement's own view is in `arrangement.state`, the Mixer's in \
+                 `mixer_view.state`, the Session View's in `session.state` and the Device \
+                 View's in `device_view.state`.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .args::<NoArgs>()
+            .result::<ViewState>(),
         CommandSpec::new(VIEW_TOGGLE_CLIP_VIEW, "Clip View")
             .description(
                 "Shows or hides the Clip View in the detail area, which holds the MIDI Note \

@@ -446,6 +446,15 @@ pub fn state(shell: &Shell, engine: EngineTransport) -> TransportState {
         time_signature: format!("{}/{}", signature.numerator(), signature.denominator()),
         time_signature_editable: editable(shell, Group::Numerator),
         metronome: doc.settings().metronome,
+        arrangement_record: engine.recording,
+        take_running: engine.take_running,
+        counting_in: engine.counting_in,
+        punch_in: doc.settings().punch_in,
+        punch_out: doc.settings().punch_out,
+        midi_overdub: doc.settings().midi_overdub,
+        automation_arm: shell.arrangement().automation_arm(),
+        recording: shell.running_recording(),
+        last_recording: shell.last_recording().cloned(),
     }
 }
 

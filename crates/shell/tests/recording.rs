@@ -275,6 +275,93 @@ fn a_recorded_tone_is_in_the_file_to_the_sample_and_lands_where_recording_starte
     );
 }
 
+/// `transport.state` as an agent reads it.
+fn transport_state(shell: &mut Shell) -> Value {
+    shell.run("transport.state", json!({})).unwrap()
+}
+
+// A running recording shows in `transport.state`: Arrangement Record, the
+// take, the armed tracks and the frames dropped; once it ends, the report
+// says what it wrote and that it made its clip.
+#[test]
+fn a_running_recording_and_the_last_one_s_report_read_back_from_transport_state() {
+    let dir = TestDir::new("readback");
+    let (mut shell, control) = duplex_shell();
+    shell
+        .run("set.save_as", json!({ "path": dir.arg("Take.blset") }))
+        .unwrap();
+    let track = armed_track(&mut shell, 3, "Guitar");
+    control.set_input_tone(2, 12_000.0, 0.5);
+
+    let idle = transport_state(&mut shell);
+    assert_eq!(idle["arrangement_record"], false);
+    assert_eq!(idle["take_running"], false);
+    assert_eq!(idle["recording"], Value::Null);
+    assert_eq!(idle["last_recording"], Value::Null);
+
+    shell
+        .run("transport.set_recording", json!({ "recording": true }))
+        .unwrap();
+    shell.run("transport.play", json!({})).unwrap();
+    let until = Instant::now() + Duration::from_secs(5);
+    let state = loop {
+        let state = transport_state(&mut shell);
+        if state["take_running"] == true || Instant::now() > until {
+            break state;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    };
+    assert_eq!(state["arrangement_record"], true);
+    assert_eq!(state["take_running"], true);
+    assert_eq!(state["counting_in"], false);
+    assert_eq!(state["recording"]["armed_tracks"], json!([track]));
+    assert_eq!(state["recording"]["dropped_frames"], 0);
+
+    shell.run("transport.stop", json!({})).unwrap();
+    wait_for_clip(&mut shell, track);
+    let state = transport_state(&mut shell);
+    assert_eq!(state["arrangement_record"], false);
+    assert_eq!(state["take_running"], false);
+    assert_eq!(state["recording"], Value::Null);
+    let report = &state["last_recording"];
+    assert_eq!(report["error"], Value::Null);
+    assert_eq!(report["clips_made"], true);
+    assert_eq!(report["dropped_frames"], 0);
+    assert_eq!(report["files"][0]["track"], json!(track));
+    assert_eq!(report["files"][0]["channels"], 1);
+    assert!(report["files"][0]["frames"].as_u64().unwrap() > 0);
+    assert!(
+        report["files"][0]["path"]
+            .as_str()
+            .unwrap()
+            .contains("Recorded")
+    );
+}
+
+// The count-in shows as counting while it sounds, and no take runs until it
+// is over.
+#[test]
+fn the_count_in_shows_in_transport_state_before_the_take_starts() {
+    let (mut shell, _control) = duplex_shell();
+    armed_track(&mut shell, 3, "Guitar");
+    shell
+        .run(
+            "transport.set_metronome_count_in",
+            json!({ "count_in": "4_bars" }),
+        )
+        .unwrap();
+    shell
+        .run("transport.set_recording", json!({ "recording": true }))
+        .unwrap();
+    shell.run("transport.play", json!({})).unwrap();
+    play_for(&mut shell, 300);
+    let state = transport_state(&mut shell);
+    assert_eq!(state["counting_in"], true);
+    assert_eq!(state["take_running"], false);
+    assert_eq!(state["arrangement_record"], true);
+    shell.run("transport.stop", json!({})).unwrap();
+}
+
 // Spec: app-shell R13. A recording that can't write its file is reported
 // and makes no clip.
 #[cfg(unix)]
@@ -326,6 +413,14 @@ fn a_recording_that_cannot_write_is_reported_and_makes_no_clip() {
             .len(),
         0,
         "a failed recording makes no clip"
+    );
+    // The report an agent reads says the same.
+    let state = transport_state(&mut shell);
+    let report = &state["last_recording"];
+    assert_eq!(report["clips_made"], false);
+    assert!(
+        report["error"].is_string(),
+        "the failure is in the report: {report}"
     );
     std::fs::set_permissions(&recorded, std::fs::Permissions::from_mode(0o755)).unwrap();
 }

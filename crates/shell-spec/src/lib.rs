@@ -95,5 +95,6 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     session_view::register(registry)?;
     session_launch::register(registry)?;
     plugins::register(registry)?;
+    settings::register(registry)?;
     perception::register(registry)
 }

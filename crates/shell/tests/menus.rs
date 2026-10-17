@@ -107,6 +107,8 @@ fn every_shell_command_is_on_a_menu_or_a_control() {
         // (L-CLIP-014), and agents reach both.
         commands::VIEW_FOLD_NOTES,
         commands::VIEW_LANE,
+        // A query for agents, like `transport.state`.
+        commands::VIEW_STATE,
     ]
     .into();
     let bar = menu_bar(MenuPlatform::Mac);

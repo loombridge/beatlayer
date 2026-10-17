@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-338 commands in 31 areas.
+345 commands in 31 areas.
 
 ## Permission classes
 
@@ -121,11 +121,15 @@ Each command has:
 | [`clip.delete`](#clipdelete) | Delete Clip | `destructive` |  |  |
 | [`clip.delete_envelope`](#clipdelete_envelope) | Clear Envelope | `edit` |  |  |
 | [`clip.delete_envelope_breakpoint`](#clipdelete_envelope_breakpoint) | Delete Envelope Breakpoint | `edit` |  |  |
+| [`clip.delete_warp_markers`](#clipdelete_warp_markers) | Delete Warp Markers | `edit` |  |  |
+| [`clip.insert_warp_marker`](#clipinsert_warp_marker) | Insert Warp Marker | `edit` |  |  |
 | [`clip.move`](#clipmove) | Move Clip | `edit` |  |  |
 | [`clip.move_by`](#clipmove_by) | Move Clips | `edit` |  |  |
 | [`clip.move_envelope_breakpoint`](#clipmove_envelope_breakpoint) | Move Envelope Breakpoint | `edit` |  |  |
 | [`clip.move_to_slot`](#clipmove_to_slot) | Move Clip to Slot | `edit` |  |  |
+| [`clip.move_warp_markers`](#clipmove_warp_markers) | Move Warp Markers | `edit` |  |  |
 | [`clip.rename`](#cliprename) | Rename Clip | `edit` | `Cmd+R` | `Ctrl+R` |
+| [`clip.scale_tempo`](#clipscale_tempo) | Scale Clip Tempo | `edit` |  |  |
 | [`clip.set_data`](#clipset_data) | Replace Clip Contents | `edit` |  |  |
 | [`clip.set_envelope_breakpoint`](#clipset_envelope_breakpoint) | Add Envelope Breakpoint | `edit` |  |  |
 | [`clip.set_envelope_curve`](#clipset_envelope_curve) | Curve Envelope Segment | `edit` |  |  |
@@ -142,7 +146,10 @@ Each command has:
 | [`clip.set_midi_region`](#clipset_midi_region) | Set MIDI Clip Start and End | `edit` |  |  |
 | [`clip.set_mute`](#clipset_mute) | Activate/Deactivate Clip | `edit` | `0` | `0` |
 | [`clip.set_region`](#clipset_region) | Set Clip Start and End | `edit` |  |  |
+| [`clip.set_segment_bpm`](#clipset_segment_bpm) | Set Warp Segment BPM | `edit` |  |  |
 | [`clip.set_velocity_amount`](#clipset_velocity_amount) | Set Clip Velocity Amount | `edit` |  |  |
+| [`clip.set_warp`](#clipset_warp) | Clip Warp On/Off | `edit` |  |  |
+| [`clip.shift_warp_marker`](#clipshift_warp_marker) | Shift Warp Marker | `edit` |  |  |
 | [`clip.trim_start`](#cliptrim_start) | Trim Clip Start | `edit` |  |  |
 | [`clip_view.quantize_settings`](#clip_viewquantize_settings) | Quantize Settings | `read` |  |  |
 | [`clip_view.select_notes`](#clip_viewselect_notes) | Select Notes | `read` |  |  |
@@ -1979,6 +1986,41 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `clip.delete_warp_markers`
+
+**Delete Warp Markers**. Permission: `edit`. Contexts: `clip-view`.
+
+Deletes the warp markers named in `markers` (their place in the map, the first being 0) of each of the warped audio clips `clips`, which must hold files of the same length: the segments either side of each join into one straight segment. Deleting the last marker leaves the audio after the new last one at the clip's tempo. A warped clip keeps at least one marker: deleting them all is refused.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clips` | array of [`ClipId`](#clipid) | yes | The warped audio clips: their files must be as long as each other's. |
+| `markers` | array of integer, at least 0 | yes | The markers to delete, by their place in the map, the first being 0. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `clip.insert_warp_marker`
+
+**Insert Warp Marker**. Permission: `edit`. Contexts: `clip-view`.
+
+Adds a warp marker to each of the warped audio clips `clips`, which must hold files of the same length: at a `beat` of the clip's contents (ticks from its 1.1.1, negative before it), at the time in the file the map already places there, or at a `time` in the file (seconds), on the beat the map already places it. Give one of the two. Nothing moves; the audio either side stays where it is. Inserting where a marker is already changes nothing. Markers are named by their place in the map (`data.audio.warp_markers`), the first being 0. The edit is made to every clip in one undo step, or to none if it's refused for one.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clips` | array of [`ClipId`](#clipid) | yes | The warped audio clips: their files must be as long as each other's. |
+| `beat` | [`Ticks`](#ticks) or null | no | The beat, in ticks from the clip's 1.1.1, to put the marker on, at the time in the file the map already places there. Give this or `time`. |
+| `time` | number or null | no | The time in the file, in seconds, to put the marker at, on the beat the map already places it. Give this or `beat`. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `clip.move`
 
 **Move Clip**. Permission: `edit`. Contexts: `arrangement`.
@@ -2052,6 +2094,24 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `clip.move_warp_markers`
+
+**Move Warp Markers**. Permission: `edit`. Contexts: `clip-view`.
+
+Moves the warp markers named in `markers` (their place in the map, the first being 0) of each of the warped audio clips `clips`, which must hold files of the same length, by the same number of ticks `by` (negative moves them earlier). Each keeps its time in the file, so the audio either side of it stretches or squeezes to fit. Refused, changing nothing, if a marker would pass or reach a neighbour that isn't moving with it. Moving the last marker sets the clip's tempo to the new last segment's, so the audio after it carries on at that speed.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clips` | array of [`ClipId`](#clipid) | yes | The warped audio clips: their files must be as long as each other's. |
+| `markers` | array of integer, at least 0 | yes | The markers to move, by their place in the map, the first being 0. |
+| `by` | [`Ticks`](#ticks) | yes | How far to move them, in ticks: negative moves them earlier. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `clip.rename`
 
 **Rename Clip**. Permission: `edit`. Contexts: `arrangement`.
@@ -2070,6 +2130,23 @@ Arguments:
 |---|---|---|---|
 | `clip` | [`ClipId`](#clipid) | yes | The clip. |
 | `name` | string | yes | The new name. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `clip.scale_tempo`
+
+**Scale Clip Tempo**. Permission: `edit`. Contexts: `clip-view`.
+
+Multiplies every segment's tempo and the clip's own tempo of a warped audio clip by `factor`: 2 is Live's ×2 and 0.5 its ÷2, which correct a tempo found at half or double. Each marker's distance in ticks from the first marker is multiplied by it, and the Start and End markers and loop brace move with them about the first marker, so each keeps its place in the audio. The clip's place and length in the arrangement don't change. Refused if the clip's tempo would leave 1 to 1,000 BPM.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The warped audio clip. |
+| `factor` | number | yes | What to multiply by: 2 for ×2, 0.5 for ÷2. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -2253,7 +2330,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Set Clip Loop**. Permission: `edit`. Contexts: `clip-view`.
 
-Moves an audio clip's loop brace, in seconds into its audio file (`end` `null` for the end of the file), as the Clip View's loop Position and Length fields do. It doesn't switch the loop on or off: use `clip.set_loop_enabled`. While the loop is on, the clip plays from its Start marker into the brace, then repeats the brace until the clip ends in the arrangement; make the clip longer with `clip.set_length` to hear more repeats. A new clip's brace is the whole file.
+Moves an audio clip's loop brace, in seconds into its audio file for an unwarped clip or in ticks of its contents (`ticks` true) for a warped one (a command in the other form is refused; `end` `null` for the end of the file), as the Clip View's loop Position and Length fields do. It doesn't switch the loop on or off: use `clip.set_loop_enabled`. While the loop is on, the clip plays from its Start marker into the brace, then repeats the brace until the clip ends in the arrangement; make the clip longer with `clip.set_length` to hear more repeats. A new clip's brace is the whole file.
 
 Default keys: none.
 
@@ -2262,8 +2339,9 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `clip` | [`ClipId`](#clipid) | yes | The audio clip. |
-| `start` | number, at least 0 | yes | Where the brace starts, in seconds into the file: 0 or more. |
+| `start` | number | yes | Where the brace starts, in seconds into the file: 0 or more. A warped clip's is whole ticks of its contents (`ticks` true). |
 | `end` | number or null | no | Where it ends, in seconds into the file, after `start`; `null` (or nothing) for the end of the file. |
+| `ticks` | boolean | no | Whether `start` and `end` are ticks of a warped clip's contents instead of seconds in the file of an unwarped one: they must be the form the clip shows. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -2345,7 +2423,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Set Clip Start and End**. Permission: `edit`. Contexts: `clip-view`.
 
-Moves an audio clip's Start and End markers, in seconds into its audio file: the clip starts playing its file at `start` when the song reaches the clip, and, while its loop is off, plays until `end` (`null` for the end of the file) or the clip's own end in the arrangement, whichever comes first, then is silent. Clips play unwarped, at the file's own speed. While the loop is on, `start` must be before the loop's end. Use `clip.set_length` to change how long the clip lasts in the arrangement.
+Moves an audio clip's Start and End markers: the clip starts playing at `start` when the song reaches the clip, and, while its loop is off, plays until `end` (`null` for the end of the file) or the clip's own end in the arrangement, whichever comes first, then is silent. An unwarped clip plays at its file's own speed and its positions are seconds into the file (`ticks` false, the default). A warped clip (`clip.set_warp`) follows the set's tempo and its positions are ticks of its contents, from the clip's 1.1.1, with `ticks` true; a command in the other form is refused. While the loop is on, `start` must be before the loop's end. Use `clip.set_length` to change how long the clip lasts in the arrangement.
 
 Default keys: none.
 
@@ -2354,8 +2432,27 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `clip` | [`ClipId`](#clipid) | yes | The audio clip. |
-| `start` | number, at least 0 | yes | The Start marker, in seconds into the file: 0 or more. While the loop is on, it must be before the loop brace's end. |
+| `start` | number | yes | The Start marker, in seconds into the file: 0 or more. While the loop is on, it must be before the loop brace's end. A warped clip's is whole ticks of its contents (`ticks` true). |
 | `end` | number or null | no | The End marker, in seconds into the file, after `start`; `null` (or nothing) for the end of the file. |
+| `ticks` | boolean | no | Whether `start` and `end` are ticks of a warped clip's contents instead of seconds in the file of an unwarped one: they must be the form the clip shows. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `clip.set_segment_bpm`
+
+**Set Warp Segment BPM**. Permission: `edit`. Contexts: `clip-view`.
+
+Sets a warped audio clip's BPM field. With `marker` (its place in the map, the first being 0), `bpm` is the tempo of the segment that starts at that marker: every later marker moves by the same number of ticks, so that segment alone changes and each later one keeps its tempo; for the last marker it is the clip's own tempo, from 1 to 1,000. Without `marker`, `bpm` is the first segment's tempo (the clip's when there's one marker) and every tempo of the clip scales by the same factor, as `clip.scale_tempo` does.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The warped audio clip. |
+| `bpm` | number | yes | The tempo in BPM: positive, and from 1 to 1,000 for the clip's. |
+| `marker` | integer or null | no | The marker whose segment to set, by its place in the map, the first being 0: `null` (or nothing) for the first segment's tempo, which scales every segment. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -2373,6 +2470,41 @@ Arguments:
 |---|---|---|---|
 | `clip` | [`ClipId`](#clipid) | yes | The clip, which sits in a Session slot. |
 | `amount` | number from 0 to 1 | yes | 0 for no influence, up to 1 for 100 %. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `clip.set_warp`
+
+**Clip Warp On/Off**. Permission: `edit`. Contexts: `clip-view`.
+
+Switches an audio clip's Warp on or off. Off, the clip plays at its file's own speed whatever the set's tempo, and its Start and End markers and loop brace are seconds into the file. On, it follows the set's tempo through its warp map (`data.audio.warp_markers`: each pairs a time in the file with a beat, in ticks from the clip's 1.1.1, and `data.audio.tempo` is the speed of the file after the last marker), and its markers and brace are ticks of its contents. Switching on a clip that has no map gives it one marker at its Start marker on 1.1.1, at the set's tempo there, so it goes on playing at the speed it did; switching off keeps the map. Either way the markers and brace convert, so each keeps its place in the audio, and the clip keeps its place and length in the arrangement. Until warped playback arrives (Phase 4), a warped clip still plays at its file's own speed.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The audio clip. |
+| `warp` | boolean | yes | Whether the clip follows the set's tempo through its warp map. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `clip.shift_warp_marker`
+
+**Shift Warp Marker**. Permission: `edit`. Contexts: `clip-view`.
+
+Moves the time in the file of warp marker `marker` (its place in the map, the first being 0) of each of the warped audio clips `clips`, which must hold files of the same length, by `by` seconds (negative moves it earlier), keeping its beat: the waveform moves under the marker. Refused, changing nothing, if the marker would pass a neighbour or leave the file.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clips` | array of [`ClipId`](#clipid) | yes | The warped audio clips: their files must be as long as each other's. |
+| `marker` | integer, at least 0 | yes | The marker, by its place in the map, the first being 0. |
+| `by` | number | yes | How far to move its time in the file, in seconds: negative moves it earlier. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -6280,11 +6412,15 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.delete`](#clipdelete) | the query tool's `track` | `clips` |
 | [`clip.delete_envelope`](#clipdelete_envelope) | the query tool's `clip` | `envelopes` |
 | [`clip.delete_envelope_breakpoint`](#clipdelete_envelope_breakpoint) | the query tool's `clip` | `envelopes` |
+| [`clip.delete_warp_markers`](#clipdelete_warp_markers) | the query tool's `clip` | `data.audio.warp_markers` |
+| [`clip.insert_warp_marker`](#clipinsert_warp_marker) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.move`](#clipmove) | the query tool's `clip` | `start` |
 | [`clip.move_by`](#clipmove_by) | the query tool's `clip` | `start` |
 | [`clip.move_envelope_breakpoint`](#clipmove_envelope_breakpoint) | the query tool's `clip` | `envelopes` |
 | [`clip.move_to_slot`](#clipmove_to_slot) | the query tool's `track` | `slots` |
+| [`clip.move_warp_markers`](#clipmove_warp_markers) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.rename`](#cliprename) | the query tool's `clip` | `name` |
+| [`clip.scale_tempo`](#clipscale_tempo) | the query tool's `clip` | `data.audio.tempo` |
 | [`clip.set_data`](#clipset_data) | the query tool's `clip` | `data` |
 | [`clip.set_envelope_breakpoint`](#clipset_envelope_breakpoint) | the query tool's `clip` | `envelopes` |
 | [`clip.set_envelope_curve`](#clipset_envelope_curve) | the query tool's `clip` | `envelopes` |
@@ -6301,7 +6437,10 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.set_midi_region`](#clipset_midi_region) | the query tool's `clip` | `data.midi.start` |
 | [`clip.set_mute`](#clipset_mute) | the query tool's `clip` | `mute` |
 | [`clip.set_region`](#clipset_region) | the query tool's `clip` | `data.audio.start` |
+| [`clip.set_segment_bpm`](#clipset_segment_bpm) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.set_velocity_amount`](#clipset_velocity_amount) | the query tool's `clip` | `launch.velocity_amount` |
+| [`clip.set_warp`](#clipset_warp) | the query tool's `clip` | `data.audio.warp` |
+| [`clip.shift_warp_marker`](#clipshift_warp_marker) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.trim_start`](#cliptrim_start) | the query tool's `clip` | `offset` |
 | [`device.add`](#deviceadd) | the query tool's `track` | `devices` |
 | [`device.cut`](#devicecut) | the query tool's `track` | `devices` |
@@ -7118,7 +7257,11 @@ An audio clip's data: the audio file it plays, named by content hash, and how it
 | `loop_end` | number or null | no | Where the loop brace ends in the file, in seconds, after its start; `null` (or nothing) for the end of the file. While the loop is on, the Start marker must be before it. |
 | `loop_start` | number, at least 0 | no | Where the loop brace starts in the file, in seconds. 0 or more; 0 unless given. |
 | `looping` | boolean | no | The Loop switch: whether the clip repeats its loop brace. Off unless given. |
+| `signature` | [`TimeSignature`](#timesignature) or null | no | A warped clip's own time signature, the Clip View's Signature fields; `null` (or nothing) means the song's signature at the clip's start. |
 | `start` | number, at least 0 | no | The Start marker: where in the file, in seconds, the clip starts playing. 0 or more; 0 unless given. |
+| `tempo` | number or null | no | The clip's tempo in BPM, from 1 to 1,000: the speed of the file after the last warp marker (R2). Given whenever there are markers. |
+| `warp` | boolean | no | The Warp switch (the warping spec, R1): off unless given. On, the clip follows the set's tempo through its warp map, and `start`, `end`, `loop_start` and `loop_end` are whole ticks of its contents, counted from the clip's 1.1.1, instead of seconds in the file. |
+| `warp_markers` | array of [`WarpMarker`](#warpmarker) | no | The warp markers, in increasing order of both fields: a warped clip has at least one. Switching Warp off keeps them (R3). |
 
 <details><summary>JSON Schema</summary>
 
@@ -7174,11 +7317,43 @@ An audio clip's data: the audio file it plays, named by content hash, and how it
       "$ref": "#/$defs/ContentHash",
       "description": "The media file the clip plays, by content hash."
     },
+    "signature": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TimeSignature"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "A warped clip's own time signature, the Clip View's Signature fields; `null` (or nothing) means the song's signature at the clip's start."
+    },
     "start": {
       "description": "The Start marker: where in the file, in seconds, the clip starts playing. 0 or more; 0 unless given.",
       "format": "double",
       "minimum": 0.0,
       "type": "number"
+    },
+    "tempo": {
+      "description": "The clip's tempo in BPM, from 1 to 1,000: the speed of the file after the last warp marker (R2). Given whenever there are markers.",
+      "format": "double",
+      "maximum": 1000.0,
+      "minimum": 1.0,
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "warp": {
+      "description": "The Warp switch (the warping spec, R1): off unless given. On, the clip follows the set's tempo through its warp map, and `start`, `end`, `loop_start` and `loop_end` are whole ticks of its contents, counted from the clip's 1.1.1, instead of seconds in the file.",
+      "type": "boolean"
+    },
+    "warp_markers": {
+      "description": "The warp markers, in increasing order of both fields: a warped clip has at least one. Switching Warp off keeps them (R3).",
+      "items": {
+        "$ref": "#/$defs/WarpMarker"
+      },
+      "type": "array"
     }
   },
   "required": [
@@ -16767,6 +16942,42 @@ What `view.state` returns: what the view commands switch, without switching any 
     "clip_view",
     "assistant",
     "plug_in_windows"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `WarpMarker`
+
+A warp marker: `time`, seconds into the audio file, plays on `beat`, in ticks (705,600 to the quarter note) counted from the clip's 1.1.1 (negative before it).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `time` | number, at least 0 | yes | Seconds into the file: 0 or more. |
+| `beat` | [`Ticks`](#ticks) | yes | The beat the time plays on, in ticks from the clip's 1.1.1. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A warp marker: `time`, seconds into the audio file, plays on `beat`, in ticks (705,600 to the quarter note) counted from the clip's 1.1.1 (negative before it).",
+  "properties": {
+    "beat": {
+      "$ref": "#/$defs/Ticks",
+      "description": "The beat the time plays on, in ticks from the clip's 1.1.1."
+    },
+    "time": {
+      "description": "Seconds into the file: 0 or more.",
+      "format": "double",
+      "minimum": 0.0,
+      "type": "number"
+    }
+  },
+  "required": [
+    "time",
+    "beat"
   ],
   "type": "object"
 }

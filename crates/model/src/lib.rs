@@ -77,6 +77,7 @@ mod routing;
 mod scene;
 mod shared;
 mod track;
+mod warp;
 
 pub use automation::{
     Automation, AutomationTarget, Breakpoint, Envelope, MixerParam, TrackAutomation, curve_value,
@@ -108,3 +109,4 @@ pub use track::{
     Channel, CrossfadeAssign, Input, Mixer, Monitor, Output, Routing, SendTap, Tap, Track,
     TrackKind,
 };
+pub use warp::WarpMarker;

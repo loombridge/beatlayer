@@ -1040,13 +1040,15 @@ const ENTRIES: &[Entry] = &[
         permission: Permission::Edit,
         contexts: &[ClipView],
         keys: &[],
-        description: "Moves an audio clip's Start and End markers, in seconds into its audio \
-            file: the clip starts playing its file at `start` when the song reaches the clip, \
-            and, while its loop is off, plays until `end` (`null` for the end of the file) or \
-            the clip's own end in the arrangement, whichever comes first, then is silent. \
-            Clips play unwarped, at the file's own speed. While the loop is on, `start` must \
-            be before the loop's end. Use `clip.set_length` to change how long the clip lasts \
-            in the arrangement.",
+        description: "Moves an audio clip's Start and End markers: the clip starts playing at \
+            `start` when the song reaches the clip, and, while its loop is off, plays until \
+            `end` (`null` for the end of the file) or the clip's own end in the arrangement, \
+            whichever comes first, then is silent. An unwarped clip plays at its file's own \
+            speed and its positions are seconds into the file (`ticks` false, the default). A \
+            warped clip (`clip.set_warp`) follows the set's tempo and its positions are ticks \
+            of its contents, from the clip's 1.1.1, with `ticks` true; a command in the other \
+            form is refused. While the loop is on, `start` must be before the loop's end. Use \
+            `clip.set_length` to change how long the clip lasts in the arrangement.",
     },
     Entry {
         id: "clip.set_loop",
@@ -1055,9 +1057,11 @@ const ENTRIES: &[Entry] = &[
         permission: Permission::Edit,
         contexts: &[ClipView],
         keys: &[],
-        description: "Moves an audio clip's loop brace, in seconds into its audio file \
-            (`end` `null` for the end of the file), as the Clip View's loop Position and \
-            Length fields do. It doesn't switch the loop on or off: use \
+        description: "Moves an audio clip's loop brace, in seconds into its audio file for an \
+            unwarped clip or in ticks of its contents (`ticks` true) for a warped one (a \
+            command in the other form is refused; `end` `null` for the end of the file), as \
+            the Clip View's loop Position and Length fields do. It doesn't switch the loop on \
+            or off: use \
             `clip.set_loop_enabled`. While the loop is on, the clip plays from its Start \
             marker into the brace, then repeats the brace until the clip ends in the \
             arrangement; make the clip longer with `clip.set_length` to hear more repeats. A \
@@ -1129,6 +1133,112 @@ const ENTRIES: &[Entry] = &[
             that starts or ends mid-waveform from clicking: 0.004 (4 ms) is the length that \
             Create Fades on Clip Edges gives new clips. Lengths must be finite and at least \
             0.",
+    },
+    Entry {
+        id: "clip.set_warp",
+        action: Action::Apply("set_clip_warp"),
+        label: "Clip Warp On/Off",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Switches an audio clip's Warp on or off. Off, the clip plays at its \
+            file's own speed whatever the set's tempo, and its Start and End markers and loop \
+            brace are seconds into the file. On, it follows the set's tempo through its warp \
+            map (`data.audio.warp_markers`: each pairs a time in the file with a beat, in ticks \
+            from the clip's 1.1.1, and `data.audio.tempo` is the speed of the file after the \
+            last marker), and its markers and brace are ticks of its contents. Switching on a \
+            clip that has no map gives it one marker at its Start marker on 1.1.1, at the set's \
+            tempo there, so it goes on playing at the speed it did; switching off keeps the \
+            map. Either way the markers and brace convert, so each keeps its place in the \
+            audio, and the clip keeps its place and length in the arrangement. Until warped \
+            playback arrives (Phase 4), a warped clip still plays at its file's own speed.",
+    },
+    Entry {
+        id: "clip.insert_warp_marker",
+        action: Action::Apply("insert_warp_marker"),
+        label: "Insert Warp Marker",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Adds a warp marker to each of the warped audio clips `clips`, which must \
+            hold files of the same length: at a `beat` of the clip's contents (ticks from its \
+            1.1.1, negative before it), at the time in the file the map already places there, \
+            or at a `time` in the file (seconds), on the beat the map already places it. \
+            Give one of the two. Nothing moves; the audio either side stays where it is. \
+            Inserting where a marker is already changes nothing. Markers are named by their \
+            place in the map (`data.audio.warp_markers`), the first being 0. The edit is made \
+            to every clip in one undo step, or to none if it's refused for one.",
+    },
+    Entry {
+        id: "clip.move_warp_markers",
+        action: Action::Apply("move_warp_markers"),
+        label: "Move Warp Markers",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Moves the warp markers named in `markers` (their place in the map, the \
+            first being 0) of each of the warped audio clips `clips`, which must hold files of \
+            the same length, by the same number of ticks `by` (negative moves them earlier). \
+            Each keeps its time in the file, so the audio either side of it stretches or \
+            squeezes to fit. Refused, changing nothing, if a marker would pass or reach a \
+            neighbour that isn't moving with it. Moving the last marker sets the clip's tempo \
+            to the new last segment's, so the audio after it carries on at that speed.",
+    },
+    Entry {
+        id: "clip.shift_warp_marker",
+        action: Action::Apply("shift_warp_marker"),
+        label: "Shift Warp Marker",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Moves the time in the file of warp marker `marker` (its place in the \
+            map, the first being 0) of each of the warped audio clips `clips`, which must hold \
+            files of the same length, by `by` seconds (negative moves it earlier), keeping \
+            its beat: the waveform moves under the marker. Refused, changing nothing, if the \
+            marker would pass a neighbour or leave the file.",
+    },
+    Entry {
+        id: "clip.delete_warp_markers",
+        action: Action::Apply("delete_warp_markers"),
+        label: "Delete Warp Markers",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Deletes the warp markers named in `markers` (their place in the map, the \
+            first being 0) of each of the warped audio clips `clips`, which must hold files of \
+            the same length: the segments either side of each join into one straight segment. \
+            Deleting the last marker leaves the audio after the new last one at the clip's \
+            tempo. A warped clip keeps at least one marker: deleting them all is refused.",
+    },
+    Entry {
+        id: "clip.set_segment_bpm",
+        action: Action::Apply("set_segment_bpm"),
+        label: "Set Warp Segment BPM",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Sets a warped audio clip's BPM field. With `marker` (its place in the \
+            map, the first being 0), `bpm` is the tempo of the segment that starts at that \
+            marker: every later marker moves by the same number of ticks, so that segment \
+            alone changes and each later one keeps its tempo; for the last marker it is the \
+            clip's own tempo, from 1 to 1,000. Without `marker`, `bpm` is the first segment's \
+            tempo (the clip's when there's one marker) and every tempo of the clip scales by \
+            the same factor, as `clip.scale_tempo` does.",
+    },
+    Entry {
+        id: "clip.scale_tempo",
+        action: Action::Apply("scale_tempo"),
+        label: "Scale Clip Tempo",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Multiplies every segment's tempo and the clip's own tempo of a warped \
+            audio clip by `factor`: 2 is Live's ×2 and 0.5 its ÷2, which correct a tempo found \
+            at half or double. Each marker's distance in ticks from the first marker is \
+            multiplied by it, and the Start and End markers and loop brace move with them \
+            about the first marker, so each keeps its place in the audio. The clip's place \
+            and length in the arrangement don't change. Refused if the clip's tempo would \
+            leave 1 to 1,000 BPM.",
     },
     Entry {
         id: "clip.set_legato",

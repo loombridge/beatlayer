@@ -641,6 +641,20 @@ mod tests {
                 name: "Chorus".to_owned(),
             })
             .unwrap();
+        // Spec: session-view R20. A scene's own tempo and signature save
+        // with it, and a scene without them writes neither.
+        editor
+            .apply(Command::SetSceneTempo {
+                scene,
+                tempo: Some(bl_core::time::Bpm::new(96.5).unwrap()),
+            })
+            .unwrap();
+        editor
+            .apply(Command::SetSceneTimeSignature {
+                scene,
+                signature: Some(bl_core::time::TimeSignature::new(7, 8).unwrap()),
+            })
+            .unwrap();
         let clip: ClipId = editor.new_id();
         editor
             .apply(Command::CreateSlotClip {
@@ -658,6 +672,13 @@ mod tests {
         let value = serde_json::to_value(&doc).unwrap();
         // The scenes save in order, and the clip under its track's slots.
         assert_eq!(value["scenes"][1]["name"], json!("Chorus"));
+        assert_eq!(value["scenes"][1]["tempo"], json!(96.5));
+        assert_eq!(
+            value["scenes"][1]["signature"],
+            json!({ "numerator": 7, "denominator": 8 })
+        );
+        assert!(value["scenes"][0].get("tempo").is_none());
+        assert!(value["scenes"][0].get("signature").is_none());
         let saved = &value["tracks"][0]["slots"][0];
         assert_eq!(saved["scene"], json!(scene.0.get()));
         assert_eq!(saved["clip"]["id"], json!(clip.0.get()));

@@ -20,7 +20,7 @@ use crate::node::{NodeData, NodeKey};
 use crate::processor::{Carry, Processor, starts_playback};
 use crate::recording::RecordingPlan;
 use crate::registry::Registry;
-use crate::session::SessionCommand;
+use crate::session::{SceneOverride, SessionCommand};
 use crate::sources::Loaded;
 use crate::state::{EngineState, Monitor};
 
@@ -211,6 +211,9 @@ enum Request {
     Cancel(u64),
     /// A Session View command (WP-3.2).
     Session(SessionCommand),
+    /// What the audio thread says a launched scene put in place: compile
+    /// the last document again under it (WP-3.5).
+    Override(SceneOverride),
     Flush(mpsc::Sender<()>),
     /// What to record while the transport records (WP-2.13).
     Record(Box<Owned<RecordingPlan>>),
@@ -310,6 +313,7 @@ impl std::fmt::Debug for Request {
             Self::Schedule(_) => "Schedule",
             Self::Cancel(_) => "Cancel",
             Self::Session(_) => "Session",
+            Self::Override(_) => "Override",
             Self::Flush(_) => "Flush",
             Self::Record(_) => "Record",
             Self::Detach => "Detach",
@@ -345,6 +349,8 @@ pub struct Engine {
     monitors: mpsc::Receiver<Monitor>,
     /// Reports from processors that have been replaced, not yet read.
     held: Vec<Report>,
+    /// The scene override the compiler thread was last told of.
+    override_sent: SceneOverride,
     gc: GcHandle,
     counts: Arc<Counts>,
     // Dropped last, after the compiler thread has let go of everything.
@@ -416,6 +422,7 @@ impl Engine {
             monitor,
             monitors,
             held: Vec::new(),
+            override_sent: SceneOverride::default(),
             gc,
             counts,
             drop_thread,
@@ -444,6 +451,9 @@ impl Engine {
         while let Ok(monitor) = self.monitors.try_recv() {
             let mut old = mem::replace(&mut self.monitor, monitor);
             self.held.extend(old.reports());
+            // The processor that takes over starts with the set's own maps,
+            // and the compiler thread has compiled for it.
+            self.override_sent = SceneOverride::default();
         }
     }
 
@@ -549,6 +559,14 @@ impl Engine {
     /// The latest state the audio thread published.
     pub fn state(&mut self) -> &EngineState {
         self.adopt();
+        // Spec: session-view R23. A scene's launch changed the maps the
+        // audio thread plays under: the compiler thread compiles the last
+        // document under them, so the Arrangement's clips follow the tempo.
+        let scene_override = self.monitor.state().scene_override;
+        if scene_override != self.override_sent {
+            self.override_sent = scene_override;
+            self.request(Request::Override(scene_override));
+        }
         self.monitor.state()
     }
 
@@ -721,6 +739,17 @@ fn compile_loop(
                         }
                     }
                 },
+                Request::Override(scene_override) => {
+                    // Without a processor the next restart compiles the
+                    // set's own maps.
+                    if let Some(sender) = sender.as_mut() {
+                        let update = compiler.set_override(scene_override);
+                        if update.program.is_some() {
+                            counts.programs.fetch_add(1, Relaxed);
+                        }
+                        sender.send_update(update);
+                    }
+                }
                 Request::Flush(ack) => flushes.push(ack),
                 Request::Record(plan) => {
                     // While no processor runs, nothing records it.

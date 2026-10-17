@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-326 commands in 31 areas.
+330 commands in 31 areas.
 
 ## Permission classes
 
@@ -214,6 +214,7 @@ Each command has:
 | [`mixer_view.focus`](#mixer_viewfocus) | Move Focus to Mixer | `read` | `Option+Shift+M` | `Alt+Shift+M` |
 | [`mixer_view.in_out`](#mixer_viewin_out) | Mixer In/Out | `read` | `Cmd+Option+I` | `Ctrl+Alt+I` |
 | [`mixer_view.return_tracks`](#mixer_viewreturn_tracks) | Return Tracks | `read` | `Cmd+Option+R` | `Ctrl+Alt+R` |
+| [`mixer_view.scene_tempo`](#mixer_viewscene_tempo) | Scene Tempo and Time Signature | `read` |  |  |
 | [`mixer_view.scroll`](#mixer_viewscroll) | Scroll Mixer | `read` |  |  |
 | [`mixer_view.sends`](#mixer_viewsends) | Mixer Sends | `read` | `Cmd+Option+S` | `Ctrl+Alt+S` |
 | [`mixer_view.state`](#mixer_viewstate) | Mixer View State | `read` |  |  |
@@ -250,8 +251,11 @@ Each command has:
 | [`scene.duplicate`](#sceneduplicate) | Duplicate Scene | `edit` |  |  |
 | [`scene.move`](#scenemove) | Move Scene | `edit` |  |  |
 | [`scene.rename`](#scenerename) | Rename Scene | `edit` |  |  |
+| [`scene.set_tempo`](#sceneset_tempo) | Set Scene Tempo | `edit` |  |  |
+| [`scene.set_time_signature`](#sceneset_time_signature) | Set Scene Time Signature | `edit` |  |  |
 | [`session.back_to_arrangement`](#sessionback_to_arrangement) | Back to Arrangement | `read` | `F10` | `F10` |
 | [`session.back_to_arrangement_track`](#sessionback_to_arrangement_track) | Back to Arrangement (Track) | `read` |  |  |
+| [`session.capture_and_insert_scene`](#sessioncapture_and_insert_scene) | Capture and Insert Scene | `edit` | `Cmd+Shift+I` | `Ctrl+Shift+I` |
 | [`session.copy_clip_to_slot`](#sessioncopy_clip_to_slot) | Copy Clip to Slot | `edit` |  |  |
 | [`session.deactivate`](#sessiondeactivate) | Deactivate Clips | `edit` | `0` | `0` |
 | [`session.delete`](#sessiondelete) | Delete in the Session View | `destructive` |  |  |
@@ -3622,6 +3626,22 @@ Arguments:
 
 Result: [`MixerViewState`](#mixerviewstate).
 
+#### `mixer_view.scene_tempo`
+
+**Scene Tempo and Time Signature**. Permission: `read`. Contexts: `global`.
+
+Shows or hides the Session View's scene tempo and time signature fields, at the left of the Main track's column, as View > Scene Tempo and Time Signature does. Hidden in a new set. Switches unless `shown` says which. Changes only the view; a scene's own tempo and signature are in the set (`scene.set_tempo`, `scene.set_time_signature`).
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `shown` | boolean or null | no | Show it (true) or hide it (false); switches it if left out. |
+
+Result: [`MixerViewState`](#mixerviewstate).
+
 #### `mixer_view.scroll`
 
 **Scroll Mixer**. Permission: `read`. Contexts: `global`.
@@ -4267,6 +4287,40 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `scene.set_tempo`
+
+**Set Scene Tempo**. Permission: `edit`. Contexts: `session`.
+
+Gives a scene a tempo, from 20 to 999 BPM, that launching the scene sets for the set, as the Tempo field in the Main column and the Scene View does. `tempo` left out or null switches the scene's tempo off, as double-clicking the field or Return to Default does, so launching it leaves the set's tempo as it is. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `scene` | [`SceneId`](#sceneid) | yes | The scene. |
+| `tempo` | [`Bpm`](#bpm) or null | no | The tempo, or `None` for none of its own. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `scene.set_time_signature`
+
+**Set Scene Time Signature**. Permission: `edit`. Contexts: `session`.
+
+Gives a scene a time signature that launching the scene sets for the set, as the Signature field in the Main column and the Scene View does: a numerator from 1 to 99 over a denominator of 1, 2, 4, 8, or 16. `signature` left out or null switches the scene's signature off, so launching it leaves the set's signature as it is. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `scene` | [`SceneId`](#sceneid) | yes | The scene. |
+| `signature` | [`TimeSignature`](#timesignature) or null | no | The signature, or `None` for none of its own. |
+
+Result: [`ChangeSet`](#changeset).
+
 ### Area `session`
 
 #### `session.back_to_arrangement`
@@ -4300,6 +4354,22 @@ Arguments:
 | `track` | [`TrackId`](#trackid) | yes | The track. |
 
 Result: nothing (`null`).
+
+#### `session.capture_and_insert_scene`
+
+**Capture and Insert Scene**. Permission: `edit`. Contexts: `session`.
+
+Inserts a new scene holding copies of the clips that are playing, each in its own track's slot, as Create > Capture and Insert Scene (Cmd-Shift-I, Ctrl-Shift-I) does, and the playing clips carry on in the copies without a break. The scene goes after the scene launched last, or after the selected scene when none has been launched since the set opened, and its tempo and time signature are set to the ones in force now. With nothing playing it inserts an empty scene with the same tempo and signature, and launches nothing. One undo step. The playing clips are the engine's, so it needs an engine that runs.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-SES-009 | `Cmd+Shift+I` | `Ctrl+Shift+I` | `session` | Capture the playing clips into a new scene | runs it |
+
+Arguments: none (send `{}`).
+
+Result: [`ChangeSet`](#changeset).
 
 #### `session.copy_clip_to_slot`
 
@@ -6152,6 +6222,9 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`scene.duplicate`](#sceneduplicate) | the query tool's `song` | `scenes` |
 | [`scene.move`](#scenemove) | the query tool's `song` | `scenes` |
 | [`scene.rename`](#scenerename) | the query tool's `scene` | `name` |
+| [`scene.set_tempo`](#sceneset_tempo) | the query tool's `scene` | `tempo` |
+| [`scene.set_time_signature`](#sceneset_time_signature) | the query tool's `scene` | `signature` |
+| [`session.capture_and_insert_scene`](#sessioncapture_and_insert_scene) | the query tool's `song` | `scenes` |
 | [`session.copy_clip_to_slot`](#sessioncopy_clip_to_slot) | the query tool's `track` | `slots` |
 | [`session.deactivate`](#sessiondeactivate) | the query tool's `clip` | `mute` |
 | [`session.delete`](#sessiondelete) | the query tool's `track` | `slots` |
@@ -12047,6 +12120,7 @@ What `mixer_view.state` and the other view commands return.
 | `sends` | boolean | yes | Whether the Sends section shows. |
 | `volume` | boolean | yes | Whether the mixer strips (volume, pan, the meter, the activator, Solo, Arm) show. |
 | `crossfader` | boolean | yes | Whether the Crossfader section shows: the tracks' A/B assign buttons and Main's crossfader. Hidden in a new set. |
+| `scene_tempo` | boolean | yes | Whether the Session View's Main column shows the scenes' tempo and time signature fields (View > Scene Tempo and Time Signature). Hidden in a new set. |
 | `return_tracks` | boolean | yes | Whether the return tracks' columns show. |
 
 <details><summary>JSON Schema</summary>
@@ -12071,6 +12145,10 @@ What `mixer_view.state` and the other view commands return.
       "description": "Whether the return tracks' columns show.",
       "type": "boolean"
     },
+    "scene_tempo": {
+      "description": "Whether the Session View's Main column shows the scenes' tempo and time signature fields (View > Scene Tempo and Time Signature). Hidden in a new set.",
+      "type": "boolean"
+    },
     "sends": {
       "description": "Whether the Sends section shows.",
       "type": "boolean"
@@ -12091,6 +12169,7 @@ What `mixer_view.state` and the other view commands return.
     "sends",
     "volume",
     "crossfader",
+    "scene_tempo",
     "return_tracks"
   ],
   "type": "object"

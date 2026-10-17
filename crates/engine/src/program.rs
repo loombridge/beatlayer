@@ -4,7 +4,7 @@
 use core::fmt;
 use core::ops::Range;
 
-use bl_core::time::{SampleRate, TempoMap, TimeSignatureMap};
+use bl_core::time::{Bpm, SampleRate, TempoMap, TimeSignature, TimeSignatureMap};
 use bl_model::{Channel, LaunchMode, ParamId, SceneId, Tap, TrackId};
 
 use crate::midi::{MidiRoutes, TrackMidiInput};
@@ -12,7 +12,7 @@ use crate::mixer::{MeterReading, Route, TrackMixer};
 use crate::node::{
     Block, Node, NodeData, NodeEvent, NodeKey, NoteBuffer, ParamValue, TransportInfo,
 };
-use crate::session::SessionPlayback;
+use crate::session::{SceneMaps, SessionPlayback};
 use crate::sidechain::SidechainKey;
 
 /// A compiled song, ready to run on the audio thread: a flat array of
@@ -105,8 +105,23 @@ pub struct EngineProgram {
     /// The tracks that play on the device's channels instead of into Main
     /// (Audio To set to Ext. Out), in display order.
     pub(crate) ext_outs: Vec<ExtOut>,
+    /// The maps the program plays under: the set's, or the ones a launched
+    /// scene put in place (WP-3.5), which the audio thread switches to and
+    /// from among [`Program::scene_maps`] and the set's own below, so no map
+    /// is ever the last one left holding its memory there.
     pub(crate) tempo: TempoMap,
     pub(crate) time_signatures: TimeSignatureMap,
+    /// The set's own tempo map and time-signature map, which the program
+    /// plays under unless a launched scene overrides them.
+    pub(crate) base_tempo: TempoMap,
+    pub(crate) base_signatures: TimeSignatureMap,
+    /// The tempo and signature of every scene that has its own (WP-3.5).
+    pub(crate) scene_maps: Vec<SceneMaps>,
+    /// The maps of the tempo and signature a launched scene put in place, as
+    /// the compiler last heard of them: they hold after the scene's own
+    /// fields change or the scene goes.
+    pub(crate) override_tempo: Option<(Bpm, TempoMap)>,
+    pub(crate) override_signatures: Option<(TimeSignature, TimeSignatureMap)>,
     pub(crate) sample_rate: SampleRate,
     /// Every audio and MIDI slot that holds a clip, as `(scene, track,
     /// launch mode)` triples sorted by scene and then track: what a scene

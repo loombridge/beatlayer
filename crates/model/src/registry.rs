@@ -1368,6 +1368,32 @@ const ENTRIES: &[Entry] = &[
             number, which is its position.",
     },
     Entry {
+        id: "scene.set_tempo",
+        action: Action::Apply("set_scene_tempo"),
+        label: "Set Scene Tempo",
+        permission: Permission::Edit,
+        contexts: &[Session],
+        keys: &[],
+        description: "Gives a scene a tempo, from 20 to 999 BPM, that launching the scene sets \
+            for the set, as the Tempo field in the Main column and the Scene View does. `tempo` \
+            left out or null switches the scene's tempo off, as double-clicking the field or \
+            Return to Default does, so launching it leaves the set's tempo as it is. One undo \
+            step.",
+    },
+    Entry {
+        id: "scene.set_time_signature",
+        action: Action::Apply("set_scene_time_signature"),
+        label: "Set Scene Time Signature",
+        permission: Permission::Edit,
+        contexts: &[Session],
+        keys: &[],
+        description: "Gives a scene a time signature that launching the scene sets for the set, \
+            as the Signature field in the Main column and the Scene View does: a numerator from \
+            1 to 99 over a denominator of 1, 2, 4, 8, or 16. `signature` left out or null \
+            switches the scene's signature off, so launching it leaves the set's signature as it \
+            is. One undo step.",
+    },
+    Entry {
         id: "device.insert",
         action: Action::Apply("insert_device"),
         label: "Insert Device",

@@ -225,6 +225,26 @@ impl Document {
         &self.settings
     }
 
+    /// A copy of the document whose tempo map or time-signature map is
+    /// replaced, for what a launched scene's tempo or signature overrides
+    /// while it holds (WP-3.5). The set itself keeps its maps: only the
+    /// engine's compiler plays the copy.
+    #[must_use]
+    pub fn with_maps(
+        &self,
+        tempo: Option<TempoMap>,
+        time_signatures: Option<TimeSignatureMap>,
+    ) -> Self {
+        let mut copy = self.clone();
+        if let Some(tempo) = tempo {
+            copy.settings.tempo = tempo;
+        }
+        if let Some(time_signatures) = time_signatures {
+            copy.settings.time_signatures = time_signatures;
+        }
+        copy
+    }
+
     /// The Main track's ID.
     #[must_use]
     pub fn main_id(&self) -> TrackId {

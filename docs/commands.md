@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-314 commands in 31 areas.
+322 commands in 31 areas.
 
 ## Permission classes
 
@@ -132,6 +132,8 @@ Each command has:
 | [`clip.set_envelope_linked`](#clipset_envelope_linked) | Link Envelope | `edit` |  |  |
 | [`clip.set_fades`](#clipset_fades) | Set Clip Fades | `edit` |  |  |
 | [`clip.set_gain`](#clipset_gain) | Set Clip Gain | `edit` |  |  |
+| [`clip.set_launch_quantization`](#clipset_launch_quantization) | Set Clip Launch Quantization | `edit` |  |  |
+| [`clip.set_legato`](#clipset_legato) | Set Clip Legato | `edit` |  |  |
 | [`clip.set_length`](#clipset_length) | Resize Clip | `edit` |  |  |
 | [`clip.set_loop`](#clipset_loop) | Set Clip Loop | `edit` |  |  |
 | [`clip.set_loop_enabled`](#clipset_loop_enabled) | Clip Loop On/Off | `edit` |  |  |
@@ -139,6 +141,7 @@ Each command has:
 | [`clip.set_midi_region`](#clipset_midi_region) | Set MIDI Clip Start and End | `edit` |  |  |
 | [`clip.set_mute`](#clipset_mute) | Activate/Deactivate Clip | `edit` | `0` | `0` |
 | [`clip.set_region`](#clipset_region) | Set Clip Start and End | `edit` |  |  |
+| [`clip.set_velocity_amount`](#clipset_velocity_amount) | Set Clip Velocity Amount | `edit` |  |  |
 | [`clip.trim_start`](#cliptrim_start) | Trim Clip Start | `edit` |  |  |
 | [`clip_view.quantize_settings`](#clip_viewquantize_settings) | Quantize Settings | `read` |  |  |
 | [`clip_view.select_notes`](#clip_viewselect_notes) | Select Notes | `read` |  |  |
@@ -286,7 +289,12 @@ Each command has:
 | [`settings.set_auto_hide_plug_in_windows`](#settingsset_auto_hide_plug_in_windows) | Auto-Hide Plug-In Windows | `edit` |  |  |
 | [`settings.set_continuous_save`](#settingsset_continuous_save) | Save Continuously | `edit` |  |  |
 | [`settings.set_create_fades_on_clip_edges`](#settingsset_create_fades_on_clip_edges) | Create Fades on Clip Edges | `edit` |  |  |
+| [`settings.set_default_launch_mode`](#settingsset_default_launch_mode) | Default Launch Mode | `edit` |  |  |
+| [`settings.set_default_launch_quantization`](#settingsset_default_launch_quantization) | Default Launch Quantization | `edit` |  |  |
 | [`settings.set_outline_view_in_focus`](#settingsset_outline_view_in_focus) | Outline View in Focus | `edit` |  |  |
+| [`settings.set_select_next_scene_on_launch`](#settingsset_select_next_scene_on_launch) | Select Next Scene on Launch | `edit` |  |  |
+| [`settings.set_select_on_launch`](#settingsset_select_on_launch) | Select on Launch | `edit` |  |  |
+| [`settings.set_start_recording_on_scene_launch`](#settingsset_start_recording_on_scene_launch) | Start Recording on Scene Launch | `edit` |  |  |
 | [`settings.set_theme`](#settingsset_theme) | Theme | `edit` |  |  |
 | [`settings.set_warp_recorded_audio`](#settingsset_warp_recorded_audio) | Warp Recorded Audio | `edit` |  |  |
 | [`settings.state`](#settingsstate) | Settings State | `read` |  |  |
@@ -2156,6 +2164,40 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `clip.set_launch_quantization`
+
+**Set Clip Launch Quantization**. Permission: `edit`. Contexts: `clip-view`.
+
+Sets a Session clip's own launch quantisation, the grid its launches wait for: one of the global quantisation's steps (`none`, `8_bars`, `4_bars`, `2_bars`, `1_bar`, `half`, `half_triplet`, `quarter`, `quarter_triplet`, `eighth`, `eighth_triplet`, `sixteenth`, `sixteenth_triplet`, `thirty_second`), or `null` (the default, Live's "Global") to follow the global quantisation. `clip` is the ID of a clip that sits in a slot. The setting is saved with the clip and is one undo step; launching doesn't read it yet.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The clip, which sits in a Session slot. |
+| `quantization` | [`LaunchQuantization`](#launchquantization) or null | no | The step the clip's launches wait for; `null` (or nothing) follows the global quantisation, Live's "Global". |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `clip.set_legato`
+
+**Set Clip Legato**. Permission: `edit`. Contexts: `clip-view`.
+
+Switches Legato on or off for a Session clip, one that sits in a slot (`clip` is its ID). A Legato clip takes over the play position of the clip playing on its track when it launches, so the two stay in sync. Off is the default. The setting is saved with the clip and is one undo step; launching doesn't read it yet.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The clip, which sits in a Session slot. |
+| `legato` | boolean | yes | Whether Legato is on. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `clip.set_length`
 
 **Resize Clip**. Permission: `edit`. Contexts: `arrangement`.
@@ -2280,6 +2322,23 @@ Arguments:
 | `clip` | [`ClipId`](#clipid) | yes | The audio clip. |
 | `start` | number, at least 0 | yes | The Start marker, in seconds into the file: 0 or more. While the loop is on, it must be before the loop brace's end. |
 | `end` | number or null | no | The End marker, in seconds into the file, after `start`; `null` (or nothing) for the end of the file. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `clip.set_velocity_amount`
+
+**Set Clip Velocity Amount**. Permission: `edit`. Contexts: `clip-view`.
+
+Sets how much the velocity of the MIDI note that launches a Session clip changes the clip's volume: `amount` is from 0 (no influence, the default) to 1 (100 %, where the softest note plays the clip silently). `clip` is the ID of a clip that sits in a slot. The setting is saved with the clip and is one undo step; launching doesn't read it yet.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The clip, which sits in a Session slot. |
+| `amount` | number from 0 to 1 | yes | 0 for no influence, up to 1 for 100 %. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -4852,11 +4911,91 @@ Arguments:
 
 Result: [`SwitchResult`](#switchresult).
 
+#### `settings.set_default_launch_mode`
+
+**Default Launch Mode**. Permission: `edit`. Contexts: `settings`.
+
+Chooses Default Launch Mode on the Settings window's Record, Warp & Launch page: the launch mode (`trigger`, `gate`, `toggle` or `repeat`) a new Session clip starts with. It's `trigger` in a new install, as Live's is. Clips made so far keep their modes, and launch modes aren't built into clips yet, so for now it only keeps the choice. The setting is kept for the next start, and isn't part of the set or an undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `mode` | [`LaunchMode`](#launchmode) | yes | The launch mode new clips start with. |
+
+Result: nothing (`null`).
+
+#### `settings.set_default_launch_quantization`
+
+**Default Launch Quantization**. Permission: `edit`. Contexts: `settings`.
+
+Chooses Default Launch Quantization on the Settings window's Record, Warp & Launch page: the launch quantisation a new Session clip starts with, one of the global quantisation's steps (see `clip.set_launch_quantization`), or `null` to follow the global quantisation (the default, Live's "Global"). Clips already in the set keep theirs. The setting is kept for the next start, and isn't part of the set or an undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `quantization` | [`LaunchQuantization`](#launchquantization) or null | no | The quantisation new clips start with; `null` (or nothing) follows the global one, Live's "Global". |
+
+Result: nothing (`null`).
+
 #### `settings.set_outline_view_in_focus`
 
 **Outline View in Focus**. Permission: `edit`. Contexts: `settings`.
 
 Switches Outline View in Focus, on the Settings window's Display & Input page: while it's on, as it is in a new install (as Live's is), a border is drawn round the part of the main window that has the keyboard focus and an outline round the focused control; while it's off, nothing shows where the focus is. The setting is kept for the next start, and isn't part of the set or an undo step. The result's `on` is the setting afterwards.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether the setting is on. |
+
+Result: [`SwitchResult`](#switchresult).
+
+#### `settings.set_select_next_scene_on_launch`
+
+**Select Next Scene on Launch**. Permission: `edit`. Contexts: `settings`.
+
+Switches Select Next Scene on Launch on the Settings window's Record, Warp & Launch page; it's on in a new install, as Live's is. While it's on, launching a scene (`session.launch_scene`) selects the scene after it, when there is one. The setting is kept for the next start, and isn't part of the set or an undo step. The result's `on` is the setting afterwards.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether the setting is on. |
+
+Result: [`SwitchResult`](#switchresult).
+
+#### `settings.set_select_on_launch`
+
+**Select on Launch**. Permission: `edit`. Contexts: `settings`.
+
+Switches Select on Launch on the Settings window's Record, Warp & Launch page; it's on in a new install, as Live's is. While it's on, launching a clip that sits in a slot (`session.launch`) selects that slot. The setting is kept for the next start, and isn't part of the set or an undo step. The result's `on` is the setting afterwards.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether the setting is on. |
+
+Result: [`SwitchResult`](#switchresult).
+
+#### `settings.set_start_recording_on_scene_launch`
+
+**Start Recording on Scene Launch**. Permission: `edit`. Contexts: `settings`.
+
+Switches Start Recording on Scene Launch on the Settings window's Record, Warp & Launch page; it's off in a new install, as Live's is. Session recording isn't built yet, so for now it only keeps the choice. The setting is kept for the next start, and isn't part of the set or an undo step. The result's `on` is the setting afterwards.
 
 Default keys: none.
 
@@ -4904,7 +5043,7 @@ Result: [`SwitchResult`](#switchresult).
 
 **Settings State**. Permission: `read`. Contexts: `global`.
 
-Reports every preference the Settings window shows with a value, by page, in the form its own command takes it: the theme (`settings.set_theme`), Display & Input (zoom, Outline View in Focus, the Tab key settings), the audio device settings with Driver Error Compensation and the test tone (`audio.configure`, `audio.set_test_tone`), the MIDI ports and computer keyboard (`midi.set_port`), Create Fades on Clip Edges, Warp Recorded Audio, Auto-Hide Plug-In Windows, the plug-ins the Browser hides and prefers (`plugin.settings`), the agent server and the assistant. The server's and the agents' tokens and the assistant's API key are never reported, only whether one is stored. Preferences aren't saved with the set. Changes nothing. Use it to check a `settings.set_*` command took effect.
+Reports every preference the Settings window shows with a value, by page, in the form its own command takes it: the theme (`settings.set_theme`), Display & Input (zoom, Outline View in Focus, the Tab key settings), the audio device settings with Driver Error Compensation and the test tone (`audio.configure`, `audio.set_test_tone`), the MIDI ports and computer keyboard (`midi.set_port`), Create Fades on Clip Edges, Warp Recorded Audio, the Launch section, Auto-Hide Plug-In Windows, the plug-ins the Browser hides and prefers (`plugin.settings`), the agent server and the assistant. The server's and the agents' tokens and the assistant's API key are never reported, only whether one is stored. Preferences aren't saved with the set. Changes nothing. Use it to check a `settings.set_*` command took effect.
 
 Default keys: none.
 
@@ -5869,6 +6008,8 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.set_envelope_linked`](#clipset_envelope_linked) | the query tool's `clip` | `envelopes` |
 | [`clip.set_fades`](#clipset_fades) | the query tool's `clip` | `data.audio.fade_in` |
 | [`clip.set_gain`](#clipset_gain) | the query tool's `clip` | `data.audio.gain` |
+| [`clip.set_launch_quantization`](#clipset_launch_quantization) | the query tool's `clip` | `launch.quantization` |
+| [`clip.set_legato`](#clipset_legato) | the query tool's `clip` | `launch.legato` |
 | [`clip.set_length`](#clipset_length) | the query tool's `clip` | `length` |
 | [`clip.set_loop`](#clipset_loop) | the query tool's `clip` | `data.audio.loop_start` |
 | [`clip.set_loop_enabled`](#clipset_loop_enabled) | the query tool's `clip` | `data.audio.looping` |
@@ -5876,6 +6017,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.set_midi_region`](#clipset_midi_region) | the query tool's `clip` | `data.midi.start` |
 | [`clip.set_mute`](#clipset_mute) | the query tool's `clip` | `mute` |
 | [`clip.set_region`](#clipset_region) | the query tool's `clip` | `data.audio.start` |
+| [`clip.set_velocity_amount`](#clipset_velocity_amount) | the query tool's `clip` | `launch.velocity_amount` |
 | [`clip.trim_start`](#cliptrim_start) | the query tool's `clip` | `offset` |
 | [`device.add`](#deviceadd) | the query tool's `track` | `devices` |
 | [`device.cut`](#devicecut) | the query tool's `track` | `devices` |
@@ -5955,7 +6097,12 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`set.save_as`](#setsave_as) | the query tool's `song` | `set.path` |
 | [`settings.set_auto_hide_plug_in_windows`](#settingsset_auto_hide_plug_in_windows) | `settings.state` | `auto_hide_plug_in_windows` |
 | [`settings.set_create_fades_on_clip_edges`](#settingsset_create_fades_on_clip_edges) | `settings.state` | `create_fades_on_clip_edges` |
+| [`settings.set_default_launch_mode`](#settingsset_default_launch_mode) | `settings.state` | `launch.default_mode` |
+| [`settings.set_default_launch_quantization`](#settingsset_default_launch_quantization) | `settings.state` | `launch.default_quantization` |
 | [`settings.set_outline_view_in_focus`](#settingsset_outline_view_in_focus) | `settings.state` | `display_input.outline_view_in_focus` |
+| [`settings.set_select_next_scene_on_launch`](#settingsset_select_next_scene_on_launch) | `settings.state` | `launch.select_next_scene_on_launch` |
+| [`settings.set_select_on_launch`](#settingsset_select_on_launch) | `settings.state` | `launch.select_on_launch` |
+| [`settings.set_start_recording_on_scene_launch`](#settingsset_start_recording_on_scene_launch) | `settings.state` | `launch.start_recording_on_scene_launch` |
 | [`settings.set_theme`](#settingsset_theme) | `settings.state` | `theme` |
 | [`settings.set_warp_recorded_audio`](#settingsset_warp_recorded_audio) | `settings.state` | `warp_recorded_audio` |
 | [`slot.set_stop_button`](#slotset_stop_button) | the query tool's `track` | `removed_stop_buttons` |
@@ -7812,6 +7959,7 @@ A clip on a track's arrangement lane.
 | `mute` | boolean | yes | Whether the clip is switched off, so it stays in place but doesn't play. |
 | `data` | [`ClipData`](#clipdata) | yes | What the clip plays. |
 | `envelopes` | array of [`ClipEnvelope`](#clipenvelope) | no | The clip's envelopes (WP-3.15): one per parameter of its track it modulates, in target order. Empty for a clip with none, which is what a set saved before this package holds. |
+| `launch` | [`ClipLaunch`](#cliplaunch) | no | The clip's launch settings (WP-3.4), which only a Session clip's launching reads. The defaults for a clip saved without them. |
 | `offset` | [`Ticks`](#ticks) | no | How far into its contents a MIDI clip starts: its notes are placed from `start - offset`, and the part before the clip's start doesn't play. 0 (or left out) plays the contents from their beginning. Never negative. Splitting a MIDI clip or trimming its left edge changes it, so each part plays what it played before. An audio clip's is always 0: its Start marker moves instead, as Live's does. |
 
 <details><summary>JSON Schema</summary>
@@ -7834,6 +7982,10 @@ A clip on a track's arrangement lane.
     "id": {
       "$ref": "#/$defs/ClipId",
       "description": "The clip's ID."
+    },
+    "launch": {
+      "$ref": "#/$defs/ClipLaunch",
+      "description": "The clip's launch settings (WP-3.4), which only a Session clip's launching reads. The defaults for a clip saved without them."
     },
     "length": {
       "$ref": "#/$defs/Ticks",
@@ -7970,6 +8122,52 @@ Type: integer, at least 1.
   "format": "uint64",
   "minimum": 1,
   "type": "integer"
+}
+```
+
+</details>
+
+### `ClipLaunch`
+
+A Session clip's own launch settings (the Clip View's Launch panel, WP-3.4). They are saved with the clip, so they're part of the set and each change is one undo step; a clip without them has the defaults.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `legato` | boolean | no | Legato: the clip takes over the play position of the clip playing on its track when it launches. |
+| `quantization` | [`LaunchQuantization`](#launchquantization) or null | no | The clip's own launch quantisation; `null` (left out) follows the global one, which Live's chooser calls "Global". |
+| `velocity_amount` | number | no | How much the velocity of a note that launches the clip changes its volume, from 0 (none, the default) to 1 (100 %). |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A Session clip's own launch settings (the Clip View's Launch panel, WP-3.4). They are saved with the clip, so they're part of the set and each change is one undo step; a clip without them has the defaults.",
+  "properties": {
+    "legato": {
+      "default": false,
+      "description": "Legato: the clip takes over the play position of the clip playing on its track when it launches.",
+      "type": "boolean"
+    },
+    "quantization": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/LaunchQuantization"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "The clip's own launch quantisation; `null` (left out) follows the global one, which Live's chooser calls \"Global\"."
+    },
+    "velocity_amount": {
+      "default": 0.0,
+      "description": "How much the velocity of a note that launches the clip changes its volume, from 0 (none, the default) to 1 (100 %).",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "type": "object"
 }
 ```
 
@@ -10728,6 +10926,113 @@ A label as the sidebar lists it.
     "name",
     "section",
     "available"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `LaunchMode`
+
+How a Session clip's launch button behaves (the clip's Launch Mode, and the Default Launch Mode setting).
+
+One of:
+
+- `"trigger"`: Pressing starts the clip; releasing does nothing. The observed default.
+- `"gate"`: The clip plays while the button is held.
+- `"toggle"`: Pressing starts the clip and the next press stops it.
+- `"repeat"`: The clip retriggers while the button is held.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How a Session clip's launch button behaves (the clip's Launch Mode, and the Default Launch Mode setting).",
+  "oneOf": [
+    {
+      "const": "trigger",
+      "description": "Pressing starts the clip; releasing does nothing. The observed default.",
+      "type": "string"
+    },
+    {
+      "const": "gate",
+      "description": "The clip plays while the button is held.",
+      "type": "string"
+    },
+    {
+      "const": "toggle",
+      "description": "Pressing starts the clip and the next press stops it.",
+      "type": "string"
+    },
+    {
+      "const": "repeat",
+      "description": "The clip retriggers while the button is held.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `LaunchPrefs`
+
+The Launch section of Record, Warp & Launch (L-SET-018), as observed in Live 12.4.6: what a new clip starts with and what launching does. They are preferences, kept between starts and not saved with a set.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `default_mode` | [`LaunchMode`](#launchmode) | yes | Default Launch Mode, as `settings.set_default_launch_mode` sets it. |
+| `default_quantization` | [`LaunchQuantization`](#launchquantization) or null | yes | Default Launch Quantization, as `settings.set_default_launch_quantization` sets it: `null` is "Global". |
+| `select_on_launch` | boolean | yes | Select on Launch: a launched clip selects itself. |
+| `select_next_scene_on_launch` | boolean | yes | Select Next Scene on Launch: a launched scene selects the next one. |
+| `start_recording_on_scene_launch` | boolean | yes | Start Recording on Scene Launch. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Launch section of Record, Warp & Launch (L-SET-018), as observed in Live 12.4.6: what a new clip starts with and what launching does. They are preferences, kept between starts and not saved with a set.",
+  "properties": {
+    "default_mode": {
+      "$ref": "#/$defs/LaunchMode",
+      "default": "trigger",
+      "description": "Default Launch Mode, as `settings.set_default_launch_mode` sets it."
+    },
+    "default_quantization": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/LaunchQuantization"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Default Launch Quantization, as `settings.set_default_launch_quantization` sets it: `null` is \"Global\"."
+    },
+    "select_next_scene_on_launch": {
+      "default": true,
+      "description": "Select Next Scene on Launch: a launched scene selects the next one.",
+      "type": "boolean"
+    },
+    "select_on_launch": {
+      "default": true,
+      "description": "Select on Launch: a launched clip selects itself.",
+      "type": "boolean"
+    },
+    "start_recording_on_scene_launch": {
+      "default": false,
+      "description": "Start Recording on Scene Launch.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "default_mode",
+    "default_quantization",
+    "select_on_launch",
+    "select_next_scene_on_launch",
+    "start_recording_on_scene_launch"
   ],
   "type": "object"
 }
@@ -14459,6 +14764,7 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
 | `tempo_midi` | [`MidiPortsResult`](#midiportsresult) | yes | Tempo & MIDI: the MIDI ports' switches and the computer MIDI keyboard, the same as `midi.ports` reports. |
 | `create_fades_on_clip_edges` | boolean | yes | Record, Warp & Launch: Create Fades on Clip Edges, as `settings.set_create_fades_on_clip_edges` sets it. |
 | `warp_recorded_audio` | boolean | yes | Record, Warp & Launch: Warp Recorded Audio, as `settings.set_warp_recorded_audio` sets it. |
+| `launch` | [`LaunchPrefs`](#launchprefs) | yes | Record, Warp & Launch: the Launch section, as the `settings.set_default_launch_*`, `settings.set_select_on_launch`, `settings.set_select_next_scene_on_launch` and `settings.set_start_recording_on_scene_launch` commands set it. |
 | `auto_hide_plug_in_windows` | boolean | yes | Plug-Ins: Auto-Hide Plug-In Windows, as `settings.set_auto_hide_plug_in_windows` sets it. |
 | `plug_ins` | [`PluginSettings`](#pluginsettings) | yes | Plug-Ins: how the Browser shows plug-ins, as `plugin.settings` sets it. |
 | `agents` | [`AgentsPageSettings`](#agentspagesettings) | yes | Agents. |
@@ -14494,6 +14800,10 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
       "$ref": "#/$defs/DisplayInputSettings",
       "description": "Display & Input."
     },
+    "launch": {
+      "$ref": "#/$defs/LaunchPrefs",
+      "description": "Record, Warp & Launch: the Launch section, as the `settings.set_default_launch_*`, `settings.set_select_on_launch`, `settings.set_select_next_scene_on_launch` and `settings.set_start_recording_on_scene_launch` commands set it."
+    },
     "page": {
       "$ref": "#/$defs/SettingsPage",
       "description": "The page the Settings window shows, or showed last."
@@ -14523,6 +14833,7 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
     "tempo_midi",
     "create_fades_on_clip_edges",
     "warp_recorded_audio",
+    "launch",
     "auto_hide_plug_in_windows",
     "plug_ins",
     "agents",

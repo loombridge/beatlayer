@@ -313,8 +313,14 @@ fn a_long_layer_is_read_in_the_background_with_ram_mode_off() {
     let samples = vec![0.25f32; 12 * 48_000];
     std::fs::write(
         &path,
-        bl_media::wav_bytes(&samples, 1, 48_000, bl_media::BitDepth::Int16, bl_media::Dither::None)
-            .unwrap(),
+        bl_media::wav_bytes(
+            &samples,
+            1,
+            48_000,
+            bl_media::BitDepth::Int16,
+            bl_media::Dither::None,
+        )
+        .unwrap(),
     )
     .unwrap();
     let store = std::sync::Arc::new(bl_media::MediaStore::new());
@@ -336,7 +342,11 @@ fn a_long_layer_is_read_in_the_background_with_ram_mode_off() {
         layers: vec![layer],
     };
     rig.apply(insert);
-    assert_eq!(library.progressive.load(Relaxed), 1, "a layer over ten seconds is read behind its start");
+    assert_eq!(
+        library.progressive.load(Relaxed),
+        1,
+        "a layer over ten seconds is read behind its start"
+    );
     assert_eq!(library.whole.load(Relaxed), 0);
     // An edit that sends the layers again shares what's being read.
     rig.apply(Command::SetLayerZones {

@@ -14,9 +14,9 @@ use bl_model::{
     snap_to_zero_crossing,
 };
 use bl_shell_spec::multisampler::{
-    self as ids, AddLayersArgs, LayersAdded, LayersChanged, LoopKind, MultisamplerState,
-    Normalize, NormalizeArgs, SelectLayersArgs, LayerSelectMode, SetLayerArgs, SetLayerSampleArgs,
-    SetViewArgs, SnapMarkersArgs, HotSwapLayerArgs,
+    self as ids, AddLayersArgs, HotSwapLayerArgs, LayerSelectMode, LayersAdded, LayersChanged,
+    LoopKind, MultisamplerState, Normalize, NormalizeArgs, SelectLayersArgs, SetLayerArgs,
+    SetLayerSampleArgs, SetViewArgs, SnapMarkersArgs,
 };
 
 use super::*;
@@ -35,9 +35,15 @@ impl Shell {
                 let device = self.multisampler_target(id, args.device)?;
                 let layers = self.layers_or_selection(id, device, args.layers)?;
                 let snap = self.layers_of(device).snap;
-                let changed = self.edit_layers(id, "Change Sample Settings", device, &layers, |_, settings| {
-                    settings.clone()
-                }, &args.settings, snap)?;
+                let changed = self.edit_layers(
+                    id,
+                    "Change Sample Settings",
+                    device,
+                    &layers,
+                    |_, settings| settings.clone(),
+                    &args.settings,
+                    snap,
+                )?;
                 Ok(to_value(&changed))
             }
             ids::SNAP_LAYER_MARKERS => {
@@ -176,18 +182,21 @@ impl Shell {
         id: &str,
         device: Option<DeviceId>,
     ) -> Result<DeviceId, ShellError> {
-        let device = device
-            .or_else(|| self.devices.selected())
-            .ok_or_else(|| ShellError::Unavailable {
-                command: id.to_owned(),
-                reason: "select a device first".to_owned(),
-            })?;
-        let found = self.editor.document().device(device).ok_or_else(|| {
-            ShellError::InvalidArgs {
-                command: id.to_owned(),
-                message: format!("no {device}"),
-            }
-        })?;
+        let device =
+            device
+                .or_else(|| self.devices.selected())
+                .ok_or_else(|| ShellError::Unavailable {
+                    command: id.to_owned(),
+                    reason: "select a device first".to_owned(),
+                })?;
+        let found =
+            self.editor
+                .document()
+                .device(device)
+                .ok_or_else(|| ShellError::InvalidArgs {
+                    command: id.to_owned(),
+                    message: format!("no {device}"),
+                })?;
         if !DeviceView::is_multisampler(found) {
             return Err(self.failed(id, format!("{device} isn't a multisampler")));
         }
@@ -210,7 +219,8 @@ impl Shell {
         device: DeviceId,
         layers: Option<Vec<LayerId>>,
     ) -> Result<Vec<LayerId>, ShellError> {
-        let layers = layers.unwrap_or_else(|| self.devices.layer_selection(self.editor.document(), device));
+        let layers =
+            layers.unwrap_or_else(|| self.devices.layer_selection(self.editor.document(), device));
         if layers.is_empty() {
             return Err(ShellError::Unavailable {
                 command: id.to_owned(),
@@ -256,7 +266,13 @@ impl Shell {
         let media = ContentHash(*hash.as_bytes());
         self.store.add_media(media, &entry.path, entry.size);
         let channels = u8::try_from(data.channel_count()).unwrap_or(u8::MAX);
-        Ok((media, data.frames() as u64, data.sample_rate(), channels, data))
+        Ok((
+            media,
+            data.frames() as u64,
+            data.sample_rate(),
+            channels,
+            data,
+        ))
     }
 
     /// Adds files as layers (R3).
@@ -410,8 +426,15 @@ impl Shell {
             let Some(sample) = self.left_channel(layer) else {
                 continue;
             };
-            let (start, end) = (layer.start as usize, (layer.end as usize).min(sample.frames()));
-            let channel = |c: usize| sample.channel(c).map_or(&[][..], |s| &s[start.min(end)..end]);
+            let (start, end) = (
+                layer.start as usize,
+                (layer.end as usize).min(sample.frames()),
+            );
+            let channel = |c: usize| {
+                sample
+                    .channel(c)
+                    .map_or(&[][..], |s| &s[start.min(end)..end])
+            };
             let settings = match what {
                 Normalize::Volume => {
                     let peak = (0..sample.channel_count())
@@ -475,7 +498,12 @@ impl Shell {
     }
 
     /// Changes the layer selection (R11).
-    fn select(&mut self, id: &str, device: DeviceId, args: &SelectLayersArgs) -> Result<(), ShellError> {
+    fn select(
+        &mut self,
+        id: &str,
+        device: DeviceId,
+        args: &SelectLayersArgs,
+    ) -> Result<(), ShellError> {
         let held = self.layers_of(device);
         if let Some(missing) = args.layers.iter().find(|l| held.get(**l).is_none()) {
             return Err(self.failed(id, format!("no layer {}", missing.0)));

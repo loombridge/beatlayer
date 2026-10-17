@@ -19,9 +19,8 @@ use bl_devices::multisampler::{
     VOICES, VOLUME, multisampler_type,
 };
 use bl_engine::{
-    Block, Collector, DeviceLayers, LayerAudio, LayerSample, Node, NodeEvent, NoteBuffer, NoteEvent,
-    NoteKind,
-    ParamValue, Registry, TransportInfo,
+    Block, Collector, DeviceLayers, LayerAudio, LayerSample, Node, NodeEvent, NoteBuffer,
+    NoteEvent, NoteKind, ParamValue, Registry, TransportInfo,
 };
 use bl_model::{ContentHash, DeviceRole, Layer, LayerId, ReleaseMode, SustainMode, Zone};
 use common::{CHANNELS, RATE, device, node};
@@ -262,7 +261,10 @@ fn each_key_and_velocity_plays_the_layers_that_take_it() {
         only.key = Zone::new(0, 10);
         silent.give(vec![(only, e)], false);
         let out = silent.render(500, &[on(0, 60, 1.0)]);
-        assert!(out.iter().flatten().all(|s| *s == 0.0), "no layer, no sound");
+        assert!(
+            out.iter().flatten().all(|s| *s == 0.0),
+            "no layer, no sound"
+        );
     }
 }
 
@@ -291,7 +293,13 @@ fn neighbouring_zones_crossfade_over_their_fades_linear_and_constant_power() {
                 let notes = [on(0, key, 1.0), off(400, key)];
                 let out = rig.render(500, &notes);
                 let x = f64::from(key - 50) / 10.0;
-                let share = |x: f64| if pow { (x * core::f64::consts::FRAC_PI_2).sin() } else { x };
+                let share = |x: f64| {
+                    if pow {
+                        (x * core::f64::consts::FRAC_PI_2).sin()
+                    } else {
+                        x
+                    }
+                };
                 let expected = share(1.0 - x) + 4.0 * share(x);
                 let got = f64::from(level_at(&out, 200));
                 assert!(
@@ -355,14 +363,23 @@ fn round_robin_rotates_in_each_mode_and_renders_the_same_every_time() {
         let params = |mode: f64| [(ROUND_ROBIN, 1.0), (RR_MODE, mode), (ENV_RELEASE, 0.0)];
         let mut forward = Rig::new(&params(0.0), block);
         forward.give(rotation(), false);
-        assert_eq!(rotation_run(&mut forward, 6), [1.0, 2.0, 4.0, 1.0, 2.0, 4.0]);
+        assert_eq!(
+            rotation_run(&mut forward, 6),
+            [1.0, 2.0, 4.0, 1.0, 2.0, 4.0]
+        );
         let mut backward = Rig::new(&params(1.0), block);
         backward.give(rotation(), false);
-        assert_eq!(rotation_run(&mut backward, 6), [4.0, 2.0, 1.0, 4.0, 2.0, 1.0]);
+        assert_eq!(
+            rotation_run(&mut backward, 6),
+            [4.0, 2.0, 1.0, 4.0, 2.0, 1.0]
+        );
         let mut other = Rig::new(&params(2.0), block);
         other.give(rotation(), false);
         let played = rotation_run(&mut other, 40);
-        assert!(played.windows(2).all(|w| w[0] != w[1]), "never the same twice");
+        assert!(
+            played.windows(2).all(|w| w[0] != w[1]),
+            "never the same twice"
+        );
         assert!([1.0, 2.0, 4.0].iter().all(|v| played.contains(v)));
         // A random mode repeats bit for bit between renders.
         let render = |block| {
@@ -371,7 +388,10 @@ fn round_robin_rotates_in_each_mode_and_renders_the_same_every_time() {
             rotation_run(&mut random, 30)
         };
         assert_eq!(render(block), render(block));
-        assert!(render(block).windows(2).any(|w| w[0] == w[1]), "repeats are possible");
+        assert!(
+            render(block).windows(2).any(|w| w[0] == w[1]),
+            "repeats are possible"
+        );
         // Without Round Robin every layer plays.
         let mut all = Rig::new(&[(ENV_RELEASE, 0.0)], block);
         all.give(rotation(), false);
@@ -397,7 +417,13 @@ fn the_reset_interval_restarts_each_mode_on_the_grid() {
             let mut rig = Rig::new(&params(mode), block);
             rig.playing = true;
             rig.give(rotation(), false);
-            let times = [100, 6_000, quarter + 100, quarter + 6_000, 2 * quarter + 100];
+            let times = [
+                100,
+                6_000,
+                quarter + 100,
+                quarter + 6_000,
+                2 * quarter + 100,
+            ];
             let mut notes = Vec::new();
             for &t in &times {
                 notes.push(on(t, 60, 1.0));
@@ -407,10 +433,17 @@ fn the_reset_interval_restarts_each_mode_on_the_grid() {
             times.map(|t| out[0][t + 50].round())
         };
         assert_eq!(run(0.0), [1.0, 2.0, 1.0, 2.0, 1.0], "Forward from the top");
-        assert_eq!(run(1.0), [4.0, 2.0, 4.0, 2.0, 4.0], "Backward from the bottom");
+        assert_eq!(
+            run(1.0),
+            [4.0, 2.0, 4.0, 2.0, 4.0],
+            "Backward from the bottom"
+        );
         for mode in [2.0, 3.0] {
             let played = run(mode);
-            assert_eq!(played[2], played[0], "mode {mode} restarts on the first it played");
+            assert_eq!(
+                played[2], played[0],
+                "mode {mode} restarts on the first it played"
+            );
             assert_eq!(played[4], played[0], "mode {mode}");
         }
     }
@@ -422,7 +455,12 @@ fn a_layer_plays_at_its_root_key_and_a_semitone_a_key() {
     for block in BLOCKS {
         let impulse = sample(4800, |i| if i == 1000 { 1.0 } else { 0.0 });
         let first = |out: &[Vec<f32>]| out[0].iter().position(|s| s.abs() > 0.9).unwrap();
-        for (root, key, at) in [(60u8, 60u8, 1000), (60, 72, 500), (48, 60, 500), (72, 60, 2000)] {
+        for (root, key, at) in [
+            (60u8, 60u8, 1000),
+            (60, 72, 500),
+            (48, 60, 500),
+            (72, 60, 2000),
+        ] {
             let mut rig = Rig::new(&[], block);
             let mut l = layer(1, &impulse);
             l.root_key = root;
@@ -456,7 +494,10 @@ fn a_voice_plays_from_sample_start_to_sample_end_and_link_starts_at_the_loop() {
         l.release_loop = 2400;
         rig.give(vec![(l, Arc::clone(&whole))], false);
         let out = rig.render(4800, &[on(0, 60, 1.0)]);
-        assert!(out[0][..1200].iter().all(|s| (s - 1.0).abs() < 1e-5), "{block}");
+        assert!(
+            out[0][..1200].iter().all(|s| (s - 1.0).abs() < 1e-5),
+            "{block}"
+        );
         assert!(out[0][1200..].iter().all(|s| *s == 0.0));
 
         let impulse = sample(4800, |i| if i == 1500 { 1.0 } else { 0.0 });
@@ -496,7 +537,10 @@ fn each_sustain_mode_loops_as_it_says() {
         let mut straight = Rig::new(&[], block);
         straight.give(vec![looped(SustainMode::Off, ReleaseMode::Off)], false);
         let out = straight.render(6000, &[on(0, 60, 1.0)]);
-        assert!((out[0][3000] - value(3000)).abs() < 1e-5, "plays straight through");
+        assert!(
+            (out[0][3000] - value(3000)).abs() < 1e-5,
+            "plays straight through"
+        );
         assert_eq!(out[0][5000], 0.0, "and ends at Sample End");
 
         let mut forward = Rig::new(&[], block);
@@ -512,7 +556,10 @@ fn each_sustain_mode_loops_as_it_says() {
         }
 
         let mut back = Rig::new(&[], block);
-        back.give(vec![looped(SustainMode::BackAndForth, ReleaseMode::Off)], false);
+        back.give(
+            vec![looped(SustainMode::BackAndForth, ReleaseMode::Off)],
+            false,
+        );
         let out = back.render(6000, &[on(0, 60, 1.0)]);
         for i in 0..900 {
             assert!(
@@ -521,7 +568,8 @@ fn each_sustain_mode_loops_as_it_says() {
             );
         }
         assert!(
-            (out[0][3003] - value(1000 + 3)).abs() < 1e-5 && (out[0][3010] - value(1000 + 10)).abs() < 1e-5,
+            (out[0][3003] - value(1000 + 3)).abs() < 1e-5
+                && (out[0][3010] - value(1000 + 10)).abs() < 1e-5,
             "and forward again from Loop Start"
         );
     }
@@ -540,7 +588,9 @@ fn each_release_mode_plays_the_release_as_it_says() {
         keep.give(vec![looped(SustainMode::Loop, ReleaseMode::Off)], false);
         let out = keep.render(8000, &held_then_off);
         assert!(
-            out[0][3000..7000].iter().all(|s| *s <= value(2000) + 1e-3 && *s >= value(1000) * 0.99),
+            out[0][3000..7000]
+                .iter()
+                .all(|s| *s <= value(2000) + 1e-3 && *s >= value(1000) * 0.99),
             "Off stays in the loop until the release ends"
         );
 
@@ -566,10 +616,17 @@ fn each_release_mode_plays_the_release_as_it_says() {
         );
 
         let mut bounce = Rig::new(&params, block);
-        bounce.give(vec![looped(SustainMode::Loop, ReleaseMode::BackAndForth)], false);
+        bounce.give(
+            vec![looped(SustainMode::Loop, ReleaseMode::BackAndForth)],
+            false,
+        );
         let out = bounce.render(9000, &held_then_off);
         let after: Vec<f32> = out[0][6000..9000].to_vec();
-        assert!(after.iter().all(|s| *s >= value(3000) * 0.99 && *s <= value(4800)));
+        assert!(
+            after
+                .iter()
+                .all(|s| *s >= value(3000) * 0.99 && *s <= value(4800))
+        );
         assert!(
             after.windows(2).any(|w| w[1] < w[0]) && after.windows(2).any(|w| w[1] > w[0]),
             "Back-and-Forth Release Loop goes both ways"
@@ -579,7 +636,10 @@ fn each_release_mode_plays_the_release_as_it_says() {
 
 /// The largest jump between neighbouring frames.
 fn biggest_step(signal: &[f32]) -> f32 {
-    signal.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0, f32::max)
+    signal
+        .windows(2)
+        .map(|w| (w[1] - w[0]).abs())
+        .fold(0.0, f32::max)
 }
 
 // Spec: multisampler R19
@@ -587,7 +647,9 @@ fn biggest_step(signal: &[f32]) -> f32 {
 fn the_loop_crossfade_has_no_click_in_either_law() {
     for block in BLOCKS {
         // 1.5 cycles of a cosine: a bare wrap jumps from −1 to 1.
-        let cosine = sample(4800, |i| (core::f64::consts::TAU * 15.0 * i as f64 / HZ).cos() as f32);
+        let cosine = sample(4800, |i| {
+            (core::f64::consts::TAU * 15.0 * i as f64 / HZ).cos() as f32
+        });
         for linear in [false, true] {
             let mut bare = Rig::new(&[], block);
             let mut l = layer(1, &cosine);
@@ -611,7 +673,10 @@ fn the_loop_crossfade_has_no_click_in_either_law() {
 
 /// How many times `signal` rises through zero.
 fn rising(signal: &[f32]) -> usize {
-    signal.windows(2).filter(|w| w[0] < 0.0 && w[1] >= 0.0).count()
+    signal
+        .windows(2)
+        .filter(|w| w[0] < 0.0 && w[1] >= 0.0)
+        .count()
 }
 
 // Spec: multisampler R19
@@ -619,7 +684,9 @@ fn rising(signal: &[f32]) -> usize {
 fn loop_detune_retunes_inside_the_loop() {
     for block in BLOCKS {
         // A 1 kHz sine of exactly 100 cycles, so the loop wraps seamlessly.
-        let sine = sample(4800, |i| (core::f64::consts::TAU * 1000.0 * i as f64 / HZ).sin() as f32);
+        let sine = sample(4800, |i| {
+            (core::f64::consts::TAU * 1000.0 * i as f64 / HZ).sin() as f32
+        });
         let count = |detune: f64| {
             let mut rig = Rig::new(&[], block);
             let mut l = layer(1, &sine);
@@ -644,8 +711,14 @@ fn reverse_plays_from_the_end_through_the_loop_to_the_start() {
         let mut rig = Rig::new(&[(REVERSE, 1.0), (ENV_RELEASE, 0.0)], block);
         rig.give(vec![looped(SustainMode::Off, ReleaseMode::Off)], false);
         let out = rig.render(6000, &[on(0, 60, 1.0)]);
-        assert!((out[0][0] - value(4799)).abs() < 1e-5, "starts at Sample End");
-        assert!((out[0][1000] - value(3799)).abs() < 1e-5, "and runs backwards");
+        assert!(
+            (out[0][0] - value(4799)).abs() < 1e-5,
+            "starts at Sample End"
+        );
+        assert!(
+            (out[0][1000] - value(3799)).abs() < 1e-5,
+            "and runs backwards"
+        );
         assert!((out[0][4790] - value(9)).abs() < 1e-5, "to Sample Start");
         assert_eq!(out[0][5000], 0.0);
 
@@ -675,7 +748,11 @@ fn the_root_key_plays_the_frames_exactly_in_every_mode() {
             rig.give(vec![(layer(1, &noise), Arc::clone(&noise))], false);
             let out = rig.render(2000, &[on(0, 60, 1.0)]);
             for i in 0..1990 {
-                assert_eq!(out[0][i], noise.channel(0).unwrap()[i], "mode {mode} frame {i}");
+                assert_eq!(
+                    out[0][i],
+                    noise.channel(0).unwrap()[i],
+                    "mode {mode} frame {i}"
+                );
             }
         }
     }
@@ -686,7 +763,9 @@ fn the_root_key_plays_the_frames_exactly_in_every_mode() {
 fn best_interpolation_keeps_aliases_eighty_db_down() {
     // A 3 kHz sine an octave up and 49 cents: 6.17 kHz, at positions that
     // fall between frames.
-    let sine = sample(48_000, |i| (core::f64::consts::TAU * 3000.0 * i as f64 / HZ).sin() as f32);
+    let sine = sample(48_000, |i| {
+        (core::f64::consts::TAU * 3000.0 * i as f64 / HZ).sin() as f32
+    });
     let hz = 3000.0 * 2f64.powf(1.0 + 49.0 / 1200.0);
     let residual = |mode: f64| {
         let mut rig = Rig::new(&[(INTERPOLATION, mode)], 4096);
@@ -696,7 +775,10 @@ fn best_interpolation_keeps_aliases_eighty_db_down() {
         let out = rig.render(24_000, &[on(0, 72, 1.0)]);
         let (amplitude, rms) = fit(&out[0], 2000, 16_000, hz);
         if mode == 2.0 {
-            assert!((amplitude - 1.0).abs() < 0.01, "Best keeps the level: {amplitude}");
+            assert!(
+                (amplitude - 1.0).abs() < 0.01,
+                "Best keeps the level: {amplitude}"
+            );
         }
         20.0 * (rms / amplitude).log10()
     };
@@ -708,7 +790,12 @@ fn best_interpolation_keeps_aliases_eighty_db_down() {
 
 /// Plays a note on a constant sample and returns the level every `step`
 /// frames.
-fn envelope_levels(params: &[(bl_model::ParamId, f64)], notes: &[Played], frames: usize, block: usize) -> Vec<f32> {
+fn envelope_levels(
+    params: &[(bl_model::ParamId, f64)],
+    notes: &[Played],
+    frames: usize,
+    block: usize,
+) -> Vec<f32> {
     let mut rig = Rig::new(params, block);
     rig.playing = true;
     let (l, s) = flat(1, 1.0);
@@ -729,9 +816,18 @@ fn the_envelope_takes_its_levels_times_and_slopes() {
             (ENV_RELEASE, 100.0),
         ];
         let ms = |t: f64| (t * 48.0) as usize;
-        let levels = envelope_levels(&params, &[on(0, 60, 1.0), off(ms(500.0), 60)], ms(700.0), block);
+        let levels = envelope_levels(
+            &params,
+            &[on(0, 60, 1.0), off(ms(500.0), 60)],
+            ms(700.0),
+            block,
+        );
         let near = |t: f64, expected: f32| {
-            assert!((levels[ms(t)] - expected).abs() < 0.01, "at {t} ms: {} not {expected}", levels[ms(t)]);
+            assert!(
+                (levels[ms(t)] - expected).abs() < 0.01,
+                "at {t} ms: {} not {expected}",
+                levels[ms(t)]
+            );
         };
         near(1.0, 0.208);
         near(50.0, 0.6);
@@ -740,15 +836,27 @@ fn the_envelope_takes_its_levels_times_and_slopes() {
         near(200.0, 0.5);
         near(400.0, 0.5);
         near(550.0, 0.25);
-        assert_eq!(levels[ms(650.0)], 0.0, "the voice ends when the release does");
+        assert_eq!(
+            levels[ms(650.0)],
+            0.0,
+            "the voice ends when the release does"
+        );
         // A positive attack slope moves fast first: x^(4^-1) at half time.
         let steep = envelope_levels(
-            &[(ENV_INITIAL, 0.0), (ENV_ATTACK, 100.0), (ENV_ATTACK_SLOPE, 100.0)],
+            &[
+                (ENV_INITIAL, 0.0),
+                (ENV_ATTACK, 100.0),
+                (ENV_ATTACK_SLOPE, 100.0),
+            ],
             &[on(0, 60, 1.0)],
             ms(200.0),
             block,
         );
-        assert!((steep[ms(50.0)] - 0.5f32.powf(0.25)).abs() < 0.01, "{}", steep[ms(50.0)]);
+        assert!(
+            (steep[ms(50.0)] - 0.5f32.powf(0.25)).abs() < 0.01,
+            "{}",
+            steep[ms(50.0)]
+        );
     }
 }
 
@@ -779,10 +887,22 @@ fn each_envelope_loop_mode_repeats_as_it_says() {
         // Trigger: a short note's release waits for the decay's end.
         let mut params = cycle.to_vec();
         params.push((ENV_LOOP, 4.0));
-        let levels = envelope_levels(&params, &[on(0, 60, 1.0), off(ms(50.0), 60)], ms(500.0), block);
-        assert!((levels[ms(150.0)] - 0.75).abs() < 0.02, "still decaying: {}", levels[ms(150.0)]);
+        let levels = envelope_levels(
+            &params,
+            &[on(0, 60, 1.0), off(ms(50.0), 60)],
+            ms(500.0),
+            block,
+        );
+        assert!(
+            (levels[ms(150.0)] - 0.75).abs() < 0.02,
+            "still decaying: {}",
+            levels[ms(150.0)]
+        );
         assert!(levels[ms(190.0)] > 0.45);
-        assert!(levels[ms(240.0)] < levels[ms(200.0)], "released at the decay's end");
+        assert!(
+            levels[ms(240.0)] < levels[ms(200.0)],
+            "released at the decay's end"
+        );
         assert_eq!(levels[ms(400.0)], 0.0);
         // Beat: at 120 bpm a 1/8 note is 250 ms; the note goes again from
         // its level at the attack's rate.
@@ -790,8 +910,16 @@ fn each_envelope_loop_mode_repeats_as_it_says() {
         params.extend([(ENV_LOOP, 2.0), (ENV_REPEAT, 3.0)]);
         let levels = envelope_levels(&params, &[on(0, 60, 1.0)], ms(500.0), block);
         assert!((levels[ms(240.0)] - 0.5).abs() < 0.01);
-        assert!((levels[ms(275.0)] - 0.75).abs() < 0.02, "{}", levels[ms(275.0)]);
-        assert!((levels[ms(300.0)] - 1.0).abs() < 0.01, "{}", levels[ms(300.0)]);
+        assert!(
+            (levels[ms(275.0)] - 0.75).abs() < 0.02,
+            "{}",
+            levels[ms(275.0)]
+        );
+        assert!(
+            (levels[ms(300.0)] - 1.0).abs() < 0.01,
+            "{}",
+            levels[ms(300.0)]
+        );
     }
 }
 
@@ -814,10 +942,26 @@ fn sync_repeats_land_on_the_song_grid() {
         // Decaying at 240 ms (0.8), the grid's 250 ms sends it up from 0.75
         // to its peak at 275, where a repeat counted from the note would
         // still be falling (0.69 at 262).
-        assert!((levels[ms(240.0)] - 0.8).abs() < 0.01, "{}", levels[ms(240.0)]);
-        assert!((levels[ms(262.0)] - 0.875).abs() < 0.03, "{}", levels[ms(262.0)]);
-        assert!((levels[ms(277.0)] - 1.0).abs() < 0.02, "{}", levels[ms(277.0)]);
-        assert!((levels[ms(330.0)] - 0.725).abs() < 0.03, "{}", levels[ms(330.0)]);
+        assert!(
+            (levels[ms(240.0)] - 0.8).abs() < 0.01,
+            "{}",
+            levels[ms(240.0)]
+        );
+        assert!(
+            (levels[ms(262.0)] - 0.875).abs() < 0.03,
+            "{}",
+            levels[ms(262.0)]
+        );
+        assert!(
+            (levels[ms(277.0)] - 1.0).abs() < 0.02,
+            "{}",
+            levels[ms(277.0)]
+        );
+        assert!(
+            (levels[ms(330.0)] - 0.725).abs() < 0.03,
+            "{}",
+            levels[ms(330.0)]
+        );
     }
 }
 
@@ -857,7 +1001,10 @@ fn a_stolen_note_fades_out_and_retrigger_restarts_its_key() {
         let out = rig.render(48_000, &[on(0, 60, 1.0), on(24_000, 64, 1.0)]);
         let left = &out[0];
         assert!((left[20_000] - 1.0).abs() < 0.01, "one note before");
-        assert!(left[24_000..24_240].iter().all(|s| (s - 1.0).abs() < 0.05), "the steal crosses");
+        assert!(
+            left[24_000..24_240].iter().all(|s| (s - 1.0).abs() < 0.05),
+            "the steal crosses"
+        );
         assert!((left[30_000] - 1.0).abs() < 0.01, "one note after");
         assert!(biggest_step(&left[1..]) < 0.05);
 
@@ -872,7 +1019,10 @@ fn a_stolen_note_fades_out_and_retrigger_restarts_its_key() {
         );
         assert!((out[0][1000] - 2.0).abs() < 1e-4, "one note, two layers");
         assert!((out[0][4000] - 4.0).abs() < 1e-4, "two notes, four voices");
-        assert!((out[0][9000] - 4.0).abs() < 1e-4, "the third steals the first note");
+        assert!(
+            (out[0][9000] - 4.0).abs() < 1e-4,
+            "the third steals the first note"
+        );
 
         // Without Retrigger a key played twice sounds twice; with it, once.
         for (retrigger, expected) in [(0.0, 2.0), (1.0, 1.0)] {
@@ -880,7 +1030,10 @@ fn a_stolen_note_fades_out_and_retrigger_restarts_its_key() {
             let (l, s) = flat(1, 1.0);
             rig.give(vec![(l, s)], false);
             let out = rig.render(8000, &[on(0, 60, 1.0), on(3000, 60, 1.0)]);
-            assert!((out[0][6000] - expected).abs() < 0.02, "retrigger {retrigger}");
+            assert!(
+                (out[0][6000] - expected).abs() < 0.02,
+                "retrigger {retrigger}"
+            );
         }
     }
 }
@@ -896,7 +1049,10 @@ fn volume_velocity_pan_and_random_pan_place_the_note() {
             rig.render(500, &[on(0, 60, velocity)])
         };
         let out = play(&[(VEL_VOL, 100.0)], 0.5);
-        assert!((out[0][100] - 0.5).abs() < 0.01, "Vel > Vol follows velocity");
+        assert!(
+            (out[0][100] - 0.5).abs() < 0.01,
+            "Vel > Vol follows velocity"
+        );
         let out = play(&[(VEL_VOL, 0.0)], 0.5);
         assert!((out[0][100] - 1.0).abs() < 1e-5, "and at 0 it doesn't");
         let out = play(&[(VOLUME, db_gain(-6.0))], 1.0);
@@ -918,11 +1074,16 @@ fn volume_velocity_pan_and_random_pan_place_the_note() {
                 notes.push(off(n * 500 + 100, 60));
             }
             let out = rig.render(12 * 500, &notes);
-            (0..12).map(|n| out[0][n * 500 + 50] - out[1][n * 500 + 50]).collect::<Vec<f32>>()
+            (0..12)
+                .map(|n| out[0][n * 500 + 50] - out[1][n * 500 + 50])
+                .collect::<Vec<f32>>()
         };
         let first = pans(block);
         assert_eq!(first, pans(block), "seeded: a render repeats");
-        assert!(first.iter().any(|d| d.abs() > 0.1), "the notes move: {first:?}");
+        assert!(
+            first.iter().any(|d| d.abs() > 0.1),
+            "the notes move: {first:?}"
+        );
         assert!(first.windows(2).any(|w| (w[0] - w[1]).abs() > 0.05));
     }
 }
@@ -938,7 +1099,10 @@ fn a_layer_edit_keeps_sounding_notes_going() {
     let mut rig = Rig::new(&[], 512);
     let (a, sa) = flat(1, 1.0);
     let (b, sb) = flat(2, 2.0);
-    rig.give(vec![(a.clone(), Arc::clone(&sa)), (b.clone(), Arc::clone(&sb))], false);
+    rig.give(
+        vec![(a.clone(), Arc::clone(&sa)), (b.clone(), Arc::clone(&sb))],
+        false,
+    );
     let first = rig.render(2000, &[on(0, 60, 1.0)]);
     assert!((first[0][1000] - 3.0).abs() < 1e-4);
     // The list is reordered and the second layer's zone narrowed: the note
@@ -961,8 +1125,14 @@ fn long_file(name: &str, seconds: usize) -> std::path::PathBuf {
     let path = dir.join("Long.wav");
     std::fs::write(
         &path,
-        bl_media::wav_bytes(&samples, 1, 48_000, bl_media::BitDepth::Int16, bl_media::Dither::None)
-            .unwrap(),
+        bl_media::wav_bytes(
+            &samples,
+            1,
+            48_000,
+            bl_media::BitDepth::Int16,
+            bl_media::Dither::None,
+        )
+        .unwrap(),
     )
     .unwrap();
     path
@@ -978,7 +1148,11 @@ fn a_long_layer_plays_from_its_held_start_while_the_rest_is_read() {
     for block in [100, 4096] {
         let decoder = bl_media::Decoder::open(&path).unwrap();
         let (sample, fill) = bl_media::ProgressiveSample::start(decoder, 10 * 48_000).unwrap();
-        assert_eq!(sample.ready(), 10 * 48_000, "the start is held before it plays");
+        assert_eq!(
+            sample.ready(),
+            10 * 48_000,
+            "the start is held before it plays"
+        );
         let mut layer = Layer::new(
             LayerId(1),
             "Long",
@@ -1003,14 +1177,20 @@ fn a_long_layer_plays_from_its_held_start_while_the_rest_is_read() {
         fill.spawn().unwrap();
         let waited = std::time::Instant::now();
         while sample.ready() < frames {
-            assert!(waited.elapsed() < std::time::Duration::from_secs(20), "the read stalled");
+            assert!(
+                waited.elapsed() < std::time::Duration::from_secs(20),
+                "the read stalled"
+            );
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
         let rest = rig.render(15 * 48_000, &[]);
         let played: Vec<f32> = first[0].iter().chain(&rest[0]).copied().collect();
         let expected = whole.channel(0).unwrap();
         assert!(
-            played.iter().zip(expected).all(|(a, b)| (a - b).abs() < 1e-6),
+            played
+                .iter()
+                .zip(expected)
+                .all(|(a, b)| (a - b).abs() < 1e-6),
             "block {block}: it plays what decoding the whole file gives"
         );
         assert_eq!(underruns.load(Relaxed), 0, "never waited for the disk");
@@ -1026,7 +1206,14 @@ fn a_frame_the_disk_hasnt_delivered_plays_as_silence_and_counts() {
     // Nothing reads past the held start.
     let (sample, _fill) = bl_media::ProgressiveSample::start(decoder, 10 * 48_000).unwrap();
     let frames = sample.frames();
-    let layer = Layer::new(LayerId(1), "Long", ContentHash([9; 32]), frames as u64, 48_000, 1);
+    let layer = Layer::new(
+        LayerId(1),
+        "Long",
+        ContentHash([9; 32]),
+        frames as u64,
+        48_000,
+        1,
+    );
     let mut rig = Rig::new(&[(ENV_RELEASE, 0.0)], 512);
     let underruns = rig.send(
         vec![LayerAudio {
@@ -1036,7 +1223,13 @@ fn a_frame_the_disk_hasnt_delivered_plays_as_silence_and_counts() {
         false,
     );
     let out = rig.render(12 * 48_000, &[on(0, 60, 1.0)]);
-    assert!(out[0][9 * 48_000..10 * 48_000].iter().any(|s| *s != 0.0), "the held start plays");
-    assert!(out[0][10 * 48_000 + 10..].iter().all(|s| *s == 0.0), "then silence");
+    assert!(
+        out[0][9 * 48_000..10 * 48_000].iter().any(|s| *s != 0.0),
+        "the held start plays"
+    );
+    assert!(
+        out[0][10 * 48_000 + 10..].iter().all(|s| *s == 0.0),
+        "then silence"
+    );
     assert!(underruns.load(Relaxed) > 0, "counted");
 }

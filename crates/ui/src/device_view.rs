@@ -403,9 +403,9 @@ impl DeviceViewUi {
                     match &frame.multisampler {
                         // Spec: multisampler R1. The tab chosen in the title
                         // bar shows its controls.
-                        Some(state) => self.multisampler.body(
-                            ui, shell, theme, frame, state, panel, body, events,
-                        ),
+                        Some(state) => self
+                            .multisampler
+                            .body(ui, shell, theme, frame, state, panel, body, events),
                         None => crate::device_panel::show(ui, theme, frame, panel, body, events),
                     }
                 }

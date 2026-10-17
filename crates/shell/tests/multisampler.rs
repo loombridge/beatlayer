@@ -172,7 +172,11 @@ fn added_layers_take_the_whole_ranges_and_the_files_root_key() {
         assert_eq!((layer.velocity.low, layer.velocity.high), (1, 127));
         assert_eq!((layer.select.low, layer.select.high), (0, 127));
         assert_eq!(
-            (layer.key.fade_low, layer.key.fade_high, layer.velocity.fade_low),
+            (
+                layer.key.fade_low,
+                layer.key.fade_high,
+                layer.velocity.fade_low
+            ),
             (0, 0, 0),
             "no fades"
         );
@@ -190,7 +194,13 @@ fn added_layers_take_the_whole_ranges_and_the_files_root_key() {
     );
     // The new layers are the selection, and a file that isn't audio is
     // named and skipped.
-    assert_eq!(state(&mut shell, device)["selection"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        state(&mut shell, device)["selection"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
     let junk = scratch.path("notes.txt");
     std::fs::write(&junk, "not audio").unwrap();
     let again = add_layers(&mut shell, device, &[&without, &junk]);
@@ -222,10 +232,8 @@ fn layers_len(shell: &Shell, device: DeviceId) -> usize {
 /// a note at C3 held for the whole of it on the multisampler's track, and
 /// returns the first channel and whether any media was missing.
 fn play(shell: &Shell, device: DeviceId, frames: u64) -> (Vec<f32>, usize) {
-    let mut editor = bl_model::Editor::from_document(
-        shell.editor().document().clone(),
-        shell.editor().ids(),
-    );
+    let mut editor =
+        bl_model::Editor::from_document(shell.editor().document().clone(), shell.editor().ids());
     let track = editor.document().device_track(device).unwrap();
     let clip = editor.new_id();
     editor
@@ -235,7 +243,12 @@ fn play(shell: &Shell, device: DeviceId, frames: u64) -> (Vec<f32>, usize) {
                 clip,
                 Ticks::ZERO,
                 Ticks::WHOLE * 8,
-                ClipData::Midi(MidiData::new([Note::new(60, Ticks::ZERO, Ticks::WHOLE * 8, 100)])),
+                ClipData::Midi(MidiData::new([Note::new(
+                    60,
+                    Ticks::ZERO,
+                    Ticks::WHOLE * 8,
+                    100,
+                )])),
             ),
         })
         .unwrap();
@@ -259,9 +272,14 @@ fn five_hundred_and_twelve_layers_play_save_and_reopen() {
     wav(&file, 4800, 0.001, None);
     let mut shell = shell(&scratch);
     let device = add_multisampler(&mut shell);
-    let paths: Vec<String> = (0..512).map(|_| file.to_string_lossy().into_owned()).collect();
+    let paths: Vec<String> = (0..512)
+        .map(|_| file.to_string_lossy().into_owned())
+        .collect();
     shell
-        .run("device.add_layers", json!({ "device": device, "paths": paths }))
+        .run(
+            "device.add_layers",
+            json!({ "device": device, "paths": paths }),
+        )
         .unwrap();
     assert_eq!(layers_len(&shell, device), 512);
     // Each layer plays: 512 voices of 0.001 sum to about half.
@@ -330,14 +348,23 @@ fn sorting_and_select_all_with_same_range() {
     let refs: Vec<&Path> = files.iter().map(PathBuf::as_path).collect();
     add_layers(&mut shell, device, &refs);
     let names = |shell: &Shell| -> Vec<String> {
-        layers(shell, device).iter().map(|l| l.name.clone()).collect()
+        layers(shell, device)
+            .iter()
+            .map(|l| l.name.clone())
+            .collect()
     };
     shell
-        .run("device.sort_layers", json!({ "device": device, "by": "name", "descending": false }))
+        .run(
+            "device.sort_layers",
+            json!({ "device": device, "by": "name", "descending": false }),
+        )
         .unwrap();
     assert_eq!(names(&shell), ["Alto", "Bass", "Cello"]);
     shell
-        .run("device.sort_layers", json!({ "device": device, "by": "name", "descending": true }))
+        .run(
+            "device.sort_layers",
+            json!({ "device": device, "by": "name", "descending": true }),
+        )
         .unwrap();
     assert_eq!(names(&shell), ["Cello", "Bass", "Alto"]);
 
@@ -377,14 +404,23 @@ fn normalize_volume_and_pan_set_each_layer() {
     add_layers(&mut shell, device, &[&quiet]);
     let before = shell.editor().undo_history().len();
     shell
-        .run("device.normalize_layers", json!({ "device": device, "what": "volume" }))
+        .run(
+            "device.normalize_layers",
+            json!({ "device": device, "what": "volume" }),
+        )
         .unwrap();
     let volume = layers(&shell, device)[0].volume;
-    assert!((volume - 4.0).abs() < 0.01, "a peak of 0.25 takes four: {volume}");
+    assert!(
+        (volume - 4.0).abs() < 0.01,
+        "a peak of 0.25 takes four: {volume}"
+    );
     assert_eq!(shell.editor().undo_history().len(), before + 1);
     // A mono layer keeps its pan.
     shell
-        .run("device.normalize_layers", json!({ "device": device, "what": "pan" }))
+        .run(
+            "device.normalize_layers",
+            json!({ "device": device, "what": "pan" }),
+        )
         .unwrap();
     assert_eq!(layers(&shell, device)[0].pan, 0.0);
 }
@@ -408,7 +444,10 @@ fn snap_puts_set_markers_on_zero_crossings() {
     add_layers(&mut shell, device, &[&sine]);
     let marker = |shell: &mut Shell, snap: bool| {
         shell
-            .run("device.set_layer_options", json!({ "device": device, "snap": snap }))
+            .run(
+                "device.set_layer_options",
+                json!({ "device": device, "snap": snap }),
+            )
             .unwrap();
         shell
             .run(
@@ -419,13 +458,20 @@ fn snap_puts_set_markers_on_zero_crossings() {
         let layer = layers(shell, device).remove(0);
         (layer.loop_start, layer.loop_end)
     };
-    assert_eq!(marker(&mut shell, false), (1010, 3012), "Snap off sets them as given");
+    assert_eq!(
+        marker(&mut shell, false),
+        (1010, 3012),
+        "Snap off sets them as given"
+    );
     let (start, end) = marker(&mut shell, true);
     assert_eq!((start % 50, end % 50), (0, 0), "{start} {end}");
     assert!(start.abs_diff(1010) <= 25 && end.abs_diff(3012) <= 25);
     // Snap Markers snaps a loop's markers once, whatever Snap says.
     shell
-        .run("device.set_layer_options", json!({ "device": device, "snap": false }))
+        .run(
+            "device.set_layer_options",
+            json!({ "device": device, "snap": false }),
+        )
         .unwrap();
     shell
         .run(
@@ -434,7 +480,10 @@ fn snap_puts_set_markers_on_zero_crossings() {
         )
         .unwrap();
     shell
-        .run("device.snap_layer_markers", json!({ "device": device, "layers": [1] }))
+        .run(
+            "device.snap_layer_markers",
+            json!({ "device": device, "layers": [1] }),
+        )
         .unwrap();
     let layer = layers(&shell, device).remove(0);
     assert_eq!((layer.loop_start % 50, layer.loop_end % 50), (0, 0));
@@ -469,22 +518,36 @@ fn auto_select_follows_the_incoming_note() {
         .run("midi.toggle_computer_keyboard", json!({ "on": true }))
         .unwrap();
     shell
-        .run("device.set_multisampler_view", json!({ "device": device, "auto_select": true }))
+        .run(
+            "device.set_multisampler_view",
+            json!({ "device": device, "auto_select": true }),
+        )
         .unwrap();
     shell
-        .run("device.select_layers", json!({ "device": device, "layers": [ids[0]] }))
+        .run(
+            "device.select_layers",
+            json!({ "device": device, "layers": [ids[0]] }),
+        )
         .unwrap();
     // The A key plays C3 with the keyboard's octave at 0: layer two takes it.
-    let lowest = shell.run("midi.computer_keyboard_octave", json!({ "steps": 0 })).unwrap()["lowest_note"]
+    let lowest = shell
+        .run("midi.computer_keyboard_octave", json!({ "steps": 0 }))
+        .unwrap()["lowest_note"]
         .as_u64()
         .unwrap();
     assert_eq!(lowest, 60);
     shell
-        .run("midi.computer_keyboard_key", json!({ "key": "a", "pressed": true }))
+        .run(
+            "midi.computer_keyboard_key",
+            json!({ "key": "a", "pressed": true }),
+        )
         .unwrap();
     assert_eq!(state(&mut shell, device)["selection"], json!([ids[1]]));
     shell
-        .run("midi.computer_keyboard_key", json!({ "key": "a", "pressed": false }))
+        .run(
+            "midi.computer_keyboard_key",
+            json!({ "key": "a", "pressed": false }),
+        )
         .unwrap();
     assert_eq!(
         state(&mut shell, device)["selection"],
@@ -510,7 +573,10 @@ fn the_views_are_saved_with_the_set_and_are_no_undo_step() {
     assert_eq!(shell.editor().undo_history().len(), steps, "no undo step");
     let set = save_as(&mut shell, &scratch);
     shell
-        .run("device.set_multisampler_view", json!({ "device": device, "tab": "midi" }))
+        .run(
+            "device.set_multisampler_view",
+            json!({ "device": device, "tab": "midi" }),
+        )
         .unwrap();
     shell
         .run("set.open", json!({ "path": set.to_string_lossy() }))
@@ -539,7 +605,11 @@ fn the_title_shows_the_first_layers_name() {
             .unwrap()
             .to_owned()
     };
-    assert_eq!(title(&mut shell), "Mosaic", "the device's own name with no layers");
+    assert_eq!(
+        title(&mut shell),
+        "Mosaic",
+        "the device's own name with no layers"
+    );
     let file = scratch.path("Strings.wav");
     wav(&file, 480, 0.1, None);
     add_layers(&mut shell, device, &[&file]);
@@ -579,16 +649,27 @@ fn hot_swapping_a_layer_replaces_its_sample_and_keeps_its_zones() {
     let steps = shell.editor().undo_history().len();
     // The sample chosen in the browser replaces the layer's.
     shell
-        .run("browser.select", json!({ "paths": [new.to_string_lossy()] }))
+        .run(
+            "browser.select",
+            json!({ "paths": [new.to_string_lossy()] }),
+        )
         .unwrap();
     shell.run("browser.load_selected", json!({})).unwrap();
     let swapped = layers(&shell, device)[0].clone();
     assert_ne!(swapped.media, layer.media);
     assert_eq!(swapped.length, 9600);
     assert_eq!(swapped.root_key, 55, "its settings stay");
-    assert_eq!((swapped.key.low, swapped.key.high), (40, 70), "and its zones");
+    assert_eq!(
+        (swapped.key.low, swapped.key.high),
+        (40, 70),
+        "and its zones"
+    );
     assert_eq!(swapped.end, 4800, "the end marker stays at the same share");
-    assert_eq!(shell.editor().undo_history().len(), steps + 1, "one undo step");
+    assert_eq!(
+        shell.editor().undo_history().len(),
+        steps + 1,
+        "one undo step"
+    );
     assert_eq!(
         state_of(&mut shell, device)["hot_swap"],
         Value::Null,
@@ -611,14 +692,24 @@ fn a_long_layer_streams_with_ram_mode_off_and_never_waits() {
     let device = add_multisampler(&mut shell);
     add_layers(&mut shell, device, &[&file]);
     let layer = &layers(&shell, device)[0];
-    assert!(layer.length > 10 * 48_000, "over the ten seconds that stream");
+    assert!(
+        layer.length > 10 * 48_000,
+        "over the ten seconds that stream"
+    );
     // RAM Mode off, as a new device has it: the first nine seconds play from
     // the held start at once, the same as they do with every layer whole.
     let (streamed, missing) = play(&shell, device, 9 * 48_000);
     assert_eq!(missing, 0);
-    assert!(streamed[2000..9 * 48_000 - 2000].iter().all(|s| (s - 0.5).abs() < 1e-3));
+    assert!(
+        streamed[2000..9 * 48_000 - 2000]
+            .iter()
+            .all(|s| (s - 0.5).abs() < 1e-3)
+    );
     shell
-        .run("device.set_layer_options", json!({ "device": device, "ram_mode": true }))
+        .run(
+            "device.set_layer_options",
+            json!({ "device": device, "ram_mode": true }),
+        )
         .unwrap();
     let (whole, _) = play(&shell, device, 9 * 48_000);
     assert_eq!(streamed, whole, "both give the same audio");

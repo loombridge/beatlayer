@@ -156,7 +156,8 @@ pub fn multisampler_type() -> DeviceType {
     let scale = |id, name: &str| {
         ParamDescriptor::continuous(id, name, (-100.0, 100.0), 0.0, ParamUnit::Percent)
     };
-    let params = vec![
+    let params =
+        vec![
         ParamDescriptor::integer(SELECTOR, "Selector", (0, 127), 0, ParamUnit::None).describe(
             "The Sample Selector: a new note plays the layers whose sample select zone holds \
              this value. Moving it changes which layers a new note can play, never a layer \
@@ -722,7 +723,8 @@ impl Voice {
         } else {
             self.in_loop = false;
         }
-        if (self.forward && self.position >= self.end) || (!self.forward && self.position < self.start)
+        if (self.forward && self.position >= self.end)
+            || (!self.forward && self.position < self.start)
         {
             self.active = false;
         }
@@ -809,24 +811,13 @@ fn bessel_i0(x: f64) -> f64 {
 /// One channel of a sample at `position`: the frame itself at a whole
 /// position in every mode (R22), otherwise as `mode` reads between frames,
 /// silence outside the sample. `frame` gives the channel's frames.
-fn read_channel(
-    sinc: &Sinc,
-    frame: impl Fn(usize) -> f32,
-    position: f64,
-    mode: Interp,
-) -> f32 {
+fn read_channel(sinc: &Sinc, frame: impl Fn(usize) -> f32, position: f64, mode: Interp) -> f32 {
     if position < 0.0 {
         return 0.0;
     }
     let index = position as usize;
     let frac = (position - index as f64) as f32;
-    let at = |i: i64| -> f32 {
-        if i < 0 {
-            0.0
-        } else {
-            frame(i as usize)
-        }
-    };
+    let at = |i: i64| -> f32 { if i < 0 { 0.0 } else { frame(i as usize) } };
     if frac == 0.0 {
         return at(index as i64);
     }
@@ -1029,7 +1020,9 @@ impl Multisampler {
         // R4: the layers the note's three values fall in.
         let matches = |i: usize| {
             let layer = &layers.layers[i].layer;
-            layer.key.contains(key) && layer.velocity.contains(vel7) && layer.select.contains(s.selector)
+            layer.key.contains(key)
+                && layer.velocity.contains(vel7)
+                && layer.select.contains(s.selector)
         };
         let mut chosen = [0u32; NOTE_LAYERS];
         let mut count = 0;
@@ -1133,8 +1126,7 @@ impl Multisampler {
                 continue;
             }
             let (loop_start, loop_end) = (frames(layer.loop_start), frames(layer.loop_end));
-            let semitones =
-                f64::from(key) - f64::from(layer.root_key) + layer.detune / 100.0;
+            let semitones = f64::from(key) - f64::from(layer.root_key) + layer.detune / 100.0;
             let crossfade = (layer.crossfade_ms / 1000.0 * s.rate)
                 .min((loop_end - loop_start) / 2.0)
                 .max(0.0);
@@ -1361,8 +1353,7 @@ impl NativeDevice for Multisampler {
                             );
                         }
                         let amount = voice.gain * level;
-                        let balance = ((voice.pan + pan.get(frame).copied().unwrap_or(0.0))
-                            / 50.0)
+                        let balance = ((voice.pan + pan.get(frame).copied().unwrap_or(0.0)) / 50.0)
                             .clamp(-1.0, 1.0);
                         l += value.0 * amount * (1.0 - balance.max(0.0));
                         r += value.1 * amount * (1.0 + balance.min(0.0));

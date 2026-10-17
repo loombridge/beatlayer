@@ -480,7 +480,9 @@ impl LayerSettings {
         // Markers the settings leave alone follow the ones they move: a loop
         // that no longer fits inside the sample's new span is held to it.
         if self.loop_end.is_none() {
-            next.loop_end = next.loop_end.clamp(next.start.saturating_add(1), next.end.max(1));
+            next.loop_end = next
+                .loop_end
+                .clamp(next.start.saturating_add(1), next.end.max(1));
         }
         if self.loop_start.is_none() {
             next.loop_start = next
@@ -488,7 +490,9 @@ impl LayerSettings {
                 .clamp(next.start, next.loop_end.saturating_sub(1).max(next.start));
         }
         if self.release_loop.is_none() {
-            next.release_loop = next.release_loop.clamp(next.loop_end, next.end.max(next.loop_end));
+            next.release_loop = next
+                .release_loop
+                .clamp(next.loop_end, next.end.max(next.loop_end));
         }
         if self.crossfade_ms.is_none() {
             next.crossfade_ms = next.crossfade_ms.min(next.crossfade_limit_ms());
@@ -901,8 +905,7 @@ impl Layers {
             Distribution::Equally => {
                 let (low, high) = kind.range();
                 for (n, &i) in chosen.iter().enumerate() {
-                    *self.list[i].zone_mut(kind) =
-                        equal_share(low, high, n, chosen.len());
+                    *self.list[i].zone_mut(kind) = equal_share(low, high, n, chosen.len());
                 }
             }
             Distribution::AroundRootKey => {
@@ -938,7 +941,9 @@ impl Layers {
 fn equal_share(low: u8, high: u8, n: usize, count: usize) -> Zone {
     let m = usize::from(high - low) + 1;
     let first = usize::from(low) + m * n / count;
-    let last = (usize::from(low) + m * (n + 1) / count).saturating_sub(1).max(first);
+    let last = (usize::from(low) + m * (n + 1) / count)
+        .saturating_sub(1)
+        .max(first);
     Zone::new(
         u8::try_from(first).unwrap_or(high),
         u8::try_from(last).unwrap_or(high),
@@ -1023,31 +1028,46 @@ mod tests {
         assert_eq!(zone.gain(51, FadeMode::Lin), 0.0);
         assert!(Zone::new(5, 5).is_valid(ZoneKind::Key));
         assert!(!Zone::new(0, 5).is_valid(ZoneKind::Velocity));
-        assert!(!Zone { fade_low: 3, fade_high: 3, ..Zone::new(1, 5) }.is_valid(ZoneKind::Key));
+        assert!(
+            !Zone {
+                fade_low: 3,
+                fade_high: 3,
+                ..Zone::new(1, 5)
+            }
+            .is_valid(ZoneKind::Key)
+        );
     }
 
     // Spec: multisampler R12
     #[test]
     fn distributing_equally_and_around_root_keys() {
         let mut l = layers(&[60; 4]);
-        l.distribute(&[], Distribution::Equally, ZoneKind::Key).unwrap();
+        l.distribute(&[], Distribution::Equally, ZoneKind::Key)
+            .unwrap();
         let keys: Vec<_> = l.list.iter().map(|l| (l.key.low, l.key.high)).collect();
         assert_eq!(keys, [(0, 31), (32, 63), (64, 95), (96, 127)]);
-        l.distribute(&[], Distribution::Equally, ZoneKind::Velocity).unwrap();
-        let velocities: Vec<_> = l.list.iter().map(|l| (l.velocity.low, l.velocity.high)).collect();
+        l.distribute(&[], Distribution::Equally, ZoneKind::Velocity)
+            .unwrap();
+        let velocities: Vec<_> = l
+            .list
+            .iter()
+            .map(|l| (l.velocity.low, l.velocity.high))
+            .collect();
         assert_eq!(velocities, [(1, 31), (32, 63), (64, 95), (96, 127)]);
 
         // Selected layers only, when several are.
         let mut l = layers(&[60; 4]);
         let ids = [l.list[1].id, l.list[3].id];
-        l.distribute(&ids, Distribution::Equally, ZoneKind::Select).unwrap();
+        l.distribute(&ids, Distribution::Equally, ZoneKind::Select)
+            .unwrap();
         assert_eq!((l.list[0].select.low, l.list[0].select.high), (0, 127));
         assert_eq!((l.list[1].select.low, l.list[1].select.high), (0, 63));
         assert_eq!((l.list[3].select.low, l.list[3].select.high), (64, 127));
 
         // Roots C3, E3, G3 split at ⌊(a+b)/2⌋; a shared root divides its zone.
         let mut l = layers(&[60, 64, 67, 64]);
-        l.distribute(&[], Distribution::AroundRootKey, ZoneKind::Key).unwrap();
+        l.distribute(&[], Distribution::AroundRootKey, ZoneKind::Key)
+            .unwrap();
         let keys: Vec<_> = l.list.iter().map(|l| (l.key.low, l.key.high)).collect();
         assert_eq!(keys, [(0, 62), (63, 63), (66, 127), (64, 65)]);
     }
@@ -1076,7 +1096,10 @@ mod tests {
         };
         l.update(&[id], &settings).unwrap();
         let layer = &l.list[0];
-        assert_eq!((layer.loop_start, layer.loop_end, layer.release_loop), (0, 30_000, 30_000));
+        assert_eq!(
+            (layer.loop_start, layer.loop_end, layer.release_loop),
+            (0, 30_000, 30_000)
+        );
         // Markers set together must be in order, or nothing changes.
         let out_of_order = LayerSettings {
             loop_start: Some(20_000),
@@ -1099,9 +1122,15 @@ mod tests {
         let mut l = layers(&[60, 62, 64]);
         let [a, b, c] = [l.list[0].id, l.list[1].id, l.list[2].id];
         let copies = l.duplicate(&[b]).unwrap();
-        assert_eq!(l.list.iter().map(|l| l.id).collect::<Vec<_>>(), [a, b, copies[0], c]);
+        assert_eq!(
+            l.list.iter().map(|l| l.id).collect::<Vec<_>>(),
+            [a, b, copies[0], c]
+        );
         l.moved(&[c, a], 1).unwrap();
-        assert_eq!(l.list.iter().map(|l| l.id).collect::<Vec<_>>(), [b, a, c, copies[0]]);
+        assert_eq!(
+            l.list.iter().map(|l| l.id).collect::<Vec<_>>(),
+            [b, a, c, copies[0]]
+        );
         l.remove(&[a]).unwrap();
         let again = l.insert(None, &[layer(70)]).unwrap();
         assert_ne!(again[0], a, "an ID is never reused");

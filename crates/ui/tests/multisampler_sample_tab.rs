@@ -44,8 +44,14 @@ fn window() -> (Harness, DeviceId, LayerId) {
         .collect();
     std::fs::write(
         &file,
-        bl_media::wav_bytes(&samples, 1, 48_000, bl_media::BitDepth::Int16, bl_media::Dither::None)
-            .unwrap(),
+        bl_media::wav_bytes(
+            &samples,
+            1,
+            48_000,
+            bl_media::BitDepth::Int16,
+            bl_media::Dither::None,
+        )
+        .unwrap(),
     )
     .unwrap();
     h.shell
@@ -91,9 +97,22 @@ fn the_sample_tab_draws_the_selected_layer_and_its_markers() {
     let (mut h, device, id) = window();
     let nodes = Harness::nodes(&h.settle());
     let chooser = nodes.iter().find(|n| n.label == "Sample Chooser").unwrap();
-    assert_eq!(chooser.value, "Strings", "the Sample chooser names the layer");
-    let start = nodes.iter().find(|n| n.label == "Sample Start" && n.role == egui::accesskit::Role::Slider).unwrap().bounds.unwrap();
-    let end = nodes.iter().find(|n| n.label == "Sample End" && n.role == egui::accesskit::Role::Slider).unwrap().bounds.unwrap();
+    assert_eq!(
+        chooser.value, "Strings",
+        "the Sample chooser names the layer"
+    );
+    let start = nodes
+        .iter()
+        .find(|n| n.label == "Sample Start" && n.role == egui::accesskit::Role::Slider)
+        .unwrap()
+        .bounds
+        .unwrap();
+    let end = nodes
+        .iter()
+        .find(|n| n.label == "Sample End" && n.role == egui::accesskit::Role::Slider)
+        .unwrap()
+        .bounds
+        .unwrap();
     assert!(start.x0 < end.x0, "start is left of end");
     for channel in ["B", "M", "L", "R"] {
         assert!(nodes.iter().any(|n| n.label == channel), "{channel}");
@@ -105,7 +124,10 @@ fn the_sample_tab_draws_the_selected_layer_and_its_markers() {
             .find(|n| n.label == name && n.role == egui::accesskit::Role::Slider)
             .and_then(|n| n.bounds)
     };
-    assert!(marker(&nodes, "Loop End").is_none(), "no sustain loop, no loop markers");
+    assert!(
+        marker(&nodes, "Loop End").is_none(),
+        "no sustain loop, no loop markers"
+    );
     h.shell
         .run(
             "device.update_layers",
@@ -115,7 +137,10 @@ fn the_sample_tab_draws_the_selected_layer_and_its_markers() {
         .unwrap();
     let nodes = Harness::nodes(&h.settle());
     let loop_end = marker(&nodes, "Loop End").unwrap();
-    assert!(loop_end.x0 > start.x0 && loop_end.x0 < end.x0, "inside the sample");
+    assert!(
+        loop_end.x0 > start.x0 && loop_end.x0 < end.x0,
+        "inside the sample"
+    );
 
     // Dragging a marker moves it, and the drag is one undo step.
     let steps = h.shell.editor().undo_history().len();
@@ -163,9 +188,9 @@ fn the_waveforms_hover_reads_the_sample_and_the_wheel_zooms() {
     h.frame(vec![Event::PointerMoved(inside)]);
     let nodes = Harness::nodes(&h.frame(vec![Event::PointerMoved(inside + vec2(1.0, 0.0))]));
     assert!(
-        nodes
-            .iter()
-            .any(|n| n.value.contains("Strings") && n.value.contains("48000 frames") && n.value.contains("48000 Hz")),
+        nodes.iter().any(|n| n.value.contains("Strings")
+            && n.value.contains("48000 frames")
+            && n.value.contains("48000 Hz")),
         "the Status Bar names the sample's length and rate"
     );
     // Cmd with the wheel zooms the time: Sample End leaves the view.

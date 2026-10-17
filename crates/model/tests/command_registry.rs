@@ -704,12 +704,33 @@ fn every_command_runs_by_id() {
         "device.insert_layers",
         json!({ "device": eq, "index": null, "layers": [layer("Low"), layer("Mid"), layer("High")] }),
     );
-    let ids: Vec<u32> = agent.editor.document().device(eq).unwrap().layers.list.iter().map(|l| l.id.0).collect();
+    let ids: Vec<u32> = agent
+        .editor
+        .document()
+        .device(eq)
+        .unwrap()
+        .layers
+        .list
+        .iter()
+        .map(|l| l.id.0)
+        .collect();
     assert_eq!(ids, [1, 2, 3], "the device numbers its layers");
-    agent.run("device.rename_layer", json!({ "device": eq, "layer": 2, "name": "Middle" }));
-    agent.run("device.duplicate_layers", json!({ "device": eq, "layers": [2] }));
-    agent.run("device.move_layers", json!({ "device": eq, "layers": [3], "index": 0 }));
-    agent.run("device.sort_layers", json!({ "device": eq, "by": "name", "descending": false }));
+    agent.run(
+        "device.rename_layer",
+        json!({ "device": eq, "layer": 2, "name": "Middle" }),
+    );
+    agent.run(
+        "device.duplicate_layers",
+        json!({ "device": eq, "layers": [2] }),
+    );
+    agent.run(
+        "device.move_layers",
+        json!({ "device": eq, "layers": [3], "index": 0 }),
+    );
+    agent.run(
+        "device.sort_layers",
+        json!({ "device": eq, "by": "name", "descending": false }),
+    );
     agent.run(
         "device.set_layer_zone",
         json!({ "device": eq, "kind": "key", "zones": [
@@ -730,7 +751,10 @@ fn every_command_runs_by_id() {
         "device.distribute_layers",
         json!({ "device": eq, "layers": [], "how": "equally", "kind": "key" }),
     );
-    agent.run("device.delete_layers", json!({ "device": eq, "layers": [2] }));
+    agent.run(
+        "device.delete_layers",
+        json!({ "device": eq, "layers": [2] }),
+    );
     agent.run(
         "device.set_layer_options",
         json!({ "device": eq, "ram_mode": true, "snap": true, "linear_loop_fades": null }),

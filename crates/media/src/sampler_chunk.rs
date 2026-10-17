@@ -60,7 +60,12 @@ fn parse(body: &[u8]) -> Option<SamplerInfo> {
     let extra = word(32)? as usize;
     let first = 36 + extra;
     let loop_points = (loops > 0)
-        .then(|| Some((u64::from(word(first + 8)?), u64::from(word(first + 12)?) + 1)))
+        .then(|| {
+            Some((
+                u64::from(word(first + 8)?),
+                u64::from(word(first + 12)?) + 1,
+            ))
+        })
         .flatten()
         .filter(|(start, end)| start < end);
     Some(SamplerInfo {
@@ -122,7 +127,10 @@ mod tests {
         assert_eq!(read_sampler_info(&path).loop_points, None);
         std::fs::write(&path, b"not audio at all").unwrap();
         assert_eq!(read_sampler_info(&path), SamplerInfo::default());
-        assert_eq!(read_sampler_info(&dir.join("missing.wav")), SamplerInfo::default());
+        assert_eq!(
+            read_sampler_info(&dir.join("missing.wav")),
+            SamplerInfo::default()
+        );
         std::fs::remove_file(&path).unwrap();
         std::fs::remove_dir(&dir).unwrap();
     }

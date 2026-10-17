@@ -8,16 +8,15 @@
 //! too. A drag on a zone or a marker is one undo step however far it goes.
 
 use bl_model::{
-    EditorSize, Layer, LayerId, LayerSettings, ReleaseMode, SamplerTab, SustainMode, Zone,
-    ZoneKind,
+    EditorSize, Layer, LayerId, LayerSettings, ReleaseMode, SamplerTab, SustainMode, Zone, ZoneKind,
 };
 use bl_shell::device_commands::{DeviceFrame, DevicePanel};
 use bl_shell::multisampler_commands::MultisamplerState;
 use bl_shell::{Invocation, Shell};
 use egui::accesskit::Role;
 use egui::{
-    Align2, Id, Key, Modifiers, Rect, Sense, Shape, Stroke, StrokeKind, Ui,
-    UiBuilder, WidgetInfo, WidgetType, pos2, vec2,
+    Align2, Id, Key, Modifiers, Rect, Sense, Shape, Stroke, StrokeKind, Ui, UiBuilder, WidgetInfo,
+    WidgetType, pos2, vec2,
 };
 use serde_json::json;
 
@@ -187,7 +186,11 @@ pub fn note_name(key: u8) -> String {
     const NAMES: [&str; 12] = [
         "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
     ];
-    format!("{}{}", NAMES[usize::from(key % 12)], i32::from(key / 12) - 2)
+    format!(
+        "{}{}",
+        NAMES[usize::from(key % 12)],
+        i32::from(key / 12) - 2
+    )
 }
 
 /// Where the parts of one zone's bar are, in its row of `bars`.
@@ -387,8 +390,8 @@ fn button(
 ) -> (bool, egui::Response) {
     let response = ui.interact(rect, id, Sense::click());
     crate::focus::register(ui.ctx(), id, bl_shell::Area::Detail, None);
-    let pressed = response.clicked()
-        || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter)));
+    let pressed =
+        response.clicked() || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter)));
     let c = &theme.colors;
     let face = if on {
         c.accent.0
@@ -469,7 +472,10 @@ impl MultisamplerUi {
             ("MIDI", Some(SamplerTab::Midi)),
         ];
         for ((label, tab), width) in names.into_iter().zip(WIDTHS) {
-            let rect = Rect::from_min_size(pos2(x, title.top() + 1.0), vec2(width, title.height() - 2.0));
+            let rect = Rect::from_min_size(
+                pos2(x, title.top() + 1.0),
+                vec2(width, title.height() - 2.0),
+            );
             x += width + 2.0;
             let on = match tab {
                 None => state.view.zone_editor,
@@ -511,7 +517,9 @@ impl MultisamplerUi {
         events: &mut Vec<UiEvent>,
     ) {
         match state.view.tab {
-            SamplerTab::Sample => self.sample_tab(ui, shell, theme, frame, state, panel, body, events),
+            SamplerTab::Sample => {
+                self.sample_tab(ui, shell, theme, frame, state, panel, body, events)
+            }
             SamplerTab::FilterGlobal => {
                 // The envelope and output bands of the layout.
                 let mut shown = panel.clone();
@@ -519,9 +527,8 @@ impl MultisamplerUi {
                     &panel.description.layout.root
                 {
                     let keep: Vec<_> = nodes.iter().skip(2).cloned().collect();
-                    shown.description.layout = bl_model::DeviceLayout::new(
-                        bl_model::device_layout::LayoutNode::Row(keep),
-                    );
+                    shown.description.layout =
+                        bl_model::DeviceLayout::new(bl_model::device_layout::LayoutNode::Row(keep));
                 }
                 crate::device_panel::show(ui, theme, frame, &shown, body, events);
             }
@@ -661,7 +668,10 @@ impl MultisamplerUi {
         });
         egui::Popup::menu(&response).show(|ui| {
             for other in &device.layers.list {
-                if ui.selectable_label(other.id == layer.id, &other.name).clicked() {
+                if ui
+                    .selectable_label(other.id == layer.id, &other.name)
+                    .clicked()
+                {
                     invoke(
                         events,
                         bl_shell::multisampler_commands::SELECT_LAYERS,
@@ -681,7 +691,10 @@ impl MultisamplerUi {
         ] {
             let rect = Rect::from_min_size(pos2(x, strip.top()), vec2(18.0, strip.height()));
             x += 20.0;
-            let current = self.waveform.as_ref().map_or(Channels::Both, |w| w.channels);
+            let current = self
+                .waveform
+                .as_ref()
+                .map_or(Channels::Both, |w| w.channels);
             if button(
                 ui,
                 theme,
@@ -691,8 +704,7 @@ impl MultisamplerUi {
                 current == channels,
                 hint,
             )
-            .0
-                && let Some(waveform) = &mut self.waveform
+            .0 && let Some(waveform) = &mut self.waveform
             {
                 waveform.channels = channels;
             }
@@ -713,7 +725,11 @@ impl MultisamplerUi {
         events: &mut Vec<UiEvent>,
     ) {
         let c = &theme.colors;
-        if self.waveform.as_ref().is_none_or(|w| w.media != layer.media) {
+        if self
+            .waveform
+            .as_ref()
+            .is_none_or(|w| w.media != layer.media)
+        {
             self.waveform = shell.layer_audio(layer.media).map(|audio| Waveform {
                 media: layer.media,
                 first: 0.0,
@@ -762,9 +778,9 @@ impl MultisamplerUi {
         let frames_per_point = wave.span / f64::from(rect.width().max(1.0));
         let conv = wave.audio.frames() as f64 / layer.length.max(1) as f64;
         let channel_data: Vec<&[f32]> = match wave.channels {
-            Channels::Both | Channels::Mono => {
-                (0..wave.audio.channel_count()).filter_map(|i| wave.audio.channel(i)).collect()
-            }
+            Channels::Both | Channels::Mono => (0..wave.audio.channel_count())
+                .filter_map(|i| wave.audio.channel(i))
+                .collect(),
             Channels::Left => wave.audio.channel(0).into_iter().collect(),
             Channels::Right => wave
                 .audio
@@ -781,7 +797,8 @@ impl MultisamplerUi {
             let half = lane_height * 0.45 * wave.vertical;
             for px in 0..rect.width() as usize {
                 let from = (wave.first + px as f64 * frames_per_point) as usize;
-                let to = ((wave.first + (px as f64 + 1.0) * frames_per_point) as usize).max(from + 1);
+                let to =
+                    ((wave.first + (px as f64 + 1.0) * frames_per_point) as usize).max(from + 1);
                 let (mut low, mut high) = (0.0f32, 0.0f32);
                 let sum = wave.channels == Channels::Mono;
                 for frame_index in from..to.min(wave.audio.frames()) {
@@ -811,7 +828,9 @@ impl MultisamplerUi {
             rect.left() + ((frame_in_file as f64 * conv - wave.first) / frames_per_point) as f32
         };
         for marker in Marker::ALL {
-            if matches!(marker, Marker::LoopStart | Marker::LoopEnd) && layer.sustain == SustainMode::Off {
+            if matches!(marker, Marker::LoopStart | Marker::LoopEnd)
+                && layer.sustain == SustainMode::Off
+            {
                 continue;
             }
             if marker == Marker::ReleaseLoop
@@ -824,7 +843,8 @@ impl MultisamplerUi {
             if x < rect.left() - 4.0 || x > rect.right() + 4.0 {
                 continue;
             }
-            let handle = Rect::from_min_max(pos2(x - 4.0, rect.top()), pos2(x + 4.0, rect.bottom()));
+            let handle =
+                Rect::from_min_max(pos2(x - 4.0, rect.top()), pos2(x + 4.0, rect.bottom()));
             let id = Id::new(("marker", frame.id, marker.name()));
             let response = ui.interact(handle, id, Sense::drag());
             let colour = match marker {
@@ -867,7 +887,8 @@ impl MultisamplerUi {
                 && let Some(pointer) = ui.input(|i| i.pointer.latest_pos())
             {
                 let in_audio = wave.first + f64::from(pointer.x - rect.left()) * frames_per_point;
-                let frame_in_file = (in_audio / conv).round().clamp(0.0, layer.length as f64) as u64;
+                let frame_in_file =
+                    (in_audio / conv).round().clamp(0.0, layer.length as f64) as u64;
                 if frame_in_file != marker.frame(layer) {
                     invoke(
                         events,
@@ -979,7 +1000,13 @@ impl MultisamplerUi {
             &|v, n| v + f64::from(n),
             note_name(layer.root_key),
         ) {
-            set(events, LayerSettings { root_key: Some(root as u8), ..Default::default() });
+            set(
+                events,
+                LayerSettings {
+                    root_key: Some(root as u8),
+                    ..Default::default()
+                },
+            );
         }
         if let Some(detune) = step(
             "Detune",
@@ -992,7 +1019,13 @@ impl MultisamplerUi {
             &|v, n| v + f64::from(n),
             format!("{:.0} ct", layer.detune),
         ) {
-            set(events, LayerSettings { detune: Some(detune), ..Default::default() });
+            set(
+                events,
+                LayerSettings {
+                    detune: Some(detune),
+                    ..Default::default()
+                },
+            );
         }
         if let Some(volume) = step(
             "Volume",
@@ -1005,11 +1038,21 @@ impl MultisamplerUi {
             &|v, n| {
                 let db = if v <= 0.0 { -60.0 } else { 20.0 * v.log10() };
                 let next = db + f64::from(n) * 0.5;
-                if next <= -60.0 { 0.0 } else { 10f64.powf(next / 20.0) }
+                if next <= -60.0 {
+                    0.0
+                } else {
+                    10f64.powf(next / 20.0)
+                }
             },
             db(layer.volume),
         ) {
-            set(events, LayerSettings { volume: Some(volume), ..Default::default() });
+            set(
+                events,
+                LayerSettings {
+                    volume: Some(volume),
+                    ..Default::default()
+                },
+            );
         }
         if let Some(pan) = step(
             "Pan",
@@ -1022,7 +1065,13 @@ impl MultisamplerUi {
             &|v, n| v + f64::from(n),
             format!("{:.0}", layer.pan),
         ) {
-            set(events, LayerSettings { pan: Some(pan), ..Default::default() });
+            set(
+                events,
+                LayerSettings {
+                    pan: Some(pan),
+                    ..Default::default()
+                },
+            );
         }
         // Reverse and Interpolation are the device's parameters.
         let reverse = param_value(panel, bl_devices::multisampler::REVERSE) >= 0.5;
@@ -1050,7 +1099,10 @@ impl MultisamplerUi {
         let choices: Vec<Choice<usize>> = bl_devices::multisampler::INTERPOLATIONS
             .iter()
             .enumerate()
-            .map(|(i, name)| Choice { label: (*name).to_owned(), value: i })
+            .map(|(i, name)| Choice {
+                label: (*name).to_owned(),
+                value: i,
+            })
             .collect();
         let rect = Rect::from_min_size(pos2(x, top), vec2(74.0, 18.0));
         x += 78.0;
@@ -1072,12 +1124,32 @@ impl MultisamplerUi {
         }
         // Snap and RAM Mode are options of the layer list, not parameters.
         for (label, on, key, hint) in [
-            ("Snap", options.snap, "snap", "Markers set land on zero crossings of the left channel"),
-            ("RAM", options.ram_mode, "ram_mode", "Holds every layer whole in memory"),
+            (
+                "Snap",
+                options.snap,
+                "snap",
+                "Markers set land on zero crossings of the left channel",
+            ),
+            (
+                "RAM",
+                options.ram_mode,
+                "ram_mode",
+                "Holds every layer whole in memory",
+            ),
         ] {
             let rect = Rect::from_min_size(pos2(x, top), vec2(36.0, 18.0));
             x += 40.0;
-            if button(ui, theme, header_id(device, label), rect, (label, label), on, hint).0 {
+            if button(
+                ui,
+                theme,
+                header_id(device, label),
+                rect,
+                (label, label),
+                on,
+                hint,
+            )
+            .0
+            {
                 invoke(
                     events,
                     "device.set_layer_options",
@@ -1124,7 +1196,13 @@ impl MultisamplerUi {
         )
         .0
         {
-            set(events, LayerSettings { link: Some(!layer.link), ..Default::default() });
+            set(
+                events,
+                LayerSettings {
+                    link: Some(!layer.link),
+                    ..Default::default()
+                },
+            );
         }
         let sustains = [
             ("No Sustain Loop", SustainMode::Off),
@@ -1133,7 +1211,10 @@ impl MultisamplerUi {
         ];
         let choices: Vec<Choice<SustainMode>> = sustains
             .iter()
-            .map(|(label, value)| Choice { label: (*label).to_owned(), value: *value })
+            .map(|(label, value)| Choice {
+                label: (*label).to_owned(),
+                value: *value,
+            })
             .collect();
         let rect = Rect::from_min_size(pos2(x, top + row), vec2(110.0, 18.0));
         x += 114.0;
@@ -1147,7 +1228,13 @@ impl MultisamplerUi {
             Some(&layer.sustain),
             true,
         ) {
-            set(events, LayerSettings { sustain: Some(mode), ..Default::default() });
+            set(
+                events,
+                LayerSettings {
+                    sustain: Some(mode),
+                    ..Default::default()
+                },
+            );
         }
         let releases = [
             ("Release Off", ReleaseMode::Off),
@@ -1157,7 +1244,10 @@ impl MultisamplerUi {
         ];
         let choices: Vec<Choice<ReleaseMode>> = releases
             .iter()
-            .map(|(label, value)| Choice { label: (*label).to_owned(), value: *value })
+            .map(|(label, value)| Choice {
+                label: (*label).to_owned(),
+                value: *value,
+            })
             .collect();
         let rect = Rect::from_min_size(pos2(x, top + row), vec2(140.0, 18.0));
         if layer.sustain != SustainMode::Off
@@ -1172,7 +1262,13 @@ impl MultisamplerUi {
                 true,
             )
         {
-            set(events, LayerSettings { release: Some(mode), ..Default::default() });
+            set(
+                events,
+                LayerSettings {
+                    release: Some(mode),
+                    ..Default::default()
+                },
+            );
         }
     }
 
@@ -1212,7 +1308,12 @@ impl MultisamplerUi {
         });
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, 0.0, c.panel.0);
-        painter.rect_stroke(rect, 0.0, Stroke::new(1.0, c.separator.0), StrokeKind::Inside);
+        painter.rect_stroke(
+            rect,
+            0.0,
+            Stroke::new(1.0, c.separator.0),
+            StrokeKind::Inside,
+        );
         self.header(ui, shell, theme, frame, state, panel, parts.header, events);
 
         let kind = state.view.editor;
@@ -1232,11 +1333,16 @@ impl MultisamplerUi {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 for index in range {
                     let layer = &layers[index];
-                    let (row, _) = ui.allocate_exact_size(vec2(body.width(), row_h), Sense::hover());
+                    let (row, _) =
+                        ui.allocate_exact_size(vec2(body.width(), row_h), Sense::hover());
                     let list_row = Rect::from_min_size(row.min, vec2(LIST_WIDTH, row_h));
                     let bars_row = Rect::from_min_max(pos2(parts.bars.left(), row.top()), row.max);
-                    self.list_row(ui, shell, theme, frame, state, device, layer, index, list_row, events);
-                    self.bar_row(ui, theme, frame, state, device, layer, parts.bars, bars_row, events);
+                    self.list_row(
+                        ui, shell, theme, frame, state, device, layer, index, list_row, events,
+                    );
+                    self.bar_row(
+                        ui, theme, frame, state, device, layer, parts.bars, bars_row, events,
+                    );
                 }
             });
         if layers.is_empty() {
@@ -1254,13 +1360,7 @@ impl MultisamplerUi {
 
     /// Carries a drag on zones on: the zones follow the pointer, each as the
     /// drag's handle moves it, and the release ends the one undo step.
-    fn update_drag(
-        &mut self,
-        ui: &Ui,
-        frame: &DeviceFrame,
-        bars: Rect,
-        events: &mut Vec<UiEvent>,
-    ) {
+    fn update_drag(&mut self, ui: &Ui, frame: &DeviceFrame, bars: Rect, events: &mut Vec<UiEvent>) {
         let Some(drag) = self.drag.as_mut() else {
             return;
         };
@@ -1367,8 +1467,7 @@ impl MultisamplerUi {
             "Opens the selected layer's folder in the browser; the sample chosen there \
              replaces the layer's sample",
         )
-        .0
-            && let Some(layer) = layer
+        .0 && let Some(layer) = layer
         {
             invoke(
                 events,
@@ -1527,7 +1626,10 @@ impl MultisamplerUi {
         }) {
             let x = x_of(parts.bars, kind, f32::from(value));
             painter.line_segment(
-                [pos2(x, parts.scale.bottom() - 4.0), pos2(x, parts.scale.bottom())],
+                [
+                    pos2(x, parts.scale.bottom() - 4.0),
+                    pos2(x, parts.scale.bottom()),
+                ],
                 Stroke::new(1.0, c.text_dim.0),
             );
             let text = if kind == ZoneKind::Key {
@@ -1611,7 +1713,9 @@ impl MultisamplerUi {
         {
             let edit = ui.put(
                 rect,
-                egui::TextEdit::singleline(text).font(theme.small_font()).margin(vec2(2.0, 0.0)),
+                egui::TextEdit::singleline(text)
+                    .font(theme.small_font())
+                    .margin(vec2(2.0, 0.0)),
             );
             if !*focused {
                 edit.request_focus();
@@ -1673,12 +1777,7 @@ impl MultisamplerUi {
             );
         }
         if response.has_focus() && crate::focus::outlined(ui.ctx()) {
-            painter.rect_stroke(
-                rect,
-                0.0,
-                Stroke::new(1.0, c.focus.0),
-                StrokeKind::Inside,
-            );
+            painter.rect_stroke(rect, 0.0, Stroke::new(1.0, c.focus.0), StrokeKind::Inside);
         }
         ui.ctx().accesskit_node_builder(id, |node| {
             node.set_role(Role::ListItem);
@@ -1735,8 +1834,20 @@ impl MultisamplerUi {
                 ui.close();
             }
         }
-        run(ui, events, "Delete", "device.delete_layers", json!({ "device": device, "layers": layers }));
-        run(ui, events, "Duplicate", "device.duplicate_layers", json!({ "device": device, "layers": layers }));
+        run(
+            ui,
+            events,
+            "Delete",
+            "device.delete_layers",
+            json!({ "device": device, "layers": layers }),
+        );
+        run(
+            ui,
+            events,
+            "Duplicate",
+            "device.duplicate_layers",
+            json!({ "device": device, "layers": layers }),
+        );
         if ui.button("Rename").clicked() {
             self.renaming = Some((layer.id, layer.name.clone(), false));
             ui.close();
@@ -1850,9 +1961,17 @@ impl MultisamplerUi {
         // The zone's shape: its fades slope up from the silent edges.
         let (left, right) = (parts.body.left(), parts.body.right());
         let fade_left = x_of(bars, kind, f32::from(zone.low) + f32::from(zone.fade_low));
-        let fade_right = x_of(bars, kind, f32::from(zone.high) + 1.0 - f32::from(zone.fade_high));
+        let fade_right = x_of(
+            bars,
+            kind,
+            f32::from(zone.high) + 1.0 - f32::from(zone.fade_high),
+        );
         let (top, bottom) = (row.top() + 2.0, row.bottom() - 1.0);
-        let colour = if selected { c.accent.0 } else { c.control_hover.0 };
+        let colour = if selected {
+            c.accent.0
+        } else {
+            c.control_hover.0
+        };
         painter.add(Shape::convex_polygon(
             vec![
                 pos2(left, bottom),
@@ -1861,7 +1980,14 @@ impl MultisamplerUi {
                 pos2(right, bottom),
             ],
             colour,
-            Stroke::new(1.0, if selected { c.accent_text.0 } else { c.separator.0 }),
+            Stroke::new(
+                1.0,
+                if selected {
+                    c.accent_text.0
+                } else {
+                    c.separator.0
+                },
+            ),
         ));
         let name = format!("{} {}", layer.name, zone_text(kind, zone));
         // Later widgets sit above earlier ones where they overlap: the body
@@ -1876,7 +2002,9 @@ impl MultisamplerUi {
             let id = bar_id(frame.id, layer.id, part);
             let response = ui.interact(rect, id, Sense::click_and_drag());
             if matches!(handle, Handle::Low | Handle::High) {
-                let _ = response.clone().on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
+                let _ = response
+                    .clone()
+                    .on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
             }
             ui.ctx().accesskit_node_builder(id, |node| {
                 node.set_role(Role::Slider);
@@ -1950,9 +2078,10 @@ fn clicked(
 
 /// A layer's sample as the Status Bar names it.
 fn sample_name(shell: &Shell, layer: &Layer) -> String {
-    shell
-        .layer_folder(layer.media)
-        .map_or_else(|| format!("missing ({})", layer.name), |_| layer.name.clone())
+    shell.layer_folder(layer.media).map_or_else(
+        || format!("missing ({})", layer.name),
+        |_| layer.name.clone(),
+    )
 }
 
 /// A zone as the Status Bar reads it: `C1 to C3` for keys, `1 to 127`
@@ -1985,7 +2114,11 @@ mod tests {
             assert_eq!(value_at(bars, ZoneKind::Key, x), i32::from(key));
         }
         assert_eq!(value_at(bars, ZoneKind::Velocity, 100.0), 1);
-        assert_eq!(value_at(bars, ZoneKind::Key, 5000.0), 127, "kept on the scale");
+        assert_eq!(
+            value_at(bars, ZoneKind::Key, 5000.0),
+            127,
+            "kept on the scale"
+        );
         assert_eq!(note_name(0), "C-2");
         assert_eq!(note_name(60), "C3");
         assert_eq!(note_name(127), "G8");
@@ -2002,17 +2135,37 @@ mod tests {
         let key = ZoneKind::Key;
         // The low edge past the high end stops at it, and the fades fit.
         let shrunk = drag_zone(zone, Handle::Low, 100, key);
-        assert_eq!((shrunk.low, shrunk.high, shrunk.fade_low, shrunk.fade_high), (40, 40, 0, 0));
+        assert_eq!(
+            (shrunk.low, shrunk.high, shrunk.fade_low, shrunk.fade_high),
+            (40, 40, 0, 0)
+        );
         let moved = drag_zone(zone, Handle::Body, 200, key);
-        assert_eq!((moved.low, moved.high), (107, 127), "the body stops at the scale's end");
+        assert_eq!(
+            (moved.low, moved.high),
+            (107, 127),
+            "the body stops at the scale's end"
+        );
         assert_eq!((moved.fade_low, moved.fade_high), (5, 5));
         let faded = drag_zone(zone, Handle::FadeLow, 50, key);
-        assert_eq!((faded.fade_low, faded.fade_high), (15, 5), "inside the zone, beside the other fade");
+        assert_eq!(
+            (faded.fade_low, faded.fade_high),
+            (15, 5),
+            "inside the zone, beside the other fade"
+        );
         let high = drag_zone(zone, Handle::FadeHigh, -50, key);
         assert_eq!((high.fade_low, high.fade_high), (5, 15));
-        for handle in [Handle::Low, Handle::High, Handle::Body, Handle::FadeLow, Handle::FadeHigh] {
+        for handle in [
+            Handle::Low,
+            Handle::High,
+            Handle::Body,
+            Handle::FadeLow,
+            Handle::FadeHigh,
+        ] {
             for delta in [-300, -7, 0, 7, 300] {
-                assert!(drag_zone(zone, handle, delta, key).is_valid(key), "{handle:?} {delta}");
+                assert!(
+                    drag_zone(zone, handle, delta, key).is_valid(key),
+                    "{handle:?} {delta}"
+                );
                 assert!(drag_zone(zone, handle, delta, ZoneKind::Velocity).low >= 1);
             }
         }

@@ -20,7 +20,7 @@ use crate::error::ModelError;
 use crate::ids::{ClipId, ContentHash, DeviceId, ParamId, SceneId, TrackId};
 use crate::launch::{ClipLaunch, LaunchMode, LaunchQuantization};
 use crate::layers::{
-    Distribution, Layer, LayerId, LayerSettings, LayerSort, Layers, LayerZone, ZoneKind,
+    Distribution, Layer, LayerId, LayerSettings, LayerSort, LayerZone, Layers, ZoneKind,
 };
 use crate::metronome::{CountIn, MetronomeRhythm, MetronomeSound};
 use crate::scene::{SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};

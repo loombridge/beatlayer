@@ -134,14 +134,21 @@ fn drag(h: &mut Harness, from: Pos2, dx: f32) {
     h.frame(vec![Event::PointerMoved(from)]);
     h.frame(vec![press(from, true, Modifiers::NONE)]);
     for i in 1..=10 {
-        h.frame(vec![Event::PointerMoved(from + vec2(dx * i as f32 / 10.0, 0.0))]);
+        h.frame(vec![Event::PointerMoved(
+            from + vec2(dx * i as f32 / 10.0, 0.0),
+        )]);
     }
     h.frame(vec![press(from + vec2(dx, 0.0), false, Modifiers::NONE)]);
     h.settle();
 }
 
 /// Where a layer's bar parts are, in row `index` of the key editor.
-fn parts(h: &mut Harness, device: DeviceId, index: usize, layer: LayerId) -> bl_ui::multisampler::BarParts {
+fn parts(
+    h: &mut Harness,
+    device: DeviceId,
+    index: usize,
+    layer: LayerId,
+) -> bl_ui::multisampler::BarParts {
     let rect = editor_rect(h);
     let areas = areas(rect);
     let row_h = row_height(bl_model::EditorSize::Medium);
@@ -166,25 +173,46 @@ fn the_zone_tab_opens_the_editor_above_the_device_view() {
             .bounds
             .unwrap()
     };
-    let xs: Vec<f64> = ["Zone", "Sample", "Pitch/Osc", "Filter/Global", "Modulation", "MIDI"]
-        .iter()
-        .map(|name| tab(&nodes, name).x0)
-        .collect();
+    let xs: Vec<f64> = [
+        "Zone",
+        "Sample",
+        "Pitch/Osc",
+        "Filter/Global",
+        "Modulation",
+        "MIDI",
+    ]
+    .iter()
+    .map(|name| tab(&nodes, name).x0)
+    .collect();
     assert!(xs.windows(2).all(|w| w[0] < w[1]), "in order: {xs:?}");
     let view = Harness::node(&nodes, "Device View").bounds.unwrap();
     let editor = Harness::node(&nodes, "Zone Editor").bounds.unwrap();
     assert!(editor.y1 <= view.y0, "above the Device View");
     // Zone toggles it: a click on the tab closes it, and again opens it.
     let zone = tab(&nodes, "Zone");
-    let centre = pos2(((zone.x0 + zone.x1) / 2.0) as f32, ((zone.y0 + zone.y1) / 2.0) as f32);
+    let centre = pos2(
+        ((zone.x0 + zone.x1) / 2.0) as f32,
+        ((zone.y0 + zone.y1) / 2.0) as f32,
+    );
     h.click(centre);
     h.settle();
     let nodes = Harness::nodes(&h.settle());
     assert!(!nodes.iter().any(|n| n.label == "Zone Editor"), "closed");
-    assert!(!h.shell.editor().undo_history().next().unwrap_or("").is_empty());
+    assert!(
+        !h.shell
+            .editor()
+            .undo_history()
+            .next()
+            .unwrap_or("")
+            .is_empty()
+    );
     h.click(centre);
     h.settle();
-    assert!(Harness::nodes(&h.settle()).iter().any(|n| n.label == "Zone Editor"));
+    assert!(
+        Harness::nodes(&h.settle())
+            .iter()
+            .any(|n| n.label == "Zone Editor")
+    );
     let _ = device;
 }
 
@@ -257,8 +285,16 @@ fn a_drag_acts_on_every_selected_layer_alike() {
     let body = parts(&mut h, device, 0, ids[0]).body.center();
     drag(&mut h, body, 5.0 * per_key + 1.0);
     assert_eq!(zone(&h, device, ids[0]).low, 15);
-    assert_eq!(zone(&h, device, ids[1]).low, 35, "the selected neighbour moved too");
-    assert_eq!(zone(&h, device, ids[2]).low, 50, "an unselected layer stayed");
+    assert_eq!(
+        zone(&h, device, ids[1]).low,
+        35,
+        "the selected neighbour moved too"
+    );
+    assert_eq!(
+        zone(&h, device, ids[2]).low,
+        50,
+        "an unselected layer stayed"
+    );
     assert_eq!(steps(&h), before + 1);
 }
 
@@ -274,7 +310,10 @@ fn the_editor_zooms_and_hovering_shows_the_zone() {
         )
         .unwrap();
     let large = editor_rect(&mut h);
-    assert!(large.height() > medium.height(), "Large is taller than Medium");
+    assert!(
+        large.height() > medium.height(),
+        "Large is taller than Medium"
+    );
     // Hovering a layer's bar shows its name and range in the Status Bar.
     h.shell
         .run(
@@ -290,7 +329,9 @@ fn the_editor_zooms_and_hovering_shows_the_zone() {
     h.frame(vec![Event::PointerMoved(at)]);
     let nodes = Harness::nodes(&h.frame(vec![Event::PointerMoved(at + vec2(1.0, 0.0))]));
     assert!(
-        nodes.iter().any(|n| n.value.contains("Layer 1") && n.value.contains("C1 to C2")),
+        nodes
+            .iter()
+            .any(|n| n.value.contains("Layer 1") && n.value.contains("C1 to C2")),
         "the readout names the layer and its keys"
     );
 }
@@ -342,14 +383,37 @@ fn the_layer_lists_menu_holds_lives_items_in_order() {
                 .y0
         })
         .collect();
-    assert!(tops.windows(2).all(|w| w[0] < w[1]), "in Live's order: {tops:?}");
+    assert!(
+        tops.windows(2).all(|w| w[0] < w[1]),
+        "in Live's order: {tops:?}"
+    );
     // Delete runs the command on the layer the menu opened on.
     let delete = Harness::node(&nodes, "Delete").bounds.unwrap();
-    h.click(pos2(((delete.x0 + delete.x1) / 2.0) as f32, ((delete.y0 + delete.y1) / 2.0) as f32));
+    h.click(pos2(
+        ((delete.x0 + delete.x1) / 2.0) as f32,
+        ((delete.y0 + delete.y1) / 2.0) as f32,
+    ));
     h.settle();
-    let left = h.shell.editor().document().device(device).unwrap().layers.list.len();
+    let left = h
+        .shell
+        .editor()
+        .document()
+        .device(device)
+        .unwrap()
+        .layers
+        .list
+        .len();
     assert_eq!(left, 1);
-    assert!(h.shell.editor().document().device(device).unwrap().layers.get(ids[0]).is_some());
+    assert!(
+        h.shell
+            .editor()
+            .document()
+            .device(device)
+            .unwrap()
+            .layers
+            .get(ids[0])
+            .is_some()
+    );
 }
 
 // Spec: multisampler R3
@@ -361,8 +425,14 @@ fn dropping_samples_on_the_layer_list_adds_them_at_the_drop_point() {
     let file = dir.join("Dropped.wav");
     std::fs::write(
         &file,
-        bl_media::wav_bytes(&[0.5; 480], 1, 48_000, bl_media::BitDepth::Int16, bl_media::Dither::None)
-            .unwrap(),
+        bl_media::wav_bytes(
+            &[0.5; 480],
+            1,
+            48_000,
+            bl_media::BitDepth::Int16,
+            bl_media::Dither::None,
+        )
+        .unwrap(),
     )
     .unwrap();
     let areas = areas(editor_rect(&mut h));
@@ -370,7 +440,8 @@ fn dropping_samples_on_the_layer_list_adds_them_at_the_drop_point() {
     // Dropped between the two layers: the new one lands second.
     let at = pos2(areas.list.left() + 20.0, areas.bars.top() + row_h + 1.0);
     h.frame(vec![Event::PointerMoved(at)]);
-    h.dropped.push(std::sync::Arc::new(DroppedFile(file.clone())));
+    h.dropped
+        .push(std::sync::Arc::new(DroppedFile(file.clone())));
     h.settle();
     let names: Vec<String> = h
         .shell

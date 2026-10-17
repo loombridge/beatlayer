@@ -17,8 +17,8 @@ use bl_engine::DeviceType;
 use bl_model::device_layout::{BODY_HEIGHT, ControlBand, LayoutNode, Widget};
 use bl_model::{
     Command, Device, DeviceDescription, DeviceId, DeviceKind, DeviceLayout, DeviceRole,
-    DeviceWindows, Document, Editor, LayerId, MultisamplerView, MultisamplerViews, ParamId, TrackId,
-    TrackKind,
+    DeviceWindows, Document, Editor, LayerId, MultisamplerView, MultisamplerViews, ParamId,
+    TrackId, TrackKind,
 };
 use bl_project::preset::{self, Preset};
 use bl_shell_spec::arrangement as view_ids;
@@ -496,7 +496,11 @@ impl DeviceView {
             let held = self.held.entry(device.id).or_default();
             if !down {
                 held.remove(&key);
-            } else if self.multisamplers.get(&device.id).is_some_and(|v| v.auto_select) {
+            } else if self
+                .multisamplers
+                .get(&device.id)
+                .is_some_and(|v| v.auto_select)
+            {
                 let selector = device
                     .params
                     .get(&bl_devices::multisampler::SELECTOR)

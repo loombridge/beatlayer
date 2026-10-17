@@ -1889,7 +1889,9 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ),
         (
             "device.set_layer_media",
-            Exception(Equivalent("`device.set_layer_sample`, which reads the file")),
+            Exception(Equivalent(
+                "`device.set_layer_sample`, which reads the file",
+            )),
         ),
         (
             "device.set_layer_sample",

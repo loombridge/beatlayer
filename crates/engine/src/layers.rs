@@ -50,7 +50,11 @@ impl LayerSample {
                 .copied()
                 .unwrap_or(0.0),
             Self::Progressive(data) => {
-                let channel = if channel < data.channel_count() { channel } else { 0 };
+                let channel = if channel < data.channel_count() {
+                    channel
+                } else {
+                    0
+                };
                 data.get(channel, frame)
             }
         }

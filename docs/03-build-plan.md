@@ -524,7 +524,7 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 5.39 | todo |  |  |
 | 5.40 | todo |  |  |
 | 5.41 | todo |  | Waits on IMP-20's acceptance |
-| 5.42 | todo |  |  |
+| 5.42 | done | 17 October 2026 | [#103](https://github.com/loombridge/beatlayer/pull/103); the effects LFO, envelope follower and seeded randomness every effect device shares, the Show Options menu items and expand toggle (`device.expand`), with Reprise moved onto the shared LFO; [the spec](specs/device-framework.md) |
 | 5.43 | todo |  |  |
 | 5.44 | todo |  |  |
 | 5.45 | todo |  |  |

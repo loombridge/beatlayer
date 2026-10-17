@@ -1,0 +1,63 @@
+# Device changes: unplugging, sample-rate changes, sleep and wake
+
+- **Status:** implemented, against the null backend's simulation of each event
+- **Work packages:** WP-1.13 (detection in `bl-audio-io`, recovery in `bl-engine` and `bl-audio-engine`, which joins them so that `bl-engine` links no audio backend). The app shell shows the message (WP-1.7 and the Status Bar package).
+- **Parity-matrix row:** none of its own; it keeps "Audio settings" (L-SET-012) and the audio engine's on and off states (S-ENGINE-001, L-CTRL-024, L-STAT-002) working when the hardware changes under them
+- **Checked against:** the Live 12 reference manual (online edition), read on 10 October 2026, and the UI parity reference's observations of Live 12.4.3 on macOS, 10 October 2026
+
+## The behaviour
+
+You're playing a song through an audio interface and something happens to the device: you unplug it, another program or the system changes its sample rate, or the computer goes to sleep and wakes up. Beatlayer doesn't crash, hang, or keep a dead stream open. The audio stops cleanly, the song stops where it was, and the app shows a message saying what happened. When the device can run again (you plug it back in, the new rate is known, the computer has woken), audio comes back on its own, on the same device, and the message goes away. Nothing in the song is lost, and the song doesn't start playing again by itself.
+
+This spec covers what the engine and the audio I/O layer do. Where and how the app shows the message is the app shell's (WP-1.7) and follows the Status Bar's message area (L-STAT-002). Choosing another device by hand is the Audio settings' (L-SET-012), through the same code.
+
+The manual says nothing about devices disappearing, rate changes, or sleep, so most of the rules below are Beatlayer's own choices, made to be safe and unsurprising.
+
+## Sources
+
+| ID | Kind | Source | What it shows |
+|---|---|---|---|
+| S1 | Manual | Live 12 reference manual, chapter 2, "First Steps", section 2.3.3, "Audio" | The Audio settings choose a driver type, input and output devices, the sample rate, and latency, and test the interface. On macOS an option makes Live's output follow the device chosen in the system's sound settings. Nothing about a device going away. |
+| S2 | Manual | Live 12 reference manual, chapter 38, "Computer Audio Resources and Strategies", sections 38.1.1 and 38.3 | The CPU meter compares the time spent computing a buffer with the time it lasts; overloads show in the Control Bar. Nothing about device loss, rate changes, or sleep. |
+| S3 | Manual and observation | Live 12 reference manual, section 42.21; observed in Live 12.4.3 on macOS, 10 October 2026: Options menu (UI parity reference S-ENGINE-001, M-OPT-029) | The audio engine can be switched off and on (Cmd+Option+Shift+E). |
+| S4 | Observation | Live 12.4.3 on macOS, 10 October 2026, with the audio engine off (UI parity reference L-STAT-002, L-CTRL-024, I-CLICK-029) | With the engine off, the Status Bar's message area says so, and clicking the message opens the Audio settings; the CPU meter reads OFF. |
+| S5 | Beatlayer | [Architecture](../02-architecture.md), "Audio and MIDI I/O" and "Real-time rules" | A stream that doesn't ask for a rate opens at the device's current rate, because opening a Core Audio device at another rate changes the device's own setting. No allocation, lock, or blocking call on an audio thread. |
+
+## Rules
+
+- **R1.** When the output device disappears while a stream runs, the stream is stopped and closed, the transport stops at the position it reached, and the engine's device state becomes "interrupted: device lost", with a message naming the device. (S4, S5)
+- **R2.** While the device is missing, Beatlayer tries to open it again, once a second by default, counting the attempts and keeping the last error. When the same device (by ID) is back, the stream reopens with the same settings, the engine restarts at the rate the device runs at, the song keeps its position in beats, the device state returns to "running", and an event says audio has recovered and after how long. (S1)
+- **R3.** When a device's sample rate changes under a running stream (another program or the system changed it), the stream is closed and reopened straight away at the device's new rate, and the engine recompiles the song at that rate. Beatlayer doesn't set the device back to the old rate, and from then on follows the device's rate; the event carries the old and new rates so the app can update its settings. (S1, S5)
+- **R4.** When the computer is going to sleep and the system says so, the stream is stopped and closed before it sleeps; when it wakes, the stream reopens. When nothing says so in advance, Beatlayer notices the wake afterwards from a jump between its clocks and checks the stream: a stream that keeps running is left alone, and one that has stopped calling back is restarted (R5). (S5)
+- **R5.** A running stream that stops calling back for longer than the stall timeout (three seconds by default) without reporting anything is treated as dead: it's closed and reopened as in R2. (S5)
+- **R6.** A stream that follows the system's default output device (S1's macOS option, or no device chosen) moves with the default when it changes, without stopping, and Beatlayer reports the change as an event. It's interrupted only when no output device is left. (S1)
+- **R7.** After a recovery the transport is stopped at the position it had reached; it never starts playing by itself. The rest of the transport stays as it was: the insert marker, and the Arrangement loop and whether it's on, on the same beats at the new rate, so Continue resumes where the song stopped and loops as before ([transport](transport.md) R6, R13). Scheduled commands that hadn't fired still fire when the song reaches them, at the new rate's frame for their beat. The engine clock stands still while the device is away and carries on from where it stopped, and a transport command waiting for a frame of it runs as long after the recovery as it was due after the interruption, except one that would start the song, which is dropped, and a Stop while the song was playing, which the interruption has already done. (S5)
+- **R8.** Beatlayer can fall back to the system's default output device while the chosen one is missing, and moves back to the chosen device when it returns. The option is off by default, so audio never jumps to the computer's speakers unasked. (S1)
+- **R9.** Choosing another device, rate, or buffer size in the settings closes the stream and opens the new one; if the new one can't open, the previous settings are reopened and the error is reported. (S1)
+- **R10.** Nothing above adds work to an audio thread that allocates, locks, or blocks: the stream's callback reaches the engine through a hand-off that only moves a pointer and an atomic flag, and detection and recovery run on a thread of their own. (S5)
+
+## Beatlayer's own choices
+
+- Messages are Beatlayer's own words, for example `The audio device "MOTU M2" was disconnected. Audio is off until it's connected again.`
+- While the engine is detached from a device, edits to the song aren't compiled; the newest document is compiled once, at the new rate, when audio comes back. Parameter changes and node data sent outside the document are dropped meanwhile. Play, Continue, and Play/Stop are ignored. Every other transport command (a locate, a stop, a loop change, at once or for a frame of the engine clock), scheduled commands, and cancellations are kept in the order they came, and act on the stopped song when audio comes back, as they would have on the stopped song meanwhile: a locate moves the insert marker, and a Stop returns to 1.1.1 ([transport](transport.md) R4, R7).
+- The engine's nodes are made afresh at the restart, so a reverb's tail or a delay's buffer doesn't survive an interruption.
+- Sleep is noticed from the clocks on every platform. Notifications from the operating system before it sleeps (IOKit on macOS, power broadcasts on Windows, logind on Linux) plug in through the same `PowerMonitor` trait in a later package.
+
+## Tests
+
+| Rule | Test | Kind |
+|---|---|---|
+| R1 | `crates/audio-io/src/supervisor.rs`, `unplugging_interrupts_and_replugging_recovers`; `crates/audio-engine/tests/device.rs`, `unplugging_during_playback_reports_and_recovers_on_replug` | unit |
+| R2 | `crates/audio-io/src/supervisor.rs`, `unplugging_interrupts_and_replugging_recovers`, `a_device_missing_at_start_is_waited_for`; `crates/audio-engine/tests/device.rs`, `unplugging_during_playback_reports_and_recovers_on_replug` | unit |
+| R3 | `crates/audio-io/src/supervisor.rs`, `a_sample_rate_change_reopens_at_the_new_rate`; `crates/audio-engine/tests/device.rs`, `a_sample_rate_change_recompiles_at_the_new_rate`; `crates/engine/tests/restart.rs`, `a_restart_at_a_new_rate_renders_like_a_fresh_engine` | unit |
+| R4 | `crates/audio-io/src/supervisor.rs`, `sleep_stops_the_stream_and_wake_reopens_it`, `a_wake_noticed_afterwards_leaves_a_healthy_stream_alone`; `crates/audio-io/src/power.rs`, the `ClockJump` tests; `crates/audio-engine/tests/device.rs`, `sleep_and_wake_stop_and_restart_the_engine` | unit |
+| R5 | `crates/audio-io/src/supervisor.rs`, `a_stalled_stream_is_restarted` | unit |
+| R6 | `crates/audio-io/src/supervisor.rs`, `a_stream_on_the_default_device_moves_with_it`; `crates/audio-io/src/null.rs`, `a_default_stream_moves_when_its_device_goes` | unit |
+| R7 | `crates/engine/tests/restart.rs`, `a_restart_keeps_the_beat_and_stops_the_transport`, `a_restart_while_stopped_mid_song_keeps_where_it_stopped_and_the_insert_marker`, `scheduled_commands_survive_a_restart`, `while_detached_play_is_ignored_and_a_locate_is_kept`, `a_device_change_during_looped_playback_keeps_the_loop_and_the_playhead`, `a_sample_rate_change_during_looped_playback_keeps_the_loop_and_the_playhead`, `a_locate_and_timed_transport_commands_sent_while_detached_land_on_restart`; `crates/audio-engine/tests/device.rs`, `device_changes_during_looped_playback_keep_the_loop_and_the_playhead` | unit |
+| R8 | `crates/audio-io/src/supervisor.rs`, `falling_back_to_the_default_is_off_unless_asked`, `the_fallback_moves_back_when_the_device_returns` | unit |
+| R9 | `crates/audio-io/src/supervisor.rs`, `reconfiguring_moves_to_another_device`, `a_failed_reconfigure_reopens_the_previous_settings` | unit |
+| R10 | `crates/audio-io/src/supervisor.rs`, `the_hand_off_stays_off_the_heap`; `crates/audio-engine/src/lib.rs`, `the_engine_callback_stays_off_the_heap`; `rtsan/tests/device_changes.rs` (under RealtimeSanitizer) | unit, RTSan |
+
+## Checking on real hardware
+
+The rules are tested against the null device's simulation of each event. `bl-cli device-changes --backend coreaudio --device <interface> --seconds 120` plays a 440 Hz tone at −60 dBFS and prints each event and message as it happens, for unplugging a real interface during playback and for a real sleep and wake. On Windows and Linux, the stall detector (R5) covers a backend that reports nothing about a lost device or a rate change.

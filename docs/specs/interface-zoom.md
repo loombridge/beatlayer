@@ -1,0 +1,51 @@
+# Interface zoom
+
+- **Status:** implemented (R1 to R10 each have a passing test)
+- **Work packages:** WP-1.17 (global zoom); the second window's own zoom comes with the second window in M6
+- **Parity-matrix row:** Views and workflow: Interface zoom, per window
+- **Checked against:** Live 12.4.3, through the UI parity reference recorded on 10 October 2026, and the Live 12 reference manual and release notes as published on 11 October 2026
+
+## The behaviour
+
+The interface zoom makes everything Beatlayer draws larger or smaller together, from 50% to 200%, for people who want bigger text and controls on a large screen or more on a small one. Display & Input, the first page of the Settings window, has it under Display, after Language; the View menu's Zoom submenu has Zoom In, Zoom Out, and Reset Zoom to 100%; and Cmd with plus or minus (Ctrl on Windows and Linux) zooms in and out. Each pane and control keeps its place relative to the others, so the layout looks the same at every zoom, only bigger or smaller, and text is drawn at the zoomed size so it stays sharp. The zoom is kept for the next start.
+
+This spec covers one zoom for every window, as Beatlayer has only the main and Settings windows until M6; Live 12 gives the second window a zoom of its own (S5), which comes with the second window. Where each pane and control sits at 100% is in [layout.md](../ui-parity/layout.md); the Arrangement View's own time and track-height zoom is in [arrangement-view](arrangement-view.md).
+
+## Sources
+
+| ID | Kind | Source | What it shows |
+|---|---|---|---|
+| S1 | Manual | Live 12 reference manual, chapter 2 "First Steps", section 2.3.1 "Display & Input" | The Display section sets the interface's language and its zoom, for the main window, the second window when it's open, and the Settings window. Changed with the mouse, the Settings window's own zoom changes only when the mouse button is released. No range or steps are given |
+| S2 | Observation | Live 12.4.3 on macOS, 10 October 2026, recorded in layout.md (L-SET-001 to 003, L-SET-010) | Display & Input is the first Settings page; its first section, Display, holds Language then Zoom; the Settings window is 562 × 617 points with the page layout of L-SET-003 |
+| S3 | Manual | Same manual, chapter 42, section 42.9 "Zooming, Display and Selections", through shortcuts.toml S-ZOOM-001 and S-ZOOM-002 | Cmd with plus and minus (Ctrl on Windows) zoom the window in and out |
+| S4 | Observation | Live 12.4.3 on macOS, 10 October 2026, recorded in menus.md (M-VIEW-003 to 003c) | The View menu's third item is a Zoom submenu with Zoom In, Zoom Out, and Reset Zoom to 100%, in that order. The submenu wasn't opened, so its keys and which items are disabled weren't seen (ui-parity README, "Pending" 1) |
+| S5 | Release notes | Live 12 release notes, 12.0 and 12.1 | 12.0: the first and second windows can have different zooms, set in Display & Input. 12.1: Cmd (Ctrl) with plus or minus zooms the interface, as an accessibility improvement |
+| S6 | Beatlayer | [The architecture](../02-architecture.md), "UI" and "Agent control"; [the parity matrix](../04-parity-matrix.md), "Interface zoom, per window"; D17 and D22 in the decisions log; ADR-001 | A global zoom scales the whole UI from 50% to 200%, per-window zoom in M6; every action is a registered command with a permission class, and a preference that's trivially changed back is edit-class; Beatlayer draws Live's 23-point title bar on macOS, with the system's window buttons in it; the UI is egui, which scales through its points-per-pixel |
+
+## Rules
+
+- **R1.** The zoom scales every window Beatlayer draws, the main window and the Settings window, by one factor from 50% to 200% (100% on a new install). The layout layer lays out in Live's points at 100% and every one is drawn as `zoom` points of the window: a window `zoom` times as large as another shows exactly what the other shows at 100%, every pane and control `zoom` times as large and as far from the content area's corner. At every zoom, in every window at least as big as its minimum (R7), every pair of layout.md rows the layout layer places keeps its order across and down and its nesting, no two rows overlap that don't in Live's reference window at 100%, and every row is inside the window. (S1, S6)
+- **R2.** The scaling is egui's points-per-pixel, so text and lines are drawn at the zoomed size rather than stretched from a smaller image, and stay sharp; a screen reader gets the zoom as the scale of the accessibility tree's root. (S6)
+- **R3.** View ▸ Zoom ▸ Zoom In (Cmd-plus, also Cmd-=; Ctrl on Windows and Linux) goes to the next step up, Zoom Out (Cmd-minus) to the next step down, and Reset Zoom to 100% to 100%. The steps are every 10% from 50% to 200%; from a zoom between steps, Zoom In and Zoom Out go to the nearest step in their direction. Zoom In is disabled at 200% and Zoom Out at 50%. (S3, S4, S5)
+- **R4.** Display & Input's Display section shows Language (English, until translations in M9) and then Zoom, a number box showing the zoom as a percentage ("100 %"), which steps through R3's steps when dragged up or down, with Up and Down while it has the keyboard focus, or with a screen reader's increment and decrement. The main window follows as it changes; the Settings window takes the new zoom, and its size at that zoom (R8), only once no mouse button is down in it, so a drag doesn't rescale the window under the pointer. (S1, S2)
+- **R5.** Every zoom change is a registered command: `view.zoom_in`, `view.zoom_out`, `view.zoom_reset`, and `view.set_zoom` with `percent`, a whole percentage from 50 to 200 (a value outside that range that reaches it anyway is brought within it). All four are edit-class: each writes the preferences file and is trivially changed back. None changes the set or is an undo step. (S6)
+- **R6.** The zoom is kept in the preferences file and the next start opens at it; 100% is kept as no zoom at all, as on a new install. A preferences file whose zoom is outside 50% to 200% starts at the nearer end; one that isn't a number starts at 100%. (S1, S6)
+- **R7.** The main window's smallest size grows with the zoom: the layout layer's minimum of 1340 × 640 points (where the Control Bar's stretching gaps close; 1320 in Live, plus the assistant toggle's 20, D24) times the zoom, plus the title bar where Beatlayer draws it, plus the drawn menu bar's height (derived from egui's style) times the zoom where menus are drawn in the window (Linux, or with `--drawn-menus`), so the Status Bar stays inside the window at the minimum size. Zooming keeps the window's size unless it's under the new minimum, when it grows to it as far as its screen allows, and never shrinks it. On a screen too small for the zoom's minimum, the window is as big as the screen allows and the layout keeps its minimum size, so the far right and bottom are out of view rather than overlapping. (S6)
+- **R8.** The Settings window is Live's 562 × 617 points at 100%, its content scaled by the zoom (562 × 594 points times the zoom, plus the title bar where Beatlayer draws it), within its screen. (S1, S2)
+- **R9.** On macOS the title bar Beatlayer draws (D22) stays 23 points tall at every zoom, with its title at its 100% size, since the system's window buttons in it don't scale; only the content under it scales. (S6)
+- **R10.** egui's own zoom keys are off, so only the keymap zooms: Cmd-0 is Live's key for turning launch quantisation off (S-GQ-005, M3), not a zoom, and Cmd-= reaches Zoom In through the keymap rather than around it. (S3, S6)
+
+## Tests
+
+| Rule | Test | Kind |
+|---|---|---|
+| R1 | `crates/ui/tests/zoom.rs`, `every_row_scales_by_the_zoom_at_every_percentage`, `rows_keep_their_places_and_nothing_overlaps_at_every_percentage`, `controls_keep_their_live_size_times_the_zoom`, `the_main_window_draws_every_row_scaled_at_every_step`; `beatlayer --screenshot` with `--command view.set_zoom='{"percent":N}'` | unit (every whole percentage), UI script (every step), image |
+| R2 | `crates/ui/tests/zoom.rs`, `the_main_window_draws_every_row_scaled_at_every_step` (the frame's pixels per point and the tree's root scale are the zoom), `the_zoom_keys_zoom_every_layout_point_and_egui_s_own_keys_are_off` | UI script |
+| R3 | `crates/shell-spec/src/settings.rs`, `zoom_steps_run_every_ten_percent_from_50_to_200`; `crates/shell/tests/interface_zoom.rs`, `zoom_in_and_out_walk_every_step_and_stop_at_the_ends`, `set_zoom_takes_any_whole_percentage_in_range`; `crates/shell/tests/shell_commands.rs`, `view_commands_switch_the_view_and_zoom`; `crates/ui/tests/zoom.rs`, `the_zoom_keys_zoom_every_layout_point_and_egui_s_own_keys_are_off`, `the_view_menu_has_the_zoom_items_in_live_s_order` | unit, UI script |
+| R4 | `crates/ui/tests/zoom.rs`, `display_and_input_has_the_zoom_after_the_language`, `dragging_the_zoom_rescales_the_settings_window_on_release` | UI script |
+| R5 | `crates/shell/tests/interface_zoom.rs`, `set_zoom_takes_any_whole_percentage_in_range`, `zoom_commands_are_edit_class_preferences_outside_the_set`; `crates/shell/tests/menus.rs`, `every_shell_command_is_on_a_menu_or_a_control`; `cargo xtask commands` | unit |
+| R6 | `crates/shell/tests/interface_zoom.rs`, `the_zoom_is_kept_between_launches`, `a_zoom_out_of_range_in_the_preferences_file_starts_in_range`; `crates/shell-spec/src/settings.rs`, `zoom_factors_and_percentages_stay_in_range` | unit, through real preference files |
+| R7 | `crates/ui/tests/zoom.rs`, `the_minimum_window_grows_with_the_zoom`, `the_window_grows_to_its_minimum_as_far_as_the_screen_allows`, `rows_keep_their_places_and_nothing_overlaps_at_every_percentage` (in the minimum window at each zoom), `the_main_window_with_drawn_menus_holds_the_status_bar_at_minimum_size` | unit; the app applies it as the window's minimum size |
+| R8 | `crates/ui/tests/zoom.rs`, `the_settings_window_scales_with_the_zoom`, `the_settings_window_draws_its_rows_scaled_at_every_step` | unit, UI script |
+| R9 | `crates/ui/tests/zoom.rs`, `the_main_window_draws_every_row_scaled_at_every_step` (with the title bar drawn), `the_settings_window_draws_its_rows_scaled_at_every_step` | UI script |
+| R10 | `crates/ui/tests/zoom.rs`, `the_zoom_keys_zoom_every_layout_point_and_egui_s_own_keys_are_off` | UI script |

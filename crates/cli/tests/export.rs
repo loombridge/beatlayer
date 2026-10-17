@@ -111,7 +111,7 @@ fn run(document: &bl_model::Document, media: Arc<dyn MediaLibrary>, job: &Job) -
     let report = export::export(
         document,
         media,
-        None,
+        bl_shell::export::Hosts::default(),
         job,
         &AtomicBool::new(false),
         &mut |_| {},
@@ -593,7 +593,7 @@ fn cancelling_leaves_nothing_behind() {
                 let result = export::export(
                     scene.document(),
                     media_of(fixture),
-                    None,
+                    bl_shell::export::Hosts::default(),
                     &job,
                     &cancel,
                     &mut |done| {
@@ -634,7 +634,7 @@ fn a_failure_leaves_nothing_behind() {
         let result = export::export(
             scene.document(),
             media_of(fixture),
-            None,
+            bl_shell::export::Hosts::default(),
             &job,
             &AtomicBool::new(false),
             &mut |_| {},
@@ -646,7 +646,7 @@ fn a_failure_leaves_nothing_behind() {
     let result = export::export(
         scene.document(),
         media_of(fixture),
-        None,
+        bl_shell::export::Hosts::default(),
         &job(
             temp.0.join("nowhere/mix.wav"),
             FileType::Wav,
@@ -1019,7 +1019,7 @@ fn cancelling_a_loop_render_leaves_nothing_behind() {
         let result = export::export(
             editor.document(),
             media.clone(),
-            None,
+            bl_shell::export::Hosts::default(),
             &loop_job(temp.0.join("loop.wav"), 96_000),
             &cancel,
             // 0.5 is the range's last block: the tail renders next.

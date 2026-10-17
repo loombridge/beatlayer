@@ -1737,6 +1737,17 @@ impl Shell {
         &self.vst3
     }
 
+    /// The hosts an offline render borrows the engine's plug-ins from
+    /// (WP-2.6b, WP-4.21).
+    #[must_use]
+    pub fn plugin_hosts(&self) -> bl_plugin_host::Hosts<'_> {
+        bl_plugin_host::Hosts {
+            clap: Some(&self.plugins),
+            vst3: Some(&self.vst3),
+            au: Some(&self.au),
+        }
+    }
+
     /// Lets go of the plug-ins of the set being replaced (WP-2.6): the new
     /// set's plug-in devices load their plug-ins from their saved state.
     fn set_replaced(&mut self) {
@@ -4901,7 +4912,7 @@ impl Shell {
             return crate::export::run_command(
                 self.editor.document(),
                 media,
-                Some(&self.plugins),
+                self.plugin_hosts(),
                 self.arrangement.time_selection(),
                 self.arrangement.selected_tracks(),
                 engine_rate,
@@ -5044,7 +5055,7 @@ impl Shell {
             media: Arc::clone(&self.media) as Arc<dyn bl_engine::MediaLibrary>,
             selection: self.arrangement.time_selection(),
             engine_rate,
-            plugins: Some(&self.plugins),
+            plugins: self.plugin_hosts(),
             playing,
             cancel: None,
         };

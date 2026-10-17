@@ -25,7 +25,7 @@ mod imp;
 mod imp;
 
 pub use crate::clap::{ParamChange, PluginStatus};
-pub use imp::{AuFactory, AuHost, AuType};
+pub use imp::{AuFactory, AuHost, AuType, Loan, LoanFactory};
 
 /// Describes the Audio Units a `.component` bundle declares, for the
 /// scanner's child process (WP-2.8's second part): one `ScannedPlugin` per
@@ -56,6 +56,8 @@ pub enum AuError {
     Refused(String),
     /// It was called off the host's own thread.
     WrongThread,
+    /// The units are lent to another offline render already.
+    Lent,
 }
 
 impl fmt::Display for AuError {
@@ -66,6 +68,7 @@ impl fmt::Display for AuError {
             Self::NoInstance(device) => write!(f, "{device} has no running Audio Unit"),
             Self::Refused(what) => write!(f, "the Audio Unit refused {what}"),
             Self::WrongThread => f.write_str("the host's calls run on the thread that made it"),
+            Self::Lent => f.write_str("the units are lent to another render"),
         }
     }
 }

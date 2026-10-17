@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-337 commands in 31 areas.
+355 commands in 31 areas.
 
 ## Permission classes
 
@@ -147,24 +147,39 @@ Each command has:
 | [`clip_view.quantize_settings`](#clip_viewquantize_settings) | Quantize Settings | `read` |  |  |
 | [`clip_view.select_notes`](#clip_viewselect_notes) | Select Notes | `read` |  |  |
 | [`device.add`](#deviceadd) | Add Device | `edit` |  |  |
+| [`device.add_layers`](#deviceadd_layers) | Add Samples | `external` |  |  |
 | [`device.copy`](#devicecopy) | Copy Device | `read` | `Cmd+C` | `Ctrl+C` |
 | [`device.cut`](#devicecut) | Cut Device | `destructive` | `Cmd+X` | `Ctrl+X` |
+| [`device.delete_layers`](#devicedelete_layers) | Delete Samples | `edit` |  |  |
+| [`device.distribute_layers`](#devicedistribute_layers) | Distribute Ranges | `edit` |  |  |
 | [`device.duplicate`](#deviceduplicate) | Duplicate Device | `edit` | `Cmd+D` | `Ctrl+D` |
+| [`device.duplicate_layers`](#deviceduplicate_layers) | Duplicate Samples | `edit` |  |  |
 | [`device.fold`](#devicefold) | Fold Device | `read` | `Minus` | `Minus` |
 | [`device.hot_swap`](#devicehot_swap) | Hot-Swap Presets | `read` |  |  |
 | [`device.insert`](#deviceinsert) | Insert Device | `edit` |  |  |
+| [`device.insert_layers`](#deviceinsert_layers) | Add Samples | `edit` |  |  |
 | [`device.load_preset`](#deviceload_preset) | Load Preset | `external` |  |  |
 | [`device.load_sample`](#deviceload_sample) | Load Sample | `external` |  |  |
 | [`device.move`](#devicemove) | Move Device | `edit` |  |  |
+| [`device.move_layers`](#devicemove_layers) | Move Samples | `edit` |  |  |
+| [`device.normalize_layers`](#devicenormalize_layers) | Normalize | `edit` |  |  |
 | [`device.parameters`](#deviceparameters) | Device Parameters | `read` |  |  |
 | [`device.paste`](#devicepaste) | Paste Device | `edit` | `Cmd+V` | `Ctrl+V` |
 | [`device.remove`](#deviceremove) | Delete Device | `destructive` | `Delete` | `Delete` |
 | [`device.rename`](#devicerename) | Rename Device | `edit` | `Cmd+R` | `Ctrl+R` |
+| [`device.rename_layer`](#devicerename_layer) | Rename Sample | `edit` |  |  |
 | [`device.save_default_preset`](#devicesave_default_preset) | Save as Default Preset | `external` |  |  |
 | [`device.save_preset`](#devicesave_preset) | Save Preset | `external` |  |  |
 | [`device.select`](#deviceselect) | Select Device | `read` |  |  |
+| [`device.select_layers`](#deviceselect_layers) | Select Samples | `read` |  |  |
 | [`device.set_enabled`](#deviceset_enabled) | Activate/Deactivate Device | `edit` |  |  |
 | [`device.set_floating`](#deviceset_floating) | Float | `edit` | `Option+F` | `Ctrl+Alt+F` |
+| [`device.set_layer`](#deviceset_layer) | Change Sample Settings | `edit` |  |  |
+| [`device.set_layer_media`](#deviceset_layer_media) | Replace Sample | `edit` |  |  |
+| [`device.set_layer_options`](#deviceset_layer_options) | Change Sample Options | `edit` |  |  |
+| [`device.set_layer_sample`](#deviceset_layer_sample) | Replace Sample | `external` |  |  |
+| [`device.set_layer_zone`](#deviceset_layer_zone) | Change Zones | `edit` |  |  |
+| [`device.set_multisampler_view`](#deviceset_multisampler_view) | Set Multisampler View | `read` |  |  |
 | [`device.set_param`](#deviceset_param) | Set Device Parameter | `edit` |  |  |
 | [`device.set_sample`](#deviceset_sample) | Set Sample | `edit` |  |  |
 | [`device.set_show_preset_name`](#deviceset_show_preset_name) | Show Preset Name | `edit` |  |  |
@@ -176,6 +191,9 @@ Each command has:
 | [`device.set_state`](#deviceset_state) | Set Device State | `edit` |  |  |
 | [`device.set_window`](#deviceset_window) | Move Device Window | `read` |  |  |
 | [`device.show_sidechain`](#deviceshow_sidechain) | Show Sidechain | `read` |  |  |
+| [`device.snap_layer_markers`](#devicesnap_layer_markers) | Snap Markers | `edit` |  |  |
+| [`device.sort_layers`](#devicesort_layers) | Sort Samples | `edit` |  |  |
+| [`device.update_layers`](#deviceupdate_layers) | Change Sample Settings | `edit` |  |  |
 | [`device.windows`](#devicewindows) | Floating Device Windows | `read` |  |  |
 | [`device_view.state`](#device_viewstate) | Device View State | `read` |  |  |
 | [`edit.redo`](#editredo) | Redo | `edit` | `Cmd+Shift+Z` | `Ctrl+Y` |
@@ -2450,6 +2468,24 @@ Arguments:
 
 Result: [`DeviceAdded`](#deviceadded).
 
+#### `device.add_layers`
+
+**Add Samples**. Permission: `external`. Contexts: `device-view`.
+
+Adds audio files to a multisampler as layers, as dropping them on the zone editor's layer list does: each file is imported into the set's media, and gets one layer after the selected layers (or at the end), or at `index`, with every zone whole and unfaded, its Root Key from the file's sampler metadata (C3 where it has none), Sample Start and End at the file's ends, and its loop points from the file's first loop with Sustain Mode left off. The new layers become the selected ones. A file that isn't audio is skipped and named in `skipped`. One undo step. It reads files outside the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `paths` | array of string | yes | The audio files, one layer each. |
+| `device` | [`DeviceId`](#deviceid) or null | no | The multisampler; the selected device if left out. |
+| `index` | integer or null | no | Where in the layer list the first goes; after the selected layers (or at the end with none selected) if left out. |
+
+Result: [`LayersAdded`](#layersadded).
+
 #### `device.copy`
 
 **Copy Device**. Permission: `read`. Contexts: `device-view`.
@@ -2490,6 +2526,42 @@ Arguments:
 
 Result: [`DeviceViewState`](#deviceviewstate).
 
+#### `device.delete_layers`
+
+**Delete Samples**. Permission: `edit`. Contexts: `device-view`.
+
+Removes the listed layers from a multisampler, as the layer list's Delete does. A layer that isn't there refuses the whole command. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `layers` | array of [`LayerId`](#layerid) | yes | The layers to remove. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `device.distribute_layers`
+
+**Distribute Ranges**. Permission: `edit`. Contexts: `device-view`.
+
+Spreads the listed layers' ranges, in list order and without fades: `equally` gives each an equal share of the range of the zone named by `kind` (keys from 0 to 127, velocities 1 to 127, select 0 to 127), and `around_root_key` splits the keyboard between the layers' root keys, layers that share a root dividing its zone. With one layer or none listed, every layer. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `layers` | array of [`LayerId`](#layerid) | yes | The layers to spread. |
+| `how` | [`Distribution`](#distribution) | yes | How to spread them. |
+| `kind` | [`ZoneKind`](#zonekind) | yes | The zone editor in view: which zone `equally` spreads. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `device.duplicate`
 
 **Duplicate Device**. Permission: `edit`. Contexts: `device-view`.
@@ -2509,6 +2581,23 @@ Arguments:
 | `device` | [`DeviceId`](#deviceid) or null | no | The device; the selected one if left out. |
 
 Result: [`DeviceAdded`](#deviceadded).
+
+#### `device.duplicate_layers`
+
+**Duplicate Samples**. Permission: `edit`. Contexts: `device-view`.
+
+Copies the listed layers, each copy straight after its original with the next layer ID, as the layer list's Duplicate does. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `layers` | array of [`LayerId`](#layerid) | yes | The layers to copy. |
+
+Result: [`ChangeSet`](#changeset).
 
 #### `device.fold`
 
@@ -2566,6 +2655,24 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `device.insert_layers`
+
+**Add Samples**. Permission: `edit`. Contexts: `device-view`.
+
+Adds layers to a multisampler at `index` (`null` for the end), each a sample named by content hash with its zones (every zone whole and unfaded in a new layer), Root Key, loop points and levels. The multisampler gives each layer the next of its own layer IDs, in order, ignoring the `id` you send; read them back from the device's `layers` in the query tool's `device` result. A sample must be in the media store to play; to add files from disk as a person does, use `device.add_layers`. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `layers` | array of [`Layer`](#layer) | yes | The layers. |
+| `index` | integer or null | no | Where in the layer list the first goes, or `null` for the end. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `device.load_preset`
 
 **Load Preset**. Permission: `external`. Contexts: `device-view`.
@@ -2617,6 +2724,42 @@ Arguments:
 | `index` | integer, at least 0 | yes | Where it goes in that chain. |
 
 Result: [`ChangeSet`](#changeset).
+
+#### `device.move_layers`
+
+**Move Samples**. Permission: `edit`. Contexts: `device-view`.
+
+Moves the listed layers, keeping their order, so the first sits at `index` among the layers that stay; the list's order decides Round Robin's turns and which layer a sort leaves first.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `layers` | array of [`LayerId`](#layerid) | yes | The layers to move. |
+| `index` | integer, at least 0 | yes | Where the first goes among the layers left. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `device.normalize_layers`
+
+**Normalize**. Permission: `edit`. Contexts: `device-view`.
+
+Normalize Volume sets each layer's Volume (`layers`, or the selected ones) so its sample's largest magnitude between Sample Start and Sample End reaches 0 dBFS; Normalize Pan sets each layer's Pan so its left and right channels play at equal RMS level after the pan. A silent layer, and a mono one for Normalize Pan, keep their value. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `what` | [`Normalize`](#normalize) | yes | What to normalise. |
+| `device` | [`DeviceId`](#deviceid) or null | no | The multisampler; the selected device if left out. |
+| `layers` | array or null | no | The layers; the selected layers if left out. |
+
+Result: [`LayersChanged`](#layerschanged).
 
 #### `device.parameters`
 
@@ -2696,6 +2839,24 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `device.rename_layer`
+
+**Rename Sample**. Permission: `edit`. Contexts: `device-view`.
+
+Renames a layer, as the layer list's Rename does. The name is what the title bar shows for the first layer while Show Preset Name is on.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `layer` | [`LayerId`](#layerid) | yes | The layer. |
+| `name` | string | yes | Its new name. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `device.save_default_preset`
 
 **Save as Default Preset**. Permission: `external`. Contexts: `device-view`.
@@ -2745,6 +2906,24 @@ Arguments:
 
 Result: [`DeviceViewState`](#deviceviewstate).
 
+#### `device.select_layers`
+
+**Select Samples**. Permission: `read`. Contexts: `device-view`.
+
+Selects layers in a multisampler's layer list, as clicking does: `replace` makes the listed layers the selection (every layer with none listed), `add` joins them to it, `toggle` flips each, and `same_range` selects every layer whose range in the editor in view equals the first listed layer's. The selection shows in the Sample tab and reads back in `device_view.state`. It changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) or null | no | The multisampler; the selected device if left out. |
+| `layers` | array of [`LayerId`](#layerid) | no | The layers; every layer if left out with `replace`. |
+| `mode` | [`LayerSelectMode`](#layerselectmode) | no | How they change the selection. |
+
+Result: [`MultisamplerState`](#multisamplerstate).
+
 #### `device.set_enabled`
 
 **Activate/Deactivate Device**. Permission: `edit`. Contexts: `device-view`.
@@ -2782,6 +2961,121 @@ Arguments:
 | `floating` | boolean | yes | Float (true) or dock (false). |
 
 Result: [`ChangeSet`](#changeset).
+
+#### `device.set_layer`
+
+**Change Sample Settings**. Permission: `edit`. Contexts: `device-view`.
+
+Changes settings of layers (`layers`, or the selected ones) as the Sample tab does: Root Key, Detune, Volume (a linear gain), Pan, Sample Start and End, Link, the sustain and release modes, Loop Start and End, the Release Loop point, the loop's Crossfade and Detune. While the multisampler's Snap is on, every marker set lands on the nearest zero crossing of the layer's left channel. Markers are in frames of the sample at its own rate. The markers must stay ordered; one setting out of range refuses the whole change. One undo step. `device.update_layers` sets them exactly, without snapping.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `settings` | [`LayerSettings`](#layersettings) | yes | The settings to set; the ones left out stay as they were. |
+| `device` | [`DeviceId`](#deviceid) or null | no | The multisampler; the selected device if left out. |
+| `layers` | array or null | no | The layers; the selected layers if left out. |
+
+Result: [`LayersChanged`](#layerschanged).
+
+#### `device.set_layer_media`
+
+**Replace Sample**. Permission: `edit`. Contexts: `device-view`.
+
+Replaces one layer's sample with another already in the media store, keeping the layer's zones and settings and its markers at the same share of the new length, as hot-swapping a sample does. `length`, `sample_rate` and `channels` describe the new sample. To pick a file from disk, use `device.set_layer_sample`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `layer` | [`LayerId`](#layerid) | yes | The layer. |
+| `media` | [`ContentHash`](#contenthash) | yes | The new sample, by content hash. |
+| `length` | integer, at least 0 | yes | Its length in frames at its own rate. |
+| `sample_rate` | integer, at least 0 | yes | Its own rate in hertz. |
+| `channels` | integer from 0 to 255 | yes | Its channels. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `device.set_layer_options`
+
+**Change Sample Options**. Permission: `edit`. Contexts: `device-view`.
+
+Sets the multisampler options that aren't parameters: `ram_mode` (decode every layer whole into memory; off, long layers stream from disk), `snap` (markers set afterwards land on zero crossings of the left channel) and `linear_loop_fades` (the title bar's Use Constant Power Fade for Loops, off when true). Options left out stay as they were.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `linear_loop_fades` | boolean or null | no | Whether loop crossfades are linear rather than constant-power. |
+| `ram_mode` | boolean or null | no | RAM Mode: decode every layer whole into memory. |
+| `snap` | boolean or null | no | Snap: markers land on zero crossings. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `device.set_layer_sample`
+
+**Replace Sample**. Permission: `external`. Contexts: `device-view`.
+
+Replaces a layer's sample (`layer`, or the first selected layer) with an audio file, keeping its zones and settings and its markers at the same share of the new length, as hot-swapping a sample does. The file is imported into the set's media. One undo step. It reads a file outside the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | The audio file. |
+| `device` | [`DeviceId`](#deviceid) or null | no | The multisampler; the selected device if left out. |
+| `layer` | [`LayerId`](#layerid) or null | no | The layer; the first selected layer if left out. |
+
+Result: [`LayersChanged`](#layerschanged).
+
+#### `device.set_layer_zone`
+
+**Change Zones**. Permission: `edit`. Contexts: `device-view`.
+
+Sets one kind of zone (`key` 0 to 127, `velocity` 1 to 127, or `select` 0 to 127) of the listed layers, each with its own `low`, `high` and fades (`fade_low` and `fade_high`, how many values each fade spans). A zone holds at least one value and its fades stay inside it. In a fade the layer is silent at the zone's edge and reaches full level at the fade's inner edge, linearly or constant-power as the device's Fade Mode says. One undo step, as one drag in the zone editor is.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `kind` | [`ZoneKind`](#zonekind) | yes | Which zone. |
+| `zones` | array of [`LayerZone`](#layerzone) | yes | Each layer's new zone. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `device.set_multisampler_view`
+
+**Set Multisampler View**. Permission: `read`. Contexts: `device-view`.
+
+Sets what a multisampler's views show, as its title bar's tabs and the zone editor's controls do: the `tab` in its body (`sample`, `pitch_osc`, `filter_global`, `modulation` or `midi`), whether the zone editor shows above the Device View (`zone_editor`, the Zone tab), which editor shows (`editor`: `key`, `velocity` or `select`), its row `size`, and Auto Select. The views are saved with the set but are no undo step, and change nothing in the sound. They read back in `device_view.state`.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `auto_select` | boolean or null | no | Auto Select: notes select the layers they play. |
+| `device` | [`DeviceId`](#deviceid) or null | no | The multisampler; the selected device if left out. |
+| `editor` | [`ZoneKind`](#zonekind) or null | no | Which zone editor shows: Key, Vel or Sel. |
+| `size` | [`EditorSize`](#editorsize) or null | no | The zone editor's row size. |
+| `tab` | [`SamplerTab`](#samplertab) or null | no | The tab shown in the body. |
+| `zone_editor` | boolean or null | no | Whether the zone editor shows above the Device View (the Zone tab). |
+
+Result: [`MultisamplerState`](#multisamplerstate).
 
 #### `device.set_param`
 
@@ -2971,6 +3265,60 @@ Arguments:
 | `shown` | boolean or null | no | Show (true) or hide (false); switches if left out. |
 
 Result: [`DeviceViewState`](#deviceviewstate).
+
+#### `device.snap_layer_markers`
+
+**Snap Markers**. Permission: `edit`. Contexts: `device-view`.
+
+Snaps a loop's two markers (the sustain loop's Loop Start and Loop End, or the release loop's point) to the nearest zero crossings of the layers' left channel once, whatever Snap says, as the loop brace's context menu does. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) or null | no | The multisampler; the selected device if left out. |
+| `layers` | array or null | no | The layers; the selected layers if left out. |
+| `loop` | [`LoopKind`](#loopkind) | no | Which loop's markers; the sustain loop's if left out. |
+
+Result: [`LayersChanged`](#layerschanged).
+
+#### `device.sort_layers`
+
+**Sort Samples**. Permission: `edit`. Contexts: `device-view`.
+
+Sorts a multisampler's layers by name, key, velocity or selector (the lowest value of that zone), ascending or `descending`, as the layer list's sorting items do. Layers that tie keep their order.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `by` | [`LayerSort`](#layersort) | yes | What to sort by. |
+| `descending` | boolean | yes | Whether the largest comes first. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `device.update_layers`
+
+**Change Sample Settings**. Permission: `edit`. Contexts: `device-view`.
+
+Changes settings of the listed layers exactly as given, without snapping markers to zero crossings (`device.set_layer` does that while Snap is on): `root_key`, `detune`, `volume` (a linear gain, up to +24 dB), `pan`, `start`, `end`, `link`, `sustain` and `release` modes, `loop_start`, `loop_end`, `release_loop` (frames of the sample at its own rate), `crossfade_ms` and `loop_detune`. Settings left out stay as they were. The markers must stay ordered: Start, Loop Start, Loop End, Release Loop and End, inside the sample. One setting out of range refuses the whole command.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `layers` | array of [`LayerId`](#layerid) | yes | The layers to change. |
+| `settings` | [`LayerSettings`](#layersettings) | yes | The settings to set. |
+
+Result: [`ChangeSet`](#changeset).
 
 #### `device.windows`
 
@@ -6287,17 +6635,30 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.set_velocity_amount`](#clipset_velocity_amount) | the query tool's `clip` | `launch.velocity_amount` |
 | [`clip.trim_start`](#cliptrim_start) | the query tool's `clip` | `offset` |
 | [`device.add`](#deviceadd) | the query tool's `track` | `devices` |
+| [`device.add_layers`](#deviceadd_layers) | the query tool's `device` | `layers` |
 | [`device.cut`](#devicecut) | the query tool's `track` | `devices` |
+| [`device.delete_layers`](#devicedelete_layers) | the query tool's `device` | `layers` |
+| [`device.distribute_layers`](#devicedistribute_layers) | the query tool's `device` | `layers` |
 | [`device.duplicate`](#deviceduplicate) | the query tool's `track` | `devices` |
+| [`device.duplicate_layers`](#deviceduplicate_layers) | the query tool's `device` | `layers` |
 | [`device.insert`](#deviceinsert) | the query tool's `track` | `devices` |
+| [`device.insert_layers`](#deviceinsert_layers) | the query tool's `device` | `layers` |
 | [`device.load_preset`](#deviceload_preset) | the query tool's `device` | `params` |
 | [`device.load_sample`](#deviceload_sample) | the query tool's `device` | `media` |
 | [`device.move`](#devicemove) | the query tool's `track` | `devices` |
+| [`device.move_layers`](#devicemove_layers) | the query tool's `device` | `layers` |
+| [`device.normalize_layers`](#devicenormalize_layers) | the query tool's `device` | `layers` |
 | [`device.paste`](#devicepaste) | the query tool's `track` | `devices` |
 | [`device.remove`](#deviceremove) | the query tool's `track` | `devices` |
 | [`device.rename`](#devicerename) | the query tool's `device` | `name` |
+| [`device.rename_layer`](#devicerename_layer) | the query tool's `device` | `layers` |
 | [`device.set_enabled`](#deviceset_enabled) | the query tool's `device` | `enabled` |
 | [`device.set_floating`](#deviceset_floating) | the query tool's `device` | `floating` |
+| [`device.set_layer`](#deviceset_layer) | the query tool's `device` | `layers` |
+| [`device.set_layer_media`](#deviceset_layer_media) | the query tool's `device` | `layers` |
+| [`device.set_layer_options`](#deviceset_layer_options) | the query tool's `device` | `layers` |
+| [`device.set_layer_sample`](#deviceset_layer_sample) | the query tool's `device` | `layers` |
+| [`device.set_layer_zone`](#deviceset_layer_zone) | the query tool's `device` | `layers` |
 | [`device.set_param`](#deviceset_param) | the query tool's `device` | `params` |
 | [`device.set_sample`](#deviceset_sample) | the query tool's `device` | `media` |
 | [`device.set_show_preset_name`](#deviceset_show_preset_name) | the query tool's `device` | `show_preset_name` |
@@ -6307,6 +6668,9 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.set_sidechain_listen`](#deviceset_sidechain_listen) | the query tool's `device` | `sidechain.listen` |
 | [`device.set_sidechain_mix`](#deviceset_sidechain_mix) | the query tool's `device` | `sidechain.mix` |
 | [`device.set_state`](#deviceset_state) | the query tool's `device` | `params` |
+| [`device.snap_layer_markers`](#devicesnap_layer_markers) | the query tool's `device` | `layers` |
+| [`device.sort_layers`](#devicesort_layers) | the query tool's `device` | `layers` |
+| [`device.update_layers`](#deviceupdate_layers) | the query tool's `device` | `layers` |
 | [`edit.redo`](#editredo) | the query tool's `song` | `undo.next_redo` |
 | [`edit.undo`](#editundo) | the query tool's `song` | `undo.next_undo` |
 | [`midi.import_file`](#midiimport_file) | the query tool's `track` | `clips` |
@@ -8849,6 +9213,7 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 | `enabled` | boolean | yes | Whether the device is switched on. A device that's off passes its input through unchanged. |
 | `params` | array of pair of [`ParamId`](#paramid) and number | yes | Parameter values the user has set, in the parameter's own units. Every value is finite. Parameters not listed keep their defaults.  They serialise as a list of `[parameter, value]` pairs, since some formats can't key a map by number. |
 | `floating` | boolean | no | Whether the device floats in a window of its own rather than showing in the Device View (IMP-14, WP-2.5b), where its place in the chain shows as a strip. Only native devices float. Left out of the saved set while docked. Where its window sits isn't part of the document: moving or resizing a window isn't an undo step ([`WindowFrame`]). |
+| `layers` | [`Layers`](#layers) | no | A multisampler's layers and the options of its layer list (WP-5.13, the multisampler spec, R2). Left out of the saved set for a device that holds none. |
 | `media` | [`ContentHash`](#contenthash) or null | no | The media the device plays, by content hash (WP-2.16): the sampler's sample, which the media store holds like a clip's audio (the sampler spec, R11). Left out of the saved set for a device that plays none. |
 | `own_name` | string | no | The device's own name, such as `Auto Filter`, which the title bar shows while Show Preset Name is off. Empty while it's the same as [`name`](Self::name), and left out of the saved set then. |
 | `plugin` | [`PluginState`](#pluginstate) or null | no | A plug-in's own state and where it was loaded from (WP-2.6), as last saved with the set. Left out of the saved set for a native device, and for a plug-in until the set is first saved with it. |
@@ -8877,6 +9242,10 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
     "kind": {
       "$ref": "#/$defs/DeviceKind",
       "description": "What the device is."
+    },
+    "layers": {
+      "$ref": "#/$defs/Layers",
+      "description": "A multisampler's layers and the options of its layer list (WP-5.13, the multisampler spec, R2). Left out of the saved set for a device that holds none."
     },
     "media": {
       "anyOf": [
@@ -9064,6 +9433,7 @@ One device as the Device View shows it.
 | `selected` | boolean | yes | Whether it's the selected device. |
 | `hot_swap` | boolean | yes | Whether it's the device being hot-swapped. |
 | `sidechain` | [`SidechainSection`](#sidechainsection) or null | yes | Its sidechain section, if it has a sidechain input (WP-2.19b). |
+| `multisampler` | [`MultisamplerState`](#multisamplerstate) or null | no | A multisampler's views and selected layers (WP-5.13, R30); left out for any other device. |
 | `panel` | [`DevicePanel`](#devicepanel) or null | no | Its parameters and layout, for the generic UI; left out for a device whose type doesn't describe them. |
 
 <details><summary>JSON Schema</summary>
@@ -9096,6 +9466,17 @@ One device as the Device View shows it.
     "kind": {
       "$ref": "#/$defs/DeviceKind",
       "description": "What it is."
+    },
+    "multisampler": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MultisamplerState"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "A multisampler's views and selected layers (WP-5.13, R30); left out for any other device."
     },
     "name": {
       "description": "Its own name, such as `Auto Filter`.",
@@ -9826,6 +10207,37 @@ The Display & Input page's settings.
 
 </details>
 
+### `Distribution`
+
+How Distribute Ranges spreads layers (R12).
+
+One of:
+
+- `"equally"`: Equal shares of the range of the editor in view.
+- `"around_root_key"`: Key zones split where neighbouring root keys meet.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How Distribute Ranges spreads layers (R12).",
+  "oneOf": [
+    {
+      "const": "equally",
+      "description": "Equal shares of the range of the editor in view.",
+      "type": "string"
+    },
+    {
+      "const": "around_root_key",
+      "description": "Key zones split where neighbouring root keys meet.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `Dither`
 
 The noise added before rounding below 32 bits (the export spec, R7).
@@ -10015,6 +10427,43 @@ What an edit did, and what's selected afterwards.
     "undo_step"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `EditorSize`
+
+How tall the zone editor's rows are (R10): a right-click offers Small, Medium and Large, which change only the view.
+
+One of:
+
+- `"small"`: The smallest rows.
+- `"medium"`: The default rows.
+- `"large"`: The tallest rows.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How tall the zone editor's rows are (R10): a right-click offers Small, Medium and Large, which change only the view.",
+  "oneOf": [
+    {
+      "const": "small",
+      "description": "The smallest rows.",
+      "type": "string"
+    },
+    {
+      "const": "medium",
+      "description": "The default rows.",
+      "type": "string"
+    },
+    {
+      "const": "large",
+      "description": "The tallest rows.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -11506,6 +11955,624 @@ The global launch quantisation and its enabled switch (L-CTRL-010, M-OPT-014): s
 
 </details>
 
+### `Layer`
+
+One sample of a multisample (R2).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | [`LayerId`](#layerid) | yes | The layer's ID, unique within its device. |
+| `name` | string | yes | Its name: the file's name until renamed. |
+| `media` | [`ContentHash`](#contenthash) | yes | Its sample, which the media store holds. |
+| `length` | integer, at least 0 | yes | The sample's length in frames at its own rate. |
+| `sample_rate` | integer, at least 0 | yes | The sample's own rate, in hertz: the unit its markers count in. |
+| `channels` | integer from 0 to 255 | yes | How many channels the sample has. |
+| `key` | [`Zone`](#zone) | yes | The notes it plays over. |
+| `velocity` | [`Zone`](#zone) | yes | The velocities it plays at. |
+| `select` | [`Zone`](#zone) | yes | The Sample Selector values it plays at. |
+| `root_key` | integer from 0 to 255 | yes | The key that plays the sample at its own pitch, 0 to 127 (R15). |
+| `volume` | number | yes | Its level as a linear gain from 0 (−∞ dB) to +24 dB (rule G1). |
+| `start` | integer, at least 0 | yes | Sample Start, in frames of the sample (R16). |
+| `end` | integer, at least 0 | yes | Sample End, in frames of the sample. |
+| `loop_start` | integer, at least 0 | yes | Loop Start, in frames. |
+| `loop_end` | integer, at least 0 | yes | Loop End, in frames. |
+| `release_loop` | integer, at least 0 | yes | Where the release loop begins, between Loop End and Sample End. |
+| `crossfade_ms` | number | no | The loop's crossfade in milliseconds (R19). |
+| `detune` | number | no | Its tuning, in cents from −50 to 50. |
+| `link` | boolean | no | Link: the voice starts at Loop Start instead of Sample Start. The Sample Start it keeps comes back when Link goes off. |
+| `loop_detune` | number | no | How the voice is retuned inside a loop, in cents (R19). |
+| `pan` | number | no | Its place in the stereo field, −50 to 50. |
+| `release` | [`ReleaseMode`](#releasemode) | no | What the note's end does inside a sustain loop (R18). |
+| `sustain` | [`SustainMode`](#sustainmode) | no | The sustain loop's kind (R17). |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "One sample of a multisample (R2).",
+  "properties": {
+    "channels": {
+      "description": "How many channels the sample has.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "crossfade_ms": {
+      "description": "The loop's crossfade in milliseconds (R19).",
+      "format": "double",
+      "type": "number"
+    },
+    "detune": {
+      "description": "Its tuning, in cents from −50 to 50.",
+      "format": "double",
+      "type": "number"
+    },
+    "end": {
+      "description": "Sample End, in frames of the sample.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "id": {
+      "$ref": "#/$defs/LayerId",
+      "description": "The layer's ID, unique within its device."
+    },
+    "key": {
+      "$ref": "#/$defs/Zone",
+      "description": "The notes it plays over."
+    },
+    "length": {
+      "description": "The sample's length in frames at its own rate.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "link": {
+      "description": "Link: the voice starts at Loop Start instead of Sample Start. The Sample Start it keeps comes back when Link goes off.",
+      "type": "boolean"
+    },
+    "loop_detune": {
+      "description": "How the voice is retuned inside a loop, in cents (R19).",
+      "format": "double",
+      "type": "number"
+    },
+    "loop_end": {
+      "description": "Loop End, in frames.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "loop_start": {
+      "description": "Loop Start, in frames.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "media": {
+      "$ref": "#/$defs/ContentHash",
+      "description": "Its sample, which the media store holds."
+    },
+    "name": {
+      "description": "Its name: the file's name until renamed.",
+      "type": "string"
+    },
+    "pan": {
+      "description": "Its place in the stereo field, −50 to 50.",
+      "format": "double",
+      "type": "number"
+    },
+    "release": {
+      "$ref": "#/$defs/ReleaseMode",
+      "default": "off",
+      "description": "What the note's end does inside a sustain loop (R18)."
+    },
+    "release_loop": {
+      "description": "Where the release loop begins, between Loop End and Sample End.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "root_key": {
+      "description": "The key that plays the sample at its own pitch, 0 to 127 (R15).",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "sample_rate": {
+      "description": "The sample's own rate, in hertz: the unit its markers count in.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "select": {
+      "$ref": "#/$defs/Zone",
+      "description": "The Sample Selector values it plays at."
+    },
+    "start": {
+      "description": "Sample Start, in frames of the sample (R16).",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "sustain": {
+      "$ref": "#/$defs/SustainMode",
+      "default": "off",
+      "description": "The sustain loop's kind (R17)."
+    },
+    "velocity": {
+      "$ref": "#/$defs/Zone",
+      "description": "The velocities it plays at."
+    },
+    "volume": {
+      "description": "Its level as a linear gain from 0 (−∞ dB) to +24 dB (rule G1).",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "media",
+    "length",
+    "sample_rate",
+    "channels",
+    "key",
+    "velocity",
+    "select",
+    "root_key",
+    "volume",
+    "start",
+    "end",
+    "loop_start",
+    "loop_end",
+    "release_loop"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `LayerId`
+
+The ID of a layer: a positive integer, unique within its device.
+
+Type: integer, at least 0.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The ID of a layer: a positive integer, unique within its device.",
+  "format": "uint32",
+  "minimum": 0,
+  "type": "integer"
+}
+```
+
+</details>
+
+### `LayerSelectMode`
+
+How `device.select_layers` changes the selection.
+
+One of:
+
+- `"replace"`: The listed layers become the selection (a click).
+- `"add"`: They join it (Shift-click).
+- `"toggle"`: Each leaves the selection if it's in it and joins it if not (Cmd-click).
+- `"same_range"`: The selection becomes every layer whose range in the editor in view equals the first listed layer's (Select All With Same Range).
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How `device.select_layers` changes the selection.",
+  "oneOf": [
+    {
+      "const": "replace",
+      "description": "The listed layers become the selection (a click).",
+      "type": "string"
+    },
+    {
+      "const": "add",
+      "description": "They join it (Shift-click).",
+      "type": "string"
+    },
+    {
+      "const": "toggle",
+      "description": "Each leaves the selection if it's in it and joins it if not (Cmd-click).",
+      "type": "string"
+    },
+    {
+      "const": "same_range",
+      "description": "The selection becomes every layer whose range in the editor in view equals the first listed layer's (Select All With Same Range).",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `LayerSettings`
+
+Settings of a layer to change, each left as it was when `None` (`device.update_layers`).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `crossfade_ms` | number or null | no | The loop's crossfade in milliseconds. |
+| `detune` | number or null | no | Detune, −50 to 50 cents. |
+| `end` | integer or null | no | Sample End, in frames. |
+| `link` | boolean or null | no | Link. |
+| `loop_detune` | number or null | no | The loop's Detune, −50 to 50 cents. |
+| `loop_end` | integer or null | no | Loop End, in frames. |
+| `loop_start` | integer or null | no | Loop Start, in frames. |
+| `pan` | number or null | no | Pan, −50 to 50. |
+| `release` | [`ReleaseMode`](#releasemode) or null | no | Release Mode. |
+| `release_loop` | integer or null | no | The Release Loop point, in frames. |
+| `root_key` | integer or null | no | Root Key, 0 to 127. |
+| `start` | integer or null | no | Sample Start, in frames. |
+| `sustain` | [`SustainMode`](#sustainmode) or null | no | Sustain Mode. |
+| `volume` | number or null | no | Volume, a linear gain from 0 to +24 dB. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "Settings of a layer to change, each left as it was when `None` (`device.update_layers`).",
+  "properties": {
+    "crossfade_ms": {
+      "description": "The loop's crossfade in milliseconds.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "detune": {
+      "description": "Detune, −50 to 50 cents.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "end": {
+      "description": "Sample End, in frames.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "link": {
+      "description": "Link.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "loop_detune": {
+      "description": "The loop's Detune, −50 to 50 cents.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "loop_end": {
+      "description": "Loop End, in frames.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "loop_start": {
+      "description": "Loop Start, in frames.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "pan": {
+      "description": "Pan, −50 to 50.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "release": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ReleaseMode"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Release Mode."
+    },
+    "release_loop": {
+      "description": "The Release Loop point, in frames.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "root_key": {
+      "description": "Root Key, 0 to 127.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "start": {
+      "description": "Sample Start, in frames.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "sustain": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SustainMode"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Sustain Mode."
+    },
+    "volume": {
+      "description": "Volume, a linear gain from 0 to +24 dB.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `LayerSort`
+
+How the layer list is sorted (R11).
+
+One of:
+
+- `"name"`: Alphabetically by name, ignoring case.
+- `"key"`: By the key zone's lowest key.
+- `"velocity"`: By the velocity zone's lowest velocity.
+- `"selector"`: By the sample select zone's lowest value.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How the layer list is sorted (R11).",
+  "oneOf": [
+    {
+      "const": "name",
+      "description": "Alphabetically by name, ignoring case.",
+      "type": "string"
+    },
+    {
+      "const": "key",
+      "description": "By the key zone's lowest key.",
+      "type": "string"
+    },
+    {
+      "const": "velocity",
+      "description": "By the velocity zone's lowest velocity.",
+      "type": "string"
+    },
+    {
+      "const": "selector",
+      "description": "By the sample select zone's lowest value.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `LayerZone`
+
+One layer's zone of a kind (`device.set_layer_zone`).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `layer` | [`LayerId`](#layerid) | yes | The layer. |
+| `zone` | [`Zone`](#zone) | yes | Its new zone. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "One layer's zone of a kind (`device.set_layer_zone`).",
+  "properties": {
+    "layer": {
+      "$ref": "#/$defs/LayerId",
+      "description": "The layer."
+    },
+    "zone": {
+      "$ref": "#/$defs/Zone",
+      "description": "Its new zone."
+    }
+  },
+  "required": [
+    "layer",
+    "zone"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `Layers`
+
+The layers a multisampler holds and the settings of the layer list that aren't parameters (R2, R19, R20, R23).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `list` | array of [`Layer`](#layer) | yes | The layers, in list order. |
+| `last_id` | integer, at least 0 | yes | The last layer ID given out: the next is one more. |
+| `linear_loop_fades` | boolean | no | The title bar's Use Constant Power Fade for Loops being off (R19, R29); constant power is the default. |
+| `ram_mode` | boolean | no | RAM Mode: every layer decoded whole into memory (R23). |
+| `snap` | boolean | no | Snap: markers land on zero crossings (R20). |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "The layers a multisampler holds and the settings of the layer list that aren't parameters (R2, R19, R20, R23).",
+  "properties": {
+    "last_id": {
+      "description": "The last layer ID given out: the next is one more.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "linear_loop_fades": {
+      "description": "The title bar's Use Constant Power Fade for Loops being off (R19, R29); constant power is the default.",
+      "type": "boolean"
+    },
+    "list": {
+      "description": "The layers, in list order.",
+      "items": {
+        "$ref": "#/$defs/Layer"
+      },
+      "type": "array"
+    },
+    "ram_mode": {
+      "description": "RAM Mode: every layer decoded whole into memory (R23).",
+      "type": "boolean"
+    },
+    "snap": {
+      "description": "Snap: markers land on zero crossings (R20).",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "list",
+    "last_id"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `LayersAdded`
+
+What `device.add_layers` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The multisampler. |
+| `layers` | array of [`LayerId`](#layerid) | yes | The new layers, in list order: now the selected layers. |
+| `skipped` | array of string | yes | The files that weren't added, each with why. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.add_layers` returns.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The multisampler."
+    },
+    "layers": {
+      "description": "The new layers, in list order: now the selected layers.",
+      "items": {
+        "$ref": "#/$defs/LayerId"
+      },
+      "type": "array"
+    },
+    "skipped": {
+      "description": "The files that weren't added, each with why.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "device",
+    "layers",
+    "skipped"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `LayersChanged`
+
+What the layer commands return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The multisampler. |
+| `layers` | array of [`LayerId`](#layerid) | yes | The layers the command changed. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What the layer commands return.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The multisampler."
+    },
+    "layers": {
+      "description": "The layers the command changed.",
+      "items": {
+        "$ref": "#/$defs/LayerId"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "device",
+    "layers"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `LayoutNode`
 
 A part of a device's layout.
@@ -11683,6 +12750,37 @@ What `device.load_sample` returns.
     "name"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `LoopKind`
+
+Which of a layer's loops `device.snap_layer_markers` snaps.
+
+One of:
+
+- `"sustain"`: The sustain loop's Loop Start and Loop End.
+- `"release"`: The release loop's point.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Which of a layer's loops `device.snap_layer_markers` snaps.",
+  "oneOf": [
+    {
+      "const": "sustain",
+      "description": "The sustain loop's Loop Start and Loop End.",
+      "type": "string"
+    },
+    {
+      "const": "release",
+      "description": "The release loop's point.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -12394,6 +13492,80 @@ One of:
 
 </details>
 
+### `MultisamplerState`
+
+A multisampler's views and selection, as `device_view.state` reports them (R30).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `tab` | [`SamplerTab`](#samplertab) | yes | The tab in the body. |
+| `zone_editor` | boolean | yes | Whether the zone editor shows above the Device View. |
+| `editor` | [`ZoneKind`](#zonekind) | yes | Which zone editor the Key, Vel and Sel chooser shows (R10). |
+| `size` | [`EditorSize`](#editorsize) | yes | The zone editor's row size. |
+| `auto_select` | boolean | yes | Auto Select (R7). |
+| `selection` | array of [`LayerId`](#layerid) | yes | The selected layers, in list order. |
+| `layers` | integer, at least 0 | yes | How many layers it holds. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A multisampler's views and selection, as `device_view.state` reports them (R30).",
+  "properties": {
+    "auto_select": {
+      "default": false,
+      "description": "Auto Select (R7).",
+      "type": "boolean"
+    },
+    "editor": {
+      "$ref": "#/$defs/ZoneKind",
+      "default": "key",
+      "description": "Which zone editor the Key, Vel and Sel chooser shows (R10)."
+    },
+    "layers": {
+      "description": "How many layers it holds.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "selection": {
+      "description": "The selected layers, in list order.",
+      "items": {
+        "$ref": "#/$defs/LayerId"
+      },
+      "type": "array"
+    },
+    "size": {
+      "$ref": "#/$defs/EditorSize",
+      "default": "medium",
+      "description": "The zone editor's row size."
+    },
+    "tab": {
+      "$ref": "#/$defs/SamplerTab",
+      "default": "sample",
+      "description": "The tab in the body."
+    },
+    "zone_editor": {
+      "default": false,
+      "description": "Whether the zone editor shows above the Device View.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "tab",
+    "zone_editor",
+    "editor",
+    "size",
+    "auto_select",
+    "selection",
+    "layers"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `NewDevice`
 
 The device `device.add` adds.
@@ -12435,6 +13607,37 @@ The device `device.add` adds.
     "name"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `Normalize`
+
+What `device.normalize_layers` sets.
+
+One of:
+
+- `"volume"`: Each layer's Volume, so its peak reaches 0 dBFS.
+- `"pan"`: Each layer's Pan, so its channels play at equal level.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.normalize_layers` sets.",
+  "oneOf": [
+    {
+      "const": "volume",
+      "description": "Each layer's Volume, so its peak reaches 0 dBFS.",
+      "type": "string"
+    },
+    {
+      "const": "pan",
+      "description": "Each layer's Pan, so its channels play at equal level.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -14356,6 +15559,49 @@ What `set.recover` returns.
 
 </details>
 
+### `ReleaseMode`
+
+What a note's end does while a sustain loop is on (R18).
+
+One of:
+
+- `"off"`: Keeps the voice in the sustain loop until the release ends.
+- `"release"`: Plays on through Loop End to Sample End.
+- `"loop"`: Plays on, then loops from the release loop point to Sample End.
+- `"back_and_forth"`: As `loop`, back and forth.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a note's end does while a sustain loop is on (R18).",
+  "oneOf": [
+    {
+      "const": "off",
+      "description": "Keeps the voice in the sustain loop until the release ends.",
+      "type": "string"
+    },
+    {
+      "const": "release",
+      "description": "Plays on through Loop End to Sample End.",
+      "type": "string"
+    },
+    {
+      "const": "loop",
+      "description": "Plays on, then loops from the release loop point to Sample End.",
+      "type": "string"
+    },
+    {
+      "const": "back_and_forth",
+      "description": "As `loop`, back and forth.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `Rendered`
 
 Where rendered audio came from.
@@ -14579,6 +15825,55 @@ The recording under way, in `transport.state`.
     "session_slots"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `SamplerTab`
+
+The tab a multisampler shows in its body (R1); Zone isn't one, since it opens the zone editor above the Device View instead.
+
+One of:
+
+- `"sample"`: The selected layer's waveform and playback.
+- `"pitch_osc"`: Pitch and the modulation oscillator.
+- `"filter_global"`: The filter and the global controls.
+- `"modulation"`: The auxiliary envelope and the LFOs.
+- `"midi"`: The MIDI sources.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The tab a multisampler shows in its body (R1); Zone isn't one, since it opens the zone editor above the Device View instead.",
+  "oneOf": [
+    {
+      "const": "sample",
+      "description": "The selected layer's waveform and playback.",
+      "type": "string"
+    },
+    {
+      "const": "pitch_osc",
+      "description": "Pitch and the modulation oscillator.",
+      "type": "string"
+    },
+    {
+      "const": "filter_global",
+      "description": "The filter and the global controls.",
+      "type": "string"
+    },
+    {
+      "const": "modulation",
+      "description": "The auxiliary envelope and the LFOs.",
+      "type": "string"
+    },
+    {
+      "const": "midi",
+      "description": "The MIDI sources.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -15480,6 +16775,43 @@ A coarse spectrum.
     "bands"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `SustainMode`
+
+What a voice does between Sample Start and Sample End while a note is held (R17).
+
+One of:
+
+- `"off"`: Plays straight through.
+- `"loop"`: Plays to Loop End, goes on from Loop Start, and repeats.
+- `"back_and_forth"`: Plays to Loop End, then backwards to Loop Start, and repeats.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a voice does between Sample Start and Sample End while a note is held (R17).",
+  "oneOf": [
+    {
+      "const": "off",
+      "description": "Plays straight through.",
+      "type": "string"
+    },
+    {
+      "const": "loop",
+      "description": "Plays to Loop End, goes on from Loop Start, and repeats.",
+      "type": "string"
+    },
+    {
+      "const": "back_and_forth",
+      "description": "Plays to Loop End, then backwards to Loop Start, and repeats.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -16783,6 +18115,100 @@ Where a floating device's window sits and how big it is (IMP-14, WP-2.5b), in po
     "height"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `Zone`
+
+A range of values with a fade at each end (R5): the layer is silent at the lowest and highest value when it has a fade there, and reaches full level `fade_low` values above the lowest and `fade_high` below the highest.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `low` | integer from 0 to 255 | yes | The lowest value in the zone. |
+| `high` | integer from 0 to 255 | yes | The highest value in the zone. |
+| `fade_high` | integer from 0 to 255 | no | How many values the fade at the high end spans; 0 for none. |
+| `fade_low` | integer from 0 to 255 | no | How many values the fade at the low end spans; 0 for none. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "A range of values with a fade at each end (R5): the layer is silent at the lowest and highest value when it has a fade there, and reaches full level `fade_low` values above the lowest and `fade_high` below the highest.",
+  "properties": {
+    "fade_high": {
+      "description": "How many values the fade at the high end spans; 0 for none.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "fade_low": {
+      "description": "How many values the fade at the low end spans; 0 for none.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "high": {
+      "description": "The highest value in the zone.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "low": {
+      "description": "The lowest value in the zone.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "low",
+    "high"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ZoneKind`
+
+Which of a layer's three zones.
+
+One of:
+
+- `"key"`: The notes it plays over, 0 to 127.
+- `"velocity"`: The note-on velocities it plays at, 1 to 127.
+- `"select"`: The Sample Selector values it plays at, 0 to 127.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Which of a layer's three zones.",
+  "oneOf": [
+    {
+      "const": "key",
+      "description": "The notes it plays over, 0 to 127.",
+      "type": "string"
+    },
+    {
+      "const": "velocity",
+      "description": "The note-on velocities it plays at, 1 to 127.",
+      "type": "string"
+    },
+    {
+      "const": "select",
+      "description": "The Sample Selector values it plays at, 0 to 127.",
+      "type": "string"
+    }
+  ]
 }
 ```
 

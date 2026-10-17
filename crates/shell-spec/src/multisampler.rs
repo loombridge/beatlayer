@@ -198,7 +198,7 @@ pub struct SetViewArgs {
 /// How `device.select_layers` changes the selection.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum SelectMode {
+pub enum LayerSelectMode {
     /// The listed layers become the selection (a click).
     #[default]
     Replace,
@@ -224,7 +224,7 @@ pub struct SelectLayersArgs {
     pub layers: Vec<LayerId>,
     /// How they change the selection.
     #[serde(default)]
-    pub mode: SelectMode,
+    pub mode: LayerSelectMode,
 }
 
 /// A multisampler's views and selection, as `device_view.state` reports

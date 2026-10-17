@@ -15,7 +15,7 @@ use bl_model::{
 };
 use bl_shell_spec::multisampler::{
     self as ids, AddLayersArgs, LayersAdded, LayersChanged, LoopKind, MultisamplerState,
-    Normalize, NormalizeArgs, SelectLayersArgs, SelectMode, SetLayerArgs, SetLayerSampleArgs,
+    Normalize, NormalizeArgs, SelectLayersArgs, LayerSelectMode, SetLayerArgs, SetLayerSampleArgs,
     SetViewArgs, SnapMarkersArgs,
 };
 
@@ -451,13 +451,13 @@ impl Shell {
             .collect();
         let picked: BTreeSet<LayerId> = args.layers.iter().copied().collect();
         let next: BTreeSet<LayerId> = match args.mode {
-            SelectMode::Replace if args.layers.is_empty() => {
+            LayerSelectMode::Replace if args.layers.is_empty() => {
                 held.list.iter().map(|l| l.id).collect()
             }
-            SelectMode::Replace => picked,
-            SelectMode::Add => &now | &picked,
-            SelectMode::Toggle => &now ^ &picked,
-            SelectMode::SameRange => {
+            LayerSelectMode::Replace => picked,
+            LayerSelectMode::Add => &now | &picked,
+            LayerSelectMode::Toggle => &now ^ &picked,
+            LayerSelectMode::SameRange => {
                 let kind = self.devices.multisampler_view(device).editor;
                 let zone = |l: &Layer| match kind {
                     ZoneKind::Key => l.key,

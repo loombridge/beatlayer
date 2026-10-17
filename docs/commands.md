@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-333 commands in 31 areas.
+335 commands in 31 areas.
 
 ## Permission classes
 
@@ -132,6 +132,7 @@ Each command has:
 | [`clip.set_envelope_linked`](#clipset_envelope_linked) | Link Envelope | `edit` |  |  |
 | [`clip.set_fades`](#clipset_fades) | Set Clip Fades | `edit` |  |  |
 | [`clip.set_gain`](#clipset_gain) | Set Clip Gain | `edit` |  |  |
+| [`clip.set_launch_mode`](#clipset_launch_mode) | Set Clip Launch Mode | `edit` |  |  |
 | [`clip.set_launch_quantization`](#clipset_launch_quantization) | Set Clip Launch Quantization | `edit` |  |  |
 | [`clip.set_legato`](#clipset_legato) | Set Clip Legato | `edit` |  |  |
 | [`clip.set_length`](#clipset_length) | Resize Clip | `edit` |  |  |
@@ -270,6 +271,7 @@ Each command has:
 | [`session.overdub`](#sessionoverdub) | Overdub Slot | `external` |  |  |
 | [`session.record`](#sessionrecord) | Record to Session | `external` | `Cmd+Shift+F9`; `Cmd+Shift+F9` | `Ctrl+Shift+F9`; `Ctrl+Shift+F9` |
 | [`session.record_slot`](#sessionrecord_slot) | Record into Slot | `external` |  |  |
+| [`session.release`](#sessionrelease) | Release Clip Launch Button | `read` |  |  |
 | [`session.scroll`](#sessionscroll) | Scroll the Session View | `read` |  |  |
 | [`session.select`](#sessionselect) | Select in the Session View | `read` |  |  |
 | [`session.select_all`](#sessionselect_all) | Select All Slots | `read` | `Cmd+A` | `Ctrl+A` |
@@ -2172,6 +2174,23 @@ Arguments:
 |---|---|---|---|
 | `clip` | [`ClipId`](#clipid) | yes | The audio clip. |
 | `gain` | number, at least 0 | yes | The gain: 1 is 0 dB, 0.5 about −6 dB, and 0 silence. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `clip.set_launch_mode`
+
+**Set Clip Launch Mode**. Permission: `edit`. Contexts: `clip-view`.
+
+Sets what a press and a release of a Session clip's launch button do (a clip that sits in a slot; `clip` is its ID): `trigger` (the default) starts the clip on the launch grid and it plays on, a second press restarts it; `gate` starts it on a press and stops it on the grid after the release; `toggle` starts it on a press and the next press stops it on the grid; `repeat` starts it on a press and restarts it every launch quantisation step while the press lasts, then stops it on the grid after the release. A new clip starts with the Default Launch Mode setting. The mode is read at each press and release, so changing it doesn't touch a clip that is playing.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The clip. |
+| `mode` | [`LaunchMode`](#launchmode) | yes | What a press and a release of its launch button do. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -4515,7 +4534,7 @@ Result: [`LaunchSettings`](#launchsettings).
 
 **Launch Clip**. Permission: `read`. Contexts: `session`.
 
-Launches the clip in a track's Session slot at `scene`, as clicking the slot's launch button does. While the song plays the clip starts on the next line of the global launch quantisation grid, and until then the slot reads `queued`; while it's stopped the transport starts at once from the Arrangement position and the clip starts with it. A clip already playing on that track stops where the new one starts. The engine publishes the slots' states with the playhead, so the UI can draw them. It changes nothing in the set.
+Launches the clip in a track's Session slot at `scene`, as clicking the slot's launch button does. While the song plays the clip starts on the next line of the global launch quantisation grid, and until then the slot reads `queued`; while it's stopped the transport starts at once from the Arrangement position and the clip starts with it. A clip already playing on that track stops where the new one starts. The clip's launch mode (`clip.set_launch_mode`) says what the press does next: a Trigger, Gate or Repeat clip that already plays restarts on the grid, and a Toggle clip that plays is queued to stop. A Gate or Repeat clip stops when `session.release` follows. The engine publishes the slots' states with the playhead, so the UI can draw them. It changes nothing in the set.
 
 Default keys: none.
 
@@ -4610,6 +4629,23 @@ Arguments:
 | `scene` | [`SceneId`](#sceneid) | yes | The scene whose slot it is. |
 
 Result: [`RecordingStarted`](#recordingstarted).
+
+#### `session.release`
+
+**Release Clip Launch Button**. Permission: `read`. Contexts: `session`.
+
+Ends the press that `session.launch` began on the slot at `track` and `scene`, as letting go of the slot's launch button does. A clip in Gate mode stops on the next line of its launch quantisation grid, or at once with quantisation off, and a Repeat clip stops the same way after the quantum it is playing; a release never cancels a launch still queued, so the clip plays one quantum before it stops. A Trigger or Toggle clip ignores the release, and so does a slot that isn't playing. The clip's mode is read at the release. It changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track whose slot it is. |
+| `scene` | [`SceneId`](#sceneid) | yes | The scene whose slot it is. |
+
+Result: nothing (`null`).
 
 #### `session.scroll`
 
@@ -6196,6 +6232,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.set_envelope_linked`](#clipset_envelope_linked) | the query tool's `clip` | `envelopes` |
 | [`clip.set_fades`](#clipset_fades) | the query tool's `clip` | `data.audio.fade_in` |
 | [`clip.set_gain`](#clipset_gain) | the query tool's `clip` | `data.audio.gain` |
+| [`clip.set_launch_mode`](#clipset_launch_mode) | the query tool's `clip` | `launch.mode` |
 | [`clip.set_launch_quantization`](#clipset_launch_quantization) | the query tool's `clip` | `launch.quantization` |
 | [`clip.set_legato`](#clipset_legato) | the query tool's `clip` | `launch.legato` |
 | [`clip.set_length`](#clipset_length) | the query tool's `clip` | `length` |
@@ -8328,6 +8365,7 @@ A Session clip's own launch settings (the Clip View's Launch panel, WP-3.4). The
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `legato` | boolean | no | Legato: the clip takes over the play position of the clip playing on its track when it launches. |
+| `mode` | [`LaunchMode`](#launchmode) | no | What a press and a release of the clip's launch button do (WP-3.3). |
 | `quantization` | [`LaunchQuantization`](#launchquantization) or null | no | The clip's own launch quantisation; `null` (left out) follows the global one, which Live's chooser calls "Global". |
 | `velocity_amount` | number | no | How much the velocity of a note that launches the clip changes its volume, from 0 (none, the default) to 1 (100 %). |
 
@@ -8341,6 +8379,11 @@ A Session clip's own launch settings (the Clip View's Launch panel, WP-3.4). The
       "default": false,
       "description": "Legato: the clip takes over the play position of the clip playing on its track when it launches.",
       "type": "boolean"
+    },
+    "mode": {
+      "$ref": "#/$defs/LaunchMode",
+      "default": "trigger",
+      "description": "What a press and a release of the clip's launch button do (WP-3.3)."
     },
     "quantization": {
       "anyOf": [

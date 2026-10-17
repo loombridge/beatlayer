@@ -25,7 +25,7 @@ use core::fmt;
 use bl_commands::Context::{self, Global, Session};
 use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_core::time::{Bpm, Frames, SampleRate, TempoMap, Ticks, TimeSignature, TimeSignatureMap};
-use bl_model::{LaunchSettings, SceneId, TrackId};
+use bl_model::{LaunchMode, LaunchQuantization, LaunchSettings, SceneId, TrackId};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
@@ -113,6 +113,14 @@ pub enum SessionCommand {
         /// The scene whose slot it is.
         scene: SceneId,
     },
+    /// Releases the launch button of a slot: a Gate or Repeat clip stops on
+    /// the grid, and the other modes ignore it (WP-3.3).
+    Release {
+        /// The track whose slot it is.
+        track: TrackId,
+        /// The scene whose slot it is.
+        scene: SceneId,
+    },
     /// Launches every clip of a scene, all on one grid line.
     LaunchScene(SceneId),
     /// Stops a track's playing clip on the next grid line.
@@ -177,16 +185,41 @@ struct Slot {
     scene: SceneId,
     /// The song frame the clip plays from, while it plays.
     started: Option<Frames>,
-    /// The frame it changes at: where a queued launch plays from, or where
-    /// a queued stop lands.
+    /// The frame it changes at: where a queued launch plays from, where a
+    /// queued restart plays again from, or where a queued stop lands.
     due: Option<Frames>,
+    /// Whether the change at `due` of a slot that plays is a restart rather
+    /// than a stop (the launch quantisation spec, R17).
+    restart: bool,
+    /// A stop to queue once the launch or restart at `due` has happened:
+    /// a Gate or Repeat button was released before the clip started (R19).
+    then_stop: Option<Frames>,
+    /// The grid tick the last launch or restart was queued for, which the
+    /// stop after it and Repeat's next line are counted from.
+    line: Ticks,
+    /// Whether a Repeat button is held, so the clip restarts on each line
+    /// (R21).
+    repeating: bool,
+    /// Whether the queued restart is one Repeat queued itself, which a
+    /// release turns into the stop (R21).
+    auto: bool,
 }
 
 impl Slot {
+    /// Makes a clip that plays stop at `at`, dropping the restart, the stop
+    /// behind it and the Repeat that were waiting.
+    fn stop_at(&mut self, at: Frames) {
+        self.due = Some(at);
+        self.restart = false;
+        self.then_stop = None;
+        self.repeating = false;
+        self.auto = false;
+    }
+
     /// What the slot is doing, for the UI.
     fn state(self) -> SlotState {
         match (self.started, self.due) {
-            (Some(_), Some(_)) => SlotState::QueuedToStop,
+            (Some(_), Some(_)) if !self.restart => SlotState::QueuedToStop,
             (Some(_), None) => SlotState::Playing,
             _ => SlotState::Queued,
         }
@@ -251,41 +284,90 @@ impl SessionLauncher {
         self.marks.clear();
     }
 
-    /// The frame a launch or a stop asked for now waits for: the next line
-    /// of the quantisation grid, at once while the song is stopped or
-    /// quantisation is off. The one place the grid is worked out.
-    pub(crate) fn frame_for(&self, playhead: Playhead<'_>) -> Frames {
+    /// The tick of the grid line a launch or a stop asked for now waits for:
+    /// the next line of the quantisation grid, at once while the song is
+    /// stopped or quantisation is off. The one place the grid is worked out.
+    fn line_for(&self, playhead: Playhead<'_>) -> Ticks {
         if !playhead.wait_for_grid {
-            return playhead.frames(playhead.position);
+            return playhead.position;
         }
-        playhead.frames(
-            self.settings
-                .next_line(playhead.position, playhead.signatures),
-        )
+        self.settings
+            .next_line(playhead.position, playhead.signatures)
     }
 
-    /// Launches the clip in `(track, scene)`. While the song plays it plays
-    /// from the next grid line; while it's stopped, the caller starts the
-    /// transport and the clip plays from the playhead at once.
-    pub(crate) fn launch(&mut self, track: TrackId, scene: SceneId, playhead: Playhead<'_>) {
+    /// The frame a launch or a stop asked for now waits for.
+    pub(crate) fn frame_for(&self, playhead: Playhead<'_>) -> Frames {
+        playhead.frames(self.line_for(playhead))
+    }
+
+    /// Whether Repeat has a step to repeat at: with quantisation off it acts
+    /// as Trigger (R21).
+    fn steps(&self) -> bool {
+        self.settings.enabled && self.settings.quantization != LaunchQuantization::None
+    }
+
+    /// A press of the launch button of `(track, scene)`, whose clip has
+    /// launch mode `mode`: what it does is the mode's rule (R12 to R21).
+    pub(crate) fn press(
+        &mut self,
+        track: TrackId,
+        scene: SceneId,
+        mode: LaunchMode,
+        playhead: Playhead<'_>,
+    ) {
+        let line = self.line_for(playhead);
+        let at = playhead.frames(line);
+        self.press_at(track, scene, mode, line, at);
+    }
+
+    /// A release of the launch button of `(track, scene)`, whose clip has
+    /// launch mode `mode`. Only Gate and Repeat act on it (R18, R21).
+    pub(crate) fn release(
+        &mut self,
+        track: TrackId,
+        scene: SceneId,
+        mode: LaunchMode,
+        playhead: Playhead<'_>,
+    ) {
+        if !matches!(mode, LaunchMode::Gate | LaunchMode::Repeat) {
+            return;
+        }
+        let settings = self.settings;
         let at = self.frame_for(playhead);
-        self.launch_at(track, scene, at);
+        let Some(slot) = self.find_mut(track, scene) else {
+            return;
+        };
+        slot.repeating = false;
+        if slot.auto && slot.restart && slot.due.is_some() {
+            // The clip plays out the quantum it is in (R21).
+            slot.stop_at(at);
+        } else if slot.started.is_none() || slot.restart {
+            // The release never cancels a queued launch: the stop lands on
+            // the line after it, so the clip plays one quantum (R19).
+            let after = settings.next_line(slot.line, playhead.signatures);
+            slot.then_stop = Some(playhead.frames(after));
+        } else {
+            // Keep the earlier of a stop already queued and this one.
+            slot.stop_at(slot.due.map_or(at, |due| due.min(at)));
+        }
     }
 
-    /// Launches every slot of `scene` that `slots` names (`(scene, track)`
-    /// pairs, from the running program), all on one frame: a scene's clips
-    /// start together (observed in Live 12.4.3).
-    /// Returns the frame they start on, which is where the scene's own
-    /// tempo and signature apply.
+    /// Launches every slot of `scene` that `slots` names (`(scene, track,
+    /// mode)` triples, from the running program), all on one frame: a scene's
+    /// clips start together (observed in Live 12.4.3). A scene launch acts
+    /// as a Trigger press on each, whatever the clip's mode. Returns the
+    /// frame they start on, which is where the scene's own tempo and
+    /// signature apply.
     pub(crate) fn launch_scene(
         &mut self,
         scene: SceneId,
-        slots: &[(SceneId, TrackId)],
+        slots: &[(SceneId, TrackId, LaunchMode)],
         playhead: Playhead<'_>,
     ) -> Frames {
-        let at = self.frame_for(playhead);
-        for &(_, track) in slots {
-            self.launch_at(track, scene, at);
+        let line = self.line_for(playhead);
+        let at = playhead.frames(line);
+        for &(_, track, _) in slots {
+            self.press_at(track, scene, LaunchMode::Trigger, line, at);
         }
         at
     }
@@ -297,12 +379,16 @@ impl SessionLauncher {
     }
 
     /// Moves the playing slot of each track that has a slot in `slots`
-    /// (`(scene, track)` pairs of the destination scene) to that scene,
+    /// (`(scene, track, mode)` triples of the destination scene) to that scene,
     /// keeping when it started and any stop it waits for. A slot still
     /// waiting to start stays where it is.
-    pub(crate) fn move_to_scene(&mut self, scene: SceneId, slots: &[(SceneId, TrackId)]) {
+    pub(crate) fn move_to_scene(
+        &mut self,
+        scene: SceneId,
+        slots: &[(SceneId, TrackId, LaunchMode)],
+    ) {
         for slot in &mut self.slots {
-            if slot.started.is_some() && slots.iter().any(|&(_, track)| track == slot.track) {
+            if slot.started.is_some() && slots.iter().any(|&(_, track, _)| track == slot.track) {
                 slot.scene = scene;
             }
         }
@@ -334,6 +420,7 @@ impl SessionLauncher {
         for slot in &mut self.slots {
             slot.started = slot.started.map(&convert);
             slot.due = slot.due.map(&convert);
+            slot.then_stop = slot.then_stop.map(&convert);
         }
         for (_, due) in &mut self.scenes {
             *due = convert(*due);
@@ -343,27 +430,66 @@ impl SessionLauncher {
         }
     }
 
-    /// Launches `(track, scene)` to play from `at` (already worked out, so
-    /// a scene's slots share one frame).
+    /// Launches `(track, scene)` to play from `at`, already worked out: a
+    /// recorded slot that plays on from where its recording ended (WP-3.11).
+    /// A slot the launcher already holds is left alone. It starts in the
+    /// block it is asked in, so no release reads its grid line first.
     pub(crate) fn launch_at(&mut self, track: TrackId, scene: SceneId, at: Frames) {
-        // A slot that is already queued or playing is left alone: a second
-        // launch of the same slot changes nothing, for now (the launch modes,
-        // WP-3.3, decide what a second press means), and a queued slot keeps
-        // the frame it was queued for (R4). One entry per slot.
-        if self.find_mut(track, scene).is_some() {
+        if self.find_mut(track, scene).is_none() {
+            self.press_at(track, scene, LaunchMode::Trigger, Ticks::ZERO, at);
+        }
+    }
+
+    /// A press of `(track, scene)`'s launch button with its grid line already
+    /// worked out, so a scene's slots share one frame.
+    fn press_at(
+        &mut self,
+        track: TrackId,
+        scene: SceneId,
+        mode: LaunchMode,
+        line: Ticks,
+        at: Frames,
+    ) {
+        let repeating = mode == LaunchMode::Repeat && self.steps();
+        let Some(slot) = self.find_mut(track, scene) else {
+            self.clear_way_for(track, scene, at);
+            if self.slots.len() == self.slots.capacity() {
+                self.overflowed += 1;
+                return;
+            }
+            self.slots.push(Slot {
+                track,
+                scene,
+                started: None,
+                due: Some(at),
+                restart: false,
+                then_stop: None,
+                line,
+                repeating,
+                auto: false,
+            });
+            return;
+        };
+        slot.then_stop = None;
+        slot.auto = false;
+        slot.repeating = repeating;
+        if slot.started.is_none() {
+            // Still queued to start: it keeps the frame it was queued for
+            // (R4), and a second press changes nothing.
             return;
         }
-        self.clear_way_for(track, scene, at);
-        if self.slots.len() == self.slots.capacity() {
-            self.overflowed += 1;
-            return;
+        let queued_stop = slot.due.is_some() && !slot.restart;
+        if mode == LaunchMode::Toggle && !queued_stop {
+            // Toggle: the press after a start queues the stop (R20).
+            slot.stop_at(at);
+        } else if !(slot.due.is_some() && slot.restart) {
+            // Trigger, Gate and Repeat restart the clip on the grid; so does
+            // a Toggle press while its stop is queued (R17, R20).
+            slot.due = Some(at);
+            slot.restart = true;
+            slot.line = line;
+            self.clear_way_for(track, scene, at);
         }
-        self.slots.push(Slot {
-            track,
-            scene,
-            started: None,
-            due: Some(at),
-        });
     }
 
     /// Makes the track's other slots give way at `at`: the clip playing
@@ -376,7 +502,7 @@ impl SessionLauncher {
                 continue;
             }
             match slot.started {
-                Some(_) => slot.due = Some(at),
+                Some(_) => slot.stop_at(at),
                 None => slot.due = None,
             }
         }
@@ -405,7 +531,10 @@ impl SessionLauncher {
             }
             match slot.started {
                 // Keep the earlier of a stop already queued and this one.
-                Some(_) => slot.due = Some(slot.due.map_or(at, |due| due.min(at))),
+                Some(_) => slot.stop_at(match (slot.due, slot.restart) {
+                    (Some(due), false) => due.min(at),
+                    _ => at,
+                }),
                 None => slot.due = None,
             }
         }
@@ -476,13 +605,21 @@ impl SessionLauncher {
                 continue;
             }
             slot.due = None;
-            if slot.started.is_none() {
-                // The queued launch plays from the frame it was queued for,
-                // and takes its track over from the Arrangement there.
+            if slot.started.is_none() || slot.restart {
+                // The queued launch or restart plays from the frame it was
+                // queued for, and takes its track over from the Arrangement
+                // there; a stop queued behind it follows.
                 slot.started = Some(due);
+                slot.restart = false;
+                slot.auto = false;
+                let then_stop = slot.then_stop.take();
                 let track = slot.track;
+                if let Some(stop) = then_stop {
+                    slot.due = Some(stop);
+                } else {
+                    i += 1;
+                }
                 self.take_over(track);
-                i += 1;
             } else {
                 // A queued stop: the clip is done.
                 self.slots.swap_remove(i);
@@ -495,6 +632,24 @@ impl SessionLauncher {
                 self.take_over(track);
             } else {
                 i += 1;
+            }
+        }
+    }
+
+    /// Queues the next restart of every slot whose Repeat button is held and
+    /// whose clip plays, one quantisation step after the last (R21). The
+    /// processor calls it after [`Self::apply_due`].
+    pub(crate) fn repeat(&mut self, playhead: Playhead<'_>) {
+        if !self.steps() {
+            return;
+        }
+        let settings = self.settings;
+        for slot in &mut self.slots {
+            if slot.repeating && slot.started.is_some() && slot.due.is_none() {
+                slot.line = settings.next_line(slot.line, playhead.signatures);
+                slot.due = Some(playhead.frames(slot.line));
+                slot.restart = true;
+                slot.auto = true;
             }
         }
     }
@@ -644,6 +799,10 @@ pub fn command_from_args(id: &str, args: Value) -> Result<SessionCommand, RunErr
             let LaunchArgs { track, scene } = serde_json::from_value(args).map_err(invalid)?;
             Ok(SessionCommand::Launch { track, scene })
         }
+        Action::Release => {
+            let LaunchArgs { track, scene } = serde_json::from_value(args).map_err(invalid)?;
+            Ok(SessionCommand::Release { track, scene })
+        }
         Action::LaunchScene => {
             let LaunchSceneArgs { scene } = serde_json::from_value(args).map_err(invalid)?;
             Ok(SessionCommand::LaunchScene(scene))
@@ -701,6 +860,8 @@ impl std::error::Error for RunError {}
 enum Action {
     /// [`SessionCommand::Launch`].
     Launch,
+    /// [`SessionCommand::Release`].
+    Release,
     /// [`SessionCommand::LaunchScene`].
     LaunchScene,
     /// [`SessionCommand::StopTrack`].
@@ -738,7 +899,7 @@ impl Entry {
             spec = spec.binding(key);
         }
         spec = match self.action {
-            Action::Launch => spec.args::<LaunchArgs>(),
+            Action::Launch | Action::Release => spec.args::<LaunchArgs>(),
             Action::LaunchScene => spec.args::<LaunchSceneArgs>(),
             Action::StopTrack => spec.args::<StopTrackArgs>(),
             Action::StopAll | Action::BackToArrangement => spec.args::<NoArgs>(),
@@ -762,8 +923,26 @@ const ENTRIES: &[Entry] = &[
             the global launch quantisation grid, and until then the slot reads `queued`; while \
             it's stopped the transport starts at once from the Arrangement position and the \
             clip starts with it. A clip already playing on that track stops where the new one \
-            starts. The engine publishes the slots' states with the playhead, so the UI can \
-            draw them. It changes nothing in the set.",
+            starts. The clip's launch mode (`clip.set_launch_mode`) says what the press does \
+            next: a Trigger, Gate or Repeat clip that already plays restarts on the grid, and a \
+            Toggle clip that plays is queued to stop. A Gate or Repeat clip stops when \
+            `session.release` follows. The engine publishes the slots' states with the \
+            playhead, so the UI can draw them. It changes nothing in the set.",
+    },
+    Entry {
+        id: "session.release",
+        action: Action::Release,
+        label: "Release Clip Launch Button",
+        contexts: &[Session],
+        key: None,
+        description: "Ends the press that `session.launch` began on the slot at `track` and \
+            `scene`, as letting go of the slot's launch button does. A clip in Gate mode stops \
+            on the next line of its launch quantisation grid, or at once with quantisation off, \
+            and a Repeat clip stops the same way after the quantum it is playing; a release \
+            never cancels a launch still queued, so the clip plays one quantum before it \
+            stops. A Trigger or Toggle clip ignores the release, and so does a slot that \
+            isn't playing. The clip's mode is read at the release. It changes nothing in the \
+            set.",
     },
     Entry {
         id: "session.launch_scene",
@@ -872,20 +1051,16 @@ mod tests {
         let mut launcher = SessionLauncher::new(16);
         // A quarter in: the 1-bar grid's next line is the bar line.
         let at = Ticks::QUARTER;
-        launcher.launch(track, scene, playhead(&tempo, &sigs, true, at));
+        launcher.press(
+            track,
+            scene,
+            LaunchMode::Trigger,
+            playhead(&tempo, &sigs, true, at),
+        );
         assert_eq!(launcher.state_of(track, scene), Some(SlotState::Queued));
         let due = tempo.ticks_to_frames(Ticks::WHOLE, SampleRate::HZ_48000);
         assert_eq!(launcher.next_due(Frames::ZERO), Some(due));
         launcher.apply_due(due);
-        assert_eq!(launcher.state_of(track, scene), Some(SlotState::Playing));
-        // Spec: launch-quantisation R12. A second launch of the slot that
-        // plays changes nothing: what a second press does is the launch
-        // mode's business (WP-3.3).
-        launcher.launch(
-            track,
-            scene,
-            playhead(&tempo, &sigs, true, Ticks::WHOLE * 3),
-        );
         assert_eq!(launcher.state_of(track, scene), Some(SlotState::Playing));
         assert_eq!(launcher.next_due(Frames::ZERO), None);
         let mut playing = Vec::with_capacity(4);
@@ -900,7 +1075,12 @@ mod tests {
         );
         // While stopped it plays at once.
         let (other, scene2) = ids();
-        launcher.launch(other, scene2, playhead(&tempo, &sigs, false, at));
+        launcher.press(
+            other,
+            scene2,
+            LaunchMode::Trigger,
+            playhead(&tempo, &sigs, false, at),
+        );
         assert_eq!(
             launcher.state_of(other, scene2),
             Some(SlotState::Queued),
@@ -918,8 +1098,18 @@ mod tests {
         let tempo = tempo();
         let sigs = TimeSignatureMap::default();
         let mut launcher = SessionLauncher::new(16);
-        launcher.launch(track, scene, playhead(&tempo, &sigs, true, Ticks::ZERO));
-        launcher.launch(track, other, playhead(&tempo, &sigs, true, Ticks::QUARTER));
+        launcher.press(
+            track,
+            scene,
+            LaunchMode::Trigger,
+            playhead(&tempo, &sigs, true, Ticks::ZERO),
+        );
+        launcher.press(
+            track,
+            other,
+            LaunchMode::Trigger,
+            playhead(&tempo, &sigs, true, Ticks::QUARTER),
+        );
         assert_eq!(
             launcher.state_of(track, scene),
             None,
@@ -932,7 +1122,12 @@ mod tests {
         let bar = tempo.ticks_to_frames(Ticks::WHOLE, SampleRate::HZ_48000);
         launcher.apply_due(bar);
         assert_eq!(launcher.state_of(track, other), Some(SlotState::Playing));
-        launcher.launch(track, third, playhead(&tempo, &sigs, true, Ticks::WHOLE));
+        launcher.press(
+            track,
+            third,
+            LaunchMode::Trigger,
+            playhead(&tempo, &sigs, true, Ticks::WHOLE),
+        );
         assert_eq!(
             launcher.state_of(track, other),
             Some(SlotState::QueuedToStop)
@@ -946,15 +1141,24 @@ mod tests {
     #[test]
     fn a_second_launch_of_the_same_slot_leaves_one_entry() {
         // Spec: launch-quantisation R12. A second launch of a slot that is
-        // queued or playing changes nothing, so the launcher holds one entry
-        // per slot.
+        // queued changes nothing, so the launcher holds one entry per slot.
         let (track, scene) = ids();
         let tempo = tempo();
         let sigs = TimeSignatureMap::default();
         let mut launcher = SessionLauncher::new(16);
-        launcher.launch(track, scene, playhead(&tempo, &sigs, true, Ticks::QUARTER));
+        launcher.press(
+            track,
+            scene,
+            LaunchMode::Trigger,
+            playhead(&tempo, &sigs, true, Ticks::QUARTER),
+        );
         let due = tempo.ticks_to_frames(Ticks::WHOLE, SampleRate::HZ_48000);
-        launcher.launch(track, scene, playhead(&tempo, &sigs, true, Ticks::QUARTER));
+        launcher.press(
+            track,
+            scene,
+            LaunchMode::Trigger,
+            playhead(&tempo, &sigs, true, Ticks::QUARTER),
+        );
         let mut status = Vec::with_capacity(8);
         launcher.status(&mut status);
         assert_eq!(status.len(), 1, "{status:?}");
@@ -964,14 +1168,17 @@ mod tests {
             "the frame it was queued for stays"
         );
         launcher.apply_due(due);
-        launcher.launch(
+        // Spec: launch-quantisation R17. A press of a playing Trigger clip
+        // queues a restart of the same slot, so there is still one entry.
+        launcher.press(
             track,
             scene,
+            LaunchMode::Trigger,
             playhead(&tempo, &sigs, true, Ticks::WHOLE * 3),
         );
         launcher.status(&mut status);
         assert_eq!(status.len(), 1, "{status:?}");
-        assert_eq!(launcher.state_of(track, scene), Some(SlotState::Playing));
+        assert_eq!(launcher.state_of(track, scene), Some(SlotState::Queued));
     }
 
     #[test]
@@ -982,13 +1189,23 @@ mod tests {
         let tempo = tempo();
         let sigs = TimeSignatureMap::default();
         let mut launcher = SessionLauncher::new(16);
-        launcher.launch(track, scene, playhead(&tempo, &sigs, true, Ticks::ZERO));
+        launcher.press(
+            track,
+            scene,
+            LaunchMode::Trigger,
+            playhead(&tempo, &sigs, true, Ticks::ZERO),
+        );
         let bar = tempo.ticks_to_frames(Ticks::WHOLE, SampleRate::HZ_48000);
         launcher.apply_due(bar);
         assert_eq!(launcher.state_of(track, scene), Some(SlotState::Playing));
         // The next bar line, with the song a quarter in.
         let at = Ticks::WHOLE + Ticks::QUARTER;
-        launcher.launch(track, other, playhead(&tempo, &sigs, true, at));
+        launcher.press(
+            track,
+            other,
+            LaunchMode::Trigger,
+            playhead(&tempo, &sigs, true, at),
+        );
         launcher.stop(Some(track), &[], playhead(&tempo, &sigs, true, at));
         assert_eq!(
             launcher.state_of(track, other),
@@ -1013,7 +1230,12 @@ mod tests {
         let mut slots = Vec::new();
         for _ in 0..3 {
             let (track, scene) = ids();
-            launcher.launch(track, scene, playhead(&tempo, &sigs, true, Ticks::ZERO));
+            launcher.press(
+                track,
+                scene,
+                LaunchMode::Trigger,
+                playhead(&tempo, &sigs, true, Ticks::ZERO),
+            );
             slots.push((track, scene));
         }
         let bar = tempo.ticks_to_frames(Ticks::WHOLE, SampleRate::HZ_48000);
@@ -1039,8 +1261,9 @@ mod tests {
         let mut launcher = SessionLauncher::new(16);
         let mut alloc = bl_core::id::IdAllocator::new();
         let scene = SceneId(alloc.allocate());
-        let slots: Vec<(SceneId, TrackId)> =
-            (0..3).map(|_| (scene, TrackId(alloc.allocate()))).collect();
+        let slots: Vec<(SceneId, TrackId, LaunchMode)> = (0..3)
+            .map(|_| (scene, TrackId(alloc.allocate()), LaunchMode::Trigger))
+            .collect();
         launcher.launch_scene(scene, &slots, playhead(&tempo, &sigs, true, Ticks::QUARTER));
         let mut playing = Vec::with_capacity(8);
         launcher.playback(&mut playing);
@@ -1068,7 +1291,12 @@ mod tests {
             quantization: LaunchQuantization::None,
             enabled: true,
         });
-        launcher.launch(track, scene, playhead(&tempo, &sigs, true, Ticks::QUARTER));
+        launcher.press(
+            track,
+            scene,
+            LaunchMode::Trigger,
+            playhead(&tempo, &sigs, true, Ticks::QUARTER),
+        );
         let now = tempo.ticks_to_frames(Ticks::QUARTER, SampleRate::HZ_48000);
         assert_eq!(launcher.next_due(Frames::ZERO), Some(now));
         launcher.apply_due(now);
@@ -1078,7 +1306,12 @@ mod tests {
         // in Live").
         launcher.set_settings(LaunchSettings::default());
         let at = Ticks::WHOLE + Ticks::QUARTER;
-        launcher.launch(track, other, playhead(&tempo, &sigs, true, at));
+        launcher.press(
+            track,
+            other,
+            LaunchMode::Trigger,
+            playhead(&tempo, &sigs, true, at),
+        );
         let due = tempo.ticks_to_frames(Ticks::WHOLE * 2, SampleRate::HZ_48000);
         assert_eq!(launcher.next_due(Frames::ZERO), Some(due));
         launcher.set_settings(LaunchSettings {
@@ -1092,6 +1325,276 @@ mod tests {
         );
     }
 
+    /// The song frame of `ticks` at the tests' tempo.
+    fn frame(ticks: Ticks) -> Frames {
+        tempo().ticks_to_frames(ticks, SampleRate::HZ_48000)
+    }
+
+    /// A launcher whose `mode` clip plays from the first bar line.
+    fn playing(mode: LaunchMode) -> (SessionLauncher, TrackId, SceneId) {
+        let (track, scene) = ids();
+        let mut launcher = SessionLauncher::new(16);
+        let (tempo, sigs) = (tempo(), TimeSignatureMap::default());
+        launcher.press(
+            track,
+            scene,
+            mode,
+            playhead(&tempo, &sigs, true, Ticks::ZERO),
+        );
+        launcher.apply_due(frame(Ticks::WHOLE));
+        assert_eq!(launcher.state_of(track, scene), Some(SlotState::Playing));
+        (launcher, track, scene)
+    }
+
+    #[test]
+    fn a_trigger_press_restarts_a_playing_clip_on_the_grid_and_a_release_does_nothing() {
+        // Spec: launch-quantisation R17
+        let (mut launcher, track, scene) = playing(LaunchMode::Trigger);
+        let (tempo, sigs) = (tempo(), TimeSignatureMap::default());
+        let at = Ticks::WHOLE + Ticks::QUARTER;
+        launcher.press(
+            track,
+            scene,
+            LaunchMode::Trigger,
+            playhead(&tempo, &sigs, true, at),
+        );
+        assert_eq!(launcher.state_of(track, scene), Some(SlotState::Queued));
+        // A second press before the line keeps the frame (R4).
+        launcher.press(
+            track,
+            scene,
+            LaunchMode::Trigger,
+            playhead(&tempo, &sigs, true, at),
+        );
+        launcher.release(
+            track,
+            scene,
+            LaunchMode::Trigger,
+            playhead(&tempo, &sigs, true, at),
+        );
+        let line = frame(Ticks::WHOLE * 2);
+        assert_eq!(launcher.next_due(Frames::ZERO), Some(line));
+        launcher.apply_due(line);
+        assert_eq!(launcher.state_of(track, scene), Some(SlotState::Playing));
+        let mut playing = Vec::with_capacity(4);
+        launcher.playback(&mut playing);
+        assert_eq!(
+            playing[0].frame, line,
+            "the clip plays again from its start"
+        );
+        // A press while its stop is queued restarts it as well.
+        launcher.stop(
+            Some(track),
+            &[],
+            playhead(&tempo, &sigs, true, Ticks::WHOLE * 2),
+        );
+        assert_eq!(
+            launcher.state_of(track, scene),
+            Some(SlotState::QueuedToStop)
+        );
+        launcher.press(
+            track,
+            scene,
+            LaunchMode::Trigger,
+            playhead(&tempo, &sigs, true, Ticks::WHOLE * 2),
+        );
+        assert_eq!(launcher.state_of(track, scene), Some(SlotState::Queued));
+    }
+
+    #[test]
+    fn a_gate_release_stops_the_clip_on_the_next_grid_line() {
+        // Spec: launch-quantisation R18
+        let (mut launcher, track, scene) = playing(LaunchMode::Gate);
+        let (tempo, sigs) = (tempo(), TimeSignatureMap::default());
+        let at = Ticks::WHOLE + Ticks::QUARTER;
+        launcher.release(
+            track,
+            scene,
+            LaunchMode::Gate,
+            playhead(&tempo, &sigs, true, at),
+        );
+        assert_eq!(
+            launcher.state_of(track, scene),
+            Some(SlotState::QueuedToStop)
+        );
+        let line = frame(Ticks::WHOLE * 2);
+        assert_eq!(launcher.next_due(Frames::ZERO), Some(line));
+        launcher.apply_due(line);
+        assert_eq!(launcher.state_of(track, scene), None);
+        // With quantisation off the clip stops at the release frame.
+        let (mut launcher, track, scene) = playing(LaunchMode::Gate);
+        launcher.set_settings(LaunchSettings {
+            quantization: LaunchQuantization::None,
+            enabled: true,
+        });
+        launcher.release(
+            track,
+            scene,
+            LaunchMode::Gate,
+            playhead(&tempo, &sigs, true, at),
+        );
+        assert_eq!(launcher.next_due(Frames::ZERO), Some(frame(at)));
+        launcher.apply_due(frame(at));
+        assert_eq!(launcher.state_of(track, scene), None);
+    }
+
+    #[test]
+    fn a_release_inside_one_interval_never_cancels_the_launch() {
+        // Spec: launch-quantisation R19
+        let (track, scene) = ids();
+        let (tempo, sigs) = (tempo(), TimeSignatureMap::default());
+        let mut launcher = SessionLauncher::new(16);
+        let press = Ticks::QUARTER;
+        launcher.press(
+            track,
+            scene,
+            LaunchMode::Gate,
+            playhead(&tempo, &sigs, true, press),
+        );
+        launcher.release(
+            track,
+            scene,
+            LaunchMode::Gate,
+            playhead(&tempo, &sigs, true, press + Ticks::QUARTER),
+        );
+        assert_eq!(launcher.state_of(track, scene), Some(SlotState::Queued));
+        launcher.apply_due(frame(Ticks::WHOLE));
+        assert_eq!(
+            launcher.state_of(track, scene),
+            Some(SlotState::QueuedToStop)
+        );
+        let mut playing = Vec::with_capacity(4);
+        launcher.playback(&mut playing);
+        assert_eq!(playing[0].frame, frame(Ticks::WHOLE));
+        assert_eq!(
+            launcher.next_due(frame(Ticks::WHOLE)),
+            Some(frame(Ticks::WHOLE * 2)),
+            "it plays one quantum"
+        );
+        launcher.apply_due(frame(Ticks::WHOLE * 2));
+        assert_eq!(launcher.state_of(track, scene), None);
+    }
+
+    #[test]
+    fn a_toggle_press_alternates_the_stop_and_the_restart() {
+        // Spec: launch-quantisation R20
+        let (mut launcher, track, scene) = playing(LaunchMode::Toggle);
+        let (tempo, sigs) = (tempo(), TimeSignatureMap::default());
+        let at = Ticks::WHOLE + Ticks::QUARTER;
+        let line = frame(Ticks::WHOLE * 2);
+        launcher.release(
+            track,
+            scene,
+            LaunchMode::Toggle,
+            playhead(&tempo, &sigs, true, at),
+        );
+        assert_eq!(
+            launcher.state_of(track, scene),
+            Some(SlotState::Playing),
+            "no release rule"
+        );
+        launcher.press(
+            track,
+            scene,
+            LaunchMode::Toggle,
+            playhead(&tempo, &sigs, true, at),
+        );
+        assert_eq!(
+            launcher.state_of(track, scene),
+            Some(SlotState::QueuedToStop)
+        );
+        assert_eq!(launcher.next_due(Frames::ZERO), Some(line));
+        // A third press replaces the stop with a restart on the line.
+        launcher.press(
+            track,
+            scene,
+            LaunchMode::Toggle,
+            playhead(&tempo, &sigs, true, at),
+        );
+        assert_eq!(launcher.state_of(track, scene), Some(SlotState::Queued));
+        launcher.apply_due(line);
+        let mut playing = Vec::with_capacity(4);
+        launcher.playback(&mut playing);
+        assert_eq!(playing[0].frame, line);
+        // A stop that lands ends the clip.
+        launcher.press(
+            track,
+            scene,
+            LaunchMode::Toggle,
+            playhead(&tempo, &sigs, true, Ticks::WHOLE * 2),
+        );
+        launcher.apply_due(frame(Ticks::WHOLE * 3));
+        assert_eq!(launcher.state_of(track, scene), None);
+    }
+
+    #[test]
+    fn a_held_repeat_restarts_every_step_and_a_release_ends_the_quantum() {
+        // Spec: launch-quantisation R21
+        let (track, scene) = ids();
+        let (tempo, sigs) = (tempo(), TimeSignatureMap::default());
+        let mut launcher = SessionLauncher::new(16);
+        launcher.set_settings(LaunchSettings {
+            quantization: LaunchQuantization::Quarter,
+            enabled: true,
+        });
+        let on = |at| playhead(&tempo, &sigs, true, at);
+        launcher.press(track, scene, LaunchMode::Repeat, on(Ticks::ZERO));
+        for step in 1..=3 {
+            let line = frame(Ticks::QUARTER * step);
+            assert_eq!(
+                launcher.next_due(frame(Ticks::QUARTER * (step - 1))),
+                Some(line)
+            );
+            launcher.apply_due(line);
+            launcher.repeat(on(Ticks::QUARTER * step));
+            let mut playing = Vec::with_capacity(4);
+            launcher.playback(&mut playing);
+            assert_eq!(playing[0].frame, line, "the clip restarts on line {step}");
+        }
+        // Released inside the quantum that began at the third line: the
+        // queued retrigger becomes the stop.
+        let release = Ticks::QUARTER * 3 + Ticks::SIXTEENTH;
+        launcher.release(track, scene, LaunchMode::Repeat, on(release));
+        assert_eq!(
+            launcher.state_of(track, scene),
+            Some(SlotState::QueuedToStop)
+        );
+        assert_eq!(
+            launcher.next_due(frame(Ticks::QUARTER * 3)),
+            Some(frame(Ticks::QUARTER * 4))
+        );
+        launcher.apply_due(frame(Ticks::QUARTER * 4));
+        assert_eq!(launcher.state_of(track, scene), None);
+        // With quantisation off Repeat acts as Trigger: no retriggers.
+        launcher.set_settings(LaunchSettings {
+            quantization: LaunchQuantization::None,
+            enabled: true,
+        });
+        launcher.press(track, scene, LaunchMode::Repeat, on(Ticks::QUARTER * 5));
+        launcher.apply_due(frame(Ticks::QUARTER * 5));
+        launcher.repeat(on(Ticks::QUARTER * 5));
+        assert_eq!(launcher.state_of(track, scene), Some(SlotState::Playing));
+        assert_eq!(launcher.next_due(Frames::ZERO), None);
+    }
+
+    #[test]
+    fn a_scene_launch_acts_as_a_trigger_press_whatever_the_mode() {
+        // Spec: launch-quantisation R22
+        let (mut launcher, track, scene) = playing(LaunchMode::Toggle);
+        let (tempo, sigs) = (tempo(), TimeSignatureMap::default());
+        let slots = [(scene, track, LaunchMode::Toggle)];
+        launcher.launch_scene(
+            scene,
+            &slots,
+            playhead(&tempo, &sigs, true, Ticks::WHOLE + Ticks::QUARTER),
+        );
+        assert_eq!(
+            launcher.state_of(track, scene),
+            Some(SlotState::Queued),
+            "a restart, not a stop"
+        );
+    }
+
     #[test]
     fn a_started_clip_takes_its_track_over_and_a_stop_leaves_it_so() {
         // Spec: session-view R20
@@ -1100,7 +1603,12 @@ mod tests {
         let sigs = TimeSignatureMap::default();
         let mut launcher = SessionLauncher::new(16);
         let mut playing = Vec::with_capacity(4);
-        launcher.launch(track, scene, playhead(&tempo, &sigs, true, Ticks::QUARTER));
+        launcher.press(
+            track,
+            scene,
+            LaunchMode::Trigger,
+            playhead(&tempo, &sigs, true, Ticks::QUARTER),
+        );
         launcher.playback(&mut playing);
         assert!(
             playing.is_empty() && launcher.overridden().is_empty(),
@@ -1159,17 +1667,17 @@ mod tests {
         let sigs = TimeSignatureMap::default();
         let mut launcher = SessionLauncher::new(16);
         let at = playhead(&tempo, &sigs, true, Ticks::ZERO);
-        launcher.launch(a, scene_a, at);
-        launcher.launch(b, scene_b, at);
+        launcher.press(a, scene_a, LaunchMode::Trigger, at);
+        launcher.press(b, scene_b, LaunchMode::Trigger, at);
         let bar = tempo.ticks_to_frames(Ticks::WHOLE, SampleRate::HZ_48000);
         launcher.apply_due(bar);
         // `a` plays with a stop queued, `b` plays, `c` has a launch queued
         // and an idle stop's mark.
         let later = playhead(&tempo, &sigs, true, Ticks::WHOLE + Ticks::QUARTER);
         launcher.stop(Some(a), &[], later);
-        launcher.launch(c, scene_c, later);
+        launcher.press(c, scene_c, LaunchMode::Trigger, later);
         launcher.stop(Some(c), &[], later);
-        launcher.launch(c, scene_c, later);
+        launcher.press(c, scene_c, LaunchMode::Trigger, later);
         launcher.back_to_arrangement(Some(a));
         assert_eq!(launcher.state_of(a, scene_a), None);
         assert_eq!(launcher.overridden(), [b], "only that track returned");
@@ -1228,6 +1736,13 @@ mod tests {
         assert_eq!(
             command_from_args("session.stop_track", serde_json::json!({ "track": track })),
             Ok(SessionCommand::StopTrack(track))
+        );
+        assert_eq!(
+            command_from_args(
+                "session.release",
+                serde_json::json!({ "track": track, "scene": scene })
+            ),
+            Ok(SessionCommand::Release { track, scene })
         );
         assert_eq!(
             command_from_args("session.stop_all", serde_json::json!({})),

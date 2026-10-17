@@ -11,9 +11,9 @@ use bl_model::registry::{self, RunError};
 use bl_model::{
     ArrangementLoop, AudioData, AutomationTarget, Change, ChangeSet, Channel, Clip, ClipData,
     ClipId, ClipLaunch, Command, ContentHash, CountIn, CrossfadeAssign, Device, DeviceId,
-    DeviceKind, EditError, Editor, Input, LaunchQuantization, MetronomeRhythm, MetronomeSound,
-    MidiData, MixerParam, ModelError, Monitor, Note, Output, ParamId, PluginFormat, SceneId,
-    SendTap, TakeClip, TakeLane, Tap, TrackId, TrackKind,
+    DeviceKind, EditError, Editor, Input, LaunchMode, LaunchQuantization, MetronomeRhythm,
+    MetronomeSound, MidiData, MixerParam, ModelError, Monitor, Note, Output, ParamId, PluginFormat,
+    SceneId, SendTap, TakeClip, TakeLane, Tap, TrackId, TrackKind,
 };
 use serde_json::{Value, json};
 
@@ -51,7 +51,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        98,
+        99,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -61,7 +61,8 @@ fn every_document_command_is_registered() {
          clips, WP-3.2 set_slot_stop_button, WP-2.12 seven for automation, WP-3.15 six for clip \
          envelopes, WP-3.17 two for the crossfader, WP-2.14 set_midi_overdub, WP-2.13 the \
          two punch switches, WP-2.13 add_take_lane, WP-3.4 three for a clip's launch \
-         settings, and WP-3.5 two for a scene's tempo and signature"
+         settings, WP-3.5 two for a scene's tempo and signature, and WP-3.3 \
+         set_clip_launch_mode"
     );
 
     for op in &ops {
@@ -577,12 +578,17 @@ fn every_command_runs_by_id() {
         "clip.set_velocity_amount",
         json!({ "clip": slot_riff, "amount": 0.5 }),
     );
+    agent.run(
+        "clip.set_launch_mode",
+        json!({ "clip": slot_riff, "mode": "gate" }),
+    );
     assert_eq!(
         agent.editor.document().clip(slot_riff).unwrap().launch,
         ClipLaunch {
             legato: true,
             quantization: Some(LaunchQuantization::Eighth),
             velocity_amount: 0.5,
+            mode: LaunchMode::Gate,
         }
     );
 
@@ -1388,6 +1394,13 @@ fn schemas_match_what_commands_serialise() {
             },
         ),
         ("clip.set_mute", Command::SetClipMute { clip, mute: true }),
+        (
+            "clip.set_launch_mode",
+            Command::SetClipLaunchMode {
+                clip,
+                mode: LaunchMode::Gate,
+            },
+        ),
         (
             "clip.set_data",
             Command::SetClipData {

@@ -4484,6 +4484,7 @@ impl Shell {
                         columns: &columns,
                         scenes: &scenes,
                         edge_fades,
+                        launch_mode: self.prefs.launch.default_mode,
                         capture,
                         launch_quantization: self.prefs.launch.default_quantization,
                     },

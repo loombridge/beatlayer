@@ -20,8 +20,8 @@ use bl_core::id::Id;
 use bl_core::time::{Bpm, TempoMap, Ticks, TimeSignature, TimeSignatureMap};
 use bl_model::{
     AudioData, Change, ChangeSet, Clip, ClipData, ClipId, Command, ContentHash, Device, DeviceId,
-    DeviceKind, Document, EditError, Editor, Input, MidiData, Mixer, Monitor, Note, ParamId,
-    PluginFormat, Routing, SceneId, SendTap, TrackId, TrackKind,
+    DeviceKind, Document, EditError, Editor, Input, LaunchMode, MidiData, Mixer, Monitor, Note,
+    ParamId, PluginFormat, Routing, SceneId, SendTap, TrackId, TrackKind,
 };
 use proptest::prelude::*;
 use proptest::sample::Index;
@@ -97,6 +97,7 @@ enum Op {
     SetClipLength(Index, u16),
     RenameClip(Index, u8),
     SetClipMute(Index, bool),
+    SetClipLaunchMode(Index, u8),
     SetClipData(Index, Data),
     TrimClipStart(Index, i16),
     /// One of an audio clip's settings (WP-1.4): its markers, loop brace,
@@ -213,6 +214,7 @@ fn op() -> impl Strategy<Value = Op> {
         2 => (i(), 0u16..256).prop_map(|(c, l)| Op::SetClipLength(c, l)),
         1 => (i(), any::<u8>()).prop_map(|(c, n)| Op::RenameClip(c, n)),
         1 => (i(), any::<bool>()).prop_map(|(c, b)| Op::SetClipMute(c, b)),
+        1 => (i(), 0u8..4).prop_map(|(c, m)| Op::SetClipLaunchMode(c, m)),
         2 => (i(), data()).prop_map(|(c, d)| Op::SetClipData(c, d)),
         2 => (i(), -16i16..64).prop_map(|(c, by)| Op::TrimClipStart(c, by)),
         3 => (i(), any::<u8>(), value(0.0..4.0), value(0.0..4.0))
@@ -571,6 +573,10 @@ impl Op {
             Self::SetClipMute(c, mute) => Command::SetClipMute {
                 clip: at.clip(c),
                 mute: *mute,
+            },
+            Self::SetClipLaunchMode(c, mode) => Command::SetClipLaunchMode {
+                clip: at.clip(c),
+                mode: LaunchMode::ALL[usize::from(*mode)],
             },
             Self::SetClipData(c, data) => {
                 let clip = at.clip(c);

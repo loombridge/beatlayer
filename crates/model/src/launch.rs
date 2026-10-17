@@ -246,6 +246,9 @@ pub struct ClipLaunch {
     /// volume, from 0 (none, the default) to 1 (100 %).
     #[serde(default)]
     pub velocity_amount: f64,
+    /// What a press and a release of the clip's launch button do (WP-3.3).
+    #[serde(default)]
+    pub mode: LaunchMode,
 }
 
 impl ClipLaunch {

@@ -1001,6 +1001,23 @@ const ENTRIES: &[Entry] = &[
             stays in place but doesn't play, and false activates it again.",
     },
     Entry {
+        id: "clip.set_launch_mode",
+        action: Action::Apply("set_clip_launch_mode"),
+        label: "Set Clip Launch Mode",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Sets what a press and a release of a Session clip's launch button do (a \
+            clip that sits in a slot; `clip` is its ID): \
+            `trigger` (the default) starts the clip on the launch grid and it plays on, a second \
+            press restarts it; `gate` starts it on a press and stops it on the grid after the \
+            release; `toggle` starts it on a press and the next press stops it on the grid; \
+            `repeat` starts it on a press and restarts it every launch quantisation step while \
+            the press lasts, then stops it on the grid after the release. A new clip starts with \
+            the Default Launch Mode setting. The mode is read at each press and release, so \
+            changing it doesn't touch a clip that is playing.",
+    },
+    Entry {
         id: "clip.set_data",
         action: Action::Apply("set_clip_data"),
         label: "Replace Clip Contents",

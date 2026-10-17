@@ -18,7 +18,7 @@ use crate::device::{Device, DeviceRole};
 use crate::document::Document;
 use crate::error::ModelError;
 use crate::ids::{ClipId, ContentHash, DeviceId, ParamId, SceneId, TrackId};
-use crate::launch::{ClipLaunch, LaunchQuantization};
+use crate::launch::{ClipLaunch, LaunchMode, LaunchQuantization};
 use crate::metronome::{CountIn, MetronomeRhythm, MetronomeSound};
 use crate::scene::{SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
 use crate::shared::Shared;
@@ -520,6 +520,13 @@ pub enum Command {
         /// Whether it's muted.
         mute: bool,
     },
+    /// Sets a clip's launch mode (WP-3.3).
+    SetClipLaunchMode {
+        /// The clip.
+        clip: ClipId,
+        /// What a press and a release of its launch button do.
+        mode: LaunchMode,
+    },
     /// Replaces what a clip plays. The data must match the clip's track.
     SetClipData {
         /// The clip.
@@ -997,6 +1004,7 @@ impl Command {
             Self::SetClipLength { .. } => "Resize clip",
             Self::RenameClip { .. } => "Rename clip",
             Self::SetClipMute { .. } => "Mute clip",
+            Self::SetClipLaunchMode { .. } => "Change launch mode",
             Self::SetClipData { .. } => "Edit clip",
             Self::TrimClipStart { .. } => "Resize clip",
             Self::SetClipRegion { .. } => "Change clip region",
@@ -1421,6 +1429,9 @@ impl Document {
                     self.clip_mut(*clip)?.mute = *mute;
                 }
                 Ok(())
+            }
+            Command::SetClipLaunchMode { clip, mode } => {
+                self.edit_launch(*clip, |launch| launch.mode = *mode)
             }
             Command::SetClipData { clip, data } => {
                 let owner = self.clip_owner(*clip)?;
@@ -6391,6 +6402,7 @@ mod tests {
                 legato: true,
                 quantization: Some(LaunchQuantization::None),
                 velocity_amount: 1.0,
+                ..ClipLaunch::default()
             },
             "None is a step of its own, apart from following the global one"
         );

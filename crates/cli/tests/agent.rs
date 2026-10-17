@@ -1253,6 +1253,42 @@ fn an_agent_launches_and_stops_session_clips_by_command_id() {
     host.play_to(14 * block);
     assert!(host.offline.state().session_over.is_empty());
     assert!(host.offline.state().session.is_empty(), "its clip stopped");
+
+    // Spec: launch-quantisation R18, R22. Set the clip to Gate by ID, press
+    // and release its launch button by ID: with quantisation off, it plays
+    // while pressed and stops at the release.
+    let clip = host
+        .client
+        .transport()
+        .shell
+        .editor()
+        .document()
+        .track(track)
+        .and_then(|track| track.slot(scene))
+        .expect("the slot holds the clip")
+        .id;
+    host.call(
+        "run",
+        json!({ "commands": [
+            { "command": "clip.set_launch_mode", "args": { "clip": clip, "mode": "gate" } },
+        ] }),
+    );
+    host.call(
+        "run",
+        json!({ "commands": [
+            { "command": "session.launch", "args": { "track": track, "scene": scene } },
+        ] }),
+    );
+    host.play_to(16 * block);
+    assert_eq!(host.offline.state().session[0].state, SlotState::Playing);
+    host.call(
+        "run",
+        json!({ "commands": [
+            { "command": "session.release", "args": { "track": track, "scene": scene } },
+        ] }),
+    );
+    host.play_to(18 * block);
+    assert!(host.offline.state().session.is_empty());
     assert_eq!(
         host.offline.heap_operations(),
         0,

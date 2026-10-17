@@ -4,7 +4,9 @@
 //! MIDI thread keeps sending through `bl-midi-io`'s sender, whose mutex
 //! only the sending side takes. RTSan stops the process at the first
 //! allocation, free, lock, or blocking call on the audio thread, and the
-//! allocation trap fails the test at any heap use it sees.
+//! allocation trap fails the test at any heap use it sees. One track plays a
+//! test instrument, so the input merges with a clip's notes in the chain, and
+//! the monitoring edits end the notes it holds.
 
 bl_rt::install_trap!();
 
@@ -14,9 +16,12 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use bl_core::midi::{MidiInputEvent, MidiMessage, MidiSource, PortId};
-use bl_core::time::SampleRate;
-use bl_engine::{Collector, Compiler, EngineConfig, NoInput, Registry, channel};
-use bl_model::{Command, Editor, Input, Monitor, TrackKind};
+use bl_core::time::{SampleRate, TICKS_PER_QUARTER, Ticks};
+use bl_engine::testing::{self, Probe};
+use bl_engine::{Collector, Compiler, EngineConfig, NoInput, TransportCommand, channel};
+use bl_model::{
+    Clip, ClipData, Command, Device, DeviceKind, Editor, Input, MidiData, Monitor, Note, TrackKind,
+};
 
 // Without `--cfg lspk_rtsan` (`rtsan/.cargo/config.toml`), this doesn't build.
 const _: () = assert!(
@@ -28,7 +33,11 @@ const _: () = assert!(
 fn midi_input_passes_under_rtsan() {
     let config = EngineConfig::new(SampleRate::HZ_48000, 256);
     let mut collector = Collector::new();
-    let mut compiler = Compiler::new(config, Registry::new(), collector.handle());
+    let mut compiler = Compiler::new(
+        config,
+        testing::registry(&Arc::new(Probe::default())),
+        collector.handle(),
+    );
     let (mut sender, mut processor, _monitor) = channel(&config);
     let (input, engine_end) = bl_midi_io::input_queue(4096);
     processor.set_midi_input(engine_end);
@@ -68,8 +77,36 @@ fn midi_input_passes_under_rtsan() {
             .unwrap();
         tracks.push(track);
     }
+    let instrument = editor.new_id();
+    editor
+        .apply(Command::InsertDevice {
+            track: tracks[0],
+            index: 0,
+            device: Device::new(
+                instrument,
+                "",
+                DeviceKind::Native {
+                    device_type: testing::INSTRUMENT.to_owned(),
+                },
+            ),
+        })
+        .unwrap();
+    let clip = editor.new_id();
+    let beat = Ticks(TICKS_PER_QUARTER);
+    editor
+        .apply(Command::CreateClip {
+            track: tracks[0],
+            clip: Clip::new(
+                clip,
+                Ticks::ZERO,
+                beat * 16,
+                ClipData::Midi(MidiData::new([Note::new(60, Ticks::ZERO, beat, 100)])),
+            ),
+        })
+        .unwrap();
     sender.send_update(compiler.sync(editor.document()));
     assert!(sender.flush());
+    sender.transport(TransportCommand::Play);
 
     // A MIDI thread sends a note every 0.4 ms, through the mutex.
     let stop = Arc::new(AtomicBool::new(false));

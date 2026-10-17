@@ -1,7 +1,7 @@
 # Audio clip editing: Reverse, Crop, Consolidate, and Consolidate Time to New Scene
 
-- **Status:** draft
-- **Work packages:** WP-4.7 (Reverse, R7 to R13), WP-4.13 (Crop, Consolidate, and Consolidate Time to New Scene, R14 to R28). The processed files of R1 to R6 are WP-4.20's, which both use.
+- **Status:** partial (R1 to R6, WP-4.20, are built; R7 to R28 wait for WP-4.7 and WP-4.13)
+- **Work packages:** WP-4.7 (Reverse, R7 to R13), WP-4.13 (Crop, Consolidate, and Consolidate Time to New Scene, R14 to R28). The processed files of R1 to R6 are WP-4.20's, which both use, and so do freezing and bounce ([freeze and bounce](freeze-and-bounce.md)).
 - **Parity-matrix row:** Audio clips and warping: Clip pitch, reverse, RAM mode, high-quality interpolation (reverse); Split, Crop, Crop to Time Selection (crop); Consolidate
 - **Checked against:** the Live 12 reference manual (online edition), read 17 October 2026, and the UI parity reference's observations of Live 12.4.3 on macOS (10 October 2026)
 
@@ -32,13 +32,13 @@ This spec covers what each edit does to the clip and to the disk, where its file
 
 ## Rules
 
-**The files these edits write (WP-4.7 and WP-4.13)**
+**The files these edits write (WP-4.20)**
 
 - **R1.** Reverse, Crop on an audio clip, and Consolidate on audio write new files into the set's project folder: `Samples/Processed/Reverse/`, `Samples/Processed/Crop/`, and `Samples/Processed/Consolidate/`, each made the first time it's needed. They never change, move, or delete the file a clip played before. (S1, S3, S6)
 - **R2.** Each new file is a WAV of 32-bit floating-point samples, as recordings are (recording R3). A reversed or cropped file holds the source file's own samples at its own sample rate and with its own channels, so it reads back as the source's decoded frames exactly, reversed or cut to the region. A consolidated file is rendered at the engine's rate (R20). Beatlayer's own: Live takes a consolidated file's rate and bit depth from its settings (S7), and Beatlayer writes what loses nothing. (S7, S12)
 - **R3.** A new file is named after its source and the edit, Beatlayer's own: `<source file's name> Reverse.wav` and `<source file's name> Crop.wav`, and `<track label> Consolidate [<stamp>].wav` with the stamp of recordings' names. A name already taken in the folder gets ` 2`, ` 3`, and so on before its extension, so nothing is overwritten. A file whose bytes are already one of the set's media isn't written again: the clip names the media the set has. (S12)
 - **R4.** Each new file joins the set's media table with its path relative to the project folder and its content hash, and is saved with the set like any media. Undoing the edit leaves the file on disk, and redoing it uses the same file. (S12)
-- **R5.** In a set that has never been saved, the new files go into the Temporary Folder, the File & Folder settings' path (L-SET-015), whose default is a `Temporary` folder in Beatlayer's own application-data folder. The first save moves each file the set uses from there into the project folder's `Samples/Processed/<kind>/`, R3's naming applying there, and points the media table at its new path. Writing into the Temporary Folder doesn't make a command external: it's the unsaved set's own folder. Beatlayer's own: the manual says only that such files stay in the Temporary Folder until the set is saved. (S1, S3, S6, S9, S11)
+- **R5.** In a set that has never been saved, the new files go into the Temporary Folder, the File & Folder settings' path (L-SET-015), whose default is a `Temporary` folder in Beatlayer's own application-data folder, each in a folder of its kind's name there (`Reverse/`, `Crop/`, and so on). The path is `settings.set_temporary_folder`, read back from `settings.state`. The first save moves each file the set uses from there into the project folder's `Samples/Processed/<kind>/`, R3's naming applying there, and points the media table at its new path. Writing into the Temporary Folder doesn't make a command external: it's the unsaved set's own folder. Beatlayer's own: the manual says only that such files stay in the Temporary Folder until the set is saved. (S1, S3, S6, S9, S11)
 - **R6.** The work runs off the audio thread: the file is written on a worker thread while the clip goes on playing what it played, the Status Bar shows its progress, and the edit lands as one undo step once the file is complete, reaching the engine as any clip edit does (audio-clips R12), with no allocation, lock, or wait on the audio thread. A failure, a full disk say, deletes what was written and leaves the set as it was, with a message in the Status Bar. An agent's call returns when the edit has landed. (S1, S13)
 
 **Reverse (WP-4.7)**
@@ -82,12 +82,12 @@ This spec covers what each edit does to the clip and to the disk, where its file
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | `crates/shell/tests/audio_editing.rs`, `each_edit_writes_into_its_processed_folder_and_leaves_the_source` | shell test |
-| R2 | `crates/media/src/encode.rs`, `a_reversed_or_cropped_file_reads_back_as_the_sources_frames`; `crates/shell/tests/audio_editing.rs`, `a_consolidated_file_is_32_bit_float_at_the_engines_rate` | unit, shell test |
-| R3 | `crates/shell/tests/audio_editing.rs`, `processed_files_are_named_after_their_source_and_never_overwrite`, `the_same_bytes_are_never_written_twice` | shell test |
-| R4 | `crates/project/tests/round_trip.rs`, `processed_media_save_with_the_set`; `crates/shell/tests/audio_editing.rs`, `undo_leaves_the_file_and_redo_uses_it` | unit, shell test |
-| R5 | `crates/shell/tests/audio_editing.rs`, `an_unsaved_sets_files_move_into_the_project_on_its_first_save` | shell test |
-| R6 | `crates/shell/tests/audio_editing.rs`, `a_long_reverse_lands_as_one_step_and_a_failure_leaves_nothing`; `rtsan/tests/audio_editing.rs`, `clips_edited_during_playback_pass_under_rtsan` | shell test, RealtimeSanitizer |
+| R1 | `crates/shell/tests/processed_files.rs`, `a_processed_file_lands_whole_in_its_kinds_folder_as_32_bit_float` | shell test |
+| R2 | `crates/shell/tests/processed_files.rs`, `a_processed_file_lands_whole_in_its_kinds_folder_as_32_bit_float` | shell test |
+| R3 | `crates/shell/tests/processed_files.rs`, `a_second_file_of_the_same_name_gets_2_and_nothing_is_overwritten`, `bytes_the_set_already_has_are_not_kept_twice` | shell test |
+| R4 | `crates/shell/tests/processed_files.rs`, `an_unsaved_sets_files_move_into_the_project_on_its_first_save`, `undo_leaves_the_file_on_disk_and_redo_uses_it_again` | shell test |
+| R5 | `crates/shell/tests/processed_files.rs`, `an_unsaved_sets_files_move_into_the_project_on_its_first_save`, `the_temporary_folder_is_a_kept_setting_that_reads_back`, `browse_asks_for_a_folder`; `crates/cli/tests/agent.rs`, `an_agent_sets_the_temporary_folder_by_command_id_and_reads_it_back` | shell test, agent API test |
+| R6 | `crates/shell/tests/processed_files.rs`, `a_write_that_fails_part_way_leaves_no_file_and_the_set_as_it_was`, `the_status_bar_shows_the_progress_while_a_file_is_written`, `a_new_set_drops_a_file_still_being_written`, `the_engine_plays_on_off_the_heap_while_a_file_is_written` | shell test, null stream under the allocation trap |
 | R7 | `crates/shell/tests/audio_editing.rs`, `reverse_writes_the_files_frames_backwards`; `crates/engine/tests/clips.rs`, `a_reversed_clip_plays_its_audio_backwards` | shell test, engine test under the allocation trap |
 | R8 | `crates/model/src/command.rs`, `reversing_mirrors_the_markers_loop_and_warp_markers` | unit |
 | R9 | `crates/model/src/command.rs`, `reversing_leaves_clip_envelopes_in_place` | unit |

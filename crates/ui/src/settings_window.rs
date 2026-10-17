@@ -869,11 +869,6 @@ fn theme_page(
     );
 }
 
-/// Tempo & MIDI (L-SET-014): the MIDI ports table (WP-2.2), each input and
-/// output with its Track, Sync, and Remote switches, as the MIDI I/O spec
-/// R2 gives it. The Tempo Follower, control surfaces, and Takeover Mode come
-/// with later packages. Sync and Remote are kept and act when sync and MIDI
-/// mapping are built (R5).
 /// File & Folder (L-SET-015): the Temporary Folder row, with its Browse
 /// button and path (WP-4.20). The page's other rows come with later
 /// packages.
@@ -891,6 +886,11 @@ fn file_folder_page(ui: &mut Ui, shell: &Shell, rows: &mut Rows<'_>, events: &mu
     rows.copyable_row(ui, "Path", "temporary-folder", &path.to_string_lossy());
 }
 
+/// Tempo & MIDI (L-SET-014): the MIDI ports table (WP-2.2), each input and
+/// output with its Track, Sync, and Remote switches, as the MIDI I/O spec
+/// R2 gives it. The Tempo Follower, control surfaces, and Takeover Mode come
+/// with later packages. Sync and Remote are kept and act when sync and MIDI
+/// mapping are built (R5).
 fn tempo_midi_page(
     ui: &mut Ui,
     shell: &Shell,

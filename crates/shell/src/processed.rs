@@ -249,6 +249,16 @@ impl Job {
     }
 }
 
+impl Drop for Job {
+    /// A file the worker finished but nobody took (the set was replaced)
+    /// is deleted, as the worker deletes one it can't hand over.
+    fn drop(&mut self) {
+        if let Ok(Ok(_)) = self.finished.try_recv() {
+            let _ = std::fs::remove_file(&self.part);
+        }
+    }
+}
+
 /// A number no other file this run has, for hidden names.
 fn unique() -> u64 {
     static NEXT: AtomicU64 = AtomicU64::new(0);

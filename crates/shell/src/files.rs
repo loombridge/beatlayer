@@ -454,15 +454,20 @@ impl ProjectFiles {
                 continue;
             };
             let folder = project.processed(&kind.to_string_lossy());
-            std::fs::create_dir_all(&folder)
-                .map_err(|e| format!("couldn't create {}: {e}", folder.display()))?;
-            let destination = free_import(&folder, &name.to_string_lossy())?;
-            if let Err(error) = move_file(&path, &destination) {
-                self.move_back(moved);
-                return Err(error);
+            let placed = std::fs::create_dir_all(&folder)
+                .map_err(|e| format!("couldn't create {}: {e}", folder.display()))
+                .and_then(|()| free_import(&folder, &name.to_string_lossy()))
+                .and_then(|destination| move_file(&path, &destination).map(|()| destination));
+            match placed {
+                Ok(destination) => {
+                    self.added.insert(hash, (destination, size));
+                    moved.push((hash, path));
+                }
+                Err(error) => {
+                    self.move_back(moved);
+                    return Err(error);
+                }
             }
-            self.added.insert(hash, (destination, size));
-            moved.push((hash, path));
         }
         Ok(moved)
     }

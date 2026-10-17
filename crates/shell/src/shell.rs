@@ -2916,6 +2916,25 @@ impl Shell {
         &self.session_states
     }
 
+    /// Sends a transport command to the engine, as menus, keys, the Control
+    /// Bar and agents all do. Recording gives the engine what to write
+    /// before it knows the transport records (WP-2.13). A reason no files
+    /// can come of it (a set with no project folder, say) is reported in the
+    /// Status Bar; the transport still records, as the metronome's "only
+    /// while recording" follows it.
+    ///
+    /// # Errors
+    ///
+    /// A message if no engine runs.
+    pub fn send_transport(&mut self, command: bl_engine::TransportCommand) -> Result<(), String> {
+        if command == bl_engine::TransportCommand::SetRecording(true)
+            && let Err(reason) = self.begin_recording()
+        {
+            self.set_message(reason, true);
+        }
+        self.audio.send_transport(command)
+    }
+
     /// Starts a recording (WP-2.13, WP-2.14): a ring for every armed audio
     /// track whose Audio From is Ext. In, and a writer thread draining them
     /// into the project's `Samples/Recorded/`; and a ring for every armed
@@ -4173,18 +4192,7 @@ impl Shell {
                         message: error.to_string(),
                     }
                 })?;
-            // WP-2.13. Recording gives the engine what to write before it
-            // knows the transport records. A reason no files can come of it
-            // (a set with no project folder, say) is reported in the Status
-            // Bar; the transport still records, as the metronome's "only
-            // while recording" follows it.
-            if command == bl_engine::TransportCommand::SetRecording(true)
-                && let Err(reason) = self.begin_recording()
-            {
-                self.set_message(reason, true);
-            }
-            self.audio
-                .send_transport(command)
+            self.send_transport(command)
                 .map_err(|reason| ShellError::Unavailable {
                     command: id.to_owned(),
                     reason,

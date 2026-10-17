@@ -462,6 +462,7 @@ static FAKE_MIGRATIONS: &[Migration] = &[
     MIGRATIONS[0],
     MIGRATIONS[1],
     MIGRATIONS[2],
+    MIGRATIONS[3],
 ];
 
 /// The scaffold migrates an old file: the invented version 0 fixture loads

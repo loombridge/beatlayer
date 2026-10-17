@@ -243,10 +243,10 @@ impl Driver {
     }
 
     /// Calls `report` with the id, base and played value of each parameter
-    /// a clip's modulation acts on, as of the last block (R10).
+    /// a clip's modulation moves off its base, as of the last block (R10).
     pub(crate) fn modulated(&self, report: &mut dyn FnMut(ParamId, f64, f64)) {
         for slot in &self.slots {
-            if slot.modulated && slot.sent.is_some() {
+            if slot.modulated && slot.sent.is_some() && slot.last.0 != slot.last.1 {
                 report(ParamId(slot.id), slot.last.0, slot.last.1);
             }
         }

@@ -65,7 +65,10 @@ fn an_agent_reads_a_parameters_base_played_value_and_sources() {
     assert_eq!(parameter["played"], 0.5);
     let source = &parameter["sources"][0];
     assert_eq!(source["share"], 0.5);
-    assert!(source["contribution"].as_f64().unwrap() < 0.0, "a volume only goes down");
+    assert!(
+        source["contribution"].as_f64().unwrap() < 0.0,
+        "a volume only goes down"
+    );
 
     // The same query for a track that has none reports nothing.
     call(

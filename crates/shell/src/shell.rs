@@ -11,8 +11,8 @@ use bl_engine::session as engine_session;
 use bl_engine::transport as engine_transport;
 use bl_media::MediaStore;
 use bl_model::{
-    AudioData, AutomationTarget, ChangeSet, Clip, ClipData, ContentHash, Editor, Input, LaunchSettings, TakeClip,
-    TakeLane, TrackId, TrackKind, registry as model,
+    AudioData, AutomationTarget, ChangeSet, Clip, ClipData, ContentHash, Editor, Input,
+    LaunchSettings, TakeClip, TakeLane, TrackId, TrackKind, registry as model,
 };
 use bl_project::ProjectFolder;
 use serde::Serialize;

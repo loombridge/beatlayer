@@ -35,7 +35,11 @@ fn travel_of<'a>(
         AutomationTarget::Device { device, param } => {
             let device = track.devices().find(|d| d.id == device)?;
             let description = devices.description(&device.kind)?.param(param)?;
-            let value = device.params.get(&param).copied().unwrap_or(description.default);
+            let value = device
+                .params
+                .get(&param)
+                .copied()
+                .unwrap_or(description.default);
             (Travel::Param(description), value)
         }
     })
@@ -52,21 +56,29 @@ pub(crate) fn state(
     played: impl Fn(TrackId, &AutomationTarget) -> Option<(f64, f64)>,
 ) -> ModulationState {
     let mut parameters = Vec::new();
-    for owner in document.tracks().filter(|t| track.is_none_or(|id| t.id() == id)) {
+    for owner in document
+        .tracks()
+        .filter(|t| track.is_none_or(|id| t.id() == id))
+    {
         let mut targets: BTreeMap<AutomationTarget, Vec<ModulationSource>> = BTreeMap::new();
         for clip in owner.clips() {
             for envelope in clip.envelopes() {
-                let Some((travel, control)) = travel_of(document, devices, owner.id(), &envelope.target)
+                let Some((travel, control)) =
+                    travel_of(document, devices, owner.id(), &envelope.target)
                 else {
                     continue;
                 };
                 let (base, _) = played(owner.id(), &envelope.target).unwrap_or((control, control));
                 let share = clip_envelope_value_at(clip, envelope, at);
-                targets.entry(envelope.target).or_default().push(ModulationSource {
-                    clip: clip.id,
-                    share,
-                    contribution: share.map_or(0.0, |share| travel.clip_contribution(base, share)),
-                });
+                targets
+                    .entry(envelope.target)
+                    .or_default()
+                    .push(ModulationSource {
+                        clip: clip.id,
+                        share,
+                        contribution: share
+                            .map_or(0.0, |share| travel.clip_contribution(base, share)),
+                    });
             }
         }
         for (target, sources) in targets {

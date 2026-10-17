@@ -58,6 +58,7 @@ A plug-in built on Loombridge's plug-in kit can be compiled into Beatlayer and r
 - **R23.** Its own commands are device commands, named and served as the CLAP hosting spec's R18 says, from the moment the device is in the set. Running one runs it on the main thread, checked against its schema; the parameters it changed go into the set in the same undo step (an agent's labelled one), and the engine brings them to the node on their frame (R6). A change the plug-in makes outside a command, as from its own window, is one undo step per gesture, named for its parameter (R18). (S7)
 - **R24.** The set holds its values, which win when the set is opened again, and its own state, in the kit's state layout, taken in without an undo step each time the set is saved or the device copied; a reopened set's device starts a new instance from that state. Offline renders pass it through until WP-2.6b, as they pass CLAP plug-ins (the CLAP hosting spec's decisions). (S7)
 - **R25.** The kit's two example plug-ins, Example Gain and Example Sine, join the device list only with `bl-devices`' `kit-examples` feature, which is off by default, so nothing user-facing ships. (S7)
+- **R26.** A device with sample slots (WP-5.17, the eight-slot drum sampler) numbers slot `k`'s copy of a parameter as the first slot's number plus `k` times a stride, and its layout can hold display cells that stand for a slot and bands of slot controls that name the first slot's parameters. A band of slot controls is placed for the slot the panel has selected, so the panel shows one slot's controls at a time, and counts as placing that parameter once for every slot, so rule R10 holds. The selected slot is the view's, not the set's. (Beatlayer's own)
 
 ## Tests
 
@@ -87,6 +88,7 @@ A plug-in built on Loombridge's plug-in kit can be compiled into Beatlayer and r
 | R23 | `crates/devices/tests/kit.rs`, `a_command_runs_on_the_main_thread_and_reports_its_changes`; `crates/agent/tests/kit_devices.rs`, `a_kit_plugin_compiled_in_serves_its_commands_as_device_commands` | unit, MCP script, real-time trap count |
 | R24 | `crates/agent/tests/kit_devices.rs`, `a_kit_plugin_compiled_in_serves_its_commands_as_device_commands` | MCP script |
 | R25 | `crates/agent/tests/kit_devices.rs`, `a_kit_plugin_compiled_in_serves_its_commands_as_device_commands` (built with the feature) | MCP script |
+| R26 | `crates/model/src/device_layout.rs`, `a_band_of_slot_controls_names_the_selected_slots_parameters`; `crates/ui/tests/device_view.rs`, `clicking_a_slot_cell_shows_that_slots_controls` | unit; UI script |
 
 
 ## Details

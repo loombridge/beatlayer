@@ -2179,7 +2179,7 @@ impl Shell {
     /// set records where it is and the device names it by content hash, and
     /// the engine plays it. One undo step.
     fn load_sample(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
-        let device_ids::LoadSampleArgs { device, path } = Self::args(id, args)?;
+        let device_ids::LoadSampleArgs { device, path, slot } = Self::args(id, args)?;
         let device =
             device
                 .or_else(|| self.devices.selected())
@@ -2187,23 +2187,37 @@ impl Shell {
                     command: id.to_owned(),
                     reason: "select a device first".to_owned(),
                 })?;
-        let kind = self
+        let target = self
             .editor
             .document()
             .device(device)
-            .map(|device| device.kind.clone())
+            .cloned()
             .ok_or_else(|| ShellError::InvalidArgs {
                 command: id.to_owned(),
                 message: format!("no {device}"),
             })?;
-        // Only the sampler plays a sample (the sampler spec, R11).
-        let sampler = bl_model::DeviceKind::Native {
-            device_type: bl_devices::sampler::SAMPLER.to_owned(),
-        };
-        if kind != sampler {
+        // Only the sampler and the drum sampler play samples (the sampler
+        // spec, R11).
+        let plays = matches!(
+            &target.kind,
+            bl_model::DeviceKind::Native { device_type } if bl_devices::plays_samples(device_type)
+        );
+        if !plays {
             return Err(ShellError::Failed {
                 command: id.to_owned(),
                 message: format!("{device} doesn't play a sample"),
+            });
+        }
+        // A device with several slots loads into the one selected unless
+        // told which.
+        let slot = slot.unwrap_or_else(|| self.devices.slot_of(&target) as u8);
+        let slots = self.devices.slot_count(&target.kind).max(1);
+        if u32::from(slot) >= slots {
+            return Err(ShellError::InvalidArgs {
+                command: id.to_owned(),
+                message: format!(
+                    "{device} has {slots} sample slots, counted from 0; there is no slot {slot}"
+                ),
             });
         }
         let path = PathBuf::from(path);
@@ -2226,6 +2240,7 @@ impl Shell {
             .apply(bl_model::Command::SetDeviceSample {
                 device,
                 media: Some(media),
+                slot,
             })
             .map_err(|error| ShellError::Failed {
                 command: id.to_owned(),
@@ -2241,6 +2256,7 @@ impl Shell {
         Ok(to_value(&device_ids::LoadSampleResult {
             device,
             media,
+            slot,
             name,
         }))
     }
@@ -2336,6 +2352,26 @@ impl Shell {
         self.devices.hot_swap()?;
         match self.browser_view.selected() {
             [one] if bl_project::preset::is_preset(one) => Some(one.clone()),
+            _ => None,
+        }
+    }
+
+    /// The browser's selection, if it's one audio file and a device that
+    /// plays samples is being hot-swapped: what Enter or a double-click
+    /// loads into the device's selected slot (WP-5.17).
+    fn hot_swap_sample(&self) -> Option<(bl_model::DeviceId, PathBuf)> {
+        let device = self.devices.hot_swap()?;
+        let takes = self.editor.document().device(device).is_some_and(|d| {
+            matches!(
+                &d.kind,
+                bl_model::DeviceKind::Native { device_type }
+                    if bl_devices::plays_samples(device_type)
+            )
+        });
+        match self.browser_view.selected() {
+            [one] if takes && browser::arrange::is_audio(&one.to_string_lossy()) => {
+                Some((device, one.clone()))
+            }
             _ => None,
         }
     }
@@ -3720,7 +3756,9 @@ impl Shell {
         if ids::handles(id) || transport_ids::handles(id) {
             return true;
         }
-        if id == browser_ids::LOAD_SELECTED && self.hot_swap_preset().is_some() {
+        if id == browser_ids::LOAD_SELECTED
+            && (self.hot_swap_preset().is_some() || self.hot_swap_sample().is_some())
+        {
             return true;
         }
         if device_ids::handles(id) {
@@ -4605,6 +4643,18 @@ impl Shell {
                 self.touch();
             }
             return Ok(outcome.value);
+        }
+        if id == browser_ids::LOAD_SELECTED
+            && let Some((device, path)) = self.hot_swap_sample()
+        {
+            // Spec: eight-slot-drum-sampler R17. Loading a sample while
+            // hot-swapping a device that plays samples loads it into the
+            // device's selected slot, as dropping it there does.
+            Self::args::<NoArgs>(id, args)?;
+            return self.load_sample(
+                device_ids::LOAD_SAMPLE,
+                json!({ "device": device, "path": path.to_string_lossy() }),
+            );
         }
         if id == browser_ids::LOAD_SELECTED
             && let Some(path) = self.hot_swap_preset()

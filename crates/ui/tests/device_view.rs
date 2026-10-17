@@ -512,7 +512,12 @@ fn a_dropped_sample_loads_into_the_sampler_under_the_pointer() {
     std::fs::write(&file, bytes).unwrap();
 
     assert_eq!(
-        h.shell.editor().document().device(device).unwrap().media,
+        h.shell
+            .editor()
+            .document()
+            .device(device)
+            .unwrap()
+            .media_at(0),
         None,
         "a new sampler has no sample"
     );
@@ -526,9 +531,176 @@ fn a_dropped_sample_loads_into_the_sampler_under_the_pointer() {
             .document()
             .device(device)
             .unwrap()
-            .media
+            .media_at(0)
             .is_some(),
         "the drop loaded the sample"
     );
+    let _ = std::fs::remove_file(&file);
+}
+
+/// The drum sampler's cell for sample slot `slot` (counted from 0), as the
+/// panel draws it.
+fn slot_cell_rect(h: &mut Harness, device: DeviceId, slot: u32) -> Rect {
+    let frame = frame_of(h, device);
+    let panel = h
+        .shell
+        .device_view_state()
+        .devices
+        .into_iter()
+        .find(|d| d.id == device)
+        .and_then(|d| d.panel)
+        .expect("a panel");
+    bl_ui::device_panel::place(
+        &panel,
+        bl_ui::device_panel::body_rect(frame, TITLE_BAR_HEIGHT),
+    )
+    .1
+    .into_iter()
+    .find(|(_, _, s)| *s == Some(slot))
+    .expect("a cell for the slot")
+    .1
+}
+
+fn add_kitbag(h: &mut Harness) -> DeviceId {
+    let kit = bl_devices::kitbag_type();
+    add(
+        h,
+        json!({ "kind": kit.kind, "name": kit.name, "role": kit.role }),
+    )
+}
+
+fn selected_slot(h: &Harness, device: DeviceId) -> u32 {
+    h.shell
+        .device_view_state()
+        .devices
+        .into_iter()
+        .find(|d| d.id == device)
+        .and_then(|d| d.panel)
+        .map(|p| p.selected_slot)
+        .unwrap()
+}
+
+// Spec: eight-slot-drum-sampler R18
+#[test]
+fn clicking_a_slot_cell_shows_that_slots_controls() {
+    let mut h = harness();
+    let device = add_kitbag(&mut h);
+    // Slot 4 pans left; the panel shows slot 1's Pan until slot 4 is picked.
+    let pan = bl_devices::kitbag::param(3, bl_devices::kitbag::slot::PAN);
+    h.shell
+        .run(
+            "device.set_param",
+            json!({ "device": device, "param": pan, "value": -20.0 }),
+        )
+        .unwrap();
+    h.settle();
+    let nodes = Harness::nodes(&h.settle());
+    assert_eq!(Harness::node(&nodes, "Slot 1 Pan").value, "0");
+    let cell = Harness::node(&nodes, "Slot 4");
+    assert_eq!(cell.role, Role::Button);
+    assert!(
+        cell.description.contains("plays D#3") && cell.description.contains("empty"),
+        "{}",
+        cell.description
+    );
+    assert!(
+        Harness::node(&nodes, "Slot 1")
+            .description
+            .contains("selected"),
+        "slot 1 is selected to start"
+    );
+
+    let at = slot_cell_rect(&mut h, device, 3).center();
+    h.click(at);
+    h.settle();
+    assert_eq!(selected_slot(&h, device), 3);
+    let nodes = Harness::nodes(&h.settle());
+    assert_eq!(Harness::node(&nodes, "Slot 4 Pan").value, "-20");
+    assert!(
+        nodes.iter().all(|n| n.label != "Slot 1 Pan"),
+        "slot 1's controls are gone"
+    );
+    assert!(
+        Harness::node(&nodes, "Slot 4")
+            .description
+            .contains("selected")
+    );
+    assert!(
+        !Harness::node(&nodes, "Slot 1")
+            .description
+            .contains("selected")
+    );
+    // Choosing a slot is a view change: nothing for undo.
+    assert_ne!(last_step(&h), "Select Sample Slot");
+}
+
+// Spec: eight-slot-drum-sampler R18
+#[test]
+fn a_sample_dropped_on_a_slot_cell_loads_into_that_slot_and_delete_clears_it() {
+    let mut h = harness();
+    let device = add_kitbag(&mut h);
+    let file = std::env::temp_dir().join(format!("bl-ui-kitbag-{}.wav", std::process::id()));
+    let samples: Vec<f32> = (0..480)
+        .map(|i| (i as f32 * 440.0 / 48_000.0 * std::f32::consts::TAU).sin() * 0.25)
+        .collect();
+    let bytes = bl_media::wav_bytes(
+        &samples,
+        1,
+        48_000,
+        bl_media::BitDepth::Int16,
+        bl_media::Dither::None,
+    )
+    .unwrap();
+    std::fs::write(&file, bytes).unwrap();
+
+    let media = |h: &Harness| {
+        h.shell
+            .editor()
+            .document()
+            .device(device)
+            .unwrap()
+            .media
+            .clone()
+    };
+    assert!(media(&h).is_empty(), "a new drum sampler has no samples");
+    // Dropped on slot 6's cell, the file goes to slot 6 whatever is
+    // selected.
+    let cell = slot_cell_rect(&mut h, device, 5).center();
+    h.frame(vec![Event::PointerMoved(cell)]);
+    h.dropped
+        .push(std::sync::Arc::new(DroppedFile(file.clone())));
+    h.frame(Vec::new());
+    let loaded = media(&h);
+    assert_eq!(loaded.len(), 6, "{loaded:?}");
+    assert!(loaded[..5].iter().all(Option::is_none) && loaded[5].is_some());
+    assert_eq!(last_step(&h), "Load Sample");
+    let nodes = Harness::nodes(&h.settle());
+    assert!(
+        Harness::node(&nodes, "Slot 6")
+            .description
+            .contains("holds a sample")
+    );
+    assert!(
+        Harness::node(&nodes, "Slot 5")
+            .description
+            .contains("empty")
+    );
+
+    // Dropped elsewhere on the device, it goes to the selected slot (1).
+    let frame = frame_of(&mut h, device);
+    let title = pos2(frame.center().x, frame.top() + 4.0);
+    h.frame(vec![Event::PointerMoved(title)]);
+    h.dropped
+        .push(std::sync::Arc::new(DroppedFile(file.clone())));
+    h.frame(Vec::new());
+    assert!(media(&h)[0].is_some(), "slot 1, the selected one");
+
+    // Delete on a focused cell clears its slot: one undo step.
+    h.click(cell);
+    h.settle();
+    h.key(Key::Delete, Modifiers::NONE);
+    h.settle();
+    assert_eq!(media(&h).len(), 1, "slot 6 is clear: {:?}", media(&h));
+    assert_eq!(last_step(&h), "Clear Sample");
     let _ = std::fs::remove_file(&file);
 }

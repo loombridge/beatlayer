@@ -13,7 +13,7 @@
 use std::sync::Arc;
 
 use bl_core::time::{Frames, SampleRate, TempoMap};
-use bl_engine::{DeviceType, NodeConfig, NodeData, NoteEvent, NoteKind, Registry};
+use bl_engine::{DeviceType, NodeConfig, NodeData, NoteEvent, NoteKind, Registry, SlotSample};
 use bl_media::SampleData;
 use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
 use bl_model::{DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
@@ -702,8 +702,8 @@ impl Sampler {
     fn sample(&self) -> Option<&SampleData> {
         self.data
             .as_ref()
-            .and_then(|data| data.downcast_ref::<Arc<SampleData>>())
-            .map(Arc::as_ref)
+            .and_then(|data| data.downcast_ref::<SlotSample>())
+            .map(|slot| slot.sample.as_ref())
     }
 
     /// The settings one stretch of a block plays by.
@@ -1167,9 +1167,9 @@ impl NativeDevice for Sampler {
         let sample = match self
             .data
             .as_ref()
-            .and_then(|data| data.downcast_ref::<Arc<SampleData>>())
+            .and_then(|data| data.downcast_ref::<SlotSample>())
         {
-            Some(sample) if sample.frames() > 0 => Arc::clone(sample),
+            Some(slot) if slot.sample.frames() > 0 => Arc::clone(&slot.sample),
             _ => {
                 for voice in &mut self.voices {
                     voice.active = false;
@@ -1220,7 +1220,13 @@ impl NativeDevice for Sampler {
     }
 
     fn receive_data(&mut self, data: NodeData) {
-        self.data = Some(data);
+        // The sampler has one sample slot.
+        if data
+            .downcast_ref::<SlotSample>()
+            .is_some_and(|slot| slot.slot == 0)
+        {
+            self.data = Some(data);
+        }
     }
 }
 
@@ -1304,7 +1310,7 @@ impl Settings {
 }
 
 /// The kit's filter type the Type choice names.
-fn filter_type_of(entry: usize) -> FilterType {
+pub(crate) fn filter_type_of(entry: usize) -> FilterType {
     match entry {
         1 => FilterType::Lp24,
         2 => FilterType::Hp12,
@@ -1658,7 +1664,7 @@ impl Voice {
 /// One sample frame at `position` in each channel: linear interpolation
 /// between the neighbouring frames, silence past the end, and a mono sample
 /// on both sides.
-fn read(sample: &SampleData, position: f64) -> (f32, f32) {
+pub(crate) fn read(sample: &SampleData, position: f64) -> (f32, f32) {
     let frames = sample.frames();
     if frames == 0 || position < 0.0 {
         return (0.0, 0.0);

@@ -105,8 +105,9 @@ impl SettingsPage {
     /// in the chooser. The shell (WP-1.7) builds Audio and the theme choice,
     /// WP-1.17 Display & Input's Zoom, WP-1.4b Record, Warp & Launch's
     /// Create Fades on Clip Edges, WP-2.5b Plug-Ins' Auto-Hide Plug-In
-    /// Windows, WP-1.15 the Agents page's agent server settings, and WP-2.2 the
-    /// Tempo & MIDI page's MIDI ports table.
+    /// Windows, WP-1.15 the Agents page's agent server settings, WP-2.2 the
+    /// Tempo & MIDI page's MIDI ports table, and WP-4.20 File & Folder's
+    /// Temporary Folder.
     #[must_use]
     pub const fn is_built(self) -> bool {
         matches!(
@@ -118,6 +119,7 @@ impl SettingsPage {
                 | Self::PlugIns
                 | Self::Agents
                 | Self::TempoMidi
+                | Self::FileFolder
         )
     }
 
@@ -280,6 +282,13 @@ pub struct AgentsPageSettings {
     pub clients: Vec<AllowedAgent>,
 }
 
+/// File & Folder's settings in `settings.state`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct FileFolderSettings {
+    /// The Temporary Folder in use: the setting, or the default.
+    pub temporary_folder: String,
+}
+
 /// What `settings.state` returns: the Settings window's preferences by
 /// page. Pages whose settings no package has built yet are left out.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -306,6 +315,9 @@ pub struct SettingsState {
     /// `settings.set_select_next_scene_on_launch` and
     /// `settings.set_start_recording_on_scene_launch` commands set it.
     pub launch: LaunchPrefs,
+    /// File & Folder: the Temporary Folder, as `settings.set_temporary_folder`
+    /// sets it.
+    pub file_folder: FileFolderSettings,
     /// Plug-Ins: Auto-Hide Plug-In Windows, as
     /// `settings.set_auto_hide_plug_in_windows` sets it.
     pub auto_hide_plug_in_windows: bool,

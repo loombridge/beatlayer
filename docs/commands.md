@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-344 commands in 31 areas.
+345 commands in 31 areas.
 
 ## Permission classes
 
@@ -315,6 +315,7 @@ Each command has:
 | [`settings.set_select_next_scene_on_launch`](#settingsset_select_next_scene_on_launch) | Select Next Scene on Launch | `edit` |  |  |
 | [`settings.set_select_on_launch`](#settingsset_select_on_launch) | Select on Launch | `edit` |  |  |
 | [`settings.set_start_recording_on_scene_launch`](#settingsset_start_recording_on_scene_launch) | Start Recording on Scene Launch | `edit` |  |  |
+| [`settings.set_temporary_folder`](#settingsset_temporary_folder) | Temporary Folder | `edit` |  |  |
 | [`settings.set_theme`](#settingsset_theme) | Theme | `edit` |  |  |
 | [`settings.set_warp_recorded_audio`](#settingsset_warp_recorded_audio) | Warp Recorded Audio | `edit` |  |  |
 | [`settings.state`](#settingsstate) | Settings State | `read` |  |  |
@@ -5366,6 +5367,22 @@ Arguments:
 
 Result: [`SwitchResult`](#switchresult).
 
+#### `settings.set_temporary_folder`
+
+**Temporary Folder**. Permission: `edit`. Contexts: `settings`.
+
+Chooses the Temporary Folder on the Settings window's File & Folder page: where the files Reverse, Crop, Consolidate, Freeze and Bounce write go while the set has never been saved (the first save moves them into the project's `Samples/Processed` folders). `path` is an absolute path, made when it is first needed, or `null` for the default, a `Temporary` folder in Beatlayer's application-data folder. Files already written stay where they are. Run by a person from the Browse button without a `path`, it asks for a folder. The setting is kept for the next start, and isn't part of the set or an undo step. The result's `path` is the folder in use afterwards.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `path` | string or null | no | The folder's absolute path, or `null` for the default: a `Temporary` folder in Beatlayer's application-data folder. |
+
+Result: [`TemporaryFolderResult`](#temporaryfolderresult).
+
 #### `settings.set_theme`
 
 **Theme**. Permission: `edit`. Contexts: `settings`.
@@ -6515,6 +6532,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`settings.set_select_next_scene_on_launch`](#settingsset_select_next_scene_on_launch) | `settings.state` | `launch.select_next_scene_on_launch` |
 | [`settings.set_select_on_launch`](#settingsset_select_on_launch) | `settings.state` | `launch.select_on_launch` |
 | [`settings.set_start_recording_on_scene_launch`](#settingsset_start_recording_on_scene_launch) | `settings.state` | `launch.start_recording_on_scene_launch` |
+| [`settings.set_temporary_folder`](#settingsset_temporary_folder) | `settings.state` | `file_folder.temporary_folder` |
 | [`settings.set_theme`](#settingsset_theme) | `settings.state` | `theme` |
 | [`settings.set_warp_recorded_audio`](#settingsset_warp_recorded_audio) | `settings.state` | `warp_recorded_audio` |
 | [`slot.set_stop_button`](#slotset_stop_button) | the query tool's `track` | `removed_stop_buttons` |
@@ -10374,6 +10392,34 @@ What `export.audio` returns.
     "took_seconds",
     "speed",
     "missing_media"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `FileFolderSettings`
+
+File & Folder's settings in `settings.state`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `temporary_folder` | string | yes | The Temporary Folder in use: the setting, or the default. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "File & Folder's settings in `settings.state`.",
+  "properties": {
+    "temporary_folder": {
+      "description": "The Temporary Folder in use: the setting, or the default.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "temporary_folder"
   ],
   "type": "object"
 }
@@ -15356,6 +15402,7 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
 | `create_fades_on_clip_edges` | boolean | yes | Record, Warp & Launch: Create Fades on Clip Edges, as `settings.set_create_fades_on_clip_edges` sets it. |
 | `warp_recorded_audio` | boolean | yes | Record, Warp & Launch: Warp Recorded Audio, as `settings.set_warp_recorded_audio` sets it. |
 | `launch` | [`LaunchPrefs`](#launchprefs) | yes | Record, Warp & Launch: the Launch section, as the `settings.set_default_launch_*`, `settings.set_select_on_launch`, `settings.set_select_next_scene_on_launch` and `settings.set_start_recording_on_scene_launch` commands set it. |
+| `file_folder` | [`FileFolderSettings`](#filefoldersettings) | yes | File & Folder: the Temporary Folder, as `settings.set_temporary_folder` sets it. |
 | `auto_hide_plug_in_windows` | boolean | yes | Plug-Ins: Auto-Hide Plug-In Windows, as `settings.set_auto_hide_plug_in_windows` sets it. |
 | `plug_ins` | [`PluginSettings`](#pluginsettings) | yes | Plug-Ins: how the Browser shows plug-ins, as `plugin.settings` sets it. |
 | `agents` | [`AgentsPageSettings`](#agentspagesettings) | yes | Agents. |
@@ -15391,6 +15438,10 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
       "$ref": "#/$defs/DisplayInputSettings",
       "description": "Display & Input."
     },
+    "file_folder": {
+      "$ref": "#/$defs/FileFolderSettings",
+      "description": "File & Folder: the Temporary Folder, as `settings.set_temporary_folder` sets it."
+    },
     "launch": {
       "$ref": "#/$defs/LaunchPrefs",
       "description": "Record, Warp & Launch: the Launch section, as the `settings.set_default_launch_*`, `settings.set_select_on_launch`, `settings.set_select_next_scene_on_launch` and `settings.set_start_recording_on_scene_launch` commands set it."
@@ -15425,6 +15476,7 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
     "create_fades_on_clip_edges",
     "warp_recorded_audio",
     "launch",
+    "file_folder",
     "auto_hide_plug_in_windows",
     "plug_ins",
     "agents",
@@ -15981,6 +16033,34 @@ One of:
       "type": "object"
     }
   ]
+}
+```
+
+</details>
+
+### `TemporaryFolderResult`
+
+What `settings.set_temporary_folder` returns: the folder in use afterwards.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | The Temporary Folder's path. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `settings.set_temporary_folder` returns: the folder in use afterwards.",
+  "properties": {
+    "path": {
+      "description": "The Temporary Folder's path.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "path"
+  ],
+  "type": "object"
 }
 ```
 

@@ -1123,6 +1123,34 @@ fn the_assistant_settings_are_the_person_s_own_through_the_agent_api() {
     assert!(client.into_transport().finish().unwrap().success());
 }
 
+/// An agent sets the Temporary Folder by command ID and reads it back from
+/// `settings.state` (WP-4.20).
+#[test]
+fn an_agent_sets_the_temporary_folder_by_command_id_and_reads_it_back() {
+    // Spec: audio-clip-editing R5
+    let dir = TempDir::new("temporary-folder");
+    let chosen = dir.0.join("Scratch");
+    let mut client = bl_cli_mcp(&["--autonomous"]);
+    let set = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "settings.set_temporary_folder",
+                               "args": { "path": chosen } }] }),
+    );
+    assert_eq!(set["results"][0]["result"]["path"], json!(chosen), "{set}");
+    let state = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "settings.state", "args": {} }] }),
+    );
+    assert_eq!(
+        state["results"][0]["result"]["file_folder"]["temporary_folder"],
+        json!(chosen),
+        "{state}"
+    );
+    assert!(client.into_transport().finish().unwrap().success());
+}
+
 #[test]
 fn an_autonomous_agent_can_quit_bl_cli_mcp() {
     let mut client = bl_cli_mcp(&["--autonomous"]);

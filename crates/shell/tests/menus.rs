@@ -86,6 +86,9 @@ fn every_shell_command_is_on_a_menu_or_a_control() {
         // The Record, Warp & Launch page's switch (the audio clips spec,
         // R22).
         commands::SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES,
+        // The File & Folder page's Temporary Folder (the audio clip editing
+        // spec, R5).
+        commands::SETTINGS_SET_TEMPORARY_FOLDER,
         // The same page's Warp recorded audio switch (the recording spec,
         // R13).
         commands::SETTINGS_SET_WARP_RECORDED_AUDIO,

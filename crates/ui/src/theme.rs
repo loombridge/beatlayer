@@ -90,6 +90,9 @@ pub struct Colours {
     /// A parameter's modulation: its ring segment, its fader mark, its
     /// envelope in a clip, and the LED of a modulated parameter (WP-5.9).
     pub modulation: Colour,
+    /// The tint of every parameter a lit Map button can map, and of the lit
+    /// button (WP-5.10).
+    pub mapping: Colour,
     /// Track and clip colours, assigned to new tracks in turn.
     pub track_palette: Vec<Colour>,
 }

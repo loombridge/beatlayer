@@ -1573,6 +1573,73 @@ fn an_agent_builds_and_reads_back_a_nested_rack() {
     assert_eq!(history["undo"]["items"][0], "racks: Ungroup");
 }
 
+// Spec: racks R41 (WP-5.7): an agent takes a rack chain's tap as a track's
+// input by command ID, reads it back as the track's input, and sees it go
+// to No Input with the chain.
+#[test]
+fn an_agent_takes_a_chain_tap() {
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("racks").unwrap();
+    let tracks = default_tracks(&mut client);
+    let (source, tapper) = (tracks[2], tracks[3]);
+    let built = call(
+        &mut client,
+        "run",
+        json!({ "label": "Build a rack", "commands": [
+            { "command": "device.insert", "args": { "track": source, "index": 0, "device": {
+                "id": {"$new": "rack"}, "name": "Layers", "enabled": true, "params": [],
+                "kind": { "rack": { "kind": "audio_effect" } },
+                "chains": [{ "id": {"$new": "wet"}, "name": "Wet", "devices": [] }],
+            } } },
+        ] }),
+    );
+    let wet = built["ids"]["wet"].as_u64().unwrap();
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "routing.set_input", "args": { "track": tapper,
+            "input": { "type": "track", "track": source, "tap": "post_fx", "chain": wet } } }] }),
+    );
+
+    let read = |client: &mut Client<InProcess>| {
+        call(client, "query", json!({ "id": tapper, "detail": "full" }))["saved"]["routing"]["input"]
+            .clone()
+    };
+    assert_eq!(
+        read(&mut client),
+        json!({ "type": "track", "track": source, "tap": "post_fx", "chain": wet })
+    );
+    let history = call(&mut client, "query", json!({ "path": "history" }));
+    assert_eq!(history["undo"]["items"][0], "racks: Set Input");
+
+    // A chain that isn't on the track is refused.
+    let refused = client
+        .call(
+            "run",
+            json!({ "commands": [{ "command": "routing.set_input", "args": { "track": tapper,
+                "input": { "type": "track", "track": tracks[0], "chain": wet } } }] }),
+        )
+        .unwrap();
+    assert!(refused.is_error, "{}", refused.text);
+
+    // Removing the chain leaves No Input; undo brings the tap back.
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "chain.remove", "args": { "chain": wet } }] }),
+    );
+    assert_eq!(read(&mut client), json!({ "type": "none" }));
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "edit.undo", "args": {} }] }),
+    );
+    assert_eq!(
+        read(&mut client),
+        json!({ "type": "track", "track": source, "tap": "post_fx", "chain": wet })
+    );
+}
+
 // Spec: device-chains R34 and R35, device-framework R14 (WP-5.42): an agent
 // adds the framework's test effects, shows and hides its expanded part,
 // switches its own menu option, and reads all of it back, by command ID.

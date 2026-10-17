@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-367 commands in 33 areas.
+371 commands in 34 areas.
 
 ## Permission classes
 
@@ -249,6 +249,10 @@ Each command has:
 | [`mixer_view.toggle`](#mixer_viewtoggle) | Mixer | `read` | `Cmd+Option+M` | `Ctrl+Alt+M` |
 | [`mixer_view.volume`](#mixer_viewvolume) | Mixer Volume | `read` |  |  |
 | [`modulation.state`](#modulationstate) | Modulation State | `read` |  |  |
+| [`modulator.arm_map`](#modulatorarm_map) | Map | `read` |  |  |
+| [`modulator.map`](#modulatormap) | Map Modulator | `edit` |  |  |
+| [`modulator.set_shape`](#modulatorset_shape) | Edit Shape | `edit` |  |  |
+| [`modulator.unmap`](#modulatorunmap) | Unmap Modulator | `edit` |  |  |
 | [`note.add`](#noteadd) | Add Note | `edit` |  |  |
 | [`note.delete`](#notedelete) | Delete Notes | `destructive` |  |  |
 | [`note.move`](#notemove) | Move Notes | `edit` |  |  |
@@ -3388,6 +3392,7 @@ Arguments:
 | `device` | [`DeviceId`](#deviceid) | yes | The device. |
 | `params` | array of pair of [`ParamId`](#paramid) and number | yes | The parameter values, as `[parameter, value]` pairs, each finite and each parameter once. |
 | `name` | string | yes | The name the title bar shows while Show Preset Name is on, such as the preset's; empty for the device's own name. |
+| `shape` | array or null | no | A Curve Mod's breakpoint shape (the modulation spec, R23), which a preset of one holds; `null` for the default shape. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -4261,7 +4266,7 @@ Result: [`MixerViewState`](#mixerviewstate).
 
 **Modulation State**. Permission: `read`. Contexts: `global`.
 
-Reports the parameters a track's clips modulate (all tracks' when `track` is left out): for each, the track and the parameter (a mixer control, a send, or a device's parameter), its base (what its automation or its control sets), the value it played in the last block, and the clip envelopes modulating it, each with its value at the play position and what it contributes, as a share of the parameter's travel. A clip envelope modulates by a share: 0 to 1 for a volume or a send, which brings its level down to that share, and −1 to 1 for the rest. It reads back `clip.set_envelope_breakpoint` and the other clip envelope commands. Changes nothing.
+Reports the parameters a track's clips and the modulators act on (all tracks' when `track` is left out): for each, the track and the parameter (a mixer control, a send, or a device's parameter), its base (what its automation, a modulator in Remote Control or its control sets), the value it played in the last block, the clip envelopes modulating it, each with its value at the play position and what it contributes, as a share of the parameter's travel, the modulator slots mapping it (`modulators`), and the modulator that holds it in Remote Control (`held_by`). A clip envelope modulates by a share: 0 to 1 for a volume or a send, which brings its level down to that share, and −1 to 1 for the rest. It reads back `clip.set_envelope_breakpoint` and the other clip envelope commands, and `modulator.map`. Changes nothing.
 
 Default keys: none.
 
@@ -4272,6 +4277,78 @@ Arguments:
 | `track` | [`TrackId`](#trackid) or null | no | The track, or every track when left out. |
 
 Result: [`ModulationState`](#modulationstate).
+
+### Area `modulator`
+
+#### `modulator.arm_map`
+
+**Map**. Permission: `read`. Contexts: `device-view`.
+
+Lights or puts out a modulator slot's Map button, as clicking it does. While one is lit, every parameter in the set that can be mapped is tinted, and clicking one maps it to the slot (`modulator.map`); Esc, or the button again (`armed`: false), puts it out and changes nothing. Lighting a button puts out the one that was lit. It changes only the view: it isn't an undo step, and `device_view.state` reports the lit button in `armed_map`. Only a modulator has slots.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `slot` | integer from 0 to 255 | yes | The slot, from 0 to 7. |
+| `armed` | boolean or null | no | Arm (true) or disarm (false); switches if left out. |
+| `device` | [`DeviceId`](#deviceid) or null | no | The modulator; the selected device if left out. |
+
+Result: [`DeviceViewState`](#deviceviewstate).
+
+#### `modulator.map`
+
+**Map Modulator**. Permission: `edit`. Contexts: `device-view`.
+
+Maps one of a modulator's eight slots (`slot`, 0 to 7) to a parameter, as the slot's Map button and a click on the parameter's control do. `target` is a mixer control (`volume`, `pan` or `mute`) or a send of any track, or a parameter of any device on any track, but not a parameter of the modulator itself. The slot's earlier mapping is replaced; one modulator doesn't map one parameter twice. A modulator in Remote Control can't map a parameter another modulator in Remote Control holds. The mapping is saved with the set, goes with its target when that is deleted, and shows in the `mappings` field of the query tool's `device`. One undo step (Map Modulator).
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The modulator device. |
+| `slot` | integer from 0 to 255 | yes | The slot, from 0 to 7. |
+| `target` | [`ModTarget`](#modtarget) | yes | The parameter to map: a mixer control or send of any track, or a parameter of any device but the modulator's own. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `modulator.set_shape`
+
+**Edit Shape**. Permission: `edit`. Contexts: `device-view`.
+
+Replaces the breakpoint shape of a Curve Mod, as every edit of its display does (adding, moving, bending or deleting a breakpoint, Clear and the six presets). `points` lists up to 64 breakpoints in order along the cycle, each with `x` (its place, 0 to 1), `y` (the output there, 0 to 1) and `bend` (of the segment starting there, from -1 to 1, 0 straight). An empty list outputs 0. One undo step (Edit Shape).
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The Curve Mod device. |
+| `points` | array of [`ShapePoint`](#shapepoint) | yes | The breakpoints, in order along the cycle (at most 64), each with its place and output from 0 to 1 and the bend of the segment starting there, from −1 to 1. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `modulator.unmap`
+
+**Unmap Modulator**. Permission: `edit`. Contexts: `device-view`.
+
+Removes the mapping of a modulator's slot (`slot`, 0 to 7), as its Unmap button does: the parameter plays its own value again from the next frame. A slot with no mapping stays as it is. One undo step (Unmap Modulator).
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The modulator device. |
+| `slot` | integer from 0 to 255 | yes | The slot, from 0 to 7. |
+
+Result: [`ChangeSet`](#changeset).
 
 ### Area `note`
 
@@ -6900,6 +6977,9 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`mixer.set_solo_in_place`](#mixerset_solo_in_place) | the query tool's `song` | `settings.solo_in_place` |
 | [`mixer.set_volume`](#mixerset_volume) | the query tool's `track` | `mixer.volume` |
 | [`mixer.solo_exclusive`](#mixersolo_exclusive) | the query tool's `track` | `mixer.solo` |
+| [`modulator.map`](#modulatormap) | the query tool's `device` | `mappings` |
+| [`modulator.set_shape`](#modulatorset_shape) | the query tool's `device` | `shape` |
+| [`modulator.unmap`](#modulatorunmap) | the query tool's `device` | `mappings` |
 | [`note.add`](#noteadd) | the query tool's `clip` | `data.midi.notes` |
 | [`note.delete`](#notedelete) | the query tool's `clip` | `data.midi.notes` |
 | [`note.move`](#notemove) | the query tool's `clip` | `data.midi.notes` |
@@ -7358,6 +7438,43 @@ What `perception.analyze` returns. A measure not asked for is null.
     "tempo",
     "key",
     "transients"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ArmedMap`
+
+A lit Map button.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The modulator. |
+| `slot` | integer from 0 to 255 | yes | Its slot. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A lit Map button.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The modulator."
+    },
+    "slot": {
+      "description": "Its slot.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "device",
+    "slot"
   ],
   "type": "object"
 }
@@ -9711,11 +9828,13 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 | `b_active` | boolean | no | Whether the device's B state is the active one, whose values [`params`](Self::params) holds (device compare R1). Left out of the saved set while A is active. |
 | `chains` | array of [`Chain`](#chain) | no | A rack's chains, in order (WP-5.1). Empty for every device that isn't a rack, and left out of the saved set then, so sets saved before racks load unchanged. |
 | `floating` | boolean | no | Whether the device floats in a window of its own rather than showing in the Device View (IMP-14, WP-2.5b), where its place in the chain shows as a strip. Only native devices float. Left out of the saved set while docked. Where its window sits isn't part of the document: moving or resizing a window isn't an undo step ([`WindowFrame`]). |
+| `mappings` | array of [`Mapping`](#mapping) | no | The parameters a modulator maps, one per slot (the modulation spec, R19). Left out of the saved set for a device that maps none. |
 | `media` | array of [`ContentHash`](#contenthash) or null | no | The media the device plays, by content hash, one entry per sample slot (WP-2.16, WP-5.17): the sampler's sample is slot 0, the eight-slot drum sampler's slots are 0 to 7. The media store holds each like a clip's audio (the sampler spec, R11). A slot with no sample is `None`, and the list never ends in one. Left out of the saved set for a device that plays none; a set saved before slots existed holds one hash, which loads as slot 0. |
 | `other_params` | array or null | no | The values of the state that isn't active, in the same form as [`params`](Self::params) (device compare R1, R10). `None` while the two states are equal, as a new device's are, and left out of the saved set then. Use [`other_params`](Self::other_params) to read it. |
 | `own_name` | string | no | The device's own name, such as `Auto Filter`, which the title bar shows while Show Preset Name is off. Empty while it's the same as [`name`](Self::name), and left out of the saved set then. |
 | `plugin` | [`PluginState`](#pluginstate) or null | no | A plug-in's own state and where it was loaded from (WP-2.6), as last saved with the set. Left out of the saved set for a native device, and for a plug-in until the set is first saved with it. |
 | `role` | [`DeviceRole`](#devicerole) | no | Where it goes in a chain: MIDI effects, then the instrument, then audio effects. Audio effects aren't marked in the saved set. |
+| `shape` | array or null | no | The breakpoints of a Curve Mod's shape (R23); `None` plays the default shape. Left out of the saved set while it is the default. |
 | `show_preset_name` | boolean | no | Whether the title bar shows the preset's or the given name (on, as a new device is) or the device's own name: the context menu's Show Preset Name. Left out of the saved set while on. |
 | `sidechain` | [`Sidechain`](#sidechain) or null | no | The device's sidechain input, if its type declares one (WP-2.19b): where its detector can listen other than its own input. Left out of the saved set for a device without one. |
 
@@ -9751,6 +9870,13 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
     "kind": {
       "$ref": "#/$defs/DeviceKind",
       "description": "What the device is."
+    },
+    "mappings": {
+      "description": "The parameters a modulator maps, one per slot (the modulation spec, R19). Left out of the saved set for a device that maps none.",
+      "items": {
+        "$ref": "#/$defs/Mapping"
+      },
+      "type": "array"
     },
     "media": {
       "description": "The media the device plays, by content hash, one entry per sample slot (WP-2.16, WP-5.17): the sampler's sample is slot 0, the eight-slot drum sampler's slots are 0 to 7. The media store holds each like a clip's audio (the sampler spec, R11). A slot with no sample is `None`, and the list never ends in one. Left out of the saved set for a device that plays none; a set saved before slots existed holds one hash, which loads as slot 0.",
@@ -9827,6 +9953,16 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
     "role": {
       "$ref": "#/$defs/DeviceRole",
       "description": "Where it goes in a chain: MIDI effects, then the instrument, then audio effects. Audio effects aren't marked in the saved set."
+    },
+    "shape": {
+      "description": "The breakpoints of a Curve Mod's shape (R23); `None` plays the default shape. Left out of the saved set while it is the default.",
+      "items": {
+        "$ref": "#/$defs/ShapePoint"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
     },
     "show_preset_name": {
       "description": "Whether the title bar shows the preset's or the given name (on, as a new device is) or the device's own name: the context menu's Show Preset Name. Left out of the saved set while on.",
@@ -10051,6 +10187,7 @@ One device as the Device View shows it.
 | `hot_swap` | boolean | yes | Whether it's the device being hot-swapped. |
 | `sidechain` | [`SidechainSection`](#sidechainsection) or null | yes | Its sidechain section, if it has a sidechain input (WP-2.19b). |
 | `display_view` | string or null | no | The view its display shows, if its display has views (WP-5.43): one of its description's `views`. |
+| `modulator` | [`ModulatorFrame`](#modulatorframe) or null | no | For a modulator, what it maps and which Map button is armed (WP-5.10). |
 | `panel` | [`DevicePanel`](#devicepanel) or null | no | Its parameters and layout, for the generic UI; left out for a device whose type doesn't describe them. |
 
 <details><summary>JSON Schema</summary>
@@ -10105,6 +10242,17 @@ One device as the Device View shows it.
     "kind": {
       "$ref": "#/$defs/DeviceKind",
       "description": "What it is."
+    },
+    "modulator": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ModulatorFrame"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "For a modulator, what it maps and which Map button is armed (WP-5.10)."
     },
     "name": {
       "description": "Its own name, such as `Auto Filter`.",
@@ -10642,6 +10790,7 @@ What `device_view.state` returns.
 | `selected` | [`DeviceId`](#deviceid) or null | yes | The selected device, if it's in this chain. |
 | `hot_swap` | [`HotSwap`](#hotswap) or null | yes | The device being hot-swapped, on any track, and what the browser's bar says ("Swapping Audio Effect"). |
 | `can_paste` | boolean | yes | Whether the clipboard holds a device to paste. |
+| `armed_map` | [`ArmedMap`](#armedmap) or null | no | The Map button that is lit, on any track: a click on any parameter's control maps it to the slot (WP-5.10). |
 
 <details><summary>JSON Schema</summary>
 
@@ -10649,6 +10798,17 @@ What `device_view.state` returns.
 {
   "description": "What `device_view.state` returns.",
   "properties": {
+    "armed_map": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ArmedMap"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The Map button that is lit, on any track: a click on any parameter's control maps it to the slot (WP-5.10)."
+    },
     "can_paste": {
       "description": "Whether the clipboard holds a device to paste.",
       "type": "boolean"
@@ -12019,7 +12179,7 @@ The index of the places' files, built in the background.
 
 ### `Input`
 
-Where a track takes its input from. Audio tracks: `external` (Ext. In, the audio interface's inputs, with its `channel`; a new audio track's), `resampling` (the Main output), `track` (another audio track, a return, or Main, tapped at `tap`), or `none` (No Input). MIDI tracks: `all_ins` (every MIDI input; a new MIDI track's), `computer_keyboard`, `port` (one MIDI input, by its name as the MIDI settings list it), `track` (another MIDI track), or `none`.
+Where a track takes its input from. Audio tracks: `external` (Ext. In, the audio interface's inputs, with its `channel`; a new audio track's), `resampling` (the Main output), `track` (another audio track, a MIDI track with an instrument, a return, or Main, tapped at `tap`; with a `chain` of an instrument or audio effect rack on that track, that chain's signal at `tap`), or `none` (No Input). MIDI tracks: `all_ins` (every MIDI input; a new MIDI track's), `computer_keyboard`, `port` (one MIDI input, by its name as the MIDI settings list it), `track` (another MIDI track), or `none`.
 
 One of:
 
@@ -12029,13 +12189,13 @@ One of:
 - an object with `type` = `"computer_keyboard"`: The computer MIDI keyboard. MIDI tracks only.
 - an object with `type` = `"port"`, `name` (string): One MIDI input port, by the name the MIDI system gives it. MIDI tracks only. The track keeps the name while the port is away and receives again when a port of that name returns.
 - an object with `type` = `"resampling"`: Resampling: the Main output. Audio tracks only.
-- an object with `type` = `"track"`, `track` ([`TrackId`](#trackid)), `tap` ([`Tap`](#tap)): Another track's signal.
+- an object with `type` = `"track"`, `track` ([`TrackId`](#trackid)), `chain` ([`ChainId`](#chainid) or null), `tap` ([`Tap`](#tap)): Another track's signal.
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "Where a track takes its input from. Audio tracks: `external` (Ext. In, the audio interface's inputs, with its `channel`; a new audio track's), `resampling` (the Main output), `track` (another audio track, a return, or Main, tapped at `tap`), or `none` (No Input). MIDI tracks: `all_ins` (every MIDI input; a new MIDI track's), `computer_keyboard`, `port` (one MIDI input, by its name as the MIDI settings list it), `track` (another MIDI track), or `none`.",
+  "description": "Where a track takes its input from. Audio tracks: `external` (Ext. In, the audio interface's inputs, with its `channel`; a new audio track's), `resampling` (the Main output), `track` (another audio track, a MIDI track with an instrument, a return, or Main, tapped at `tap`; with a `chain` of an instrument or audio effect rack on that track, that chain's signal at `tap`), or `none` (No Input). MIDI tracks: `all_ins` (every MIDI input; a new MIDI track's), `computer_keyboard`, `port` (one MIDI input, by its name as the MIDI settings list it), `track` (another MIDI track), or `none`.",
   "oneOf": [
     {
       "description": "No Input.",
@@ -12127,6 +12287,17 @@ One of:
     {
       "description": "Another track's signal.",
       "properties": {
+        "chain": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChainId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "A chain of an instrument or audio effect rack on that track, at any depth, whose signal is taken at `tap` instead of the track's own (the racks spec, R38 to R41)."
+        },
         "tap": {
           "$ref": "#/$defs/Tap",
           "description": "Where in that track the signal is taken: Post Mixer if it's left out."
@@ -12227,6 +12398,7 @@ One of:
 - `"set"`: A Beatlayer set.
 - `"preset"`: A Beatlayer device preset, which loads into the device being hot-swapped (WP-2.4).
 - `"plugin"`: A plug-in the scanner found (WP-2.9).
+- `"device"`: One of Beatlayer's own devices, listed under a device label (the Modulators label, WP-5.10); its path is the device type's ID.
 
 <details><summary>JSON Schema</summary>
 
@@ -12257,6 +12429,11 @@ One of:
     {
       "const": "plugin",
       "description": "A plug-in the scanner found (WP-2.9).",
+      "type": "string"
+    },
+    {
+      "const": "device",
+      "description": "One of Beatlayer's own devices, listed under a device label (the Modulators label, WP-5.10); its path is the device type's ID.",
       "type": "string"
     }
   ]
@@ -13119,6 +13296,86 @@ Loudness, as EBU R 128 reports it (ITU-R BS.1770-4).
 
 </details>
 
+### `Mapping`
+
+One slot's mapping: the parameter it modulates.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `slot` | integer from 0 to 255 | yes | The slot, from 0 to 7. |
+| `target` | [`ModTarget`](#modtarget) | yes | The parameter it maps. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One slot's mapping: the parameter it modulates.",
+  "properties": {
+    "slot": {
+      "description": "The slot, from 0 to 7.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "target": {
+      "$ref": "#/$defs/ModTarget",
+      "description": "The parameter it maps."
+    }
+  },
+  "required": [
+    "slot",
+    "target"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `MappingRow`
+
+One slot's mapping as its panel names it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `slot` | integer from 0 to 255 | yes | The slot, from 0 to 7. |
+| `target` | [`ModTarget`](#modtarget) | yes | The parameter it maps. |
+| `label` | string | yes | The target's device and parameter, or track and control, by name, as the slot shows them. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One slot's mapping as its panel names it.",
+  "properties": {
+    "label": {
+      "description": "The target's device and parameter, or track and control, by name, as the slot shows them.",
+      "type": "string"
+    },
+    "slot": {
+      "description": "The slot, from 0 to 7.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "target": {
+      "$ref": "#/$defs/ModTarget",
+      "description": "The parameter it maps."
+    }
+  },
+  "required": [
+    "slot",
+    "target",
+    "label"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Measure`
 
 One kind of analysis.
@@ -13707,9 +13964,100 @@ What `mixer_view.state` and the other view commands return.
 
 </details>
 
+### `ModTarget`
+
+A parameter a modulator maps: `mixer` with a `track` and a `param`, `send` with the sending `track` and the return track `to`, or `device` with the device and its `param`.
+
+One of:
+
+- an object with `type` = `"mixer"`, `track` ([`TrackId`](#trackid)), `param` ([`MixerParam`](#mixerparam)): A control of a track's mixer.
+- an object with `type` = `"send"`, `track` ([`TrackId`](#trackid)), `to` ([`TrackId`](#trackid)): The level of a track's send to a return track.
+- an object with `type` = `"device"`, `device` ([`DeviceId`](#deviceid)), `param` ([`ParamId`](#paramid)): A parameter of a device, on any track.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A parameter a modulator maps: `mixer` with a `track` and a `param`, `send` with the sending `track` and the return track `to`, or `device` with the device and its `param`.",
+  "oneOf": [
+    {
+      "description": "A control of a track's mixer.",
+      "properties": {
+        "param": {
+          "$ref": "#/$defs/MixerParam",
+          "description": "The control."
+        },
+        "track": {
+          "$ref": "#/$defs/TrackId",
+          "description": "The track."
+        },
+        "type": {
+          "const": "mixer",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "track",
+        "param"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "The level of a track's send to a return track.",
+      "properties": {
+        "to": {
+          "$ref": "#/$defs/TrackId",
+          "description": "The return track the send feeds."
+        },
+        "track": {
+          "$ref": "#/$defs/TrackId",
+          "description": "The sending track."
+        },
+        "type": {
+          "const": "send",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "track",
+        "to"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A parameter of a device, on any track.",
+      "properties": {
+        "device": {
+          "$ref": "#/$defs/DeviceId",
+          "description": "The device."
+        },
+        "param": {
+          "$ref": "#/$defs/ParamId",
+          "description": "Its parameter."
+        },
+        "type": {
+          "const": "device",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "device",
+        "param"
+      ],
+      "type": "object"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `ModulatedParameter`
 
-A parameter a track's clips modulate.
+A parameter a track's clips or modulators act on.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -13718,17 +14066,38 @@ A parameter a track's clips modulate.
 | `base` | number | yes | Its base, in the parameter's own units: its automation envelope's value or its control's, as the last block played it while the song plays under modulation, and its control's otherwise. |
 | `played` | number | yes | The value it played in the last block; the base while nothing modulates it now. |
 | `sources` | array of [`ModulationSource`](#modulationsource) | yes | The clip envelopes modulating it. |
+| `modulators` | array of [`ModulatorSource`](#modulatorsource) | yes | The modulator slots mapping it. |
+| `held_by` | [`DeviceId`](#deviceid) or null | no | The modulator in Remote Control that holds it, if one does. |
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "A parameter a track's clips modulate.",
+  "description": "A parameter a track's clips or modulators act on.",
   "properties": {
     "base": {
       "description": "Its base, in the parameter's own units: its automation envelope's value or its control's, as the last block played it while the song plays under modulation, and its control's otherwise.",
       "format": "double",
       "type": "number"
+    },
+    "held_by": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DeviceId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The modulator in Remote Control that holds it, if one does."
+    },
+    "modulators": {
+      "default": [],
+      "description": "The modulator slots mapping it.",
+      "items": {
+        "$ref": "#/$defs/ModulatorSource"
+      },
+      "type": "array"
     },
     "played": {
       "description": "The value it played in the last block; the base while nothing modulates it now.",
@@ -13756,7 +14125,8 @@ A parameter a track's clips modulate.
     "target",
     "base",
     "played",
-    "sources"
+    "sources",
+    "modulators"
   ],
   "type": "object"
 }
@@ -13833,6 +14203,112 @@ What `modulation.state` reports.
   },
   "required": [
     "parameters"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ModulatorFrame`
+
+What a modulator's panel shows beside its parameters (WP-5.10; the modulation spec, R15, R19, R23).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `mappings` | array of [`MappingRow`](#mappingrow) | yes | Its mappings, by slot. |
+| `armed` | integer or null | no | The slot whose Map button is lit, while a click on a parameter maps it. |
+| `shape` | array or null | no | A Curve Mod's breakpoint shape (the default one until it is edited); left out for a modulator that has none. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a modulator's panel shows beside its parameters (WP-5.10; the modulation spec, R15, R19, R23).",
+  "properties": {
+    "armed": {
+      "description": "The slot whose Map button is lit, while a click on a parameter maps it.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "mappings": {
+      "description": "Its mappings, by slot.",
+      "items": {
+        "$ref": "#/$defs/MappingRow"
+      },
+      "type": "array"
+    },
+    "shape": {
+      "description": "A Curve Mod's breakpoint shape (the default one until it is edited); left out for a modulator that has none.",
+      "items": {
+        "$ref": "#/$defs/ShapePoint"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "mappings"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ModulatorSource`
+
+One modulator slot acting on a parameter (WP-5.10).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The modulator device. |
+| `slot` | integer from 0 to 255 | yes | Its slot, from 0 to 7. |
+| `remote_control` | boolean | yes | Whether the modulator is in Remote Control, holding the parameter rather than modulating it. |
+| `contribution` | number or null | yes | What it contributes now, as a share of the parameter's travel, when it is the only source and the engine's published values tell: `null` when several sources act together (the engine publishes their sum) or when it holds the parameter. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One modulator slot acting on a parameter (WP-5.10).",
+  "properties": {
+    "contribution": {
+      "description": "What it contributes now, as a share of the parameter's travel, when it is the only source and the engine's published values tell: `null` when several sources act together (the engine publishes their sum) or when it holds the parameter.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The modulator device."
+    },
+    "remote_control": {
+      "description": "Whether the modulator is in Remote Control, holding the parameter rather than modulating it.",
+      "type": "boolean"
+    },
+    "slot": {
+      "description": "Its slot, from 0 to 7.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "device",
+    "slot",
+    "remote_control",
+    "contribution"
   ],
   "type": "object"
 }
@@ -16802,6 +17278,48 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
     "plug_ins",
     "agents",
     "assistant"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ShapePoint`
+
+One breakpoint of a Curve Mod's shape (R23): a place in the cycle, the output there, and the bend of the segment starting at it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `x` | number | yes | Where in the cycle, from 0 (its start) to 1 (its end). |
+| `y` | number | yes | The output there, from 0 to 1. |
+| `bend` | number | no | The bend of the segment starting here, from −1 to 1, by the automation spec's curve law; 0 is straight. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One breakpoint of a Curve Mod's shape (R23): a place in the cycle, the output there, and the bend of the segment starting at it.",
+  "properties": {
+    "bend": {
+      "description": "The bend of the segment starting here, from −1 to 1, by the automation spec's curve law; 0 is straight.",
+      "format": "double",
+      "type": "number"
+    },
+    "x": {
+      "description": "Where in the cycle, from 0 (its start) to 1 (its end).",
+      "format": "double",
+      "type": "number"
+    },
+    "y": {
+      "description": "The output there, from 0 to 1.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "x",
+    "y"
   ],
   "type": "object"
 }

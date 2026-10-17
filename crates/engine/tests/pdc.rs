@@ -561,3 +561,58 @@ fn grouping_and_ungrouping_keep_a_delays_tail() {
     out.extend(rig.render(2 * LATENCY, 64));
     assert_eq!(heard(&out), vec![(LATENCY, 1.0)]);
 }
+
+// Spec: racks R40, delay-compensation R2. A chain tap is a route into the
+// track that takes it, held back as every route is: with the latency of the
+// chain's devices behind it at Post FX and Post Mixer, and none at Pre FX.
+#[test]
+fn a_chain_tap_lines_up() {
+    // Tapping an inner rack's chain adds the outer chain's device before it.
+    for (nested, tap, at) in [
+        (false, "pre_fx", 0),
+        (false, "post_fx", LATENCY),
+        (false, "post_mixer", LATENCY),
+        (true, "pre_fx", LATENCY),
+        (true, "post_fx", 2 * LATENCY),
+    ] {
+        let mut rig = impulses(&[1.0, 3.0]);
+        let ed = &mut rig.editor;
+        let source = track(ed, TrackKind::Audio, None);
+        let other = track(ed, TrackKind::Audio, None);
+        let tapper = track(ed, TrackKind::Audio, None);
+        clip(ed, source, hash(1));
+        clip(ed, other, hash(2));
+        let (_, chains) = rack(ed, source, RackKind::AudioEffect, 1);
+        effect_in(ed, chains[0], DELAY, &[(DELAY_FRAMES, LATENCY as f64)]);
+        let mut chain = chains[0];
+        if nested {
+            let (_, inner) = rack_in(ed, chain, RackKind::AudioEffect, 1);
+            effect_in(ed, inner[0], DELAY, &[(DELAY_FRAMES, LATENCY as f64)]);
+            chain = inner[0];
+        }
+        run(
+            ed,
+            "routing.set_output",
+            json!({ "track": source, "output": { "type": "sends_only" } }),
+        );
+        run(
+            ed,
+            "routing.set_input",
+            json!({ "track": tapper, "input":
+                    { "type": "track", "track": source, "tap": tap, "chain": chain } }),
+        );
+        run(
+            ed,
+            "routing.set_monitor",
+            json!({ "track": tapper, "monitor": "in" }),
+        );
+        rig.sync();
+        let out = rig.render(4 * LATENCY, 64);
+        assert_eq!(
+            heard(&out),
+            vec![(at, 4.0)],
+            "{tap}{}: the tap's impulse and the other track's meet at Main",
+            if nested { ", nested" } else { "" }
+        );
+    }
+}

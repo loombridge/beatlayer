@@ -210,13 +210,15 @@ fn session_record_records_a_midi_clip_into_the_slot_in_one_undo_step() {
         before + 1,
         "one undo step"
     );
-    // The slot launched where the take ended, and plays on as a loop.
-    assert!(
+    // The slot launched where the take ended, and plays on as a loop. The
+    // launch is applied in the block after the take ends, so the poll that
+    // ends the recording may still see it queued.
+    poll_until(&mut shell, "the recorded slot to play", |shell| {
         shell
             .session_states()
             .iter()
             .any(|s| s.track == keys && s.scene == scene && s.state == SlotState::Playing)
-    );
+    });
     shell.run("edit.undo", json!({})).unwrap();
     assert!(slot_clip(&shell, keys, scene).is_none());
     shell.run("edit.redo", json!({})).unwrap();

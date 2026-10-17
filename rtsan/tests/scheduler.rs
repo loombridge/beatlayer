@@ -15,9 +15,7 @@ use std::sync::Arc;
 use bl_core::time::SampleRate;
 use bl_engine::nodes::{TEST_TONE, test_tone};
 use bl_engine::testing::{self, GAIN, GAIN_PARAM, Probe, SPIN, SPIN_MICROS};
-use bl_engine::{
-    Collector, Compiler, EngineConfig, Pool, PoolConfig, TransportCommand, channel,
-};
+use bl_engine::{Collector, Compiler, EngineConfig, Pool, PoolConfig, TransportCommand, channel};
 use bl_model::{
     Chain, Command, Device, DeviceKind, DeviceRole, Editor, RackKind, TrackId, TrackKind,
 };

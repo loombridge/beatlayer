@@ -11,7 +11,7 @@ Every action a person can take in Beatlayer is a command in a registry, with an 
 | `list_commands` | See the areas (`track`, `clip`, `mixer`, `device`, `song`, `transport`, `set`, and more), then list an area's commands or search them by words. |
 | `describe_command` | Read a command's full description and argument schema before you run it for the first time. |
 | `run` | Run one command, or a batch of document edits as one undo step. Set `dry_run` to check without changing anything. |
-| `query` | Read the project: an overview, a track, clip, or device by ID or by a readable path. |
+| `query` | Read the project: an overview, a track, clip, device, scene, Session slot, or automation envelope by ID or by a readable path. |
 | `transport` | Play, stop, continue, and locate the song, move and switch the loop, and check whether the song plays here and where the playhead is. |
 | `schedule` | Run a command when the song reaches a bar and beat, on the exact sample. |
 | `checkpoint` | Save the song under a name, try something, and restore it if you don't like the result. |
@@ -93,6 +93,14 @@ You can't hear the speakers or see the screen, so three tools perceive for you. 
 
 Listen before and after a change, and compare the numbers: for example, `preview` the chorus, turn the bass down, and `analyze` both previews.
 
+## Reading back what you set
+
+Anything you can set, you can read back. `query` with `detail: "full"` returns, under `saved`, everything the set file saves for a track, clip, device, or scene, in the file's own form (the song's settings are under `song`'s `saved`). That covers a track's mixer, crossfader assignment, routing and channels, Monitor, sends, automation and Session slots; a clip's markers, loop, gain, fades and envelopes; a device's parameters, sidechain and state; and the song's tempo map, time signatures, loop, punch, metronome and record switches, and launch quantisation. The default `summary` stays compact. A list comes a page at a time, and a list inside a list shows only its length: read it at the item's own path.
+
+Paths reach the rest: `scene 1` or `scene "Verse"` (scenes count from 1, as the Session View numbers them), `track "Bass" / slot 3` (a track's Session slot, with its clip), `track "Bass" / lane 1` (a take lane and its passes), and `track "Bass" / automation` (the track's envelopes; `automation "volume"` or `automation "device 41 param 3"` reads one, its points a page at a time with `detail: "full"`).
+
+State the set doesn't save, such as whether the song is recording or what a window shows, is read with the read commands (`transport.state`, `mixer_view.state`, and the other `.state` commands).
+
 ## Good practice
 
 - **Look before you edit.** Start with `query` for an overview, and `describe_command` for any command you haven't used.
@@ -116,6 +124,8 @@ Each command has a permission class:
 Some commands' class depends on their arguments. In the Arrangement a clip placed over part of another replaces the part it covers, as in Live, so moving, resizing, nudging, duplicating, or pasting clips, adding files from the browser, or importing a MIDI file, onto time where other clips are is destructive as well as its own class, and asks first; the same command into empty space doesn't. The person's question names the clips it would replace or shorten. Likewise `clip.set_data` that sends fewer notes than a MIDI clip has deletes notes, so it asks first; one that adds notes or keeps their count doesn't. `describe_command` marks these commands (`raised_by_arguments`), and a `dry_run` says which class a call has (`permission`), whether it would ask, which clips it would replace (`replaces`), and, for `clip.set_data`, how many notes the clip has and would keep (`fewer_notes`). A call's class is decided when it runs, against the song as it is then.
 
 The person can turn on autonomous mode for you in Beatlayer's Settings window, and then destructive and external commands run without asking. If the person declines, nothing changes: don't retry without asking them. Headless (`bl-cli mcp`), there's no one to ask, so these commands are refused unless it was started with `--autonomous`.
+
+Recording captures input devices, a microphone included, so `transport.set_recording` is external and asks first, whichever value it sets. `transport.stop_recording` stops a recording and never asks.
 
 **Your rights go with your token.** When the person first allows you, Beatlayer makes you a token of your own, which the person can copy from your row in the Settings window. Your client sends it as its bearer token, and then you're never asked about again and you're autonomous if the person switched that on, whatever name your client gives. A client that sends the agent server's token instead is asked about each time it connects, and is never autonomous, even with an allowed agent's name.
 

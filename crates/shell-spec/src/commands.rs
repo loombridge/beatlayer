@@ -106,6 +106,8 @@ pub const SETTINGS_SET_THEME: &str = "settings.set_theme";
 /// `settings.set_create_fades_on_clip_edges`: switch Create Fades on Clip
 /// Edges.
 pub const SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES: &str = "settings.set_create_fades_on_clip_edges";
+/// `settings.set_warp_recorded_audio`: switch Warp recorded audio (WP-2.13).
+pub const SETTINGS_SET_WARP_RECORDED_AUDIO: &str = "settings.set_warp_recorded_audio";
 /// `settings.set_auto_hide_plug_in_windows`: switch Auto-Hide Plug-In
 /// Windows (WP-2.5b).
 pub const SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS: &str = "settings.set_auto_hide_plug_in_windows";
@@ -164,6 +166,7 @@ pub const IDS: &[&str] = &[
     SETTINGS_PREVIOUS_PAGE,
     SETTINGS_SET_THEME,
     SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES,
+    SETTINGS_SET_WARP_RECORDED_AUDIO,
     SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS,
     SETTINGS_SET_OUTLINE_VIEW_IN_FOCUS,
     AUDIO_DEVICES,
@@ -908,6 +911,21 @@ fn specs() -> Vec<CommandSpec> {
         .context(Settings)
         .args::<SwitchArgs>()
         .result::<SwitchResult>(),
+        // Record, Warp & Launch, Warp/Fades (IMP-02; WP-2.13).
+        CommandSpec::new(SETTINGS_SET_WARP_RECORDED_AUDIO, "Warp Recorded Audio")
+            .description(
+                "Switches Warp recorded audio, on the Settings window's Record, Warp & Launch \
+                 page, a Beatlayer addition (IMP-02); it's on in a new install, as Live warps \
+                 its recordings. Clips have no warp settings yet, so for now recorded clips play \
+                 at their file's own speed whether it's on or off; warping will read the setting \
+                 for the clips a recording makes. The setting is kept for the next start, and \
+                 isn't part of the set or an undo step. The result's `on` is the setting \
+                 afterwards.",
+            )
+            .permission(Permission::Edit)
+            .context(Settings)
+            .args::<SwitchArgs>()
+            .result::<SwitchResult>(),
         // Plug-Ins, Plug-In Windows (L-SET-017; WP-2.5b).
         CommandSpec::new(
             SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS,

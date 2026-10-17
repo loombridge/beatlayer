@@ -23,6 +23,18 @@ cpal = "0.18.2"
 # a lock on the audio thread (WP-1.13; decision D14).
 rtrb = "0.4.0"
 
+# A device's latency properties, which cpal doesn't expose (WP-2.13). Both
+# crates are cpal's own Core Audio bindings, so nothing new enters the build.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-core-audio = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "AudioHardware",
+] }
+objc2-core-foundation = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "CFString",
+] }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 # JACK alongside ALSA. Building needs the ALSA and JACK development headers and
 # pkg-config. cpal's native PipeWire host (its `pipewire` feature) isn't on:

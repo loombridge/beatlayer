@@ -524,6 +524,18 @@ fn impulse_wav(path: &Path, frames: u32, at: u32) {
 /// and the frame of the file at which the loud sample of a clip that plays
 /// it at song frame 5,000 is found.
 fn impulse_in_recording(compensation_ms: f64) -> (Ticks, usize, Value) {
+    let (start, loudest, status, _) = impulse_through(compensation_ms, None, 1);
+    (start, loudest, status)
+}
+
+/// The same, with the impulse's track on Ext. Out `ext_out` (Main otherwise)
+/// and the recorded track on Ext. In `listen`; also returns the recording's
+/// peak.
+fn impulse_through(
+    compensation_ms: f64,
+    ext_out: Option<Value>,
+    listen: u16,
+) -> (Ticks, usize, Value, f32) {
     let dir = TestDir::new("loopback");
     let (backend, _) = four_channel_backend();
     let mut shell = shell_on(backend.with_latency(400, 600).with_loopback(1_480));
@@ -558,13 +570,21 @@ fn impulse_in_recording(compensation_ms: f64) -> (Ticks, usize, Value) {
         )
         .unwrap();
     let player = shell.editor().document().top_level().last().unwrap();
+    if let Some(channel) = ext_out {
+        shell
+            .run(
+                "routing.set_output",
+                json!({ "track": player, "output": { "type": "external", "channel": channel } }),
+            )
+            .unwrap();
+    }
     shell
         .run(
             "browser.add_to_arrangement",
             json!({ "paths": [file.display().to_string()], "track": player, "at": 0 }),
         )
         .unwrap();
-    let track = armed_track(&mut shell, 1, "Loopback");
+    let track = armed_track(&mut shell, listen, "Loopback");
     shell
         .run(
             "routing.set_monitor",
@@ -590,7 +610,7 @@ fn impulse_in_recording(compensation_ms: f64) -> (Ticks, usize, Value) {
         .max_by(|&a, &b| samples[a].abs().total_cmp(&samples[b].abs()))
         .unwrap();
     let status = shell.run("audio.status", json!({})).unwrap();
-    (clip.start, loudest, status)
+    (clip.start, loudest, status, samples[loudest].abs())
 }
 
 // Spec: recording R7; WP-2.13. A sound played at song frame 5,000 comes back
@@ -616,6 +636,22 @@ fn a_loopback_records_aligned_and_the_compensation_moves_recordings_by_exactly_i
         5_960,
         "negative moves it later"
     );
+}
+
+// Spec: routing R3; WP-2.13. Over the loopback, which carries each output
+// channel to the input of the same number, a clip on a track set to Ext. Out
+// 3/4 is heard on input channels 3 and 4 and not on 1 or 2, so Main doesn't
+// carry it.
+#[test]
+fn a_track_on_ext_out_reaches_its_device_channels_and_not_the_first_pair() {
+    let pair_3_4 = json!({ "type": "pair", "channel": 3 });
+    let (_, at, _, peak) = impulse_through(10.0, Some(pair_3_4.clone()), 3);
+    assert_eq!(at, 5_000, "the impulse is on channel 3");
+    assert!(peak > 0.5, "{peak}");
+    let (_, _, _, peak) = impulse_through(10.0, Some(pair_3_4.clone()), 4);
+    assert!(peak > 0.5, "the pair's right side is on channel 4: {peak}");
+    let (_, _, _, peak) = impulse_through(10.0, Some(pair_3_4), 1);
+    assert_eq!(peak, 0.0, "not on channel 1, so not in Main");
 }
 
 // Spec: recording R7; WP-2.13. The compensation keeps to two decimals and to
@@ -712,4 +748,147 @@ fn punch_records_only_between_the_brace_ends() {
     let clip_frames = tempo.ticks_to_frames(clip.end(), rate).get()
         - tempo.ticks_to_frames(clip.start, rate).get();
     assert!((clip_frames - frames).abs() <= 2, "{clip_frames}");
+}
+
+/// The track's take lanes, once a recording has made them.
+fn wait_for_lanes(shell: &mut Shell, track: TrackId) -> Vec<bl_model::TakeLane> {
+    let until = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < until {
+        shell.poll_engine();
+        let lanes: Vec<bl_model::TakeLane> = shell
+            .editor()
+            .document()
+            .track(track)
+            .map(|track| track.take_lanes().cloned().collect())
+            .unwrap_or_default();
+        if !lanes.is_empty() {
+            return lanes;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    panic!("the recording made no take lane");
+}
+
+/// The track's Arrangement clips, in start order.
+fn main_lane(shell: &Shell, track: TrackId) -> Vec<bl_model::Clip> {
+    let mut clips: Vec<bl_model::Clip> = shell
+        .editor()
+        .document()
+        .track(track)
+        .unwrap()
+        .clips()
+        .cloned()
+        .collect();
+    clips.sort_by_key(|clip| clip.start);
+    clips
+}
+
+// Spec: recording R12. Recording over the loop makes a take lane for each
+// pass, in order, with the latest pass on the main lane and the part before
+// the loop a clip of its own; each pass is one undo step.
+#[test]
+fn recording_over_a_loop_makes_a_take_lane_for_each_pass() {
+    let dir = TestDir::new("loop");
+    let (mut shell, control) = duplex_shell();
+    let saved: Value = shell
+        .run("set.save_as", json!({ "path": dir.arg("Loop.blset") }))
+        .unwrap();
+    let set = PathBuf::from(saved["path"].as_str().unwrap());
+    let folder = set.parent().unwrap().to_path_buf();
+
+    let track = armed_track(&mut shell, 3, "Guitar");
+    let rate = shell.audio().status().sample_rate.expect("a device runs");
+    control.set_input_tone(2, f64::from(rate) / 4.0, 0.5);
+
+    // A loop a sixteenth note long (an eighth of a second at 120 bpm) on the
+    // second beat, with recording starting a sixteenth before it.
+    let sixteenth = Ticks::QUARTER / 4;
+    shell
+        .run(
+            "transport.set_loop",
+            json!({ "start": Ticks::QUARTER, "length": sixteenth }),
+        )
+        .unwrap();
+    shell
+        .run("transport.set_loop_enabled", json!({ "enabled": true }))
+        .unwrap();
+    shell
+        .run(
+            "transport.locate",
+            json!({ "position": Ticks::QUARTER - sixteenth }),
+        )
+        .unwrap();
+    shell
+        .run("transport.set_recording", json!({ "recording": true }))
+        .unwrap();
+    shell.run("transport.play", json!({})).unwrap();
+    play_for(&mut shell, 700);
+    shell.run("transport.stop", json!({})).unwrap();
+
+    let lanes = wait_for_lanes(&mut shell, track);
+    assert!(lanes.len() >= 3, "several passes: {}", lanes.len());
+    let names: Vec<&str> = lanes.iter().map(|lane| lane.name.as_str()).collect();
+    let expected: Vec<String> = (1..=lanes.len()).map(|n| format!("Take {n}")).collect();
+    assert_eq!(
+        names, expected,
+        "Take 1 nearest the main lane, the newest last"
+    );
+    assert!(lanes.iter().all(|lane| lane.clips.len() == 1));
+
+    // The passes follow one another in the one file, each a loop long.
+    let _ = recorded_file(&folder);
+    let pass = |n: usize| &lanes[n].clips[0];
+    let seconds = 1.0 / 8.0;
+    for n in 1..lanes.len() - 1 {
+        assert_eq!(pass(n).start, Ticks::QUARTER, "every pass sits on the loop");
+        let by = pass(n).data.start - pass(n - 1).data.start;
+        assert!(
+            (by - seconds).abs() < 1e-3,
+            "pass {n} follows the one before: {by}"
+        );
+    }
+
+    // The main lane: the lead-in, then the latest pass over the loop.
+    let clips = main_lane(&shell, track);
+    assert_eq!(clips[0].start, Ticks::QUARTER - sixteenth, "the lead-in");
+    let latest = clips
+        .iter()
+        .find(|clip| clip.start == Ticks::QUARTER)
+        .expect("a clip on the loop");
+    let last = pass(lanes.len() - 1);
+    assert_eq!(latest.data, bl_model::ClipData::Audio(last.data));
+    assert_eq!(latest.length, last.length);
+
+    // The whole path stayed off the heap.
+    let stats = shell.audio().stats().expect("a stream is open");
+    assert_eq!(stats.heap_operations, 0, "{stats:?}");
+
+    // The set round-trips the take lanes.
+    shell.run("set.save", json!({})).unwrap();
+    let (project, _) = bl_project::load(&set).unwrap();
+    let saved: Vec<bl_model::TakeLane> = project
+        .document
+        .track(track)
+        .unwrap()
+        .take_lanes()
+        .cloned()
+        .collect();
+    assert_eq!(saved, lanes, "the lanes come back as they were saved");
+
+    // Each pass is an undo step: undo unrolls them from the last.
+    shell.run("edit.undo", json!({})).unwrap();
+    let after = shell
+        .editor()
+        .document()
+        .track(track)
+        .unwrap()
+        .take_lanes()
+        .len();
+    assert_eq!(after, lanes.len() - 1, "one undo takes the last pass off");
+    for _ in 1..lanes.len() {
+        shell.run("edit.undo", json!({})).unwrap();
+    }
+    let track_now = shell.editor().document().track(track).unwrap();
+    assert_eq!(track_now.take_lanes().len(), 0);
+    assert_eq!(track_now.clips().len(), 0, "the recording is undone");
 }

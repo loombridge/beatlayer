@@ -593,7 +593,7 @@ checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
 
 [[package]]
 name = "beatlayer"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bl-agent",
  "bl-analysis",
@@ -678,7 +678,7 @@ checksum = "3ded4057c258ba199e2d26386d3af3780957ecaee6c4ef4041c6b4b8b97c0b06"
 
 [[package]]
 name = "bl-agent"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bl-analysis",
  "bl-commands",
@@ -688,6 +688,7 @@ dependencies = [
  "bl-media",
  "bl-model",
  "bl-plugin-host",
+ "bl-project",
  "bl-shell",
  "bl-test-vst3",
  "hound",
@@ -702,7 +703,7 @@ dependencies = [
 
 [[package]]
 name = "bl-analysis"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bl-dsp",
  "bl-media",
@@ -711,7 +712,7 @@ dependencies = [
 
 [[package]]
 name = "bl-assistant"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bl-commands",
  "bl-model",
@@ -726,7 +727,7 @@ dependencies = [
 
 [[package]]
 name = "bl-audio-engine"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bl-audio-io",
  "bl-core",
@@ -738,17 +739,19 @@ dependencies = [
 
 [[package]]
 name = "bl-audio-io"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "azo",
  "bl-rt",
  "cpal",
+ "objc2-core-audio",
+ "objc2-core-foundation",
  "rtrb",
 ]
 
 [[package]]
 name = "bl-cli"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bl-agent",
  "bl-assistant",
@@ -776,14 +779,14 @@ dependencies = [
 
 [[package]]
 name = "bl-commands"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "lspk-commands",
 ]
 
 [[package]]
 name = "bl-control"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bl-midi-io",
  "bl-model",
@@ -791,7 +794,7 @@ dependencies = [
 
 [[package]]
 name = "bl-core"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "libm",
  "proptest",
@@ -802,7 +805,7 @@ dependencies = [
 
 [[package]]
 name = "bl-devices"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bl-commands",
  "bl-core",
@@ -824,14 +827,14 @@ dependencies = [
 
 [[package]]
 name = "bl-dsp"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "lspk-params",
 ]
 
 [[package]]
 name = "bl-engine"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bl-audio-io",
  "bl-commands",
@@ -851,7 +854,7 @@ dependencies = [
 
 [[package]]
 name = "bl-interop"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bl-core",
  "bl-model",
@@ -861,14 +864,14 @@ dependencies = [
 
 [[package]]
 name = "bl-link"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bl-core",
 ]
 
 [[package]]
 name = "bl-media"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bl-audio-io",
  "bl-core",
@@ -890,7 +893,7 @@ dependencies = [
 
 [[package]]
 name = "bl-midi-io"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bl-core",
  "bl-engine",
@@ -902,7 +905,7 @@ dependencies = [
 
 [[package]]
 name = "bl-model"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bl-commands",
  "bl-core",
@@ -916,7 +919,7 @@ dependencies = [
 
 [[package]]
 name = "bl-plugin-host"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bl-commands",
  "bl-core",
@@ -946,7 +949,7 @@ dependencies = [
 
 [[package]]
 name = "bl-project"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bl-commands",
  "bl-core",
@@ -960,14 +963,14 @@ dependencies = [
 
 [[package]]
 name = "bl-rt"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "lspk-rt",
 ]
 
 [[package]]
 name = "bl-shell"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bl-analysis",
  "bl-assistant",
@@ -996,7 +999,7 @@ dependencies = [
 
 [[package]]
 name = "bl-shell-spec"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bl-commands",
  "bl-core",
@@ -1008,14 +1011,14 @@ dependencies = [
 
 [[package]]
 name = "bl-stretch"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bl-dsp",
 ]
 
 [[package]]
 name = "bl-test-clap"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "clack-extensions",
  "clack-plugin",
@@ -1023,14 +1026,14 @@ dependencies = [
 
 [[package]]
 name = "bl-test-vst3"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "vst3",
 ]
 
 [[package]]
 name = "bl-ui"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bl-assistant",
  "bl-audio-io",
@@ -6302,7 +6305,7 @@ checksum = "b9cc00251562a284751c9973bace760d86c0276c471b4be569fe6b068ee97a56"
 
 [[package]]
 name = "xtask"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "bl-commands",
  "bl-engine",

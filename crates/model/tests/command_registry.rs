@@ -12,7 +12,8 @@ use bl_model::{
     ArrangementLoop, AudioData, AutomationTarget, Change, ChangeSet, Channel, Clip, ClipData,
     ClipId, Command, ContentHash, CountIn, CrossfadeAssign, Device, DeviceId, DeviceKind,
     EditError, Editor, Input, MetronomeRhythm, MetronomeSound, MidiData, MixerParam, ModelError,
-    Monitor, Note, Output, ParamId, PluginFormat, SceneId, SendTap, Tap, TrackId, TrackKind,
+    Monitor, Note, Output, ParamId, PluginFormat, SceneId, SendTap, TakeClip, TakeLane, Tap,
+    TrackId, TrackKind,
 };
 use serde_json::{Value, json};
 
@@ -50,7 +51,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        92,
+        93,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -58,8 +59,8 @@ fn every_document_command_is_registered() {
          WP-2.1 two for MIDI clips, WP-2.16 set_device_sample, WP-2.15 five for the metronome, \
          WP-2.13 the two for Main Out and Cue Out, WP-3.1 five for scenes and two for slot \
          clips, WP-3.2 set_slot_stop_button, WP-2.12 seven for automation, WP-3.15 six for clip \
-         envelopes, WP-3.17 two for the crossfader, WP-2.14 set_midi_overdub, and WP-2.13 the \
-         two punch switches"
+         envelopes, WP-3.17 two for the crossfader, WP-2.14 set_midi_overdub, WP-2.13 the \
+         two punch switches, and WP-2.13 add_take_lane"
     );
 
     for op in &ops {
@@ -284,6 +285,40 @@ fn every_command_runs_by_id() {
         Some("Change \"Routing\"")
     );
 
+    // Ext. Out with a channel, and without one for the first pair.
+    agent.run(
+        "routing.set_output",
+        json!({ "track": drums, "output": { "type": "external", "channel": { "type": "mono", "channel": 3 } } }),
+    );
+    assert_eq!(
+        agent
+            .editor
+            .document()
+            .track(drums)
+            .unwrap()
+            .routing()
+            .output,
+        Output::External {
+            channel: Channel::Mono(3)
+        }
+    );
+    agent.run(
+        "routing.set_output",
+        json!({ "track": drums, "output": { "type": "external" } }),
+    );
+    assert_eq!(
+        agent
+            .editor
+            .document()
+            .track(drums)
+            .unwrap()
+            .routing()
+            .output,
+        Output::External {
+            channel: Channel::Pair(1)
+        }
+    );
+
     // Song settings.
     let changes = agent.run(
         "song.set_tempo",
@@ -359,6 +394,13 @@ fn every_command_runs_by_id() {
             "id": loop_clip, "name": "Loop", "start": 0, "length": bar, "mute": false,
             "data": { "audio": { "media": "ab".repeat(32) } },
         } }),
+    );
+    agent.run(
+        "track.add_take_lane",
+        json!({ "track": drums, "lane": { "name": "Take 1", "clips": [
+            { "name": "Loop", "start": 0, "length": bar,
+              "data": { "media": "ab".repeat(32), "start": 0.5, "end": 1.5 } },
+        ] } }),
     );
     agent.run(
         "clip.move",
@@ -1270,6 +1312,21 @@ fn schemas_match_what_commands_serialise() {
                     Ticks::WHOLE,
                     ClipData::Midi(notes.clone()),
                 ),
+            },
+        ),
+        (
+            "track.add_take_lane",
+            Command::AddTakeLane {
+                track,
+                lane: TakeLane {
+                    name: "Take 1".to_owned(),
+                    clips: vec![TakeClip {
+                        name: "Loop".to_owned(),
+                        start: Ticks::WHOLE,
+                        length: Ticks::WHOLE,
+                        data: AudioData::new(ContentHash([5; 32])),
+                    }],
+                },
             },
         ),
         ("clip.delete", Command::DeleteClip { clip }),

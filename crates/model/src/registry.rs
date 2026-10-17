@@ -862,8 +862,9 @@ const ENTRIES: &[Entry] = &[
             does: `default` (Main, or the group the track is in), `main` (Main, even from \
             inside a group), `track` with another audio track (its input, heard while that \
             track monitors it) or the track's own group, `sends_only` (only through its sends \
-            to the return tracks), or `external` (Ext. Out, which carries nothing until audio \
-            outputs are built). Audio, group, and return tracks take any of these. A routing \
+            to the return tracks), or `external` (Ext. Out: the track plays on the audio \
+            interface's output channels, a single channel or a stereo pair, the first pair by \
+            default, and not into Main). Audio, group, and return tracks take any of these. A routing \
             may make a loop, as in Live; the engine then plays the routing that closes the \
             loop as silence.",
     },
@@ -917,6 +918,20 @@ const ENTRIES: &[Entry] = &[
             dB with no fades. A MIDI clip carries its notes, placed from the clip's start. \
             Audio clips go only on audio tracks and MIDI clips only on MIDI tracks. `clip.id` \
             must be a new ID the project has issued for it.",
+    },
+    Entry {
+        id: "track.add_take_lane",
+        action: Action::Apply("add_take_lane"),
+        label: "Add Take Lane",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Adds a take lane under an audio track's arrangement lane, after the lanes \
+            it has. `lane.name` names it and `lane.clips` are the recorded passes it holds, each \
+            with a `name`, a `start` and `length` in ticks (705,600 to the quarter note), and \
+            audio `data` as `clip.create` takes it. The track plays only its arrangement lane: \
+            loop recording adds a lane for every pass and copies the latest pass to the \
+            arrangement lane. Audio tracks only.",
     },
     Entry {
         id: "clip.delete",

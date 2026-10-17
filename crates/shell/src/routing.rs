@@ -15,10 +15,6 @@ use serde_json::{Value, json};
 
 use crate::Invocation;
 
-/// The package that brings the audio interface's outputs for a track's
-/// Ext. Out (the interface's inputs and Main's outputs are built).
-pub const DUPLEX_AUDIO: &str = "WP-2.13";
-
 /// What the In/Out choosers list from outside the set: how many input and
 /// output channels the open audio device has (zero while none is open), and
 /// the MIDI input ports the computer offers.
@@ -58,15 +54,6 @@ impl Entry {
             run: Some(run),
             chosen,
             pending: None,
-        }
-    }
-
-    fn pending(label: impl Into<String>, chosen: bool, package: &'static str) -> Self {
-        Self::Choice {
-            label: label.into(),
-            run: None,
-            chosen,
-            pending: Some(package),
         }
     }
 
@@ -273,7 +260,7 @@ pub fn in_out(doc: &Document, track: TrackId, interface: &Interface) -> Option<I
             input_channel: input_channel(track, t.routing().input.clone(), None, false, interface),
             monitor: monitor(track, t.routing().monitor),
             output: audio_to(doc, track),
-            output_channel: output_channel(t.routing().output),
+            output_channel: output_channel(track, t.routing().output, interface.outputs),
         },
         TrackKind::Midi => InOut::Clips {
             input: midi_from(doc, track, &interface.midi_inputs),
@@ -307,7 +294,7 @@ pub fn in_out(doc: &Document, track: TrackId, interface: &Interface) -> Option<I
         },
         TrackKind::Group | TrackKind::Return => InOut::Output {
             output: audio_to(doc, track),
-            output_channel: output_channel(t.routing().output),
+            output_channel: output_channel(track, t.routing().output, interface.outputs),
         },
         TrackKind::Main => InOut::Main {
             cue: interface_outputs(
@@ -363,33 +350,19 @@ fn channel_value(channel: Channel) -> Value {
     }
 }
 
-/// The interface's inputs as Live lists them: the single channels (`1`,
-/// `2`, …), then the stereo pairs (`1/2`, `3/4`, …).
-fn interface_inputs(track: TrackId, chosen: Channel, inputs: u16) -> Vec<Entry> {
-    let mut entries: Vec<Entry> = (1..=inputs)
+/// The interface's inputs or outputs as Live lists them: the single
+/// channels (`1`, `2`, …), then the stereo pairs (`1/2`, `3/4`, …), each
+/// running `run`'s command.
+fn interface_channels(
+    channels: u16,
+    chosen: Channel,
+    run: impl Fn(Channel) -> Invocation,
+) -> Vec<Entry> {
+    (1..=channels)
         .map(Channel::Mono)
-        .map(|channel| {
-            Entry::choice(
-                channel.label(),
-                set_input(
-                    track,
-                    json!({ "type": "external", "channel": channel_value(channel) }),
-                ),
-                channel == chosen,
-            )
-        })
-        .collect();
-    entries.extend(channel_pairs(inputs).into_iter().map(|channel| {
-        Entry::choice(
-            channel.label(),
-            set_input(
-                track,
-                json!({ "type": "external", "channel": channel_value(channel) }),
-            ),
-            channel == chosen,
-        )
-    }));
-    entries
+        .chain(channel_pairs(channels))
+        .map(|channel| Entry::choice(channel.label(), run(channel), channel == chosen))
+        .collect()
 }
 
 /// Audio From (observed): Ext. In · Configure… ─ Resampling ─ the group,
@@ -537,7 +510,12 @@ fn input_channel(
         Input::External { channel } => Chooser {
             name: "Input Channel",
             text: channel.label(),
-            entries: interface_inputs(track, channel, interface.inputs),
+            entries: interface_channels(interface.inputs, channel, |channel| {
+                set_input(
+                    track,
+                    json!({ "type": "external", "channel": channel_value(channel) }),
+                )
+            }),
             pending: None,
         },
         Input::Port { name } if midi => {
@@ -593,8 +571,8 @@ fn monitor(track: TrackId, chosen: Monitor) -> MonitorSwitch {
 
 /// Audio To (observed): Ext. Out · Configure… ─ Main, the track's group,
 /// and the audio tracks in display order, without the track itself ─
-/// Sends Only. A group's list puts a separator after Main. Ext. Out comes
-/// with duplex audio (WP-2.13).
+/// Sends Only. A group's list puts a separator after Main. Choosing Ext. Out
+/// again keeps the channel it has.
 fn audio_to(doc: &Document, track: TrackId) -> Chooser {
     let Some(t) = doc.track(track) else {
         return chooser("Output Type", Vec::new());
@@ -602,8 +580,18 @@ fn audio_to(doc: &Document, track: TrackId) -> Chooser {
     let goes_to = doc.output_of(track);
     let output = t.routing().output;
     let main = doc.main_id();
+    let ext_out = match output {
+        Output::External { channel } => {
+            json!({ "type": "external", "channel": channel_value(channel) })
+        }
+        _ => json!({ "type": "external" }),
+    };
     let mut entries = vec![
-        Entry::pending("Ext. Out", output == Output::External, DUPLEX_AUDIO),
+        Entry::choice(
+            "Ext. Out",
+            set_output(track, ext_out),
+            matches!(output, Output::External { .. }),
+        ),
         configure("audio"),
         Entry::Separator,
         Entry::choice(
@@ -667,9 +655,10 @@ fn midi_to(doc: &Document, track: TrackId) -> Chooser {
 /// The output channel: Track In with a track chosen (observed; in Live 12
 /// it lists Track In alone even when that track's devices have sidechain
 /// inputs, which take their source themselves),
-/// the interface's outputs with Ext. Out (WP-2.13), nothing otherwise. A
-/// group as the output has no channel.
-fn output_channel(output: Output) -> Chooser {
+/// the interface's outputs with Ext. Out (the single channels, then the
+/// pairs; dimmed with no device open), nothing otherwise. A group as the
+/// output has no channel.
+fn output_channel(track: TrackId, output: Output, outputs: u16) -> Chooser {
     match output {
         Output::Track { .. } => Chooser {
             name: "Output Channel",
@@ -682,12 +671,29 @@ fn output_channel(output: Output) -> Chooser {
             }],
             pending: None,
         },
-        Output::External => Chooser {
-            name: "Output Channel",
-            text: "1/2".to_owned(),
-            entries: Vec::new(),
-            pending: Some(DUPLEX_AUDIO),
-        },
+        Output::External { channel } => {
+            // A choice past the device's outputs is kept and drawn dimmed,
+            // like the chooser with no device open (unobserved).
+            let last = match channel {
+                Channel::Mono(c) => c,
+                Channel::Pair(c) => c.saturating_add(1),
+            };
+            Chooser {
+                name: "Output Channel",
+                text: channel.label(),
+                entries: if last <= outputs {
+                    interface_channels(outputs, channel, |channel| {
+                        set_output(
+                            track,
+                            json!({ "type": "external", "channel": channel_value(channel) }),
+                        )
+                    })
+                } else {
+                    Vec::new()
+                },
+                pending: None,
+            }
+        }
         _ => Chooser {
             name: "Output Channel",
             text: String::new(),

@@ -53,6 +53,65 @@ const POLL: Duration = Duration::from_millis(1);
 /// observed yet.
 pub const UNDO_LABEL: &str = "Recorded Clip";
 
+/// The undo step each pass of a loop recording makes, so Undo run again and
+/// again unrolls the passes from the last (the recording spec, R12; Live's
+/// name for the step isn't observed yet).
+pub const LOOP_UNDO_LABEL: &str = "Record";
+
+/// One pass of a loop recording: the song frame it starts at, where its
+/// audio starts in the recorded file, and how many frames it holds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Pass {
+    /// The song frame the pass starts at.
+    pub song_start: Frames,
+    /// The frame of the file the pass starts at.
+    pub file_from: u64,
+    /// How many frames the pass holds.
+    pub frames: u64,
+}
+
+/// Splits a take that went round the loop into its parts (the recording
+/// spec, R12): the lead-in before the loop's start, if recording began before
+/// it, and then each pass round the loop, the first from where recording
+/// began if that was inside the loop, the last as far as it got. `file` is
+/// how many frames the file holds.
+#[must_use]
+pub fn passes(take: TakeBounds, file: u64) -> (Option<Pass>, Vec<Pass>) {
+    let Some((start, end)) = take.wrap else {
+        let whole = Pass {
+            song_start: take.start,
+            file_from: 0,
+            frames: file,
+        };
+        return (None, vec![whole]);
+    };
+    let mut from = 0;
+    let mut lead_in = None;
+    let mut at = take.start;
+    if take.start < start {
+        let frames = ((start - take.start).get() as u64).min(file);
+        lead_in = Some(Pass {
+            song_start: take.start,
+            file_from: 0,
+            frames,
+        });
+        from = frames;
+        at = start;
+    }
+    let mut passes = Vec::new();
+    while from < file {
+        let frames = ((end - at).get() as u64).min(file - from);
+        passes.push(Pass {
+            song_start: at,
+            file_from: from,
+            frames,
+        });
+        from += frames;
+        at = start;
+    }
+    (lead_in, passes)
+}
+
 /// One track to record: where its input comes from, and the name of the
 /// file it goes to.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -612,6 +671,39 @@ mod tests {
 
     use super::*;
 
+    // Spec: recording R12. A take that wrapped is a lead-in and passes.
+    #[test]
+    fn a_take_that_went_round_the_loop_splits_into_a_lead_in_and_passes() {
+        let looped = |start: i64| TakeBounds {
+            start: Frames(start),
+            end: Frames(0),
+            wrap: Some((Frames(100), Frames(200))),
+        };
+        let pass = |song_start: i64, file_from: u64, frames: u64| Pass {
+            song_start: Frames(song_start),
+            file_from,
+            frames,
+        };
+        // From before the loop: 40 frames of lead-in, two full passes, and
+        // 30 frames of a third.
+        let (lead, rest) = passes(looped(60), 40 + 100 + 100 + 30);
+        assert_eq!(lead, Some(pass(60, 0, 40)));
+        assert_eq!(
+            rest,
+            vec![pass(100, 40, 100), pass(100, 140, 100), pass(100, 240, 30)]
+        );
+        // From inside the loop: the first pass is partial.
+        let (lead, rest) = passes(looped(150), 50 + 100 + 10);
+        assert_eq!(lead, None);
+        assert_eq!(
+            rest,
+            vec![pass(150, 0, 50), pass(100, 50, 100), pass(100, 150, 10)]
+        );
+        // Ending on a pass boundary leaves no empty pass.
+        let (_, rest) = passes(looped(100), 200);
+        assert_eq!(rest, vec![pass(100, 0, 100), pass(100, 100, 100)]);
+    }
+
     #[test]
     fn file_names_are_lives_and_hold_no_path_characters() {
         assert_eq!(
@@ -742,6 +834,7 @@ mod tests {
         TakeBounds {
             start: Frames(from * 96_000),
             end: Frames(to * 96_000),
+            wrap: None,
         }
     }
 

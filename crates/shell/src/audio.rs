@@ -254,6 +254,17 @@ impl AudioCallback for EngineCallback {
                             .copy_from_slice(block.channel(c));
                     }
                 }
+                // Tracks on Ext. Out add to the channels they name, Main
+                // Out's included (the routing spec, R3).
+                for c in 0..block.ext_channels().min(channels) {
+                    let ext = block.ext_channel(c);
+                    for (to, from) in output.channel_mut(c)[done..done + frames]
+                        .iter_mut()
+                        .zip(ext)
+                    {
+                        *to += from;
+                    }
+                }
                 done += frames;
             }
         }
@@ -1048,6 +1059,7 @@ impl AudioHost {
         let max_frames = (info.max_block_frames as usize).max(1);
         let config = EngineConfig {
             input_channels: info.input_channels.into(),
+            output_channels: info.output_channels.into(),
             ..EngineConfig::new(rate, max_frames)
         };
         let mut registry = Registry::new();
@@ -1179,15 +1191,12 @@ impl AudioHost {
     /// (WP-2.13). `None` while no stream is open.
     #[must_use]
     pub fn recording_delay(&self) -> Option<i64> {
-        let info = self.stream.as_ref()?.info();
+        let stream = self.stream.as_ref()?;
         let compensation = clamped_compensation_ms(self.settings.driver_error_compensation_ms)
-            * f64::from(info.sample_rate)
+            * f64::from(stream.info().sample_rate)
             / 1000.0;
-        Some(
-            i64::from(info.input_latency)
-                + i64::from(info.output_latency)
-                + compensation.round() as i64,
-        )
+        let latency = stream.latency();
+        Some(i64::from(latency.input) + i64::from(latency.output) + compensation.round() as i64)
     }
 
     /// What the device runs at now.
@@ -1195,6 +1204,7 @@ impl AudioHost {
     pub fn status(&self) -> AudioStatus {
         let info = self.stream.as_ref().map(|stream| stream.info());
         let stats = self.stream.as_ref().map(|stream| stream.stats());
+        let latency = self.stream.as_ref().map(|stream| stream.latency());
         let sample_rate = info.map(|info| info.sample_rate);
         let buffer_size = stats
             .and_then(|stats| stats.last_device_frames)
@@ -1223,8 +1233,8 @@ impl AudioHost {
             buffer_ms: buffer_size
                 .zip(sample_rate)
                 .map(|(frames, rate)| f64::from(frames) * 1000.0 / f64::from(rate.max(1))),
-            input_latency_ms: info.map(|info| ms(info.input_latency)),
-            output_latency_ms: info.map(|info| ms(info.output_latency)),
+            input_latency_ms: latency.map(|latency| ms(latency.input)),
+            output_latency_ms: latency.map(|latency| ms(latency.output)),
             overall_latency_ms: self
                 .recording_delay()
                 .zip(sample_rate)
@@ -1349,9 +1359,14 @@ mod tests {
     /// A detached engine with one test tone on a MIDI track, as `bl-engine`'s
     /// own tests make one.
     fn toned_engine() -> Engine {
+        tone_tracks(&[(bl_model::TrackKind::Midi, bl_model::Output::Default)])
+    }
+
+    /// An engine with a test tone on a track of each kind and Audio To given.
+    fn tone_tracks(tracks: &[(bl_model::TrackKind, bl_model::Output)]) -> Engine {
         use bl_engine::nodes::{TEST_TONE, test_tone};
         use bl_engine::testing::{self, Probe};
-        use bl_model::{Command, Device, DeviceKind, Editor, TrackKind};
+        use bl_model::{Command, Device, DeviceKind, Editor};
 
         let probe = Arc::new(Probe::default());
         let engine = Engine::start_detached(
@@ -1360,32 +1375,37 @@ mod tests {
         )
         .unwrap();
         let mut editor = Editor::new();
-        let track = editor.new_id();
-        editor
-            .apply(Command::CreateTrack {
-                id: track,
-                kind: TrackKind::Midi,
-                name: "Tone".to_owned(),
-                parent: None,
-                index: 0,
-            })
-            .unwrap();
-        let mut device = Device::new(
-            editor.new_id(),
-            "",
-            DeviceKind::Native {
-                device_type: TEST_TONE.to_owned(),
-            },
-        );
-        device.params.insert(test_tone::FREQUENCY, 1_000.0);
-        device.params.insert(test_tone::LEVEL, -6.0);
-        editor
-            .apply(Command::InsertDevice {
-                track,
-                index: 0,
-                device,
-            })
-            .unwrap();
+        for (i, &(kind, output)) in tracks.iter().enumerate() {
+            let track = editor.new_id();
+            editor
+                .apply(Command::CreateTrack {
+                    id: track,
+                    kind,
+                    name: "Tone".to_owned(),
+                    parent: None,
+                    index: i,
+                })
+                .unwrap();
+            let mut device = Device::new(
+                editor.new_id(),
+                "",
+                DeviceKind::Native {
+                    device_type: TEST_TONE.to_owned(),
+                },
+            );
+            device.params.insert(test_tone::FREQUENCY, 1_000.0);
+            device.params.insert(test_tone::LEVEL, -6.0);
+            editor
+                .apply(Command::InsertDevice {
+                    track,
+                    index: 0,
+                    device,
+                })
+                .unwrap();
+            if output != bl_model::Output::Default {
+                editor.apply(Command::SetOutput { track, output }).unwrap();
+            }
+        }
         engine.sync(editor.document());
         assert!(engine.flush(Duration::from_secs(5)));
         engine
@@ -1430,5 +1450,68 @@ mod tests {
             data[512..].iter().all(|&s| s == 0.0),
             "channels 3/4 stay silent"
         );
+    }
+
+    /// The callback of a four-output device playing `tracks`' tones.
+    fn four_outputs(
+        tracks: &[(bl_model::TrackKind, bl_model::Output)],
+        main_out: u32,
+    ) -> EngineCallback {
+        let processor = tone_tracks(tracks)
+            .restarter()
+            .restart(
+                EngineConfig {
+                    output_channels: 4,
+                    ..EngineConfig::new(SampleRate::HZ_48000, 256)
+                },
+                None,
+                Duration::from_secs(5),
+            )
+            .unwrap();
+        let (mut handoff, incoming) = RingBuffer::new(1);
+        handoff.push(processor).unwrap();
+        let shared = Arc::new(EngineShared::default());
+        shared.set_main_out(main_out);
+        EngineCallback::with_engine(shared, incoming)
+    }
+
+    // Spec: routing R3 (WP-2.13)
+    #[test]
+    fn a_track_on_ext_out_plays_on_its_channels_and_not_in_main() {
+        use bl_model::{Channel, Output, TrackKind};
+        let on = |channel| (TrackKind::Audio, Output::External { channel });
+
+        // Pair 3/4: channels 3 and 4 only, Main Out's 1/2 silent.
+        let mut engine = four_outputs(&[on(Channel::Pair(3))], 0);
+        let mut data = vec![0.0f32; 4 * 256];
+        run_block(&mut engine, &mut data, 4, 48_000);
+        assert!(data[..512].iter().all(|&s| s == 0.0), "not in Main");
+        assert!(data[512..768].iter().any(|&s| s != 0.0));
+        assert_eq!(&data[512..768], &data[768..], "both of the pair");
+
+        // Single channel 3: channel 3 alone, and Main untouched.
+        let mut engine = four_outputs(&[on(Channel::Mono(3))], 0);
+        data.fill(0.0);
+        run_block(&mut engine, &mut data, 4, 48_000);
+        assert!(data[..512].iter().all(|&s| s == 0.0));
+        assert!(data[512..768].iter().any(|&s| s != 0.0));
+        assert!(
+            data[768..].iter().all(|&s| s == 0.0),
+            "channel 4 stays silent"
+        );
+
+        // Main Out 1/2 and a track on Ext. Out 1/2 sum.
+        let main = (TrackKind::Audio, Output::Default);
+        let mut engine = four_outputs(&[main], 0);
+        data.fill(0.0);
+        run_block(&mut engine, &mut data, 4, 48_000);
+        let alone = data[..256].to_vec();
+        let mut engine = four_outputs(&[main, on(Channel::Pair(1))], 0);
+        data.fill(0.0);
+        run_block(&mut engine, &mut data, 4, 48_000);
+        let both: Vec<f32> = alone.iter().map(|s| s * 2.0).collect();
+        assert_eq!(&data[..256], &both[..], "Main and Ext. Out add on 1/2");
+        assert_eq!(&data[256..512], &both[..]);
+        assert!(data[512..].iter().all(|&s| s == 0.0));
     }
 }

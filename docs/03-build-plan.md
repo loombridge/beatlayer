@@ -355,6 +355,6 @@ Total to 1.0: 90 packages planned in Phases 0 to 3, and about 185 estimated in P
 | 3.13 | todo |  |  |
 | 3.14 | todo |  |  |
 | 3.15 | done | 16 October 2026 | [#61](https://github.com/loombridge/beatlayer/pull/61); clip envelopes in the document and the engine; [the spec](specs/clip-envelopes.md) |
-| 3.16 | todo |  |  |
+| 3.16 | done | 17 October 2026 | [#91](https://github.com/loombridge/beatlayer/pull/91); the Clip View's Notes, Envelopes and MPE tabs, the Envelopes tab's editor with its choosers and Linked switch, and the Clip View following the latest selected Session or Arrangement clip; [the spec](specs/clip-envelopes.md) |
 | 3.17 | done | 16 October 2026 | [#55](https://github.com/loombridge/beatlayer/pull/55); the crossfader and per-track A/B assignment |
 | 3.18 | todo |  | Waits on 2.13 for the Cue Out chooser |

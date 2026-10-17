@@ -84,6 +84,12 @@ pub struct Colours {
     pub display_line: Colour,
     pub value_fill: Colour,
     pub inactive: Colour,
+    /// An automation envelope, and the LED of a parameter that has one
+    /// (WP-5.9).
+    pub automation: Colour,
+    /// A parameter's modulation: its ring segment, its fader mark, its
+    /// envelope in a clip, and the LED of a modulated parameter (WP-5.9).
+    pub modulation: Colour,
     /// Track and clip colours, assigned to new tracks in turn.
     pub track_palette: Vec<Colour>,
 }

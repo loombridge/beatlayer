@@ -11,8 +11,8 @@ use bl_engine::session as engine_session;
 use bl_engine::transport as engine_transport;
 use bl_media::MediaStore;
 use bl_model::{
-    AudioData, ChangeSet, Clip, ClipData, ContentHash, Editor, Input, LaunchSettings, TakeClip,
-    TakeLane, TrackId, TrackKind, registry as model,
+    AudioData, AutomationTarget, ChangeSet, Clip, ClipData, ContentHash, Editor, Input,
+    LaunchSettings, TakeClip, TakeLane, TrackId, TrackKind, registry as model,
 };
 use bl_project::ProjectFolder;
 use serde::Serialize;
@@ -38,7 +38,8 @@ use crate::commands::{
     self as ids, ClipEnvelopeArgs, ClipTabArgs, DefaultLaunchModeArgs,
     DefaultLaunchQuantizationArgs, DefaultSetArgs, FileReport, FoldNotesArgs, LaneArgs, PathArgs,
     RelinkArgs, SaveAsArgs, SetResult, SettingsArgs, SwitchArgs, SwitchResult, TemplateArgs,
-    TestToneArgs, TestToneState, ThemeArgs, ViewResult, ViewState, ZoomArgs,
+    TemporaryFolderArgs, TemporaryFolderResult, TestToneArgs, TestToneState, ThemeArgs, ViewResult,
+    ViewState, ZoomArgs,
 };
 use crate::devices::{self, DeviceError, DeviceView};
 use crate::files::{ProjectFiles, SetStore, new_set_from};
@@ -71,13 +72,14 @@ use bl_shell_spec::session_launch as session_launch_ids;
 use bl_shell_spec::session_record as session_record_ids;
 use bl_shell_spec::session_view as session_ids;
 use bl_shell_spec::settings::{
-    AgentsPageSettings, AudioPageSettings, DisplayInputSettings, LaunchPrefs,
+    AgentsPageSettings, AudioPageSettings, DisplayInputSettings, FileFolderSettings, LaunchPrefs,
     STATE as SETTINGS_STATE, SettingsState,
 };
 use bl_shell_spec::tracks as track_ids;
 use bl_shell_spec::transport as transport_ids;
 use bl_shell_spec::transport::{RecordedFileReport, RecordingReport, RunningRecording};
 
+mod processed_files;
 mod session_recording;
 
 /// The argument a key in a range (F1 to F8) adds to a toggling mixer
@@ -209,6 +211,9 @@ pub enum Effect {
     /// Ask for a folder, then add it to the browser's Places with
     /// `browser.add_folder` (WP-1.10).
     PickFolder,
+    /// Ask for a folder, then run `settings.set_temporary_folder` with it
+    /// (WP-4.20).
+    PickTemporaryFolder,
     /// Start renaming a device in its title bar, where the person types the
     /// new name; Return runs `device.rename` with it (WP-2.4).
     RenameDevice(bl_model::DeviceId),
@@ -369,6 +374,9 @@ pub struct Shell {
     /// The media the set's clips play, which the browser fills and the
     /// Arrangement's waveforms read.
     media: Arc<MediaStore>,
+    /// Processed files being written, with the edits that land when each is
+    /// whole (WP-4.20).
+    processed: Vec<processed_files::Pending>,
     /// The Arrangement's clipboard (WP-1.8b), kept across sets as Live
     /// keeps it, and never part of a set.
     clipboard: Option<Clipboard>,
@@ -395,6 +403,12 @@ pub struct Shell {
     /// Insert Scene goes after.
     last_launched: Option<bl_model::SceneId>,
     session_over: Vec<TrackId>,
+    /// The parameters under modulation, as the engine last published them
+    /// (WP-5.9).
+    modulated: Vec<bl_engine::PlayedParam>,
+    /// Whether `modulated` came from a running engine, so it clears when
+    /// the engine stops while values a host set stay.
+    modulating: bool,
     /// The meters the engine last published, one per track (WP-1.9).
     meters: Vec<bl_engine::TrackMeter>,
     /// Whether the meters were the engine's when last polled.
@@ -645,6 +659,7 @@ impl Shell {
         let mut shell = Self {
             browser_view,
             media,
+            processed: Vec::new(),
             registry,
             editor,
             saved,
@@ -690,6 +705,8 @@ impl Shell {
             scene_override: bl_engine::SceneOverride::default(),
             last_launched: None,
             session_over: Vec::new(),
+            modulated: Vec::new(),
+            modulating: false,
             meters: Vec::new(),
             metering: false,
             previews: crate::perception::Previews::default(),
@@ -1280,6 +1297,9 @@ impl Shell {
             tempo_midi: self.midi.report(),
             create_fades_on_clip_edges: self.create_fades_on_clip_edges(),
             warp_recorded_audio: self.warp_recorded_audio(),
+            file_folder: FileFolderSettings {
+                temporary_folder: self.temporary_folder().to_string_lossy().into_owned(),
+            },
             launch: self.prefs.launch,
             auto_hide_plug_in_windows: self.auto_hide_plug_in_windows(),
             plug_ins: self.plugin_settings(),
@@ -1667,6 +1687,9 @@ impl Shell {
     /// Lets go of the plug-ins of the set being replaced (WP-2.6): the new
     /// set's plug-in devices load their plug-ins from their saved state.
     fn set_replaced(&mut self) {
+        // A file still being written was for the set that's gone: its worker
+        // deletes it when it finds nobody waiting (WP-4.20).
+        self.processed.clear();
         if self.session_run.take().is_some() {
             // The recording's document is gone; its take ends unplaced.
             let _ = self
@@ -2463,7 +2486,7 @@ impl Shell {
         if let Some(error) = polled.error {
             self.set_message(error, true);
         }
-        let mut changed = polled.changed;
+        let mut changed = polled.changed | self.poll_processed();
         // A MIDI device plugged in or removed (WP-2.2).
         if self.midi_listed.elapsed() >= MIDI_RELIST {
             changed |= self.refresh_midi();
@@ -2934,6 +2957,12 @@ impl Shell {
         // Spec: session-view R24. The tracks a Session clip has taken over,
         // which the Back to Arrangement buttons light from.
         self.audio.session_over_into(&mut self.session_over);
+        // Spec: modulation R7. What the modulated controls played in the
+        // last block: the rings and the fader marks draw from it.
+        if running || self.modulating {
+            self.modulating = running;
+            self.audio.modulated_into(&mut self.modulated);
+        }
         let brace = self.editor.document().settings().arrangement_loop;
         self.set_transport(TransportView {
             playing: engine.playing,
@@ -3024,6 +3053,25 @@ impl Shell {
             },
             |(_, signature)| signature,
         )
+    }
+
+    /// Sets the parameters under modulation, for a host with no engine and
+    /// for tests; a running engine's replace them.
+    pub fn set_modulated(&mut self, modulated: Vec<bl_engine::PlayedParam>) {
+        self.modulated = modulated;
+    }
+
+    /// What `target` of `track` played in the last block while a clip's
+    /// modulation acted on it (the modulation spec, R7): its base and the
+    /// value it played, in the parameter's own units. `None` while it plays
+    /// its base.
+    #[must_use]
+    pub fn played(&self, track: TrackId, target: &AutomationTarget) -> Option<(f64, f64)> {
+        let (node, param) = bl_engine::target_node(track, target);
+        self.modulated
+            .iter()
+            .find(|entry| entry.node == node && entry.param == param)
+            .map(|entry| (entry.base, entry.played))
     }
 
     /// The tracks a Session clip has taken over from the Arrangement
@@ -4159,6 +4207,10 @@ impl Shell {
                 self.effects.push(Effect::PickFolder);
                 Ok(Value::Null)
             }
+            ids::SETTINGS_SET_TEMPORARY_FOLDER if !has("path") => {
+                self.effects.push(Effect::PickTemporaryFolder);
+                Ok(Value::Null)
+            }
             _ if !has("track") && Switch::of_command(id).is_some() => {
                 let switch = Switch::of_command(id).expect("just checked");
                 self.toggle_tracks(id, switch, args)
@@ -4622,6 +4674,16 @@ impl Shell {
         }
         if perception_ids::handles(id) {
             return self.run_perception(id, args);
+        }
+        if bl_shell_spec::modulation::handles(id) {
+            let bl_shell_spec::modulation::StateArgs { track } = Self::args(id, args)?;
+            return Ok(to_value(&crate::modulation::state(
+                self.editor.document(),
+                &self.devices,
+                track,
+                self.arrangement.transport().position,
+                |track, target| self.played(track, target),
+            )));
         }
         if export_ids::handles(id) {
             // Spec: export R15. The set, its media, the Arrangement's time
@@ -5129,10 +5191,19 @@ impl Shell {
                 );
                 self.store.set_windows(self.devices.windows().clone());
                 self.store.set_folds(self.clip_view.folds().clone());
+                self.store.set_temporary_folder(self.temporary_folder());
                 let (path, warnings) = self
                     .store
                     .save_as(Path::new(&path), &self.editor)
                     .map_err(failed)?;
+                // Processed files the first save moved out of the Temporary
+                // Folder: the media store follows them.
+                for (hash, now, _) in self.store.media_files() {
+                    let hash = bl_media::ContentHash::from_bytes(hash.0);
+                    if self.media.entry(hash).is_some_and(|e| !e.path.exists()) && now.is_file() {
+                        let _ = self.media.import(&now);
+                    }
+                }
                 self.saved_as(path, &warnings);
                 Ok(self.set_result())
             }
@@ -5537,6 +5608,21 @@ impl Shell {
                 self.prefs.create_fades_on_clip_edges = OnByDefault(on);
                 self.save_preferences();
                 Ok(to_value(&SwitchResult { on }))
+            }
+            ids::SETTINGS_SET_TEMPORARY_FOLDER => {
+                let TemporaryFolderArgs { path } = Self::args(id, args)?;
+                let path = path.map(PathBuf::from);
+                if path.as_deref().is_some_and(|path| !path.is_absolute()) {
+                    return Err(ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message: "the Temporary Folder's path must be absolute".to_owned(),
+                    });
+                }
+                self.prefs.temporary_folder = path;
+                self.save_preferences();
+                Ok(to_value(&TemporaryFolderResult {
+                    path: self.temporary_folder().to_string_lossy().into_owned(),
+                }))
             }
             ids::SETTINGS_SET_WARP_RECORDED_AUDIO => {
                 let SwitchArgs { on } = Self::args(id, args)?;

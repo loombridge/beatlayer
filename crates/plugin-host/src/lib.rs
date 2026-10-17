@@ -23,6 +23,7 @@
 
 pub mod au;
 pub mod clap;
+mod drive;
 mod lend;
 pub mod scan;
 pub mod vst3;

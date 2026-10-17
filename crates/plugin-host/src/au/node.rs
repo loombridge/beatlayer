@@ -23,7 +23,10 @@ use std::ptr::NonNull;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicU64, Ordering::Relaxed};
 
-use bl_engine::{Block, Node, NodeConfig, NodeEvent, NoteEvent, NoteKind, ParamValue};
+use bl_engine::{
+    AutomationList, Block, Node, NodeConfig, NodeData, NodeEvent, NoteEvent, NoteKind, ParamValue,
+};
+use bl_model::ParamId;
 use block2::RcBlock;
 use objc2::rc::Retained;
 use objc2_audio_toolbox::{
@@ -32,6 +35,8 @@ use objc2_audio_toolbox::{
 };
 use objc2_core_audio_types::{AudioBuffer, AudioBufferList, AudioTimeStamp, AudioTimeStampFlags};
 use rtrb::{Consumer, Producer, RingBuffer};
+
+use crate::drive::Driver;
 
 /// The most channels a unit's bus has that Beatlayer feeds.
 pub(crate) const MAX_CHANNELS: usize = 8;
@@ -89,6 +94,9 @@ pub(crate) struct Processor {
     /// own frame, and a `ParamValue::Default` event sets its captured
     /// value, never read from the unit on the audio thread.
     params: Vec<(Retained<AUParameter>, f64)>,
+    /// Its parameters' automation and modulation, played into it (the
+    /// modulation spec, R10).
+    drive: Driver,
     /// The pull block the unit reads its input with: it points at [`pull`].
     ///
     /// [`pull`]: Self::pull
@@ -177,6 +185,8 @@ pub struct AuNode {
     failed: bool,
     /// Changes kept for the unit while it isn't running a node.
     pending: Vec<(u32, ParamValue)>,
+    /// The automation and clip modulation the compiler sent.
+    automation: Option<NodeData>,
     /// The block's events, in order, kept with the node's room.
     events: Vec<(u32, In)>,
     steady: u64,
@@ -195,6 +205,7 @@ impl AuNode {
             status: Arc::clone(&status),
             failed: false,
             pending: Vec::with_capacity(PENDING_CAPACITY),
+            automation: None,
             events: Vec::with_capacity(EVENT_CAPACITY),
             steady: 0,
         };
@@ -283,9 +294,18 @@ impl Node for AuNode {
         }
         processor.fill_input(block);
         let status = Arc::clone(&self.status);
-        collect(&mut self.events, &self.pending, block, &status, |param| {
-            processor.default_of(param)
-        });
+        let list = self
+            .automation
+            .as_ref()
+            .and_then(|data| data.downcast_ref::<AutomationList>());
+        collect(
+            &mut self.events,
+            &self.pending,
+            block,
+            &status,
+            processor,
+            list,
+        );
         self.pending.clear();
 
         // The unit renders one segment at a time: the events at an offset
@@ -335,6 +355,18 @@ impl Node for AuNode {
         }
     }
 
+    fn receive_data(&mut self, data: NodeData) {
+        if data.downcast_ref::<AutomationList>().is_some() {
+            self.automation = Some(data);
+        }
+    }
+
+    fn modulated(&self, report: &mut dyn FnMut(ParamId, f64, f64)) {
+        if let Some(processor) = &self.processor {
+            processor.drive.modulated(report);
+        }
+    }
+
     fn latency(&self) -> u32 {
         self.status.latency.load(Relaxed)
     }
@@ -351,14 +383,17 @@ impl Drop for AuNode {
 }
 
 /// The block's parameter changes and notes as events, the kept changes at
-/// its first frame, in order of frame. Past the room, events are dropped
-/// and counted.
+/// its first frame, in order of frame, and the values automation and
+/// modulation give the parameters they drive (the modulation spec, R10),
+/// which stand in for the changes of those parameters' controls. Past the
+/// room, events are dropped and counted.
 fn collect(
     events: &mut Vec<(u32, In)>,
     pending: &[(u32, ParamValue)],
     block: &Block<'_>,
     status: &Status,
-    default_of: impl Fn(u32) -> Option<f64>,
+    processor: &mut Processor,
+    list: Option<&AutomationList>,
 ) {
     events.clear();
     let capacity = events.capacity();
@@ -369,24 +404,31 @@ fn collect(
             status.dropped.fetch_add(1, Relaxed);
         }
     };
-    for &(param, value) in pending {
+    let transport = block.transport();
+    processor.drive.prepare(list, transport);
+    let mut change = |events: &mut Vec<(u32, In)>, offset: u32, param: u32, value: ParamValue| {
         let value = match value {
             ParamValue::Set(value) => Some(value),
-            ParamValue::Default => default_of(param),
+            ParamValue::Default => processor.default_of(param),
         };
         if let Some(value) = value {
-            push(events, 0, In::Param(param, value));
+            processor.drive.set_control(param, value);
+            if !processor.drive.is_driven(param) {
+                push(events, offset, In::Param(param, value));
+            }
         }
+    };
+    for &(param, value) in pending {
+        change(events, 0, param, value);
     }
     for event in block.events() {
-        let value = match event.value {
-            ParamValue::Set(value) => Some(value),
-            ParamValue::Default => default_of(event.param.0),
-        };
-        if let Some(value) = value {
-            push(events, event.offset, In::Param(event.param.0, value));
-        }
+        change(events, event.offset, event.param.0, event.value);
     }
+    processor
+        .drive
+        .play(list, transport, block.frames(), |play| {
+            push(events, play.offset, In::Param(play.id, play.played));
+        });
     for note in block.notes() {
         push(events, note.offset, In::Note(*note));
     }
@@ -407,10 +449,10 @@ impl Processor {
         unit: Retained<AUAudioUnit>,
         config: &NodeConfig,
         params: Vec<(Retained<AUParameter>, f64)>,
+        drive: Driver,
         render: AURenderBlock,
         midi: AUScheduleMIDIEventBlock,
-        input_channels: usize,
-        output_channels: usize,
+        (input_channels, output_channels): (usize, usize),
     ) -> Self {
         let max_frames = config.max_frames.max(1);
         let pull = Box::new(Pull {
@@ -473,6 +515,7 @@ impl Processor {
             render,
             midi,
             params,
+            drive,
             pull_block,
             pull,
             output: vec![0.0; MAX_CHANNELS * max_frames].into_boxed_slice(),

@@ -328,6 +328,7 @@ fn render_range(
             samples.extend_from_slice(block);
             Ok(())
         },
+        None,
     )
     .map_err(|error| match error {
         ExportError::Invalid(message) => invalid(command, message),

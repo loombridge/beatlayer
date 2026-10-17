@@ -33,6 +33,7 @@ use serde_json::json;
 
 use crate::main_window::UiEvent;
 use crate::theme::Theme;
+use crate::widgets::{modulated_text, paint_ring_segment, ring_segment};
 
 /// Points of vertical drag that move a control from one end of its range to
 /// the other (observed in Live 12.4.6 on Dry/Wet: 0.8% of the range per
@@ -100,9 +101,15 @@ pub type CellRects = Vec<(String, Rect)>;
 /// [`DeviceLayout::place`]: bl_model::DeviceLayout::place
 #[must_use]
 pub fn place(panel: &DevicePanel, body: Rect) -> (ControlRects, CellRects) {
+    place_shown(panel, false, body)
+}
+
+/// The same for a device whose expanded part shows while `expanded`
+/// (WP-5.42).
+#[must_use]
+pub fn place_shown(panel: &DevicePanel, expanded: bool, body: Rect) -> (ControlRects, CellRects) {
     let placed = panel
-        .description
-        .layout
+        .layout(expanded)
         .place(Size::new(body.width(), body.height()));
     let at = |r: bl_model::device_layout::Rect| {
         Rect::from_min_size(body.min + vec2(r.x, r.y), vec2(r.width, r.height))
@@ -130,17 +137,19 @@ struct Drag {
 }
 
 /// Draws a device's panel in `body`, and turns what the person does into
-/// `device.set_param` invocations.
+/// `device.set_param` invocations. `played` gives the base and the played
+/// value of a parameter while a clip modulates it.
 pub fn show(
     ui: &mut Ui,
     theme: &Theme,
     frame: &DeviceFrame,
     panel: &DevicePanel,
     body: Rect,
+    played: &dyn Fn(ParamId) -> Option<(f64, f64)>,
     events: &mut Vec<UiEvent>,
 ) {
     let c = &theme.colors;
-    let (controls, cells) = place(panel, body);
+    let (controls, cells) = place_shown(panel, frame.expanded, body);
     for (index, (name, rect)) in cells.into_iter().enumerate() {
         // A display cell: black, with a thin border (observed). What it
         // shows is the device's own to draw.
@@ -170,6 +179,7 @@ pub fn show(
             enabled: frame.enabled,
             descriptor,
             value,
+            modulated: played(param),
             rect,
         };
         match widget {
@@ -187,6 +197,8 @@ struct Control<'a> {
     enabled: bool,
     descriptor: &'a ParamDescriptor,
     value: f64,
+    /// Its base and what it plays while a clip modulates it.
+    modulated: Option<(f64, f64)>,
     rect: Rect,
 }
 
@@ -326,15 +338,23 @@ impl Control<'_> {
         }
     }
 
+    /// The value the control shows: its base while it's modulated.
+    fn shown(&self) -> f64 {
+        self.modulated.map_or(self.value, |(base, _)| base)
+    }
+
     fn describe(&self, ui: &Ui, response: &Response, role: Role) {
         let d = self.descriptor;
-        let text = d.format(self.value);
+        let text = modulated_text(
+            d.format(self.shown()),
+            self.modulated.map(|(_, played)| d.format(played)),
+        );
         response.widget_info(|| WidgetInfo::slider(true, self.value, &d.name));
         ui.ctx().accesskit_node_builder(response.id, |node| {
             node.set_role(role);
             node.set_label(d.name.clone());
             node.set_value(text);
-            node.set_numeric_value(self.value);
+            node.set_numeric_value(self.shown());
             node.set_min_numeric_value(d.min());
             node.set_max_numeric_value(d.max());
             node.add_action(Action::Increment);
@@ -369,9 +389,20 @@ impl Control<'_> {
                 .collect()
         };
         painter.add(Shape::line(arc(1.0), Stroke::new(2.0, c.control.0)));
-        let n = self.descriptor.normalize(self.value) as f32;
+        let n = self.descriptor.normalize(self.shown()) as f32;
         if n > 0.0 {
             painter.add(Shape::line(arc(n), Stroke::new(2.0, self.lit(theme))));
+        }
+        // Spec: modulation R7: the pointer stays at the base, and the ring
+        // shows the way to the value it plays.
+        if let Some(segment) = self
+            .modulated
+            .and_then(|(_, played)| ring_segment(n, self.descriptor.normalize(played) as f32))
+        {
+            paint_ring_segment(painter, theme, segment, |to| {
+                let a = from + sweep * to;
+                centre + vec2(a.cos(), a.sin()) * radius
+            });
         }
         let a = from + sweep * n;
         painter.line_segment(
@@ -381,7 +412,7 @@ impl Control<'_> {
         painter.text(
             value_row.center(),
             Align2::CENTER_CENTER,
-            self.descriptor.format(self.value),
+            self.descriptor.format(self.shown()),
             theme.small_font(),
             c.text.0,
         );

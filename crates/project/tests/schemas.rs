@@ -10,7 +10,9 @@
 //! Version 1 is the first. Version 2 (WP-1.4b) moved audio clips' offsets
 //! into their Start markers. Version 3 (WP-3.1) added the Session View's
 //! scenes and the clips in their slots; a set saved before it opens with the
-//! default eight scenes, whose IDs sit after the set's largest.
+//! default eight scenes, whose IDs sit after the set's largest. Version 4
+//! added the global launch quantisation. Version 5 (WP-5.9) made a clip
+//! envelope's values modulation rather than parameter units.
 //! `schema-0-fake.json` is an invented version 0, with a migration to
 //! version 1 defined below, to show the scaffold carries an old file through
 //! to the current model.
@@ -460,6 +462,7 @@ static FAKE_MIGRATIONS: &[Migration] = &[
     MIGRATIONS[0],
     MIGRATIONS[1],
     MIGRATIONS[2],
+    MIGRATIONS[3],
 ];
 
 /// The scaffold migrates an old file: the invented version 0 fixture loads

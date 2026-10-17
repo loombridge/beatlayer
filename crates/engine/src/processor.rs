@@ -1781,6 +1781,10 @@ impl Processor {
             .extend(self.session.overridden().iter().copied().take(room));
         state.meters.clear();
         state.meters_truncated = false;
+        state.modulated.clear();
+        if let Some(program) = &self.program {
+            program.get().modulated(&mut state.modulated);
+        }
         if let Some(program) = &self.program {
             let program = program.get();
             for &task in &program.order {

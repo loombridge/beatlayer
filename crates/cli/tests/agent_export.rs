@@ -338,6 +338,60 @@ fn an_agent_exports_a_set_with_a_vst3_plugin_and_an_audio_unit_by_command() {
     assert!(client.into_transport().finish().unwrap().success());
 }
 
+/// Spec: export R15, R24 (WP-4.17). An agent exports a range of a stem
+/// through a reverb as a loop, by command: the file is the range long, and
+/// holds the tail the same export without `render_as_loop` leaves out.
+#[test]
+fn an_agent_exports_a_loop_by_command() {
+    let dir = TempDir::new("loop");
+    let stem = dir.0.join("Stem.wav");
+    write_stem(&stem, 440.0, 1.0);
+
+    let mut client = bl_cli_mcp(&["--autonomous"]);
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "browser.add_to_arrangement",
+                               "args": { "paths": [stem.to_string_lossy()], "at": 0 } }] }),
+    );
+    let tracks = call(&mut client, "query", json!({ "path": "tracks" }));
+    let track = tracks["tracks"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|track| track["name"] == "Stem")
+        .expect("the stem's track")["id"]
+        .clone();
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "device.add",
+                               "args": { "track": track,
+                                         "device": { "kind": { "native": { "device_type": "beatlayer.rotunda" } },
+                                                     "name": "Reverb", "role": "audio_effect" } } }] }),
+    );
+
+    // The first half second, 705,600 ticks to the quarter note.
+    let export = |client: &mut Client<Stdio>, name: &str, looped: bool| {
+        let file = dir.0.join(name);
+        let exported = call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": "export.audio",
+                                   "args": { "path": file.to_string_lossy(), "bit_depth": 32,
+                                             "sample_rate": 48000, "start": 0, "length": 705_600,
+                                             "render_as_loop": looped } }] }),
+        );
+        assert_eq!(exported["results"][0]["result"]["frames"], 24_000);
+        fs::read(file).unwrap()
+    };
+    let plain = export(&mut client, "plain.wav", false);
+    let looped = export(&mut client, "loop.wav", true);
+    assert!(client.into_transport().finish().unwrap().success());
+    assert_eq!(plain.len(), looped.len());
+    assert_ne!(plain, looped, "the tail is folded in");
+}
+
 /// Spec: export R15.
 #[test]
 fn without_autonomous_an_export_is_refused_and_writes_nothing() {

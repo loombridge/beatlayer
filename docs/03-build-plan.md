@@ -512,7 +512,7 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 5.27 | todo |  |  |
 | 5.28 | todo |  | The oscilloscope waits on IMP-26's acceptance |
 | 5.29 | todo |  | Waits on IMP-25's acceptance |
-| 5.30 | todo |  |  |
+| 5.30 | done | 17 October 2026 | [#109](https://github.com/loombridge/beatlayer/pull/109); the note path between devices (notes sent in order, every note ended when a device is switched off, removed or moved) and six MIDI effects: Lift, Touch, Dice, Remap, Stack and Hold. Step buttons, indicators, Use Current Scale and Stack's menu items wait on display state, Phase 6's scales and device-chains R35 |
 | 5.31 | todo |  |  |
 | 5.32 | todo |  |  |
 | 5.33 | todo |  | Waits on IMP-24's acceptance |

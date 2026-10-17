@@ -217,6 +217,9 @@ pub enum Effect {
     /// Start renaming a device in its title bar, where the person types the
     /// new name; Return runs `device.rename` with it (WP-2.4).
     RenameDevice(bl_model::DeviceId),
+    /// Start renaming a track in its title bar, where the person types the
+    /// new name; Return runs `track.rename` with it (WP-4.22).
+    RenameTrack(TrackId),
 }
 
 /// Where a gesture that edits the set is (WP-1.8b): see [`Shell::gesture`].
@@ -3787,6 +3790,23 @@ impl Shell {
     /// fit its schema, and nothing about the state rules it out.
     #[must_use]
     pub fn can_invoke(&self, id: &str, args: &Value) -> bool {
+        self.can_invoke_in(id, args, &self.active_contexts())
+    }
+
+    /// The contexts a track's title-bar menu works in (WP-4.22): the active
+    /// ones, with `track-headers` first, because the menu acts on the
+    /// selected title bars whichever view it opened in.
+    #[must_use]
+    pub fn track_menu_contexts(&self) -> Vec<Context> {
+        let mut contexts = self.active_contexts();
+        contexts.retain(|c| *c != Context::TrackHeaders);
+        contexts.insert(0, Context::TrackHeaders);
+        contexts
+    }
+
+    /// [`Shell::can_invoke`] with `active` as the contexts that apply.
+    #[must_use]
+    pub fn can_invoke_in(&self, id: &str, args: &Value, active: &[Context]) -> bool {
         let Some(spec) = self.registry.get(id) else {
             return false;
         };
@@ -3794,7 +3814,6 @@ impl Shell {
             // A drag is under way; keys wait for it (Esc cancels it).
             return false;
         }
-        let active = self.active_contexts();
         if !spec.contexts.iter().any(|context| active.contains(context)) {
             return false;
         }
@@ -3892,6 +3911,12 @@ impl Shell {
         if id == "device.rename" && args.get("name").is_none() {
             // A person names the device in its title bar.
             return self.devices.selected().is_some();
+        }
+        if id == "track.delete" && args.get("track").is_none() {
+            return !self.deletable_tracks().is_empty();
+        }
+        if id == "track.rename" && args.get("name").is_none() {
+            return self.renamable_track(args).is_some();
         }
         if id == device_ids::SET_FLOATING {
             // IMP-14: only native devices float; plug-ins open their own
@@ -4228,6 +4253,34 @@ impl Shell {
         result
     }
 
+    /// The tracks Delete reaches: the selected ones, less Main, which can't
+    /// be deleted.
+    fn deletable_tracks(&self) -> Vec<TrackId> {
+        let doc = self.editor.document();
+        self.arrangement
+            .selected_tracks()
+            .iter()
+            .copied()
+            .filter(|&t| doc.track(t).is_some_and(|t| t.kind() != TrackKind::Main))
+            .collect()
+    }
+
+    /// The track Rename reaches: the one `args` names, else the first
+    /// selected, unless it's Main, whose name is fixed.
+    fn renamable_track(&self, args: &Value) -> Option<TrackId> {
+        let named = args
+            .get("track")
+            .and_then(|v| serde_json::from_value(v.clone()).ok());
+        named
+            .or_else(|| self.arrangement.selected_tracks().first().copied())
+            .filter(|&t| {
+                self.editor
+                    .document()
+                    .track(t)
+                    .is_some_and(|t| t.kind() != TrackKind::Main)
+            })
+    }
+
     /// Runs a command as a person asked for it, from a menu, a key, or a
     /// control: fills in arguments the person didn't give, asks before
     /// losing unsaved changes, and asks for a file where one is needed (as
@@ -4290,6 +4343,47 @@ impl Shell {
             _ if !has("track") && Switch::of_command(id).is_some() => {
                 let switch = Switch::of_command(id).expect("just checked");
                 self.toggle_tracks(id, switch, args)
+            }
+            "track.delete" if !has("track") => {
+                // Spec: track-context-menu R4. Delete acts on every selected
+                // track, as one undo step.
+                let tracks = self.deletable_tracks();
+                if tracks.is_empty() {
+                    return Err(ShellError::Unavailable {
+                        command: id.to_owned(),
+                        reason: "select a track first".to_owned(),
+                    });
+                }
+                let opened = !self.gesture;
+                if opened {
+                    self.begin_gesture(track_ids::DELETE_STEP);
+                }
+                let mut result = Ok(Value::Null);
+                for track in tracks {
+                    // A group's delete took its selected members with it.
+                    if self.editor.document().track(track).is_none() {
+                        continue;
+                    }
+                    result = self.run(id, json!({ "track": track }));
+                    if result.is_err() {
+                        break;
+                    }
+                }
+                if opened {
+                    self.end_gesture();
+                }
+                result
+            }
+            "track.rename" if !has("name") => {
+                let track = self
+                    .renamable_track(&args)
+                    .ok_or_else(|| ShellError::Unavailable {
+                        command: id.to_owned(),
+                        reason: "select a track first".to_owned(),
+                    })?;
+                self.effects.push(Effect::RenameTrack(track));
+                self.touch();
+                Ok(Value::Null)
             }
             "device.rename" if !has("name") => {
                 let args = self.filled_args(id, args)?;

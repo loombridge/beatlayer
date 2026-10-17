@@ -5,6 +5,7 @@
 //! reads, whether it's enabled or checked, which keys it shows, and what it
 //! runs, so the native menus (in the app) and the drawn menu bar agree.
 
+use bl_commands::Context;
 use bl_shell::menus::{Action, Menu, MenuItem, shown};
 use bl_shell::{Invocation, Shell};
 use egui::Ui;
@@ -36,11 +37,24 @@ pub fn item_state(
     keymap: &Keymap,
     platform: Platform,
 ) -> ItemState {
+    item_state_in(item, shell, keymap, platform, &shell.active_contexts())
+}
+
+/// [`item_state`] with `contexts` as the ones that apply, for a context menu
+/// that acts on what it was opened on whatever has the keyboard.
+#[must_use]
+pub fn item_state_in(
+    item: &MenuItem,
+    shell: &Shell,
+    keymap: &Keymap,
+    platform: Platform,
+    contexts: &[Context],
+) -> ItemState {
     let resolved = |id: &str, args: Value, chord: Option<&Chord>| ItemState {
         label: shell
             .dynamic_label(id)
             .unwrap_or_else(|| item.label.to_owned()),
-        enabled: shell.can_invoke(id, &args),
+        enabled: shell.can_invoke_in(id, &args, contexts),
         checked: shell.switch_state(id),
         chord: chord.cloned(),
         invocation: Some(Invocation::new(id, args)),
@@ -56,10 +70,9 @@ pub fn item_state(
         Action::Command(id) => resolved(id, json!({}), keymap.chord_for_command(id, platform)),
         Action::Shortcut(shortcuts) => {
             let chord = keymap.chord_for_shortcut(shortcuts[0], platform);
-            let contexts = shell.active_contexts();
             shortcuts
                 .iter()
-                .find_map(|shortcut| keymap.command_for(shortcut, &contexts))
+                .find_map(|shortcut| keymap.command_for(shortcut, contexts))
                 .map_or_else(
                     || inert(chord),
                     |command| resolved(&command.id, Value::Object(command.args.clone()), chord),
@@ -313,7 +326,28 @@ pub(crate) fn item(
     platform: Platform,
     events: &mut Vec<UiEvent>,
 ) -> egui::Response {
-    let state = item_state(item, shell, keymap, platform);
+    item_in(
+        ui,
+        item,
+        shell,
+        keymap,
+        platform,
+        &shell.active_contexts(),
+        events,
+    )
+}
+
+/// [`item`] with `contexts` as the ones that apply ([`item_state_in`]).
+pub(crate) fn item_in(
+    ui: &mut Ui,
+    item: &MenuItem,
+    shell: &Shell,
+    keymap: &Keymap,
+    platform: Platform,
+    contexts: &[Context],
+    events: &mut Vec<UiEvent>,
+) -> egui::Response {
+    let state = item_state_in(item, shell, keymap, platform, contexts);
     let mut text = state.label.clone();
     if state.checked == Some(true) {
         text = format!("✔ {text}");

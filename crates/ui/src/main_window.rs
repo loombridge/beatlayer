@@ -297,6 +297,7 @@ impl MainWindowUi {
                 let title = self.device_title(*device);
                 self.devices.start_rename(*device, &title);
             }
+            Effect::RenameTrack(track) => crate::track_menu::start_rename(ctx, *track),
             Effect::MoveFocus {
                 backwards,
                 neighbor,
@@ -416,7 +417,7 @@ impl MainWindowUi {
             outline_focused_area(ui, shell, theme, &layout);
             self.drawn = Some(layout);
         });
-        self.mixer_typing = crate::mixer::is_typing(ctx);
+        self.mixer_typing = crate::mixer::is_typing(ctx) || crate::track_menu::is_renaming(ctx);
         self.menu_open = egui::Popup::is_any_open(ctx);
         // The track whose control has the focus, for the neighbour items'
         // state (the accessibility spec, R4).

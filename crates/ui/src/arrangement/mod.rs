@@ -52,6 +52,7 @@ use self::scene::{ClipIndex, FrameStats, Label, LanesInput, ShownClip};
 use crate::layout::{ArrangementLayout, header_columns};
 use crate::main_window::{UiEvent, main_view_id};
 use crate::theme::Theme;
+use crate::track_menu::TrackMenus;
 
 /// How far one press of Option-+ or Option-− (Alt on Windows) changes the
 /// selected tracks' heights, in points. Not measured in Live.
@@ -177,6 +178,8 @@ pub struct ArrangementUi {
     automation: AutomationGestures,
     /// The clip and time-selection context menus (WP-1.8b).
     menus: ContextMenus,
+    /// The track header's context menu (WP-4.22).
+    track_menus: TrackMenus,
     /// The playhead the last frame drew: its position and its x, if it was
     /// in view (WP-1.18).
     playhead: Option<(Ticks, f32)>,
@@ -229,6 +232,7 @@ impl ArrangementUi {
             clips: ClipGestures::default(),
             automation: AutomationGestures::default(),
             menus: ContextMenus::new(),
+            track_menus: TrackMenus::default(),
             playhead: None,
             mixer: None,
             described: Vec::new(),
@@ -440,7 +444,10 @@ impl ArrangementUi {
         lanes_response.context_menu(|ui| self.menus.show(ui, shell, events));
         // S-CTX-002: the keys open the same menu, for the selected clips or
         // at the insert marker (the accessibility spec, R8).
-        if ui.ctx().memory(|m| m.has_focus(main_view_id())) && crate::menus::context_menu_keys(ui) {
+        if ui.ctx().memory(|m| m.has_focus(main_view_id()))
+            && !view.title_bars_selected()
+            && crate::menus::context_menu_keys(ui)
+        {
             let clip = self
                 .shown
                 .iter()
@@ -1140,6 +1147,9 @@ impl ArrangementUi {
         let visible = rows_between(&self.rows, scroll_y, scroll_y + column.height());
         let selected = view.selected_tracks();
         let title_bars = view.title_bars_selected();
+        // S-CTX-002 with the view focused opens the selected title bar's
+        // menu (the accessibility spec, R8).
+        let keys = title_bars && ui.ctx().memory(|m| m.has_focus(main_view_id()));
         let mut header_ui = ui.new_child(egui::UiBuilder::new().max_rect(column));
         header_ui.set_clip_rect(column);
         for (index, row) in self.rows[visible.clone()].iter().enumerate() {
@@ -1165,6 +1175,8 @@ impl ArrangementUi {
                     title_selected: is_selected && title_bars,
                     foldable: true,
                     resizable: !view.optimize_height(),
+                    menus: &self.track_menus,
+                    keys: keys && selected.first() == Some(&row.track),
                 },
                 &self.every_track,
                 events,
@@ -1225,6 +1237,8 @@ impl ArrangementUi {
                     title_selected: is_selected && title_bars,
                     foldable: false,
                     resizable: false,
+                    menus: &self.track_menus,
+                    keys: keys && selected.first() == Some(id),
                 },
                 &[],
                 events,

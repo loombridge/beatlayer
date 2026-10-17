@@ -209,6 +209,19 @@ pub struct BrowserView {
     plugins: Vec<bl_plugin_host::scan::ScannedPlugin>,
 }
 
+/// Beatlayer's modulator devices, as the Modulators label lists them: each
+/// with its type ID and name.
+fn modulator_devices() -> Vec<(String, String)> {
+    bl_devices::device_types()
+        .into_iter()
+        .filter(|t| bl_model::modulator::is_modulator_kind(&t.kind))
+        .filter_map(|t| match t.kind {
+            bl_model::DeviceKind::Native { device_type } => Some((device_type, t.name)),
+            bl_model::DeviceKind::Plugin { .. } | bl_model::DeviceKind::Rack { .. } => None,
+        })
+        .collect()
+}
+
 fn parse<T: DeserializeOwned>(args: Value) -> Result<T, BrowserError> {
     let args = if args.is_null() { json!({}) } else { args };
     serde_json::from_value(args).map_err(|e| BrowserError::InvalidArgs(e.to_string()))
@@ -503,6 +516,32 @@ impl BrowserView {
     fn rebuild(&mut self) {
         self.note = None;
         let label = self.label.clone();
+        if label == Label::Modulators {
+            // Spec: modulation R12. The Modulators label lists Beatlayer's
+            // modulator devices.
+            let query = self.search.trim().to_ascii_lowercase();
+            let items: Vec<Item> = modulator_devices()
+                .into_iter()
+                .filter(|(_, name)| query.is_empty() || name.to_ascii_lowercase().contains(&query))
+                .map(|(id, name)| Item {
+                    path: id,
+                    name,
+                    kind: ItemKind::Device,
+                    depth: 0,
+                    open: false,
+                    folder: None,
+                })
+                .collect();
+            if items.is_empty() {
+                self.note = Some(format!(
+                    "Nothing matches \u{201c}{}\u{201d}.",
+                    self.search.trim()
+                ));
+            }
+            self.rows = Rows::Items(items);
+            self.cursor = self.selected.last().and_then(|path| self.position_of(path));
+            return;
+        }
         if label == Label::PlugIns {
             // Spec: plugin-scanning R7. The Plug-Ins label lists what the
             // scanner found, hidden plug-ins already filtered out.
@@ -887,6 +926,22 @@ impl BrowserView {
         self.playing = None;
     }
 
+    /// The modulator device selected under the Modulators label, as its type
+    /// ID and name.
+    #[must_use]
+    pub fn selected_device(&self) -> Option<(String, String)> {
+        let selected = self.selected.last()?.to_string_lossy().into_owned();
+        modulator_devices()
+            .into_iter()
+            .find(|(id, _)| *id == selected)
+    }
+
+    /// Whether no audio file is selected.
+    #[must_use]
+    pub fn selected_audio_is_empty(&self) -> bool {
+        self.selected_audio().is_empty()
+    }
+
     /// The selected audio files, in the content pane's order.
     fn selected_audio(&self) -> Vec<PathBuf> {
         let mut files: Vec<(Option<usize>, PathBuf)> = self
@@ -905,7 +960,9 @@ impl BrowserView {
     #[must_use]
     pub fn can_run(&self, id: &str, args: &Value) -> bool {
         match id {
-            ids::LOAD_SELECTED => !self.selected_audio().is_empty(),
+            ids::LOAD_SELECTED => {
+                !self.selected_audio().is_empty() || self.selected_device().is_some()
+            }
             ids::PREVIEW => args.get("path").is_some() || self.selected_audio().len() == 1,
             ids::REMOVE_FOLDER => args
                 .get("path")
@@ -1012,11 +1069,23 @@ impl BrowserView {
             }
             ids::SELECT => {
                 let SelectArgs { paths, add } = parse(args)?;
+                // A modulator under the Modulators label is named by its
+                // type ID, which isn't a path.
+                let is_device = |p: &str| modulator_devices().iter().any(|(id, _)| id == p);
                 let paths = paths
                     .iter()
-                    .map(|p| absolute(p))
+                    .map(|p| {
+                        if is_device(p) {
+                            Ok(PathBuf::from(p))
+                        } else {
+                            absolute(p)
+                        }
+                    })
                     .collect::<Result<Vec<_>, _>>()?;
-                if let Some(missing) = paths.iter().find(|p| !p.exists()) {
+                if let Some(missing) = paths
+                    .iter()
+                    .find(|p| !p.exists() && !is_device(&p.to_string_lossy()))
+                {
                     return Err(BrowserError::InvalidArgs(format!(
                         "{} doesn't exist",
                         missing.to_string_lossy()

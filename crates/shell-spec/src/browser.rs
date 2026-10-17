@@ -185,7 +185,6 @@ impl Label {
                 Some("Beatlayer's audio effects arrive in milestone M2 (WP-2.18a and WP-2.18b).")
             }
             Self::MidiEffects => Some("MIDI effects arrive in milestone M5."),
-            Self::Modulators => Some("Modulators arrive in milestone M5."),
             Self::Clips => Some("Clip files arrive in milestone M6."),
             Self::Grooves => Some("Grooves arrive with the Groove Pool in milestone M6."),
             Self::Tunings => Some("Tunings arrive in milestone M6."),
@@ -248,6 +247,9 @@ pub enum ItemKind {
     Preset,
     /// A plug-in the scanner found (WP-2.9).
     Plugin,
+    /// One of Beatlayer's own devices, listed under a device label (the
+    /// Modulators label, WP-5.10); its path is the device type's ID.
+    Device,
 }
 
 /// One row of the content pane.

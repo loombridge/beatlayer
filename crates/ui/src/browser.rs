@@ -685,7 +685,7 @@ impl BrowserUi {
             ItemKind::Audio => glyph(&painter, mark, Glyph::Wave, ink),
             ItemKind::Set => glyph(&painter, mark, Glyph::Set, ink),
             ItemKind::Preset => glyph(&painter, mark, Glyph::Preset, ink),
-            ItemKind::Plugin => glyph(&painter, mark, Glyph::Plugin, ink),
+            ItemKind::Plugin | ItemKind::Device => glyph(&painter, mark, Glyph::Plugin, ink),
         }
         let text_colour = if selected {
             theme.colors.text.0
@@ -725,6 +725,14 @@ impl BrowserUi {
                 // Spec: device-chains R19. While a device is hot-swapped, a
                 // preset loads into it.
                 ItemKind::Preset => {
+                    if !selected {
+                        invoke(events, ids::SELECT, json!({ "paths": [item.path] }));
+                    }
+                    invoke(events, ids::LOAD_SELECTED, json!({}));
+                }
+                // Spec: modulation R12. A device loads onto the selected
+                // track.
+                ItemKind::Device => {
                     if !selected {
                         invoke(events, ids::SELECT, json!({ "paths": [item.path] }));
                     }
@@ -795,6 +803,7 @@ impl BrowserUi {
             ItemKind::Set => "Beatlayer set",
             ItemKind::Preset => "Beatlayer device preset",
             ItemKind::Plugin => "plug-in",
+            ItemKind::Device => "device",
         };
         response
             .widget_info(|| WidgetInfo::selected(WidgetType::Other, true, selected, &item.name));
@@ -1129,7 +1138,7 @@ impl BrowserUi {
                     }
                 }
                 ItemKind::Audio => invoke(events, ids::PREVIEW, json!({ "path": item.path })),
-                ItemKind::Set | ItemKind::Preset | ItemKind::Plugin => {}
+                ItemKind::Set | ItemKind::Preset | ItemKind::Plugin | ItemKind::Device => {}
             }
         }
         if left {

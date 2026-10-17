@@ -48,6 +48,7 @@ inactive = "#9aa3ad"
 # ring, the mark under its fader, a clip's modulation envelope.
 automation = "#c46a1f"
 modulation = "#7a4fc4"
+mapping = "#12857a"
 track_palette = [
   "#d4584b", "#dd8446", "#d6af3c", "#93b642", "#47a95a", "#35a68b", "#3699c2",
   "#4676cc", "#6a5fc9", "#9156c4", "#c056a3", "#c85c77", "#88939e", "#ad8e6c",

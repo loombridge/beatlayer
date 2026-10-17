@@ -71,6 +71,7 @@ inactive = "#6a717a"
 # ring, the mark under its fader, a clip's modulation envelope.
 automation = "#f0a35c"
 modulation = "#b78cf0"
+mapping = "#4fd6c4"
 # Beatlayer's own track colours, given to new tracks in turn.
 track_palette = [
   "#e0675a", "#e8945a", "#e6c35c", "#a8c95a", "#5fbf6e", "#4fbfa3", "#4fb0d6",

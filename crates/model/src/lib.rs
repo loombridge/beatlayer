@@ -73,6 +73,7 @@ mod ids;
 mod launch;
 mod metronome;
 pub mod modulation;
+pub mod modulator;
 pub mod param;
 pub mod rack;
 pub mod registry;

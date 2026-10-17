@@ -42,6 +42,7 @@ pub mod lfo;
 pub mod lift;
 pub mod limiter;
 mod midi_fx;
+pub mod modulator;
 pub mod polysynth;
 pub mod remap;
 pub mod reverb;
@@ -56,7 +57,7 @@ pub use delay::{DELAY, delay_type};
 pub use dice::{DICE, dice_type};
 pub use drum_sampler::{DRUM_SAMPLER, DrumSampler, drum_sampler_type};
 pub use eq::{Contour, EQ, eq_type};
-pub use framework::{Audio, NativeDevice, NativeNode, ParamBank, add};
+pub use framework::{Audio, Modulation, NativeDevice, NativeNode, ParamBank, add};
 pub use hold::{HOLD, hold_type};
 pub use kit::{KitFactory, KitHost};
 pub use kitbag::{KITBAG, Kitbag, kitbag_type};
@@ -88,6 +89,7 @@ pub fn display(
     match device_type {
         EQ => Some(eq::display(device, description, values, data)),
         COMPRESSOR => Some(compressor::display(device, description, values, data)),
+        bl_model::modulator::WAVE_MOD => Some(modulator::wave_display(device, description, values)),
         _ => None,
     }
 }
@@ -106,6 +108,7 @@ pub fn register(registry: &mut Registry) {
     sampler::register(registry);
     drum_sampler::register(registry);
     kitbag::register(registry);
+    modulator::register(registry);
     lift::register(registry);
     touch::register(registry);
     dice::register(registry);

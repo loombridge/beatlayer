@@ -402,6 +402,15 @@ impl View<'_> {
             .map(|(param, value)| json!({ "param": param, "value": value }))
             .collect();
         value["params"] = self.page.slice(params);
+        // Spec: modulation R18. A modulator's mappings, which
+        // `modulator.map` and `modulator.unmap` change, and a Curve Mod's
+        // shape.
+        if bl_model::modulator::is_modulator_kind(&device.kind) {
+            value["mappings"] = json!(device.mappings);
+            if let Some(shape) = &device.shape {
+                value["shape"] = json!(shape);
+            }
+        }
         if device.can_compare() {
             // Spec: device-compare R11.
             let pairs = |params: &bl_model::OrdMap<bl_model::ParamId, f64>| {

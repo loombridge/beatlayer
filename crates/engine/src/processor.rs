@@ -1690,11 +1690,6 @@ impl Processor {
         }
     }
 
-    /// Copies this part of the block's input into the Session recording's
-    /// rings (WP-3.11). The take starts at its grid frame and ends at the
-    /// one it was asked to end on; it ignores the Arrangement's loop and
-    /// punch points, and stamps its MIDI with a frame count that runs on
-    /// through the loop's wraps, so the shell lays the clip out from 0.
     /// Copies the notes the monitoring MIDI tracks received in the frames
     /// `offset..offset + frames` of the block into Capture MIDI's ring,
     /// stamped with the engine clock and, while the song plays, the song
@@ -1725,6 +1720,11 @@ impl Processor {
         }
     }
 
+    /// Copies this part of the block's input into the Session recording's
+    /// rings (WP-3.11). The take starts at its grid frame and ends at the
+    /// one it was asked to end on; it ignores the Arrangement's loop and
+    /// punch points, and stamps its MIDI with a frame count that runs on
+    /// through the loop's wraps, so the shell lays the clip out from 0.
     fn capture_session(&mut self, offset: usize, frames: usize) {
         let Some(session) = self.session_take else {
             return;

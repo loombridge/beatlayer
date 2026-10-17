@@ -47,16 +47,6 @@ This spec covers what is remembered, where the clip goes, how long it is and wha
 - The tempo is changed to 0.5 BPM from exact note times. In Live the same notes gave results such as 119.50 where exact 0.5 s spacing would give 120.00, from the timing of the port; the tests use a spacing of 0.5018 s for that row.
 - A song with tempo changes along it keeps its tempo.
 
-## To observe in Live
-
-- Uneven phrases: which gap starts a new phrase, and the tempo they give.
-- Played tempos outside 100 to 150.
-- The loop length of a new clip in an empty slot while the transport runs, beyond the 8-note case.
-- How far back the buffer reaches with no capture or recording at all (it held about 20 s).
-- A merge into a clip that does not loop.
-- A capture with notes played before the transport started, then the transport running.
-- Capture into the Arrangement, and capture while the transport runs with the Arrangement in focus.
-
 ## Tests
 
 | Rule | Test | Kind |

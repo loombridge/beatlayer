@@ -134,6 +134,7 @@ pub fn pair(messages: &[CapturedMidi]) -> Vec<Played> {
             .or_else(|| anchor.map(|(clock, at)| at + Frames(m.clock as i64 - clock as i64)))
     };
     let end = messages.last().map_or(0, |m| m.clock);
+    let end_song = messages.last().and_then(song);
     let mut held: [Option<&CapturedMidi>; 128] = [None; 128];
     let mut notes = Vec::new();
     let mut finish = |on: &CapturedMidi, off_clock: u64, off_song, release: u8| {
@@ -163,7 +164,7 @@ pub fn pair(messages: &[CapturedMidi]) -> Vec<Played> {
         }
     }
     for started in held.into_iter().flatten() {
-        finish(started, end, None, 0);
+        finish(started, end, end_song, 0);
     }
     notes.sort_by_key(|note| note.on);
     notes
@@ -658,6 +659,26 @@ mod tests {
                 .collect::<Vec<_>>(),
             [(60, 100, 200, 90), (62, 300, 500, 80), (64, 500, 500, 70)]
         );
+    }
+
+    // Spec: capture-midi R2. A note held to the end ends on the last
+    // message's song frame too, so a running capture keeps its length.
+    #[test]
+    fn a_held_note_ends_on_the_last_messages_song_frame() {
+        use bl_core::midi::MidiMessage;
+        let message = |clock, song, message| CapturedMidi {
+            track: TrackId(bl_core::id::Id::new(1).unwrap()),
+            clock,
+            song: Some(Frames(song)),
+            message,
+        };
+        let messages = [
+            message(100, 1_100, MidiMessage::note_on(0, 60, 90)),
+            message(300, 1_300, MidiMessage::note_on(0, 62, 80)),
+            message(400, 1_400, MidiMessage::note_off(0, 62)),
+        ];
+        let notes = pair(&messages);
+        assert_eq!(notes[0].song_off, Some(Frames(1_400)));
     }
 
     #[test]

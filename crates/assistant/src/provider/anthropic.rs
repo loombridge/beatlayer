@@ -11,7 +11,7 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 
 use crate::keychain::Keychain;
-use crate::message::{Event, Part, Reply, Request, Role, Stop};
+use crate::message::{Event, Part, Reply, Request, Role, Stop, Usage};
 use crate::provider::{self, Error, Provider};
 use crate::tools::{ToolCall, ToolSpec};
 
@@ -80,6 +80,7 @@ impl Provider for Anthropic {
             stop: Stop::End,
         };
         let mut blocks: Vec<Block> = Vec::new();
+        let mut usage: Option<Usage> = None;
         for event in provider::events(&mut response) {
             let data = event?;
             let value = provider::json_event(&data)?;
@@ -126,12 +127,25 @@ impl Provider for Anthropic {
                         reply.tool_calls.push(call);
                     }
                 }
+                "message_start" => {
+                    if let Some(tokens) = value["message"]["usage"]["input_tokens"].as_u64() {
+                        usage.get_or_insert_default().input = tokens;
+                    }
+                }
                 "message_delta" => {
+                    if let Some(tokens) = value["usage"]["output_tokens"].as_u64() {
+                        usage.get_or_insert_default().output = tokens;
+                    }
                     if let Some(reason) = value["delta"]["stop_reason"].as_str() {
                         reply.stop = stop(reason);
                     }
                 }
-                "message_stop" => break,
+                "message_stop" => {
+                    if let Some(usage) = usage {
+                        on_event(Event::Usage(usage));
+                    }
+                    break;
+                }
                 "error" => return Err(provider::stream_error(&data)),
                 _ => {}
             }

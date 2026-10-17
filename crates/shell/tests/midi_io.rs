@@ -621,7 +621,7 @@ fn the_computer_keyboard_plays_through_a_midi_effect_into_an_instrument() {
     assert_eq!(heard, [(NoteKind::On, 67), (NoteKind::Off, 67)]);
 }
 
-// Spec: midi-io R12, device-framework R35. A control change, pitch bend and
+// Spec: midi-io R12, device-framework R39. A control change, pitch bend and
 // channel pressure from a port reach the instrument through a MIDI effect,
 // in order with the notes, and through the same effect switched off.
 #[test]

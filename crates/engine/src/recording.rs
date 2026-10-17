@@ -24,6 +24,7 @@ use rtrb::Producer;
 
 use crate::midi::MidiEvent;
 use crate::program::EngineProgram;
+use crate::session::SessionEvent;
 
 /// One recorded track: the interface channels its input names and the ring
 /// its samples go to, one frame's samples after another (one sample a frame
@@ -73,6 +74,24 @@ pub struct SessionTarget {
     pub overdub: bool,
 }
 
+/// The ring an Arrangement take logs the Session clips that start and end
+/// into, for the shell to copy into the Arrangement when it ends (WP-3.13).
+pub struct LaunchLog {
+    /// The events, in the order they happened.
+    pub producer: Producer<SessionEvent>,
+    /// Events the ring was too full to take, for the shell to report.
+    pub dropped: Arc<AtomicU64>,
+}
+
+impl LaunchLog {
+    /// Logs one event, or counts it dropped.
+    pub(crate) fn push(&mut self, event: SessionEvent) {
+        if self.producer.push(event).is_err() {
+            self.dropped.fetch_add(1, Relaxed);
+        }
+    }
+}
+
 /// What the audio thread records: every armed track's input and its ring.
 pub struct RecordingPlan {
     /// The audio tracks, in the order the shell listed them.
@@ -88,6 +107,9 @@ pub struct RecordingPlan {
     /// grid ([`SessionCommand::Record`](crate::SessionCommand::Record)) and
     /// ignores the Arrangement's loop and punch points.
     pub session: Vec<SessionTarget>,
+    /// Where an Arrangement take logs the Session clips that start and end
+    /// while it runs (WP-3.13); `None` to log nothing.
+    pub launches: Option<LaunchLog>,
 }
 
 /// The song frames a finished take covers: `start` to `end`, playback that

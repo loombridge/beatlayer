@@ -777,7 +777,7 @@ fn mpe_pitch_bend_bends_one_note_only() {
     );
 }
 
-// Spec: polysynth R22, device-framework R35. The pitch wheel moves every
+// Spec: polysynth R22, device-framework R39. The pitch wheel moves every
 // note on its frame, by the PB Range.
 #[test]
 fn the_pitch_wheel_bends_every_note_by_the_pb_range() {
@@ -821,7 +821,7 @@ fn the_pitch_wheel_bends_every_note_by_the_pb_range() {
     );
 }
 
-// Spec: polysynth R21, device-framework R35. A change of the mod wheel
+// Spec: polysynth R21, device-framework R39. A change of the mod wheel
 // (controller 1) moves the Modwheel source, from the frame it lands on.
 #[test]
 fn the_mod_wheel_moves_the_modwheel_source() {

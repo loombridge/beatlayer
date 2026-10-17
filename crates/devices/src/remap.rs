@@ -154,7 +154,7 @@ impl NativeDevice for Remap {
                 }
                 NoteKind::Off | NoteKind::Choke => self.router.end(audio, &note, note.velocity),
                 NoteKind::Expression { .. } => self.router.expression(audio, &note),
-                // Spec: device-framework R35. A channel message passes through.
+                // Spec: device-framework R39. A channel message passes through.
                 _ => audio.send(note),
             }
         }

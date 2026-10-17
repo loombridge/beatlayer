@@ -94,6 +94,7 @@ fn plan(
             midi: Vec::new(),
             delay: 0,
             session: Vec::new(),
+            launches: None,
         },
         consumers,
         dropped,

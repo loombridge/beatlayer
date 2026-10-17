@@ -857,7 +857,7 @@ impl<P: Plugin> NativeDevice for KitDevice<P> {
                 // Per-note expressions wait for the kit host's MPE work:
                 // the instruments that play them today are native.
                 NoteKind::Expression { .. } => continue,
-                // Spec: device-framework R35. A kit plug-in reads a channel
+                // Spec: device-framework R39. A kit plug-in reads a channel
                 // message as the MIDI event it is.
                 NoteKind::Control { .. }
                 | NoteKind::PitchBend { .. }

@@ -291,7 +291,7 @@ impl NativeDevice for Hold {
                 }
                 (NoteKind::Choke, _) => self.router.end(audio, &note, note.velocity),
                 (NoteKind::Expression { .. }, _) => self.router.expression(audio, &note),
-                // Spec: device-framework R35. A channel message passes through.
+                // Spec: device-framework R39. A channel message passes through.
                 (_, _) => audio.send(note),
             }
         }

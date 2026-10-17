@@ -988,7 +988,7 @@ impl NativeDevice for PolySynth {
                     expression: NoteExpression::Bend,
                     ..
                 } if !self.synth.note_pb => continue,
-                // Spec: device-framework R35. The pitch wheel and the mod
+                // Spec: device-framework R39. The pitch wheel and the mod
                 // wheel reach the voice manager as the MIDI they are.
                 NoteKind::Control { .. }
                 | NoteKind::PitchBend { .. }

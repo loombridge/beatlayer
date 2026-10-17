@@ -163,7 +163,7 @@ fn a_chain_of_midi_effects_passes_under_rtsan() {
     eprintln!("800 blocks through six MIDI effects under RealtimeSanitizer: {ons} note-ons");
 }
 
-// Spec: device-framework R35. Control changes, pitch bends and channel
+// Spec: device-framework R39. Control changes, pitch bends and channel
 // pressure from monitored input go through two MIDI effects, one of them
 // switched off and on again, into a test instrument.
 #[test]

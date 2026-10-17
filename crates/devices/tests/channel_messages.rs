@@ -1,5 +1,5 @@
 //! Channel messages between devices (WP-5.44; the device framework spec,
-//! R35): a control change, pitch bend or channel pressure one device sends
+//! R39): a control change, pitch bend or channel pressure one device sends
 //! reaches the next on its frame, in order with the notes, through a MIDI
 //! effect and a switched-off device, and a block of hundreds allocates
 //! nothing. Every block is a real-time section under the allocation trap.
@@ -71,7 +71,7 @@ fn kinds(chain: &Chain) -> Vec<(i64, NoteKind)> {
     chain.heard().iter().map(|h| (h.0, h.1)).collect()
 }
 
-// Spec: device-framework R35. A message a device sends reaches the next
+// Spec: device-framework R39. A message a device sends reaches the next
 // device on its frame, behind the note it followed; a MIDI effect that
 // doesn't change it forwards it.
 #[test]
@@ -99,7 +99,7 @@ fn a_message_one_device_sends_reaches_the_next_on_its_frame() {
     }
 }
 
-// Spec: device-framework R35, device-chains R6. A device switched off passes
+// Spec: device-framework R39, device-chains R6. A device switched off passes
 // the messages it receives to the next unchanged, as it does its notes.
 #[test]
 fn a_switched_off_device_passes_messages_through() {
@@ -123,7 +123,7 @@ fn a_switched_off_device_passes_messages_through() {
     }
 }
 
-// Spec: device-framework R30, R35. A block of several hundred messages goes
+// Spec: device-framework R30, R39. A block of several hundred messages goes
 // through a chain without allocating, in the order they were sent.
 #[test]
 fn several_hundred_messages_in_one_block_allocate_nothing_and_keep_their_order() {

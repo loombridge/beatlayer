@@ -5,6 +5,9 @@
 #![allow(dead_code, unused_imports, reason = "each test file uses some")]
 
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use bl_core::id::Id;
 use bl_core::time::{SampleRate, Ticks};
@@ -117,6 +120,58 @@ pub fn vst3_device(id: u64, params: &[(u32, f64)]) -> Device {
         device.params.insert(ParamId(*param), *value);
     }
     device
+}
+
+/// The engine's node for a device, running block after block on its own
+/// thread with an input of 1, keeping the last block's first sample.
+pub struct Engine {
+    stop: Arc<AtomicBool>,
+    last: Arc<Mutex<Option<f32>>>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Engine {
+    pub fn start(mut node: Box<dyn Node>) -> Self {
+        let stop = Arc::new(AtomicBool::new(false));
+        let last = Arc::new(Mutex::new(None));
+        let thread = {
+            let (stop, last) = (Arc::clone(&stop), Arc::clone(&last));
+            std::thread::spawn(move || {
+                while !stop.load(Relaxed) {
+                    let out = run(node.as_mut(), &[1.0; FRAMES], &[], &[]);
+                    *last.lock().unwrap() = Some(out.channels[0][FRAMES - 1]);
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+            })
+        };
+        Self {
+            stop,
+            last,
+            thread: Some(thread),
+        }
+    }
+
+    /// Waits for the node's output to settle at `level`.
+    pub fn settles_at(&self, level: f32) {
+        let until = Instant::now() + Duration::from_secs(5);
+        while *self.last.lock().unwrap() != Some(level) {
+            assert!(
+                Instant::now() < until,
+                "the engine's node never put out {level}: {:?}",
+                self.last.lock().unwrap()
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+}
+
+impl Drop for Engine {
+    fn drop(&mut self) {
+        self.stop.store(true, Relaxed);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
 }
 
 /// What the compiler sends a plug-in's node for a clip envelope on one of

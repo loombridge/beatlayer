@@ -86,6 +86,7 @@ pub mod processed;
 pub mod recording;
 pub mod routing;
 pub mod scene_fields;
+mod session_capture;
 pub mod session_view;
 pub mod settings;
 mod shell;

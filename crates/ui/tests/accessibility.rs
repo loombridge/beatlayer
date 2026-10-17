@@ -1139,6 +1139,31 @@ fn a_sidechained_device(h: &mut Harness) {
         .unwrap();
 }
 
+/// A Squeeze, whose display has views, on the selected audio track.
+fn a_squeeze(h: &mut Harness) {
+    h.shell.set_device_types(bl_devices::device_types());
+    let track = h.shell.editor().document().top_level().nth(2).unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let types = bl_devices::device_types();
+    let t = types
+        .iter()
+        .find(|t| t.name == "Squeeze")
+        .expect("the compressor is offered");
+    h.shell
+        .run(
+            "device.add",
+            json!({ "device": {
+                "kind": t.kind, "name": t.name, "role": t.role, "sidechain": t.sidechain,
+            } }),
+        )
+        .unwrap();
+    h.shell
+        .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
 /// The framework's test effects on audio track 3, the selected track, no
 /// device selected: a device with an expanded part, so it has the expand
 /// toggle (WP-5.42).
@@ -1932,6 +1957,12 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ),
         ("device_view.state", Exception(Query)),
         ("device.parameters", Exception(Query)),
+        ("device.display", Exception(Query)),
+        // A display's view buttons (device framework R38): Enter on one.
+        (
+            "device.set_display_view",
+            main(a_squeeze, device_view, "Activity view", Key::Enter),
+        ),
         // Floating device windows (WP-2.5b): Float and Dock are
         // `device.set_floating`, on a key and in the device's menu.
         ("device.windows", Exception(Query)),

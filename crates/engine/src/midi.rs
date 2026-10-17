@@ -272,7 +272,7 @@ impl MidiRoutes {
                 };
                 notes.insert(note(offset, pressure, channel, key, 0.0));
             } else if let Some(message) = NoteEvent::from_message(offset, &event.message) {
-                // Spec: device-framework R35
+                // Spec: device-framework R39
                 notes.insert(message);
             }
         }

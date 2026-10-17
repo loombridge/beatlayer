@@ -10,6 +10,7 @@ use bl_core::time::{Frames, SampleRate, TempoMap};
 use bl_model::{DeviceId, ParamId, TrackId};
 use rtgc::{ArcGc, LocalRtGc};
 
+use crate::display::DisplayReader;
 use crate::session::SessionPlayback;
 
 /// What a node is in the document, which stays the same from one compile to
@@ -427,6 +428,14 @@ pub trait Node: Send + 'static {
     fn latency(&self) -> u32 {
         0
     }
+
+    /// The reader of the node's display data, if it has a display (the
+    /// device framework spec, R26): the compiler asks once, when it makes
+    /// the node, and the shell reads the newest values the node publishes
+    /// after each block. The default is no display.
+    fn display(&mut self) -> Option<DisplayReader> {
+        None
+    }
 }
 
 /// One block of audio for a node to process, with what it needs to know.
@@ -791,7 +800,7 @@ mod tests {
         NoteEvent::from_message(offset, &MidiMessage::from_bytes(bytes).unwrap()).unwrap()
     }
 
-    // Spec: device-framework R35
+    // Spec: device-framework R39
     #[test]
     fn channel_messages_round_trip_through_their_midi_bytes() {
         for bytes in [
@@ -828,7 +837,7 @@ mod tests {
         }
     }
 
-    // Spec: device-framework R35
+    // Spec: device-framework R39
     #[test]
     fn a_message_keeps_its_place_among_the_notes_on_its_frame() {
         let on = NoteEvent {

@@ -28,9 +28,11 @@
 //! the framework's tests use. The kit's two example plug-ins join the
 //! device list with the `kit-examples` feature, off by default.
 
+pub mod channel_eq;
 pub mod compressor;
 pub mod delay;
 pub mod dice;
+mod dynamics;
 pub mod eq;
 mod framework;
 pub mod hold;
@@ -43,11 +45,14 @@ pub mod polysynth;
 pub mod remap;
 pub mod reverb;
 pub mod sampler;
+mod sections;
 pub mod stack;
 pub mod testing;
+pub mod three_band_eq;
 pub mod touch;
 pub mod utility;
 
+pub use channel_eq::{CHANNEL_EQ, Strip, channel_eq_type};
 pub use compressor::{COMPRESSOR, Squeeze, compressor_type};
 pub use delay::{DELAY, delay_type};
 pub use dice::{DICE, dice_type};
@@ -63,6 +68,7 @@ pub use remap::{REMAP, remap_type};
 pub use reverb::{REVERB, reverb_type};
 pub use sampler::{Sampler, sampler_type};
 pub use stack::{STACK, stack_type};
+pub use three_band_eq::{THREE_BAND_EQ, Triad, three_band_eq_type};
 pub use touch::{TOUCH, touch_type};
 
 use bl_engine::{DeviceType, Registry};
@@ -83,6 +89,8 @@ pub fn display(
     match device_type {
         EQ => Some(eq::display(device, description, values, data)),
         COMPRESSOR => Some(compressor::display(device, description, values, data)),
+        CHANNEL_EQ => Some(channel_eq::display(device, description, values, data)),
+        THREE_BAND_EQ => Some(three_band_eq::display(device, description, values, data)),
         _ => None,
     }
 }
@@ -98,6 +106,8 @@ pub fn register(registry: &mut Registry) {
     reverb::register(registry);
     utility::register(registry);
     eq::register(registry);
+    channel_eq::register(registry);
+    three_band_eq::register(registry);
     sampler::register(registry);
     lift::register(registry);
     touch::register(registry);

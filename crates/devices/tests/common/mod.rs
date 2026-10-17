@@ -4,6 +4,7 @@
 #![allow(dead_code, reason = "each test file uses some")]
 
 pub mod chain;
+pub mod response;
 
 use bl_core::id::Id;
 use bl_core::time::{SampleRate, TempoMap};

@@ -156,6 +156,7 @@ fn notes_played_during_a_take_are_on_their_exact_samples() {
         Some(TakeBounds {
             start: Frames(48_000),
             end: Frames(48_000 + 6 * BLOCK as i64),
+            wrap: None,
         })
     );
     midi.rig.collector.collect();

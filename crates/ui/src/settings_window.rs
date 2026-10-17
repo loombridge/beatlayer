@@ -635,8 +635,9 @@ const TAP_TEMPO: [Pending; 1] = [switch_row("Start Transport With Tap Tempo", "M
 
 /// Record, Warp & Launch (L-SET-018, as observed in Live 12.4.6): the
 /// Record, Warp/Fades, Launch, and Tap Tempo sections in Live's order, with
-/// Create Fades on Clip Edges, the fourth row of Warp/Fades, the only
-/// setting built (WP-1.4b). The other rows keep their places, pending.
+/// Create Fades on Clip Edges, the fourth row of Warp/Fades (WP-1.4b), and
+/// Warp recorded audio, a Beatlayer addition after it (IMP-02), the only
+/// settings built. The other rows keep their places, pending.
 fn record_warp_launch_page(
     ui: &mut Ui,
     shell: &Shell,
@@ -666,6 +667,25 @@ fn record_warp_launch_page(
             json!({ "on": on }),
         )));
     }
+    let rect = rows.row(ui, "Warp recorded audio", SettingsLayout::SWITCH);
+    if let Some(on) = switch(
+        ui,
+        theme,
+        "warp-recorded-audio",
+        "Warp recorded audio",
+        rect,
+        shell.warp_recorded_audio(),
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            ids::SETTINGS_SET_WARP_RECORDED_AUDIO,
+            json!({ "on": on }),
+        )));
+    }
+    rows.note(
+        ui,
+        "Warp recorded audio applies once warping arrives (milestone M4): until then recorded \
+         clips play unwarped, whatever it says.",
+    );
     rows.heading(ui, "Launch");
     for row in &LAUNCH {
         rows.pending(ui, row);

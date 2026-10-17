@@ -8,7 +8,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::automation::{Automation, AutomationTarget, TrackAutomation};
-use crate::clip::Clip;
+use crate::clip::{Clip, TakeLane};
 use crate::device::Device;
 use crate::ids::{ClipId, DeviceId, SceneId, TrackId};
 use crate::shared::Shared;
@@ -474,6 +474,9 @@ pub struct Track {
     /// S-SES-005): every audio and MIDI slot has one until then. Return,
     /// group, and Main tracks have none.
     pub(crate) removed_stop_buttons: BTreeSet<SceneId>,
+    /// The take lanes under the Arrangement lane, in order (WP-2.13): one per
+    /// recorded loop pass. Audio tracks only.
+    pub(crate) take_lanes: Vector<TakeLane>,
     pub(crate) children: Vector<TrackId>,
     /// One envelope per automated parameter of this track (WP-2.12): a
     /// control of its mixer, one of its sends, or a parameter of a device in
@@ -494,6 +497,7 @@ impl Track {
             clips: OrdMap::new(),
             slots: OrdMap::new(),
             removed_stop_buttons: BTreeSet::new(),
+            take_lanes: Vector::new(),
             children: Vector::new(),
             automation: TrackAutomation::new(),
         }
@@ -612,6 +616,11 @@ impl Track {
         self.slots.get_mut(&scene).map(Shared::make_mut)
     }
 
+    /// The take lanes under the track's Arrangement lane, nearest first.
+    pub fn take_lanes(&self) -> impl ExactSizeIterator<Item = &TakeLane> + '_ {
+        self.take_lanes.iter()
+    }
+
     /// The tracks directly inside this one, in order. Only groups have them.
     pub fn children(&self) -> impl ExactSizeIterator<Item = TrackId> + DoubleEndedIterator + '_ {
         self.children.iter().copied()
@@ -655,6 +664,7 @@ impl Track {
             || self.mixer != other.mixer
             || self.routing != other.routing
             || self.removed_stop_buttons != other.removed_stop_buttons
+            || !(self.take_lanes.ptr_eq(&other.take_lanes) || self.take_lanes == other.take_lanes)
             || !(self.sends.ptr_eq(&other.sends) || self.sends == other.sends)
             || !(self.children.ptr_eq(&other.children) || self.children == other.children)
             || !(self.automation.ptr_eq(&other.automation) || self.automation == other.automation)

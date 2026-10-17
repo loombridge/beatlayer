@@ -1286,6 +1286,15 @@ fn paths() -> BTreeMap<&'static str, Path> {
             ),
         ),
         (
+            "settings.set_warp_recorded_audio",
+            settings(
+                "record-warp-launch",
+                nothing,
+                "Warp recorded audio",
+                Key::Enter,
+            ),
+        ),
+        (
             "settings.set_auto_hide_plug_in_windows",
             settings("plug-ins", nothing, "Auto-Hide Plug-In Windows", Key::Enter),
         ),
@@ -1477,6 +1486,12 @@ fn paths() -> BTreeMap<&'static str, Path> {
             )),
         ),
         ("clip.create", Exception(editing)),
+        (
+            "track.add_take_lane",
+            Exception(LaterView(
+                "the take lanes' view and comping (milestone M6); loop recording makes the lanes",
+            )),
+        ),
         ("clip.delete", Exception(editing)),
         ("clip.move", Exception(editing)),
         ("clip.move_by", Exception(editing)),

@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::automation::{
     AutomationTarget, MixerParam, PointError, check_bend, drop_device, entry, override_target,
 };
-use crate::clip::{AudioData, Clip, ClipData, ClipEnvelope, MidiData, clip_entry};
+use crate::clip::{AudioData, Clip, ClipData, ClipEnvelope, MidiData, TakeLane, clip_entry};
 use crate::device::{Device, DeviceRole};
 use crate::document::Document;
 use crate::error::ModelError;
@@ -451,6 +451,14 @@ pub enum Command {
         track: TrackId,
         /// The clip, with a new ID.
         clip: Clip,
+    },
+    /// Adds a take lane under an audio track's Arrangement lane, after the
+    /// lanes it has, holding recorded passes.
+    AddTakeLane {
+        /// The audio track.
+        track: TrackId,
+        /// The lane and its passes.
+        lane: TakeLane,
     },
     /// Deletes a clip, from the Arrangement or from a track's Session slot.
     DeleteClip {
@@ -939,6 +947,7 @@ impl Command {
             | Self::SetCueOut { .. } => "Change \"Routing\"",
             Self::SetMonitor { .. } => "Change monitoring",
             Self::CreateClip { .. } => "Create clip",
+            Self::AddTakeLane { .. } => "Add take lane",
             Self::DeleteClip { .. } => "Delete clip",
             Self::MoveClip { .. } => "Move clip",
             Self::MoveClips { .. } => "Move clips",
@@ -1339,6 +1348,7 @@ impl Document {
                 self.set_main_channel(*channel, |routing| &mut routing.cue_out)
             }
             Command::CreateClip { track, clip } => self.create_clip(*track, clip),
+            Command::AddTakeLane { track, lane } => self.add_take_lane(*track, lane),
             Command::DeleteClip { clip } => self.remove_clip(*clip),
             Command::MoveClip { clip, track, start } => self.move_clip(*clip, *track, *start),
             Command::MoveClips { clips, by } => self.move_clips(clips, *by),
@@ -1756,6 +1766,17 @@ impl Document {
             .clips
             .insert(clip.id, Shared::new(clip.clone()));
         self.index.clip_track.insert(clip.id, track);
+        Ok(())
+    }
+
+    fn add_take_lane(&mut self, track: TrackId, lane: &TakeLane) -> Result<(), ModelError> {
+        check_kind(
+            self.track_ref(track)?,
+            |kind| kind == TrackKind::Audio,
+            "an audio track",
+        )?;
+        check_take_lane(lane)?;
+        self.track_mut(track)?.take_lanes.push_back(lane.clone());
         Ok(())
     }
 
@@ -2988,6 +3009,17 @@ pub(crate) fn check_clip(clip: &Clip) -> Result<(), ModelError> {
     check_clip_data(&clip.data)
 }
 
+/// Checks a take lane's passes: each has a start and length that fit and
+/// audio data that follows the audio clips' rules.
+pub(crate) fn check_take_lane(lane: &TakeLane) -> Result<(), ModelError> {
+    for clip in &lane.clips {
+        check_extent(clip.start, clip.length)?;
+        check_audio(&clip.data)?;
+        check_marker_order(&clip.data)?;
+    }
+    Ok(())
+}
+
 /// Checks a device's parameter values.
 pub(crate) fn check_device(device: &Device) -> Result<(), ModelError> {
     if device.floating && !device.can_float() {
@@ -3088,7 +3120,8 @@ mod tests {
 
     use super::*;
     use crate::automation::Breakpoint;
-    use crate::clip::{EDGE_FADE_SECONDS as EDGE_FADE, MidiData, Note};
+    use crate::changes::ChangeSet;
+    use crate::clip::{EDGE_FADE_SECONDS as EDGE_FADE, MidiData, Note, TakeClip};
     use crate::device::{DeviceKind, DeviceRole, PluginFormat};
     use crate::ids::ContentHash;
     use crate::scene::DEFAULT_SCENE_COUNT;
@@ -3872,6 +3905,89 @@ mod tests {
             }),
             ModelError::InvalidValue { .. }
         ));
+    }
+
+    // Spec: recording R12
+    #[test]
+    fn take_lanes_are_added_in_order_to_audio_tracks_and_survive_a_save() {
+        let mut song = Song::new();
+        let audio_track = song.track(TrackKind::Audio, None);
+        let midi_track = song.track(TrackKind::Midi, None);
+        let lane = |name: &str, start: f64| TakeLane {
+            name: name.to_owned(),
+            clips: vec![TakeClip {
+                name: "Take".to_owned(),
+                start: Ticks::QUARTER,
+                length: Ticks::QUARTER,
+                data: AudioData {
+                    start,
+                    end: Some(start + 0.5),
+                    ..AudioData::new(ContentHash([3; 32]))
+                },
+            }],
+        };
+        let before = song.doc.clone();
+        song.apply(Command::AddTakeLane {
+            track: audio_track,
+            lane: lane("Take 1", 0.0),
+        })
+        .unwrap();
+        song.apply(Command::AddTakeLane {
+            track: audio_track,
+            lane: lane("Take 2", 0.5),
+        })
+        .unwrap();
+        let names: Vec<&str> = song
+            .doc
+            .track(audio_track)
+            .unwrap()
+            .take_lanes()
+            .map(|lane| lane.name.as_str())
+            .collect();
+        assert_eq!(names, ["Take 1", "Take 2"], "in the order they were added");
+        assert!(
+            ChangeSet::between(&before, &song.doc)
+                .tracks
+                .contains_key(&audio_track),
+            "the track shows as changed"
+        );
+
+        // Only audio tracks have take lanes, and a pass needs a real length
+        // and sound data.
+        assert!(matches!(
+            song.reject(Command::AddTakeLane {
+                track: midi_track,
+                lane: lane("Take 1", 0.0),
+            }),
+            ModelError::WrongTrackKind { .. }
+        ));
+        let mut empty = lane("Take 3", 0.0);
+        empty.clips[0].length = Ticks::ZERO;
+        assert!(matches!(
+            song.reject(Command::AddTakeLane {
+                track: audio_track,
+                lane: empty,
+            }),
+            ModelError::EmptyLength(_)
+        ));
+        let mut bad = lane("Take 3", 0.0);
+        bad.clips[0].data.gain = f64::NAN;
+        assert!(matches!(
+            song.reject(Command::AddTakeLane {
+                track: audio_track,
+                lane: bad,
+            }),
+            ModelError::InvalidValue { .. }
+        ));
+
+        // A save and load keeps them, and the loaded document follows every
+        // rule.
+        let saved = serde_json::to_string(&crate::repr::DocumentRepr::from(&song.doc)).unwrap();
+        let loaded: crate::repr::DocumentRepr = serde_json::from_str(&saved).unwrap();
+        let loaded = Document::try_from(loaded).unwrap();
+        assert_eq!(loaded, song.doc);
+        loaded.check_invariants().unwrap();
+        assert_eq!(loaded.track(audio_track).unwrap().take_lanes().len(), 2);
     }
 
     // Spec: audio-clips R7

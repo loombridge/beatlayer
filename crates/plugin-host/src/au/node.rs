@@ -423,7 +423,7 @@ fn collect(
     }
     processor
         .drive
-        .play(list, transport, block.frames(), |play| {
+        .play(list, transport, block.frames(), block.modulation(), |play| {
             push(events, play.offset, In::Param(play.id, play.played));
         });
     for note in block.notes() {

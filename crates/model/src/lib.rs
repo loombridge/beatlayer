@@ -72,6 +72,7 @@ mod ids;
 mod launch;
 mod metronome;
 pub mod modulation;
+pub mod modulator;
 pub mod param;
 pub mod registry;
 mod repr;

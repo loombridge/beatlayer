@@ -893,6 +893,34 @@ pub enum Command {
         /// The value, in the parameter's own units.
         value: f64,
     },
+    /// Maps a slot of a modulator to a parameter (the modulation spec, R15):
+    /// the Map button's gesture. The slot's earlier mapping goes.
+    MapModulator {
+        /// The modulator device.
+        device: DeviceId,
+        /// The slot, from 0 to 7.
+        slot: u8,
+        /// The parameter to map: a mixer control or send of any track, or a
+        /// parameter of any device but the modulator's own.
+        target: crate::modulator::ModTarget,
+    },
+    /// Removes the mapping of a modulator's slot (R15): the Unmap button.
+    UnmapModulator {
+        /// The modulator device.
+        device: DeviceId,
+        /// The slot, from 0 to 7.
+        slot: u8,
+    },
+    /// Replaces the breakpoint shape of a Curve Mod (R23): every edit of
+    /// its display, Clear and the presets make a new list.
+    SetShape {
+        /// The Curve Mod device.
+        device: DeviceId,
+        /// The breakpoints, in order along the cycle (at most 64), each with
+        /// its place and output from 0 to 1 and the bend of the segment
+        /// starting there, from −1 to 1.
+        points: Vec<crate::modulator::ShapePoint>,
+    },
     /// Sets the media a device plays, by content hash (WP-2.16): the
     /// sampler's sample, which the media store holds like a clip's audio.
     SetDeviceSample {
@@ -1067,6 +1095,10 @@ impl Command {
             Self::SetDeviceParam { .. } => "Change parameter",
             // WP-2.16. Live's undo name for loading a Simpler sample is to
             // observe; Beatlayer's names the edit.
+            // WP-5.10: Beatlayer's own names.
+            Self::MapModulator { .. } => "Map Modulator",
+            Self::UnmapModulator { .. } => "Unmap Modulator",
+            Self::SetShape { .. } => "Edit Shape",
             Self::SetDeviceSample { media: Some(_), .. } => "Load Sample",
             Self::SetDeviceSample { media: None, .. } => "Clear Sample",
             // WP-2.19b, as Live 12.4.6 names them (observed); Listen's is to
@@ -1193,7 +1225,11 @@ impl Document {
                 parent,
                 index,
             } => self.create_track(*id, *kind, name, *parent, *index),
-            Command::DeleteTrack { track } => self.delete_track(*track),
+            Command::DeleteTrack { track } => {
+                self.delete_track(*track)?;
+                self.prune_mappings();
+                Ok(())
+            }
             Command::MoveTrack {
                 track,
                 parent,
@@ -1564,6 +1600,7 @@ impl Document {
                 let track = self.track_mut(owner)?;
                 drop_device(&mut track.automation, *device);
                 drop_device_envelopes(track, *device);
+                self.prune_mappings();
                 Ok(())
             }
             Command::MoveDevice {
@@ -1621,6 +1658,21 @@ impl Document {
                 value,
             } => {
                 check_value("parameter value", *value, value.is_finite())?;
+                // Spec: modulation R16. Remote Control holds what a
+                // modulator maps; one parameter has one holder.
+                if *param == crate::modulator::MODE && *value >= 0.5 {
+                    let current = self.device_ref(*device)?;
+                    if current
+                        .mappings
+                        .iter()
+                        .any(|m| self.held_by(m.target, *device).is_some())
+                    {
+                        return Err(ModelError::InvalidInput(
+                            "another modulator in Remote Control already holds a parameter this \
+                             one maps",
+                        ));
+                    }
+                }
                 if self.device_ref(*device)?.params.get(param) != Some(value) {
                     let owner = self.device_owner(*device)?;
                     self.device_mut(*device)?.params.insert(*param, *value);
@@ -1634,6 +1686,13 @@ impl Document {
                 }
                 Ok(())
             }
+            Command::MapModulator {
+                device,
+                slot,
+                target,
+            } => self.map_modulator(*device, *slot, *target),
+            Command::UnmapModulator { device, slot } => self.unmap_modulator(*device, *slot),
+            Command::SetShape { device, points } => self.set_shape(*device, points),
             Command::SetDeviceSample { device, media } => {
                 if self.device_ref(*device)?.media != *media {
                     self.device_mut(*device)?.media = *media;
@@ -2468,6 +2527,8 @@ impl Document {
         insert_at(chain, index, Shared::new(device.clone()))?;
         self.index.device_track.insert(device.id, track);
         check_chain(self.track_ref(track)?)?;
+        // Spec: modulation R19. A mapping to a parameter the set lacks goes.
+        self.prune_mappings();
         self.check_routing(track)
     }
 
@@ -2845,7 +2906,7 @@ impl Document {
         self.device_track(id).ok_or(ModelError::NoSuchDevice(id))
     }
 
-    fn device_ref(&self, id: DeviceId) -> Result<&Device, ModelError> {
+    pub(crate) fn device_ref(&self, id: DeviceId) -> Result<&Device, ModelError> {
         self.device(id).ok_or(ModelError::NoSuchDevice(id))
     }
 
@@ -2863,7 +2924,7 @@ impl Document {
         Ok(())
     }
 
-    fn device_mut(&mut self, id: DeviceId) -> Result<&mut Device, ModelError> {
+    pub(crate) fn device_mut(&mut self, id: DeviceId) -> Result<&mut Device, ModelError> {
         let owner = self.device_owner(id)?;
         let chain = &mut self.track_mut(owner)?.devices;
         let position = position_in(chain, |d| d.id == id).ok_or(ModelError::NoSuchDevice(id))?;
@@ -3175,6 +3236,10 @@ pub(crate) fn check_device(device: &Device) -> Result<(), ModelError> {
     }
     for value in device.params.values() {
         check_value("parameter value", *value, value.is_finite())?;
+    }
+    crate::modulator::check_mappings(device)?;
+    if let Some(shape) = &device.shape {
+        crate::modulator::check_shape(shape)?;
     }
     if let Some(sidechain) = &device.sidechain {
         let gain = sidechain.gain;

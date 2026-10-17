@@ -44,7 +44,7 @@ pub mod utility;
 pub use compressor::{COMPRESSOR, Squeeze, compressor_type};
 pub use delay::{DELAY, delay_type};
 pub use eq::{Contour, EQ, eq_type};
-pub use framework::{Audio, NativeDevice, NativeNode, ParamBank, add};
+pub use framework::{Audio, Modulation, NativeDevice, NativeNode, ParamBank, add};
 pub use kit::{KitFactory, KitHost};
 pub use lfo::{Lfo, Rate, Shape, Stereo, Wave};
 pub use limiter::{Brickwall, limiter_type};

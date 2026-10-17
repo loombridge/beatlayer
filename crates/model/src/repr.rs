@@ -292,6 +292,9 @@ impl TryFrom<DocumentRepr> for Document {
                 document.check_clip_envelopes(id, clip)?;
             }
         }
+        // Spec: modulation R19. A mapping naming a parameter the set doesn't
+        // have doesn't load.
+        document.prune_mappings();
         Ok(document)
     }
 }

@@ -7,6 +7,7 @@ use core::ops::Range;
 use bl_core::time::{Frames, SampleRate, TempoMap};
 use bl_dsp::LinearSmoother;
 use bl_dsp::smooth::DEFAULT_SMOOTHING_SECONDS;
+use bl_engine::modbus::{Bus, Control};
 use bl_engine::{
     AutomationList, Block, DeviceType, Node, NodeConfig, NodeData, NodeEvent, NoteEvent,
     ParamValue, Registry, segments,
@@ -47,6 +48,71 @@ pub trait NativeDevice: Send + 'static {
     /// (WP-2.11).
     fn latency(&self) -> u32 {
         0
+    }
+
+    /// Whether the device is a modulator (WP-5.10): the engine works its
+    /// output out in [`control`](Self::control) before any track runs, and
+    /// [`process`](Self::process) is never called.
+    fn is_modulator(&self) -> bool {
+        false
+    }
+
+    /// A modulator's output for a stretch between parameter changes: it
+    /// writes the rows [`Modulation`] gives, from its parameters, which
+    /// are already worked out for the stretch.
+    fn control(&mut self, modulation: &mut Modulation<'_, '_>, params: &ParamBank) {
+        let _ = (modulation, params);
+    }
+}
+
+/// A stretch of the rows a modulator writes, between parameter changes
+/// (WP-5.10).
+pub struct Modulation<'c, 'a> {
+    ctl: &'c mut Control<'a>,
+    range: Range<usize>,
+}
+
+impl Modulation<'_, '_> {
+    /// Frames in the stretch.
+    #[must_use]
+    pub fn frames(&self) -> usize {
+        self.range.len()
+    }
+
+    /// The sample rate.
+    #[must_use]
+    pub fn sample_rate(&self) -> SampleRate {
+        self.ctl.sample_rate
+    }
+
+    /// The song's tempo map.
+    #[must_use]
+    pub fn tempo(&self) -> &TempoMap {
+        self.ctl.tempo
+    }
+
+    /// The song position of the stretch's first frame.
+    #[must_use]
+    pub fn song_position(&self) -> Frames {
+        Frames(self.ctl.transport.position.get() + self.range.start as i64)
+    }
+
+    /// Whether the song is playing.
+    #[must_use]
+    pub fn playing(&self) -> bool {
+        self.ctl.transport.playing
+    }
+
+    /// Row `index` of the modulator's rows, over the stretch, writable
+    /// ([`bl_engine::modbus::ROWS`] of them, a contribution row and a hold
+    /// row per slot).
+    ///
+    /// # Panics
+    ///
+    /// If `index` isn't a row.
+    pub fn row_mut(&mut self, index: usize) -> &mut [f32] {
+        let range = self.range.clone();
+        &mut self.ctl.row_mut(index)[range]
     }
 }
 
@@ -251,12 +317,15 @@ impl ParamBank {
 
     /// Works out every parameter's value for the next `frames` frames: an
     /// automated one from its envelope, on the exact frame, when the song
-    /// plays at song frame `from`; then the clips' modulation on top of that
-    /// base (the modulation spec, R2 and R3), clamped to the parameter's
-    /// range; the rest gliding toward their values as always.
-    fn advance(&mut self, frames: usize, from: Option<i64>) {
+    /// plays at song frame `from`; a held one at the position a modulator
+    /// in Remote Control holds it at; then the clips' and the modulators'
+    /// modulation on top of that base (the modulation spec, R2, R3 and
+    /// R14), clamped to the parameter's range; the rest gliding toward
+    /// their values as always. `bus` holds the modulators' rows, whose
+    /// frame `offset` is the stretch's first.
+    fn advance(&mut self, frames: usize, from: Option<i64>, bus: Bus<'_>, offset: usize) {
         self.frames = frames;
-        let automation = from.and_then(|_| self.automation.clone());
+        let automation = self.automation.clone();
         let automation = automation
             .as_ref()
             .and_then(|data| data.downcast_ref::<AutomationList>());
@@ -264,38 +333,52 @@ impl ParamBank {
             let frames = frames.min(slot.ramp.len());
             let id = slot.descriptor.id;
             let descriptor = &slot.descriptor;
-            let envelope = automation.and_then(|list| list.envelope(id));
-            let modulates = automation.is_some_and(|list| list.modulates(id));
             slot.modulated = None;
-            let (Some(list), Some(from)) = (automation, from) else {
+            let Some(list) = automation else {
                 Self::glide(slot, frames);
                 continue;
             };
+            let envelope = from.and_then(|_| list.envelope(id));
+            let modulates = list.modulates(id);
             if envelope.is_none() && !modulates {
                 Self::glide(slot, frames);
                 continue;
             }
-            // The base is the envelope's value on each frame, or the
-            // control's, which glides as it always does; the modulation acts
-            // on it on the frame, without a glide of its own, and never
-            // changes it: when it goes, the parameter plays its base again.
+            // The base is a modulator's hold, else the envelope's value on
+            // each frame, else the control's, which glides as it always
+            // does; the modulation acts on it on the frame, without a glide
+            // of its own, and never changes it: when it goes, the parameter
+            // plays its base again.
             let travel = Travel::Param(descriptor);
             let mut base = 0.0;
             let mut played = 0.0;
+            let mut held = false;
             for (i, value) in slot.ramp[..frames].iter_mut().enumerate() {
-                let frame = from + i as i64;
-                base = envelope.map_or_else(|| slot.smoother.step(), |e| e.value_at(frame));
-                played = descriptor.clamp(list.played(travel, id, frame, base));
+                let song = from.map(|from| from + i as i64);
+                let at = offset + i;
+                let control = if envelope.is_none() {
+                    slot.smoother.step()
+                } else {
+                    0.0
+                };
+                let position = list.held(id, bus, at);
+                held = position.is_some();
+                base = match (position, envelope, song) {
+                    (Some(position), ..) => travel.value(position),
+                    (None, Some(envelope), Some(frame)) => envelope.value_at(frame),
+                    _ => control,
+                };
+                played = descriptor.clamp(list.played(travel, id, song, base, bus, at));
                 *value = played as f32;
             }
             if frames == 0 {
                 continue;
             }
-            if envelope.is_some() {
+            if envelope.is_some() && !held {
                 slot.smoother.snap(descriptor.clamp(base));
             }
-            slot.modulated =
-                (modulates && played != descriptor.clamp(base)).then_some((base, played));
+            slot.modulated = (modulates && (held || played != descriptor.clamp(base)))
+                .then_some((base, played));
         }
     }
 
@@ -445,8 +528,12 @@ impl<D: NativeDevice> NativeNode<D> {
 
 impl<D: NativeDevice> Node for NativeNode<D> {
     fn process(&mut self, block: &mut Block<'_>) {
+        if self.device.is_modulator() {
+            return;
+        }
         let frames = block.frames();
         let transport = block.transport();
+        let bus = block.modulation();
         for segment in segments(block.events(), frames) {
             for event in segment.events {
                 self.params.apply(event);
@@ -457,7 +544,8 @@ impl<D: NativeDevice> Node for NativeNode<D> {
             let from = transport
                 .playing
                 .then(|| transport.position.get() + segment.range.start as i64);
-            self.params.advance(segment.range.len(), from);
+            self.params
+                .advance(segment.range.len(), from, bus, segment.range.start);
             let last = segment.range.end >= frames;
             let mut audio = Audio {
                 block,
@@ -467,6 +555,30 @@ impl<D: NativeDevice> Node for NativeNode<D> {
             };
             self.device.process(&mut audio, &self.params);
         }
+    }
+
+    fn control(&mut self, ctl: &mut Control<'_>) -> bool {
+        if !self.device.is_modulator() {
+            return false;
+        }
+        let transport = ctl.transport;
+        let (events, frames, earlier) = (ctl.events, ctl.frames, ctl.earlier);
+        for segment in segments(events, frames) {
+            for event in segment.events {
+                self.params.apply(event);
+            }
+            let from = transport
+                .playing
+                .then(|| transport.position.get() + segment.range.start as i64);
+            self.params
+                .advance(segment.range.len(), from, earlier, segment.range.start);
+            let mut modulation = Modulation {
+                ctl: &mut *ctl,
+                range: segment.range,
+            };
+            self.device.control(&mut modulation, &self.params);
+        }
+        true
     }
 
     fn flush(&mut self, events: &[NodeEvent]) {

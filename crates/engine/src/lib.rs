@@ -89,6 +89,7 @@ mod engine;
 mod gc;
 mod input;
 mod message;
+pub mod modbus;
 mod metronome;
 mod midi;
 pub mod midi_clips;

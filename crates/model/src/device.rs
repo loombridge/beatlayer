@@ -11,6 +11,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{ContentHash, DeviceId, ParamId};
+use crate::modulator::{Mapping, ShapePoint};
 use crate::track::Input;
 
 /// A device in a track's chain: a native instrument or effect, or a plug-in.
@@ -71,6 +72,14 @@ pub struct Device {
     /// spec, R11). Left out of the saved set for a device that plays none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub media: Option<ContentHash>,
+    /// The parameters a modulator maps, one per slot (the modulation spec,
+    /// R19). Left out of the saved set for a device that maps none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mappings: Vec<Mapping>,
+    /// The breakpoints of a Curve Mod's shape (R23); `None` plays the
+    /// default shape. Left out of the saved set while it is the default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shape: Option<Vec<ShapePoint>>,
 }
 
 /// A plug-in device's own state, as the set file keeps it (WP-2.6).
@@ -256,6 +265,8 @@ impl Device {
             floating: false,
             plugin: None,
             media: None,
+            mappings: Vec::new(),
+            shape: None,
         }
     }
 

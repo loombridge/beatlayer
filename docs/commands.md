@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-342 commands in 32 areas.
+343 commands in 32 areas.
 
 ## Permission classes
 
@@ -193,6 +193,7 @@ Each command has:
 | [`focus.previous_neighbor`](#focusprevious_neighbor) | Previous Neighbor | `read` | `Option+Shift+Tab` | `Ctrl+Shift+Tab` |
 | [`focus.toggle_tab_navigation`](#focustoggle_tab_navigation) | Use Tab Key to Move Focus | `read` |  |  |
 | [`focus.toggle_wrap_navigation`](#focustoggle_wrap_navigation) | Wrap Keyboard Navigation | `read` |  |  |
+| [`midi.capture`](#midicapture) | Capture MIDI | `edit` |  |  |
 | [`midi.computer_keyboard_key`](#midicomputer_keyboard_key) | Computer Keyboard Key | `read` |  |  |
 | [`midi.computer_keyboard_octave`](#midicomputer_keyboard_octave) | Computer Keyboard Octave | `read` |  |  |
 | [`midi.computer_keyboard_velocity`](#midicomputer_keyboard_velocity) | Computer Keyboard Velocity | `read` |  |  |
@@ -3261,6 +3262,18 @@ Arguments: none (send `{}`).
 Result: [`SwitchResult`](#switchresult).
 
 ### Area `midi`
+
+#### `midi.capture`
+
+**Capture MIDI**. Permission: `edit`. Contexts: `global`.
+
+Capture MIDI (Create ▸ Capture MIDI; the Control Bar's button). Brings back the notes played on the MIDI tracks that monitor their input, since the last capture or recording, as one clip on each track that was played, with their velocities and timing. A track with a clip playing while the transport runs gets the notes added to that clip: it grows to the loop pass the last note falls in and its loop moves there, keeping its length. Any other track gets a new clip in the selected scene's slot if it is empty, else the next empty slot below, else a scene added at the end; the clip's loop is the whole bars that cover its last phrase, from the first note-on to the last. With the transport stopped the first note is on 1.1.1 and the song's tempo may change to the played tempo; with it running the tempo stays. Control changes, pitch bend and pressure are not captured yet. Refused when no note was played; `transport.state` shows `capture_midi_ready`. One undo step.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`Captured`](#captured).
 
 #### `midi.computer_keyboard_key`
 
@@ -6399,6 +6412,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.set_state`](#deviceset_state) | the query tool's `device` | `params` |
 | [`edit.redo`](#editredo) | the query tool's `song` | `undo.next_redo` |
 | [`edit.undo`](#editundo) | the query tool's `song` | `undo.next_undo` |
+| [`midi.capture`](#midicapture) | the query tool's `track` | `slots` |
 | [`midi.import_file`](#midiimport_file) | the query tool's `track` | `clips` |
 | [`midi.set_port`](#midiset_port) | `midi.ports` | `ports` |
 | [`midi.toggle_computer_keyboard`](#miditoggle_computer_keyboard) | `midi.ports` | `keyboard.on` |
@@ -8081,6 +8095,93 @@ What `perception.capture_view` returns, beside the image.
     "mime_type",
     "bytes",
     "pixels_per_point"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `Captured`
+
+What `midi.capture` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clips` | array of [`CapturedClip`](#capturedclip) | yes | The clips, one for each track that was played. |
+| `tempo` | number or null | yes | The song's new tempo, when the capture changed it (only with the transport stopped); `null` when it stayed. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `midi.capture` returns.",
+  "properties": {
+    "clips": {
+      "description": "The clips, one for each track that was played.",
+      "items": {
+        "$ref": "#/$defs/CapturedClip"
+      },
+      "type": "array"
+    },
+    "tempo": {
+      "description": "The song's new tempo, when the capture changed it (only with the transport stopped); `null` when it stayed.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "clips",
+    "tempo"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `CapturedClip`
+
+One clip a capture made or changed.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track whose notes it holds. |
+| `scene` | [`SceneId`](#sceneid) | yes | The scene whose slot it is in. |
+| `clip` | [`ClipId`](#clipid) | yes | The clip. |
+| `merged` | boolean | yes | Whether the notes joined the clip that was playing, rather than making a new clip. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One clip a capture made or changed.",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The clip."
+    },
+    "merged": {
+      "description": "Whether the notes joined the clip that was playing, rather than making a new clip.",
+      "type": "boolean"
+    },
+    "scene": {
+      "$ref": "#/$defs/SceneId",
+      "description": "The scene whose slot it is in."
+    },
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "The track whose notes it holds."
+    }
+  },
+  "required": [
+    "track",
+    "scene",
+    "clip",
+    "merged"
   ],
   "type": "object"
 }
@@ -16948,6 +17049,7 @@ What `transport.state` returns: the transport and the Control Bar's transport se
 | `automation_arm` | boolean | yes | Whether Automation Arm is on (view state, not saved with the set). |
 | `recording` | [`RunningRecording`](#runningrecording) or null | yes | The recording under way, from the moment recording starts until its clips are made; null when none is. |
 | `last_recording` | [`RecordingReport`](#recordingreport) or null | yes | What the last recording that ended came to; null until one has ended in this session. |
+| `capture_midi_ready` | boolean | yes | Whether Capture MIDI has notes to bring back: a monitoring MIDI track was played since the last capture or recording, so `midi.capture` runs and the Control Bar's button and Create menu item are enabled. |
 
 <details><summary>JSON Schema</summary>
 
@@ -16965,6 +17067,11 @@ What `transport.state` returns: the transport and the Control Bar's transport se
     },
     "automation_arm": {
       "description": "Whether Automation Arm is on (view state, not saved with the set).",
+      "type": "boolean"
+    },
+    "capture_midi_ready": {
+      "default": false,
+      "description": "Whether Capture MIDI has notes to bring back: a monitoring MIDI track was played since the last capture or recording, so `midi.capture` runs and the Control Bar's button and Create menu item are enabled.",
       "type": "boolean"
     },
     "counting_in": {
@@ -17091,7 +17198,8 @@ What `transport.state` returns: the transport and the Control Bar's transport se
     "midi_overdub",
     "automation_arm",
     "recording",
-    "last_recording"
+    "last_recording",
+    "capture_midi_ready"
   ],
   "type": "object"
 }

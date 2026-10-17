@@ -59,6 +59,7 @@ use bl_plugin_host::scan::Scanner;
 use bl_plugin_host::vst3::Vst3Host;
 use bl_shell_spec::arrangement as view_ids;
 use bl_shell_spec::browser as browser_ids;
+use bl_shell_spec::capture_midi as capture_ids;
 use bl_shell_spec::devices as device_ids;
 use bl_shell_spec::editing as edit_ids;
 use bl_shell_spec::export as export_ids;
@@ -79,6 +80,7 @@ use bl_shell_spec::tracks as track_ids;
 use bl_shell_spec::transport as transport_ids;
 use bl_shell_spec::transport::{RecordedFileReport, RecordingReport, RunningRecording};
 
+mod capture;
 mod processed_files;
 mod session_recording;
 
@@ -462,6 +464,9 @@ pub struct Shell {
     recorded_takes: u32,
     /// The Session recording under way, beside `recording` (WP-3.11).
     session_run: Option<session_recording::SessionRun>,
+    /// The notes monitoring MIDI tracks received, for Capture MIDI
+    /// (WP-3.14).
+    capture: bl_engine::capture::Buffer,
     /// The control moves of the automation recording under way (WP-2.12).
     automation_take: crate::automation_record::Take,
     /// What the Session clips that played during the recording under way
@@ -723,6 +728,7 @@ impl Shell {
             last_recording: None,
             recorded_takes: 0,
             session_run: None,
+            capture: bl_engine::capture::Buffer::default(),
             automation_take: crate::automation_record::Take::default(),
             session_watch: crate::session_capture::Watch::default(),
             automation_recording: false,
@@ -3015,6 +3021,7 @@ impl Shell {
     /// R14). Returns the transport it took.
     pub fn poll_engine(&mut self) -> EngineTransport {
         let engine = self.audio.transport_state();
+        self.poll_capture();
         // WP-2.13. A recording's take reaches the shell with the engine's
         // state; the clips are made from it once the writer has finished.
         self.poll_recording(&engine);
@@ -3884,6 +3891,10 @@ impl Shell {
             }
             _ => {}
         }
+        if capture_ids::handles(id) {
+            // Spec: capture-midi R1. Nothing played, nothing to capture.
+            return self.capture_midi_ready() && self.audio.engine_running();
+        }
         if ids::handles(id) || transport_ids::handles(id) {
             return true;
         }
@@ -4501,6 +4512,7 @@ impl Shell {
     /// is unchanged when a command fails, except that a device that refuses
     /// new audio settings goes back to the previous ones.
     pub fn run(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        self.poll_capture();
         let arranged = self.arrangement.selected_clips().to_vec();
         let slot = self.selected_slot_clip();
         let result = self.run_command(id, args);
@@ -4697,6 +4709,9 @@ impl Shell {
         }
         if session_record_ids::handles(id) {
             return self.run_session_record(id, args);
+        }
+        if capture_ids::handles(id) {
+            return self.run_capture_midi(id, args);
         }
         if session_launch_ids::handles(id) {
             // Spec: launch-quantisation R1, R3, R6, R10. The Control Bar's

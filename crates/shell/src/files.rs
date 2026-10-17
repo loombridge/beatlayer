@@ -831,7 +831,12 @@ pub fn factory_default_set() -> Editor {
 #[must_use]
 pub fn new_set_from(path: Option<&Path>) -> Editor {
     path.and_then(|path| SetFile::open(path).ok())
-        .map(|(_, project)| project.editor())
+        .map(|(set, mut project)| {
+            if set.info().is_some_and(SetInfo::before_relative_modulation) {
+                bl_devices::relative_clip_envelopes(&mut project.document);
+            }
+            project.editor()
+        })
         .unwrap_or_else(factory_default_set)
 }
 

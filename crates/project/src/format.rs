@@ -148,7 +148,8 @@ pub struct SetInfo {
     pub revision: u64,
     /// The program and version that saved it.
     pub saved_by: String,
-    /// The schema version the file was written in. If it's older than
+    /// The schema version the file was written in, or the Save Continuously
+    /// save point it opened at (the song's own form). If it's older than
     /// [`SCHEMA_VERSION`], the file was migrated as it loaded, and saving it
     /// writes the current version.
     pub schema: u32,

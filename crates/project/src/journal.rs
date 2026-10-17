@@ -62,7 +62,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::error::LoadError;
-use crate::format::{LoadOptions, Project, compress, decode_value, decompress_frame};
+use crate::format::{LoadOptions, Project, SetInfo, compress, decode_value, decompress_frame};
 use crate::patch::{self, Patch};
 
 /// The file extension of a journal.
@@ -650,13 +650,14 @@ fn read_whole(path: &Path) -> Result<Vec<u8>, LoadError> {
 
 /// The song at the newest save point that follows a set's revision, if
 /// any journal beside it has one: what opening the set gives with Save
-/// Continuously's edits applied. Journals that can't be read, or whose save
-/// point doesn't load, are skipped.
+/// Continuously's edits applied, with what the save point's saved form says
+/// about itself. Journals that can't be read, or whose save point doesn't
+/// load, are skipped.
 pub(crate) fn newest_save_point(
     set: &Path,
     follows: Follows,
     options: &LoadOptions,
-) -> Option<Project> {
+) -> Option<(Project, SetInfo)> {
     let mut newest: Option<((SystemTime, u64), Value)> = None;
     for journal in journals_beside(set).ok()? {
         let Ok(read) = read_file(&journal, options) else {
@@ -675,9 +676,7 @@ pub(crate) fn newest_save_point(
         }
     }
     let (_, value) = newest?;
-    decode_value(&value, options)
-        .ok()
-        .map(|(project, _)| project)
+    decode_value(&value, options).ok()
 }
 
 #[cfg(test)]
@@ -881,7 +880,7 @@ mod tests {
         assert_eq!(restore(&points[0]).unwrap(), songs[1]);
         assert_eq!(restore(&points[2]).unwrap(), songs[3]);
         assert_eq!(
-            newest_save_point(&set, FOLLOWS, &LoadOptions::default()),
+            newest_save_point(&set, FOLLOWS, &LoadOptions::default()).map(|(song, _)| song),
             Some(songs[3].clone())
         );
         // Another revision has none.
@@ -891,7 +890,7 @@ mod tests {
         };
         assert!(save_points(&set, other).is_empty());
         assert_eq!(
-            newest_save_point(&set, other, &LoadOptions::default()),
+            newest_save_point(&set, other, &LoadOptions::default()).map(|(song, _)| song),
             None
         );
 

@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-338 commands in 31 areas.
+340 commands in 31 areas.
 
 ## Permission classes
 
@@ -147,6 +147,8 @@ Each command has:
 | [`clip_view.quantize_settings`](#clip_viewquantize_settings) | Quantize Settings | `read` |  |  |
 | [`clip_view.select_notes`](#clip_viewselect_notes) | Select Notes | `read` |  |  |
 | [`device.add`](#deviceadd) | Add Device | `edit` |  |  |
+| [`device.compare_copy`](#devicecompare_copy) | Compare: Copy | `edit` |  |  |
+| [`device.compare_switch`](#devicecompare_switch) | Compare: Switch | `edit` | `P` | `P` |
 | [`device.copy`](#devicecopy) | Copy Device | `read` | `Cmd+C` | `Ctrl+C` |
 | [`device.cut`](#devicecut) | Cut Device | `destructive` | `Cmd+X` | `Ctrl+X` |
 | [`device.duplicate`](#deviceduplicate) | Duplicate Device | `edit` | `Cmd+D` | `Ctrl+D` |
@@ -2450,6 +2452,42 @@ Arguments:
 | `track` | [`TrackId`](#trackid) or null | no | The track; the selected track if left out. |
 
 Result: [`DeviceAdded`](#deviceadded).
+
+#### `device.compare_copy`
+
+**Compare: Copy**. Permission: `edit`. Contexts: `device-view`.
+
+Copies every value of a native device's active state, A or B, over the other, as the Edit menu's and the device menu's Compare: Copy A to B (Copy B to A while B is active) do. What the device plays doesn't change, and no envelope is overridden. One undo step, named as the item that ran it. Racks and plug-ins have no states, so a command for one is refused. From the menus it copies the selected device's state.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `device.compare_switch`
+
+**Compare: Switch**. Permission: `edit`. Contexts: `device-view`.
+
+Makes the other of a native device's two states, A and B, the active one, as the Edit menu's and the device menu's Compare: Switch to B/A and the P key do. Every parameter whose value differs between the states moves to the newly active state's value, a continuous one gliding as any change does, and every parameter of the device that has an envelope is overridden until Re-Enable Automation. One undo step, named as the item that ran it. A change to a parameter goes to the active state only. Racks and plug-ins have no states, so a command for one is refused. `device.parameters` says which state is active and each parameter's value in the other; the query tool's `device` has both in `compare`. From the keyboard and the menus it switches the selected device.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-DEV-011 | `P` | `P` | `device-view` | Switch the device between its A and B states | runs it |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+
+Result: [`ChangeSet`](#changeset).
 
 #### `device.copy`
 
@@ -6304,6 +6342,8 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.set_velocity_amount`](#clipset_velocity_amount) | the query tool's `clip` | `launch.velocity_amount` |
 | [`clip.trim_start`](#cliptrim_start) | the query tool's `clip` | `offset` |
 | [`device.add`](#deviceadd) | the query tool's `track` | `devices` |
+| [`device.compare_copy`](#devicecompare_copy) | the query tool's `device` | `compare` |
+| [`device.compare_switch`](#devicecompare_switch) | the query tool's `device` | `compare` |
 | [`device.cut`](#devicecut) | the query tool's `track` | `devices` |
 | [`device.duplicate`](#deviceduplicate) | the query tool's `track` | `devices` |
 | [`device.insert`](#deviceinsert) | the query tool's `track` | `devices` |
@@ -8866,8 +8906,10 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 | `kind` | [`DeviceKind`](#devicekind) | yes | What the device is. |
 | `enabled` | boolean | yes | Whether the device is switched on. A device that's off passes its input through unchanged. |
 | `params` | array of pair of [`ParamId`](#paramid) and number | yes | Parameter values the user has set, in the parameter's own units. Every value is finite. Parameters not listed keep their defaults.  They serialise as a list of `[parameter, value]` pairs, since some formats can't key a map by number. |
+| `b_active` | boolean | no | Whether the device's B state is the active one, whose values [`params`](Self::params) holds (device compare R1). Left out of the saved set while A is active. |
 | `floating` | boolean | no | Whether the device floats in a window of its own rather than showing in the Device View (IMP-14, WP-2.5b), where its place in the chain shows as a strip. Only native devices float. Left out of the saved set while docked. Where its window sits isn't part of the document: moving or resizing a window isn't an undo step ([`WindowFrame`]). |
 | `media` | [`ContentHash`](#contenthash) or null | no | The media the device plays, by content hash (WP-2.16): the sampler's sample, which the media store holds like a clip's audio (the sampler spec, R11). Left out of the saved set for a device that plays none. |
+| `other_params` | array or null | no | The values of the state that isn't active, in the same form as [`params`](Self::params) (device compare R1, R10). `None` while the two states are equal, as a new device's are, and left out of the saved set then. Use [`other_params`](Self::other_params) to read it. |
 | `own_name` | string | no | The device's own name, such as `Auto Filter`, which the title bar shows while Show Preset Name is off. Empty while it's the same as [`name`](Self::name), and left out of the saved set then. |
 | `plugin` | [`PluginState`](#pluginstate) or null | no | A plug-in's own state and where it was loaded from (WP-2.6), as last saved with the set. Left out of the saved set for a native device, and for a plug-in until the set is first saved with it. |
 | `role` | [`DeviceRole`](#devicerole) | no | Where it goes in a chain: MIDI effects, then the instrument, then audio effects. Audio effects aren't marked in the saved set. |
@@ -8880,6 +8922,10 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 {
   "description": "A device in a track's chain: a native instrument or effect, or a plug-in.",
   "properties": {
+    "b_active": {
+      "description": "Whether the device's B state is the active one, whose values [`params`](Self::params) holds (device compare R1). Left out of the saved set while A is active.",
+      "type": "boolean"
+    },
     "enabled": {
       "description": "Whether the device is switched on. A device that's off passes its input through unchanged.",
       "type": "boolean"
@@ -8910,6 +8956,27 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
     "name": {
       "description": "The name the title bar shows while Show Preset Name is on: the device's own name until a preset or Rename gives it another.",
       "type": "string"
+    },
+    "other_params": {
+      "description": "The values of the state that isn't active, in the same form as [`params`](Self::params) (device compare R1, R10). `None` while the two states are equal, as a new device's are, and left out of the saved set then. Use [`other_params`](Self::other_params) to read it.",
+      "items": {
+        "maxItems": 2,
+        "minItems": 2,
+        "prefixItems": [
+          {
+            "$ref": "#/$defs/ParamId"
+          },
+          {
+            "format": "double",
+            "type": "number"
+          }
+        ],
+        "type": "array"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
     },
     "own_name": {
       "description": "The device's own name, such as `Auto Filter`, which the title bar shows while Show Preset Name is off. Empty while it's the same as [`name`](Self::name), and left out of the saved set then.",
@@ -9079,6 +9146,7 @@ One device as the Device View shows it.
 | `show_preset_name` | boolean | yes | Whether its title shows its preset's or given name. |
 | `folded` | boolean | yes | Whether it's folded to its title bar. |
 | `floating` | boolean | yes | Whether it floats in a window of its own, its place in the chain a strip (WP-2.5b). |
+| `b_active` | boolean | yes | Whether its B state is the active one, which the title bar marks "(B)" (device compare R5). |
 | `selected` | boolean | yes | Whether it's the selected device. |
 | `hot_swap` | boolean | yes | Whether it's the device being hot-swapped. |
 | `sidechain` | [`SidechainSection`](#sidechainsection) or null | yes | Its sidechain section, if it has a sidechain input (WP-2.19b). |
@@ -9090,6 +9158,11 @@ One device as the Device View shows it.
 {
   "description": "One device as the Device View shows it.",
   "properties": {
+    "b_active": {
+      "default": false,
+      "description": "Whether its B state is the active one, which the title bar marks \"(B)\" (device compare R5).",
+      "type": "boolean"
+    },
     "enabled": {
       "description": "Whether it's switched on.",
       "type": "boolean"
@@ -9174,6 +9247,7 @@ One device as the Device View shows it.
     "show_preset_name",
     "folded",
     "floating",
+    "b_active",
     "selected",
     "hot_swap",
     "sidechain"
@@ -9468,6 +9542,7 @@ What `device.parameters` returns.
 |---|---|---|---|
 | `device` | [`DeviceId`](#deviceid) | yes | The device. |
 | `params` | array of [`ParameterState`](#parameterstate) | yes | Its parameters, in the order its type lists them; empty if its type doesn't describe them. |
+| `active` | string or null | no | Which of its A and B states is active, `A` or `B` (device compare R11); left out for a device without two states. |
 
 <details><summary>JSON Schema</summary>
 
@@ -9475,6 +9550,13 @@ What `device.parameters` returns.
 {
   "description": "What `device.parameters` returns.",
   "properties": {
+    "active": {
+      "description": "Which of its A and B states is active, `A` or `B` (device compare R11); left out for a device without two states.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "device": {
       "$ref": "#/$defs/DeviceId",
       "description": "The device."
@@ -13130,6 +13212,7 @@ One of a device's parameters as `device.parameters` reports it.
 | `value` | number | yes | Its value now, in its own units: what `device.set_param` takes. |
 | `text` | string | yes | How the value reads, as its control shows it, such as `-6.0 dB`. |
 | `description` | string | no | What it does, for the Info View (WP-2.24) and agents. |
+| `other` | number or null | no | Its value in the A and B state that isn't active (device compare R11); left out for a device without two states. |
 
 <details><summary>JSON Schema</summary>
 
@@ -13161,6 +13244,14 @@ One of a device's parameters as `device.parameters` reports it.
     "name": {
       "description": "Its name, as its control's label and the Status Bar show it, such as `Gain`.",
       "type": "string"
+    },
+    "other": {
+      "description": "Its value in the A and B state that isn't active (device compare R11); left out for a device without two states.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
     },
     "text": {
       "description": "How the value reads, as its control shows it, such as `-6.0 dB`.",

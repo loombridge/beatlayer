@@ -51,7 +51,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        99,
+        101,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -62,7 +62,7 @@ fn every_document_command_is_registered() {
          envelopes, WP-3.17 two for the crossfader, WP-2.14 set_midi_overdub, WP-2.13 the \
          two punch switches, WP-2.13 add_take_lane, WP-3.4 three for a clip's launch \
          settings, WP-3.5 two for a scene's tempo and signature, and WP-3.3 \
-         set_clip_launch_mode"
+         set_clip_launch_mode, and WP-5.12 the two Compare commands"
     );
 
     for op in &ops {
@@ -666,6 +666,25 @@ fn every_command_runs_by_id() {
         "device.set_floating",
         json!({ "device": eq, "floating": false }),
     );
+    // Spec: device-compare R11. A switch makes B active, a copy takes the
+    // active state over the other.
+    agent.run("device.compare_switch", json!({ "device": eq }));
+    assert!(agent.editor.document().device(eq).unwrap().b_active);
+    assert_eq!(
+        agent.editor.undo_history().next(),
+        Some("Compare: Switch to B")
+    );
+    agent.run(
+        "device.set_param",
+        json!({ "device": eq, "param": 3, "value": 1.5 }),
+    );
+    agent.run("device.compare_copy", json!({ "device": eq }));
+    assert_eq!(
+        agent.editor.undo_history().next(),
+        Some("Compare: Copy B to A")
+    );
+    agent.run("device.compare_switch", json!({ "device": eq }));
+    assert!(!agent.editor.document().device(eq).unwrap().b_active);
     agent.run(
         "device.set_state",
         json!({ "device": eq, "params": [[1, 0.25]], "name": "Tone" }),
@@ -1514,6 +1533,8 @@ fn schemas_match_what_commands_serialise() {
                 shown: false,
             },
         ),
+        ("device.compare_switch", Command::CompareSwitch { device }),
+        ("device.compare_copy", Command::CompareCopy { device }),
         (
             "device.set_floating",
             Command::SetDeviceFloating {
@@ -1944,6 +1965,8 @@ fn bindings_follow_the_spec() {
         "slot.set_stop_button",
         // Beatlayer's own key, Option-F on macOS (IMP-14, S-DEV-015).
         "device.set_floating",
+        // Spec: device-compare R6, S-DEV-011.
+        "device.compare_switch",
         "transport.set_metronome_enabled",
     ]
     .into_iter()

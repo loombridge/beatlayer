@@ -269,6 +269,11 @@ impl DeviceView {
                             descriptor: p.clone(),
                             value,
                             text: p.format(value),
+                            other: device.can_compare().then(|| {
+                                description
+                                    .value(device.other_params(), p.id)
+                                    .unwrap_or(p.default)
+                            }),
                         }
                     })
                     .collect()
@@ -276,6 +281,9 @@ impl DeviceView {
             .unwrap_or_default();
         DeviceParameters {
             device: device.id,
+            active: device
+                .can_compare()
+                .then(|| if device.b_active { "B" } else { "A" }.to_owned()),
             params,
         }
     }
@@ -437,6 +445,7 @@ impl DeviceView {
             show_preset_name: d.show_preset_name,
             folded: self.folded.contains(&d.id),
             floating: d.floating,
+            b_active: d.b_active,
             selected: self.selected == Some(d.id),
             hot_swap: self.hot_swap == Some(d.id),
             panel: self.panel(d),
@@ -871,6 +880,8 @@ impl DeviceView {
         // A copy goes in the chain, docked, whether or not the original
         // floats (WP-2.5b).
         copy.floating = false;
+        // Spec: device-compare R8. A copy takes the active state in both.
+        copy.set_both(device.params.clone());
         editor
             .transact(label, |editor| {
                 editor.apply(Command::InsertDevice {

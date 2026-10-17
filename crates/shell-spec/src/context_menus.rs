@@ -11,7 +11,7 @@
 //! out a choice for each setting.
 
 use crate::arrangement::SET_GRID;
-use crate::devices::{SAVE_DEFAULT_PRESET, SET_FLOATING};
+use crate::devices::{COMPARE_COPY, COMPARE_SWITCH, SAVE_DEFAULT_PRESET, SET_FLOATING};
 use crate::menus::{Action, MenuItem, Row, SEPARATOR, items};
 
 use Action::{Command as Cmd, Pending, Shortcut as Key};
@@ -134,12 +134,8 @@ const DEVICE: &[Row] = &[
         Cmd("device.set_show_preset_name"),
     ),
     SEPARATOR,
-    (
-        "C-DEVICE-010",
-        "Compare: Switch to B",
-        Pending(Some("S-DEV-011")),
-    ),
-    ("C-DEVICE-011", "Compare: Copy A to B", Pending(None)),
+    ("C-DEVICE-010", "Compare: Switch to B", Cmd(COMPARE_SWITCH)),
+    ("C-DEVICE-011", "Compare: Copy A to B", Cmd(COMPARE_COPY)),
     SEPARATOR,
     (
         "C-DEVICE-012",
@@ -163,7 +159,6 @@ pub fn pending_package(row: &str) -> Option<&'static str> {
     match row {
         "C-DEVICE-005" | "C-CLIP-ARR-008" => Some("WP-2.24 (the Info View)"),
         "C-DEVICE-007" => Some("milestone M5 (racks)"),
-        "C-DEVICE-010" | "C-DEVICE-011" => Some("milestone M5 (A/B compare)"),
         _ => None,
     }
 }

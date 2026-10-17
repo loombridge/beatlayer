@@ -27,6 +27,7 @@ use crate::commands::{
     VIEW_TOGGLE_PLUG_IN_WINDOWS, VIEW_TOGGLE_SESSION_ARRANGEMENT, VIEW_ZOOM_IN, VIEW_ZOOM_OUT,
     VIEW_ZOOM_RESET, WINDOW_CLOSE,
 };
+use crate::devices::COMPARE_COPY;
 use crate::mixer_view::{
     CROSSFADER as MIXER_CROSSFADER, FOCUS as MIXER_FOCUS, IN_OUT as MIXER_IN_OUT,
     RETURN_TRACKS as MIXER_RETURN_TRACKS, SCENE_TEMPO as MIXER_SCENE_TEMPO, SENDS as MIXER_SENDS,
@@ -299,7 +300,7 @@ const EDIT: &[Row] = &[
     ),
     SEPARATOR,
     ("M-EDIT-016", "Compare: Switch to B", Key(&["S-DEV-011"])),
-    ("M-EDIT-017", "Compare: Copy A to B", Pending(None)),
+    ("M-EDIT-017", "Compare: Copy A to B", Cmd(COMPARE_COPY)),
     SEPARATOR,
     ("M-EDIT-018", "Cut Time", Key(&["S-ARR-015"])),
     ("M-EDIT-019", "Copy Time", Key(&["S-ARR-016"])),

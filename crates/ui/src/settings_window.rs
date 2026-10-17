@@ -137,6 +137,7 @@ impl SettingsUi {
                 SettingsPage::TempoMidi => {
                     tempo_midi_page(ui, shell, theme, &mut rows, &mut events);
                 }
+                SettingsPage::FileFolder => file_folder_page(ui, shell, &mut rows, &mut events),
                 other => rows.note(
                     ui,
                     &format!(
@@ -873,6 +874,23 @@ fn theme_page(
 /// R2 gives it. The Tempo Follower, control surfaces, and Takeover Mode come
 /// with later packages. Sync and Remote are kept and act when sync and MIDI
 /// mapping are built (R5).
+/// File & Folder (L-SET-015): the Temporary Folder row, with its Browse
+/// button and path (WP-4.20). The page's other rows come with later
+/// packages.
+fn file_folder_page(ui: &mut Ui, shell: &Shell, rows: &mut Rows<'_>, events: &mut Vec<UiEvent>) {
+    rows.heading(ui, "Temporary Folder");
+    let rect = rows.row(ui, "Temporary Folder", SettingsLayout::CHOOSER);
+    if ui.put(rect, egui::Button::new("Browse")).clicked() {
+        // No path: the host asks for a folder.
+        events.push(UiEvent::Invoke(Invocation::new(
+            ids::SETTINGS_SET_TEMPORARY_FOLDER,
+            json!({}),
+        )));
+    }
+    let path = shell.temporary_folder();
+    rows.copyable_row(ui, "Path", "temporary-folder", &path.to_string_lossy());
+}
+
 fn tempo_midi_page(
     ui: &mut Ui,
     shell: &Shell,

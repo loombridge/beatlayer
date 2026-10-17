@@ -1304,6 +1304,15 @@ impl Host {
                     ));
                 }
             }
+            Effect::PickTemporaryFolder => {
+                let dialog = rfd::FileDialog::new().set_title("Temporary Folder");
+                if let Some(path) = dialog.pick_folder() {
+                    self.invoke(&Invocation::new(
+                        bl_shell::commands::SETTINGS_SET_TEMPORARY_FOLDER,
+                        json!({ "path": path.to_string_lossy() }),
+                    ));
+                }
+            }
             Effect::OpenSettings => self.open_settings_window(event_loop),
             Effect::CloseSettings => {
                 self.settings = None;

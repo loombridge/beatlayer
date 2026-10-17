@@ -82,6 +82,8 @@ fn the_session_views_launching_passes_under_rtsan() {
             5 | 15 => Some(SessionCommand::StopTrack(track)),
             7 => Some(SessionCommand::LaunchScene(scene)),
             17 => Some(SessionCommand::StopAll),
+            8 => Some(SessionCommand::TrackBackToArrangement(track)),
+            19 => Some(SessionCommand::BackToArrangement),
             1 => Some(SessionCommand::SetQuantization(LaunchSettings {
                 quantization: LaunchQuantization::None,
                 enabled: true,

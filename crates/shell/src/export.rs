@@ -13,8 +13,10 @@
 //!    ([`ClapHost::lend`], WP-2.6b).
 //! 2. At a file rate below the engine's, the render is converted down with
 //!    the media converter; otherwise the engine renders at the file's rate.
-//! 3. With Normalize, the render goes to a scratch file first, so the gain
-//!    can be worked out from its peak and applied on a second pass.
+//! 3. With Normalize, or Render as Loop, the render goes to a scratch file
+//!    first, so the gain can be worked out from the peak and applied on a
+//!    second pass. Render as Loop also renders the song's tail past the
+//!    range's end and adds it onto the file's start before that pass.
 //! 4. [`bl_media::AudioWriter`] dithers, rounds, and encodes it, into a
 //!    hidden file beside the destination that's moved into place only when
 //!    it's complete. Cancelling or a failure deletes what was written and
@@ -57,6 +59,15 @@ pub const RATES: std::ops::RangeInclusive<u32> = 8_000..=384_000;
 /// The longest export: a day.
 const MAX_SECONDS: f64 = 86_400.0;
 
+/// Spec: export R25. A Render as Loop tail ends once the output has stayed
+/// below −120 dBFS for [`TAIL_QUIET`] seconds, or after [`TAIL_SECONDS`].
+const TAIL_SECONDS: u64 = 60;
+const TAIL_QUIET: f64 = 0.1;
+const TAIL_FLOOR: f32 = 1e-6;
+
+/// Where a render hands its frames: interleaved, in order.
+pub type Sink<'a> = dyn FnMut(&[f32]) -> Result<(), ExportError> + 'a;
+
 /// How long the range is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Length {
@@ -91,6 +102,9 @@ pub struct Job {
     pub length: Length,
     /// Replace a file already at `path`.
     pub replace: bool,
+    /// Add the tail past the range's end onto the file's start (Render as
+    /// Loop, the export spec, R24).
+    pub render_as_loop: bool,
     /// The engine's block size, from 1 to 8,192 frames.
     pub block: usize,
 }
@@ -419,7 +433,8 @@ pub struct Render {
 /// What a render did.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Rendered {
-    /// Frames handed on, at the render's `sample_rate`.
+    /// Frames of the range handed on, at the render's `sample_rate`. A
+    /// tail goes to its own sink and isn't counted.
     pub frames: u64,
     /// Channels in each frame.
     pub channels: u16,
@@ -448,6 +463,11 @@ pub struct Rendered {
 /// `cancel` between blocks and calls `progress` with the share rendered,
 /// from 0 to 1. `longest` is the most seconds it renders.
 ///
+/// With a `tail` sink, the song goes on past the range's end as if Stop were
+/// pressed there, until the output has stayed below −120 dBFS for 100 ms or
+/// 60 s have passed (the export spec, R25): `sink` gets only the range's
+/// frames, and `tail` the frames after them.
+///
 /// # Errors
 ///
 /// [`ExportError`]: cancelled, a range it can't render, a plug-in it
@@ -462,7 +482,8 @@ pub fn render(
     longest: f64,
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(f64),
-    sink: &mut dyn FnMut(&[f32]) -> Result<(), ExportError>,
+    sink: &mut Sink<'_>,
+    mut tail: Option<&mut Sink<'_>>,
 ) -> Result<Rendered, ExportError> {
     if !RATES.contains(&spec.sample_rate) {
         return Err(ExportError::Invalid(format!(
@@ -549,16 +570,37 @@ pub fn render(
     offline
         .sender()
         .transport_at(TransportCommand::Play, When::Frame(0));
+    // Spec: export R25. The tail starts with the range's last frame done.
+    let with_tail = tail.is_some();
+    if with_tail {
+        offline
+            .sender()
+            .transport_at(TransportCommand::Stop, When::Frame(frames));
+    }
 
     let mut converter = (spec.sample_rate < render_hz)
         .then(|| Downsampler::new(render_hz, spec.sample_rate, channels, frames))
         .transpose()?;
     let mut non_finite = 0u64;
     let mut out_frames = 0u64;
+    // The frames of the range at the file's rate; what follows is the tail.
+    let range_out = if with_tail {
+        bl_media::converted_len(frames as usize, render_hz, spec.sample_rate) as u64
+    } else {
+        u64::MAX
+    };
     let mut forward = |samples: &[f32]| -> Result<(), ExportError> {
         non_finite += samples.iter().filter(|s| !s.is_finite()).count() as u64;
-        out_frames += (samples.len() / channels) as u64;
-        sink(samples)
+        let in_range = ((samples.len() / channels) as u64).min(range_out - out_frames);
+        out_frames += in_range;
+        let (range, after) = samples.split_at(in_range as usize * channels);
+        if !range.is_empty() {
+            sink(range)?;
+        }
+        match tail.as_mut() {
+            Some(tail) if !after.is_empty() => tail(after),
+            _ => Ok(()),
+        }
     };
     let mut samples = Vec::with_capacity(spec.block * channels);
     let mut done = 0u64;
@@ -575,6 +617,49 @@ pub fn render(
         }
         done += block as u64;
         progress(done as f64 / frames as f64);
+    }
+    if with_tail {
+        let mut tail_frames = 0u64;
+        let longest_tail = TAIL_SECONDS * u64::from(render_hz);
+        let quiet_for = (TAIL_QUIET * f64::from(render_hz)) as u64;
+        let mut quiet = 0u64;
+        if let Some(converter) = converter.as_mut() {
+            converter.expected = u64::MAX;
+        }
+        while quiet < quiet_for && tail_frames < longest_tail {
+            if cancel.load(Ordering::Relaxed) {
+                return Err(ExportError::Cancelled);
+            }
+            let block = (spec.block as u64).min(longest_tail - tail_frames) as usize;
+            interleave(&offline.process(block), &mut samples);
+            // The tail ends on the frame that completes the quiet stretch,
+            // whatever the block size.
+            let mut keep = block;
+            for (n, frame) in samples.chunks_exact(channels).enumerate() {
+                quiet = if frame.iter().all(|s| s.abs() < TAIL_FLOOR) {
+                    quiet + 1
+                } else {
+                    0
+                };
+                if quiet >= quiet_for {
+                    keep = n + 1;
+                    break;
+                }
+            }
+            samples.truncate(keep * channels);
+            match converter.as_mut() {
+                Some(converter) => converter.push(&samples, &mut forward)?,
+                None => forward(&samples)?,
+            }
+            tail_frames += keep as u64;
+        }
+        if let Some(converter) = converter.as_mut() {
+            converter.expected = bl_media::converted_len(
+                (frames + tail_frames) as usize,
+                render_hz,
+                spec.sample_rate,
+            ) as u64;
+        }
     }
     if let Some(converter) = converter.as_mut() {
         converter.finish(&mut forward)?;
@@ -640,7 +725,19 @@ fn run(
         )
         .channels as u16,
     };
-    let mut out = if job.normalize {
+    // Spec: export R26. A loop's head can't be written before the tail is
+    // known, so it waits in memory, the first TAIL_SECONDS of the file at
+    // most (the tail is no longer); the rest goes to the scratch file.
+    let staged = job.normalize || job.render_as_loop;
+    let channels = usize::from(spec.channels);
+    let head_room = if job.render_as_loop {
+        TAIL_SECONDS as usize * job.sample_rate as usize * channels
+    } else {
+        0
+    };
+    let mut head: Vec<f32> = Vec::new();
+    let mut tail: Vec<f32> = Vec::new();
+    let mut out = if staged {
         let file = File::create(scratch).map_err(|error| failed(scratch, &error))?;
         Out::Scratch(BufWriter::with_capacity(1 << 16, file), Vec::new())
     } else {
@@ -648,7 +745,11 @@ fn run(
     };
 
     // Pass one: the render.
-    let passes = if job.normalize { 2.0 } else { 1.0 };
+    let mut add_tail = |samples: &[f32]| {
+        tail.extend_from_slice(samples);
+        Ok(())
+    };
+    let passes = if staged { 2.0 } else { 1.0 };
     let mut peak = 0.0f32;
     let rendered = render(
         document,
@@ -665,6 +766,8 @@ fn run(
         cancel,
         &mut |share| progress(share / passes),
         &mut |samples| {
+            let (first, samples) = samples.split_at((head_room - head.len()).min(samples.len()));
+            head.extend_from_slice(first);
             for &sample in samples {
                 if sample.is_finite() {
                     peak = peak.max(sample.abs());
@@ -684,18 +787,31 @@ fn run(
                 }
             }
         },
+        job.render_as_loop.then_some(&mut add_tail as &mut Sink<'_>),
     )?;
-    let channels = usize::from(rendered.channels);
 
-    // Pass two, with Normalize: the scratch file through the gain to the
-    // writer. Spec: export R8.
+    // Spec: export R24. Frame j of the tail lands on frame j mod the range's
+    // length: the head holds the whole range, or, past TAIL_SECONDS, more
+    // frames than the tail has.
+    for (j, frame) in tail.chunks_exact(channels).enumerate() {
+        let at = j % rendered.frames as usize * channels;
+        for (sample, &added) in head[at..at + channels].iter_mut().zip(frame) {
+            *sample += added;
+        }
+    }
+    peak = head
+        .iter()
+        .fold(peak, |peak, sample| peak.max(sample.abs()));
+
+    // Pass two, with Normalize or Render as Loop: the head and the scratch
+    // file through the gain to the writer. Spec: export R8.
     let mut gain = 1.0;
     let writer = match out {
         Out::Writer(writer) => writer,
         Out::Scratch(file, _) => {
             file.into_inner()
                 .map_err(|error| failed(scratch, &error.error().to_string()))?;
-            if peak > 0.0 {
+            if job.normalize && peak > 0.0 {
                 gain = 1.0 / f64::from(peak);
             }
             let mut writer =
@@ -707,9 +823,16 @@ fn run(
             let chunk_frames = 8192;
             let mut bytes = vec![0u8; chunk_frames * channels * 4];
             let mut chunk = Vec::with_capacity(chunk_frames * channels);
-            let total = rendered.frames;
+            let total = rendered.frames - (head.len() / channels) as u64;
             let mut read = 0u64;
             peak = 0.0;
+            for sample in &mut head {
+                *sample = (f64::from(*sample) * gain) as f32;
+                peak = peak.max(sample.abs());
+            }
+            writer
+                .write(&head)
+                .map_err(|error| failed(partial, &error))?;
             while read < total {
                 if cancel.load(Ordering::Relaxed) {
                     return Err(ExportError::Cancelled);
@@ -1012,6 +1135,7 @@ pub fn run_command(
         start,
         length: Length::To(end),
         replace: args.replace,
+        render_as_loop: args.render_as_loop,
         block: BLOCK,
     };
 

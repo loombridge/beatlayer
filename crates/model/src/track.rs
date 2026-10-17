@@ -10,7 +10,8 @@ use serde::{Deserialize, Serialize};
 use crate::automation::{Automation, AutomationTarget, TrackAutomation};
 use crate::clip::{Clip, TakeLane};
 use crate::device::Device;
-use crate::ids::{ClipId, DeviceId, SceneId, TrackId};
+use crate::ids::{ChainId, ClipId, DeviceId, SceneId, TrackId};
+use crate::rack::Chain;
 use crate::shared::Shared;
 
 /// The kind of a track, fixed when the track is created.
@@ -560,10 +561,42 @@ impl Track {
         self.devices.iter().map(|device| &**device)
     }
 
-    /// Where a device sits in the chain, counting from 0.
+    /// Where a device sits in the chain, counting from 0. Only devices in
+    /// the chain itself, not those inside its racks (see
+    /// [`find_device`](Self::find_device)).
     #[must_use]
     pub fn device_position(&self, device: DeviceId) -> Option<usize> {
         self.devices.iter().position(|d| d.id == device)
+    }
+
+    /// Every device of the track, those inside its racks included at any
+    /// depth, in signal order.
+    pub fn devices_deep(&self) -> impl Iterator<Item = &Device> {
+        self.devices.iter().flat_map(|device| device.walk())
+    }
+
+    /// The device with this ID, in the chain or inside one of its racks.
+    #[must_use]
+    pub fn find_device(&self, id: DeviceId) -> Option<&Device> {
+        self.devices.iter().find_map(|device| device.find(id))
+    }
+
+    /// The rack chain with this ID, at any depth.
+    #[must_use]
+    pub fn find_chain(&self, id: ChainId) -> Option<&Chain> {
+        self.devices.iter().find_map(|device| device.find_chain(id))
+    }
+
+    /// Whether the track's devices, racks and chains are laid out as
+    /// another version's are (see [`Device::same_shape`]).
+    #[must_use]
+    pub fn same_chain_shape(&self, other: &Self) -> bool {
+        self.devices.len() == other.devices.len()
+            && self
+                .devices
+                .iter()
+                .zip(&other.devices)
+                .all(|(a, b)| Shared::ptr_eq(a, b) || a.same_shape(b))
     }
 
     /// The track's clips, ordered by ID: those on its Arrangement lane.
@@ -674,11 +707,6 @@ impl Track {
             || !(self.sends.ptr_eq(&other.sends) || self.sends == other.sends)
             || !(self.children.ptr_eq(&other.children) || self.children == other.children)
             || !(self.automation.ptr_eq(&other.automation) || self.automation == other.automation)
-            || !(self.devices.ptr_eq(&other.devices)
-                || self
-                    .devices
-                    .iter()
-                    .map(|d| d.id)
-                    .eq(other.devices.iter().map(|d| d.id)))
+            || !(self.devices.ptr_eq(&other.devices) || self.same_chain_shape(other))
     }
 }

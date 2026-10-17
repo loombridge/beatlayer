@@ -1164,7 +1164,7 @@ impl Shell {
             .editor
             .document()
             .tracks()
-            .flat_map(|track| track.devices())
+            .flat_map(|track| track.devices_deep())
             .filter(|device| {
                 matches!(&device.kind, DeviceKind::Native { device_type } if device_type == STACK)
                     && device.params.get(&LEARN).is_some_and(|on| *on >= 0.5)
@@ -1576,7 +1576,7 @@ impl Shell {
             .flat_map(|track| {
                 let label = crate::routing::track_label(doc, track.id());
                 track
-                    .devices()
+                    .devices_deep()
                     .filter(|d| self.kit.handles(&d.kind) || crate::plugins::is_clap(doc, d.id))
                     .map(|d| {
                         let listed = if self.kit.handles(&d.kind) {
@@ -1860,6 +1860,7 @@ impl Shell {
                             sidechain: false,
                         },
                         track,
+                        chain: None,
                         index,
                     }),
                 )?)
@@ -1879,6 +1880,7 @@ impl Shell {
                 let plugin_id = match &device_type.kind {
                     bl_model::DeviceKind::Plugin { plugin_id, .. } => plugin_id.clone(),
                     bl_model::DeviceKind::Native { device_type } => device_type.clone(),
+                    bl_model::DeviceKind::Rack { kind } => kind.name().to_owned(),
                 };
                 Ok(to_value(&plugin_ids::PluginLoaded {
                     device: added.device,
@@ -1918,6 +1920,7 @@ impl Shell {
                             sidechain: false,
                         },
                         track,
+                        chain: None,
                         index,
                     }),
                 )?)
@@ -1937,6 +1940,7 @@ impl Shell {
                 let plugin_id = match &device_type.kind {
                     bl_model::DeviceKind::Plugin { plugin_id, .. } => plugin_id.clone(),
                     bl_model::DeviceKind::Native { device_type } => device_type.clone(),
+                    bl_model::DeviceKind::Rack { kind } => kind.name().to_owned(),
                 };
                 Ok(to_value(&plugin_ids::PluginLoaded {
                     device: added.device,
@@ -3816,6 +3820,24 @@ impl Shell {
                 || "Nothing to Redo".to_owned(),
                 |step| format!("Redo {step}"),
             )),
+            // Spec: device-compare R3, R4: the items follow the state of the
+            // selected device.
+            device_ids::COMPARE_SWITCH | device_ids::COMPARE_COPY => {
+                let b = self
+                    .devices
+                    .selected()
+                    .and_then(|d| self.editor.document().device(d))
+                    .is_some_and(|d| d.b_active);
+                Some(
+                    match (id == device_ids::COMPARE_SWITCH, b) {
+                        (true, false) => "Compare: Switch to B",
+                        (true, true) => "Compare: Switch to A",
+                        (false, false) => "Compare: Copy A to B",
+                        (false, true) => "Compare: Copy B to A",
+                    }
+                    .to_owned(),
+                )
+            }
             // The Playback menu's first item toggles with Stop (M-PLAY-001).
             transport_ids::PLAY_STOP => {
                 Some(if self.playing() { "Stop" } else { "Play" }.to_owned())
@@ -3957,17 +3979,24 @@ impl Shell {
         if id == "track.rename" && args.get("name").is_none() {
             return self.renamable_track(args).is_some();
         }
-        if id == device_ids::SET_FLOATING {
+        if id == device_ids::SET_FLOATING
+            || matches!(id, device_ids::COMPARE_SWITCH | device_ids::COMPARE_COPY)
+        {
             // IMP-14: only native devices float; plug-ins open their own
-            // editor windows.
+            // editor windows. Spec: device-compare R6: only native devices
+            // have A and B states.
             let named = args
                 .get("device")
                 .and_then(|v| serde_json::from_value(v.clone()).ok());
-            let floats = named
+            let device = named
                 .or(self.devices.selected())
-                .and_then(|d| self.editor.document().device(d))
-                .is_some_and(bl_model::Device::can_float);
-            if !floats {
+                .and_then(|d| self.editor.document().device(d));
+            let fits = if id == device_ids::SET_FLOATING {
+                device.is_some_and(bl_model::Device::can_float)
+            } else {
+                device.is_some_and(bl_model::Device::can_compare)
+            };
+            if !fits {
                 return false;
             }
         }

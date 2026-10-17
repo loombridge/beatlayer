@@ -217,3 +217,36 @@ fn swapping_to_snapshot_keeps_the_sample_start_and_length_in_one_undo_step() {
     );
     assert!(refused.is_err(), "a device that isn't Strike");
 }
+
+// Spec: one-shot-drum-sampler R23
+#[test]
+fn a_strike_inside_a_rack_chain_swaps_in_place() {
+    let scratch = Scratch::new("rack");
+    let mut shell = headless_with_config(&scratch.path("config"));
+    let strike = add_strike(&mut shell);
+    // The rack wraps it in a chain of its own.
+    shell
+        .run("device.group", json!({ "devices": [strike] }))
+        .unwrap();
+    let before = shell.editor().document().device_place(strike).unwrap();
+    assert!(before.chain.is_some(), "Strike is in a rack's chain");
+
+    let swapped: DeviceAdded = serde_json::from_value(
+        shell
+            .run("device.swap_to_snapshot", json!({ "device": strike }))
+            .unwrap(),
+    )
+    .unwrap();
+    let after = shell
+        .editor()
+        .document()
+        .device_place(swapped.device)
+        .unwrap();
+    assert_eq!(after, before, "Snapshot took its place in the chain");
+    assert!(shell.editor().document().device(strike).is_none());
+    shell.run("edit.undo", json!({})).unwrap();
+    assert_eq!(
+        shell.editor().document().device_place(strike).unwrap(),
+        before
+    );
+}

@@ -10,7 +10,7 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 
 use crate::keychain::Keychain;
-use crate::message::{Event, Part, Reply, Request, Role, Stop};
+use crate::message::{Event, Part, Reply, Request, Role, Stop, Usage};
 use crate::provider::{self, Error, Provider};
 use crate::tools::{ToolCall, ToolSpec};
 
@@ -76,9 +76,19 @@ impl Provider for Gemini {
             tool_calls: Vec::new(),
             stop: Stop::End,
         };
+        let mut usage = None;
         for event in provider::events(&mut response) {
             let data = event?;
             let value = provider::json_event(&data)?;
+            if let Some(counts) = value
+                .get("usageMetadata")
+                .filter(|counts| counts.is_object())
+            {
+                usage = Some(Usage {
+                    input: counts["promptTokenCount"].as_u64().unwrap_or_default(),
+                    output: counts["candidatesTokenCount"].as_u64().unwrap_or_default(),
+                });
+            }
             if value.get("error").is_some_and(|error| !error.is_null()) {
                 return Err(provider::stream_error(&data));
             }
@@ -102,6 +112,9 @@ impl Provider for Gemini {
                     reply.tool_calls.push(call);
                 }
             }
+        }
+        if let Some(usage) = usage {
+            on_event(Event::Usage(usage));
         }
         Ok(reply)
     }

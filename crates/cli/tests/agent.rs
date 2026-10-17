@@ -1054,6 +1054,48 @@ fn without_autonomous_bl_cli_mcp_refuses_what_would_ask_and_says_how_to_allow_it
 }
 
 #[test]
+fn with_result_format_toon_a_long_table_is_toon_and_anything_else_stays_compact_json() {
+    let mut json = bl_cli_mcp(&[]);
+    let mut toon = bl_cli_mcp(&["--result-format", "toon"]);
+
+    // The factory set lists 7 tracks, short of the 8 rows a table needs.
+    let short = toon.call("query", json!({ "path": "tracks" })).unwrap();
+    assert!(short.text.starts_with("{\"tracks\":"), "{}", short.text);
+
+    // Four more tracks make a table of 11 rows.
+    let add: Vec<Value> = (0..4)
+        .map(|i| {
+            json!({ "command": "track.create", "args": {
+                "id": { "$new": format!("t{i}") }, "kind": "midi", "index": 4 + i,
+                "name": format!("Added {i}") } })
+        })
+        .collect();
+    for client in [&mut json, &mut toon] {
+        call(client, "run", json!({ "commands": add }));
+    }
+    let query = json!({ "path": "tracks" });
+    let plain = json.call("query", query.clone()).unwrap();
+    let long = toon.call("query", query).unwrap();
+    assert!(plain.text.starts_with("{\"tracks\":"), "{}", plain.text);
+    assert!(
+        long.text
+            .starts_with("tracks:\n  items[11]{clips,devices,group,id,kind,mixer.arm,"),
+        "{}",
+        long.text
+    );
+    assert!(long.text.len() < plain.text.len());
+    // `structuredContent` is the same JSON either way.
+    assert_eq!(long.structured, plain.structured);
+    assert_eq!(long.structured.as_ref().unwrap()["tracks"]["total"], 11);
+
+    // A result with no table stays compact JSON.
+    let nested = toon
+        .call("describe_command", json!({ "command": "clip.create" }))
+        .unwrap();
+    assert!(nested.text.starts_with("{\"access\":"), "{}", nested.text);
+}
+
+#[test]
 fn the_assistant_settings_are_the_person_s_own_through_the_agent_api() {
     // Spec: agent-permissions R9, by analogy. Even an autonomous session
     // may not change the built-in assistant's settings or its key.

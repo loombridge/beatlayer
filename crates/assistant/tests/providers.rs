@@ -14,7 +14,7 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use bl_assistant::keychain::{Keychain, MemoryKeychain};
-use bl_assistant::message::{Event, Message, Request, Stop};
+use bl_assistant::message::{Event, Message, Request, Stop, Usage};
 use bl_assistant::provider::{Anthropic, Error, Gemini, OpenAi, Provider};
 use bl_assistant::tools::ToolSet;
 use bl_commands::{CommandSpec, Registry};
@@ -500,4 +500,69 @@ fn a_provider_without_a_key_says_so() {
         }
     );
     assert!(error.to_string().contains("anthropic"), "{error}");
+}
+
+/// The usage events a provider sent for a stream.
+fn usage_of(provider: &dyn Provider, tools: &ToolSet) -> Vec<Usage> {
+    let mut seen = Vec::new();
+    provider
+        .stream(&request(tools), &mut |event| {
+            if let Event::Usage(usage) = event {
+                seen.push(usage);
+            }
+        })
+        .expect("a finished turn");
+    seen
+}
+
+#[test]
+fn each_provider_reports_the_tokens_it_counted() {
+    let counted = [Usage {
+        input: 321,
+        output: 7,
+    }];
+    let tools = tools();
+
+    // OpenAI's usage arrives in a last chunk with no choices, and the
+    // request asks for it.
+    let mut stream = sse(&[
+        json!({"choices": [{"index": 0, "delta": {"content": "Hi"}, "finish_reason": "stop"}]}),
+        json!({"choices": [], "usage": {"prompt_tokens": 321, "completion_tokens": 7}}),
+    ]);
+    stream.push_str("data: [DONE]\n\n");
+    let mock = Mock::sse(&stream);
+    let provider = OpenAi::new(keychain(OpenAi::ACCOUNT, "sk-test")).base_url(mock.url());
+    assert_eq!(usage_of(&provider, &tools), counted);
+    assert_eq!(
+        mock.arrived().body()["stream_options"],
+        json!({"include_usage": true})
+    );
+
+    // Anthropic counts the input when the message starts and the output at
+    // its end.
+    let mock = Mock::sse(&sse(&[
+        json!({"type": "message_start", "message": {"id": "m", "usage": {"input_tokens": 321, "output_tokens": 1}}}),
+        json!({"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}),
+        json!({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "Hi"}}),
+        json!({"type": "content_block_stop", "index": 0}),
+        json!({"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 7}}),
+        json!({"type": "message_stop"}),
+    ]));
+    let provider = Anthropic::new(keychain(Anthropic::ACCOUNT, "sk-ant-test")).base_url(mock.url());
+    assert_eq!(usage_of(&provider, &tools), counted);
+
+    // Gemini repeats its running count in each chunk; the last one counts.
+    let mock = Mock::sse(&sse(&[
+        json!({"candidates": [{"content": {"role": "model", "parts": [{"text": "Hi"}]}}], "usageMetadata": {"promptTokenCount": 321, "candidatesTokenCount": 3}}),
+        json!({"candidates": [{"content": {"role": "model", "parts": [{"text": "!"}]}, "finishReason": "STOP"}], "usageMetadata": {"promptTokenCount": 321, "candidatesTokenCount": 7}}),
+    ]));
+    let provider = Gemini::new(keychain(Gemini::ACCOUNT, "goog-test")).base_url(mock.url());
+    assert_eq!(usage_of(&provider, &tools), counted);
+
+    // A server that reports nothing sends no usage.
+    let mock = Mock::sse(&sse(&[
+        json!({"candidates": [{"content": {"role": "model", "parts": [{"text": "Hi"}]}, "finishReason": "STOP"}]}),
+    ]));
+    let provider = Gemini::new(keychain(Gemini::ACCOUNT, "goog-test")).base_url(mock.url());
+    assert!(usage_of(&provider, &tools).is_empty());
 }

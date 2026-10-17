@@ -28,6 +28,7 @@ use bl_core::time::SampleRate;
 use bl_model::{Document, Input, TrackId, TrackKind};
 use rtrb::Consumer;
 
+use crate::node::{NoteBuffer, NoteEvent, NoteExpression, NoteKind};
 use crate::program::Task;
 
 /// The most messages a block takes from the queue. More wait for the next
@@ -113,6 +114,12 @@ struct Route {
     monitored: bool,
     /// This block's messages, reserved when the program is compiled.
     events: Vec<MidiEvent>,
+    /// The `(channel, key)` of every note the track's devices were sent an
+    /// on for and no off, room made for all 2,048.
+    held: Vec<(u8, u8)>,
+    /// Whether the held notes must end: the program replaced one whose
+    /// route took something else or didn't monitor.
+    release: bool,
 }
 
 impl Route {
@@ -180,6 +187,8 @@ impl MidiRoutes {
                     channel: routing.channel.map(|c| c.saturating_sub(1)),
                     monitored: routing.monitoring(track.mixer().arm),
                     events: Vec::with_capacity(MIDI_EVENTS_PER_TRACK),
+                    held: Vec::with_capacity(16 * 128),
+                    release: false,
                 })
             })
             .collect();
@@ -202,6 +211,79 @@ impl MidiRoutes {
         for route in &mut self.routes {
             route.events.clear();
         }
+    }
+
+    /// Takes over the held notes of `old`'s routes, for a program that
+    /// replaces it with the same devices. A route that no longer takes what
+    /// it took, or no longer monitors, ends them in its first block. Real-time
+    /// safe: it swaps buffers.
+    pub(crate) fn inherit(&mut self, old: &mut Self) {
+        for route in &mut self.routes {
+            let Some(was) = old.routes.iter_mut().find(|r| r.track == route.track) else {
+                continue;
+            };
+            std::mem::swap(&mut route.held, &mut was.held);
+            route.release =
+                !route.monitored || route.filter != was.filter || route.channel != was.channel;
+        }
+    }
+
+    /// Puts what `track`'s input received in the frames `from..until` of
+    /// the block into `notes`, merged with the notes already there, at
+    /// offsets counted from `from`; ends the held notes first if the route
+    /// changed. A track that doesn't monitor adds nothing.
+    pub(crate) fn play(&mut self, track: TrackId, from: u32, until: u32, notes: &mut NoteBuffer) {
+        let Some(route) = self.routes.iter_mut().find(|r| r.track == track) else {
+            return;
+        };
+        if route.release {
+            // Spec: midi-io R26
+            route.release = false;
+            for (channel, key) in route.held.drain(..) {
+                notes.insert(note(0, NoteKind::Off, channel, key, 0.0));
+            }
+        }
+        if !route.monitored {
+            return;
+        }
+        // Spec: midi-io R12
+        for event in &route.events {
+            if event.offset < from || event.offset >= until {
+                continue;
+            }
+            let offset = event.offset - from;
+            let (channel, key, value) = (
+                event.message.channel().unwrap_or(0),
+                event.message.data1(),
+                f32::from(event.message.data2()) / 127.0,
+            );
+            if event.message.is_note_on() {
+                if !route.held.contains(&(channel, key)) {
+                    route.held.push((channel, key));
+                }
+                notes.insert(note(offset, NoteKind::On, channel, key, value));
+            } else if event.message.is_note_off() {
+                route.held.retain(|&held| held != (channel, key));
+                notes.insert(note(offset, NoteKind::Off, channel, key, value));
+            } else if event.message.status() & 0xF0 == 0xA0 {
+                let pressure = NoteKind::Expression {
+                    expression: NoteExpression::Pressure,
+                    value,
+                };
+                notes.insert(note(offset, pressure, channel, key, 0.0));
+            }
+        }
+    }
+}
+
+fn note(offset: u32, kind: NoteKind, channel: u8, key: u8, velocity: f32) -> NoteEvent {
+    NoteEvent {
+        offset,
+        kind,
+        channel,
+        key,
+        velocity,
+        note_id: None,
     }
 }
 

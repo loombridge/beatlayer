@@ -4,13 +4,16 @@
 //! right notes, and the switches persist. Everything runs against the
 //! in-process test backend and a real engine processor driven by hand.
 
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bl_core::midi::{MidiInputEvent, MidiMessage, MidiSource};
 use bl_core::time::SampleRate;
-use bl_engine::{Engine, EngineConfig, NoInput, Processor, Registry};
+use bl_devices::sampler::SAMPLER;
+use bl_engine::{Engine, EngineConfig, MediaLibrary, NoInput, OpenedSource, Processor, Registry};
+use bl_media::{BitDepth, Dither, SampleData};
 use bl_midi_io::{Direction, TestBackend};
-use bl_model::{Input, TrackId};
+use bl_model::{DeviceKind, DeviceRole, Input, TrackId};
 use bl_shell::Shell;
 use bl_shell::audio::AudioHost;
 use bl_shell::files::ProjectFiles;
@@ -35,6 +38,10 @@ struct Rig {
 
 impl Rig {
     fn new() -> Self {
+        Self::with_registry(Registry::new())
+    }
+
+    fn with_registry(registry: Registry) -> Self {
         let test = TestBackend::new();
         test.add_port(Direction::Input, "Keys A");
         test.add_port(Direction::Input, "Keys B");
@@ -42,11 +49,8 @@ impl Rig {
         let mut shell = Shell::headless();
         shell.use_midi_backend(Box::new(test.clone()));
         let track = shell.editor().document().top_level().next().unwrap();
-        let (engine, mut processor) = Engine::start(
-            EngineConfig::new(SampleRate::HZ_48000, BLOCK),
-            Registry::new(),
-        )
-        .unwrap();
+        let (engine, mut processor) =
+            Engine::start(EngineConfig::new(SampleRate::HZ_48000, BLOCK), registry).unwrap();
         processor.set_midi_input(shell.midi().sender().attach(1024));
         let mut rig = Self {
             shell,
@@ -488,4 +492,72 @@ fn the_audio_hosts_engine_takes_the_queue() {
     }
     std::thread::sleep(Duration::from_millis(100));
     assert_eq!(sender.stats().snapshot().dropped, 0);
+}
+
+/// Every sample the set names is a second of 0.5.
+struct Constant;
+
+impl MediaLibrary for Constant {
+    fn open(&self, _: bl_model::ContentHash, _: SampleRate, _: u64) -> Option<OpenedSource> {
+        None
+    }
+
+    fn sample(&self, _: bl_model::ContentHash, rate: SampleRate) -> Option<Arc<SampleData>> {
+        SampleData::new(rate.hz(), vec![vec![0.5; rate.hz() as usize]])
+            .ok()
+            .map(Arc::new)
+    }
+}
+
+// Spec: midi-io R12
+#[test]
+fn the_computer_keyboard_plays_snapshot_on_a_monitoring_track() {
+    let mut registry = Registry::new();
+    bl_devices::register(&mut registry);
+    registry.set_media(Arc::new(Constant));
+    let mut rig = Rig::with_registry(registry);
+
+    // Snapshot with a sample, on the MIDI track.
+    let folder = std::env::temp_dir().join(format!("bl-midi-play-{}", std::process::id()));
+    std::fs::create_dir_all(&folder).unwrap();
+    let file = folder.join("Tone.wav");
+    let wav = bl_media::wav_bytes(&[0.5; 4800], 1, 48_000, BitDepth::Int16, Dither::None).unwrap();
+    std::fs::write(&file, wav).unwrap();
+    let track = rig.track;
+    rig.run("arrangement.select_tracks", json!({ "tracks": [track] }));
+    let added = rig.run(
+        "device.add",
+        json!({ "device": {
+            "kind": DeviceKind::Native { device_type: SAMPLER.to_owned() },
+            "name": "Snapshot",
+            "role": DeviceRole::Instrument,
+        } }),
+    );
+    rig.run(
+        "device.load_sample",
+        json!({ "device": added["device"], "path": file.to_string_lossy() }),
+    );
+    std::fs::remove_file(&file).unwrap();
+    std::fs::remove_dir(&folder).unwrap();
+    rig.run("midi.toggle_computer_keyboard", json!({ "on": true }));
+    rig.run(
+        "routing.set_monitor",
+        json!({ "track": track, "monitor": "in" }),
+    );
+    rig.sync();
+
+    // Loudest sample of the block's first channel.
+    let peak = |rig: &mut Rig| {
+        let now = rig.next.max(Instant::now());
+        rig.next = now + Duration::from_nanos(BLOCK as u64 * 1_000_000_000 / 48_000);
+        let out = rig.processor.process_at(BLOCK, &NoInput, now);
+        out.channel(0).iter().fold(0.0_f32, |m, s| m.max(s.abs()))
+    };
+    assert_eq!(peak(&mut rig), 0.0, "silent before a key");
+    rig.run(
+        "midi.computer_keyboard_key",
+        json!({ "key": "A", "pressed": true }),
+    );
+    let heard = (0..4).map(|_| peak(&mut rig)).fold(0.0_f32, f32::max);
+    assert!(heard > 0.01, "the key plays Snapshot: {heard}");
 }

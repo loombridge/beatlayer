@@ -190,7 +190,7 @@ impl Editor {
         }
         let changes = ChangeSet::between(&before, &self.document);
         if self.open.is_empty() && !changes.is_empty() {
-            self.record(command.label().into(), before);
+            self.record(command.label_in(&before).into(), before);
         }
         Ok(changes)
     }

@@ -95,7 +95,7 @@ pub fn device_commands(
     let mut found = Vec::new();
     for track in doc.tracks() {
         let label = crate::routing::track_label(doc, track.id());
-        for device in track.devices() {
+        for device in track.devices_deep() {
             let own = if kit.handles(&device.kind) {
                 kit.commands(device.id)
             } else if is_clap(doc, device.id) {
@@ -143,10 +143,23 @@ pub fn is_au(doc: &Document, device: DeviceId) -> bool {
     })
 }
 
-/// Whether the set has a CLAP device.
+/// Whether the set has a plug-in device of `format`.
 #[must_use]
-pub fn has_clap(doc: &Document) -> bool {
-    !clap_devices(doc).is_empty()
+pub fn has_format(doc: &Document, format: PluginFormat) -> bool {
+    !devices(doc, format).is_empty()
+}
+
+/// Whether the set has a CLAP, VST3 or Audio Unit device: an offline render
+/// of it borrows the engine's plug-ins (offline-plugin-renders R1).
+#[must_use]
+pub fn has_plugin(doc: &Document) -> bool {
+    [
+        PluginFormat::Clap,
+        PluginFormat::Vst3,
+        PluginFormat::AudioUnit,
+    ]
+    .into_iter()
+    .any(|format| has_format(doc, format))
 }
 
 /// Whether `device` is a VST3 plug-in device in `doc`.
@@ -193,7 +206,7 @@ fn au_devices(doc: &Document) -> Vec<DeviceId> {
 /// Every plug-in device of `format` in the set, in track order.
 fn devices(doc: &Document, format: PluginFormat) -> Vec<DeviceId> {
     doc.tracks()
-        .flat_map(|track| track.devices().map(|d| d.id).collect::<Vec<_>>())
+        .flat_map(|track| track.devices_deep().map(|d| d.id).collect::<Vec<_>>())
         .filter(|device| {
             doc.device(*device).is_some_and(|d| {
                 matches!(
@@ -240,7 +253,7 @@ pub fn capture_states(
         .tracks()
         .flat_map(|track| {
             track
-                .devices()
+                .devices_deep()
                 .filter(|d| kit.handles(&d.kind))
                 .map(|d| d.id)
                 .collect::<Vec<_>>()
@@ -395,7 +408,7 @@ pub fn set_plugin_list(doc: &Document, scanner: &Scanner) -> SetPluginList {
     let blocked = scanner.blocked();
     let mut order: Vec<(String, SetPlugin)> = Vec::new();
     for track in doc.tracks() {
-        for device in track.devices() {
+        for device in track.devices_deep() {
             let DeviceKind::Plugin { format, plugin_id } = &device.kind else {
                 continue;
             };

@@ -229,6 +229,8 @@ impl ScannedPlugin {
         let plugin_id = match device_type.kind {
             DeviceKind::Plugin { plugin_id, .. } => plugin_id,
             DeviceKind::Native { device_type } => device_type,
+            // A host loads plug-ins; a rack is the document's own.
+            DeviceKind::Rack { kind } => kind.name().to_owned(),
         };
         Self {
             format,

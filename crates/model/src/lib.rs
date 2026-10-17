@@ -103,7 +103,7 @@ pub use launch::{ClipLaunch, LaunchMode, LaunchQuantization, LaunchSettings};
 pub use metronome::{CountIn, MetronomeRhythm, MetronomeSettings, MetronomeSound};
 pub use param::{DeviceDescription, ParamDescriptor, ParamKind, ParamUnit};
 pub use repr::{SavedSong, saved_schema};
-pub use scene::{DEFAULT_SCENE_COUNT, Scene};
+pub use scene::{DEFAULT_SCENE_COUNT, SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
 pub use track::{
     Channel, CrossfadeAssign, Input, Mixer, Monitor, Output, Routing, SendTap, Tap, Track,
     TrackKind,

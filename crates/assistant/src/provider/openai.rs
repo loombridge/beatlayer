@@ -12,7 +12,7 @@ use std::sync::Arc;
 use serde_json::{Map, Value, json};
 
 use crate::keychain::{Keychain, KeychainError};
-use crate::message::{Event, Part, Reply, Request, Role, Stop};
+use crate::message::{Event, Part, Reply, Request, Role, Stop, Usage};
 use crate::provider::{self, Error, Provider};
 use crate::tools::{ToolCall, ToolSpec};
 
@@ -58,6 +58,7 @@ impl Provider for OpenAi {
             "model": request.model,
             "messages": messages(request),
             "stream": true,
+            "stream_options": { "include_usage": true },
             "max_tokens": request.max_tokens,
         });
         if !request.tools.is_empty() {
@@ -90,6 +91,12 @@ impl Provider for OpenAi {
             let chunk = provider::json_event(&data)?;
             if chunk.get("error").is_some_and(|error| !error.is_null()) {
                 return Err(provider::stream_error(&data));
+            }
+            if let Some(usage) = chunk.get("usage").filter(|usage| usage.is_object()) {
+                on_event(Event::Usage(Usage {
+                    input: usage["prompt_tokens"].as_u64().unwrap_or_default(),
+                    output: usage["completion_tokens"].as_u64().unwrap_or_default(),
+                }));
             }
             let Some(choice) = chunk["choices"]
                 .as_array()

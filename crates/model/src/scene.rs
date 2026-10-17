@@ -7,6 +7,7 @@
 //! the session view spec.
 
 use bl_core::id::Id;
+use bl_core::time::{Bpm, TimeSignature};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -26,7 +27,20 @@ pub struct Scene {
     /// The scene's name, which may be empty: a scene without a name shows
     /// its number, which is its position.
     pub name: String,
+    /// The tempo the scene sets when it is launched, if it has its own
+    /// (20 to 999 BPM). `None` leaves the set's tempo as it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tempo: Option<Bpm>,
+    /// The time signature the scene sets when it is launched, if it has its
+    /// own. `None` leaves the set's signature as it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature: Option<TimeSignature>,
 }
+
+/// The lowest tempo a scene can set (Live's scene tempo range).
+pub const SCENE_TEMPO_MIN: f64 = 20.0;
+/// The highest tempo a scene can set.
+pub const SCENE_TEMPO_MAX: f64 = 999.0;
 
 impl Scene {
     /// An unnamed scene.
@@ -35,6 +49,8 @@ impl Scene {
         Self {
             id,
             name: String::new(),
+            tempo: None,
+            signature: None,
         }
     }
 }

@@ -29,8 +29,8 @@ use crate::commands::{
 };
 use crate::mixer_view::{
     CROSSFADER as MIXER_CROSSFADER, FOCUS as MIXER_FOCUS, IN_OUT as MIXER_IN_OUT,
-    RETURN_TRACKS as MIXER_RETURN_TRACKS, SENDS as MIXER_SENDS, TOGGLE as MIXER_TOGGLE,
-    VOLUME as MIXER_VOLUME,
+    RETURN_TRACKS as MIXER_RETURN_TRACKS, SCENE_TEMPO as MIXER_SCENE_TEMPO, SENDS as MIXER_SENDS,
+    TOGGLE as MIXER_TOGGLE, VOLUME as MIXER_VOLUME,
 };
 
 /// The platform a menu bar is for: macOS has an application menu; Windows
@@ -577,7 +577,7 @@ const VIEW: &[Row] = &[
     (
         "M-VIEW-035",
         "Scene Tempo and Time Signature",
-        Pending(None),
+        Cmd(MIXER_SCENE_TEMPO),
     ),
     SEPARATOR,
     ("M-VIEW-036", "Automation Mode", Key(&["S-ENV-001"])),

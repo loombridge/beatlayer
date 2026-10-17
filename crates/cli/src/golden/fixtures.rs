@@ -25,14 +25,16 @@ use std::sync::Arc;
 use bl_core::time::{Bpm, TempoMap, Ticks, TimeSignature, TimeSignatureChange, TimeSignatureMap};
 use bl_engine::mixer::{gain_from_db, track as mixer};
 use bl_engine::nodes::{BEAT_TONE, TEST_TONE, beat_tone, test_tone};
-use bl_engine::{Action, MediaMap, NodeKey, ParamValue, ScheduledCommand, TransportCommand};
+use bl_engine::{
+    Action, MediaMap, NodeKey, ParamValue, ScheduledCommand, SessionCommand, TransportCommand,
+};
 use bl_model::{
     AudioData, Clip, ClipData, ClipId, Command, ContentHash, CrossfadeAssign, Device, DeviceId,
     DeviceKind, Editor, ParamId, SendTap, TrackId, TrackKind,
 };
 
 use super::{Fixture, MediaFile, SAMPLE_RATE, Scene};
-use crate::render::Cue;
+use crate::render::{Cue, Launch};
 
 pub(super) const FIXTURES: &[Fixture] = &[
     Fixture {
@@ -82,6 +84,13 @@ pub(super) const FIXTURES: &[Fixture] = &[
         about: "A loop inside a tempo ramp from 90 to 150 BPM that runs on past the loop's \
                 end: each pass speeds up, and the wrap lands where the tempo map puts the end.",
         build: tempo_ramp_loop,
+    },
+    Fixture {
+        name: "scene-tempo",
+        about: "A scene with its own tempo launched while the song plays at 120 BPM: the launch \
+                lands on the next bar line, where the beat tone's beats lengthen to the \
+                scene's 60 BPM and the playhead keeps its beat.",
+        build: scene_tempo,
     },
     Fixture {
         name: "pan-and-sends",
@@ -168,6 +177,7 @@ struct Song {
     media: MediaMap,
     schedule: Vec<ScheduledCommand>,
     cues: Vec<Cue>,
+    launches: Vec<Launch>,
 }
 
 impl Song {
@@ -178,6 +188,7 @@ impl Song {
             media: MediaMap::new(),
             schedule: Vec::new(),
             cues: Vec::new(),
+            launches: Vec::new(),
         }
     }
 
@@ -278,6 +289,11 @@ impl Song {
     /// Moves the transport on frame `at` of the render.
     fn cue(&mut self, at: u64, command: TransportCommand) {
         self.cues.push(Cue { at, command });
+    }
+
+    /// Asks the Session View for `command` on frame `at` of the render.
+    fn launch(&mut self, at: u64, command: SessionCommand) {
+        self.launches.push(Launch { at, command });
     }
 
     /// Puts the loop brace at `start` for `length`, and switches the loop
@@ -404,6 +420,7 @@ impl Song {
             } else {
                 self.cues
             },
+            launches: self.launches,
             frames: SAMPLE_RATE.seconds_to_frames(seconds).get() as u64,
         }
     }
@@ -603,6 +620,25 @@ fn tempo_ramp_loop() -> Scene {
     song.cue(0, TransportCommand::Locate(bar_2));
     song.cue(0, TransportCommand::Play);
     song.finish(4.5)
+}
+
+/// Spec: session-view R22, R23.
+fn scene_tempo() -> Scene {
+    let mut song = Song::new();
+    song.apply(Command::SetTempo {
+        tempo: TempoMap::constant(bpm(120.0)),
+    });
+    let track = song.track(TrackKind::Midi, "Beat", None);
+    song.beat_tone(track, 220.0, -24.0);
+    let scene = song.editor.document().scenes().next().unwrap().id;
+    song.apply(Command::SetSceneTempo {
+        scene,
+        tempo: Some(bpm(60.0)),
+    });
+    // Asked for a frame past 1.2.1: the 1 Bar grid puts the launch on
+    // 2.1.1, frame 96,000, and the scene has no clips to launch.
+    song.launch(24_001, SessionCommand::LaunchScene(scene));
+    song.finish(4.0)
 }
 
 /// Spec: mixer R1 to R9.

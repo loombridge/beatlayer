@@ -9,6 +9,7 @@ use crate::gc::Collector;
 use crate::message::Report;
 use crate::processor::{Output, Processor};
 use crate::registry::Registry;
+use crate::session::SceneOverride;
 use crate::state::{EngineState, Monitor};
 
 /// The engine on one thread, for rendering faster than real time: exporting
@@ -52,6 +53,9 @@ pub struct Offline {
     reports: Vec<Report>,
     heap_operations: u64,
     missing: Vec<ContentHash>,
+    /// The scene override the compiler was last told of, as the engine's
+    /// main thread keeps it.
+    override_sent: SceneOverride,
 }
 
 impl Offline {
@@ -71,6 +75,7 @@ impl Offline {
             reports: Vec::new(),
             heap_operations: 0,
             missing: Vec::new(),
+            override_sent: SceneOverride::default(),
         }
     }
 
@@ -131,6 +136,16 @@ impl Offline {
         // freed here, between blocks, as the drop thread would.
         self.collector.collect();
         self.reports.extend(self.monitor.reports());
+        // Spec: session-view R23. What the engine's main thread does when a
+        // scene's launch changes the maps the audio thread plays under: the
+        // last document is compiled again under them, ahead of the next
+        // block.
+        let scene_override = self.monitor.state().scene_override;
+        if scene_override != self.override_sent {
+            self.override_sent = scene_override;
+            let update = self.compiler.set_override(scene_override);
+            self.sender.send_update(update);
+        }
         self.processor.output()
     }
 

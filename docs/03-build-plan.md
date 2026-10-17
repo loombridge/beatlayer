@@ -437,7 +437,7 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 3.2 | done | 16 October 2026 | [#62](https://github.com/loombridge/beatlayer/pull/62); clip launching, launch quantisation and stop buttons; [the spec](specs/launch-quantisation.md) |
 | 3.3 | todo |  |  |
 | 3.4 | done | 17 October 2026 | [#79](https://github.com/loombridge/beatlayer/pull/79); a clip's launch settings stored and set by command, the Launch preferences, Select on Launch and Select Next Scene on Launch; the engine's use of Legato, clip quantisation and velocity, and Nudge, still to build; [the spec](specs/launch-quantisation.md) |
-| 3.5 | todo |  |  |
+| 3.5 | done | 17 October 2026 | [#85](https://github.com/loombridge/beatlayer/pull/85); a scene's own tempo and time signature, applied on its launch frame and held until Re-Enable Automation, the Scene View, and Capture and Insert Scene; [the spec](specs/session-view.md) |
 | 3.6 | done | 17 October 2026 | [#82](https://github.com/loombridge/beatlayer/pull/82); Session clips take their track over from the Arrangement, and Back to Arrangement (F10) and the per-track return by command; the buttons are WP-3.8's; [the spec](specs/session-view.md) |
 | 3.7 | done | 15 October 2026 | [#58](https://github.com/loombridge/beatlayer/pull/58); the Session View grid; [the spec](specs/session-view.md) |
 | 3.8 | blocked | 16 October 2026 | Waits on 3.6 (3.2 merged since); the grid's launching needs Back to Arrangement's state |

@@ -142,11 +142,14 @@ pub fn click(element: Element, shell: &Shell) -> Option<Invocation> {
 /// spec, R5).
 #[must_use]
 pub fn automation_overridden(shell: &Shell) -> bool {
-    shell
-        .editor()
-        .document()
-        .tracks()
-        .any(bl_model::Track::automation_overridden)
+    // Spec: session-view R23. A launched scene's tempo or signature
+    // overrides the set's, and lights it too (observed in Live 12.4.3).
+    !shell.scene_override().is_none()
+        || shell
+            .editor()
+            .document()
+            .tracks()
+            .any(bl_model::Track::automation_overridden)
 }
 
 /// The Re-Enable Automation command (the automation spec, R5).

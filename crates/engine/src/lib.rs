@@ -85,6 +85,7 @@ bl_rt::install_trap!();
 mod automation;
 pub mod clips;
 mod compiler;
+pub mod display;
 mod engine;
 mod gc;
 mod input;
@@ -116,6 +117,7 @@ use bl_core::time::SampleRate;
 pub use automation::{AutomationList, clip_envelope_value_at, target_node};
 pub use clips::{ClipPlayer, MediaLibrary, MediaMap, MediaStreams, OpenedSource, SourceCues};
 pub use compiler::{Compiler, Update};
+pub use display::{DisplayData, DisplayReader, DisplayWriter, Displays, display_channel};
 pub use engine::{CompileCounts, Engine, Restarter, Sender, channel};
 pub use gc::{Collector, DROP_PERIOD, DropThread, GcHandle, Owned, Program};
 pub use input::{DeviceInput, NoInput};
@@ -135,10 +137,12 @@ pub use offline::Offline;
 pub use processor::{Carry, Output, Processor};
 pub use program::EngineProgram;
 pub use recording::{
-    MidiRecordTrack, RecordTrack, RecordedMidi, RecordingPlan, SessionTarget, TakeBounds,
+    LaunchLog, MidiRecordTrack, RecordTrack, RecordedMidi, RecordingPlan, SessionTarget, TakeBounds,
 };
 pub use registry::{DeviceType, NodeFactory, Registry};
-pub use session::{SceneOverride, SessionCommand, SessionPlayback, SlotState, SlotStatus};
+pub use session::{
+    SceneOverride, SessionCommand, SessionEvent, SessionPlayback, SlotState, SlotStatus,
+};
 pub use state::{EngineCounters, EngineState, Monitor, PlayedParam, TrackMeter};
 
 /// An engine's fixed sizes, chosen when it's made. The audio thread works

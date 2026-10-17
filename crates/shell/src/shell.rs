@@ -464,6 +464,9 @@ pub struct Shell {
     session_run: Option<session_recording::SessionRun>,
     /// The control moves of the automation recording under way (WP-2.12).
     automation_take: crate::automation_record::Take,
+    /// What the Session clips that played during the recording under way
+    /// were (WP-3.13).
+    session_watch: crate::session_capture::Watch,
     /// Whether automation was recording when the engine was last polled:
     /// the transport records and plays.
     automation_recording: bool,
@@ -721,6 +724,7 @@ impl Shell {
             recorded_takes: 0,
             session_run: None,
             automation_take: crate::automation_record::Take::default(),
+            session_watch: crate::session_capture::Watch::default(),
             automation_recording: false,
             plug_in_windows: true,
             devices: {
@@ -2129,6 +2133,26 @@ impl Shell {
             .state(doc, devices::shown_track(&self.arrangement, doc))
     }
 
+    /// Sets the display data a device's display draws, as
+    /// [`Shell::poll_engine`] does with the engine's (for a shell without an
+    /// engine, as in tests; while one runs, the next poll takes its data
+    /// instead).
+    pub fn set_device_display_data(&mut self, device: bl_model::DeviceId, values: &[f32]) {
+        let data = self.devices.displays_mut().entry(device).or_default();
+        data.published += 1;
+        data.values.clear();
+        data.values.extend_from_slice(values);
+    }
+
+    /// What `device`'s display shows, as the engine last published it
+    /// (the device framework spec, R36): the cell draws it, a screen reader
+    /// says it. `None` if the set has no such device.
+    #[must_use]
+    pub fn device_display(&self, device: bl_model::DeviceId) -> Option<bl_model::DeviceDisplay> {
+        let device = self.editor.document().device(device)?;
+        Some(self.devices.display(device))
+    }
+
     /// Every floating device's window, on any track (WP-2.5b), for the
     /// app to open, close, and place.
     #[must_use]
@@ -2204,6 +2228,11 @@ impl Shell {
                 &self.kit,
                 &mut self.editor,
             );
+        }
+        if id == device_ids::DISPLAY && self.audio.engine_running() {
+            // Spec: device-framework R37. The newest the nodes published,
+            // for an agent that never polls the engine.
+            self.audio.displays_into(self.devices.displays_mut());
         }
         let user_library = self.browser_view.user_library().map(Path::to_path_buf);
         let zoom = self.zoom();
@@ -3003,10 +3032,30 @@ impl Shell {
             // Not a revision: the window redraws while a meter shows a
             // level, and nothing else depends on them.
             self.audio.meters_into(&mut self.meters);
+            // Spec: device-framework R35. The display data the devices'
+            // nodes published, which the device displays draw. Not a
+            // revision either.
+            self.audio.displays_into(self.devices.displays_mut());
         }
         // Spec: launch-quantisation R10. The slots the engine is launching
         // or stopping, which the grid's launch buttons draw.
         self.audio.session_into(&mut self.session_states);
+        // A drag in progress waits: its end is one change, not a split for
+        // every frame of it.
+        if self.recording.is_some()
+            && !self.gesture
+            && let Some(rate) = self.audio.sample_rate().and_then(SampleRate::new)
+        {
+            // Spec: session-to-arrangement R3. The clips that play, as they
+            // were, for the copies a recording makes.
+            self.session_watch.poll(
+                self.editor.document(),
+                &self.session_states,
+                engine.position,
+                &self.editor.document().settings().tempo,
+                rate,
+            );
+        }
         self.scene_override = self.audio.scene_override();
         // Spec: session-view R24. The tracks a Session clip has taken over,
         // which the Back to Arrangement buttons light from.
@@ -3216,6 +3265,7 @@ impl Shell {
         }
         let (mut plan, mut recording) =
             crate::recording::start(folder.as_deref(), rate, &tracks, &midi, Vec::new())?;
+        self.session_watch = crate::session_capture::Watch::default();
         let delay = self
             .audio
             .recording_delay()
@@ -3281,6 +3331,7 @@ impl Shell {
             files,
             midi,
             dropped,
+            launches,
         } = outcome;
         self.last_recording = Some(RecordingReport {
             error: None,
@@ -3321,11 +3372,12 @@ impl Shell {
                     files: Ok(files),
                     midi,
                     dropped,
+                    launches,
                 },
             );
             return;
         }
-        if files.is_empty() && midi.is_empty() {
+        if files.is_empty() && midi.is_empty() && launches.is_empty() {
             return;
         }
         let Some(take) = take else {
@@ -3343,6 +3395,14 @@ impl Shell {
         let end = tempo.frames_to_ticks(take.end - Frames(delay), rate);
         let edge_fades = self.create_fades_on_clip_edges();
         let overdub = self.editor.document().settings().midi_overdub;
+        // shortcut: a take that went round the loop copies no Session
+        // clips; upgrade when Live's behaviour there is observed.
+        let watch = std::mem::take(&mut self.session_watch);
+        let runs = if take.wrap.is_none() {
+            crate::session_capture::runs(&launches, take.end, &tempo, rate)
+        } else {
+            Vec::new()
+        };
         let mut imported = Vec::with_capacity(files.len());
         for file in &files {
             match self.media.import(&file.path) {
@@ -3367,44 +3427,41 @@ impl Shell {
         let applied = match take.wrap {
             None => {
                 let mut placed = std::collections::BTreeSet::new();
-                self.editor
-                    .transact(crate::recording::UNDO_LABEL, |editor| {
-                        for (track, hash, path, _) in &imported {
-                            let id = editor.new_id();
-                            // Spec: audio-clips R7. With Create Fades on Clip Edges
-                            // on, a new recorded clip's edges fade over 4 ms, like a
-                            // dropped file's.
-                            let audio = AudioData::new(*hash);
-                            let audio = if edge_fades {
-                                audio.with_edge_fades()
-                            } else {
-                                audio
-                            };
-                            let mut clip = Clip::new(
-                                id,
-                                start,
-                                end.saturating_sub(start),
-                                ClipData::Audio(audio),
-                            );
-                            clip.name = file_stem(path);
-                            crate::arrangement::placing::clear(
-                                editor, *track, start, end, &placed,
-                            )?;
-                            placed.insert(id);
-                            editor.apply(bl_model::Command::CreateClip {
-                                track: *track,
-                                clip,
-                            })?;
-                        }
-                        crate::recording::place_midi(
-                            editor,
-                            &midi,
-                            take,
-                            rate,
-                            overdub,
-                            &mut placed,
-                        )
-                    })
+                let label = if runs.is_empty() {
+                    crate::recording::UNDO_LABEL
+                } else {
+                    crate::recording::LOOP_UNDO_LABEL
+                };
+                let armed: Vec<TrackId> = imported
+                    .iter()
+                    .map(|(track, ..)| *track)
+                    .chain(midi.iter().map(|take| take.track))
+                    .collect();
+                self.editor.transact(label, |editor| {
+                    for (track, hash, path, _) in &imported {
+                        let id = editor.new_id();
+                        // Spec: audio-clips R7. With Create Fades on Clip Edges
+                        // on, a new recorded clip's edges fade over 4 ms, like a
+                        // dropped file's.
+                        let audio = AudioData::new(*hash);
+                        let audio = if edge_fades {
+                            audio.with_edge_fades()
+                        } else {
+                            audio
+                        };
+                        let mut clip =
+                            Clip::new(id, start, end.saturating_sub(start), ClipData::Audio(audio));
+                        clip.name = file_stem(path);
+                        crate::arrangement::placing::clear(editor, *track, start, end, &placed)?;
+                        placed.insert(id);
+                        editor.apply(bl_model::Command::CreateClip {
+                            track: *track,
+                            clip,
+                        })?;
+                    }
+                    crate::recording::place_midi(editor, &midi, take, rate, overdub, &mut placed)?;
+                    crate::session_capture::place(editor, &watch, &runs, &armed, end)
+                })
             }
             Some(_) => {
                 let frames = files.first().map_or(0, |file| file.frames);
@@ -4556,7 +4613,11 @@ impl Shell {
             let args_floating = args.get("floating") == Some(&Value::Bool(true));
             // Spec: automation R17. With Automation Arm on and the transport
             // recording, a control move is noted for the envelope too.
-            let moved = (self.arrangement.automation_arm() && self.automation_recording)
+            // Spec: session-to-arrangement R5. A Session clip that has taken a
+            // track over writes the moves too, whether or not Automation Arm
+            // is on.
+            let moved = ((self.arrangement.automation_arm() || !self.session_over.is_empty())
+                && self.automation_recording)
                 .then(|| model::command_from_args(id, args.clone()).ok())
                 .flatten()
                 .and_then(|command| {

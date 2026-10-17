@@ -9,6 +9,7 @@ use bl_core::time::{Frames, SampleRate, TempoMap};
 use bl_model::{ChainId, DeviceId, ParamId, TrackId};
 use rtgc::{ArcGc, LocalRtGc};
 
+use crate::display::DisplayReader;
 use crate::session::SessionPlayback;
 
 /// What a node is in the document, which stays the same from one compile to
@@ -322,6 +323,14 @@ pub trait Node: Send + 'static {
     /// (WP-2.11).
     fn latency(&self) -> u32 {
         0
+    }
+
+    /// The reader of the node's display data, if it has a display (the
+    /// device framework spec, R26): the compiler asks once, when it makes
+    /// the node, and the shell reads the newest values the node publishes
+    /// after each block. The default is no display.
+    fn display(&mut self) -> Option<DisplayReader> {
+        None
     }
 }
 

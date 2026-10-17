@@ -75,6 +75,23 @@ pub struct SessionPlayback {
     pub frame: Frames,
 }
 
+/// A Session clip starting or ending, as an Arrangement recording sees it
+/// (WP-3.13): the launcher logs one for every start, restart, stop and
+/// return while a take runs, and a take that begins with clips playing
+/// logs a start for each.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SessionEvent {
+    /// The track whose slot it is.
+    pub track: TrackId,
+    /// The scene whose slot it is.
+    pub scene: SceneId,
+    /// The song frame it happened on.
+    pub at: Frames,
+    /// For a start, the song frame the clip launched on: `at`, or earlier
+    /// for a clip already playing when the take began. `None` for an end.
+    pub launched: Option<Frames>,
+}
+
 /// The tempo and time signature a launched scene set, which hold until
 /// Re-Enable Automation or Back to Arrangement (WP-3.5). Each names the
 /// scene it came from.
@@ -245,6 +262,10 @@ pub(crate) struct SessionLauncher {
     /// playing on it: a stop button pressed on an idle track silences its
     /// Arrangement there.
     marks: Vec<(TrackId, Frames)>,
+    /// The starts and ends since the processor last took them (WP-3.13).
+    /// Room for two per slot and two more per track, drained after every
+    /// change; an event past its end counts in `overflowed`.
+    pub(crate) log: Vec<SessionEvent>,
     /// Launches dropped because every slot was taken.
     pub(crate) overflowed: u64,
 }
@@ -259,6 +280,7 @@ impl SessionLauncher {
             scenes: Vec::with_capacity(SCENE_APPLIES),
             overridden: Vec::with_capacity(capacity),
             marks: Vec::with_capacity(capacity),
+            log: Vec::with_capacity(capacity * 4),
             overflowed: 0,
         }
     }
@@ -555,6 +577,27 @@ impl SessionLauncher {
         }
     }
 
+    /// Logs a clip starting (`launched`) or ending at `at` (WP-3.13).
+    fn note(&mut self, track: TrackId, scene: SceneId, at: Frames, launched: Option<Frames>) {
+        if self.log.len() < self.log.capacity() {
+            self.log.push(SessionEvent {
+                track,
+                scene,
+                at,
+                launched,
+            });
+        } else {
+            self.overflowed += 1;
+        }
+    }
+
+    /// The slots whose clips play, with the frame each launched on.
+    pub(crate) fn started(&self) -> impl Iterator<Item = (TrackId, SceneId, Frames)> + '_ {
+        self.slots
+            .iter()
+            .filter_map(|slot| Some((slot.track, slot.scene, slot.started?)))
+    }
+
     /// Lists `track` as taken over from the Arrangement.
     fn take_over(&mut self, track: TrackId) {
         if self.overridden.contains(&track) {
@@ -571,8 +614,14 @@ impl SessionLauncher {
     /// once: its slots stop whether they play or wait for the grid, a stop
     /// still queued is dropped, and the Arrangement plays from the playhead
     /// (WP-3.6).
-    pub(crate) fn back_to_arrangement(&mut self, track: Option<TrackId>) {
+    pub(crate) fn back_to_arrangement(&mut self, track: Option<TrackId>, at: Frames) {
         let returned = |t: TrackId| track.is_none_or(|only| only == t);
+        for i in 0..self.slots.len() {
+            let slot = self.slots[i];
+            if returned(slot.track) && slot.started.is_some() {
+                self.note(slot.track, slot.scene, at, None);
+            }
+        }
         self.slots.retain(|slot| !returned(slot.track));
         self.marks.retain(|&(t, _)| !returned(t));
         self.overridden.retain(|&t| !returned(t));
@@ -605,15 +654,24 @@ impl SessionLauncher {
                 continue;
             }
             slot.due = None;
-            if slot.started.is_none() || slot.restart {
+            let (track, scene) = (slot.track, slot.scene);
+            let (running, launching) = (
+                slot.started.is_some(),
+                slot.started.is_none() || slot.restart,
+            );
+            if running {
+                self.note(track, scene, due, None);
+            }
+            if launching {
                 // The queued launch or restart plays from the frame it was
                 // queued for, and takes its track over from the Arrangement
                 // there; a stop queued behind it follows.
+                self.note(track, scene, due, Some(due));
+                let slot = &mut self.slots[i];
                 slot.started = Some(due);
                 slot.restart = false;
                 slot.auto = false;
                 let then_stop = slot.then_stop.take();
-                let track = slot.track;
                 if let Some(stop) = then_stop {
                     slot.due = Some(stop);
                 } else {
@@ -1678,11 +1736,11 @@ mod tests {
         launcher.press(c, scene_c, LaunchMode::Trigger, later);
         launcher.stop(Some(c), &[], later);
         launcher.press(c, scene_c, LaunchMode::Trigger, later);
-        launcher.back_to_arrangement(Some(a));
+        launcher.back_to_arrangement(Some(a), Frames::ZERO);
         assert_eq!(launcher.state_of(a, scene_a), None);
         assert_eq!(launcher.overridden(), [b], "only that track returned");
         assert_eq!(launcher.state_of(b, scene_b), Some(SlotState::Playing));
-        launcher.back_to_arrangement(None);
+        launcher.back_to_arrangement(None, Frames::ZERO);
         let mut status = Vec::with_capacity(8);
         launcher.status(&mut status);
         assert!(status.is_empty() && launcher.overridden().is_empty());

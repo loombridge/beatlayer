@@ -59,6 +59,7 @@ fn fixture() -> Project {
     let bus = track(&mut editor, TrackKind::Group, "Bus", None, 2);
     let drums = track(&mut editor, TrackKind::Audio, "Drums", Some(bus), 0);
     let verb = track(&mut editor, TrackKind::Return, "Verb", None, 0);
+    let pad = track(&mut editor, TrackKind::Midi, "Pad", None, 3);
 
     // The song.
     apply(
@@ -163,7 +164,7 @@ fn fixture() -> Project {
         },
         Command::SetMidiOutput {
             track: keys,
-            to: None,
+            to: Some(pad),
         },
         Command::SetMainOut {
             channel: Channel::Pair(3),
@@ -264,6 +265,7 @@ fn fixture() -> Project {
     device.enabled = false;
     device.show_preset_name = false;
     device.floating = true;
+    device.media = Some(ContentHash([9; 32]));
     device.role = DeviceRole::AudioEffect;
     device.params.insert(ParamId(2), 0.75);
     device.sidechain = Some(Sidechain {
@@ -532,6 +534,7 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
         (
             &keys,
             &[
+                "routing.midi_output",
                 "slots.0.clip",
                 "slots.0.scene",
                 "removed_stop_buttons.0",
@@ -552,6 +555,7 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "params",
                 "sidechain",
                 "floating",
+                "media",
             ][..],
         ),
         (
@@ -757,5 +761,83 @@ fn saved_forms_come_a_page_at_a_time() {
     assert_eq!(
         vox["saved"]["automation"]["items"][0]["points"],
         json!({ "total": 1 })
+    );
+}
+
+/// Whether `field` (dotted names, `[]` after a list) is in `value`, looking
+/// through a page's `items`.
+fn present(value: &Value, field: &str) -> bool {
+    let mut here = vec![value];
+    for segment in field.split('.') {
+        let (key, is_list) = segment
+            .strip_suffix("[]")
+            .map_or((segment, false), |key| (key, true));
+        let mut next: Vec<&Value> = here.iter().filter_map(|value| value.get(key)).collect();
+        if is_list {
+            next = next
+                .iter()
+                .flat_map(|list| {
+                    let items = list.get("items").unwrap_or(list);
+                    items.as_array().into_iter().flatten()
+                })
+                .collect();
+        }
+        if next.is_empty() {
+            return false;
+        }
+        here = next;
+    }
+    true
+}
+
+#[test]
+fn every_query_readback_the_command_table_names_is_in_a_real_full_result() {
+    use bl_commands::readback::{Object, READBACK, Readback};
+
+    let project = fixture();
+    let document = serde_json::to_value(&project.document).unwrap();
+    let mut client = open(&project, "declared");
+    let (tracks, clips, devices) = saved_parts(&document);
+    let mut full = |ids: &[Value]| -> Vec<Value> {
+        ids.iter()
+            .map(|saved| {
+                query(&mut client, json!({ "id": saved["id"], "detail": "full" }))["saved"].clone()
+            })
+            .collect()
+    };
+    let (tracks, clips, devices) = (full(&tracks), full(&clips), full(&devices));
+    let scenes: Vec<Value> = (1..=document["scenes"].as_array().unwrap().len())
+        .map(|n| {
+            let path = format!("scene {n}");
+            query(&mut client, json!({ "path": path, "detail": "full" }))["saved"].clone()
+        })
+        .collect();
+    let song = query(&mut client, json!({ "path": "song", "detail": "full" }));
+
+    let mut missing: Vec<String> = Object::Song
+        .listed()
+        .iter()
+        .filter(|field| !present(&song, field))
+        .map(|field| format!("the song's listed field `{field}`"))
+        .collect();
+    for (command, readback) in READBACK {
+        let Readback::Query { object, field } = readback else {
+            continue;
+        };
+        let found = match object {
+            Object::Song => present(&song, field) || present(&song["saved"], field),
+            Object::Track => tracks.iter().any(|saved| present(saved, field)),
+            Object::Clip => clips.iter().any(|saved| present(saved, field)),
+            Object::Device => devices.iter().any(|saved| present(saved, field)),
+            Object::Scene => scenes.iter().any(|saved| present(saved, field)),
+        };
+        if !found {
+            missing.push(format!("{command}: `{field}` of a {} query", object.path()));
+        }
+    }
+    assert!(
+        missing.is_empty(),
+        "the fixture's full results lack:\n{}",
+        missing.join("\n")
     );
 }

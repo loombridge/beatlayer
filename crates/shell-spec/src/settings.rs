@@ -10,6 +10,7 @@ use crate::agent::AllowedAgent;
 use crate::assistant::AssistantState;
 use crate::audio::{AudioSettings, ToneSettings};
 use crate::midi_io::MidiPortsResult;
+use crate::plugins::PluginSettings;
 
 /// `settings.state`: every preference the Settings window shows with a
 /// value.
@@ -269,6 +270,9 @@ pub struct SettingsState {
     /// Plug-Ins: Auto-Hide Plug-In Windows, as
     /// `settings.set_auto_hide_plug_in_windows` sets it.
     pub auto_hide_plug_in_windows: bool,
+    /// Plug-Ins: how the Browser shows plug-ins, as `plugin.settings` sets
+    /// it.
+    pub plug_ins: PluginSettings,
     /// Agents.
     pub agents: AgentsPageSettings,
     /// Agents, the assistant: provider, base URL, model, and whether an API
@@ -290,7 +294,8 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  Input (zoom, Outline View in Focus, the Tab key settings), the audio device \
                  settings with Driver Error Compensation and the test tone (`audio.configure`, \
                  `audio.set_test_tone`), the MIDI ports and computer keyboard (`midi.set_port`), \
-                 Create Fades on Clip Edges, Warp Recorded Audio, Auto-Hide Plug-In Windows, the agent server and the \
+                 Create Fades on Clip Edges, Warp Recorded Audio, Auto-Hide Plug-In Windows, the plug-ins the Browser hides and prefers \
+                 (`plugin.settings`), the agent server and the \
                  assistant. The server's and the agents' tokens and the assistant's API key are \
                  never reported, only whether one is stored. Preferences aren't saved with the \
                  set. Changes nothing. Use it to check a `settings.set_*` command took effect.",

@@ -12,6 +12,8 @@
 
 pub use lspk_commands::*;
 
+pub mod readback;
+
 /// The command reference, generated from the registry by
 /// `cargo xtask commands`, with Beatlayer's opening.
 pub mod reference {
@@ -45,7 +47,9 @@ pub mod reference {
      no shortcut for has no default keys;\n\
      - **arguments** and a **result** as JSON Schemas generated from the Rust types. An \
      agent sends the arguments as a JSON object. The types they use are under \
-     [Types](#types).\n";
+     [Types](#types);\n\
+     - a **readback** for every command that isn't `read`: the read command or query that shows \
+     its effect, so an agent can check what it did ([Readback](#readback)).\n";
 
     /// Renders Beatlayer's command reference as Markdown: [`INTRO`], then
     /// everything [`markdown_with_intro`] generates from the registry.

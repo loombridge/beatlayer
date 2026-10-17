@@ -1,7 +1,7 @@
 //! State the set doesn't save, read back through the agent API: every
-//! `transport.set_*` and `settings.set_*` command changes something that
-//! `transport.state` or `settings.state` then reports, so an agent that can
-//! set a value can read it back.
+//! `transport.set_*`, `settings.set_*` and `plugin.settings` command changes
+//! something that `transport.state` or `settings.state` then reports, so an
+//! agent that can set a value can read it back.
 
 use bl_agent::Agent;
 use bl_agent::client::{Client, InProcess};
@@ -156,6 +156,10 @@ fn each_settings_command_reads_back_from_settings_state() {
     assert_eq!(before["create_fades_on_clip_edges"], true);
     assert_eq!(before["warp_recorded_audio"], true);
     assert_eq!(before["auto_hide_plug_in_windows"], true);
+    assert_eq!(
+        before["plug_ins"],
+        json!({ "hidden": [], "show_hidden": false })
+    );
     assert_eq!(before["display_input"]["outline_view_in_focus"], true);
     assert_eq!(before["display_input"]["zoom_percent"], 100);
     assert_eq!(
@@ -182,6 +186,11 @@ fn each_settings_command_reads_back_from_settings_state() {
         &mut client,
         "settings.set_auto_hide_plug_in_windows",
         json!({ "on": false }),
+    );
+    run(
+        &mut client,
+        "plugin.settings",
+        json!({ "hidden": ["vst3/example"], "show_hidden": true, "format_preference": "clap" }),
     );
     run(
         &mut client,
@@ -212,6 +221,10 @@ fn each_settings_command_reads_back_from_settings_state() {
     assert_eq!(state["create_fades_on_clip_edges"], false);
     assert_eq!(state["warp_recorded_audio"], false);
     assert_eq!(state["auto_hide_plug_in_windows"], false);
+    assert_eq!(
+        state["plug_ins"],
+        json!({ "hidden": ["vst3/example"], "show_hidden": true, "format_preference": "clap" })
+    );
     assert_eq!(
         state["display_input"],
         json!({

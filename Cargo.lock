@@ -781,6 +781,7 @@ name = "bl-commands"
 version = "0.0.0"
 dependencies = [
  "lspk-commands",
+ "serde_json",
 ]
 
 [[package]]

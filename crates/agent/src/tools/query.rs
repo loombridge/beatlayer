@@ -16,7 +16,8 @@
 use bl_core::time::{Ticks, TimeSignatureMap};
 use bl_model::automation::{Automation, AutomationTarget};
 use bl_model::{
-    Clip, ClipData, ClipId, Device, DeviceId, Document, Scene, SceneId, TakeLane, Track, TrackId,
+    Clip, ClipData, ClipId, Device, DeviceId, Document, SavedSong, Scene, SceneId, TakeLane, Track,
+    TrackId,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -482,12 +483,11 @@ fn overview(ctx: &Ctx<'_>, view: &View<'_>) -> Value {
         // The set file's own fields for the song: the settings (tempo map,
         // time signatures, loop, punch, metronome and record switches), the
         // launch quantisation saved beside them, and the scenes.
-        let scenes: Vec<&Scene> = document.scenes().collect();
-        value["saved"] = view.saved(&json!({
-            "settings": settings,
-            "launch": shell.launch_settings(),
-            "scenes": scenes,
-        }));
+        value["saved"] = view.saved(&SavedSong {
+            settings,
+            launch: shell.launch_settings(),
+            scenes: document.scenes().collect(),
+        });
     }
     value
 }

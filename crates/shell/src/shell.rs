@@ -1249,6 +1249,7 @@ impl Shell {
             create_fades_on_clip_edges: self.create_fades_on_clip_edges(),
             warp_recorded_audio: self.warp_recorded_audio(),
             auto_hide_plug_in_windows: self.auto_hide_plug_in_windows(),
+            plug_ins: self.plugin_settings(),
             agents: AgentsPageSettings {
                 server: server.server,
                 port: agent.port,
@@ -1978,13 +1979,18 @@ impl Shell {
                     self.save_preferences();
                     self.publish_plugins();
                 }
-                Ok(to_value(&plugin_ids::PluginSettings {
-                    hidden: self.prefs.hidden_plugins.iter().cloned().collect(),
-                    show_hidden: self.prefs.show_hidden_plugins,
-                    format_preference: self.prefs.plugin_format_preference,
-                }))
+                Ok(to_value(&self.plugin_settings()))
             }
             _ => Err(ShellError::UnknownCommand(id.to_owned())),
+        }
+    }
+
+    /// How the Browser shows plug-ins: what `plugin.settings` returns.
+    fn plugin_settings(&self) -> plugin_ids::PluginSettings {
+        plugin_ids::PluginSettings {
+            hidden: self.prefs.hidden_plugins.iter().cloned().collect(),
+            show_hidden: self.prefs.show_hidden_plugins,
+            format_preference: self.prefs.plugin_format_preference,
         }
     }
 

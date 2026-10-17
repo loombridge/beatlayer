@@ -9,6 +9,7 @@ use std::collections::BTreeSet;
 use bl_core::id::Id;
 use bl_core::time::Ticks;
 use imbl::{OrdMap, Vector};
+use schemars::{JsonSchema, Schema, schema_for};
 use serde::{Deserialize, Serialize};
 
 use crate::automation::{AutomationTarget, Breakpoint, Envelope};
@@ -21,6 +22,7 @@ use crate::device::Device;
 use crate::document::{Document, Index, Settings};
 use crate::error::ModelError;
 use crate::ids::{SceneId, TrackId};
+use crate::launch::LaunchSettings;
 use crate::scene::{Scene, default_scenes};
 use crate::shared::Shared;
 use crate::track::{Mixer, Routing, Track, TrackKind};
@@ -37,7 +39,7 @@ pub(crate) struct DocumentRepr {
     scenes: Option<Vec<Scene>>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 struct TrackRepr {
     id: TrackId,
     kind: TrackKind,
@@ -87,7 +89,7 @@ fn is_on(value: &bool) -> bool {
 }
 
 /// One parameter's automation as the set saves it.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 struct AutomationRepr {
     /// The parameter it drives.
     target: AutomationTarget,
@@ -101,10 +103,38 @@ struct AutomationRepr {
 }
 
 /// One saved Session slot that holds a clip.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 struct SlotRepr {
     scene: SceneId,
     clip: Clip,
+}
+
+/// The song's own state as the set saves it: its settings (the tempo map,
+/// time signatures, loop, punch and record switches), the launch
+/// quantisation saved beside them, and the scenes.
+#[derive(Serialize, JsonSchema)]
+pub struct SavedSong<'a> {
+    /// The song-wide settings.
+    pub settings: &'a Settings,
+    /// The Session View's launch quantisation.
+    pub launch: LaunchSettings,
+    /// The scenes, in order.
+    pub scenes: Vec<&'a Scene>,
+}
+
+/// The JSON Schema of `object` as the set saves it, for checking that a
+/// field an agent is told to read back exists: `track` (without the tracks
+/// inside it), `clip`, `device`, `scene` or `song`.
+#[must_use]
+pub fn saved_schema(object: &str) -> Option<Schema> {
+    Some(match object {
+        "track" => schema_for!(TrackRepr),
+        "clip" => schema_for!(Clip),
+        "device" => schema_for!(Device),
+        "scene" => schema_for!(Scene),
+        "song" => schema_for!(SavedSong<'static>),
+        _ => return None,
+    })
 }
 
 impl From<&Document> for DocumentRepr {

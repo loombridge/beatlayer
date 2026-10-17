@@ -17,6 +17,7 @@ The roadmap, architecture, build plan, and parity plan aren't published yet; a m
 
 - No Ableton code, content, or trademarks, by any route.
 - Every user-facing action is a registered command with a schema, a description, and a permission class, so agents reach every feature through the agent API.
+- Anything an agent can set, it can read back: every command that isn't `read` names, in the readback table beside the registry, the read command or query field that shows its effect, or says why there is nothing to read. `cargo xtask commands` fails on one that doesn't.
 - The UI matches Live 12's placement, menus, and key bindings, with Beatlayer's own icons, typeface, and colours.
 - No allocation, lock, or blocking call on an audio thread.
 - Engine, model, and device crates never depend on a UI crate. `cargo xtask layers` enforces this.

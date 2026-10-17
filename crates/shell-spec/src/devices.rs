@@ -50,6 +50,9 @@ pub const LOAD_PRESET: &str = "device.load_preset";
 /// `device.load_sample`: load an audio file into a device that plays one
 /// sample (WP-2.16).
 pub const LOAD_SAMPLE: &str = "device.load_sample";
+/// `device.select_slot`: select a sample slot of a device that has them
+/// (WP-5.17).
+pub const SELECT_SLOT: &str = "device.select_slot";
 /// `device.hot_swap`: start or end hot-swapping a device's presets.
 pub const HOT_SWAP: &str = "device.hot_swap";
 /// `device.parameters`: a device's parameters, described, with their values.
@@ -108,6 +111,7 @@ pub const IDS: &[&str] = &[
     SAVE_DEFAULT_PRESET,
     LOAD_PRESET,
     LOAD_SAMPLE,
+    SELECT_SLOT,
     HOT_SWAP,
     PARAMETERS,
     SHOW_SIDECHAIN,
@@ -248,6 +252,17 @@ pub struct DevicePanel {
     /// target that opens the plug-in's editor. False for a native device.
     #[serde(default)]
     pub plugin: bool,
+    /// For a device with sample slots (WP-5.17): the slot whose controls
+    /// the panel shows, a view setting that isn't saved with the set.
+    #[serde(default)]
+    pub selected_slot: u32,
+    /// For a device with sample slots: whether each slot holds a sample.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub loaded_slots: Vec<bool>,
+    /// For a device with sample slots: the key each slot plays, as Live
+    /// names notes (`C3`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub slot_keys: Vec<String>,
 }
 
 impl DevicePanel {
@@ -734,6 +749,22 @@ pub struct LoadSampleArgs {
     pub device: Option<DeviceId>,
     /// The audio file to load into the device.
     pub path: String,
+    /// The sample slot to load it into, counted from 0; the slot the
+    /// panel has selected for a device with several, and 0 for one with
+    /// one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot: Option<u8>,
+}
+
+/// Arguments of `device.select_slot`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SelectSlotArgs {
+    /// The device; the selected one if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The slot, counted from 0.
+    pub slot: u32,
 }
 
 /// What `device.load_sample` returns.
@@ -744,6 +775,9 @@ pub struct LoadSampleResult {
     /// The sample's media, by content hash: what the device and the set
     /// name it by.
     pub media: ContentHash,
+    /// The slot that took it, counted from 0.
+    #[serde(default)]
+    pub slot: u8,
     /// The file's name, for messages.
     pub name: String,
 }
@@ -949,16 +983,33 @@ fn specs() -> Vec<CommandSpec> {
             .result::<PresetResult>(),
         CommandSpec::new(LOAD_SAMPLE, "Load Sample")
             .description(
-                "Loads an audio file into a device that plays one sample (the sampler), as \
-                 dropping the file on the device does: the file goes into the set's media \
-                 store, named by its content hash, and the device keeps that reference, so the \
-                 set reopens playing it. One undo step, named Load Sample. Reads a file outside \
-                 the project. A device whose type doesn't play a sample is refused.",
+                "Loads an audio file into a device that plays samples (the sampler, or the \
+                 eight-slot drum sampler), as dropping the file on the device does: the file \
+                 goes into the set's media store, named by its content hash, and the device \
+                 keeps that reference, so the set reopens playing it. `slot` says which of a \
+                 device's sample slots takes it (counted from 0); left out, it is the slot \
+                 selected in the panel, or the only one. One undo step, named Load Sample. \
+                 Reads a file outside the project. A device whose type doesn't play a sample, \
+                 or a slot it doesn't have, is refused. `device.set_sample` with a null `media` \
+                 clears a slot.",
             )
             .permission(Permission::External)
             .context(DeviceView)
             .args::<LoadSampleArgs>()
             .result::<LoadSampleResult>(),
+        CommandSpec::new(SELECT_SLOT, "Select Sample Slot")
+            .description(
+                "Selects one of a device's sample slots, as clicking its cell in the panel \
+                 does: the panel then shows that slot's controls, and a sample loaded without \
+                 naming a slot goes into it. Only a device with sample slots has any (the \
+                 eight-slot drum sampler has eight, counted from 0). It changes only the \
+                 view: it isn't an undo step, and isn't saved with the set. The selected slot \
+                 is `selected_slot` in the device's panel (`device.state`).",
+            )
+            .permission(Permission::Read)
+            .context(DeviceView)
+            .args::<SelectSlotArgs>()
+            .result::<DeviceViewState>(),
         CommandSpec::new(HOT_SWAP, "Hot-Swap Presets")
             .description(
                 "Starts or ends hot-swapping a device's presets, as the title bar's Hot-Swap \

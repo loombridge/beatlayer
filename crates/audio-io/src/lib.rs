@@ -65,6 +65,7 @@ bl_rt::install_trap!();
 mod buffer;
 mod cpal_backend;
 mod error;
+mod latency;
 mod null;
 mod power;
 mod runner;
@@ -451,7 +452,9 @@ pub struct StreamInfo {
     /// The largest block [`AudioCallback::process`] receives.
     pub max_block_frames: u32,
     /// Frames between a sound arriving at the device's input and the stream
-    /// getting it, as the device reports. Zero when it reports none.
+    /// getting it, as the device reports. Zero when it reports none. A
+    /// backend that measures it as the stream runs says so in
+    /// [`Stream::latency`].
     pub input_latency: u32,
     /// Frames between the stream handing the device a sound and it coming
     /// out, as the device reports. Zero when it reports none.
@@ -531,12 +534,33 @@ pub trait Backend {
     ) -> Result<Box<dyn Stream>, Error>;
 }
 
+/// The latency a device reports, in frames, each direction counting its
+/// buffer once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Latency {
+    /// Between a sound arriving at the input and the stream getting it.
+    pub input: u32,
+    /// Between the stream handing the device a sound and it coming out.
+    pub output: u32,
+}
+
 /// A running or paused connection to a device.
 ///
 /// Dropping a stream stops it.
 pub trait Stream {
     /// What the stream runs at.
     fn info(&self) -> &StreamInfo;
+
+    /// The device's latency now: [`StreamInfo`]'s, or, for a stream that
+    /// measures it from its first callbacks (where the platform's API hides
+    /// the figure), the measurement once it is in and zero before.
+    fn latency(&self) -> Latency {
+        let info = self.info();
+        Latency {
+            input: info.input_latency,
+            output: info.output_latency,
+        }
+    }
 
     /// Starts calling the callback.
     fn start(&mut self) -> Result<(), Error>;

@@ -1111,6 +1111,25 @@ fn a_device(h: &mut Harness) {
         .unwrap();
 }
 
+/// The eight-slot drum sampler on the third track, the selected track, no
+/// device selected (WP-5.17).
+fn a_drum_sampler(h: &mut Harness) {
+    let track = h.shell.editor().document().top_level().nth(2).unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let t = bl_devices::kitbag_type();
+    h.shell
+        .run(
+            "device.add",
+            json!({ "device": { "kind": t.kind, "name": t.name, "role": t.role } }),
+        )
+        .unwrap();
+    h.shell
+        .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
 /// The Test Sidechain on audio track 3, the selected track, its sidechain
 /// section shown, no device selected (WP-2.19b).
 fn a_sidechained_device(h: &mut Harness) {
@@ -1911,6 +1930,94 @@ fn paths() -> BTreeMap<&'static str, Path> {
             )),
         ),
         ("device.set_param", Exception(device_params)),
+        // Racks (WP-5.1): Group and Ungroup are on Cmd-G and Cmd-Shift-G;
+        // the rack's chain list and its controls arrive with the Device
+        // View's rack (WP-5.2), until then agents reach them.
+        (
+            "device.wrap_in_rack",
+            Exception(Equivalent("Group (`device.group`, Cmd-G)")),
+        ),
+        (
+            "device.unwrap_rack",
+            Exception(Equivalent("Ungroup (`device.ungroup`, Cmd-Shift-G)")),
+        ),
+        (
+            "device.insert_in_chain",
+            Exception(Equivalent(
+                "adding a device as a person does (`device.add`)",
+            )),
+        ),
+        (
+            "device.move_to_chain",
+            Exception(Equivalent(
+                "Cmd-X on the selected device, then Cmd-V before another (`device.cut`, \
+                 `device.paste`)",
+            )),
+        ),
+        (
+            "device.set_enabled_all",
+            Exception(LaterView(
+                "the rack's Device Activator in the rack's title bar, Option-click (WP-5.2)",
+            )),
+        ),
+        (
+            "chain.add",
+            Exception(LaterView(
+                "the rack's chain list and its drop area (WP-5.2)",
+            )),
+        ),
+        (
+            "chain.remove",
+            Exception(LaterView("the rack's chain list, Delete (WP-5.2)")),
+        ),
+        (
+            "chain.move",
+            Exception(LaterView("dragging a chain in the chain list (WP-5.2)")),
+        ),
+        (
+            "chain.rename",
+            Exception(LaterView("the chain list's context menu, Rename (WP-5.2)")),
+        ),
+        (
+            "chain.set_colour",
+            Exception(LaterView("the chain list's context menu (WP-5.2)")),
+        ),
+        (
+            "chain.set_info",
+            Exception(LaterView("the chain list's context menu (WP-5.2)")),
+        ),
+        (
+            "chain.set_gain",
+            Exception(LaterView("the chain list's Volume slider (WP-5.2)")),
+        ),
+        (
+            "chain.set_pan",
+            Exception(LaterView("the chain list's Pan slider (WP-5.2)")),
+        ),
+        (
+            "chain.set_enabled",
+            Exception(LaterView("the chain list's activator (WP-5.2)")),
+        ),
+        (
+            "chain.set_solo",
+            Exception(LaterView("the chain list's Solo button (WP-5.2)")),
+        ),
+        (
+            "chain.copy",
+            Exception(LaterView("the chain list, Cmd-C (WP-5.2)")),
+        ),
+        (
+            "chain.cut",
+            Exception(LaterView("the chain list, Cmd-X (WP-5.2)")),
+        ),
+        (
+            "chain.paste",
+            Exception(LaterView("the chain list, Cmd-V (WP-5.2)")),
+        ),
+        (
+            "chain.duplicate",
+            Exception(LaterView("the chain list, Cmd-D (WP-5.2)")),
+        ),
         (
             "device.load_sample",
             Exception(Gap(
@@ -1922,6 +2029,12 @@ fn paths() -> BTreeMap<&'static str, Path> {
         (
             "device.set_sample",
             Exception(Equivalent("loading a sample (`device.load_sample`)")),
+        ),
+        // The drum sampler's slot cells (WP-5.17): Tab to one, then Enter
+        // selects the slot.
+        (
+            "device.select_slot",
+            main(a_drum_sampler, device_view, "Slot 2", Key::Enter),
         ),
         // A device's sidechain strip and section (routing R29): Enter on
         // its buttons, Up and Down on its chooser and number boxes.

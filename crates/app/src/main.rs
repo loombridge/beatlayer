@@ -21,6 +21,9 @@ Options:
   -h, --help             Print this message and exit
       --check            Load the keymap, the menus, the themes, and the command
                          registry without opening a window, report, and exit
+      --check-audio      Open the default audio output for a second without
+                         opening a window, report, and exit (3 if no device
+                         could start)
       --config-dir DIR   Keep preferences in DIR instead of the platform's place
       --null-audio       Play through the null device instead of the sound card
       --window-size WxH  Open the main window at W x H points, title bar included
@@ -73,6 +76,7 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Parsed, String> {
                 return Ok(Parsed::Exit(ExitCode::SUCCESS));
             }
             "--check" => return Ok(Parsed::Exit(check())),
+            "--check-audio" => return Ok(Parsed::Exit(check_audio())),
             "--config-dir" => {
                 parsed.config_dir = Some(it.next().ok_or("--config-dir takes a directory")?.into());
             }
@@ -144,6 +148,38 @@ fn main() -> ExitCode {
 /// `cargo xtask package` checks every packaged binary against this.
 fn version_line() -> String {
     format!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"))
+}
+
+/// What `--check-audio` exits with when no device could start, as on a
+/// machine with no sound card. A crash shows as a signal instead.
+const NO_AUDIO_DEVICE: u8 = 3;
+
+/// `--check-audio`: opens the default output as the app does at start-up,
+/// runs it for a second, and closes it, so a packaged binary shows its
+/// audio path starts in a release build.
+fn check_audio() -> ExitCode {
+    let mut audio = bl_shell::audio::AudioHost::new(bl_shell::audio::AudioSettings::default());
+    if let Err(error) = audio.start() {
+        println!("{}: no audio device started: {error}", version_line());
+        return ExitCode::from(NO_AUDIO_DEVICE);
+    }
+    std::thread::sleep(std::time::Duration::from_secs(1));
+    let status = audio.status();
+    audio.stop();
+    let device = status
+        .output_device
+        .map_or_else(|| "no output".to_owned(), |device| device.name);
+    let ms = |value: Option<f64>| value.map_or_else(|| "?".to_owned(), |ms| format!("{ms:.1} ms"));
+    println!(
+        "{}: {} on {device} ran for a second at {} Hz; output latency {}",
+        version_line(),
+        status.driver,
+        status
+            .sample_rate
+            .map_or_else(|| "?".to_owned(), |rate| rate.to_string()),
+        ms(status.output_latency_ms),
+    );
+    ExitCode::SUCCESS
 }
 
 /// `--check`: builds everything the window needs except the window, so a

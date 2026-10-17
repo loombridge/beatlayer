@@ -164,11 +164,27 @@ fn sample_drop(
     if !takes {
         return;
     }
-    invoke(
-        events,
-        ids::LOAD_SAMPLE,
-        json!({ "device": device, "path": path }),
-    );
+    // Dropped on a sample slot's cell, it loads into that slot; anywhere
+    // else on the device, into the selected one (WP-5.17).
+    let slot = state
+        .devices
+        .iter()
+        .find(|frame| frame.id == *device)
+        .and_then(|frame| {
+            let panel = frame.panel.as_ref()?;
+            let rect = placed.iter().find(|(id, _)| id == device)?.1;
+            let mut body = crate::device_panel::body_rect(rect, TITLE_BAR_HEIGHT);
+            body.min.x += ids::sidechain_width(frame);
+            let (_, cells) = crate::device_panel::place_shown(panel, frame.expanded, body);
+            cells
+                .into_iter()
+                .find_map(|(_, cell, slot)| slot.filter(|_| cell.contains(pointer)))
+        });
+    let mut args = json!({ "device": device, "path": path });
+    if let Some(slot) = slot {
+        args["slot"] = json!(slot);
+    }
+    invoke(events, ids::LOAD_SAMPLE, args);
 }
 
 impl DeviceViewUi {
@@ -322,7 +338,7 @@ impl DeviceViewUi {
         let _ = ui.interact(rect, id, Sense::hover());
         ui.ctx().accesskit_node_builder(id, |node| {
             node.set_role(Role::Group);
-            node.set_label(frame.title.clone());
+            node.set_label(frame.title_text());
             node.set_description(format!(
                 "{}, {}{}",
                 frame.role.label(),
@@ -469,7 +485,7 @@ impl DeviceViewUi {
         let painter = ui.painter_at(rect);
         if strip {
             // The name reads upwards on a folded device (observed).
-            let galley = painter.layout_no_wrap(frame.title.clone(), theme.small_font(), colour);
+            let galley = painter.layout_no_wrap(frame.title_text(), theme.small_font(), colour);
             let at = pos2(
                 rect.center().x - galley.size().y / 2.0,
                 rect.top() + galley.size().x.min(rect.height()),
@@ -479,7 +495,7 @@ impl DeviceViewUi {
             painter.text(
                 pos2(rect.left(), rect.center().y),
                 Align2::LEFT_CENTER,
-                &frame.title,
+                frame.title_text(),
                 theme.small_font(),
                 colour,
             );
@@ -507,11 +523,11 @@ impl DeviceViewUi {
         }
         focus_ring(ui, theme, rect, &response);
         response.widget_info(|| {
-            WidgetInfo::selected(WidgetType::Button, true, frame.selected, &frame.title)
+            WidgetInfo::selected(WidgetType::Button, true, frame.selected, frame.title_text())
         });
         ui.ctx().accesskit_node_builder(id, |node| {
             node.set_role(Role::Button);
-            node.set_label(frame.title.clone());
+            node.set_label(frame.title_text());
             node.set_selected(frame.selected);
             node.set_description(
                 if window {

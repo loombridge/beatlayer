@@ -46,7 +46,7 @@ impl Document {
             }
             self.check_target(track, to, |kind| kind == TrackKind::Midi)?;
         }
-        for device in track.devices() {
+        for device in track.devices_deep() {
             if let Some(sidechain) = &device.sidechain {
                 check_sidechain_input(self, track, sidechain.input.clone())?;
             }
@@ -116,7 +116,7 @@ impl Document {
             .tracks
             .iter()
             .filter(|(_, t)| {
-                names_any(&t.routing, gone) || t.devices().any(|d| listens_to(d, gone))
+                names_any(&t.routing, gone) || t.devices_deep().any(|d| listens_to(d, gone))
             })
             .map(|(&id, _)| id)
             .collect();
@@ -124,11 +124,14 @@ impl Document {
             if let Some(track) = self.tracks.get_mut(&id) {
                 let track = crate::shared::Shared::make_mut(track);
                 for device in track.devices.iter_mut() {
-                    if listens_to(device, gone) {
-                        let device = crate::shared::Shared::make_mut(device);
-                        if let Some(sidechain) = &mut device.sidechain {
-                            sidechain.input = Input::None;
-                        }
+                    if device.walk().any(|d| listens_to(d, gone)) {
+                        crate::shared::Shared::make_mut(device).walk_mut(&mut |device| {
+                            if listens_to(device, gone)
+                                && let Some(sidechain) = &mut device.sidechain
+                            {
+                                sidechain.input = Input::None;
+                            }
+                        });
                     }
                 }
                 let routing = &mut track.routing;

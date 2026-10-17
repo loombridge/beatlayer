@@ -210,6 +210,8 @@ impl Document {
                                     Travel::Param(&description).legacy_share(control, old)
                                 },
                             ),
+                        // A set from before relative modulation holds no racks.
+                        AutomationTarget::Chain { .. } => old.clamp(-1.0, 1.0),
                     });
                 }
                 if let Some(clip) = track.clip_mut(clip) {

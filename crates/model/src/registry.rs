@@ -1517,6 +1517,38 @@ const ENTRIES: &[Entry] = &[
             defaults.",
     },
     Entry {
+        id: "device.compare_switch",
+        action: Action::Apply("compare_switch"),
+        label: "Compare: Switch",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[Key::Runs("S-DEV-011")],
+        description: "Makes the other of a native device's two states, A and B, the active \
+            one, as the Edit menu's and the device menu's Compare: Switch to B/A and the P key \
+            do. Every parameter whose value differs between the states moves to the newly \
+            active state's value, a continuous one gliding as any change does, and every \
+            parameter of the device that has an envelope is overridden until Re-Enable \
+            Automation. One undo step, named as the item that ran it. A change to a parameter \
+            goes to the active state only. Racks and plug-ins have no states, so a command for \
+            one is refused. `device.parameters` says which state is active and each \
+            parameter's value in the other; the query tool's `device` has both in `compare`. \
+            From the keyboard and the menus it switches the selected device.",
+    },
+    Entry {
+        id: "device.compare_copy",
+        action: Action::Apply("compare_copy"),
+        label: "Compare: Copy",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Copies every value of a native device's active state, A or B, over the \
+            other, as the Edit menu's and the device menu's Compare: Copy A to B (Copy B to A \
+            while B is active) do. What the device plays doesn't change, and no envelope is \
+            overridden. One undo step, named as the item that ran it. Racks and plug-ins have \
+            no states, so a command for one is refused. From the menus it copies the selected \
+            device's state.",
+    },
+    Entry {
         id: "device.set_sample",
         action: Action::Apply("set_device_sample"),
         label: "Set Sample",
@@ -1524,10 +1556,12 @@ const ENTRIES: &[Entry] = &[
         contexts: &[DeviceView],
         keys: &[],
         description: "Sets the audio a device plays (`media`, a content hash, or null to play \
-            none), which the media store holds like a clip's audio. A device whose type plays a \
-            sample plays that file; other devices ignore it. The set keeps the reference, so it \
-            reopens playing the same file. To load a file from disk as a person does, use \
-            `device.load_sample`.",
+            none), which the media store holds like a clip's audio, in sample slot `slot` \
+            (counted from 0, and 0 unless given: the sampler has the one, the eight-slot drum \
+            sampler eight). A device whose type plays samples plays that file; other devices \
+            ignore it. The set keeps the reference, so it reopens playing the same file. Null \
+            clears the slot, one undo step named Clear Sample. To load a file from disk as a \
+            person does, use `device.load_sample`.",
     },
     Entry {
         id: "device.set_sidechain_input",
@@ -1591,6 +1625,141 @@ const ENTRIES: &[Entry] = &[
             its detector hears (the sidechain, after its gain and mix) instead of the \
             processed track, so you can check what triggers it. Switch it off to hear the \
             track again.",
+    },
+    Entry {
+        id: "device.insert_in_chain",
+        action: Action::Apply("insert_chain_device"),
+        label: "Insert Device in Chain",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Inserts a device into a rack's chain at `index`, where 0 is first in the chain's signal flow, as `device.insert` does for a track's chain. The chain may belong to a rack at any depth. The device is described as for `device.insert`, with a new ID. A chain keeps the order for its kind of rack: an audio effect rack's chains hold only audio effects, a MIDI effect rack's only MIDI effects, and an instrument or drum rack's chains hold MIDI effects, then at most one instrument, then audio effects; an index or device that breaks it is refused.",
+    },
+    Entry {
+        id: "device.move_to_chain",
+        action: Action::Apply("move_device_to_chain"),
+        label: "Move Device to Chain",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Moves a device to `index` in a rack's chain, from a track's chain or another chain, on the same track or another, keeping its settings and running state. The index counts positions after the device is taken out of its current place. The chain must stay in order for its kind of rack. A rack can't be moved into one of its own chains. To move a device out of a rack, use `device.move`.",
+    },
+    Entry {
+        id: "device.set_enabled_all",
+        action: Action::Apply("set_device_enabled_all"),
+        label: "Switch Device and Contents",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[Key::Toggles("S-DEV-003", "enabled")],
+        description: "Switches a device and every device inside it, at any depth, on or off with `enabled`: Option-click (Alt-click) on a rack's Device Activator. On a device that isn't a rack it is `device.set_enabled`. One undo step.",
+    },
+    Entry {
+        id: "chain.add",
+        action: Action::Apply("add_chain"),
+        label: "Add Chain",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Adds a chain to a rack at `index` in the rack's list of chains, where 0 is first. The chain has a new ID from the project, a `name` (left empty, a chain made with a device in it is named after the device's title and an empty one `Chain`), an optional `colour` (0 to 69), `info` text, a `mixer` (leave it out for a new chain's: `volume` 1, `pan` 0, `enabled` true, `solo` false) and its `devices`, each with a new ID, in the order for the kind of rack. An empty chain passes its input straight to its mixer, which makes a dry path. One undo step.",
+    },
+    Entry {
+        id: "chain.remove",
+        action: Action::Apply("remove_chain"),
+        label: "Delete Chain",
+        permission: Permission::Destructive,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Deletes a chain from its rack, with its devices and its automation. Undo restores it, but because it removes the person's work an agent asks first.",
+    },
+    Entry {
+        id: "chain.move",
+        action: Action::Apply("move_chain"),
+        label: "Move Chain",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Moves a chain to `index` in a rack's list of chains, within its rack or into another rack, on the same track or another, keeping its devices' settings and running state. The index counts positions after the chain is taken out of its current place. The chain must fit the other rack's kind, and a chain can't go into a rack it holds.",
+    },
+    Entry {
+        id: "chain.rename",
+        action: Action::Apply("rename_chain"),
+        label: "Rename Chain",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Renames a rack's chain: the name the chain list shows. An empty name gives it the name a chain has without one: its first device's title, or `Chain` while it holds none.",
+    },
+    Entry {
+        id: "chain.set_colour",
+        action: Action::Apply("set_chain_colour"),
+        label: "Set Chain Colour",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Colours a chain with swatch `colour` of the palette of 5 rows of 14 (0 to 69), or clears its colour with null.",
+    },
+    Entry {
+        id: "chain.set_info",
+        action: Action::Apply("set_chain_info"),
+        label: "Edit Chain Info Text",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sets the info text of a chain, Edit Info Text in its context menu. Empty clears it.",
+    },
+    Entry {
+        id: "chain.set_gain",
+        action: Action::Apply("set_chain_volume"),
+        label: "Set Chain Gain",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sets a chain's Volume as linear gain with the track fader's range: 1 is 0 dB (a new chain's), 2 about +6 dB, 0 silence. The chain's level glides to the new value over 20 ms with no new program. Chains of a MIDI effect rack have no volume. Moving it by hand turns off its automation envelope.",
+    },
+    Entry {
+        id: "chain.set_pan",
+        action: Action::Apply("set_chain_pan"),
+        label: "Set Chain Pan",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sets a chain's Pan from -1 (left) to 1 (right), 0 centre (a new chain's), by the track mixer's constant-power law. Chains of a MIDI effect rack have no pan.",
+    },
+    Entry {
+        id: "chain.set_enabled",
+        action: Action::Apply("set_chain_enabled"),
+        label: "Chain Activator",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Switches a chain's Chain Activator: a chain that's off adds nothing to its rack's output, and its level glides down over 20 ms. Its devices keep running, and its latency still counts.",
+    },
+    Entry {
+        id: "chain.set_solo",
+        action: Action::Apply("set_chain_solo"),
+        label: "Solo Chain",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Solos or unsolos a chain: while any chain of a rack is soloed, the rack's unsoloed chains add nothing. It leaves every other rack and every track as it is.",
+    },
+    Entry {
+        id: "device.wrap_in_rack",
+        action: Action::Apply("group_devices"),
+        label: "Wrap Devices in a Rack",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Wraps devices of one chain in a new rack, which takes the first device's place: the rack holds one chain that holds the devices in their order, each keeping its settings and running state. `devices` are in one chain of a track or a rack; `rack` is a new rack device (its kind `rack` of `instrument`, `audio_effect`, `midi_effect` or `drum`, and the role of its kind) with new IDs and exactly one empty chain. The rack's kind must be one that can hold them: an audio effect rack for audio effects alone, a MIDI effect rack for MIDI effects alone, an instrument rack for any other mix. A grouping that would break the chain's order is refused. One undo step. To group the selection as a person does, use `device.group`.",
+    },
+    Entry {
+        id: "device.unwrap_rack",
+        action: Action::Apply("ungroup_device"),
+        label: "Take a Rack Apart",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Takes a rack with one chain, or none, apart: the chain's devices take the rack's place in order, keeping their settings and running state; the rack, its chain and its mixer are gone. A rack of several chains can't be taken apart. One undo step. To ungroup the selected rack as a person does, use `device.ungroup`.",
     },
     Entry {
         id: UNDO,

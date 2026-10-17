@@ -59,6 +59,7 @@ use bl_plugin_host::scan::Scanner;
 use bl_plugin_host::vst3::Vst3Host;
 use bl_shell_spec::arrangement as view_ids;
 use bl_shell_spec::browser as browser_ids;
+use bl_shell_spec::capture_midi as capture_ids;
 use bl_shell_spec::devices as device_ids;
 use bl_shell_spec::editing as edit_ids;
 use bl_shell_spec::export as export_ids;
@@ -79,6 +80,7 @@ use bl_shell_spec::tracks as track_ids;
 use bl_shell_spec::transport as transport_ids;
 use bl_shell_spec::transport::{RecordedFileReport, RecordingReport, RunningRecording};
 
+mod capture;
 mod processed_files;
 mod session_recording;
 
@@ -462,6 +464,9 @@ pub struct Shell {
     recorded_takes: u32,
     /// The Session recording under way, beside `recording` (WP-3.11).
     session_run: Option<session_recording::SessionRun>,
+    /// The notes monitoring MIDI tracks received, for Capture MIDI
+    /// (WP-3.14).
+    capture: bl_engine::capture::Buffer,
     /// The control moves of the automation recording under way (WP-2.12).
     automation_take: crate::automation_record::Take,
     /// The control moves of the Session recording under way (WP-3.12).
@@ -727,6 +732,7 @@ impl Shell {
             last_recording: None,
             recorded_takes: 0,
             session_run: None,
+            capture: bl_engine::capture::Buffer::default(),
             automation_take: crate::automation_record::Take::default(),
             session_automation: crate::automation_record::SessionTake::default(),
             session_take_start: None,
@@ -1170,7 +1176,7 @@ impl Shell {
             .editor
             .document()
             .tracks()
-            .flat_map(|track| track.devices())
+            .flat_map(|track| track.devices_deep())
             .filter(|device| {
                 matches!(&device.kind, DeviceKind::Native { device_type } if device_type == STACK)
                     && device.params.get(&LEARN).is_some_and(|on| *on >= 0.5)
@@ -1590,7 +1596,7 @@ impl Shell {
             .flat_map(|track| {
                 let label = crate::routing::track_label(doc, track.id());
                 track
-                    .devices()
+                    .devices_deep()
                     .filter(|d| self.kit.handles(&d.kind) || crate::plugins::is_clap(doc, d.id))
                     .map(|d| {
                         let listed = if self.kit.handles(&d.kind) {
@@ -1751,6 +1757,17 @@ impl Shell {
         &self.vst3
     }
 
+    /// The hosts an offline render borrows the engine's plug-ins from
+    /// (WP-2.6b, WP-4.21).
+    #[must_use]
+    pub fn plugin_hosts(&self) -> bl_plugin_host::Hosts<'_> {
+        bl_plugin_host::Hosts {
+            clap: Some(&self.plugins),
+            vst3: Some(&self.vst3),
+            au: Some(&self.au),
+        }
+    }
+
     /// Lets go of the plug-ins of the set being replaced (WP-2.6): the new
     /// set's plug-in devices load their plug-ins from their saved state.
     fn set_replaced(&mut self) {
@@ -1863,6 +1880,7 @@ impl Shell {
                             sidechain: false,
                         },
                         track,
+                        chain: None,
                         index,
                     }),
                 )?)
@@ -1882,6 +1900,7 @@ impl Shell {
                 let plugin_id = match &device_type.kind {
                     bl_model::DeviceKind::Plugin { plugin_id, .. } => plugin_id.clone(),
                     bl_model::DeviceKind::Native { device_type } => device_type.clone(),
+                    bl_model::DeviceKind::Rack { kind } => kind.name().to_owned(),
                 };
                 Ok(to_value(&plugin_ids::PluginLoaded {
                     device: added.device,
@@ -1921,6 +1940,7 @@ impl Shell {
                             sidechain: false,
                         },
                         track,
+                        chain: None,
                         index,
                     }),
                 )?)
@@ -1940,6 +1960,7 @@ impl Shell {
                 let plugin_id = match &device_type.kind {
                     bl_model::DeviceKind::Plugin { plugin_id, .. } => plugin_id.clone(),
                     bl_model::DeviceKind::Native { device_type } => device_type.clone(),
+                    bl_model::DeviceKind::Rack { kind } => kind.name().to_owned(),
                 };
                 Ok(to_value(&plugin_ids::PluginLoaded {
                     device: added.device,
@@ -2290,7 +2311,7 @@ impl Shell {
     /// set records where it is and the device names it by content hash, and
     /// the engine plays it. One undo step.
     fn load_sample(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
-        let device_ids::LoadSampleArgs { device, path } = Self::args(id, args)?;
+        let device_ids::LoadSampleArgs { device, path, slot } = Self::args(id, args)?;
         let device =
             device
                 .or_else(|| self.devices.selected())
@@ -2298,23 +2319,37 @@ impl Shell {
                     command: id.to_owned(),
                     reason: "select a device first".to_owned(),
                 })?;
-        let kind = self
+        let target = self
             .editor
             .document()
             .device(device)
-            .map(|device| device.kind.clone())
+            .cloned()
             .ok_or_else(|| ShellError::InvalidArgs {
                 command: id.to_owned(),
                 message: format!("no {device}"),
             })?;
-        // Only the sampler plays a sample (the sampler spec, R11).
-        let sampler = bl_model::DeviceKind::Native {
-            device_type: bl_devices::sampler::SAMPLER.to_owned(),
-        };
-        if kind != sampler {
+        // Only the sampler and the drum sampler play samples (the sampler
+        // spec, R11).
+        let plays = matches!(
+            &target.kind,
+            bl_model::DeviceKind::Native { device_type } if bl_devices::plays_samples(device_type)
+        );
+        if !plays {
             return Err(ShellError::Failed {
                 command: id.to_owned(),
                 message: format!("{device} doesn't play a sample"),
+            });
+        }
+        // A device with several slots loads into the one selected unless
+        // told which.
+        let slot = slot.unwrap_or_else(|| self.devices.slot_of(&target) as u8);
+        let slots = self.devices.slot_count(&target.kind).max(1);
+        if u32::from(slot) >= slots {
+            return Err(ShellError::InvalidArgs {
+                command: id.to_owned(),
+                message: format!(
+                    "{device} has {slots} sample slots, counted from 0; there is no slot {slot}"
+                ),
             });
         }
         let path = PathBuf::from(path);
@@ -2337,6 +2372,7 @@ impl Shell {
             .apply(bl_model::Command::SetDeviceSample {
                 device,
                 media: Some(media),
+                slot,
             })
             .map_err(|error| ShellError::Failed {
                 command: id.to_owned(),
@@ -2352,6 +2388,7 @@ impl Shell {
         Ok(to_value(&device_ids::LoadSampleResult {
             device,
             media,
+            slot,
             name,
         }))
     }
@@ -2447,6 +2484,26 @@ impl Shell {
         self.devices.hot_swap()?;
         match self.browser_view.selected() {
             [one] if bl_project::preset::is_preset(one) => Some(one.clone()),
+            _ => None,
+        }
+    }
+
+    /// The browser's selection, if it's one audio file and a device that
+    /// plays samples is being hot-swapped: what Enter or a double-click
+    /// loads into the device's selected slot (WP-5.17).
+    fn hot_swap_sample(&self) -> Option<(bl_model::DeviceId, PathBuf)> {
+        let device = self.devices.hot_swap()?;
+        let takes = self.editor.document().device(device).is_some_and(|d| {
+            matches!(
+                &d.kind,
+                bl_model::DeviceKind::Native { device_type }
+                    if bl_devices::plays_samples(device_type)
+            )
+        });
+        match self.browser_view.selected() {
+            [one] if takes && browser::arrange::is_audio(&one.to_string_lossy()) => {
+                Some((device, one.clone()))
+            }
             _ => None,
         }
     }
@@ -3029,6 +3086,7 @@ impl Shell {
     /// R14). Returns the transport it took.
     pub fn poll_engine(&mut self) -> EngineTransport {
         let engine = self.audio.transport_state();
+        self.poll_capture();
         // WP-2.13. A recording's take reaches the shell with the engine's
         // state; the clips are made from it once the writer has finished.
         self.poll_recording(&engine);
@@ -3820,6 +3878,24 @@ impl Shell {
                 || "Nothing to Redo".to_owned(),
                 |step| format!("Redo {step}"),
             )),
+            // Spec: device-compare R3, R4: the items follow the state of the
+            // selected device.
+            device_ids::COMPARE_SWITCH | device_ids::COMPARE_COPY => {
+                let b = self
+                    .devices
+                    .selected()
+                    .and_then(|d| self.editor.document().device(d))
+                    .is_some_and(|d| d.b_active);
+                Some(
+                    match (id == device_ids::COMPARE_SWITCH, b) {
+                        (true, false) => "Compare: Switch to B",
+                        (true, true) => "Compare: Switch to A",
+                        (false, false) => "Compare: Copy A to B",
+                        (false, true) => "Compare: Copy B to A",
+                    }
+                    .to_owned(),
+                )
+            }
             // The Playback menu's first item toggles with Stop (M-PLAY-001).
             transport_ids::PLAY_STOP => {
                 Some(if self.playing() { "Stop" } else { "Play" }.to_owned())
@@ -3899,10 +3975,16 @@ impl Shell {
             }
             _ => {}
         }
+        if capture_ids::handles(id) {
+            // Spec: capture-midi R1. Nothing played, nothing to capture.
+            return self.capture_midi_ready() && self.audio.engine_running();
+        }
         if ids::handles(id) || transport_ids::handles(id) {
             return true;
         }
-        if id == browser_ids::LOAD_SELECTED && self.hot_swap_preset().is_some() {
+        if id == browser_ids::LOAD_SELECTED
+            && (self.hot_swap_preset().is_some() || self.hot_swap_sample().is_some())
+        {
             return true;
         }
         if device_ids::handles(id) {
@@ -3961,17 +4043,24 @@ impl Shell {
         if id == "track.rename" && args.get("name").is_none() {
             return self.renamable_track(args).is_some();
         }
-        if id == device_ids::SET_FLOATING {
+        if id == device_ids::SET_FLOATING
+            || matches!(id, device_ids::COMPARE_SWITCH | device_ids::COMPARE_COPY)
+        {
             // IMP-14: only native devices float; plug-ins open their own
-            // editor windows.
+            // editor windows. Spec: device-compare R6: only native devices
+            // have A and B states.
             let named = args
                 .get("device")
                 .and_then(|v| serde_json::from_value(v.clone()).ok());
-            let floats = named
+            let device = named
                 .or(self.devices.selected())
-                .and_then(|d| self.editor.document().device(d))
-                .is_some_and(bl_model::Device::can_float);
-            if !floats {
+                .and_then(|d| self.editor.document().device(d));
+            let fits = if id == device_ids::SET_FLOATING {
+                device.is_some_and(bl_model::Device::can_float)
+            } else {
+                device.is_some_and(bl_model::Device::can_compare)
+            };
+            if !fits {
                 return false;
             }
         }
@@ -4516,6 +4605,7 @@ impl Shell {
     /// is unchanged when a command fails, except that a device that refuses
     /// new audio settings goes back to the previous ones.
     pub fn run(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        self.poll_capture();
         let arranged = self.arrangement.selected_clips().to_vec();
         let slot = self.selected_slot_clip();
         let result = self.run_command(id, args);
@@ -4734,6 +4824,9 @@ impl Shell {
         if session_record_ids::handles(id) {
             return self.run_session_record(id, args);
         }
+        if capture_ids::handles(id) {
+            return self.run_capture_midi(id, args);
+        }
         if session_launch_ids::handles(id) {
             // Spec: launch-quantisation R1, R3, R6, R10. The Control Bar's
             // Quantization Menu and the Options items run here, with the
@@ -4889,6 +4982,18 @@ impl Shell {
             return Ok(outcome.value);
         }
         if id == browser_ids::LOAD_SELECTED
+            && let Some((device, path)) = self.hot_swap_sample()
+        {
+            // Spec: eight-slot-drum-sampler R17. Loading a sample while
+            // hot-swapping a device that plays samples loads it into the
+            // device's selected slot, as dropping it there does.
+            Self::args::<NoArgs>(id, args)?;
+            return self.load_sample(
+                device_ids::LOAD_SAMPLE,
+                json!({ "device": device, "path": path.to_string_lossy() }),
+            );
+        }
+        if id == browser_ids::LOAD_SELECTED
             && let Some(path) = self.hot_swap_preset()
         {
             // Spec: device-chains R19. Loading a preset while hot-swapping
@@ -4937,7 +5042,7 @@ impl Shell {
             return crate::export::run_command(
                 self.editor.document(),
                 media,
-                Some(&self.plugins),
+                self.plugin_hosts(),
                 self.arrangement.time_selection(),
                 self.arrangement.selected_tracks(),
                 engine_rate,
@@ -5080,7 +5185,7 @@ impl Shell {
             media: Arc::clone(&self.media) as Arc<dyn bl_engine::MediaLibrary>,
             selection: self.arrangement.time_selection(),
             engine_rate,
-            plugins: Some(&self.plugins),
+            plugins: self.plugin_hosts(),
             playing,
             cancel: None,
         };

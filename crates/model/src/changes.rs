@@ -112,7 +112,7 @@ impl ChangeSet {
         for clip in track.slots.values() {
             record(&mut self.clips, clip.id, change);
         }
-        for device in &track.devices {
+        for device in track.devices_deep() {
             record(&mut self.devices, device.id, change);
         }
     }
@@ -148,8 +148,8 @@ impl ChangeSet {
             }
         }
         if !old.devices.ptr_eq(&new.devices) {
-            let before: BTreeMap<_, _> = old.devices.iter().map(|d| (d.id, d)).collect();
-            let after: BTreeMap<_, _> = new.devices.iter().map(|d| (d.id, d)).collect();
+            let before: BTreeMap<_, _> = old.devices_deep().map(|d| (d.id, d)).collect();
+            let after: BTreeMap<_, _> = new.devices_deep().map(|d| (d.id, d)).collect();
             for (device, old_device) in &before {
                 match after.get(device) {
                     None => record(&mut self.devices, *device, Change::Removed),

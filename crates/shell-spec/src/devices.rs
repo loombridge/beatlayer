@@ -5,7 +5,7 @@
 //! The document's own device commands (`device.insert`, `device.remove`,
 //! `device.move`, `device.rename`, `device.set_enabled`,
 //! `device.set_show_preset_name`, `device.set_state`, `device.set_param`,
-//! `device.set_floating`)
+//! `device.set_floating`, `device.compare_switch`, `device.compare_copy`)
 //! are `bl-model`'s. Those here run on the shell, which knows the selection,
 //! the clipboard, the User Library, and the browser. A command whose
 //! `device` is left out acts on the device selected in the Device View, as
@@ -16,8 +16,8 @@ use bl_commands::Context::{Browser, DeviceView, Global};
 use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_model::device_layout::BODY_HEIGHT;
 use bl_model::{
-    ContentHash, DeviceDescription, DeviceDisplay, DeviceId, DeviceKind, DeviceLayout, DeviceRole,
-    ParamDescriptor, ParamId, Tap, TrackId, TrackKind, WindowFrame,
+    ChainId, ContentHash, DeviceDescription, DeviceDisplay, DeviceId, DeviceKind, DeviceLayout,
+    DeviceRole, ParamDescriptor, ParamId, Tap, TrackId, TrackKind, WindowFrame,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -50,6 +50,9 @@ pub const LOAD_PRESET: &str = "device.load_preset";
 /// `device.load_sample`: load an audio file into a device that plays one
 /// sample (WP-2.16).
 pub const LOAD_SAMPLE: &str = "device.load_sample";
+/// `device.select_slot`: select a sample slot of a device that has them
+/// (WP-5.17).
+pub const SELECT_SLOT: &str = "device.select_slot";
 /// `device.hot_swap`: start or end hot-swapping a device's presets.
 pub const HOT_SWAP: &str = "device.hot_swap";
 /// `device.parameters`: a device's parameters, described, with their values.
@@ -63,6 +66,20 @@ pub const DISPLAY: &str = "device.display";
 /// (WP-5.43).
 pub const SET_DISPLAY_VIEW: &str = "device.set_display_view";
 
+/// `device.group`: wrap the selected devices, or chains, in a new rack
+/// (WP-5.1).
+pub const GROUP: &str = "device.group";
+/// `device.ungroup`: take the selected rack apart (WP-5.1).
+pub const UNGROUP: &str = "device.ungroup";
+/// `chain.copy`: copy a chain to the chain clipboard (WP-5.1).
+pub const CHAIN_COPY: &str = "chain.copy";
+/// `chain.cut`: cut a chain to the chain clipboard.
+pub const CHAIN_CUT: &str = "chain.cut";
+/// `chain.paste`: paste the clipboard's chain into a rack.
+pub const CHAIN_PASTE: &str = "chain.paste";
+/// `chain.duplicate`: duplicate a chain straight after itself.
+pub const CHAIN_DUPLICATE: &str = "chain.duplicate";
+
 /// `device.windows`: the floating devices' windows (WP-2.5b).
 pub const WINDOWS: &str = "device.windows";
 /// `device.set_window`: where a floating device's window sits.
@@ -70,6 +87,13 @@ pub const SET_WINDOW: &str = "device.set_window";
 /// `device.set_floating`: the document's command that floats or docks a
 /// device (`bl-model`'s).
 pub const SET_FLOATING: &str = "device.set_floating";
+
+/// `device.compare_switch`: make a native device's other A/B state active
+/// (`bl-model`'s).
+pub const COMPARE_SWITCH: &str = "device.compare_switch";
+/// `device.compare_copy`: copy a native device's active A/B state over the
+/// other (`bl-model`'s).
+pub const COMPARE_COPY: &str = "device.compare_copy";
 
 /// Every command [`register`] adds, so a host knows which IDs to send to
 /// `bl-shell`'s `Shell::run`.
@@ -87,6 +111,7 @@ pub const IDS: &[&str] = &[
     SAVE_DEFAULT_PRESET,
     LOAD_PRESET,
     LOAD_SAMPLE,
+    SELECT_SLOT,
     HOT_SWAP,
     PARAMETERS,
     SHOW_SIDECHAIN,
@@ -94,6 +119,12 @@ pub const IDS: &[&str] = &[
     SET_DISPLAY_VIEW,
     WINDOWS,
     SET_WINDOW,
+    GROUP,
+    UNGROUP,
+    CHAIN_COPY,
+    CHAIN_CUT,
+    CHAIN_PASTE,
+    CHAIN_DUPLICATE,
 ];
 
 /// The document's device commands that act on the selected device when
@@ -104,6 +135,8 @@ pub const ON_SELECTED: &[&str] = &[
     "device.set_enabled",
     "device.set_show_preset_name",
     SET_FLOATING,
+    COMPARE_SWITCH,
+    COMPARE_COPY,
 ];
 
 /// Whether `id` is one of the Device View's commands.
@@ -219,6 +252,17 @@ pub struct DevicePanel {
     /// target that opens the plug-in's editor. False for a native device.
     #[serde(default)]
     pub plugin: bool,
+    /// For a device with sample slots (WP-5.17): the slot whose controls
+    /// the panel shows, a view setting that isn't saved with the set.
+    #[serde(default)]
+    pub selected_slot: u32,
+    /// For a device with sample slots: whether each slot holds a sample.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub loaded_slots: Vec<bool>,
+    /// For a device with sample slots: the key each slot plays, as Live
+    /// names notes (`C3`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub slot_keys: Vec<String>,
 }
 
 impl DevicePanel {
@@ -279,6 +323,10 @@ pub struct ParameterState {
     /// rather than a control in its body (C-DEVICE-015).
     #[serde(default)]
     pub menu_option: bool,
+    /// Its value in the A and B state that isn't active (device compare
+    /// R11); left out for a device without two states.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub other: Option<f64>,
 }
 
 /// What `device.parameters` returns.
@@ -286,6 +334,10 @@ pub struct ParameterState {
 pub struct DeviceParameters {
     /// The device.
     pub device: DeviceId,
+    /// Which of its A and B states is active, `A` or `B` (device compare
+    /// R11); left out for a device without two states.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active: Option<String>,
     /// Its parameters, in the order its type lists them; empty if its type
     /// doesn't describe them.
     pub params: Vec<ParameterState>,
@@ -338,6 +390,10 @@ pub struct DeviceFrame {
     /// strip (WP-2.5b).
     #[serde(default)]
     pub floating: bool,
+    /// Whether its B state is the active one, which the title bar marks
+    /// "(B)" (device compare R5).
+    #[serde(default)]
+    pub b_active: bool,
     /// Whether it's the selected device.
     pub selected: bool,
     /// Whether it's the device being hot-swapped.
@@ -352,6 +408,19 @@ pub struct DeviceFrame {
     /// of its description's `views`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_view: Option<String>,
+}
+
+impl DeviceFrame {
+    /// What its title bar reads, with "(B)" after the name while the B
+    /// state is active (device compare R5).
+    #[must_use]
+    pub fn title_text(&self) -> String {
+        if self.b_active {
+            format!("{} (B)", self.title)
+        } else {
+            self.title.clone()
+        }
+    }
 }
 
 /// A device's sidechain section, as its left strip and the section show it
@@ -532,6 +601,10 @@ pub struct AddDeviceArgs {
     /// The track; the selected track if left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub track: Option<TrackId>,
+    /// A rack's chain to add it to, at any depth, in place of the track's
+    /// own chain (WP-5.1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chain: Option<ChainId>,
     /// Where it goes in the chain; after the selected device, or at the end
     /// of its role's place in the chain, if left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -559,10 +632,76 @@ pub struct PasteDeviceArgs {
     /// The track; the selected track if left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub track: Option<TrackId>,
-    /// Paste before this device; before the selected device, or at the end
-    /// of the chain with none selected, if left out.
+    /// A rack's chain to paste into, at any depth, in place of the track's
+    /// own chain (WP-5.1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chain: Option<ChainId>,
+    /// Paste before this device, which may be in a rack's chain; before the
+    /// selected device, or at the end of the chain with none selected, if
+    /// left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub before: Option<DeviceId>,
+}
+
+/// Arguments of `device.group`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct GroupArgs {
+    /// The devices to wrap in a new rack, all in one chain; the selected
+    /// device if both lists are left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub devices: Option<Vec<DeviceId>>,
+    /// Several chains of one rack to group instead: they become the chains
+    /// of a new rack of the same kind, in a new chain in the first one's
+    /// place.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chains: Option<Vec<ChainId>>,
+}
+
+/// What `device.group` returns.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Grouped {
+    /// The new rack, now selected.
+    pub rack: DeviceId,
+    /// The chain that holds the devices, or, when chains were grouped, the
+    /// new chain that holds the new rack.
+    pub chain: ChainId,
+}
+
+/// What `device.ungroup` returns.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Ungrouped {
+    /// The devices that took the rack's place, in order; the first is now
+    /// selected.
+    pub devices: Vec<DeviceId>,
+}
+
+/// Arguments of `chain.copy`, `chain.cut` and `chain.duplicate`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ChainArgs {
+    /// The chain.
+    pub chain: ChainId,
+}
+
+/// Arguments of `chain.paste`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PasteChainArgs {
+    /// The rack to paste into.
+    pub rack: DeviceId,
+    /// Where it goes in the rack's list of chains; the end if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<usize>,
+}
+
+/// What the chain commands that add a chain return.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ChainAdded {
+    /// The new chain.
+    pub chain: ChainId,
+    /// The rack it is in.
+    pub rack: DeviceId,
 }
 
 /// Arguments of `device.save_preset`.
@@ -610,6 +749,22 @@ pub struct LoadSampleArgs {
     pub device: Option<DeviceId>,
     /// The audio file to load into the device.
     pub path: String,
+    /// The sample slot to load it into, counted from 0; the slot the
+    /// panel has selected for a device with several, and 0 for one with
+    /// one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot: Option<u8>,
+}
+
+/// Arguments of `device.select_slot`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SelectSlotArgs {
+    /// The device; the selected one if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The slot, counted from 0.
+    pub slot: u32,
 }
 
 /// What `device.load_sample` returns.
@@ -620,6 +775,9 @@ pub struct LoadSampleResult {
     /// The sample's media, by content hash: what the device and the set
     /// name it by.
     pub media: ContentHash,
+    /// The slot that took it, counted from 0.
+    #[serde(default)]
+    pub slot: u8,
     /// The file's name, for messages.
     pub name: String,
 }
@@ -697,7 +855,8 @@ fn specs() -> Vec<CommandSpec> {
                  instrument, then audio effects. An instrument or MIDI effect added while an \
                  audio, group, or return track is selected goes on a new MIDI track at the end \
                  of the track list, which becomes the selected track, as one undo step (Insert \
-                 Device and Track). A chain holds one instrument until racks arrive.",
+                 Device and Track). With `chain` it goes into that rack chain instead. A chain \
+                 holds one instrument; a rack holds more.",
             )
             .permission(Permission::Edit)
             .contexts([DeviceView, Browser])
@@ -765,7 +924,8 @@ fn specs() -> Vec<CommandSpec> {
                  selected device (or `before`), or at the end of the chain with none selected, \
                  on the selected track (or `track`), and selects it: one undo step, named Copy \
                  Device. The chain keeps Live's order, so an audio effect can't go before an \
-                 instrument, and instruments and MIDI effects only go on MIDI tracks.",
+                 instrument, and instruments and MIDI effects only go on MIDI tracks. With \
+                 `chain` it pastes into that rack chain, or before a device that is in one.",
             )
             .permission(Permission::Edit)
             .context(DeviceView)
@@ -775,8 +935,9 @@ fn specs() -> Vec<CommandSpec> {
         CommandSpec::new(DUPLICATE, "Duplicate Device")
             .description(
                 "Puts a copy of a device, with its settings, straight after it, and selects the \
-                 copy: one undo step, named Duplicate Device. A chain holds one instrument until \
-                 racks arrive, so an instrument can't be duplicated yet.",
+                 copy: one undo step, named Duplicate Device. A chain holds one instrument, so \
+                 an instrument can't be duplicated; a rack is copied whole, with new IDs for \
+                 its chains and devices.",
             )
             .permission(Permission::Edit)
             .context(DeviceView)
@@ -822,16 +983,33 @@ fn specs() -> Vec<CommandSpec> {
             .result::<PresetResult>(),
         CommandSpec::new(LOAD_SAMPLE, "Load Sample")
             .description(
-                "Loads an audio file into a device that plays one sample (the sampler), as \
-                 dropping the file on the device does: the file goes into the set's media \
-                 store, named by its content hash, and the device keeps that reference, so the \
-                 set reopens playing it. One undo step, named Load Sample. Reads a file outside \
-                 the project. A device whose type doesn't play a sample is refused.",
+                "Loads an audio file into a device that plays samples (the sampler, or the \
+                 eight-slot drum sampler), as dropping the file on the device does: the file \
+                 goes into the set's media store, named by its content hash, and the device \
+                 keeps that reference, so the set reopens playing it. `slot` says which of a \
+                 device's sample slots takes it (counted from 0); left out, it is the slot \
+                 selected in the panel, or the only one. One undo step, named Load Sample. \
+                 Reads a file outside the project. A device whose type doesn't play a sample, \
+                 or a slot it doesn't have, is refused. `device.set_sample` with a null `media` \
+                 clears a slot.",
             )
             .permission(Permission::External)
             .context(DeviceView)
             .args::<LoadSampleArgs>()
             .result::<LoadSampleResult>(),
+        CommandSpec::new(SELECT_SLOT, "Select Sample Slot")
+            .description(
+                "Selects one of a device's sample slots, as clicking its cell in the panel \
+                 does: the panel then shows that slot's controls, and a sample loaded without \
+                 naming a slot goes into it. Only a device with sample slots has any (the \
+                 eight-slot drum sampler has eight, counted from 0). It changes only the \
+                 view: it isn't an undo step, and isn't saved with the set. The selected slot \
+                 is `selected_slot` in the device's panel (`device.state`).",
+            )
+            .permission(Permission::Read)
+            .context(DeviceView)
+            .args::<SelectSlotArgs>()
+            .result::<DeviceViewState>(),
         CommandSpec::new(HOT_SWAP, "Hot-Swap Presets")
             .description(
                 "Starts or ends hot-swapping a device's presets, as the title bar's Hot-Swap \
@@ -872,6 +1050,74 @@ fn specs() -> Vec<CommandSpec> {
             .context(DeviceView)
             .args::<ShowSidechainArgs>()
             .result::<DeviceViewState>(),
+        CommandSpec::new(GROUP, "Group")
+            .description(
+                "Wraps the selected devices (or `devices`, all in one chain) in a new rack, as \
+                 Group does: the rack takes the first device's place and holds one chain, named \
+                 after the first device, that holds the devices in their order, each keeping \
+                 its settings and running state; the rack is selected. The rack is the kind that \
+                 can hold them: an audio effect rack for audio effects alone, a MIDI effect \
+                 rack for MIDI effects alone, and an instrument rack for any other mix. A \
+                 selection that grouping would put out of the chain's order is refused. With \
+                 `chains` (several chains of one rack) they become the chains of a new rack of \
+                 the same kind, inside a new chain in the first one's place. One undo step \
+                 (Group).",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .binding("S-DEV-001")
+            .args::<GroupArgs>()
+            .result::<Grouped>(),
+        CommandSpec::new(UNGROUP, "Ungroup")
+            .description(
+                "Takes the selected rack (or `device`) apart, as Ungroup does: the devices of \
+                 its one chain take the rack's place in order and the first is selected; the \
+                 rack, its chain's mixer and its Macro Controls go. A rack with no chains is \
+                 just removed; a rack of several chains can't be taken apart. One undo step \
+                 (Ungroup).",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .binding("S-DEV-002")
+            .args::<DeviceArgs>()
+            .result::<Ungrouped>(),
+        CommandSpec::new(CHAIN_COPY, "Copy Chain")
+            .description(
+                "Copies a rack's chain, with its devices, name, colour, info text and mixer, \
+                 to the chain clipboard for `chain.paste`. Changes nothing in the set.",
+            )
+            .permission(Permission::Read)
+            .context(DeviceView)
+            .args::<ChainArgs>()
+            .result::<DeviceViewState>(),
+        CommandSpec::new(CHAIN_CUT, "Cut Chain")
+            .description(
+                "Copies a rack's chain to the chain clipboard and deletes it: one undo step \
+                 (Delete Chain). Because it removes the person's work an agent asks first.",
+            )
+            .permission(Permission::Destructive)
+            .context(DeviceView)
+            .args::<ChainArgs>()
+            .result::<DeviceViewState>(),
+        CommandSpec::new(CHAIN_PASTE, "Paste Chain")
+            .description(
+                "Pastes the chain clipboard's chain into a rack at `index` (the end if left \
+                 out), as a new chain with new IDs and everything else copied: one undo step \
+                 (Insert Chain). The chain must fit the rack's kind.",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<PasteChainArgs>()
+            .result::<ChainAdded>(),
+        CommandSpec::new(CHAIN_DUPLICATE, "Duplicate Chain")
+            .description(
+                "Puts a copy of a rack's chain, with new IDs, straight after it: one undo step \
+                 (Insert Chain).",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<ChainArgs>()
+            .result::<ChainAdded>(),
         CommandSpec::new(DISPLAY, "Device Display")
             .description(
                 "Reports what a device's display shows now, read from the display data its \

@@ -12,6 +12,14 @@
 //! modules, keeps one component and controller per device, and activates
 //! them for a node the compiler thread made. Its [`Vst3Factory`] goes into
 //! the engine's [`Registry`](bl_engine::Registry).
+//!
+//! Offline renders (exports and agents' previews) borrow the same
+//! instances ([`Vst3Host::lend`], WP-4.21), as [`ClapHost::lend`] does for
+//! CLAP: each instance comes back from the engine's node, is reactivated
+//! for the render's rate and block size, and when the [`Loan`] ends goes
+//! back to the engine with the state it had.
+//!
+//! [`ClapHost::lend`]: crate::clap::ClapHost::lend
 
 mod describe;
 mod handlers;
@@ -28,6 +36,7 @@ use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread::ThreadId;
+use std::time::{Duration, Instant};
 
 use bl_engine::{DeviceType, Node, NodeConfig, NodeFactory};
 use bl_model::{
@@ -57,6 +66,8 @@ pub enum Vst3Error {
     Refused(String),
     /// It was called off the main thread.
     WrongThread,
+    /// The plug-ins are lent to another offline render already.
+    Lent,
 }
 
 impl fmt::Display for Vst3Error {
@@ -67,6 +78,7 @@ impl fmt::Display for Vst3Error {
             Self::NoInstance(device) => write!(f, "{device} has no running VST3 plug-in"),
             Self::Refused(what) => write!(f, "the plug-in refused {what}"),
             Self::WrongThread => f.write_str("VST3's main-thread calls run on the main thread"),
+            Self::Lent => f.write_str("the plug-ins are lent to another render"),
         }
     }
 }
@@ -95,7 +107,8 @@ pub struct PluginStatus {
     pub path: PathBuf,
     /// Whether it's active: activated for a node and processing.
     pub active: bool,
-    /// The settings it's active for: the engine's rate and block size.
+    /// The settings it's active for: the engine's rate and block size, or
+    /// an offline render's while one has it.
     pub active_for: Option<NodeConfig>,
     /// The latency it reported when last activated, in frames.
     pub latency: u32,
@@ -260,6 +273,10 @@ struct Main {
     /// The devices whose plug-in reported a new latency, for the engine's
     /// delay compensation.
     latency_changes: Vec<(DeviceId, u32)>,
+    /// An offline render has the plug-ins ([`Vst3Host::lend`]).
+    lending: bool,
+    /// Devices the render couldn't borrow a plug-in for, and why.
+    loan_problems: Vec<(DeviceId, String)>,
 }
 
 impl Main {
@@ -272,6 +289,8 @@ impl Main {
             host: ComWrapper::new(HostApplication),
             changes: Vec::new(),
             latency_changes: Vec::new(),
+            lending: false,
+            loan_problems: Vec::new(),
         }
     }
 }
@@ -356,6 +375,8 @@ struct Instance {
     silenced: bool,
     failure: Option<String>,
     latency: u32,
+    /// The offline render that has it.
+    lent: Option<Lent>,
     /// The host's component handler, which the controller reports its own
     /// changes and restart asks to. Declared last, so it outlives both the
     /// controller that holds it and the component it is set through.
@@ -365,6 +386,22 @@ struct Instance {
     )]
     handler: ComWrapper<ComponentHandler>,
 }
+
+/// A plug-in lent to an offline render: the render's node, and what to
+/// give back to the engine afterwards.
+struct Lent {
+    ends: HostEnds,
+    /// The rate and block size it is activated for in the render.
+    config: NodeConfig,
+    /// The plug-in's state before the render, which it gets back.
+    saved: Option<Vec<u8>>,
+    /// Why the engine's node had it refused, if it had.
+    refused: Option<String>,
+}
+
+/// How long a render waits for the engine's node to hand a plug-in back:
+/// a node does at its next block, a few milliseconds away.
+const HAND_BACK_WAIT: Duration = Duration::from_secs(2);
 
 /// The VST3 host: VST3's main thread for every plug-in, on the thread that
 /// made it.
@@ -647,7 +684,11 @@ impl Vst3Host {
             plugin_id: instance.plugin_id.clone(),
             path: instance.path.clone(),
             active: instance.handed.is_some(),
-            active_for: instance.config.filter(|_| instance.handed.is_some()),
+            active_for: instance
+                .lent
+                .as_ref()
+                .map_or(instance.config, |lent| Some(lent.config))
+                .filter(|_| instance.handed.is_some()),
             latency: instance.latency,
             failure: instance
                 .failure
@@ -684,6 +725,122 @@ impl Vst3Host {
     /// Lets go of every plug-in, as when another set opens.
     pub fn clear(&self) {
         self.retain(&BTreeSet::new());
+    }
+
+    /// Lends the plug-ins to an offline render (WP-4.21), as
+    /// [`ClapHost::lend`](crate::clap::ClapHost::lend) does for CLAP: an
+    /// export or a preview, rendering on this thread. The loan's
+    /// [`factory`](Loan::factory) goes into the render's registry; for
+    /// each VST3 device the render makes a node for, it takes the plug-in
+    /// back from the engine's node (waiting for that node's next block),
+    /// deactivates it, sets it to the rendered set's parameter values, and
+    /// activates it for the render's rate and block size. A device with no
+    /// plug-in yet gets one, from its saved state. Meanwhile the engine's
+    /// node passes its input through.
+    ///
+    /// When the loan is dropped, after the render's engine, every plug-in
+    /// goes back to the engine with the state it had before, activated for
+    /// the engine's rate and block size again; one that failed while
+    /// rendering stays silent in the engine too.
+    ///
+    /// # Errors
+    ///
+    /// [`Vst3Error::WrongThread`] off the main thread, and
+    /// [`Vst3Error::Lent`] while another loan is out.
+    pub fn lend(&self) -> Result<Loan, Vst3Error> {
+        let mut guard = lock(&self.inner.main);
+        let main = guard.get()?;
+        if main.lending {
+            return Err(Vst3Error::Lent);
+        }
+        main.lending = true;
+        main.loan_problems.clear();
+        Ok(Loan {
+            inner: Arc::clone(&self.inner),
+            _main_thread: std::marker::PhantomData,
+        })
+    }
+}
+
+/// The host's plug-ins, lent to an offline render ([`Vst3Host::lend`]).
+/// Dropping it, on the main thread and after the render's engine, gives
+/// every plug-in back to the engine.
+pub struct Loan {
+    inner: Arc<Inner>,
+    /// It ends on the main thread, which made it.
+    _main_thread: std::marker::PhantomData<*const ()>,
+}
+
+impl fmt::Debug for Loan {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Loan").finish_non_exhaustive()
+    }
+}
+
+impl Loan {
+    /// The factory for the render's registry: it makes each VST3 device's
+    /// node with the device's own plug-in, borrowed from the engine.
+    #[must_use]
+    pub fn factory(&self) -> LoanFactory {
+        LoanFactory {
+            inner: Arc::clone(&self.inner),
+        }
+    }
+
+    /// The devices whose plug-in the render couldn't borrow, and why: the
+    /// engine's node didn't hand it back in time. Their nodes pass their
+    /// input through, so the render isn't what the engine plays.
+    #[must_use]
+    pub fn problems(&self) -> Vec<(DeviceId, String)> {
+        let mut guard = lock(&self.inner.main);
+        guard
+            .get()
+            .map(|main| main.loan_problems.clone())
+            .unwrap_or_default()
+    }
+}
+
+impl Drop for Loan {
+    fn drop(&mut self) {
+        let mut guard = lock(&self.inner.main);
+        if let Ok(main) = guard.get() {
+            end_loan(main, &self.inner);
+        }
+    }
+}
+
+/// A loan's factory for an offline render's registry ([`Loan::factory`]).
+pub struct LoanFactory {
+    inner: Arc<Inner>,
+}
+
+impl NodeFactory for LoanFactory {
+    fn create(&self, device: &Device, config: &NodeConfig) -> Option<Box<dyn Node>> {
+        let DeviceKind::Plugin {
+            format: PluginFormat::Vst3,
+            ..
+        } = &device.kind
+        else {
+            return None;
+        };
+        let (node, ends) = Vst3Node::new(config, 0);
+        let mut guard = lock(&self.inner.main);
+        let problem = match guard.get() {
+            Ok(main) if main.lending => borrow(main, device, *config, ends, &self.inner).err(),
+            Ok(_) => Some("the plug-ins aren't lent to a render".to_owned()),
+            Err(error) => Some(error.to_string()),
+        };
+        if let (Some(why), Ok(main)) = (problem, guard.get()) {
+            main.loan_problems.push((device.id, why));
+        }
+        Some(Box::new(node))
+    }
+
+    fn device_types(&self) -> Vec<DeviceType> {
+        lock(&self.inner.types)
+            .iter()
+            .map(|t| t.device_type.clone())
+            .collect()
     }
 }
 
@@ -1042,6 +1199,7 @@ fn new_instance(main: &Main, module: &Module, cid: &TUID) -> Result<Instance, Vs
         silenced: false,
         failure: None,
         latency: 0,
+        lent: None,
         handler,
     })
 }
@@ -1178,6 +1336,140 @@ fn serve(main: &mut Main, request: Request, inner: &Inner) {
     instance.config = Some(config);
     instance.refused = None;
     instance.silenced = false;
+}
+
+/// Lends the device's plug-in to an offline render's node (WP-4.21): takes
+/// it back from the engine's node, and activates it for the render's
+/// settings with the rendered set's parameter values. A plug-in that can't
+/// be made or won't activate leaves the node passing its input through;
+/// one that failed while processing leaves it silent.
+fn borrow(
+    main: &mut Main,
+    device: &Device,
+    config: NodeConfig,
+    ends: HostEnds,
+    inner: &Inner,
+) -> Result<(), String> {
+    if !ensure_instance(main, device, inner) {
+        // Spec: clap-hosting R12, which the VST3 spec mirrors.
+        return Ok(());
+    }
+    let Some(instance) = main.instances.get_mut(&device.id) else {
+        return Ok(());
+    };
+    if instance.lent.is_some() {
+        return Err("its plug-in is lent to this render already".to_owned());
+    }
+    // Spec: offline-plugin-renders R4. Its state, to give back.
+    let saved = saved_state(instance)
+        .ok()
+        .map(|(component, controller)| plugin_state(&component, &controller));
+    // Spec: offline-plugin-renders R2. The engine's node hands it back at
+    // its next block.
+    if instance.handed.is_some() {
+        for ends in instance.ends.iter().chain(&instance.retired) {
+            ends.status.hand_back.store(true, Relaxed);
+        }
+        let until = Instant::now() + HAND_BACK_WAIT;
+        loop {
+            take_back(instance);
+            if instance.handed.is_none() {
+                break;
+            }
+            if Instant::now() >= until {
+                return Err(
+                    "the engine playing the set didn't hand its plug-in back in time".to_owned(),
+                );
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+    let mut lent = Lent {
+        ends,
+        config,
+        saved,
+        refused: instance.refused.take(),
+    };
+    if instance.silenced {
+        // Spec: offline-plugin-renders R6. Failed, it stays silent.
+        lent.ends.status.silent.store(true, Relaxed);
+        instance.lent = Some(lent);
+        return Ok(());
+    }
+    // Spec: offline-plugin-renders R3. The rendered set's values, and the
+    // render's rate and block size.
+    set_values(instance, device);
+    // Spec: clap-hosting R12, which the VST3 spec mirrors. One that won't
+    // activate for the render leaves its node passing its input through.
+    if let Ok(active) = activate(instance, &config) {
+        lent.ends.status.latency.store(active.latency, Relaxed);
+        let generation = active.generation;
+        if lent.ends.to_node.push(active).is_ok() {
+            instance.handed = Some(generation);
+        }
+    }
+    instance.lent = Some(lent);
+    Ok(())
+}
+
+/// Ends a loan: every lent plug-in goes back to the engine's node with the
+/// state it had, or stays silent if it failed while rendering.
+fn end_loan(main: &mut Main, inner: &Inner) {
+    if !main.lending {
+        return;
+    }
+    main.lending = false;
+    main.loan_problems.clear();
+    let Main {
+        instances,
+        changes,
+        latency_changes,
+        ..
+    } = main;
+    let mut latencies = lock(&inner.latencies);
+    for (&device, instance) in instances {
+        let Some(lent) = &instance.lent else { continue };
+        lent.ends.status.hand_back.store(true, Relaxed);
+        // The render's engine is gone, and its node gave the component
+        // back as it went; one it never ran leaves its queue with it.
+        take_back(instance);
+        if instance.handed.is_some()
+            && instance
+                .lent
+                .as_ref()
+                .is_some_and(|lent| lent.ends.to_node.is_abandoned())
+        {
+            deactivate(instance);
+            instance.handed = None;
+        }
+        let Some(lent) = instance.lent.take() else {
+            continue;
+        };
+        let failed = lent.ends.status.failed.load(Relaxed);
+        if instance.handed.is_some() {
+            // A render's node still holds it: it's deactivated once that
+            // node gives it back.
+            instance.retired.push(lent.ends);
+        }
+        // Spec: offline-plugin-renders R4. The state it had; what the
+        // render did to its parameters is dropped.
+        if let Some(saved) = &lent.saved {
+            let _ = load_state(instance, saved);
+        }
+        instance.gestures.take(|_, _| {});
+        instance.refused = lent.refused;
+        if failed {
+            // Spec: offline-plugin-renders R6, clap-hosting R12.
+            instance.silenced = true;
+            instance.failure = Some(
+                "it failed while processing in an offline render; the device is silent".to_owned(),
+            );
+            if let Some(ends) = &instance.ends {
+                ends.status.silent.store(true, Relaxed);
+            }
+        }
+        pump(device, instance, changes, latency_changes, &mut latencies);
+    }
 }
 
 /// Makes the device's plug-in if it has none. Returns whether it has one;
@@ -1364,6 +1656,7 @@ fn activate(instance: &mut Instance, config: &NodeConfig) -> Result<node::Active
         in_channels,
         out_channels,
         params: instance.params.iter().map(|p| p.map).collect(),
+        midi: midi_map(&instance.controller),
         pending: std::mem::take(&mut instance.pending),
         drive: Driver::new(instance.params.iter().map(|p| {
             // Each control starts where the controller is: the set's values
@@ -1385,6 +1678,30 @@ fn activate(instance: &mut Instance, config: &NodeConfig) -> Result<node::Active
     })
 }
 
+/// What the controller's `IMidiMapping` maps each channel's MIDI controllers
+/// to: the parameter, at `channel * CONTROLLERS + controller`. Every
+/// assignment is asked once, here on the main thread, so the audio thread
+/// only looks it up. A controller without the interface maps nothing.
+fn midi_map(controller: &ComPtr<IEditController>) -> Vec<Option<u32>> {
+    let mut map = vec![None; 16 * node::CONTROLLERS];
+    let Some(mapping) = controller.cast::<IMidiMapping>() else {
+        return map;
+    };
+    for (at, slot) in map.iter_mut().enumerate() {
+        let (channel, number) = (at / node::CONTROLLERS, at % node::CONTROLLERS);
+        let mut id = 0;
+        // SAFETY: the controller answers for any channel and controller
+        // number, from the main thread, writing the ID where it's pointed.
+        let result = unsafe {
+            mapping.getMidiControllerAssignment(0, channel as i16, number as i16, &raw mut id)
+        };
+        if result == kResultOk {
+            *slot = Some(id);
+        }
+    }
+    map
+}
+
 /// Deactivates an instance, as VST3 asks: stop processing, then leave the
 /// active state.
 fn deactivate(instance: &mut Instance) {
@@ -1400,7 +1717,13 @@ fn deactivate(instance: &mut Instance) {
 /// changed.
 fn take_back(instance: &mut Instance) -> bool {
     let mut returned = Vec::new();
-    for ends in instance.ends.iter_mut().chain(instance.retired.iter_mut()) {
+    let lent = instance.lent.iter_mut().map(|lent| &mut lent.ends);
+    for ends in instance
+        .ends
+        .iter_mut()
+        .chain(instance.retired.iter_mut())
+        .chain(lent)
+    {
         while let Ok(active) = ends.from_node.pop() {
             returned.push(active);
         }
@@ -1436,7 +1759,8 @@ fn pump(
     // A restart it asked for — its latency changed, say: ask its node for
     // the component; the next pump activates it again, and the node passes
     // its input through for the blocks between (R10).
-    if instance.restart.swap(0, Relaxed) != 0
+    if instance.lent.is_none()
+        && instance.restart.swap(0, Relaxed) != 0
         && instance.handed.is_some()
         && let Some(ends) = &instance.ends
     {
@@ -1448,7 +1772,9 @@ fn pump(
     // device's (R5), and the changes its controller made itself, for the
     // set (R6).
     changed |= sync_controller(instance);
-    changed |= take_gestures(device, instance, changes);
+    if instance.lent.is_none() {
+        changed |= take_gestures(device, instance, changes);
+    }
 
     if let Some(ends) = &instance.ends
         && ends.status.failed.load(Relaxed)
@@ -1460,6 +1786,7 @@ fn pump(
     }
 
     let ready = instance.handed.is_none()
+        && instance.lent.is_none()
         && instance.refused.is_none()
         && !instance.silenced
         && instance.config.is_some();
@@ -1503,6 +1830,10 @@ fn pump(
 /// its parameters are the device's (R5). Returns whether anything changed.
 fn sync_controller(instance: &mut Instance) -> bool {
     let mut changed = false;
+    // Spec: offline-plugin-renders R4. What a render applied is dropped.
+    if let Some(lent) = &mut instance.lent {
+        while lent.ends.applied.pop().is_ok() {}
+    }
     for ends in instance.ends.iter_mut().chain(instance.retired.iter_mut()) {
         while let Ok((id, normalized)) = ends.applied.pop() {
             // SAFETY: the controller takes its own parameter's value, by

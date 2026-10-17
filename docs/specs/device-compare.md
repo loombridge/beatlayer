@@ -1,6 +1,6 @@
 # Device A/B compare
 
-- **Status:** draft
+- **Status:** implemented
 - **Work packages:** WP-5.12 (this spec). The device frame, its menu, the device clipboard and presets are [device-chains.md](device-chains.md)'s; a device's parameters and their glide are [device-framework.md](device-framework.md)'s; overriding and re-enabling automation is [automation.md](automation.md)'s; racks are [racks.md](racks.md)'s
 - **Parity-matrix row:** Racks and device features: Device A/B compare
 - **Checked against:** the Live 12 reference manual (online edition), read 17 October 2026; the Live 12 release notes, 12.3 and 12.4
@@ -43,16 +43,16 @@ This spec covers the two states in the document, the Compare commands, their key
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | `crates/model/src/device.rs`, `a_new_device_has_two_equal_states_with_a_active` | unit |
+| R1 | `crates/model/src/command.rs`, `a_new_device_has_two_equal_states_with_a_active` | unit |
 | R2 | `crates/model/src/command.rs`, `a_change_goes_to_the_active_state_only` | unit |
-| R3 | `crates/shell/tests/device_compare.rs`, `switching_plays_the_other_states_values_in_one_undo_step`; `crates/engine/tests/device_chains.rs`, `a_state_switch_glides_its_continuous_parameters` | unit, engine test under the allocation trap |
-| R4 | `crates/shell/tests/device_compare.rs`, `copy_overwrites_the_other_state_and_reverses_with_b_active` | unit |
+| R3 | `crates/shell/tests/device_compare.rs`, `switching_plays_the_other_states_values_in_one_undo_step`; `crates/devices/tests/device_compare.rs`, `a_state_switch_glides_its_continuous_parameters` | unit, engine test under the allocation trap |
+| R4 | `crates/shell/tests/device_compare.rs`, `copy_overwrites_the_other_state_and_reverses_with_b_active`; `crates/model/src/command.rs`, `a_copy_overwrites_the_other_state` | unit |
 | R5 | `crates/ui/tests/device_view.rs`, `the_title_bar_shows_b_while_b_is_active`; `crates/shell/tests/device_compare.rs`, `switching_keeps_the_preset_name` | UI script, unit |
-| R6 | `crates/ui/tests/keymap.rs`, `every_shortcut_is_bound_or_marked_with_the_milestone_that_binds_it`; `crates/ui/tests/menus.rs`, `compare_items_follow_the_state_and_are_disabled_for_racks_and_plugins` | keymap test, UI script |
-| R7 | `crates/shell/tests/device_compare.rs`, `a_switch_overrides_the_devices_envelopes_and_re_enable_returns_them`, `copy_overrides_nothing` | unit, engine test |
-| R8 | `crates/model/src/command.rs`, `a_copied_device_takes_the_active_state_in_both`, `a_moved_device_keeps_both_states` | unit |
-| R9 | `crates/shell/tests/device_compare.rs`, `a_preset_saves_the_active_state_and_loads_into_both` | unit |
+| R6 | `crates/ui/tests/keymap.rs`, `every_shortcut_is_bound_or_marked_with_the_milestone_that_binds_it`; `crates/ui/tests/device_view.rs`, `compare_items_follow_the_state_and_are_disabled_for_racks_and_plugins`; `crates/shell/tests/device_compare.rs`, `a_device_without_states_refuses_the_compare_commands`; `crates/model/src/command.rs`, `plug_ins_have_no_states_and_a_moved_device_keeps_both` | keymap test, UI script, unit |
+| R7 | `crates/shell/tests/device_compare.rs`, `a_switch_overrides_the_devices_envelopes_and_re_enable_returns_them`, `copy_overrides_nothing`; `crates/model/src/command.rs`, `a_switch_swaps_the_states_and_overrides_the_envelopes_and_a_copy_does_not` | unit |
+| R8 | `crates/shell/tests/device_compare.rs`, `a_copy_takes_the_active_state_in_both`; `crates/model/src/command.rs`, `plug_ins_have_no_states_and_a_moved_device_keeps_both` | unit |
+| R9 | `crates/shell/tests/device_compare.rs`, `a_preset_saves_the_active_state_and_loads_into_both`; `crates/model/src/command.rs`, `a_change_goes_to_the_active_state_only` | unit |
 | R10 | `crates/model/src/repr.rs`, `both_states_save_with_the_set_and_load_back`; `crates/cli/tests/older_sets.rs`, `a_set_without_b_loads_with_b_equal_to_a` | unit |
-| R11 | `crates/model/tests/command_registry.rs`, `every_command_runs_by_id`, `every_command_is_complete`; `crates/cli/tests/agent_device_compare.rs`, `an_agent_switches_copies_and_reads_back_both_states` | unit, agent test |
-| R12 | `crates/shell/tests/device_compare.rs`, `undo_brings_back_both_states_and_the_overrides` | unit |
-| R13 | `crates/engine/tests/device_chains.rs`, `a_state_switch_sends_no_program` (blocks under the allocation trap) | engine test under the allocation trap |
+| R11 | `crates/model/tests/command_registry.rs`, `every_command_runs_by_id`, `every_document_command_is_registered`, `schemas_match_what_commands_serialise`; `crates/cli/tests/agent_device_compare.rs`, `an_agent_switches_copies_and_reads_back_both_states` | unit, agent test |
+| R12 | `crates/shell/tests/device_compare.rs`, `switching_plays_the_other_states_values_in_one_undo_step`, `copy_overwrites_the_other_state_and_reverses_with_b_active`, `a_switch_overrides_the_devices_envelopes_and_re_enable_returns_them` | unit |
+| R13 | `crates/devices/tests/device_compare.rs`, `a_state_switch_sends_no_program` (blocks under the allocation trap) | engine test under the allocation trap |

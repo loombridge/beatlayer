@@ -1,6 +1,6 @@
 # Racks
 
-- **Status:** draft
+- **Status:** partial (WP-5.1 is built: R1 to R17, but for R12's gesture in the Device View and the zones and `zones` read-back of R17, which are WP-5.2's and WP-5.3's; R18 onwards aren't)
 - **Work packages:** WP-5.1, the rack in the document and the engine (R1 to R17); WP-5.2, the rack in the Device View (R18 to R26); WP-5.19, its chains in the mixer (R27 to R29); WP-5.3, zones and Auto Select (R30 to R37); WP-5.7, rack chain taps (R38 to R41); WP-5.8, rack presets and hot-swap (R42 to R47). Macros and their variations are [macros](macros.md)' (WP-5.4, WP-5.5); what only drum racks have is [drum racks](drum-racks.md)' (WP-5.6); A/B compare is WP-5.12's; running a rack's chains on the real-time worker pool is WP-5.37's
 - **Parity-matrix row:** Racks and device features: Instrument, Audio Effect, MIDI Effect, and Drum racks; Parallel chains, key, velocity, and chain-select zones with fades, Auto Select. Mixing and routing: Routing taps (rack chain taps). Views and workflow: Browser: preview in sync with tempo, hot-swap (hot-swap). Files and export: Clip, device preset, and rack preset files (rack presets)
 - **Checked against:** the Live 12 reference manual (online edition), read 17 October 2026 (chapters 4, 17, 23, 25 and 42), and the UI parity reference's rows [L-DEV-008](../ui-parity/layout.md), [M-EDIT-014, M-EDIT-015, M-VIEW-041, M-VIEW-042, C-DEVICE-007, C-DEVICE-013](../ui-parity/menus.md), [I-CLICK-022, I-CLICK-023, I-CLICK-024](../ui-parity/interactions.md), and [S-DEV-001 to S-DEV-003, S-DEV-005, S-DEV-008, S-DEV-012 to S-DEV-014, S-VIEW-006, S-SES-023](../ui-parity/shortcuts.toml)
@@ -105,20 +105,20 @@ This spec covers what every rack has: the rack in the document and the engine, i
 | R1 | `crates/model/tests/racks.rs`, `each_kind_holds_only_what_fits_in_lives_order` | unit |
 | R2 | `crates/model/tests/racks.rs`, `racks_go_where_their_role_goes_and_nest` | unit |
 | R3 | `crates/engine/tests/racks.rs`, `every_chain_takes_the_racks_input_and_the_output_is_their_sum`, `an_empty_chain_is_a_dry_path_and_an_empty_rack_passes_through` | engine test under the allocation trap |
-| R4 | `crates/engine/tests/racks.rs`, `a_midi_effect_racks_chains_merge_in_time_then_list_order` | engine test under the allocation trap |
-| R5 | `crates/engine/tests/racks.rs`, `chain_volume_pan_activator_and_solo_shape_the_sum` | engine test under the allocation trap |
+| R4 | `crates/engine/tests/racks.rs`, `a_midi_effect_racks_chains_merge_in_time_then_list_order`, `a_midi_effect_racks_chains_merge_their_messages_with_their_notes`, `a_midi_chain_that_is_off_passes_only_its_note_offs`, `an_instrument_racks_chains_all_take_the_notes` | engine test under the allocation trap |
+| R5 | `crates/engine/tests/racks.rs`, `chain_volume_pan_activator_and_solo_shape_the_sum`, `a_solo_inside_one_rack_leaves_every_other_rack_and_track_as_it_is` | engine test under the allocation trap |
 | R6 | `crates/engine/tests/racks.rs`, `chain_mixer_changes_glide_without_a_new_program`; `crates/model/tests/racks.rs`, `chain_mixer_controls_are_automation_targets` | engine test under the allocation trap; unit |
-| R7 | `crates/shell/tests/racks.rs`, `device_commands_work_inside_chains_and_devices_move_in_and_out` | unit |
-| R8 | `crates/shell/tests/racks.rs`, `chains_are_added_moved_copied_renamed_and_coloured_in_one_step_each` | unit |
-| R9 | `crates/shell/tests/racks.rs`, `group_wraps_the_selection_in_the_kind_that_holds_it` | unit |
+| R7 | `crates/shell/tests/racks.rs`, `device_commands_work_inside_chains_and_devices_move_in_and_out`; `crates/model/tests/racks.rs`, `a_device_moves_between_a_chain_and_a_track_and_between_racks`; `crates/engine/tests/racks.rs`, `a_switched_off_rack_passes_through_and_takes_changes_while_off` | unit; engine test under the allocation trap |
+| R8 | `crates/shell/tests/racks.rs`, `chains_are_added_moved_copied_renamed_and_coloured_in_one_step_each`; `crates/model/tests/racks.rs`, `chain_edits_are_one_undo_step_each_and_undo_whole` | unit |
+| R9 | `crates/shell/tests/racks.rs`, `group_wraps_the_selection_in_the_kind_that_holds_it`; `crates/ui/tests/keymap.rs`, `the_group_and_ungroup_keys_reach_their_commands_in_the_device_view`; `crates/model/tests/racks.rs`, `group_and_ungroup_keep_every_device_and_its_settings` | unit; keymap test |
 | R10 | `crates/shell/tests/racks.rs`, `grouping_chains_nests_a_rack_of_the_same_kind` | unit |
 | R11 | `crates/shell/tests/racks.rs`, `ungroup_puts_one_chains_devices_back_and_is_disabled_for_several` | unit |
-| R12 | `crates/ui/tests/rack_view.rs`, `option_click_on_a_racks_activator_switches_everything_inside` | UI script |
-| R13 | `crates/model/src/repr.rs`, `racks_save_and_load_with_every_chain`; `crates/cli/tests/older_sets.rs`, `sets_from_before_racks_load_unchanged` | unit |
-| R14 | `crates/engine/tests/racks.rs`, `grouping_and_chain_edits_make_only_new_nodes` | engine test under the allocation trap |
-| R15 | `crates/engine/tests/racks.rs`, `a_nested_rack_renders_the_same_at_every_block_size`; `rtsan/tests/racks.rs` | golden render; RealtimeSanitizer |
-| R16 | `crates/engine/tests/pdc.rs`, `a_racks_chains_line_up_at_its_sum`, `a_rack_reports_its_slowest_chain` | golden render |
-| R17 | `crates/cli/tests/agent.rs`, `an_agent_builds_and_reads_back_a_nested_rack`; `crates/agent/tests/readback.rs` | agent test |
+| R12 | `crates/shell/tests/racks.rs`, `switching_a_rack_with_its_contents_is_one_undo_step`; `crates/model/tests/racks.rs`, `switching_a_rack_with_its_contents_reaches_every_depth_in_one_step`; `crates/ui/tests/rack_view.rs`, `option_click_on_a_racks_activator_switches_everything_inside` (WP-5.2, not yet written) | unit; UI script |
+| R13 | `crates/model/src/repr.rs`, `racks_save_and_load_with_every_chain`; `crates/shell/tests/racks.rs`, `a_chain_and_its_devices_survive_save_and_load`; `crates/cli/tests/older_sets.rs`, `sets_from_before_racks_load_unchanged` | unit |
+| R14 | `crates/engine/tests/racks.rs`, `grouping_and_chain_edits_make_only_new_nodes`, `grouping_keeps_a_devices_state_running`; `crates/engine/tests/pdc.rs`, `grouping_and_ungrouping_keep_a_delays_tail` | engine test under the allocation trap |
+| R15 | `crates/engine/tests/racks.rs`, `a_nested_rack_renders_the_same_at_every_block_size`; `rtsan/tests/racks.rs`, `a_nested_rack_passes_under_rtsan` | golden render; RealtimeSanitizer |
+| R16 | `crates/engine/tests/pdc.rs`, `a_racks_chains_line_up_at_its_sum`, `a_rack_reports_its_slowest_chain`, `a_switched_off_device_changes_the_alignment_but_a_chains_activator_does_not` | golden render |
+| R17 | `crates/cli/tests/agent.rs`, `an_agent_builds_and_reads_back_a_nested_rack`; `crates/agent/tests/readback.rs` (the fixture's rack and its chains) | agent test |
 | R18 | `crates/ui/tests/rack_view.rs`, `a_racks_views_sit_left_to_right_in_its_brackets` | UI script |
 | R19 | `crates/shell/tests/racks.rs`, `showing_and_hiding_views_is_no_undo_step_and_is_kept`; `crates/ui/tests/rack_view.rs`, `hiding_every_view_folds_the_rack` | unit; UI script |
 | R20 | `crates/ui/tests/keymap.rs`, `plus_and_minus_show_and_hide_chains_and_minus_folds_otherwise` | keymap test |

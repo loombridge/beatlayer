@@ -12,7 +12,7 @@
 //! out a choice for each setting.
 
 use crate::arrangement::SET_GRID;
-use crate::devices::{SAVE_DEFAULT_PRESET, SET_FLOATING};
+use crate::devices::{COMPARE_COPY, COMPARE_SWITCH, SAVE_DEFAULT_PRESET, SET_FLOATING};
 use crate::menus::{Action, IMP_12, MenuItem, Row, SEPARATOR, items};
 use crate::tracks::DUPLICATE_WITHOUT_CLIPS;
 
@@ -127,7 +127,7 @@ const DEVICE: &[Row] = &[
     ("C-DEVICE-005", "Edit Info Text", Pending(None)),
     SEPARATOR,
     ("C-DEVICE-006", "Delete", Key(&["S-EDIT-005"])),
-    ("C-DEVICE-007", "Group", Pending(Some("S-DEV-001"))),
+    ("C-DEVICE-007", "Group", Key(&["S-DEV-001"])),
     ("C-DEVICE-008", "Fold", Key(&["S-DEV-014"])),
     (IMP_14, "Float", Cmd(SET_FLOATING)),
     (
@@ -136,12 +136,8 @@ const DEVICE: &[Row] = &[
         Cmd("device.set_show_preset_name"),
     ),
     SEPARATOR,
-    (
-        "C-DEVICE-010",
-        "Compare: Switch to B",
-        Pending(Some("S-DEV-011")),
-    ),
-    ("C-DEVICE-011", "Compare: Copy A to B", Pending(None)),
+    ("C-DEVICE-010", "Compare: Switch to B", Cmd(COMPARE_SWITCH)),
+    ("C-DEVICE-011", "Compare: Copy A to B", Cmd(COMPARE_COPY)),
     SEPARATOR,
     (
         "C-DEVICE-012",
@@ -278,8 +274,6 @@ pub fn pending_package(row: &str) -> Option<&'static str> {
             Some("a package not planned yet (track colours)")
         }
         "C-TRACK-013" | "C-TRACK-014" => Some("a package not planned yet"),
-        "C-DEVICE-007" => Some("milestone M5 (racks)"),
-        "C-DEVICE-010" | "C-DEVICE-011" => Some("milestone M5 (A/B compare)"),
         _ => None,
     }
 }

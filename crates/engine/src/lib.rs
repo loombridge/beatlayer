@@ -83,6 +83,7 @@
 bl_rt::install_trap!();
 
 mod automation;
+pub mod capture;
 pub mod clips;
 mod compiler;
 pub mod display;
@@ -118,7 +119,10 @@ pub use automation::{
     AutomationList, SessionNow, clip_envelope_value_at, session_content_tick, session_pass_end,
     target_node,
 };
-pub use clips::{ClipPlayer, MediaLibrary, MediaMap, MediaStreams, OpenedSource, SourceCues};
+pub use capture::{CAPTURE_RING, CapturedMidi};
+pub use clips::{
+    ClipPlayer, MediaLibrary, MediaMap, MediaStreams, OpenedSource, SlotSample, SourceCues,
+};
 pub use compiler::{Compiler, Update};
 pub use display::{DisplayData, DisplayReader, DisplayWriter, Displays, display_channel};
 pub use engine::{CompileCounts, Engine, Restarter, Sender, channel};

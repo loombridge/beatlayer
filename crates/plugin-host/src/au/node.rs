@@ -66,6 +66,9 @@ pub(crate) struct Status {
     pub(crate) hand_back: AtomicBool,
     /// The unit failed a call on the audio thread.
     pub(crate) failed: AtomicBool,
+    /// The host says the device is silent while the node has no unit: its
+    /// unit failed elsewhere, in an offline render (WP-4.21).
+    pub(crate) silent: AtomicBool,
     /// Events dropped because a list was full.
     pub(crate) dropped: AtomicU64,
     /// The editor's parameter-observer token, so the host's own parameter
@@ -276,7 +279,7 @@ impl Node for AuNode {
             // Not running: keep the changes for it, and pass the input
             // through (or stay silent after a failure).
             self.keep_all(block);
-            if self.failed {
+            if self.failed || self.status.silent.load(Relaxed) {
                 silence(block);
             }
             return;
@@ -580,12 +583,29 @@ impl Processor {
         if self.midi.is_null() {
             return false;
         }
+        // Spec: au-hosting R18. A channel message goes in as its MIDI bytes.
+        if let Some(message) = note.message() {
+            let mut bytes = message.padded();
+            let length = message.bytes().len() as isize;
+            let data = NonNull::from(&mut bytes[0]);
+            // SAFETY: the MIDI block belongs to this unit and takes the
+            // message's valid bytes, which it copies before it returns; the
+            // call is made between render calls, where Apple's
+            // documentation allows it.
+            unsafe {
+                (&*self.midi).call((AUEventSampleTimeImmediate, 0, length, data));
+            }
+            return true;
+        }
         let channel = note.channel.min(15);
         let key = note.key.min(127);
         let mut bytes = match note.kind {
             // Per-note expressions wait for MPE hosting (the parity
             // matrix's note): a plug-in's note port takes them then.
-            NoteKind::Expression { .. } => return false,
+            NoteKind::Expression { .. }
+            | NoteKind::Control { .. }
+            | NoteKind::PitchBend { .. }
+            | NoteKind::ChannelPressure { .. } => return false,
             NoteKind::On => {
                 #[expect(
                     clippy::cast_possible_truncation,

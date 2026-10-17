@@ -12,10 +12,14 @@ use bl_engine::testing;
 use bl_model::{DeviceId, TrackId};
 use bl_shell::Area;
 use bl_shell::device_commands::{DEVICE_GAP, DeviceAdded, TITLE_BAR_HEIGHT};
+use bl_shell::menus::MenuPlatform;
+use bl_shell::menus::menu_bar;
 use bl_ui::device_view::{
     EMPTY_TEXT, activator_rect, button_rects, control_id, layout, title_rect,
 };
+use bl_ui::keymap::Platform;
 use bl_ui::main_window::UiEvent;
+use bl_ui::menus::item_state;
 use common::{Harness, Node, Window, command};
 use egui::accesskit::Role;
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, Rect, pos2};
@@ -246,28 +250,24 @@ fn the_context_menu_lists_lives_items_and_names_later_packages() {
         "Duplicate",
         "Rename",
         "Delete",
+        "Group",
         "Fold",
         "Show Preset Name",
+        "Compare: Switch to B",
+        "Compare: Copy A to B",
         "Save as Default Preset",
     ] {
         assert!(!item(label).disabled, "{label} works");
     }
     // Show Preset Name is ticked on a new device (observed).
     assert!(item("Show Preset Name").label.starts_with('✔'));
-    for (label, package) in [
-        ("Edit Info Text", "WP-2.24"),
-        ("Group", "M5"),
-        ("Compare: Switch to B", "M5"),
-        ("Compare: Copy A to B", "M5"),
-    ] {
-        let node: Node = item(label);
-        assert!(node.disabled, "{label} waits");
-        assert!(
-            node.description.contains(package),
-            "{label}: {}",
-            node.description
-        );
-    }
+    let node: Node = item("Edit Info Text");
+    assert!(node.disabled, "Edit Info Text waits");
+    assert!(
+        node.description.contains("WP-2.24"),
+        "Edit Info Text: {}",
+        node.description
+    );
 }
 
 // Spec: device-chains R24 (Show Options opens the same menu)
@@ -512,7 +512,12 @@ fn a_dropped_sample_loads_into_the_sampler_under_the_pointer() {
     std::fs::write(&file, bytes).unwrap();
 
     assert_eq!(
-        h.shell.editor().document().device(device).unwrap().media,
+        h.shell
+            .editor()
+            .document()
+            .device(device)
+            .unwrap()
+            .media_at(0),
         None,
         "a new sampler has no sample"
     );
@@ -526,9 +531,298 @@ fn a_dropped_sample_loads_into_the_sampler_under_the_pointer() {
             .document()
             .device(device)
             .unwrap()
-            .media
+            .media_at(0)
             .is_some(),
         "the drop loaded the sample"
     );
     let _ = std::fs::remove_file(&file);
+}
+
+/// The drum sampler's cell for sample slot `slot` (counted from 0), as the
+/// panel draws it.
+fn slot_cell_rect(h: &mut Harness, device: DeviceId, slot: u32) -> Rect {
+    let frame = frame_of(h, device);
+    let panel = h
+        .shell
+        .device_view_state()
+        .devices
+        .into_iter()
+        .find(|d| d.id == device)
+        .and_then(|d| d.panel)
+        .expect("a panel");
+    bl_ui::device_panel::place(
+        &panel,
+        bl_ui::device_panel::body_rect(frame, TITLE_BAR_HEIGHT),
+    )
+    .1
+    .into_iter()
+    .find(|(_, _, s)| *s == Some(slot))
+    .expect("a cell for the slot")
+    .1
+}
+
+fn add_kitbag(h: &mut Harness) -> DeviceId {
+    let kit = bl_devices::kitbag_type();
+    add(
+        h,
+        json!({ "kind": kit.kind, "name": kit.name, "role": kit.role }),
+    )
+}
+
+fn selected_slot(h: &Harness, device: DeviceId) -> u32 {
+    h.shell
+        .device_view_state()
+        .devices
+        .into_iter()
+        .find(|d| d.id == device)
+        .and_then(|d| d.panel)
+        .map(|p| p.selected_slot)
+        .unwrap()
+}
+
+// Spec: eight-slot-drum-sampler R18
+#[test]
+fn clicking_a_slot_cell_shows_that_slots_controls() {
+    let mut h = harness();
+    let device = add_kitbag(&mut h);
+    // Slot 4 pans left; the panel shows slot 1's Pan until slot 4 is picked.
+    let pan = bl_devices::kitbag::param(3, bl_devices::kitbag::slot::PAN);
+    h.shell
+        .run(
+            "device.set_param",
+            json!({ "device": device, "param": pan, "value": -20.0 }),
+        )
+        .unwrap();
+    h.settle();
+    let nodes = Harness::nodes(&h.settle());
+    assert_eq!(Harness::node(&nodes, "Slot 1 Pan").value, "0");
+    let cell = Harness::node(&nodes, "Slot 4");
+    assert_eq!(cell.role, Role::Button);
+    assert!(
+        cell.description.contains("plays F3") && cell.description.contains("empty"),
+        "{}",
+        cell.description
+    );
+    assert!(
+        Harness::node(&nodes, "Slot 1")
+            .description
+            .contains("selected"),
+        "slot 1 is selected to start"
+    );
+
+    let at = slot_cell_rect(&mut h, device, 3).center();
+    h.click(at);
+    h.settle();
+    assert_eq!(selected_slot(&h, device), 3);
+    let nodes = Harness::nodes(&h.settle());
+    assert_eq!(Harness::node(&nodes, "Slot 4 Pan").value, "-20");
+    assert!(
+        nodes.iter().all(|n| n.label != "Slot 1 Pan"),
+        "slot 1's controls are gone"
+    );
+    assert!(
+        Harness::node(&nodes, "Slot 4")
+            .description
+            .contains("selected")
+    );
+    assert!(
+        !Harness::node(&nodes, "Slot 1")
+            .description
+            .contains("selected")
+    );
+    // Choosing a slot is a view change: nothing for undo.
+    assert_ne!(last_step(&h), "Select Sample Slot");
+}
+
+// Spec: eight-slot-drum-sampler R18
+#[test]
+fn a_sample_dropped_on_a_slot_cell_loads_into_that_slot_and_delete_clears_it() {
+    let mut h = harness();
+    let device = add_kitbag(&mut h);
+    let file = std::env::temp_dir().join(format!("bl-ui-kitbag-{}.wav", std::process::id()));
+    let samples: Vec<f32> = (0..480)
+        .map(|i| (i as f32 * 440.0 / 48_000.0 * std::f32::consts::TAU).sin() * 0.25)
+        .collect();
+    let bytes = bl_media::wav_bytes(
+        &samples,
+        1,
+        48_000,
+        bl_media::BitDepth::Int16,
+        bl_media::Dither::None,
+    )
+    .unwrap();
+    std::fs::write(&file, bytes).unwrap();
+
+    let media = |h: &Harness| {
+        h.shell
+            .editor()
+            .document()
+            .device(device)
+            .unwrap()
+            .media
+            .clone()
+    };
+    assert!(media(&h).is_empty(), "a new drum sampler has no samples");
+    // Dropped on slot 6's cell, the file goes to slot 6 whatever is
+    // selected.
+    let cell = slot_cell_rect(&mut h, device, 5).center();
+    h.frame(vec![Event::PointerMoved(cell)]);
+    h.dropped
+        .push(std::sync::Arc::new(DroppedFile(file.clone())));
+    h.frame(Vec::new());
+    let loaded = media(&h);
+    assert_eq!(loaded.len(), 6, "{loaded:?}");
+    assert!(loaded[..5].iter().all(Option::is_none) && loaded[5].is_some());
+    assert_eq!(last_step(&h), "Load Sample");
+    let nodes = Harness::nodes(&h.settle());
+    assert!(
+        Harness::node(&nodes, "Slot 6")
+            .description
+            .contains("holds a sample")
+    );
+    assert!(
+        Harness::node(&nodes, "Slot 5")
+            .description
+            .contains("empty")
+    );
+
+    // Dropped elsewhere on the device, it goes to the selected slot (1).
+    let frame = frame_of(&mut h, device);
+    let title = pos2(frame.center().x, frame.top() + 4.0);
+    h.frame(vec![Event::PointerMoved(title)]);
+    h.dropped
+        .push(std::sync::Arc::new(DroppedFile(file.clone())));
+    h.frame(Vec::new());
+    assert!(media(&h)[0].is_some(), "slot 1, the selected one");
+
+    // Delete on a focused cell clears its slot: one undo step.
+    h.click(cell);
+    h.settle();
+    h.key(Key::Delete, Modifiers::NONE);
+    h.settle();
+    assert_eq!(media(&h).len(), 1, "slot 6 is clear: {:?}", media(&h));
+    assert_eq!(last_step(&h), "Clear Sample");
+    let _ = std::fs::remove_file(&file);
+}
+
+/// The Edit menu's item of this row, as it reads and works now.
+fn edit_item(h: &Harness, row: &str) -> bl_ui::menus::ItemState {
+    let bar = menu_bar(MenuPlatform::current());
+    let item = bar
+        .iter()
+        .flat_map(bl_shell::menus::Menu::walk)
+        .find(|item| item.row == row)
+        .unwrap_or_else(|| panic!("{row} is in the menus"));
+    item_state(item, &h.shell, &h.keymap, Platform::current())
+}
+
+// Spec: device-compare R5
+#[test]
+fn the_title_bar_shows_b_while_b_is_active() {
+    let mut h = harness();
+    let a = add(&mut h, gain());
+    let title = |h: &mut Harness| {
+        let nodes = Harness::nodes(&h.settle());
+        nodes
+            .iter()
+            .find(|n| n.label.starts_with("Test Gain"))
+            .map(|n| n.label.clone())
+            .expect("the title bar")
+    };
+    assert_eq!(title(&mut h), "Test Gain");
+    h.shell
+        .run("device.compare_switch", json!({ "device": a }))
+        .unwrap();
+    assert_eq!(title(&mut h), "Test Gain (B)");
+    // Folded, the strip reads it too.
+    h.shell.run("device.fold", json!({ "device": a })).unwrap();
+    assert_eq!(title(&mut h), "Test Gain (B)");
+    h.shell
+        .run("device.compare_switch", json!({ "device": a }))
+        .unwrap();
+    assert_eq!(title(&mut h), "Test Gain");
+}
+
+// Spec: device-compare R6 (M-EDIT-016, M-EDIT-017, C-DEVICE-010, C-DEVICE-011)
+#[test]
+fn compare_items_follow_the_state_and_are_disabled_for_racks_and_plugins() {
+    let mut h = harness();
+    // With no device selected the Edit menu's items are disabled.
+    for row in ["M-EDIT-016", "M-EDIT-017"] {
+        assert!(!edit_item(&h, row).enabled, "{row} with no device");
+    }
+    let a = add(&mut h, gain());
+    h.shell
+        .invoke("device.select", json!({ "device": a }))
+        .unwrap();
+    // The items work with the Device View focused, as Float's key does.
+    h.shell.set_focused_area(Area::Detail);
+    h.settle();
+    let (switch, copy) = (edit_item(&h, "M-EDIT-016"), edit_item(&h, "M-EDIT-017"));
+    assert_eq!(
+        (switch.label.as_str(), switch.enabled),
+        ("Compare: Switch to B", true)
+    );
+    assert_eq!(
+        (copy.label.as_str(), copy.enabled),
+        ("Compare: Copy A to B", true)
+    );
+    assert_eq!(switch.invocation.unwrap().id, "device.compare_switch");
+    assert!(switch.chord.is_some(), "the Edit menu shows P");
+
+    // The items run the commands on the selected device.
+    h.shell.invoke("device.compare_switch", json!({})).unwrap();
+    assert_eq!(last_step(&h), "Compare: Switch to B");
+    h.settle();
+    assert_eq!(edit_item(&h, "M-EDIT-016").label, "Compare: Switch to A");
+    assert_eq!(edit_item(&h, "M-EDIT-017").label, "Compare: Copy B to A");
+    let fa = frame_of(&mut h, a);
+    let out = right_click(&mut h, title_rect(fa, false).center());
+    let nodes = Harness::nodes(&out);
+    let menu = |label: &str| {
+        nodes
+            .iter()
+            .find(|n| n.label.starts_with(label))
+            .unwrap_or_else(|| panic!("no menu item {label:?}"))
+            .clone()
+    };
+    assert!(!menu("Compare: Switch to A").disabled);
+    assert!(!menu("Compare: Copy B to A").disabled);
+    h.frame(vec![Event::Key {
+        key: Key::Escape,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: Modifiers::NONE,
+    }]);
+
+    // A plug-in device has no states, as in Live: the items are disabled.
+    let plugin: DeviceId = h.shell.new_id();
+    let track = h.shell.editor().document().device_track(a).unwrap();
+    h.shell
+        .run(
+            "device.insert",
+            json!({ "track": track, "index": 1, "device": {
+                "id": plugin, "name": "Reverb", "enabled": true, "params": [],
+                "kind": { "plugin": { "format": "clap", "plugin_id": "org.example.reverb" } },
+            } }),
+        )
+        .unwrap();
+    h.shell
+        .invoke("device.select", json!({ "device": plugin }))
+        .unwrap();
+    h.settle();
+    for row in ["M-EDIT-016", "M-EDIT-017"] {
+        assert!(!edit_item(&h, row).enabled, "{row} on a plug-in");
+    }
+    let fp = frame_of(&mut h, plugin);
+    let out = right_click(&mut h, title_rect(fp, false).center());
+    let nodes = Harness::nodes(&out);
+    for label in ["Compare: Switch to B", "Compare: Copy A to B"] {
+        let item = nodes
+            .iter()
+            .find(|n| n.label.starts_with(label))
+            .unwrap_or_else(|| panic!("no menu item {label:?}"));
+        assert!(item.disabled, "{label} on a plug-in");
+    }
 }

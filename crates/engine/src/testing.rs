@@ -53,6 +53,10 @@ pub const KEY: &str = "test.key";
 pub const INSTRUMENT: &str = "test.instrument";
 /// The delay node's device type (WP-2.11).
 pub const DELAY: &str = "test.delay";
+/// The transposing MIDI effect's device type (WP-5.1).
+pub const TRANSPOSE: &str = "test.transpose";
+/// The transposing MIDI effect's shift, in semitones.
+pub const SEMITONES: ParamId = ParamId(0);
 /// The DC node's value.
 pub const VALUE: ParamId = ParamId(0);
 /// The gain node's gain, linear.
@@ -177,6 +181,10 @@ pub fn registry(probe: &Arc<Probe>) -> Registry {
             producer,
             _tracked: Tracked::new(&p),
         })
+    });
+    let p = Arc::clone(probe);
+    registry.add_native(TRANSPOSE, move |device, _| {
+        Box::new(Transpose::new(device, &p))
     });
     let p = Arc::clone(probe);
     registry.add_native(DELAY, move |device, config| {
@@ -442,6 +450,32 @@ impl Node for TestInstrument {
                 frame: pos + event.offset as i64,
                 event,
             });
+        }
+    }
+}
+
+/// A MIDI effect that sends every note on shifted by its semitones (WP-5.1):
+/// racks of MIDI effects have something to merge.
+#[derive(Debug)]
+struct Transpose {
+    semitones: i32,
+    _tracked: Tracked,
+}
+
+impl Transpose {
+    fn new(device: &Device, probe: &Arc<Probe>) -> Self {
+        Self {
+            semitones: device.params.get(&SEMITONES).copied().unwrap_or(0.0) as i32,
+            _tracked: Tracked::new(probe),
+        }
+    }
+}
+
+impl Node for Transpose {
+    fn process(&mut self, block: &mut Block<'_>) {
+        for &note in block.notes() {
+            let key = (i32::from(note.key) + self.semitones).clamp(0, 127) as u8;
+            block.send_note(NoteEvent { key, ..note });
         }
     }
 }

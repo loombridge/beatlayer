@@ -331,6 +331,10 @@ impl MainWindowUi {
         // Spec: accessibility R3, R4, R7. The keyboard's moves go by the
         // order the last frame drew.
         crate::menus::menu_keys(ctx);
+        // Spec: modulation R15. A lit Map button tints the parameters it can
+        // map, and Esc puts it out.
+        crate::mapping::set_armed(ctx, shell.armed_map());
+        crate::mapping::escape(ctx, &mut events);
         self.order = crate::focus::take(ctx);
         crate::focus::set_outlined(ctx, shell.outline_view_in_focus());
         if let Some(step) = self.focus_move.take() {

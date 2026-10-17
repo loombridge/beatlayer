@@ -35,6 +35,13 @@ pub const POLARITY: ParamId = ParamId(65);
 /// The Depth, from 0 % (no effect) to 100 % (full), which scales every
 /// mapping's effect (R13). A parameter of every modulator.
 pub const DEPTH: ParamId = ParamId(66);
+/// The Curve Mod's Grid: the display's divisions of the cycle, a choice among
+/// [`GRIDS`] (R23).
+pub const GRID_DIVISIONS: ParamId = ParamId(13);
+/// The Curve Mod's Snap: breakpoints snap to the grid (R23).
+pub const SNAP: ParamId = ParamId(14);
+/// The Grid's choices: each one's name and its divisions of the cycle.
+pub const GRIDS: [(&str, u32); 5] = [("1/2", 2), ("1/4", 4), ("1/8", 8), ("1/16", 16), ("1/32", 32)];
 /// The first parameter id a slot owns; each slot has three.
 const SLOT_BASE: u32 = 67;
 
@@ -198,6 +205,58 @@ pub fn shape_preset(number: u8) -> Option<Vec<ShapePoint>> {
         6 => vec![p(0.0, 1.0, 0.6), p(1.0, 0.0, 0.0)],
         _ => return None,
     })
+}
+
+/// `points` with a breakpoint added at (`x`, `y`), kept in order (R23); the
+/// same list if another breakpoint is within a gap of `x` or the list is
+/// full.
+#[must_use]
+pub fn with_point_added(points: &[ShapePoint], x: f64, y: f64) -> Vec<ShapePoint> {
+    let x = x.clamp(0.0, 1.0);
+    let y = y.clamp(0.0, 1.0);
+    if points.len() >= MAX_POINTS || points.iter().any(|p| (p.x - x).abs() < MIN_GAP) {
+        return points.to_vec();
+    }
+    let at = points.partition_point(|p| p.x < x);
+    let mut out = points.to_vec();
+    out.insert(at, ShapePoint { x, y, bend: 0.0 });
+    out
+}
+
+/// `points` with breakpoint `index` moved to (`x`, `y`): it keeps its bend
+/// and its place in the order, a gap from its neighbours (R23).
+#[must_use]
+pub fn with_point_moved(points: &[ShapePoint], index: usize, x: f64, y: f64) -> Vec<ShapePoint> {
+    let mut out = points.to_vec();
+    let Some(point) = out.get_mut(index) else {
+        return out;
+    };
+    let low = if index == 0 { 0.0 } else { points[index - 1].x + MIN_GAP };
+    let high = points.get(index + 1).map_or(1.0, |next| next.x - MIN_GAP);
+    point.x = x.clamp(low, high.max(low));
+    point.y = y.clamp(0.0, 1.0);
+    out
+}
+
+/// `points` with the bend of the segment starting at breakpoint `index` set
+/// (R23), from −1 to 1.
+#[must_use]
+pub fn with_bend(points: &[ShapePoint], index: usize, bend: f64) -> Vec<ShapePoint> {
+    let mut out = points.to_vec();
+    if let Some(point) = out.get_mut(index) {
+        point.bend = bend.clamp(-1.0, 1.0);
+    }
+    out
+}
+
+/// `points` without breakpoint `index` (R23).
+#[must_use]
+pub fn without_point(points: &[ShapePoint], index: usize) -> Vec<ShapePoint> {
+    let mut out = points.to_vec();
+    if index < out.len() {
+        out.remove(index);
+    }
+    out
 }
 
 /// The shape a new Curve Mod plays: the triangle.
@@ -400,6 +459,22 @@ mod tests {
             ShapePoint { x: 1.0, y: 1.0, bend: 0.0 },
         ];
         assert!(shape_value(&curved, 0.5) < 0.5, "a positive bend bows below the line");
+    }
+
+    #[test]
+    fn edits_keep_a_shape_valid() {
+        let mut points = shape_preset(1).unwrap();
+        points = with_point_added(&points, 0.5, 0.9);
+        assert_eq!(points.len(), 3);
+        assert_eq!(points, with_point_added(&points, 0.5 + MIN_GAP / 2.0, 0.1), "a gap is kept");
+        points = with_point_moved(&points, 1, 2.0, -3.0);
+        assert!(check_shape(&points).is_ok(), "{points:?}");
+        assert!(points[1].x < points[2].x && points[1].y == 0.0);
+        points = with_bend(&points, 0, 5.0);
+        assert_eq!(points[0].bend, 1.0);
+        points = without_point(&points, 1);
+        assert_eq!(points.len(), 2);
+        assert!(check_shape(&without_point(&points, 0)).is_ok());
     }
 
     #[test]

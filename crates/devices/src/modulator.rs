@@ -69,10 +69,7 @@ pub const TRIGGER_MODE: ParamId = ParamId(10);
 pub const TRIGGER: ParamId = ParamId(11);
 /// Manual: the point of the shape the output takes, in Manual mode.
 pub const MANUAL: ParamId = ParamId(12);
-/// Grid: the display's divisions.
-pub const GRID_DIVISIONS: ParamId = ParamId(13);
-/// Snap: breakpoints snap to the grid.
-pub const SNAP: ParamId = ParamId(14);
+pub use bl_model::modulator::{GRID_DIVISIONS, GRIDS, SNAP};
 
 /// The Wave Mod's waveforms, in the order of its chooser (R22).
 pub const WAVES: [&str; 9] = [
@@ -96,8 +93,6 @@ pub const DIVISIONS: [(&str, f64); 9] = [
 /// The Curve Mod's trigger modes.
 pub const TRIGGER_MODES: [&str; 3] = ["Loop", "1-Shot", "Manual"];
 
-/// The display's grid divisions of the cycle.
-pub const GRIDS: [(&str, u32); 5] = [("1/2", 2), ("1/4", 4), ("1/8", 8), ("1/16", 16), ("1/32", 32)];
 
 /// The Wave Mod's type.
 #[must_use]
@@ -680,6 +675,34 @@ impl WaveSource {
     }
 }
 
+impl WaveSource {
+    /// The waveform `wave` at `total` cycles, from 0 to 1, bent by `shape`
+    /// (−1 to 1) and cut into `steps` steps (R22): Shape bends none of the
+    /// random waves, and Steps none of Random, Bin and Square.
+    fn wave(&mut self, wave: usize, total: f64, shape: f64, steps: f64) -> f64 {
+        let cycle = total.floor();
+        self.advance_to(cycle as i64);
+        let frac = total - cycle;
+        let random = matches!(wave, 5..=8);
+        let bent = if random { frac } else { frac.powf(4f64.powf(-shape)) };
+        let mut w = match wave {
+            0 => 0.5 - 0.5 * (std::f64::consts::TAU * bent).cos(),
+            1 => bent,
+            2 => 1.0 - bent,
+            3 => 1.0 - (2.0 * bent - 1.0).abs(),
+            4 => f64::from(u8::from(bent < 0.5)),
+            5 => self.current,
+            6 => f64::from(u8::from(self.current >= 0.5)),
+            7 => self.walk,
+            _ => self.previous + (self.current - self.previous) * frac,
+        };
+        if steps >= 2.0 && !matches!(wave, 4..=6) {
+            w = (w * (steps - 1.0)).round() / (steps - 1.0);
+        }
+        w.clamp(0.0, 1.0)
+    }
+}
+
 impl Source for WaveSource {
     fn restart(&mut self, seed: u64) {
         self.phasor = Phasor::default();
@@ -696,30 +719,12 @@ impl Source for WaveSource {
             return None;
         }
         let total = self.phasor.total(e, c);
-        let wave = e.param(params, WAVE) as usize;
-        let shape = e.param(params, SHAPE) / 100.0;
-        let steps = e.param(params, STEPS);
-        let cycle = total.floor();
-        self.advance_to(cycle as i64);
-        let frac = total - cycle;
-        let random = matches!(wave, 5..=8);
-        // Shape bends the phase; the random waves have none to bend.
-        let bent = if random { frac } else { frac.powf(4f64.powf(-shape)) };
-        let mut w = match wave {
-            0 => 0.5 - 0.5 * (std::f64::consts::TAU * bent).cos(),
-            1 => bent,
-            2 => 1.0 - bent,
-            3 => 1.0 - (2.0 * bent - 1.0).abs(),
-            4 => f64::from(u8::from(bent < 0.5)),
-            5 => self.current,
-            6 => f64::from(u8::from(self.current >= 0.5)),
-            7 => self.walk,
-            _ => self.previous + (self.current - self.previous) * frac,
-        };
-        if steps >= 2.0 && !matches!(wave, 4..=6) {
-            w = (w * (steps - 1.0)).round() / (steps - 1.0);
-        }
-        Some(w.clamp(0.0, 1.0))
+        Some(self.wave(
+            e.param(params, WAVE) as usize,
+            total,
+            e.param(params, SHAPE) / 100.0,
+            e.param(params, STEPS),
+        ))
     }
 
     fn receive(&mut self, _: &NodeData) {}
@@ -791,5 +796,46 @@ impl Source for CurveSource {
         if let Some(shape) = data.downcast_ref::<Shape>() {
             self.points.clone_from(&shape.0);
         }
+    }
+}
+
+/// The Wave Mod's display (R22): one cycle of its waveform as the controls
+/// set it, or four of a random one, from its seed's first draws, with
+/// Offset applied.
+#[must_use]
+pub fn wave_display(
+    device: bl_model::DeviceId,
+    description: &DeviceDescription,
+    values: &bl_model::OrdMap<ParamId, f64>,
+) -> bl_model::DeviceDisplay {
+    const POINTS: usize = 96;
+    let value = |id: ParamId| description.value(values, id).unwrap_or(0.0);
+    let wave = value(WAVE) as usize;
+    let cycles = if matches!(wave, 5..=8) { 4.0 } else { 1.0 };
+    let mut source = WaveSource::new();
+    let offset = value(OFFSET) / 100.0;
+    let samples = (0..=POINTS)
+        .map(|i| {
+            let total = cycles * i as f64 / POINTS as f64;
+            let w = source.wave(wave, total, value(SHAPE) / 100.0, value(STEPS));
+            (w + offset).clamp(0.0, 1.0) as f32
+        })
+        .collect();
+    bl_model::DeviceDisplay {
+        device,
+        live: false,
+        view: None,
+        series: vec![bl_model::DisplaySeries {
+            name: "Wave".to_owned(),
+            unit: String::new(),
+            x_unit: "cycles".to_owned(),
+            x_range: [0.0, cycles as f32],
+            log_x: false,
+            y_range: [0.0, 1.0],
+            detail: false,
+            values: samples,
+        }],
+        markers: Vec::new(),
+        readings: Vec::new(),
     }
 }

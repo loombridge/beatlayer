@@ -402,7 +402,7 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 1.17 | done | 11 October 2026 |  |
 | 1.18 | done | 11 October 2026 | The Control Bar's transport and the Playback menu in the app |
 | 2.1 | done | 14 October 2026 | [#23](https://github.com/loombridge/beatlayer/pull/23): the MIDI clip model and its playback ([the spec](specs/midi-clips.md)) |
-| 2.2 | done | 17 October 2026 | [#48](https://github.com/loombridge/beatlayer/pull/48) and [#66](https://github.com/loombridge/beatlayer/pull/66): MIDI input and output, input routing and the computer MIDI keyboard ([the spec](specs/midi-io.md)) |
+| 2.2 | done | 17 October 2026 | [#48](https://github.com/loombridge/beatlayer/pull/48), [#66](https://github.com/loombridge/beatlayer/pull/66) and [#98](https://github.com/loombridge/beatlayer/pull/98): MIDI input and output, input routing and the computer MIDI keyboard; a monitored MIDI track's devices play its input ([the spec](specs/midi-io.md)) |
 | 2.3 | done | 15 October 2026 | [#39](https://github.com/loombridge/beatlayer/pull/39), [#49](https://github.com/loombridge/beatlayer/pull/49) and [#50](https://github.com/loombridge/beatlayer/pull/50): the piano roll's note editor, its lanes, Fold and Quantize ([the spec](specs/piano-roll.md)) |
 | 2.4 | done | 12 October 2026 | Per-device latency with WP-2.11 |
 | 2.5 | done | 12 October 2026 | Floating windows in 2.5b |

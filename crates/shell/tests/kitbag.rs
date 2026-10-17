@@ -168,7 +168,7 @@ fn a_set_with_eight_samples_reopens_with_them_by_hash() {
             .all(|(s, l)| usize::from(l.slot) == s)
     );
 
-    let set = scratch.path("Kit.blset");
+    let set = scratch.path("Drums.blset");
     let saved: bl_shell::commands::SetResult = serde_json::from_value(
         shell
             .run("set.save_as", json!({ "path": set.to_string_lossy() }))

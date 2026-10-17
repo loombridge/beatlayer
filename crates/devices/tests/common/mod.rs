@@ -148,7 +148,9 @@ pub fn control(
                 events: &here,
                 transport: TransportInfo {
                     playing: transport.playing,
-                    position: Frames(transport.position.get() + done as i64),
+                    position: Frames(
+                        transport.position.get() + if transport.playing { done as i64 } else { 0 },
+                    ),
                 },
                 sample_rate: RATE,
                 tempo,

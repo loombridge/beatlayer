@@ -2028,6 +2028,7 @@ impl Document {
                     .ok_or(ModelError::NoSuchChain(*chain))?;
                 self.index.remove_chain(&removed);
                 forget(self.track_mut(owner)?, &Gone::chain(&removed));
+                self.prune_mappings();
                 Ok(())
             }
             Command::MoveChain { chain, rack, index } => self.move_chain(*chain, *rack, *index),

@@ -40,15 +40,26 @@ pub fn armed(ctx: &Context) -> Option<ArmedMap> {
         .flatten()
 }
 
-/// Esc puts a lit Map button out and changes nothing (R15). Call it once a
-/// frame, before the controls are drawn.
-pub fn escape(ctx: &Context, events: &mut Vec<UiEvent>) {
+/// Esc puts a lit Map button out and changes nothing (R15), and Enter is
+/// kept for the focused target, so its control doesn't act on it too. Call
+/// it once a frame, before the controls are drawn. While a value is being
+/// typed, or a menu is open (`typing`), both keys stay theirs.
+pub fn escape(ctx: &Context, typing: bool, events: &mut Vec<UiEvent>) {
+    let typing = typing || ctx.text_edit_focused();
+    let entered = armed(ctx).is_some()
+        && !typing
+        && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Enter));
+    ctx.data_mut(|d| d.insert_temp(entered_id(), entered));
     let Some(lit) = armed(ctx) else {
         return;
     };
-    if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
+    if !typing && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
         events.push(UiEvent::Invoke(disarm(lit)));
     }
+}
+
+fn entered_id() -> Id {
+    Id::new("modulator-map-enter")
 }
 
 fn disarm(lit: ArmedMap) -> Invocation {
@@ -87,7 +98,8 @@ pub fn overlay(
         StrokeKind::Inside,
     );
     let response = ui.interact(rect, control.with("map-target"), Sense::click());
-    let entered = ui.memory(|m| m.has_focus(control)) && ui.input(|i| i.key_pressed(Key::Enter));
+    let entered = ui.memory(|m| m.has_focus(control))
+        && ui.data(|d| d.get_temp::<bool>(entered_id()).unwrap_or(false));
     if response.hovered() {
         ui.ctx().set_cursor_icon(CursorIcon::Crosshair);
     }

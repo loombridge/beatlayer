@@ -173,6 +173,30 @@ fn a_synced_lfo_locks_to_the_song_position() {
     assert!(here != slow);
 }
 
+// Spec: modulation R20
+#[test]
+fn a_synced_lfo_holds_still_while_the_song_is_stopped() {
+    let mut node = wave(&[(WAVE, 1.0), (TIME_MODE, 1.0), (RATE_BEATS, 3.0)]);
+    let stopped = TransportInfo {
+        playing: false,
+        position: Frames(1_000),
+    };
+    let out = control(
+        node.as_mut(),
+        1_024,
+        512,
+        &[],
+        &TempoMap::default(),
+        stopped,
+    )
+    .contribution(0)
+    .to_vec();
+    assert!(
+        out.iter().all(|&v| v == out[0]),
+        "it stays where the song is"
+    );
+}
+
 // Spec: modulation R22
 #[test]
 fn hold_freezes_and_r_restarts_from_phase() {

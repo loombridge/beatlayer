@@ -1280,21 +1280,27 @@ impl DeviceView {
         // floats (WP-5.1, WP-2.5b), and so does everything inside a rack.
         copy.reassign_ids(&mut || editor.new_id::<DeviceId>().0);
         // Spec: modulation R19. A modulator copied alone keeps its settings
-        // and no mappings.
+        // and no mappings; one copied inside a rack maps the copies of its
+        // targets inside it.
+        let pairs: Vec<(&Device, DeviceId)> =
+            device.walk().zip(copy.walk().map(|d| d.id)).collect();
         copy.clear_mappings();
         let id = copy.id;
         editor
-            .transact(label, |editor| match place.chain {
-                None => editor.apply(Command::InsertDevice {
-                    track: place.track,
-                    index: place.index,
-                    device: copy,
-                }),
-                Some(chain) => editor.apply(Command::InsertChainDevice {
-                    chain,
-                    index: place.index,
-                    device: copy,
-                }),
+            .transact(label, |editor| {
+                match place.chain {
+                    None => editor.apply(Command::InsertDevice {
+                        track: place.track,
+                        index: place.index,
+                        device: copy,
+                    }),
+                    Some(chain) => editor.apply(Command::InsertChainDevice {
+                        chain,
+                        index: place.index,
+                        device: copy,
+                    }),
+                }?;
+                map_inner_copies(editor, &pairs)
             })
             .map_err(|e| DeviceError::Failed(e.to_string()))?;
         self.selected = Some(id);
@@ -1317,13 +1323,21 @@ impl DeviceView {
     ) -> Result<ChainAdded, DeviceError> {
         let mut copy = chain.clone();
         copy.reassign_ids(&mut || editor.new_id::<DeviceId>().0);
+        let pairs: Vec<(&Device, DeviceId)> = chain
+            .devices_deep()
+            .zip(copy.devices_deep().map(|d| d.id))
+            .collect();
         copy.devices.iter_mut().for_each(Device::clear_mappings);
         let id = copy.id;
+        let command = Command::AddChain {
+            rack,
+            index,
+            chain: copy,
+        };
         editor
-            .apply(Command::AddChain {
-                rack,
-                index,
-                chain: copy,
+            .transact(command.label(), |editor| {
+                editor.apply(command)?;
+                map_inner_copies(editor, &pairs)
             })
             .map_err(|e| DeviceError::Failed(e.to_string()))?;
         Ok(ChainAdded { chain: id, rack })
@@ -1575,4 +1589,35 @@ pub fn load_hot_swapped(
         .ok_or_else(|| DeviceError::Unavailable("no device is being hot-swapped".to_owned()))?;
     load_preset(view, editor, device, path)?;
     Ok(preset_result(device, path))
+}
+
+/// Maps the copies of the modulators in a copied rack or chain to the
+/// copies of their targets inside it (the modulation spec, R19); a mapping
+/// whose target is outside the copy isn't copied. `pairs` pairs each
+/// original with its copy's ID.
+fn map_inner_copies(
+    editor: &mut Editor,
+    pairs: &[(&Device, DeviceId)],
+) -> Result<(), bl_model::EditError> {
+    use bl_model::modulator::ModTarget;
+    let copy_of = |original: DeviceId| {
+        pairs
+            .iter()
+            .find(|(o, _)| o.id == original)
+            .map(|(_, c)| *c)
+    };
+    for &(original, copy) in pairs {
+        for mapping in &original.mappings {
+            if let ModTarget::Device { device, param } = mapping.target
+                && let Some(device) = copy_of(device)
+            {
+                editor.apply(Command::MapModulator {
+                    device: copy,
+                    slot: mapping.slot,
+                    target: ModTarget::Device { device, param },
+                })?;
+            }
+        }
+    }
+    Ok(())
 }

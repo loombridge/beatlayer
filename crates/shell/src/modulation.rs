@@ -119,8 +119,10 @@ pub(crate) fn state(
             }
         }
         for (target, (sources, mut modulators)) in targets {
-            let (travel, control) = travel_of(document, devices, owner.id(), &target)
-                .expect("a target that has sources was found");
+            // A mapping may name a parameter its device doesn't describe.
+            let Some((travel, control)) = travel_of(document, devices, owner.id(), &target) else {
+                continue;
+            };
             let (base, played) = played(owner.id(), &target).unwrap_or((control, control));
             let held_by = modulators
                 .iter()

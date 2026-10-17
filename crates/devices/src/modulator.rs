@@ -467,12 +467,14 @@ impl<S: Source> Modulator<S> {
         f: usize,
         lookahead: i64,
     ) -> f64 {
-        let song = modulation.song_position().0 + f as i64;
+        // Spec: modulation R20. The song position stands still while the
+        // song is stopped, at any block size.
+        let song = modulation.song_position().0;
         let e = Eval {
             rate: self.rate,
             tempo: modulation.tempo(),
             song: if modulation.playing() {
-                song + lookahead
+                song + f as i64 + lookahead
             } else {
                 song
             },
@@ -752,7 +754,10 @@ struct CurveSource {
 }
 
 impl CurveSource {
-    fn new(points: Vec<ShapePoint>) -> Self {
+    fn new(mut points: Vec<ShapePoint>) -> Self {
+        // Room for the longest shape, so a new one arriving on the audio
+        // thread never allocates (R20).
+        points.reserve(modulator::MAX_POINTS.saturating_sub(points.len()));
         Self {
             points,
             phasor: Phasor::default(),
@@ -774,6 +779,11 @@ impl Source for CurveSource {
     fn eval(&mut self, e: &Eval<'_>, c: Common, params: &ParamBank) -> Option<f64> {
         let first = |id: ParamId| e.param(params, id);
         let mode = first(TRIGGER_MODE) as usize;
+        // Spec: modulation R23. R is inactive in beat divisions.
+        let c = Common {
+            restart: c.restart && matches!(c.rate, Rate::Hz(_)),
+            ..c
+        };
         let x = match mode {
             // Loop: the shape repeats at the rate.
             0 => self.phasor.total(e, c).rem_euclid(1.0),

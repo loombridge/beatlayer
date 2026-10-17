@@ -148,7 +148,8 @@ fn every_chooser_lists_what_lives_lists_in_the_same_order() {
             .input,
         Input::Track {
             track: audio[1],
-            tap: Tap::PostFx
+            tap: Tap::PostFx,
+            chain: None,
         }
     );
     assert_eq!(
@@ -599,4 +600,198 @@ fn returns_past_z_take_two_letters() {
             .count()
             == 30
     );
+}
+
+/// Adds a rack named `name` of `kind` to the selected track, or into
+/// `chain`, with chains of these names; returns the rack and its chains.
+fn add_rack(
+    shell: &mut Shell,
+    chain: Option<bl_model::ChainId>,
+    kind: &str,
+    role: &str,
+    name: &str,
+    chains: &[&str],
+) -> (bl_model::DeviceId, Vec<bl_model::ChainId>) {
+    let device = json!({ "kind": { "rack": { "kind": kind } }, "name": name, "role": role });
+    let args = match chain {
+        Some(chain) => json!({ "device": device, "chain": chain }),
+        None => json!({ "device": device }),
+    };
+    let rack: bl_model::DeviceId =
+        serde_json::from_value(shell.invoke("device.add", args).unwrap()["device"].clone())
+            .unwrap();
+    shell
+        .invoke("device.rename", json!({ "device": rack, "name": name }))
+        .unwrap();
+    let ids = chains
+        .iter()
+        .enumerate()
+        .map(|(n, chain_name)| {
+            let id: bl_model::ChainId = shell.new_id();
+            shell
+                .invoke(
+                    "chain.add",
+                    json!({ "rack": rack, "index": n,
+                            "chain": { "id": id, "name": chain_name, "devices": [] } }),
+                )
+                .unwrap();
+            id
+        })
+        .collect();
+    (rack, ids)
+}
+
+fn select(shell: &mut Shell, track: TrackId) {
+    shell
+        .invoke("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+}
+
+// Spec: racks R38, R39
+#[test]
+fn a_track_with_racks_offers_three_taps_per_chain() {
+    let Set {
+        mut shell,
+        midi,
+        audio,
+        ..
+    } = observed_set();
+    // Track 4 holds an audio effect rack of two chains.
+    select(&mut shell, audio[1]);
+    let (_, chains) = add_rack(
+        &mut shell,
+        None,
+        "audio_effect",
+        "audio_effect",
+        "Verb",
+        &["Wet", "Dry"],
+    );
+    // A MIDI track is listed once it holds an instrument, with the taps of
+    // its instrument rack's chains.
+    let (input, ..) = clips(&shell, audio[0]);
+    assert!(!input.labels().contains(&"1-MIDI"), "no instrument yet");
+    select(&mut shell, midi[0]);
+    add_rack(
+        &mut shell,
+        None,
+        "instrument",
+        "instrument",
+        "Keys",
+        &["Pad"],
+    );
+    let (input, ..) = clips(&shell, audio[0]);
+    assert_eq!(
+        input.labels(),
+        [
+            "Ext. In",
+            "Configure…",
+            "─",
+            "Resampling",
+            "─",
+            "1-MIDI",
+            "4-Audio",
+            "A-Reverb",
+            "B-Delay",
+            "Main",
+            "─",
+            "No Input"
+        ]
+    );
+
+    // Choosing the track taps its Post Mixer; its channel chooser then
+    // lists its own taps and a rack | chain | tap for each of the chains.
+    choose(&mut shell, &input, "4-Audio");
+    let (_, channel, ..) = clips(&shell, audio[0]);
+    assert_eq!(
+        channel.labels(),
+        [
+            "Pre FX",
+            "Post FX",
+            "Post Mixer",
+            "Verb | Wet | Pre FX",
+            "Verb | Wet | Post FX",
+            "Verb | Wet | Post Mixer",
+            "Verb | Dry | Pre FX",
+            "Verb | Dry | Post FX",
+            "Verb | Dry | Post Mixer",
+        ]
+    );
+    assert_eq!(channel.text, "Post Mixer");
+    choose(&mut shell, &channel, "Verb | Dry | Post FX");
+    assert_eq!(
+        shell
+            .editor()
+            .document()
+            .track(audio[0])
+            .unwrap()
+            .routing()
+            .input,
+        Input::Track {
+            track: audio[1],
+            tap: Tap::PostFx,
+            chain: Some(chains[1]),
+        }
+    );
+    assert_eq!(
+        shell.editor().undo_history().next(),
+        Some("Change \"Routing\"")
+    );
+    let (input, channel, ..) = clips(&shell, audio[0]);
+    assert_eq!(input.text, "4-Audio");
+    assert_eq!(channel.text, "Verb | Dry | Post FX");
+    // Back to the track's own tap.
+    choose(&mut shell, &channel, "Post FX");
+    let (_, channel, ..) = clips(&shell, audio[0]);
+    assert_eq!(channel.text, "Post FX");
+
+    // A MIDI track's instrument rack is tapped the same way.
+    choose(&mut shell, &input, "1-MIDI");
+    let (_, channel, ..) = clips(&shell, audio[0]);
+    assert_eq!(channel.labels()[3], "Keys | Pad | Pre FX");
+    // MIDI From offers the tracks only.
+    let (input, ..) = clips(&shell, midi[1]);
+    choose(&mut shell, &input, "1-MIDI");
+    let (_, channel, ..) = clips(&shell, midi[1]);
+    assert_eq!(channel.labels(), ["Pre FX", "Post FX", "Post Mixer"]);
+}
+
+// Spec: racks R39
+#[test]
+fn chain_taps_read_rack_chain_and_tap_in_signal_order() {
+    let Set {
+        mut shell, audio, ..
+    } = observed_set();
+    select(&mut shell, audio[1]);
+    // Outer's first chain holds Inner; a drum rack's chains aren't offered.
+    let (_, outer) = add_rack(
+        &mut shell,
+        None,
+        "audio_effect",
+        "audio_effect",
+        "Outer",
+        &["A", "B"],
+    );
+    add_rack(
+        &mut shell,
+        Some(outer[0]),
+        "audio_effect",
+        "audio_effect",
+        "Inner",
+        &["I1", "I2"],
+    );
+    let (input, ..) = clips(&shell, audio[0]);
+    choose(&mut shell, &input, "4-Audio");
+    let (_, channel, ..) = clips(&shell, audio[0]);
+    let racks_and_chains: Vec<&str> = channel
+        .labels()
+        .into_iter()
+        .skip(3)
+        .filter_map(|label| label.strip_suffix(" | Pre FX"))
+        .collect();
+    assert_eq!(
+        racks_and_chains,
+        ["Outer | A", "Inner | I1", "Inner | I2", "Outer | B"],
+        "a nested rack straight after the chain that holds it"
+    );
+    assert_eq!(channel.labels().len(), 3 + 4 * 3);
 }

@@ -19,8 +19,8 @@ use crate::midi_clips::{MidiClipList, MidiClipPlayer};
 use crate::mixer::{self, Route, Solo, TrackMixer, route};
 use crate::node::{NodeData, NodeKey, NoteBuffer, ParamValue};
 use crate::program::{
-    DeviceInput, DeviceSidechain, EngineProgram, ExtOut, Input, Instance, Migration, NO_DELAY,
-    NodeSlot, Rack, RackChain, RackMode, Span, Step, Task, delay_storage,
+    DeviceInput, DeviceSidechain, EngineProgram, ExtOut, Input, Instance, Migration, NO_CHAIN,
+    NO_DELAY, NodeSlot, Rack, RackChain, RackMode, Span, Step, Task, delay_storage,
 };
 use crate::registry::Registry;
 use crate::routing::{Edge, Graph, Via};
@@ -488,23 +488,34 @@ impl Compiler {
         let mut inputs: BTreeMap<TrackId, Vec<Input>> = BTreeMap::new();
         let mut sidechain_inputs: BTreeMap<DeviceId, Vec<Input>> = BTreeMap::new();
         let mut taps: BTreeSet<(TrackId, Tap)> = BTreeSet::new();
+        // The inputs that tap a rack chain: the track they feed, their
+        // place among its inputs, and the chain, which is found once the
+        // tasks have added their racks.
+        let mut chain_taps: Vec<(TrackId, usize, ChainId)> = Vec::new();
         for edge in &graph.edges {
             let (Some(&from), Some(to)) = (task_of.get(&edge.from), document.track(edge.to)) else {
                 continue;
             };
             let route = self.route(&mut build, document, &solo, edge, to);
-            if edge.tap != Tap::PostMixer {
+            if edge.tap != Tap::PostMixer && edge.chain.is_none() {
                 taps.insert((edge.from, edge.tap));
             }
             let input = Input {
                 route,
                 from,
                 tap: edge.tap,
+                chain: NO_CHAIN,
                 delay: NO_DELAY,
             };
             match edge.via.sidechain() {
                 Some(device) => sidechain_inputs.entry(device).or_default().push(input),
-                None => inputs.entry(edge.to).or_default().push(input),
+                None => {
+                    let to_inputs = inputs.entry(edge.to).or_default();
+                    if let Some(chain) = edge.chain {
+                        chain_taps.push((edge.to, to_inputs.len(), chain));
+                    }
+                    to_inputs.push(input);
+                }
             }
         }
 
@@ -533,6 +544,21 @@ impl Compiler {
                 Tap::PostFx => &mut task.post_fx,
                 Tap::PostMixer => continue,
             };
+            if slot.is_none() {
+                *slot = Some(kept);
+                kept += 1;
+            }
+        }
+
+        // The chains that routes tap keep a copy at each tap too.
+        for (to, at, chain) in chain_taps {
+            let task = build.tasks[task_of[&to] as usize];
+            let Some(&index) = build.chain_index.get(&chain) else {
+                continue;
+            };
+            let input = &mut build.inputs[task.inputs.start as usize + at];
+            input.chain = index;
+            let slot = &mut build.rack_chains[index as usize].taps[RackChain::tap_index(input.tap)];
             if slot.is_none() {
                 *slot = Some(kept);
                 kept += 1;
@@ -1072,11 +1098,15 @@ impl Compiler {
                 mixer,
                 buffer: build.chain_buffers,
                 delay: NO_DELAY,
+                taps: [None; 3],
             });
             build.chain_buffers += 1;
         }
         let start = build.rack_chains.len() as u32;
         build.rack_chains.extend(chains);
+        for (at, chain) in device.chains.iter().enumerate() {
+            build.chain_index.insert(chain.id, start + at as u32);
+        }
         build.racks.push(Rack {
             mode: match kind {
                 RackKind::AudioEffect => RackMode::Audio,
@@ -1229,6 +1259,8 @@ struct Build {
     rack_chains: Vec<RackChain>,
     /// How many rack chains have a buffer of their own so far.
     chain_buffers: u32,
+    /// Each rack chain's place in `rack_chains`.
+    chain_index: BTreeMap<ChainId, u32>,
     sidechains: Vec<DeviceSidechain>,
     sidechain_inputs: Vec<Input>,
     unhosted: Vec<DeviceId>,
@@ -1325,6 +1357,19 @@ fn tap_latency(arrival: &[u32], chain: &[u32], from: usize, tap: Tap) -> u32 {
     }
 }
 
+/// The same for an input that may tap a rack chain, whose `(start, length)`
+/// within its task's chain `rack_chains` holds: the signal at the rack's
+/// input has the chain's start behind it, and after the chain's devices the
+/// chain's length too (the racks spec, R40).
+fn input_latency(arrival: &[u32], chain: &[u32], rack_chains: &[(u32, u32)], input: &Input) -> u32 {
+    if input.chain == NO_CHAIN {
+        return tap_latency(arrival, chain, input.from as usize, input.tap);
+    }
+    let (start, length) = rack_chains[input.chain as usize];
+    let after = if input.tap == Tap::PreFx { 0 } else { length };
+    arrival[input.from as usize] + start + after
+}
+
 /// Works out and records delay compensation (WP-2.11): how far each track's
 /// clips and each route are held back so every path into a track lines up,
 /// each sidechain's source lines up with its device's own input, and each
@@ -1354,9 +1399,12 @@ fn compensate(build: &mut Build, order: &[u32]) {
     // node's own input is.
     let mut chain = vec![0u32; tasks];
     let mut offsets: Vec<Vec<(u32, u32)>> = vec![Vec::new(); tasks];
+    // Where each rack chain's input is in its task's chain, and what its
+    // devices add, for routes that tap it.
+    let mut rack_at = vec![(0u32, 0u32); build.rack_chains.len()];
     for (t, task) in build.tasks.clone().iter().enumerate() {
         chain[t] = flow_latency(build, task.chain);
-        offsets[t] = node_offsets(build, task.chain);
+        offsets[t] = node_offsets(build, task.chain, &mut rack_at);
         for &(slot, before) in &offsets[t] {
             for s in task.sidechains.range() {
                 if build.sidechains[s].device == slot {
@@ -1364,6 +1412,9 @@ fn compensate(build: &mut Build, order: &[u32]) {
                 }
             }
         }
+    }
+    for (at, rack_chain) in rack_at.iter_mut().zip(&build.rack_chains) {
+        at.1 = flow_latency(build, rack_chain.steps);
     }
     // The frames from song time to each track's input sum: what its inputs
     // and its devices' sidechain sources make it wait for.
@@ -1373,18 +1424,13 @@ fn compensate(build: &mut Build, order: &[u32]) {
         let task = build.tasks[t];
         let mut arrived = 0u32;
         for input in &build.inputs[task.inputs.range()] {
-            arrived = arrived.max(tap_latency(
-                &arrival,
-                &chain,
-                input.from as usize,
-                input.tap,
-            ));
+            arrived = arrived.max(input_latency(&arrival, &chain, &rack_at, input));
         }
         for s in task.sidechains.range() {
             let sc = build.sidechains[s];
             for input in &build.sidechain_inputs[sc.inputs.range()] {
-                let need = tap_latency(&arrival, &chain, input.from as usize, input.tap)
-                    .saturating_sub(sc.before);
+                let need =
+                    input_latency(&arrival, &chain, &rack_at, input).saturating_sub(sc.before);
                 arrived = arrived.max(need);
             }
         }
@@ -1397,7 +1443,7 @@ fn compensate(build: &mut Build, order: &[u32]) {
         let a = arrival[t];
         for i in task.inputs.range() {
             let input = build.inputs[i];
-            let lat = tap_latency(&arrival, &chain, input.from as usize, input.tap);
+            let lat = input_latency(&arrival, &chain, &rack_at, &input);
             let delay = a.saturating_sub(lat);
             if delay > 0 {
                 let index = line(build, delay);
@@ -1408,7 +1454,7 @@ fn compensate(build: &mut Build, order: &[u32]) {
             let sc = build.sidechains[s];
             for i in sc.inputs.range() {
                 let input = build.sidechain_inputs[i];
-                let lat = tap_latency(&arrival, &chain, input.from as usize, input.tap);
+                let lat = input_latency(&arrival, &chain, &rack_at, &input);
                 let delay = (a + sc.before).saturating_sub(lat);
                 if delay > 0 {
                     let index = line(build, delay);
@@ -1449,9 +1495,16 @@ fn flow_latency(build: &Build, steps: Span) -> u32 {
 /// which its input is, given the chain starts `start` frames in (the racks
 /// spec, R16): what the audio it acts on is behind song time by, and so what
 /// its parameter changes are held back by. A switched-off rack's contents
-/// don't run, so they aren't listed.
-fn node_offsets(build: &Build, steps: Span) -> Vec<(u32, u32)> {
-    fn walk(build: &Build, steps: Span, start: u32, out: &mut Vec<(u32, u32)>) {
+/// don't run, so they aren't listed. Each rack chain's start is recorded in
+/// `rack_at`, by its place in `rack_chains`.
+fn node_offsets(build: &Build, steps: Span, rack_at: &mut [(u32, u32)]) -> Vec<(u32, u32)> {
+    fn walk(
+        build: &Build,
+        steps: Span,
+        start: u32,
+        out: &mut Vec<(u32, u32)>,
+        rack_at: &mut [(u32, u32)],
+    ) {
         let mut before = start;
         for &step in &build.steps[steps.range()] {
             match step {
@@ -1464,8 +1517,10 @@ fn node_offsets(build: &Build, steps: Span) -> Vec<(u32, u32)> {
                     if rack.bypass {
                         continue;
                     }
-                    for chain in &build.rack_chains[rack.chains.range()] {
-                        walk(build, chain.steps, before, out);
+                    for i in rack.chains.range() {
+                        let chain = &build.rack_chains[i];
+                        rack_at[i].0 = before;
+                        walk(build, chain.steps, before, out, rack_at);
                         out.push((chain.mixer, before + flow_latency(build, chain.steps)));
                     }
                     before += rack.latency;
@@ -1474,7 +1529,7 @@ fn node_offsets(build: &Build, steps: Span) -> Vec<(u32, u32)> {
         }
     }
     let mut out = Vec::new();
-    walk(build, steps, 0, &mut out);
+    walk(build, steps, 0, &mut out, rack_at);
     out
 }
 

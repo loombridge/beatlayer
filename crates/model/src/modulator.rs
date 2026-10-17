@@ -410,3 +410,177 @@ mod tests {
         assert!(check_shape(&[p(0.0, 0.0), p(1.0, 1.0)]).is_ok());
     }
 }
+
+#[cfg(test)]
+mod document_tests {
+    use super::*;
+    use crate::command::Command;
+    use crate::editor::Editor;
+    use crate::track::TrackKind;
+
+    struct Set {
+        editor: Editor,
+        audio: TrackId,
+        other: TrackId,
+        ret: TrackId,
+        wave: DeviceId,
+        target: DeviceId,
+    }
+
+    fn device(editor: &mut Editor, track: TrackId, device_type: &str) -> DeviceId {
+        let id = editor.new_id();
+        editor
+            .apply(Command::InsertDevice {
+                track,
+                index: 0,
+                device: Device::new(
+                    id,
+                    device_type,
+                    DeviceKind::Native {
+                        device_type: device_type.to_owned(),
+                    },
+                ),
+            })
+            .unwrap();
+        id
+    }
+
+    fn set() -> Set {
+        let mut editor = Editor::new();
+        let mut track = |kind| {
+            let id = editor.new_id();
+            editor
+                .apply(Command::CreateTrack {
+                    id,
+                    kind,
+                    name: String::new(),
+                    parent: None,
+                    index: 0,
+                })
+                .unwrap();
+            id
+        };
+        let audio = track(TrackKind::Audio);
+        let other = track(TrackKind::Audio);
+        let ret = track(TrackKind::Return);
+        let wave = device(&mut editor, audio, WAVE_MOD);
+        let target = device(&mut editor, other, "beatlayer.eq");
+        Set {
+            editor,
+            audio,
+            other,
+            ret,
+            wave,
+            target,
+        }
+    }
+
+    fn map(editor: &mut Editor, device: DeviceId, slot: u8, target: ModTarget) -> Result<(), String> {
+        editor
+            .apply(Command::MapModulator {
+                device,
+                slot,
+                target,
+            })
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+
+    // Spec: modulation R17
+    #[test]
+    fn a_modulator_maps_any_track_but_not_itself() {
+        let mut set = set();
+        let (wave, target) = (set.wave, set.target);
+        let on = |param| ModTarget::Device { device: target, param: ParamId(param) };
+        map(&mut set.editor, wave, 0, on(1)).unwrap();
+        map(&mut set.editor,
+            wave,
+            1,
+            ModTarget::Mixer { track: set.other, param: MixerParam::Pan },
+        )
+        .unwrap();
+        map(&mut set.editor, wave, 2, ModTarget::Send { track: set.other, to: set.ret }).unwrap();
+        assert!(
+            map(&mut set.editor, wave, 3, ModTarget::Device { device: wave, param: ParamId(1) }).is_err(),
+            "not its own parameters"
+        );
+        assert!(map(&mut set.editor, wave, 3, on(1)).is_err(), "not one parameter twice");
+        // A second modulator may modulate the same parameter.
+        let second = device(&mut set.editor, set.audio, WAVE_MOD);
+        map(&mut set.editor, second, 0, on(1)).unwrap();
+        // Only a modulator maps.
+        assert!(map(&mut set.editor, target, 0, on(2)).is_err());
+        assert!(map(&mut set.editor, wave, 8, on(2)).is_err(), "eight slots");
+    }
+
+    // Spec: modulation R17
+    #[test]
+    fn eight_slots_and_one_per_expression_tab() {
+        let mut set = set();
+        let wave = set.wave;
+        for slot in 0..SLOTS {
+            map(&mut set.editor,
+                wave,
+                slot,
+                ModTarget::Device { device: set.target, param: ParamId(u32::from(slot)) },
+            )
+            .unwrap();
+        }
+        assert_eq!(set.editor.document().device(wave).unwrap().mappings.len(), 8);
+        // A slot takes a new target in place of its old one.
+        map(&mut set.editor, wave, 0, ModTarget::Mixer { track: set.audio, param: MixerParam::Volume })
+            .unwrap();
+        assert_eq!(set.editor.document().device(wave).unwrap().mappings.len(), 8);
+    }
+
+    // Spec: modulation R19
+    #[test]
+    fn a_deleted_target_takes_its_mapping() {
+        let mut set = set();
+        let (wave, target) = (set.wave, set.target);
+        map(&mut set.editor, wave, 0, ModTarget::Device { device: target, param: ParamId(1) }).unwrap();
+        map(&mut set.editor, wave, 1, ModTarget::Mixer { track: set.other, param: MixerParam::Volume })
+            .unwrap();
+        map(&mut set.editor, wave, 2, ModTarget::Mixer { track: set.audio, param: MixerParam::Volume })
+            .unwrap();
+        // A target moved to another track keeps its mapping.
+        set.editor
+            .apply(Command::MoveDevice { device: target, track: set.audio, index: 0 })
+            .unwrap();
+        assert_eq!(set.editor.document().device(wave).unwrap().mappings.len(), 3);
+        // Deleting the device and the track take theirs in the same undo step.
+        set.editor.apply(Command::RemoveDevice { device: target }).unwrap();
+        assert_eq!(set.editor.document().device(wave).unwrap().mappings.len(), 2);
+        set.editor.apply(Command::DeleteTrack { track: set.other }).unwrap();
+        let slots: Vec<u8> =
+            set.editor.document().device(wave).unwrap().mappings.iter().map(|m| m.slot).collect();
+        assert_eq!(slots, [2]);
+        set.editor.undo().unwrap();
+        assert_eq!(set.editor.document().device(wave).unwrap().mappings.len(), 2, "one step");
+    }
+
+    // Spec: modulation R16
+    #[test]
+    fn a_held_parameter_refuses_a_second_holder() {
+        let mut set = set();
+        let (wave, target) = (set.wave, set.target);
+        let second = device(&mut set.editor, set.audio, WAVE_MOD);
+        let on = ModTarget::Device { device: target, param: ParamId(1) };
+        for who in [wave, second] {
+            map(&mut set.editor, who, 0, on).unwrap();
+        }
+        let hold = |editor: &mut Editor, device| {
+            editor.apply(Command::SetDeviceParam { device, param: MODE, value: 1.0 })
+        };
+        hold(&mut set.editor, wave).unwrap();
+        assert!(hold(&mut set.editor, second).is_err(), "the second can't hold it too");
+        // Mapping while in Remote Control is refused too.
+        let other = ModTarget::Device { device: target, param: ParamId(2) };
+        map(&mut set.editor, wave, 1, other).unwrap();
+        set.editor.apply(Command::UnmapModulator { device: wave, slot: 0 }).unwrap();
+        hold(&mut set.editor, second).unwrap();
+        assert!(map(&mut set.editor, wave, 0, on).is_err(), "held by another in Remote Control");
+        let third = ModTarget::Device { device: target, param: ParamId(3) };
+        assert!(map(&mut set.editor, wave, 2, third).is_ok(), "an unheld parameter maps");
+    }
+}

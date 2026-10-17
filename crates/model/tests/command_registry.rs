@@ -1568,6 +1568,7 @@ fn schemas_match_what_commands_serialise() {
                 device,
                 params: [(ParamId(4), 0.5)].into_iter().collect(),
                 name: "Warm Pad".to_owned(),
+                shape: None,
             },
         ),
         (

@@ -28,6 +28,7 @@ use bl_shell_spec::devices::{
     PresetResult, SavePresetArgs, SelectDeviceArgs, SetWindowArgs, ShowSidechainArgs,
     SidechainSection,
 };
+use bl_shell_spec::devices::{ArmMapArgs, ArmedMap, MappingRow, ModulatorFrame};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -47,6 +48,8 @@ pub struct DeviceView {
     hot_swap: Option<DeviceId>,
     /// Devices whose sidechain section is shown (WP-2.19b).
     sidechains_shown: BTreeSet<DeviceId>,
+    /// The lit Map button, if one is (WP-5.10).
+    armed: Option<(DeviceId, u8)>,
     /// The view each device's display shows, where it has chosen one
     /// (WP-5.43).
     display_views: std::collections::BTreeMap<DeviceId, String>,
@@ -324,6 +327,7 @@ impl DeviceView {
         self.folded.retain(exists);
         self.expanded.retain(exists);
         self.sidechains_shown.retain(exists);
+        self.armed = self.armed.filter(|(d, _)| exists(d));
         self.display_views.retain(|d, _| exists(d));
         self.displays.retain(|d, _| exists(d));
     }
@@ -359,6 +363,65 @@ impl DeviceView {
                 })
             }),
             can_paste: self.clipboard.is_some(),
+            armed_map: self.armed.map(|(device, slot)| ArmedMap { device, slot }),
+        }
+    }
+
+    /// The lit Map button, if one is: its modulator and slot (WP-5.10).
+    #[must_use]
+    pub fn armed(&self) -> Option<(DeviceId, u8)> {
+        self.armed
+    }
+
+    /// What a modulator's panel shows beside its parameters.
+    fn modulator_frame(&self, doc: &Document, d: &Device) -> Option<ModulatorFrame> {
+        use bl_model::modulator::{CURVE_MOD, default_shape, is_modulator_kind};
+        if !is_modulator_kind(&d.kind) {
+            return None;
+        }
+        let curve = matches!(&d.kind, DeviceKind::Native { device_type } if device_type == CURVE_MOD);
+        Some(ModulatorFrame {
+            mappings: d
+                .mappings
+                .iter()
+                .map(|m| MappingRow {
+                    slot: m.slot,
+                    target: m.target,
+                    label: self.target_label(doc, m.target),
+                })
+                .collect(),
+            armed: self.armed.filter(|(device, _)| *device == d.id).map(|(_, slot)| slot),
+            shape: curve.then(|| d.shape.clone().unwrap_or_else(default_shape)),
+        })
+    }
+
+    /// How a mapping's slot names its target: a device's title and the
+    /// parameter's name, or a track's label and its control.
+    fn target_label(&self, doc: &Document, target: bl_model::modulator::ModTarget) -> String {
+        use bl_model::modulator::ModTarget;
+        use bl_model::MixerParam;
+        match target {
+            ModTarget::Device { device, param } => doc.device(device).map_or_else(String::new, |d| {
+                let name = self
+                    .description(&d.kind)
+                    .and_then(|description| description.param(param))
+                    .map_or_else(|| format!("Parameter {}", param.0), |p| p.name.clone());
+                format!("{} / {name}", d.title())
+            }),
+            ModTarget::Mixer { track, param } => format!(
+                "{} {}",
+                crate::routing::track_label(doc, track),
+                match param {
+                    MixerParam::Volume => "Volume",
+                    MixerParam::Pan => "Pan",
+                    MixerParam::Mute => "Track Activator",
+                }
+            ),
+            ModTarget::Send { track, to } => format!(
+                "{} Send {}",
+                crate::routing::track_label(doc, track),
+                crate::routing::track_label(doc, to)
+            ),
         }
     }
 
@@ -492,6 +555,7 @@ impl DeviceView {
                 }
             }),
             display_view: self.display_view(d),
+            modulator: self.modulator_frame(doc, d),
         }
     }
 
@@ -571,6 +635,10 @@ impl DeviceView {
             }),
             ids::LOAD_PRESET => has_target() && args.get("path").is_some(),
             ids::PARAMETERS | ids::DISPLAY | ids::SET_DISPLAY_VIEW => has_target(),
+            ids::ARM_MAP => self.target(doc, named).is_ok_and(|device| {
+                doc.device(device)
+                    .is_some_and(|d| bl_model::modulator::is_modulator_kind(&d.kind))
+            }),
             ids::SET_WINDOW => named
                 .and_then(|device| doc.device(device))
                 .is_some_and(|d| d.floating),
@@ -820,6 +888,31 @@ impl DeviceView {
                 outcome.value = to_value(&preset_result(device, &path));
                 return Ok(outcome);
             }
+            ids::ARM_MAP => {
+                let ArmMapArgs { device, slot, armed } = parse(args)?;
+                let device = self.target(editor.document(), device)?;
+                if !editor
+                    .document()
+                    .device(device)
+                    .is_some_and(|d| bl_model::modulator::is_modulator_kind(&d.kind))
+                {
+                    return Err(DeviceError::Unavailable(format!("{device} isn't a modulator")));
+                }
+                if slot >= bl_model::modulator::SLOTS {
+                    return Err(DeviceError::InvalidArgs(format!(
+                        "a modulator's slots are 0 to {}",
+                        bl_model::modulator::SLOTS - 1
+                    )));
+                }
+                let lit = self.armed == Some((device, slot));
+                self.armed = if armed.unwrap_or(!lit) {
+                    Some((device, slot))
+                } else if lit {
+                    None
+                } else {
+                    self.armed
+                };
+            }
             ids::DISPLAY => {
                 let DeviceArgs { device } = parse(args)?;
                 let device = self.target(editor.document(), device)?;
@@ -952,6 +1045,7 @@ impl DeviceView {
                     device: id,
                     params: self.sanitize(&args.device.kind, preset.params.clone()),
                     name: preset::preset_name(path),
+                    shape: preset.shape.clone(),
                 })?;
             }
             Ok::<_, bl_model::EditError>(())
@@ -985,6 +1079,9 @@ impl DeviceView {
         // A copy goes in the chain, docked, whether or not the original
         // floats (WP-2.5b).
         copy.floating = false;
+        // Spec: modulation R19. A modulator copied alone keeps its settings
+        // and no mappings.
+        copy.mappings.clear();
         editor
             .transact(label, |editor| {
                 editor.apply(Command::InsertDevice {
@@ -1040,6 +1137,7 @@ fn load_preset(
             device,
             params: view.sanitize(&loaded.kind, loaded.params),
             name: preset::preset_name(path),
+            shape: loaded.shape,
         })
         .map(|_| ())
         .map_err(|e| DeviceError::Failed(e.to_string()))

@@ -868,6 +868,10 @@ pub enum Command {
         /// The name the title bar shows while Show Preset Name is on, such
         /// as the preset's; empty for the device's own name.
         name: String,
+        /// A Curve Mod's breakpoint shape (the modulation spec, R23), which
+        /// a preset of one holds; `null` for the default shape.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        shape: Option<Vec<crate::modulator::ShapePoint>>,
     },
     /// Floats a device in a window of its own, or docks it back in the
     /// Device View (IMP-14, WP-2.5b). Only native devices float.
@@ -1626,9 +1630,11 @@ impl Document {
                 device,
                 params,
                 name,
+                shape,
             } => {
                 let mut loaded = self.device_ref(*device)?.clone();
                 loaded.params = params.clone();
+                loaded.shape.clone_from(shape);
                 loaded.set_name(name);
                 check_device(&loaded)?;
                 if loaded != *self.device_ref(*device)? {
@@ -4843,6 +4849,7 @@ mod tests {
             device,
             params: params.clone(),
             name: "Warm".to_owned(),
+            shape: None,
         })
         .unwrap();
         let loaded = song.doc.device(device).unwrap();
@@ -4854,6 +4861,7 @@ mod tests {
                 device,
                 params: bad,
                 name: String::new(),
+                shape: None,
             }),
             ModelError::InvalidValue { .. }
         ));

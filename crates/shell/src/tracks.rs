@@ -5,7 +5,9 @@
 //! transaction, so it's one undo step and each part of it is checked as any
 //! edit is.
 
-use bl_model::{Command, Device, Document, EditError, Editor, Output, Track, TrackId, TrackKind};
+use bl_model::{
+    Command, Device, DeviceId, Document, EditError, Editor, Output, Track, TrackId, TrackKind,
+};
 
 use crate::routing::{return_letter, track_label};
 
@@ -55,6 +57,7 @@ pub fn duplicate_without_clips(
     editor
         .transact(label, |editor| {
             let mut renames = Vec::new();
+            let mut devices = Vec::new();
             // The last first, so each original's place stays where it was.
             for &original in originals.iter().rev() {
                 let doc = editor.document();
@@ -72,9 +75,10 @@ pub fn duplicate_without_clips(
                     .iter()
                     .position(|&t| t == original)
                     .map_or(0, |i| i + 1);
-                let copy = copy_track(editor, original, parent, index, &mut renames)?;
+                let copy = copy_track(editor, original, parent, index, &mut renames, &mut devices)?;
                 copies.push(copy);
             }
+            map_copies(editor, &renames, &devices)?;
             for (copy, original) in renames {
                 rename_like(editor, copy, original)?;
             }
@@ -95,6 +99,7 @@ fn copy_track(
     parent: Option<TrackId>,
     index: usize,
     renames: &mut Vec<(TrackId, TrackId)>,
+    devices: &mut Vec<(DeviceId, DeviceId)>,
 ) -> Result<TrackId, EditError> {
     let source = editor
         .document()
@@ -153,10 +158,14 @@ fn copy_track(
         })?;
     }
     for (index, device) in source.devices().enumerate() {
+        // Its mappings come once the copies of its targets are there
+        // (`map_copies`).
         let copy = Device {
             id: editor.new_id(),
+            mappings: Vec::new(),
             ..device.clone()
         };
+        devices.push((device.id, copy.id));
         editor.apply(Command::InsertDevice {
             track: id,
             index,
@@ -165,7 +174,7 @@ fn copy_track(
     }
     let children: Vec<TrackId> = source.children().collect();
     for (index, child) in children.into_iter().enumerate() {
-        copy_track(editor, child, Some(id), index, renames)?;
+        copy_track(editor, child, Some(id), index, renames, devices)?;
     }
     // The routing last, once the devices and the tracks inside are there.
     let routing = source.routing().clone();
@@ -193,6 +202,48 @@ fn copy_track(
         })?;
     }
     Ok(id)
+}
+
+/// Maps the copies of modulators to the copies of their targets (the
+/// modulation spec, R19): a mapping whose target was duplicated too goes to
+/// the copy, and one whose target wasn't isn't copied. `tracks` and
+/// `devices` pair each copy with its original.
+fn map_copies(
+    editor: &mut Editor,
+    tracks: &[(TrackId, TrackId)],
+    devices: &[(DeviceId, DeviceId)],
+) -> Result<(), EditError> {
+    use bl_model::modulator::ModTarget;
+    let track_copy = |original: TrackId| tracks.iter().find(|(_, o)| *o == original).map(|(c, _)| *c);
+    let device_copy = |original: DeviceId| devices.iter().find(|(o, _)| *o == original).map(|(_, c)| *c);
+    for &(original, copy) in devices {
+        let mappings = editor
+            .document()
+            .device(original)
+            .map(|d| d.mappings.clone())
+            .unwrap_or_default();
+        for mapping in mappings {
+            let target = match mapping.target {
+                ModTarget::Mixer { track, param } => {
+                    track_copy(track).map(|track| ModTarget::Mixer { track, param })
+                }
+                ModTarget::Send { track, to } => {
+                    track_copy(track).map(|track| ModTarget::Send { track, to })
+                }
+                ModTarget::Device { device, param } => {
+                    device_copy(device).map(|device| ModTarget::Device { device, param })
+                }
+            };
+            if let Some(target) = target {
+                editor.apply(Command::MapModulator {
+                    device: copy,
+                    slot: mapping.slot,
+                    target,
+                })?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Gives `copy` its original's name, numbered for its own place where the

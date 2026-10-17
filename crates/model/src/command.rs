@@ -11,7 +11,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::automation::{
-    AutomationTarget, MixerParam, PointError, check_bend, entry, override_target,
+    AutomationTarget, MixerParam, PointError, check_bend, entry, override_device, override_target,
 };
 use crate::clip::{AudioData, Clip, ClipData, ClipEnvelope, MidiData, TakeLane, clip_entry};
 use crate::device::{Device, DeviceRole};
@@ -938,6 +938,18 @@ pub enum Command {
         /// Whether it's on.
         enabled: bool,
     },
+    /// Makes the other of a device's A and B states the active one
+    /// (device compare R3). Only native devices have two states.
+    CompareSwitch {
+        /// The device.
+        device: DeviceId,
+    },
+    /// Copies the active one of a device's A and B states over the other
+    /// (device compare R4). Only native devices have two states.
+    CompareCopy {
+        /// The device.
+        device: DeviceId,
+    },
     /// Sets one of a device's parameters to a finite value.
     SetDeviceParam {
         /// The device.
@@ -1253,6 +1265,9 @@ impl Command {
             Self::SetDeviceFloating {
                 floating: false, ..
             } => "Dock Device",
+            // Spec: device-compare R3, R4; `label_in` names the direction.
+            Self::CompareSwitch { .. } => "Compare: Switch",
+            Self::CompareCopy { .. } => "Compare: Copy",
             Self::SetDeviceParam { .. } => "Change parameter",
             // WP-2.16. Live's undo name for loading a Simpler sample is to
             // observe; Beatlayer's names the edit.
@@ -1281,6 +1296,21 @@ impl Command {
             Self::SetChainPan { .. } => "Change chain pan",
             Self::SetChainEnabled { .. } => "Change \"Chain On\"",
             Self::SetChainSolo { .. } => "Solo chain",
+        }
+    }
+
+    /// The undo step's name for this command run on `before`: the same as
+    /// [`label`](Self::label), but a Compare command says which way it went
+    /// (device compare R3, R4).
+    #[must_use]
+    pub fn label_in(&self, before: &Document) -> &'static str {
+        let b = |device: &DeviceId| before.device(*device).is_some_and(|d| d.b_active);
+        match self {
+            Self::CompareSwitch { device } if b(device) => "Compare: Switch to A",
+            Self::CompareSwitch { .. } => "Compare: Switch to B",
+            Self::CompareCopy { device } if b(device) => "Compare: Copy B to A",
+            Self::CompareCopy { .. } => "Compare: Copy A to B",
+            _ => self.label(),
         }
     }
 
@@ -1795,7 +1825,7 @@ impl Document {
                 name,
             } => {
                 let mut loaded = self.device_ref(*device)?.clone();
-                loaded.params = params.clone();
+                loaded.set_both(params.clone());
                 loaded.set_name(name);
                 check_device(&loaded)?;
                 if loaded != *self.device_ref(*device)? {
@@ -1827,7 +1857,7 @@ impl Document {
                 check_value("parameter value", *value, value.is_finite())?;
                 if self.device_ref(*device)?.params.get(param) != Some(value) {
                     let owner = self.device_owner(*device)?;
-                    self.device_mut(*device)?.params.insert(*param, *value);
+                    self.device_mut(*device)?.set_param(*param, *value);
                     override_target(
                         &mut self.track_mut(owner)?.automation,
                         &AutomationTarget::Device {
@@ -1835,6 +1865,24 @@ impl Document {
                             param: *param,
                         },
                     );
+                }
+                Ok(())
+            }
+            Command::CompareSwitch { device } => {
+                if !self.device_ref(*device)?.can_compare() {
+                    return Err(ModelError::NoCompare(*device));
+                }
+                let owner = self.device_owner(*device)?;
+                self.device_mut(*device)?.compare_switch();
+                override_device(&mut self.track_mut(owner)?.automation, *device);
+                Ok(())
+            }
+            Command::CompareCopy { device } => {
+                if !self.device_ref(*device)?.can_compare() {
+                    return Err(ModelError::NoCompare(*device));
+                }
+                if self.device_ref(*device)?.other_params.is_some() {
+                    self.device_mut(*device)?.compare_copy();
                 }
                 Ok(())
             }
@@ -3761,8 +3809,11 @@ fn check_one_device(device: &Device) -> Result<(), ModelError> {
     if device.floating && !device.can_float() {
         return Err(ModelError::CannotFloat(device.id));
     }
-    for value in device.params.values() {
+    for value in device.params.values().chain(device.other_params().values()) {
         check_value("parameter value", *value, value.is_finite())?;
+    }
+    if !device.can_compare() && (device.b_active || device.other_params.is_some()) {
+        return Err(ModelError::NoCompare(device.id));
     }
     if let Some(sidechain) = &device.sidechain {
         let gain = sidechain.gain;
@@ -7216,5 +7267,162 @@ mod tests {
         let held = song.doc.slot(midi_track, scene).unwrap();
         assert_eq!((held.name.as_str(), held.mute), ("Riff", true));
         assert_eq!(song.doc.clip(clip).unwrap().name, "Riff");
+    }
+
+    fn param_of(song: &Song, device: DeviceId, active: bool) -> Option<f64> {
+        let d = song.doc.device(device).unwrap();
+        let params = if active { &d.params } else { d.other_params() };
+        params.get(&ParamId(2)).copied()
+    }
+
+    fn set_param(song: &mut Song, device: DeviceId, value: f64) {
+        song.apply(Command::SetDeviceParam {
+            device,
+            param: ParamId(2),
+            value,
+        })
+        .unwrap();
+    }
+
+    // Spec: device-compare R1
+    #[test]
+    fn a_new_device_has_two_equal_states_with_a_active() {
+        let mut song = Song::new();
+        let device = utility(song.fresh());
+        assert!(device.can_compare());
+        assert!(!device.b_active);
+        assert_eq!(device.other_params(), &device.params);
+    }
+
+    // Spec: device-compare R2
+    #[test]
+    fn a_change_goes_to_the_active_state_only() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        let device = song.device(track);
+        set_param(&mut song, device, -3.0);
+        // A changed, B kept the default (not set).
+        assert_eq!(param_of(&song, device, true), Some(-3.0));
+        assert_eq!(param_of(&song, device, false), None);
+        song.apply(Command::CompareSwitch { device }).unwrap();
+        set_param(&mut song, device, 5.0);
+        assert_eq!(param_of(&song, device, true), Some(5.0));
+        assert_eq!(param_of(&song, device, false), Some(-3.0));
+        // A preset loads into both states, with A active (R9).
+        song.apply(Command::SetDeviceState {
+            device,
+            params: [(ParamId(2), 1.0)].into_iter().collect(),
+            name: String::new(),
+        })
+        .unwrap();
+        let d = song.doc.device(device).unwrap();
+        assert!(!d.b_active && d.other_params.is_none());
+        assert_eq!(param_of(&song, device, false), Some(1.0));
+    }
+
+    // Spec: device-compare R3, R4, R7
+    #[test]
+    fn a_switch_swaps_the_states_and_overrides_the_envelopes_and_a_copy_does_not() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        let device = song.device(track);
+        let target = AutomationTarget::Device {
+            device,
+            param: ParamId(7),
+        };
+        song.apply(Command::SetAutomationBreakpoint {
+            track,
+            target,
+            at: Ticks::ZERO,
+            value: 1.0,
+        })
+        .unwrap();
+        set_param(&mut song, device, -3.0);
+        let enabled = |song: &Song| {
+            song.doc
+                .track(track)
+                .unwrap()
+                .automation_for(&target)
+                .unwrap()
+                .enabled
+        };
+        // Setting another parameter by hand leaves this envelope on; a copy
+        // overrides nothing.
+        assert!(enabled(&song));
+        song.apply(Command::CompareCopy { device }).unwrap();
+        assert!(enabled(&song));
+        assert_eq!(param_of(&song, device, false), Some(-3.0));
+        // Equal states: a switch still overrides every envelope of the
+        // device (R7), and the other state keeps its values.
+        song.apply(Command::CompareSwitch { device }).unwrap();
+        assert!(!enabled(&song));
+        assert!(song.doc.device(device).unwrap().b_active);
+        assert_eq!(param_of(&song, device, true), Some(-3.0));
+        // Re-Enable Automation, then a switch back overrides it again.
+        song.apply(Command::ReEnableAutomationFor { track, target })
+            .unwrap();
+        assert!(enabled(&song));
+        song.apply(Command::CompareSwitch { device }).unwrap();
+        assert!(!enabled(&song));
+        assert!(!song.doc.device(device).unwrap().b_active);
+    }
+
+    // Spec: device-compare R4
+    #[test]
+    fn a_copy_overwrites_the_other_state() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        let device = song.device(track);
+        set_param(&mut song, device, -3.0);
+        song.apply(Command::CompareSwitch { device }).unwrap();
+        set_param(&mut song, device, 5.0);
+        // B is active: Copy B to A.
+        song.apply(Command::CompareCopy { device }).unwrap();
+        assert_eq!(param_of(&song, device, true), Some(5.0));
+        assert_eq!(param_of(&song, device, false), Some(5.0));
+        assert!(song.doc.device(device).unwrap().b_active);
+    }
+
+    // Spec: device-compare R6, R8
+    #[test]
+    fn plug_ins_have_no_states_and_a_moved_device_keeps_both() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        let other = song.track(TrackKind::Audio, None);
+        let plugin = DeviceId(song.ids.allocate());
+        song.apply(Command::InsertDevice {
+            track,
+            index: 0,
+            device: Device::new(
+                plugin,
+                "Reverb",
+                DeviceKind::Plugin {
+                    format: PluginFormat::Clap,
+                    plugin_id: "org.example.reverb".to_owned(),
+                },
+            ),
+        })
+        .unwrap();
+        assert_eq!(
+            song.reject(Command::CompareSwitch { device: plugin }),
+            ModelError::NoCompare(plugin)
+        );
+        assert_eq!(
+            song.reject(Command::CompareCopy { device: plugin }),
+            ModelError::NoCompare(plugin)
+        );
+        let device = song.device(track);
+        set_param(&mut song, device, -3.0);
+        song.apply(Command::CompareSwitch { device }).unwrap();
+        set_param(&mut song, device, 5.0);
+        song.apply(Command::MoveDevice {
+            device,
+            track: other,
+            index: 0,
+        })
+        .unwrap();
+        assert!(song.doc.device(device).unwrap().b_active);
+        assert_eq!(param_of(&song, device, true), Some(5.0));
+        assert_eq!(param_of(&song, device, false), Some(-3.0));
     }
 }

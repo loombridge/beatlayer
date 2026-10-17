@@ -268,6 +268,9 @@ fn fixture() -> Project {
     device.media = Some(ContentHash([9; 32]));
     device.role = DeviceRole::AudioEffect;
     device.params.insert(ParamId(2), 0.75);
+    // B active, with A's values kept (device compare R1, R10).
+    device.b_active = true;
+    device.other_params = Some([(ParamId(2), 0.25)].into_iter().collect());
     device.sidechain = Some(Sidechain {
         enabled: true,
         input: Input::Track {
@@ -692,6 +695,8 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "sidechain",
                 "floating",
                 "media",
+                "b_active",
+                "other_params",
             ][..],
         ),
         (
@@ -938,6 +943,11 @@ fn every_query_readback_the_command_table_names_is_in_a_real_full_result() {
     let document = serde_json::to_value(&project.document).unwrap();
     let mut client = open(&project, "declared");
     let (tracks, clips, devices) = saved_parts(&document);
+    // The device's whole results too, for the fields listed beside `saved`.
+    let device_results: Vec<Value> = devices
+        .iter()
+        .map(|saved| query(&mut client, json!({ "id": saved["id"], "detail": "full" })))
+        .collect();
     let mut full = |ids: &[Value]| -> Vec<Value> {
         ids.iter()
             .map(|saved| {
@@ -968,7 +978,11 @@ fn every_query_readback_the_command_table_names_is_in_a_real_full_result() {
             Object::Song => present(&song, field) || present(&song["saved"], field),
             Object::Track => tracks.iter().any(|saved| present(saved, field)),
             Object::Clip => clips.iter().any(|saved| present(saved, field)),
-            Object::Device => devices.iter().any(|saved| present(saved, field)),
+            Object::Device => {
+                devices.iter().any(|saved| present(saved, field))
+                    || (Object::Device.listed().contains(field)
+                        && device_results.iter().any(|result| present(result, field)))
+            }
             Object::Scene => scenes.iter().any(|saved| present(saved, field)),
         };
         if !found {

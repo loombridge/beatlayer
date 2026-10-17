@@ -1517,6 +1517,38 @@ const ENTRIES: &[Entry] = &[
             defaults.",
     },
     Entry {
+        id: "device.compare_switch",
+        action: Action::Apply("compare_switch"),
+        label: "Compare: Switch",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[Key::Runs("S-DEV-011")],
+        description: "Makes the other of a native device's two states, A and B, the active \
+            one, as the Edit menu's and the device menu's Compare: Switch to B/A and the P key \
+            do. Every parameter whose value differs between the states moves to the newly \
+            active state's value, a continuous one gliding as any change does, and every \
+            parameter of the device that has an envelope is overridden until Re-Enable \
+            Automation. One undo step, named as the item that ran it. A change to a parameter \
+            goes to the active state only. Racks and plug-ins have no states, so a command for \
+            one is refused. `device.parameters` says which state is active and each \
+            parameter's value in the other; the query tool's `device` has both in `compare`. \
+            From the keyboard and the menus it switches the selected device.",
+    },
+    Entry {
+        id: "device.compare_copy",
+        action: Action::Apply("compare_copy"),
+        label: "Compare: Copy",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Copies every value of a native device's active state, A or B, over the \
+            other, as the Edit menu's and the device menu's Compare: Copy A to B (Copy B to A \
+            while B is active) do. What the device plays doesn't change, and no envelope is \
+            overridden. One undo step, named as the item that ran it. Racks and plug-ins have \
+            no states, so a command for one is refused. From the menus it copies the selected \
+            device's state.",
+    },
+    Entry {
         id: "device.set_sample",
         action: Action::Apply("set_device_sample"),
         label: "Set Sample",

@@ -867,7 +867,10 @@ mod tests {
         let mut menus: Vec<(String, Vec<Reference>)> = Vec::new();
         for line in text.lines() {
             if let Some(heading) = line.strip_prefix("## ") {
-                if heading.starts_with("Context menus") {
+                // The menu bar's sections end where the Control Bar's and the
+                // context menus' begin.
+                if heading.starts_with("Control Bar menus") || heading.starts_with("Context menus")
+                {
                     break;
                 }
                 menus.push((heading.to_owned(), Vec::new()));

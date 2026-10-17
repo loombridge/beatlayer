@@ -111,6 +111,10 @@ pub struct EngineState {
     /// The tempo and time signature a launched scene put in place of the
     /// set's, until Re-Enable Automation or Back to Arrangement (WP-3.5).
     pub scene_override: SceneOverride,
+    /// The tracks a Session clip has taken over from the Arrangement, until
+    /// a return (WP-3.6): the Back to Arrangement buttons light while it
+    /// lists any, and a track's own button lights while it lists the track.
+    pub session_over: Vec<TrackId>,
     /// Every track's meter, in the order the tracks run.
     pub meters: Vec<TrackMeter>,
     /// Whether some tracks have no meter because there are more than
@@ -142,6 +146,7 @@ impl EngineState {
             cpu_load_max: 0.0,
             session: Vec::with_capacity(slots),
             scene_override: SceneOverride::default(),
+            session_over: Vec::with_capacity(tracks),
             meters: Vec::with_capacity(tracks),
             meters_truncated: false,
             counters: EngineCounters::default(),
@@ -175,6 +180,8 @@ impl Clone for EngineState {
         meters.extend_from_slice(&self.meters);
         let mut session = Vec::with_capacity(self.session.capacity());
         session.extend_from_slice(&self.session);
+        let mut session_over = Vec::with_capacity(self.session_over.capacity());
+        session_over.extend_from_slice(&self.session_over);
         Self {
             sample_rate: self.sample_rate,
             clock: self.clock,
@@ -193,6 +200,7 @@ impl Clone for EngineState {
             cpu_load_max: self.cpu_load_max,
             session,
             scene_override: self.scene_override,
+            session_over,
             meters,
             meters_truncated: self.meters_truncated,
             counters: self.counters,

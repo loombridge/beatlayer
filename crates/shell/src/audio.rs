@@ -50,7 +50,7 @@ use bl_engine::{
     TakeBounds, TransportCommand,
 };
 use bl_media::{MediaStore, StreamerStats};
-use bl_model::{Channel, Document, LaunchSettings};
+use bl_model::{Channel, Document, LaunchSettings, TrackId};
 pub use bl_shell_spec::audio::{
     AudioDevices, AudioSettings, AudioStatus, COMPENSATION_LIMIT_MS, ConfigureAudio, DeviceListing,
     DeviceRef, DriverInfo, TONE_DEFAULT_DBFS, TONE_DEFAULT_HZ, TONE_MAX_DBFS, TONE_MAX_HZ,
@@ -697,6 +697,17 @@ impl AudioHost {
         self.engine
             .as_mut()
             .map_or_else(Default::default, |engine| engine.state().scene_override)
+    }
+
+    /// The tracks a Session clip has taken over from the Arrangement
+    /// (WP-3.6) as the engine last published them: the Back to Arrangement
+    /// buttons light from this. Empty once every track returned, and while no
+    /// engine runs.
+    pub fn session_over_into(&mut self, out: &mut Vec<TrackId>) {
+        out.clear();
+        if let Some(engine) = self.engine.as_mut() {
+            out.extend_from_slice(&engine.state().session_over);
+        }
     }
 
     /// Gives the engine what to record while the transport records

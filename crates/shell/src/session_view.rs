@@ -15,7 +15,10 @@ use std::path::Path;
 
 use bl_core::time::{Bpm, Ticks, TimeSignature};
 use bl_media::MediaStore;
-use bl_model::{AudioData, ChangeSet, Clip, ClipData, ClipId, Editor, MidiData, SceneId, TrackId};
+use bl_model::{
+    AudioData, ChangeSet, Clip, ClipData, ClipId, Editor, LaunchQuantization, MidiData, SceneId,
+    TrackId,
+};
 use bl_shell_spec::session_view::{
     self as ids, CopyClipArgs, DropFilesArgs, DuplicateSceneArgs, InsertClipArgs, InsertSceneArgs,
     ScrollArgs, SelectArgs, SelectEdge, SelectEdgeArgs, SessionSelectMode, SessionViewState,
@@ -53,6 +56,9 @@ pub struct Context<'a> {
     /// Whether a new clip's edges fade (Settings ▸ Create Fades on Clip
     /// Edges).
     pub edge_fades: bool,
+    /// The launch quantisation a new clip starts with (Settings ▸ Default
+    /// Launch Quantization); `None` follows the global one.
+    pub launch_quantization: Option<LaunchQuantization>,
     /// What Capture and Insert Scene needs from the engine.
     pub capture: Capture,
 }
@@ -321,12 +327,13 @@ impl SessionView {
                     .time_signatures
                     .signature_at(Ticks::ZERO)
                     .bar_length();
-                let clip = Clip::new(
+                let mut clip = Clip::new(
                     ctx.editor.new_id(),
                     Ticks::ZERO,
                     bar,
                     ClipData::Midi(MidiData::new(std::iter::empty())),
                 );
+                clip.launch.quantization = ctx.launch_quantization;
                 let changes = self.edit(ctx.editor, "Insert Empty MIDI Clip", |editor| {
                     model(
                         editor,
@@ -724,6 +731,7 @@ impl SessionView {
                 let mut clip =
                     Clip::new(editor.new_id(), Ticks::ZERO, length, ClipData::Audio(audio));
                 clip.name.clone_from(name);
+                clip.launch.quantization = ctx.launch_quantization;
                 model(
                     editor,
                     "clip.create_in_slot",

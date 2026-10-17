@@ -3275,7 +3275,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["F10"]
 win = ["F10"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.back_to_arrangement", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-TRANS-010"

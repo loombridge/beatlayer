@@ -334,3 +334,22 @@ fn playing_clips_move_to_the_captured_scene_and_play_on_without_a_break() {
         .collect();
     assert_eq!(ons, vec![(0, 60), (24_000, 62)]);
 }
+
+// Spec: session-view R23
+#[test]
+fn back_to_arrangement_gives_back_the_sets_tempo() {
+    let (mut rig, _, scene) = rig_with_scene(256, |rig, scene| {
+        rig.editor
+            .apply(Command::SetSceneTempo {
+                scene,
+                tempo: Some(bpm(60.0)),
+            })
+            .unwrap();
+    });
+    rig.sender.session(SessionCommand::LaunchScene(scene));
+    play(&mut rig, 1_000, 256);
+    assert!(!rig.monitor.state().scene_override.is_none());
+    rig.sender.session(SessionCommand::BackToArrangement);
+    play(&mut rig, 256, 256);
+    assert!(rig.monitor.state().scene_override.is_none());
+}

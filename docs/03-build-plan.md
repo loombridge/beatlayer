@@ -214,6 +214,8 @@ Goal: make a whole song from scratch with MIDI, instruments, plug-ins, recording
 | 2.26 | Export, part 2: one track or the selected tracks as well as the Main output, and MP3 at 320 kbps | S | 1.12 |
 | 2.27 | Export, part 3: Beatlayer's own answer to Live's POW-r dither (licensed, so not reproduced): research and build a noise-shaped dither for 16-bit exports, offered in the export dialog where Live lists POW-r, with its noise spectrum measured against Live's triangular dither | M | 1.12 |
 | 2.28 | Agent previews off the main thread: `perception.preview` (WP-1.16) renders on a worker thread, so a long preview never stalls the interface; the call waits for the render as now | S | 1.16 | A 30-second preview of a 50-track set keeps the main thread's frame time within its budget while it renders, and the preview matches one rendered on the main thread sample for sample |
+| 2.29 | MIDI controller data in clips ([the spec](specs/midi-controller-data.md) R1 to R9): a MIDI clip's controller envelopes (each CC, pitch bend, channel pressure) and each note's own pressure, saved with the set, edited by the clip envelope commands, played to the track's devices on the frame (steps and streams along slopes), read back by query; the Envelopes tab's MIDI Ctrl entry | L | 2.14, 3.15, 3.16 | A clip's CC1 envelope plays as one message per step on its frame and as a stream along a slope, the same in any block size with no allocation on the audio thread; a set with controller envelopes and per-note pressure saves and loads them; the tab lists MIDI Ctrl and marks the controllers with envelopes |
+| 2.29b | Recording MIDI controller data ([the spec](specs/midi-controller-data.md) R10 to R16): Arrangement Record and MIDI Arrangement Overdub, Session slot recording and overdub, and Capture MIDI's controllers | M | 2.29, 3.11, 3.14 | Each recording turns CC, pitch bend and channel pressure into stepped envelopes and polyphonic pressure into per-note pressure, channels merged; controller-only takes make clips; overdubs replace a controller from its first new message; Capture MIDI adds breakpoints and keeps nothing after the last note-off |
 
 Each package lists its full acceptance criteria and traps in its pull request's first commit, before code, in the same form as Phase 0. Plug-in packages test against a fixed set of free plug-ins (for example Surge XT, Dexed, and Airwindows Consolidated in CLAP and VST3, and Apple's built-in Audio Units), installed on the test machine and never committed.
 
@@ -433,6 +435,8 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 2.26 | done | 15 October 2026 | [#2](https://github.com/loombridge/beatlayer/pull/2) and [#47](https://github.com/loombridge/beatlayer/pull/47): export of one track or the selected tracks, and MP3 at 320 kbps ([the spec](specs/export.md)) |
 | 2.27 | done | 15 October 2026 | [#32](https://github.com/loombridge/beatlayer/pull/32): Beatlayer's own Noise Shaped dither for 16- and 24-bit exports ([the spec](specs/export.md)) |
 | 2.28 | done | 13 October 2026 | [#1](https://github.com/loombridge/beatlayer/pull/1): previews and range analyses render on a worker thread in the app |
+| 2.29 | todo |  |  |
+| 2.29b | todo |  |  |
 | 3.1 | done | 15 October 2026 | [#53](https://github.com/loombridge/beatlayer/pull/53); clip slots and scenes in the document |
 | 3.2 | done | 16 October 2026 | [#62](https://github.com/loombridge/beatlayer/pull/62); clip launching, launch quantisation and stop buttons; [the spec](specs/launch-quantisation.md) |
 | 3.3 | done | 17 October 2026 | [#80](https://github.com/loombridge/beatlayer/pull/80); Trigger, Gate, Toggle and Repeat in the engine, the clip's mode set by command and saved, and `session.release`; the launch buttons don't send the release yet; [the spec](specs/launch-quantisation.md) |
@@ -446,7 +450,7 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 3.11 | done | 17 October 2026 | [#86](https://github.com/loombridge/beatlayer/pull/86); armed tracks record into Session slots on the launch grid, and an overdub adds to the MIDI clip that plays, one undo step per loop pass; [the spec](specs/session-recording.md) |
 | 3.12 | todo |  |  |
 | 3.13 | todo |  |  |
-| 3.14 | todo |  |  |
+| 3.14 | todo |  | Notes only; its controller data is WP-2.29b |
 | 3.15 | done | 16 October 2026 | [#61](https://github.com/loombridge/beatlayer/pull/61); clip envelopes in the document and the engine; [the spec](specs/clip-envelopes.md) |
 | 3.16 | done | 17 October 2026 | [#91](https://github.com/loombridge/beatlayer/pull/91); the Clip View's Notes, Envelopes and MPE tabs, the Envelopes tab's editor with its choosers and Linked switch, and the Clip View following the latest selected Session or Arrangement clip; [the spec](specs/clip-envelopes.md) |
 | 3.17 | done | 16 October 2026 | [#55](https://github.com/loombridge/beatlayer/pull/55); the crossfader and per-track A/B assignment |

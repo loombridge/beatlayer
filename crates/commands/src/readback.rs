@@ -64,6 +64,7 @@ impl Object {
                 "checkpoints",
                 "tracks",
             ],
+            Self::Device => &["compare"],
             _ => &[],
         }
     }
@@ -204,6 +205,8 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("clip.set_velocity_amount", query(Clip, "launch.velocity_amount")),
     ("clip.trim_start", query(Clip, "offset")),
     ("device.add", query(Track, "devices")),
+    ("device.compare_copy", query(Device, "compare")),
+    ("device.compare_switch", query(Device, "compare")),
     ("device.cut", query(Track, "devices")),
     ("device.duplicate", query(Track, "devices")),
     ("device.insert", query(Track, "devices")),

@@ -671,7 +671,10 @@ trigger = "press"
 milestone = "M5"
 mac = ["P"]
 win = ["P"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "device.compare_switch", contexts = ["device-view"] },
+]
 
 [[shortcut]]
 id = "S-EDIT-001"

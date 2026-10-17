@@ -380,6 +380,21 @@ pub(crate) fn override_target(automation: &mut TrackAutomation, target: &Automat
     }
 }
 
+/// Turns every envelope of `device`'s parameters off in `automation`: what
+/// switching the device's A and B states does (device compare R7).
+pub(crate) fn override_device(automation: &mut TrackAutomation, device: DeviceId) {
+    let targets: Vec<AutomationTarget> = automation
+        .keys()
+        .filter(
+            |target| matches!(target, AutomationTarget::Device { device: d, .. } if *d == device),
+        )
+        .copied()
+        .collect();
+    for target in targets {
+        override_target(automation, &target);
+    }
+}
+
 /// Drops every envelope of `device`'s parameters from `automation`: what
 /// deleting the device, or moving it to another track, does. A device's
 /// automation belongs to the track it's in.

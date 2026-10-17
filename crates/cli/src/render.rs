@@ -19,7 +19,7 @@ use std::time::Instant;
 use bl_core::time::{SampleRate, Ticks};
 use bl_engine::{
     EngineConfig, MediaLibrary, MediaMap, MediaStreams, Offline, Output, Registry, Report,
-    ScheduledCommand, TransportCommand, When,
+    ScheduledCommand, SessionCommand, TransportCommand, When,
 };
 use bl_media::MediaStore;
 use bl_model::{ContentHash, DeviceId, Document};
@@ -112,6 +112,17 @@ impl Cue {
     };
 }
 
+/// A launch or a stop the render asks of the Session View on a frame of
+/// the render: the request reaches the engine on that frame, and lands on
+/// the launch quantisation grid after it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Launch {
+    /// The frame, from the render's first.
+    pub at: u64,
+    /// What the Session View is asked to do there.
+    pub command: SessionCommand,
+}
+
 /// Plays `document` from its start, with `schedule`'s commands scheduled
 /// before the first block, and hands each block's output to `sink`. It has
 /// no media, so any clips play silence: [`render_with`] gives them some.
@@ -159,6 +170,24 @@ pub fn render_with(
     schedule: &[ScheduledCommand],
     cues: &[Cue],
     settings: &Settings,
+    sink: impl FnMut(&Output<'_>),
+) -> Summary {
+    render_launching(document, media, schedule, cues, &[], settings, sink)
+}
+
+/// [`render_with`], with the Session View asked to launch and stop by
+/// `launches`, each on its frame (in order of frame).
+///
+/// # Panics
+///
+/// If `settings.block` is 0.
+pub fn render_launching(
+    document: &Document,
+    media: Arc<dyn MediaLibrary>,
+    schedule: &[ScheduledCommand],
+    cues: &[Cue],
+    launches: &[Launch],
+    settings: &Settings,
     mut sink: impl FnMut(&Output<'_>),
 ) -> Summary {
     let config = EngineConfig::new(settings.sample_rate, settings.block);
@@ -183,22 +212,38 @@ pub fn render_with(
         missing_media,
         ..Summary::default()
     };
-    offline.render(settings.frames, |output| {
-        for c in 0..output.channels() {
-            for &sample in output.channel(c) {
-                if sample.is_finite() {
-                    summary.peak = summary.peak.max(sample.abs());
-                } else {
-                    summary.non_finite += 1;
-                }
-            }
-        }
-        summary.frames += output.frames() as u64;
-        sink(&output);
+    // The render stops at each launch's frame, so the request reaches the
+    // engine there whatever the block size.
+    let mut done = 0;
+    for launch in launches {
+        let at = launch.at.min(settings.frames);
+        offline.render(at - done, |output| {
+            take_block(&mut summary, &mut sink, &output)
+        });
+        done = at;
+        offline.sender().session(launch.command);
+    }
+    offline.render(settings.frames - done, |output| {
+        take_block(&mut summary, &mut sink, &output);
     });
     summary.reports = offline.reports();
     summary.heap_operations = offline.heap_operations();
     summary
+}
+
+/// Counts a block of the render into `summary` and hands it to `sink`.
+fn take_block(summary: &mut Summary, sink: &mut impl FnMut(&Output<'_>), output: &Output<'_>) {
+    for c in 0..output.channels() {
+        for &sample in output.channel(c) {
+            if sample.is_finite() {
+                summary.peak = summary.peak.max(sample.abs());
+            } else {
+                summary.non_finite += 1;
+            }
+        }
+    }
+    summary.frames += output.frames() as u64;
+    sink(output);
 }
 
 /// Appends a block to `samples`, interleaved: each frame's channels in turn.

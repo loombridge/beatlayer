@@ -33,6 +33,8 @@ pub const SCROLL: &str = "session.scroll";
 pub const INSERT_SCENE: &str = "session.insert_scene";
 /// `session.duplicate_scene`: duplicate the selected scene.
 pub const DUPLICATE_SCENE: &str = "session.duplicate_scene";
+/// `session.capture_and_insert_scene`: Capture and Insert Scene (Cmd+Shift+I).
+pub const CAPTURE_AND_INSERT_SCENE: &str = "session.capture_and_insert_scene";
 /// `session.insert_empty_midi_clip`: Insert Empty MIDI Clip (Cmd+Shift+M).
 pub const INSERT_EMPTY_MIDI_CLIP: &str = "session.insert_empty_midi_clip";
 /// `session.copy_clip_to_slot`: copy a clip into another slot.
@@ -56,6 +58,7 @@ pub const IDS: &[&str] = &[
     SCROLL,
     INSERT_SCENE,
     DUPLICATE_SCENE,
+    CAPTURE_AND_INSERT_SCENE,
     INSERT_EMPTY_MIDI_CLIP,
     COPY_CLIP_TO_SLOT,
     DELETE,
@@ -309,6 +312,22 @@ fn specs() -> Vec<CommandSpec> {
             .permission(Permission::Edit)
             .context(Session)
             .args::<DuplicateSceneArgs>()
+            .result::<ChangeSet>(),
+        CommandSpec::new(CAPTURE_AND_INSERT_SCENE, "Capture and Insert Scene")
+            .description(
+                "Inserts a new scene holding copies of the clips that are playing, each in its \
+             own track's slot, as Create > Capture and Insert Scene (Cmd-Shift-I, Ctrl-Shift-I) \
+             does, and the playing clips carry on in the copies without a break. The scene goes \
+             after the scene launched last, or after the selected scene when none has been \
+             launched since the set opened, and its tempo and time signature are set to the \
+             ones in force now. With nothing playing it inserts an empty scene with the same \
+             tempo and signature, and launches nothing. One undo step. The playing clips are \
+             the engine's, so it needs an engine that runs.",
+            )
+            .permission(Permission::Edit)
+            .context(Session)
+            .binding("S-SES-009")
+            .args::<NoArgs>()
             .result::<ChangeSet>(),
         CommandSpec::new(INSERT_EMPTY_MIDI_CLIP, "Insert Empty MIDI Clip")
             .description(

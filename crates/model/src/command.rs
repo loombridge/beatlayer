@@ -20,7 +20,7 @@ use crate::error::ModelError;
 use crate::ids::{ClipId, ContentHash, DeviceId, ParamId, SceneId, TrackId};
 use crate::launch::{ClipLaunch, LaunchQuantization};
 use crate::metronome::{CountIn, MetronomeRhythm, MetronomeSound};
-use crate::scene::Scene;
+use crate::scene::{SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
 use crate::shared::Shared;
 use crate::track::{
     Channel, CrossfadeAssign, Input, Mixer, Monitor, Output, SendTap, Track, TrackKind,
@@ -226,6 +226,22 @@ pub enum Command {
         track: TrackId,
         /// The new name.
         name: String,
+    },
+    /// Gives a scene a tempo to set when it is launched, from 20 to 999
+    /// BPM, or switches it off with `None` (WP-3.5).
+    SetSceneTempo {
+        /// The scene.
+        scene: SceneId,
+        /// The tempo, or `None` for none of its own.
+        tempo: Option<Bpm>,
+    },
+    /// Gives a scene a time signature to set when it is launched, or
+    /// switches it off with `None` (WP-3.5).
+    SetSceneTimeSignature {
+        /// The scene.
+        scene: SceneId,
+        /// The signature, or `None` for none of its own.
+        signature: Option<TimeSignature>,
     },
     /// Sets a track's volume, as linear gain (finite, at least 0).
     SetVolume {
@@ -1010,6 +1026,8 @@ impl Command {
             // observe; Beatlayer's names the edit.
             Self::DuplicateScene { .. } => "Duplicate scene",
             Self::RenameScene { .. } => "Rename scene",
+            Self::SetSceneTempo { .. } => "Change scene tempo",
+            Self::SetSceneTimeSignature { .. } => "Change scene time signature",
             Self::CreateSlotClip { .. } => "Create clip",
             Self::MoveSlotClip { .. } => "Move clip",
             // Spec: launch-quantisation R8. Live 12.4.6's names, from its
@@ -1499,6 +1517,10 @@ impl Document {
                 self.duplicate_scene(*scene, *id, clips)
             }
             Command::RenameScene { scene, name } => self.rename_scene(*scene, name),
+            Command::SetSceneTempo { scene, tempo } => self.set_scene_tempo(*scene, *tempo),
+            Command::SetSceneTimeSignature { scene, signature } => {
+                self.set_scene_signature(*scene, *signature)
+            }
             Command::CreateSlotClip { track, scene, clip } => {
                 self.create_slot_clip(*track, *scene, clip)
             }
@@ -1944,6 +1966,34 @@ impl Document {
         Ok(())
     }
 
+    fn set_scene_tempo(&mut self, id: SceneId, tempo: Option<Bpm>) -> Result<(), ModelError> {
+        let position = self.scene_position(id).ok_or(ModelError::NoSuchScene(id))?;
+        if let Some(bpm) = tempo {
+            let range = SCENE_TEMPO_MIN..=SCENE_TEMPO_MAX;
+            check_value("scene tempo", bpm.get(), range.contains(&bpm.get()))?;
+        }
+        if let Some(scene) = self.scenes.get_mut(position)
+            && scene.tempo != tempo
+        {
+            scene.tempo = tempo;
+        }
+        Ok(())
+    }
+
+    fn set_scene_signature(
+        &mut self,
+        id: SceneId,
+        signature: Option<TimeSignature>,
+    ) -> Result<(), ModelError> {
+        let position = self.scene_position(id).ok_or(ModelError::NoSuchScene(id))?;
+        if let Some(scene) = self.scenes.get_mut(position)
+            && scene.signature != signature
+        {
+            scene.signature = signature;
+        }
+        Ok(())
+    }
+
     /// Copies a scene and its clips straight after it: one fresh scene, and
     /// an independent copy of each clip the scene holds, under the IDs the
     /// caller lists, every track that holds one listed once.
@@ -1984,10 +2034,9 @@ impl Document {
                 return Err(ModelError::DuplicateId(clip.0));
             }
         }
-        let name = self
+        let original = self
             .scene(id)
             .expect("just checked the scene exists")
-            .name
             .clone();
         for (track, clip, source) in copies {
             let copied = Clip {
@@ -2000,7 +2049,14 @@ impl Document {
                 .insert(copy, Shared::new(copied));
             self.index.clip_track.insert(clip, track);
         }
-        insert_at(&mut self.scenes, position + 1, Scene { id: copy, name })
+        insert_at(
+            &mut self.scenes,
+            position + 1,
+            Scene {
+                id: copy,
+                ..original
+            },
+        )
     }
 
     fn create_slot_clip(
@@ -6032,6 +6088,89 @@ mod tests {
             vec![id.0]
         );
         assert!(Command::DeleteTrack { track }.created_ids().is_empty());
+    }
+
+    // Spec: session-view R20
+    #[test]
+    fn a_scene_tempo_and_signature_are_set_cleared_copied_and_one_undo_step_each() {
+        let mut editor = crate::Editor::new();
+        let scene = editor.document().scenes().next().unwrap().id;
+        let tempo = |editor: &crate::Editor| editor.document().scene(scene).unwrap().tempo;
+        let signature = |editor: &crate::Editor| editor.document().scene(scene).unwrap().signature;
+        assert_eq!((tempo(&editor), signature(&editor)), (None, None));
+        let ninety = Bpm::new(90.0).unwrap();
+        let three_four = TimeSignature::new(3, 4).unwrap();
+        editor
+            .apply(Command::SetSceneTempo {
+                scene,
+                tempo: Some(ninety),
+            })
+            .unwrap();
+        editor
+            .apply(Command::SetSceneTimeSignature {
+                scene,
+                signature: Some(three_four),
+            })
+            .unwrap();
+        assert_eq!(
+            (tempo(&editor), signature(&editor)),
+            (Some(ninety), Some(three_four))
+        );
+        // Duplicating a scene keeps its tempo and signature.
+        let copy: SceneId = editor.new_id();
+        editor
+            .apply(Command::DuplicateScene {
+                scene,
+                id: copy,
+                clips: Vec::new(),
+            })
+            .unwrap();
+        assert_eq!(editor.document().scene(copy).unwrap().tempo, Some(ninety));
+        assert_eq!(
+            editor.document().scene(copy).unwrap().signature,
+            Some(three_four)
+        );
+        editor.undo().unwrap();
+        // Each set is its own undo step, and setting the same value is none.
+        editor
+            .apply(Command::SetSceneTempo {
+                scene,
+                tempo: Some(ninety),
+            })
+            .unwrap();
+        editor.undo().unwrap();
+        assert_eq!((tempo(&editor), signature(&editor)), (Some(ninety), None));
+        editor.undo().unwrap();
+        assert_eq!(tempo(&editor), None);
+        // On, then off.
+        editor
+            .apply(Command::SetSceneTempo {
+                scene,
+                tempo: Some(ninety),
+            })
+            .unwrap();
+        editor
+            .apply(Command::SetSceneTempo { scene, tempo: None })
+            .unwrap();
+        assert_eq!(tempo(&editor), None);
+        // A tempo outside 20 to 999 BPM is refused and changes nothing.
+        for bpm in [19.9, 999.5] {
+            let before = editor.document().clone();
+            let error = editor
+                .apply(Command::SetSceneTempo {
+                    scene,
+                    tempo: Some(Bpm::new(bpm).unwrap()),
+                })
+                .unwrap_err();
+            assert!(
+                matches!(
+                    error,
+                    crate::editor::EditError::Command(ModelError::InvalidValue { .. })
+                ),
+                "{error:?}"
+            );
+            assert_eq!(editor.document(), &before);
+        }
     }
 
     // Spec: session-view R1, R4, R5, R6, R7, R8

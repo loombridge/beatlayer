@@ -82,6 +82,7 @@ pub mod placeholders;
 pub mod plugins;
 pub mod recording;
 pub mod routing;
+pub mod scene_fields;
 pub mod session_view;
 pub mod settings;
 mod shell;

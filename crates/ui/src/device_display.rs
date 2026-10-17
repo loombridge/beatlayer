@@ -1,5 +1,5 @@
 //! What a device's display cell draws from its display data (the device
-//! framework spec, R27): spectra and curves over their axes with markers on
+//! framework spec, R31): spectra and curves over their axes with markers on
 //! them, a gain reduction meter, and the views a display offers. The data is
 //! the device type's own (`bl_model::DeviceDisplay`); what is drawn depends
 //! only on what the data holds, so a later device draws through the same

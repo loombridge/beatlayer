@@ -21,6 +21,12 @@
 //!   and [`FAIL_GUI`] its next editor show or hide. [`ASK_RESIZE`] makes
 //!   it ask the host for an editor window size ([`ASK_RESIZE_WIDTH`] by
 //!   [`ASK_RESIZE_HEIGHT`]), as a plug-in that resizes its own view does.
+//! - **Modulation.** [`DEPTH`] is marked modulatable, and takes a modulation
+//!   amount as CLAP's `PARAM_MOD` event, which the plug-in reports as
+//!   [`DEPTH_MOD`] (the last amount it got for [`DEPTH`]) while [`DEPTH`]
+//!   itself stays the value it was given. [`GAIN`] isn't marked modulatable,
+//!   but the plug-in scales its gain by one plus any amount it gets for it,
+//!   so a host that sent one anyway would be heard.
 //! - **Editor.** A window that draws nothing, so tests open and close it
 //!   headless: floating in any windowing API, and embedded into the host's
 //!   window on the platforms that build one (win32 and x11; WP-2.10). What
@@ -32,7 +38,7 @@
 use std::ffi::CStr;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicU8, AtomicU32, AtomicU64, Ordering::Relaxed};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering::Relaxed};
 
 use clack_extensions::audio_ports::{
     AudioPortFlags, AudioPortInfo, AudioPortInfoWriter, AudioPortType, PluginAudioPorts,
@@ -53,7 +59,8 @@ use clack_extensions::params::{
 use clack_extensions::state::{PluginState, PluginStateImpl};
 use clack_plugin::events::Match;
 use clack_plugin::events::event_types::{
-    NoteOffEvent, NoteOnEvent, ParamGestureBeginEvent, ParamGestureEndEvent, ParamValueEvent,
+    NoteOffEvent, NoteOnEvent, ParamGestureBeginEvent, ParamGestureEndEvent, ParamModEvent,
+    ParamValueEvent,
 };
 use clack_plugin::events::spaces::CoreEventSpace;
 use clack_plugin::prelude::*;
@@ -80,6 +87,12 @@ pub const EDITOR_SCALE: u32 = 4;
 pub const EDITOR_WIDTH: u32 = 5;
 /// Editor Height: the height the host last set the editor to (`set_size`).
 pub const EDITOR_HEIGHT: u32 = 6;
+/// Depth: a modulatable value from 0 to 1, 0 by default; it does nothing to
+/// the audio.
+pub const DEPTH: u32 = 7;
+/// Depth Modulation: the last modulation amount [`DEPTH`] was sent, from
+/// −1 to 1; the plug-in sets it itself.
+pub const DEPTH_MOD: u32 = 8;
 /// How far the echoed notes are transposed, in semitones.
 pub const ECHO_TRANSPOSE: i16 = 12;
 /// What a saved state starts with.
@@ -93,6 +106,9 @@ pub const FAIL_GUI: &[u8] = b"FAIL:GUI";
 /// A state that asks the host to resize this plug-in's editor window, as
 /// a plug-in resizing its own view does (`request_resize`; WP-2.10).
 pub const ASK_RESIZE: &[u8] = b"ASK:RESIZE";
+/// A state that makes the plug-in report every parameter value it is given
+/// back to the host as its own change, as some plug-ins do.
+pub const ECHO_PARAMS: &[u8] = b"ECHO:PARAMS";
 /// The size [`ASK_RESIZE`] asks for, in physical pixels.
 pub const ASK_RESIZE_WIDTH: u32 = 500;
 /// The height [`ASK_RESIZE`] asks for, in physical pixels.
@@ -115,6 +131,10 @@ pub struct GainEcho;
 pub struct Shared<'a> {
     host: HostSharedHandle<'a>,
     gain: AtomicU64,
+    /// The modulation amount the gain was sent, as bits.
+    gain_mod: AtomicU64,
+    depth: AtomicU64,
+    depth_mod: AtomicU64,
     latency: AtomicU32,
     active_latency: AtomicU32,
     last_note: AtomicU64,
@@ -123,16 +143,30 @@ pub struct Shared<'a> {
     editor_width: AtomicU32,
     editor_height: AtomicU32,
     failure: AtomicU8,
+    /// [`ECHO_PARAMS`] was loaded.
+    echo: AtomicBool,
 }
 
 impl Shared<'_> {
+    /// The gain the audio takes: its value, scaled by one plus the
+    /// modulation it was sent.
     fn gain(&self) -> f64 {
         f64::from_bits(self.gain.load(Relaxed))
+            * (1.0 + f64::from_bits(self.gain_mod.load(Relaxed)))
+    }
+
+    fn modulate(&self, id: u32, amount: f64) {
+        match id {
+            GAIN => self.gain_mod.store(amount.to_bits(), Relaxed),
+            DEPTH => self.depth_mod.store(amount.to_bits(), Relaxed),
+            _ => {}
+        }
     }
 
     fn set(&self, id: u32, value: f64) {
         match id {
             GAIN => self.gain.store(value.clamp(0.0, 2.0).to_bits(), Relaxed),
+            DEPTH => self.depth.store(value.clamp(0.0, 1.0).to_bits(), Relaxed),
             LATENCY => {
                 #[expect(
                     clippy::cast_possible_truncation,
@@ -172,7 +206,9 @@ impl Shared<'_> {
 
     fn get(&self, id: u32) -> Option<f64> {
         match id {
-            GAIN => Some(self.gain()),
+            GAIN => Some(f64::from_bits(self.gain.load(Relaxed))),
+            DEPTH => Some(f64::from_bits(self.depth.load(Relaxed))),
+            DEPTH_MOD => Some(f64::from_bits(self.depth_mod.load(Relaxed))),
             LATENCY => Some(f64::from(self.latency.load(Relaxed))),
             LAST_NOTE => Some(f64::from_bits(self.last_note.load(Relaxed))),
             EDITOR_SCALE => Some(f64::from_bits(self.editor_scale.load(Relaxed))),
@@ -188,6 +224,11 @@ impl Shared<'_> {
                 && let Some(id) = param.param_id()
             {
                 self.set(id.get(), param.value());
+            }
+            if let Some(param) = event.as_event::<ParamModEvent>()
+                && let Some(id) = param.param_id()
+            {
+                self.modulate(id.get(), param.amount());
             }
         }
     }
@@ -250,6 +291,9 @@ impl DefaultPluginFactory for GainEcho {
         Ok(Shared {
             host,
             gain: AtomicU64::new(1.0f64.to_bits()),
+            gain_mod: AtomicU64::new(0.0f64.to_bits()),
+            depth: AtomicU64::new(0.0f64.to_bits()),
+            depth_mod: AtomicU64::new(0.0f64.to_bits()),
             latency: AtomicU32::new(0),
             active_latency: AtomicU32::new(0),
             last_note: AtomicU64::new(0.0f64.to_bits()),
@@ -257,6 +301,7 @@ impl DefaultPluginFactory for GainEcho {
             editor_width: AtomicU32::new(0),
             editor_height: AtomicU32::new(0),
             failure: AtomicU8::new(NO_FAILURE),
+            echo: AtomicBool::new(false),
         })
     }
 
@@ -339,10 +384,26 @@ impl<'a> PluginAudioProcessor<'a, Shared<'a>, MainThread<'a>> for Processor<'a> 
             start = end;
             let Some(batch) = batch else { break };
             for event in batch {
-                if let Some(CoreEventSpace::ParamValue(param)) = event.as_core_event()
-                    && let Some(id) = param.param_id()
-                {
-                    self.shared.set(id.get(), param.value());
+                match event.as_core_event() {
+                    Some(CoreEventSpace::ParamValue(param)) => {
+                        if let Some(id) = param.param_id() {
+                            self.shared.set(id.get(), param.value());
+                            if self.shared.echo.load(Relaxed) {
+                                let _ = events.output.try_push(ParamValueEvent::new(
+                                    event.header().time(),
+                                    id,
+                                    Pckn::match_all(),
+                                    param.value(),
+                                ));
+                            }
+                        }
+                    }
+                    Some(CoreEventSpace::ParamMod(param)) => {
+                        if let Some(id) = param.param_id() {
+                            self.shared.modulate(id.get(), param.amount());
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
@@ -439,7 +500,7 @@ impl PluginNotePortsImpl for MainThread<'_> {
 
 impl PluginMainThreadParams for MainThread<'_> {
     fn count(&self) -> u32 {
-        6
+        8
     }
 
     fn get_info(&self, index: u32, info: &mut ParamInfoWriter<'_>) {
@@ -475,6 +536,14 @@ impl PluginMainThreadParams for MainThread<'_> {
                 0.0,
                 automatable | ParamInfoFlags::IS_STEPPED,
             ),
+            6 => (
+                DEPTH,
+                b"Depth",
+                1.0,
+                0.0,
+                automatable | ParamInfoFlags::IS_MODULATABLE,
+            ),
+            7 => (DEPTH_MOD, b"Depth Modulation", 1.0, 0.0, automatable),
             _ => return,
         };
         info.set(&ParamInfo {
@@ -483,7 +552,7 @@ impl PluginMainThreadParams for MainThread<'_> {
             cookie: Cookie::empty(),
             name,
             module: b"",
-            min_value: 0.0,
+            min_value: if id == DEPTH_MOD { -1.0 } else { 0.0 },
             max_value: max,
             default_value: default,
         });
@@ -526,7 +595,7 @@ impl PluginStateImpl for MainThread<'_> {
         let shared = self.shared;
         let mut bytes = Vec::with_capacity(24);
         bytes.extend_from_slice(STATE_MAGIC);
-        bytes.extend_from_slice(&shared.gain().to_le_bytes());
+        bytes.extend_from_slice(&shared.get(GAIN).unwrap_or(1.0).to_le_bytes());
         bytes.extend_from_slice(&shared.latency.load(Relaxed).to_le_bytes());
         bytes.extend_from_slice(&shared.get(LAST_NOTE).unwrap_or(0.0).to_le_bytes());
         output.write_all(&bytes)?;
@@ -547,6 +616,10 @@ impl PluginStateImpl for MainThread<'_> {
         }
         if bytes == FAIL_GUI {
             shared.failure.store(GUI_FAILS, Relaxed);
+            return Ok(());
+        }
+        if bytes == ECHO_PARAMS {
+            shared.echo.store(true, Relaxed);
             return Ok(());
         }
         if bytes == ASK_RESIZE {

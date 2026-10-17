@@ -33,6 +33,7 @@ pub mod delay;
 pub mod eq;
 mod framework;
 pub mod kit;
+pub mod lfo;
 pub mod limiter;
 pub mod polysynth;
 pub mod reverb;
@@ -45,6 +46,7 @@ pub use delay::{DELAY, delay_type};
 pub use eq::{Contour, EQ, eq_type};
 pub use framework::{Audio, NativeDevice, NativeNode, ParamBank, add};
 pub use kit::{KitFactory, KitHost};
+pub use lfo::{Lfo, Rate, Shape, Stereo, Wave};
 pub use limiter::{Brickwall, limiter_type};
 pub use polysynth::{POLYSYNTH, PolySynth, polysynth_type};
 pub use reverb::{REVERB, reverb_type};
@@ -55,7 +57,7 @@ use bl_model::{DeviceDescription, DeviceDisplay, DeviceId, OrdMap, ParamId};
 
 /// The display of the native device `device_type`, if its type draws one
 /// from its parameters and the data its node publishes (the device
-/// framework spec, R27): `values` are the device's set values and `data` the
+/// framework spec, R31): `values` are the device's set values and `data` the
 /// newest data its node published, if an engine runs.
 #[must_use]
 pub fn display(
@@ -94,6 +96,19 @@ pub fn device_types() -> Vec<DeviceType> {
     let mut registry = Registry::empty();
     register(&mut registry);
     registry.device_types()
+}
+
+/// Turns the clip envelopes of a set saved before relative modulation into
+/// modulation that plays what they played (the modulation spec, R5), with
+/// Beatlayer's native devices' descriptions. A plug-in's parameters have
+/// none here: its envelopes played nothing before, and keep their values,
+/// clamped.
+pub fn relative_clip_envelopes(document: &mut bl_model::Document) {
+    let types = device_types();
+    document.relative_clip_envelopes(&|device, param| {
+        let kind = types.iter().find(|t| t.kind == device.kind)?;
+        kind.description.param(param).cloned()
+    });
 }
 
 /// A [`KitHost`] with the kit plug-ins compiled into Beatlayer: its

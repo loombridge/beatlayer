@@ -712,6 +712,16 @@ impl AudioHost {
         }
     }
 
+    /// The parameters under modulation as the engine last published them
+    /// (WP-5.9): what the knobs' rings and the faders' marks draw from.
+    /// Empty while the song doesn't play, and while no engine runs.
+    pub fn modulated_into(&mut self, out: &mut Vec<bl_engine::PlayedParam>) {
+        out.clear();
+        if let Some(engine) = self.engine.as_mut() {
+            out.extend_from_slice(&engine.state().modulated);
+        }
+    }
+
     /// Gives the engine what to record while the transport records
     /// (WP-2.13): the armed tracks' inputs and the rings their samples go
     /// to. It replaces any earlier plan; the take that ends drops it, which
@@ -856,7 +866,7 @@ impl AudioHost {
     }
 
     /// Copies the display data the engine's devices last published into
-    /// `out`, reusing its capacity (the device framework spec, R26). Empty
+    /// `out`, reusing its capacity (the device framework spec, R30). Empty
     /// while no engine runs.
     pub fn displays_into(
         &self,

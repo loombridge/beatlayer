@@ -3,7 +3,9 @@
 //! is dropped and counted (real-time rule 4), never allocated for.
 
 use bl_engine::{NoteEvent, NoteKind};
-use clack_host::events::event_types::{NoteChokeEvent, NoteOffEvent, NoteOnEvent, ParamValueEvent};
+use clack_host::events::event_types::{
+    NoteChokeEvent, NoteOffEvent, NoteOnEvent, ParamModEvent, ParamValueEvent,
+};
 use clack_host::events::io::{InputEventBuffer, OutputEventBuffer, TryPushError};
 use clack_host::events::spaces::CoreEventSpace;
 use clack_host::events::{Match, Pckn, UnknownEvent};
@@ -16,6 +18,7 @@ pub(crate) const EVENT_CAPACITY: usize = 1024;
 #[derive(Clone, Copy)]
 enum In {
     Param(ParamValueEvent),
+    Mod(ParamModEvent),
     On(NoteOnEvent),
     Off(NoteOffEvent),
     Choke(NoteChokeEvent),
@@ -29,6 +32,7 @@ impl In {
     fn as_unknown(&self) -> &UnknownEvent {
         match self {
             Self::Param(e) => e.as_ref(),
+            Self::Mod(e) => e.as_ref(),
             Self::On(e) => e.as_ref(),
             Self::Off(e) => e.as_ref(),
             Self::Choke(e) => e.as_ref(),
@@ -70,6 +74,20 @@ impl InputList {
                 id,
                 Pckn::match_all(),
                 value,
+            )));
+        }
+    }
+
+    /// Adds a modulation of a parameter marked modulatable: its `amount`, in
+    /// the parameter's units, on top of its value, for every note and
+    /// channel.
+    pub(crate) fn param_mod(&mut self, time: u32, id: u32, amount: f64) {
+        if let Some(id) = ClapId::from_raw(id) {
+            self.push(In::Mod(ParamModEvent::new(
+                time,
+                id,
+                Pckn::match_all(),
+                amount,
             )));
         }
     }

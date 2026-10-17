@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-340 commands in 31 areas.
+342 commands in 32 areas.
 
 ## Permission classes
 
@@ -151,6 +151,7 @@ Each command has:
 | [`device.cut`](#devicecut) | Cut Device | `destructive` | `Cmd+X` | `Ctrl+X` |
 | [`device.display`](#devicedisplay) | Device Display | `read` |  |  |
 | [`device.duplicate`](#deviceduplicate) | Duplicate Device | `edit` | `Cmd+D` | `Ctrl+D` |
+| [`device.expand`](#deviceexpand) | Expand Device | `read` |  |  |
 | [`device.fold`](#devicefold) | Fold Device | `read` | `Minus` | `Minus` |
 | [`device.hot_swap`](#devicehot_swap) | Hot-Swap Presets | `read` |  |  |
 | [`device.insert`](#deviceinsert) | Insert Device | `edit` |  |  |
@@ -222,6 +223,7 @@ Each command has:
 | [`mixer_view.state`](#mixer_viewstate) | Mixer View State | `read` |  |  |
 | [`mixer_view.toggle`](#mixer_viewtoggle) | Mixer | `read` | `Cmd+Option+M` | `Ctrl+Alt+M` |
 | [`mixer_view.volume`](#mixer_viewvolume) | Mixer Volume | `read` |  |  |
+| [`modulation.state`](#modulationstate) | Modulation State | `read` |  |  |
 | [`note.add`](#noteadd) | Add Note | `edit` |  |  |
 | [`note.delete`](#notedelete) | Delete Notes | `destructive` |  |  |
 | [`note.move`](#notemove) | Move Notes | `edit` |  |  |
@@ -2529,6 +2531,23 @@ Arguments:
 
 Result: [`DeviceAdded`](#deviceadded).
 
+#### `device.expand`
+
+**Expand Device**. Permission: `read`. Contexts: `device-view`.
+
+Shows or hides a device's expanded part, as the toggle in its title bar does: the extra controls (a modulation section, say) some devices keep out of sight until asked; switches unless `expanded` says which. Only devices with an expanded part (`expandable` in `device_view.state`) have one. Like folding, it changes only the view: it isn't an undo step, and isn't saved with the set. The device's width in the chain follows it.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) or null | no | The device; the selected one if left out. |
+| `expanded` | boolean or null | no | Show (true) or hide (false) the expanded part; switches if left out. |
+
+Result: [`DeviceViewState`](#deviceviewstate).
+
 #### `device.fold`
 
 **Fold Device**. Permission: `read`. Contexts: `device-view`.
@@ -3026,7 +3045,7 @@ Result: [`FloatingWindows`](#floatingwindows).
 
 **Device View State**. Permission: `read`. Contexts: `global`.
 
-Reports what the Device View shows: the selected track and its devices in signal order, each with its title, its own name, its kind and role, whether it's on, folded, selected, or being hot-swapped; the selected device; hot-swapping; and whether there's a device to paste. A native device also lists its parameters' descriptors, its layout, and its values (`panel`); `device.parameters` reports any device's. Changes nothing.
+Reports what the Device View shows: the selected track and its devices in signal order, each with its title, its own name, its kind and role, whether it's on, folded, selected, or being hot-swapped, and whether it has an expanded part (`expandable`) and shows it (`expanded`); the selected device; hot-swapping; and whether there's a device to paste. A native device also lists its parameters' descriptors, its layout, and its values (`panel`); `device.parameters` reports any device's. Changes nothing.
 
 Default keys: none.
 
@@ -3771,6 +3790,24 @@ Arguments:
 | `shown` | boolean or null | no | Show it (true) or hide it (false); switches it if left out. |
 
 Result: [`MixerViewState`](#mixerviewstate).
+
+### Area `modulation`
+
+#### `modulation.state`
+
+**Modulation State**. Permission: `read`. Contexts: `global`.
+
+Reports the parameters a track's clips modulate (all tracks' when `track` is left out): for each, the track and the parameter (a mixer control, a send, or a device's parameter), its base (what its automation or its control sets), the value it played in the last block, and the clip envelopes modulating it, each with its value at the play position and what it contributes, as a share of the parameter's travel. A clip envelope modulates by a share: 0 to 1 for a volume or a send, which brings its level down to that share, and −1 to 1 for the rest. It reads back `clip.set_envelope_breakpoint` and the other clip envelope commands. Changes nothing.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) or null | no | The track, or every track when left out. |
+
+Result: [`ModulationState`](#modulationstate).
 
 ### Area `note`
 
@@ -9069,6 +9106,7 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
 |---|---|---|---|
 | `params` | array of [`ParamDescriptor`](#paramdescriptor) | yes | Its parameters. |
 | `layout` | [`DeviceLayout`](#devicelayout) | yes | Where its controls and display cells sit (IMP-14). |
+| `menu_options` | array of [`ParamId`](#paramid) | no | The switches the device lists as its own items in its Show Options menu, after Save as Default Preset (C-DEVICE-015), in this order. They are parameters like any other, but the layout places no control for them. |
 | `views` | array of string | no | The views its display offers, such as `Transfer Curve`, the first being the one it starts in; empty for a display with one view. Which is shown is view state (`device.set_display_view`). |
 
 <details><summary>JSON Schema</summary>
@@ -9080,6 +9118,13 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
     "layout": {
       "$ref": "#/$defs/DeviceLayout",
       "description": "Where its controls and display cells sit (IMP-14)."
+    },
+    "menu_options": {
+      "description": "The switches the device lists as its own items in its Show Options menu, after Save as Default Preset (C-DEVICE-015), in this order. They are parameters like any other, but the layout places no control for them.",
+      "items": {
+        "$ref": "#/$defs/ParamId"
+      },
+      "type": "array"
     },
     "params": {
       "description": "Its parameters.",
@@ -9190,6 +9235,8 @@ One device as the Device View shows it.
 | `takes_sample` | boolean | yes | Whether its type plays one sample, so a sample dropped on it loads into it (`device.load_sample`, WP-2.16). |
 | `show_preset_name` | boolean | yes | Whether its title shows its preset's or given name. |
 | `folded` | boolean | yes | Whether it's folded to its title bar. |
+| `expandable` | boolean | yes | Whether it has an expanded part, which its title bar's expand toggle shows and hides (L-DEV-004; WP-5.42). |
+| `expanded` | boolean | yes | Whether its expanded part is shown. Never while it has none. |
 | `floating` | boolean | yes | Whether it floats in a window of its own, its place in the chain a strip (WP-2.5b). |
 | `selected` | boolean | yes | Whether it's the selected device. |
 | `hot_swap` | boolean | yes | Whether it's the device being hot-swapped. |
@@ -9212,6 +9259,16 @@ One device as the Device View shows it.
     },
     "enabled": {
       "description": "Whether it's switched on.",
+      "type": "boolean"
+    },
+    "expandable": {
+      "default": false,
+      "description": "Whether it has an expanded part, which its title bar's expand toggle shows and hides (L-DEV-004; WP-5.42).",
+      "type": "boolean"
+    },
+    "expanded": {
+      "default": false,
+      "description": "Whether its expanded part is shown. Never while it has none.",
       "type": "boolean"
     },
     "floating": {
@@ -9293,6 +9350,8 @@ One device as the Device View shows it.
     "takes_sample",
     "show_preset_name",
     "folded",
+    "expandable",
+    "expanded",
     "floating",
     "selected",
     "hot_swap",
@@ -9400,6 +9459,7 @@ A device's layout (IMP-14): bands of controls and display cells in rows and colu
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `root` | [`LayoutNode`](#layoutnode) | yes | The whole body. |
+| `expanded` | [`LayoutNode`](#layoutnode) or null | no | The part the device adds to its body while it is expanded (L-DEV-004, L-DEV-007), if it has one: placed to the right of [`root`](Self::root). It places its parameters' controls like the rest of the layout. |
 
 <details><summary>JSON Schema</summary>
 
@@ -9407,6 +9467,17 @@ A device's layout (IMP-14): bands of controls and display cells in rows and colu
 {
   "description": "A device's layout (IMP-14): bands of controls and display cells in rows and columns.",
   "properties": {
+    "expanded": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/LayoutNode"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The part the device adds to its body while it is expanded (L-DEV-004, L-DEV-007), if it has one: placed to the right of [`root`](Self::root). It places its parameters' controls like the rest of the layout."
+    },
     "root": {
       "$ref": "#/$defs/LayoutNode",
       "description": "The whole body."
@@ -12711,6 +12782,139 @@ What `mixer_view.state` and the other view commands return.
 
 </details>
 
+### `ModulatedParameter`
+
+A parameter a track's clips modulate.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track whose parameter it is. |
+| `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter: a mixer control, a send, or a device's parameter. |
+| `base` | number | yes | Its base, in the parameter's own units: its automation envelope's value or its control's, as the last block played it while the song plays under modulation, and its control's otherwise. |
+| `played` | number | yes | The value it played in the last block; the base while nothing modulates it now. |
+| `sources` | array of [`ModulationSource`](#modulationsource) | yes | The clip envelopes modulating it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A parameter a track's clips modulate.",
+  "properties": {
+    "base": {
+      "description": "Its base, in the parameter's own units: its automation envelope's value or its control's, as the last block played it while the song plays under modulation, and its control's otherwise.",
+      "format": "double",
+      "type": "number"
+    },
+    "played": {
+      "description": "The value it played in the last block; the base while nothing modulates it now.",
+      "format": "double",
+      "type": "number"
+    },
+    "sources": {
+      "description": "The clip envelopes modulating it.",
+      "items": {
+        "$ref": "#/$defs/ModulationSource"
+      },
+      "type": "array"
+    },
+    "target": {
+      "$ref": "#/$defs/AutomationTarget",
+      "description": "The parameter: a mixer control, a send, or a device's parameter."
+    },
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "The track whose parameter it is."
+    }
+  },
+  "required": [
+    "track",
+    "target",
+    "base",
+    "played",
+    "sources"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ModulationSource`
+
+One source modulating a parameter: a clip's envelope.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The clip whose modulation envelope it is. |
+| `share` | number or null | yes | The envelope's value at the play position: a share, from 0 to 1 for a volume or a send's level and from −1 to 1 for the rest; `null` while the clip doesn't play there. |
+| `contribution` | number | yes | What it contributes at the play position, as a share of the parameter's travel; 0 while the clip doesn't play there. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One source modulating a parameter: a clip's envelope.",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The clip whose modulation envelope it is."
+    },
+    "contribution": {
+      "description": "What it contributes at the play position, as a share of the parameter's travel; 0 while the clip doesn't play there.",
+      "format": "double",
+      "type": "number"
+    },
+    "share": {
+      "description": "The envelope's value at the play position: a share, from 0 to 1 for a volume or a send's level and from −1 to 1 for the rest; `null` while the clip doesn't play there.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "clip",
+    "share",
+    "contribution"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ModulationState`
+
+What `modulation.state` reports.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `parameters` | array of [`ModulatedParameter`](#modulatedparameter) | yes | Every parameter a clip's envelope modulates, track by track. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `modulation.state` reports.",
+  "properties": {
+    "parameters": {
+      "description": "Every parameter a clip's envelope modulates, track by track.",
+      "items": {
+        "$ref": "#/$defs/ModulatedParameter"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "parameters"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Monitor`
 
 Whether a track's input is heard: `in` always (its clips are silent), `auto` while the track is armed, or `off` never.
@@ -13437,6 +13641,7 @@ One of a device's parameters as `device.parameters` reports it.
 | `automatable` | boolean | yes | Whether automation and modulation can move it. Always true (rule G2); [`check`](Self::check) refuses a descriptor without it. |
 | `value` | number | yes | Its value now, in its own units: what `device.set_param` takes. |
 | `text` | string | yes | How the value reads, as its control shows it, such as `-6.0 dB`. |
+| `menu_option` | boolean | yes | Whether it's one of the device's own items in its Show Options menu rather than a control in its body (C-DEVICE-015). |
 | `description` | string | no | What it does, for the Info View (WP-2.24) and agents. |
 
 <details><summary>JSON Schema</summary>
@@ -13466,6 +13671,11 @@ One of a device's parameters as `device.parameters` reports it.
       "$ref": "#/$defs/ParamKind",
       "description": "What kind of value it takes, and its range."
     },
+    "menu_option": {
+      "default": false,
+      "description": "Whether it's one of the device's own items in its Show Options menu rather than a control in its body (C-DEVICE-015).",
+      "type": "boolean"
+    },
     "name": {
       "description": "Its name, as its control's label and the Status Bar show it, such as `Gain`.",
       "type": "string"
@@ -13487,7 +13697,8 @@ One of a device's parameters as `device.parameters` reports it.
     "default",
     "automatable",
     "value",
-    "text"
+    "text",
+    "menu_option"
   ],
   "type": "object"
 }

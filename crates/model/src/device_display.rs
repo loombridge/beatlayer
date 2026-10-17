@@ -1,5 +1,5 @@
-//! What a device's display shows, as data (the device framework spec, R26
-//! to R29): curves and spectra over an axis, markers on them, and single
+//! What a device's display shows, as data (the device framework spec, R30
+//! to R33): curves and spectra over an axis, markers on them, and single
 //! readings, so the cell draws them, a screen reader says them, and an agent
 //! reads them. A device type works them out from its parameters' values and
 //! the display data its node publishes.

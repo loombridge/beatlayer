@@ -35,6 +35,12 @@ pub struct DeviceDescription {
     /// is shown is view state (`device.set_display_view`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub views: Vec<String>,
+    /// The switches the device lists as its own items in its Show Options
+    /// menu, after Save as Default Preset (C-DEVICE-015), in this order.
+    /// They are parameters like any other, but the layout places no control
+    /// for them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub menu_options: Vec<ParamId>,
 }
 
 // Every value in a description is a finite number (`check`), so equality is
@@ -51,6 +57,7 @@ impl DeviceDescription {
             params,
             layout,
             views: Vec::new(),
+            menu_options: Vec::new(),
         }
     }
 
@@ -67,6 +74,29 @@ impl DeviceDescription {
     pub fn with_layout(mut self, layout: DeviceLayout) -> Self {
         self.layout = layout;
         self
+    }
+
+    /// The same, with the switches `options` as the device's own Show
+    /// Options items. A device with the generic layout gets it again
+    /// without them.
+    #[must_use]
+    pub fn with_menu_options(mut self, options: &[ParamId]) -> Self {
+        let generic = self.layout == DeviceLayout::generic(&self.params);
+        self.menu_options = options.to_vec();
+        if generic {
+            self.layout = DeviceLayout::generic(&self.placed());
+        }
+        self
+    }
+
+    /// The parameters the layout places a control for: all but the menu
+    /// options.
+    fn placed(&self) -> Vec<ParamDescriptor> {
+        self.params
+            .iter()
+            .filter(|p| !self.menu_options.contains(&p.id))
+            .cloned()
+            .collect()
     }
 
     /// The descriptor of `id`.
@@ -95,8 +125,10 @@ impl DeviceDescription {
     }
 
     /// Why the description breaks a rule, if it does: a parameter that does
-    /// ([`ParamDescriptor::check`]), two with one number, or a layout that
-    /// doesn't place every parameter exactly once ([`DeviceLayout::check`]).
+    /// ([`ParamDescriptor::check`]), two with one number, a menu option that
+    /// isn't a switch of the device (or is listed twice), or a layout that
+    /// doesn't place every other parameter exactly once
+    /// ([`DeviceLayout::check`]).
     ///
     /// # Errors
     ///
@@ -108,7 +140,18 @@ impl DeviceDescription {
                 return Err(format!("parameter {} is described twice", param.id.0));
             }
         }
-        self.layout.check(&self.params)
+        for (i, option) in self.menu_options.iter().enumerate() {
+            let is_switch = self
+                .param(*option)
+                .is_some_and(|p| matches!(p.kind, ParamKind::Toggle));
+            if !is_switch || self.menu_options[..i].contains(option) {
+                return Err(format!(
+                    "menu option {} isn't a switch of the device, or is listed twice",
+                    option.0
+                ));
+            }
+        }
+        self.layout.check(&self.placed())
     }
 }
 
@@ -131,6 +174,39 @@ mod tests {
         let mut gain = ParamDescriptor::gain(id(0), "Gain", 6.0, 0.0);
         gain.automatable = false;
         assert!(DeviceDescription::new(vec![gain]).check().is_err());
+    }
+
+    // Spec: device-chains R35
+    #[test]
+    fn a_menu_option_is_a_switch_the_layout_places_no_control_for() {
+        let params = vec![
+            ParamDescriptor::gain(id(0), "Gain", 6.0, 0.0),
+            ParamDescriptor::toggle(id(1), "Mono", true),
+        ];
+        let described = DeviceDescription::new(params.clone()).with_menu_options(&[id(1)]);
+        described.check().unwrap();
+        assert_eq!(
+            described.layout,
+            DeviceLayout::generic(&params[..1]),
+            "the generic layout leaves it out"
+        );
+        // A menu option that isn't a switch, or isn't there, is refused.
+        assert!(
+            DeviceDescription::new(params.clone())
+                .with_menu_options(&[id(0)])
+                .check()
+                .is_err()
+        );
+        assert!(
+            DeviceDescription::new(params.clone())
+                .with_menu_options(&[id(7)])
+                .check()
+                .is_err()
+        );
+        // So is a layout that places it as well.
+        let mut placed = DeviceDescription::new(params);
+        placed.menu_options = vec![id(1)];
+        assert!(placed.check().is_err(), "a control for a menu option");
     }
 
     // Spec: device-framework R7

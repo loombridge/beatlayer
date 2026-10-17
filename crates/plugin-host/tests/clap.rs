@@ -10,12 +10,15 @@ bl_rt::install_trap!();
 
 mod common;
 
-use bl_engine::{Node, NodeFactory, NoteEvent, NoteKind};
+use bl_core::time::{Frames, Ticks};
+use bl_engine::{AutomationList, Node, NodeFactory, NoteEvent, NoteKind, TransportInfo};
+use bl_model::modulation::Travel;
 use bl_model::{DeviceKind, DeviceRole, ParamId, ParamKind, PluginFormat};
 use bl_plugin_host::clap::{ClapError, ClapHost, ParamChange};
 use common::{
-    CHANNELS, EDITOR_HEIGHT, EDITOR_SCALE, EDITOR_WIDTH, FRAMES, GAIN, LAST_NOTE, LATENCY,
-    PLUGIN_ID, PLUGIN_NAME, bundle, config, device, run, set,
+    BAR, CHANNELS, DEPTH, DEPTH_MOD, EDITOR_HEIGHT, EDITOR_SCALE, EDITOR_WIDTH, FRAMES, GAIN,
+    LAST_NOTE, LATENCY, PLUGIN_ID, PLUGIN_NAME, bundle, config, device, modulation_for, run,
+    run_at, set,
 };
 
 fn note(offset: u32, kind: NoteKind, key: u8, velocity: f32) -> NoteEvent {
@@ -67,7 +70,9 @@ fn a_plugin_loads_by_path_with_its_parameters() {
             (ParamId(LAST_NOTE), "Last Note"),
             (ParamId(EDITOR_SCALE), "Editor Scale"),
             (ParamId(EDITOR_WIDTH), "Editor Width"),
-            (ParamId(EDITOR_HEIGHT), "Editor Height")
+            (ParamId(EDITOR_HEIGHT), "Editor Height"),
+            (ParamId(DEPTH), "Depth"),
+            (ParamId(DEPTH_MOD), "Depth Modulation")
         ]
     );
     assert!(params.iter().all(|p| p.automatable));
@@ -415,4 +420,168 @@ fn main_thread_calls_from_another_thread_are_refused() {
             assert_eq!(host.load(bundle()), Err(ClapError::WrongThread));
         });
     });
+}
+
+/// The song playing from `position`.
+fn playing(position: i64) -> TransportInfo {
+    TransportInfo {
+        playing: true,
+        position: Frames(position),
+    }
+}
+
+/// A parameter's value as the plug-in reports it to the host.
+fn reported(host: &ClapHost, param: u32) -> f64 {
+    let status = host.status(device(1, &[]).id).expect("a status");
+    status
+        .values
+        .iter()
+        .find(|(id, _)| *id == ParamId(param))
+        .expect("the parameter is reported")
+        .1
+}
+
+// Spec: modulation R10
+#[test]
+fn a_modulatable_parameter_takes_modulation_events() {
+    let (host, mut node) = running(&[(DEPTH, 0.25)]);
+    // A clip's envelope holds half the travel all along.
+    let data = modulation_for(
+        device(1, &[]),
+        DEPTH,
+        &[(Ticks::ZERO, 0.5), (Ticks::WHOLE, 0.5)],
+    );
+    node.receive_data(data);
+
+    run_at(node.as_mut(), &[1.0; FRAMES], &[], &[], playing(0));
+    assert_eq!(reported(&host, DEPTH), 0.25, "its value stays the base");
+    assert_eq!(
+        reported(&host, DEPTH_MOD),
+        0.5,
+        "the modulation is the difference to the value it plays"
+    );
+    let modulated = |node: &dyn Node| {
+        let mut seen = Vec::new();
+        node.modulated(&mut |param, base, played| seen.push((param, base, played)));
+        seen
+    };
+    assert_eq!(modulated(node.as_ref()), [(ParamId(DEPTH), 0.25, 0.75)]);
+
+    // The control moves the base the modulation rides on, up to the end of
+    // the travel: 0.75 plus half would pass 1, so the amount is what's left.
+    run_at(
+        node.as_mut(),
+        &[1.0; FRAMES],
+        &[set(10, DEPTH, 0.75)],
+        &[],
+        playing(FRAMES as i64),
+    );
+    assert_eq!(reported(&host, DEPTH), 0.75);
+    assert_eq!(reported(&host, DEPTH_MOD), 0.25);
+
+    // The song stops: the plug-in has its control's value, and its
+    // modulation goes to nothing.
+    run(node.as_mut(), &[1.0; FRAMES], &[], &[]);
+    assert_eq!(reported(&host, DEPTH), 0.75);
+    assert_eq!(reported(&host, DEPTH_MOD), 0.0);
+    assert_eq!(modulated(node.as_ref()), []);
+}
+
+/// Channel 0 of `blocks` blocks of `FRAMES / blocks` frames of 1.0 through
+/// a node for a Test Gain Echo with a gain of 0.5 and the clip envelope
+/// `data`, from song frame `from`.
+fn gain_render(data: &bl_engine::NodeData, from: i64, blocks: usize) -> Vec<f32> {
+    let (_host, mut node) = running(&[(GAIN, 0.5)]);
+    node.receive_data(data.clone());
+    let each = FRAMES / blocks;
+    (0..blocks)
+        .flat_map(|i| {
+            let at = from + (i * each) as i64;
+            run_at(node.as_mut(), &vec![1.0; each], &[], &[], playing(at)).channels[0].clone()
+        })
+        .collect()
+}
+
+// Spec: modulation R6, R10
+#[test]
+fn other_parameters_take_the_played_value() {
+    // The envelope climbs from nothing to the whole travel over the bar.
+    let data = modulation_for(
+        device(1, &[]),
+        GAIN,
+        &[(Ticks::ZERO, 0.0), (Ticks::WHOLE, 1.0)],
+    );
+    let list = data.downcast_ref::<AutomationList>().expect("a list");
+    let types = {
+        let host = ClapHost::new();
+        host.load(bundle()).unwrap();
+        host.factory().device_types()
+    };
+    let gain = types[0].description.param(ParamId(GAIN)).unwrap();
+    let played = |frame: i64| list.played(Travel::Param(gain), ParamId(GAIN), frame, 0.5);
+
+    // Not a modulatable parameter: the plug-in is given the value played,
+    // as a parameter value, on the block's first frame and on each song
+    // frame that is a multiple of 32; any modulation event would scale the
+    // test plug-in's gain.
+    let from = 1000;
+    let out = gain_render(&data, from, 1);
+    for (i, sample) in out.iter().enumerate() {
+        let frame = from + i as i64;
+        // Before the first grid point the first frame's value holds.
+        let want = played(if frame < 1024 { from } else { frame / 32 * 32 });
+        assert_eq!(*sample, want as f32, "frame {frame}");
+    }
+    assert_ne!(played(from), 0.5, "the clip modulates the gain");
+    assert!(from + (FRAMES as i64) < BAR);
+
+    // A render is the same at any block size.
+    for blocks in [2, 4, 64] {
+        assert_eq!(gain_render(&data, from, blocks), out, "{blocks} blocks");
+    }
+}
+
+// Spec: modulation R10
+#[test]
+fn a_value_the_plugin_reports_back_because_the_engine_sent_it_is_not_a_change() {
+    let data = modulation_for(
+        device(1, &[]),
+        GAIN,
+        &[(Ticks::ZERO, 0.0), (Ticks::WHOLE, 1.0)],
+    );
+    let (host, mut node) = running(&[(GAIN, 0.5)]);
+    host.load_state(device(1, &[]).id, bl_test_clap::ECHO_PARAMS)
+        .unwrap();
+    node.receive_data(data);
+    for block in 0..4 {
+        run_at(
+            node.as_mut(),
+            &[1.0; FRAMES],
+            &[],
+            &[],
+            playing(1000 + block * FRAMES as i64),
+        );
+    }
+    // The song stops: the control's value goes back to the plug-in, which
+    // reports it too.
+    run(node.as_mut(), &[1.0; FRAMES], &[], &[]);
+    host.idle();
+    assert_eq!(host.take_param_changes(), [], "automation and modulation");
+
+    // What the plug-in does by itself still comes back.
+    run(
+        node.as_mut(),
+        &[1.0; FRAMES],
+        &[],
+        &[note(0, NoteKind::On, 60, 0.5)],
+    );
+    host.idle();
+    assert_eq!(
+        host.take_param_changes(),
+        [ParamChange {
+            device: device(1, &[]).id,
+            param: ParamId(LAST_NOTE),
+            value: 60.0
+        }]
+    );
 }

@@ -1,5 +1,5 @@
 //! A device's display data, from its node to the main thread (the device
-//! framework spec, R26 to R28): after each block a node publishes the
+//! framework spec, R30 to R32): after each block a node publishes the
 //! latest values its display draws (a spectrum, a gain reduction), through
 //! a lock-free triple buffer made with the node, as the engine publishes
 //! its meters. The shell reads the newest; nothing on the audio thread

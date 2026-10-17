@@ -1,7 +1,7 @@
 # Audio Unit hosting
 
 - **Status:** built (loading by component description, processing, parameters, state, latency, the scanner's Audio Units, the browser's units, and the unit's own editor are built and tested against Apple's built-in units)
-- **Work packages:** WP-2.8 (this spec). The plug-in scanner and the browser's plug-ins are WP-2.9's; a unit's own editor windows, the window layer, and the plug-in device panel are WP-2.10's (the AU scanner is part of that package); delay compensation is WP-2.11's; offline renders (export, agents' previews) borrow CLAP instances (WP-2.6b) and don't borrow units until WP-4.21; VST3 is WP-2.7
+- **Work packages:** WP-2.8 (this spec). The plug-in scanner and the browser's plug-ins are WP-2.9's; a unit's own editor windows, the window layer, and the plug-in device panel are WP-2.10's (the AU scanner is part of that package); delay compensation is WP-2.11's; offline renders (export, agents' previews) borrow CLAP instances (WP-2.6b) and units (WP-4.21, built) as [offline plug-in renders](offline-plugin-renders.md) say; VST3 is WP-2.7
 - **Parity-matrix row:** Audio Units v2 and v3 (M2, macOS; built in WP-2.8)
 - **Checked against:** Apple's AudioToolbox documentation (`AudioComponent`, `AUAudioUnit`, render blocks, parameter trees, `fullState`, latency), read 15 October 2026; the architecture's "Plug-in hosting" and "Real-time rules"; the CLAP hosting spec, whose rules this mirrors where the formats allow; Live 12.4.6 on macOS, 12 October 2026 (Plug-In Sources lists Use Audio Units v2 and Use Audio Units v3, both Off by default); Apple's built-in units on this machine (macOS 27, Apple silicon)
 
@@ -11,7 +11,7 @@ An Audio Unit runs as a device in a track's chain, as any device does: in signal
 
 The unit processes the track's audio block by block: the main thread activates it for the engine's rate, channels, and block size, and its node runs it on the audio thread, with each parameter change and each note on its own frame. Its automatable parameters are the device's parameters: the generic UI, `device.parameters`, and automation see them as they see a native device's. Its own state is saved with the set and comes back when the set is opened again; it reports its latency, which delay compensation (WP-2.11) will use.
 
-A unit's own editor window opens and closes through `plugin.show_window` (R13), and the changes it makes come back into the set as one undo step per gesture (R6), as a CLAP editor's do. Offline renders (export, agents' previews) don't use units yet (WP-4.21 makes them): they render with a registry of their own in which no factory makes AU nodes, so an AU device passes its input through there, as a CLAP device did before WP-2.6b. Audio Units are macOS only: on Windows and Linux the commands say so, and an AU device in a set opened elsewhere is unhosted and passes its input through.
+A unit's own editor window opens and closes through `plugin.show_window` (R13), and the changes it makes come back into the set as one undo step per gesture (R6), as a CLAP editor's do. Offline renders (export, agents' previews) borrow the units the engine plays (WP-4.21), as they borrow CLAP plug-ins: the unit comes back from the engine's node, is activated for the render's rate and block size, and goes back with the state it had. Audio Units are macOS only: on Windows and Linux the commands say so, and an AU device in a set opened elsewhere is unhosted and passes its input through.
 
 ## Sources
 

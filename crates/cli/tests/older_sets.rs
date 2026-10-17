@@ -126,3 +126,162 @@ fn a_version_1_set_with_split_audio_clips_loads_and_plays_as_it_did() {
     );
     assert_eq!(render(&loaded.document), expected);
 }
+
+/// A one-bar MIDI clip, on the track from the start of the song.
+fn midi_clip(editor: &mut Editor, track: bl_model::TrackId) -> bl_model::ClipId {
+    let clip = editor.new_id();
+    editor
+        .apply(Command::CreateClip {
+            track,
+            clip: Clip::new(
+                clip,
+                Ticks::ZERO,
+                Ticks::WHOLE,
+                ClipData::Midi(bl_model::MidiData::default()),
+            ),
+        })
+        .unwrap();
+    clip
+}
+
+/// Two MIDI tracks of a steady signal: the first's fader at 0.5, the second
+/// through a Utility. With `envelopes`, a clip envelope on each, flat, as a
+/// set from before relative modulation held them: values in the parameters'
+/// own units, added to the control. Without, the controls are set to what
+/// those sums gave, which is what the set played.
+fn dc_song(envelopes: bool) -> Document {
+    use bl_devices::utility::{GAIN, UTILITY};
+    use bl_engine::testing::{DC, VALUE};
+    use bl_model::{AutomationTarget, Device, DeviceKind, MixerParam};
+
+    let mut editor = Editor::new();
+    let add = |editor: &mut Editor, device_type: &str, params: &[(bl_model::ParamId, f64)]| {
+        let track = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id: track,
+                kind: TrackKind::Midi,
+                name: String::new(),
+                parent: None,
+                index: 0,
+            })
+            .unwrap();
+        for (index, (device_type, params)) in
+            [(DC, vec![(VALUE, 0.5)]), (device_type, params.to_vec())]
+                .into_iter()
+                .enumerate()
+        {
+            let id = editor.new_id();
+            let mut device = Device::new(
+                id,
+                "",
+                DeviceKind::Native {
+                    device_type: device_type.to_owned(),
+                },
+            );
+            device.params.extend(params);
+            editor
+                .apply(Command::InsertDevice {
+                    track,
+                    index,
+                    device,
+                })
+                .unwrap();
+        }
+        track
+    };
+    let a = add(&mut editor, UTILITY, &[]);
+    let b = add(
+        &mut editor,
+        UTILITY,
+        &[(GAIN, if envelopes { 1.0 } else { 2.0 })],
+    );
+    let volume = if envelopes { 0.5 } else { 0.25 };
+    editor
+        .apply(Command::SetVolume { track: a, volume })
+        .unwrap();
+    if envelopes {
+        let gain_device = editor
+            .document()
+            .track(b)
+            .unwrap()
+            .devices()
+            .nth(1)
+            .unwrap()
+            .id;
+        for (track, target, old) in [
+            (
+                a,
+                AutomationTarget::Mixer {
+                    param: MixerParam::Volume,
+                },
+                -0.25,
+            ),
+            (
+                b,
+                AutomationTarget::Device {
+                    device: gain_device,
+                    param: GAIN,
+                },
+                1.0,
+            ),
+        ] {
+            let clip = midi_clip(&mut editor, track);
+            editor
+                .apply(Command::SetClipEnvelopeBreakpoint {
+                    clip,
+                    target,
+                    at: Ticks::ZERO,
+                    value: old,
+                })
+                .unwrap();
+        }
+    }
+    editor.document().clone()
+}
+
+/// Renders `document` with the test devices and the shipped ones.
+fn render_devices(document: &Document) -> Vec<f32> {
+    let probe = std::sync::Arc::new(bl_engine::testing::Probe::default());
+    let mut registry = bl_engine::testing::registry(&probe);
+    bl_devices::register(&mut registry);
+    let mut offline = Offline::new(EngineConfig::new(SampleRate::HZ_48000, 256), registry);
+    offline.sync(document);
+    offline.sender().transport(TransportCommand::Play);
+    let mut out = Vec::new();
+    offline.render(24_000, |output| out.extend_from_slice(output.channel(0)));
+    out
+}
+
+// Spec: modulation R5
+#[test]
+fn an_older_clip_envelope_renders_the_same() {
+    // The set as version 4 saved it: values in the parameters' own units.
+    let project = Project {
+        document: dc_song(true),
+        ids: IdAllocator::new(),
+        media: Media::default(),
+        windows: bl_model::DeviceWindows::new(),
+        folds: bl_model::ClipFolds::new(),
+        launch: bl_model::LaunchSettings::default(),
+    };
+    let mut saved: Value = serde_json::from_slice(&encode_json(&project, 1).unwrap()).unwrap();
+    saved["schema"] = json!(4);
+    let (mut loaded, info) = decode_json(
+        &serde_json::to_vec(&saved).unwrap(),
+        &LoadOptions::default(),
+    )
+    .unwrap();
+    assert!(info.before_relative_modulation());
+    bl_devices::relative_clip_envelopes(&mut loaded.document);
+    let (now, played) = (
+        render_devices(&loaded.document),
+        render_devices(&dc_song(false)),
+    );
+    assert!(played[20_000] > 0.5, "the signal plays: {}", played[20_000]);
+    // 0.5 · 0.25 through the first track and 0.5 · 2.0 through the second.
+    assert!((played[20_000] - 1.125).abs() < 1e-4, "{}", played[20_000]);
+    for (frame, (a, b)) in now.iter().zip(&played).enumerate().skip(10_000) {
+        assert!((a - b).abs() < 1e-3, "frame {frame}: {a} isn't {b}");
+    }
+}

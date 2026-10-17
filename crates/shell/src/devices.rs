@@ -23,9 +23,10 @@ use bl_project::preset::{self, Preset};
 use bl_shell_spec::arrangement as view_ids;
 use bl_shell_spec::devices::{
     self as ids, AddDeviceArgs, DeviceAdded, DeviceArgs, DeviceFrame, DevicePanel,
-    DeviceParameters, DeviceViewState, FloatingWindow, FloatingWindows, FoldDeviceArgs, HotSwap,
-    HotSwapArgs, LoadPresetArgs, ParameterState, PasteDeviceArgs, PresetResult, SavePresetArgs,
-    SelectDeviceArgs, SelectSlotArgs, SetWindowArgs, ShowSidechainArgs, SidechainSection,
+    DeviceParameters, DeviceViewState, ExpandDeviceArgs, FloatingWindow, FloatingWindows,
+    FoldDeviceArgs, HotSwap, HotSwapArgs, LoadPresetArgs, ParameterState, PasteDeviceArgs,
+    PresetResult, SavePresetArgs, SelectDeviceArgs, SelectSlotArgs, SetWindowArgs,
+    ShowSidechainArgs, SidechainSection,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -40,6 +41,8 @@ use crate::arrangement::ArrangementView;
 pub struct DeviceView {
     selected: Option<DeviceId>,
     folded: BTreeSet<DeviceId>,
+    /// Devices whose expanded part is shown (WP-5.42).
+    expanded: BTreeSet<DeviceId>,
     clipboard: Option<Device>,
     hot_swap: Option<DeviceId>,
     /// The sample slot each device with slots shows the controls of
@@ -47,6 +50,11 @@ pub struct DeviceView {
     slots: std::collections::BTreeMap<DeviceId, u32>,
     /// Devices whose sidechain section is shown (WP-2.19b).
     sidechains_shown: BTreeSet<DeviceId>,
+    /// The view each device's display shows, where it has chosen one
+    /// (WP-5.43).
+    display_views: std::collections::BTreeMap<DeviceId, String>,
+    /// The display data the engine's nodes last published (WP-5.43).
+    displays: std::collections::BTreeMap<DeviceId, bl_engine::DisplayData>,
     types: Vec<DeviceType>,
     /// Where floating devices' windows sit (WP-2.5b). A frame outlives
     /// its device's docking and deletion, so undoing either puts the
@@ -100,6 +108,18 @@ pub struct Context<'a> {
     pub auto_hide: bool,
     /// Whether View ▸ Plug-In Windows shows the windows.
     pub windows_shown: bool,
+}
+
+/// The display of a device whose type draws none.
+fn empty_display(device: DeviceId) -> bl_model::DeviceDisplay {
+    bl_model::DeviceDisplay {
+        device,
+        live: false,
+        view: None,
+        series: Vec::new(),
+        markers: Vec::new(),
+        readings: Vec::new(),
+    }
 }
 
 fn parse<T: DeserializeOwned>(args: Value) -> Result<T, DeviceError> {
@@ -280,6 +300,8 @@ impl DeviceView {
             description: DeviceDescription {
                 params: selected,
                 layout,
+                views: Vec::new(),
+                menu_options: Vec::new(),
             },
             plugin: true,
             selected_slot: 0,
@@ -302,6 +324,7 @@ impl DeviceView {
                             descriptor: p.clone(),
                             value,
                             text: p.format(value),
+                            menu_option: description.menu_options.contains(&p.id),
                         }
                     })
                     .collect()
@@ -333,7 +356,16 @@ impl DeviceView {
         self.hot_swap = self.hot_swap.filter(exists);
         self.slots.retain(|device, _| exists(device));
         self.folded.retain(exists);
+        self.expanded.retain(exists);
         self.sidechains_shown.retain(exists);
+        self.display_views.retain(|d, _| exists(d));
+        self.displays.retain(|d, _| exists(d));
+    }
+
+    /// Whether `device`'s type has an expanded part.
+    fn expandable(&self, device: &Device) -> bool {
+        self.description(&device.kind)
+            .is_some_and(|d| d.layout.has_expanded())
     }
 
     /// Whether a device's sidechain section is shown.
@@ -470,6 +502,8 @@ impl DeviceView {
             ),
             show_preset_name: d.show_preset_name,
             folded: self.folded.contains(&d.id),
+            expandable: self.expandable(d),
+            expanded: self.expandable(d) && self.expanded.contains(&d.id),
             floating: d.floating,
             selected: self.selected == Some(d.id),
             hot_swap: self.hot_swap == Some(d.id),
@@ -491,7 +525,44 @@ impl DeviceView {
                     listen: sidechain.listen,
                 }
             }),
+            display_view: self.display_view(d),
         }
+    }
+
+    /// The view `device`'s display shows: the one chosen, or the first its
+    /// description offers; none for a display with one view.
+    fn display_view(&self, device: &Device) -> Option<String> {
+        let views = &self.description(&device.kind)?.views;
+        self.display_views
+            .get(&device.id)
+            .filter(|view| views.contains(view))
+            .or_else(|| views.first())
+            .cloned()
+    }
+
+    /// The display data the engine published, to fill from.
+    pub fn displays_mut(
+        &mut self,
+    ) -> &mut std::collections::BTreeMap<DeviceId, bl_engine::DisplayData> {
+        &mut self.displays
+    }
+
+    /// What `device`'s display shows now: its type's display from the
+    /// device's values and the newest data its node published.
+    #[must_use]
+    pub fn display(&self, device: &Device) -> bl_model::DeviceDisplay {
+        let DeviceKind::Native { device_type } = &device.kind else {
+            return empty_display(device.id);
+        };
+        let data = self.displays.get(&device.id).map(|d| d.values.as_slice());
+        let mut display = self
+            .description(&device.kind)
+            .and_then(|description| {
+                bl_devices::display(device_type, device.id, description, &device.params, data)
+            })
+            .unwrap_or_else(|| empty_display(device.id));
+        display.view = self.display_view(device);
+        display
     }
 
     /// The device a command acts on: `device`, or the selected one.
@@ -519,6 +590,9 @@ impl DeviceView {
             | ids::SAVE_DEFAULT_PRESET
             | ids::FOLD
             | ids::SELECT_SLOT => has_target(),
+            ids::EXPAND => self
+                .target(doc, named)
+                .is_ok_and(|device| doc.device(device).is_some_and(|d| self.expandable(d))),
             ids::SHOW_SIDECHAIN => self
                 .target(doc, named)
                 .is_ok_and(|device| doc.device(device).is_some_and(|d| d.sidechain.is_some())),
@@ -533,7 +607,7 @@ impl DeviceView {
                     .is_some_and(|t| device.role.fits(t.kind()))
             }),
             ids::LOAD_PRESET => has_target() && args.get("path").is_some(),
-            ids::PARAMETERS => has_target(),
+            ids::PARAMETERS | ids::DISPLAY | ids::SET_DISPLAY_VIEW => has_target(),
             ids::SET_WINDOW => named
                 .and_then(|device| doc.device(device))
                 .is_some_and(|d| d.floating),
@@ -646,6 +720,25 @@ impl DeviceView {
                     self.folded.insert(device);
                 } else {
                     self.folded.remove(&device);
+                }
+            }
+            ids::EXPAND => {
+                let ExpandDeviceArgs { device, expanded } = parse(args)?;
+                let device = self.target(editor.document(), device)?;
+                if editor
+                    .document()
+                    .device(device)
+                    .is_none_or(|d| !self.expandable(d))
+                {
+                    return Err(DeviceError::Unavailable(format!(
+                        "{device} has no expanded part"
+                    )));
+                }
+                let expanded = expanded.unwrap_or(!self.expanded.contains(&device));
+                if expanded {
+                    self.expanded.insert(device);
+                } else {
+                    self.expanded.remove(&device);
                 }
             }
             ids::ADD => {
@@ -778,6 +871,27 @@ impl DeviceView {
                 ));
                 outcome.value = to_value(&preset_result(device, &path));
                 return Ok(outcome);
+            }
+            ids::DISPLAY => {
+                let DeviceArgs { device } = parse(args)?;
+                let device = self.target(editor.document(), device)?;
+                let current = editor.document().device(device).expect("the target exists");
+                outcome.value = to_value(&self.display(current));
+                return Ok(outcome);
+            }
+            ids::SET_DISPLAY_VIEW => {
+                let ids::SetDisplayViewArgs { device, view } = parse(args)?;
+                let device = self.target(editor.document(), device)?;
+                let current = editor.document().device(device).expect("the target exists");
+                let offered = self
+                    .description(&current.kind)
+                    .map_or(&[][..], |d| d.views.as_slice());
+                if !offered.contains(&view) {
+                    return Err(DeviceError::InvalidArgs(format!(
+                        "{device}'s display has no view {view:?}; it offers {offered:?}"
+                    )));
+                }
+                self.display_views.insert(device, view);
             }
             ids::PARAMETERS => {
                 let DeviceArgs { device } = parse(args)?;

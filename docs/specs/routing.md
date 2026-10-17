@@ -1,7 +1,7 @@
 # Routing: the In/Out section, track-to-track audio, resampling, and returns
 
 - **Status:** implemented (every rule has a passing test)
-- **Work packages:** WP-2.19 (this spec); devices' sidechains and Duplicate Track Without Clips (IMP-12) are WP-2.19b's (R22 to R31); the returns' own sends (Enable Send, with feedback) wait for the track context menu (C-TRACK), which no package has built yet; the audio interface's inputs and outputs (Ext. In and Ext. Out channels, Cue Out, Main Out) are WP-2.13's; MIDI ports and the computer keyboard are WP-2.2's; MIDI reaching tracks is WP-2.1's
+- **Work packages:** WP-2.19 (this spec); devices' sidechains and Duplicate Track Without Clips (IMP-12) are WP-2.19b's (R22 to R31); the returns' own sends (Enable Send, with feedback) wait for the return track's context menu, which isn't recorded (WP-4.22 built the other tracks' menu, [track-context-menu](track-context-menu.md)); the audio interface's inputs and outputs (Ext. In and Ext. Out channels, Cue Out, Main Out) are WP-2.13's; MIDI ports and the computer keyboard are WP-2.2's; MIDI reaching tracks is WP-2.1's
 - **Parity-matrix row:** Mixing and routing: Return tracks and sends; Routing taps: before effects, after effects, after mixer; Resampling, MIDI track to MIDI track; Sidechain to devices and plug-ins
 - **Checked against:** Live 12.4.6 on macOS, observed on 12 October 2026, and the Live 12 reference manual, chapters 17, 18, and 24, read 12 October 2026
 

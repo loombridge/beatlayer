@@ -28,7 +28,8 @@ use std::time::{Duration, SystemTime};
 
 use bl_core::time::{Frames, SampleRate, TempoMap, Ticks};
 use bl_engine::{
-    MidiRecordTrack, RecordTrack, RecordedMidi, RecordingPlan, SessionTarget, TakeBounds,
+    LaunchLog, MidiRecordTrack, RecordTrack, RecordedMidi, RecordingPlan, SessionEvent,
+    SessionTarget, TakeBounds,
 };
 use bl_media::{AudioWriter, BitDepth, Dither, EncodeSpec, FileType};
 use bl_model::{
@@ -46,6 +47,10 @@ const RING_FRAMES: usize = 1 << 17;
 /// one MIDI track: far more than a person plays between two polls.
 const MIDI_RING: usize = 1 << 14;
 
+/// Session clip starts and ends the ring between the audio thread and the
+/// main thread holds: a person launches a few a second.
+const LAUNCH_RING: usize = 1 << 10;
+
 /// Samples the writer buffers before a write.
 const CHUNK: usize = 8_192;
 
@@ -57,8 +62,9 @@ const POLL: Duration = Duration::from_millis(1);
 pub const UNDO_LABEL: &str = "Recorded Clip";
 
 /// The undo step each pass of a loop recording makes, so Undo run again and
-/// again unrolls the passes from the last (the recording spec, R12; Live's
-/// name for the step isn't observed yet).
+/// again unrolls the passes from the last (the recording spec, R12), and the
+/// one a recording that copied Session clips makes (the Session to
+/// Arrangement spec, R6).
 pub const LOOP_UNDO_LABEL: &str = "Record";
 
 /// One pass of a loop recording: the song frame it starts at, where its
@@ -205,6 +211,9 @@ pub fn start(
         .spawn(move || write(writing, rate, done))
         .map_err(|e| format!("couldn't start the recording writer: {e}"))?;
     drop(thread);
+    let (launch_producer, launches) = RingBuffer::new(LAUNCH_RING);
+    let launches_dropped = Arc::new(AtomicU64::new(0));
+    dropped.push(Arc::clone(&launches_dropped));
     let mut midi_plan = Vec::with_capacity(midi.len());
     let mut midi_reading = Vec::with_capacity(midi.len());
     for &track in midi {
@@ -228,6 +237,10 @@ pub fn start(
             midi: midi_plan,
             delay: 0,
             session,
+            launches: Some(LaunchLog {
+                producer: launch_producer,
+                dropped: launches_dropped,
+            }),
         },
         Recording {
             armed: tracks
@@ -239,6 +252,8 @@ pub fn start(
             files: None,
             dropped,
             midi: midi_reading,
+            launches,
+            events: Vec::new(),
             take: None,
             delay: 0,
         },
@@ -268,6 +283,10 @@ pub struct Recording {
     dropped: Vec<Arc<AtomicU64>>,
     /// The MIDI tracks' rings, drained at every poll.
     midi: Vec<MidiReading>,
+    /// The ring the Session clips that start and end go through, drained at
+    /// every poll (WP-3.13), and what has been drained.
+    launches: Consumer<SessionEvent>,
+    events: Vec<SessionEvent>,
     take: Option<TakeBounds>,
     /// Frames the audio is moved earlier (WP-2.13): the plan's `delay`,
     /// which the shell sets once it knows the device.
@@ -308,6 +327,9 @@ pub struct Outcome {
     /// Frames (and MIDI messages) a ring was too full to take: the disk or
     /// the main thread fell behind, and the recording ended before them.
     pub dropped: u64,
+    /// The Session clips that started and ended while the take ran, in
+    /// order (WP-3.13).
+    pub launches: Vec<SessionEvent>,
 }
 
 /// One file the writer finished.
@@ -330,7 +352,7 @@ impl Recording {
         &self.armed
     }
 
-    /// Frames and MIDI messages dropped so far.
+    /// Frames, MIDI messages and Session launches dropped so far.
     #[must_use]
     pub fn dropped(&self) -> u64 {
         self.dropped
@@ -362,7 +384,10 @@ impl Recording {
     /// what the writer finished is reported as it is.
     #[must_use]
     pub fn poll(&mut self, running: bool) -> Option<Outcome> {
-        let mut ended = true;
+        let mut ended = self.launches.is_abandoned();
+        while let Ok(event) = self.launches.pop() {
+            self.events.push(event);
+        }
         for reading in &mut self.midi {
             // A ring abandoned before the drain has nothing more to come.
             ended &= reading.consumer.is_abandoned();
@@ -383,7 +408,8 @@ impl Recording {
             return None;
         }
         let recorded = matches!(&self.files, Some(Ok(files)) if !files.is_empty())
-            || self.midi.iter().any(|reading| !reading.messages.is_empty());
+            || self.midi.iter().any(|reading| !reading.messages.is_empty())
+            || !self.events.is_empty();
         if recorded && self.take.is_none() && running {
             // The take state is published at the end of the block the plan
             // went in, so it can arrive a frame after the writer's report.
@@ -405,6 +431,7 @@ impl Recording {
             files: self.files.take().expect("set above"),
             midi,
             dropped,
+            launches: std::mem::take(&mut self.events),
         })
     }
 }

@@ -21,7 +21,7 @@
 use std::f32::consts::PI;
 
 use bl_model::device_layout::{Size, Widget};
-use bl_model::{DeviceId, ParamDescriptor, ParamId, ParamKind};
+use bl_model::{DeviceDisplay, DeviceId, ParamDescriptor, ParamId, ParamKind};
 use bl_shell::Invocation;
 use bl_shell::device_commands as ids;
 use bl_shell::device_commands::{DeviceFrame, DevicePanel};
@@ -34,6 +34,7 @@ use serde_json::json;
 
 use crate::main_window::UiEvent;
 use crate::theme::Theme;
+use crate::widgets::{modulated_text, paint_ring_segment, ring_segment};
 
 /// Points of vertical drag that move a control from one end of its range to
 /// the other (observed in Live 12.4.6 on Dry/Wet: 0.8% of the range per
@@ -102,9 +103,15 @@ pub type CellRects = Vec<(String, Rect, Option<u32>)>;
 /// [`DeviceLayout::place_for`]: bl_model::DeviceLayout::place_for
 #[must_use]
 pub fn place(panel: &DevicePanel, body: Rect) -> (ControlRects, CellRects) {
+    place_shown(panel, false, body)
+}
+
+/// The same for a device whose expanded part shows while `expanded`
+/// (WP-5.42).
+#[must_use]
+pub fn place_shown(panel: &DevicePanel, expanded: bool, body: Rect) -> (ControlRects, CellRects) {
     let placed = panel
-        .description
-        .layout
+        .layout(expanded)
         .place_for(Size::new(body.width(), body.height()), panel.selected_slot);
     let at = |r: bl_model::device_layout::Rect| {
         Rect::from_min_size(body.min + vec2(r.x, r.y), vec2(r.width, r.height))
@@ -132,17 +139,23 @@ struct Drag {
 }
 
 /// Draws a device's panel in `body`, and turns what the person does into
-/// `device.set_param` invocations.
+/// `device.set_param` invocations. `display` is what the device's display
+/// shows now, if its type draws one. `played` gives the base and the played
+/// value of a parameter while a clip modulates it.
 pub fn show(
     ui: &mut Ui,
     theme: &Theme,
     frame: &DeviceFrame,
-    panel: &DevicePanel,
+    display: Option<&DeviceDisplay>,
     body: Rect,
+    played: &dyn Fn(ParamId) -> Option<(f64, f64)>,
     events: &mut Vec<UiEvent>,
 ) {
+    let Some(panel) = frame.panel.as_ref() else {
+        return;
+    };
     let c = &theme.colors;
-    let (controls, cells) = place(panel, body);
+    let (controls, cells) = place_shown(panel, frame.expanded, body);
     for (index, (name, rect, slot)) in cells.into_iter().enumerate() {
         // A display cell: black, with a thin border (observed). What it
         // shows is the device's own to draw.
@@ -160,9 +173,27 @@ pub fn show(
             continue;
         }
         let _ = ui.interact(rect, id, Sense::hover());
+        // Spec: device-framework R36. The device's own drawing fills its
+        // first cell, and a screen reader hears its readings.
+        let shown = display.filter(|d| index == 0 && has_drawing(d));
+        if let Some(display) = shown {
+            crate::device_display::draw(
+                ui,
+                theme,
+                rect,
+                id,
+                frame.enabled,
+                display,
+                &panel.description.views,
+                events,
+            );
+        }
         ui.ctx().accesskit_node_builder(id, |node| {
             node.set_role(Role::Image);
             node.set_label(name);
+            if let Some(display) = shown {
+                node.set_value(display.text());
+            }
         });
     }
     for (param, widget, rect) in controls {
@@ -176,6 +207,7 @@ pub fn show(
             enabled: frame.enabled,
             descriptor,
             value,
+            modulated: played(param),
             rect,
         };
         match widget {
@@ -295,12 +327,19 @@ fn slot_cell(
     });
 }
 
+/// Whether a display has anything to draw.
+fn has_drawing(display: &DeviceDisplay) -> bool {
+    !(display.series.is_empty() && display.readings.is_empty())
+}
+
 /// One control being drawn.
 struct Control<'a> {
     device: DeviceId,
     enabled: bool,
     descriptor: &'a ParamDescriptor,
     value: f64,
+    /// Its base and what it plays while a clip modulates it.
+    modulated: Option<(f64, f64)>,
     rect: Rect,
 }
 
@@ -440,15 +479,23 @@ impl Control<'_> {
         }
     }
 
+    /// The value the control shows: its base while it's modulated.
+    fn shown(&self) -> f64 {
+        self.modulated.map_or(self.value, |(base, _)| base)
+    }
+
     fn describe(&self, ui: &Ui, response: &Response, role: Role) {
         let d = self.descriptor;
-        let text = d.format(self.value);
+        let text = modulated_text(
+            d.format(self.shown()),
+            self.modulated.map(|(_, played)| d.format(played)),
+        );
         response.widget_info(|| WidgetInfo::slider(true, self.value, &d.name));
         ui.ctx().accesskit_node_builder(response.id, |node| {
             node.set_role(role);
             node.set_label(d.name.clone());
             node.set_value(text);
-            node.set_numeric_value(self.value);
+            node.set_numeric_value(self.shown());
             node.set_min_numeric_value(d.min());
             node.set_max_numeric_value(d.max());
             node.add_action(Action::Increment);
@@ -483,9 +530,20 @@ impl Control<'_> {
                 .collect()
         };
         painter.add(Shape::line(arc(1.0), Stroke::new(2.0, c.control.0)));
-        let n = self.descriptor.normalize(self.value) as f32;
+        let n = self.descriptor.normalize(self.shown()) as f32;
         if n > 0.0 {
             painter.add(Shape::line(arc(n), Stroke::new(2.0, self.lit(theme))));
+        }
+        // Spec: modulation R7: the pointer stays at the base, and the ring
+        // shows the way to the value it plays.
+        if let Some(segment) = self
+            .modulated
+            .and_then(|(_, played)| ring_segment(n, self.descriptor.normalize(played) as f32))
+        {
+            paint_ring_segment(painter, theme, segment, |to| {
+                let a = from + sweep * to;
+                centre + vec2(a.cos(), a.sin()) * radius
+            });
         }
         let a = from + sweep * n;
         painter.line_segment(
@@ -495,7 +553,7 @@ impl Control<'_> {
         painter.text(
             value_row.center(),
             Align2::CENTER_CENTER,
-            self.descriptor.format(self.value),
+            self.descriptor.format(self.shown()),
             theme.small_font(),
             c.text.0,
         );

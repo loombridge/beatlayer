@@ -18,7 +18,7 @@ use serde_json::{Map, Value};
 use crate::error::LoadError;
 
 /// The schema version this build writes, and the newest it can read.
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
 
 /// The oldest schema version this build can read, through [`MIGRATIONS`].
 pub const OLDEST_SCHEMA_VERSION: u32 = SCHEMA_VERSION - MIGRATIONS.len() as u32;
@@ -50,6 +50,15 @@ pub const MIGRATIONS: &[Migration] = &[
                   track's removed Clip Stop buttons; a set saved before them opens with a new \
                   set's quantisation and with a stop button in every slot (the launch \
                   quantisation spec, R1 and R8), so the saved JSON itself needs nothing",
+        apply: Ok,
+    },
+    Migration {
+        from: 4,
+        summary: "a clip envelope's values are modulation (a share of the parameter's travel, or \
+                  of a level's position) rather than parameter units added to the value; a set \
+                  saved before it keeps the old values in the JSON, and the loader's caller \
+                  turns them with the controls' values and the devices' descriptions \
+                  (`SetInfo::before_relative_modulation`; the modulation spec, R5)",
         apply: Ok,
     },
 ];

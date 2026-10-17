@@ -147,7 +147,7 @@ impl RenderRequest {
             media: self.render.media,
             selection: self.render.selection,
             engine_rate: self.render.engine_rate,
-            plugins: None,
+            plugins: bl_shell::export::Hosts::default(),
             playing: self.render.playing,
             cancel: Some(cancel),
         };

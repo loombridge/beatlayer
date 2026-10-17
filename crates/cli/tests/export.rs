@@ -27,9 +27,12 @@ use bl_cli::golden::{
 };
 use bl_cli::render::{self, Cue, Settings, interleave, render_with, to_i24};
 use bl_core::time::{SampleRate, Ticks};
-use bl_engine::{MediaLibrary, MediaMap};
+use bl_engine::{EngineConfig, MediaLibrary, MediaMap, Offline, TransportCommand, When};
 use bl_media::{BitDepth, Dither, FileType};
-use bl_model::{AudioData, Clip, ClipData, Command as Edit, ContentHash, Editor, TrackKind};
+use bl_model::{
+    AudioData, Clip, ClipData, Command as Edit, ContentHash, Device, DeviceKind, Document, Editor,
+    ParamId, TrackKind,
+};
 use bl_project::{Media, MediaPath, MediaRef, Project};
 use bl_shell::export::{self, ExportError, Job, Length, Report};
 
@@ -93,6 +96,7 @@ fn job(path: PathBuf, file_type: FileType, bit_depth: BitDepth, frames: u64) -> 
         start: Ticks::ZERO,
         length: Length::Frames(frames),
         replace: false,
+        render_as_loop: false,
         block: export::BLOCK,
     }
 }
@@ -107,7 +111,7 @@ fn run(document: &bl_model::Document, media: Arc<dyn MediaLibrary>, job: &Job) -
     let report = export::export(
         document,
         media,
-        None,
+        bl_shell::export::Hosts::default(),
         job,
         &AtomicBool::new(false),
         &mut |_| {},
@@ -235,7 +239,7 @@ fn every_fixture_exports_as_its_golden_reference_to_the_bit() {
         exported += 1;
     }
     // Every fixture a saved set can hold, but the loop's.
-    assert_eq!(exported, 11);
+    assert_eq!(exported, 13);
     assert!(
         !temp.names().iter().any(|name| name.starts_with('.')),
         "no hidden files left: {:?}",
@@ -589,7 +593,7 @@ fn cancelling_leaves_nothing_behind() {
                 let result = export::export(
                     scene.document(),
                     media_of(fixture),
-                    None,
+                    bl_shell::export::Hosts::default(),
                     &job,
                     &cancel,
                     &mut |done| {
@@ -630,7 +634,7 @@ fn a_failure_leaves_nothing_behind() {
         let result = export::export(
             scene.document(),
             media_of(fixture),
-            None,
+            bl_shell::export::Hosts::default(),
             &job,
             &AtomicBool::new(false),
             &mut |_| {},
@@ -642,7 +646,7 @@ fn a_failure_leaves_nothing_behind() {
     let result = export::export(
         scene.document(),
         media_of(fixture),
-        None,
+        bl_shell::export::Hosts::default(),
         &job(
             temp.0.join("nowhere/mix.wav"),
             FileType::Wav,
@@ -701,6 +705,332 @@ fn the_same_export_is_the_same_bytes_at_any_block_size() {
         for (a, b) in plain.iter().zip(&dithered) {
             assert!((a - b).abs() <= reach * step + 1e-9, "{a} against {b}");
         }
+    }
+}
+
+/// A track holding a one-bar clip with a tone for its first `tone` frames,
+/// through one native device with `params`: the sound a device leaves
+/// behind after the tone is the tail a Render as Loop export folds.
+fn echo_set(device_type: &str, params: &[(ParamId, f64)], tone: u32) -> (Editor, MediaMap) {
+    let mut editor = Editor::new();
+    let mut media = MediaMap::new();
+    let burst: Vec<f32> = (0..96_000)
+        .map(|n| {
+            if n < tone {
+                (0.5 * (std::f64::consts::TAU * 440.0 * f64::from(n) / 48_000.0).sin()) as f32
+            } else {
+                0.0
+            }
+        })
+        .collect();
+    let hash = ContentHash([7; 32]);
+    media.insert(
+        hash,
+        Arc::new(bl_media::SampleData::new(48_000, vec![burst.clone(), burst]).unwrap()),
+    );
+    let track = editor.new_id();
+    editor
+        .apply(Edit::CreateTrack {
+            id: track,
+            kind: TrackKind::Audio,
+            name: "Burst".to_owned(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let clip = Clip::new(
+        editor.new_id(),
+        Ticks::ZERO,
+        Ticks::WHOLE,
+        ClipData::Audio(AudioData::new(hash)),
+    );
+    editor.apply(Edit::CreateClip { track, clip }).unwrap();
+    let mut device = Device::new(
+        editor.new_id(),
+        "",
+        DeviceKind::Native {
+            device_type: device_type.to_owned(),
+        },
+    );
+    for &(param, value) in params {
+        device.params.insert(param, value);
+    }
+    editor
+        .apply(Edit::InsertDevice {
+            track,
+            index: 0,
+            device,
+        })
+        .unwrap();
+    (editor, media)
+}
+
+fn reverb_set() -> (Editor, MediaMap) {
+    echo_set(
+        bl_devices::reverb::REVERB,
+        &[(bl_devices::reverb::DECAY, 3.0)],
+        4_800,
+    )
+}
+
+/// The engine playing from 1.1.1, as an export starts it, in blocks of 100
+/// frames, which no export uses.
+fn playing(document: &Document, media: Arc<dyn MediaLibrary>) -> Offline {
+    let mut registry = bl_engine::Registry::new();
+    bl_devices::register(&mut registry);
+    let mut offline = Offline::new(
+        EngineConfig::new(SAMPLE_RATE, 100),
+        registry.with_media(media),
+    );
+    offline.sync(document);
+    offline
+        .sender()
+        .transport(TransportCommand::Locate(Ticks::ZERO));
+    offline
+        .sender()
+        .transport_at(TransportCommand::Play, When::Frame(0));
+    offline
+}
+
+/// Spec: export R24, R25, the two passes by hand: the range rendered
+/// alone, and, in an engine of its own, the song rendered to the range's
+/// end, stopped there, and rendered on until it has been below -120 dBFS for
+/// 100 ms or 60 seconds have passed. Returns the range and the tail.
+fn two_passes(
+    document: &Document,
+    media: &Arc<dyn MediaLibrary>,
+    frames: u64,
+) -> (Vec<f32>, Vec<f32>) {
+    let mut range = Vec::new();
+    playing(document, media.clone()).render(frames, |block| interleave(&block, &mut range));
+    let mut offline = playing(document, media.clone());
+    offline.render(frames, |_| {});
+    offline.sender().transport(TransportCommand::Stop);
+    let (mut tail, mut quiet) = (Vec::new(), 0);
+    while quiet < 4_800 && tail.len() < 60 * 48_000 * 2 {
+        let mut block = Vec::new();
+        interleave(&offline.process(100), &mut block);
+        for frame in block.chunks(2) {
+            if quiet < 4_800 {
+                tail.extend_from_slice(frame);
+                quiet = if frame.iter().all(|s| s.abs() < 1e-6) {
+                    quiet + 1
+                } else {
+                    0
+                };
+            }
+        }
+    }
+    (range, tail)
+}
+
+/// The tail added onto the range's start, sample by sample, wrapping round
+/// as often as it takes.
+fn fold(range: &[f32], tail: &[f32]) -> Vec<f32> {
+    let mut folded = range.to_vec();
+    for (j, frame) in tail.chunks(2).enumerate() {
+        let at = j * 2 % range.len();
+        folded[at] += frame[0];
+        folded[at + 1] += frame[1];
+    }
+    folded
+}
+
+fn loop_job(path: PathBuf, frames: u64) -> Job {
+    let mut job = job(path, FileType::Wav, BitDepth::Float32, frames);
+    job.render_as_loop = true;
+    job
+}
+
+/// Spec: export R24. A one-bar range through a reverb is one bar long,
+/// holds the tail at its start, and nulls against the two passes.
+#[test]
+fn a_loop_render_nulls_against_its_two_pass_reference() {
+    let (editor, media) = reverb_set();
+    let media: Arc<dyn MediaLibrary> = Arc::new(media);
+    let temp = TempDir::new("loop");
+    let path = temp.0.join("loop.wav");
+    let report = run(
+        editor.document(),
+        media.clone(),
+        &loop_job(path.clone(), 96_000),
+    );
+    let (range, tail) = two_passes(editor.document(), &media, 96_000);
+    assert!(tail.len() > 2 * 48_000 && tail.len() < 60 * 48_000 * 2);
+    let (_, _, looped) = decode(&path);
+    assert_eq!(report.frames, 96_000);
+    assert_eq!(looped.len(), 96_000 * 2, "exactly one bar");
+    assert_ne!(bits(&looped[..9_600]), bits(&range[..9_600]), "the tail");
+    assert_eq!(bits(&looped), bits(&fold(&range, &tail)));
+}
+
+/// Spec: export R24.
+#[test]
+fn a_tail_longer_than_the_range_wraps_round_again() {
+    let (editor, media) = reverb_set();
+    let media: Arc<dyn MediaLibrary> = Arc::new(media);
+    let temp = TempDir::new("wrap");
+    let path = temp.0.join("loop.wav");
+    run(
+        editor.document(),
+        media.clone(),
+        &loop_job(path.clone(), 12_000),
+    );
+    let (range, tail) = two_passes(editor.document(), &media, 12_000);
+    assert!(tail.len() > 3 * range.len(), "wraps three times or more");
+    let (_, _, looped) = decode(&path);
+    assert_eq!(looped.len(), 12_000 * 2);
+    assert_eq!(bits(&looped), bits(&fold(&range, &tail)));
+}
+
+/// Spec: export R25. What plays after the end is what the devices leave: a
+/// clip running on past it is stopped, and a delay that never dies away is
+/// cut at 60 seconds.
+#[test]
+fn the_tail_is_what_the_devices_sound_after_the_end_stops() {
+    // Stems of 4 seconds with no device cut at 1: nothing is left to fold.
+    let (editor, media) = eight_stems(4.0);
+    let media: Arc<dyn MediaLibrary> = Arc::new(media);
+    let temp = TempDir::new("stop");
+    let (looped, plain) = (temp.0.join("loop.wav"), temp.0.join("plain.wav"));
+    run(
+        editor.document(),
+        media.clone(),
+        &loop_job(looped.clone(), 48_000),
+    );
+    run(
+        editor.document(),
+        media,
+        &job(plain.clone(), FileType::Wav, BitDepth::Float32, 48_000),
+    );
+    assert_eq!(bits(&decode(&looped).2), bits(&decode(&plain).2));
+
+    let delay = bl_devices::delay::FEEDBACK;
+    let (editor, media) = echo_set(
+        bl_devices::delay::DELAY,
+        &[(delay, 100.0), (bl_devices::delay::FILTER, 0.0)],
+        96_000,
+    );
+    let media: Arc<dyn MediaLibrary> = Arc::new(media);
+    let path = temp.0.join("delay.wav");
+    run(
+        editor.document(),
+        media.clone(),
+        &loop_job(path.clone(), 96_000),
+    );
+    let (range, tail) = two_passes(editor.document(), &media, 96_000);
+    assert_eq!(tail.len(), 60 * 48_000 * 2, "cut at 60 seconds");
+    assert_eq!(bits(&decode(&path).2), bits(&fold(&range, &tail)));
+}
+
+/// Spec: export R26. The tail is added after the conversion down, at the
+/// file's rate, and Normalize sees the looped file's peak.
+#[test]
+fn the_tail_is_added_after_conversion_and_before_normalize_and_dither() {
+    let (editor, media) = reverb_set();
+    let media: Arc<dyn MediaLibrary> = Arc::new(media);
+    let temp = TempDir::new("order");
+    let path = temp.0.join("loop.wav");
+    let mut looped = loop_job(path.clone(), 96_000);
+    looped.sample_rate = 44_100;
+    looped.normalize = true;
+    let report = run(editor.document(), media.clone(), &looped);
+
+    // The two passes at 48 kHz, converted down together, then folded.
+    let (range, tail) = two_passes(editor.document(), &media, 96_000);
+    let both: Vec<Vec<f32>> = (0..2)
+        .map(|c| {
+            range
+                .iter()
+                .chain(&tail)
+                .skip(c)
+                .step_by(2)
+                .copied()
+                .collect()
+        })
+        .collect();
+    let converted =
+        bl_media::convert_sample_rate(&bl_media::SampleData::new(48_000, both).unwrap(), 44_100)
+            .unwrap();
+    let kept = bl_media::converted_len(96_000, 48_000, 44_100);
+    let interleaved: Vec<f32> = (0..converted.frames())
+        .flat_map(|n| {
+            [
+                converted.channel(0).unwrap()[n],
+                converted.channel(1).unwrap()[n],
+            ]
+        })
+        .collect();
+    let folded = fold(&interleaved[..kept * 2], &interleaved[kept * 2..]);
+    let peak = folded.iter().fold(0.0f32, |peak, s| peak.max(s.abs()));
+    let unfolded = interleaved[..kept * 2]
+        .iter()
+        .fold(0.0f32, |peak, s| peak.max(s.abs()));
+    assert_ne!(peak, unfolded, "the tail changes the peak");
+    let gain = 1.0 / f64::from(peak);
+    let expected: Vec<f32> = folded
+        .iter()
+        .map(|&s| (f64::from(s) * gain) as f32)
+        .collect();
+    let (rate, _, written) = decode(&path);
+    assert_eq!((rate, written.len()), (44_100, kept * 2));
+    assert_eq!(bits(&written), bits(&expected));
+    assert_eq!(report.gain, gain);
+}
+
+/// Spec: export R27.
+#[test]
+fn a_loop_render_is_the_same_bytes_at_any_block_size() {
+    let (editor, media) = reverb_set();
+    let media: Arc<dyn MediaLibrary> = Arc::new(media);
+    let temp = TempDir::new("loop-blocks");
+    for (dither, rate) in [
+        (Dither::Triangular, 48_000),
+        (Dither::Rectangular, 48_000),
+        (Dither::NoiseShaped, 44_100),
+    ] {
+        let mut files = Vec::new();
+        for (n, block) in [512, 61, 4096].into_iter().enumerate() {
+            let path = temp.0.join(format!("{dither:?}-{n}.wav"));
+            let mut job = loop_job(path.clone(), 96_000);
+            job.bit_depth = BitDepth::Int16;
+            job.dither = dither;
+            job.sample_rate = rate;
+            job.block = block;
+            run(editor.document(), media.clone(), &job);
+            files.push(fs::read(&path).unwrap());
+        }
+        assert!(
+            files.windows(2).all(|pair| pair[0] == pair[1]),
+            "{dither:?}"
+        );
+    }
+}
+
+/// Spec: export R27. Cancelled while the range renders or while the tail
+/// does, a loop render leaves nothing behind.
+#[test]
+fn cancelling_a_loop_render_leaves_nothing_behind() {
+    let (editor, media) = reverb_set();
+    let media: Arc<dyn MediaLibrary> = Arc::new(media);
+    for cancel_at in [0.2, 0.5] {
+        let temp = TempDir::new("loop-cancel");
+        let cancel = AtomicBool::new(false);
+        let result = export::export(
+            editor.document(),
+            media.clone(),
+            bl_shell::export::Hosts::default(),
+            &loop_job(temp.0.join("loop.wav"), 96_000),
+            &cancel,
+            // 0.5 is the range's last block: the tail renders next.
+            &mut |done| {
+                if done >= cancel_at {
+                    cancel.store(true, Ordering::Relaxed);
+                }
+            },
+        );
+        assert_eq!(result, Err(ExportError::Cancelled), "at {cancel_at}");
+        assert!(temp.names().is_empty(), "{:?}", temp.names());
     }
 }
 

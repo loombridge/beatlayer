@@ -24,7 +24,10 @@ use bl_engine::{DeviceType, NodeConfig, Registry};
 use bl_model::Device;
 use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
 use bl_model::param::db_to_gain;
-use bl_model::{DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
+use bl_model::{
+    DeviceDescription, DeviceDisplay, DeviceId, DeviceLayout, DeviceRole, DisplayMarker,
+    DisplayReading, DisplaySeries, OrdMap, ParamDescriptor, ParamId, ParamUnit,
+};
 
 use crate::framework::{Audio, DelayLine, NativeDevice, ParamBank, add};
 
@@ -185,7 +188,11 @@ pub fn compressor_type() -> DeviceType {
     ];
     DeviceType::native(COMPRESSOR, "Squeeze", DeviceRole::AudioEffect)
         .with_sidechain()
-        .with_description(DeviceDescription::new(params).with_layout(layout()))
+        .with_description(
+            DeviceDescription::new(params)
+                .with_layout(layout())
+                .with_views(&VIEWS),
+        )
 }
 
 /// The device's layout: the ratio, attack's and release's controls on the
@@ -323,6 +330,19 @@ fn step_of(ms: f64, rate: f64) -> f32 {
     (1.0 - (-1.0 / samples).exp()) as f32
 }
 
+/// The dB the static curve moves per dB over the threshold. The top of the
+/// ratio's range is an infinite ratio: the slope is 1 (expansion's stays
+/// finite).
+fn curve_slope(ratio: f64, expand: bool) -> f64 {
+    if expand {
+        ratio - 1.0
+    } else if ratio >= RATIO_MAX {
+        1.0
+    } else {
+        1.0 - 1.0 / ratio
+    }
+}
+
 /// Squeeze's audio-thread half.
 pub struct Squeeze {
     rate: f64,
@@ -341,6 +361,10 @@ pub struct Squeeze {
     /// The gain now, and how long a reduction has been held (Auto Release).
     gain: f32,
     hold_frames: f32,
+    /// The loudest input and output samples since the display last
+    /// published, as linear amplitude.
+    peak_in: f32,
+    peak_out: f32,
 }
 
 impl Squeeze {
@@ -365,6 +389,8 @@ impl Squeeze {
             rms: [0.0; 2],
             gain: 1.0,
             hold_frames: 0.0,
+            peak_in: 0.0,
+            peak_out: 0.0,
         }
     }
 
@@ -407,15 +433,7 @@ impl NativeDevice for Squeeze {
         let ratio = params.value(at(RATIO)).clamp(1.0, RATIO_MAX);
         let mode = (params.value(at(MODE)) as usize).min(MODE_EXPAND);
         let expand = mode == MODE_EXPAND;
-        // The top of the ratio's range is an infinite ratio: the curve's
-        // slope is 1 (expansion's stays finite).
-        let slope = if expand {
-            ratio - 1.0
-        } else if ratio >= RATIO_MAX {
-            1.0
-        } else {
-            1.0 - 1.0 / ratio
-        };
+        let slope = curve_slope(ratio, expand);
         let knee = params.value(at(KNEE));
         let auto = params.value(at(AUTO_RELEASE)) >= 0.5;
         let log_envelope = params.value(at(ENVELOPE)) as usize == ENV_LOG;
@@ -461,6 +479,7 @@ impl NativeDevice for Squeeze {
             for (i, target) in self.targets[..frames].iter_mut().enumerate() {
                 let keyed = audio.sidechain(channel).map(|key| key[i]);
                 let sample = keyed.unwrap_or_else(|| audio.channel_mut(channel)[i]);
+                self.peak_in = self.peak_in.max(sample.abs());
                 let filtered = if sc_on {
                     self.filter[channel].process(sample)
                 } else {
@@ -520,7 +539,9 @@ impl NativeDevice for Squeeze {
                 self.delay[channel].write(sample);
                 let mix = wet[i] * 0.01;
                 let level = self.gains[i] * makeup * out[i];
-                audio.channel_mut(channel)[i] = delayed * (mix * level + (1.0 - mix));
+                let output = delayed * (mix * level + (1.0 - mix));
+                self.peak_out = self.peak_out.max(output.abs());
+                audio.channel_mut(channel)[i] = output;
             }
         }
     }
@@ -528,4 +549,102 @@ impl NativeDevice for Squeeze {
     fn latency(&self) -> u32 {
         self.lookahead
     }
+
+    fn display_len(&self) -> usize {
+        DISPLAY_VALUES
+    }
+
+    fn display(&mut self, out: &mut [f32]) {
+        let db = |level: f32| Self::level_db(f64::from(level)) as f32;
+        out[0] = db(self.gain);
+        out[1] = db(self.peak_in);
+        out[2] = db(self.peak_out);
+        self.peak_in = 0.0;
+        self.peak_out = 0.0;
+    }
+}
+
+/// What the node publishes: the gain now, and the input's and the output's
+/// peaks since the last block, all in dB.
+const DISPLAY_VALUES: usize = 3;
+
+/// The views the display offers (the compressor spec, R16), the first the
+/// one it starts in.
+pub const VIEWS: [&str; 3] = ["Transfer Curve", "Activity", "Collapsed"];
+
+/// The transfer curve's input levels, in dB, one point per dB.
+const CURVE_FROM_DB: f32 = -60.0;
+const CURVE_POINTS: usize = 61;
+
+/// The device's display (the compressor spec, R15): the gain reduction and
+/// the input's and output's levels, the transfer curve, and the threshold
+/// and the level now as markers on it. `data` is what the node published,
+/// if an engine runs.
+#[must_use]
+pub fn display(
+    device: DeviceId,
+    description: &DeviceDescription,
+    values: &OrdMap<ParamId, f64>,
+    data: Option<&[f32]>,
+) -> DeviceDisplay {
+    let value = |id: ParamId| description.value(values, id).unwrap_or(0.0);
+    let expand = (value(MODE) as usize).min(MODE_EXPAND) == MODE_EXPAND;
+    let slope = curve_slope(value(RATIO).clamp(1.0, RATIO_MAX), expand);
+    let (threshold, knee) = (value(THRESHOLD), value(KNEE));
+    let through = |db: f64| db + Squeeze::curve_db(db, threshold, slope, knee, expand);
+    let reading = |name: &str, level: f32| DisplayReading {
+        name: name.to_owned(),
+        value: level,
+        unit: "dB".to_owned(),
+        text: format!("{level:.1} dB"),
+    };
+    let mut out = DeviceDisplay {
+        device,
+        live: data.is_some(),
+        view: None,
+        series: vec![DisplaySeries {
+            name: "Transfer Curve".to_owned(),
+            unit: "dB".to_owned(),
+            x_unit: "dB".to_owned(),
+            x_range: [CURVE_FROM_DB, 0.0],
+            log_x: false,
+            y_range: [CURVE_FROM_DB, 0.0],
+            detail: false,
+            values: (0..CURVE_POINTS)
+                .map(|i| through(f64::from(CURVE_FROM_DB) + i as f64) as f32)
+                .collect(),
+        }],
+        markers: vec![DisplayMarker {
+            name: "Threshold".to_owned(),
+            series: "Transfer Curve".to_owned(),
+            x: threshold as f32,
+            y: through(threshold) as f32,
+            text: format!(
+                "Threshold {}",
+                description
+                    .param(THRESHOLD)
+                    .map_or_else(String::new, |p| p.format(threshold))
+            ),
+        }],
+        readings: Vec::new(),
+    };
+    if let Some([gain, input, output]) =
+        data.and_then(|d| <[f32; DISPLAY_VALUES]>::try_from(d).ok())
+    {
+        out.readings = vec![
+            reading("Gain Reduction", gain),
+            reading("Input", input),
+            reading("Output", output),
+        ];
+        if input > CURVE_FROM_DB {
+            out.markers.push(DisplayMarker {
+                name: "Level".to_owned(),
+                series: "Transfer Curve".to_owned(),
+                x: input,
+                y: through(f64::from(input)) as f32,
+                text: format!("Level {input:.1} dB"),
+            });
+        }
+    }
+    out
 }

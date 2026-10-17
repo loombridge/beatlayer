@@ -21,8 +21,8 @@ use crate::node::{NodeData, NodeEvent, NodeKey, ParamValue, TransportInfo};
 use crate::program::{EngineProgram, Resolved};
 use crate::recording::{RecordingPlan, TakeBounds};
 use crate::session::{
-    Playhead, SceneOverride, SessionCommand, SessionLauncher, SessionPlayback, SlotState,
-    SlotStatus,
+    Playhead, SceneOverride, SessionCommand, SessionEvent, SessionLauncher, SessionPlayback,
+    SlotState, SlotStatus,
 };
 use crate::state::{EngineCounters, EngineState, TrackMeter};
 
@@ -1033,13 +1033,13 @@ impl Processor {
             SessionCommand::StopTrack(track) => self.stop_session(Some(track)),
             SessionCommand::StopAll => self.stop_session(None),
             SessionCommand::BackToArrangement => {
-                self.session.back_to_arrangement(None);
+                self.session.back_to_arrangement(None, self.position);
                 // Spec: session-view R23. Returning every track also gives
                 // the set's own tempo and signature back.
                 self.clear_scene_override();
             }
             SessionCommand::TrackBackToArrangement(track) => {
-                self.session.back_to_arrangement(Some(track));
+                self.session.back_to_arrangement(Some(track), self.position);
             }
             SessionCommand::SetQuantization(settings) => self.session.set_settings(settings),
             SessionCommand::Record => self.record_session(),
@@ -1298,6 +1298,45 @@ impl Processor {
             while let Some(scene) = self.session.take_due_scene(self.position) {
                 self.apply_scene(scene);
             }
+        }
+        self.flush_launches();
+    }
+
+    /// Hands the starts and ends the launcher logged to the Arrangement
+    /// take's ring, or drops them when no such take runs (WP-3.13).
+    fn flush_launches(&mut self) {
+        if self.take.is_some()
+            && self.session_take.is_none()
+            && let Some(log) = self
+                .plan
+                .as_mut()
+                .and_then(|plan| plan.get_mut().launches.as_mut())
+        {
+            for event in self.session.log.drain(..) {
+                log.push(event);
+            }
+        }
+        self.session.log.clear();
+    }
+
+    /// A take that begins with Session clips playing logs a start for each,
+    /// at the take's first frame (WP-3.13).
+    fn log_playing_clips(&mut self) {
+        let at = self.position;
+        let Some(log) = self
+            .plan
+            .as_mut()
+            .and_then(|plan| plan.get_mut().launches.as_mut())
+        else {
+            return;
+        };
+        for (track, scene, launched) in self.session.started() {
+            log.push(SessionEvent {
+                track,
+                scene,
+                at,
+                launched: Some(launched),
+            });
         }
     }
 
@@ -1621,6 +1660,7 @@ impl Processor {
                 next: self.position,
                 wrap: None,
             });
+            self.log_playing_clips();
         }
         let written = self.take.map_or(0, |take| take.written);
         let skip = (delay.max(0) as u64)
@@ -1781,6 +1821,10 @@ impl Processor {
             .extend(self.session.overridden().iter().copied().take(room));
         state.meters.clear();
         state.meters_truncated = false;
+        state.modulated.clear();
+        if let Some(program) = &self.program {
+            program.get().modulated(&mut state.modulated);
+        }
         if let Some(program) = &self.program {
             let program = program.get();
             for &task in &program.order {

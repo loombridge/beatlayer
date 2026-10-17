@@ -19,7 +19,8 @@ use bl_model::{
     SceneId, TrackId, TrackKind, registry,
 };
 use bl_project::{
-    Media, MediaPath, MediaRef, Project, ProjectFolder, SET_EXTENSION, SaveOptions, SetFile, is_set,
+    Media, MediaPath, MediaRef, Project, ProjectFolder, SET_EXTENSION, SaveOptions, SetFile,
+    SetInfo, is_set,
 };
 use serde_json::json;
 
@@ -203,7 +204,10 @@ impl ProjectFiles {
 
 impl SetStore for ProjectFiles {
     fn open(&mut self, path: &Path) -> Result<(Editor, PathBuf), String> {
-        let (set, project) = SetFile::open(path).map_err(|error| error.to_string())?;
+        let (set, mut project) = SetFile::open(path).map_err(|error| error.to_string())?;
+        if set.info().is_some_and(SetInfo::before_relative_modulation) {
+            bl_devices::relative_clip_envelopes(&mut project.document);
+        }
         let editor = project.editor();
         let opened = set.path().to_owned();
         self.set = Some(set);
@@ -827,7 +831,12 @@ pub fn factory_default_set() -> Editor {
 #[must_use]
 pub fn new_set_from(path: Option<&Path>) -> Editor {
     path.and_then(|path| SetFile::open(path).ok())
-        .map(|(_, project)| project.editor())
+        .map(|(set, mut project)| {
+            if set.info().is_some_and(SetInfo::before_relative_modulation) {
+                bl_devices::relative_clip_envelopes(&mut project.document);
+            }
+            project.editor()
+        })
         .unwrap_or_else(factory_default_set)
 }
 

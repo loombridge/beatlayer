@@ -448,13 +448,16 @@ fn place_band(band: &ControlBand, x: f32, y: f32, slot: u32, placed: &mut Placed
 pub struct DeviceLayout {
     /// The whole body.
     pub root: LayoutNode,
+    /// The part the device adds to its body while it is expanded (L-DEV-004,
+    /// L-DEV-007), if it has one: placed to the right of [`root`](Self::root).
+    /// It places its parameters' controls like the rest of the layout.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expanded: Option<LayoutNode>,
 }
 
 impl Default for DeviceLayout {
     fn default() -> Self {
-        Self {
-            root: LayoutNode::Row(Vec::new()),
-        }
+        Self::new(LayoutNode::Row(Vec::new()))
     }
 }
 
@@ -499,7 +502,39 @@ impl DeviceLayout {
     /// A layout of `root`.
     #[must_use]
     pub fn new(root: LayoutNode) -> Self {
-        Self { root }
+        Self {
+            root,
+            expanded: None,
+        }
+    }
+
+    /// The same, with `part` as what the device adds while expanded.
+    #[must_use]
+    pub fn with_expanded(mut self, part: LayoutNode) -> Self {
+        self.expanded = Some(part);
+        self
+    }
+
+    /// Whether the device has an expanded part, so its title bar has the
+    /// expand toggle.
+    #[must_use]
+    pub fn has_expanded(&self) -> bool {
+        self.expanded.is_some()
+    }
+
+    /// The layout as drawn: the expanded part, if there is one, joined to
+    /// the right of the rest while `expanded`, and left out otherwise. The
+    /// result has no expanded part of its own, so [`docked_size`],
+    /// [`place`] and the rest answer for what is shown.
+    ///
+    /// [`docked_size`]: Self::docked_size
+    /// [`place`]: Self::place
+    #[must_use]
+    pub fn shown(&self, expanded: bool) -> Self {
+        match (&self.expanded, expanded) {
+            (Some(part), true) => Self::new(LayoutNode::Row(vec![self.root.clone(), part.clone()])),
+            _ => Self::new(self.root.clone()),
+        }
     }
 
     /// The generic UI's layout of `params`: a band [`BODY_HEIGHT`] tall
@@ -599,7 +634,10 @@ impl DeviceLayout {
     pub fn check(&self, params: &[ParamDescriptor]) -> Result<(), String> {
         let mut seen: Vec<ParamId> = Vec::new();
         let mut problem = None;
-        self.root.visit(&mut |node| {
+        // Every control counts, in the part that is always there or in the
+        // expanded one.
+        let whole = self.shown(true);
+        whole.root.visit(&mut |node| {
             if problem.is_some() {
                 return;
             }
@@ -724,6 +762,51 @@ mod tests {
         ]))
     }
 
+    // Spec: device-chains R34
+    #[test]
+    fn an_expanded_part_joins_the_body_to_the_right_only_while_shown() {
+        let layout = DeviceLayout::new(LayoutNode::Band(ControlBand::stacked(
+            BODY_HEIGHT,
+            &knobs(0, 2),
+        )))
+        .with_expanded(LayoutNode::Band(ControlBand::stacked(
+            BODY_HEIGHT,
+            &knobs(2, 2),
+        )));
+        // Every parameter is placed once, in the body or the expanded part.
+        layout.check(&params(4)).unwrap();
+        assert!(layout.check(&params(5)).is_err(), "a control is missing");
+        assert!(layout.has_expanded());
+        let (hidden, shown) = (layout.shown(false), layout.shown(true));
+        assert!(!hidden.has_expanded() && !shown.has_expanded());
+        assert_eq!(hidden.docked_size(), Size::new(56.0, BODY_HEIGHT));
+        assert_eq!(shown.docked_size(), Size::new(112.0, BODY_HEIGHT));
+        let placed = shown.place(shown.docked_size());
+        let at = |param: u32| {
+            placed
+                .controls
+                .iter()
+                .find(|c| c.param == ParamId(param))
+                .unwrap()
+                .rect
+        };
+        assert_eq!(at(0), hidden.place(hidden.docked_size()).controls[0].rect);
+        assert!(at(2).x >= 56.0, "the expanded part sits right of the body");
+        // A parameter placed in both parts is refused, as in one band.
+        let twice = DeviceLayout::new(LayoutNode::Band(ControlBand::stacked(
+            BODY_HEIGHT,
+            &knobs(0, 2),
+        )))
+        .with_expanded(LayoutNode::Band(ControlBand::stacked(
+            BODY_HEIGHT,
+            &knobs(1, 2),
+        )));
+        assert!(twice.check(&params(3)).is_err());
+        // A layout with no expanded part shows as it is.
+        let plain = DeviceLayout::generic(&params(2));
+        assert_eq!(plain.shown(true), plain);
+    }
+
     // Spec: device-framework R10
     #[test]
     fn the_docked_size_is_every_part_at_its_own_size() {
@@ -829,7 +912,7 @@ mod tests {
         assert_eq!(docked.width, PADDING + 4.0 * (48.0 + PADDING));
     }
 
-    // Spec: device-framework R26
+    // Spec: device-framework R39
     #[test]
     fn a_band_of_slot_controls_names_the_selected_slots_parameters() {
         // Two slots of three parameters each, 10 apart, and a cell for each

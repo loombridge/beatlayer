@@ -64,6 +64,7 @@ impl Object {
                 "checkpoints",
                 "tracks",
             ],
+            Self::Device => &["compare"],
             _ => &[],
         }
     }
@@ -217,6 +218,8 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("chain.set_solo", query(Device, "chains")),
     ("chain.set_gain", query(Device, "chains")),
     ("device.add", query(Track, "devices")),
+    ("device.compare_copy", query(Device, "compare")),
+    ("device.compare_switch", query(Device, "compare")),
     ("device.cut", query(Track, "devices")),
     ("device.duplicate", query(Track, "devices")),
     ("device.group", query(Track, "devices")),

@@ -49,6 +49,18 @@ pub struct Device {
     #[serde(with = "param_pairs")]
     #[schemars(with = "Vec<(ParamId, f64)>")]
     pub params: OrdMap<ParamId, f64>,
+    /// Whether the device's B state is the active one, whose values
+    /// [`params`](Self::params) holds (device compare R1). Left out of the
+    /// saved set while A is active.
+    #[serde(default, skip_serializing_if = "is_off")]
+    pub b_active: bool,
+    /// The values of the state that isn't active, in the same form as
+    /// [`params`](Self::params) (device compare R1, R10). `None` while the
+    /// two states are equal, as a new device's are, and left out of the
+    /// saved set then. Use [`other_params`](Self::other_params) to read it.
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "other_pairs")]
+    #[schemars(with = "Option<Vec<(ParamId, f64)>>")]
+    pub other_params: Option<OrdMap<ParamId, f64>>,
     /// The device's sidechain input, if its type declares one (WP-2.19b):
     /// where its detector can listen other than its own input. Left out
     /// of the saved set for a device without one.
@@ -258,6 +270,8 @@ impl Device {
             enabled: true,
             show_preset_name: true,
             params: OrdMap::new(),
+            b_active: false,
+            other_params: None,
             sidechain: None,
             floating: false,
             plugin: None,
@@ -271,6 +285,59 @@ impl Device {
     #[must_use]
     pub fn can_float(&self) -> bool {
         matches!(self.kind, DeviceKind::Native { .. })
+    }
+
+    /// Whether the device has A and B states: native devices do; racks
+    /// and plug-ins don't, as in Live (device compare R6).
+    #[must_use]
+    pub fn can_compare(&self) -> bool {
+        matches!(self.kind, DeviceKind::Native { .. })
+    }
+
+    /// The values of the state that isn't active.
+    #[must_use]
+    pub fn other_params(&self) -> &OrdMap<ParamId, f64> {
+        self.other_params.as_ref().unwrap_or(&self.params)
+    }
+
+    /// Sets one parameter in the active state only (device compare R2).
+    pub(crate) fn set_param(&mut self, param: ParamId, value: f64) {
+        let before = self.params.clone();
+        self.params.insert(param, value);
+        if self.can_compare() {
+            self.other_params.get_or_insert(before);
+            self.forget_equal_other();
+        }
+    }
+
+    /// Sets both states to `params`, with A active, as a device starts,
+    /// loading a preset does (device compare R9) and a copy does (R8).
+    pub fn set_both(&mut self, params: OrdMap<ParamId, f64>) {
+        self.params = params;
+        self.b_active = false;
+        self.other_params = None;
+    }
+
+    /// Makes the other state active (device compare R3).
+    pub(crate) fn compare_switch(&mut self) {
+        let other = self
+            .other_params
+            .take()
+            .unwrap_or_else(|| self.params.clone());
+        self.other_params = Some(std::mem::replace(&mut self.params, other));
+        self.b_active = !self.b_active;
+        self.forget_equal_other();
+    }
+
+    /// Copies the active state over the other (device compare R4).
+    pub(crate) fn compare_copy(&mut self) {
+        self.other_params = None;
+    }
+
+    fn forget_equal_other(&mut self) {
+        if self.other_params.as_ref() == Some(&self.params) {
+            self.other_params = None;
+        }
     }
 
     /// The same device with a sidechain input, as a new device has.
@@ -418,6 +485,43 @@ pub enum PluginFormat {
     AudioUnit,
     /// LV2 (Linux).
     Lv2,
+}
+
+/// Serialises an optional set of parameter values as `param_pairs` does.
+mod other_pairs {
+    use imbl::OrdMap;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    use super::param_pairs;
+    use crate::ids::ParamId;
+
+    struct Pairs(OrdMap<ParamId, f64>);
+
+    impl Serialize for Pairs {
+        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            param_pairs::serialize(&self.0, serializer)
+        }
+    }
+
+    impl<'de> Deserialize<'de> for Pairs {
+        fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            param_pairs::deserialize(deserializer).map(Self)
+        }
+    }
+
+    #[expect(clippy::ref_option, reason = "serde passes a reference")]
+    pub(super) fn serialize<S: Serializer>(
+        params: &Option<OrdMap<ParamId, f64>>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        params.clone().map(Pairs).serialize(serializer)
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<OrdMap<ParamId, f64>>, D::Error> {
+        Ok(Option::<Pairs>::deserialize(deserializer)?.map(|pairs| pairs.0))
+    }
 }
 
 /// Serialises parameter values as a list of `[parameter, value]` pairs.

@@ -602,6 +602,7 @@ impl EngineProgram {
             debug_assert_eq!(new.key, old.key, "a migration joins different nodes");
             std::mem::swap(&mut new.node, &mut old.node);
         }
+        self.midi.inherit(&mut old.midi);
         true
     }
 
@@ -669,6 +670,11 @@ impl EngineProgram {
                     });
                 }
             }
+
+            // Spec: midi-io R12. What the track's input played merges with
+            // its clips' notes, on its own frames.
+            self.midi
+                .play(task.track, from, until, &mut self.note_buffers[0]);
 
             // Its clips, held back to line up with its inputs.
             if task.clip_delay != NO_DELAY {

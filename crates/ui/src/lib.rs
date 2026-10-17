@@ -49,6 +49,7 @@ pub mod focus;
 pub mod in_out;
 pub mod input;
 pub mod keymap;
+pub mod launch_panel;
 pub mod layout;
 pub mod main_window;
 pub mod menus;

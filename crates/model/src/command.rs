@@ -20,7 +20,7 @@ use crate::error::ModelError;
 use crate::ids::{ChainId, ClipId, ContentHash, DeviceId, ParamId, SceneId, TrackId};
 use crate::launch::{ClipLaunch, LaunchMode, LaunchQuantization};
 use crate::metronome::{CountIn, MetronomeRhythm, MetronomeSound};
-use crate::rack::{CHAIN_COLOURS, Chain};
+use crate::rack::{CHAIN_COLOURS, Chain, RackKind};
 use crate::scene::{SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
 use crate::shared::Shared;
 use crate::track::{
@@ -3143,6 +3143,14 @@ impl Document {
         let chains = &mut self.device_mut(rack)?.chains;
         check_index(index, chains.len())?;
         chains.insert(index, moved.clone());
+        // Only instrument and audio effect racks' chains are tapped (the
+        // racks spec, R38).
+        if !matches!(
+            self.device_ref(rack)?.rack_kind(),
+            Some(RackKind::Instrument | RackKind::AudioEffect)
+        ) {
+            self.forget_chain_taps(&BTreeSet::from([id]));
+        }
         if from != to {
             self.index.add_chain(&moved, to);
             self.forget_in(from, &Gone::chain(&moved))?;

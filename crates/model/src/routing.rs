@@ -1109,7 +1109,6 @@ mod tests {
     fn chain_taps_forget_deleted_chains() {
         let mut editor = Editor::new();
         let (source, tapper, rack, [a, b, inner]) = racks_to_tap(&mut editor);
-        let before = editor.document().clone();
         let tap = |chain| Input::Track {
             track: source,
             tap: Tap::PostFx,
@@ -1184,7 +1183,46 @@ mod tests {
             .apply(Command::DeleteTrack { track: source })
             .unwrap();
         assert_eq!(after_taps(&editor), Input::None);
-        let _ = before;
+    }
+
+    // Spec: racks R41
+    #[test]
+    fn a_chain_moved_into_a_rack_that_offers_no_taps_is_forgotten() {
+        let mut editor = Editor::new();
+        let tapper = add(&mut editor, TrackKind::Audio, None);
+        let source = add(&mut editor, TrackKind::Midi, None);
+        let (notes, keys): (DeviceId, DeviceId) = (editor.new_id(), editor.new_id());
+        let pad: ChainId = editor.new_id();
+        for (index, device) in [
+            (0, Device::rack(notes, RackKind::MidiEffect)),
+            (
+                1,
+                Device::rack(keys, RackKind::Instrument).with_chain(Chain::new(pad, "Pad")),
+            ),
+        ] {
+            editor
+                .apply(Command::InsertDevice {
+                    track: source,
+                    index,
+                    device,
+                })
+                .unwrap();
+        }
+        tap_chain(&mut editor, tapper, source, pad);
+        editor
+            .apply(Command::MoveChain {
+                chain: pad,
+                rack: notes,
+                index: 0,
+            })
+            .unwrap();
+        assert_eq!(
+            editor.document().track(tapper).unwrap().routing().input,
+            Input::None
+        );
+        let loaded: Document =
+            serde_json::from_value(serde_json::to_value(editor.document()).unwrap()).unwrap();
+        assert_eq!(&loaded, editor.document());
     }
 
     // Spec: racks R38

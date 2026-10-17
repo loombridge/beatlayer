@@ -51,7 +51,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        96,
+        98,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -60,8 +60,8 @@ fn every_document_command_is_registered() {
          WP-2.13 the two for Main Out and Cue Out, WP-3.1 five for scenes and two for slot \
          clips, WP-3.2 set_slot_stop_button, WP-2.12 seven for automation, WP-3.15 six for clip \
          envelopes, WP-3.17 two for the crossfader, WP-2.14 set_midi_overdub, WP-2.13 the \
-         two punch switches, WP-2.13 add_take_lane, and WP-3.4 three for a clip's launch \
-         settings"
+         two punch switches, WP-2.13 add_take_lane, WP-3.4 three for a clip's launch \
+         settings, and WP-3.5 two for a scene's tempo and signature"
     );
 
     for op in &ops {
@@ -588,6 +588,11 @@ fn every_command_runs_by_id() {
 
     // The scene commands: rename, move, duplicate, insert, delete.
     agent.run("scene.rename", json!({ "scene": first, "name": "Verse" }));
+    agent.run("scene.set_tempo", json!({ "scene": first, "tempo": 96.5 }));
+    agent.run(
+        "scene.set_time_signature",
+        json!({ "scene": first, "signature": { "numerator": 7, "denominator": 8 } }),
+    );
     assert_eq!(agent.editor.document().scene(first).unwrap().name, "Verse");
     agent.run("scene.move", json!({ "scene": first, "index": 4 }));
     assert_eq!(agent.editor.document().scene_position(first), Some(4));
@@ -1652,6 +1657,20 @@ fn schemas_match_what_commands_serialise() {
             Command::RenameScene {
                 scene,
                 name: "Verse".to_owned(),
+            },
+        ),
+        (
+            "scene.set_tempo",
+            Command::SetSceneTempo {
+                scene,
+                tempo: Some(Bpm::new(90.0).unwrap()),
+            },
+        ),
+        (
+            "scene.set_time_signature",
+            Command::SetSceneTimeSignature {
+                scene,
+                signature: Some(TimeSignature::new(3, 4).unwrap()),
             },
         ),
     ];

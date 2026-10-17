@@ -8,7 +8,7 @@ use crate::message::{LoopRegion, Report};
 #[cfg(doc)]
 use crate::mixer::{METER_RELEASE_DB_PER_SECOND, RMS_SECONDS};
 use crate::recording::TakeBounds;
-use crate::session::SlotStatus;
+use crate::session::{SceneOverride, SlotStatus};
 
 /// One track's meters: its peak and RMS levels per channel, as linear
 /// amplitude, measured after its mixer (pan, volume, and the Track
@@ -108,6 +108,9 @@ pub struct EngineState {
     /// entry per queued, playing, or stopping slot; a slot that stopped
     /// isn't listed, so an empty list is a Session View at rest.
     pub session: Vec<SlotStatus>,
+    /// The tempo and time signature a launched scene put in place of the
+    /// set's, until Re-Enable Automation or Back to Arrangement (WP-3.5).
+    pub scene_override: SceneOverride,
     /// The tracks a Session clip has taken over from the Arrangement, until
     /// a return (WP-3.6): the Back to Arrangement buttons light while it
     /// lists any, and a track's own button lights while it lists the track.
@@ -142,6 +145,7 @@ impl EngineState {
             cpu_load: 0.0,
             cpu_load_max: 0.0,
             session: Vec::with_capacity(slots),
+            scene_override: SceneOverride::default(),
             session_over: Vec::with_capacity(tracks),
             meters: Vec::with_capacity(tracks),
             meters_truncated: false,
@@ -195,6 +199,7 @@ impl Clone for EngineState {
             cpu_load: self.cpu_load,
             cpu_load_max: self.cpu_load_max,
             session,
+            scene_override: self.scene_override,
             session_over,
             meters,
             meters_truncated: self.meters_truncated,

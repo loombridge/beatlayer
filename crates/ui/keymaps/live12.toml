@@ -2234,7 +2234,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Cmd+Shift+I"]
 win = ["Ctrl+Shift+I"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.capture_and_insert_scene", contexts = ["session"] },
+]
 
 [[shortcut]]
 id = "S-SES-010"

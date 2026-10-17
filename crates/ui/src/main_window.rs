@@ -390,7 +390,11 @@ impl MainWindowUi {
             // under the pointer are known by the time it reads them.
             self.status_bar(ui, shell, theme, &layout, &mut events);
             self.info_view(ui, theme, shell, layout.info_view);
-            if shell.clip_view().visible() {
+            if let Some(scene) = shell.scene_view_scene() {
+                // Spec: session-view R21. A selected scene takes the detail
+                // area for the Scene View (L-SES-011).
+                crate::scene_view::show(ui, shell, theme, layout.device_view, scene, &mut events);
+            } else if shell.clip_view().visible() {
                 // Spec: piano-roll. The Clip View takes the detail area in
                 // place of the Device View.
                 self.clip_view

@@ -1933,6 +1933,18 @@ fn paths() -> BTreeMap<&'static str, Path> {
             Exception(LaterView("the Session grid and its menus (WP-3.7)")),
         ),
         (
+            "scene.set_tempo",
+            Exception(Unobserved(
+                "the scene's Tempo field, which a click focuses and Up, Down, digits, and Delete edit; its place in Live's Tab order",
+            )),
+        ),
+        (
+            "scene.set_time_signature",
+            Exception(Unobserved(
+                "the scene's Signature fields, which a click focuses and Up, Down, digits, and Delete edit; their place in Live's Tab order",
+            )),
+        ),
+        (
             "clip.create_in_slot",
             Exception(LaterView("the Session grid and its menus (WP-3.7)")),
         ),

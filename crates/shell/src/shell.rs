@@ -385,6 +385,12 @@ pub struct Shell {
     /// The Session slots' states the engine last published (WP-3.2), which
     /// the grid's launch buttons draw from.
     session_states: Vec<bl_engine::SlotStatus>,
+    /// The tempo and time signature a launched scene put in place of the
+    /// set's, as the engine last published them (WP-3.5).
+    scene_override: bl_engine::SceneOverride,
+    /// The scene launched last since the set opened, which Capture and
+    /// Insert Scene goes after.
+    last_launched: Option<bl_model::SceneId>,
     session_over: Vec<TrackId>,
     /// The meters the engine last published, one per track (WP-1.9).
     meters: Vec<bl_engine::TrackMeter>,
@@ -676,6 +682,8 @@ impl Shell {
             mixer: MixerView::new(),
             session: SessionView::new(),
             session_states: Vec::new(),
+            scene_override: bl_engine::SceneOverride::default(),
+            last_launched: None,
             session_over: Vec::new(),
             meters: Vec::new(),
             metering: false,
@@ -2898,6 +2906,7 @@ impl Shell {
         // Spec: launch-quantisation R10. The slots the engine is launching
         // or stopping, which the grid's launch buttons draw.
         self.audio.session_into(&mut self.session_states);
+        self.scene_override = self.audio.scene_override();
         // Spec: session-view R24. The tracks a Session clip has taken over,
         // which the Back to Arrangement buttons light from.
         self.audio.session_over_into(&mut self.session_over);
@@ -2942,6 +2951,55 @@ impl Shell {
     #[must_use]
     pub fn session_states(&self) -> &[bl_engine::SlotStatus] {
         &self.session_states
+    }
+
+    /// The scene the Scene View shows in the detail area (L-SES-011): the
+    /// first scene selected in the Session View, while it's in front.
+    #[must_use]
+    pub fn scene_view_scene(&self) -> Option<bl_model::SceneId> {
+        (self.main_view == MainView::Session)
+            .then(|| self.session.state().scenes.first().copied())
+            .flatten()
+            .filter(|scene| self.editor.document().scene(*scene).is_some())
+    }
+
+    /// The tempo and time signature a launched scene put in place of the
+    /// set's, as the engine last published them (WP-3.5): they hold until
+    /// Re-Enable Automation or Back to Arrangement. Nothing while no engine
+    /// runs.
+    #[must_use]
+    pub fn scene_override(&self) -> bl_engine::SceneOverride {
+        self.scene_override
+    }
+
+    /// The tempo in force at the playhead: a launched scene's, or the
+    /// set's tempo map there (WP-3.5).
+    #[must_use]
+    pub fn current_tempo(&self) -> bl_core::time::Bpm {
+        self.scene_override.tempo.map_or_else(
+            || {
+                let at = self.arrangement.transport().position;
+                self.editor.document().settings().tempo.bpm_at(at)
+            },
+            |(_, bpm)| bpm,
+        )
+    }
+
+    /// The time signature in force at the playhead: a launched scene's, or
+    /// the set's map there (WP-3.5).
+    #[must_use]
+    pub fn current_signature(&self) -> bl_core::time::TimeSignature {
+        self.scene_override.signature.map_or_else(
+            || {
+                let at = self.arrangement.transport().position;
+                self.editor
+                    .document()
+                    .settings()
+                    .time_signatures
+                    .signature_at(at)
+            },
+            |(_, signature)| signature,
+        )
     }
 
     /// The tracks a Session clip has taken over from the Arrangement
@@ -4259,6 +4317,13 @@ impl Shell {
                     value,
                 );
             }
+            if id == bl_model::registry::RE_ENABLE_AUTOMATION {
+                // Spec: session-view R23. A launched scene's tempo and
+                // signature hold until Re-Enable Automation.
+                let _ = self
+                    .audio
+                    .send_session(engine_session::SessionCommand::ClearSceneOverride);
+            }
             if id == device_ids::SET_FLOATING && args_floating {
                 // A device floated shows the windows again (R33).
                 self.plug_in_windows = true;
@@ -4302,6 +4367,11 @@ impl Shell {
                     command: id.to_owned(),
                     reason,
                 })?;
+            if let engine_session::SessionCommand::Launch { scene, .. }
+            | engine_session::SessionCommand::LaunchScene(scene) = command
+            {
+                self.last_launched = Some(scene);
+            }
             self.select_on_launch(command);
             return Ok(Value::Null);
         }
@@ -4388,6 +4458,19 @@ impl Shell {
                 .map(|scene| scene.id)
                 .collect();
             let edge_fades = self.prefs.create_fades_on_clip_edges.0;
+            // Spec: session-view R24. Capture and Insert Scene copies the
+            // clips the engine plays, whichever scene they sit in.
+            let capture = crate::session_view::Capture {
+                playing: self
+                    .session_states
+                    .iter()
+                    .filter(|slot| slot.state != bl_engine::SlotState::Queued)
+                    .map(|slot| (slot.track, slot.scene))
+                    .collect(),
+                last_launched: self.last_launched,
+                tempo: self.current_tempo(),
+                signature: self.current_signature(),
+            };
             let outcome = self
                 .session
                 .run(
@@ -4399,6 +4482,7 @@ impl Shell {
                         columns: &columns,
                         scenes: &scenes,
                         edge_fades,
+                        capture,
                         launch_quantization: self.prefs.launch.default_quantization,
                     },
                 )
@@ -4422,6 +4506,14 @@ impl Shell {
             if outcome.document_changed {
                 self.dirty = true;
                 self.document_changed();
+            }
+            if let Some(scene) = outcome.captured {
+                // Spec: session-view R24. The playing clips carry on in the
+                // copies. Without an engine nothing plays, and the scene
+                // is just inserted.
+                let _ = self
+                    .audio
+                    .send_session(engine_session::SessionCommand::MoveToScene(scene));
             }
             if id == session_ids::FOCUS {
                 // Spec: session-view. Navigate ▸ Session View shows it and

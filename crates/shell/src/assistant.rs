@@ -176,6 +176,7 @@ pub fn run_turn(
                         arguments: call.arguments,
                         result: None,
                     }),
+                    Event::Usage(_) => {}
                 }
             },
         )

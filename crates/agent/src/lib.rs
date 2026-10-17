@@ -111,8 +111,8 @@ pub mod stdio;
 mod tools;
 
 pub use lspk_agent::{
-    ClientInfo, Credential, Outcome, PROTOCOL_VERSIONS, Question, QuestionKind, STDIO_SESSION,
-    Session, base64, jsonrpc,
+    ClientInfo, Credential, Outcome, PROTOCOL_VERSIONS, Question, QuestionKind, ResultFormat,
+    STDIO_SESSION, Session, base64, jsonrpc, toon,
 };
 pub use server::{
     Agent, CaptureRequest, Captured, PreviewOutcome, Render, RenderKind, RenderOutcome,

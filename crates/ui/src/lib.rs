@@ -53,6 +53,8 @@ pub mod layout;
 pub mod main_window;
 pub mod menus;
 pub mod mixer;
+pub mod scene_fields;
+pub mod scene_view;
 pub mod session_view;
 pub mod settings_window;
 pub mod sidechain;

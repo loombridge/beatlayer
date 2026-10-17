@@ -43,6 +43,7 @@ This part loads, describes, activates and processes, saves and restores the comp
 - **R14.** The host's main-thread calls run only on the thread that made it (VST3's main thread) and are refused elsewhere. (S3)
 - **R16.** `plugin.load` and `plugin.info` are the registered commands agents run for a VST3 device: `plugin.load` is External, like any load, and `plugin.info` is a read. `plugin.info` reports the device's class ID, its file, whether it's active and for which settings, its latency, what went wrong if anything, its controller's parameter values in plain units, and that it has no editor until WP-2.10. (S1)
 - **R17.** Nothing the node does on the audio thread allocates, locks, or blocks: its buffers, parameter queues and event lists are made with it, and a change or event past their room is dropped and counted. (S1)
+- **R18.** A control change, pitch bend or channel pressure reaches a plug-in through its controller's MIDI mapping (`IMidiMapping`), as VST3 has hosts do it: the parameter the controller maps the message's controller to (bus 0, the message's channel, the controller's number, 128 for channel pressure and 129 for pitch bend) takes the message's value, normalized (the value over 127, a bend over 16,383), on the message's frame. The mapping is asked once, when the plug-in is activated. A message the controller doesn't map is ignored. A parameter's queue holds 64 points in a block; a message past that is dropped and counted. (S6)
 
 ## Tests
 
@@ -65,3 +66,4 @@ The test plug-in, Test Gain Echo, is built from source in `crates/test-vst3` and
 | R14 | `crates/plugin-host/tests/vst3.rs`, `main_thread_calls_from_another_thread_are_refused` | unit |
 | R16 | `crates/agent/tests/plugin_vst3.rs`, `a_vst3_plugin_loads_by_path_through_the_agent_api`; `crates/shell/tests/plugins.rs`, `a_vst3_plugin_loads_runs_and_processes_through_the_commands`; `crates/plugin-host/tests/vst3.rs`, `audio_runs_through_the_plugin_and_a_change_lands_on_its_frame` (the host's report) | unit |
 | R17 | every block in `crates/plugin-host/tests/vst3.rs` runs as a real-time section under the allocation trap | real-time trap |
+| R18 | `crates/plugin-host/tests/vst3.rs`, `channel_messages_set_the_parameters_the_controller_maps_them_to` | unit, real-time trap |

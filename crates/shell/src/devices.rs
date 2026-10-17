@@ -250,11 +250,13 @@ impl DeviceView {
             plugin: false,
             selected_slot: self.slot_of(device),
             loaded_slots: device.media.iter().map(Option::is_some).collect(),
-            // shortcut: every device with slots plays them from C3 up, as the
+            // shortcut: every device with slots plays them on the keys the
             // eight-slot drum sampler does; a device with another mapping
             // names its keys in its own description.
-            slot_keys: (0..description.layout.slot_count())
-                .map(|slot| bl_midi_io::note_name(bl_devices::kitbag::FIRST_KEY + slot as u8))
+            slot_keys: bl_devices::kitbag::KEYS
+                .iter()
+                .take(description.layout.slot_count() as usize)
+                .map(|&key| bl_midi_io::note_name(key))
                 .collect(),
         })
     }

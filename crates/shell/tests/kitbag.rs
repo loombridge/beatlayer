@@ -251,7 +251,7 @@ fn a_sample_with_no_slot_goes_into_the_selected_one_and_the_panel_says_so() {
     assert_eq!(panel(&shell, device).selected_slot, 0, "slot 1 to start");
     assert_eq!(panel(&shell, device).slot_keys.len(), SLOTS);
     assert_eq!(panel(&shell, device).slot_keys[0], "C3");
-    assert_eq!(panel(&shell, device).slot_keys[7], "G3");
+    assert_eq!(panel(&shell, device).slot_keys[7], "C4");
     let first = load(&mut shell, device, &a, None);
     assert_eq!(first.slot, 0);
 

@@ -599,7 +599,7 @@ fn clicking_a_slot_cell_shows_that_slots_controls() {
     let cell = Harness::node(&nodes, "Slot 4");
     assert_eq!(cell.role, Role::Button);
     assert!(
-        cell.description.contains("plays D#3") && cell.description.contains("empty"),
+        cell.description.contains("plays F3") && cell.description.contains("empty"),
         "{}",
         cell.description
     );

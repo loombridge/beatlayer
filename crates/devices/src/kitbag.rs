@@ -30,10 +30,9 @@ pub const KITBAG: &str = "beatlayer.kitbag";
 /// How many sample slots it has.
 pub const SLOTS: usize = 8;
 
-/// The key slot 1 plays: C3, with each slot the next key up (Beatlayer's
-/// reading of the manual, which only says the slots follow C3 up the
-/// octave).
-pub const FIRST_KEY: u8 = 60;
+/// The key each slot plays: the eight white keys from C3 to C4, the
+/// octave the manual puts the slots in, slot 1 on C3.
+pub const KEYS: [u8; SLOTS] = [60, 62, 64, 65, 67, 69, 71, 72];
 
 /// How far apart one slot's parameter numbers are from the next's.
 pub const STRIDE: u32 = 32;
@@ -590,12 +589,9 @@ impl Kitbag {
 
     /// Takes a note: starts, releases or cuts voices.
     fn play(&mut self, note: NoteEvent, params: &ParamBank, rate: SampleRate) {
-        let Some(slot) = note.key.checked_sub(FIRST_KEY).map(usize::from) else {
+        let Some(slot) = KEYS.iter().position(|&key| key == note.key) else {
             return;
         };
-        if slot >= SLOTS {
-            return;
-        }
         let frame = note.offset as usize;
         match note.kind {
             NoteKind::On => self.note_on(slot, note, params, frame, rate),

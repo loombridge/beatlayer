@@ -13,9 +13,7 @@ mod common;
 
 use std::sync::Arc;
 
-use bl_devices::kitbag::{
-    FIRST_KEY, LINK, SLOTS, TIME, TRANSPOSE, VOLUME, kitbag_type, param, slot,
-};
+use bl_devices::kitbag::{KEYS, LINK, SLOTS, TIME, TRANSPOSE, VOLUME, kitbag_type, param, slot};
 use bl_engine::{
     Block, Collector, DeviceType, EngineConfig, MediaMap, Node, NodeEvent, NoteBuffer, NoteEvent,
     NoteKind, Offline, ParamValue, Registry, SlotSample, TransportCommand, TransportInfo,
@@ -68,11 +66,11 @@ fn note(offset: u32, kind: NoteKind, key: u8, velocity: f32) -> NoteEvent {
 }
 
 fn on(offset: u32, slot: usize) -> NoteEvent {
-    note(offset, NoteKind::On, FIRST_KEY + slot as u8, 1.0)
+    note(offset, NoteKind::On, KEYS[slot], 1.0)
 }
 
 fn off(offset: u32, slot: usize) -> NoteEvent {
-    note(offset, NoteKind::Off, FIRST_KEY + slot as u8, 1.0)
+    note(offset, NoteKind::Off, KEYS[slot], 1.0)
 }
 
 fn set(offset: u32, param: ParamId, value: f64) -> NodeEvent {
@@ -223,7 +221,7 @@ fn the_drum_sampler_is_described_and_laid_out() {
 fn each_slots_key_plays_its_sample_at_its_pitch() {
     // Each slot's sample is one impulse, at a frame of its own.
     let impulse_at = |s: usize| 100 + 50 * s;
-    for s in 0..SLOTS {
+    for (s, key) in KEYS.into_iter().enumerate() {
         let mut node = kitbag(&[], 2048);
         for t in 0..SLOTS {
             give(
@@ -237,7 +235,7 @@ fn each_slots_key_plays_its_sample_at_its_pitch() {
             first(&out[0], |v| v.abs() > 0.5),
             impulse_at(s),
             "key {} plays slot {}'s sample from its start",
-            FIRST_KEY as usize + s,
+            key,
             s + 1
         );
         assert_eq!(
@@ -254,8 +252,9 @@ fn each_slots_key_plays_its_sample_at_its_pitch() {
         node.as_mut(),
         512,
         &[
-            note(0, NoteKind::On, FIRST_KEY - 1, 1.0),
-            note(0, NoteKind::On, FIRST_KEY + SLOTS as u8, 1.0),
+            note(0, NoteKind::On, KEYS[0] - 1, 1.0),
+            note(0, NoteKind::On, KEYS[0] + 1, 1.0),
+            note(0, NoteKind::On, KEYS[SLOTS - 1] + 1, 1.0),
             on(0, 1),
         ],
         &[],
@@ -286,7 +285,7 @@ fn transpose_by_twelve_halves_or_doubles_the_speed() {
         let out = run(
             node.as_mut(),
             4800,
-            &[note(0, NoteKind::On, FIRST_KEY, velocity)],
+            &[note(0, NoteKind::On, KEYS[0], velocity)],
             &[],
         );
         first(&out[0], |v| v.abs() > 0.5)
@@ -485,7 +484,7 @@ fn the_filters_frequency_follows_velocity_and_a_random_amount() {
         let out = run(
             node.as_mut(),
             24_000,
-            &[note(0, NoteKind::On, FIRST_KEY, velocity)],
+            &[note(0, NoteKind::On, KEYS[0], velocity)],
             &[],
         );
         amplitude_at(&out[0][8_000..16_000], 4_000.0)
@@ -577,7 +576,7 @@ fn pan_and_volume_place_and_scale_the_slot() {
         let out = run(
             node.as_mut(),
             512,
-            &[note(0, NoteKind::On, FIRST_KEY, velocity)],
+            &[note(0, NoteKind::On, KEYS[0], velocity)],
             &[],
         );
         (out[0][400], out[1][400])
@@ -807,11 +806,8 @@ fn pattern(block: usize, total: usize) -> Vec<Vec<f32>> {
         .flat_map(|s| {
             let at = 100 + 1_700 * s;
             [
-                (
-                    at,
-                    note(0, NoteKind::On, FIRST_KEY + s as u8, 0.4 + 0.07 * s as f32),
-                ),
-                (at + 900, note(0, NoteKind::Off, FIRST_KEY + s as u8, 0.5)),
+                (at, note(0, NoteKind::On, KEYS[s], 0.4 + 0.07 * s as f32)),
+                (at + 900, note(0, NoteKind::Off, KEYS[s], 0.5)),
             ]
         })
         .collect();
@@ -898,7 +894,7 @@ fn song(samples: &[(usize, bl_model::ContentHash)]) -> (Editor, Device) {
         .unwrap();
     let ticks = |quarters: i64| bl_core::time::Ticks(bl_core::time::TICKS_PER_QUARTER * quarters);
     let notes: Vec<Note> = (0..SLOTS)
-        .map(|s| Note::new(FIRST_KEY + s as u8, ticks(s as i64), ticks(1), 100))
+        .map(|s| Note::new(KEYS[s], ticks(s as i64), ticks(1), 100))
         .collect();
     let clip: bl_model::ClipId = editor.new_id();
     editor

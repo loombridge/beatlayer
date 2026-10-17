@@ -12,7 +12,7 @@ bl_rt::install_trap!();
 use std::sync::Arc;
 
 use bl_core::time::{SampleRate, Ticks};
-use bl_devices::kitbag::{KITBAG, LINK, SLOTS, TIME, param, slot};
+use bl_devices::kitbag::{KEYS, KITBAG, LINK, SLOTS, TIME, param, slot};
 use bl_engine::{Collector, Compiler, EngineConfig, MediaMap, Registry, TransportCommand, channel};
 use bl_media::SampleData;
 use bl_model::{
@@ -107,7 +107,7 @@ fn the_drum_samplers_notes_on_every_slot_pass_under_rtsan() {
     let notes: Vec<Note> = (0..3 * SLOTS as i64)
         .map(|n| {
             Note::new(
-                60 + (n % SLOTS as i64) as u8,
+                KEYS[(n % SLOTS as i64) as usize],
                 Ticks(n * sixteenth),
                 Ticks(sixteenth * 3),
                 30 + (n * 11 % 98) as u8,

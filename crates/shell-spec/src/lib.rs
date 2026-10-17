@@ -28,6 +28,8 @@
 //!   selecting and folding devices, adding them, the device clipboard,
 //!   presets, and hot-swapping; [`context_menus`] holds the device title
 //!   bar's menu.
+//! - [`multisampler`]: the multisampler's commands that need the shell
+//!   (WP-5.13): adding layers from files, Snap, Normalize, and its views.
 //! - [`tracks`]: Duplicate Track Without Clips (WP-2.19b, IMP-12).
 //! - [`session_launch`]: the global launch quantisation and its enabled
 //!   switch (WP-3.2), which the Control Bar's Quantization Menu shows.
@@ -61,6 +63,7 @@ pub mod menus;
 pub mod midi_files;
 pub mod midi_io;
 pub mod mixer_view;
+pub mod multisampler;
 pub mod notes;
 pub mod perception;
 pub mod plugins;
@@ -92,6 +95,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     midi_files::register(registry)?;
     midi_io::register(registry)?;
     devices::register(registry)?;
+    multisampler::register(registry)?;
     tracks::register(registry)?;
     session_view::register(registry)?;
     session_launch::register(registry)?;

@@ -16,7 +16,7 @@ use std::path::{Component, Path, PathBuf};
 use bl_core::id::IdAllocator;
 use bl_model::{
     ClipFolds, ContentHash, DEFAULT_SCENE_COUNT, DeviceWindows, Document, Editor, LaunchSettings,
-    SceneId, TrackId, TrackKind, registry,
+    MultisamplerViews, SceneId, TrackId, TrackKind, registry,
 };
 use bl_project::{
     Media, MediaPath, MediaRef, Project, ProjectFolder, SET_EXTENSION, SaveOptions, SetFile, is_set,
@@ -92,6 +92,19 @@ pub trait SetStore {
         DeviceWindows::new()
     }
 
+    /// Gives the store what each multisampler's views show (WP-5.13), for
+    /// the next save to write beside the document. A store that keeps none
+    /// ignores it.
+    fn set_multisampler_views(&mut self, views: MultisamplerViews) {
+        let _ = views;
+    }
+
+    /// What each of the open set's multisamplers' views showed, as it was
+    /// saved.
+    fn multisampler_views(&self) -> MultisamplerViews {
+        MultisamplerViews::new()
+    }
+
     /// Gives the store which clips' MIDI Note Editors are folded (WP-2.3),
     /// for the next save to write beside the document. A store that keeps
     /// no folds ignores it.
@@ -165,6 +178,9 @@ pub struct ProjectFiles {
     /// Files added since the set was opened (WP-1.10), by their paths on
     /// disk, for the next save's media table.
     added: BTreeMap<ContentHash, (PathBuf, u64)>,
+    /// What each multisampler's views show (WP-5.13): the open set's, then
+    /// the shell's for the next save.
+    multisamplers: MultisamplerViews,
     /// Floating devices' window frames (WP-2.5b): the open set's, then the
     /// shell's for the next save.
     windows: DeviceWindows,
@@ -199,6 +215,7 @@ impl SetStore for ProjectFiles {
         self.set = Some(set);
         self.media = project.media;
         self.windows = project.windows;
+        self.multisamplers = project.multisamplers;
         self.folds = project.folds;
         self.launch = project.launch;
         self.added.clear();
@@ -244,9 +261,18 @@ impl SetStore for ProjectFiles {
         self.set = None;
         self.media = Media::new();
         self.windows = DeviceWindows::new();
+        self.multisamplers = MultisamplerViews::new();
         self.folds = ClipFolds::new();
         self.launch = LaunchSettings::default();
         self.added.clear();
+    }
+
+    fn set_multisampler_views(&mut self, views: MultisamplerViews) {
+        self.multisamplers = views;
+    }
+
+    fn multisampler_views(&self) -> MultisamplerViews {
+        self.multisamplers.clone()
     }
 
     fn set_windows(&mut self, windows: DeviceWindows) {
@@ -317,6 +343,7 @@ impl SetStore for ProjectFiles {
         }
         let project = Project::from_editor(editor, media)
             .with_windows(&self.windows)
+            .with_multisamplers(&self.multisamplers)
             .with_folds(&self.folds)
             .with_launch(self.launch);
         let mut set = SetFile::open(path)
@@ -428,6 +455,7 @@ impl ProjectFiles {
         let warnings = self.add_media_to(&mut media, path);
         let project = Project::from_editor(editor, media)
             .with_windows(&self.windows)
+            .with_multisamplers(&self.multisamplers)
             .with_folds(&self.folds)
             .with_launch(self.launch);
         let mut set = self

@@ -299,13 +299,18 @@ impl Device {
     }
 
     /// What its title bar shows: its preset's or given name while Show
-    /// Preset Name is on, and its own name while it's off.
+    /// Preset Name is on, and its own name while it's off. A multisampler
+    /// that nothing has named shows its first layer's name while it's on.
     #[must_use]
     pub fn title(&self) -> &str {
-        if self.show_preset_name {
-            &self.name
-        } else {
-            self.own_name()
+        if !self.show_preset_name {
+            return self.own_name();
+        }
+        // A multisampler no preset or Rename has named shows its first
+        // layer's name (the multisampler spec, R29).
+        match self.layers.list.first() {
+            Some(layer) if self.own_name.is_empty() => &layer.name,
+            _ => &self.name,
         }
     }
 

@@ -649,6 +649,19 @@ impl Layers {
         LayerId(self.last_id)
     }
 
+    /// The layers a note plays (R4): those whose key, velocity and select
+    /// zones hold `key`, `velocity` (1 to 127) and `selector`.
+    #[must_use]
+    pub fn matching(&self, key: u8, velocity: u8, selector: u8) -> Vec<LayerId> {
+        self.list
+            .iter()
+            .filter(|l| {
+                l.key.contains(key) && l.velocity.contains(velocity) && l.select.contains(selector)
+            })
+            .map(|l| l.id)
+            .collect()
+    }
+
     /// Checks the list: valid layers with unique IDs no larger than
     /// `last_id`.
     ///

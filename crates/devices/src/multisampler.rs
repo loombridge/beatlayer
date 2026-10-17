@@ -114,12 +114,13 @@ pub const MAX_VOICES: usize = 32;
 
 /// How many layers one note can play at once; a note matching more plays
 /// the first of them.
-const NOTE_LAYERS: usize = 64;
+const NOTE_LAYERS: usize = 1024;
 
-/// The voices the node holds: [`MAX_VOICES`] notes' layers and room for the
-/// ones being stolen while they fade out. A note that finds none free takes
-/// the oldest fading one.
-const SLOTS: usize = 256;
+/// The voices the node holds, one per layer sounding: room for a few notes
+/// that each play many layers, and for the ones being stolen while they fade
+/// out. A note that finds none free takes the oldest fading one, and plays
+/// without the layers it finds no room for.
+const SLOTS: usize = 2048;
 
 /// How long a stolen note's voices fade out, in seconds (the sampler's
 /// 5 ms steal fade, sampler spec R8).
@@ -865,6 +866,10 @@ pub struct Multisampler {
     /// seeded from the device so a render repeats (R8).
     rng: u32,
     sinc: Sinc,
+    /// The voices sounding, by place in `voices`, so a block's frames visit
+    /// only those; and the places left free.
+    live: Vec<u16>,
+    free: Vec<u16>,
     /// Whether the transport played in the last stretch.
     was_playing: bool,
     /// The engine's rate, for the steal fade of voices a new layer list
@@ -882,6 +887,8 @@ impl Multisampler {
             counter: 0,
             rng: (seed as u32 ^ (seed >> 32) as u32).wrapping_mul(0x9E37_79B9) | 1,
             sinc: Sinc::new(),
+            live: Vec::with_capacity(SLOTS),
+            free: (0..SLOTS as u16).rev().collect(),
             was_playing: false,
             rate: config.sample_rate.as_f64(),
         }
@@ -1129,7 +1136,7 @@ impl Multisampler {
             let crossfade = (layer.crossfade_ms / 1000.0 * s.rate)
                 .min((loop_end - loop_start) / 2.0)
                 .max(0.0);
-            let Some(slot) = self.free_slot() else {
+            let Some(slot) = self.claim_slot() else {
                 continue;
             };
             let mut voice = Voice::idle();
@@ -1244,16 +1251,18 @@ impl Multisampler {
         Some(pick)
     }
 
-    /// A slot for a new voice: an idle one, else the oldest fading one.
-    fn free_slot(&self) -> Option<usize> {
-        self.voices.iter().position(|v| !v.active).or_else(|| {
-            self.voices
-                .iter()
-                .enumerate()
-                .filter(|(_, v)| v.fading)
-                .min_by_key(|(_, v)| v.note)
-                .map(|(i, _)| i)
-        })
+    /// A place for a new voice: a free one, else the oldest fading voice's.
+    fn claim_slot(&mut self) -> Option<usize> {
+        if let Some(slot) = self.free.pop() {
+            self.live.push(slot);
+            return Some(usize::from(slot));
+        }
+        self.voices
+            .iter()
+            .enumerate()
+            .filter(|(_, v)| v.fading)
+            .min_by_key(|(_, v)| v.note)
+            .map(|(slot, _)| slot)
     }
 }
 
@@ -1303,56 +1312,64 @@ impl NativeDevice for Multisampler {
             }
             let (mut l, mut r) = (0.0f32, 0.0f32);
             let sinc = &self.sinc;
-            for voice in &mut self.voices {
-                if !voice.active {
-                    continue;
-                }
-                let level = voice.env.step(&s.env, voice.scale, sync_hit);
-                if voice.env.stage == Stage::Idle {
-                    voice.active = false;
-                    continue;
-                }
-                let Some(sample) = layers
-                    .layers
-                    .get(voice.layer as usize)
-                    .and_then(|entry| entry.sample.as_deref())
-                else {
-                    voice.active = false;
-                    continue;
-                };
-                let mut value = read(sinc, sample, voice.position, s.interp);
-                // The loop's wrap: a crossfade from its end into its start
-                // (R19), constant-power unless the title bar says linear.
-                if voice.sustain == SustainMode::Loop
-                    && voice.looping()
-                    && voice.forward
-                    && voice.crossfade > 0.0
-                    && voice.position >= voice.loop_end - voice.crossfade
-                {
-                    let t = ((voice.position - (voice.loop_end - voice.crossfade))
-                        / voice.crossfade) as f32;
-                    let (out, into) = if s.power_loops {
-                        (
-                            (t * core::f32::consts::FRAC_PI_2).cos(),
-                            (t * core::f32::consts::FRAC_PI_2).sin(),
-                        )
+            let mut at = 0;
+            while at < self.live.len() {
+                let slot = self.live[at];
+                let voice = &mut self.voices[usize::from(slot)];
+                if voice.active {
+                    let level = voice.env.step(&s.env, voice.scale, sync_hit);
+                    if voice.env.stage == Stage::Idle {
+                        voice.active = false;
+                    } else if let Some(sample) = layers
+                        .layers
+                        .get(voice.layer as usize)
+                        .and_then(|entry| entry.sample.as_deref())
+                    {
+                        let mut value = read(sinc, sample, voice.position, s.interp);
+                        // The loop's wrap: a crossfade from its end into its
+                        // start (R19), constant-power unless the title bar
+                        // says linear.
+                        if voice.sustain == SustainMode::Loop
+                            && voice.looping()
+                            && voice.forward
+                            && voice.crossfade > 0.0
+                            && voice.position >= voice.loop_end - voice.crossfade
+                        {
+                            let t = ((voice.position - (voice.loop_end - voice.crossfade))
+                                / voice.crossfade) as f32;
+                            let (out, into) = if s.power_loops {
+                                (
+                                    (t * core::f32::consts::FRAC_PI_2).cos(),
+                                    (t * core::f32::consts::FRAC_PI_2).sin(),
+                                )
+                            } else {
+                                (1.0 - t, t)
+                            };
+                            let head = voice.loop_start
+                                + (voice.position - (voice.loop_end - voice.crossfade));
+                            let from_start = read(sinc, sample, head, s.interp);
+                            value = (
+                                value.0 * out + from_start.0 * into,
+                                value.1 * out + from_start.1 * into,
+                            );
+                        }
+                        let amount = voice.gain * level;
+                        let balance = ((voice.pan + pan.get(frame).copied().unwrap_or(0.0))
+                            / 50.0)
+                            .clamp(-1.0, 1.0);
+                        l += value.0 * amount * (1.0 - balance.max(0.0));
+                        r += value.1 * amount * (1.0 + balance.min(0.0));
+                        voice.advance();
                     } else {
-                        (1.0 - t, t)
-                    };
-                    let head = voice.loop_start
-                        + (voice.position - (voice.loop_end - voice.crossfade));
-                    let from_start = read(sinc, sample, head, s.interp);
-                    value = (
-                        value.0 * out + from_start.0 * into,
-                        value.1 * out + from_start.1 * into,
-                    );
+                        voice.active = false;
+                    }
                 }
-                let amount = voice.gain * level;
-                let balance = ((voice.pan + pan.get(frame).copied().unwrap_or(0.0)) / 50.0)
-                    .clamp(-1.0, 1.0);
-                l += value.0 * amount * (1.0 - balance.max(0.0));
-                r += value.1 * amount * (1.0 + balance.min(0.0));
-                voice.advance();
+                if self.voices[usize::from(slot)].active {
+                    at += 1;
+                } else {
+                    self.live.swap_remove(at);
+                    self.free.push(slot);
+                }
             }
             let volume = volume.get(frame).copied().unwrap_or(1.0);
             left[frame] = l * volume;

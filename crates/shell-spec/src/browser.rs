@@ -253,7 +253,9 @@ pub enum ItemKind {
 /// One row of the content pane.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Item {
-    /// Its path on disk.
+    /// Its path on disk; in the Plug-Ins label, the row's key instead: a
+    /// vendor folder's is `plug-ins:/` and the vendor, a plug-in's is its
+    /// file, `#`, and its identifier (the plug-in scanning spec, R11).
     pub path: String,
     /// Its name, as the Name column shows it.
     pub name: String,
@@ -267,6 +269,10 @@ pub struct Item {
     /// In search results, the folder it's in, relative to its place.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub folder: Option<String>,
+    /// For a plug-in, its format, which the row's badge shows (the plug-in
+    /// scanning spec, R11).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<bl_model::PluginFormat>,
 }
 
 /// The preview: the switch, the volume, and what plays.
@@ -567,7 +573,8 @@ fn specs() -> Vec<CommandSpec> {
         CommandSpec::new(OPEN_FOLDER, "Open Folder")
             .description(
                 "Opens or closes a folder in the browser's content pane, listing its folders \
-                 and audio files indented under it. Opening a folder closes the other open \
+                 and audio files indented under it (in the Plug-Ins label, a vendor's folder \
+                 and its plug-ins). Opening a folder closes the other open \
                  folders it isn't inside, unless `keep_others` (Cmd or Ctrl held). Right and \
                  Left do this on the selected folder. Changes nothing, but reads folders outside \
                  the project.",
@@ -578,7 +585,8 @@ fn specs() -> Vec<CommandSpec> {
             .result::<BrowserState>(),
         CommandSpec::new(SELECT, "Select in Browser")
             .description(
-                "Selects items in the browser's content pane by path, replacing the selection \
+                "Selects items in the browser's content pane by path (or, in the Plug-Ins label, \
+                 by the row's key), replacing the selection \
                  or, with `add`, adding to it, as clicking, Shift-clicking, and Up and Down do. \
                  While the Preview switch is on, selecting one audio file previews it through \
                  the audio device; selecting anything else stops the preview. Changes nothing in \
@@ -648,7 +656,11 @@ fn specs() -> Vec<CommandSpec> {
                  audio track, otherwise onto a new audio track below the last one, one after \
                  another, as one undo step. A clip placed over part of another replaces that \
                  part, so when a clip on that track ends after the insert marker it's \
-                 destructive as well as external. Reads the files, outside the project.",
+                 destructive as well as external. Reads the files, outside the project. With \
+                 one plug-in selected it loads that plug-in instead, as `plugin.load` does: \
+                 onto the selected track (a new track when none is), an instrument onto a new MIDI \
+                 track when the selected track holds audio, or in place of the device being \
+                 hot-swapped.",
             )
             .permission(Permission::External)
             .context(Browser)

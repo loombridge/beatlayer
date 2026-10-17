@@ -43,6 +43,7 @@ use self::index::{Index, Scope, Snapshot};
 use self::listing::{Entry, file_kind};
 use self::preview::{Loader, MediaSamples};
 use crate::audio::AudioHost;
+use bl_plugin_host::scan::ScannedPlugin;
 
 /// Wakes the app's event loop when background work (indexing, decoding a
 /// preview) has news. The host sets what it does; until then it does
@@ -206,7 +207,7 @@ pub struct BrowserView {
     waker: Waker,
     /// The plug-ins the scanner found (WP-2.9), already filtered by the
     /// hidden and format preferences; the Plug-Ins label lists them.
-    plugins: Vec<bl_plugin_host::scan::ScannedPlugin>,
+    plugins: Vec<ScannedPlugin>,
 }
 
 fn parse<T: DeserializeOwned>(args: Value) -> Result<T, BrowserError> {
@@ -223,6 +224,30 @@ fn absolute(path: &str) -> Result<PathBuf, BrowserError> {
         return Err(BrowserError::InvalidArgs("the path is empty".to_owned()));
     }
     std::path::absolute(path).map_err(|e| BrowserError::InvalidArgs(format!("{path}: {e}")))
+}
+
+/// The start of a Plug-Ins vendor folder's key.
+pub const PLUGIN_FOLDER: &str = "plug-ins:/";
+
+/// A plug-in's key in the Plug-Ins label: its file, `#`, and its
+/// identifier, so two plug-ins in one file are told apart.
+#[must_use]
+pub fn plugin_key(plugin: &ScannedPlugin) -> String {
+    format!("{}#{}", plugin.path.to_string_lossy(), plugin.plugin_id)
+}
+
+/// A vendor folder's key in the Plug-Ins label.
+fn vendor_key(vendor: &str) -> String {
+    format!("{PLUGIN_FOLDER}{vendor}")
+}
+
+/// The vendor a plug-in is filed under, if it names one.
+fn vendor_of(plugin: &ScannedPlugin) -> Option<&str> {
+    plugin
+        .vendor
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
 }
 
 impl BrowserView {
@@ -270,7 +295,7 @@ impl BrowserView {
     /// Sets the plug-ins the Plug-Ins label lists (WP-2.9). The shell
     /// passes what the scanner found, already filtered by the hidden and
     /// format preferences.
-    pub fn set_plugins(&mut self, plugins: Vec<bl_plugin_host::scan::ScannedPlugin>) {
+    pub fn set_plugins(&mut self, plugins: Vec<ScannedPlugin>) {
         self.plugins = plugins;
         if self.label == Label::PlugIns {
             self.rebuild();
@@ -492,6 +517,7 @@ impl BrowserView {
                 depth,
                 open,
                 folder: None,
+                format: None,
             });
             if open {
                 self.list_into(&entry.path, depth.saturating_add(1), out);
@@ -504,31 +530,7 @@ impl BrowserView {
         self.note = None;
         let label = self.label.clone();
         if label == Label::PlugIns {
-            // Spec: plugin-scanning R7. The Plug-Ins label lists what the
-            // scanner found, hidden plug-ins already filtered out.
-            let query = self.search.trim().to_ascii_lowercase();
-            let items: Vec<Item> = self
-                .plugins
-                .iter()
-                .filter(|p| query.is_empty() || p.name.to_ascii_lowercase().contains(&query))
-                .map(|p| Item {
-                    path: format!("{}#{}", p.path.to_string_lossy(), p.plugin_id),
-                    name: p.name.clone(),
-                    kind: ItemKind::Plugin,
-                    depth: 0,
-                    open: false,
-                    folder: None,
-                })
-                .collect();
-            if items.is_empty() {
-                self.note = Some(if query.is_empty() {
-                    "No plug-ins found yet. Rescan to look for the plug-ins on this machine."
-                        .to_owned()
-                } else {
-                    format!("Nothing matches \u{201c}{}\u{201d}.", self.search.trim())
-                });
-            }
-            self.rows = Rows::Items(items);
+            self.rows = Rows::Items(self.plugin_rows());
             self.cursor = self.selected.last().and_then(|path| self.position_of(path));
             return;
         }
@@ -585,6 +587,7 @@ impl BrowserView {
                             depth: 0,
                             open,
                             folder: None,
+                            format: None,
                         });
                         if open {
                             self.list_into(&path, 1, &mut items);
@@ -646,6 +649,102 @@ impl BrowserView {
         self.cursor = self.selected.last().and_then(|path| self.position_of(path));
     }
 
+    /// The Plug-Ins label's rows (spec: plugin-scanning R7 and R11): a
+    /// folder per vendor, in name order, each holding its plug-ins, one row
+    /// per format, as Live 12 lays them out; plug-ins that name no vendor
+    /// follow the folders. A search lists the plug-ins whose names match,
+    /// each naming its vendor.
+    fn plugin_rows(&mut self) -> Vec<Item> {
+        let query = self.search.trim().to_lowercase();
+        let row = |p: &ScannedPlugin, depth: u16, folder: Option<String>| Item {
+            path: plugin_key(p),
+            name: p.name.clone(),
+            kind: ItemKind::Plugin,
+            depth,
+            open: false,
+            folder,
+            format: Some(p.format),
+        };
+        let mut items = Vec::new();
+        if !query.is_empty() {
+            items.extend(
+                self.plugins
+                    .iter()
+                    .filter(|p| p.name.to_lowercase().contains(&query))
+                    .map(|p| row(p, 0, p.vendor.clone())),
+            );
+            if items.is_empty() {
+                self.note = Some(format!(
+                    "Nothing matches \u{201c}{}\u{201d}.",
+                    self.search.trim()
+                ));
+            }
+            return items;
+        }
+        let mut vendors: Vec<&str> = self.plugins.iter().filter_map(|p| vendor_of(p)).collect();
+        vendors.sort_by_key(|v| v.to_lowercase());
+        vendors.dedup();
+        for vendor in vendors {
+            let key = vendor_key(vendor);
+            let open = self.open.contains(Path::new(&key));
+            items.push(Item {
+                path: key,
+                name: vendor.to_owned(),
+                kind: ItemKind::Folder,
+                depth: 0,
+                open,
+                folder: None,
+                format: None,
+            });
+            if open {
+                items.extend(
+                    self.plugins
+                        .iter()
+                        .filter(|p| vendor_of(p) == Some(vendor))
+                        .map(|p| row(p, 1, None)),
+                );
+            }
+        }
+        items.extend(
+            self.plugins
+                .iter()
+                .filter(|p| vendor_of(p).is_none())
+                .map(|p| row(p, 0, None)),
+        );
+        if items.is_empty() {
+            self.note = Some(
+                "No plug-ins found. Rescan, or switch on a plug-in format, in Settings \u{25b8} \
+                 Plug-Ins."
+                    .to_owned(),
+            );
+        }
+        items
+    }
+
+    /// The plug-in a Plug-Ins row's key names, if the label lists it.
+    #[must_use]
+    pub fn plugin(&self, key: &Path) -> Option<&ScannedPlugin> {
+        let key = key.to_string_lossy();
+        self.plugins.iter().find(|p| plugin_key(p) == key)
+    }
+
+    /// The selected plug-in, when the selection is one plug-in: what Enter
+    /// or a double-click loads.
+    #[must_use]
+    pub fn selected_plugin(&self) -> Option<&ScannedPlugin> {
+        match self.selected.as_slice() {
+            [one] => self.plugin(one),
+            _ => None,
+        }
+    }
+
+    /// Whether `key` names a Plug-Ins row: a vendor folder or a plug-in.
+    fn is_plugin_row(&self, key: &str) -> bool {
+        key.strip_prefix(PLUGIN_FOLDER)
+            .is_some_and(|vendor| self.plugins.iter().any(|p| vendor_of(p) == Some(vendor)))
+            || self.plugin(Path::new(key)).is_some()
+    }
+
     /// How many rows the content pane has.
     #[must_use]
     pub fn row_count(&self) -> usize {
@@ -670,6 +769,7 @@ impl BrowserView {
                     depth: 0,
                     open: false,
                     folder: Some(snapshot.folder_label(hit)),
+                    format: None,
                 })
             }
         }
@@ -905,7 +1005,9 @@ impl BrowserView {
     #[must_use]
     pub fn can_run(&self, id: &str, args: &Value) -> bool {
         match id {
-            ids::LOAD_SELECTED => !self.selected_audio().is_empty(),
+            ids::LOAD_SELECTED => {
+                !self.selected_audio().is_empty() || self.selected_plugin().is_some()
+            }
             ids::PREVIEW => args.get("path").is_some() || self.selected_audio().len() == 1,
             ids::REMOVE_FOLDER => args
                 .get("path")
@@ -989,13 +1091,18 @@ impl BrowserView {
                     open,
                     keep_others,
                 } = parse(args)?;
-                let path = absolute(&path)?;
-                if !path.is_dir() {
-                    return Err(BrowserError::InvalidArgs(format!(
-                        "{} isn't a folder",
-                        path.to_string_lossy()
-                    )));
-                }
+                let path = if path.starts_with(PLUGIN_FOLDER) && self.is_plugin_row(&path) {
+                    PathBuf::from(path)
+                } else {
+                    let path = absolute(&path)?;
+                    if !path.is_dir() {
+                        return Err(BrowserError::InvalidArgs(format!(
+                            "{} isn't a folder",
+                            path.to_string_lossy()
+                        )));
+                    }
+                    path
+                };
                 let opening = open.unwrap_or(!self.open.contains(&path));
                 if opening {
                     if !keep_others {
@@ -1012,11 +1119,22 @@ impl BrowserView {
             }
             ids::SELECT => {
                 let SelectArgs { paths, add } = parse(args)?;
+                // Spec: plugin-scanning R11. A Plug-Ins row is selected by
+                // its key, which names no file of its own.
                 let paths = paths
                     .iter()
-                    .map(|p| absolute(p))
+                    .map(|p| {
+                        if self.is_plugin_row(p) {
+                            Ok(PathBuf::from(p))
+                        } else {
+                            absolute(p)
+                        }
+                    })
                     .collect::<Result<Vec<_>, _>>()?;
-                if let Some(missing) = paths.iter().find(|p| !p.exists()) {
+                if let Some(missing) = paths
+                    .iter()
+                    .find(|p| !p.exists() && !self.is_plugin_row(&p.to_string_lossy()))
+                {
                     return Err(BrowserError::InvalidArgs(format!(
                         "{} doesn't exist",
                         missing.to_string_lossy()

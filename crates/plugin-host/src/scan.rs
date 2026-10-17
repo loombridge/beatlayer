@@ -352,7 +352,9 @@ impl Scanner {
 
     fn run(&self, format: PluginFormat, paths: &[PathBuf], fresh: bool) -> ScanReport {
         let mut report = ScanReport::default();
-        let mut guard = self.lock();
+        // The store is locked only to read or record one file at a time, never
+        // while a child process runs, so the browser and `plugin.list` read
+        // it while a scan runs in the background (WP-2.9b).
         for path in plugin_files(format, paths) {
             let key = path.to_string_lossy().into_owned();
             let metadata = match std::fs::metadata(&path) {
@@ -363,26 +365,30 @@ impl Scanner {
                         path: path.clone(),
                         reason: format!("couldn't read the file: {e}"),
                     };
-                    guard.blocked.insert(key, blocked.clone());
+                    self.lock().blocked.insert(key, blocked.clone());
                     report.blocked.push(blocked);
                     continue;
                 }
             };
             let size = metadata.len();
             let modified = nanos(metadata.modified().ok());
-            if !fresh
-                && let Some(cached) = guard.cache.get(&key)
-                && cached.size == size
-                && cached.modified == modified
-            {
-                report.cached += 1;
-                report.plugins.extend(cached.plugins.iter().cloned());
-                continue;
+            if !fresh {
+                let guard = self.lock();
+                if let Some(cached) = guard.cache.get(&key)
+                    && cached.size == size
+                    && cached.modified == modified
+                {
+                    report.cached += 1;
+                    report.plugins.extend(cached.plugins.iter().cloned());
+                    continue;
+                }
             }
+            report.scanned += 1;
+            let described = self.describe(format, &path);
+            let mut guard = self.lock();
             guard.cache.remove(&key);
             guard.blocked.remove(&key);
-            report.scanned += 1;
-            match self.describe(format, &path) {
+            match described {
                 Ok(plugins) => {
                     guard.cache.insert(
                         key,
@@ -408,6 +414,13 @@ impl Scanner {
         report
             .plugins
             .sort_by(|a, b| a.name.cmp(&b.name).then(a.path.cmp(&b.path)));
+        let mut guard = self.lock();
+        // A plug-in removed from a folder this scan searched is forgotten,
+        // so it leaves the browser.
+        guard.cache.retain(|key, _| {
+            let file = Path::new(key);
+            file.exists() || !paths.iter().any(|root| file.starts_with(root))
+        });
         self.persist(&guard);
         report
     }

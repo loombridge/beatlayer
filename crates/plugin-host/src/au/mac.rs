@@ -1206,7 +1206,9 @@ fn role(component_type: u32) -> Option<DeviceRole> {
 /// Where a unit goes in a chain, from its component type's four characters.
 fn role_text(component_type: &str) -> Option<DeviceRole> {
     match component_type {
-        "aufx" => Some(DeviceRole::AudioEffect),
+        // A music effect (`aumf`) is an effect that also takes notes, such
+        // as Serum 2 FX; it sits in the chain as an audio effect.
+        "aufx" | "aumf" => Some(DeviceRole::AudioEffect),
         "aumu" | "augn" => Some(DeviceRole::Instrument),
         "aumi" => Some(DeviceRole::MidiEffect),
         _ => None,

@@ -10,6 +10,7 @@
 //! which Live doesn't have. It follows Plug-Ins, the page whose plug-ins
 //! are the other way another program drives the app.
 
+use bl_model::{LaunchMode, LaunchQuantization};
 use bl_shell::assistant::AssistantProvider;
 use bl_shell::audio::{
     AudioDevices, AudioStatus, COMPENSATION_LIMIT_MS, DeviceListing, TONE_MAX_DBFS, TONE_MAX_HZ,
@@ -621,23 +622,15 @@ const WARP: [Pending; 3] = [
     chooser_row("Default Warp Mode", "M4"),
 ];
 
-/// The Launch section's rows before Start Recording on Scene Launch, which
-/// is built (WP-3.11); the others come with the Session View.
-const LAUNCH: [Pending; 4] = [
-    chooser_row("Default Launch Mode", "M3").showing("Trigger"),
-    chooser_row("Default Launch Quantization", "M3").showing("Global"),
-    switch_row("Select on Launch", "M3").showing("On"),
-    switch_row("Select Next Scene on Launch", "M3").showing("On"),
-];
-
 /// The Tap Tempo section.
 const TAP_TEMPO: [Pending; 1] = [switch_row("Start Transport With Tap Tempo", "M2")];
 
 /// Record, Warp & Launch (L-SET-018, as observed in Live 12.4.6): the
 /// Record, Warp/Fades, Launch, and Tap Tempo sections in Live's order, with
 /// Create Fades on Clip Edges, the fourth row of Warp/Fades (WP-1.4b), and
-/// Warp recorded audio, a Beatlayer addition after it (IMP-02), the only
-/// settings built. The other rows keep their places, pending.
+/// Warp recorded audio, a Beatlayer addition after it (IMP-02), and the
+/// Launch section's rows (WP-3.4), the only settings built. The other rows
+/// keep their places, pending.
 fn record_warp_launch_page(
     ui: &mut Ui,
     shell: &Shell,
@@ -687,30 +680,98 @@ fn record_warp_launch_page(
          clips play unwarped, whatever it says.",
     );
     rows.heading(ui, "Launch");
-    for row in &LAUNCH {
-        rows.pending(ui, row);
-    }
-    let rect = rows.row(
-        ui,
-        "Start Recording on Scene Launch",
-        SettingsLayout::SWITCH,
-    );
-    if let Some(on) = switch(
-        ui,
-        theme,
-        "start-recording-on-scene-launch",
-        "Start Recording on Scene Launch",
-        rect,
-        shell.start_recording_on_scene_launch(),
-    ) {
-        events.push(UiEvent::Invoke(Invocation::new(
-            ids::SETTINGS_SET_START_RECORDING_ON_SCENE_LAUNCH,
-            json!({ "on": on }),
-        )));
-    }
+    launch_rows(ui, shell, theme, rows, events);
     rows.heading(ui, "Tap Tempo");
     for row in &TAP_TEMPO {
         rows.pending(ui, row);
+    }
+}
+
+/// The Launch section's rows (WP-3.4), in Live's order.
+fn launch_rows(
+    ui: &mut Ui,
+    shell: &Shell,
+    theme: &Theme,
+    rows: &mut Rows<'_>,
+    events: &mut Vec<UiEvent>,
+) {
+    let prefs = shell.launch_prefs();
+    let modes: Vec<Choice<LaunchMode>> = LaunchMode::ALL
+        .into_iter()
+        .map(|value| Choice {
+            label: value.label().to_owned(),
+            value,
+        })
+        .collect();
+    let rect = rows.row(ui, "Default Launch Mode", SettingsLayout::CHOOSER);
+    if let Some(mode) = chooser(
+        ui,
+        theme,
+        "default-launch-mode",
+        "Default Launch Mode",
+        rect,
+        &modes,
+        Some(&prefs.default_mode),
+        true,
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            ids::SETTINGS_SET_DEFAULT_LAUNCH_MODE,
+            json!({ "mode": mode }),
+        )));
+    }
+    let steps: Vec<Choice<Option<LaunchQuantization>>> = std::iter::once(Choice {
+        label: "Global".to_owned(),
+        value: None,
+    })
+    .chain(LaunchQuantization::ALL.into_iter().map(|step| Choice {
+        label: step.label().to_owned(),
+        value: Some(step),
+    }))
+    .collect();
+    let rect = rows.row(ui, "Default Launch Quantization", SettingsLayout::CHOOSER);
+    if let Some(quantization) = chooser(
+        ui,
+        theme,
+        "default-launch-quantization",
+        "Default Launch Quantization",
+        rect,
+        &steps,
+        Some(&prefs.default_quantization),
+        true,
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            ids::SETTINGS_SET_DEFAULT_LAUNCH_QUANTIZATION,
+            json!({ "quantization": quantization }),
+        )));
+    }
+    let switches = [
+        (
+            "Select on Launch",
+            "select-on-launch",
+            prefs.select_on_launch,
+            ids::SETTINGS_SET_SELECT_ON_LAUNCH,
+        ),
+        (
+            "Select Next Scene on Launch",
+            "select-next-scene-on-launch",
+            prefs.select_next_scene_on_launch,
+            ids::SETTINGS_SET_SELECT_NEXT_SCENE_ON_LAUNCH,
+        ),
+        (
+            "Start Recording on Scene Launch",
+            "start-recording-on-scene-launch",
+            prefs.start_recording_on_scene_launch,
+            ids::SETTINGS_SET_START_RECORDING_ON_SCENE_LAUNCH,
+        ),
+    ];
+    for (label, id_salt, value, command) in switches {
+        let rect = rows.row(ui, label, SettingsLayout::SWITCH);
+        if let Some(on) = switch(ui, theme, id_salt, label, rect, value) {
+            events.push(UiEvent::Invoke(Invocation::new(
+                command,
+                json!({ "on": on }),
+            )));
+        }
     }
 }
 

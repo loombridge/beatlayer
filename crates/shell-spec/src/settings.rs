@@ -6,6 +6,8 @@ use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use bl_model::{LaunchMode, LaunchQuantization};
+
 use crate::agent::AllowedAgent;
 use crate::assistant::AssistantState;
 use crate::audio::{AudioSettings, ToneSettings};
@@ -230,6 +232,38 @@ pub struct AudioPageSettings {
     pub tone: ToneSettings,
 }
 
+/// The Launch section of Record, Warp & Launch (L-SET-018), as observed in
+/// Live 12.4.6: what a new clip starts with and what launching does. They
+/// are preferences, kept between starts and not saved with a set.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(default)]
+pub struct LaunchPrefs {
+    /// Default Launch Mode, as `settings.set_default_launch_mode` sets it.
+    pub default_mode: LaunchMode,
+    /// Default Launch Quantization, as
+    /// `settings.set_default_launch_quantization` sets it: `null` is
+    /// "Global".
+    pub default_quantization: Option<LaunchQuantization>,
+    /// Select on Launch: a launched clip selects itself.
+    pub select_on_launch: bool,
+    /// Select Next Scene on Launch: a launched scene selects the next one.
+    pub select_next_scene_on_launch: bool,
+    /// Start Recording on Scene Launch.
+    pub start_recording_on_scene_launch: bool,
+}
+
+impl Default for LaunchPrefs {
+    fn default() -> Self {
+        Self {
+            default_mode: LaunchMode::Trigger,
+            default_quantization: None,
+            select_on_launch: true,
+            select_next_scene_on_launch: true,
+            start_recording_on_scene_launch: false,
+        }
+    }
+}
+
 /// The Agents page's settings. The server's token and each allowed agent's
 /// are never reported, only whether the server has one.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -267,9 +301,11 @@ pub struct SettingsState {
     /// Record, Warp & Launch: Warp Recorded Audio, as
     /// `settings.set_warp_recorded_audio` sets it.
     pub warp_recorded_audio: bool,
-    /// Record, Warp & Launch: Start Recording on Scene Launch, as
-    /// `settings.set_start_recording_on_scene_launch` sets it.
-    pub start_recording_on_scene_launch: bool,
+    /// Record, Warp & Launch: the Launch section, as the
+    /// `settings.set_default_launch_*`, `settings.set_select_on_launch`,
+    /// `settings.set_select_next_scene_on_launch` and
+    /// `settings.set_start_recording_on_scene_launch` commands set it.
+    pub launch: LaunchPrefs,
     /// Plug-Ins: Auto-Hide Plug-In Windows, as
     /// `settings.set_auto_hide_plug_in_windows` sets it.
     pub auto_hide_plug_in_windows: bool,
@@ -297,7 +333,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  Input (zoom, Outline View in Focus, the Tab key settings), the audio device \
                  settings with Driver Error Compensation and the test tone (`audio.configure`, \
                  `audio.set_test_tone`), the MIDI ports and computer keyboard (`midi.set_port`), \
-                 Create Fades on Clip Edges, Warp Recorded Audio, Auto-Hide Plug-In Windows, the plug-ins the Browser hides and prefers \
+                 Create Fades on Clip Edges, Warp Recorded Audio, the Launch section, Auto-Hide Plug-In Windows, the plug-ins the Browser hides and prefers \
                  (`plugin.settings`), the agent server and the \
                  assistant. The server's and the agents' tokens and the assistant's API key are \
                  never reported, only whether one is stored. Preferences aren't saved with the \

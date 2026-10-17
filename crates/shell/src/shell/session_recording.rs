@@ -209,7 +209,7 @@ impl Shell {
     /// also records into the empty slots of armed tracks in it. The caller
     /// has sent the launch, so both start on the same grid line.
     pub(super) fn record_on_scene_launch(&mut self, scene: SceneId) {
-        if !self.prefs.start_recording_on_scene_launch || self.recording.is_some() {
+        if !self.prefs.launch.start_recording_on_scene_launch || self.recording.is_some() {
             return;
         }
         let doc = self.editor.document();

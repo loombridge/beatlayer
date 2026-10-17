@@ -1056,6 +1056,7 @@ fn paths() -> BTreeMap<&'static str, Path> {
     // keys (shortcuts.md, `note-editor` and `note-selection`) come with a
     // later package.
     let note_editor = LaterView("the note editor's keys (the note-editor shortcuts, milestone M2)");
+    let clip_launch = LaterView("the Clip View's Launch panel (WP-3.9)");
     let clip_envelopes = LaterView(
         "the Clip View's Envelope editor: the Envelopes tab's breakpoint edits and its Linked \
          switch (the clip envelopes package, milestone M3)",
@@ -1296,6 +1297,42 @@ fn paths() -> BTreeMap<&'static str, Path> {
             ),
         ),
         (
+            "settings.set_default_launch_mode",
+            settings(
+                "record-warp-launch",
+                nothing,
+                "Default Launch Mode",
+                Key::ArrowDown,
+            ),
+        ),
+        (
+            "settings.set_default_launch_quantization",
+            settings(
+                "record-warp-launch",
+                nothing,
+                "Default Launch Quantization",
+                Key::ArrowDown,
+            ),
+        ),
+        (
+            "settings.set_select_on_launch",
+            settings(
+                "record-warp-launch",
+                nothing,
+                "Select on Launch",
+                Key::Enter,
+            ),
+        ),
+        (
+            "settings.set_select_next_scene_on_launch",
+            settings(
+                "record-warp-launch",
+                nothing,
+                "Select Next Scene on Launch",
+                Key::Enter,
+            ),
+        ),
+        (
             "settings.set_start_recording_on_scene_launch",
             settings(
                 "record-warp-launch",
@@ -1465,6 +1502,12 @@ fn paths() -> BTreeMap<&'static str, Path> {
                 "the Session View's Stop All Clips button (WP-3.8)",
             )),
         ),
+        (
+            "session.back_to_arrangement_track",
+            Exception(LaterView(
+                "the Arrangement's per-track Back to Arrangement buttons (WP-3.8)",
+            )),
+        ),
         // Session recording (WP-3.11): Session Record is on a shortcut and the
         // Playback menu; the slots' record buttons arrive with the launching
         // UI.
@@ -1542,6 +1585,9 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("clip.delete_envelope_breakpoint", Exception(clip_envelopes)),
         ("clip.delete_envelope", Exception(clip_envelopes)),
         ("clip.set_envelope_linked", Exception(clip_envelopes)),
+        ("clip.set_legato", Exception(clip_launch)),
+        ("clip.set_launch_quantization", Exception(clip_launch)),
+        ("clip.set_velocity_amount", Exception(clip_launch)),
         ("clip_view.select_notes", Exception(note_editor)),
         ("note.add", Exception(note_editor)),
         ("note.delete", Exception(note_editor)),

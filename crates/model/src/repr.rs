@@ -693,6 +693,70 @@ mod tests {
         assert!(error.contains("audio or MIDI"), "{error}");
     }
 
+    // Spec: launch-quantisation R14
+    #[test]
+    fn a_clips_launch_settings_save_and_a_clip_saved_without_them_has_the_defaults() {
+        let mut editor = Editor::new();
+        let track = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id: track,
+                kind: TrackKind::Midi,
+                name: "Keys".to_owned(),
+                parent: None,
+                index: 0,
+            })
+            .unwrap();
+        let scene = editor.document().scenes().next().unwrap().id;
+        let clip: ClipId = editor.new_id();
+        editor
+            .apply(Command::CreateSlotClip {
+                track,
+                scene,
+                clip: Clip::new(
+                    clip,
+                    Ticks::ZERO,
+                    Ticks::WHOLE,
+                    ClipData::Midi(MidiData::default()),
+                ),
+            })
+            .unwrap();
+        let plain = serde_json::to_value(editor.document()).unwrap();
+        assert!(
+            plain["tracks"][0]["slots"][0]["clip"]
+                .get("launch")
+                .is_none(),
+            "the defaults aren't written"
+        );
+
+        editor
+            .apply(Command::SetClipLegato { clip, legato: true })
+            .unwrap();
+        editor
+            .apply(Command::SetClipLaunchQuantization {
+                clip,
+                quantization: Some(crate::LaunchQuantization::Eighth),
+            })
+            .unwrap();
+        editor
+            .apply(Command::SetClipVelocityAmount { clip, amount: 0.75 })
+            .unwrap();
+        let doc = editor.document().clone();
+        let loaded = load(serde_json::to_value(&doc).unwrap()).unwrap();
+        assert_eq!(loaded, doc);
+        assert_eq!(
+            loaded.slot(track, scene).unwrap().launch.velocity_amount,
+            0.75
+        );
+
+        // The set as it was saved without them opens with the defaults.
+        let older = load(plain).unwrap();
+        assert_eq!(
+            older.slot(track, scene).unwrap().launch,
+            crate::ClipLaunch::default()
+        );
+    }
+
     // Spec: session-view R14
     #[test]
     fn a_set_saved_before_scenes_and_slots_loads_with_the_default() {

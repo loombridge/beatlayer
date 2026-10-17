@@ -1,0 +1,71 @@
+# Transport: play, stop, continue, the insert marker, and the Arrangement loop
+
+- **Status:** implemented (every rule has a passing test)
+- **Work packages:** WP-1.5
+- **Parity-matrix row:** Views and workflow: Arrangement View; Control Bar
+- **Checked against:** the Live 12 reference manual, read 10 October 2026, and the UI parity reference's observations of Live 12.4.3 (10 October 2026)
+
+## The behaviour
+
+The transport plays the Arrangement. Play starts playback from the insert marker, the flashing line a click in the Arrangement leaves; Stop stops it, and a second Stop returns to the start of the arrangement, 1.1.1; Continue Playback resumes where playback stopped rather than at the insert marker. The Arrangement Position fields in the Control Bar, the Home key, and Return Play Position to 1.1.1 move the insert marker. With the Arrangement Loop switch on, playback that reaches the end of the loop brace jumps back to its start, again and again, until the switch goes off or playback stops. The brace's start and length are musical positions (the Control Bar's Loop Start and Loop Length fields), so they follow the tempo map.
+
+Beatlayer keeps three things in the engine: whether the song plays, the song position (the playhead: the next frame to play, which stays where playback stopped so Continue can resume there), and the insert marker. The loop brace and its switch are part of the set. The engine applies each transport action on an exact frame, splits its audio blocks where the transport starts, stops, jumps, or loops, and publishes the playhead for the UI after every block.
+
+This spec covers the Arrangement's transport. It leaves to other specs and packages: time selections and what Play does with one (S-TRANS-003, S-TRANS-004, and Loop Selection, S-ARR-011: WP-1.8b), dragging and nudging the brace (S-LOOP-007 to S-LOOP-010, I-DRAG-019: WP-1.8a), the scrub area, whose jumps are quantised by the global launch quantisation (WP-1.8a), Follow (WP-1.8a), locators and Set Song Start Time Here (Phase 6), punch in and out and the metronome (Phase 2), and the Session View's launch quantisation, which decides when clips and scenes start (Phase 3). The transport here starts, stops, and jumps on the frame it's asked for, unquantised, as the Arrangement's controls do.
+
+## Sources
+
+| ID | Kind | Source | What it shows |
+|---|---|---|---|
+| S1 | Manual | Live 12 reference manual, chapter 6 "Arrangement View", section 6.3 "Transport and Playback" | Play and Stop in the Control Bar, and the space bar, start and stop Arrangement playback. Playback starts from the insert marker, which a click in a track moves; its default is the start of the arrangement. Double-clicking Stop, or Home (Fn and Left on a Mac), returns the insert marker to the start. Shift and the space bar resume playback from where it last stopped instead of from the insert marker. The Arrangement Position fields show the play position, and editing them moves the insert marker. |
+| S2 | Manual | Live 11 reference manual, chapter 6, section 6.2 "Transport" | Double-clicking Stop, Home, or Fn and Left returns the play position to 1.1.1. |
+| S3 | Manual | Live 12 reference manual, chapter 6, section 6.6 "The Arrangement Loop" | The Control Bar's Arrangement Loop switch makes Live repeat a section of the Arrangement; the Loop Start and Loop Length fields set where the brace starts and how long it is; Loop Selection (Cmd-L, Ctrl-L) sets the brace to the selection and switches the loop on; the brace's ends and bar can be dragged, and arrow keys nudge and resize it. |
+| S4 | Manual | Live 12 reference manual, chapter 6, section 6.9 "Selecting Clips and Time" | Playback starts at the insert marker, or at the start of a time selection. |
+| S5 | Manual | Live 12 reference manual, chapter 42, sections 42.16 (Arrangement View) and 42.20 (Transport), as recorded in [shortcuts.toml](../ui-parity/shortcuts.toml) | S-TRANS-001 (Space: play from the start marker, or stop), S-TRANS-002 (Shift-Space: continue), S-TRANS-005 (Home, Fn-Left: insert marker to the start), S-ARR-032 (Option-Space, Ctrl-Space: play from the insert marker), S-ARR-033 (Cmd-Shift-Space, Ctrl-Shift-Space: insert marker to the play position). |
+| S6 | Observation | Live 12.4.3 on macOS, 10 October 2026, recorded in [menus.md](../ui-parity/menus.md) (WP-0.13) | The Playback menu: Play, which toggles with Stop (M-PLAY-001); Continue Playback (M-PLAY-002); Play From Insert Marker (M-PLAY-003); Return Play Position to 1.1.1, with no key shown (M-PLAY-004); Move Insert Marker To Playhead (M-PLAY-005). |
+| S7 | Observation | Live 12.4.3 on macOS, 10 October 2026, recorded in [layout.md](../ui-parity/layout.md) (WP-0.13) | The Arrangement Position fields, where typing 3.3.1 moves the insert marker exactly there (L-CTRL-013); the Play and Stop buttons (L-CTRL-014); the Loop Start fields, the Arrangement Loop switch, and the Loop Length fields (L-CTRL-016 to L-CTRL-018). |
+| S8 | Spec | [musical-time.md](musical-time.md), "What Live does", items 2 and 8 | The arrangement starts at 1.1.1, tick 0. |
+
+## Rules
+
+- **R1.** Play starts playback from the insert marker. A new set's insert marker is at 1.1.1. (S1, S6)
+- **R2.** A start is sample-exact: the first frame played is the frame the insert marker falls on through the tempo map (the nearest frame), and a start asked for on a frame of the engine clock happens on that frame, whatever the audio block size. (S1; WP-1.5's acceptance)
+- **R3.** Stop, while playing, stops playback. The insert marker doesn't move, and the play position stays where playback stopped. (S1)
+- **R4.** Stop, while stopped, returns the insert marker and the play position to 1.1.1. Live's double-click on Stop is a Stop that stops, then a Stop while stopped. (S1, S2)
+- **R5.** Play/Stop (the space bar, and the Playback menu's Play item, which reads Stop while playing) stops while playing, as R3, and plays from the insert marker while stopped, as R1. It never returns to 1.1.1. (S1, S5, S6)
+- **R6.** Continue Playback (Shift-Space) plays on from where playback last stopped, not from the insert marker. While playing, it does nothing. (S1, S5, S6)
+- **R7.** Setting the play position (the Arrangement Position fields) moves the insert marker. While playing, playback jumps there at once. While stopped, nothing plays, and Continue still resumes where playback stopped. (S1, S7)
+- **R8.** Return Play Position to 1.1.1 and the Home key (Fn-Left on a Mac) set the play position to 1.1.1, as R7 does. The menu item runs `transport.return_to_start` and Home runs `transport.locate` at 1.1.1 (added in WP-1.18). (S1, S2, S5, S6)
+- **R9.** Move Insert Marker To Playhead (Cmd-Shift-Space, Ctrl-Shift-Space) puts the insert marker at the play position: where the song is playing, or where it stopped. (S5, S6)
+- **R10.** Play From Insert Marker (Option-Space, Ctrl-Space, in the Arrangement) starts playback from the insert marker. Beatlayer has no time selections or song start time yet, so it does what Play does; it will differ from Play when Play starts from a selection (S4). (S4, S5, S6)
+- **R11.** Play, while playing, starts again from the insert marker.
+- **R12.** The insert marker and the play position never go before 1.1.1: a position before it is taken as 1.1.1. (S1, S8)
+- **R13.** With the loop on, playback that reaches the loop brace's end goes on from its start: the frame after the last one before the end is the start's frame, sample-exact at any block size. It loops until the loop is switched off or playback stops. (S3)
+- **R14.** Playback that starts before the brace plays into it and then loops. Playback at or after the brace's end plays on and doesn't loop, including when the brace moves behind a playing playhead. (S3)
+- **R15.** The brace's start and end are musical positions: they fall on frames through the tempo map, so playback wraps on the frame the map gives the end, even inside a tempo ramp, and a new tempo map moves the loop's frames with its bars while the playhead keeps its beat. (S3, S8)
+- **R16.** The brace (its start and length) and the Loop switch belong to the set: they're saved with it, a set saved before Beatlayer had them loads with the default, and each change is one undo step. (S3, S7)
+- **R17.** The brace starts at 1.1.1 or later and is longer than zero. A change that breaks either is refused and changes nothing. (S3, S8)
+- **R18.** A new set's brace starts at 1.1.1 and is four 4/4 bars (16 quarter notes) long, with the loop off.
+- **R19.** Every transport action is a registered command, runnable by ID with JSON arguments (D17). Playback commands are in the `read` class, because they change nothing in the project or on disk; the loop commands are `edit`, because undo reverses them. Their default keys: Space runs Play/Stop, Shift-Space Continue Playback, Home sets the play position to 1.1.1, Option-Space (Ctrl-Space) Play From Insert Marker in the Arrangement, and Cmd-Shift-Space (Ctrl-Shift-Space) Move Insert Marker To Playhead there. Play, Stop, and the loop commands have no key of their own in Live's shortcut list. (S5, S6)
+- **R20.** After every audio block, the engine publishes for the UI, through a triple buffer and without a lock, whether it's playing, the playhead in frames and ticks, the insert marker, and the loop it plays, all from the same block, so the UI's playhead shows where the engine is. (WP-1.5's acceptance; the architecture's "Real-time rules")
+
+## Tests
+
+| Rule | Test | Kind |
+|---|---|---|
+| R1, R2 | `crates/engine/tests/transport.rs`, `play_starts_from_the_insert_marker_on_its_exact_frame_at_any_block_size` | unit (frame by frame, at blocks of 1, 100, and 4,096) |
+| R1 to R6 | `crates/cli/tests/transport_goldens.rs`, `a_start_mid_bar_and_every_move_after_it_land_on_their_samples`; the `start-mid-bar` reference in `tests/golden/` | golden render, against a frame-by-frame model of these rules |
+| R3, R6, R7 | `crates/engine/tests/transport.rs`, `stop_keeps_where_playback_stopped_and_continue_resumes_there` | unit |
+| R4 | `crates/engine/tests/transport.rs`, `stop_while_stopped_returns_to_the_start` | unit |
+| R5 | `crates/engine/tests/transport.rs`, `play_stop_toggles_and_never_returns_to_the_start` | unit |
+| R7, R11, R12 | `crates/engine/tests/transport.rs`, `the_insert_marker_moves_and_playback_jumps_only_while_playing` | unit |
+| R8, R10, R19 | `crates/engine/tests/transport.rs`, `the_bindings_follow_the_spec`, `every_transport_command_runs_by_id`; `xtask/src/commands.rs`, `the_repository_reference_is_in_sync` | unit |
+| R9 | `crates/engine/tests/transport.rs`, `the_insert_marker_moves_to_the_playhead` | unit |
+| R13, R14 | `crates/engine/tests/transport.rs`, `the_loop_wraps_on_its_exact_frame_again_and_again_at_any_block_size`, `playback_at_or_after_the_loops_end_plays_on`; `crates/cli/tests/transport_goldens.rs`, `a_loop_wraps_on_its_samples_again_and_again`; the `loop-wraps` reference | unit, golden render |
+| R13, R15 | `crates/engine/tests/transport.rs`, `the_loop_follows_the_tempo_map_and_a_ramp_across_its_end`; `crates/cli/tests/transport_goldens.rs`, `a_loop_inside_a_tempo_ramp_wraps_where_the_map_puts_its_end`; the `tempo-ramp-loop` reference | unit, golden render |
+| R16 | `crates/model/src/document.rs`, `the_loop_is_part_of_the_set_and_saved_when_it_isnt_the_default`; `crates/engine/tests/transport.rs`, `the_documents_loop_reaches_the_engine_without_a_compile_and_undoes`; `crates/cli/tests/golden.rs`, `bl_cli_render_writes_what_the_harness_renders` (a saved set's loop renders as `loop-wraps`); `crates/project/tests/schemas.rs`, `every_fixture_loads_as_the_fixture_song` (a set from before the loop loads); `crates/model/tests/undo_properties.rs` (undo after random loop edits) | unit, golden render, property |
+| R17 | `crates/model/tests/command_registry.rs`, `bad_requests_change_nothing`; `crates/model/src/document.rs`, `the_loop_is_part_of_the_set_and_saved_when_it_isnt_the_default` | unit |
+| R18 | `crates/model/src/document.rs`, `a_new_sets_loop_is_four_bars_from_the_start_and_off` | unit |
+| R20 | `crates/engine/tests/transport.rs`, `the_published_playhead_follows_every_block`; `crates/engine/tests/playhead.rs`, `the_ui_thread_sees_the_playhead_the_engine_played` (a real-time audio thread and a reader thread) | unit, real-time |
+
+Scheduled transport commands (D17's commands at a bar and beat) act on their song frames too: `crates/engine/tests/transport.rs`, `scheduled_transport_commands_act_on_their_song_frames`. Agents drive the same commands through the agent API (WP-1.15), on the engine's queue: `crates/cli/tests/agent.rs`, `an_agent_plays_locates_and_stops_the_transport_on_exact_samples` (play, locate, continue, and stop, with a scheduled jump and stop, every frame against a model of these rules at three block sizes). The real-time rules hold throughout: every engine test runs its blocks under the allocation trap, and `rtsan/tests/transport.rs` runs the transport under RealtimeSanitizer.

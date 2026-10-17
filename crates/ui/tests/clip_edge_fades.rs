@@ -29,20 +29,14 @@ fn the_record_warp_and_launch_page_switches_create_fades_on_clip_edges() {
     let switch = Harness::node(&nodes, "Create Fades on Clip Edges");
     assert_eq!(switch.role, Role::Button);
     assert!(!switch.disabled);
-    // Live's rows in Live's order, every other one pending: Record's seven,
-    // then Warp/Fades' three before the switch, then Launch and Tap Tempo.
-    // Start Recording on Scene Launch is built too (WP-3.11).
-    let built = [
-        "Create Fades on Clip Edges",
-        "Start Recording on Scene Launch",
-    ];
+    // Live's rows in Live's order, every other one pending but the Launch
+    // section's (WP-3.4): Record's seven, then Warp/Fades' three before the
+    // switch, then Launch and Tap Tempo.
+    let live = |label: &str| label == "Create Fades on Clip Edges" || label.contains("Launch");
     let top = |label: &str| {
         let node = Harness::node(&nodes, label);
-        assert!(
-            node.disabled || built.contains(&label),
-            "{label} is pending"
-        );
-        if !built.contains(&label) {
+        assert!(node.disabled || live(label), "{label} is pending");
+        if !live(label) {
             assert!(node.description.contains("Not built yet"), "{label}");
         }
         node.bounds.expect("drawn").y0
@@ -139,11 +133,11 @@ fn the_record_warp_and_launch_page_switches_warp_recorded_audio() {
     assert!(h.shell.warp_recorded_audio());
 }
 
-// Spec: session-recording R10. Start Recording on Scene Launch is the last
-// switch of the Launch section: off in a new install, and it runs its
-// command.
+// Spec: launch-quantisation R15. The Launch section's rows are live on the
+// Record, Warp & Launch page: the switches run their commands and the
+// choosers are enabled.
 #[test]
-fn the_record_warp_and_launch_page_switches_start_recording_on_scene_launch() {
+fn the_launch_rows_of_record_warp_and_launch_are_live() {
     let mut h = Harness::new(Window::Settings);
     h.shell
         .invoke("app.settings", json!({ "page": "record-warp-launch" }))
@@ -152,24 +146,42 @@ fn the_record_warp_and_launch_page_switches_start_recording_on_scene_launch() {
     h.settle();
 
     let nodes = Harness::nodes(&h.frame(vec![]));
-    let switch = Harness::node(&nodes, "Start Recording on Scene Launch");
-    assert_eq!(switch.role, Role::Button);
-    assert!(!switch.disabled);
-    assert!(
-        !h.shell.start_recording_on_scene_launch(),
-        "off, as observed"
-    );
+    for chooser in ["Default Launch Mode", "Default Launch Quantization"] {
+        assert!(!Harness::node(&nodes, chooser).disabled, "{chooser}");
+    }
+    assert!(h.shell.launch_prefs().select_on_launch, "on, as Live's is");
 
-    h.accesskit(
-        Id::new(("switch", "start-recording-on-scene-launch")),
-        Action::Click,
-    );
+    h.accesskit(Id::new(("switch", "select-on-launch")), Action::Click);
     h.settle();
-    assert!(h.shell.start_recording_on_scene_launch());
+    assert!(!h.shell.launch_prefs().select_on_launch);
     assert!(h.events.iter().any(|e| matches!(
         e,
         bl_ui::main_window::UiEvent::Invoke(i)
-            if i.id == "settings.set_start_recording_on_scene_launch"
-                && i.args == json!({ "on": true })
+            if i.id == "settings.set_select_on_launch" && i.args == json!({ "on": false })
     )));
+}
+
+// Spec: session-recording R12. The Record section's rows show the values
+// Live 12 shows in a new install, though the settings behind them come with
+// later packages.
+#[test]
+fn the_record_rows_show_the_values_live_shows_in_a_new_install() {
+    let mut h = Harness::new(Window::Settings);
+    h.shell
+        .invoke("app.settings", json!({ "page": "record-warp-launch" }))
+        .unwrap();
+    h.shell.take_effects();
+    h.settle();
+
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    for (label, value) in [
+        ("File Type", "WAV"),
+        ("Bit Depth", "24"),
+        ("Count-In", "None"),
+        ("Clip Update Rate", "1/16"),
+        ("Record Session automation in", "Armed Tracks"),
+        ("Start Transport With Record", "On"),
+    ] {
+        assert_eq!(Harness::node(&nodes, label).value, value, "{label}");
+    }
 }

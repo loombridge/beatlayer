@@ -481,3 +481,230 @@ fn a_launched_audio_slot_clip_plays_its_file_from_the_launch_frame() {
         assert_eq!(*sample, at(i as i64), "frame {i} of the launch");
     }
 }
+
+/// An offline engine with `tracks` audio tracks, each holding a constant in
+/// the Arrangement (0.25 on the first, 0.5 on the second) and the ramp in its
+/// Session slot at the first scene.
+fn over_rig(block: usize, tracks: usize) -> (Offline, Vec<TrackId>, SceneId) {
+    let mut media = MediaMap::new();
+    media.insert(ContentHash([7; 32]), ramp(96_000));
+    let mut editor = Editor::new();
+    let scene = editor.document().scenes().next().unwrap().id;
+    let mut ids = Vec::new();
+    for k in 0..tracks {
+        let hash = ContentHash([8 + k as u8; 32]);
+        let level = 0.25 * (k + 1) as f32;
+        media.insert(
+            hash,
+            Arc::new(SampleData::new(48_000, vec![vec![level; 400_000]]).unwrap()),
+        );
+        let track = track(&mut editor, TrackKind::Audio, None);
+        for (start, length, audio) in [
+            (Ticks::ZERO, Ticks::WHOLE * 4, AudioData::new(hash)),
+            (
+                Ticks::ZERO,
+                Ticks::WHOLE,
+                AudioData::new(ContentHash([7; 32])),
+            ),
+        ] {
+            let clip = Clip::new(editor.new_id(), start, length, ClipData::Audio(audio));
+            // The second clip sits in the slot, the first in the Arrangement.
+            let command = if length == Ticks::WHOLE {
+                Command::CreateSlotClip { track, scene, clip }
+            } else {
+                Command::CreateClip { track, clip }
+            };
+            editor.apply(command).unwrap();
+        }
+        ids.push(track);
+    }
+    let registry = Registry::new().with_media(Arc::new(media));
+    let mut offline = Offline::new(EngineConfig::new(RATE, block), registry);
+    offline.sync(editor.document());
+    assert!(offline.missing_media().is_empty());
+    (offline, ids, scene)
+}
+
+/// Renders up to song frame `until`, appending the left channel to `out`.
+fn render_to(offline: &mut Offline, out: &mut Vec<f32>, until: usize) {
+    offline.render((until - out.len()) as u64, |output| {
+        out.extend_from_slice(output.channel(0));
+    });
+}
+
+// Spec: session-view R20, R22
+#[test]
+fn a_launched_clip_silences_the_arrangement_until_a_return() {
+    for block in [64, 700, 4096] {
+        let (mut offline, tracks, scene) = over_rig(block, 1);
+        let track = tracks[0];
+        let mut out = Vec::new();
+        offline.sender().transport(TransportCommand::Play);
+        render_to(&mut offline, &mut out, 24_001);
+        offline
+            .sender()
+            .session(SessionCommand::Launch { track, scene });
+        render_to(&mut offline, &mut out, 96_600);
+        let at = |frame: usize| format!("{frame} at blocks of {block}");
+        // The Arrangement sounds until the launch's grid line, and the clip
+        // alone sounds from it.
+        assert!(out[..96_000].iter().all(|&s| s == 0.25), "{}", at(0));
+        for i in 0..600 {
+            assert_eq!(out[96_000 + i], self::at(i as i64), "{}", at(96_000 + i));
+        }
+        assert_eq!(offline.state().session_over, [track]);
+        // A stop queued now lands on the 3.1.1 line; the track stays taken
+        // over after it, silent.
+        render_to(&mut offline, &mut out, 100_000);
+        offline.sender().session(SessionCommand::StopTrack(track));
+        render_to(&mut offline, &mut out, 200_000);
+        assert_eq!(
+            out[100_000],
+            self::at(4_000),
+            "still playing before the line"
+        );
+        assert!(out[192_000..].iter().all(|&s| s == 0.0), "{}", at(192_000));
+        assert!(offline.state().session.is_empty());
+        assert_eq!(offline.state().session_over, [track], "{}", at(0));
+        // The return gives the Arrangement back on its first frame.
+        offline.sender().session(SessionCommand::BackToArrangement);
+        render_to(&mut offline, &mut out, 201_000);
+        assert!(out[200_000..].iter().all(|&s| s == 0.25), "{}", at(200_000));
+        assert!(offline.state().session_over.is_empty());
+        assert_eq!(offline.heap_operations(), 0);
+    }
+}
+
+// Spec: session-view R21
+#[test]
+fn a_stop_on_an_idle_track_silences_its_arrangement_on_the_grid() {
+    for block in [64, 700, 4096] {
+        let (mut offline, tracks, _) = over_rig(block, 1);
+        let mut out = Vec::new();
+        offline.sender().transport(TransportCommand::Play);
+        render_to(&mut offline, &mut out, 24_001);
+        offline.sender().session(SessionCommand::StopAll);
+        render_to(&mut offline, &mut out, 97_000);
+        assert!(out[..96_000].iter().all(|&s| s == 0.25), "block {block}");
+        assert!(out[96_000..].iter().all(|&s| s == 0.0), "block {block}");
+        assert_eq!(offline.state().session_over, tracks);
+    }
+}
+
+// Spec: session-view R22
+#[test]
+fn a_return_drops_a_queued_launch() {
+    let (mut offline, tracks, scene) = over_rig(512, 1);
+    let mut out = Vec::new();
+    offline.sender().transport(TransportCommand::Play);
+    render_to(&mut offline, &mut out, 24_001);
+    offline.sender().session(SessionCommand::Launch {
+        track: tracks[0],
+        scene,
+    });
+    render_to(&mut offline, &mut out, 30_000);
+    offline.sender().session(SessionCommand::BackToArrangement);
+    render_to(&mut offline, &mut out, 100_000);
+    assert!(out.iter().all(|&s| s == 0.25), "the launch never lands");
+    assert!(offline.state().session.is_empty());
+    assert!(offline.state().session_over.is_empty());
+}
+
+// Spec: session-view R23
+#[test]
+fn the_per_track_return_returns_one_track() {
+    let (mut offline, tracks, scene) = over_rig(512, 2);
+    let mut out = Vec::new();
+    offline.sender().transport(TransportCommand::Play);
+    render_to(&mut offline, &mut out, 24_001);
+    offline.sender().session(SessionCommand::LaunchScene(scene));
+    render_to(&mut offline, &mut out, 97_000);
+    assert_eq!(offline.state().session_over.len(), 2);
+    // Both tracks play the ramp; returning the first brings its 0.25 back
+    // and leaves the second's clip playing.
+    offline
+        .sender()
+        .session(SessionCommand::TrackBackToArrangement(tracks[0]));
+    render_to(&mut offline, &mut out, 98_000);
+    for i in 0..600 {
+        let frame = 97_000 + i;
+        let expected = 0.25 + self::at((frame - 96_000) as i64);
+        assert!((out[frame] - expected).abs() < 1e-6, "{frame}");
+    }
+    assert_eq!(offline.state().session_over, [tracks[1]]);
+    assert!(
+        offline
+            .state()
+            .session
+            .iter()
+            .all(|slot| slot.track == tracks[1])
+    );
+}
+
+// Spec: session-view R20, R22
+#[test]
+fn a_taken_over_midi_track_lets_its_arrangement_notes_go_and_plays_them_again_after_a_return() {
+    let mut rig = Rig::new(512);
+    rig.editor
+        .apply(Command::SetTempo { tempo: tempo() })
+        .unwrap();
+    let track = midi_track(&mut rig);
+    let scene = scene(&rig);
+    let bar = Ticks::WHOLE;
+    let arrangement = Clip::new(
+        rig.editor.new_id(),
+        Ticks::ZERO,
+        bar * 4,
+        ClipData::Midi(MidiData::new(vec![
+            Note::new(60, Ticks::ZERO, bar * 2, 100),
+            Note::new(61, bar + bar / 2, bar / 4, 100),
+            Note::new(63, bar * 3, bar / 4, 100),
+        ])),
+    );
+    rig.editor
+        .apply(Command::CreateClip {
+            track,
+            clip: arrangement,
+        })
+        .unwrap();
+    slot_clip(
+        &mut rig.editor,
+        track,
+        scene,
+        &[Note::new(62, Ticks::ZERO, Ticks::QUARTER, 100)],
+    );
+    rig.sync();
+    rig.sender.transport(TransportCommand::Play);
+    at_frame(&mut rig, 24_001, 512, |rig| {
+        rig.sender.session(SessionCommand::Launch { track, scene });
+    });
+    // The clip takes over on the 2.1.1 line; stop it on the 3.1.1 line, and
+    // return once the playhead is past it.
+    at_frame(&mut rig, 150_000 - 24_001, 512, |rig| {
+        rig.sender.session(SessionCommand::StopTrack(track));
+    });
+    at_frame(&mut rig, 200_000 - 150_000, 512, |rig| {
+        rig.sender.session(SessionCommand::BackToArrangement);
+    });
+    play(&mut rig, 100_000, 512);
+    let recorded = notes(&mut rig);
+    let of = |key: u8| -> Vec<(i64, bool)> {
+        recorded
+            .iter()
+            .filter(|note| note.1 == key)
+            .map(|note| (note.0, note.2))
+            .collect()
+    };
+    assert_eq!(
+        of(60),
+        [(0, true), (BAR_FRAMES, false)],
+        "the Arrangement's note is let go where the clip takes over"
+    );
+    assert_eq!(of(62).first(), Some(&(BAR_FRAMES, true)));
+    assert!(
+        of(61).is_empty(),
+        "the Arrangement is silent while taken over"
+    );
+    assert_eq!(of(63).first(), Some(&(BAR_FRAMES * 3, true)));
+    assert!(rig.monitor.state().session_over.is_empty());
+}

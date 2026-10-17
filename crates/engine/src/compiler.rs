@@ -500,6 +500,11 @@ impl Compiler {
             time_signatures: document.settings().time_signatures.clone(),
             sample_rate: self.config.sample_rate,
             scene_slots: scene_slots(document),
+            session_tracks: document
+                .track_order()
+                .into_iter()
+                .filter(|&id| document.track(id).is_some_and(|t| t.kind().holds_clips()))
+                .collect(),
             note_buffers: [
                 NoteBuffer::with_capacity(1024),
                 NoteBuffer::with_capacity(1024),

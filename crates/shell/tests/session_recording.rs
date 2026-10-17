@@ -436,7 +436,10 @@ fn launching_a_scene_records_only_when_start_recording_on_scene_launch_is_on() {
     let keys = midi_track(&mut shell, "Keys");
     let scene = first_scene(&shell);
     let state = shell.run("settings.state", json!({})).unwrap();
-    assert_eq!(state["start_recording_on_scene_launch"], json!(false));
+    assert_eq!(
+        state["launch"]["start_recording_on_scene_launch"],
+        json!(false)
+    );
 
     shell
         .run("session.launch_scene", json!({ "scene": scene }))

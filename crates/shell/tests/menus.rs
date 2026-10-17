@@ -89,8 +89,12 @@ fn every_shell_command_is_on_a_menu_or_a_control() {
         // The same page's Warp recorded audio switch (the recording spec,
         // R13).
         commands::SETTINGS_SET_WARP_RECORDED_AUDIO,
-        // The Launch section's Start Recording on Scene Launch switch (the
-        // session recording spec, R10).
+        // The same page's Launch section (the launch quantisation spec,
+        // R15).
+        commands::SETTINGS_SET_DEFAULT_LAUNCH_MODE,
+        commands::SETTINGS_SET_DEFAULT_LAUNCH_QUANTIZATION,
+        commands::SETTINGS_SET_SELECT_ON_LAUNCH,
+        commands::SETTINGS_SET_SELECT_NEXT_SCENE_ON_LAUNCH,
         commands::SETTINGS_SET_START_RECORDING_ON_SCENE_LAUNCH,
         // The Plug-Ins page's switch (the device chains spec, R31).
         commands::SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS,

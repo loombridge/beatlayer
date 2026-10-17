@@ -645,6 +645,7 @@ impl Processor {
         if let Some(running) = mismatch {
             self.mismatch(program.get(), running);
         }
+        self.session.retain_tracks(&program.get().session_tracks);
         // Dropping the old program here only lets go of it: the drop thread
         // frees it.
         drop(self.program.replace(program));
@@ -921,6 +922,10 @@ impl Processor {
             SessionCommand::LaunchScene(scene) => self.launch_scene(scene),
             SessionCommand::StopTrack(track) => self.stop_session(Some(track)),
             SessionCommand::StopAll => self.stop_session(None),
+            SessionCommand::BackToArrangement => self.session.back_to_arrangement(None),
+            SessionCommand::TrackBackToArrangement(track) => {
+                self.session.back_to_arrangement(Some(track));
+            }
             SessionCommand::SetQuantization(settings) => self.session.set_settings(settings),
             SessionCommand::Record => self.record_session(),
             SessionCommand::StopRecording => self.stop_session_take(true),
@@ -956,7 +961,7 @@ impl Processor {
         let start = self.session.frame_for(playhead);
         if let Some(plan) = self.plan.as_mut() {
             for target in plan.get_mut().session.iter().filter(|t| !t.overdub) {
-                self.session.stop(Some(target.track), playhead);
+                self.session.stop(Some(target.track), &[], playhead);
             }
         }
         self.session_take = Some(SessionTake {
@@ -1069,7 +1074,11 @@ impl Processor {
             self.position,
             self.config.sample_rate,
         );
-        self.session.stop(track, playhead);
+        let tracks = self
+            .program
+            .as_ref()
+            .map_or(&[][..], |program| program.get().session_tracks.as_slice());
+        self.session.stop(track, tracks, playhead);
         let recorded = self.plan.as_mut().is_some_and(|plan| {
             plan.get_mut()
                 .session
@@ -1588,6 +1597,11 @@ impl Processor {
         }
         state.session.clear();
         state.session.extend_from_slice(&self.session_status);
+        state.session_over.clear();
+        let room = state.session_over.capacity();
+        state
+            .session_over
+            .extend(self.session.overridden().iter().copied().take(room));
         state.meters.clear();
         state.meters_truncated = false;
         if let Some(program) = &self.program {

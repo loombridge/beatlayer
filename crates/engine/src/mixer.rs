@@ -30,7 +30,7 @@ use bl_core::time::SampleRate;
 use bl_model::modulation::Travel;
 use bl_model::{CrossfadeAssign, Document, Mixer, ParamId, Tap, TrackId, TrackKind};
 
-use crate::automation::{AutomationList, PlacedEnvelope};
+use crate::automation::{AutomationList, SessionNow, Song};
 use crate::node::{Block, Node, NodeConfig, NodeData, NodeEvent, ParamValue, segments};
 use crate::routing::{Edge, Graph, Via};
 
@@ -562,12 +562,16 @@ impl Node for TrackMixer {
         for segment in segments(block.events(), block.frames()) {
             self.apply(segment.events);
             match playing {
-                Some(list) => self.scale_envelopes(
-                    block,
-                    segment.range.clone(),
-                    transport.position.get(),
-                    list,
-                ),
+                Some(list) => {
+                    let now = block.session_now(list);
+                    self.scale_envelopes(
+                        block,
+                        segment.range.clone(),
+                        transport.position.get(),
+                        list,
+                        &now,
+                    );
+                }
                 None => {
                     let (mut after, mut crossfader) = (self.gains, self.crossfader);
                     for frame in segment.range.clone() {
@@ -625,14 +629,15 @@ impl TrackMixer {
         range: core::ops::Range<usize>,
         from: i64,
         list: &AutomationList,
+        now: &SessionNow<'_>,
     ) {
         let channels = block.channels();
         let controls = [self.volume, self.pan, f64::from(u8::from(self.mute))];
         // A pan the envelopes don't move keeps its gains over the whole
         // range; only an automated or modulated pan works out the law frame
         // by frame.
-        let fixed_pan = (list.envelope(track::PAN).is_none() && !list.modulates(track::PAN))
-            .then(|| pan_gains(self.pan));
+        let fixed_pan =
+            (!list.drives(track::PAN) && !list.modulates(track::PAN)).then(|| pan_gains(self.pan));
         // The crossfade isn't automated: it glides on top of the envelopes,
         // the same gliding position for every channel (the mixer spec, R23).
         let (crossfade, start) = (self.crossfade, self.crossfader);
@@ -645,7 +650,7 @@ impl TrackMixer {
                 let frame = from + (range.start + i) as i64;
                 let fade = crossfade_gain(crossfader.next(), crossfade);
                 *sample = (f64::from(*sample)
-                    * gain_at(list, frame, index, controls, fixed_pan)
+                    * gain_at(list, now, frame, index, controls, fixed_pan)
                     * fade) as f32;
                 if meter {
                     self.meters.measure_one(c, *sample);
@@ -661,7 +666,7 @@ impl TrackMixer {
         self.crossfader = crossfader;
         let last = from + range.end as i64 - 1;
         for (index, ramp) in self.gains.iter_mut().enumerate() {
-            *ramp = Ramp::at(gain_at(list, last, index, controls, fixed_pan));
+            *ramp = Ramp::at(gain_at(list, now, last, index, controls, fixed_pan));
         }
         for ((entry, param), control) in self
             .modulated
@@ -671,7 +676,7 @@ impl TrackMixer {
         {
             *entry = list
                 .modulates(param)
-                .then(|| played(list, last, param, control))
+                .then(|| played(list, now, last, param, control))
                 .filter(|(base, played)| played != base);
         }
     }
@@ -682,18 +687,19 @@ impl TrackMixer {
 /// (the modulation spec, R2 to R4).
 fn gain_at(
     list: &AutomationList,
+    now: &SessionNow<'_>,
     frame: i64,
     index: usize,
     controls: [f64; 3],
     fixed_pan: Option<[f64; 2]>,
 ) -> f64 {
     let [volume, pan, mute] = controls;
-    if played(list, frame, track::MUTE, mute).1 != 0.0 {
+    if played(list, now, frame, track::MUTE, mute).1 != 0.0 {
         return 0.0;
     }
-    let level = played(list, frame, track::VOLUME, volume).1.max(0.0);
+    let level = played(list, now, frame, track::VOLUME, volume).1.max(0.0);
     let [left, right] = fixed_pan
-        .unwrap_or_else(|| pan_gains(played(list, frame, track::PAN, pan).1.clamp(-1.0, 1.0)));
+        .unwrap_or_else(|| pan_gains(played(list, now, frame, track::PAN, pan).1.clamp(-1.0, 1.0)));
     match index {
         0 => level * left,
         1 => level * right,
@@ -702,12 +708,16 @@ fn gain_at(
 }
 
 /// The base and the played value of the mixer control `param` at `frame`:
-/// its envelope's value where it has one, else `control`, then moved by the
-/// clips' modulation.
-fn played(list: &AutomationList, frame: i64, param: ParamId, control: f64) -> (f64, f64) {
-    let base = list
-        .envelope(param)
-        .map_or(control, |envelope| envelope.value_at(frame));
+/// the value a Session clip's automation or its envelope gives where it has
+/// one, else `control`, then moved by the clips' modulation.
+fn played(
+    list: &AutomationList,
+    now: &SessionNow<'_>,
+    frame: i64,
+    param: ParamId,
+    control: f64,
+) -> (f64, f64) {
+    let base = list.base(param, frame, now).unwrap_or(control);
     let travel = match param {
         track::VOLUME => Travel::Fader,
         track::PAN => Travel::Pan,
@@ -846,7 +856,7 @@ impl Route {
         to: &mut [f32],
         from: &[f32],
         shape: Planar,
-        song: Option<i64>,
+        song: Option<Song<'_>>,
         events: &[NodeEvent],
     ) {
         let Planar {
@@ -863,9 +873,9 @@ impl Route {
             .as_ref()
             .and_then(|data| data.downcast_ref::<AutomationList>())
             .filter(|list| !list.is_empty());
-        let envelope = list.and_then(|list| list.envelope(route::LEVEL));
+        let driven = list.is_some_and(|list| list.drives(route::LEVEL));
         let modulated = list.is_some_and(|list| list.modulates(route::LEVEL));
-        let follows = song.is_some() && (envelope.is_some() || modulated);
+        let follows = song.is_some() && (driven || modulated);
         self.modulated = None;
         if !follows && events.is_empty() && self.is_silent() {
             return;
@@ -883,20 +893,21 @@ impl Route {
                 self.gain.toward(self.target(), self.smoothing);
             }
             match if follows { song } else { None } {
-                Some(now) => {
+                Some(song) => {
                     let list = list.expect("a route that follows has a list");
+                    let now = list.now(song.session, song.tempo, song.rate);
                     for c in 0..channels {
                         let at = c * stride + segment.range.start..c * stride + segment.range.end;
                         for (i, sample) in to[at.clone()].iter_mut().enumerate() {
-                            let frame = now + (segment.range.start + i) as i64;
-                            let gain = self.envelope_gain(list, envelope, frame);
+                            let frame = song.frame + (segment.range.start + i) as i64;
+                            let gain = self.envelope_gain(list, &now, frame);
                             *sample += (f64::from(from[at.start + i]) * gain) as f32;
                         }
                     }
-                    let last = now + segment.range.end as i64 - 1;
-                    self.gain = Ramp::at(self.envelope_gain(list, envelope, last));
+                    let last = song.frame + segment.range.end as i64 - 1;
+                    self.gain = Ramp::at(self.envelope_gain(list, &now, last));
                     self.modulated = modulated
-                        .then(|| self.level_at(list, envelope, last))
+                        .then(|| self.level_at(list, &now, last))
                         .filter(|(base, played)| played != base);
                 }
                 None => {
@@ -924,28 +935,18 @@ impl Route {
     /// The route's gain at `frame`: its envelope's level, or its control's
     /// where the level isn't automated, with the clips' modulation added on
     /// top (WP-3.15) and clamped, unless solo silences it or it's closed.
-    fn envelope_gain(
-        &self,
-        list: &AutomationList,
-        envelope: Option<&PlacedEnvelope>,
-        frame: i64,
-    ) -> f64 {
+    fn envelope_gain(&self, list: &AutomationList, now: &SessionNow<'_>, frame: i64) -> f64 {
         if self.solo_mute || self.closed {
             return 0.0;
         }
-        self.level_at(list, envelope, frame).1.max(0.0)
+        self.level_at(list, now, frame).1.max(0.0)
     }
 
     /// The level's base and played value at `frame` (the modulation spec,
     /// R3): its envelope's or its control's, moved by the clips' modulation
     /// on the send's travel.
-    fn level_at(
-        &self,
-        list: &AutomationList,
-        envelope: Option<&PlacedEnvelope>,
-        frame: i64,
-    ) -> (f64, f64) {
-        let base = envelope.map_or(self.level, |envelope| envelope.value_at(frame));
+    fn level_at(&self, list: &AutomationList, now: &SessionNow<'_>, frame: i64) -> (f64, f64) {
+        let base = list.base(route::LEVEL, frame, now).unwrap_or(self.level);
         (base, list.played(Travel::Send, route::LEVEL, frame, base))
     }
 

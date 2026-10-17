@@ -401,8 +401,7 @@ fn collect(
             status.dropped.fetch_add(1, Relaxed);
         }
     };
-    let transport = block.transport();
-    processor.drive.prepare(list, transport);
+    processor.drive.prepare(list, block);
     let mut change = |events: &mut Vec<(u32, In)>, offset: u32, param: u32, value: ParamValue| {
         let value = match value {
             ParamValue::Set(value) => Some(value),
@@ -421,11 +420,9 @@ fn collect(
     for event in block.events() {
         change(events, event.offset, event.param.0, event.value);
     }
-    processor
-        .drive
-        .play(list, transport, block.frames(), |play| {
-            push(events, play.offset, In::Param(play.id, play.played));
-        });
+    processor.drive.play(list, block, |play| {
+        push(events, play.offset, In::Param(play.id, play.played));
+    });
     for note in block.notes() {
         push(events, note.offset, In::Note(*note));
     }

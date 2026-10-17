@@ -154,6 +154,7 @@ fn every_parameter_is_modulatable_to_the_frame() {
                 .unwrap();
             editor
                 .apply(Command::SetClipEnvelopeBreakpoint {
+                    kind: bl_model::EnvelopeKind::Modulation,
                     clip,
                     target: AutomationTarget::Device {
                         device: id,

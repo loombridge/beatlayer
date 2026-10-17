@@ -114,7 +114,10 @@ pub mod testing;
 
 use bl_core::time::SampleRate;
 
-pub use automation::{AutomationList, clip_envelope_value_at, target_node};
+pub use automation::{
+    AutomationList, SessionNow, clip_envelope_value_at, session_content_tick, session_pass_end,
+    target_node,
+};
 pub use clips::{ClipPlayer, MediaLibrary, MediaMap, MediaStreams, OpenedSource, SourceCues};
 pub use compiler::{Compiler, Update};
 pub use display::{DisplayData, DisplayReader, DisplayWriter, Displays, display_channel};
@@ -142,6 +145,7 @@ pub use recording::{
 pub use registry::{DeviceType, NodeFactory, Registry};
 pub use session::{
     SceneOverride, SessionCommand, SessionEvent, SessionPlayback, SlotState, SlotStatus,
+    StoppedClip,
 };
 pub use state::{EngineCounters, EngineState, Monitor, PlayedParam, TrackMeter};
 

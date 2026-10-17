@@ -75,7 +75,7 @@ This spec covers how modulation and automation combine on a parameter, in the en
 
 ## Not built yet
 
-- A Session clip's Automation and Modulation switches (R9): they need Session clips' automation envelopes (WP-3.12), which the document doesn't hold yet. An Arrangement clip's editor edits modulation only, as R9 says.
+- A Session clip's Automation and Modulation switches (R9): the document holds Session clips' Automation envelopes now ([session-automation.md](session-automation.md), WP-3.12) and the envelope commands take `kind`, but the editor edits Modulation envelopes only. An Arrangement clip's editor edits modulation only, as R9 says.
 - What holds a parameter, in `modulation.state` (R11): a macro or a modulator in Remote Control holds one only once WP-5.4 and WP-5.10 land, and the result gains the field then.
 - A modulated Audio Unit parameter's test (R10): the Audio Unit host plays the value as the VST3 host does, with no test of its own yet.
 

@@ -299,7 +299,7 @@ impl ParamBank {
     /// plays at song frame `from`; then the clips' modulation on top of that
     /// base (the modulation spec, R2 and R3), clamped to the parameter's
     /// range; the rest gliding toward their values as always.
-    fn advance(&mut self, frames: usize, from: Option<i64>) {
+    fn advance(&mut self, frames: usize, from: Option<i64>, block: &Block<'_>) {
         self.frames = frames;
         let automation = from.and_then(|_| self.automation.clone());
         let automation = automation
@@ -309,17 +309,18 @@ impl ParamBank {
             let frames = frames.min(slot.ramp.len());
             let id = slot.descriptor.id;
             let descriptor = &slot.descriptor;
-            let envelope = automation.and_then(|list| list.envelope(id));
+            let driven = automation.is_some_and(|list| list.drives(id));
             let modulates = automation.is_some_and(|list| list.modulates(id));
             slot.modulated = None;
             let (Some(list), Some(from)) = (automation, from) else {
                 Self::glide(slot, frames);
                 continue;
             };
-            if envelope.is_none() && !modulates {
+            if !driven && !modulates {
                 Self::glide(slot, frames);
                 continue;
             }
+            let now = block.session_now(list);
             // The base is the envelope's value on each frame, or the
             // control's, which glides as it always does; the modulation acts
             // on it on the frame, without a glide of its own, and never
@@ -327,16 +328,21 @@ impl ParamBank {
             let travel = Travel::Param(descriptor);
             let mut base = 0.0;
             let mut played = 0.0;
+            let mut set = false;
             for (i, value) in slot.ramp[..frames].iter_mut().enumerate() {
                 let frame = from + i as i64;
-                base = envelope.map_or_else(|| slot.smoother.step(), |e| e.value_at(frame));
+                let driven = list.base(id, frame, &now);
+                set = driven.is_some();
+                base = driven.unwrap_or_else(|| slot.smoother.step());
                 played = descriptor.clamp(list.played(travel, id, frame, base));
                 *value = played as f32;
             }
             if frames == 0 {
                 continue;
             }
-            if envelope.is_some() {
+            // A parameter an envelope set in the block's last frame leaves
+            // its control's glide at that value.
+            if set {
                 slot.smoother.snap(descriptor.clamp(base));
             }
             slot.modulated =
@@ -517,7 +523,7 @@ impl<D: NativeDevice> Node for NativeNode<D> {
             let from = transport
                 .playing
                 .then(|| transport.position.get() + segment.range.start as i64);
-            self.params.advance(segment.range.len(), from);
+            self.params.advance(segment.range.len(), from, block);
             let last = segment.range.end >= frames;
             let mut audio = Audio {
                 block,

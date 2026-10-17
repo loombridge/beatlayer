@@ -16,12 +16,16 @@
 
 use std::collections::BTreeMap;
 
-use bl_core::time::{SampleRate, TempoMap, Ticks};
+use bl_core::time::{Frames, SampleRate, TempoMap, Ticks};
 use bl_model::modulation::Travel;
-use bl_model::{AutomationTarget, ClipData, MidiData, MixerParam, ParamId, TrackId, curve_value};
+use bl_model::{
+    AutomationTarget, ClipData, EnvelopeKind, MidiData, MixerParam, ParamId, SceneId, TrackId,
+    curve_value,
+};
 
 use crate::mixer;
 use crate::node::NodeKey;
+use crate::session::SessionPlayback;
 
 /// One parameter's envelope, placed in engine frames. Its values are
 /// read by the node whose parameter it drives.
@@ -252,14 +256,120 @@ fn played_regions(
     regions
 }
 
+/// Where a block sits in the song, for a route that reads automation
+/// (WP-2.12, WP-3.12): the song frame it starts on, and what places a Session
+/// clip.
+#[derive(Clone, Copy)]
+pub(crate) struct Song<'a> {
+    pub(crate) frame: i64,
+    pub(crate) session: &'a [SessionPlayback],
+    pub(crate) tempo: &'a TempoMap,
+    pub(crate) rate: SampleRate,
+}
+
+/// How a Session MIDI clip's contents lie over the time since it launched:
+/// the layout `midi_clips` plays its notes by (launch-quantisation R9).
+#[derive(Clone, Copy)]
+struct Layout {
+    start_marker: Ticks,
+    end_marker: Option<Ticks>,
+    looping: bool,
+    loop_start: Ticks,
+    loop_end: Option<Ticks>,
+    length: Ticks,
+}
+
+impl Layout {
+    fn of(clip: &bl_model::Clip, midi: &MidiData) -> Self {
+        Self {
+            start_marker: midi.start,
+            end_marker: midi.end,
+            looping: midi.looping,
+            loop_start: midi.loop_start,
+            loop_end: midi.loop_end,
+            length: clip.length,
+        }
+    }
+
+    /// The end of the loop brace, or of what a clip that doesn't loop plays.
+    fn end(self) -> Ticks {
+        if self.looping {
+            self.loop_end.unwrap_or_else(|| {
+                (self.loop_start + self.length).max(self.loop_start + Ticks::QUARTER)
+            })
+        } else {
+            let end = self.end_marker.unwrap_or(self.start_marker + self.length);
+            self.start_marker + self.length.min(end - self.start_marker).max(Ticks::ZERO)
+        }
+    }
+
+    /// The contents position a linked envelope plays `since` ticks after the
+    /// launch: from the Start marker to the brace's end, then round the
+    /// brace; a clip that doesn't loop holds its last position once it has
+    /// played out. An unlinked envelope runs once from the clip's start, one
+    /// tick per tick, and holds its last value past its end.
+    fn content_at(self, since: Ticks, linked: bool) -> Ticks {
+        if !linked {
+            return since;
+        }
+        let end = self.end();
+        if !self.looping {
+            return (self.start_marker + since).min(end);
+        }
+        if end <= self.loop_start || self.start_marker >= end {
+            return self.start_marker;
+        }
+        let first = end - self.start_marker;
+        if since < first {
+            return self.start_marker + since;
+        }
+        self.loop_start + Ticks((since - first).0 % (end - self.loop_start).0)
+    }
+}
+
+/// One Session clip's automation envelope for a parameter (WP-3.12): what
+/// the node plays while that clip is the one playing on its track.
+struct SessionEnvelope {
+    scene: SceneId,
+    envelope: bl_model::Envelope,
+    layout: Layout,
+    linked: bool,
+    /// The node's delay (WP-2.11), by which the clip's time is held back.
+    shift: i64,
+}
+
+/// The Session clip that sets a list's parameters in one block: the scene
+/// whose clip plays on the list's track, or the one that stopped there on a
+/// track that stays taken over, and the tempo map to lay it out by.
+#[derive(Clone, Copy)]
+pub struct SessionNow<'a> {
+    anchor: Option<Anchor>,
+    tempo: &'a TempoMap,
+    rate: SampleRate,
+}
+
+#[derive(Clone, Copy)]
+struct Anchor {
+    scene: SceneId,
+    launched: Ticks,
+    /// For a clip that stopped, the frame it did, where its envelopes hold.
+    stopped: Option<Frames>,
+}
+
 /// One node's automation: an envelope per automated parameter, and the
 /// clips' envelopes modulating them.
 pub struct AutomationList {
+    /// The track the node belongs to, whose Session clip the list reads.
+    track: TrackId,
     /// One envelope per parameter, ordered by parameter.
     envelopes: Vec<(ParamId, PlacedEnvelope)>,
     /// The clips' envelopes (WP-3.15), one entry per parameter they
     /// modulate, ordered by parameter.
     modulation: Vec<(ParamId, Vec<PlacedClipEnvelope>)>,
+    /// The Session clips' automation envelopes (WP-3.12), ordered by
+    /// parameter. They set the parameter, over the track's envelope, while
+    /// their clip plays.
+    session: Vec<(ParamId, SessionEnvelope)>,
 }
 
 impl AutomationList {
@@ -271,6 +381,83 @@ impl AutomationList {
             .binary_search_by_key(&param, |&(param, _)| param)
             .ok()?;
         Some(&self.envelopes[index].1)
+    }
+
+    /// The Session clip that sets this list's parameters in a block that
+    /// starts with `session` playing under `tempo` at `rate` (WP-3.12).
+    #[must_use]
+    pub fn now<'a>(
+        &self,
+        session: &[SessionPlayback],
+        tempo: &'a TempoMap,
+        rate: SampleRate,
+    ) -> SessionNow<'a> {
+        let entry = if self.session.is_empty() {
+            None
+        } else {
+            session.iter().find(|entry| entry.track == self.track)
+        };
+        let anchor = entry.and_then(|entry| match (entry.scene, entry.last) {
+            (Some(scene), _) => Some(Anchor {
+                scene,
+                launched: tempo.frames_to_ticks(entry.frame, rate),
+                stopped: None,
+            }),
+            (None, Some(last)) => Some(Anchor {
+                scene: last.scene,
+                launched: tempo.frames_to_ticks(last.launched, rate),
+                stopped: Some(last.stopped),
+            }),
+            (None, None) => None,
+        });
+        SessionNow {
+            anchor,
+            tempo,
+            rate,
+        }
+    }
+
+    /// Whether anything sets `param` apart from its control: a track
+    /// envelope, or a Session clip's automation envelope, whether or not
+    /// that clip plays now.
+    #[must_use]
+    pub fn drives(&self, param: ParamId) -> bool {
+        self.envelope(param).is_some() || self.session.iter().any(|&(p, _)| p == param)
+    }
+
+    /// The value that sets `param` at song `frame`, if something does: the
+    /// automation envelope of the Session clip playing on the track (or
+    /// holding where it stopped, until Back to Arrangement), else the track's
+    /// own envelope, else `None` and the control. The clip wins over the
+    /// Arrangement's automation for the parameter while its track is taken
+    /// over (WP-3.12).
+    // Spec: session-automation R6, R7
+    #[must_use]
+    pub fn base(&self, param: ParamId, frame: i64, now: &SessionNow<'_>) -> Option<f64> {
+        self.session_value(param, frame, now).or_else(|| {
+            self.envelope(param)
+                .map(|envelope| envelope.value_at(frame))
+        })
+    }
+
+    /// The value the Session clip in `now` gives `param` at `frame`.
+    fn session_value(&self, param: ParamId, frame: i64, now: &SessionNow<'_>) -> Option<f64> {
+        let anchor = now.anchor?;
+        let (_, clip) = self
+            .session
+            .iter()
+            .find(|(p, clip)| *p == param && clip.scene == anchor.scene)?;
+        let frame = frame - clip.shift;
+        // A clip that stopped holds what it played on its last frame.
+        let frame = anchor
+            .stopped
+            .map_or(frame, |stopped| frame.min(stopped.get() - 1));
+        let since = now.tempo.frames_to_ticks(Frames(frame), now.rate) - anchor.launched;
+        if since < Ticks::ZERO {
+            return None;
+        }
+        clip.envelope
+            .value_at(clip.layout.content_at(since, clip.linked))
     }
 
     /// The value the node's `param` plays at `frame`, `base` being its
@@ -309,23 +496,37 @@ impl AutomationList {
     pub fn drive<'a>(
         &self,
         frame: i64,
+        now: &SessionNow<'_>,
         travel_of: impl Fn(ParamId) -> Option<Travel<'a>>,
         control_of: impl Fn(ParamId) -> f64,
         mut visit: impl FnMut(ParamId, f64, f64),
     ) {
-        let driven = self.envelopes.iter().map(|&(param, _)| param).chain(
-            self.modulation
-                .iter()
-                .map(|&(param, _)| param)
-                .filter(|&param| self.envelope(param).is_none()),
-        );
+        let driven = self
+            .envelopes
+            .iter()
+            .map(|&(param, _)| param)
+            .chain(
+                self.session
+                    .iter()
+                    .enumerate()
+                    .filter(|&(i, &(param, _))| {
+                        (i == 0 || self.session[i - 1].0 != param) && self.envelope(param).is_none()
+                    })
+                    .map(|(_, &(param, _))| param),
+            )
+            .chain(
+                self.modulation
+                    .iter()
+                    .map(|&(param, _)| param)
+                    .filter(|&param| !self.drives(param)),
+            );
         for param in driven {
             let Some(travel) = travel_of(param) else {
                 continue;
             };
             let base = self
-                .envelope(param)
-                .map_or_else(|| control_of(param), |envelope| envelope.value_at(frame));
+                .base(param, frame, now)
+                .unwrap_or_else(|| control_of(param));
             visit(param, base, self.played(travel, param, frame, base));
         }
     }
@@ -345,7 +546,7 @@ impl AutomationList {
     /// so it follows its controls again.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.envelopes.is_empty() && self.modulation.is_empty()
+        self.envelopes.is_empty() && self.modulation.is_empty() && self.session.is_empty()
     }
 }
 
@@ -402,7 +603,10 @@ pub(crate) fn lists(
         if clip.mute {
             continue;
         }
-        for envelope in clip.envelopes() {
+        for envelope in clip
+            .envelopes()
+            .filter(|envelope| envelope.kind == EnvelopeKind::Modulation)
+        {
             let (key, param) = target_node(track.id(), &envelope.target);
             let placed = PlacedClipEnvelope::placed(clip, envelope, tempo, rate, delay(key));
             if let Some(placed) = placed {
@@ -414,11 +618,41 @@ pub(crate) fn lists(
             }
         }
     }
+    // The Session clips' automation envelopes (WP-3.12): each slot clip that
+    // sets a parameter while it plays, kept apart from the Arrangement's
+    // clips because the launcher, not the song's frames, says when it plays.
+    for (scene, clip) in track.slots() {
+        let ClipData::Midi(midi) = &clip.data else {
+            continue;
+        };
+        if clip.mute {
+            continue;
+        }
+        for envelope in clip.envelopes().filter(|envelope| {
+            envelope.kind == EnvelopeKind::Automation
+                && envelope.enabled
+                && !envelope.envelope.is_empty()
+        }) {
+            let (key, param) = target_node(track.id(), &envelope.target);
+            lists.entry(key).or_default().session.push((
+                param,
+                SessionEnvelope {
+                    scene,
+                    envelope: envelope.envelope.clone(),
+                    layout: Layout::of(clip, midi),
+                    linked: envelope.linked,
+                    shift: delay(key),
+                },
+            ));
+        }
+    }
+    let track = track.id();
     lists
         .into_iter()
         .map(|(key, mut entries)| {
             entries.envelopes.sort_by_key(|&(param, _)| param);
             entries.modulation.sort_by_key(|&(param, _)| param);
+            entries.session.sort_by_key(|&(param, _)| param);
             // However many clips modulate one parameter, the node reads
             // them together.
             let mut modulation: Vec<(ParamId, Vec<PlacedClipEnvelope>)> = Vec::new();
@@ -431,8 +665,10 @@ pub(crate) fn lists(
             (
                 key,
                 AutomationList {
+                    track,
                     envelopes: entries.envelopes,
                     modulation,
+                    session: entries.session,
                 },
             )
         })
@@ -476,6 +712,29 @@ pub fn clip_envelope_value_at(
         .and_then(|(from, _, content, _)| envelope.envelope.value_at(content + (at - from)))
 }
 
+/// The contents position of the Session MIDI clip `clip`, `since` ticks after
+/// its launch, where an envelope of the given `linked` state plays (WP-3.12):
+/// what a reader that has no engine frame, such as the recording of a move,
+/// asks for, by the layout the engine's read path uses.
+#[must_use]
+pub fn session_content_tick(clip: &bl_model::Clip, linked: bool, since: Ticks) -> Option<Ticks> {
+    let ClipData::Midi(midi) = &clip.data else {
+        return None;
+    };
+    Some(Layout::of(clip, midi).content_at(since, linked))
+}
+
+/// The contents position where a Session MIDI clip's linked envelope reaches
+/// the end of what the clip plays in one pass: the loop brace's end, or the
+/// end of a clip that doesn't loop.
+#[must_use]
+pub fn session_pass_end(clip: &bl_model::Clip) -> Option<Ticks> {
+    let ClipData::Midi(midi) = &clip.data else {
+        return None;
+    };
+    Some(Layout::of(clip, midi).end())
+}
+
 /// What one node is sent: the track envelopes driving its parameters and
 /// the clips' envelopes modulating them, each to sort by parameter before
 /// they're sent.
@@ -483,6 +742,7 @@ pub fn clip_envelope_value_at(
 struct Entries {
     envelopes: Vec<(ParamId, PlacedEnvelope)>,
     modulation: Vec<(ParamId, PlacedClipEnvelope)>,
+    session: Vec<(ParamId, SessionEnvelope)>,
 }
 
 #[cfg(test)]
@@ -515,6 +775,34 @@ mod tests {
         .unwrap()
     }
 
+    // Spec: session-automation R8
+    #[test]
+    fn a_clips_contents_lie_over_the_time_since_its_launch() {
+        let bar = Ticks::WHOLE;
+        let looping = Layout {
+            start_marker: bar / 4,
+            end_marker: None,
+            looping: true,
+            loop_start: Ticks::ZERO,
+            loop_end: Some(bar),
+            length: bar * 3,
+        };
+        // From the Start marker to the brace's end, then round the brace.
+        assert_eq!(looping.content_at(Ticks::ZERO, true), bar / 4);
+        assert_eq!(looping.content_at(bar * 3 / 4, true), Ticks::ZERO);
+        assert_eq!(looping.content_at(bar * 3 / 4 + bar / 2, true), bar / 2);
+        assert_eq!(looping.end(), bar);
+        // A clip that doesn't loop holds its last position.
+        let once = Layout {
+            looping: false,
+            ..looping
+        };
+        assert_eq!(once.content_at(bar / 4, true), bar / 2);
+        assert_eq!(once.content_at(bar * 9, true), bar * 13 / 4);
+        // An unlinked envelope runs once from the launch, tick per tick.
+        assert_eq!(looping.content_at(bar * 5, false), bar * 5);
+    }
+
     // Spec: modulation R3
     #[test]
     fn a_list_without_clips_plays_its_base() {
@@ -525,12 +813,17 @@ mod tests {
             0,
         );
         let list = AutomationList {
+            track: TrackId(bl_core::id::Id::new(1).unwrap()),
             envelopes: vec![(ParamId(1), envelope)],
             modulation: Vec::new(),
+            session: Vec::new(),
         };
         let mut seen = Vec::new();
+        let tempo = TempoMap::default();
+        let now = list.now(&[], &tempo, SampleRate::HZ_48000);
         list.drive(
             12_000,
+            &now,
             |_| Some(Travel::Pan),
             |_| 0.0,
             |param, base, played| seen.push((param, base, played)),

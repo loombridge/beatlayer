@@ -487,6 +487,14 @@ impl<'a> Block<'a> {
         self.session
     }
 
+    /// The Session clip that sets `list`'s parameters in this block
+    /// (WP-3.12): the one playing on the list's track, or holding where it
+    /// stopped on a track that stays taken over.
+    #[must_use]
+    pub fn session_now(&self, list: &crate::AutomationList) -> crate::SessionNow<'a> {
+        list.now(self.session, self.tempo, self.sample_rate)
+    }
+
     /// The song's tempo map, which places ticks on frames: the song
     /// position of frame `i` in ticks is
     /// `tempo().frames_to_ticks(transport().position + i, sample_rate())`.

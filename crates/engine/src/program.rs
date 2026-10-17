@@ -937,7 +937,12 @@ impl EngineProgram {
                         &mut self.pool[own.clone()],
                         &self.delay_scratch[..size],
                         shape,
-                        song,
+                        song.map(|frame| crate::automation::Song {
+                            frame,
+                            session,
+                            tempo: &self.tempo,
+                            rate: self.sample_rate,
+                        }),
                         scratch,
                     );
                 } else {
@@ -949,7 +954,18 @@ impl EngineProgram {
                             else {
                                 continue;
                             };
-                            route.mix(mine, theirs, shape, song, scratch);
+                            route.mix(
+                                mine,
+                                theirs,
+                                shape,
+                                song.map(|frame| crate::automation::Song {
+                                    frame,
+                                    session,
+                                    tempo: &self.tempo,
+                                    rate: self.sample_rate,
+                                }),
+                                scratch,
+                            );
                         }
                         (_, Some(buffer)) => {
                             let theirs = buffer as usize * size..(buffer as usize + 1) * size;
@@ -957,7 +973,12 @@ impl EngineProgram {
                                 &mut self.pool[own.clone()],
                                 &self.tap_pool[theirs],
                                 shape,
-                                song,
+                                song.map(|frame| crate::automation::Song {
+                                    frame,
+                                    session,
+                                    tempo: &self.tempo,
+                                    rate: self.sample_rate,
+                                }),
                                 scratch,
                             );
                         }

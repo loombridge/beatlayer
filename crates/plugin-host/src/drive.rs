@@ -5,7 +5,7 @@
 //! format takes them. Everything is made with the node, so nothing here
 //! allocates on the audio thread.
 
-use bl_engine::{AutomationList, TransportInfo};
+use bl_engine::{AutomationList, Block, SessionNow, TransportInfo};
 use bl_model::modulation::Travel;
 use bl_model::{ParamDescriptor, ParamId};
 
@@ -103,16 +103,16 @@ impl Driver {
     /// Works out which parameters the block drives: while the song plays,
     /// those a track envelope or a clip's modulation envelope holds. Call
     /// it before the block's changes and [`play`](Self::play).
-    pub(crate) fn prepare(&mut self, list: Option<&AutomationList>, transport: TransportInfo) {
+    pub(crate) fn prepare(&mut self, list: Option<&AutomationList>, block: &Block<'_>) {
         self.echoes.clear();
-        let list = Self::active(list, transport);
+        let list = Self::active(list, block.transport());
         if list.is_none() && !self.live {
             return;
         }
         for slot in &mut self.slots {
             let id = ParamId(slot.id);
             slot.modulated = list.is_some_and(|list| list.modulates(id));
-            slot.driven = slot.modulated || list.is_some_and(|list| list.envelope(id).is_some());
+            slot.driven = slot.modulated || list.is_some_and(|list| list.drives(id));
         }
     }
 
@@ -142,19 +142,21 @@ impl Driver {
     pub(crate) fn play(
         &mut self,
         list: Option<&AutomationList>,
-        transport: TransportInfo,
-        frames: usize,
+        block: &Block<'_>,
         mut send: impl FnMut(Play),
     ) {
+        let transport = block.transport();
         if let Some(list) = Self::active(list, transport) {
             self.live = true;
-            let frames = i64::try_from(frames).unwrap_or(i64::MAX);
+            let now = block.session_now(list);
+            let frames = i64::try_from(block.frames()).unwrap_or(i64::MAX);
             let mut offset = 0;
             while offset < frames {
                 let frame = transport.position.0 + offset;
                 let on_grid = frame.rem_euclid(GRID) == 0;
                 self.visit(
                     list,
+                    &now,
                     frame,
                     u32::try_from(offset).unwrap_or(0),
                     on_grid,
@@ -191,6 +193,7 @@ impl Driver {
     fn visit(
         &mut self,
         list: &AutomationList,
+        now: &SessionNow<'_>,
         frame: i64,
         offset: u32,
         on_grid: bool,
@@ -207,6 +210,7 @@ impl Driver {
             let slots: &[Slot] = slots;
             list.drive(
                 frame,
+                now,
                 |id| find(slots, id.0).map(|at| Travel::Param(&slots[at].descriptor)),
                 |id| find(slots, id.0).map_or(0.0, |at| slots[at].control),
                 |id, base, played| scratch.push((id.0, base, played)),

@@ -317,6 +317,7 @@ fn fixture() -> Project {
     apply(
         &mut editor,
         Command::SetClipEnvelopeBreakpoint {
+            kind: bl_model::EnvelopeKind::Modulation,
             clip: audio.id,
             target: volume,
             at: Ticks(0),

@@ -229,6 +229,7 @@ fn dc_song(envelopes: bool) -> Document {
             let clip = midi_clip(&mut editor, track);
             editor
                 .apply(Command::SetClipEnvelopeBreakpoint {
+                    kind: bl_model::EnvelopeKind::Modulation,
                     clip,
                     target,
                     at: Ticks::ZERO,

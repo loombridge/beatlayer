@@ -300,6 +300,7 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("settings.set_outline_view_in_focus", read("settings.state", "display_input.outline_view_in_focus")),
     ("settings.set_default_launch_mode", read("settings.state", "launch.default_mode")),
     ("settings.set_default_launch_quantization", read("settings.state", "launch.default_quantization")),
+    ("settings.set_record_session_automation_in", read("settings.state", "record_session_automation_in")),
     ("settings.set_select_next_scene_on_launch", read("settings.state", "launch.select_next_scene_on_launch")),
     ("settings.set_select_on_launch", read("settings.state", "launch.select_on_launch")),
     ("settings.set_start_recording_on_scene_launch", read("settings.state", "launch.start_recording_on_scene_launch")),

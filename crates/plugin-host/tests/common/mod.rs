@@ -177,6 +177,7 @@ pub fn modulation_for(device: Device, param: u32, points: &[(Ticks, f64)]) -> No
     for &(at, value) in points {
         editor
             .apply(Command::SetClipEnvelopeBreakpoint {
+                kind: bl_model::EnvelopeKind::Modulation,
                 clip,
                 target,
                 at,

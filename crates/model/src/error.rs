@@ -277,7 +277,8 @@ impl fmt::Display for ModelError {
             Self::NotMidiClip(id) => write!(f, "{id} is an audio clip; this needs a MIDI clip"),
             Self::NotSlotClip(id) => write!(
                 f,
-                "{id} isn't in a Session slot; launch settings belong to Session clips"
+                "{id} isn't in a Session slot; launch settings and automation envelopes belong to Session \
+                 clips"
             ),
             Self::CannotRoute { track, to } => write!(
                 f,

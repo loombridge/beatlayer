@@ -1208,10 +1208,11 @@ const ENTRIES: &[Entry] = &[
         permission: Permission::Edit,
         contexts: &[ClipView],
         keys: &[],
-        description: "Moves one of a clip envelope's breakpoints from `at` to `to`, keeping its \
-            value, as dragging it in the Envelopes tab does. `clip` and `target` name the \
-            envelope as `clip.set_envelope_breakpoint` does. `to` is 0 or later, and not where \
-            another breakpoint of the same envelope already is.",
+        description: "Moves one of a clip envelope's breakpoints from `at` to `to`, as dragging it \
+            in the Envelopes tab does. `clip` and `target` name the envelope as \
+            `clip.set_envelope_breakpoint` does. `to` is 0 or later, and not where another \
+            breakpoint of the same envelope already is. `value` gives the breakpoint a new \
+            value in the parameter's own units; left out, it keeps the one it has.",
     },
     Entry {
         id: "clip.delete_envelope_breakpoint",

@@ -1333,7 +1333,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Option+Tab"]
 win = ["Ctrl+Tab"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "view.clip_tab", contexts = ["sample-editor"] },
+]
 
 [[shortcut]]
 id = "S-CLIPMODE-002"
@@ -1344,7 +1347,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Option+Tab"]
 win = ["Ctrl+Tab"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "view.clip_tab", contexts = ["note-editor"] },
+]
 
 [[shortcut]]
 id = "S-CLIPMODE-003"
@@ -1355,7 +1361,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["Option+Shift+1"]
 win = ["Alt+Shift+1"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "view.clip_tab", contexts = ["clip-view"], args = { tab = "notes" } },
+]
 
 [[shortcut]]
 id = "S-CLIPMODE-004"
@@ -1366,7 +1375,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Option+Shift+2"]
 win = ["Alt+Shift+2"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "view.clip_tab", contexts = ["clip-view"], args = { tab = "envelopes" } },
+]
 
 [[shortcut]]
 id = "S-CLIPMODE-005"

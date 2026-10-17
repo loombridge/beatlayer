@@ -22,7 +22,7 @@
 use bl_commands::Context::{ClipView, NoteEditor, NoteSelection};
 use bl_commands::{CommandSpec, Permission, RegisterError, Registry};
 use bl_core::time::Ticks;
-use bl_model::ClipId;
+use bl_model::{AutomationTarget, ClipId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -79,6 +79,35 @@ pub enum NoteSelectMode {
     Replace,
     /// Select each note that isn't selected and deselect each that is.
     Toggle,
+}
+
+/// The Clip View's tabs (layout.md, L-CLIP-010): which editor it shows for
+/// the clip. The MPE tab comes with its own package.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[schemars(
+    description = "A tab of the Clip View: `notes` (the MIDI Note Editor) or `envelopes` (the \
+                   clip's envelopes)."
+)]
+pub enum ClipTab {
+    /// The MIDI Note Editor.
+    #[default]
+    Notes,
+    /// The clip's envelopes (WP-3.16).
+    Envelopes,
+}
+
+impl ClipTab {
+    /// The tabs `view.clip_tab` cycles through, in the order the Clip View
+    /// lists them.
+    pub const ALL: [Self; 2] = [Self::Notes, Self::Envelopes];
+
+    /// The tab after this one, going back to the first after the last.
+    #[must_use]
+    pub fn next(self) -> Self {
+        let at = Self::ALL.iter().position(|tab| *tab == self).unwrap_or(0);
+        Self::ALL[(at + 1) % Self::ALL.len()]
+    }
 }
 
 /// Which of a note's editable values the lane shows and the value commands
@@ -364,8 +393,8 @@ pub struct NoteEditResult {
     pub undo_step: bool,
 }
 
-/// What the Clip View shows: which clip its MIDI Note Editor is editing,
-/// the notes selected in it, and the lane's setting.
+/// What the Clip View shows: which clip it is editing, the notes selected in
+/// it, the lane's setting, and the tab with the envelope it shows.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ClipViewState {
     /// Whether the Clip View shows in the detail area.
@@ -383,6 +412,11 @@ pub struct ClipViewState {
     /// Whether the note editor shows only the rows that hold notes (Fold,
     /// F).
     pub folded: bool,
+    /// The tab the Clip View shows.
+    pub tab: ClipTab,
+    /// The parameter whose envelope the Envelopes tab shows; `null` when it
+    /// shows none.
+    pub envelope: Option<AutomationTarget>,
 }
 
 /// Adds the Clip View's note-editing commands to a registry.

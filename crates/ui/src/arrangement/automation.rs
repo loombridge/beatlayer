@@ -30,23 +30,23 @@ use crate::widgets::{self, Choice};
 
 /// How close to a breakpoint, in points, a click deletes it or a press drags
 /// it.
-const BREAKPOINT_GRAB: f32 = 5.0;
+pub(crate) const BREAKPOINT_GRAB: f32 = 5.0;
 
 /// How close to a segment, in points, a click adds a breakpoint to it or an
 /// Alt/Option press curves it.
-const SEGMENT_GRAB: f32 = 4.0;
+pub(crate) const SEGMENT_GRAB: f32 = 4.0;
 
 /// The size of a breakpoint's square, in points.
-const BREAKPOINT_SIZE: f32 = 5.0;
+pub(crate) const BREAKPOINT_SIZE: f32 = 5.0;
 
 /// How far Option/Alt drags a segment, per point, to move its bend: the
 /// bend's own law is Beatlayer's (the automation spec, R12), because Live's
 /// isn't measured, and so is this gesture's mapping to it.
-const CURVE_PER_POINT: f64 = 0.02;
+pub(crate) const CURVE_PER_POINT: f64 = 0.02;
 
 /// How much Shift scales a breakpoint drag's value: finer steps
 /// (shortcuts.toml, S-ENV-002).
-const FINE_VALUE: f64 = 0.2;
+pub(crate) const FINE_VALUE: f64 = 0.2;
 
 fn invoke(events: &mut Vec<UiEvent>, id: &str, args: Value) {
     events.push(UiEvent::Invoke(Invocation::new(id, args)));
@@ -213,7 +213,7 @@ impl Lanes<'_> {
 /// How a parameter's values map onto its lane's vertical axis: the axis Live
 /// draws it on, so a fader's useful range isn't squashed.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) enum LaneScale {
+pub(crate) enum LaneScale {
     /// A track's volume fader, which is dB-like: [`mixer_controls`]'s travel.
     Volume,
     /// A send level, whose travel matches the faders'.
@@ -228,7 +228,7 @@ pub(super) enum LaneScale {
 
 impl LaneScale {
     /// Where a value sits on the axis, from 0 (the bottom) to 1 (the top).
-    fn position(self, value: f64) -> f64 {
+    pub(crate) fn position(self, value: f64) -> f64 {
         let t = match self {
             Self::Volume => mixer_controls::fader_position(value),
             Self::Send => mixer_controls::send_position(value),
@@ -246,7 +246,7 @@ impl LaneScale {
     }
 
     /// The value at a place on the axis, from 0 (the bottom) to 1 (the top).
-    fn value(self, t: f64) -> f64 {
+    pub(crate) fn value(self, t: f64) -> f64 {
         let t = t.clamp(0.0, 1.0);
         match self {
             Self::Volume => mixer_controls::fader_gain(t),
@@ -259,7 +259,7 @@ impl LaneScale {
 }
 
 /// The scale a parameter's lane draws on.
-fn lane_scale(shell: &Shell, doc: &Document, target: AutomationTarget) -> LaneScale {
+pub(crate) fn lane_scale(shell: &Shell, doc: &Document, target: AutomationTarget) -> LaneScale {
     match target {
         AutomationTarget::Mixer {
             param: MixerParam::Volume,
@@ -298,7 +298,7 @@ pub enum AutomationDevice {
 }
 
 /// The device a target belongs to, as the device chooser sees it.
-fn device_of(target: AutomationTarget) -> AutomationDevice {
+pub(crate) fn device_of(target: AutomationTarget) -> AutomationDevice {
     match target {
         AutomationTarget::Mixer { .. } | AutomationTarget::Send { .. } => AutomationDevice::Mixer,
         AutomationTarget::Device { device, .. } => AutomationDevice::Device(device),
@@ -396,7 +396,7 @@ pub fn control_choices(
 
 /// The target a newly chosen device shows: the mixer's volume, a device's
 /// first automatable parameter, or nothing.
-fn default_target(
+pub(crate) fn default_target(
     shell: &Shell,
     doc: &Document,
     device: AutomationDevice,
@@ -415,7 +415,7 @@ fn default_target(
 
 /// Whether a target belongs to a chosen device, for the control chooser's
 /// selection.
-fn belongs_to(target: AutomationTarget, device: AutomationDevice) -> bool {
+pub(crate) fn belongs_to(target: AutomationTarget, device: AutomationDevice) -> bool {
     device_of(target) == device
 }
 
@@ -810,7 +810,7 @@ pub(super) fn lane_header(
 }
 
 /// A label for a target, for assistive technology.
-pub(super) fn target_label(shell: &Shell, doc: &Document, target: AutomationTarget) -> String {
+pub(crate) fn target_label(shell: &Shell, doc: &Document, target: AutomationTarget) -> String {
     match target {
         AutomationTarget::Mixer { param } => match param {
             MixerParam::Volume => "Volume".to_owned(),

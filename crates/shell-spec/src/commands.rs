@@ -5,15 +5,17 @@
 //! can check them and list them in the command reference without linking a UI
 //! crate or an audio host. `bl-shell`'s `Shell::run` runs them by ID.
 
-use bl_commands::Context::{ClipView, Dialog, Global, NoteEditor, Settings, TabFocus};
-use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};
+use bl_commands::Context::{
+    ClipView, Dialog, Envelope, Global, NoteEditor, SampleEditor, Settings, TabFocus,
+};
+use bl_commands::{Binding, CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use bl_model::{LaunchMode, LaunchQuantization};
 
 use crate::audio::{AudioDevices, AudioStatus, ConfigureAudio};
-use crate::notes::{ClipViewState, NoteField};
+use crate::notes::{ClipTab, ClipViewState, NoteField};
 use crate::settings::{SettingsPage, ThemeChoice};
 
 /// `set.new`: replace the set with the factory default set.
@@ -61,6 +63,12 @@ pub const VIEW_DRAW_MODE: &str = "view.draw_mode";
 pub const VIEW_FOLD_NOTES: &str = "view.fold_notes";
 /// `view.lane`: choose which value the Clip View's lane shows (WP-2.3).
 pub const VIEW_LANE: &str = "view.lane";
+/// `view.clip_tab`: show a tab of the Clip View, or go on to the next
+/// (S-CLIPMODE-001 to 004, WP-3.16).
+pub const VIEW_CLIP_TAB: &str = "view.clip_tab";
+/// `view.clip_envelope`: choose the parameter whose envelope the Clip View's
+/// Envelopes tab shows (WP-3.16).
+pub const VIEW_CLIP_ENVELOPE: &str = "view.clip_envelope";
 /// `view.toggle_info_view`: show or hide the Info View.
 pub const VIEW_TOGGLE_INFO_VIEW: &str = "view.toggle_info_view";
 /// `view.toggle_plug_in_windows`: show or hide the plug-in windows: the
@@ -165,6 +173,8 @@ pub const IDS: &[&str] = &[
     VIEW_DRAW_MODE,
     VIEW_FOLD_NOTES,
     VIEW_LANE,
+    VIEW_CLIP_TAB,
+    VIEW_CLIP_ENVELOPE,
     VIEW_TOGGLE_INFO_VIEW,
     VIEW_TOGGLE_PLUG_IN_WINDOWS,
     VIEW_TOGGLE_SESSION_ARRANGEMENT,
@@ -392,6 +402,24 @@ pub struct FoldNotesArgs {
 pub struct LaneArgs {
     /// Which value the lane shows.
     pub lane: NoteField,
+}
+
+/// Arguments of `view.clip_tab`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ClipTabArgs {
+    /// The tab to show. Left out, the Clip View goes on to the next one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tab: Option<ClipTab>,
+}
+
+/// Arguments of `view.clip_envelope`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ClipEnvelopeArgs {
+    /// The parameter of the shown clip's track whose envelope the Envelopes
+    /// tab shows, or `null` to show none.
+    pub target: Option<bl_model::AutomationTarget>,
 }
 
 /// What a command that switches something returns: its new state.
@@ -735,6 +763,38 @@ fn specs() -> Vec<CommandSpec> {
             .permission(Permission::Read)
             .contexts([ClipView, NoteEditor])
             .args::<LaneArgs>()
+            .result::<ClipViewState>(),
+        CommandSpec::new(VIEW_CLIP_TAB, "Clip View Tab")
+            .description(
+                "Chooses the tab the Clip View shows for its clip: `notes` (the MIDI Note \
+                 Editor, Option+Shift+1) or `envelopes` (the clip's envelopes, \
+                 Option+Shift+2). Left out, `tab` goes on to the next tab and round to the \
+                 first after the last (Option+Tab). The Clip View shows the clip most \
+                 recently selected, in the Arrangement or in a Session slot. Changes only \
+                 the view, so it's no undo step and isn't saved with the set. The result \
+                 says which tab shows.",
+            )
+            .permission(Permission::Read)
+            .contexts([ClipView, NoteEditor, SampleEditor, Envelope])
+            .binding(Binding::new("S-CLIPMODE-001"))
+            .binding(Binding::new("S-CLIPMODE-002"))
+            .binding(Binding::new("S-CLIPMODE-003").arg("tab", "notes"))
+            .binding(Binding::new("S-CLIPMODE-004").arg("tab", "envelopes"))
+            .args::<ClipTabArgs>()
+            .result::<ClipViewState>(),
+        CommandSpec::new(VIEW_CLIP_ENVELOPE, "Clip View Envelope")
+            .description(
+                "Chooses the parameter whose envelope the Clip View's Envelopes tab shows \
+                 and edits, as its device and control choosers do: `target` is a control of \
+                 the shown clip's track's mixer, one of its sends, or a parameter of a \
+                 device in its chain, named as `clip.set_envelope_breakpoint` names it; \
+                 `null` shows none. Changes only the view, so it's no undo step. Editing \
+                 the envelope is done by the `clip.*envelope*` commands. The result says \
+                 which parameter shows.",
+            )
+            .permission(Permission::Read)
+            .contexts([ClipView, Envelope])
+            .args::<ClipEnvelopeArgs>()
             .result::<ClipViewState>(),
         CommandSpec::new(VIEW_TOGGLE_INFO_VIEW, "Info")
             .description(

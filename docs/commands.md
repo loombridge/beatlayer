@@ -349,6 +349,8 @@ Each command has:
 | [`transport.state`](#transportstate) | Transport Status | `read` |  |  |
 | [`transport.stop`](#transportstop) | Stop | `read` |  |  |
 | [`transport.stop_recording`](#transportstop_recording) | Stop Recording | `read` |  |  |
+| [`view.clip_envelope`](#viewclip_envelope) | Clip View Envelope | `read` |  |  |
+| [`view.clip_tab`](#viewclip_tab) | Clip View Tab | `read` | `Option+Tab`; `Option+Tab`; `Option+Shift+1`; `Option+Shift+2` | `Ctrl+Tab`; `Ctrl+Tab`; `Alt+Shift+1`; `Alt+Shift+2` |
 | [`view.draw_mode`](#viewdraw_mode) | Draw Mode | `read` | `B` | `B` |
 | [`view.fold_notes`](#viewfold_notes) | Fold to Notes | `read` | `F` | `F` |
 | [`view.full_screen`](#viewfull_screen) | Full Screen | `read` | `Ctrl+Cmd+F` | `F11` |
@@ -2015,7 +2017,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Move Envelope Breakpoint**. Permission: `edit`. Contexts: `clip-view`.
 
-Moves one of a clip envelope's breakpoints from `at` to `to`, keeping its value, as dragging it in the Envelopes tab does. `clip` and `target` name the envelope as `clip.set_envelope_breakpoint` does. `to` is 0 or later, and not where another breakpoint of the same envelope already is.
+Moves one of a clip envelope's breakpoints from `at` to `to`, as dragging it in the Envelopes tab does. `clip` and `target` name the envelope as `clip.set_envelope_breakpoint` does. `to` is 0 or later, and not where another breakpoint of the same envelope already is. `value` gives the breakpoint a new value in the parameter's own units; left out, it keeps the one it has.
 
 Default keys: none.
 
@@ -2027,6 +2029,7 @@ Arguments:
 | `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter of the clip's track. |
 | `at` | [`Ticks`](#ticks) | yes | Where the breakpoint is now. |
 | `to` | [`Ticks`](#ticks) | yes | Where it goes: 0 or later, and not where another breakpoint of the same envelope already is. |
+| `value` | number or null | no | The value it takes there, in the parameter's own units, or `null` (or nothing) to keep the value it has. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -5922,6 +5925,45 @@ Result: nothing (`null`).
 
 ### Area `view`
 
+#### `view.clip_envelope`
+
+**Clip View Envelope**. Permission: `read`. Contexts: `clip-view`, `envelope`.
+
+Chooses the parameter whose envelope the Clip View's Envelopes tab shows and edits, as its device and control choosers do: `target` is a control of the shown clip's track's mixer, one of its sends, or a parameter of a device in its chain, named as `clip.set_envelope_breakpoint` names it; `null` shows none. Changes only the view, so it's no undo step. Editing the envelope is done by the `clip.*envelope*` commands. The result says which parameter shows.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `target` | [`AutomationTarget`](#automationtarget) or null | no | The parameter of the shown clip's track whose envelope the Envelopes tab shows, or `null` to show none. |
+
+Result: [`ClipViewState`](#clipviewstate).
+
+#### `view.clip_tab`
+
+**Clip View Tab**. Permission: `read`. Contexts: `clip-view`, `note-editor`, `sample-editor`, `envelope`.
+
+Chooses the tab the Clip View shows for its clip: `notes` (the MIDI Note Editor, Option+Shift+1) or `envelopes` (the clip's envelopes, Option+Shift+2). Left out, `tab` goes on to the next tab and round to the first after the last (Option+Tab). The Clip View shows the clip most recently selected, in the Arrangement or in a Session slot. Changes only the view, so it's no undo step and isn't saved with the set. The result says which tab shows.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-CLIPMODE-001 | `Option+Tab` | `Ctrl+Tab` | `sample-editor` | Switch between the Sample and Envelopes tabs | runs it |
+| S-CLIPMODE-002 | `Option+Tab` | `Ctrl+Tab` | `note-editor` | Cycle the Notes, Envelopes and MPE tabs | runs it |
+| S-CLIPMODE-003 | `Option+Shift+1` | `Alt+Shift+1` | `clip-view` | Show the Content Editor (the Sample or Notes tab) | fixes `tab` = `"notes"` |
+| S-CLIPMODE-004 | `Option+Shift+2` | `Alt+Shift+2` | `clip-view` | Show the Envelope Editor (the Envelopes tab) | fixes `tab` = `"envelopes"` |
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `tab` | [`ClipTab`](#cliptab) or null | no | The tab to show. Left out, the Clip View goes on to the next one. |
+
+Result: [`ClipViewState`](#clipviewstate).
+
 #### `view.draw_mode`
 
 **Draw Mode**. Permission: `read`. Contexts: `global`.
@@ -8410,9 +8452,40 @@ A Session clip's own launch settings (the Clip View's Launch panel, WP-3.4). The
 
 </details>
 
+### `ClipTab`
+
+A tab of the Clip View: `notes` (the MIDI Note Editor) or `envelopes` (the clip's envelopes).
+
+One of:
+
+- `"notes"`: The MIDI Note Editor.
+- `"envelopes"`: The clip's envelopes (WP-3.16).
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A tab of the Clip View: `notes` (the MIDI Note Editor) or `envelopes` (the clip's envelopes).",
+  "oneOf": [
+    {
+      "const": "notes",
+      "description": "The MIDI Note Editor.",
+      "type": "string"
+    },
+    {
+      "const": "envelopes",
+      "description": "The clip's envelopes (WP-3.16).",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `ClipViewState`
 
-What the Clip View shows: which clip its MIDI Note Editor is editing, the notes selected in it, and the lane's setting.
+What the Clip View shows: which clip it is editing, the notes selected in it, the lane's setting, and the tab with the envelope it shows.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -8422,12 +8495,14 @@ What the Clip View shows: which clip its MIDI Note Editor is editing, the notes 
 | `selected` | array of integer, at least 0 | yes | The selected notes, by their place in the clip's notes in order (by start, then pitch). |
 | `lane` | [`NoteField`](#notefield) | yes | Which value the lane under the note editor shows and edits. |
 | `folded` | boolean | yes | Whether the note editor shows only the rows that hold notes (Fold, F). |
+| `tab` | [`ClipTab`](#cliptab) | yes | The tab the Clip View shows. |
+| `envelope` | [`AutomationTarget`](#automationtarget) or null | yes | The parameter whose envelope the Envelopes tab shows; `null` when it shows none. |
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "What the Clip View shows: which clip its MIDI Note Editor is editing, the notes selected in it, and the lane's setting.",
+  "description": "What the Clip View shows: which clip it is editing, the notes selected in it, the lane's setting, and the tab with the envelope it shows.",
   "properties": {
     "clip": {
       "anyOf": [
@@ -8443,6 +8518,17 @@ What the Clip View shows: which clip its MIDI Note Editor is editing, the notes 
     "draw_mode": {
       "description": "Whether Draw Mode is on (B): clicking the note area adds a note, and clicking a note removes it.",
       "type": "boolean"
+    },
+    "envelope": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AutomationTarget"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The parameter whose envelope the Envelopes tab shows; `null` when it shows none."
     },
     "folded": {
       "description": "Whether the note editor shows only the rows that hold notes (Fold, F).",
@@ -8461,6 +8547,10 @@ What the Clip View shows: which clip its MIDI Note Editor is editing, the notes 
       },
       "type": "array"
     },
+    "tab": {
+      "$ref": "#/$defs/ClipTab",
+      "description": "The tab the Clip View shows."
+    },
     "visible": {
       "description": "Whether the Clip View shows in the detail area.",
       "type": "boolean"
@@ -8472,7 +8562,9 @@ What the Clip View shows: which clip its MIDI Note Editor is editing, the notes 
     "clip",
     "selected",
     "lane",
-    "folded"
+    "folded",
+    "tab",
+    "envelope"
   ],
   "type": "object"
 }

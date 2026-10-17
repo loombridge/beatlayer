@@ -680,7 +680,8 @@ pub enum Command {
         /// chooses which side the segment bows to.
         bend: f64,
     },
-    /// Moves one of a clip envelope's breakpoints, keeping its value.
+    /// Moves one of a clip envelope's breakpoints, keeping its value unless
+    /// `value` gives it a new one, as dragging it in the Envelopes tab does.
     MoveClipEnvelopeBreakpoint {
         /// The clip.
         clip: ClipId,
@@ -691,6 +692,10 @@ pub enum Command {
         /// Where it goes: 0 or later, and not where another breakpoint of
         /// the same envelope already is.
         to: Ticks,
+        /// The value it takes there, in the parameter's own units, or `null`
+        /// (or nothing) to keep the value it has.
+        #[serde(default)]
+        value: Option<f64>,
     },
     /// Deletes one of a clip envelope's breakpoints, so the segments either
     /// side of it become the one starting at the breakpoint before it.
@@ -1509,7 +1514,8 @@ impl Document {
                 target,
                 at,
                 to,
-            } => self.move_clip_envelope_breakpoint(*clip, *target, *at, *to),
+                value,
+            } => self.move_clip_envelope_breakpoint(*clip, *target, *at, *to, *value),
             Command::DeleteClipEnvelopeBreakpoint { clip, target, at } => {
                 self.delete_clip_envelope_breakpoint(*clip, *target, *at)
             }
@@ -2346,16 +2352,20 @@ impl Document {
     }
 
     /// Moves the breakpoint at `at` on the clip's envelope for `target` to
-    /// `to`, keeping its value.
+    /// `to`, keeping its value unless `value` gives it another.
     fn move_clip_envelope_breakpoint(
         &mut self,
         clip: ClipId,
         target: AutomationTarget,
         at: Ticks,
         to: Ticks,
+        value: Option<f64>,
     ) -> Result<(), ModelError> {
         if to < Ticks::ZERO {
             return Err(ModelError::NegativePosition(to));
+        }
+        if let Some(value) = value {
+            check_value("clip envelope value", value, value.is_finite())?;
         }
         self.check_clip_envelope_target(clip, target)?;
         let envelope = self
@@ -2369,6 +2379,9 @@ impl Document {
         envelope
             .move_point(at, to)
             .map_err(automation_point_error)?;
+        if let Some(value) = value {
+            envelope.set(to, value);
+        }
         self.clip_envelope_mut(clip, target)?.envelope = envelope;
         Ok(())
     }
@@ -2559,7 +2572,7 @@ impl Document {
     /// Checks that `target` names a parameter of `track`: a control of its
     /// mixer, one of its sends to a return track, or a parameter of a device
     /// in its chain.
-    pub(crate) fn check_automation_target(
+    pub fn check_automation_target(
         &self,
         track: TrackId,
         target: AutomationTarget,
@@ -5170,6 +5183,42 @@ mod tests {
         song.doc.check_invariants().unwrap();
     }
 
+    // Spec: clip-envelopes R5
+    #[test]
+    fn moving_a_clip_envelope_breakpoint_can_give_it_a_new_value() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        let clip = song.clip(track, 0);
+        let volume = AutomationTarget::Mixer {
+            param: MixerParam::Volume,
+        };
+        song.apply(Command::SetClipEnvelopeBreakpoint {
+            clip,
+            target: volume,
+            at: Ticks::ZERO,
+            value: 0.5,
+        })
+        .unwrap();
+        song.apply(Command::MoveClipEnvelopeBreakpoint {
+            clip,
+            target: volume,
+            at: Ticks::ZERO,
+            to: Ticks::WHOLE,
+            value: Some(0.25),
+        })
+        .unwrap();
+        let envelope = &song.doc.clip(clip).unwrap().envelope(&volume).unwrap();
+        assert!(envelope.envelope.point(Ticks::ZERO).is_none());
+        assert_eq!(envelope.envelope.point(Ticks::WHOLE).unwrap().value, 0.25);
+        song.reject(Command::MoveClipEnvelopeBreakpoint {
+            clip,
+            target: volume,
+            at: Ticks::WHOLE,
+            to: Ticks::WHOLE * 2,
+            value: Some(f64::NAN),
+        });
+    }
+
     // Spec: clip-envelopes R1, R5
     #[test]
     fn a_clip_carries_envelopes_and_their_edits_work() {
@@ -5277,6 +5326,7 @@ mod tests {
             target: volume,
             at: Ticks::WHOLE,
             to: Ticks::WHOLE * 2,
+            value: None,
         })
         .unwrap();
         let envelope = &song.doc.clip(clip).unwrap().envelope(&volume).unwrap();
@@ -5355,6 +5405,7 @@ mod tests {
                 target: volume,
                 at: Ticks::ZERO,
                 to: Ticks::WHOLE * 2,
+                value: None,
             }),
             ModelError::ChangeInUse {
                 what: "breakpoint",
@@ -5367,6 +5418,7 @@ mod tests {
                 target: volume,
                 at: Ticks::WHOLE,
                 to: Ticks::WHOLE * 4,
+                value: None,
             }),
             ModelError::NoChange {
                 what: "breakpoint",

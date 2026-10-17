@@ -151,6 +151,7 @@ fn clip_envelopes_pass_under_rtsan() {
                 target: volume(),
                 at: Ticks::WHOLE / 2,
                 to: Ticks::WHOLE / 4,
+                value: None,
             }),
             12 => Some(Command::SetClipEnvelopeLinked {
                 clip,

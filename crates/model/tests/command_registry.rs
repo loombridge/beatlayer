@@ -1262,6 +1262,7 @@ fn schemas_match_what_commands_serialise() {
                 },
                 at: Ticks::QUARTER,
                 to: Ticks::WHOLE,
+                value: None,
             },
         ),
         (

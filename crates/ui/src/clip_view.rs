@@ -32,17 +32,23 @@ use bl_core::time::Ticks;
 use bl_model::registry::{SET_MIDI_LOOP, SET_MIDI_REGION};
 use bl_model::{ClipData, ClipId, Document, MidiData, Note};
 use bl_shell::arrangement::ArrangementView;
+use bl_shell::arrangement_commands::{AdaptiveGrid, FixedGrid};
 use bl_shell::clip_view::{move_limits, notes_in_order, resize_limit};
 use bl_shell::commands::VIEW_LANE;
 use bl_shell::note_commands as ids;
-use bl_shell::note_commands::NoteField;
-use bl_shell::{GesturePhase, Invocation, Shell};
-use egui::{Align2, CursorIcon, Id, Key, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, pos2};
+use bl_shell::note_commands::{ClipTab, NoteField};
+use bl_shell::{Area, GesturePhase, Invocation, Shell};
+use egui::{
+    Align2, CursorIcon, Id, Key, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, WidgetInfo, WidgetType,
+    pos2, vec2,
+};
 use serde_json::{Value, json};
 
 use crate::arrangement::editing::EditKeys;
+use crate::clip_envelope::{self, EnvelopeEditor};
 use crate::main_window::UiEvent;
 use crate::theme::Theme;
+use crate::widgets::{self, Choice};
 
 /// How wide the key track is, at the note area's left (L-CLIP-012).
 pub const KEY_WIDTH: f32 = 27.0;
@@ -53,6 +59,18 @@ pub const LANE_HEIGHT: f32 = 43.0;
 /// How close to a note's end, in points, a press resizes it rather than
 /// moving it.
 pub const EDGE_GRAB: f32 = 4.0;
+/// How tall the editor toolbar is, in points: the tabs and the grid chooser
+/// (L-CLIP-010).
+pub const TOOLBAR_HEIGHT: f32 = 16.0;
+/// How wide a tab is, and how far apart their left edges are (L-CLIP-010's
+/// tabs sit 61 points apart).
+const TAB_WIDTH: f32 = 58.0;
+const TAB_STEP: f32 = 61.0;
+/// How far the first tab sits from the Clip View's left edge (x 1029 against
+/// the toolbar's 593, L-CLIP-010).
+const TABS_LEFT: f32 = 436.0;
+/// How wide the grid chooser is, in points.
+const GRID_CHOOSER_WIDTH: f32 = 72.0;
 /// How tall the editor ruler and marker strip is, in points (L-CLIP-011).
 pub const STRIP_HEIGHT: f32 = 16.0;
 /// How close to a marker's or a loop-brace end's line, in points, a press
@@ -68,18 +86,57 @@ const DEFAULT_TOP: f32 = 60.0;
 /// How wide a note's stem in the lane is.
 const STEM_WIDTH: f32 = 3.0;
 
+/// The editor toolbar along the Clip View's top (L-CLIP-010): the Notes,
+/// Envelopes and MPE tabs, and the grid chooser.
+#[must_use]
+pub fn toolbar_rect(view: Rect) -> Rect {
+    Rect::from_min_max(view.min, pos2(view.max.x, view.top() + TOOLBAR_HEIGHT))
+}
+
+/// The tabs in the order the toolbar lists them: the tab each shows, with
+/// its name. The MPE tab comes with its own package, so it shows disabled.
+const TABS: [(Option<ClipTab>, &str); 3] = [
+    (Some(ClipTab::Notes), "Notes"),
+    (Some(ClipTab::Envelopes), "Envelopes"),
+    (None, "MPE"),
+];
+
+/// The tab at `index` in [`TABS`].
+#[must_use]
+pub fn tab_rect(view: Rect, index: usize) -> Rect {
+    let toolbar = toolbar_rect(view);
+    let left = (view.left() + TABS_LEFT)
+        .min(view.right() - TAB_STEP * TABS.len() as f32 - GRID_CHOOSER_WIDTH)
+        .max(view.left());
+    Rect::from_min_size(
+        pos2(left + TAB_STEP * index as f32, toolbar.top()),
+        vec2(TAB_WIDTH, toolbar.height()),
+    )
+}
+
+/// The grid chooser, at the toolbar's right end.
+#[must_use]
+pub fn grid_chooser_rect(view: Rect) -> Rect {
+    let toolbar = toolbar_rect(view);
+    Rect::from_min_size(
+        pos2(toolbar.right() - GRID_CHOOSER_WIDTH - 3.0, toolbar.top()),
+        vec2(GRID_CHOOSER_WIDTH, toolbar.height()),
+    )
+}
+
 /// The editor ruler and marker strip above the note area (L-CLIP-011):
 /// the clip's Start and End markers and its loop brace.
 #[must_use]
 pub fn strip_rect(view: Rect) -> Rect {
-    Rect::from_min_max(view.min, pos2(view.max.x, view.top() + STRIP_HEIGHT))
+    let top = view.top() + TOOLBAR_HEIGHT;
+    Rect::from_min_max(pos2(view.left(), top), pos2(view.max.x, top + STRIP_HEIGHT))
 }
 
-/// The note area: the Clip View without its marker strip, its key track and
-/// its lane.
+/// The note area: the Clip View without its toolbar, its marker strip, its
+/// key track and its lane.
 #[must_use]
 pub fn grid_rect(view: Rect) -> Rect {
-    let top = view.top() + STRIP_HEIGHT;
+    let top = view.top() + TOOLBAR_HEIGHT + STRIP_HEIGHT;
     Rect::from_min_max(
         pos2(view.left() + KEY_WIDTH, top),
         pos2(view.max.x, (view.bottom() - LANE_HEIGHT).max(top)),
@@ -93,7 +150,7 @@ pub fn lane_rect(view: Rect) -> Rect {
     Rect::from_min_max(
         pos2(
             view.left(),
-            (view.bottom() - LANE_HEIGHT).max(view.top() + STRIP_HEIGHT),
+            (view.bottom() - LANE_HEIGHT).max(view.top() + TOOLBAR_HEIGHT + STRIP_HEIGHT),
         ),
         view.max,
     )
@@ -112,6 +169,39 @@ fn loop_ticks(midi: &MidiData, length: Ticks) -> (Ticks, Ticks) {
         midi.loop_start,
         midi.loop_end.unwrap_or(midi.start + length),
     )
+}
+
+/// Paints the editor's background and the editing grid's vertical lines
+/// over `grid`, with contents tick `start` at its left edge and the clip's
+/// `length` across it.
+pub(crate) fn paint_grid_lines(
+    ui: &Ui,
+    shell: &Shell,
+    theme: &Theme,
+    grid: Rect,
+    start: Ticks,
+    length: Ticks,
+) {
+    let painter = ui.painter();
+    let colours = &theme.colors;
+    painter.rect_filled(grid, 0.0, colours.lane.0);
+    let step = shell.arrangement().grid_ticks(shell.editor().document());
+    let px = (ui.ctx().pixels_per_point() * 0.5).max(0.5);
+    let mut at = start - Ticks(start.get().rem_euclid(step.get()));
+    while at <= start + length {
+        let x = x_of_tick(grid, start, length, at);
+        let bar = at.get().rem_euclid(Ticks::WHOLE.get()) == 0;
+        painter.rect_filled(
+            Rect::from_min_max(pos2(x, grid.top()), pos2(x + px, grid.bottom())),
+            0.0,
+            if bar {
+                colours.grid_bar.0
+            } else {
+                colours.grid_beat.0
+            },
+        );
+        at += step;
+    }
 }
 
 /// The keys the note editor shows, top to bottom: every key, or only the
@@ -515,6 +605,113 @@ fn gesture(events: &mut Vec<UiEvent>, phase: GesturePhase, id: &str, args: Value
     });
 }
 
+/// The grid chooser's choices: the zoom-adaptive settings, then the fixed
+/// spacings, as the Arrangement's context menus list them (C-CLIP-ARR-020,
+/// C-CLIP-ARR-021).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GridChoice {
+    Adaptive(AdaptiveGrid),
+    Fixed(FixedGrid),
+}
+
+/// Draws the toolbar: the Notes, Envelopes and MPE tabs, and the grid
+/// chooser (L-CLIP-010). A tab runs `view.clip_tab`, the grid chooser
+/// `arrangement.set_grid`.
+fn toolbar(ui: &mut Ui, shell: &Shell, theme: &Theme, view: Rect, events: &mut Vec<UiEvent>) {
+    let colours = &theme.colors;
+    let shown = shell.clip_view().tab();
+    ui.painter()
+        .rect_filled(toolbar_rect(view), 0.0, colours.bar.0);
+    for (index, (tab, name)) in TABS.iter().enumerate() {
+        let rect = tab_rect(view, index);
+        let id = Id::new(("clip-view-tab", index));
+        let enabled = tab.is_some();
+        let response = ui.interact(
+            rect,
+            id,
+            if enabled {
+                Sense::click()
+            } else {
+                Sense::hover()
+            },
+        );
+        if enabled {
+            crate::focus::register(ui.ctx(), id, Area::Detail, None);
+        }
+        let on = *tab == Some(shown);
+        let face = if on {
+            colours.control_pressed.0
+        } else if response.hovered() && enabled {
+            colours.control_hover.0
+        } else {
+            colours.control.0
+        };
+        ui.painter().rect_filled(rect, theme.sizes.corner, face);
+        ui.painter().text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            name,
+            theme.font(),
+            if enabled {
+                colours.text.0
+            } else {
+                colours.pending.0
+            },
+        );
+        response.widget_info(|| WidgetInfo::selected(WidgetType::RadioButton, enabled, on, *name));
+        if response.clicked()
+            && let Some(tab) = tab
+        {
+            events.push(UiEvent::Invoke(Invocation::new(
+                "view.clip_tab",
+                json!({ "tab": tab }),
+            )));
+        }
+    }
+    let grid = shell.arrangement().grid();
+    let choices: Vec<Choice<GridChoice>> = AdaptiveGrid::ALL
+        .iter()
+        .map(|choice| Choice {
+            label: choice.label().to_owned(),
+            value: GridChoice::Adaptive(*choice),
+        })
+        .chain(FixedGrid::ALL.iter().map(|choice| Choice {
+            label: choice.label().to_owned(),
+            value: GridChoice::Fixed(*choice),
+        }))
+        .collect();
+    let current = if grid.fixed_on {
+        GridChoice::Fixed(grid.fixed)
+    } else {
+        GridChoice::Adaptive(grid.adaptive)
+    };
+    crate::focus::register(
+        ui.ctx(),
+        Id::new(("chooser", "clip-view-grid")),
+        Area::Detail,
+        None,
+    );
+    if let Some(chosen) = widgets::chooser(
+        ui,
+        theme,
+        "clip-view-grid",
+        "Grid",
+        grid_chooser_rect(view),
+        &choices,
+        Some(&current),
+        true,
+    ) {
+        let args = match chosen {
+            GridChoice::Adaptive(choice) => json!({ "adaptive": choice }),
+            GridChoice::Fixed(choice) => json!({ "fixed": choice }),
+        };
+        events.push(UiEvent::Invoke(Invocation::new(
+            bl_shell::arrangement_commands::SET_GRID,
+            args,
+        )));
+    }
+}
+
 /// What a drag in the lane under the note area is doing (WP-2.3).
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct LaneDrag {
@@ -545,6 +742,8 @@ pub struct ClipViewUi {
     lane_drag: Option<LaneDrag>,
     /// The marquee under way: where it began, and where it is now.
     marquee: Option<(Pos2, Pos2)>,
+    /// The Envelopes tab's editor.
+    envelope: EnvelopeEditor,
 }
 
 impl Default for ClipViewUi {
@@ -558,6 +757,7 @@ impl Default for ClipViewUi {
             strip_drag: None,
             lane_drag: None,
             marquee: None,
+            envelope: EnvelopeEditor::default(),
         }
     }
 }
@@ -611,6 +811,7 @@ impl ClipViewUi {
             self.strip_drag = None;
             self.lane_drag = None;
             self.marquee = None;
+            self.envelope.reset();
             return;
         };
         let folded = shell.clip_view().is_folded(clip);
@@ -625,10 +826,42 @@ impl ClipViewUi {
             self.strip_drag = None;
             self.lane_drag = None;
             self.marquee = None;
+            self.envelope.reset();
         }
         let grid = grid_rect(rect);
         let strip = strip_rect(rect);
         if grid.width() < 1.0 || grid.height() < KEY_HEIGHT || strip.height() < 1.0 {
+            return;
+        }
+        toolbar(ui, shell, theme, rect, events);
+        if shell.clip_view().tab() == ClipTab::Envelopes
+            && let Some(value) = doc.clip(clip)
+        {
+            let target = clip_envelope::shown_target(shell, doc, clip);
+            let axis = match self.strip_drag {
+                Some(drag) if drag.part == StripPart::Start => drag.start,
+                _ => clip_envelope::axis_start(value, &midi, target),
+            };
+            self.paint_strip(ui.painter(), theme, strip, grid, &midi, axis, length);
+            self.strip_input(
+                ui,
+                doc,
+                shell.arrangement(),
+                strip,
+                grid,
+                clip,
+                &midi,
+                axis,
+                length,
+                events,
+            );
+            let frame = clip_envelope::Frame {
+                view: rect,
+                clip: value,
+                midi: &midi,
+                target,
+            };
+            self.envelope.show(ui, shell, theme, &frame, events);
             return;
         }
         let notes = notes_in_order(&midi);
@@ -733,25 +966,9 @@ impl ClipViewUi {
         }
 
         // The clip's contents: the grid lines, then the notes over them.
-        painter.rect_filled(grid, 0.0, colours.lane.0);
         let doc = shell.editor().document();
-        let step = shell.arrangement().grid_ticks(doc);
+        paint_grid_lines(ui, shell, theme, grid, start, length);
         let px = (ui.ctx().pixels_per_point() * 0.5).max(0.5);
-        let mut at = start - Ticks(start.get().rem_euclid(step.get()));
-        while at <= start + length {
-            let x = x_of_tick(grid, start, length, at);
-            let bar = at.get().rem_euclid(Ticks::WHOLE.get()) == 0;
-            painter.rect_filled(
-                Rect::from_min_max(pos2(x, grid.top()), pos2(x + px, grid.bottom())),
-                0.0,
-                if bar {
-                    colours.grid_bar.0
-                } else {
-                    colours.grid_beat.0
-                },
-            );
-            at += step;
-        }
         for row in 0..rows.keys.len() {
             let y = rows.y_of_row(grid, row) + KEY_HEIGHT;
             if y < grid.top() || y > grid.bottom() {

@@ -40,6 +40,7 @@
 pub mod arrangement;
 pub mod assistant_panel;
 pub mod browser;
+pub mod clip_envelope;
 pub mod clip_view;
 pub mod control_bar;
 pub mod device_panel;

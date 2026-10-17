@@ -342,7 +342,7 @@ Total to 1.0: 90 packages planned in Phases 0 to 3, and about 185 estimated in P
 | 2.28 | done | 13 October 2026 | [#1](https://github.com/loombridge/beatlayer/pull/1): previews and range analyses render on a worker thread in the app |
 | 3.1 | done | 15 October 2026 | [#53](https://github.com/loombridge/beatlayer/pull/53); clip slots and scenes in the document |
 | 3.2 | done | 16 October 2026 | [#62](https://github.com/loombridge/beatlayer/pull/62); clip launching, launch quantisation and stop buttons; [the spec](specs/launch-quantisation.md) |
-| 3.3 | todo |  |  |
+| 3.3 | done | 17 October 2026 | [#80](https://github.com/loombridge/beatlayer/pull/80); Trigger, Gate, Toggle and Repeat in the engine, the clip's mode set by command and saved, and `session.release`; the launch buttons don't send the release yet; [the spec](specs/launch-quantisation.md) |
 | 3.4 | done | 17 October 2026 | [#79](https://github.com/loombridge/beatlayer/pull/79); a clip's launch settings stored and set by command, the Launch preferences, Select on Launch and Select Next Scene on Launch; the engine's use of Legato, clip quantisation and velocity, and Nudge, still to build; [the spec](specs/launch-quantisation.md) |
 | 3.5 | done | 17 October 2026 | [#85](https://github.com/loombridge/beatlayer/pull/85); a scene's own tempo and time signature, applied on its launch frame and held until Re-Enable Automation, the Scene View, and Capture and Insert Scene; [the spec](specs/session-view.md) |
 | 3.6 | done | 17 October 2026 | [#82](https://github.com/loombridge/beatlayer/pull/82); Session clips take their track over from the Arrangement, and Back to Arrangement (F10) and the per-track return by command; the buttons are WP-3.8's; [the spec](specs/session-view.md) |

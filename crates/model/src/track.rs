@@ -340,7 +340,7 @@ impl Output {
 
 /// A track's In/Out settings: its input and its channel, Monitor, and its
 /// output (the routing spec).
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 pub struct Routing {
     /// Audio From or MIDI From.
     pub input: Input,
@@ -410,7 +410,7 @@ impl Routing {
 
 /// A track's mixer settings: its volume, pan, and switches. Its sends are
 /// [`Track::sends`]. The rules are in the mixer spec.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Mixer {
     /// Linear gain: 1.0 is unity (0 dB) and 0.0 is silence (−∞ dB). Finite
     /// and never negative.

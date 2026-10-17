@@ -8,6 +8,7 @@
 
 use std::path::Path;
 
+use bl_commands::readback::{self, READBACK};
 use bl_commands::{RegisterError, Registry, reference};
 
 use crate::ui_parity;
@@ -87,11 +88,7 @@ pub fn check(root: &Path) -> Result<(), String> {
 /// generated reference need the UI parity reference.
 pub fn check_registry() -> Result<(), String> {
     let registry = catalogue()?;
-    let problems: Vec<String> = registry
-        .problems()
-        .iter()
-        .map(ToString::to_string)
-        .collect();
+    let problems = registry_problems(&registry);
     if !problems.is_empty() {
         return Err(format!(
             "the command registry has {} problem(s):\n  {}",
@@ -114,11 +111,7 @@ pub fn check_registry() -> Result<(), String> {
 fn build(root: &Path) -> Result<(Registry, String), String> {
     let registry = catalogue()?;
     let shortcuts = ui_parity::shortcut_table(root)?;
-    let mut problems: Vec<String> = registry
-        .problems()
-        .iter()
-        .map(ToString::to_string)
-        .collect();
+    let mut problems = registry_problems(&registry);
     problems.extend(
         registry
             .binding_problems(&shortcuts)
@@ -133,7 +126,27 @@ fn build(root: &Path) -> Result<(Registry, String), String> {
         ));
     }
     let rendered = reference::markdown(&registry, &shortcuts)?;
+    // The readback section goes before the types it may refer to.
+    let rendered = rendered.replacen(
+        "\n## Types",
+        &format!("\n{}## Types", readback::markdown(&registry, READBACK)),
+        1,
+    );
     Ok((registry, rendered))
+}
+
+/// What is wrong with the registry itself: a part missing from a command, and
+/// a command that changes something without saying where it reads back.
+fn registry_problems(registry: &Registry) -> Vec<String> {
+    let mut problems: Vec<String> = registry
+        .problems()
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    problems.extend(readback::problems(registry, READBACK, |object| {
+        bl_model::saved_schema(object.path()).map(|schema| schema.as_value().clone())
+    }));
+    problems
 }
 
 /// Every registered command, from every provider.
@@ -148,6 +161,27 @@ pub fn catalogue() -> Result<Registry, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every command that changes something names where its effect reads
+    /// back, and the place exists.
+    #[test]
+    fn every_command_that_changes_something_names_where_it_reads_back() {
+        let registry = catalogue().expect("the providers register");
+        assert_eq!(registry_problems(&registry), Vec::<String>::new());
+    }
+
+    /// The saved forms the readback table is checked against hold the fields
+    /// the set saves, and only those.
+    #[test]
+    fn the_saved_forms_are_checked_by_their_fields() {
+        let track = bl_model::saved_schema("track").expect("a track has a saved form");
+        assert!(readback::has_field(track.as_value(), "routing.output"));
+        assert!(readback::has_field(track.as_value(), "automation[].points"));
+        assert!(!readback::has_field(track.as_value(), "routing.nothing"));
+        let song = bl_model::saved_schema("song").expect("the song has a saved form");
+        assert!(readback::has_field(song.as_value(), "settings.punch_in"));
+        assert!(readback::has_field(song.as_value(), "scenes[].name"));
+    }
 
     /// The real registry must be complete and the reference in sync, so
     /// `cargo test` catches drift as well as `cargo xtask check`.

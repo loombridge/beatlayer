@@ -3,6 +3,7 @@
 use bl_core::id::Id;
 use bl_core::time::{TempoMap, Ticks, TimeSignatureMap};
 use imbl::{OrdMap, Vector};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::clip::Clip;
@@ -14,7 +15,7 @@ use crate::shared::Shared;
 use crate::track::{Track, TrackKind};
 
 /// Song-wide settings.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Settings {
     /// The tempo map. The default is 120 BPM throughout.
     pub tempo: TempoMap,
@@ -106,7 +107,7 @@ fn is_off(value: &bool) -> bool {
 /// The Arrangement loop: where the loop brace sits, and whether the Loop
 /// switch is on. With it on, playback that reaches the brace's end jumps
 /// back to its start (the transport spec).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 pub struct ArrangementLoop {
     /// Where the brace starts: 0 (1.1.1) or later.
     pub start: Ticks,

@@ -7,6 +7,7 @@
 //! the session view spec.
 
 use bl_core::id::Id;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::error::ModelError;
@@ -18,7 +19,7 @@ pub const DEFAULT_SCENE_COUNT: usize = 8;
 
 /// A scene: one row of the Session grid, holding a clip slot in every audio
 /// and MIDI track.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Scene {
     /// The scene's ID.
     pub id: SceneId,

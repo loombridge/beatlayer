@@ -12,6 +12,8 @@ publish.workspace = true
 # re-exports it. Its schemars is pinned, since the command reference is
 # generated from its schemas.
 lspk-commands.workspace = true
+# The readback table is checked against JSON Schemas.
+serde_json = "1"
 
 [lints]
 workspace = true

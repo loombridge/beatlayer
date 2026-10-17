@@ -627,6 +627,7 @@ impl Processor {
         if let Some(running) = mismatch {
             self.mismatch(program.get(), running);
         }
+        self.session.retain_tracks(&program.get().session_tracks);
         // Dropping the old program here only lets go of it: the drop thread
         // frees it.
         drop(self.program.replace(program));
@@ -876,6 +877,10 @@ impl Processor {
             SessionCommand::LaunchScene(scene) => self.launch_scene(scene),
             SessionCommand::StopTrack(track) => self.stop_session(Some(track)),
             SessionCommand::StopAll => self.stop_session(None),
+            SessionCommand::BackToArrangement => self.session.back_to_arrangement(None),
+            SessionCommand::TrackBackToArrangement(track) => {
+                self.session.back_to_arrangement(Some(track));
+            }
             SessionCommand::SetQuantization(settings) => self.session.set_settings(settings),
         }
     }
@@ -904,7 +909,7 @@ impl Processor {
     }
 
     /// Releases a slot's launch button: a Gate or Repeat clip stops on the
-    /// grid (the launch quantisation spec, R15 and R18).
+    /// grid (the launch quantisation spec, R18 and R21).
     fn release_slot(&mut self, track: TrackId, scene: SceneId) {
         let mode = self.slot_mode(track, scene);
         let playhead = Self::playhead(
@@ -919,7 +924,7 @@ impl Processor {
     }
 
     /// The launch mode of the clip in a slot, read when a button is pressed
-    /// or released; Trigger for a slot with no clip (R19).
+    /// or released; Trigger for a slot with no clip (R22).
     fn slot_mode(&self, track: TrackId, scene: SceneId) -> LaunchMode {
         self.program
             .as_ref()
@@ -969,7 +974,11 @@ impl Processor {
             self.position,
             self.config.sample_rate,
         );
-        self.session.stop(track, playhead);
+        let tracks = self
+            .program
+            .as_ref()
+            .map_or(&[][..], |program| program.get().session_tracks.as_slice());
+        self.session.stop(track, tracks, playhead);
     }
 
     /// The transport as the launcher reads it. The maps are borrowed from
@@ -1002,7 +1011,7 @@ impl Processor {
     fn apply_due_session(&mut self) {
         if self.playing {
             self.session.apply_due(self.position);
-            // Spec: launch-quantisation R18
+            // Spec: launch-quantisation R21
             let playhead = Self::playhead(
                 self.program.as_ref().map(Program::get),
                 &self.fallback_tempo,
@@ -1382,6 +1391,11 @@ impl Processor {
         self.session.status(&mut self.session_status);
         state.session.clear();
         state.session.extend_from_slice(&self.session_status);
+        state.session_over.clear();
+        let room = state.session_over.capacity();
+        state
+            .session_over
+            .extend(self.session.overridden().iter().copied().take(room));
         state.meters.clear();
         state.meters_truncated = false;
         if let Some(program) = &self.program {

@@ -6,13 +6,13 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use bl_model::ParamId;
 use bl_model::PluginFormat;
-use bl_model::{LaunchMode, ParamId};
 
 pub use bl_shell_spec::midi_io::PortDirection;
 pub use bl_shell_spec::settings::{
-    SettingsPage, ThemeChoice, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, ZOOM_STEPS, zoom_factor,
-    zoom_percent, zoom_step,
+    LaunchPrefs, SettingsPage, ThemeChoice, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, ZOOM_STEPS,
+    zoom_factor, zoom_percent, zoom_step,
 };
 
 use crate::agent::AgentSettings;
@@ -69,16 +69,15 @@ pub struct Preferences {
     /// spec, R7 and R22). On by default, as observed in Live 12.4.6, and on
     /// for preferences saved before the setting existed.
     pub create_fades_on_clip_edges: OnByDefault,
-    /// Default Launch Mode (Record, Warp & Launch, L-SET-018): the launch
-    /// mode a new Session clip starts with (WP-3.3). Trigger, as observed in
-    /// Live 12.4.6; the Settings window's row and its command are WP-3.4's.
-    pub default_launch_mode: LaunchMode,
     /// Warp recorded audio (Record, Warp & Launch, Warp/Fades; IMP-02, the
     /// recording spec, R13): whether a recorded clip will be warped, once
     /// warping arrives; clips have no warp fields until then. On by default,
     /// as Live warps its recordings, and on for preferences saved before the
     /// setting existed.
     pub warp_recorded_audio: OnByDefault,
+    /// The Launch section of Record, Warp & Launch (L-SET-018; WP-3.4),
+    /// with the defaults observed in Live 12.4.3.
+    pub launch: LaunchPrefs,
     /// Auto-Hide Plug-In Windows (Plug-Ins, Plug-In Windows, L-SET-017):
     /// a floating device's window or a plug-in's editor hides while
     /// another track is selected and comes back with its track (WP-2.5b),

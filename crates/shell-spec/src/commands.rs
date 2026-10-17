@@ -10,6 +10,8 @@ use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use bl_model::{LaunchMode, LaunchQuantization};
+
 use crate::audio::{AudioDevices, AudioStatus, ConfigureAudio};
 use crate::notes::{ClipViewState, NoteField};
 use crate::settings::{SettingsPage, ThemeChoice};
@@ -108,6 +110,22 @@ pub const SETTINGS_SET_THEME: &str = "settings.set_theme";
 pub const SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES: &str = "settings.set_create_fades_on_clip_edges";
 /// `settings.set_warp_recorded_audio`: switch Warp recorded audio (WP-2.13).
 pub const SETTINGS_SET_WARP_RECORDED_AUDIO: &str = "settings.set_warp_recorded_audio";
+/// `settings.set_default_launch_mode`: choose Default Launch Mode (WP-3.4).
+pub const SETTINGS_SET_DEFAULT_LAUNCH_MODE: &str = "settings.set_default_launch_mode";
+/// `settings.set_default_launch_quantization`: choose Default Launch
+/// Quantization (WP-3.4).
+pub const SETTINGS_SET_DEFAULT_LAUNCH_QUANTIZATION: &str =
+    "settings.set_default_launch_quantization";
+/// `settings.set_select_on_launch`: switch Select on Launch (WP-3.4).
+pub const SETTINGS_SET_SELECT_ON_LAUNCH: &str = "settings.set_select_on_launch";
+/// `settings.set_select_next_scene_on_launch`: switch Select Next Scene on
+/// Launch (WP-3.4).
+pub const SETTINGS_SET_SELECT_NEXT_SCENE_ON_LAUNCH: &str =
+    "settings.set_select_next_scene_on_launch";
+/// `settings.set_start_recording_on_scene_launch`: switch Start Recording on
+/// Scene Launch (WP-3.4).
+pub const SETTINGS_SET_START_RECORDING_ON_SCENE_LAUNCH: &str =
+    "settings.set_start_recording_on_scene_launch";
 /// `settings.set_auto_hide_plug_in_windows`: switch Auto-Hide Plug-In
 /// Windows (WP-2.5b).
 pub const SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS: &str = "settings.set_auto_hide_plug_in_windows";
@@ -167,6 +185,11 @@ pub const IDS: &[&str] = &[
     SETTINGS_SET_THEME,
     SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES,
     SETTINGS_SET_WARP_RECORDED_AUDIO,
+    SETTINGS_SET_DEFAULT_LAUNCH_MODE,
+    SETTINGS_SET_DEFAULT_LAUNCH_QUANTIZATION,
+    SETTINGS_SET_SELECT_ON_LAUNCH,
+    SETTINGS_SET_SELECT_NEXT_SCENE_ON_LAUNCH,
+    SETTINGS_SET_START_RECORDING_ON_SCENE_LAUNCH,
     SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS,
     SETTINGS_SET_OUTLINE_VIEW_IN_FOCUS,
     AUDIO_DEVICES,
@@ -264,6 +287,24 @@ pub struct SettingsArgs {
 pub struct ThemeArgs {
     /// The theme.
     pub theme: ThemeChoice,
+}
+
+/// Arguments of `settings.set_default_launch_mode`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DefaultLaunchModeArgs {
+    /// The launch mode new clips start with.
+    pub mode: LaunchMode,
+}
+
+/// Arguments of `settings.set_default_launch_quantization`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DefaultLaunchQuantizationArgs {
+    /// The quantisation new clips start with; `null` (or nothing) follows
+    /// the global one, Live's "Global".
+    #[serde(default)]
+    pub quantization: Option<LaunchQuantization>,
 }
 
 /// Arguments of a command that switches a setting on or off.
@@ -926,6 +967,79 @@ fn specs() -> Vec<CommandSpec> {
             .context(Settings)
             .args::<SwitchArgs>()
             .result::<SwitchResult>(),
+        // Record, Warp & Launch, Launch (L-SET-018; WP-3.4): edit-class
+        // preferences, kept between starts and not saved with a set.
+        CommandSpec::new(SETTINGS_SET_DEFAULT_LAUNCH_MODE, "Default Launch Mode")
+            .description(
+                "Chooses Default Launch Mode on the Settings window's Record, Warp & Launch \
+                 page: the launch mode (`trigger`, `gate`, `toggle` or `repeat`) a new Session \
+                 clip starts with. It's `trigger` in a new install, as Live's is. Clips made \
+                 so far keep their modes, and launch modes aren't built into clips yet, so for \
+                 now it only keeps the choice. The setting is kept for the next start, and \
+                 isn't part of the set or an undo step.",
+            )
+            .permission(Permission::Edit)
+            .context(Settings)
+            .args::<DefaultLaunchModeArgs>()
+            .result::<()>(),
+        CommandSpec::new(
+            SETTINGS_SET_DEFAULT_LAUNCH_QUANTIZATION,
+            "Default Launch Quantization",
+        )
+        .description(
+            "Chooses Default Launch Quantization on the Settings window's Record, Warp & \
+             Launch page: the launch quantisation a new Session clip starts with, one of the \
+             global quantisation's steps (see `clip.set_launch_quantization`), or `null` to \
+             follow the global quantisation (the default, Live's \"Global\"). Clips already \
+             in the set keep theirs. The setting is kept for the next start, and isn't part \
+             of the set or an undo step.",
+        )
+        .permission(Permission::Edit)
+        .context(Settings)
+        .args::<DefaultLaunchQuantizationArgs>()
+        .result::<()>(),
+        CommandSpec::new(SETTINGS_SET_SELECT_ON_LAUNCH, "Select on Launch")
+            .description(
+                "Switches Select on Launch on the Settings window's Record, Warp & Launch \
+                 page; it's on in a new install, as Live's is. While it's on, launching a clip \
+                 that sits in a slot (`session.launch`) selects that slot. The setting is kept \
+                 for the next start, and isn't part of the set or an undo step. The result's \
+                 `on` is the setting afterwards.",
+            )
+            .permission(Permission::Edit)
+            .context(Settings)
+            .args::<SwitchArgs>()
+            .result::<SwitchResult>(),
+        CommandSpec::new(
+            SETTINGS_SET_SELECT_NEXT_SCENE_ON_LAUNCH,
+            "Select Next Scene on Launch",
+        )
+        .description(
+            "Switches Select Next Scene on Launch on the Settings window's Record, Warp & \
+             Launch page; it's on in a new install, as Live's is. While it's on, launching a \
+             scene (`session.launch_scene`) selects the scene after it, when there is one. The \
+             setting is kept for the next start, and isn't part of the set or an undo step. \
+             The result's `on` is the setting afterwards.",
+        )
+        .permission(Permission::Edit)
+        .context(Settings)
+        .args::<SwitchArgs>()
+        .result::<SwitchResult>(),
+        CommandSpec::new(
+            SETTINGS_SET_START_RECORDING_ON_SCENE_LAUNCH,
+            "Start Recording on Scene Launch",
+        )
+        .description(
+            "Switches Start Recording on Scene Launch on the Settings window's Record, Warp & \
+             Launch page; it's off in a new install, as Live's is. Session recording isn't \
+             built yet, so for now it only keeps the choice. The setting is kept for the next \
+             start, and isn't part of the set or an undo step. The result's `on` is the \
+             setting afterwards.",
+        )
+        .permission(Permission::Edit)
+        .context(Settings)
+        .args::<SwitchArgs>()
+        .result::<SwitchResult>(),
         // Plug-Ins, Plug-In Windows (L-SET-017; WP-2.5b).
         CommandSpec::new(
             SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS,

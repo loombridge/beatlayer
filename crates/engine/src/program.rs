@@ -113,6 +113,9 @@ pub struct EngineProgram {
     /// launch queues (WP-3.2) and where a press finds its clip's mode
     /// (WP-3.3).
     pub(crate) scene_slots: Vec<(SceneId, TrackId, LaunchMode)>,
+    /// Every audio and MIDI track, in order: what Stop All Clips stops
+    /// (WP-3.6).
+    pub(crate) session_tracks: Vec<TrackId>,
     pub(crate) note_buffers: [NoteBuffer; 2],
     /// The MIDI tracks' inputs, and what each received in the last block
     /// (WP-2.2).

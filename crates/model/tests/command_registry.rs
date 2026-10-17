@@ -10,10 +10,10 @@ use bl_core::time::{Bpm, TempoMap, Ticks, TimeSignature, TimeSignatureMap};
 use bl_model::registry::{self, RunError};
 use bl_model::{
     ArrangementLoop, AudioData, AutomationTarget, Change, ChangeSet, Channel, Clip, ClipData,
-    ClipId, Command, ContentHash, CountIn, CrossfadeAssign, Device, DeviceId, DeviceKind,
-    EditError, Editor, Input, LaunchMode, MetronomeRhythm, MetronomeSound, MidiData, MixerParam,
-    ModelError, Monitor, Note, Output, ParamId, PluginFormat, SceneId, SendTap, TakeClip, TakeLane,
-    Tap, TrackId, TrackKind,
+    ClipId, ClipLaunch, Command, ContentHash, CountIn, CrossfadeAssign, Device, DeviceId,
+    DeviceKind, EditError, Editor, Input, LaunchMode, LaunchQuantization, MetronomeRhythm,
+    MetronomeSound, MidiData, MixerParam, ModelError, Monitor, Note, Output, ParamId, PluginFormat,
+    SceneId, SendTap, TakeClip, TakeLane, Tap, TrackId, TrackKind,
 };
 use serde_json::{Value, json};
 
@@ -51,7 +51,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        94,
+        97,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -60,7 +60,8 @@ fn every_document_command_is_registered() {
          WP-2.13 the two for Main Out and Cue Out, WP-3.1 five for scenes and two for slot \
          clips, WP-3.2 set_slot_stop_button, WP-2.12 seven for automation, WP-3.15 six for clip \
          envelopes, WP-3.17 two for the crossfader, WP-2.14 set_midi_overdub, WP-2.13 the \
-         two punch switches, WP-3.3 set_clip_launch_mode, and WP-2.13 add_take_lane"
+         two punch switches, WP-2.13 add_take_lane, WP-3.4 three for a clip's launch \
+         settings, and WP-3.3 set_clip_launch_mode"
     );
 
     for op in &ops {
@@ -414,10 +415,6 @@ fn every_command_runs_by_id() {
     agent.run("clip.rename", json!({ "clip": riff, "name": "Riff" }));
     agent.run("clip.set_mute", json!({ "clip": riff, "mute": true }));
     agent.run(
-        "clip.set_launch_mode",
-        json!({ "clip": riff, "mode": "gate" }),
-    );
-    agent.run(
         "clip.set_data",
         json!({ "clip": riff, "data": { "midi": { "notes": [
             { "key": 36, "velocity": 110, "start": 0, "length": quarter },
@@ -565,6 +562,33 @@ fn every_command_runs_by_id() {
             .track(bass)
             .unwrap()
             .has_stop_button(second)
+    );
+
+    // WP-3.4: a Session clip's launch settings.
+    agent.run(
+        "clip.set_legato",
+        json!({ "clip": slot_riff, "legato": true }),
+    );
+    agent.run(
+        "clip.set_launch_quantization",
+        json!({ "clip": slot_riff, "quantization": "eighth" }),
+    );
+    agent.run(
+        "clip.set_velocity_amount",
+        json!({ "clip": slot_riff, "amount": 0.5 }),
+    );
+    agent.run(
+        "clip.set_launch_mode",
+        json!({ "clip": slot_riff, "mode": "gate" }),
+    );
+    assert_eq!(
+        agent.editor.document().clip(slot_riff).unwrap().launch,
+        ClipLaunch {
+            legato: true,
+            quantization: Some(LaunchQuantization::Eighth),
+            velocity_amount: 0.5,
+            mode: LaunchMode::Gate,
+        }
     );
 
     // The scene commands: rename, move, duplicate, insert, delete.
@@ -1436,6 +1460,21 @@ fn schemas_match_what_commands_serialise() {
                 fade_in: 0.004,
                 fade_out: 1.5,
             },
+        ),
+        (
+            "clip.set_legato",
+            Command::SetClipLegato { clip, legato: true },
+        ),
+        (
+            "clip.set_launch_quantization",
+            Command::SetClipLaunchQuantization {
+                clip,
+                quantization: Some(LaunchQuantization::Quarter),
+            },
+        ),
+        (
+            "clip.set_velocity_amount",
+            Command::SetClipVelocityAmount { clip, amount: 0.25 },
         ),
         (
             "device.insert",

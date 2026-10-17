@@ -288,6 +288,9 @@ pub struct MidiClipPlayer {
     /// launched on: when the engine stops it, restarts it or another slot
     /// takes over, its notes are let go.
     session: Option<(ClipId, i64)>,
+    /// Whether a Session clip has taken the track over from the Arrangement
+    /// (WP-3.6).
+    taken_over: bool,
     rng: Rng,
     next_note_id: u32,
 }
@@ -303,6 +306,7 @@ impl MidiClipPlayer {
             audible: true,
             last_position: None,
             session: None,
+            taken_over: false,
             rng: Rng::new(0x853c_49e6_748f_ea9b),
             next_note_id: 1,
         }
@@ -614,19 +618,36 @@ impl Node for MidiClipPlayer {
         let tempo = block.tempo();
 
         // Spec: launch-quantisation R9. A launched slot clip plays from its
-        // launch frame, over the Arrangement's clips (WP-3.6 makes it take
-        // the track over from them). When the engine stops it or another
-        // slot takes over, its notes are let go at once.
-        let launched = block
+        // launch frame. When the engine stops it or another slot takes over,
+        // its notes are let go at once.
+        let taken_over = block
             .session()
             .iter()
-            .find(|entry| entry.track == list.track)
-            .and_then(|entry| {
-                list.clips
-                    .iter()
-                    .find(|clip| clip.scene == Some(entry.scene))
-                    .map(|clip| (entry, clip))
-            });
+            .find(|entry| entry.track == list.track);
+        let launched = taken_over.and_then(|entry| {
+            let scene = entry.scene?;
+            list.clips
+                .iter()
+                .find(|clip| clip.scene == Some(scene))
+                .map(|clip| (entry, clip))
+        });
+        // Spec: session-view R20. The Arrangement's notes
+        // are let go where the Session clip takes the track over.
+        if taken_over.is_some() && !self.taken_over {
+            for active in self.sounding.drain(..) {
+                if self.scratch_notes.len() < self.scratch_notes.capacity() {
+                    self.scratch_notes.push(NoteEvent {
+                        offset: 0,
+                        kind: NoteKind::Off,
+                        channel: active.channel,
+                        key: active.key,
+                        velocity: active.release_velocity as f32 / 127.0,
+                        note_id: active.note_id,
+                    });
+                }
+            }
+        }
+        self.taken_over = taken_over.is_some();
         let launched_id = launched.map(|(entry, clip)| (clip.id, entry.frame.get()));
         if self.session != launched_id {
             if let Some((old, _)) = self.session {
@@ -648,6 +669,11 @@ impl Node for MidiClipPlayer {
                 &mut self.scratch_notes,
                 &mut self.sounding,
             );
+        }
+
+        if self.taken_over {
+            self.send_scratch_notes(block);
+            return;
         }
 
         for clip in &list.clips {

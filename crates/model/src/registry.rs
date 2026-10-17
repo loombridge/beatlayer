@@ -1007,7 +1007,8 @@ const ENTRIES: &[Entry] = &[
         permission: Permission::Edit,
         contexts: &[ClipView],
         keys: &[],
-        description: "Sets what a press and a release of a Session clip's launch button do: \
+        description: "Sets what a press and a release of a Session clip's launch button do (a \
+            clip that sits in a slot; `clip` is its ID): \
             `trigger` (the default) starts the clip on the launch grid and it plays on, a second \
             press restarts it; `gate` starts it on a press and stops it on the grid after the \
             release; `toggle` starts it on a press and the next press stops it on the grid; \
@@ -1128,6 +1129,47 @@ const ENTRIES: &[Entry] = &[
             that starts or ends mid-waveform from clicking: 0.004 (4 ms) is the length that \
             Create Fades on Clip Edges gives new clips. Lengths must be finite and at least \
             0.",
+    },
+    Entry {
+        id: "clip.set_legato",
+        action: Action::Apply("set_clip_legato"),
+        label: "Set Clip Legato",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Switches Legato on or off for a Session clip, one that sits in a slot \
+            (`clip` is its ID). A Legato clip takes over the play position of the clip \
+            playing on its track when it launches, so the two stay in sync. Off is the \
+            default. The setting is saved with the clip and is one undo step; launching \
+            doesn't read it yet.",
+    },
+    Entry {
+        id: "clip.set_launch_quantization",
+        action: Action::Apply("set_clip_launch_quantization"),
+        label: "Set Clip Launch Quantization",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Sets a Session clip's own launch quantisation, the grid its launches \
+            wait for: one of the global quantisation's steps (`none`, `8_bars`, `4_bars`, \
+            `2_bars`, `1_bar`, `half`, `half_triplet`, `quarter`, `quarter_triplet`, `eighth`, \
+            `eighth_triplet`, `sixteenth`, `sixteenth_triplet`, `thirty_second`), or `null` \
+            (the default, Live's \"Global\") to follow the global quantisation. `clip` is the \
+            ID of a clip that sits in a slot. The setting is saved with the clip and is one \
+            undo step; launching doesn't read it yet.",
+    },
+    Entry {
+        id: "clip.set_velocity_amount",
+        action: Action::Apply("set_clip_velocity_amount"),
+        label: "Set Clip Velocity Amount",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Sets how much the velocity of the MIDI note that launches a Session clip \
+            changes the clip's volume: `amount` is from 0 (no influence, the default) to 1 \
+            (100 %, where the softest note plays the clip silently). `clip` is the ID of a \
+            clip that sits in a slot. The setting is saved with the clip and is one undo \
+            step; launching doesn't read it yet.",
     },
     Entry {
         id: "clip.set_envelope_breakpoint",

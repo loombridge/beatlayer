@@ -835,8 +835,8 @@ impl Node for ClipPlayer {
         self.sounding = true;
         self.readied = None;
         // Spec: launch-quantisation R9. The launched slot clip plays from
-        // its launch frame, over the Arrangement's clips (WP-3.6 makes it
-        // take the track over from them).
+        // its launch frame. Spec: session-view R20. While
+        // the track is taken over, the Arrangement's clips below stay silent.
         if let (Some(list), Some(bank)) = (
             self.clips
                 .as_ref()
@@ -846,10 +846,8 @@ impl Node for ClipPlayer {
             .session()
             .iter()
             .find(|entry| entry.track == list.track)
-            && let Some(at) = list
-                .clips
-                .iter()
-                .position(|clip| clip.scene == Some(entry.scene))
+            && let Some(scene) = entry.scene
+            && let Some(at) = list.clips.iter().position(|clip| clip.scene == Some(scene))
             && let Some(source) = bank[at].as_mut()
         {
             let from = transport.position.get();
@@ -880,6 +878,15 @@ impl Node for ClipPlayer {
             self.apply_gate(block);
             return;
         };
+        if block
+            .session()
+            .iter()
+            .any(|entry| entry.track == list.track)
+        {
+            self.playing_clip = false;
+            self.apply_gate(block);
+            return;
+        }
         let from = transport.position.get();
         let to = from + block.frames() as i64;
         let first = list.reach.partition_point(|&reach| reach <= from);

@@ -157,6 +157,16 @@ fn each_settings_command_reads_back_from_settings_state() {
     assert_eq!(before["warp_recorded_audio"], true);
     assert_eq!(before["auto_hide_plug_in_windows"], true);
     assert_eq!(
+        before["launch"],
+        json!({
+            "default_mode": "trigger",
+            "default_quantization": null,
+            "select_on_launch": true,
+            "select_next_scene_on_launch": true,
+            "start_recording_on_scene_launch": false,
+        })
+    );
+    assert_eq!(
         before["plug_ins"],
         json!({ "hidden": [], "show_hidden": false })
     );
@@ -181,6 +191,31 @@ fn each_settings_command_reads_back_from_settings_state() {
         &mut client,
         "settings.set_warp_recorded_audio",
         json!({ "on": false }),
+    );
+    run(
+        &mut client,
+        "settings.set_default_launch_mode",
+        json!({ "mode": "gate" }),
+    );
+    run(
+        &mut client,
+        "settings.set_default_launch_quantization",
+        json!({ "quantization": "1_bar" }),
+    );
+    run(
+        &mut client,
+        "settings.set_select_on_launch",
+        json!({ "on": false }),
+    );
+    run(
+        &mut client,
+        "settings.set_select_next_scene_on_launch",
+        json!({ "on": false }),
+    );
+    run(
+        &mut client,
+        "settings.set_start_recording_on_scene_launch",
+        json!({ "on": true }),
     );
     run(
         &mut client,
@@ -221,6 +256,16 @@ fn each_settings_command_reads_back_from_settings_state() {
     assert_eq!(state["create_fades_on_clip_edges"], false);
     assert_eq!(state["warp_recorded_audio"], false);
     assert_eq!(state["auto_hide_plug_in_windows"], false);
+    assert_eq!(
+        state["launch"],
+        json!({
+            "default_mode": "gate",
+            "default_quantization": "1_bar",
+            "select_on_launch": false,
+            "select_next_scene_on_launch": false,
+            "start_recording_on_scene_launch": true,
+        })
+    );
     assert_eq!(
         state["plug_ins"],
         json!({ "hidden": ["vst3/example"], "show_hidden": true, "format_preference": "clap" })

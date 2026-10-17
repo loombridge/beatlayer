@@ -71,6 +71,27 @@ impl LaunchQuantization {
         Self::ThirtySecond,
     ];
 
+    /// The step's name in the menu.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::None => "None",
+            Self::Bars8 => "8 Bars",
+            Self::Bars4 => "4 Bars",
+            Self::Bars2 => "2 Bars",
+            Self::Bar => "1 Bar",
+            Self::Half => "1/2",
+            Self::HalfTriplet => "1/2T",
+            Self::Quarter => "1/4",
+            Self::QuarterTriplet => "1/4T",
+            Self::Eighth => "1/8",
+            Self::EighthTriplet => "1/8T",
+            Self::Sixteenth => "1/16",
+            Self::SixteenthTriplet => "1/16T",
+            Self::ThirtySecond => "1/32",
+        }
+    }
+
     /// The step the menu moves to when the person makes quantisation
     /// smaller (S-SES-024, M-OPT-011). The smallest step stays.
     #[must_use]
@@ -175,20 +196,20 @@ impl LaunchQuantization {
     }
 }
 
-/// What a press and a release of a clip's launch button do (WP-3.3): the
-/// clip's launch mode, Trigger unless the person chose another (the observed
-/// Default Launch Mode). The rules are in the launch quantisation spec.
+/// How a Session clip's launch button behaves (the clip's Launch Mode, and
+/// the Default Launch Mode setting).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum LaunchMode {
-    /// A press starts the clip and it plays on; a second press restarts it.
+    /// Pressing starts the clip; releasing does nothing. The observed
+    /// default.
     #[default]
     Trigger,
-    /// A press starts the clip and releasing stops it.
+    /// The clip plays while the button is held.
     Gate,
-    /// A press starts the clip and the next press stops it.
+    /// Pressing starts the clip and the next press stops it.
     Toggle,
-    /// While the button is held the clip restarts every quantisation step.
+    /// The clip retriggers while the button is held.
     Repeat,
 }
 
@@ -196,11 +217,45 @@ impl LaunchMode {
     /// Every mode, in the Launch panel's order.
     pub const ALL: [Self; 4] = [Self::Trigger, Self::Gate, Self::Toggle, Self::Repeat];
 
-    /// Whether the mode is the default, so a clip leaves it out of its saved
-    /// form.
+    /// The mode's name in the chooser.
     #[must_use]
-    pub fn is_default(&self) -> bool {
-        *self == Self::Trigger
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Trigger => "Trigger",
+            Self::Gate => "Gate",
+            Self::Toggle => "Toggle",
+            Self::Repeat => "Repeat",
+        }
+    }
+}
+
+/// A Session clip's own launch settings (the Clip View's Launch panel,
+/// WP-3.4). They are saved with the clip, so they're part of the set and
+/// each change is one undo step; a clip without them has the defaults.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ClipLaunch {
+    /// Legato: the clip takes over the play position of the clip playing on
+    /// its track when it launches.
+    #[serde(default)]
+    pub legato: bool,
+    /// The clip's own launch quantisation; `null` (left out) follows the
+    /// global one, which Live's chooser calls "Global".
+    #[serde(default)]
+    pub quantization: Option<LaunchQuantization>,
+    /// How much the velocity of a note that launches the clip changes its
+    /// volume, from 0 (none, the default) to 1 (100 %).
+    #[serde(default)]
+    pub velocity_amount: f64,
+    /// What a press and a release of the clip's launch button do (WP-3.3).
+    #[serde(default)]
+    pub mode: LaunchMode,
+}
+
+impl ClipLaunch {
+    /// Whether these are the defaults, so a clip's saved form leaves them
+    /// out.
+    pub(crate) fn is_default(&self) -> bool {
+        *self == Self::default()
     }
 }
 

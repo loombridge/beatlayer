@@ -354,13 +354,35 @@ fn fixture() -> Project {
         ClipData::Midi(MidiData::new([note(48, 0), note(50, 88_200)])),
     );
     slot_clip.name = "Loop".to_owned();
-    slot_clip.launch_mode = LaunchMode::Gate;
+    slot_clip.launch.mode = LaunchMode::Gate;
+    let slot_clip_id = slot_clip.id;
     apply(
         &mut editor,
         Command::CreateSlotClip {
             track: keys,
             scene: scenes[1],
             clip: slot_clip,
+        },
+    );
+    apply(
+        &mut editor,
+        Command::SetClipLegato {
+            clip: slot_clip_id,
+            legato: true,
+        },
+    );
+    apply(
+        &mut editor,
+        Command::SetClipLaunchQuantization {
+            clip: slot_clip_id,
+            quantization: Some(LaunchQuantization::Eighth),
+        },
+    );
+    apply(
+        &mut editor,
+        Command::SetClipVelocityAmount {
+            clip: slot_clip_id,
+            amount: 0.5,
         },
     );
     apply(

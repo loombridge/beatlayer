@@ -16,7 +16,8 @@ use std::path::Path;
 use bl_core::time::Ticks;
 use bl_media::MediaStore;
 use bl_model::{
-    AudioData, ChangeSet, Clip, ClipData, ClipId, Editor, LaunchMode, MidiData, SceneId, TrackId,
+    AudioData, ChangeSet, Clip, ClipData, ClipId, Editor, LaunchMode, LaunchQuantization, MidiData,
+    SceneId, TrackId,
 };
 use bl_shell_spec::session_view::{
     self as ids, CopyClipArgs, DropFilesArgs, DuplicateSceneArgs, InsertClipArgs, InsertSceneArgs,
@@ -58,6 +59,9 @@ pub struct Context<'a> {
     /// The launch mode a new clip starts with (Settings ▸ Default Launch
     /// Mode).
     pub launch_mode: LaunchMode,
+    /// The launch quantisation a new clip starts with (Settings ▸ Default
+    /// Launch Quantization); `None` follows the global one.
+    pub launch_quantization: Option<LaunchQuantization>,
 }
 
 /// What a Session View command changed: its result, the files a drop read
@@ -246,7 +250,8 @@ impl SessionView {
                     bar,
                     ClipData::Midi(MidiData::new(std::iter::empty())),
                 );
-                clip.launch_mode = ctx.launch_mode;
+                clip.launch.mode = ctx.launch_mode;
+                clip.launch.quantization = ctx.launch_quantization;
                 let changes = self.edit(ctx.editor, "Insert Empty MIDI Clip", |editor| {
                     model(
                         editor,
@@ -644,7 +649,8 @@ impl SessionView {
                 let mut clip =
                     Clip::new(editor.new_id(), Ticks::ZERO, length, ClipData::Audio(audio));
                 clip.name.clone_from(name);
-                clip.launch_mode = ctx.launch_mode;
+                clip.launch.mode = ctx.launch_mode;
+                clip.launch.quantization = ctx.launch_quantization;
                 model(
                     editor,
                     "clip.create_in_slot",

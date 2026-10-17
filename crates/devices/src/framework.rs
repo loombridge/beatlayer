@@ -120,6 +120,13 @@ impl<'a> Audio<'_, 'a> {
         Frames(self.block.transport().position.get() + self.range.start as i64)
     }
 
+    /// Whether the song is playing, so a tempo-synced device locks to the
+    /// song position.
+    #[must_use]
+    pub fn playing(&self) -> bool {
+        self.block.transport().playing
+    }
+
     /// One channel's samples in the stretch.
     ///
     /// # Panics

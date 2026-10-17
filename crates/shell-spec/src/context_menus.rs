@@ -152,7 +152,9 @@ const DEVICE: &[Row] = &[
 
 /// The menu a device's title bar opens, by a right-click or its Show
 /// Options button (C-DEVICE). A device's own items, which Live lists after
-/// these, arrive with the devices (WP-2.5 onwards).
+/// these, follow them in the menu: the device's switches that its type marks
+/// as menu options ([`DeviceFrame::menu_options`](crate::devices::DeviceFrame::menu_options),
+/// C-DEVICE-015).
 #[must_use]
 pub fn device() -> Vec<MenuItem> {
     items(DEVICE)

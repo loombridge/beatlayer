@@ -1409,7 +1409,6 @@ impl MultisamplerUi {
 
     /// Files dropped on the layer list or the editor add layers at the drop
     /// point (R3).
-    #[expect(clippy::too_many_arguments, reason = "the drop's inputs")]
     fn drop_files(
         &mut self,
         ui: &Ui,

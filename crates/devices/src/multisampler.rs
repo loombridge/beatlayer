@@ -892,7 +892,7 @@ impl Multisampler {
         self.rng ^= self.rng << 13;
         self.rng ^= self.rng >> 17;
         self.rng ^= self.rng << 5;
-        (u64::from(self.rng) * n as u64 >> 32) as usize
+        ((u64::from(self.rng) * n as u64) >> 32) as usize
     }
 
     /// The settings one stretch of a block plays by.

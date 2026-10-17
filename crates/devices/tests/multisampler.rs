@@ -98,7 +98,7 @@ impl Rig {
         notes: &[Played],
         events: &[(usize, bl_model::ParamId, f64)],
     ) -> Vec<Vec<f32>> {
-        let mut out = vec![Vec::with_capacity(frames); CHANNELS];
+        let mut out: Vec<Vec<f32>> = (0..CHANNELS).map(|_| Vec::with_capacity(frames)).collect();
         let mut start = 0;
         while start < frames {
             let len = self.block.min(frames - start);
@@ -747,12 +747,13 @@ fn the_root_key_plays_the_frames_exactly_in_every_mode() {
             let mut rig = Rig::new(&[(INTERPOLATION, f64::from(mode))], block);
             rig.give(vec![(layer(1, &noise), Arc::clone(&noise))], false);
             let out = rig.render(2000, &[on(0, 60, 1.0)]);
-            for i in 0..1990 {
-                assert_eq!(
-                    out[0][i],
-                    noise.channel(0).unwrap()[i],
-                    "mode {mode} frame {i}"
-                );
+            for (i, (played, frame)) in out[0]
+                .iter()
+                .zip(noise.channel(0).unwrap())
+                .enumerate()
+                .take(1990)
+            {
+                assert_eq!(played, frame, "mode {mode} frame {i}");
             }
         }
     }

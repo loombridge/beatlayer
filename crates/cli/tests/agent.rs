@@ -1344,7 +1344,11 @@ fn an_agent_builds_a_multisample_by_command_and_reads_it_back() {
         document.track(track).unwrap().devices().next().unwrap().id
     };
     let layers = |client: &mut Client<InProcess>| -> Value {
-        let found = call(client, "query", json!({ "path": format!("device {}", device.0.get()) }));
+        let found = call(
+            client,
+            "query",
+            json!({ "path": format!("device {}", device.0.get()) }),
+        );
         found["layers"].clone()
     };
     let added = call(
@@ -1396,7 +1400,12 @@ fn an_agent_builds_a_multisample_by_command_and_reads_it_back() {
     // zone and the E3 layer takes the upper.
     let zones: Vec<(u64, u64)> = items
         .iter()
-        .map(|l| (l["key"]["low"].as_u64().unwrap(), l["key"]["high"].as_u64().unwrap()))
+        .map(|l| {
+            (
+                l["key"]["low"].as_u64().unwrap(),
+                l["key"]["high"].as_u64().unwrap(),
+            )
+        })
         .collect();
     assert_eq!(zones, [(0, 30), (63, 127), (31, 62)]);
     // The views read back in the Device View's state.
@@ -1405,12 +1414,20 @@ fn an_agent_builds_a_multisample_by_command_and_reads_it_back() {
         "run",
         json!({ "commands": [{ "command": "device.select", "args": { "device": device } }] }),
     );
-    let state = call(&mut client, "run", json!({ "commands": [
-        { "command": "device_view.state" }] }));
+    let state = call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+        { "command": "device_view.state" }] }),
+    );
     let frame = state["results"][0]["result"]["devices"][0]["multisampler"].clone();
     assert_eq!(frame["tab"], "filter_global");
     assert_eq!(frame["layers"], 3);
     // Undo takes the last edit back.
-    call(&mut client, "run", json!({ "commands": [{ "command": "edit.undo" }] }));
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "edit.undo" }] }),
+    );
     assert_eq!(layers(&mut client)["count"], 3);
 }

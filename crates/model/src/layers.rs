@@ -32,10 +32,11 @@ pub const LAYER_DETUNE_RANGE: f64 = 50.0;
 pub struct LayerId(pub u32);
 
 /// Which of a layer's three zones.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ZoneKind {
     /// The notes it plays over, 0 to 127.
+    #[default]
     Key,
     /// The note-on velocities it plays at, 1 to 127.
     Velocity,
@@ -595,18 +596,12 @@ fn key_editor() -> ZoneKind {
     ZoneKind::Key
 }
 
-impl Default for ZoneKind {
-    fn default() -> Self {
-        Self::Key
-    }
-}
-
 /// Each multisampler's view, as a set saves them beside its document.
 pub type MultisamplerViews = std::collections::BTreeMap<crate::ids::DeviceId, MultisamplerView>;
 
 /// The layers a multisampler holds and the settings of the layer list that
 /// aren't parameters (R2, R19, R20, R23).
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Layers {
     /// The layers, in list order.
@@ -623,18 +618,6 @@ pub struct Layers {
     /// R29); constant power is the default.
     #[serde(default, skip_serializing_if = "is_false")]
     pub linear_loop_fades: bool,
-}
-
-impl Default for Layers {
-    fn default() -> Self {
-        Self {
-            list: Vec::new(),
-            last_id: 0,
-            ram_mode: false,
-            snap: false,
-            linear_loop_fades: false,
-        }
-    }
 }
 
 impl Layers {
@@ -1020,7 +1003,7 @@ mod tests {
         assert_eq!(zone.gain(9, FadeMode::Lin), 0.0);
         assert_eq!(zone.gain(10, FadeMode::Pow), 0.0);
         assert_eq!(zone.gain(12, FadeMode::Lin), 0.5);
-        assert!((zone.gain(12, FadeMode::Pow) - 0.707_106_8).abs() < 1e-6);
+        assert!((zone.gain(12, FadeMode::Pow) - core::f32::consts::FRAC_1_SQRT_2).abs() < 1e-6);
         assert_eq!(zone.gain(14, FadeMode::Lin), 1.0);
         assert_eq!(zone.gain(42, FadeMode::Lin), 1.0);
         assert_eq!(zone.gain(46, FadeMode::Lin), 0.5);

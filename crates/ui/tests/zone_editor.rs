@@ -486,7 +486,10 @@ fn the_selector_indicator_drags_the_sample_selector() {
         .expect("the select editor shows the selector")
         .bounds
         .unwrap();
-    let from = pos2(((indicator.x0 + indicator.x1) / 2.0) as f32, ((indicator.y0 + indicator.y1) / 2.0) as f32);
+    let from = pos2(
+        ((indicator.x0 + indicator.x1) / 2.0) as f32,
+        ((indicator.y0 + indicator.y1) / 2.0) as f32,
+    );
     let before = steps(&h);
     drag(&mut h, from, 20.0 * per_value);
     let value = h
@@ -498,7 +501,10 @@ fn the_selector_indicator_drags_the_sample_selector() {
         .params
         .get(&bl_devices::multisampler::SELECTOR)
         .copied();
-    assert!(value.is_some_and(|v| (19.0..=21.0).contains(&v)), "{value:?}");
+    assert!(
+        value.is_some_and(|v| (19.0..=21.0).contains(&v)),
+        "{value:?}"
+    );
     assert_eq!(steps(&h), before + 1, "one undo step");
 }
 
@@ -512,8 +518,14 @@ fn the_hot_swap_button_replaces_the_selected_sample() {
         let path = dir.join(name);
         std::fs::write(
             &path,
-            bl_media::wav_bytes(&vec![0.5; frames], 1, 48_000, bl_media::BitDepth::Int16, bl_media::Dither::None)
-                .unwrap(),
+            bl_media::wav_bytes(
+                &vec![0.5; frames],
+                1,
+                48_000,
+                bl_media::BitDepth::Int16,
+                bl_media::Dither::None,
+            )
+            .unwrap(),
         )
         .unwrap();
         path
@@ -521,21 +533,38 @@ fn the_hot_swap_button_replaces_the_selected_sample() {
     let (old, new) = (write("Old.wav", 4800), write("New.wav", 9600));
     let _ = ids;
     h.shell
-        .run("device.add_layers", json!({ "device": device, "paths": [old.to_string_lossy()] }))
+        .run(
+            "device.add_layers",
+            json!({ "device": device, "paths": [old.to_string_lossy()] }),
+        )
         .unwrap();
     h.settle();
     let button = button_centre(&mut h, "Hot-Swap Sample");
     h.click(button);
     h.settle();
     let state = h.shell.run("device_view.state", json!({})).unwrap();
-    assert!(state["devices"][0]["multisampler"]["hot_swap"].is_number(), "hot-swapping");
+    assert!(
+        state["devices"][0]["multisampler"]["hot_swap"].is_number(),
+        "hot-swapping"
+    );
     assert!(h.shell.browser_visible(), "the browser shows");
     h.shell
-        .run("browser.select", json!({ "paths": [new.to_string_lossy()] }))
+        .run(
+            "browser.select",
+            json!({ "paths": [new.to_string_lossy()] }),
+        )
         .unwrap();
     h.shell.run("browser.load_selected", json!({})).unwrap();
     h.settle();
-    let layer = h.shell.editor().document().device(device).unwrap().layers.list[0].clone();
+    let layer = h
+        .shell
+        .editor()
+        .document()
+        .device(device)
+        .unwrap()
+        .layers
+        .list[0]
+        .clone();
     std::fs::remove_dir_all(&dir).ok();
     assert_eq!(layer.length, 9600, "the chosen sample replaced the layer's");
 }

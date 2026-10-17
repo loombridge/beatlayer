@@ -378,7 +378,6 @@ fn invoke(events: &mut Vec<UiEvent>, id: &str, args: serde_json::Value) {
 /// A small text button: lit while `on`, in the Device View's Tab order.
 /// `name` is what assistive technology reads. Returns whether it was
 /// clicked, or Enter was pressed with the keyboard on it, and its response.
-#[expect(clippy::too_many_arguments, reason = "a button's parts")]
 fn button(
     ui: &mut Ui,
     theme: &Theme,
@@ -1276,6 +1275,7 @@ impl MultisamplerUi {
 
     /// Draws the zone editor in `rect` for the multisampler `frame` and
     /// turns what the person does into commands (R7, R10, R11).
+    #[expect(clippy::too_many_arguments, reason = "the editor's inputs")]
     pub fn zone_editor(
         &mut self,
         ui: &mut Ui,
@@ -1751,7 +1751,7 @@ impl MultisamplerUi {
             0.0,
             if selected {
                 c.accent.0
-            } else if index % 2 == 0 {
+            } else if index.is_multiple_of(2) {
                 c.lane.0
             } else {
                 c.panel.0

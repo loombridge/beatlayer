@@ -33,6 +33,10 @@ fn every_control_has_a_role_a_name_and_a_value_or_a_note() {
                     node.description
                 );
             }
+            // Capture MIDI is live but has nothing to capture in a new set.
+            None if placement.element == Element::CaptureMidi => {
+                assert!(node.disabled, "{} has nothing to capture", placement.name);
+            }
             None => assert!(!node.disabled, "{} works", placement.name),
         }
     }

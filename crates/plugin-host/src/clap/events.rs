@@ -4,7 +4,7 @@
 
 use bl_engine::{NoteEvent, NoteKind};
 use clack_host::events::event_types::{
-    NoteChokeEvent, NoteOffEvent, NoteOnEvent, ParamModEvent, ParamValueEvent,
+    MidiEvent, NoteChokeEvent, NoteOffEvent, NoteOnEvent, ParamModEvent, ParamValueEvent,
 };
 use clack_host::events::io::{InputEventBuffer, OutputEventBuffer, TryPushError};
 use clack_host::events::spaces::CoreEventSpace;
@@ -22,6 +22,7 @@ enum In {
     On(NoteOnEvent),
     Off(NoteOffEvent),
     Choke(NoteChokeEvent),
+    Midi(MidiEvent),
 }
 
 impl In {
@@ -36,6 +37,7 @@ impl In {
             Self::On(e) => e.as_ref(),
             Self::Off(e) => e.as_ref(),
             Self::Choke(e) => e.as_ref(),
+            Self::Midi(e) => e.as_ref(),
         }
     }
 }
@@ -94,6 +96,12 @@ impl InputList {
 
     /// Adds a note.
     pub(crate) fn note(&mut self, note: &NoteEvent) {
+        // Spec: clap-hosting R20. A channel message goes in as the MIDI
+        // event it is.
+        if let Some(message) = note.message() {
+            self.push(In::Midi(MidiEvent::new(note.offset, 0, message.padded())));
+            return;
+        }
         let pckn = Pckn::new(
             0u16,
             u16::from(note.channel.min(15)),
@@ -107,7 +115,10 @@ impl InputList {
             NoteKind::Choke => In::Choke(NoteChokeEvent::new(note.offset, pckn)),
             // Per-note expressions wait for MPE hosting (the parity
             // matrix's note): a plug-in's note port takes them then.
-            NoteKind::Expression { .. } => return,
+            NoteKind::Expression { .. }
+            | NoteKind::Control { .. }
+            | NoteKind::PitchBend { .. }
+            | NoteKind::ChannelPressure { .. } => return,
         });
     }
 

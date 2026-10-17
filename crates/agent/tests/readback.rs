@@ -265,7 +265,7 @@ fn fixture() -> Project {
     device.enabled = false;
     device.show_preset_name = false;
     device.floating = true;
-    device.media = Some(ContentHash([9; 32]));
+    device.set_media(0, Some(ContentHash([9; 32])));
     device.role = DeviceRole::AudioEffect;
     device.params.insert(ParamId(2), 0.75);
     // B active, with A's values kept (device compare R1, R10).

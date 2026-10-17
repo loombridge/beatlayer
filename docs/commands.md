@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-365 commands in 33 areas.
+367 commands in 33 areas.
 
 ## Permission classes
 
@@ -184,6 +184,7 @@ Each command has:
 | [`device.save_default_preset`](#devicesave_default_preset) | Save as Default Preset | `external` |  |  |
 | [`device.save_preset`](#devicesave_preset) | Save Preset | `external` |  |  |
 | [`device.select`](#deviceselect) | Select Device | `read` |  |  |
+| [`device.select_slot`](#deviceselect_slot) | Select Sample Slot | `read` |  |  |
 | [`device.set_display_view`](#deviceset_display_view) | Set Display View | `read` |  |  |
 | [`device.set_enabled`](#deviceset_enabled) | Activate/Deactivate Device | `edit` |  |  |
 | [`device.set_enabled_all`](#deviceset_enabled_all) | Switch Device and Contents | `edit` | `Option+click a device activator` | `Alt+click a device activator` |
@@ -216,6 +217,7 @@ Each command has:
 | [`focus.previous_neighbor`](#focusprevious_neighbor) | Previous Neighbor | `read` | `Option+Shift+Tab` | `Ctrl+Shift+Tab` |
 | [`focus.toggle_tab_navigation`](#focustoggle_tab_navigation) | Use Tab Key to Move Focus | `read` |  |  |
 | [`focus.toggle_wrap_navigation`](#focustoggle_wrap_navigation) | Wrap Keyboard Navigation | `read` |  |  |
+| [`midi.capture`](#midicapture) | Capture MIDI | `edit` |  |  |
 | [`midi.computer_keyboard_key`](#midicomputer_keyboard_key) | Computer Keyboard Key | `read` |  |  |
 | [`midi.computer_keyboard_octave`](#midicomputer_keyboard_octave) | Computer Keyboard Octave | `read` |  |  |
 | [`midi.computer_keyboard_velocity`](#midicomputer_keyboard_velocity) | Computer Keyboard Velocity | `read` |  |  |
@@ -1760,7 +1762,7 @@ Result: nothing (`null`).
 
 **Load Selected Item**. Permission: `external`. Contexts: `browser`.
 
-Loads the browser's selected audio files into the Arrangement, as Enter or a double-click does: onto the selected track at the insert marker if it's an audio track, otherwise onto a new audio track below the last one, one after another, as one undo step. A clip placed over part of another replaces that part, so when a clip on that track ends after the insert marker it's destructive as well as external. Reads the files, outside the project.
+Loads the browser's selected audio files into the Arrangement, as Enter or a double-click does: onto the selected track at the insert marker if it's an audio track, otherwise onto a new audio track below the last one, one after another, as one undo step. A clip placed over part of another replaces that part, so when a clip on that track ends after the insert marker it's destructive as well as external. While a device is being hot-swapped (`device.hot_swap`), a selected preset loads into it instead, and so does a selected audio file, if the device plays samples (the sampler, or the eight-slot drum sampler, into its selected slot: `device.load_sample`). Reads the files, outside the project.
 
 Default keys:
 
@@ -2962,7 +2964,7 @@ Result: [`PresetResult`](#presetresult).
 
 **Load Sample**. Permission: `external`. Contexts: `device-view`.
 
-Loads an audio file into a device that plays one sample (the sampler), as dropping the file on the device does: the file goes into the set's media store, named by its content hash, and the device keeps that reference, so the set reopens playing it. One undo step, named Load Sample. Reads a file outside the project. A device whose type doesn't play a sample is refused.
+Loads an audio file into a device that plays samples (the sampler, or the eight-slot drum sampler), as dropping the file on the device does: the file goes into the set's media store, named by its content hash, and the device keeps that reference, so the set reopens playing it. `slot` says which of a device's sample slots takes it (counted from 0); left out, it is the slot selected in the panel, or the only one. One undo step, named Load Sample. Reads a file outside the project. A device whose type doesn't play a sample, or a slot it doesn't have, is refused. `device.set_sample` with a null `media` clears a slot.
 
 Default keys: none.
 
@@ -2972,6 +2974,7 @@ Arguments:
 |---|---|---|---|
 | `path` | string | yes | The audio file to load into the device. |
 | `device` | [`DeviceId`](#deviceid) or null | no | The device; the selected one if left out. |
+| `slot` | integer or null | no | The sample slot to load it into, counted from 0; the slot the panel has selected for a device with several, and 0 for one with one. |
 
 Result: [`LoadSampleResult`](#loadsampleresult).
 
@@ -3139,6 +3142,23 @@ Arguments:
 
 Result: [`DeviceViewState`](#deviceviewstate).
 
+#### `device.select_slot`
+
+**Select Sample Slot**. Permission: `read`. Contexts: `device-view`.
+
+Selects one of a device's sample slots, as clicking its cell in the panel does: the panel then shows that slot's controls, and a sample loaded without naming a slot goes into it. Only a device with sample slots has any (the eight-slot drum sampler has eight, counted from 0). It changes only the view: it isn't an undo step, and isn't saved with the set. The selected slot is `selected_slot` in the device's panel (`device.state`).
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `slot` | integer, at least 0 | yes | The slot, counted from 0. |
+| `device` | [`DeviceId`](#deviceid) or null | no | The device; the selected one if left out. |
+
+Result: [`DeviceViewState`](#deviceviewstate).
+
 #### `device.set_display_view`
 
 **Set Display View**. Permission: `read`. Contexts: `device-view`.
@@ -3237,7 +3257,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Set Sample**. Permission: `edit`. Contexts: `device-view`.
 
-Sets the audio a device plays (`media`, a content hash, or null to play none), which the media store holds like a clip's audio. A device whose type plays a sample plays that file; other devices ignore it. The set keeps the reference, so it reopens playing the same file. To load a file from disk as a person does, use `device.load_sample`.
+Sets the audio a device plays (`media`, a content hash, or null to play none), which the media store holds like a clip's audio, in sample slot `slot` (counted from 0, and 0 unless given: the sampler has the one, the eight-slot drum sampler eight). A device whose type plays samples plays that file; other devices ignore it. The set keeps the reference, so it reopens playing the same file. Null clears the slot, one undo step named Clear Sample. To load a file from disk as a person does, use `device.load_sample`.
 
 Default keys: none.
 
@@ -3247,6 +3267,7 @@ Arguments:
 |---|---|---|---|
 | `device` | [`DeviceId`](#deviceid) | yes | The device. |
 | `media` | [`ContentHash`](#contenthash) or null | no | The media, by content hash, or `null` to play none. The media store is where the audio comes from; a device given media the store doesn't hold is silent. |
+| `slot` | integer from 0 to 255 | no | The sample slot to set: 0, the only one the sampler has, unless given; the eight-slot drum sampler's are 0 to 7 (WP-5.17). |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -3691,6 +3712,18 @@ Arguments: none (send `{}`).
 Result: [`SwitchResult`](#switchresult).
 
 ### Area `midi`
+
+#### `midi.capture`
+
+**Capture MIDI**. Permission: `edit`. Contexts: `global`.
+
+Capture MIDI (Create ▸ Capture MIDI; the Control Bar's button). Brings back the notes played on the MIDI tracks that monitor their input, since the last capture or recording, as one clip on each track that was played, with their velocities and timing. A track with a clip playing while the transport runs gets the notes added to that clip: it grows to the loop pass the last note falls in and its loop moves there, keeping its length. Any other track gets a new clip in the selected scene's slot if it is empty, else the next empty slot below, else a scene added at the end; the clip's loop is the whole bars that cover its last phrase, from the first note-on to the last. With the transport stopped the first note is on 1.1.1 and the song's tempo may change to the played tempo; with it running the tempo stays. Control changes, pitch bend and pressure are not captured yet. Refused when no note was played; `transport.state` shows `capture_midi_ready`. One undo step.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`Captured`](#captured).
 
 #### `midi.computer_keyboard_key`
 
@@ -6851,6 +6884,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.wrap_in_rack`](#devicewrap_in_rack) | the query tool's `track` | `devices` |
 | [`edit.redo`](#editredo) | the query tool's `song` | `undo.next_redo` |
 | [`edit.undo`](#editundo) | the query tool's `song` | `undo.next_undo` |
+| [`midi.capture`](#midicapture) | the query tool's `track` | `slots` |
 | [`midi.import_file`](#midiimport_file) | the query tool's `track` | `clips` |
 | [`midi.set_port`](#midiset_port) | `midi.ports` | `ports` |
 | [`midi.toggle_computer_keyboard`](#miditoggle_computer_keyboard) | `midi.ports` | `keyboard.on` |
@@ -8564,6 +8598,93 @@ What `perception.capture_view` returns, beside the image.
 
 </details>
 
+### `Captured`
+
+What `midi.capture` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clips` | array of [`CapturedClip`](#capturedclip) | yes | The clips, one for each track that was played. |
+| `tempo` | number or null | yes | The song's new tempo, when the capture changed it (only with the transport stopped); `null` when it stayed. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `midi.capture` returns.",
+  "properties": {
+    "clips": {
+      "description": "The clips, one for each track that was played.",
+      "items": {
+        "$ref": "#/$defs/CapturedClip"
+      },
+      "type": "array"
+    },
+    "tempo": {
+      "description": "The song's new tempo, when the capture changed it (only with the transport stopped); `null` when it stayed.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "clips",
+    "tempo"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `CapturedClip`
+
+One clip a capture made or changed.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track whose notes it holds. |
+| `scene` | [`SceneId`](#sceneid) | yes | The scene whose slot it is in. |
+| `clip` | [`ClipId`](#clipid) | yes | The clip. |
+| `merged` | boolean | yes | Whether the notes joined the clip that was playing, rather than making a new clip. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One clip a capture made or changed.",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The clip."
+    },
+    "merged": {
+      "description": "Whether the notes joined the clip that was playing, rather than making a new clip.",
+      "type": "boolean"
+    },
+    "scene": {
+      "$ref": "#/$defs/SceneId",
+      "description": "The scene whose slot it is in."
+    },
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "The track whose notes it holds."
+    }
+  },
+  "required": [
+    "track",
+    "scene",
+    "clip",
+    "merged"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Chain`
 
 One chain of a rack: its own name, colour, info text and mixer, and its devices in signal order.
@@ -9448,6 +9569,7 @@ A band of controls, of a fixed size.
 | `width` | number | yes | Its width. |
 | `height` | number | yes | Its height. |
 | `controls` | array of [`Control`](#control) | yes | Its controls. |
+| `slots` | [`SlotGroup`](#slotgroup) or null | no | Set for a band that shows the selected sample slot's controls: its controls name the first slot's parameters, and the band is placed for the selected slot ([`DeviceLayout::place_for`]). |
 
 <details><summary>JSON Schema</summary>
 
@@ -9466,6 +9588,17 @@ A band of controls, of a fixed size.
       "description": "Its height.",
       "format": "float",
       "type": "number"
+    },
+    "slots": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SlotGroup"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Set for a band that shows the selected sample slot's controls: its controls name the first slot's parameters, and the band is placed for the selected slot ([`DeviceLayout::place_for`])."
     },
     "width": {
       "description": "Its width.",
@@ -9578,7 +9711,7 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 | `b_active` | boolean | no | Whether the device's B state is the active one, whose values [`params`](Self::params) holds (device compare R1). Left out of the saved set while A is active. |
 | `chains` | array of [`Chain`](#chain) | no | A rack's chains, in order (WP-5.1). Empty for every device that isn't a rack, and left out of the saved set then, so sets saved before racks load unchanged. |
 | `floating` | boolean | no | Whether the device floats in a window of its own rather than showing in the Device View (IMP-14, WP-2.5b), where its place in the chain shows as a strip. Only native devices float. Left out of the saved set while docked. Where its window sits isn't part of the document: moving or resizing a window isn't an undo step ([`WindowFrame`]). |
-| `media` | [`ContentHash`](#contenthash) or null | no | The media the device plays, by content hash (WP-2.16): the sampler's sample, which the media store holds like a clip's audio (the sampler spec, R11). Left out of the saved set for a device that plays none. |
+| `media` | array of [`ContentHash`](#contenthash) or null | no | The media the device plays, by content hash, one entry per sample slot (WP-2.16, WP-5.17): the sampler's sample is slot 0, the eight-slot drum sampler's slots are 0 to 7. The media store holds each like a clip's audio (the sampler spec, R11). A slot with no sample is `None`, and the list never ends in one. Left out of the saved set for a device that plays none; a set saved before slots existed holds one hash, which loads as slot 0. |
 | `other_params` | array or null | no | The values of the state that isn't active, in the same form as [`params`](Self::params) (device compare R1, R10). `None` while the two states are equal, as a new device's are, and left out of the saved set then. Use [`other_params`](Self::other_params) to read it. |
 | `own_name` | string | no | The device's own name, such as `Auto Filter`, which the title bar shows while Show Preset Name is off. Empty while it's the same as [`name`](Self::name), and left out of the saved set then. |
 | `plugin` | [`PluginState`](#pluginstate) or null | no | A plug-in's own state and where it was loaded from (WP-2.6), as last saved with the set. Left out of the saved set for a native device, and for a plug-in until the set is first saved with it. |
@@ -9620,15 +9753,18 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
       "description": "What the device is."
     },
     "media": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/ContentHash"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "description": "The media the device plays, by content hash (WP-2.16): the sampler's sample, which the media store holds like a clip's audio (the sampler spec, R11). Left out of the saved set for a device that plays none."
+      "description": "The media the device plays, by content hash, one entry per sample slot (WP-2.16, WP-5.17): the sampler's sample is slot 0, the eight-slot drum sampler's slots are 0 to 7. The media store holds each like a clip's audio (the sampler spec, R11). A slot with no sample is `None`, and the list never ends in one. Left out of the saved set for a device that plays none; a set saved before slots existed holds one hash, which loads as slot 0.",
+      "items": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ContentHash"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "type": "array"
     },
     "name": {
       "description": "The name the title bar shows while Show Preset Name is on: the device's own name until a preset or Rename gives it another.",
@@ -10317,6 +10453,9 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
 | `description` | [`DeviceDescription`](#devicedescription) | yes | Its parameters' descriptors and its layout. |
 | `values` | array of number | yes | Each parameter's value now, in the description's order, in the parameter's own units. |
 | `plugin` | boolean | yes | Whether this is a plug-in device's panel (WP-2.10, D19): eight knobs mapped to the plug-in's own parameters, with the rest of the body a target that opens the plug-in's editor. False for a native device. |
+| `selected_slot` | integer, at least 0 | yes | For a device with sample slots (WP-5.17): the slot whose controls the panel shows, a view setting that isn't saved with the set. |
+| `loaded_slots` | array of boolean | no | For a device with sample slots: whether each slot holds a sample. |
+| `slot_keys` | array of string | no | For a device with sample slots: the key each slot plays, as Live names notes (`C3`). |
 
 <details><summary>JSON Schema</summary>
 
@@ -10328,10 +10467,31 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
       "$ref": "#/$defs/DeviceDescription",
       "description": "Its parameters' descriptors and its layout."
     },
+    "loaded_slots": {
+      "description": "For a device with sample slots: whether each slot holds a sample.",
+      "items": {
+        "type": "boolean"
+      },
+      "type": "array"
+    },
     "plugin": {
       "default": false,
       "description": "Whether this is a plug-in device's panel (WP-2.10, D19): eight knobs mapped to the plug-in's own parameters, with the rest of the body a target that opens the plug-in's editor. False for a native device.",
       "type": "boolean"
+    },
+    "selected_slot": {
+      "default": 0,
+      "description": "For a device with sample slots (WP-5.17): the slot whose controls the panel shows, a view setting that isn't saved with the set.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "slot_keys": {
+      "description": "For a device with sample slots: the key each slot plays, as Live names notes (`C3`).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
     },
     "values": {
       "description": "Each parameter's value now, in the description's order, in the parameter's own units.",
@@ -10345,7 +10505,8 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
   "required": [
     "description",
     "values",
-    "plugin"
+    "plugin",
+    "selected_slot"
   ],
   "type": "object"
 }
@@ -10634,6 +10795,7 @@ A display cell: a graph, a spectrum, a waveform, or an envelope editor, which gr
 | `height` | number | yes | Its docked height, the least it has. |
 | `weight` | number | yes | Its share of extra room, against the other cells it shares with. |
 | `bottom` | [`ControlBand`](#controlband) or null | no | Controls inside its bottom edge, from its left. |
+| `slot` | integer or null | no | The sample slot the cell stands for, if it does: it shows the slot and takes a click that selects it, and a sample dropped on it (WP-5.17). |
 | `top` | [`ControlBand`](#controlband) or null | no | Controls inside its top edge, from its left. |
 
 <details><summary>JSON Schema</summary>
@@ -10661,6 +10823,15 @@ A display cell: a graph, a spectrum, a waveform, or an envelope editor, which gr
     "name": {
       "description": "What it shows, for the device that draws it and for screen readers.",
       "type": "string"
+    },
+    "slot": {
+      "description": "The sample slot the cell stands for, if it does: it shows the slot and takes a click that selects it, and a sample dropped on it (WP-5.17).",
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
     },
     "top": {
       "anyOf": [
@@ -12825,6 +12996,7 @@ What `device.load_sample` returns.
 |---|---|---|---|
 | `device` | [`DeviceId`](#deviceid) | yes | The device that took the sample. |
 | `media` | [`ContentHash`](#contenthash) | yes | The sample's media, by content hash: what the device and the set name it by. |
+| `slot` | integer from 0 to 255 | yes | The slot that took it, counted from 0. |
 | `name` | string | yes | The file's name, for messages. |
 
 <details><summary>JSON Schema</summary>
@@ -12844,11 +13016,20 @@ What `device.load_sample` returns.
     "name": {
       "description": "The file's name, for messages.",
       "type": "string"
+    },
+    "slot": {
+      "default": 0,
+      "description": "The slot that took it, counted from 0.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
     }
   },
   "required": [
     "device",
     "media",
+    "slot",
     "name"
   ],
   "type": "object"
@@ -16787,6 +16968,44 @@ A device's sidechain section, as its left strip and the section show it (WP-2.19
 
 </details>
 
+### `SlotGroup`
+
+The parameters of a device's sample slots: slot `k`'s copy of a parameter is the first slot's number plus `k` times `stride` (WP-5.17).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `stride` | integer, at least 0 | yes | How far apart one slot's parameter numbers are from the next's. |
+| `count` | integer, at least 0 | yes | How many slots there are. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The parameters of a device's sample slots: slot `k`'s copy of a parameter is the first slot's number plus `k` times `stride` (WP-5.17).",
+  "properties": {
+    "count": {
+      "description": "How many slots there are.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "stride": {
+      "description": "How far apart one slot's parameter numbers are from the next's.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "stride",
+    "count"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `SlotRef`
 
 One slot: a track's column and a scene's row.
@@ -17743,6 +17962,7 @@ What `transport.state` returns: the transport and the Control Bar's transport se
 | `automation_arm` | boolean | yes | Whether Automation Arm is on (view state, not saved with the set). |
 | `recording` | [`RunningRecording`](#runningrecording) or null | yes | The recording under way, from the moment recording starts until its clips are made; null when none is. |
 | `last_recording` | [`RecordingReport`](#recordingreport) or null | yes | What the last recording that ended came to; null until one has ended in this session. |
+| `capture_midi_ready` | boolean | yes | Whether Capture MIDI has notes to bring back: a monitoring MIDI track was played since the last capture or recording, so `midi.capture` runs and the Control Bar's button and Create menu item are enabled. |
 
 <details><summary>JSON Schema</summary>
 
@@ -17760,6 +17980,11 @@ What `transport.state` returns: the transport and the Control Bar's transport se
     },
     "automation_arm": {
       "description": "Whether Automation Arm is on (view state, not saved with the set).",
+      "type": "boolean"
+    },
+    "capture_midi_ready": {
+      "default": false,
+      "description": "Whether Capture MIDI has notes to bring back: a monitoring MIDI track was played since the last capture or recording, so `midi.capture` runs and the Control Bar's button and Create menu item are enabled.",
       "type": "boolean"
     },
     "counting_in": {
@@ -17886,7 +18111,8 @@ What `transport.state` returns: the transport and the Control Bar's transport se
     "midi_overdub",
     "automation_arm",
     "recording",
-    "last_recording"
+    "last_recording",
+    "capture_midi_ready"
   ],
   "type": "object"
 }

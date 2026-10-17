@@ -1656,6 +1656,7 @@ fn activate(instance: &mut Instance, config: &NodeConfig) -> Result<node::Active
         in_channels,
         out_channels,
         params: instance.params.iter().map(|p| p.map).collect(),
+        midi: midi_map(&instance.controller),
         pending: std::mem::take(&mut instance.pending),
         drive: Driver::new(instance.params.iter().map(|p| {
             // Each control starts where the controller is: the set's values
@@ -1675,6 +1676,30 @@ fn activate(instance: &mut Instance, config: &NodeConfig) -> Result<node::Active
             (p.descriptor.clone(), false, control)
         })),
     })
+}
+
+/// What the controller's `IMidiMapping` maps each channel's MIDI controllers
+/// to: the parameter, at `channel * CONTROLLERS + controller`. Every
+/// assignment is asked once, here on the main thread, so the audio thread
+/// only looks it up. A controller without the interface maps nothing.
+fn midi_map(controller: &ComPtr<IEditController>) -> Vec<Option<u32>> {
+    let mut map = vec![None; 16 * node::CONTROLLERS];
+    let Some(mapping) = controller.cast::<IMidiMapping>() else {
+        return map;
+    };
+    for (at, slot) in map.iter_mut().enumerate() {
+        let (channel, number) = (at / node::CONTROLLERS, at % node::CONTROLLERS);
+        let mut id = 0;
+        // SAFETY: the controller answers for any channel and controller
+        // number, from the main thread, writing the ID where it's pointed.
+        let result = unsafe {
+            mapping.getMidiControllerAssignment(0, channel as i16, number as i16, &raw mut id)
+        };
+        if result == kResultOk {
+            *slot = Some(id);
+        }
+    }
+    map
 }
 
 /// Deactivates an instance, as VST3 asks: stop processing, then leave the

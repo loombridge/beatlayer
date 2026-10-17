@@ -1279,3 +1279,70 @@ fn bl_cli_export_writes_what_the_command_does() {
     assert!(!temp.0.join("float.flac").exists());
     assert!(!temp.names().iter().any(|name| name.starts_with('.')));
 }
+
+/// Spec: modulation R21, R29. A random Wave Mod modulating a reverb's decay
+/// plays the same values in every export, at any block size, and the export
+/// differs from one without the modulator.
+#[test]
+fn two_exports_with_a_random_lfo_are_identical() {
+    let (mut editor, media) = echo_set(
+        bl_devices::reverb::REVERB,
+        &[(bl_devices::reverb::DECAY, 3.0)],
+        4_800,
+    );
+    let media: Arc<dyn MediaLibrary> = Arc::new(media);
+    let reverb = editor.document().device_ids().next().unwrap();
+    let temp = TempDir::new("random-lfo");
+    let export = |document: &Document, name: &str, block: usize| {
+        let path = temp.0.join(format!("{name}.wav"));
+        let mut job = job(path.clone(), FileType::Wav, BitDepth::Int24, 96_000);
+        job.block = block;
+        run(document, media.clone(), &job);
+        fs::read(path).unwrap()
+    };
+    let plain = export(editor.document(), "plain", 512);
+    let source = editor.new_id();
+    editor
+        .apply(Edit::CreateTrack {
+            id: source,
+            kind: TrackKind::Audio,
+            name: "Mod".to_owned(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let wave = bl_devices::modulator::wave_mod_type().device(editor.new_id());
+    let mut wave = wave;
+    for (param, value) in [
+        (bl_devices::modulator::WAVE, 5.0),
+        (bl_devices::modulator::RATE_HZ, 12.0),
+        (bl_devices::modulator::JITTER, 40.0),
+        (bl_model::modulator::amount(0), 100.0),
+    ] {
+        wave.params.insert(param, value);
+    }
+    let wave_id = wave.id;
+    editor
+        .apply(Edit::InsertDevice {
+            track: source,
+            index: 0,
+            device: wave,
+        })
+        .unwrap();
+    editor
+        .apply(Edit::MapModulator {
+            device: wave_id,
+            slot: 0,
+            target: bl_model::modulator::ModTarget::Device {
+                device: reverb,
+                param: bl_devices::reverb::DRY_WET,
+            },
+        })
+        .unwrap();
+    let first = export(editor.document(), "first", 512);
+    let second = export(editor.document(), "second", 512);
+    let other_blocks = export(editor.document(), "blocks", 61);
+    assert!(first == second, "two exports are the same bytes");
+    assert!(first == other_blocks, "at any block size");
+    assert!(first != plain, "the modulator changed the sound");
+}

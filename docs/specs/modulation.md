@@ -1,6 +1,6 @@
 # Modulation: relative modulation on top of automation, and the modulator devices
 
-- **Status:** draft
+- **Status:** partial (R1 to R11 each have a passing test, bar the gaps in "Not built yet"; R12 to R29 are WP-5.10's and WP-5.11's)
 - **Work packages:** WP-5.9 (modulation on a parameter: R1 to R11), WP-5.10 (modulators, part 1: how a modulator maps to its targets, its timing, and the equivalents of LFO and Shaper: R12 to R23), WP-5.11 (modulators, part 2: the equivalents of Envelope Follower, Envelope MIDI, Shaper MIDI and Expression Control: R24 to R29). Automation is [automation.md](automation.md)'s; clip envelopes' document and playback are [clip-envelopes.md](clip-envelopes.md)'s, and their Clip View editor is WP-3.16's; macros are [macros.md](macros.md)'s; MIDI and key mapping is milestone M7's; the warp settings as modulation targets are WP-4.8's
 - **Parity-matrix row:** Automation and modulation: Relative modulation on top of automation; Modulators: LFO, Shaper, Envelope Follower, Envelope MIDI, Shaper MIDI, Expression Control
 - **Checked against:** the Live 12 reference manual (online edition), read 17 October 2026; the Live 12 release notes, 12.3 and 12.4
@@ -73,17 +73,24 @@ This spec covers how modulation and automation combine on a parameter, in the en
 - **R28.** A modulator driven by audio, notes or MIDI (R24 to R27) makes its target's track wait for its own in the schedule, so its effect on a later track lands on the frames it's worked out for (R20). A mapping that would make two tracks wait on each other, because the target's track feeds the modulator's, is refused, saying why. A target earlier in the modulator's own chain, which its input passes through, takes its effect one 32-frame step late, the same at any block size. These are Beatlayer's own. (S13)
 - **R29.** Every modulator plays in an offline render (an export, a bounce, a freeze, an agent's preview) exactly as it plays in the song, sample for sample at any block size (R20, R21). (S13)
 
+## Not built yet
+
+- A Session clip's Automation and Modulation switches (R9): they need Session clips' automation envelopes (WP-3.12), which the document doesn't hold yet. An Arrangement clip's editor edits modulation only, as R9 says.
+- What holds a parameter, in `modulation.state` (R11): a macro or a modulator in Remote Control holds one only once WP-5.4 and WP-5.10 land, and the result gains the field then.
+- A modulated Audio Unit parameter's test (R10): the Audio Unit host plays the value as the VST3 host does, with no test of its own yet.
+
 ## Tests
+
 
 | Rule | Test | Kind |
 |---|---|---|
 | R1 | `crates/devices/tests/rules.rs`, `every_parameter_is_modulatable_to_the_frame`; `crates/engine/tests/modulation.rs`, `mixer_controls_and_sends_take_modulation` | engine test under the allocation trap |
 | R2 | `crates/engine/tests/modulation.rs`, `modulation_rides_on_automation_and_follows_it_down`, `modulation_never_changes_the_set` | golden render |
 | R3 | `crates/model/src/modulation.rs`, `contributions_add_in_the_travel_and_clamp`, `a_stepped_parameter_plays_the_nearest_step` | unit, property |
-| R4 | `crates/model/src/modulation.rs`, `a_level_is_only_brought_down_to_silence`, `pan_reach_shrinks_towards_the_ends`, `a_device_control_moves_relative_to_its_base`; `crates/engine/tests/clip_envelopes.rs`, `a_volume_clip_envelope_never_raises_the_fader` | unit, golden render |
-| R5 | `crates/model/src/repr.rs`, `clip_envelopes_from_before_relative_modulation_play_as_they_did`; `crates/cli/tests/older_sets.rs`, `an_older_clip_envelope_renders_the_same` | unit, golden render |
+| R4 | `crates/model/src/modulation.rs`, `a_level_is_only_brought_down_to_silence`, `pan_reach_shrinks_towards_the_ends`, `a_device_control_moves_relative_to_its_base`; `crates/engine/tests/clip_envelopes.rs`, `a_linked_clip_envelope_drives_the_parameter_while_the_clip_plays`; the `volume-modulation` and `device-modulation` goldens in `crates/cli/src/golden/fixtures.rs` | unit, golden render |
+| R5 | `crates/model/src/modulation.rs`, `clip_envelopes_from_before_relative_modulation_play_as_they_did`; `crates/cli/tests/older_sets.rs`, `an_older_clip_envelope_renders_the_same`; `crates/project/tests/schemas.rs`, `every_fixture_loads_as_the_fixture_song` | unit, golden render |
 | R6 | `crates/engine/tests/modulation.rs`, `modulation_is_the_same_at_any_block_size` (blocks of 1, 64 and 512 frames), `a_stopped_source_hands_back_the_base_on_the_next_frame`; `rtsan/tests/modulation.rs`, `modulated_blocks_run_clean_under_the_sanitizer` | engine test under the allocation trap, RealtimeSanitizer |
-| R7 | `crates/ui/tests/modulation.rs`, `a_modulated_knob_shows_a_ring_segment_and_keeps_its_pointer`, `a_modulated_fader_shows_its_mark`; `crates/ui/tests/accessibility.rs`, `a_modulated_control_reads_its_base_and_played_value` | UI script |
+| R7 | `crates/ui/tests/modulation.rs`, `a_modulated_knob_shows_a_ring_segment_and_keeps_its_pointer`, `a_modulated_fader_shows_its_mark`; `crates/ui/tests/accessibility.rs`, `a_modulated_control_reads_its_base_and_played_value`; `crates/engine/tests/modulation.rs`, `the_engine_publishes_what_a_modulated_parameter_played` | UI script, engine test |
 | R8 | `crates/ui/tests/modulation.rs`, `the_choosers_mark_automation_modulation_and_both` | UI script |
 | R9 | `crates/ui/tests/modulation.rs`, `a_lane_draws_the_base_only`, `the_clip_editor_draws_modulation_on_its_own_scale`, `an_arrangement_clip_has_no_automation_switch` | UI script |
 | R10 | `crates/plugin-host/tests/clap.rs`, `a_modulatable_parameter_takes_modulation_events`, `other_parameters_take_the_played_value`; `crates/plugin-host/tests/vst3.rs`, `a_vst3_parameter_takes_the_played_value`; `crates/shell/tests/plugins.rs`, `modulation_never_writes_a_plugins_value_into_the_set` | unit, engine test |

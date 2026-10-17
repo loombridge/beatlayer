@@ -307,8 +307,14 @@ fn load_file(path: &Path, options: &LoadOptions) -> Result<(Project, SetInfo, u6
         revision: info.revision,
         fingerprint,
     };
-    let project = journal::newest_save_point(path, follows, options).unwrap_or(project);
-    Ok((project, info, fingerprint))
+    // The song comes from the save point when there is one, and so does the
+    // schema it was saved in: a set opened by an older build and journalled
+    // by this one holds this build's form there (the modulation spec, R5).
+    let (project, schema) = journal::newest_save_point(path, follows, options)
+        .map_or((project, info.schema), |(project, saved)| {
+            (project, saved.schema)
+        });
+    Ok((project, SetInfo { schema, ..info }, fingerprint))
 }
 
 /// The file-system operations a save makes, so tests can stop a save after

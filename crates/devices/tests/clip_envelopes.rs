@@ -1,7 +1,8 @@
-//! A device's parameters under a clip envelope (WP-3.15): the framework adds
-//! the envelope's modulation to the parameter's own value, on the exact
-//! frame, while the clip plays, clamped to the parameter's range. Each block
-//! runs as a real-time section under the allocation trap.
+//! A device's parameters under a clip envelope (WP-3.15, WP-5.9): the
+//! framework adds the envelope's modulation to the parameter's own position
+//! on its travel, on the exact frame, while the clip plays, clamped to the
+//! travel's ends. Each block runs as a real-time section under the
+//! allocation trap.
 
 bl_rt::install_trap!();
 
@@ -97,8 +98,9 @@ fn a_devices_parameter_takes_the_clip_envelopes_modulation_on_the_exact_frame() 
     let mut editor = Editor::new();
     let (track, device, target) = track_with_utility(&mut editor, 1.0);
     let clip = one_bar_clip(&mut editor, track);
-    // The envelope ramps from 0 at 1.1.1 to 1 at the bar's end: it adds to
-    // the device's 0 dB gain, so the sample climbs from 1 to 2.
+    // The envelope ramps from 0 at 1.1.1 to 1 at the bar's end: it adds a
+    // share of the gain's travel to the position of its 0 dB, so the sample
+    // climbs from 1 to the gain's ceiling.
     editor
         .apply(Command::SetClipEnvelopeBreakpoint {
             clip,
@@ -133,12 +135,17 @@ fn a_devices_parameter_takes_the_clip_envelopes_modulation_on_the_exact_frame() 
             },
         )
     };
-    // A block from the middle of the ramp: the gain is the frame's own
-    // value, the control's 1 plus the envelope, one frame at a time.
+    // A block from the middle of the ramp: the gain is the control's position
+    // plus the envelope's share of the travel, one frame at a time.
+    let gain = testing::utility_type()
+        .description
+        .param(UTILITY_GAIN)
+        .unwrap()
+        .clone();
     let out = run(utility.as_mut(), (BAR / 2) as i64);
     for (i, &sample) in out[0].iter().enumerate() {
         let frame = BAR / 2 + i;
-        let want = 1.0 + frame as f64 / BAR as f64;
+        let want = gain.denormalize(gain.normalize(1.0) + frame as f64 / BAR as f64);
         assert!(
             (f64::from(sample) - want).abs() < 1e-6,
             "frame {frame}: {sample} isn't {want}"

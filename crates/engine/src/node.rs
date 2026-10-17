@@ -295,6 +295,13 @@ pub trait Node: Send + 'static {
         false
     }
 
+    /// Calls `report` for each parameter the node's last block played under
+    /// modulation (WP-5.9), with its base and the value it played, so the
+    /// engine can publish them. The default reports none.
+    fn modulated(&self, report: &mut dyn FnMut(ParamId, f64, f64)) {
+        let _ = report;
+    }
+
     /// How many frames the node delays its input by, for delay compensation
     /// (WP-2.11).
     fn latency(&self) -> u32 {

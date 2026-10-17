@@ -556,6 +556,7 @@ impl BrowserView {
                     depth: 0,
                     open: false,
                     folder: None,
+                    format: None,
                 })
                 .collect();
             if items.is_empty() {
@@ -1190,13 +1191,10 @@ impl BrowserView {
                         }
                     })
                     .collect::<Result<Vec<_>, _>>()?;
-                if let Some(missing) = paths
-                    .iter()
-                    .find(|p| {
-                        let p_str = p.to_string_lossy();
-                        !p.exists() && !is_device(&p_str) && !self.is_plugin_row(&p_str)
-                    })
-                {
+                if let Some(missing) = paths.iter().find(|p| {
+                    let name = p.to_string_lossy();
+                    !p.exists() && !is_device(&name) && !self.is_plugin_row(&name)
+                }) {
                     return Err(BrowserError::InvalidArgs(format!(
                         "{} doesn't exist",
                         missing.to_string_lossy()

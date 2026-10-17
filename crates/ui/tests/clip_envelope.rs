@@ -215,7 +215,7 @@ impl Env {
     }
 }
 
-// Spec: piano-roll R1, R13; S-CLIPMODE-001 to 004. Option+Shift+2 shows the
+// Spec: piano-roll R22; S-CLIPMODE-001 to 004. Option+Shift+2 shows the
 // Envelopes tab and Option+Shift+1 the Notes tab, and Option+Tab goes on to
 // the next tab.
 #[test]
@@ -239,7 +239,7 @@ fn the_tab_keys_show_and_cycle_the_tabs() {
     assert_eq!(e.h.shell.clip_view().tab(), ClipTab::Notes);
 }
 
-// Spec: piano-roll R13; AccessKit. The toolbar's tabs are in the tree, the
+// Spec: piano-roll R22; AccessKit. The toolbar's tabs are in the tree, the
 // shown one selected and MPE disabled, and clicking a tab runs
 // `view.clip_tab`.
 #[test]

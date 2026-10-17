@@ -128,7 +128,7 @@ impl Song {
     }
 }
 
-// Spec: piano-roll R1, R13. The tab commands change only the view: Notes
+// Spec: piano-roll R22. The tab commands change only the view: Notes
 // and Envelopes by name, and the next tab, round to the first, when `tab` is
 // left out. The state reads the tab back.
 #[test]
@@ -162,7 +162,7 @@ fn the_tab_commands_show_and_cycle_the_clip_views_tabs() {
     );
 }
 
-// Spec: piano-roll R13. The tab decides which editor's keys apply: the
+// Spec: piano-roll R22. The tab decides which editor's keys apply: the
 // Notes tab is the note editor, the Envelopes tab the envelope editor.
 #[test]
 fn the_envelopes_tab_swaps_the_note_editors_keys_for_the_envelope_editors() {

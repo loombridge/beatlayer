@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-334 commands in 31 areas.
+335 commands in 31 areas.
 
 ## Permission classes
 
@@ -266,6 +266,7 @@ Each command has:
 | [`session.larger_quantization`](#sessionlarger_quantization) | Larger Launch Quantization | `read` | `Cmd+2` | `Ctrl+2` |
 | [`session.launch`](#sessionlaunch) | Launch Clip | `read` |  |  |
 | [`session.launch_scene`](#sessionlaunch_scene) | Launch Scene | `read` |  |  |
+| [`session.launch_selected`](#sessionlaunch_selected) | Launch the Selected Clips and Scenes | `read` | `Enter` | `Enter` |
 | [`session.overdub`](#sessionoverdub) | Overdub Slot | `external` |  |  |
 | [`session.record`](#sessionrecord) | Record to Session | `external` | `Cmd+Shift+F9`; `Cmd+Shift+F9` | `Ctrl+Shift+F9`; `Ctrl+Shift+F9` |
 | [`session.record_slot`](#sessionrecord_slot) | Record into Slot | `external` |  |  |
@@ -4543,6 +4544,22 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `scene` | [`SceneId`](#sceneid) | yes | The scene. |
+
+Result: nothing (`null`).
+
+#### `session.launch_selected`
+
+**Launch the Selected Clips and Scenes**. Permission: `read`. Contexts: `session`.
+
+Launches every selected slot that holds a clip and every selected scene, as Enter does in the Session View: each runs `session.launch` or `session.launch_scene`, so it waits for the launch quantisation grid while the song plays and starts the transport at once while it's stopped. A selected empty slot is skipped. Select a slot or a scene first. It changes nothing in the set.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-SES-001 | `Enter` | `Enter` | `session` | Launch the selected clip, slot or scene | runs it |
+
+Arguments: none (send `{}`).
 
 Result: nothing (`null`).
 

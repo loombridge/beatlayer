@@ -83,6 +83,7 @@
 bl_rt::install_trap!();
 
 mod automation;
+pub mod capture;
 pub mod clips;
 mod compiler;
 pub mod display;
@@ -115,6 +116,7 @@ pub mod testing;
 use bl_core::time::SampleRate;
 
 pub use automation::{AutomationList, clip_envelope_value_at, target_node};
+pub use capture::{CAPTURE_RING, CapturedMidi};
 pub use clips::{
     ClipPlayer, MediaLibrary, MediaMap, MediaStreams, OpenedSource, SlotSample, SourceCues,
 };

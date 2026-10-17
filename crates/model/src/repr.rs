@@ -687,6 +687,37 @@ mod tests {
         assert!(load(value).unwrap_err().contains("instrument"));
     }
 
+    // Spec: device-compare R10
+    #[test]
+    fn both_states_save_with_the_set_and_load_back() {
+        let (mut doc, [_, audio, _]) = song();
+        let device = doc.track(audio).unwrap().devices().next().unwrap().id;
+        let saved = |doc: &Document| {
+            serde_json::to_value(doc).unwrap()["tracks"][0]["children"][0]["devices"][0].clone()
+        };
+        // Equal states write neither the active state nor the other.
+        let before = saved(&doc);
+        assert!(before.get("b_active").is_none() && before.get("other_params").is_none());
+        // A change leaves the other state as it was, and it's written.
+        let set = |value| Command::SetDeviceParam {
+            device,
+            param: ParamId(4),
+            value,
+        };
+        doc.apply(&set(-12.0)).unwrap();
+        assert_eq!(saved(&doc)["other_params"], json!([[4, -6.0]]));
+        doc.apply(&Command::CompareSwitch { device }).unwrap();
+        let after = saved(&doc);
+        assert_eq!(after["b_active"], json!(true));
+        assert_eq!(after["params"], json!([[4, -6.0]]));
+        assert_eq!(after["other_params"], json!([[4, -12.0]]));
+        assert_eq!(load(serde_json::to_value(&doc).unwrap()).unwrap(), doc);
+        // Copying makes them equal again, and the other isn't written.
+        doc.apply(&Command::CompareCopy { device }).unwrap();
+        assert!(saved(&doc).get("other_params").is_none());
+        assert_eq!(load(serde_json::to_value(&doc).unwrap()).unwrap(), doc);
+    }
+
     // Spec: clap-hosting R8
     #[test]
     fn a_plugins_state_saves_as_base64_and_loads_back() {

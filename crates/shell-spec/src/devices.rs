@@ -5,7 +5,7 @@
 //! The document's own device commands (`device.insert`, `device.remove`,
 //! `device.move`, `device.rename`, `device.set_enabled`,
 //! `device.set_show_preset_name`, `device.set_state`, `device.set_param`,
-//! `device.set_floating`)
+//! `device.set_floating`, `device.compare_switch`, `device.compare_copy`)
 //! are `bl-model`'s. Those here run on the shell, which knows the selection,
 //! the clipboard, the User Library, and the browser. A command whose
 //! `device` is left out acts on the device selected in the Device View, as
@@ -88,6 +88,13 @@ pub const SET_WINDOW: &str = "device.set_window";
 /// device (`bl-model`'s).
 pub const SET_FLOATING: &str = "device.set_floating";
 
+/// `device.compare_switch`: make a native device's other A/B state active
+/// (`bl-model`'s).
+pub const COMPARE_SWITCH: &str = "device.compare_switch";
+/// `device.compare_copy`: copy a native device's active A/B state over the
+/// other (`bl-model`'s).
+pub const COMPARE_COPY: &str = "device.compare_copy";
+
 /// Every command [`register`] adds, so a host knows which IDs to send to
 /// `bl-shell`'s `Shell::run`.
 pub const IDS: &[&str] = &[
@@ -128,6 +135,8 @@ pub const ON_SELECTED: &[&str] = &[
     "device.set_enabled",
     "device.set_show_preset_name",
     SET_FLOATING,
+    COMPARE_SWITCH,
+    COMPARE_COPY,
 ];
 
 /// Whether `id` is one of the Device View's commands.
@@ -314,6 +323,10 @@ pub struct ParameterState {
     /// rather than a control in its body (C-DEVICE-015).
     #[serde(default)]
     pub menu_option: bool,
+    /// Its value in the A and B state that isn't active (device compare
+    /// R11); left out for a device without two states.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub other: Option<f64>,
 }
 
 /// What `device.parameters` returns.
@@ -321,6 +334,10 @@ pub struct ParameterState {
 pub struct DeviceParameters {
     /// The device.
     pub device: DeviceId,
+    /// Which of its A and B states is active, `A` or `B` (device compare
+    /// R11); left out for a device without two states.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active: Option<String>,
     /// Its parameters, in the order its type lists them; empty if its type
     /// doesn't describe them.
     pub params: Vec<ParameterState>,
@@ -373,6 +390,10 @@ pub struct DeviceFrame {
     /// strip (WP-2.5b).
     #[serde(default)]
     pub floating: bool,
+    /// Whether its B state is the active one, which the title bar marks
+    /// "(B)" (device compare R5).
+    #[serde(default)]
+    pub b_active: bool,
     /// Whether it's the selected device.
     pub selected: bool,
     /// Whether it's the device being hot-swapped.
@@ -387,6 +408,19 @@ pub struct DeviceFrame {
     /// of its description's `views`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_view: Option<String>,
+}
+
+impl DeviceFrame {
+    /// What its title bar reads, with "(B)" after the name while the B
+    /// state is active (device compare R5).
+    #[must_use]
+    pub fn title_text(&self) -> String {
+        if self.b_active {
+            format!("{} (B)", self.title)
+        } else {
+            self.title.clone()
+        }
+    }
 }
 
 /// A device's sidechain section, as its left strip and the section show it

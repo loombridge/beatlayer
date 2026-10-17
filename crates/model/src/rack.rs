@@ -375,10 +375,12 @@ impl Device {
 
     /// Gives this device, every device inside it and every chain a new ID
     /// from `next`, in signal order: the copy of a rack that is pasted or
-    /// duplicated, which docks every device it holds.
+    /// duplicated, which docks every device it holds and gives each the
+    /// active state in both of its states (device compare R8).
     pub fn reassign_ids(&mut self, next: &mut impl FnMut() -> Id) {
         self.id = DeviceId(next());
         self.floating = false;
+        self.set_both(self.params.clone());
         for chain in &mut self.chains {
             chain.reassign_ids(next);
         }

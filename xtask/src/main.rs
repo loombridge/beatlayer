@@ -53,6 +53,7 @@ Tasks:
                  reading origin/main and fetching it every two minutes (--worktree reads
                  the files on disk). Localhost starts it from .claude/launch.json
   package        Build this platform's packages with cargo-packager and check they start
+  release-check  Fail unless the given tag is v followed by the workspace version
   rtsan          Run the real-time tests in rtsan/ under LLVM's RealtimeSanitizer, with a
                  runtime already on this machine (the file RTSAN_LIB_PATH names, or
                  Homebrew's llvm on macOS, or LLVM 20 or later on Linux). Arguments after
@@ -144,6 +145,10 @@ fn run(root: &Path, args: &[String]) -> Result<ExitCode, String> {
         Some("progress") => dashboard::print(root, options).map(|()| ExitCode::SUCCESS),
         Some("dashboard") => dashboard::serve(root, options).map(|()| ExitCode::SUCCESS),
         Some("package") => package::package(root).map(|()| ExitCode::SUCCESS),
+        Some("release-check") => match options {
+            [tag] => package::release_check(root, tag).map(|()| ExitCode::SUCCESS),
+            _ => Err(format!("usage: cargo xtask release-check <tag>\n\n{USAGE}")),
+        },
         Some("rtsan") => {
             let passed_on = match options.first().map(String::as_str) {
                 None => &[][..],

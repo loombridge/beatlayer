@@ -476,9 +476,9 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 4.18 | todo |  |  |
 | 4.19 | todo |  |  |
 | 4.20 | done | 17 October 2026 | [#99](https://github.com/loombridge/beatlayer/pull/99); one writer for processed audio files into `Samples/Processed/<kind>/`, and the Temporary Folder setting for a set never saved, whose files the first save moves into the project; [the spec](specs/audio-clip-editing.md) |
-| 4.21 | todo |  |  |
+| 4.21 | done | 17 October 2026 | [#104](https://github.com/loombridge/beatlayer/pull/104); the VST3 and Audio Unit hosts lend their instances to exports, previews and analysis as the CLAP host does, with one loan across the three formats; [the spec](specs/offline-plugin-renders.md) |
 | 4.22 | done | 17 October 2026 | [#108](https://github.com/loombridge/beatlayer/pull/108); right-clicking a track's title bar in the Arrangement, the Session View or a mixer, or S-CTX-002, opens C-TRACK in Live's order: the items with commands work on the selected tracks, Delete and Rename among them, and the rest are disabled and name their package; [the spec](specs/track-context-menu.md) |
-| 5.1 | todo |  |  |
+| 5.1 | done | 17 October 2026 | [#105](https://github.com/loombridge/beatlayer/pull/105); racks of the four kinds hold parallel chains, each with its own mixer, nest to any depth, run inside their track's task with delay compensation at the sum, and group and ungroup with Cmd+G and Cmd+Shift+G; the Device View's rack is WP-5.2's; [the spec](specs/racks.md) |
 | 5.2 | todo |  |  |
 | 5.3 | todo |  |  |
 | 5.4 | todo |  | The stepped and radio-button styles wait on IMP-26's acceptance |

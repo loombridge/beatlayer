@@ -6,7 +6,7 @@ use bl_core::id::Id;
 use bl_core::time::Ticks;
 
 use crate::device::DeviceRole;
-use crate::ids::{ClipId, DeviceId, SceneId, TrackId};
+use crate::ids::{ChainId, ClipId, DeviceId, SceneId, TrackId};
 use crate::track::TrackKind;
 
 /// Why a command was rejected, or why a loaded document isn't valid.
@@ -197,6 +197,44 @@ pub enum ModelError {
         /// What can't move, such as "tempo breakpoint".
         what: &'static str,
     },
+    /// No rack has a chain with this ID (WP-5.1).
+    NoSuchChain(ChainId),
+    /// The device isn't a rack, so it has no chains.
+    NotARack(DeviceId),
+    /// A rack's role doesn't match its kind, or a device that isn't a rack
+    /// holds chains.
+    RackRole(DeviceId),
+    /// A rack's chain can't hold a device with this role: an audio effect
+    /// rack's chains hold only audio effects, and a MIDI effect rack's only
+    /// MIDI effects.
+    ChainDoesNotFit {
+        /// The rack.
+        rack: DeviceId,
+        /// The device's role.
+        role: DeviceRole,
+    },
+    /// One of a rack's chains would be out of order (MIDI effects, then the
+    /// instrument, then audio effects), or hold a second instrument.
+    ChainOrder {
+        /// The rack.
+        rack: DeviceId,
+    },
+    /// A rack or chain can't go inside itself.
+    RackIntoItself(DeviceId),
+    /// The chain isn't in this track, so the track has no such parameter to
+    /// automate.
+    ChainNotInTrack {
+        /// The chain.
+        chain: ChainId,
+        /// The track.
+        track: TrackId,
+    },
+    /// The chain is a MIDI effect rack's, which has no volume or pan.
+    ChainHasNoMixer(ChainId),
+    /// What was asked to group or ungroup can't be: the devices aren't all
+    /// in one chain, or the rack isn't one new rack with one empty chain, or
+    /// the rack to take apart holds several chains.
+    BadGroup(&'static str),
 }
 
 impl fmt::Display for ModelError {
@@ -205,6 +243,31 @@ impl fmt::Display for ModelError {
             Self::NoSuchTrack(id) => write!(f, "no {id}"),
             Self::NoSuchClip(id) => write!(f, "no {id}"),
             Self::NoSuchDevice(id) => write!(f, "no {id}"),
+            Self::NoSuchChain(id) => write!(f, "no {id}"),
+            Self::NotARack(id) => write!(f, "{id} isn't a rack, so it has no chains"),
+            Self::RackRole(id) => write!(
+                f,
+                "{id} isn't a rack with the role of its kind: only racks hold chains"
+            ),
+            Self::ChainDoesNotFit { rack, role } => write!(
+                f,
+                "{rack}'s chains can't hold a {} device",
+                role.label().to_lowercase().replace("midi", "MIDI")
+            ),
+            Self::ChainOrder { rack } => write!(
+                f,
+                "each of {rack}'s chains must hold its MIDI effects first, then at most one \
+                 instrument, then its audio effects"
+            ),
+            Self::RackIntoItself(id) => write!(f, "{id} can't go inside itself"),
+            Self::ChainNotInTrack { chain, track } => {
+                write!(f, "{chain} isn't in {track}'s chain")
+            }
+            Self::BadGroup(what) => f.write_str(what),
+            Self::ChainHasNoMixer(id) => write!(
+                f,
+                "{id} belongs to a MIDI effect rack, whose chains have no volume or pan"
+            ),
             Self::NoSuchScene(id) => write!(f, "no {id}"),
             Self::SlotOccupied { track, scene } => {
                 write!(f, "{track}'s slot in {scene} already holds a clip")

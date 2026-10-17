@@ -250,6 +250,7 @@ fn the_context_menu_lists_lives_items_and_names_later_packages() {
         "Duplicate",
         "Rename",
         "Delete",
+        "Group",
         "Fold",
         "Show Preset Name",
         "Compare: Switch to B",
@@ -260,15 +261,13 @@ fn the_context_menu_lists_lives_items_and_names_later_packages() {
     }
     // Show Preset Name is ticked on a new device (observed).
     assert!(item("Show Preset Name").label.starts_with('✔'));
-    for (label, package) in [("Edit Info Text", "WP-2.24"), ("Group", "M5")] {
-        let node: Node = item(label);
-        assert!(node.disabled, "{label} waits");
-        assert!(
-            node.description.contains(package),
-            "{label}: {}",
-            node.description
-        );
-    }
+    let node: Node = item("Edit Info Text");
+    assert!(node.disabled, "Edit Info Text waits");
+    assert!(
+        node.description.contains("WP-2.24"),
+        "Edit Info Text: {}",
+        node.description
+    );
 }
 
 // Spec: device-chains R24 (Show Options opens the same menu)

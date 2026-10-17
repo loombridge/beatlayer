@@ -16,8 +16,8 @@ use bl_commands::Context::{Browser, DeviceView, Global};
 use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_model::device_layout::BODY_HEIGHT;
 use bl_model::{
-    ContentHash, DeviceDescription, DeviceDisplay, DeviceId, DeviceKind, DeviceLayout, DeviceRole,
-    ParamDescriptor, ParamId, Tap, TrackId, TrackKind, WindowFrame,
+    ChainId, ContentHash, DeviceDescription, DeviceDisplay, DeviceId, DeviceKind, DeviceLayout,
+    DeviceRole, ParamDescriptor, ParamId, Tap, TrackId, TrackKind, WindowFrame,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -63,6 +63,20 @@ pub const DISPLAY: &str = "device.display";
 /// (WP-5.43).
 pub const SET_DISPLAY_VIEW: &str = "device.set_display_view";
 
+/// `device.group`: wrap the selected devices, or chains, in a new rack
+/// (WP-5.1).
+pub const GROUP: &str = "device.group";
+/// `device.ungroup`: take the selected rack apart (WP-5.1).
+pub const UNGROUP: &str = "device.ungroup";
+/// `chain.copy`: copy a chain to the chain clipboard (WP-5.1).
+pub const CHAIN_COPY: &str = "chain.copy";
+/// `chain.cut`: cut a chain to the chain clipboard.
+pub const CHAIN_CUT: &str = "chain.cut";
+/// `chain.paste`: paste the clipboard's chain into a rack.
+pub const CHAIN_PASTE: &str = "chain.paste";
+/// `chain.duplicate`: duplicate a chain straight after itself.
+pub const CHAIN_DUPLICATE: &str = "chain.duplicate";
+
 /// `device.windows`: the floating devices' windows (WP-2.5b).
 pub const WINDOWS: &str = "device.windows";
 /// `device.set_window`: where a floating device's window sits.
@@ -101,6 +115,12 @@ pub const IDS: &[&str] = &[
     SET_DISPLAY_VIEW,
     WINDOWS,
     SET_WINDOW,
+    GROUP,
+    UNGROUP,
+    CHAIN_COPY,
+    CHAIN_CUT,
+    CHAIN_PASTE,
+    CHAIN_DUPLICATE,
 ];
 
 /// The document's device commands that act on the selected device when
@@ -566,6 +586,10 @@ pub struct AddDeviceArgs {
     /// The track; the selected track if left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub track: Option<TrackId>,
+    /// A rack's chain to add it to, at any depth, in place of the track's
+    /// own chain (WP-5.1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chain: Option<ChainId>,
     /// Where it goes in the chain; after the selected device, or at the end
     /// of its role's place in the chain, if left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -593,10 +617,76 @@ pub struct PasteDeviceArgs {
     /// The track; the selected track if left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub track: Option<TrackId>,
-    /// Paste before this device; before the selected device, or at the end
-    /// of the chain with none selected, if left out.
+    /// A rack's chain to paste into, at any depth, in place of the track's
+    /// own chain (WP-5.1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chain: Option<ChainId>,
+    /// Paste before this device, which may be in a rack's chain; before the
+    /// selected device, or at the end of the chain with none selected, if
+    /// left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub before: Option<DeviceId>,
+}
+
+/// Arguments of `device.group`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct GroupArgs {
+    /// The devices to wrap in a new rack, all in one chain; the selected
+    /// device if both lists are left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub devices: Option<Vec<DeviceId>>,
+    /// Several chains of one rack to group instead: they become the chains
+    /// of a new rack of the same kind, in a new chain in the first one's
+    /// place.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chains: Option<Vec<ChainId>>,
+}
+
+/// What `device.group` returns.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Grouped {
+    /// The new rack, now selected.
+    pub rack: DeviceId,
+    /// The chain that holds the devices, or, when chains were grouped, the
+    /// new chain that holds the new rack.
+    pub chain: ChainId,
+}
+
+/// What `device.ungroup` returns.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Ungrouped {
+    /// The devices that took the rack's place, in order; the first is now
+    /// selected.
+    pub devices: Vec<DeviceId>,
+}
+
+/// Arguments of `chain.copy`, `chain.cut` and `chain.duplicate`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ChainArgs {
+    /// The chain.
+    pub chain: ChainId,
+}
+
+/// Arguments of `chain.paste`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PasteChainArgs {
+    /// The rack to paste into.
+    pub rack: DeviceId,
+    /// Where it goes in the rack's list of chains; the end if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<usize>,
+}
+
+/// What the chain commands that add a chain return.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ChainAdded {
+    /// The new chain.
+    pub chain: ChainId,
+    /// The rack it is in.
+    pub rack: DeviceId,
 }
 
 /// Arguments of `device.save_preset`.
@@ -731,7 +821,8 @@ fn specs() -> Vec<CommandSpec> {
                  instrument, then audio effects. An instrument or MIDI effect added while an \
                  audio, group, or return track is selected goes on a new MIDI track at the end \
                  of the track list, which becomes the selected track, as one undo step (Insert \
-                 Device and Track). A chain holds one instrument until racks arrive.",
+                 Device and Track). With `chain` it goes into that rack chain instead. A chain \
+                 holds one instrument; a rack holds more.",
             )
             .permission(Permission::Edit)
             .contexts([DeviceView, Browser])
@@ -799,7 +890,8 @@ fn specs() -> Vec<CommandSpec> {
                  selected device (or `before`), or at the end of the chain with none selected, \
                  on the selected track (or `track`), and selects it: one undo step, named Copy \
                  Device. The chain keeps Live's order, so an audio effect can't go before an \
-                 instrument, and instruments and MIDI effects only go on MIDI tracks.",
+                 instrument, and instruments and MIDI effects only go on MIDI tracks. With \
+                 `chain` it pastes into that rack chain, or before a device that is in one.",
             )
             .permission(Permission::Edit)
             .context(DeviceView)
@@ -809,8 +901,9 @@ fn specs() -> Vec<CommandSpec> {
         CommandSpec::new(DUPLICATE, "Duplicate Device")
             .description(
                 "Puts a copy of a device, with its settings, straight after it, and selects the \
-                 copy: one undo step, named Duplicate Device. A chain holds one instrument until \
-                 racks arrive, so an instrument can't be duplicated yet.",
+                 copy: one undo step, named Duplicate Device. A chain holds one instrument, so \
+                 an instrument can't be duplicated; a rack is copied whole, with new IDs for \
+                 its chains and devices.",
             )
             .permission(Permission::Edit)
             .context(DeviceView)
@@ -906,6 +999,74 @@ fn specs() -> Vec<CommandSpec> {
             .context(DeviceView)
             .args::<ShowSidechainArgs>()
             .result::<DeviceViewState>(),
+        CommandSpec::new(GROUP, "Group")
+            .description(
+                "Wraps the selected devices (or `devices`, all in one chain) in a new rack, as \
+                 Group does: the rack takes the first device's place and holds one chain, named \
+                 after the first device, that holds the devices in their order, each keeping \
+                 its settings and running state; the rack is selected. The rack is the kind that \
+                 can hold them: an audio effect rack for audio effects alone, a MIDI effect \
+                 rack for MIDI effects alone, and an instrument rack for any other mix. A \
+                 selection that grouping would put out of the chain's order is refused. With \
+                 `chains` (several chains of one rack) they become the chains of a new rack of \
+                 the same kind, inside a new chain in the first one's place. One undo step \
+                 (Group).",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .binding("S-DEV-001")
+            .args::<GroupArgs>()
+            .result::<Grouped>(),
+        CommandSpec::new(UNGROUP, "Ungroup")
+            .description(
+                "Takes the selected rack (or `device`) apart, as Ungroup does: the devices of \
+                 its one chain take the rack's place in order and the first is selected; the \
+                 rack, its chain's mixer and its Macro Controls go. A rack with no chains is \
+                 just removed; a rack of several chains can't be taken apart. One undo step \
+                 (Ungroup).",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .binding("S-DEV-002")
+            .args::<DeviceArgs>()
+            .result::<Ungrouped>(),
+        CommandSpec::new(CHAIN_COPY, "Copy Chain")
+            .description(
+                "Copies a rack's chain, with its devices, name, colour, info text and mixer, \
+                 to the chain clipboard for `chain.paste`. Changes nothing in the set.",
+            )
+            .permission(Permission::Read)
+            .context(DeviceView)
+            .args::<ChainArgs>()
+            .result::<DeviceViewState>(),
+        CommandSpec::new(CHAIN_CUT, "Cut Chain")
+            .description(
+                "Copies a rack's chain to the chain clipboard and deletes it: one undo step \
+                 (Delete Chain). Because it removes the person's work an agent asks first.",
+            )
+            .permission(Permission::Destructive)
+            .context(DeviceView)
+            .args::<ChainArgs>()
+            .result::<DeviceViewState>(),
+        CommandSpec::new(CHAIN_PASTE, "Paste Chain")
+            .description(
+                "Pastes the chain clipboard's chain into a rack at `index` (the end if left \
+                 out), as a new chain with new IDs and everything else copied: one undo step \
+                 (Insert Chain). The chain must fit the rack's kind.",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<PasteChainArgs>()
+            .result::<ChainAdded>(),
+        CommandSpec::new(CHAIN_DUPLICATE, "Duplicate Chain")
+            .description(
+                "Puts a copy of a rack's chain, with new IDs, straight after it: one undo step \
+                 (Insert Chain).",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<ChainArgs>()
+            .result::<ChainAdded>(),
         CommandSpec::new(DISPLAY, "Device Display")
             .description(
                 "Reports what a device's display shows now, read from the display data its \

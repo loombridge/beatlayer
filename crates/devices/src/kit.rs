@@ -236,7 +236,7 @@ impl KitHost {
         let mut guard = lock(&self.inner.main);
         let Some(main) = guard.get() else { return };
         for track in document.tracks() {
-            for device in track.devices() {
+            for device in track.devices_deep() {
                 let Some(kind) = self.kind(&device.kind) else {
                     continue;
                 };

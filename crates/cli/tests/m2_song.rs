@@ -189,6 +189,12 @@ struct Song {
     client: Client<InProcess>,
     keyboard: TestBackend,
     folder: PathBuf,
+    /// The tracks whose third-party plug-ins render differently every time,
+    /// from the first sample, even after a CLAP reset: Surge XT's pad, and
+    /// the riff through Airwindows Consolidated (with it switched off the
+    /// riff nulls). They're muted wherever the test compares two renders of
+    /// the mix (the ducking, and the export after reopening).
+    unrepeatable: Vec<TrackId>,
 }
 
 impl Song {
@@ -232,6 +238,7 @@ impl Song {
             client,
             keyboard,
             folder: folder.to_owned(),
+            unrepeatable: Vec::new(),
         }
     }
 
@@ -901,10 +908,15 @@ impl Song {
             "device.set_enabled",
             json!({ "device": device, "enabled": true }),
         );
+        // The difference of the two mixes is the ducking only if everything
+        // else in them renders the same both times, which third-party
+        // plug-ins don't promise.
+        self.set_unrepeatable_muted(true);
         let ducked = self.export("main keyed.wav", None, 0, 4 * BAR);
         self.set_param(device, THRESHOLD, 0.0);
         let level = self.export("main level.wav", None, 0, 4 * BAR);
         self.set_param(device, THRESHOLD, DUCK_THRESHOLD);
+        self.set_unrepeatable_muted(false);
         let plain = plain.into_iter().next().unwrap();
         let with: Vec<f32> = plain
             .iter()
@@ -913,6 +925,14 @@ impl Song {
             .map(|((r, a), b)| r + (a - b))
             .collect();
         (plain, with)
+    }
+}
+
+impl Song {
+    fn set_unrepeatable_muted(&mut self, mute: bool) {
+        for track in self.unrepeatable.clone() {
+            self.run("mixer.set_mute", json!({ "track": track, "mute": mute }));
+        }
     }
 }
 
@@ -1206,6 +1226,9 @@ impl Song {
             ("Dexed", &local.dexed, &local.dexed_id, bass_notes(bars)),
         ] {
             let track = self.create_track(name, "midi");
+            if name == "Surge XT" {
+                self.unrepeatable.push(track);
+            }
             self.run(
                 "plugin.load",
                 json!({ "path": path, "plugin": id, "track": track }),
@@ -1222,6 +1245,7 @@ impl Song {
             json!({ "path": local.airwindows, "plugin": local.airwindows_id,
                     "track": parts.riff_vst3 }),
         );
+        self.unrepeatable.push(parts.riff_vst3);
     }
 
     /// `plugin.info` for `device`, once its plug-in has started.
@@ -1370,6 +1394,9 @@ impl Song {
     /// one, and a second export of it nulls against `first` to within
     /// `tolerance_db` (`None` for bit for bit).
     fn export_save_and_reopen(&mut self, bars: i64, tolerance_db: Option<f64>) {
+        // Muted in the saved set too, so the reopened set's render leaves
+        // them out as well.
+        self.set_unrepeatable_muted(true);
         let first = self.export("song first.wav", None, 0, bars * BAR);
         // The listening check: `BL_M2_SONG_OUT=/some/file.wav` keeps this
         // render, which the temporary folder would otherwise take with it.

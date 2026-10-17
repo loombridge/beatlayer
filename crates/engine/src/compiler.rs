@@ -11,7 +11,7 @@ use bl_model::{
 
 use crate::EngineConfig;
 use crate::automation;
-use crate::clips::{ClipList, ClipPlayer};
+use crate::clips::{ClipList, ClipPlayer, SlotSample};
 use crate::display::Displays;
 use crate::gc::{GcHandle, Program};
 use crate::message::{LoopRegion, ParamEvent, Punch, TransportCommand};
@@ -77,7 +77,7 @@ enum Identity {
     /// A device. Its media is part of what it is (WP-2.16): a device whose
     /// sample changed is a new node, and one the set keeps gets its audio
     /// sent again.
-    Device(DeviceKind, Option<ContentHash>),
+    Device(DeviceKind, Vec<Option<ContentHash>>),
     Player,
     MidiPlayer,
     Mixer,
@@ -679,15 +679,16 @@ impl Compiler {
         // made it; a device whose media the library doesn't hold plays
         // silence and is reported missing.
         let rate = self.config.sample_rate;
-        for &(device, media) in &build.media {
+        for &(device, slot, media) in &build.media {
             match self
                 .registry
                 .media()
                 .and_then(|library| library.sample(media, rate))
             {
-                Some(sample) => update
-                    .data
-                    .push((NodeKey::Device(device), self.gc.data(sample))),
+                Some(sample) => update.data.push((
+                    NodeKey::Device(device),
+                    self.gc.data(SlotSample { slot, sample }),
+                )),
                 None => update.missing.push(media),
             }
         }
@@ -987,7 +988,7 @@ impl Compiler {
                 continue;
             }
             let key = NodeKey::Device(device.id);
-            let identity = Identity::Device(device.kind.clone(), device.media);
+            let identity = Identity::Device(device.kind.clone(), device.media.clone());
             let (node, latency) = match self.previous(key, &identity) {
                 Some(from) => (Err(from), self.previous_latency(key, &identity)),
                 None => match self.registry.create(device, &config) {
@@ -997,8 +998,10 @@ impl Compiler {
                         }
                         // A new node that plays media gets its decoded audio
                         // with this compile's update (WP-2.16).
-                        if let Some(media) = device.media {
-                            build.media.push((device.id, media));
+                        for (slot, media) in device.media.iter().enumerate() {
+                            if let Some(media) = *media {
+                                build.media.push((device.id, slot, media));
+                            }
                         }
                         let latency = node.latency();
                         (Ok(Instance::Device(node)), latency)
@@ -1233,8 +1236,9 @@ struct Build {
     /// bus (WP-5.10).
     modulators: Vec<(u32, DeviceId)>,
     /// Devices new in this program that play media, with the media they
-    /// name: their decoded audio goes with this compile's update (WP-2.16).
-    media: Vec<(DeviceId, ContentHash)>,
+    /// name, one entry per filled sample slot: their decoded audio goes
+    /// with this compile's update (WP-2.16).
+    media: Vec<(DeviceId, usize, ContentHash)>,
     /// Tracks whose clip player is new in this program.
     new_players: BTreeSet<TrackId>,
     /// The state of routes and players that migrate in, which an edit may

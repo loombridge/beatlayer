@@ -988,6 +988,20 @@ impl NativeDevice for PolySynth {
                     expression: NoteExpression::Bend,
                     ..
                 } if !self.synth.note_pb => continue,
+                // Spec: device-framework R39. The pitch wheel and the mod
+                // wheel reach the voice manager as the MIDI they are.
+                NoteKind::Control { .. }
+                | NoteKind::PitchBend { .. }
+                | NoteKind::ChannelPressure { .. } => {
+                    let Some(message) = note.message() else {
+                        continue;
+                    };
+                    Event::Midi {
+                        time: note.offset,
+                        port: 0,
+                        data: message.padded(),
+                    }
+                }
                 NoteKind::Expression { expression, value } => {
                     let (expression, value) = match expression {
                         // Beatlayer carries a bend as the kit's tuning
@@ -1016,6 +1030,9 @@ impl NativeDevice for PolySynth {
             // when an input path brings one.
             settings.mpe.enabled = self.synth.note_pb;
             settings.mpe.bend_range = self.synth.pb_range.clamp(1.0, 96.0);
+            // The pitch wheel moves every note by the same range.
+            settings.bend_up = settings.mpe.bend_range;
+            settings.bend_down = -settings.mpe.bend_range;
         }
         let (voices, synth) = (&mut self.voices, &mut self.synth);
         voices.process(self.events.iter().copied(), frames, synth);

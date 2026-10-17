@@ -25,6 +25,10 @@
 //!   frame (an impulse), and every note-on and note-off goes back out an
 //!   octave up on the same frame, through the block's `IEventList`.
 //!
+//! - **MIDI mapping.** The controller maps control change 1 on channel 1 and
+//!   the pitch bend on channel 3 to the gain, as `IMidiMapping`, so the host
+//!   can send a channel message as a parameter change.
+//!
 //! The editor itself is the next part's (WP-2.10).
 
 use std::cell::{Cell, UnsafeCell};
@@ -864,7 +868,26 @@ impl Controller {
 }
 
 impl Class for Controller {
-    type Interfaces = (IEditController,);
+    type Interfaces = (IEditController, IMidiMapping);
+}
+
+impl IMidiMappingTrait for Controller {
+    unsafe fn getMidiControllerAssignment(
+        &self,
+        bus: int32,
+        channel: int16,
+        controller: CtrlNumber,
+        id: *mut ParamID,
+    ) -> tresult {
+        // Control change 1 on channel 1, and the pitch bend (129) on
+        // channel 3.
+        let mapped = bus == 0 && matches!((channel, controller), (0, 1) | (2, 129));
+        if mapped && !id.is_null() {
+            // SAFETY: the host passes a valid out pointer.
+            unsafe { *id = GAIN };
+        }
+        if mapped { kResultOk } else { kResultFalse }
+    }
 }
 
 impl IPluginBaseTrait for Controller {

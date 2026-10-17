@@ -15,6 +15,9 @@ use crate::modulator::{Mapping, ShapePoint};
 use crate::rack::{Chain, RackKind};
 use crate::track::Input;
 
+/// The most sample slots a device's media can fill.
+pub const MAX_MEDIA_SLOTS: usize = 16;
+
 /// A device in a track's chain: a native instrument or effect, or a plug-in.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Device {
@@ -80,11 +83,19 @@ pub struct Device {
     /// device, and for a plug-in until the set is first saved with it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin: Option<PluginState>,
-    /// The media the device plays, by content hash (WP-2.16): the sampler's
-    /// sample, which the media store holds like a clip's audio (the sampler
-    /// spec, R11). Left out of the saved set for a device that plays none.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub media: Option<ContentHash>,
+    /// The media the device plays, by content hash, one entry per sample
+    /// slot (WP-2.16, WP-5.17): the sampler's sample is slot 0, the
+    /// eight-slot drum sampler's slots are 0 to 7. The media store holds
+    /// each like a clip's audio (the sampler spec, R11). A slot with no
+    /// sample is `None`, and the list never ends in one. Left out of the
+    /// saved set for a device that plays none; a set saved before slots
+    /// existed holds one hash, which loads as slot 0.
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "media_slots"
+    )]
+    pub media: Vec<Option<ContentHash>>,
     /// The parameters a modulator maps, one per slot (the modulation spec,
     /// R19). Left out of the saved set for a device that maps none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -226,6 +237,23 @@ impl Default for Sidechain {
     }
 }
 
+/// Reads a device's media: a list of slots, or the one hash (or `null`) a
+/// set saved before sample slots held, which is slot 0.
+fn media_slots<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<Option<ContentHash>>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Saved {
+        Slots(Vec<Option<ContentHash>>),
+        One(Option<ContentHash>),
+    }
+    Ok(match Saved::deserialize(deserializer)? {
+        Saved::Slots(slots) => slots,
+        Saved::One(one) => one.into_iter().map(Some).collect(),
+    })
+}
+
 #[expect(
     clippy::trivially_copy_pass_by_ref,
     reason = "serde passes a reference"
@@ -284,10 +312,31 @@ impl Device {
             sidechain: None,
             floating: false,
             plugin: None,
-            media: None,
+            media: Vec::new(),
             mappings: Vec::new(),
             shape: None,
             chains: Vec::new(),
+        }
+    }
+
+    /// The media in sample slot `slot`, if it holds any.
+    #[must_use]
+    pub fn media_at(&self, slot: usize) -> Option<ContentHash> {
+        self.media.get(slot).copied().flatten()
+    }
+
+    /// Puts `media` in sample slot `slot`, growing the list to reach it and
+    /// trimming empty slots off its end.
+    pub fn set_media(&mut self, slot: usize, media: Option<ContentHash>) {
+        if self.media.len() <= slot {
+            if media.is_none() {
+                return;
+            }
+            self.media.resize(slot + 1, None);
+        }
+        self.media[slot] = media;
+        while self.media.last() == Some(&None) {
+            self.media.pop();
         }
     }
 

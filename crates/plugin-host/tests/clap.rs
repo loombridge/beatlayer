@@ -178,6 +178,55 @@ fn notes_reach_the_plugin_and_come_back_out_on_their_frames() {
     assert!(host.take_param_changes().is_empty());
 }
 
+// Spec: clap-hosting R20
+#[test]
+fn channel_messages_reach_the_plugin_as_midi_events_on_their_frames() {
+    let (_host, mut node) = running(&[(GAIN, 0.0)]);
+    let message = |offset, kind| NoteEvent {
+        offset,
+        kind,
+        channel: 3,
+        key: 0,
+        velocity: 0.0,
+        note_id: None,
+    };
+    let notes = [
+        message(7, NoteKind::PitchBend { value: 1.0 }),
+        message(20, NoteKind::ChannelPressure { value: 1.0 }),
+        message(
+            33,
+            NoteKind::Control {
+                controller: 1,
+                value: 64.0 / 127.0,
+            },
+        ),
+        // A bend of half the wheel's travel up: 8192 + 4096 of 16383.
+        message(
+            50,
+            NoteKind::PitchBend {
+                value: 4096.0 / 8191.0,
+            },
+        ),
+    ];
+    let out = run(node.as_mut(), &[1.0; FRAMES], &[], &notes);
+    // The test plug-in adds each message's value, from 0 to 1, on its frame.
+    let level = |offset: usize| out.channels[0][offset];
+    assert_eq!(level(7), 1.0);
+    assert_eq!(level(20), 1.0);
+    assert!((level(33) - 64.0 / 127.0).abs() < 1e-6, "{}", level(33));
+    assert!(
+        (level(50) - 12288.0 / 16383.0).abs() < 1e-6,
+        "{}",
+        level(50)
+    );
+    let quiet = out.channels[0]
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| ![7, 20, 33, 50].contains(i));
+    assert!(quiet.into_iter().all(|(_, s)| *s == 0.0));
+    assert!(out.notes.is_empty(), "a message is not echoed as a note");
+}
+
 // Spec: clap-hosting R7
 #[test]
 fn a_switched_off_plugin_takes_changes_through_flush() {

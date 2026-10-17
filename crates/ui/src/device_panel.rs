@@ -24,6 +24,7 @@ use bl_model::device_layout::{Size, Widget};
 use bl_model::modulator::ModTarget;
 use bl_model::{DeviceDisplay, DeviceId, ParamDescriptor, ParamId, ParamKind};
 use bl_shell::Invocation;
+use bl_shell::device_commands as ids;
 use bl_shell::device_commands::{DeviceFrame, DevicePanel};
 use egui::accesskit::{Action, Role};
 use egui::{
@@ -91,15 +92,16 @@ pub fn body_rect(frame: Rect, title_bar: f32) -> Rect {
 /// Each control's parameter, widget, and place in a panel.
 pub type ControlRects = Vec<(ParamId, Widget, Rect)>;
 
-/// Each display cell's name and place in a panel.
-pub type CellRects = Vec<(String, Rect)>;
+/// Each display cell's name, its place in a panel, and the sample slot it
+/// stands for if it does.
+pub type CellRects = Vec<(String, Rect, Option<u32>)>;
 
 /// Where each control and display cell sits in a body at `body`: the
-/// layout placed at the body's size ([`DeviceLayout::place`]), so docked it
-/// sits at its docked size, and a floating window (WP-2.5b) passes a larger
-/// body.
+/// layout placed at the body's size ([`DeviceLayout::place_for`]) with the
+/// panel's selected sample slot showing, so docked it sits at its docked
+/// size, and a floating window (WP-2.5b) passes a larger body.
 ///
-/// [`DeviceLayout::place`]: bl_model::DeviceLayout::place
+/// [`DeviceLayout::place_for`]: bl_model::DeviceLayout::place_for
 #[must_use]
 pub fn place(panel: &DevicePanel, body: Rect) -> (ControlRects, CellRects) {
     place_shown(panel, false, body)
@@ -111,7 +113,7 @@ pub fn place(panel: &DevicePanel, body: Rect) -> (ControlRects, CellRects) {
 pub fn place_shown(panel: &DevicePanel, expanded: bool, body: Rect) -> (ControlRects, CellRects) {
     let placed = panel
         .layout(expanded)
-        .place(Size::new(body.width(), body.height()));
+        .place_for(Size::new(body.width(), body.height()), panel.selected_slot);
     let at = |r: bl_model::device_layout::Rect| {
         Rect::from_min_size(body.min + vec2(r.x, r.y), vec2(r.width, r.height))
     };
@@ -124,7 +126,7 @@ pub fn place_shown(panel: &DevicePanel, expanded: bool, body: Rect) -> (ControlR
         placed
             .cells
             .iter()
-            .map(|c| (c.name.clone(), at(c.rect)))
+            .map(|c| (c.name.clone(), at(c.rect), c.slot))
             .collect(),
     )
 }
@@ -155,7 +157,7 @@ pub fn show(
     };
     let c = &theme.colors;
     let (controls, cells) = place_shown(panel, frame.expanded, body);
-    for (index, (name, rect)) in cells.into_iter().enumerate() {
+    for (index, (name, rect, slot)) in cells.into_iter().enumerate() {
         // A display cell: black, with a thin border (observed). What it
         // shows is the device's own to draw.
         let painter = ui.painter_at(rect);
@@ -167,6 +169,10 @@ pub fn show(
             StrokeKind::Inside,
         );
         let id = cell_id(frame.id, index);
+        if let Some(slot) = slot {
+            slot_cell(ui, theme, frame, panel, (id, &name, slot, rect), events);
+            continue;
+        }
         let _ = ui.interact(rect, id, Sense::hover());
         // Spec: modulation R15, R23. A modulator's cells show its slots'
         // mappings and, for the Curve Mod, its shape.
@@ -251,6 +257,114 @@ pub fn show(
     }
 }
 
+/// What a control's name above it reads: a sample slot's parameter drops the
+/// slot's number (`Slot 3 Start` reads `Start`), since the panel shows one
+/// slot's at a time.
+fn short_name(name: &str) -> &str {
+    name.strip_prefix("Slot ")
+        .and_then(|rest| rest.split_once(' '))
+        .filter(|(number, _)| number.chars().all(|c| c.is_ascii_digit()))
+        .map_or(name, |(_, rest)| rest)
+}
+
+/// A display cell standing for a sample slot (WP-5.17): its number and key,
+/// whether it holds a sample, and a frame in the accent while its controls
+/// are the ones the panel shows. Clicking it, or Enter, selects the slot;
+/// Delete clears its sample. A sample dropped on it loads into it
+/// ([`crate::device_view`]).
+fn slot_cell(
+    ui: &mut Ui,
+    theme: &Theme,
+    frame: &DeviceFrame,
+    panel: &DevicePanel,
+    (id, name, slot, rect): (Id, &str, u32, Rect),
+    events: &mut Vec<UiEvent>,
+) {
+    let c = &theme.colors;
+    let response = ui.interact(rect, id, Sense::click());
+    crate::focus::register(ui.ctx(), id, bl_shell::Area::Detail, None);
+    if response.clicked() {
+        response.request_focus();
+    }
+    // While a slot's cell has the keyboard, Delete clears its sample
+    // rather than deleting the device (S-DEV-006).
+    if response.gained_focus() {
+        events.push(UiEvent::FocusValue(true));
+    }
+    if response.lost_focus() {
+        events.push(UiEvent::FocusValue(false));
+    }
+    let selected = panel.selected_slot == slot;
+    let loaded = panel
+        .loaded_slots
+        .get(slot as usize)
+        .copied()
+        .unwrap_or(false);
+    if (response.clicked() || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter))))
+        && !selected
+    {
+        events.push(UiEvent::Invoke(Invocation::new(
+            ids::SELECT_SLOT,
+            json!({ "device": frame.id, "slot": slot }),
+        )));
+    }
+    if response.has_focus()
+        && loaded
+        && ui.input(|i| i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace))
+    {
+        events.push(UiEvent::Invoke(Invocation::new(
+            "device.set_sample",
+            json!({ "device": frame.id, "media": null, "slot": slot }),
+        )));
+    }
+    let painter = ui.painter_at(rect);
+    if selected {
+        painter.rect_stroke(
+            rect.shrink(1.0),
+            0.0,
+            Stroke::new(1.5, highlight(theme, frame.enabled)),
+            StrokeKind::Inside,
+        );
+    }
+    let key = panel
+        .slot_keys
+        .get(slot as usize)
+        .cloned()
+        .unwrap_or_default();
+    painter.text(
+        rect.center_top() + vec2(0.0, 4.0),
+        Align2::CENTER_TOP,
+        format!("{}", slot + 1),
+        theme.small_font(),
+        c.text.0,
+    );
+    painter.text(
+        rect.center_bottom() - vec2(0.0, 4.0),
+        Align2::CENTER_BOTTOM,
+        &key,
+        theme.small_font(),
+        c.text_dim.0,
+    );
+    if loaded {
+        // A bar along the cell's foot: this slot holds a sample.
+        let bar = Rect::from_min_size(
+            pos2(rect.left() + 4.0, rect.bottom() - 3.0),
+            vec2(rect.width() - 8.0, 2.0),
+        );
+        painter.rect_filled(bar, 0.0, highlight(theme, frame.enabled));
+    }
+    focus_ring(ui, theme, rect, &response);
+    ui.ctx().accesskit_node_builder(id, |node| {
+        node.set_role(Role::Button);
+        node.set_label(name.to_owned());
+        node.set_description(format!(
+            "plays {key}, {}{}",
+            if loaded { "holds a sample" } else { "empty" },
+            if selected { ", selected" } else { "" }
+        ));
+    });
+}
+
 /// Whether a display has anything to draw.
 fn has_drawing(display: &DeviceDisplay) -> bool {
     !(display.series.is_empty() && display.readings.is_empty())
@@ -297,7 +411,7 @@ impl Control<'_> {
         ui.painter().text(
             top.center(),
             Align2::CENTER_CENTER,
-            &self.descriptor.name,
+            short_name(&self.descriptor.name),
             theme.small_font(),
             theme.colors.text.0,
         );
@@ -535,7 +649,7 @@ impl Control<'_> {
         ui.painter().text(
             button.center(),
             Align2::CENTER_CENTER,
-            &self.descriptor.name,
+            short_name(&self.descriptor.name),
             theme.small_font(),
             ink,
         );

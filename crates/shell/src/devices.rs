@@ -27,7 +27,8 @@ use bl_shell_spec::devices::{
     DevicePanel, DeviceParameters, DeviceViewState, ExpandDeviceArgs, FloatingWindow,
     FloatingWindows, FoldDeviceArgs, GroupArgs, Grouped, HotSwap, HotSwapArgs, LoadPresetArgs,
     ParameterState, PasteChainArgs, PasteDeviceArgs, PresetResult, SavePresetArgs,
-    SelectDeviceArgs, SetWindowArgs, ShowSidechainArgs, SidechainSection, Ungrouped,
+    SelectDeviceArgs, SelectSlotArgs, SetWindowArgs, ShowSidechainArgs, SidechainSection,
+    Ungrouped,
 };
 use bl_shell_spec::devices::{ArmMapArgs, ArmedMap, MappingRow, ModulatorFrame};
 use serde::Serialize;
@@ -49,6 +50,9 @@ pub struct DeviceView {
     /// The chain cut or copied from a rack (WP-5.1).
     chain_clipboard: Option<Chain>,
     hot_swap: Option<DeviceId>,
+    /// The sample slot each device with slots shows the controls of
+    /// (WP-5.17); a device without an entry shows slot 0.
+    slots: std::collections::BTreeMap<DeviceId, u32>,
     /// Devices whose sidechain section is shown (WP-2.19b).
     sidechains_shown: BTreeSet<DeviceId>,
     /// The lit Map button, if one is (WP-5.10).
@@ -247,7 +251,36 @@ impl DeviceView {
                 .collect(),
             description: description.clone(),
             plugin: false,
+            selected_slot: self.slot_of(device),
+            loaded_slots: device.media.iter().map(Option::is_some).collect(),
+            // shortcut: every device with slots plays them on the keys the
+            // eight-slot drum sampler does; a device with another mapping
+            // names its keys in its own description.
+            slot_keys: bl_devices::kitbag::KEYS
+                .iter()
+                .take(description.layout.slot_count() as usize)
+                .map(|&key| bl_midi_io::note_name(key))
+                .collect(),
         })
+    }
+
+    /// How many sample slots devices of `kind` have: 0 for a type with
+    /// none.
+    #[must_use]
+    pub fn slot_count(&self, kind: &DeviceKind) -> u32 {
+        self.description(kind).map_or(0, |d| d.layout.slot_count())
+    }
+
+    /// The sample slot `device`'s panel shows the controls of: the one
+    /// selected, kept inside the slots its layout has.
+    #[must_use]
+    pub fn slot_of(&self, device: &Device) -> u32 {
+        let count = self.slot_count(&device.kind);
+        self.slots
+            .get(&device.id)
+            .copied()
+            .unwrap_or(0)
+            .min(count.saturating_sub(1))
     }
 
     /// A plug-in device's panel (WP-2.10, D19): the plug-in's first
@@ -287,6 +320,9 @@ impl DeviceView {
                 menu_options: Vec::new(),
             },
             plugin: true,
+            selected_slot: 0,
+            loaded_slots: Vec::new(),
+            slot_keys: Vec::new(),
         }
     }
 
@@ -342,6 +378,7 @@ impl DeviceView {
         let exists = |d: &DeviceId| doc.device(*d).is_some();
         self.selected = self.selected.filter(exists);
         self.hot_swap = self.hot_swap.filter(exists);
+        self.slots.retain(|device, _| exists(device));
         self.folded.retain(exists);
         self.expanded.retain(exists);
         self.sidechains_shown.retain(exists);
@@ -551,7 +588,7 @@ impl DeviceView {
             enabled: d.enabled,
             takes_sample: matches!(
                 &d.kind,
-                DeviceKind::Native { device_type } if device_type == bl_devices::sampler::SAMPLER
+                DeviceKind::Native { device_type } if bl_devices::plays_samples(device_type)
             ),
             show_preset_name: d.show_preset_name,
             folded: self.folded.contains(&d.id),
@@ -639,9 +676,12 @@ impl DeviceView {
             .and_then(|v| serde_json::from_value(v.clone()).ok());
         let has_target = || self.target(doc, named).is_ok();
         match id {
-            ids::CUT | ids::COPY | ids::SAVE_PRESET | ids::SAVE_DEFAULT_PRESET | ids::FOLD => {
-                has_target()
-            }
+            ids::CUT
+            | ids::COPY
+            | ids::SAVE_PRESET
+            | ids::SAVE_DEFAULT_PRESET
+            | ids::FOLD
+            | ids::SELECT_SLOT => has_target(),
             ids::EXPAND => self
                 .target(doc, named)
                 .is_ok_and(|device| doc.device(device).is_some_and(|d| self.expandable(d))),
@@ -767,6 +807,21 @@ impl DeviceView {
                     }
                 }
                 self.selected = device;
+            }
+            ids::SELECT_SLOT => {
+                let SelectSlotArgs { device, slot } = parse(args)?;
+                let device = self.target(editor.document(), device)?;
+                let count = editor
+                    .document()
+                    .device(device)
+                    .and_then(|d| self.description(&d.kind))
+                    .map_or(0, |d| d.layout.slot_count());
+                if slot >= count {
+                    return Err(DeviceError::InvalidArgs(format!(
+                        "{device} has {count} sample slots, counted from 0; there is no slot {slot}"
+                    )));
+                }
+                self.slots.insert(device, slot);
             }
             ids::FOLD => {
                 let FoldDeviceArgs { device, folded } = parse(args)?;

@@ -650,7 +650,11 @@ fn specs() -> Vec<CommandSpec> {
                  audio track, otherwise onto a new audio track below the last one, one after \
                  another, as one undo step. A clip placed over part of another replaces that \
                  part, so when a clip on that track ends after the insert marker it's \
-                 destructive as well as external. Reads the files, outside the project.",
+                 destructive as well as external. While a device is being hot-swapped \
+                 (`device.hot_swap`), a selected preset loads into it instead, and so does a \
+                 selected audio file, if the device plays samples (the sampler, or the \
+                 eight-slot drum sampler, into its selected slot: `device.load_sample`). \
+                 Reads the files, outside the project.",
             )
             .permission(Permission::External)
             .context(Browser)

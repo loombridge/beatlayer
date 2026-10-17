@@ -71,6 +71,14 @@ The test of R8 walks the whole registry. A command is reached by a key, a menu i
 4. `settings.set_continuous_save`: the Save Continuously switch on File & Folder isn't drawn yet ([crash-recovery](crash-recovery.md) R11).
 5. `device.load_sample`: loading a sample into the sampler has no key or menu item yet ([sampler](sampler.md) R11); dropping the file on the sampler's Device View frame is the only way.
 
+**Gaps in the multisampler** ([multisampler](multisampler.md), WP-5.13; its header buttons, layer rows and Sample tab fields are in the Device View's Tab order, so `device.set_multisampler_view`, `device.hot_swap_layer`, `device.select_layers`, `device.set_layer` and `device.set_layer_options` are reached with the keyboard):
+
+6. `device.add_layers`: adding samples is a drop of files on the zone editor (R3); the keyboard has no way to name files yet.
+7. `device.set_layer_zone`: dragging a zone's edge, body or fade has no keyboard form yet (R10).
+8. `device.snap_layer_markers`: the loop marker's context menu isn't opened from the keyboard (R20).
+9. `device.delete_layers`, `device.duplicate_layers`, `device.rename_layer`, `device.sort_layers`, `device.distribute_layers` and `device.normalize_layers`: the layer list's context menu isn't opened from the keyboard (R11); the Delete key deletes the selected device.
+10. `device.move_layers`: no control moves layers by hand yet; the list's sorts reorder it (R11).
+
 ## Tests
 
 | Rule | Test | Kind |

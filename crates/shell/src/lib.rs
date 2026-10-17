@@ -107,6 +107,8 @@ pub use bl_shell_spec::midi_io as midi_io_commands;
 /// The Mixer view's command IDs and their argument and result types
 /// (WP-1.9).
 pub use bl_shell_spec::mixer_view as mixer_view_commands;
+/// The multisampler's commands that run on the shell (WP-5.13).
+pub use bl_shell_spec::multisampler as multisampler_commands;
 /// The Clip View's note-editing command IDs and their argument and result
 /// types (WP-2.3).
 pub use bl_shell_spec::notes as note_commands;

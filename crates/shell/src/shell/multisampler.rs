@@ -16,7 +16,7 @@ use bl_model::{
 use bl_shell_spec::multisampler::{
     self as ids, AddLayersArgs, LayersAdded, LayersChanged, LoopKind, MultisamplerState,
     Normalize, NormalizeArgs, SelectLayersArgs, LayerSelectMode, SetLayerArgs, SetLayerSampleArgs,
-    SetViewArgs, SnapMarkersArgs,
+    SetViewArgs, SnapMarkersArgs, HotSwapLayerArgs,
 };
 
 use super::*;
@@ -120,7 +120,39 @@ impl Shell {
                 self.touch();
                 Ok(to_value(&self.multisampler_state(device)))
             }
+            ids::HOT_SWAP_LAYER => {
+                let args: HotSwapLayerArgs = Self::args(id, args)?;
+                let device = self.multisampler_target(id, args.device)?;
+                if args.on == Some(false) {
+                    self.layer_hot_swap = None;
+                } else {
+                    let layer = match args.layer {
+                        Some(layer) => layer,
+                        None => *self
+                            .layers_or_selection(id, device, None)?
+                            .first()
+                            .ok_or_else(|| self.failed(id, "select a layer first"))?,
+                    };
+                    if self.layers_of(device).get(layer).is_none() {
+                        return Err(self.failed(id, format!("no layer {}", layer.0)));
+                    }
+                    self.layer_hot_swap = Some((device, layer));
+                }
+                self.touch();
+                Ok(to_value(&self.multisampler_state(device)))
+            }
             _ => Err(ShellError::UnknownCommand(id.to_owned())),
+        }
+    }
+
+    /// The layer a loaded sample replaces, if one is being hot-swapped and
+    /// the browser has one file selected (R10): the shell's `Load Selected`
+    /// then runs `device.set_layer_sample` and ends the hot-swap.
+    pub(super) fn hot_swapped_layer_file(&self) -> Option<(DeviceId, LayerId, PathBuf)> {
+        let (device, layer) = self.layer_hot_swap?;
+        match self.browser_view.selected() {
+            [one] if one.is_file() => Some((device, layer, one.clone())),
+            _ => None,
         }
     }
 
@@ -194,6 +226,10 @@ impl Shell {
             view: self.devices.multisampler_view(device),
             selection: self.devices.layer_selection(self.editor.document(), device),
             layers: self.layers_of(device).list.len(),
+            hot_swap: self
+                .layer_hot_swap
+                .filter(|(d, _)| *d == device)
+                .map(|(_, layer)| layer),
         }
     }
 
@@ -497,6 +533,28 @@ impl Shell {
         self.devices
             .note(self.editor.document(), track, key, velocity, down);
         self.touch();
+    }
+
+    /// A layer's sample, decoded at its own rate, for the Sample tab's
+    /// waveform (R14). `None` if the media store can't supply it.
+    ///
+    /// shortcut: the first call decodes on the caller's thread; the Sample
+    /// tab asks again only when the selected layer changes, and the media
+    /// store shares what an earlier add or a playing engine decoded. Upgrade
+    /// to the peak cache's background build for very long samples.
+    #[must_use]
+    pub fn layer_audio(&self, media: ContentHash) -> Option<std::sync::Arc<SampleData>> {
+        self.media
+            .load(bl_media::ContentHash::from_bytes(media.0))
+            .ok()
+    }
+
+    /// The folder a layer's sample lies in, for Show in Browser (R11).
+    #[must_use]
+    pub fn layer_folder(&self, media: ContentHash) -> Option<PathBuf> {
+        self.media
+            .entry(bl_media::ContentHash::from_bytes(media.0))
+            .and_then(|entry| entry.path.parent().map(Path::to_path_buf))
     }
 
     /// The device a command found, for tests and the UI.

@@ -513,6 +513,7 @@ impl DeviceView {
             view: self.multisampler_view(d.id),
             selection: self.layer_selection_of(d),
             layers: d.layers.list.len(),
+            hot_swap: None,
         })
     }
 

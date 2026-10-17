@@ -36,6 +36,10 @@ pub const SET_VIEW: &str = "device.set_multisampler_view";
 /// `device.select_layers`: select layers in the layer list (R11).
 pub const SELECT_LAYERS: &str = "device.select_layers";
 
+/// `device.hot_swap_layer`: start or end hot-swapping a layer's sample
+/// (R10).
+pub const HOT_SWAP_LAYER: &str = "device.hot_swap_layer";
+
 /// The undo step's name for adding layers from files: Live's name for
 /// dropping samples on its layer list is to observe.
 pub const ADD_LAYERS_STEP: &str = "Add Samples";
@@ -49,6 +53,7 @@ pub const IDS: &[&str] = &[
     NORMALIZE_LAYERS,
     SET_VIEW,
     SELECT_LAYERS,
+    HOT_SWAP_LAYER,
 ];
 
 /// Whether `id` is one of these commands.
@@ -227,6 +232,21 @@ pub struct SelectLayersArgs {
     pub mode: LayerSelectMode,
 }
 
+/// Arguments of `device.hot_swap_layer`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct HotSwapLayerArgs {
+    /// The multisampler; the selected device if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The layer; the first selected layer if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layer: Option<LayerId>,
+    /// Start (true) or end (false) hot-swapping; starts if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
+}
+
 /// A multisampler's views and selection, as `device_view.state` reports
 /// them (R30).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -238,6 +258,9 @@ pub struct MultisamplerState {
     pub selection: Vec<LayerId>,
     /// How many layers it holds.
     pub layers: usize,
+    /// The layer whose sample is being hot-swapped, if one is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hot_swap: Option<LayerId>,
 }
 
 /// Adds the multisampler's commands to a registry.
@@ -349,6 +372,20 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .permission(Permission::Read)
             .context(DeviceView)
             .args::<SelectLayersArgs>()
+            .result::<MultisamplerState>(),
+    )?;
+    registry.register(
+        CommandSpec::new(HOT_SWAP_LAYER, "Hot-Swap Sample")
+            .description(
+                "Starts hot-swapping a layer's sample (`layer`, or the first selected layer), \
+                 as the zone editor's Hot-Swap Sample button does: the sample the browser then \
+                 loads (Enter or a double-click on a file) replaces the layer's, keeping its \
+                 zones and settings, as one undo step. `on: false` ends it. It changes \
+                 nothing in the set by itself.",
+            )
+            .permission(Permission::Read)
+            .context(DeviceView)
+            .args::<HotSwapLayerArgs>()
             .result::<MultisamplerState>(),
     )?;
     Ok(())

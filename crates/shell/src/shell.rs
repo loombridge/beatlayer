@@ -312,6 +312,9 @@ pub struct Shell {
     set_path: Option<PathBuf>,
     dirty: bool,
     store: Box<dyn SetStore>,
+    /// The multisampler layer whose sample the browser's next load
+    /// replaces (WP-5.13, R10).
+    layer_hot_swap: Option<(bl_model::DeviceId, bl_model::LayerId)>,
     audio: AudioHost,
     /// The MIDI ports and the computer MIDI keyboard (WP-2.2).
     midi: MidiHost,
@@ -653,6 +656,7 @@ impl Shell {
             set_path: None,
             dirty: false,
             store,
+            layer_hot_swap: None,
             audio,
             midi,
             midi_listed: std::time::Instant::now(),
@@ -3708,7 +3712,9 @@ impl Shell {
         if ids::handles(id) || transport_ids::handles(id) {
             return true;
         }
-        if id == browser_ids::LOAD_SELECTED && self.hot_swap_preset().is_some() {
+        if id == browser_ids::LOAD_SELECTED
+            && (self.hot_swap_preset().is_some() || self.hot_swapped_layer_file().is_some())
+        {
             return true;
         }
         if device_ids::handles(id) {
@@ -4590,6 +4596,18 @@ impl Shell {
                 self.touch();
             }
             return Ok(outcome.value);
+        }
+        if id == browser_ids::LOAD_SELECTED
+            && let Some((device, layer, path)) = self.hot_swapped_layer_file()
+        {
+            // Spec: multisampler R10. Loading a sample while hot-swapping a
+            // layer replaces the layer's.
+            Self::args::<NoArgs>(id, args)?;
+            self.layer_hot_swap = None;
+            return self.run_multisampler(
+                multisampler_ids::SET_LAYER_SAMPLE,
+                json!({ "device": device, "layer": layer, "path": path.to_string_lossy() }),
+            );
         }
         if id == browser_ids::LOAD_SELECTED
             && let Some(path) = self.hot_swap_preset()

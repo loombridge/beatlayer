@@ -267,6 +267,9 @@ pub struct SettingsState {
     /// Record, Warp & Launch: Warp Recorded Audio, as
     /// `settings.set_warp_recorded_audio` sets it.
     pub warp_recorded_audio: bool,
+    /// Record, Warp & Launch: Start Recording on Scene Launch, as
+    /// `settings.set_start_recording_on_scene_launch` sets it.
+    pub start_recording_on_scene_launch: bool,
     /// Plug-Ins: Auto-Hide Plug-In Windows, as
     /// `settings.set_auto_hide_plug_in_windows` sets it.
     pub auto_hide_plug_in_windows: bool,

@@ -75,6 +75,10 @@ pub struct Preferences {
     /// as Live warps its recordings, and on for preferences saved before the
     /// setting existed.
     pub warp_recorded_audio: OnByDefault,
+    /// Start Recording on Scene Launch (Record, Warp & Launch, Launch;
+    /// C-SCENE-012): launching a scene also records into the empty slots of
+    /// armed tracks (WP-3.11). Off by default, as observed in Live 12.4.3.
+    pub start_recording_on_scene_launch: bool,
     /// Auto-Hide Plug-In Windows (Plug-Ins, Plug-In Windows, L-SET-017):
     /// a floating device's window or a plug-in's editor hides while
     /// another track is selected and comes back with its track (WP-2.5b),

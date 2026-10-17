@@ -108,6 +108,10 @@ pub const SETTINGS_SET_THEME: &str = "settings.set_theme";
 pub const SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES: &str = "settings.set_create_fades_on_clip_edges";
 /// `settings.set_warp_recorded_audio`: switch Warp recorded audio (WP-2.13).
 pub const SETTINGS_SET_WARP_RECORDED_AUDIO: &str = "settings.set_warp_recorded_audio";
+/// `settings.set_start_recording_on_scene_launch`: switch Start Recording on
+/// Scene Launch (WP-3.11).
+pub const SETTINGS_SET_START_RECORDING_ON_SCENE_LAUNCH: &str =
+    "settings.set_start_recording_on_scene_launch";
 /// `settings.set_auto_hide_plug_in_windows`: switch Auto-Hide Plug-In
 /// Windows (WP-2.5b).
 pub const SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS: &str = "settings.set_auto_hide_plug_in_windows";
@@ -167,6 +171,7 @@ pub const IDS: &[&str] = &[
     SETTINGS_SET_THEME,
     SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES,
     SETTINGS_SET_WARP_RECORDED_AUDIO,
+    SETTINGS_SET_START_RECORDING_ON_SCENE_LAUNCH,
     SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS,
     SETTINGS_SET_OUTLINE_VIEW_IN_FOCUS,
     AUDIO_DEVICES,
@@ -926,6 +931,24 @@ fn specs() -> Vec<CommandSpec> {
             .context(Settings)
             .args::<SwitchArgs>()
             .result::<SwitchResult>(),
+        // Record, Warp & Launch, Launch (WP-3.11).
+        CommandSpec::new(
+            SETTINGS_SET_START_RECORDING_ON_SCENE_LAUNCH,
+            "Start Recording on Scene Launch",
+        )
+        .description(
+            "Switches Start Recording on Scene Launch, on the Settings window's Record, Warp \
+             & Launch page; it's off in a new install, as Live's is. While it's off, \
+             launching a scene leaves the empty slots of armed tracks alone; while it's on, \
+             launching a scene also starts recording into each of them, on the scene's launch \
+             grid line, as Trigger Recording on Launch in a scene's menu does. The setting is \
+             kept for the next start, and isn't part of the set or an undo step. The result's \
+             `on` is the setting afterwards.",
+        )
+        .permission(Permission::Edit)
+        .context(Settings)
+        .args::<SwitchArgs>()
+        .result::<SwitchResult>(),
         // Plug-Ins, Plug-In Windows (L-SET-017; WP-2.5b).
         CommandSpec::new(
             SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS,

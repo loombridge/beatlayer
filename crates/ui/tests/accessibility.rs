@@ -1296,6 +1296,15 @@ fn paths() -> BTreeMap<&'static str, Path> {
             ),
         ),
         (
+            "settings.set_start_recording_on_scene_launch",
+            settings(
+                "record-warp-launch",
+                nothing,
+                "Start Recording on Scene Launch",
+                Key::Enter,
+            ),
+        ),
+        (
             "settings.set_auto_hide_plug_in_windows",
             settings("plug-ins", nothing, "Auto-Hide Plug-In Windows", Key::Enter),
         ),
@@ -1454,6 +1463,25 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "session.stop_all",
             Exception(LaterView(
                 "the Session View's Stop All Clips button (WP-3.8)",
+            )),
+        ),
+        // Session recording (WP-3.11): Session Record is on a shortcut and the
+        // Playback menu; the slots' record buttons arrive with the launching
+        // UI.
+        (
+            "session.record_slot",
+            Exception(LaterView("the Session View's Clip Record buttons (WP-3.8)")),
+        ),
+        (
+            "session.overdub",
+            Exception(Equivalent(
+                "Session Record (`session.record`) overdubs the MIDI clip that plays",
+            )),
+        ),
+        (
+            "session.stop_recording",
+            Exception(Equivalent(
+                "Session Record again (`session.record`) ends the recording",
             )),
         ),
         (

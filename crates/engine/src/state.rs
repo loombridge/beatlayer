@@ -96,6 +96,10 @@ pub struct EngineState {
     /// The take that last ended, until the next recording starts: the song
     /// frames it covers. The shell makes the recorded clips from it.
     pub take: Option<TakeBounds>,
+    /// The take running now, as far as it has got: its start, and the frame
+    /// past the last one captured (WP-3.11). The Session View grows a
+    /// recording clip to it.
+    pub take_so_far: Option<TakeBounds>,
     /// The running program's generation, if one has arrived.
     pub program: Option<u64>,
     /// Programs swapped in.
@@ -133,6 +137,7 @@ impl EngineState {
             take_running: false,
             counting_in: false,
             take: None,
+            take_so_far: None,
             program: None,
             swaps: 0,
             cpu_load: 0.0,
@@ -183,6 +188,7 @@ impl Clone for EngineState {
             take_running: self.take_running,
             counting_in: self.counting_in,
             take: self.take,
+            take_so_far: self.take_so_far,
             program: self.program,
             swaps: self.swaps,
             cpu_load: self.cpu_load,

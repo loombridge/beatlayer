@@ -31,13 +31,18 @@ fn the_record_warp_and_launch_page_switches_create_fades_on_clip_edges() {
     assert!(!switch.disabled);
     // Live's rows in Live's order, every other one pending: Record's seven,
     // then Warp/Fades' three before the switch, then Launch and Tap Tempo.
+    // Start Recording on Scene Launch is built too (WP-3.11).
+    let built = [
+        "Create Fades on Clip Edges",
+        "Start Recording on Scene Launch",
+    ];
     let top = |label: &str| {
         let node = Harness::node(&nodes, label);
         assert!(
-            node.disabled || label == "Create Fades on Clip Edges",
+            node.disabled || built.contains(&label),
             "{label} is pending"
         );
-        if label != "Create Fades on Clip Edges" {
+        if !built.contains(&label) {
             assert!(node.description.contains("Not built yet"), "{label}");
         }
         node.bounds.expect("drawn").y0
@@ -132,4 +137,39 @@ fn the_record_warp_and_launch_page_switches_warp_recorded_audio() {
     h.accesskit(Id::new(("switch", "warp-recorded-audio")), Action::Click);
     h.settle();
     assert!(h.shell.warp_recorded_audio());
+}
+
+// Spec: session-recording R10. Start Recording on Scene Launch is the last
+// switch of the Launch section: off in a new install, and it runs its
+// command.
+#[test]
+fn the_record_warp_and_launch_page_switches_start_recording_on_scene_launch() {
+    let mut h = Harness::new(Window::Settings);
+    h.shell
+        .invoke("app.settings", json!({ "page": "record-warp-launch" }))
+        .unwrap();
+    h.shell.take_effects();
+    h.settle();
+
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    let switch = Harness::node(&nodes, "Start Recording on Scene Launch");
+    assert_eq!(switch.role, Role::Button);
+    assert!(!switch.disabled);
+    assert!(
+        !h.shell.start_recording_on_scene_launch(),
+        "off, as observed"
+    );
+
+    h.accesskit(
+        Id::new(("switch", "start-recording-on-scene-launch")),
+        Action::Click,
+    );
+    h.settle();
+    assert!(h.shell.start_recording_on_scene_launch());
+    assert!(h.events.iter().any(|e| matches!(
+        e,
+        bl_ui::main_window::UiEvent::Invoke(i)
+            if i.id == "settings.set_start_recording_on_scene_launch"
+                && i.args == json!({ "on": true })
+    )));
 }

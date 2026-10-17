@@ -564,7 +564,7 @@ fn quantise_none(h: &mut Harness) {
         .unwrap();
 }
 
-// Spec: session-view R25 (I-CLICK-001, I-CLICK-003). A launch triangle
+// Spec: session-view R31 (I-CLICK-001, I-CLICK-003). A launch triangle
 // queues its clip for the grid, the slot draws what the engine publishes,
 // and a track's stop button drops the queued launch.
 #[test]
@@ -596,7 +596,7 @@ fn clicking_a_launch_triangle_queues_a_clip_and_a_stop_button_drops_it() {
     h.shell.run("transport.stop", json!({})).unwrap();
 }
 
-// Spec: session-view R25 (I-CLICK-001, I-CLICK-003, L-SES-008). With the
+// Spec: session-view R31 (I-CLICK-001, I-CLICK-003, L-SES-008). With the
 // transport stopped a click starts the clip at once; the stop square, a
 // track's stop button and Stop All Clips each stop the grid's clips.
 #[test]
@@ -635,7 +635,7 @@ fn the_stop_square_a_stop_button_and_stop_all_clips_stop_the_grid() {
     h.shell.run("transport.stop", json!({})).unwrap();
 }
 
-// Spec: session-view R25 (I-CLICK-009). A scene's launch button launches
+// Spec: session-view R31 (I-CLICK-009). A scene's launch button launches
 // every clip in the scene.
 #[test]
 fn a_scene_launch_button_launches_the_scene() {
@@ -654,7 +654,7 @@ fn a_scene_launch_button_launches_the_scene() {
     h.shell.run("transport.stop", json!({})).unwrap();
 }
 
-// Spec: session-view R25 (L-SES-012, S-TRANS-009). Back to Arrangement
+// Spec: session-view R31 (L-SES-012, S-TRANS-009). Back to Arrangement
 // lights while a Session clip has taken a track over, a click on it and F10
 // each return the tracks, and it goes dark.
 #[test]
@@ -686,7 +686,7 @@ fn back_to_arrangement_lights_while_a_clip_plays_over_the_arrangement() {
     h.shell.run("transport.stop", json!({})).unwrap();
 }
 
-// Spec: session-view R26 (S-SES-001). Enter launches the selected clip, and
+// Spec: session-view R32 (S-SES-001). Enter launches the selected clip, and
 // the selected scene.
 #[test]
 fn enter_launches_the_selected_clip_and_scene() {
@@ -715,7 +715,7 @@ fn enter_launches_the_selected_clip_and_scene() {
     h.shell.run("transport.stop", json!({})).unwrap();
 }
 
-// Spec: session-view R25. The launch buttons reach AccessKit named with
+// Spec: session-view R31. The launch buttons reach AccessKit named with
 // their track and scene; the follow-action switch is there, disabled.
 #[test]
 fn the_launch_buttons_reach_accesskit_with_their_track_and_scene() {

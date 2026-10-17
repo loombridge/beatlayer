@@ -13,7 +13,7 @@
 
 use std::path::Path;
 
-use bl_core::time::Ticks;
+use bl_core::time::{Bpm, Ticks, TimeSignature};
 use bl_media::MediaStore;
 use bl_model::{
     AudioData, ChangeSet, Clip, ClipData, ClipId, Editor, LaunchQuantization, MidiData, SceneId,
@@ -59,6 +59,21 @@ pub struct Context<'a> {
     /// The launch quantisation a new clip starts with (Settings ▸ Default
     /// Launch Quantization); `None` follows the global one.
     pub launch_quantization: Option<LaunchQuantization>,
+    /// What Capture and Insert Scene needs from the engine.
+    pub capture: Capture,
+}
+
+/// What the engine knows that Capture and Insert Scene captures (WP-3.5).
+#[derive(Clone, Debug)]
+pub struct Capture {
+    /// The slots whose clips play, as `(track, scene)`.
+    pub playing: Vec<(TrackId, SceneId)>,
+    /// The scene launched last since the set opened, if any.
+    pub last_launched: Option<SceneId>,
+    /// The tempo in force now.
+    pub tempo: Bpm,
+    /// The time signature in force now.
+    pub signature: TimeSignature,
 }
 
 /// What a Session View command changed: its result, the files a drop read
@@ -71,6 +86,9 @@ pub struct SessionOutcome {
     pub media: Vec<MediaFile>,
     /// Whether the set changed (the command was an edit).
     pub document_changed: bool,
+    /// The scene Capture and Insert Scene made, when the playing clips move
+    /// to its copies.
+    pub captured: Option<SceneId>,
 }
 
 /// The Session View grid's view state. See the [module docs](self).
@@ -230,6 +248,74 @@ impl SessionView {
                     )
                 })?;
                 Ok(edit_outcome(changes))
+            }
+            ids::CAPTURE_AND_INSERT_SCENE => {
+                no_args(args)?;
+                // Spec: session-view R24. After the scene launched last, or
+                // else the selected one; a set with no scenes left gets it
+                // first.
+                let after = ctx
+                    .capture
+                    .last_launched
+                    .filter(|scene| ctx.scenes.contains(scene))
+                    .or_else(|| self.scenes.first().copied())
+                    .or_else(|| self.slots.first().map(|slot| slot.scene));
+                let index = after
+                    .and_then(|scene| ctx.scenes.iter().position(|s| *s == scene))
+                    .map_or(ctx.scenes.len(), |at| at + 1);
+                let id: SceneId = ctx.editor.new_id();
+                // A copy of each playing clip, in track order.
+                let mut copies = Vec::new();
+                for &track in ctx.columns {
+                    let playing = ctx
+                        .capture
+                        .playing
+                        .iter()
+                        .find(|(playing, _)| *playing == track);
+                    let source = playing
+                        .and_then(|&(_, scene)| ctx.editor.document().slot(track, scene))
+                        .cloned();
+                    if let Some(source) = source {
+                        let clip = Clip {
+                            id: ctx.editor.new_id(),
+                            start: Ticks::ZERO,
+                            offset: Ticks::ZERO,
+                            ..source
+                        };
+                        copies.push((track, clip));
+                    }
+                }
+                let Capture {
+                    tempo, signature, ..
+                } = ctx.capture;
+                let changes = self.edit(ctx.editor, "Capture and Insert Scene", |editor| {
+                    model(
+                        editor,
+                        "scene.create",
+                        &serde_json::json!({ "id": id, "index": index }),
+                    )?;
+                    model(
+                        editor,
+                        "scene.set_tempo",
+                        &serde_json::json!({ "scene": id, "tempo": tempo }),
+                    )?;
+                    model(
+                        editor,
+                        "scene.set_time_signature",
+                        &serde_json::json!({ "scene": id, "signature": signature }),
+                    )?;
+                    for (track, clip) in &copies {
+                        model(
+                            editor,
+                            "clip.create_in_slot",
+                            &serde_json::json!({ "track": track, "scene": id, "clip": clip }),
+                        )?;
+                    }
+                    Ok(())
+                })?;
+                let mut outcome = edit_outcome(changes);
+                outcome.captured = Some(id);
+                Ok(outcome)
             }
             ids::INSERT_EMPTY_MIDI_CLIP => {
                 let insert: InsertClipArgs = serde_json::from_value(args).map_err(parse)?;

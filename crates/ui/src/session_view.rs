@@ -594,13 +594,19 @@ impl GridUi {
         let selected = state.scenes.contains(&scene);
         let painter = ui.painter().clone();
         painter.rect_filled(row.name.shrink(1.0), 0.0, theme.colors.lane.0);
-        painter.text(
-            pos2(row.name.left() + 4.0, row.name.center().y),
-            Align2::LEFT_CENTER,
-            name,
-            theme.small_font(),
-            theme.colors.text.0,
-        );
+        // Spec: session-view R21. View > Scene Tempo and Time Signature
+        // puts the scene's fields where the name was (L-SES-007); they're
+        // drawn last, above the row's own click.
+        let fields = shell.mixer_view().scene_tempo();
+        if !fields {
+            painter.text(
+                pos2(row.name.left() + 4.0, row.name.center().y),
+                Align2::LEFT_CENTER,
+                name,
+                theme.small_font(),
+                theme.colors.text.0,
+            );
+        }
         painter.text(
             row.number.center(),
             Align2::CENTER_CENTER,
@@ -634,6 +640,36 @@ impl GridUi {
             response.request_focus();
             let modifiers = ui.input(|i| i.modifiers);
             select(events, None, Some(scene), click_mode(modifiers));
+        }
+        if fields {
+            self.scene_fields(ui, shell, theme, row, scene, events);
+        }
+    }
+
+    /// The scene's tempo, and the numerator and denominator of its time
+    /// signature, side by side across the Main column's name area.
+    fn scene_fields(
+        &mut self,
+        ui: &mut Ui,
+        shell: &Shell,
+        theme: &Theme,
+        row: &SceneRow,
+        scene: SceneId,
+        events: &mut Vec<UiEvent>,
+    ) {
+        use bl_shell::scene_fields::SceneField::{Denominator, Numerator, Tempo};
+        let area = row.name.shrink2(vec2(1.0, 1.0));
+        let part = (area.width() - 2.0) / 4.0;
+        let tempo = Rect::from_min_size(area.min, vec2(part * 2.0, area.height()));
+        let numerator = Rect::from_min_size(tempo.right_top(), vec2(part, area.height()));
+        let denominator = Rect::from_min_size(numerator.right_top(), vec2(part, area.height()));
+        let label = crate::scene_fields::scene_label(shell, scene);
+        for (rect, field) in [
+            (tempo, Tempo),
+            (numerator, Numerator),
+            (denominator, Denominator),
+        ] {
+            crate::scene_fields::show(ui, shell, theme, rect, scene, field, &label, events);
         }
     }
 

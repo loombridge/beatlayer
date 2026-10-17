@@ -381,7 +381,7 @@ fn wait_for_slots(shell: &mut Shell, what: &str, done: impl Fn(&[bl_engine::Slot
     panic!("timed out waiting for {what}: {:?}", shell.session_states());
 }
 
-// Spec: session-view R26 (S-SES-001). Enter's command launches the selected
+// Spec: session-view R32 (S-SES-001). Enter's command launches the selected
 // slots that hold a clip and the selected scenes, and a scripted agent
 // launches and stops by the same command IDs.
 #[test]

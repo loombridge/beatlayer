@@ -11,7 +11,7 @@ pub use bl_shell_spec::mixer_view::{
     COLUMN_WIDTH, MixerOf, MixerViewState, ScrollArgs, SectionArgs, ToggleArgs, ViewMixerState,
 };
 use bl_shell_spec::mixer_view::{
-    CROSSFADER, FOCUS, IN_OUT, RETURN_TRACKS, SCROLL, SENDS, STATE, TOGGLE, VOLUME,
+    CROSSFADER, FOCUS, IN_OUT, RETURN_TRACKS, SCENE_TEMPO, SCROLL, SENDS, STATE, TOGGLE, VOLUME,
 };
 
 use crate::arrangement::ArrangementView;
@@ -33,6 +33,7 @@ pub struct MixerView {
     sends: bool,
     volume: bool,
     crossfader: bool,
+    scene_tempo: bool,
     return_tracks: bool,
     /// Counts `mixer_view.focus` runs, so the window moves the focus once
     /// for each.
@@ -64,6 +65,7 @@ impl MixerView {
             sends: true,
             volume: true,
             crossfader: false,
+            scene_tempo: false,
             return_tracks: true,
             focus_requests: 0,
         }
@@ -117,6 +119,13 @@ impl MixerView {
         self.crossfader
     }
 
+    /// Whether the Main column shows the scene tempo and time signature
+    /// fields.
+    #[must_use]
+    pub fn scene_tempo(&self) -> bool {
+        self.scene_tempo
+    }
+
     /// Whether the return tracks' columns show.
     #[must_use]
     pub fn return_tracks(&self) -> bool {
@@ -139,6 +148,7 @@ impl MixerView {
             sends: self.sends,
             volume: self.volume,
             crossfader: self.crossfader,
+            scene_tempo: self.scene_tempo,
             return_tracks: self.return_tracks,
         }
     }
@@ -153,6 +163,7 @@ impl MixerView {
             SENDS => Some(self.sends),
             VOLUME => Some(self.volume),
             CROSSFADER => Some(self.crossfader),
+            SCENE_TEMPO => Some(self.scene_tempo),
             RETURN_TRACKS => Some(self.return_tracks),
             _ => None,
         }
@@ -189,13 +200,14 @@ impl MixerView {
                 let mixer = self.of_mut(view.unwrap_or(front));
                 mixer.shown = shown.unwrap_or(!mixer.shown);
             }
-            IN_OUT | SENDS | VOLUME | CROSSFADER | RETURN_TRACKS => {
+            IN_OUT | SENDS | VOLUME | CROSSFADER | SCENE_TEMPO | RETURN_TRACKS => {
                 let SectionArgs { shown } = serde_json::from_value(args).map_err(parse_error)?;
                 let section = match id {
                     IN_OUT => &mut self.in_out,
                     SENDS => &mut self.sends,
                     VOLUME => &mut self.volume,
                     CROSSFADER => &mut self.crossfader,
+                    SCENE_TEMPO => &mut self.scene_tempo,
                     _ => &mut self.return_tracks,
                 };
                 *section = shown.unwrap_or(!*section);

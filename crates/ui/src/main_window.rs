@@ -404,6 +404,12 @@ impl MainWindowUi {
                 self.devices
                     .show(ui, shell, theme, layout.device_view, &mut events);
             }
+            if !shell.clip_view().visible() && shell.scene_view_scene().is_none() {
+                // Spec: multisampler R1. The zone editor sits above the
+                // Device View.
+                self.devices
+                    .show_zone_editor(ui, shell, theme, layout.detail, &mut events);
+            }
             self.device_titles = shell
                 .device_view_state()
                 .devices

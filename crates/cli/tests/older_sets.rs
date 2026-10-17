@@ -96,6 +96,7 @@ fn a_version_1_set_with_split_audio_clips_loads_and_plays_as_it_did() {
         windows: bl_model::DeviceWindows::new(),
         folds: bl_model::ClipFolds::new(),
         launch: bl_model::LaunchSettings::default(),
+        multisamplers: bl_model::MultisamplerViews::new(),
     };
     let mut saved: Value = serde_json::from_slice(&encode_json(&project, 1).unwrap()).unwrap();
     saved["schema"] = json!(1);
@@ -264,6 +265,7 @@ fn an_older_clip_envelope_renders_the_same() {
         windows: bl_model::DeviceWindows::new(),
         folds: bl_model::ClipFolds::new(),
         launch: bl_model::LaunchSettings::default(),
+        multisamplers: bl_model::MultisamplerViews::new(),
     };
     let mut saved: Value = serde_json::from_slice(&encode_json(&project, 1).unwrap()).unwrap();
     saved["schema"] = json!(4);

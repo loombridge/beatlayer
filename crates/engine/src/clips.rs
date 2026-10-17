@@ -95,6 +95,40 @@ pub trait MediaLibrary: Send + Sync {
         let _ = (media, rate);
         None
     }
+
+    /// A file at the engine's own rate that a sampler reads by frame, its
+    /// first `head` frames decoded now and the rest by a thread of its own
+    /// (WP-5.13, the multisampler spec, R23); `None` where the library can't
+    /// (the file's rate isn't the engine's, its length isn't known, or it
+    /// decodes whole for a render that must repeat), when the caller reads
+    /// [`sample`](Self::sample) instead.
+    fn progressive(
+        &self,
+        media: ContentHash,
+        rate: SampleRate,
+        head: usize,
+    ) -> Option<Arc<bl_media::ProgressiveSample>> {
+        let _ = (media, rate, head);
+        None
+    }
+}
+
+/// Opens `media` as a progressive sample if it's at `rate`, and starts the
+/// thread that fills it.
+fn progressive_of(
+    store: &MediaStore,
+    media: ContentHash,
+    rate: SampleRate,
+    head: usize,
+) -> Option<Arc<bl_media::ProgressiveSample>> {
+    let hash = bl_media::ContentHash::from_bytes(media.0);
+    let decoder = store.open(hash).ok()?;
+    if decoder.info().sample_rate != rate.hz() {
+        return None;
+    }
+    let (sample, fill) = bl_media::ProgressiveSample::start(decoder, head).ok()?;
+    fill.spawn().ok()?;
+    Some(sample)
 }
 
 /// A source in memory over `data`, which is at the engine's rate.
@@ -116,6 +150,15 @@ impl MediaLibrary for MediaStore {
     fn sample(&self, media: ContentHash, rate: SampleRate) -> Option<Arc<SampleData>> {
         let hash = bl_media::ContentHash::from_bytes(media.0);
         self.load_at_rate(hash, rate.hz()).ok()
+    }
+
+    fn progressive(
+        &self,
+        media: ContentHash,
+        rate: SampleRate,
+        head: usize,
+    ) -> Option<Arc<bl_media::ProgressiveSample>> {
+        progressive_of(self, media, rate, head)
     }
 }
 
@@ -227,6 +270,20 @@ impl MediaLibrary for MediaStreams {
     fn sample(&self, media: ContentHash, rate: SampleRate) -> Option<Arc<SampleData>> {
         let hash = bl_media::ContentHash::from_bytes(media.0);
         self.store.load_at_rate(hash, rate.hz()).ok()
+    }
+
+    /// Only for playing in real time: a render that must repeat decodes
+    /// whole.
+    fn progressive(
+        &self,
+        media: ContentHash,
+        rate: SampleRate,
+        head: usize,
+    ) -> Option<Arc<bl_media::ProgressiveSample>> {
+        if self.blocking {
+            return None;
+        }
+        progressive_of(&self.store, media, rate, head)
     }
 }
 

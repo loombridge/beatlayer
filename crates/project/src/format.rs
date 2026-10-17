@@ -33,7 +33,7 @@
 use std::io::Read;
 
 use bl_core::id::IdAllocator;
-use bl_model::{ClipFolds, DeviceWindows, Document, Editor, LaunchSettings};
+use bl_model::{ClipFolds, DeviceWindows, Document, Editor, LaunchSettings, MultisamplerViews};
 use ruzstd::decoding::StreamingDecoder;
 use ruzstd::encoding::{CompressionLevel, compress_to_vec};
 use serde::{Deserialize, Serialize};
@@ -73,6 +73,10 @@ pub struct Project {
     /// saved with the set but not part of the document, so changing them is
     /// no undo step (the launch quantisation spec, R1).
     pub launch: LaunchSettings,
+    /// What each multisampler's views show (WP-5.13): the tab and the zone
+    /// editor. Saved with the set, but not part of the document, so
+    /// changing them is no undo step (the multisampler spec, R1).
+    pub multisamplers: MultisamplerViews,
 }
 
 impl Project {
@@ -93,7 +97,20 @@ impl Project {
             windows: DeviceWindows::new(),
             folds: ClipFolds::new(),
             launch: LaunchSettings::default(),
+            multisamplers: MultisamplerViews::new(),
         }
+    }
+
+    /// The same project with these multisampler views, keeping only those
+    /// of devices its document has.
+    #[must_use]
+    pub fn with_multisamplers(mut self, views: &MultisamplerViews) -> Self {
+        self.multisamplers = views
+            .iter()
+            .filter(|(device, _)| self.document.device(**device).is_some())
+            .map(|(device, view)| (*device, *view))
+            .collect();
+        self
     }
 
     /// The same project with these window frames, keeping only those of
@@ -207,6 +224,8 @@ struct Saving<'a> {
     folds: &'a ClipFolds,
     /// The global launch quantisation and its switch (WP-3.2).
     launch: LaunchSettings,
+    #[serde(skip_serializing_if = "MultisamplerViews::is_empty")]
+    multisamplers: &'a MultisamplerViews,
     document: &'a Document,
 }
 
@@ -222,6 +241,7 @@ impl<'a> Saving<'a> {
             windows: &project.windows,
             folds: &project.folds,
             launch: project.launch,
+            multisamplers: &project.multisamplers,
             document: &project.document,
         }
     }
@@ -248,6 +268,10 @@ struct Saved {
     /// before WP-3.2 load with a new set's.
     #[serde(default)]
     launch: LaunchSettings,
+    /// What each multisampler's views show (WP-5.13). Sets saved before it
+    /// open with the views a new device has.
+    #[serde(default)]
+    multisamplers: MultisamplerViews,
     document: Document,
 }
 
@@ -350,6 +374,7 @@ pub fn decode_json(json: &[u8], options: &LoadOptions) -> Result<(Project, SetIn
         windows,
         folds,
         launch,
+        multisamplers,
         document,
         ..
     } = saved;
@@ -375,9 +400,11 @@ pub fn decode_json(json: &[u8], options: &LoadOptions) -> Result<(Project, SetIn
         windows: DeviceWindows::new(),
         folds: ClipFolds::new(),
         launch,
+        multisamplers: MultisamplerViews::new(),
     }
     .with_windows(&windows)
-    .with_folds(&folds);
+    .with_folds(&folds)
+    .with_multisamplers(&multisamplers);
     let info = SetInfo {
         revision,
         saved_by,

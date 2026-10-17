@@ -23,7 +23,8 @@
 //! ([`reverb`]), the limiter ([`limiter`]), the tempo-synced delay
 //! ([`delay`]) and the Utility device ([`utility`], WP-2.18b); [`register`]
 //! adds them to the engine. The instruments are the polysynth
-//! ([`polysynth`], WP-2.17) and the sampler ([`sampler`], WP-2.16). The
+//! ([`polysynth`], WP-2.17), the sampler ([`sampler`], WP-2.16) and the
+//! multisampler ([`multisampler`], WP-5.13). The
 //! rest of the core effects ship with WP-2.18. [`testing`] has the devices
 //! the framework's tests use. The kit's two example plug-ins join the
 //! device list with the `kit-examples` feature, off by default.
@@ -39,6 +40,7 @@ pub mod lfo;
 pub mod lift;
 pub mod limiter;
 mod midi_fx;
+pub mod multisampler;
 pub mod polysynth;
 pub mod remap;
 pub mod reverb;
@@ -58,6 +60,7 @@ pub use kit::{KitFactory, KitHost};
 pub use lfo::{Lfo, Rate, Shape, Stereo, Wave};
 pub use lift::{LIFT, lift_type};
 pub use limiter::{Brickwall, limiter_type};
+pub use multisampler::{MULTISAMPLER, Multisampler, multisampler_type};
 pub use polysynth::{POLYSYNTH, PolySynth, polysynth_type};
 pub use remap::{REMAP, remap_type};
 pub use reverb::{REVERB, reverb_type};
@@ -99,6 +102,7 @@ pub fn register(registry: &mut Registry) {
     utility::register(registry);
     eq::register(registry);
     sampler::register(registry);
+    multisampler::register(registry);
     lift::register(registry);
     touch::register(registry);
     dice::register(registry);

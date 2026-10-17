@@ -50,6 +50,7 @@ struct DeviceDrag {
 /// The Device View's state between frames: a name being typed and the
 /// scroll.
 pub struct DeviceViewUi {
+    multisampler: crate::multisampler::MultisamplerUi,
     renaming: Option<Renaming>,
     scroll: f32,
     keymap: Keymap,
@@ -176,6 +177,7 @@ impl DeviceViewUi {
     #[must_use]
     pub fn new() -> Self {
         Self {
+            multisampler: crate::multisampler::MultisamplerUi::default(),
             renaming: None,
             scroll: 0.0,
             keymap: Keymap::live12(),
@@ -261,6 +263,30 @@ impl DeviceViewUi {
         );
         self.drop_target(ui, shell, theme, &state, &placed, rect, events);
         sample_drop(ui, &state, &placed, events);
+    }
+
+    /// Draws the zone editor of the selected multisampler whose editor is
+    /// open, above the Device View in `detail` (R1, R10).
+    pub fn show_zone_editor(
+        &mut self,
+        ui: &mut Ui,
+        shell: &Shell,
+        theme: &Theme,
+        detail: Rect,
+        events: &mut Vec<UiEvent>,
+    ) {
+        let state = shell.device_view_state();
+        let Some((frame, multisampler)) = state.devices.iter().find_map(|d| {
+            d.multisampler
+                .as_ref()
+                .filter(|m| d.selected && m.view.zone_editor)
+                .map(|m| (d, m))
+        }) else {
+            return;
+        };
+        let rect = crate::multisampler::zone_editor_rect(detail, multisampler.view.size);
+        self.multisampler
+            .zone_editor(ui, shell, theme, frame, multisampler, rect, events);
     }
 
     /// Draws a floating device's window (WP-2.5b): the device's frame at
@@ -382,15 +408,29 @@ impl DeviceViewUi {
                             shell.played(track, &AutomationTarget::Device { device, param })
                         })
                     };
-                    crate::device_panel::show(
-                        ui,
-                        theme,
-                        frame,
-                        display.as_ref(),
-                        body,
-                        &played,
-                        events,
-                    );
+                    match &frame.multisampler {
+                        // Spec: multisampler R1. The tab chosen in the title
+                        // bar shows its controls.
+                        Some(state) => self.multisampler.body(
+                            ui,
+                            shell,
+                            theme,
+                            (frame, state),
+                            display.as_ref(),
+                            body,
+                            &played,
+                            events,
+                        ),
+                        None => crate::device_panel::show(
+                            ui,
+                            theme,
+                            frame,
+                            display.as_ref(),
+                            body,
+                            &played,
+                            events,
+                        ),
+                    }
                 }
                 self.title(
                     ui,
@@ -401,6 +441,10 @@ impl DeviceViewUi {
                     text_colour,
                     events,
                 );
+                if let (Some(state), false) = (&frame.multisampler, strip) {
+                    self.multisampler
+                        .tabs(ui, theme, frame, state, controls.title, events);
+                }
                 self.activator(ui, theme, frame, controls.activator, events);
                 if let Some(expand) = controls.expand {
                     self.round_button(ui, theme, frame, "expand", expand, events);
@@ -724,6 +768,27 @@ impl DeviceViewUi {
                 None => response,
             };
             crate::menus::take_focus_first(ui, &response);
+        }
+        // Spec: multisampler R29. The multisampler's own options follow the
+        // device's (C-DEVICE-015).
+        if frame.multisampler.is_some() {
+            ui.separator();
+            let linear = shell
+                .multisampler_device(frame.id)
+                .is_some_and(|d| d.layers.linear_loop_fades);
+            if ui
+                .selectable_label(!linear, "Use Constant Power Fade for Loops")
+                .clicked()
+            {
+                invoke(
+                    events,
+                    "device.set_layer_options",
+                    json!({ "device": frame.id, "linear_loop_fades": !linear }),
+                );
+                ui.close();
+            }
+            ui.add_enabled(false, egui::Button::new("Convert to Snapshot"))
+                .on_disabled_hover_text("Not built yet: arrives with WP-5.15.");
         }
         // The device's own items follow Save as Default Preset
         // (C-DEVICE-015): each switch ticked while it's on, and choosing it

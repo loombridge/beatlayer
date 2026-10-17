@@ -532,3 +532,54 @@ fn a_dropped_sample_loads_into_the_sampler_under_the_pointer() {
     );
     let _ = std::fs::remove_file(&file);
 }
+
+// Spec: multisampler R29
+#[test]
+fn the_multisamplers_title_bar_menu_holds_its_options() {
+    let mut h = harness();
+    let tracks: Vec<TrackId> = h.shell.editor().document().top_level().collect();
+    h.shell
+        .invoke(
+            "arrangement.select_tracks",
+            json!({ "tracks": [tracks[0]] }),
+        )
+        .unwrap();
+    h.shell.set_device_types(bl_devices::device_types());
+    let t = bl_devices::multisampler_type();
+    let device = add(
+        &mut h,
+        json!({ "kind": t.kind, "name": t.name, "role": t.role }),
+    );
+    let frame = frame_of(&mut h, device);
+    h.click(button_rects(frame, false)[2].center());
+    let nodes = Harness::nodes(&h.settle());
+    // The device's own items, then the multisampler's.
+    assert!(
+        nodes
+            .iter()
+            .any(|n| n.label.starts_with("Save as Default Preset"))
+    );
+    let fade = nodes
+        .iter()
+        .find(|n| n.label.starts_with("Use Constant Power Fade for Loops"))
+        .expect("the multisampler's option is in the menu");
+    assert!(
+        fade.selected == Some(true) || fade.toggled == Some(true),
+        "on in a new device: {fade:?}"
+    );
+    assert!(
+        nodes
+            .iter()
+            .any(|n| n.label == "Convert to Snapshot" && n.disabled),
+        "the conversion is WP-5.15's"
+    );
+    let b = fade.bounds.unwrap();
+    h.click(pos2(
+        ((b.x0 + b.x1) / 2.0) as f32,
+        ((b.y0 + b.y1) / 2.0) as f32,
+    ));
+    h.settle();
+    let layers = &h.shell.editor().document().device(device).unwrap().layers;
+    assert!(layers.linear_loop_fades, "off now: crossfades are linear");
+    assert_eq!(last_step(&h), "Change Sample Options");
+}

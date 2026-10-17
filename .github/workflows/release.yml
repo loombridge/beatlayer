@@ -1,7 +1,9 @@
 # Builds Beatlayer's release packages when a `v*` tag is pushed: a DMG holding
 # Beatlayer.app on macOS, an MSI on Windows, and an AppImage and a tarball on
-# Linux. It attaches them to a GitHub release that is left as a **draft**, for
-# a person to review and publish by hand. It never publishes on its own.
+# Linux. It attaches them to a GitHub release that is left as a **draft** and a
+# **pre-release**, for a person to review and publish by hand. It never
+# publishes on its own. Before anything builds, the tag must be `v` followed by
+# the workspace version (`cargo xtask release-check`).
 #
 # A manual run (`gh workflow run release.yml`, or the Actions tab) builds the
 # same packages and uploads them as workflow artifacts, but creates no release:
@@ -47,8 +49,28 @@ env:
   CARGO_INCREMENTAL: 0
 
 jobs:
+  # On a tag push, the tag must be `v` plus the workspace version, before
+  # anything builds. A manual run has no tag, so the step is skipped.
+  tag:
+    name: check the tag
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check the tag against the workspace version
+        if: github.event_name == 'push'
+        run: |
+          # With no argument, rustup installs the toolchain rust-toolchain.toml pins.
+          rustup toolchain install --no-self-update
+          cargo xtask release-check "$GITHUB_REF_NAME"
+
   package:
     name: package (${{ matrix.name }})
+    needs: tag
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     strategy:
@@ -207,9 +229,9 @@ jobs:
           path: dist
           merge-multiple: true
 
-      # The release is created as a draft and stays one: nothing in this
-      # workflow publishes it. Re-running the workflow for the same tag
-      # replaces the assets on the existing draft.
+      # The release is created as a draft and a pre-release, and stays both:
+      # nothing in this workflow publishes it. Re-running the workflow for the
+      # same tag replaces the assets on the existing draft.
       - name: Create the draft release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -218,6 +240,7 @@ jobs:
           if ! gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
             gh release create "$GITHUB_REF_NAME" \
               --draft \
+              --prerelease \
               --title "Beatlayer $GITHUB_REF_NAME" \
               --notes-file RELEASE-NOTES.md
           fi

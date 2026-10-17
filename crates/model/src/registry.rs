@@ -919,6 +919,20 @@ const ENTRIES: &[Entry] = &[
             must be a new ID the project has issued for it.",
     },
     Entry {
+        id: "track.add_take_lane",
+        action: Action::Apply("add_take_lane"),
+        label: "Add Take Lane",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Adds a take lane under an audio track's arrangement lane, after the lanes \
+            it has. `lane.name` names it and `lane.clips` are the recorded passes it holds, each \
+            with a `name`, a `start` and `length` in ticks (705,600 to the quarter note), and \
+            audio `data` as `clip.create` takes it. The track plays only its arrangement lane: \
+            loop recording adds a lane for every pass and copies the latest pass to the \
+            arrangement lane. Audio tracks only.",
+    },
+    Entry {
         id: "clip.delete",
         action: Action::Apply("delete_clip"),
         label: "Delete Clip",

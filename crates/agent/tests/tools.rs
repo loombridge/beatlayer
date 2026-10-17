@@ -166,6 +166,7 @@ fn discovery_lists_areas_searches_and_describes_with_schemas() {
     assert_eq!(
         ids,
         [
+            "track.add_take_lane",
             "track.create",
             "track.delete",
             "track.duplicate_without_clips",
@@ -175,7 +176,7 @@ fn discovery_lists_areas_searches_and_describes_with_schemas() {
             "track.ungroup"
         ]
     );
-    let delete = &tracks["commands"][1];
+    let delete = &tracks["commands"][2];
     assert_eq!(delete["permission"], "destructive");
     assert_eq!(delete["access"], "refused to agents");
 

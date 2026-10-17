@@ -10,7 +10,7 @@ use bl_model::{
     AudioData, AutomationTarget, Channel, Clip, ClipData, Command, ContentHash, CountIn,
     CrossfadeAssign, Device, DeviceKind, DeviceRole, Editor, Input, LaunchQuantization,
     LaunchSettings, MetronomeRhythm, MetronomeSound, MidiData, MixerParam, Monitor, Note, Output,
-    ParamId, SendTap, Sidechain, Tap, TrackId, TrackKind,
+    ParamId, SendTap, Sidechain, TakeClip, TakeLane, Tap, TrackId, TrackKind,
 };
 use bl_project::{Media, Project};
 use bl_shell::Shell;
@@ -225,6 +225,31 @@ fn fixture() -> Project {
             pan: 0.1,
         },
     );
+
+    // Two take lanes, the first with two passes.
+    let pass = |name: &str, start: i64, from: f64| TakeClip {
+        name: name.to_owned(),
+        start: Ticks(start),
+        length: Ticks(BAR),
+        data: AudioData {
+            start: from,
+            end: Some(from + 2.0),
+            gain: 0.7,
+            ..AudioData::new(ContentHash([3; 32]))
+        },
+    };
+    for lane in [
+        TakeLane {
+            name: "Take 1".to_owned(),
+            clips: vec![pass("a", 0, 0.0), pass("b", BAR, 1.0)],
+        },
+        TakeLane {
+            name: "Take 2".to_owned(),
+            clips: vec![pass("c", 0, 0.5)],
+        },
+    ] {
+        apply(&mut editor, Command::AddTakeLane { track: vox, lane });
+    }
 
     // A device with a sidechain, parameters, a window and its own name.
     let compressor: bl_model::DeviceId = editor.new_id();
@@ -499,6 +524,7 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "automation.1.enabled",
                 "automation.0.target",
                 "devices.0.sidechain.input",
+                "take_lanes.0.clips.1.data.gain",
                 "clips.0",
             ][..],
         ),
@@ -649,6 +675,17 @@ fn scenes_slots_and_automation_are_reached_by_path() {
     );
     assert_eq!(by_name["clip"], Value::Null);
 
+    let lane = query(
+        &mut client,
+        json!({ "path": "track \"Vox\" / lane \"Take 1\"", "limit": 1 }),
+    );
+    assert_eq!(lane["number"], 1);
+    assert_eq!(lane["passes"]["total"], 2);
+    assert_eq!(lane["passes"]["items"].as_array().unwrap().len(), 1);
+    assert_eq!(lane["passes"]["items"][0]["data"]["gain"], 0.7);
+    let second_lane = query(&mut client, json!({ "path": "track \"Vox\" / lane 2" }));
+    assert_eq!(second_lane["name"], "Take 2");
+
     let list = query(&mut client, json!({ "path": "track \"Vox\" / automation" }));
     assert_eq!(list["automation"]["total"], 2);
     let volume = query(
@@ -671,6 +708,7 @@ fn scenes_slots_and_automation_are_reached_by_path() {
         ("track \"Bus\" / slot 1", "no Session slots"),
         ("track \"Vox\" / automation \"send 99\"", "no envelope"),
         ("scene 99", "no scene matches"),
+        ("track \"Vox\" / lane 3", "no lane matches"),
     ] {
         let result = client.call("query", json!({ "path": path })).unwrap();
         assert!(

@@ -452,6 +452,38 @@ impl AudioData {
     }
 }
 
+/// One recorded pass on a take lane: where it sits, how long it is, and the
+/// audio it plays. Unlike an Arrangement [`Clip`] it has no ID and isn't
+/// addressed by any command yet; take-lane editing and comping come later
+/// (the recording spec, R12).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[schemars(
+    description = "A recorded pass on a take lane: its `name`, `start` and `length` in ticks \
+                   (705,600 to the quarter note), and the audio clip `data` it plays."
+)]
+pub struct TakeClip {
+    /// The pass's name, which may be empty.
+    pub name: String,
+    /// Where the pass starts in the arrangement. Never negative.
+    pub start: Ticks,
+    /// How long the pass is. Always positive.
+    pub length: Ticks,
+    /// The audio it plays.
+    pub data: AudioData,
+}
+
+/// One take lane under a track's main lane: a name and the passes it holds,
+/// in start order. The track plays only its main lane; a take lane's clips
+/// are kept until comping lets a person audition and pick from them.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[schemars(description = "A take lane under a track's main lane: its `name` and its `clips`.")]
+pub struct TakeLane {
+    /// The lane's name, such as `Take 1`.
+    pub name: String,
+    /// The passes on the lane.
+    pub clips: Vec<TakeClip>,
+}
+
 fn is_zero(value: &f64) -> bool {
     *value == 0.0
 }

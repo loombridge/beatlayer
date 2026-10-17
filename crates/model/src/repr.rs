@@ -12,10 +12,10 @@ use imbl::{OrdMap, Vector};
 use serde::{Deserialize, Serialize};
 
 use crate::automation::{AutomationTarget, Breakpoint, Envelope};
-use crate::clip::Clip;
+use crate::clip::{Clip, TakeLane};
 use crate::command::{
     check_chain, check_clip, check_clip_fits, check_crossfader, check_device, check_extent,
-    check_mixer, check_send_level,
+    check_mixer, check_send_level, check_take_lane,
 };
 use crate::device::Device;
 use crate::document::{Document, Index, Settings};
@@ -67,6 +67,10 @@ struct TrackRepr {
     /// saved before WP-3.2 have none: every slot has one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     removed_stop_buttons: Vec<SceneId>,
+    /// The take lanes under the Arrangement lane (WP-2.13). Sets saved
+    /// before it have none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    take_lanes: Vec<TakeLane>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     children: Vec<TrackRepr>,
 }
@@ -165,6 +169,7 @@ impl TrackRepr {
                 })
                 .collect(),
             removed_stop_buttons: track.removed_stop_buttons().collect(),
+            take_lanes: track.take_lanes().cloned().collect(),
             children: if with_children {
                 track
                     .children
@@ -293,6 +298,9 @@ impl Loader {
         {
             return Err(wrong_kind(&repr, "an audio or MIDI track"));
         }
+        if !repr.take_lanes.is_empty() && repr.kind != TrackKind::Audio {
+            return Err(wrong_kind(&repr, "an audio track"));
+        }
         if !repr.children.is_empty() && repr.kind != TrackKind::Group {
             return Err(wrong_kind(&repr, "a group track"));
         }
@@ -361,6 +369,10 @@ impl Loader {
             {
                 return Err(ModelError::DuplicateId(slot.scene.0));
             }
+        }
+        for lane in repr.take_lanes {
+            check_take_lane(&lane)?;
+            track.take_lanes.push_back(lane);
         }
         for child in repr.children {
             let child = self.add_grouped(child, Some(id))?;

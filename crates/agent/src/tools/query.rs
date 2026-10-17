@@ -16,7 +16,7 @@
 use bl_core::time::{Ticks, TimeSignatureMap};
 use bl_model::automation::{Automation, AutomationTarget};
 use bl_model::{
-    Clip, ClipData, ClipId, Device, DeviceId, Document, Scene, SceneId, Track, TrackId,
+    Clip, ClipData, ClipId, Device, DeviceId, Document, Scene, SceneId, TakeLane, Track, TrackId,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -75,7 +75,8 @@ pub(crate) fn definition() -> Value {
          (as Live shows them, from 1.1.1) and as ticks (705,600 to the quarter note). Long \
          lists come a page at a time: pass the `next_offset` a result gives as `offset`. Also \
          `scene 1` or `scene \"Verse\"`, `track \"Bass\" / slot 3` (a Session slot, scenes \
-         counted from 1), and `track \"Bass\" / automation` (its envelopes; \
+         counted from 1), `track \"Bass\" / lane 1` (a take lane, with its \
+         passes), and `track \"Bass\" / automation` (its envelopes; \
          `automation \"volume\"` reads one, with its points). With `detail: \"full\"` a \
          track, clip, device, scene, and the song (`song`) also return `saved`: everything \
          the set file saves for it, in the file\'s own form, so a setting you can change is \
@@ -174,6 +175,8 @@ enum Found<'a> {
     Scene(&'a Scene),
     /// A track's Session slot at a scene.
     Slot(&'a Track, &'a Scene),
+    /// One of a track's take lanes, with its place among them.
+    Lane(&'a Track, &'a TakeLane, usize),
     /// A track's envelopes, or one of them.
     Automation(&'a Track, Option<(&'a AutomationTarget, &'a Automation)>),
 }
@@ -237,6 +240,7 @@ impl View<'_> {
             Found::Device(device) => self.device(device),
             Found::Scene(scene) => self.scene(scene),
             Found::Slot(track, scene) => self.slot(track, scene),
+            Found::Lane(track, lane, number) => self.lane(track, lane, number),
             Found::Automation(track, envelope) => self.automation(track, envelope),
         }
     }
@@ -266,6 +270,30 @@ impl View<'_> {
         value["clips"] = self.page.slice(clips);
         value["devices"] = json!(devices);
         value["tracks_inside"] = json!(children);
+        // Take lanes show only on a track that has some, so a track without
+        // them reads as it did.
+        if track.take_lanes().len() > 0 {
+            let lanes: Vec<Value> = track
+                .take_lanes()
+                .map(|lane| {
+                    let clips: Vec<Value> = lane
+                        .clips
+                        .iter()
+                        .map(|clip| {
+                            json!({
+                                "name": clip.name,
+                                "start": self.position(clip.start),
+                                "end": self.position(clip.start.saturating_add(clip.length)),
+                                "length": Self::length(clip.length),
+                                "media": clip.data.media,
+                            })
+                        })
+                        .collect();
+                    json!({ "name": lane.name, "clips": clips })
+                })
+                .collect();
+            value["take_lanes"] = json!(lanes);
+        }
         value
     }
 
@@ -370,6 +398,16 @@ impl View<'_> {
             "scene": self.scene_summary(scene),
             "stop_button": !track.removed_stop_buttons().any(|id| id == scene.id),
             "clip": clip,
+        })
+    }
+
+    fn lane(&self, track: &Track, lane: &TakeLane, number: usize) -> Value {
+        let passes: Vec<Value> = lane.clips.iter().map(|pass| self.saved(pass)).collect();
+        json!({
+            "track": track.id(),
+            "name": lane.name,
+            "number": number,
+            "passes": self.page.slice(passes),
         })
     }
 
@@ -518,6 +556,7 @@ enum Kind {
     Param,
     Scene,
     Slot,
+    Lane,
     Automation,
 }
 
@@ -530,6 +569,7 @@ impl Kind {
             Self::Param => "param",
             Self::Scene => "scene",
             Self::Slot => "slot",
+            Self::Lane => "lane",
             Self::Automation => "automation",
         }
     }
@@ -583,11 +623,12 @@ fn parse_path(path: &str) -> Result<Vec<Segment>, String> {
                 "param" | "parameter" => Kind::Param,
                 "scene" => Kind::Scene,
                 "slot" => Kind::Slot,
+                "lane" => Kind::Lane,
                 "automation" => Kind::Automation,
                 other => {
                     return Err(format!(
                         "`{other}` isn't a kind; use track, clip, device, param, scene, slot, \
-                         or automation, or one of the keywords {}",
+                         lane, or automation, or one of the keywords {}",
                         KEYWORDS.join(", ")
                     ));
                 }
@@ -650,7 +691,7 @@ fn parse_selector(text: &str, kind: Kind) -> Result<(Selector, &str), String> {
     } else if let Ok(number) = word.parse::<u64>() {
         // Scenes are counted as the Session View numbers them, from 1.
         match kind {
-            Kind::Scene | Kind::Slot => match usize::try_from(number) {
+            Kind::Scene | Kind::Slot | Kind::Lane => match usize::try_from(number) {
                 Ok(n) if n >= 1 => Selector::Position(n),
                 _ => return Err(format!("`{word}`: scenes count from 1")),
             },
@@ -803,6 +844,18 @@ fn resolve<'a>(document: &'a Document, segments: &[Segment]) -> Result<Found<'a>
                     |s| s.name.clone(),
                 )?;
                 Found::Slot(track, scene)
+            }
+            Kind::Lane => {
+                let Some(track) = track.filter(|_| matches!(found, Some(Found::Track(_)))) else {
+                    return Err("a lane can follow only a track".to_owned());
+                };
+                let lanes: Vec<&TakeLane> = track.take_lanes().collect();
+                let lane = pick(*kind, selector, lanes.clone(), |_| 0, |l| l.name.clone())?;
+                let number = lanes
+                    .iter()
+                    .position(|l| std::ptr::eq(*l, lane))
+                    .map_or(0, |at| at + 1);
+                Found::Lane(track, lane, number)
             }
             Kind::Automation => {
                 let Some(track) = track.filter(|_| matches!(found, Some(Found::Track(_)))) else {

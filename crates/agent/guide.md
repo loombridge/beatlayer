@@ -89,7 +89,7 @@ Listen before and after a change, and compare the numbers: for example, `preview
 
 Anything you can set, you can read back. `query` with `detail: "full"` returns, under `saved`, everything the set file saves for a track, clip, device, or scene, in the file's own form (the song's settings are under `song`'s `saved`). That covers a track's mixer, crossfader assignment, routing and channels, Monitor, sends, automation and Session slots; a clip's markers, loop, gain, fades and envelopes; a device's parameters, sidechain and state; and the song's tempo map, time signatures, loop, punch, metronome and record switches, and launch quantisation. The default `summary` stays compact. A list comes a page at a time, and a list inside a list shows only its length: read it at the item's own path.
 
-Paths reach the rest: `scene 1` or `scene "Verse"` (scenes count from 1, as the Session View numbers them), `track "Bass" / slot 3` (a track's Session slot, with its clip), and `track "Bass" / automation` (the track's envelopes; `automation "volume"` or `automation "device 41 param 3"` reads one, its points a page at a time with `detail: "full"`).
+Paths reach the rest: `scene 1` or `scene "Verse"` (scenes count from 1, as the Session View numbers them), `track "Bass" / slot 3` (a track's Session slot, with its clip), `track "Bass" / lane 1` (a take lane and its passes), and `track "Bass" / automation` (the track's envelopes; `automation "volume"` or `automation "device 41 param 3"` reads one, its points a page at a time with `detail: "full"`).
 
 State the set doesn't save, such as whether the song is recording or what a window shows, is read with the read commands (`transport.state`, `mixer_view.state`, and the other `.state` commands).
 

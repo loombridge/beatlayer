@@ -30,7 +30,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use bl_commands::Registry as Commands;
 use bl_core::time::{Frames, Ticks};
 use bl_engine::{
-    DeviceInput, MediaMap, RecordTrack, RecordingPlan, Registry, TakeBounds, TransportCommand,
+    DeviceInput, LoopRegion, MediaMap, RecordTrack, RecordingPlan, Registry, TakeBounds,
+    TransportCommand,
 };
 use bl_media::SampleData;
 use bl_model::{Channel, ContentHash, TrackId, TrackKind, registry};
@@ -177,6 +178,7 @@ fn a_take_holds_each_armed_tracks_input_from_the_frame_playback_started_on() {
         Some(TakeBounds {
             start: Frames(48_000),
             end: Frames(49_024),
+            wrap: None,
         }),
         "four blocks of 256 frames from the frame playback started on"
     );
@@ -219,12 +221,95 @@ fn a_full_ring_ends_the_take_and_counts_its_dropped_frames() {
         Some(TakeBounds {
             start: Frames::ZERO,
             end: Frames(16),
+            wrap: None,
         }),
         "the two blocks the ring took"
     );
     assert_eq!(dropped[0].load(Ordering::Relaxed), 8, "the third block");
     let samples = drain(&mut rings[0]);
     assert_eq!(samples.len(), 16, "the file holds the take's frames");
+}
+
+// Spec: recording R11 (WP-2.13). The Arrangement loop's wrap doesn't end the
+// take: it goes on into the next pass, so the file holds the part before the
+// loop, then every pass, one after another, and the take names the loop it
+// went round.
+#[test]
+fn a_take_goes_on_through_the_loops_wraps() {
+    let mut rig = Rig::with_input(256, 4);
+    let a = armed(&mut rig, 3);
+    rig.sync();
+
+    let (plan, mut rings, _) = plan(&[(a, Channel::Mono(3))], 1 << 18);
+    rig.sender.record(rig.collector.handle().wrap(plan));
+    // At 120 bpm a quarter note is 24,000 frames: the loop is the second
+    // one, and playback starts a quarter note before it.
+    rig.sender
+        .transport(TransportCommand::SetLoop(Some(LoopRegion {
+            start: Ticks::QUARTER,
+            end: Ticks::QUARTER * 2,
+        })));
+    rig.sender.transport(TransportCommand::SetRecording(true));
+    rig.sender.transport(TransportCommand::Play);
+    // The lead-in, two full passes, and 1,000 frames of a third.
+    let mut next = 0;
+    for _ in 0..285 {
+        let input = Input::ramp(&mut next, 256);
+        rig.block_with_input(256, &input);
+    }
+    let input = Input::ramp(&mut next, 40);
+    rig.block_with_input(40, &input);
+    rig.sender.transport(TransportCommand::Stop);
+    let input = Input::ramp(&mut next, 256);
+    rig.block_with_input(256, &input);
+
+    let state = rig.monitor.state();
+    assert_eq!(
+        state.take,
+        Some(TakeBounds {
+            start: Frames::ZERO,
+            end: Frames(25_000),
+            wrap: Some((Frames(24_000), Frames(48_000))),
+        }),
+        "one take, 1,000 frames into the third pass"
+    );
+    rig.collector.collect();
+    let samples = drain(&mut rings[0]);
+    assert_eq!(samples.len(), 73_000);
+    for (i, sample) in samples.iter().enumerate() {
+        assert_eq!(*sample, i as f32, "frame {i} follows the one before it");
+    }
+}
+
+// Spec: recording R11 (WP-2.13). A locate away from the loop still ends the
+// take, as it ends one outside a loop.
+#[test]
+fn a_locate_inside_a_loop_still_ends_the_take() {
+    let mut rig = Rig::with_input(256, 4);
+    let a = armed(&mut rig, 3);
+    rig.sync();
+
+    let (plan, _rings, _) = plan(&[(a, Channel::Mono(3))], 1 << 18);
+    rig.sender.record(rig.collector.handle().wrap(plan));
+    rig.sender
+        .transport(TransportCommand::SetLoop(Some(LoopRegion {
+            start: Ticks::QUARTER,
+            end: Ticks::QUARTER * 2,
+        })));
+    rig.sender.transport(TransportCommand::SetRecording(true));
+    rig.sender.transport(TransportCommand::Play);
+    let mut next = 0;
+    for _ in 0..2 {
+        let input = Input::ramp(&mut next, 256);
+        rig.block_with_input(256, &input);
+    }
+    rig.sender
+        .transport(TransportCommand::Locate(Ticks::QUARTER * 3));
+    let input = Input::ramp(&mut next, 256);
+    rig.block_with_input(256, &input);
+    let state = rig.monitor.state();
+    assert!(!state.recording, "the locate ended the take");
+    assert_eq!(state.take.map(|take| take.wrap), Some(None));
 }
 
 /// A DC file of `value`, playable by a clip.
@@ -383,6 +468,7 @@ fn punch_records_only_between_the_brace_ends_and_playback_carries_on() {
         Some(TakeBounds {
             start: Frames(24_000),
             end: Frames(48_000),
+            wrap: None,
         })
     );
     rig.collector.collect();
@@ -417,8 +503,34 @@ fn each_punch_switch_alone_moves_only_its_own_end() {
         take,
         TakeBounds {
             start: Frames::ZERO,
-            end: Frames(48_000)
+            end: Frames(48_000),
+            wrap: None,
         }
+    );
+    assert_eq!(drain(&mut ring).len(), 48_000);
+}
+
+// Spec: recording R9, R11 (WP-2.13). With Punch-Out on, the Loop's wrap ends
+// the take, and the recording with it, instead of going on into the next
+// pass.
+#[test]
+fn the_loops_wrap_ends_a_take_that_has_punch_out_on() {
+    let mut rig = punch_rig(false, true);
+    run(
+        &mut rig.editor,
+        "transport.set_loop_enabled",
+        json!({ "enabled": true }),
+    );
+    let mut ring = record_ramp(&mut rig, 0, 256, 300);
+    let state = rig.monitor.state();
+    assert!(!state.recording, "the wrap ended the recording");
+    assert_eq!(
+        state.take,
+        Some(TakeBounds {
+            start: Frames::ZERO,
+            end: Frames(48_000),
+            wrap: None,
+        })
     );
     assert_eq!(drain(&mut ring).len(), 48_000);
 }
@@ -448,6 +560,7 @@ fn playing_from_inside_the_brace_records_from_play_start() {
         Some(TakeBounds {
             start: Frames(36_000),
             end: Frames(48_000),
+            wrap: None,
         })
     );
     assert_eq!(drain(&mut rings[0]).len(), 12_000);

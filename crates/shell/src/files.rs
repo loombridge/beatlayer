@@ -16,7 +16,7 @@ use std::path::{Component, Path, PathBuf};
 use bl_core::id::IdAllocator;
 use bl_model::{
     ClipFolds, ContentHash, DEFAULT_SCENE_COUNT, DeviceWindows, Document, Editor, LaunchSettings,
-    SceneId, TrackId, TrackKind, registry,
+    RackViewMap, SceneId, TrackId, TrackKind, registry,
 };
 use bl_project::{
     Media, MediaPath, MediaRef, Project, ProjectFolder, SET_EXTENSION, SaveOptions, SetFile,
@@ -100,6 +100,18 @@ pub trait SetStore {
         DeviceWindows::new()
     }
 
+    /// Gives the store which views each rack shows (WP-5.2), for the next
+    /// save to write beside the document. A store that keeps no rack views
+    /// ignores it.
+    fn set_rack_views(&mut self, views: RackViewMap) {
+        let _ = views;
+    }
+
+    /// Which views each of the open set's racks shows, as it was saved.
+    fn rack_views(&self) -> RackViewMap {
+        RackViewMap::new()
+    }
+
     /// Gives the store which clips' MIDI Note Editors are folded (WP-2.3),
     /// for the next save to write beside the document. A store that keeps
     /// no folds ignores it.
@@ -179,6 +191,9 @@ pub struct ProjectFiles {
     /// Floating devices' window frames (WP-2.5b): the open set's, then the
     /// shell's for the next save.
     windows: DeviceWindows,
+    /// The views racks show (WP-5.2): the open set's, then the shell's for
+    /// the next save.
+    rack_views: RackViewMap,
     /// Folded MIDI Note Editors (WP-2.3): the open set's, then the shell's
     /// for the next save.
     folds: ClipFolds,
@@ -213,6 +228,7 @@ impl SetStore for ProjectFiles {
         self.set = Some(set);
         self.media = project.media;
         self.windows = project.windows;
+        self.rack_views = project.rack_views;
         self.folds = project.folds;
         self.launch = project.launch;
         self.added.clear();
@@ -266,6 +282,7 @@ impl SetStore for ProjectFiles {
         self.set = None;
         self.media = Media::new();
         self.windows = DeviceWindows::new();
+        self.rack_views = RackViewMap::new();
         self.folds = ClipFolds::new();
         self.launch = LaunchSettings::default();
         self.added.clear();
@@ -277,6 +294,14 @@ impl SetStore for ProjectFiles {
 
     fn windows(&self) -> DeviceWindows {
         self.windows.clone()
+    }
+
+    fn set_rack_views(&mut self, views: RackViewMap) {
+        self.rack_views = views;
+    }
+
+    fn rack_views(&self) -> RackViewMap {
+        self.rack_views.clone()
     }
 
     fn set_folds(&mut self, folds: ClipFolds) {
@@ -343,6 +368,7 @@ impl SetStore for ProjectFiles {
         }
         let project = Project::from_editor(editor, media)
             .with_windows(&self.windows)
+            .with_rack_views(&self.rack_views)
             .with_folds(&self.folds)
             .with_launch(self.launch);
         let mut set = SetFile::open(path)
@@ -506,6 +532,7 @@ impl ProjectFiles {
         let warnings = self.add_media_to(&mut media, path);
         let project = Project::from_editor(editor, media)
             .with_windows(&self.windows)
+            .with_rack_views(&self.rack_views)
             .with_folds(&self.folds)
             .with_launch(self.launch);
         let mut set = self

@@ -1573,6 +1573,144 @@ fn an_agent_builds_and_reads_back_a_nested_rack() {
     assert_eq!(history["undo"]["items"][0], "racks: Ungroup");
 }
 
+// Spec: racks R19 to R26. An agent runs what a person does in a rack's frame
+// by command ID: the views, the chain selection, solo, the drop area's new
+// chain, a chain dropped on the track, and the edit keys' commands, and reads
+// each result back from `device_view.state` and the query tool.
+#[test]
+fn an_agent_drives_a_racks_frame_by_command_id() {
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("rack-view").unwrap();
+    let audio = default_tracks(&mut client)[2];
+    let run = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        let out = call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }] }),
+        );
+        out["results"][0]["result"].clone()
+    };
+    run(
+        &mut client,
+        "arrangement.select_tracks",
+        json!({ "tracks": [audio] }),
+    );
+    let through = json!({
+        "id": {"$new": "x"}, "name": "Through", "enabled": true, "params": [],
+        "kind": { "native": { "device_type": "test.through" } },
+    });
+    let built = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "device.insert", "args": { "track": audio, "index": 0, "device": {
+            "id": {"$new": "rack"}, "name": "Layers", "enabled": true, "params": [],
+            "kind": { "rack": { "kind": "audio_effect" } },
+            "chains": [
+                { "id": {"$new": "a"}, "name": "A", "devices": [] },
+                { "id": {"$new": "b"}, "name": "B", "devices": [through] },
+                { "id": {"$new": "c"}, "name": "C", "devices": [] },
+            ],
+        } } }] }),
+    );
+    let id = |name: &str| {
+        built["ids"][name]
+            .as_u64()
+            .unwrap_or_else(|| panic!("no `{name}`"))
+    };
+    let (rack, a, b, c) = (id("rack"), id("a"), id("b"), id("c"));
+    let frame = |client: &mut Client<InProcess>| {
+        run(client, "device_view.state", json!({}))["devices"][0]["rack"].clone()
+    };
+
+    // Views: hidden and shown, read back; not an undo step.
+    let before = call(&mut client, "query", json!({ "path": "history" }));
+    run(
+        &mut client,
+        "rack.set_view",
+        json!({ "rack": rack, "view": "chain_list", "shown": false }),
+    );
+    assert_eq!(frame(&mut client)["views"]["chain_list"], json!(false));
+    run(
+        &mut client,
+        "rack.set_view",
+        json!({ "rack": rack, "view": "chain_list" }),
+    );
+    assert_eq!(frame(&mut client)["views"]["chain_list"], json!(true));
+    assert_eq!(
+        call(&mut client, "query", json!({ "path": "history" })),
+        before
+    );
+
+    // Selection, as a click, a range, and a step.
+    run(&mut client, "chain.select", json!({ "chain": a }));
+    run(
+        &mut client,
+        "chain.select",
+        json!({ "chain": c, "mode": "range" }),
+    );
+    assert_eq!(frame(&mut client)["selected_chains"], json!([a, b, c]));
+    assert_eq!(frame(&mut client)["note"], json!("3 chains selected"));
+    run(&mut client, "chain.select", json!({ "mode": "previous" }));
+    assert_eq!(frame(&mut client)["selected_chains"], json!([a]));
+
+    // Solo is read back from the chain.
+    run(&mut client, "chain.solo", json!({ "chain": b }));
+    run(
+        &mut client,
+        "chain.solo",
+        json!({ "chain": c, "add": true }),
+    );
+    let rack_now = call(&mut client, "query", json!({ "id": rack }));
+    let solos: Vec<bool> = rack_now["chains"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|chain| chain["mixer"]["solo"] == json!(true))
+        .collect();
+    assert_eq!(solos, [false, true, true]);
+    run(&mut client, "chain.hot_swap", json!({ "chain": a }));
+    assert_eq!(frame(&mut client)["chains"][0]["hot_swap"], json!(true));
+
+    // The drop area's new chain, and a chain dropped on the track.
+    let created = run(&mut client, "chain.create", json!({ "rack": rack }));
+    assert_eq!(created["chains"].as_array().unwrap().len(), 1);
+    let moved = run(
+        &mut client,
+        "chain.drop_on_track",
+        json!({ "chain": b, "track": audio }),
+    );
+    assert!(
+        moved["devices"].as_array().unwrap().len() >= 2,
+        "the device joined the track's chain"
+    );
+    assert_eq!(
+        call(&mut client, "query", json!({ "id": rack }))["chains"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+
+    // The edit keys' commands act on the selection.
+    run(&mut client, "chain.select", json!({ "chain": a }));
+    run(&mut client, "chain.duplicate", json!({}));
+    assert_eq!(
+        call(&mut client, "query", json!({ "id": rack }))["chains"]
+            .as_array()
+            .unwrap()
+            .len(),
+        4
+    );
+    run(&mut client, "chain.delete", json!({}));
+    assert_eq!(
+        call(&mut client, "query", json!({ "id": rack }))["chains"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+}
+
 // Spec: device-chains R34 and R35, device-framework R14 (WP-5.42): an agent
 // adds the framework's test effects, shows and hides its expanded part,
 // switches its own menu option, and reads all of it back, by command ID.

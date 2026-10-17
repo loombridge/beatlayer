@@ -10,15 +10,17 @@
 //!      "ids": 412,               the next object ID to hand out
 //!      "media": [ { "hash": "…", "path": "Samples/Imported/Kick.wav", "size": 88244 } ],
 //!      "windows": { "12": { "x": 80, "y": 120, "width": 320, "height": 174 } },
+//!      "rack_views": { "14": { "macros": false, "chain_list": true, "devices": true } },
 //!      "folds": [ 12, 15 ],     the clips whose note editors are folded
 //!      "document": { … }         the song, as bl-model serialises it
 //!    }
 //! ```
 //!
-//! `windows` holds where each floating device's window sits (WP-2.5b), and
-//! `folds` the clips whose MIDI Note Editors are folded (WP-2.3). Both are
-//! left out when empty. They sit beside the document rather than in it, so
-//! moving a window or folding an editor is never an undo step.
+//! `windows` holds where each floating device's window sits (WP-2.5b),
+//! `rack_views` which views each rack shows (WP-5.2), and `folds` the clips
+//! whose MIDI Note Editors are folded (WP-2.3). All are left out when empty.
+//! They sit beside the document rather than in it, so moving a window,
+//! hiding a rack's chain list or folding an editor is never an undo step.
 //!
 //! `format` and `schema` come first and keep their names in every version,
 //! so a reader can tell what a file is and which migrations it needs before
@@ -33,7 +35,7 @@
 use std::io::Read;
 
 use bl_core::id::IdAllocator;
-use bl_model::{ClipFolds, DeviceWindows, Document, Editor, LaunchSettings};
+use bl_model::{ClipFolds, DeviceWindows, Document, Editor, LaunchSettings, RackViewMap};
 use ruzstd::decoding::StreamingDecoder;
 use ruzstd::encoding::{CompressionLevel, compress_to_vec};
 use serde::{Deserialize, Serialize};
@@ -65,6 +67,10 @@ pub struct Project {
     /// Where each floating device's window sits (WP-2.5b): saved with the
     /// set, but not part of the document, so it's no undo step.
     pub windows: DeviceWindows,
+    /// Which views each rack shows (WP-5.2): saved with the set, but not part
+    /// of the document, so showing and hiding them is no undo step (the
+    /// racks spec, R19).
+    pub rack_views: RackViewMap,
     /// Which clips' MIDI Note Editors are folded to the rows that hold notes
     /// (WP-2.3): saved with the set, but not part of the document, so
     /// folding is no undo step.
@@ -91,9 +97,28 @@ impl Project {
             ids: editor.ids(),
             media,
             windows: DeviceWindows::new(),
+            rack_views: RackViewMap::new(),
             folds: ClipFolds::new(),
             launch: LaunchSettings::default(),
         }
+    }
+
+    /// The same project with these rack views, keeping only those of racks
+    /// its document has, and not those that show everything.
+    #[must_use]
+    pub fn with_rack_views(mut self, views: &RackViewMap) -> Self {
+        self.rack_views = views
+            .iter()
+            .filter(|(rack, shown)| {
+                **shown != bl_model::RackViews::default()
+                    && self
+                        .document
+                        .device(**rack)
+                        .is_some_and(|d| d.rack_kind().is_some())
+            })
+            .map(|(rack, shown)| (*rack, *shown))
+            .collect();
+        self
     }
 
     /// The same project with these window frames, keeping only those of
@@ -203,6 +228,8 @@ struct Saving<'a> {
     media: &'a Media,
     #[serde(skip_serializing_if = "DeviceWindows::is_empty")]
     windows: &'a DeviceWindows,
+    #[serde(skip_serializing_if = "RackViewMap::is_empty")]
+    rack_views: &'a RackViewMap,
     #[serde(skip_serializing_if = "ClipFolds::is_empty")]
     folds: &'a ClipFolds,
     /// The global launch quantisation and its switch (WP-3.2).
@@ -220,6 +247,7 @@ impl<'a> Saving<'a> {
             ids: project.ids,
             media: &project.media,
             windows: &project.windows,
+            rack_views: &project.rack_views,
             folds: &project.folds,
             launch: project.launch,
             document: &project.document,
@@ -242,6 +270,8 @@ struct Saved {
     media: Media,
     #[serde(default)]
     windows: DeviceWindows,
+    #[serde(default)]
+    rack_views: RackViewMap,
     #[serde(default)]
     folds: ClipFolds,
     /// The global launch quantisation and its switch (WP-3.2). Sets saved
@@ -348,6 +378,7 @@ pub fn decode_json(json: &[u8], options: &LoadOptions) -> Result<(Project, SetIn
         mut ids,
         media,
         windows,
+        rack_views,
         folds,
         launch,
         document,
@@ -373,10 +404,12 @@ pub fn decode_json(json: &[u8], options: &LoadOptions) -> Result<(Project, SetIn
         ids,
         media,
         windows: DeviceWindows::new(),
+        rack_views: RackViewMap::new(),
         folds: ClipFolds::new(),
         launch,
     }
     .with_windows(&windows)
+    .with_rack_views(&rack_views)
     .with_folds(&folds);
     let info = SetInfo {
         revision,
@@ -548,6 +581,54 @@ mod tests {
         damaged["windows"][device.0.get().to_string()]["width"] = json!(-1.0);
         damaged["windows"]["9999"] = json!({ "x": 0, "y": 0, "width": 10, "height": 10 });
         assert!(load_json(&damaged).unwrap().0.windows.is_empty());
+    }
+
+    // Spec: racks R19
+    #[test]
+    fn rack_views_are_saved_beside_the_document() {
+        let mut editor = song().editor();
+        let track = editor.document().top_level().next().unwrap();
+        let rack: bl_model::DeviceId = editor.new_id();
+        let plain: bl_model::DeviceId = editor.new_id();
+        for (index, device) in [
+            bl_model::Device::rack(rack, bl_model::RackKind::AudioEffect),
+            bl_model::Device::new(
+                plain,
+                "Utility",
+                bl_model::DeviceKind::Native {
+                    device_type: "beatlayer.utility".to_owned(),
+                },
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            editor
+                .apply(Command::InsertDevice {
+                    track,
+                    index,
+                    device,
+                })
+                .unwrap();
+        }
+        let hidden = bl_model::RackViews::default().with(bl_model::RackView::ChainList, false);
+        let gone = bl_model::DeviceId(Id::new(9_999).unwrap());
+        let views = RackViewMap::from([(rack, hidden), (plain, hidden), (gone, hidden)]);
+        let project = Project::from_editor(&editor, Media::new()).with_rack_views(&views);
+        // Only racks the set has are kept.
+        assert_eq!(project.rack_views, RackViewMap::from([(rack, hidden)]));
+        let value = json_of(&project, 1);
+        assert_eq!(
+            value["rack_views"][rack.0.get().to_string()],
+            json!({ "macros": true, "chain_list": false, "devices": true })
+        );
+        let (loaded, _) = load_json(&value).unwrap();
+        assert_eq!(loaded, project);
+        // Every view shown, no `rack_views`: older sets read the same.
+        let all = RackViewMap::from([(rack, bl_model::RackViews::default())]);
+        let shown = Project::from_editor(&editor, Media::new()).with_rack_views(&all);
+        assert!(json_of(&shown, 1).get("rack_views").is_none());
+        assert!(json_of(&song(), 1).get("rack_views").is_none());
     }
 
     #[test]

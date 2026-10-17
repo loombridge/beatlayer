@@ -255,6 +255,7 @@ fn fixture_project() -> Project {
         ids: editor.ids(),
         media,
         windows: bl_model::DeviceWindows::new(),
+        rack_views: bl_model::RackViewMap::new(),
         folds: bl_model::ClipFolds::new(),
         launch: bl_model::LaunchSettings::default(),
     }

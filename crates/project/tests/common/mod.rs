@@ -358,6 +358,7 @@ impl Recipe {
             ids,
             media,
             windows: bl_model::DeviceWindows::new(),
+            rack_views: bl_model::RackViewMap::new(),
             folds: bl_model::ClipFolds::new(),
             // WP-3.2: the global launch quantisation and its switch save
             // beside the song.

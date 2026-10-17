@@ -217,6 +217,9 @@ pub enum Effect {
     /// Start renaming a device in its title bar, where the person types the
     /// new name; Return runs `device.rename` with it (WP-2.4).
     RenameDevice(bl_model::DeviceId),
+    /// Start renaming a chain in its row of the chain list; Return runs
+    /// `chain.rename` with the new name (WP-5.2).
+    RenameChain(bl_model::ChainId),
     /// Start renaming a track in its title bar, where the person types the
     /// new name; Return runs `track.rename` with it (WP-4.22).
     RenameTrack(TrackId),
@@ -2264,6 +2267,8 @@ impl Shell {
         if outcome.document_changed {
             self.dirty = true;
             self.document_changed();
+        } else if outcome.view_changed {
+            self.dirty = true;
         }
         if let Some(message) = outcome.message {
             self.set_message(message, false);
@@ -3737,7 +3742,14 @@ impl Shell {
                             }
                         }
                     }
-                    Area::Detail => contexts.push(Context::DeviceView),
+                    Area::Detail => {
+                        // Spec: racks R22. A chain list with the focus
+                        // takes S and the edit keys.
+                        if self.devices.chain_list_focus() {
+                            contexts.push(Context::RackChains);
+                        }
+                        contexts.push(Context::DeviceView);
+                    }
                     Area::ControlBar | Area::StatusBar | Area::Assistant => {}
                 }
                 if self.prefs.tab_navigation {
@@ -3954,6 +3966,10 @@ impl Shell {
         if id == "device.rename" && args.get("name").is_none() {
             // A person names the device in its title bar.
             return self.devices.selected().is_some();
+        }
+        if id == "chain.rename" && args.get("name").is_none() {
+            // A person names the chain in its row.
+            return self.devices.selected_chains(self.editor.document()).len() == 1;
         }
         if id == "track.delete" && args.get("track").is_none() {
             return !self.deletable_tracks().is_empty();
@@ -4437,6 +4453,24 @@ impl Shell {
                     }
                 })?;
                 self.effects.push(Effect::RenameDevice(device));
+                self.touch();
+                Ok(Value::Null)
+            }
+            "chain.rename" if !has("name") => {
+                let chain = args
+                    .get("chain")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .or_else(|| {
+                        self.devices
+                            .selected_chains(self.editor.document())
+                            .first()
+                            .copied()
+                    })
+                    .ok_or_else(|| ShellError::Unavailable {
+                        command: id.to_owned(),
+                        reason: "select a chain first".to_owned(),
+                    })?;
+                self.effects.push(Effect::RenameChain(chain));
                 self.touch();
                 Ok(Value::Null)
             }
@@ -5314,6 +5348,7 @@ impl Shell {
                 self.editor = editor;
                 self.store.close();
                 self.devices.set_windows(bl_model::DeviceWindows::new());
+                self.devices.set_rack_views(bl_model::RackViewMap::new());
                 self.clip_view.set_folds(bl_model::ClipFolds::new());
                 self.set_path = None;
                 self.dirty = false;
@@ -5340,6 +5375,8 @@ impl Shell {
                 // Spec: device-chains R29. Floating windows reopen where
                 // they were saved.
                 self.devices.set_windows(self.store.windows());
+                // Spec: racks R19. So do the views each rack shows.
+                self.devices.set_rack_views(self.store.rack_views());
                 // Spec: piano-roll. Folded note editors too.
                 self.clip_view.set_folds(self.store.folds());
                 self.saved = snapshot(&editor);
@@ -5390,6 +5427,7 @@ impl Shell {
                     &mut self.editor,
                 );
                 self.store.set_windows(self.devices.windows().clone());
+                self.store.set_rack_views(self.devices.rack_views().clone());
                 self.store.set_folds(self.clip_view.folds().clone());
                 let warnings = self.store.save(&path, &self.editor).map_err(failed)?;
                 self.saved_as(path, &warnings);
@@ -5407,6 +5445,7 @@ impl Shell {
                     &mut self.editor,
                 );
                 self.store.set_windows(self.devices.windows().clone());
+                self.store.set_rack_views(self.devices.rack_views().clone());
                 self.store.set_folds(self.clip_view.folds().clone());
                 self.store.set_temporary_folder(self.temporary_folder());
                 let (path, warnings) = self
@@ -5519,6 +5558,7 @@ impl Shell {
                     &mut self.editor,
                 );
                 self.store.set_windows(self.devices.windows().clone());
+                self.store.set_rack_views(self.devices.rack_views().clone());
                 self.store.set_folds(self.clip_view.folds().clone());
                 let files = self.store.collect().map_err(failed)?;
                 let warnings = self.store.save(&path, &self.editor).map_err(failed)?;

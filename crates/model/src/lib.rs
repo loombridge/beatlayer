@@ -109,7 +109,9 @@ pub use imbl::{OrdMap, Vector};
 pub use launch::{ClipLaunch, LaunchMode, LaunchQuantization, LaunchSettings};
 pub use metronome::{CountIn, MetronomeRhythm, MetronomeSettings, MetronomeSound};
 pub use param::{DeviceDescription, ParamDescriptor, ParamKind, ParamUnit};
-pub use rack::{CHAIN_COLOURS, Chain, ChainMixer, DevicePlace, RackKind};
+pub use rack::{
+    CHAIN_COLOURS, Chain, ChainMixer, DevicePlace, RackKind, RackView, RackViewMap, RackViews,
+};
 pub use repr::{SavedSong, saved_schema};
 pub use scene::{DEFAULT_SCENE_COUNT, SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
 pub use track::{

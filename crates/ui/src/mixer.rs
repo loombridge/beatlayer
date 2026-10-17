@@ -580,6 +580,7 @@ fn title_bars(
             );
         }
         let response = ui.interact(bar, Id::new(("mixer-title", of, track)), Sense::click());
+        crate::rack_view::focus_track_under_drag(ui, shell, track, bar, events);
         let focused = ui.memory(|m| m.has_focus(column_id(of, track)));
         menus.title(
             ui,

@@ -94,6 +94,7 @@ fn a_version_1_set_with_split_audio_clips_loads_and_plays_as_it_did() {
         ids: IdAllocator::new(),
         media: Media::default(),
         windows: bl_model::DeviceWindows::new(),
+        rack_views: bl_model::RackViewMap::new(),
         folds: bl_model::ClipFolds::new(),
         launch: bl_model::LaunchSettings::default(),
     };
@@ -162,6 +163,7 @@ fn sets_from_before_racks_load_unchanged() {
         ids: editor.ids(),
         media: Media::default(),
         windows: bl_model::DeviceWindows::new(),
+        rack_views: bl_model::RackViewMap::new(),
         folds: bl_model::ClipFolds::new(),
         launch: bl_model::LaunchSettings::default(),
     };
@@ -317,6 +319,7 @@ fn an_older_clip_envelope_renders_the_same() {
         ids: IdAllocator::new(),
         media: Media::default(),
         windows: bl_model::DeviceWindows::new(),
+        rack_views: bl_model::RackViewMap::new(),
         folds: bl_model::ClipFolds::new(),
         launch: bl_model::LaunchSettings::default(),
     };

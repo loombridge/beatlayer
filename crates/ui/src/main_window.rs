@@ -134,6 +134,9 @@ pub struct MainWindowUi {
     drawn: Option<ShellLayout>,
     /// The titles the last frame's Device View showed, for Rename.
     device_titles: Vec<(bl_model::DeviceId, String)>,
+    /// The names of the chains the last frame's Device View listed, for
+    /// Rename.
+    chain_names: Vec<(bl_model::ChainId, String)>,
     /// The assistant's pane (WP-2.23, part 3): the prompt being typed and a
     /// drag on its edge.
     assistant: crate::assistant_panel::AssistantPanelUi,
@@ -210,6 +213,7 @@ impl MainWindowUi {
             menu_open: false,
             drawn: None,
             device_titles: Vec::new(),
+            chain_names: Vec::new(),
             assistant: crate::assistant_panel::AssistantPanelUi::default(),
         }
     }
@@ -229,6 +233,16 @@ impl MainWindowUi {
             .iter()
             .find(|(id, _)| *id == device)
             .map(|(_, title)| title.clone())
+            .unwrap_or_default()
+    }
+
+    /// The name a chain's row shows, for renaming it; empty for a chain the
+    /// set no longer has.
+    fn chain_name(&self, chain: bl_model::ChainId) -> String {
+        self.chain_names
+            .iter()
+            .find(|(id, _)| *id == chain)
+            .map(|(_, name)| name.clone())
             .unwrap_or_default()
     }
 
@@ -296,6 +310,11 @@ impl MainWindowUi {
                 // title bar.
                 let title = self.device_title(*device);
                 self.devices.start_rename(*device, &title);
+            }
+            Effect::RenameChain(chain) => {
+                // Spec: racks R22. Rename types the name in the chain's row.
+                let name = self.chain_name(*chain);
+                self.devices.start_chain_rename(*chain, &name);
             }
             Effect::RenameTrack(track) => crate::track_menu::start_rename(ctx, *track),
             Effect::MoveFocus {
@@ -404,12 +423,15 @@ impl MainWindowUi {
                 self.devices
                     .show(ui, shell, theme, layout.device_view, &mut events);
             }
-            self.device_titles = shell
-                .device_view_state()
-                .devices
-                .into_iter()
-                .map(|d| (d.id, d.title))
-                .collect();
+            let shown = shell.device_view_state().devices;
+            self.chain_names.clear();
+            for device in &shown {
+                collect_chain_names(device, &mut self.chain_names);
+            }
+            self.device_titles.clear();
+            for device in &shown {
+                collect_titles(device, &mut self.device_titles);
+            }
             if let Some(pane) = layout.assistant {
                 self.assistant
                     .show(ui, shell, theme, pane, true, &mut events);
@@ -689,6 +711,11 @@ impl MainWindowUi {
             }
             if *el == Element::MixerMenu {
                 self.mixer_menu(&response, shell, events);
+            }
+            if *el == Element::DeviceSelector {
+                // Spec: racks R25 (S-DEV-005). A right-click lists every
+                // device on the track.
+                response.context_menu(|ui| device_list(ui, shell, events));
             }
         }
     }
@@ -1141,6 +1168,15 @@ fn look(element: Element, shell: &Shell) -> Look {
         ..Look::default()
     };
     match element {
+        // Spec: racks R25 (L-STAT-007). The selected track's name.
+        Element::DeviceSelector => {
+            let doc = shell.editor().document();
+            shell
+                .device_view_state()
+                .track
+                .and_then(|t| doc.track(t))
+                .map_or_else(Look::default, |t| text(t.name()))
+        }
         Element::BrowserToggle => Look {
             on: shell.browser_visible(),
             value: Some(
@@ -1371,4 +1407,62 @@ pub struct DrawnMenuBar<'a> {
     pub keymap: &'a crate::keymap::Keymap,
     /// Whose keys to show.
     pub platform: crate::keymap::Platform,
+}
+
+/// The names of the chains in `device`'s rack and the racks inside it.
+fn collect_chain_names(
+    device: &bl_shell::device_commands::DeviceFrame,
+    names: &mut Vec<(bl_model::ChainId, String)>,
+) {
+    if let Some(rack) = &device.rack {
+        names.extend(rack.chains.iter().map(|c| (c.id, c.name.clone())));
+        for child in &rack.devices {
+            collect_chain_names(child, names);
+        }
+    }
+}
+
+/// The titles of `device` and the devices inside its rack, at any depth.
+fn collect_titles(
+    device: &bl_shell::device_commands::DeviceFrame,
+    titles: &mut Vec<(bl_model::DeviceId, String)>,
+) {
+    titles.push((device.id, device.title.clone()));
+    for child in device.rack.iter().flat_map(|rack| &rack.devices) {
+        collect_titles(child, titles);
+    }
+}
+
+/// The Device View selector's list: every device on the selected track as a
+/// hierarchy, each rack's devices under it chain by chain; choosing one
+/// selects it (racks spec, R25).
+fn device_list(ui: &mut Ui, shell: &Shell, events: &mut Vec<UiEvent>) {
+    let list = shell.device_view_state().device_list;
+    if list.is_empty() {
+        ui.add_enabled(false, egui::Button::new("No devices"));
+    }
+    for entry in list {
+        ui.horizontal(|ui| {
+            ui.add_space(entry.depth as f32 * 12.0);
+            let response = ui.button(&entry.label);
+            crate::menus::register_item(ui.ctx(), &response);
+            ui.ctx().accesskit_node_builder(response.id, |node| {
+                node.set_description(format!("Level {}", entry.depth + 1));
+            });
+            if response.clicked() {
+                let invocation = match (entry.device, entry.chain) {
+                    (Some(device), _) => {
+                        Invocation::new("device.select", json!({ "device": device }))
+                    }
+                    (None, Some(chain)) => Invocation::new(
+                        "chain.select",
+                        json!({ "chain": chain, "mode": "replace" }),
+                    ),
+                    (None, None) => return,
+                };
+                events.push(UiEvent::Invoke(invocation));
+                ui.close();
+            }
+        });
+    }
 }

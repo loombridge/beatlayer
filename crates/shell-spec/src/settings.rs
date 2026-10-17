@@ -263,6 +263,9 @@ pub struct SettingsState {
     /// Record, Warp & Launch: Create Fades on Clip Edges, as
     /// `settings.set_create_fades_on_clip_edges` sets it.
     pub create_fades_on_clip_edges: bool,
+    /// Record, Warp & Launch: Warp Recorded Audio, as
+    /// `settings.set_warp_recorded_audio` sets it.
+    pub warp_recorded_audio: bool,
     /// Plug-Ins: Auto-Hide Plug-In Windows, as
     /// `settings.set_auto_hide_plug_in_windows` sets it.
     pub auto_hide_plug_in_windows: bool,
@@ -287,7 +290,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  Input (zoom, Outline View in Focus, the Tab key settings), the audio device \
                  settings with Driver Error Compensation and the test tone (`audio.configure`, \
                  `audio.set_test_tone`), the MIDI ports and computer keyboard (`midi.set_port`), \
-                 Create Fades on Clip Edges, Auto-Hide Plug-In Windows, the agent server and the \
+                 Create Fades on Clip Edges, Warp Recorded Audio, Auto-Hide Plug-In Windows, the agent server and the \
                  assistant. The server's and the agents' tokens and the assistant's API key are \
                  never reported, only whether one is stored. Preferences aren't saved with the \
                  set. Changes nothing. Use it to check a `settings.set_*` command took effect.",

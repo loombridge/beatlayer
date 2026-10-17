@@ -154,6 +154,7 @@ fn each_settings_command_reads_back_from_settings_state() {
     let before = settings_state(&mut client);
     assert_eq!(before["theme"], "dark");
     assert_eq!(before["create_fades_on_clip_edges"], true);
+    assert_eq!(before["warp_recorded_audio"], true);
     assert_eq!(before["auto_hide_plug_in_windows"], true);
     assert_eq!(before["display_input"]["outline_view_in_focus"], true);
     assert_eq!(before["display_input"]["zoom_percent"], 100);
@@ -170,6 +171,11 @@ fn each_settings_command_reads_back_from_settings_state() {
     run(
         &mut client,
         "settings.set_create_fades_on_clip_edges",
+        json!({ "on": false }),
+    );
+    run(
+        &mut client,
+        "settings.set_warp_recorded_audio",
         json!({ "on": false }),
     );
     run(
@@ -204,6 +210,7 @@ fn each_settings_command_reads_back_from_settings_state() {
     let state = settings_state(&mut client);
     assert_eq!(state["theme"], "light");
     assert_eq!(state["create_fades_on_clip_edges"], false);
+    assert_eq!(state["warp_recorded_audio"], false);
     assert_eq!(state["auto_hide_plug_in_windows"], false);
     assert_eq!(
         state["display_input"],

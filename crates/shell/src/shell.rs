@@ -1247,6 +1247,7 @@ impl Shell {
             },
             tempo_midi: self.midi.report(),
             create_fades_on_clip_edges: self.create_fades_on_clip_edges(),
+            warp_recorded_audio: self.warp_recorded_audio(),
             auto_hide_plug_in_windows: self.auto_hide_plug_in_windows(),
             agents: AgentsPageSettings {
                 server: server.server,

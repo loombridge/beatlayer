@@ -98,6 +98,11 @@ pub struct Preferences {
     /// per plug-in, so a device of a known plug-in keeps its mapping.
     pub plugin_panels:
         std::collections::BTreeMap<String, std::collections::BTreeMap<usize, ParamId>>,
+    /// The Temporary Folder (File & Folder, L-SET-015): where the files an
+    /// edit writes go while the set has never been saved (WP-4.20, the audio
+    /// clip editing spec, R5). `None` is the default, a `Temporary` folder
+    /// in Beatlayer's application-data folder.
+    pub temporary_folder: Option<PathBuf>,
     /// The saved default set (File ▸ Save Beatlayer Set As Default Set),
     /// which a new set starts from (WP-2.25). `None` uses the factory
     /// default set.

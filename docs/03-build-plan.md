@@ -471,7 +471,7 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 4.17 | todo |  |  |
 | 4.18 | todo |  |  |
 | 4.19 | todo |  |  |
-| 4.20 | todo |  |  |
+| 4.20 | done | 17 October 2026 | [#99](https://github.com/loombridge/beatlayer/pull/99); one writer for processed audio files into `Samples/Processed/<kind>/`, and the Temporary Folder setting for a set never saved, whose files the first save moves into the project; [the spec](specs/audio-clip-editing.md) |
 | 4.21 | todo |  |  |
 | 4.22 | todo |  |  |
 | 5.1 | todo |  |  |

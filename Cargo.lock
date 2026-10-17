@@ -743,6 +743,8 @@ dependencies = [
  "azo",
  "bl-rt",
  "cpal",
+ "objc2-core-audio",
+ "objc2-core-foundation",
  "rtrb",
 ]
 

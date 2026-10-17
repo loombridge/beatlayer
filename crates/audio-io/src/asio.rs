@@ -404,9 +404,6 @@ impl Backend for AsioBackend {
             requested_buffer_size: request.buffer_size,
             buffer_size: Some(frames),
             max_block_frames: frames,
-            // shortcut: the driver's latency isn't read yet, so the Driver
-            // Error Compensation setting carries all of it; upgrade by
-            // reading ASIOGetLatencies.
             input_latency: 0,
             output_latency: 0,
             workgroup: None,
@@ -429,6 +426,13 @@ impl Backend for AsioBackend {
         .map_err(|e| driver_error(&format!("{name} couldn't create its buffers"), e))?;
         stream.buffers_created = true;
 
+        // The latencies are valid once the buffers exist. A driver that
+        // refuses to say counts as 0, and what it says holds the buffer.
+        if let Ok(latencies) = stream.proxy.latencies() {
+            stream.info.input_latency = frames(latencies.in_);
+            stream.info.output_latency = frames(latencies.out);
+        }
+
         // SAFETY: the driver only calls back after `start`, so nothing else
         // is using the render state yet.
         let render = unsafe { &mut *(*stream.shared).render.get() };
@@ -442,6 +446,11 @@ impl Backend for AsioBackend {
         }
         Ok(Box::new(stream))
     }
+}
+
+/// A latency the driver reports in samples, which can't be negative.
+fn frames(reported: c_long) -> u32 {
+    u32::try_from(reported).unwrap_or(0)
 }
 
 /// One channel's double buffer, owned by the driver.
@@ -687,6 +696,13 @@ mod tests {
             BufferSizes::List(vec![256])
         );
         assert_eq!(buffer_sizes(&sizes(0, 256, None)), BufferSizes::Unknown);
+    }
+
+    #[test]
+    fn a_drivers_latency_is_its_frames_and_never_negative() {
+        assert_eq!(frames(480), 480);
+        assert_eq!(frames(0), 0);
+        assert_eq!(frames(-1), 0);
     }
 
     #[test]

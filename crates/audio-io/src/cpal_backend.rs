@@ -29,12 +29,14 @@ use cpal::{FromSample, SizedSample, SupportedBufferSize, SupportedStreamConfigRa
 use bl_rt::{AudioThreadSetup, RtThreadConfig};
 
 use crate::buffer::PlanarScratch;
+use crate::latency::{self, Gauge, Slot};
 use crate::runner::{CallbackRunner, frames_to_duration};
 use crate::stats::Counters;
 use crate::{
     AudioBuffer, AudioCallback, Backend, BackendKind, BufferSizes, DEFAULT_MAX_BLOCK_FRAMES,
-    DeviceId, DeviceInfo, DeviceSelector, Error, ErrorKind, OpenDevice, STANDARD_SAMPLE_RATES,
-    SampleFormat, Stream, StreamInfo, StreamRequest, StreamStats, Workgroup, WorkgroupInfo,
+    DeviceId, DeviceInfo, DeviceSelector, Error, ErrorKind, Latency, OpenDevice,
+    STANDARD_SAMPLE_RATES, SampleFormat, Stream, StreamInfo, StreamRequest, StreamStats, Workgroup,
+    WorkgroupInfo,
 };
 
 /// The buffer size assumed for an audio thread's scheduling period when the
@@ -281,6 +283,7 @@ impl Backend for CpalBackend {
         };
 
         let counters = Arc::new(Counters::new());
+        let (input_slot, output_slot) = (Slot::default(), Slot::default());
         let (input_render, push) = match input_channels {
             0 => (None, None),
             channels => {
@@ -289,6 +292,7 @@ impl Backend for CpalBackend {
                     max_block_frames as usize,
                     Arc::clone(&counters),
                     thread_config.clone(),
+                    Gauge::new(Arc::clone(&input_slot), sample_rate),
                 );
                 (Some(render), Some(push))
             }
@@ -305,6 +309,7 @@ impl Backend for CpalBackend {
             channels: channels.into(),
             sample_rate,
             input: input_render,
+            gauge: Gauge::new(Arc::clone(&output_slot), sample_rate),
         };
         let format = range.sample_format();
         let stream = build(&device, config, format, render, Arc::clone(&counters))?;
@@ -318,6 +323,7 @@ impl Backend for CpalBackend {
             )?),
             _ => None,
         };
+        let reported = reported_latency(self.kind, &id);
         let info = StreamInfo {
             backend: self.kind,
             output_device: Some(OpenDevice {
@@ -333,11 +339,8 @@ impl Backend for CpalBackend {
             requested_buffer_size: request.buffer_size,
             buffer_size: stream.buffer_size().ok(),
             max_block_frames,
-            // shortcut: the device's latency isn't read yet (cpal has no query
-            // for it), so the Driver Error Compensation setting carries all of
-            // it; upgrade by reading the platform's device properties.
-            input_latency: 0,
-            output_latency: 0,
+            input_latency: reported.map_or(0, |(input, _)| input),
+            output_latency: reported.map_or(0, |(_, output)| output),
             workgroup: workgroup.as_ref().map(WorkgroupInfo::of),
         };
         Ok(Box::new(CpalStream {
@@ -346,8 +349,22 @@ impl Backend for CpalBackend {
             info,
             counters,
             workgroup,
+            measured: reported.is_none().then_some((input_slot, output_slot)),
         }))
     }
+}
+
+/// The device's input and output latency in frames where the platform has a
+/// query `cpal` doesn't wrap: Core Audio's device properties. `None` means the
+/// stream measures it instead (WASAPI, ALSA and JACK hide the handle, and so
+/// does Core Audio's device when its lookup fails).
+fn reported_latency(kind: BackendKind, id: &DeviceId) -> Option<(u32, u32)> {
+    #[cfg(target_os = "macos")]
+    if kind == BackendKind::CoreAudio {
+        return latency::core_audio::of_device(id.local());
+    }
+    let _ = (kind, id);
+    None
 }
 
 /// The two sides of the duplex bridge, with room for [`DUPLEX_BACKLOG`]
@@ -357,6 +374,7 @@ fn duplex_input(
     frames: usize,
     counters: Arc<Counters>,
     thread_config: RtThreadConfig,
+    gauge: Gauge,
 ) -> (DuplexInput, PushInput) {
     let (producer, consumer) = rtrb::RingBuffer::new(channels * frames * DUPLEX_BACKLOG);
     // The input callback is an audio thread of its own, so it's set up as
@@ -375,6 +393,7 @@ fn duplex_input(
             producer,
             counters,
             setup,
+            gauge,
         },
     )
 }
@@ -428,6 +447,8 @@ struct PushInput {
     counters: Arc<Counters>,
     /// The input thread's set-up, run on its first block.
     setup: AudioThreadSetup,
+    /// Measures the input latency where the platform won't report it.
+    gauge: Gauge,
 }
 
 impl PushInput {
@@ -595,6 +616,8 @@ struct Render {
     sample_rate: u32,
     /// The duplex input, when the device has one.
     input: Option<DuplexInput>,
+    /// Measures the output latency where the platform won't report it.
+    gauge: Gauge,
 }
 
 impl Render {
@@ -608,7 +631,10 @@ impl Render {
     ) {
         let channels = self.channels.max(1);
         self.runner.device_callback(data.len() / channels);
-        let start = stream_time(info.timestamp().callback);
+        let stamps = info.timestamp();
+        self.gauge
+            .feed(stamps.playback.saturating_duration_since(stamps.callback));
+        let start = stream_time(stamps.callback);
         let mut done = 0u64;
         for chunk in data.chunks_mut(self.scratch.capacity() * channels) {
             let frames = chunk.len() / channels;
@@ -667,7 +693,12 @@ fn build_input(
         let channels = usize::from(config.channels);
         device.build_input_stream::<T, _, _>(
             config,
-            move |data, _info| push.push(data, channels),
+            move |data, info| {
+                let stamps = info.timestamp();
+                push.gauge
+                    .feed(stamps.callback.saturating_duration_since(stamps.capture));
+                push.push(data, channels);
+            },
             move |error| record(&counters, &error),
             None,
         )
@@ -747,11 +778,27 @@ struct CpalStream {
     info: StreamInfo,
     counters: Arc<Counters>,
     workgroup: Option<Workgroup>,
+    /// The measured latency, when the platform reports none: the input's and
+    /// the output's, each published once.
+    measured: Option<(Slot, Slot)>,
 }
 
 impl Stream for CpalStream {
     fn info(&self) -> &StreamInfo {
         &self.info
+    }
+
+    fn latency(&self) -> Latency {
+        match &self.measured {
+            Some((input, output)) => Latency {
+                input: latency::published(input).unwrap_or(0),
+                output: latency::published(output).unwrap_or(0),
+            },
+            None => Latency {
+                input: self.info.input_latency,
+                output: self.info.output_latency,
+            },
+        }
     }
 
     fn start(&mut self) -> Result<(), Error> {
@@ -851,7 +898,8 @@ mod tests {
             promote: false,
             workgroup: None,
         };
-        let (mut out, mut inp) = duplex_input(2, 4, Arc::clone(&counters), config);
+        let gauge = Gauge::new(Slot::default(), 48_000);
+        let (mut out, mut inp) = duplex_input(2, 4, Arc::clone(&counters), config, gauge);
 
         // Before the input side has delivered anything, the output plays
         // silence: that's a stream just opened, not an xrun.

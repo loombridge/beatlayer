@@ -1172,15 +1172,12 @@ impl AudioHost {
     /// (WP-2.13). `None` while no stream is open.
     #[must_use]
     pub fn recording_delay(&self) -> Option<i64> {
-        let info = self.stream.as_ref()?.info();
+        let stream = self.stream.as_ref()?;
         let compensation = clamped_compensation_ms(self.settings.driver_error_compensation_ms)
-            * f64::from(info.sample_rate)
+            * f64::from(stream.info().sample_rate)
             / 1000.0;
-        Some(
-            i64::from(info.input_latency)
-                + i64::from(info.output_latency)
-                + compensation.round() as i64,
-        )
+        let latency = stream.latency();
+        Some(i64::from(latency.input) + i64::from(latency.output) + compensation.round() as i64)
     }
 
     /// What the device runs at now.
@@ -1188,6 +1185,7 @@ impl AudioHost {
     pub fn status(&self) -> AudioStatus {
         let info = self.stream.as_ref().map(|stream| stream.info());
         let stats = self.stream.as_ref().map(|stream| stream.stats());
+        let latency = self.stream.as_ref().map(|stream| stream.latency());
         let sample_rate = info.map(|info| info.sample_rate);
         let buffer_size = stats
             .and_then(|stats| stats.last_device_frames)
@@ -1216,8 +1214,8 @@ impl AudioHost {
             buffer_ms: buffer_size
                 .zip(sample_rate)
                 .map(|(frames, rate)| f64::from(frames) * 1000.0 / f64::from(rate.max(1))),
-            input_latency_ms: info.map(|info| ms(info.input_latency)),
-            output_latency_ms: info.map(|info| ms(info.output_latency)),
+            input_latency_ms: latency.map(|latency| ms(latency.input)),
+            output_latency_ms: latency.map(|latency| ms(latency.output)),
             overall_latency_ms: self
                 .recording_delay()
                 .zip(sample_rate)

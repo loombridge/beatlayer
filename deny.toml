@@ -8,7 +8,15 @@
 all-features = true
 
 [advisories]
-ignore = []
+ignore = [
+    # zvariant, zbus_names and zvariant_derive are unmaintained: they were
+    # merged into zbus 6. They aren't vulnerabilities. They reach us on Linux
+    # through egui-winit's accesskit (accesskit_unix needs zbus 5). Remove
+    # these when accesskit moves to zbus 6.
+    { id = "RUSTSEC-2026-0370", reason = "unmaintained, merged into zbus 6; needs accesskit on zbus 6" },
+    { id = "RUSTSEC-2026-0371", reason = "unmaintained, merged into zbus 6; needs accesskit on zbus 6" },
+    { id = "RUSTSEC-2026-0372", reason = "unmaintained, merged into zbus 6; needs accesskit on zbus 6" },
+]
 
 [licenses]
 confidence-threshold = 0.93

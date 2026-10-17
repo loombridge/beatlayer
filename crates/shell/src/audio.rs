@@ -866,7 +866,7 @@ impl AudioHost {
     }
 
     /// Copies the display data the engine's devices last published into
-    /// `out`, reusing its capacity (the device framework spec, R30). Empty
+    /// `out`, reusing its capacity (the device framework spec, R35). Empty
     /// while no engine runs.
     pub fn displays_into(
         &self,

@@ -1,5 +1,5 @@
-//! Device displays in the shell (WP-5.43; the device framework spec, R30 to
-//! R33, the eq spec, R12 to R14, the compressor spec, R14 to R16): a device's
+//! Device displays in the shell (WP-5.43; the device framework spec, R35 to
+//! R38, the eq spec, R12 to R14, the compressor spec, R14 to R16): a device's
 //! node publishes its display data after each block, under the allocation
 //! trap, and the shell reads the newest; `device.display` reports what the
 //! display shows, and the chosen view is view state.
@@ -46,7 +46,7 @@ fn insert(editor: &mut Editor, track: TrackId, kind: &str, params: &[(ParamId, f
     id
 }
 
-// Spec: device-framework R30
+// Spec: device-framework R35
 #[test]
 fn the_contours_spectrum_and_the_squeezes_gain_reduction_are_published_after_every_block() {
     for block in [1usize, 64, 512, 4096] {
@@ -152,7 +152,7 @@ fn display(shell: &mut Shell, device: DeviceId) -> DeviceDisplay {
     .unwrap()
 }
 
-// Spec: device-framework R32
+// Spec: device-framework R37
 #[test]
 fn an_agent_reads_a_display_from_its_parameters_and_from_the_newest_data() {
     let mut shell = Shell::headless();
@@ -223,7 +223,7 @@ fn an_agent_reads_a_display_from_its_parameters_and_from_the_newest_data() {
     assert!(display(&mut shell, contour).series("Spectrum").is_none());
 }
 
-// Spec: device-framework R33, compressor R16
+// Spec: device-framework R38, compressor R16
 #[test]
 fn the_squeezes_view_is_view_state_that_agents_set_and_read() {
     let mut shell = Shell::headless();

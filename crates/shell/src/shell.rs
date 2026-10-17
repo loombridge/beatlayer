@@ -321,6 +321,8 @@ pub struct Shell {
     /// When the MIDI ports were last listed, so [`Shell::poll`] lists them
     /// again every few seconds and a replugged device shows.
     midi_listed: std::time::Instant,
+    /// The chord Stack's Learn is hearing.
+    chord_learn: crate::chord_learn::ChordLearn,
     prefs: Preferences,
     config_dir: Option<PathBuf>,
     main_view: MainView,
@@ -669,6 +671,7 @@ impl Shell {
             audio,
             midi,
             midi_listed: std::time::Instant::now(),
+            chord_learn: crate::chord_learn::ChordLearn::default(),
             settings_open: false,
             prefs,
             config_dir,
@@ -1141,6 +1144,60 @@ impl Shell {
         self.midi.refresh();
         self.midi_listed = std::time::Instant::now();
         before != self.midi.ports()
+    }
+
+    /// Spec: midi-chord R15. While a Stack device's Learn is on, the keys
+    /// played set its shifts: the first key down is the root and the other
+    /// keys held become Shift 1 to 6 in order, one undo step each time the
+    /// chord changes. Returns whether the set changed.
+    fn learn_chords(&mut self) -> bool {
+        use bl_devices::stack::{LEARN, STACK, shift};
+        use bl_model::{Command, DeviceKind};
+        let learning: Vec<_> = self
+            .editor
+            .document()
+            .tracks()
+            .flat_map(|track| track.devices())
+            .filter(|device| {
+                matches!(&device.kind, DeviceKind::Native { device_type } if device_type == STACK)
+                    && device.params.get(&LEARN).is_some_and(|on| *on >= 0.5)
+            })
+            .map(|device| device.id)
+            .collect();
+        let sender = self.midi.sender().clone();
+        if learning.is_empty() {
+            if self.chord_learn.tapping {
+                sender.set_tap(false);
+                self.chord_learn.tapping = false;
+                self.chord_learn.clear();
+            }
+            return false;
+        }
+        if !self.chord_learn.tapping {
+            sender.set_tap(true);
+            self.chord_learn.tapping = true;
+        }
+        sender.take_notes(&mut self.chord_learn.heard);
+        let Some(shifts) = self.chord_learn.listen() else {
+            return false;
+        };
+        self.edit(|editor| {
+            editor.begin("Learn Chord");
+            for device in learning {
+                for (n, value) in shifts.iter().enumerate() {
+                    let command = Command::SetDeviceParam {
+                        device,
+                        param: shift(n as u32),
+                        value: f64::from(*value),
+                    };
+                    editor
+                        .apply(command)
+                        .expect("a shift takes any whole number in range");
+                }
+            }
+            editor.commit().expect("the learned shifts commit");
+        });
+        true
     }
 
     /// The preferences.
@@ -2077,7 +2134,7 @@ impl Shell {
     }
 
     /// What `device`'s display shows, as the engine last published it
-    /// (the device framework spec, R31): the cell draws it, a screen reader
+    /// (the device framework spec, R36): the cell draws it, a screen reader
     /// says it. `None` if the set has no such device.
     #[must_use]
     pub fn device_display(&self, device: bl_model::DeviceId) -> Option<bl_model::DeviceDisplay> {
@@ -2162,7 +2219,7 @@ impl Shell {
             );
         }
         if id == device_ids::DISPLAY && self.audio.engine_running() {
-            // Spec: device-framework R32. The newest the nodes published,
+            // Spec: device-framework R37. The newest the nodes published,
             // for an agent that never polls the engine.
             self.audio.displays_into(self.devices.displays_mut());
         }
@@ -2505,6 +2562,7 @@ impl Shell {
         if self.midi_listed.elapsed() >= MIDI_RELIST {
             changed |= self.refresh_midi();
         }
+        changed |= self.learn_chords();
         // Plug-ins' main-thread work (WP-2.6 to WP-2.8), and the changes
         // they made themselves.
         let plugins_changed = self.plugins.idle() | self.au.idle() | self.vst3.idle();
@@ -2963,7 +3021,7 @@ impl Shell {
             // Not a revision: the window redraws while a meter shows a
             // level, and nothing else depends on them.
             self.audio.meters_into(&mut self.meters);
-            // Spec: device-framework R30. The display data the devices'
+            // Spec: device-framework R35. The display data the devices'
             // nodes published, which the device displays draw. Not a
             // revision either.
             self.audio.displays_into(self.devices.displays_mut());

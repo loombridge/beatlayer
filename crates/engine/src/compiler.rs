@@ -615,6 +615,7 @@ impl Compiler {
                 NoteBuffer::with_capacity(1024),
                 NoteBuffer::with_capacity(1024),
             ],
+            releases: crate::program::Releases::new(),
             midi,
         };
         self.generation = generation;

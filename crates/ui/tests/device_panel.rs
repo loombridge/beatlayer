@@ -334,7 +334,7 @@ fn cell_rect(h: &mut Harness, device: DeviceId, _name: &str) -> Rect {
     cell_in(h, device, frame)
 }
 
-// Spec: device-framework R31, eq R14
+// Spec: device-framework R36, eq R14
 #[test]
 fn the_contours_cell_draws_its_curve_dots_and_spectrum_and_says_them() {
     use bl_devices::eq::{ANALYSER_BANDS, FREQ, GAIN_SLOT, ON, Q, band_param};
@@ -373,7 +373,7 @@ fn the_contours_cell_draws_its_curve_dots_and_spectrum_and_says_them() {
     assert!(node.value.contains("Spectrum peak"), "{}", node.value);
 }
 
-// Spec: device-framework R31, compressor R16
+// Spec: device-framework R36, compressor R16
 #[test]
 fn the_squeezes_cell_draws_its_gain_reduction_and_the_chosen_view() {
     let mut h = display_harness();
@@ -443,7 +443,7 @@ fn bounds_of(nodes: &[common::Node], label: &str) -> Rect {
     )
 }
 
-// Spec: device-framework R31, R11
+// Spec: device-framework R36, R11
 #[test]
 fn a_floating_window_grows_the_display_and_draws_it_there_too() {
     let mut h = display_harness();

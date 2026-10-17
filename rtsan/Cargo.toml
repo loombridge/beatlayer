@@ -31,8 +31,9 @@ bl-rt = { path = "../crates/rt" }
 bl-audio-io = { path = "../crates/audio-io" }
 bl-audio-engine = { path = "../crates/audio-engine" }
 bl-core = { path = "../crates/core" }
-# The framework's test effects device (WP-5.42), and Contour and Squeeze,
-# whose displays publish after each block (WP-5.43).
+# The framework's test effects device (WP-5.42), the MIDI effects (WP-5.30),
+# which run in a chain on the audio thread, and Contour and Squeeze, whose
+# displays publish after each block (WP-5.43).
 bl-devices = { path = "../crates/devices" }
 bl-engine = { path = "../crates/engine" }
 # Disk streaming (WP-1.3), and decoded audio for the clip players (WP-1.4).

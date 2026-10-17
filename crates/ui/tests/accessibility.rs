@@ -1958,7 +1958,7 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("device_view.state", Exception(Query)),
         ("device.parameters", Exception(Query)),
         ("device.display", Exception(Query)),
-        // A display's view buttons (device framework R33): Enter on one.
+        // A display's view buttons (device framework R38): Enter on one.
         (
             "device.set_display_view",
             main(a_squeeze, device_view, "Activity view", Key::Enter),

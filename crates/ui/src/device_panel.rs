@@ -167,7 +167,7 @@ pub fn show(
         );
         let id = cell_id(frame.id, index);
         let _ = ui.interact(rect, id, Sense::hover());
-        // Spec: device-framework R31. The device's own drawing fills its
+        // Spec: device-framework R36. The device's own drawing fills its
         // first cell, and a screen reader hears its readings.
         let shown = display.filter(|d| index == 0 && has_drawing(d));
         if let Some(display) = shown {

@@ -313,6 +313,18 @@ impl ClipView {
         })
     }
 
+    /// The shown clip when it sits in a Session slot, which is when the
+    /// Launch Properties panel shows beside the editor.
+    #[must_use]
+    pub fn shown_session_clip(
+        &self,
+        doc: &Document,
+        arrangement: &ArrangementView,
+    ) -> Option<ClipId> {
+        self.shown_clip(doc, arrangement)
+            .filter(|clip| self.session_clip == Some(*clip))
+    }
+
     /// The selected notes' places in the shown clip's notes in order, empty
     /// when the selection belongs to another clip.
     #[must_use]

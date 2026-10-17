@@ -21,10 +21,10 @@ use bl_engine::testing::{DELAY, DELAY_FRAMES, KEY};
 use bl_engine::{Block, MediaMap, Node, NodeConfig, TransportCommand};
 use bl_media::SampleData;
 use bl_model::{
-    AudioData, Clip, ClipData, Command, ContentHash, Device, DeviceId, DeviceKind, Editor, TrackId,
-    TrackKind, registry,
+    AudioData, Chain, ChainId, Clip, ClipData, Command, ContentHash, Device, DeviceId, DeviceKind,
+    Editor, RackKind, TrackId, TrackKind, registry,
 };
-use common::{Rig, device, track};
+use common::{Rig, device, effect_in, rack, rack_in, track};
 use serde_json::{Value, json};
 
 /// The latency the test device adds.
@@ -384,4 +384,180 @@ fn a_latency_change_recompiles_and_the_compensation_follows() {
     replay(&mut rig);
     let out = rig.render(2 * LATENCY + 512, 64);
     assert_null(&out, "aligned at the new latency");
+}
+
+/// A rig with an impulse of `value` for each of `values`, playing.
+fn impulses(values: &[f32]) -> Rig {
+    let mut media = MediaMap::new();
+    for (n, value) in values.iter().enumerate() {
+        media.insert(hash(n as u8 + 1), impulse(*value));
+    }
+    playing(media)
+}
+
+/// The frames where the output is not silent, with what it holds there.
+fn heard(out: &[f32]) -> Vec<(usize, f32)> {
+    out.iter()
+        .enumerate()
+        .filter(|(_, s)| s.abs() > 1e-6)
+        .map(|(at, s)| (at, *s))
+        .collect()
+}
+
+// Spec: racks R16, delay-compensation R2. A rack's sum is a summing point:
+// each chain's output is held back to the slowest chain's latency.
+#[test]
+fn a_racks_chains_line_up_at_its_sum() {
+    let mut rig = impulses(&[1.0]);
+    let a = track(&mut rig.editor, TrackKind::Audio, None);
+    clip(&mut rig.editor, a, hash(1));
+    let (_, chains) = rack(&mut rig.editor, a, RackKind::AudioEffect, 3);
+    // An empty chain (a dry path), a chain of 300 frames, one of 500.
+    effect_in(&mut rig.editor, chains[1], DELAY, &[(DELAY_FRAMES, 300.0)]);
+    effect_in(&mut rig.editor, chains[2], DELAY, &[(DELAY_FRAMES, 500.0)]);
+    rig.sync();
+    let out = rig.render(2 * LATENCY, 64);
+    assert_eq!(
+        heard(&out),
+        vec![(LATENCY, 3.0)],
+        "all three chains' impulses reach the sum on the same frame"
+    );
+    // The same at any block size.
+    for size in [1, 512, 4096] {
+        let mut again = impulses(&[1.0]);
+        let a = track(&mut again.editor, TrackKind::Audio, None);
+        clip(&mut again.editor, a, hash(1));
+        let (_, chains) = rack(&mut again.editor, a, RackKind::AudioEffect, 3);
+        effect_in(
+            &mut again.editor,
+            chains[1],
+            DELAY,
+            &[(DELAY_FRAMES, 300.0)],
+        );
+        effect_in(
+            &mut again.editor,
+            chains[2],
+            DELAY,
+            &[(DELAY_FRAMES, 500.0)],
+        );
+        again.sync();
+        assert_eq!(again.render(2 * LATENCY, size), out, "block size {size}");
+    }
+}
+
+// Spec: racks R16. The rack reports its slowest chain's latency, and its
+// track counts the rack once: another track, held back by it, nulls.
+#[test]
+fn a_rack_reports_its_slowest_chain() {
+    let mut rig = impulses(&[1.0, -3.0]);
+    let a = track(&mut rig.editor, TrackKind::Audio, None);
+    let b = track(&mut rig.editor, TrackKind::Audio, None);
+    clip(&mut rig.editor, a, hash(1));
+    clip(&mut rig.editor, b, hash(2));
+    let (_, chains) = rack(&mut rig.editor, a, RackKind::AudioEffect, 3);
+    effect_in(&mut rig.editor, chains[1], DELAY, &[(DELAY_FRAMES, 300.0)]);
+    effect_in(
+        &mut rig.editor,
+        chains[2],
+        DELAY,
+        &[(DELAY_FRAMES, LATENCY as f64)],
+    );
+    rig.sync();
+    let out = rig.render(2 * LATENCY + 512, 64);
+    assert_null(&out, "the rack's three impulses against the other track's");
+
+    // Racks inside racks: the inner rack's latency is its slowest chain's,
+    // and the outer chain's is the sum of what is in it.
+    for other in [true, false] {
+        let mut rig = impulses(&[1.0, -3.0]);
+        let a = track(&mut rig.editor, TrackKind::Audio, None);
+        clip(&mut rig.editor, a, hash(1));
+        if other {
+            let b = track(&mut rig.editor, TrackKind::Audio, None);
+            clip(&mut rig.editor, b, hash(2));
+        }
+        let (_, outer) = rack(&mut rig.editor, a, RackKind::AudioEffect, 2);
+        effect_in(&mut rig.editor, outer[0], DELAY, &[(DELAY_FRAMES, 200.0)]);
+        let (_, inner) = rack_in(&mut rig.editor, outer[0], RackKind::AudioEffect, 2);
+        effect_in(&mut rig.editor, inner[0], DELAY, &[(DELAY_FRAMES, 100.0)]);
+        rig.sync();
+        let out = rig.render(2 * LATENCY, 64);
+        if other {
+            assert_null(&out, "the other track is held back by the whole of it");
+        } else {
+            // The first outer chain is 300 frames and carries two impulses
+            // (the inner rack sums its delayed and dry chains); the other is
+            // dry and held back to it.
+            assert_eq!(heard(&out), vec![(300, 3.0)]);
+        }
+    }
+}
+
+// Spec: racks R16, delay-compensation R1. A device switched off in a chain
+// changes that chain's latency and the alignment follows; a chain's
+// activator and Solo don't change its latency.
+#[test]
+fn a_switched_off_device_changes_the_alignment_but_a_chains_activator_does_not() {
+    let mut rig = impulses(&[1.0]);
+    let a = track(&mut rig.editor, TrackKind::Audio, None);
+    clip(&mut rig.editor, a, hash(1));
+    let (_, chains) = rack(&mut rig.editor, a, RackKind::AudioEffect, 2);
+    let slow = effect_in(&mut rig.editor, chains[1], DELAY, &[(DELAY_FRAMES, 500.0)]);
+    rig.sync();
+    assert_eq!(heard(&rig.render(1024, 64)), vec![(500, 2.0)]);
+
+    rig.apply(Command::SetChainEnabled {
+        chain: chains[1],
+        enabled: false,
+    });
+    // Let the chain's level glide down, then rewind and play again: the dry
+    // chain is still held back to 500.
+    rig.render(2048, 64);
+    rig.sender.transport(TransportCommand::Stop);
+    rig.render(64, 64);
+    rig.sender.transport(TransportCommand::Play);
+    let out = rig.render(1024, 64);
+    assert_eq!(heard(&out), vec![(500, 1.0)], "its latency still counts");
+
+    rig.apply(Command::SetChainEnabled {
+        chain: chains[1],
+        enabled: true,
+    });
+    rig.apply(Command::SetDeviceEnabled {
+        device: slow,
+        enabled: false,
+    });
+    rig.render(2048, 64);
+    rig.sender.transport(TransportCommand::Stop);
+    rig.render(64, 64);
+    rig.sender.transport(TransportCommand::Play);
+    let out = rig.render(1024, 64);
+    assert_eq!(
+        heard(&out),
+        vec![(0, 2.0)],
+        "a device that is off adds no latency, so the rack reports none"
+    );
+}
+
+// Spec: racks R14, R16. Grouping and ungrouping keep a device running: an
+// impulse inside a delay when its device is grouped still comes out when it
+// should.
+#[test]
+fn grouping_and_ungrouping_keep_a_delays_tail() {
+    let mut rig = impulses(&[1.0]);
+    let a = track(&mut rig.editor, TrackKind::Audio, None);
+    clip(&mut rig.editor, a, hash(1));
+    let delay = delay_device(&mut rig.editor, a);
+    rig.sync();
+    let mut out = rig.render(100, 64);
+    let rack_id: DeviceId = rig.editor.new_id();
+    let chain: ChainId = rig.editor.new_id();
+    rig.apply(Command::GroupDevices {
+        devices: vec![delay],
+        rack: Device::rack(rack_id, RackKind::AudioEffect).with_chain(Chain::new(chain, "Chain")),
+    });
+    out.extend(rig.render(200, 64));
+    rig.apply(Command::UngroupDevice { device: rack_id });
+    out.extend(rig.render(2 * LATENCY, 64));
+    assert_eq!(heard(&out), vec![(LATENCY, 1.0)]);
 }

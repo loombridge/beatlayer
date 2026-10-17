@@ -688,7 +688,7 @@ impl BrowserUi {
             ItemKind::Audio => glyph(&painter, mark, Glyph::Wave, ink),
             ItemKind::Set => glyph(&painter, mark, Glyph::Set, ink),
             ItemKind::Preset => glyph(&painter, mark, Glyph::Preset, ink),
-            ItemKind::Plugin => glyph(&painter, mark, Glyph::Plugin, ink),
+            ItemKind::Plugin | ItemKind::Device => glyph(&painter, mark, Glyph::Plugin, ink),
         }
         let text_colour = if selected {
             theme.colors.text.0
@@ -752,9 +752,9 @@ impl BrowserUi {
                     }
                     invoke(events, ids::LOAD_SELECTED, json!({}));
                 }
-                // Spec: plugin-scanning R11. A double-click loads the
-                // plug-in onto the selected track.
-                ItemKind::Plugin => {
+                // Spec: modulation R12, plugin-scanning R11. A device or a
+                // plug-in loads onto the selected track.
+                ItemKind::Device | ItemKind::Plugin => {
                     if !selected {
                         invoke(events, ids::SELECT, json!({ "paths": [item.path] }));
                     }
@@ -846,6 +846,7 @@ impl BrowserUi {
                 Some(bl_model::PluginFormat::Lv2) => "LV2 plug-in",
                 None => "plug-in",
             },
+            ItemKind::Device => "device",
         };
         response
             .widget_info(|| WidgetInfo::selected(WidgetType::Other, true, selected, &item.name));
@@ -1180,7 +1181,7 @@ impl BrowserUi {
                     }
                 }
                 ItemKind::Audio => invoke(events, ids::PREVIEW, json!({ "path": item.path })),
-                ItemKind::Set | ItemKind::Preset | ItemKind::Plugin => {}
+                ItemKind::Set | ItemKind::Preset | ItemKind::Plugin | ItemKind::Device => {}
             }
         }
         if left {

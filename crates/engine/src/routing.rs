@@ -242,7 +242,7 @@ impl Graph {
             let Some(track) = document.track(id) else {
                 continue;
             };
-            for device in track.devices() {
+            for device in track.devices_deep() {
                 if let Some(Input::Track { track: from, tap }) =
                     device.sidechain.as_ref().map(|s| &s.input)
                 {

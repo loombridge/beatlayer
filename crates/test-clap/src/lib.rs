@@ -9,6 +9,9 @@
 //! - **Notes in and out.** A note-on adds its velocity to the output on its
 //!   frame (an impulse), and every note-on and note-off goes back out an
 //!   octave up ([`ECHO_TRANSPOSE`]) on the same frame.
+//! - **Channel messages in.** A MIDI control change, channel pressure or
+//!   pitch bend adds its value, from 0 to 1 (a pitch bend over its 14 bits),
+//!   to the output on its frame, as a note-on's velocity does.
 //! - **Parameters out.** On a note-on it sets its own [`LAST_NOTE`]
 //!   parameter to the note's key, as an editor would, inside a gesture.
 //! - **Latency.** It reports [`LATENCY`]'s value, as of its last
@@ -442,6 +445,23 @@ impl<'a> PluginAudioProcessor<'a, Shared<'a>, MainThread<'a>> for Processor<'a> 
                         let _ = events.output.try_push(ParamGestureEndEvent::new(at, id));
                     }
                 }
+                Some(CoreEventSpace::Midi(midi)) => {
+                    let at = event.header().time() as usize;
+                    let [status, one, two] = midi.data();
+                    let level = match status & 0xF0 {
+                        0xB0 => f32::from(two) / 127.0,
+                        0xD0 => f32::from(one) / 127.0,
+                        0xE0 => (i32::from(one) | i32::from(two) << 7) as f32 / 16383.0,
+                        _ => 0.0,
+                    };
+                    if at < frames {
+                        for mut pair in channels.iter_mut() {
+                            if let Some(out) = pair.output_mut() {
+                                out[at] += level;
+                            }
+                        }
+                    }
+                }
                 Some(CoreEventSpace::NoteOff(note)) => {
                     let at = event.header().time();
                     let echo = NoteOffEvent::new(at, transposed(note.pckn()), note.velocity());
@@ -491,7 +511,7 @@ impl PluginNotePortsImpl for MainThread<'_> {
             writer.set(&NotePortInfo {
                 id: ClapId::new(0),
                 name: b"Notes",
-                supported_dialects: NoteDialects::CLAP,
+                supported_dialects: NoteDialects::CLAP | NoteDialects::MIDI,
                 preferred_dialect: Some(NoteDialect::Clap),
             });
         }

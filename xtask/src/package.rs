@@ -368,9 +368,14 @@ pub fn package(root: &Path) -> Result<(), String> {
         Platform::Linux => {
             let appimage = find_one(&out_dir, ".AppImage")?;
             eprintln!("\n==> check {}", file_name(&appimage));
-            let mut command = Command::new(&appimage);
-            command.env("APPIMAGE_EXTRACT_AND_RUN", "1");
-            check_version(&mut command, &expected_version)?;
+            check_binary(
+                || {
+                    let mut command = Command::new(&appimage);
+                    command.env("APPIMAGE_EXTRACT_AND_RUN", "1");
+                    command
+                },
+                &expected_version,
+            )?;
             packages.push(appimage);
 
             eprintln!("\n==> tarball");
@@ -735,7 +740,7 @@ fn smoke_test_dmg(
         )?;
     }
 
-    check_version(&mut Command::new(&binary), expected_version)
+    check_binary(|| Command::new(&binary), expected_version)
 }
 
 /// A mounted disk image, detached when dropped.
@@ -788,7 +793,7 @@ fn smoke_test_msi(
 
     let name = format!("{executable}{}", std::env::consts::EXE_SUFFIX);
     let binary = find_file(&target, &name).ok_or_else(|| format!("the MSI has no {name}"))?;
-    check_version(&mut Command::new(binary), expected_version)
+    check_binary(|| Command::new(&binary), expected_version)
 }
 
 /// msiexec reads `PROPERTY="value"` itself, so on Windows the quotes go in as
@@ -1014,7 +1019,48 @@ fn smoke_test_tarball(
     )?;
     let binary =
         find_file(&target, executable).ok_or_else(|| format!("the tarball has no {executable}"))?;
-    check_version(&mut Command::new(binary), expected_version)
+    check_binary(|| Command::new(&binary), expected_version)
+}
+
+/// Runs a packaged binary with `--version`, then with `--check-audio`.
+fn check_binary(command: impl Fn() -> Command, expected: &str) -> Result<(), String> {
+    check_version(&mut command(), expected)?;
+    check_audio(&mut command())
+}
+
+/// What `--check-audio` exits with when no device could start.
+const NO_AUDIO_DEVICE: i32 = 3;
+
+/// Runs a packaged binary with `--check-audio`, which opens the default
+/// output as the app does at start-up. A release build can crash there
+/// where a debug build doesn't, and `--version` never reaches it. A
+/// machine with no sound card, such as a CI runner, passes with a note.
+fn check_audio(command: &mut Command) -> Result<(), String> {
+    let program = Path::new(command.get_program()).to_owned();
+    let output = command
+        .arg("--check-audio")
+        .output()
+        .map_err(|e| format!("couldn't run {}: {e}", program.display()))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    eprintln!(
+        "$ {} --check-audio\n{}",
+        program.display(),
+        stdout.trim_end()
+    );
+    match output.status.code() {
+        Some(0) => Ok(()),
+        Some(NO_AUDIO_DEVICE) => {
+            eprintln!("(no audio device here, so the audio start-up wasn't checked)");
+            Ok(())
+        }
+        _ => Err(format!(
+            "{} --check-audio failed, {}: {}{}",
+            program.display(),
+            output.status,
+            stdout.trim(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        )),
+    }
 }
 
 /// Runs a packaged binary with `--version` and checks what it prints.

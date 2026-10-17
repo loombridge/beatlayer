@@ -185,7 +185,6 @@ impl Label {
                 Some("Beatlayer's audio effects arrive in milestone M2 (WP-2.18a and WP-2.18b).")
             }
             Self::MidiEffects => Some("MIDI effects arrive in milestone M5."),
-            Self::Modulators => Some("Modulators arrive in milestone M5."),
             Self::Clips => Some("Clip files arrive in milestone M6."),
             Self::Grooves => Some("Grooves arrive with the Groove Pool in milestone M6."),
             Self::Tunings => Some("Tunings arrive in milestone M6."),
@@ -248,6 +247,9 @@ pub enum ItemKind {
     Preset,
     /// A plug-in the scanner found (WP-2.9).
     Plugin,
+    /// One of Beatlayer's own devices, listed under a device label (the
+    /// Modulators label, WP-5.10); its path is the device type's ID.
+    Device,
 }
 
 /// One row of the content pane.
@@ -656,11 +658,14 @@ fn specs() -> Vec<CommandSpec> {
                  audio track, otherwise onto a new audio track below the last one, one after \
                  another, as one undo step. A clip placed over part of another replaces that \
                  part, so when a clip on that track ends after the insert marker it's \
-                 destructive as well as external. Reads the files, outside the project. With \
-                 one plug-in selected it loads that plug-in instead, as `plugin.load` does: \
-                 onto the selected track (a new track when none is), an instrument onto a new MIDI \
-                 track when the selected track holds audio, or in place of the device being \
-                 hot-swapped.",
+                 destructive as well as external. While a device is being hot-swapped \
+                 (`device.hot_swap`), a selected preset loads into it instead, and so does a \
+                 selected audio file, if the device plays samples (the sampler, or the \
+                 eight-slot drum sampler, into its selected slot: `device.load_sample`). \
+                 With one plug-in selected it loads that plug-in instead, as `plugin.load` \
+                 does: onto the selected track (a new track when none is), an instrument onto a \
+                 new MIDI track when the selected track holds audio, or in place of the device \
+                 being hot-swapped. Reads the files, outside the project.",
             )
             .permission(Permission::External)
             .context(Browser)

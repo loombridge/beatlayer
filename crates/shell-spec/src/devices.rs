@@ -66,6 +66,9 @@ pub const DISPLAY: &str = "device.display";
 /// (WP-5.43).
 pub const SET_DISPLAY_VIEW: &str = "device.set_display_view";
 
+/// `modulator.arm_map`: arm or disarm a modulator slot's Map button
+/// (WP-5.10).
+pub const ARM_MAP: &str = "modulator.arm_map";
 /// `device.group`: wrap the selected devices, or chains, in a new rack
 /// (WP-5.1).
 pub const GROUP: &str = "device.group";
@@ -117,6 +120,7 @@ pub const IDS: &[&str] = &[
     SHOW_SIDECHAIN,
     DISPLAY,
     SET_DISPLAY_VIEW,
+    ARM_MAP,
     WINDOWS,
     SET_WINDOW,
     GROUP,
@@ -412,6 +416,38 @@ pub struct DeviceFrame {
     /// of its description's `views`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_view: Option<String>,
+    /// For a modulator, what it maps and which Map button is armed
+    /// (WP-5.10).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modulator: Option<ModulatorFrame>,
+}
+
+/// What a modulator's panel shows beside its parameters (WP-5.10; the
+/// modulation spec, R15, R19, R23).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ModulatorFrame {
+    /// Its mappings, by slot.
+    pub mappings: Vec<MappingRow>,
+    /// The slot whose Map button is lit, while a click on a parameter maps
+    /// it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub armed: Option<u8>,
+    /// A Curve Mod's breakpoint shape (the default one until it is edited);
+    /// left out for a modulator that has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shape: Option<Vec<bl_model::modulator::ShapePoint>>,
+}
+
+/// One slot's mapping as its panel names it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct MappingRow {
+    /// The slot, from 0 to 7.
+    pub slot: u8,
+    /// The parameter it maps.
+    pub target: bl_model::modulator::ModTarget,
+    /// The target's device and parameter, or track and control, by name,
+    /// as the slot shows them.
+    pub label: String,
 }
 
 impl DeviceFrame {
@@ -518,6 +554,19 @@ pub struct DeviceViewState {
     pub hot_swap: Option<HotSwap>,
     /// Whether the clipboard holds a device to paste.
     pub can_paste: bool,
+    /// The Map button that is lit, on any track: a click on any parameter's
+    /// control maps it to the slot (WP-5.10).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub armed_map: Option<ArmedMap>,
+}
+
+/// A lit Map button.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ArmedMap {
+    /// The modulator.
+    pub device: DeviceId,
+    /// Its slot.
+    pub slot: u8,
 }
 
 /// Hot-swapping, while it lasts.
@@ -808,6 +857,20 @@ pub struct ShowSidechainArgs {
     /// Show (true) or hide (false); switches if left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shown: Option<bool>,
+}
+
+/// Arguments of `modulator.arm_map`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ArmMapArgs {
+    /// The modulator; the selected device if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The slot, from 0 to 7.
+    pub slot: u8,
+    /// Arm (true) or disarm (false); switches if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub armed: Option<bool>,
 }
 
 /// Arguments of `device.set_display_view`.
@@ -1148,6 +1211,20 @@ fn specs() -> Vec<CommandSpec> {
             .permission(Permission::Read)
             .context(DeviceView)
             .args::<SetDisplayViewArgs>()
+            .result::<DeviceViewState>(),
+        CommandSpec::new(ARM_MAP, "Map")
+            .description(
+                "Lights or puts out a modulator slot's Map button, as clicking it does. While \
+                 one is lit, every parameter in the set that can be mapped is tinted, and \
+                 clicking one maps it to the slot (`modulator.map`); Esc, or the button again \
+                 (`armed`: false), puts it out and changes nothing. Lighting a button puts out \
+                 the one that was lit. It changes only the view: it isn't an undo step, and \
+                 `device_view.state` reports the lit button in `armed_map`. Only a modulator \
+                 has slots.",
+            )
+            .permission(Permission::Read)
+            .context(DeviceView)
+            .args::<ArmMapArgs>()
             .result::<DeviceViewState>(),
         CommandSpec::new(WINDOWS, "Floating Device Windows")
             .description(

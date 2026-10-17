@@ -161,6 +161,9 @@ pub struct Compiler {
     /// media, so an edit that sends the layers again shares them rather
     /// than reading each file again. A sample goes when no node holds it.
     progressive: BTreeMap<ContentHash, std::sync::Weak<bl_media::ProgressiveSample>>,
+    /// Where each modulator's rows sit on the last program's bus
+    /// (WP-5.10).
+    modulator_rows: BTreeMap<DeviceId, u32>,
     /// The readers of the displays of the devices' nodes.
     displays: Displays,
 }
@@ -198,6 +201,7 @@ impl Compiler {
             layout: BTreeMap::new(),
             sources: ClipSources::default(),
             progressive: BTreeMap::new(),
+            modulator_rows: BTreeMap::new(),
             displays: Displays::default(),
         }
     }
@@ -365,6 +369,25 @@ impl Compiler {
         // have gone the same way. A new tempo map moved every envelope, so
         // every track's goes again.
         let all = old.settings().tempo != document.settings().tempo;
+        // Spec: modulation R15, R19. A mapping made, removed or taken away
+        // with its target, or a modulator that came or went, changes the
+        // lists of the nodes it reaches, and the rows they name.
+        let mapped = modulator_mappings(&old) != modulator_mappings(document);
+        for (&id, &change) in &changes.devices {
+            if let (Change::Modified, Some(before), Some(after)) =
+                (change, old.device(id), document.device(id))
+                && before.shape != after.shape
+            {
+                let shape = after
+                    .shape
+                    .clone()
+                    .unwrap_or_else(bl_model::modulator::default_shape);
+                update.data.push((
+                    NodeKey::Device(id),
+                    self.gc.data(crate::modbus::Shape(shape)),
+                ));
+            }
+        }
         for track in document.tracks() {
             let id = track.id();
             let differs = match (old.track(id), document.track(id)) {
@@ -374,11 +397,16 @@ impl Compiler {
                 _ => false,
             };
             let clips_changed = tracks.contains(&id);
-            if all || differs || clips_changed {
+            if all || differs || clips_changed || mapped {
                 // The track whose envelopes or clips changed gets every
                 // list, so an empty one clears what a node had; a tempo map
                 // that moved them only sends the ones that drive something.
-                self.send_automation(document, id, !differs && !clips_changed, &mut update);
+                self.send_automation(
+                    document,
+                    id,
+                    !differs && !clips_changed && !mapped,
+                    &mut update,
+                );
             }
         }
         update
@@ -703,7 +731,15 @@ impl Compiler {
                 .collect(),
             releases: crate::program::Releases::new(),
             midi,
+            modulators: build.modulators.iter().map(|&(slot, _)| slot).collect(),
+            bus: vec![0.0; build.modulators.len() * crate::modbus::ROWS * self.config.max_frames],
         };
+        self.modulator_rows = build
+            .modulators
+            .iter()
+            .enumerate()
+            .map(|(row, &(_, device))| (device, row as u32))
+            .collect();
         self.generation = generation;
         self.layout = build.layout;
         self.displays
@@ -787,9 +823,13 @@ impl Compiler {
             return;
         };
         let rate = self.config.sample_rate;
-        for (key, list) in automation::lists(document, track.id(), rate, |key| {
-            i64::from(self.layout.get(&key).map_or(0, |placed| placed.delay))
-        }) {
+        for (key, list) in automation::lists(
+            document,
+            track.id(),
+            rate,
+            |key| i64::from(self.layout.get(&key).map_or(0, |placed| placed.delay)),
+            &self.modulator_rows,
+        ) {
             if driving_only && list.is_empty() {
                 continue;
             }
@@ -1063,6 +1103,12 @@ impl Compiler {
                 },
             };
             let slot = claim(build, key, identity, !device.enabled, latency, node);
+            // Spec: modulation R20. A modulator works its rows out before
+            // any task runs.
+            if bl_model::modulator::is_modulator_kind(&device.kind) {
+                build.slots[slot as usize].modulator = true;
+                build.modulators.push((slot, device.id));
+            }
             steps.push(Step::Node(slot));
             if let Some(settings) = &device.sidechain {
                 let sources = sidechain_inputs.remove(&device.id).unwrap_or_default();
@@ -1235,6 +1281,7 @@ fn claim(
         // device is switched on again.
         latency: if bypass { 0 } else { latency },
         delay: 0,
+        modulator: false,
     });
     build.layout.insert(
         key,
@@ -1275,6 +1322,9 @@ struct Build {
     sidechains: Vec<DeviceSidechain>,
     sidechain_inputs: Vec<Input>,
     unhosted: Vec<DeviceId>,
+    /// The modulators' slots and devices, in the order their rows sit on the
+    /// bus (WP-5.10).
+    modulators: Vec<(u32, DeviceId)>,
     /// Devices new in this program that play media, with the media they
     /// name, one entry per filled sample slot: their decoded audio goes
     /// with this compile's update (WP-2.16).
@@ -1671,6 +1721,17 @@ fn needs_program(
     // View's slots are the exception: which slots hold a clip travels in the
     // program's scene table, which a scene launch reads (WP-3.2).
     recompile || scene_slots(old) != scene_slots(new)
+}
+
+/// Every modulator in track and chain order with its mappings: what decides
+/// which rows the nodes' lists name (WP-5.10).
+fn modulator_mappings(document: &Document) -> Vec<(DeviceId, Vec<bl_model::modulator::Mapping>)> {
+    document
+        .tracks()
+        .flat_map(|track| track.devices_deep())
+        .filter(|device| bl_model::modulator::is_modulator_kind(&device.kind))
+        .map(|device| (device.id, device.mappings.clone()))
+        .collect()
 }
 
 /// Parameter changes for the mixers of the chains of racks that changed

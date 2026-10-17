@@ -96,6 +96,7 @@ mod metronome;
 mod midi;
 pub mod midi_clips;
 pub mod mixer;
+pub mod modbus;
 mod node;
 pub mod nodes;
 mod offline;

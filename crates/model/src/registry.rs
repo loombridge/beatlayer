@@ -1517,6 +1517,47 @@ const ENTRIES: &[Entry] = &[
             defaults.",
     },
     Entry {
+        id: "modulator.map",
+        action: Action::Apply("map_modulator"),
+        label: "Map Modulator",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Maps one of a modulator's eight slots (`slot`, 0 to 7) to a parameter, as \
+            the slot's Map button and a click on the parameter's control do. `target` is a mixer \
+            control (`volume`, `pan` or `mute`) or a send of any track, or a parameter of any \
+            device on any track, but not a parameter of the modulator itself. The slot's earlier \
+            mapping is replaced; one modulator doesn't map one parameter twice. A modulator in \
+            Remote Control can't map a parameter another modulator in Remote Control holds. The \
+            mapping is saved with the set, goes with its target when that is deleted, and shows \
+            in the `mappings` field of the query tool's `device`. One undo step (Map Modulator).",
+    },
+    Entry {
+        id: "modulator.unmap",
+        action: Action::Apply("unmap_modulator"),
+        label: "Unmap Modulator",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Removes the mapping of a modulator's slot (`slot`, 0 to 7), as its Unmap \
+            button does: the parameter plays its own value again from the next frame. A slot \
+            with no mapping stays as it is. One undo step (Unmap Modulator).",
+    },
+    Entry {
+        id: "modulator.set_shape",
+        action: Action::Apply("set_shape"),
+        label: "Edit Shape",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Replaces the breakpoint shape of a Curve Mod, as every edit of its display \
+            does (adding, moving, bending or deleting a breakpoint, Clear and the six presets). \
+            `points` lists up to 64 breakpoints in order along the cycle, each with `x` (its \
+            place, 0 to 1), `y` (the output there, 0 to 1) and `bend` (of the segment starting \
+            there, from -1 to 1, 0 straight). An empty list outputs 0. One undo step (Edit \
+            Shape).",
+    },
+    Entry {
         id: "device.compare_switch",
         action: Action::Apply("compare_switch"),
         label: "Compare: Switch",

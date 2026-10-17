@@ -51,7 +51,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        127,
+        130,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -63,7 +63,8 @@ fn every_document_command_is_registered() {
          two punch switches, WP-2.13 add_take_lane, WP-3.4 three for a clip's launch \
          settings, WP-3.5 two for a scene's tempo and signature, WP-3.3 \
          set_clip_launch_mode, WP-5.1 fifteen for racks and their chains, WP-5.12 the two \
-         Compare commands, and WP-5.13 eleven for a multisampler's layers"
+         Compare commands, WP-5.10 map_modulator, unmap_modulator and set_shape, and WP-5.13 \
+         eleven for a multisampler's layers"
     );
 
     for op in &ops {
@@ -782,6 +783,60 @@ fn every_command_runs_by_id() {
     let layers = &agent.editor.document().device(eq).unwrap().layers;
     assert_eq!(layers.list.len(), 3);
     assert!(layers.ram_mode && layers.snap && !layers.linear_loop_fades);
+    // WP-5.10: a modulator maps a parameter on another track, replaces its
+    // mapping, edits its shape and unmaps; deleting the target takes the
+    // mapping.
+    let wave: DeviceId = agent.new_id();
+    agent.run(
+        "device.insert",
+        json!({ "track": drums, "index": 0, "device": {
+            "id": wave, "name": "Curve Mod", "enabled": true, "params": [],
+            "kind": { "native": { "device_type": "beatlayer.curve_mod" } },
+        } }),
+    );
+    let victim: DeviceId = agent.new_id();
+    agent.run(
+        "device.insert",
+        json!({ "track": reverb, "index": 0, "device": {
+            "id": victim, "name": "Gone", "enabled": true, "params": [],
+            "kind": { "native": { "device_type": "beatlayer.eq" } },
+        } }),
+    );
+    agent.run(
+        "modulator.map",
+        json!({ "device": wave, "slot": 0,
+            "target": { "type": "device", "device": victim, "param": 3 } }),
+    );
+    agent.run(
+        "modulator.map",
+        json!({ "device": wave, "slot": 1,
+            "target": { "type": "mixer", "track": reverb, "param": "volume" } }),
+    );
+    assert_eq!(
+        agent.editor.document().device(wave).unwrap().mappings.len(),
+        2
+    );
+    agent.run(
+        "modulator.set_shape",
+        json!({ "device": wave, "points": [
+            { "x": 0.0, "y": 0.0 }, { "x": 0.5, "y": 1.0, "bend": 0.5 } ] }),
+    );
+    agent.run("modulator.unmap", json!({ "device": wave, "slot": 1 }));
+    assert_eq!(
+        agent.editor.document().device(wave).unwrap().mappings.len(),
+        1
+    );
+    agent.run("device.remove", json!({ "device": victim }));
+    assert!(
+        agent
+            .editor
+            .document()
+            .device(wave)
+            .unwrap()
+            .mappings
+            .is_empty()
+    );
+    agent.run("device.remove", json!({ "device": wave }));
 
     // A device with a sidechain input (WP-2.19b), listening to another
     // track.
@@ -1736,6 +1791,7 @@ fn schemas_match_what_commands_serialise() {
                 device,
                 params: [(ParamId(4), 0.5)].into_iter().collect(),
                 name: "Warm Pad".to_owned(),
+                shape: None,
             },
         ),
         (
@@ -1843,6 +1899,17 @@ fn schemas_match_what_commands_serialise() {
             },
         ),
         (
+            "modulator.map",
+            Command::MapModulator {
+                device,
+                slot: 3,
+                target: bl_model::modulator::ModTarget::Device {
+                    device,
+                    param: ParamId(2),
+                },
+            },
+        ),
+        (
             "device.set_layer_media",
             Command::SetLayerMedia {
                 device,
@@ -1869,6 +1936,17 @@ fn schemas_match_what_commands_serialise() {
                 ram_mode: Some(true),
                 snap: None,
                 linear_loop_fades: Some(true),
+            },
+        ),
+        (
+            "modulator.unmap",
+            Command::UnmapModulator { device, slot: 3 },
+        ),
+        (
+            "modulator.set_shape",
+            Command::SetShape {
+                device,
+                points: bl_model::modulator::shape_preset(3).unwrap(),
             },
         ),
         (

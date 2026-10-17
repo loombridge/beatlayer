@@ -1,8 +1,19 @@
 //! The Settings window's pages and the theme choice, as the shell's
 //! commands name them.
 
+use bl_commands::Context::Global;
+use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+
+use crate::agent::AllowedAgent;
+use crate::assistant::AssistantState;
+use crate::audio::{AudioSettings, ToneSettings};
+use crate::midi_io::MidiPortsResult;
+
+/// `settings.state`: every preference the Settings window shows with a
+/// value.
+pub const STATE: &str = "settings.state";
 
 /// A page of the Settings window, in Live's order (L-SET-002).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
@@ -193,9 +204,114 @@ impl ThemeChoice {
     }
 }
 
+/// The Display & Input page's settings.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct DisplayInputSettings {
+    /// The interface zoom in percent, as `view.set_zoom` takes it.
+    pub zoom_percent: u16,
+    /// Outline View in Focus, as `settings.set_outline_view_in_focus` sets it.
+    pub outline_view_in_focus: bool,
+    /// Use Tab Key to Move Focus, as `focus.toggle_tab_navigation` toggles it.
+    pub use_tab_key_to_move_focus: bool,
+    /// Wrap Tab Navigation, as `focus.toggle_wrap_navigation` toggles it.
+    pub wrap_tab_navigation: bool,
+}
+
+/// The Audio page's settings: the device choices as `audio.configure` takes
+/// them, and the test tone's level and frequency.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct AudioPageSettings {
+    /// Driver, devices, sample rate, buffer size, output channels and Driver
+    /// Error Compensation, as set (null is the platform's or the device's
+    /// own choice).
+    pub device: AudioSettings,
+    /// Tone Volume and Tone Frequency, as `audio.set_test_tone` takes them.
+    pub tone: ToneSettings,
+}
+
+/// The Agents page's settings. The server's token and each allowed agent's
+/// are never reported, only whether the server has one.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct AgentsPageSettings {
+    /// Whether the agent server runs, as `agent.set_server` sets it.
+    pub server: bool,
+    /// The port it listens on.
+    pub port: u16,
+    /// The address agents connect to.
+    pub url: String,
+    /// Whether the server has a token stored.
+    pub token_stored: bool,
+    /// The agents allowed to connect, with their autonomous mode.
+    pub clients: Vec<AllowedAgent>,
+}
+
+/// What `settings.state` returns: the Settings window's preferences by
+/// page. Pages whose settings no package has built yet are left out.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SettingsState {
+    /// The page the Settings window shows, or showed last.
+    pub page: SettingsPage,
+    /// Display & Input.
+    pub display_input: DisplayInputSettings,
+    /// Theme & Colors: the theme, as `settings.set_theme` takes it.
+    pub theme: ThemeChoice,
+    /// Audio.
+    pub audio: AudioPageSettings,
+    /// Tempo & MIDI: the MIDI ports' switches and the computer MIDI
+    /// keyboard, the same as `midi.ports` reports.
+    pub tempo_midi: MidiPortsResult,
+    /// Record, Warp & Launch: Create Fades on Clip Edges, as
+    /// `settings.set_create_fades_on_clip_edges` sets it.
+    pub create_fades_on_clip_edges: bool,
+    /// Record, Warp & Launch: Warp Recorded Audio, as
+    /// `settings.set_warp_recorded_audio` sets it.
+    pub warp_recorded_audio: bool,
+    /// Plug-Ins: Auto-Hide Plug-In Windows, as
+    /// `settings.set_auto_hide_plug_in_windows` sets it.
+    pub auto_hide_plug_in_windows: bool,
+    /// Agents.
+    pub agents: AgentsPageSettings,
+    /// Agents, the assistant: provider, base URL, model, and whether an API
+    /// key is stored for the provider (the key itself is never reported).
+    pub assistant: AssistantState,
+}
+
+/// Adds `settings.state` to a registry.
+///
+/// # Errors
+///
+/// [`RegisterError`] if its ID is already registered.
+pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
+    registry.register(
+        CommandSpec::new(STATE, "Settings State")
+            .description(
+                "Reports every preference the Settings window shows with a value, by page, in \
+                 the form its own command takes it: the theme (`settings.set_theme`), Display & \
+                 Input (zoom, Outline View in Focus, the Tab key settings), the audio device \
+                 settings with Driver Error Compensation and the test tone (`audio.configure`, \
+                 `audio.set_test_tone`), the MIDI ports and computer keyboard (`midi.set_port`), \
+                 Create Fades on Clip Edges, Warp Recorded Audio, Auto-Hide Plug-In Windows, the agent server and the \
+                 assistant. The server's and the agents' tokens and the assistant's API key are \
+                 never reported, only whether one is stored. Preferences aren't saved with the \
+                 set. Changes nothing. Use it to check a `settings.set_*` command took effect.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .args::<NoArgs>()
+            .result::<SettingsState>(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_query_registers_complete() {
+        let mut registry = Registry::new();
+        register(&mut registry).unwrap();
+        assert!(registry.problems().is_empty(), "{:?}", registry.problems());
+    }
 
     #[test]
     fn pages_step_round_in_order() {

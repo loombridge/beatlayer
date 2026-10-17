@@ -340,6 +340,11 @@ pub struct EngineTransport {
     pub clock: u64,
     /// Whether the transport records (WP-2.13).
     pub recording: bool,
+    /// Whether a take is running: the transport records and has begun to
+    /// write the armed tracks' input.
+    pub take_running: bool,
+    /// Whether the count-in is sounding.
+    pub counting_in: bool,
     /// The take that last ended, until the next recording starts: the song
     /// frames it covers, which the recorded clips are made from.
     pub take: Option<TakeBounds>,
@@ -807,6 +812,8 @@ impl AudioHost {
             insert_marker: state.insert_marker,
             clock: state.clock,
             recording: state.recording,
+            take_running: state.take_running,
+            counting_in: state.counting_in,
             take: state.take,
         };
         self.memory

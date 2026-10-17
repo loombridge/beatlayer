@@ -1335,6 +1335,8 @@ impl Processor {
         state.insert_marker = self.insert_marker;
         state.loop_region = self.loop_region;
         state.recording = self.recording;
+        state.take_running = self.take.is_some();
+        state.counting_in = self.metronome.is_counting_in();
         state.take = self.last_take;
         state.program = self.program.as_ref().map(|p| p.get().generation);
         state.swaps = self.swaps;

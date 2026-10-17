@@ -67,6 +67,14 @@ The **loop** belongs to the set: `set_loop` moves its brace (`start` and `length
 
 The engine acts on a transport command at the start of its next block, a few milliseconds after your call. In the app, the song plays through the app's audio engine while its audio device runs, and your transport commands share one queue with the person's, in the order they come. Headless (`bl-cli mcp`), or while the app's audio engine is off, nothing plays the song, so play, stop, continue, and locate are refused, and `status` says so; the loop can still be set, and scheduled commands wait.
 
+## Reading back what the set doesn't save
+
+`query` reads what the set saves. Everything else you can set is read from a command that changes nothing, which you run with `run`:
+
+- `transport.state`: Arrangement Record and whether a take is running or the count-in is sounding, the running recording's armed tracks and dropped frames, what the last recording came to (its files, dropped frames, and any error), Punch-In and Punch-Out, MIDI Arrangement Overdub, Automation Arm, the metronome, the loop, the tempo, and the position;
+- `settings.state`: every preference the Settings window shows with a value, by page. Tokens and API keys are never returned, only whether one is stored;
+- `view.state`: the main view, the browser, the Info View, the Clip View, and the other view toggles; `audio.status` and `midi.ports` for the devices; and `arrangement.state`, `session.state`, `mixer_view.state` and `device_view.state` for each view.
+
 ## Hearing and seeing the song
 
 You can't hear the speakers or see the screen, so three tools perceive for you. They only read: they change nothing in the set and never ask the person.

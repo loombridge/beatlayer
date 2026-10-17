@@ -223,6 +223,11 @@ pub fn start(
             delay: 0,
         },
         Recording {
+            armed: tracks
+                .iter()
+                .map(|track| track.track)
+                .chain(midi.iter().copied())
+                .collect(),
             finished,
             files: None,
             dropped,
@@ -248,6 +253,8 @@ impl Track {
 /// One track's side of the recording, on the main thread: the writer's
 /// report, the frames dropped, and the take the engine published.
 pub struct Recording {
+    /// The armed tracks it records: audio, then MIDI.
+    armed: Vec<TrackId>,
     finished: Receiver<Result<Vec<RecordedFile>, String>>,
     /// The writer's report, kept while the engine's take state catches up.
     files: Option<Result<Vec<RecordedFile>, String>>,
@@ -310,6 +317,22 @@ pub struct RecordedFile {
 }
 
 impl Recording {
+    /// The armed tracks it records: audio, then MIDI.
+    #[must_use]
+    pub fn armed(&self) -> &[TrackId] {
+        &self.armed
+    }
+
+    /// Frames and MIDI messages dropped so far.
+    #[must_use]
+    pub fn dropped(&self) -> u64 {
+        self.dropped
+            .iter()
+            .chain(self.midi.iter().map(|reading| &reading.dropped))
+            .map(|d| d.load(Relaxed))
+            .sum()
+    }
+
     /// Notes the take the engine published, from its state.
     pub fn note_take(&mut self, take: TakeBounds) {
         self.take = Some(take);
@@ -349,12 +372,7 @@ impl Recording {
             // went in, so it can arrive a frame after the writer's report.
             return None;
         }
-        let dropped = self
-            .dropped
-            .iter()
-            .chain(self.midi.iter().map(|reading| &reading.dropped))
-            .map(|d| d.load(Relaxed))
-            .sum();
+        let dropped = self.dropped();
         let midi = self
             .midi
             .drain(..)

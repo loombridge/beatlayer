@@ -362,7 +362,9 @@ pub struct MultisamplerUi {
     renaming: Option<(LayerId, String, bool)>,
     /// The layer clicked last, where Shift-click extends from.
     anchor: Option<LayerId>,
-    waveform: Option<Waveform>,
+    /// Each multisampler's waveform, so two on a track don't decode each
+    /// other's sample every frame.
+    waveforms: std::collections::HashMap<bl_model::DeviceId, Waveform>,
 }
 
 impl std::fmt::Debug for MultisamplerUi {
@@ -694,8 +696,8 @@ impl MultisamplerUi {
             let rect = Rect::from_min_size(pos2(x, strip.top()), vec2(18.0, strip.height()));
             x += 20.0;
             let current = self
-                .waveform
-                .as_ref()
+                .waveforms
+                .get(&frame.id)
                 .map_or(Channels::Both, |w| w.channels);
             if button(
                 ui,
@@ -706,7 +708,7 @@ impl MultisamplerUi {
                 current == channels,
                 hint,
             )
-            .0 && let Some(waveform) = &mut self.waveform
+            .0 && let Some(waveform) = self.waveforms.get_mut(&frame.id)
             {
                 waveform.channels = channels;
             }
@@ -728,20 +730,30 @@ impl MultisamplerUi {
     ) {
         let c = &theme.colors;
         if self
-            .waveform
-            .as_ref()
+            .waveforms
+            .get(&frame.id)
             .is_none_or(|w| w.media != layer.media)
         {
-            self.waveform = shell.layer_audio(layer.media).map(|audio| Waveform {
-                media: layer.media,
-                first: 0.0,
-                span: audio.frames().max(1) as f64,
-                audio,
-                vertical: 1.0,
-                channels: Channels::Both,
-            });
+            match shell.layer_audio(layer.media) {
+                Some(audio) => {
+                    self.waveforms.insert(
+                        frame.id,
+                        Waveform {
+                            media: layer.media,
+                            first: 0.0,
+                            span: audio.frames().max(1) as f64,
+                            audio,
+                            vertical: 1.0,
+                            channels: Channels::Both,
+                        },
+                    );
+                }
+                None => {
+                    self.waveforms.remove(&frame.id);
+                }
+            }
         }
-        let Some(wave) = &mut self.waveform else {
+        let Some(wave) = self.waveforms.get_mut(&frame.id) else {
             ui.painter().text(
                 rect.center(),
                 Align2::CENTER_CENTER,
@@ -761,7 +773,7 @@ impl MultisamplerUi {
                 let total = wave.audio.frames().max(1) as f64;
                 let at = pointer.map_or(0.5, |p| f64::from((p.x - rect.left()) / rect.width()));
                 let anchor = wave.first + wave.span * at;
-                wave.span = (wave.span / f64::from(zoom)).clamp(64.0, total);
+                wave.span = (wave.span / f64::from(zoom)).clamp(64.0_f64.min(total), total);
                 wave.first = (anchor - wave.span * at).clamp(0.0, total - wave.span);
             }
             crate::mixer::show_readout(

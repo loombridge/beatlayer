@@ -483,17 +483,20 @@ impl LayerSettings {
         if self.loop_end.is_none() {
             next.loop_end = next
                 .loop_end
-                .clamp(next.start.saturating_add(1), next.end.max(1));
+                .max(next.start.saturating_add(1))
+                .min(next.end.max(1));
         }
         if self.loop_start.is_none() {
             next.loop_start = next
                 .loop_start
-                .clamp(next.start, next.loop_end.saturating_sub(1).max(next.start));
+                .max(next.start)
+                .min(next.loop_end.saturating_sub(1).max(next.start));
         }
         if self.release_loop.is_none() {
             next.release_loop = next
                 .release_loop
-                .clamp(next.loop_end, next.end.max(next.loop_end));
+                .max(next.loop_end)
+                .min(next.end.max(next.loop_end));
         }
         if self.crossfade_ms.is_none() {
             next.crossfade_ms = next.crossfade_ms.min(next.crossfade_limit_ms());
@@ -780,14 +783,21 @@ impl Layers {
 
     /// Sorts the list by `by`, stably, ascending or descending.
     pub fn sort(&mut self, by: LayerSort, descending: bool) {
-        match by {
-            LayerSort::Name => self.list.sort_by_key(|l| l.name.to_lowercase()),
-            LayerSort::Key => self.list.sort_by_key(|l| (l.key.low, l.key.high)),
-            LayerSort::Velocity => self.list.sort_by_key(|l| (l.velocity.low, l.velocity.high)),
-            LayerSort::Selector => self.list.sort_by_key(|l| (l.select.low, l.select.high)),
-        }
+        let order = |a: &Layer, b: &Layer| match by {
+            LayerSort::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+            LayerSort::Key => (a.key.low, a.key.high).cmp(&(b.key.low, b.key.high)),
+            LayerSort::Velocity => {
+                (a.velocity.low, a.velocity.high).cmp(&(b.velocity.low, b.velocity.high))
+            }
+            LayerSort::Selector => {
+                (a.select.low, a.select.high).cmp(&(b.select.low, b.select.high))
+            }
+        };
+        // Comparing the other way round, rather than reversing, keeps ties in order.
         if descending {
-            self.list.reverse();
+            self.list.sort_by(|a, b| order(b, a));
+        } else {
+            self.list.sort_by(order);
         }
     }
 
@@ -806,6 +816,12 @@ impl Layers {
         channels: u8,
     ) -> Result<(), ModelError> {
         let at = self.require(id)?;
+        if length == 0 {
+            return Err(ModelError::InvalidValue {
+                what: "layer length",
+                value: 0.0,
+            });
+        }
         let mut next = self.list[at].clone();
         let (old, new) = (next.length.max(1) as f64, length as f64);
         let scale = |frame: u64| ((frame as f64 * new / old).round() as u64).min(length);
@@ -813,9 +829,9 @@ impl Layers {
         next.length = length;
         next.sample_rate = sample_rate;
         next.channels = channels;
-        next.start = scale(next.start);
+        next.start = scale(next.start).min(length - 1);
         next.end = scale(next.end).max(next.start + 1).min(length);
-        next.loop_start = scale(next.loop_start).clamp(next.start, next.end.saturating_sub(1));
+        next.loop_start = scale(next.loop_start).clamp(next.start, next.end - 1);
         next.loop_end = scale(next.loop_end).clamp(next.loop_start + 1, next.end);
         next.release_loop = scale(next.release_loop).clamp(next.loop_end, next.end);
         next.crossfade_ms = next.crossfade_ms.min(next.crossfade_limit_ms());
@@ -1119,5 +1135,37 @@ mod tests {
         assert_ne!(again[0], a, "an ID is never reused");
         assert!(l.remove(&[a]).is_err());
         l.check().unwrap();
+    }
+
+    #[test]
+    fn markers_past_the_end_are_refused_not_a_panic() {
+        let mut l = layers(&[60]);
+        let id = l.list[0].id;
+        let at_end = LayerSettings {
+            start: Some(48_000),
+            ..LayerSettings::default()
+        };
+        assert!(l.update(&[id], &at_end).is_err());
+        let near_end = LayerSettings {
+            start: Some(47_990),
+            ..LayerSettings::default()
+        };
+        l.update(&[id], &near_end).unwrap();
+        l.replace_media(id, ContentHash([1; 32]), 100, 48_000, 1)
+            .unwrap();
+        l.check().unwrap();
+        assert!(
+            l.replace_media(id, ContentHash([1; 32]), 0, 48_000, 1)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn a_descending_sort_keeps_ties_in_order() {
+        let mut l = layers(&[60, 60, 62]);
+        l.list[2].key = Zone::new(62, 127);
+        let [a, b, c] = [l.list[0].id, l.list[1].id, l.list[2].id];
+        l.sort(LayerSort::Key, true);
+        assert_eq!(l.list.iter().map(|l| l.id).collect::<Vec<_>>(), [c, a, b]);
     }
 }

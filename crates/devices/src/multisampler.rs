@@ -689,7 +689,9 @@ impl Voice {
                 SustainMode::BackAndForth => {
                     if self.forward {
                         if self.position >= le {
-                            self.position = le - (self.position - le);
+                            // Turns on the loop's last frame, as it turns on
+                            // its first going back.
+                            self.position = (2.0 * (le - 1.0) - self.position).max(ls);
                             self.forward = false;
                             self.in_loop = true;
                         } else if self.position >= ls {
@@ -714,7 +716,8 @@ impl Voice {
                     self.position = rl + (self.position - self.end).rem_euclid(span);
                 }
             } else if self.forward && self.position >= self.end {
-                self.position = self.end - (self.position - self.end);
+                // Sample End is past the last frame, which reads as silence.
+                self.position = (2.0 * (self.end - 1.0) - self.position).max(rl);
                 self.forward = false;
             } else if !self.forward && self.position < rl {
                 self.position = rl + (rl - self.position);

@@ -538,14 +538,20 @@ impl DeviceView {
     /// a multisampler on `track` selects the layers the note plays for as
     /// long as it's held (R7). Plays nothing in the set.
     pub fn note(&mut self, doc: &Document, track: TrackId, key: u8, velocity: u8, down: bool) {
+        // A key goes up on every track, in case the view moved while it was
+        // held.
+        if !down {
+            for held in self.held.values_mut() {
+                held.remove(&key);
+            }
+            return;
+        }
         let Some(track) = doc.track(track) else {
             return;
         };
         for device in track.devices().filter(|d| Self::is_multisampler(d)) {
             let held = self.held.entry(device.id).or_default();
-            if !down {
-                held.remove(&key);
-            } else if self
+            if self
                 .multisamplers
                 .get(&device.id)
                 .is_some_and(|v| v.auto_select)

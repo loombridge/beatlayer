@@ -563,13 +563,13 @@ fn each_sustain_mode_loops_as_it_says() {
         let out = back.render(6000, &[on(0, 60, 1.0)]);
         for i in 0..900 {
             assert!(
-                (out[0][2000 + i] - value(2000 - i)).abs() < 1e-5,
+                (out[0][2000 + i] - value(1998 - i)).abs() < 1e-5,
                 "back from Loop End: {i}"
             );
         }
         assert!(
-            (out[0][3003] - value(1000 + 3)).abs() < 1e-5
-                && (out[0][3010] - value(1000 + 10)).abs() < 1e-5,
+            (out[0][3003] - value(1000 + 5)).abs() < 1e-5
+                && (out[0][3010] - value(1000 + 12)).abs() < 1e-5,
             "and forward again from Loop Start"
         );
     }
@@ -621,7 +621,8 @@ fn each_release_mode_plays_the_release_as_it_says() {
             false,
         );
         let out = bounce.render(9000, &held_then_off);
-        let after: Vec<f32> = out[0][6000..9000].to_vec();
+        // The first turn at Sample End is at frame 5,800.
+        let after: Vec<f32> = out[0][5000..9000].to_vec();
         assert!(
             after
                 .iter()

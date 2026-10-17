@@ -115,6 +115,10 @@ impl Fill {
         let channels = self.sample.channels.len();
         let mut block: Vec<Vec<f32>> = vec![vec![0.0; BLOCK]; channels];
         while self.at < end {
+            // Nothing else holds the sample any more: stop reading for it.
+            if Arc::strong_count(&self.sample) == 1 {
+                break;
+            }
             let want = (end - self.at).min(BLOCK);
             let mut outs: Vec<&mut [f32]> = block.iter_mut().map(|c| &mut c[..want]).collect();
             let got = self.decoder.read(&mut outs)?;

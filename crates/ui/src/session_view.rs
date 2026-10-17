@@ -7,9 +7,17 @@
 //! gesture becomes one of the Session View's registered commands
 //! (`session.*`), which the host runs, so a scripted agent drives the grid
 //! the same way the person does. Only the rows on screen are built (the
-//! Arrangement's virtualised pattern). What a slot holds is `bl-model`'s;
-//! launching from the grid is WP-3.8's.
+//! Arrangement's virtualised pattern). What a slot holds is `bl-model`'s.
+//!
+//! The grid launches (WP-3.8): a slot's launch triangle and a scene's launch
+//! button run `session.launch` and `session.launch_scene`, a stop square and
+//! the status row's stop buttons run `session.stop_track` and
+//! `session.stop_all`, and the Back to Arrangement button runs
+//! `session.back_to_arrangement`. What they draw comes from the states the
+//! engine published, `Shell::session_states` and `Shell::session_over`.
 
+use bl_core::time::TICKS_PER_QUARTER;
+use bl_engine::SlotState;
 use bl_model::{ClipId, Document, SceneId, TrackId, TrackKind};
 use bl_shell::mixer_view::MixerOf;
 use bl_shell::session_view_commands as ids;
@@ -23,7 +31,10 @@ use egui::{
 use serde_json::{Value, json};
 
 use crate::arrangement::scene::track_colour;
-use crate::layout::mixer::{Column, ColumnKind, MixerLayout, SLOT_ROW, SceneRow, SessionLayout};
+use crate::layout::mixer::{
+    Column, ColumnKind, MainStatusCells, MixerLayout, SLOT_ROW, SceneRow, SessionLayout,
+    StatusCells,
+};
 use crate::main_window::UiEvent;
 use crate::theme::Theme;
 
@@ -46,10 +57,35 @@ pub fn scene_row_id(scene: SceneId) -> Id {
     Id::new(("session-scene", scene))
 }
 
-/// The ID of a scene's launch button (drawn in place; WP-3.8 makes it live).
+/// The ID of a scene's launch button.
 #[must_use]
 pub fn scene_launch_id(scene: SceneId) -> Id {
     Id::new(("session-scene-launch", scene))
+}
+
+/// The ID of a slot's launch triangle, or its stop square.
+#[must_use]
+pub fn slot_button_id(track: TrackId, scene: SceneId) -> Id {
+    Id::new(("session-slot-button", track, scene))
+}
+
+/// The ID of a track's stop button in the status row.
+#[must_use]
+pub fn track_stop_id(track: TrackId) -> Id {
+    Id::new(("session-track-stop", track))
+}
+
+/// The ID of Stop All Clips, at the Main column's left in the status row.
+#[must_use]
+pub fn stop_all_id() -> Id {
+    Id::new("session-stop-all")
+}
+
+/// The ID of the Back to Arrangement button, at the Main column's right in
+/// the status row.
+#[must_use]
+pub fn back_to_arrangement_id() -> Id {
+    Id::new("session-back-to-arrangement")
 }
 
 /// A drag under way in the grid.
@@ -208,6 +244,7 @@ impl GridUi {
             }
         }
 
+        self.status_row(ui, shell, theme, session, &layout, &columns, events);
         self.keys(&grid, shell, &columns, &scenes, events);
         self.take_drop(&grid, shell, session, &layout, &columns, &scenes, events);
         // A clip drag that ended: move it to the slot it was released on, or
@@ -306,16 +343,42 @@ impl GridUi {
             );
         }
         // The launch triangle on a slot with a clip, the stop square on an
-        // empty one, or a record circle on an armed track's empty slot
-        // (observed): drawn where Live has them; WP-3.8 makes launching
-        // live.
+        // empty one that has its stop button, or a record circle on an armed
+        // track's empty slot (observed). The triangle and the square are
+        // buttons (I-CLICK-001, I-CLICK-003); the circle waits for WP-3.11.
         let mark = Rect::from_min_size(cell.min + vec2(1.0, 1.0), vec2(9.0, cell.height() - 2.0));
+        let launch_state = shell
+            .session_states()
+            .iter()
+            .find(|status| status.track == track && status.scene == scene)
+            .map(|status| status.state);
         if clip.is_some() {
-            triangle(&painter, mark, theme.colors.text_dim.0);
+            let time = ui.input(|i| i.time);
+            triangle(&painter, mark, launch_colour(theme, launch_state, time));
+            let press = ui.interact(mark, slot_button_id(track, scene), Sense::click());
+            let label = format!("Launch {track_name}: {scene_name}");
+            self.button(
+                &press,
+                &label,
+                launch_state.is_some(),
+                events,
+                "session.launch",
+                json!({ "track": track, "scene": scene }),
+            );
         } else if t.mixer().arm {
             painter.circle_filled(mark.center(), 3.0, theme.colors.record.0);
-        } else {
+        } else if t.has_stop_button(scene) {
             painter.rect_filled(mark.shrink(1.5), 0.0, theme.colors.separator.0);
+            let press = ui.interact(mark, slot_button_id(track, scene), Sense::click());
+            let label = format!("Stop {track_name}");
+            self.button(
+                &press,
+                &label,
+                false,
+                events,
+                "session.stop_track",
+                json!({ "track": track }),
+            );
         }
 
         let modifiers = ui.input(|i| i.modifiers);
@@ -353,6 +416,161 @@ impl GridUi {
         if response.hovered() && clip.is_some() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
         }
+    }
+
+    /// A button that runs `command` when it's clicked, and gives the grid
+    /// the keyboard as a click on a slot does, so Enter launches next. It
+    /// reaches AccessKit as a button named `label`, pressed while `on`.
+    fn button(
+        &mut self,
+        response: &egui::Response,
+        label: &str,
+        on: bool,
+        events: &mut Vec<UiEvent>,
+        command: &'static str,
+        args: Value,
+    ) {
+        response.widget_info(|| WidgetInfo::selected(WidgetType::Button, true, on, label));
+        self.focus_ids.push(response.id);
+        if response.clicked() {
+            response.request_focus();
+            events.push(UiEvent::FocusArea(Area::MainView));
+            events.push(UiEvent::Invoke(Invocation::new(command, args)));
+        }
+    }
+
+    /// Draws the status row under the slots (L-SES-008): each track's stop
+    /// button and status display, and in the Main column Stop All Clips, the
+    /// global follow-action switch and the Back to Arrangement button.
+    #[expect(clippy::too_many_arguments, reason = "the frame's inputs")]
+    fn status_row(
+        &mut self,
+        ui: &mut Ui,
+        shell: &Shell,
+        theme: &Theme,
+        session: &SessionLayout,
+        layout: &MixerLayout,
+        columns: &[TrackId],
+        events: &mut Vec<UiEvent>,
+    ) {
+        let doc = shell.editor().document();
+        let states = shell.session_states();
+        // A column scrolled partly out of view is cut at the tracks' edges,
+        // as its slots are.
+        let tracks = Rect::from_x_y_ranges(layout.tracks.x_range(), session.status_row.y_range());
+        let painter = ui.painter_at(tracks);
+        let colours = &theme.colors;
+        let stop_square = |rect: Rect, colour: Color32| {
+            painter.rect_filled(rect.shrink(5.0), 0.0, colour);
+        };
+        for column in &layout.columns {
+            let track = columns[column.index];
+            let Some(t) = doc.track(track).filter(|t| t.kind().holds_clips()) else {
+                continue;
+            };
+            let cells = StatusCells::track(column.rect, session.status_row);
+            let stop = cells.stop.intersect(tracks);
+            if stop.width() <= 0.0 {
+                continue;
+            }
+            let queued_to_stop = states
+                .iter()
+                .any(|s| s.track == track && s.state == SlotState::QueuedToStop);
+            stop_square(
+                cells.stop,
+                if queued_to_stop {
+                    colours.meter.0
+                } else {
+                    colours.separator.0
+                },
+            );
+            let press = ui.interact(stop, track_stop_id(track), Sense::click());
+            let label = format!("Stop Clips {}", t.name());
+            self.button(
+                &press,
+                &label,
+                queued_to_stop,
+                events,
+                "session.stop_track",
+                json!({ "track": track }),
+            );
+            painter.rect_filled(cells.field.shrink(1.0), 0.0, colours.lane.0);
+            // The playing clip's length in beats at the status display's
+            // right (observed); the counter and the progress circle wait
+            // for the engine to publish the clip's position.
+            let playing = states
+                .iter()
+                .find(|s| s.track == track && s.state != SlotState::Queued);
+            if let Some(clip) = playing.and_then(|s| doc.slot(track, s.scene)) {
+                let beats = clip.length.get() as f64 / TICKS_PER_QUARTER as f64;
+                let beats = (beats * 100.0).round() / 100.0;
+                painter.text(
+                    pos2(cells.field.right() - 4.0, cells.field.center().y),
+                    Align2::RIGHT_CENTER,
+                    format!("{beats}"),
+                    theme.small_font(),
+                    colours.text.0,
+                );
+            }
+        }
+
+        let main = MainStatusCells::compute(layout.main.rect, session.status_row);
+        // Main lies right of the tracks, outside the painter above.
+        let painter = ui.painter_at(main.stop_all.union(main.back));
+        painter.rect_filled(main.stop_all.shrink(5.0), 0.0, colours.separator.0);
+        let press = ui.interact(main.stop_all, stop_all_id(), Sense::click());
+        self.button(
+            &press,
+            "Stop All Clips",
+            false,
+            events,
+            "session.stop_all",
+            json!({}),
+        );
+        // The global follow-action switch: drawn in place, disabled until
+        // WP-3.10 brings follow actions.
+        let follow = main.follow.shrink(4.0);
+        painter.rect_stroke(
+            follow,
+            theme.sizes.corner,
+            Stroke::new(1.0, colours.pending.0),
+            StrokeKind::Inside,
+        );
+        let id = Id::new("session-follow-actions");
+        ui.interact(main.follow, id, Sense::hover());
+        ui.ctx().accesskit_node_builder(id, |node| {
+            node.set_role(Role::Button);
+            node.set_label("Enable Follow Actions Globally".to_owned());
+            node.set_disabled();
+            node.set_description("Not built yet: arrives with WP-3.10.".to_owned());
+            node.set_bounds(bounds(main.follow));
+        });
+        // Back to Arrangement lights while a Session clip has taken a track
+        // over from the Arrangement (L-SES-012).
+        let lit = !shell.session_over().is_empty();
+        let back = main.back.shrink2(vec2(5.0, 4.0));
+        painter.add(Shape::convex_polygon(
+            vec![
+                pos2(back.right(), back.top()),
+                pos2(back.left(), back.center().y),
+                pos2(back.right(), back.bottom()),
+            ],
+            if lit {
+                colours.accent.0
+            } else {
+                colours.pending.0
+            },
+            Stroke::NONE,
+        ));
+        let press = ui.interact(main.back, back_to_arrangement_id(), Sense::click());
+        self.button(
+            &press,
+            "Back to Arrangement",
+            lit,
+            events,
+            "session.back_to_arrangement",
+            json!({}),
+        );
     }
 
     /// Draws one scene's row in the Main column (L-SES-006).
@@ -398,7 +616,6 @@ impl GridUi {
             theme.small_font(),
             theme.colors.text_dim.0,
         );
-        // The launch triangle: drawn in place, live with WP-3.8.
         triangle(&painter, row.launch.shrink(4.0), theme.colors.text_dim.0);
         let response = ui.interact(row_rect, scene_row_id(scene), Sense::click());
         response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, name));
@@ -410,15 +627,17 @@ impl GridUi {
                 node.set_selected(selected);
                 node.set_bounds(bounds(row_rect));
             });
-        let launch = ui.interact(row.launch, scene_launch_id(scene), Sense::hover());
-        launch.widget_info(|| WidgetInfo::labeled(WidgetType::Button, false, "Launch Scene"));
-        ui.ctx()
-            .accesskit_node_builder(scene_launch_id(scene), |node| {
-                node.set_role(Role::Button);
-                node.set_label(format!("Launch Scene {name}"));
-                node.set_disabled();
-                node.set_description("Not built yet: arrives with WP-3.8.".to_owned());
-            });
+        // I-CLICK-009: the scene's launch button launches every clip in it.
+        let launch = ui.interact(row.launch, scene_launch_id(scene), Sense::click());
+        let label = format!("Launch Scene {name}");
+        self.button(
+            &launch,
+            &label,
+            false,
+            events,
+            "session.launch_scene",
+            json!({ "scene": scene }),
+        );
         if response.clicked() {
             response.request_focus();
             let modifiers = ui.input(|i| i.modifiers);
@@ -704,6 +923,18 @@ fn select(events: &mut Vec<UiEvent>, track: Option<TrackId>, scene: Option<Scene
         ids::SELECT,
         Value::Object(args),
     )));
+}
+
+/// The colour of a slot's launch triangle: grey while it's stopped,
+/// flashing white and green while a launch is queued, and green while the
+/// clip plays (observed). A stop still queued keeps the playing green.
+fn launch_colour(theme: &Theme, state: Option<SlotState>, time: f64) -> Color32 {
+    let colours = &theme.colors;
+    match state {
+        None => colours.text_dim.0,
+        Some(SlotState::Queued) if (time * 4.0) as i64 % 2 == 0 => colours.text.0,
+        Some(_) => colours.meter.0,
+    }
 }
 
 /// A right-pointing launch triangle, as Live draws it on a slot and a

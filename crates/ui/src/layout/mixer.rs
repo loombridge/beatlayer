@@ -77,6 +77,64 @@ impl SceneRow {
     }
 }
 
+/// One track's parts of the status row (L-SES-008): the stop button at the
+/// column's left, and the status display beside it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StatusCells {
+    /// The track's stop button.
+    pub stop: Rect,
+    /// The track's status display.
+    pub field: Rect,
+}
+
+impl StatusCells {
+    /// Places a track column's status cells in the status row.
+    #[must_use]
+    pub fn track(column: Rect, row: Rect) -> Self {
+        let stop = Rect::from_min_max(
+            pos2(column.left(), row.top()),
+            pos2(column.left() + unmeasured::STATUS_BUTTON, row.bottom()),
+        );
+        let field = Rect::from_min_max(
+            pos2(stop.right(), row.top()),
+            pos2(column.right(), row.bottom()),
+        );
+        Self { stop, field }
+    }
+}
+
+/// The Main column's parts of the status row (L-SES-008, L-SES-012): Stop
+/// All Clips at its left, and at its right the global follow-action switch
+/// and the Back to Arrangement button.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MainStatusCells {
+    /// Stop All Clips.
+    pub stop_all: Rect,
+    /// Enable Follow Actions Globally.
+    pub follow: Rect,
+    /// Back to Arrangement.
+    pub back: Rect,
+}
+
+impl MainStatusCells {
+    /// Places the Main column's status cells in the status row.
+    #[must_use]
+    pub fn compute(main: Rect, row: Rect) -> Self {
+        let button = |left: f32| {
+            Rect::from_min_max(
+                pos2(left, row.top()),
+                pos2(left + unmeasured::STATUS_BUTTON, row.bottom()),
+            )
+        };
+        let back = button(main.right() - unmeasured::STATUS_BUTTON);
+        Self {
+            stop_all: button(main.left()),
+            follow: button(back.left() - unmeasured::STATUS_BUTTON),
+            back,
+        }
+    }
+}
+
 /// The In/Out section's height (L-MIX-001).
 pub const IN_OUT_HEIGHT: f32 = 115.0;
 
@@ -104,6 +162,10 @@ pub const ARRANGEMENT_TITLE_ROW: f32 = 17.0;
 /// Sizes no observation has measured yet: Beatlayer's until one does (the
 /// mixer view spec, "To observe in Live").
 pub mod unmeasured {
+    /// The status row's buttons' width: a stop button, Stop All Clips, the
+    /// follow-action switch and Back to Arrangement are each as wide as
+    /// the row is tall.
+    pub const STATUS_BUTTON: f32 = super::STATUS_ROW;
     /// The margin inside a column for the In/Out rows and the send knobs.
     pub const PAD: f32 = 4.0;
     /// An In/Out row's pitch: seven rows over the section.

@@ -368,3 +368,64 @@ fn the_launch_defaults_start_as_observed_keep_their_values_and_seed_new_clips() 
         Some(bl_model::LaunchQuantization::Quarter)
     );
 }
+
+/// Polls the engine until the slots it publishes satisfy `done`.
+fn wait_for_slots(shell: &mut Shell, what: &str, done: impl Fn(&[bl_engine::SlotStatus]) -> bool) {
+    for _ in 0..500 {
+        shell.poll_engine();
+        if done(shell.session_states()) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    panic!("timed out waiting for {what}: {:?}", shell.session_states());
+}
+
+// Spec: session-view R32 (S-SES-001). Enter's command launches the selected
+// slots that hold a clip and the selected scenes, and a scripted agent
+// launches and stops by the same command IDs.
+#[test]
+fn launch_selected_launches_the_selection_and_agents_launch_and_stop_by_id() {
+    let (mut shell, track, first, second) = shell_with_a_slot_clip();
+    shell
+        .run(ids::SET_QUANTIZATION, json!({ "quantization": "none" }))
+        .unwrap();
+
+    // Nothing selected, or only an empty slot: nothing to launch.
+    let error = shell.run(ids::LAUNCH_SELECTED, json!({})).unwrap_err();
+    assert!(matches!(error, ShellError::Unavailable { .. }), "{error:?}");
+    shell
+        .run("session.select", json!({ "track": track, "scene": second }))
+        .unwrap();
+    let error = shell.run(ids::LAUNCH_SELECTED, json!({})).unwrap_err();
+    assert!(matches!(error, ShellError::Unavailable { .. }), "{error:?}");
+    assert!(shell.session_states().is_empty());
+
+    // The slot with a clip launches.
+    shell
+        .run("session.select", json!({ "track": track, "scene": first }))
+        .unwrap();
+    shell.run(ids::LAUNCH_SELECTED, json!({})).unwrap();
+    wait_for_slots(&mut shell, "the selected clip", |slots| {
+        slots.len() == 1 && slots[0].track == track && slots[0].scene == first
+    });
+
+    // An agent stops the track by ID, and launches the clip again.
+    shell
+        .run("session.stop_track", json!({ "track": track }))
+        .unwrap();
+    wait_for_slots(&mut shell, "the stop", <[_]>::is_empty);
+    shell
+        .run("session.launch", json!({ "track": track, "scene": first }))
+        .unwrap();
+    wait_for_slots(&mut shell, "the launch", |slots| slots.len() == 1);
+
+    // A selected scene launches its clips.
+    shell.run("session.stop_all", json!({})).unwrap();
+    wait_for_slots(&mut shell, "stop all", <[_]>::is_empty);
+    shell
+        .run("session.select", json!({ "scene": first }))
+        .unwrap();
+    shell.run(ids::LAUNCH_SELECTED, json!({})).unwrap();
+    wait_for_slots(&mut shell, "the scene", |slots| slots.len() == 1);
+}

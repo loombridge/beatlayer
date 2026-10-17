@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-322 commands in 31 areas.
+324 commands in 31 areas.
 
 ## Permission classes
 
@@ -249,6 +249,8 @@ Each command has:
 | [`scene.duplicate`](#sceneduplicate) | Duplicate Scene | `edit` |  |  |
 | [`scene.move`](#scenemove) | Move Scene | `edit` |  |  |
 | [`scene.rename`](#scenerename) | Rename Scene | `edit` |  |  |
+| [`session.back_to_arrangement`](#sessionback_to_arrangement) | Back to Arrangement | `read` | `F10` | `F10` |
+| [`session.back_to_arrangement_track`](#sessionback_to_arrangement_track) | Back to Arrangement (Track) | `read` |  |  |
 | [`session.copy_clip_to_slot`](#sessioncopy_clip_to_slot) | Copy Clip to Slot | `edit` |  |  |
 | [`session.deactivate`](#sessiondeactivate) | Deactivate Clips | `edit` | `0` | `0` |
 | [`session.delete`](#sessiondelete) | Delete in the Session View | `destructive` |  |  |
@@ -4247,6 +4249,38 @@ Arguments:
 Result: [`ChangeSet`](#changeset).
 
 ### Area `session`
+
+#### `session.back_to_arrangement`
+
+**Back to Arrangement**. Permission: `read`. Contexts: `global`.
+
+Returns every track to the Arrangement, as the Back to Arrangement button and F10 do. A Session clip that started has taken its track over from the Arrangement, and stays so after it stops, until this runs. It stops every track's Session clips at once, not on the launch quantisation grid, and drops launches and stops still queued; the Arrangement plays again from the playhead and the transport keeps running. It changes nothing in the set.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-TRANS-009 | `F10` | `F10` | `global` | Return every track to the Arrangement (Back to Arrangement) | runs it |
+
+Arguments: none (send `{}`).
+
+Result: nothing (`null`).
+
+#### `session.back_to_arrangement_track`
+
+**Back to Arrangement (Track)**. Permission: `read`. Contexts: `global`.
+
+Returns one track to the Arrangement, as the button in the track's Arrangement header does: its Session clip stops at once, a launch or a stop still queued on it is dropped, and its Arrangement clips play again from the playhead. Other tracks are not touched, and the transport keeps running. A track nothing took over just keeps playing its Arrangement. It changes nothing in the set.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track. |
+
+Result: nothing (`null`).
 
 #### `session.copy_clip_to_slot`
 

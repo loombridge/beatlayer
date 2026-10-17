@@ -1,7 +1,7 @@
 # MIDI controller data in clips: MIDI Ctrl envelopes, per-note pressure, and recording them
 
 - **Status:** draft
-- **Work packages:** WP-2.29 (the model, saving, commands, playback and the Envelopes tab's MIDI Ctrl entry: R1 to R9) and WP-2.29b (recording controllers into clips: Arrangement Record, Session recording and Capture MIDI: R10 to R16)
+- **Work packages:** WP-2.29 (the model, saving, commands, playback and the Envelopes tab's MIDI Ctrl entry: R1 to R9; playback reaches devices through WP-5.44's path for channel messages, and MIDI To's output comes with WP-5.34) and WP-2.29b (recording controllers into clips: Arrangement Record, Session recording and Capture MIDI: R10 to R16)
 - **Parity-matrix row:** Clips and launching: MIDI controller clip envelopes (MIDI Ctrl)
 - **Checked against:** Live 12.4.3 on macOS, 17 October 2026
 

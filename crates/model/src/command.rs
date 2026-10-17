@@ -18,6 +18,7 @@ use crate::device::{Device, DeviceRole};
 use crate::document::Document;
 use crate::error::ModelError;
 use crate::ids::{ClipId, ContentHash, DeviceId, ParamId, SceneId, TrackId};
+use crate::launch::{ClipLaunch, LaunchQuantization};
 use crate::metronome::{CountIn, MetronomeRhythm, MetronomeSound};
 use crate::scene::Scene;
 use crate::shared::Shared;
@@ -597,6 +598,32 @@ pub enum Command {
         #[schemars(range(min = 0.0))]
         fade_out: f64,
     },
+    /// Switches a Session clip's Legato: on, it takes over the play position
+    /// of the clip playing on its track when it launches.
+    SetClipLegato {
+        /// The clip, which sits in a Session slot.
+        clip: ClipId,
+        /// Whether Legato is on.
+        legato: bool,
+    },
+    /// Sets a Session clip's own launch quantisation.
+    SetClipLaunchQuantization {
+        /// The clip, which sits in a Session slot.
+        clip: ClipId,
+        /// The step the clip's launches wait for; `null` (or nothing)
+        /// follows the global quantisation, Live's "Global".
+        #[serde(default)]
+        quantization: Option<LaunchQuantization>,
+    },
+    /// Sets how much the velocity of the note that launches a Session clip
+    /// changes its volume.
+    SetClipVelocityAmount {
+        /// The clip, which sits in a Session slot.
+        clip: ClipId,
+        /// 0 for no influence, up to 1 for 100 %.
+        #[schemars(range(min = 0.0, max = 1.0))]
+        amount: f64,
+    },
     /// Sets the value of one of a clip's envelopes at a position, adding a
     /// breakpoint there or replacing the one that's there, as clicking or
     /// dragging a breakpoint in the Envelopes tab does. A parameter with no
@@ -963,6 +990,11 @@ impl Command {
             Self::SetClipLoopEnabled { .. } => "Switch clip loop",
             Self::SetClipGain { .. } => "Change clip gain",
             Self::SetClipFades { .. } => "Change clip fades",
+            // WP-3.4. Live's undo names for the Launch panel's controls are
+            // to observe; Beatlayer's name the edit.
+            Self::SetClipLegato { .. } => "Switch Legato",
+            Self::SetClipLaunchQuantization { .. } => "Change clip quantization",
+            Self::SetClipVelocityAmount { .. } => "Change velocity amount",
             // WP-3.15. Live's undo names for clip envelope edits are to
             // observe; Beatlayer's name the edit.
             Self::SetClipEnvelopeBreakpoint { .. } => "Add Envelope Breakpoint",
@@ -1417,6 +1449,20 @@ impl Document {
                 audio.fade_in = *fade_in;
                 audio.fade_out = *fade_out;
             }),
+            Command::SetClipLegato { clip, legato } => {
+                self.edit_launch(*clip, |launch| launch.legato = *legato)
+            }
+            Command::SetClipLaunchQuantization { clip, quantization } => {
+                self.edit_launch(*clip, |launch| launch.quantization = *quantization)
+            }
+            Command::SetClipVelocityAmount { clip, amount } => {
+                if !(0.0..=1.0).contains(amount) {
+                    return Err(ModelError::InvalidInput(
+                        "the velocity amount is from 0 to 1",
+                    ));
+                }
+                self.edit_launch(*clip, |launch| launch.velocity_amount = *amount)
+            }
             Command::SetClipEnvelopeBreakpoint {
                 clip,
                 target,
@@ -2097,6 +2143,28 @@ impl Document {
         edit(&mut next);
         check_marker_order(&next)?;
         self.edit_audio(id, |audio| *audio = next)
+    }
+
+    /// Changes the launch settings of the Session clip `id`.
+    fn edit_launch(
+        &mut self,
+        id: ClipId,
+        edit: impl FnOnce(&mut ClipLaunch),
+    ) -> Result<(), ModelError> {
+        let owner = self.clip_owner(id)?;
+        if !self
+            .track_ref(owner)?
+            .slots()
+            .any(|(_, clip)| clip.id == id)
+        {
+            return Err(ModelError::NotSlotClip(id));
+        }
+        let mut next = self.clip_ref(id)?.launch;
+        edit(&mut next);
+        if next != self.clip_ref(id)?.launch {
+            self.clip_mut(id)?.launch = next;
+        }
+        Ok(())
     }
 
     /// Changes an audio clip's data with `edit`, if the result is valid.
@@ -6151,6 +6219,69 @@ mod tests {
                 clip,
             }),
             ModelError::NoSuchScene(nowhere)
+        );
+    }
+
+    // Spec: launch-quantisation R14
+    #[test]
+    fn a_session_clips_launch_settings_are_set_and_kept_in_range() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        let scene = song.doc.scenes().next().unwrap().id;
+        let clip: ClipId = song.fresh();
+        song.apply(Command::CreateSlotClip {
+            track,
+            scene,
+            clip: Clip::new(clip, Ticks::ZERO, Ticks::WHOLE, audio()),
+        })
+        .unwrap();
+        assert_eq!(song.doc.clip(clip).unwrap().launch, ClipLaunch::default());
+
+        song.apply(Command::SetClipLegato { clip, legato: true })
+            .unwrap();
+        song.apply(Command::SetClipLaunchQuantization {
+            clip,
+            quantization: Some(LaunchQuantization::None),
+        })
+        .unwrap();
+        song.apply(Command::SetClipVelocityAmount { clip, amount: 1.0 })
+            .unwrap();
+        assert_eq!(
+            song.doc.clip(clip).unwrap().launch,
+            ClipLaunch {
+                legato: true,
+                quantization: Some(LaunchQuantization::None),
+                velocity_amount: 1.0,
+            },
+            "None is a step of its own, apart from following the global one"
+        );
+        song.apply(Command::SetClipLaunchQuantization {
+            clip,
+            quantization: None,
+        })
+        .unwrap();
+        assert_eq!(song.doc.clip(clip).unwrap().launch.quantization, None);
+
+        for amount in [-0.1, 1.1, f64::NAN] {
+            assert!(matches!(
+                song.reject(Command::SetClipVelocityAmount { clip, amount }),
+                ModelError::InvalidInput(_)
+            ));
+        }
+
+        // An Arrangement clip has no launch settings.
+        let placed: ClipId = song.fresh();
+        song.apply(Command::CreateClip {
+            track,
+            clip: Clip::new(placed, Ticks::ZERO, Ticks::WHOLE, audio()),
+        })
+        .unwrap();
+        assert_eq!(
+            song.reject(Command::SetClipLegato {
+                clip: placed,
+                legato: true,
+            }),
+            ModelError::NotSlotClip(placed)
         );
     }
 

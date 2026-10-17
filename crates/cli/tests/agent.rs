@@ -1668,3 +1668,73 @@ fn an_agent_expands_a_device_and_switches_its_menu_option_by_command_id() {
         (json!(1.0), json!(true), json!(true))
     );
 }
+
+// Spec: auto-filter R15, device-framework R14 (WP-5.20): an agent inserts
+// Sweep by its type, sets its parameters by ID, including the two menu
+// options, and reads every one back with its descriptor.
+#[test]
+fn an_agent_inserts_sweep_by_its_type_and_sets_and_reads_its_parameters_by_id() {
+    use bl_devices::auto_filter::{
+        AUTO_FILTER, FORMANT, FREQ, HI_QUALITY, LFO_AMOUNT, MONO_SIDECHAIN, TYPE,
+    };
+
+    let mut shell = Shell::headless();
+    shell.set_device_types(bl_devices::device_types());
+    let mut client = Client::new(InProcess::new(Agent::headless(true), shell));
+    client.initialize("sweep-agent").unwrap();
+    let track = default_tracks(&mut client)[2];
+    let set = |param: bl_model::ParamId, value: f64| {
+        json!({ "command": "device.set_param",
+                "args": { "device": {"$ref": "Sweep"}, "param": param, "value": value } })
+    };
+    let reply = call(
+        &mut client,
+        "run",
+        json!({ "label": "Add Sweep", "commands": [
+            { "command": "device.insert",
+              "args": { "track": track, "index": 0,
+                        "device": { "id": {"$new": "Sweep"}, "name": "Sweep",
+                                    "kind": { "native": { "device_type": AUTO_FILTER } },
+                                    "enabled": true, "params": [] } } },
+            set(TYPE, 9.0),
+            set(FORMANT, 50.0),
+            set(FREQ, 440.0),
+            set(LFO_AMOUNT, 25.0),
+            set(HI_QUALITY, 1.0),
+        ] }),
+    );
+    let device = reply["ids"]["Sweep"].clone();
+    let read = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "device.parameters", "args": { "device": device } }] }),
+    );
+    let params = read["results"][0]["result"]["params"].as_array().unwrap();
+    assert_eq!(params.len(), 42, "every parameter is listed");
+    let get = |id: bl_model::ParamId| {
+        params
+            .iter()
+            .find(|p| p["id"] == json!(id.0))
+            .unwrap_or_else(|| panic!("parameter {id:?}"))
+            .clone()
+    };
+    let values: Vec<_> = [TYPE, FORMANT, FREQ, LFO_AMOUNT, HI_QUALITY]
+        .iter()
+        .map(|id| get(*id)["value"].clone())
+        .collect();
+    assert_eq!(
+        values,
+        [
+            json!(9.0),
+            json!(50.0),
+            json!(440.0),
+            json!(25.0),
+            json!(1.0)
+        ]
+    );
+    // The menu options are marked, and Mono Sidechain starts on.
+    assert_eq!(get(HI_QUALITY)["menu_option"], json!(true));
+    assert_eq!(get(MONO_SIDECHAIN)["menu_option"], json!(true));
+    assert_eq!(get(MONO_SIDECHAIN)["value"], json!(1.0));
+    assert!(params.iter().all(|p| p["automatable"] == json!(true)));
+}

@@ -23,7 +23,8 @@
 //! ([`reverb`]), the limiter ([`limiter`]), the tempo-synced delay
 //! ([`delay`]) and the Utility device ([`utility`], WP-2.18b); [`register`]
 //! adds them to the engine. The instruments are the polysynth
-//! ([`polysynth`], WP-2.17) and the sampler ([`sampler`], WP-2.16). The
+//! ([`polysynth`], WP-2.17), the sampler ([`sampler`], WP-2.16) and the
+//! eight-slot drum sampler ([`kitbag`], WP-5.17). The
 //! rest of the core effects ship with WP-2.18. [`testing`] has the devices
 //! the framework's tests use. The kit's two example plug-ins join the
 //! device list with the `kit-examples` feature, off by default.
@@ -36,6 +37,7 @@ pub mod eq;
 mod framework;
 pub mod hold;
 pub mod kit;
+pub mod kitbag;
 pub mod lfo;
 pub mod lift;
 pub mod limiter;
@@ -57,6 +59,7 @@ pub use eq::{Contour, EQ, eq_type};
 pub use framework::{Audio, NativeDevice, NativeNode, ParamBank, add};
 pub use hold::{HOLD, hold_type};
 pub use kit::{KitFactory, KitHost};
+pub use kitbag::{KITBAG, Kitbag, kitbag_type};
 pub use lfo::{Lfo, Rate, Shape, Stereo, Wave};
 pub use lift::{LIFT, lift_type};
 pub use limiter::{Brickwall, limiter_type};
@@ -69,13 +72,6 @@ pub use touch::{TOUCH, touch_type};
 
 use bl_engine::{DeviceType, Registry};
 use bl_model::{DeviceDescription, DeviceDisplay, DeviceId, OrdMap, ParamId};
-
-/// Whether the native device type `device_type` plays one sample, which
-/// `device.load_sample` gives it: Snapshot and Strike.
-#[must_use]
-pub fn plays_a_sample(device_type: &str) -> bool {
-    matches!(device_type, sampler::SAMPLER | DRUM_SAMPLER)
-}
 
 /// The display of the native device `device_type`, if its type draws one
 /// from its parameters and the data its node publishes (the device
@@ -97,8 +93,8 @@ pub fn display(
 }
 
 /// Adds Beatlayer's native devices to `registry`: the compressor, the
-/// polysynth, the limiter, the delay, the reverb, Utility, the EQ and the
-/// sampler.
+/// polysynth, the limiter, the delay, the reverb, Utility, the EQ, the
+/// sampler and the eight-slot drum sampler.
 pub fn register(registry: &mut Registry) {
     compressor::register(registry);
     polysynth::register(registry);
@@ -109,6 +105,7 @@ pub fn register(registry: &mut Registry) {
     eq::register(registry);
     sampler::register(registry);
     drum_sampler::register(registry);
+    kitbag::register(registry);
     lift::register(registry);
     touch::register(registry);
     dice::register(registry);
@@ -119,7 +116,7 @@ pub fn register(registry: &mut Registry) {
 
 /// The native device types Beatlayer ships, for the browser and the shell:
 /// the compressor, the polysynth, the limiter, the delay, the reverb,
-/// Utility, the EQ and the sampler.
+/// Utility, the EQ, the sampler and the eight-slot drum sampler.
 #[must_use]
 pub fn device_types() -> Vec<DeviceType> {
     let mut registry = Registry::empty();
@@ -138,6 +135,14 @@ pub fn relative_clip_envelopes(document: &mut bl_model::Document) {
         let kind = types.iter().find(|t| t.kind == device.kind)?;
         kind.description.param(param).cloned()
     });
+}
+
+/// Whether the native device type `device_type` plays samples that
+/// `device.load_sample` loads into it: the sampler and the two drum
+/// samplers.
+#[must_use]
+pub fn plays_samples(device_type: &str) -> bool {
+    matches!(device_type, sampler::SAMPLER | kitbag::KITBAG | DRUM_SAMPLER)
 }
 
 /// A [`KitHost`] with the kit plug-ins compiled into Beatlayer: its

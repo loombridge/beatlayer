@@ -144,7 +144,7 @@ Commands the manual places in the Edit menu that didn't show with this focus, an
 | M-CREATE-007 | Consolidate Time to New Scene | | | disabled | |
 | | — | | | | |
 | M-CREATE-008 | Insert Empty MIDI Clip | ⇧⌘M | S-SES-007, S-ARR-037 | disabled | Enabled in the empty slot's and time selection's context menus. A new clip is one bar long in the time signature in force at the time (observed in 12.4.3 (macOS), 15 October 2026) |
-| M-CREATE-009 | Capture MIDI | | | disabled | Same as the Control Bar's Capture MIDI button. Disabled until notes have been played, then enabled (observed in 12.4.3 (macOS), 15 October 2026) |
+| M-CREATE-009 | Capture MIDI | | | disabled | Same as the Control Bar's Capture MIDI button. Disabled until notes have been played, then enabled (observed in 12.4.3 (macOS), 15 October 2026). Runs `midi.capture` ([capture MIDI](../specs/capture-midi.md)) |
 | | — | | | | |
 | M-CREATE-010 | Create Fade | ⌥⌘F | S-ARR-008 | disabled | The manual names it Create Fade In/Out or Create Crossfade depending on the selection |
 | | — | | | | |

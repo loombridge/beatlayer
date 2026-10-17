@@ -93,8 +93,8 @@ pub use clip::{
 };
 pub use command::Command;
 pub use device::{
-    Device, DeviceKind, DeviceRole, DeviceWindows, PluginFormat, PluginState, Sidechain,
-    WindowFrame,
+    Device, DeviceKind, DeviceRole, DeviceWindows, MAX_MEDIA_SLOTS, PluginFormat, PluginState,
+    Sidechain, WindowFrame,
 };
 pub use device_display::{DeviceDisplay, DisplayMarker, DisplayReading, DisplaySeries};
 pub use device_layout::DeviceLayout;

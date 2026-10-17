@@ -142,7 +142,7 @@ fn a_dropped_sample_loads_into_strike_under_the_pointer() {
             .document()
             .device(device)
             .unwrap()
-            .media
+            .media_at(0)
             .is_some(),
         "the drop loaded the sample"
     );

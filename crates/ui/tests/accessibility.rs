@@ -1111,6 +1111,25 @@ fn a_device(h: &mut Harness) {
         .unwrap();
 }
 
+/// The eight-slot drum sampler on the third track, the selected track, no
+/// device selected (WP-5.17).
+fn a_drum_sampler(h: &mut Harness) {
+    let track = h.shell.editor().document().top_level().nth(2).unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let t = bl_devices::kitbag_type();
+    h.shell
+        .run(
+            "device.add",
+            json!({ "device": { "kind": t.kind, "name": t.name, "role": t.role } }),
+        )
+        .unwrap();
+    h.shell
+        .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
 /// The Test Sidechain on audio track 3, the selected track, its sidechain
 /// section shown, no device selected (WP-2.19b).
 fn a_sidechained_device(h: &mut Harness) {
@@ -2002,6 +2021,12 @@ fn paths() -> BTreeMap<&'static str, Path> {
         (
             "device.set_sample",
             Exception(Equivalent("loading a sample (`device.load_sample`)")),
+        ),
+        // The drum sampler's slot cells (WP-5.17): Tab to one, then Enter
+        // selects the slot.
+        (
+            "device.select_slot",
+            main(a_drum_sampler, device_view, "Slot 2", Key::Enter),
         ),
         // A device's sidechain strip and section (routing R29): Enter on
         // its buttons, Up and Down on its chooser and number boxes.

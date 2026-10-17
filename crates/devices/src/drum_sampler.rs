@@ -807,6 +807,10 @@ impl DrumSampler {
                     }
                 }
             }
+            // It doesn't answer a channel message yet, as Snapshot doesn't.
+            NoteKind::Control { .. }
+            | NoteKind::PitchBend { .. }
+            | NoteKind::ChannelPressure { .. } => {}
         }
     }
 

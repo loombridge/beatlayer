@@ -1017,7 +1017,7 @@ fn the_engine_plays_the_sample_the_set_names() {
         .unwrap();
     let strike = drum_sampler_type();
     let mut device: Device = strike.device(editor.new_id());
-    device.media = Some(hash);
+    device.media = vec![Some(hash)];
     editor
         .apply(Command::InsertDevice {
             track,

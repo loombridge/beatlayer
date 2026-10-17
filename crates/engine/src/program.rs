@@ -13,6 +13,7 @@ use crate::node::{
     Block, Node, NodeData, NodeEvent, NodeKey, NoteBuffer, ParamValue, TransportInfo,
 };
 use crate::session::{SceneMaps, SessionPlayback};
+use crate::state::PlayedParam;
 use crate::sidechain::SidechainKey;
 
 /// A compiled song, ready to run on the audio thread: a flat array of
@@ -165,6 +166,16 @@ impl Instance {
             Self::Device(node) => Some(node.as_mut()),
             Self::Mixer(mixer) => Some(mixer.as_mut()),
             Self::Route(_) | Self::Sidechain(_) => None,
+        }
+    }
+
+    /// What the instance's last block played under modulation (WP-5.9).
+    fn modulated(&self, report: &mut dyn FnMut(ParamId, f64, f64)) {
+        match self {
+            Self::Device(node) => node.modulated(report),
+            Self::Mixer(mixer) => Node::modulated(mixer.as_ref(), report),
+            Self::Route(route) => route.modulated(report),
+            Self::Sidechain(_) => {}
         }
     }
 
@@ -572,6 +583,25 @@ impl EngineProgram {
                 }
                 None => to.fill(0.0),
             }
+        }
+    }
+
+    /// Adds to `out`, up to its capacity, every parameter the last block
+    /// played under modulation (WP-5.9). Real-time safe: `out` was made
+    /// with room for them.
+    pub(crate) fn modulated(&self, out: &mut Vec<PlayedParam>) {
+        for slot in &self.slots {
+            let Some(instance) = &slot.node else { continue };
+            instance.modulated(&mut |param, base, played| {
+                if out.len() < out.capacity() {
+                    out.push(PlayedParam {
+                        node: slot.key,
+                        param,
+                        base,
+                        played,
+                    });
+                }
+            });
         }
     }
 

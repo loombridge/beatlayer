@@ -27,6 +27,7 @@ use std::collections::BTreeSet;
 use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, SQRT_2};
 
 use bl_core::time::SampleRate;
+use bl_model::modulation::Travel;
 use bl_model::{CrossfadeAssign, Document, Mixer, ParamId, Tap, TrackId, TrackKind};
 
 use crate::automation::{AutomationList, PlacedEnvelope};
@@ -420,6 +421,9 @@ pub struct TrackMixer {
     meters: Meters,
     /// The envelopes driving its parameters while the song plays (WP-2.12).
     automation: Option<NodeData>,
+    /// The base and the played value, at the last block's last frame, of the
+    /// volume, pan and activator while a clip's modulation acts on them.
+    modulated: [Option<(f64, f64)>; 3],
 }
 
 impl TrackMixer {
@@ -438,6 +442,7 @@ impl TrackMixer {
             smoothing: smoothing_frames(config.sample_rate),
             meters: Meters::new(config),
             automation: None,
+            modulated: [None; 3],
         };
         node.set(track::VOLUME, ParamValue::Set(mixer.volume));
         node.set(track::PAN, ParamValue::Set(mixer.pan));
@@ -543,6 +548,9 @@ impl Node for TrackMixer {
             .and_then(|d| d.downcast_ref::<AutomationList>())
             .filter(|list| !list.is_empty());
         let playing = transport.playing.then_some(automation).flatten();
+        if playing.is_none() {
+            self.modulated = [None; 3];
+        }
         // A control whose envelopes are gone heads back to what it asks for
         // from where the automation left it.
         if automation.is_none() {
@@ -589,6 +597,17 @@ impl Node for TrackMixer {
     fn receive_data(&mut self, data: NodeData) {
         if data.downcast_ref::<AutomationList>().is_some() {
             self.automation = Some(data);
+        }
+    }
+
+    fn modulated(&self, report: &mut dyn FnMut(ParamId, f64, f64)) {
+        for (param, entry) in [track::VOLUME, track::PAN, track::MUTE]
+            .into_iter()
+            .zip(self.modulated)
+        {
+            if let Some((base, played)) = entry {
+                report(param, base, played);
+            }
         }
     }
 }
@@ -644,12 +663,22 @@ impl TrackMixer {
         for (index, ramp) in self.gains.iter_mut().enumerate() {
             *ramp = Ramp::at(gain_at(list, last, index, controls, fixed_pan));
         }
+        for ((entry, param), control) in self
+            .modulated
+            .iter_mut()
+            .zip([track::VOLUME, track::PAN, track::MUTE])
+            .zip(controls)
+        {
+            *entry = list
+                .modulates(param)
+                .then(|| played(list, last, param, control));
+        }
     }
 }
 
 /// The gain of channel `index` at `frame`: an automated parameter from its
-/// envelope, the clips' modulation added on top (WP-3.15, clamped to the
-/// control's range), and a control where it is for the rest.
+/// envelope or a control where it is, with the clips' modulation on top
+/// (the modulation spec, R2 to R4).
 fn gain_at(
     list: &AutomationList,
     frame: i64,
@@ -658,22 +687,32 @@ fn gain_at(
     fixed_pan: Option<[f64; 2]>,
 ) -> f64 {
     let [volume, pan, mute] = controls;
-    let base = |param, control: f64| {
-        list.envelope(param)
-            .map_or(control, |envelope| envelope.value_at(frame))
-            + list.modulation(param, frame).unwrap_or(0.0)
-    };
-    if base(track::MUTE, mute) != 0.0 {
+    if played(list, frame, track::MUTE, mute).1 != 0.0 {
         return 0.0;
     }
-    let level = base(track::VOLUME, volume).max(0.0);
-    let [left, right] =
-        fixed_pan.unwrap_or_else(|| pan_gains(base(track::PAN, pan).clamp(-1.0, 1.0)));
+    let level = played(list, frame, track::VOLUME, volume).1.max(0.0);
+    let [left, right] = fixed_pan
+        .unwrap_or_else(|| pan_gains(played(list, frame, track::PAN, pan).1.clamp(-1.0, 1.0)));
     match index {
         0 => level * left,
         1 => level * right,
         _ => level,
     }
+}
+
+/// The base and the played value of the mixer control `param` at `frame`:
+/// its envelope's value where it has one, else `control`, then moved by the
+/// clips' modulation.
+fn played(list: &AutomationList, frame: i64, param: ParamId, control: f64) -> (f64, f64) {
+    let base = list
+        .envelope(param)
+        .map_or(control, |envelope| envelope.value_at(frame));
+    let travel = match param {
+        track::VOLUME => Travel::Fader,
+        track::PAN => Travel::Pan,
+        _ => Travel::Switch,
+    };
+    (base, list.played(travel, param, frame, base))
 }
 
 /// The shape of the planar buffers a route mixes: `channels` channels
@@ -707,6 +746,9 @@ pub struct Route {
     smoothing: u32,
     /// The envelope driving its level while the song plays (WP-2.12).
     automation: Option<NodeData>,
+    /// The level's base and the value it played at the last block's last
+    /// frame, while a clip's modulation acts on it.
+    modulated: Option<(f64, f64)>,
 }
 
 impl Route {
@@ -722,6 +764,7 @@ impl Route {
             gain: Ramp::at(0.0),
             smoothing: smoothing_frames(config.sample_rate),
             automation: None,
+            modulated: None,
         };
         route.set(route::LEVEL, ParamValue::Set(level));
         route.gain = Ramp::at(route.target());
@@ -822,6 +865,7 @@ impl Route {
         let envelope = list.and_then(|list| list.envelope(route::LEVEL));
         let modulated = list.is_some_and(|list| list.modulates(route::LEVEL));
         let follows = song.is_some() && (envelope.is_some() || modulated);
+        self.modulated = None;
         if !follows && events.is_empty() && self.is_silent() {
             return;
         }
@@ -850,6 +894,7 @@ impl Route {
                     }
                     let last = now + segment.range.end as i64 - 1;
                     self.gain = Ramp::at(self.envelope_gain(list, envelope, last));
+                    self.modulated = modulated.then(|| self.level_at(list, envelope, last));
                 }
                 None => {
                     let mut after = self.gain;
@@ -885,8 +930,31 @@ impl Route {
         if self.solo_mute || self.closed {
             return 0.0;
         }
-        let level = envelope.map_or(self.level, |envelope| envelope.value_at(frame));
-        (level + list.modulation(route::LEVEL, frame).unwrap_or(0.0)).max(0.0)
+        self.level_at(list, envelope, frame).1.max(0.0)
+    }
+
+    /// The level's base and played value at `frame` (the modulation spec,
+    /// R3): its envelope's or its control's, moved by the clips' modulation
+    /// on the send's travel.
+    fn level_at(
+        &self,
+        list: &AutomationList,
+        envelope: Option<&PlacedEnvelope>,
+        frame: i64,
+    ) -> (f64, f64) {
+        let base = envelope.map_or(self.level, |envelope| envelope.value_at(frame));
+        (
+            base,
+            list.played(Travel::Send, route::LEVEL, frame, base),
+        )
+    }
+
+    /// Reports the level when the last block played it under modulation
+    /// (WP-5.9).
+    pub(crate) fn modulated(&self, report: &mut dyn FnMut(ParamId, f64, f64)) {
+        if let Some((base, played)) = self.modulated {
+            report(route::LEVEL, base, played);
+        }
     }
 }
 

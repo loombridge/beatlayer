@@ -8,6 +8,7 @@ bl_rt::install_trap!();
 mod common;
 
 use bl_core::time::{Bpm, TempoMap, Ticks};
+use bl_model::fader::{fader_gain, fader_position};
 use bl_engine::TransportCommand;
 use bl_model::{
     AutomationTarget, Clip, ClipData, ClipId, Command, MidiData, MixerParam, TrackId, TrackKind,
@@ -67,10 +68,17 @@ fn ramp_value(at: usize, from: usize, to: usize) -> f64 {
     (at.saturating_sub(from) as f64) * per_frame / whole
 }
 
-/// The sample the DC device's 1.0 becomes through a fader at 0.5 with
-/// `modulation` added.
-fn want(modulation: f64) -> f32 {
-    (0.5 + modulation) as f32
+/// The sample the DC device's 1.0 becomes through a fader at 0.5 under a
+/// volume envelope at `share` (modulation spec, R4): the fader's position
+/// brought down to that share of its own, so 1.0 leaves the fader as it is
+/// and 0.0 is silence.
+fn want(share: f64) -> f32 {
+    fader_gain(fader_position(0.5) * share) as f32
+}
+
+/// What the fader plays alone: 0.5.
+fn alone() -> f32 {
+    want(1.0)
 }
 
 // Spec: clip-envelopes R3, R4
@@ -95,8 +103,9 @@ fn a_linked_clip_envelope_drives_the_parameter_while_the_clip_plays() {
     let total = BAR * 2 + 256;
     let out = rig.render(total, 64);
     assert_eq!(out.len(), total);
-    // The envelope follows the clip's one-bar loop: each bar ramps from the
-    // fader's 0.5 to 1.5, and after the clip the fader plays alone.
+    // The envelope follows the clip's one-bar loop: each bar ramps the
+    // fader's share from silence to its own 0.5, and after the clip the
+    // fader plays alone.
     for (frame, &sample) in out[..BAR * 2].iter().enumerate() {
         let expected = want(ramp_value(frame % BAR, 0, BAR));
         assert!(
@@ -105,7 +114,7 @@ fn a_linked_clip_envelope_drives_the_parameter_while_the_clip_plays() {
         );
     }
     assert!(
-        out[BAR * 2..].iter().all(|&s| s == want(0.0)),
+        out[BAR * 2..].iter().all(|&s| s == alone()),
         "after the clip the fader plays alone"
     );
     assert!(
@@ -150,7 +159,8 @@ fn an_unlinked_clip_envelope_runs_once_from_the_clip_start() {
     let (mut rig, a) = rig_at(64, 0.5);
     let clip = looping_clip(&mut rig, a, Ticks::ZERO, 2);
     // The envelope is two bars long while the clip loops every bar: unlinked
-    // it doesn't repeat, so the fader climbs to 1.5 across both bars.
+    // it doesn't repeat, so the fader climbs from silence to its own level
+    // across both bars.
     rig.apply(Command::SetClipEnvelopeLinked {
         clip,
         target: volume(),
@@ -178,7 +188,7 @@ fn an_unlinked_clip_envelope_runs_once_from_the_clip_start() {
         );
     }
     assert!(
-        out[BAR * 2..].iter().all(|&s| s == want(0.0)),
+        out[BAR * 2..].iter().all(|&s| s == alone()),
         "after the clip the fader plays alone"
     );
 }
@@ -218,7 +228,7 @@ fn an_envelope_plays_only_where_its_clip_does() {
     rig.sender.transport(TransportCommand::Play);
     let out = rig.render(BAR * 3, 64);
     assert!(
-        out[..BAR].iter().all(|&s| s == want(0.0)),
+        out[..BAR].iter().all(|&s| s == alone()),
         "before the clip the fader plays alone"
     );
     for (frame, &sample) in out[BAR..BAR * 2].iter().enumerate() {
@@ -230,7 +240,7 @@ fn an_envelope_plays_only_where_its_clip_does() {
         );
     }
     assert!(
-        out[BAR * 2..].iter().all(|&s| s == want(0.0)),
+        out[BAR * 2..].iter().all(|&s| s == alone()),
         "after it, again"
     );
 }
@@ -259,11 +269,11 @@ fn clearing_an_envelope_hands_the_parameter_back() {
     assert!(!synced.program, "clearing an envelope needs no new program");
     let out = rig.render(2_048, 64);
     assert!(
-        out[..960].windows(2).all(|w| w[1] < w[0]),
-        "the fader glides back down to its control"
+        out[..960].windows(2).all(|w| w[1] > w[0]),
+        "the fader glides back up to its control"
     );
     assert!(
-        out[960..].iter().all(|&s| s == want(0.0)),
+        out[960..].iter().all(|&s| s == alone()),
         "and rests at the control again"
     );
 }
@@ -323,7 +333,7 @@ fn a_linked_clip_envelope_lands_where_the_tempo_map_places_it() {
         want(line)
     );
     assert!(
-        out[end..].iter().all(|&s| s == want(0.0)),
+        out[end..].iter().all(|&s| s == alone()),
         "after the clip the fader plays alone"
     );
 }

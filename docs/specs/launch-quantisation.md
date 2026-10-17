@@ -1,7 +1,7 @@
 # Session View: clip launching, launch quantisation and stop buttons
 
-- **Status:** partial <!-- the engine's launching, the commands, and what a set saves are implemented and tested; the grid's launch buttons, the status row, and the Control Bar's Quantization Menu are WP-3.8's -->
-- **Work packages:** WP-3.2
+- **Status:** partial <!-- the engine's launching, the commands, and what a set saves are implemented and tested; the grid's launch buttons, the status row, and the Control Bar's Quantization Menu are WP-3.8's; a clip's launch settings and the Launch preferences are stored and set by command, but the engine doesn't read Legato, a clip's own quantisation or its velocity amount yet (WP-3.4) -->
+- **Work packages:** WP-3.2, WP-3.4
 - **Parity-matrix row:** Clips and launching: "Launch modes: Trigger, Gate, Toggle, Repeat", "Legato, launch quantisation, velocity amount, nudge, Select on Launch", "Clip stop buttons, removable"
 - **Checked against:** the Live 12 reference manual, chapter 7 "Session View"; Live 12.4.3 on macOS, 13 October 2026 ("Session View") and 11 October 2026 (the Launch settings).
 
@@ -38,6 +38,9 @@ This spec covers the launch and stop state machine in the engine, the global lau
 - **R11.** One clip plays per track: launching a slot while another of the track's slots plays stops the old one exactly where the new one starts, and a launch or a stop queued for a track replaces one already queued, so two launches on one track act in order. (S1)
 - **R12.** A second launch of the slot that is already playing changes nothing, for now: what a second press means is the clip's launch mode (WP-3.3). (S6)
 - **R13.** S-GQ-001 to S-GQ-005 set the value to a sixteenth, an eighth, a quarter, one bar and None; S-SES-024 to S-SES-027, and Options ▸ Smaller, Larger, Triplet and Launch Quantization Enabled (M-OPT-011 to M-OPT-014), make the value smaller, larger, its triplet, and switch quantisation on or off. The Control Bar's Quantization Menu shows the value (WP-3.8 draws it). Setting a value doesn't change the enabled switch, and the switch doesn't change the value. (S3, S4)
+- **R14.** A Session clip carries Legato, its own launch quantisation (none chosen means Global, following the global value; None is a step of its own) and a velocity amount from 0 to 1, saved with the clip and left out of the file while they are the defaults (off, Global, 0), so a set saved before WP-3.4 opens with the defaults. `clip.set_legato`, `clip.set_launch_quantization` and `clip.set_velocity_amount` change them, each one undo step, and refuse a clip that isn't in a slot. What the engine does with them is still to build. (S1, S3)
+- **R15.** The Launch section of Record, Warp & Launch holds Default Launch Mode (Trigger), Default Launch Quantization (Global), Select on Launch (on), Select Next Scene on Launch (on) and Start Recording on Scene Launch (off): preferences, kept between starts, not saved with a set and no undo step, each with a `settings.set_*` command and shown in `settings.state` under `launch`. A new Session clip starts with Default Launch Quantization. (S3)
+- **R16.** While Select on Launch is on, launching a slot that holds a clip selects that slot; while Select Next Scene on Launch is on, launching a scene selects the scene after it, and nothing when it is the last. (S3)
 
 ## Tests
 
@@ -56,3 +59,6 @@ This spec covers the launch and stop state machine in the engine, the global lau
 | R11 | `crates/engine/tests/session.rs`, `two_launches_on_a_track_act_in_order`; `crates/engine/src/session.rs`, `a_second_launch_on_a_track_takes_over_from_the_first` | engine and unit test |
 | R12 | `crates/engine/src/session.rs`, `a_launch_while_playing_waits_for_the_grid_and_a_launch_while_stopped_doesnt` | unit test |
 | R13 | `crates/shell/tests/session_launch.rs`, `the_quantisation_commands_change_the_value_and_the_switch`; `crates/ui/tests/keymap.rs`, `every_shortcut_is_bound_or_marked_with_the_milestone_that_binds_it` | shell and keymap test |
+| R14 | `crates/model/src/command.rs`, `a_session_clips_launch_settings_are_set_and_kept_in_range`; `crates/model/src/repr.rs`, `a_clips_launch_settings_save_and_a_clip_saved_without_them_has_the_defaults`; `crates/model/tests/command_registry.rs`, `every_command_runs_by_id` | unit and model test |
+| R15 | `crates/shell/tests/session_launch.rs`, `the_launch_defaults_start_as_observed_keep_their_values_and_seed_new_clips`; `crates/ui/tests/clip_edge_fades.rs`, `the_launch_rows_of_record_warp_and_launch_are_live`; `crates/agent/tests/readback_runtime.rs`, `each_settings_command_reads_back_from_settings_state` | shell, UI and agent test |
+| R16 | `crates/shell/tests/session_launch.rs`, `a_launched_clip_selects_itself_and_a_launched_scene_selects_the_next_one` and `launching_an_empty_slot_or_the_last_scene_selects_nothing_new` | shell test |

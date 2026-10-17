@@ -716,12 +716,17 @@ fn multi_track_export_cancellation_and_failure_leave_no_partial_files() {
         .unwrap();
 
     let renders = [(&solo1, &job1), (&solo2, &job2)];
-    let result =
-        bl_shell::export::export_multi(&renders, media.clone(), None, &cancel, &mut |share| {
+    let result = bl_shell::export::export_multi(
+        &renders,
+        media.clone(),
+        Default::default(),
+        &cancel,
+        &mut |share| {
             if share >= 0.6 {
                 cancel.store(true, std::sync::atomic::Ordering::Relaxed);
             }
-        });
+        },
+    );
     assert_eq!(result, Err(bl_shell::export::ExportError::Cancelled));
     for name in scratch.names() {
         assert!(!name.starts_with("Cancel"), "found unexpected file: {name}");
@@ -753,7 +758,7 @@ fn multi_track_export_cancellation_and_failure_leave_no_partial_files() {
     let fail_result = bl_shell::export::export_multi(
         &fail_renders,
         media,
-        None,
+        bl_shell::export::Hosts::default(),
         &std::sync::atomic::AtomicBool::new(false),
         &mut |_| {},
     );

@@ -233,6 +233,111 @@ fn an_agent_exports_an_mp3_by_command() {
     );
 }
 
+/// Exports the set as a 32-bit float WAV file by command, and returns its
+/// left channel.
+fn export_float(client: &mut Client<impl Transport>, path: &Path) -> Vec<f32> {
+    call(
+        client,
+        "run",
+        json!({ "commands": [{ "command": "export.audio",
+                               "args": { "path": path.to_string_lossy(), "bit_depth": 32,
+                                         "sample_rate": 48000 } }] }),
+    );
+    bl_media::decode_file(path)
+        .unwrap()
+        .channel(0)
+        .unwrap()
+        .to_vec()
+}
+
+/// Spec: export R15, offline-plugin-renders R1, R3, R11 (WP-4.21). An agent
+/// loads a VST3 plug-in and, on macOS, an Audio Unit onto the track it built,
+/// and `export.audio` renders through them by ID: the VST3 plug-in at a
+/// gain of 0.5 halves the clip exactly, and the unit's echo isn't the clip
+/// passed through.
+#[test]
+fn an_agent_exports_a_set_with_a_vst3_plugin_and_an_audio_unit_by_command() {
+    let dir = TempDir::new("plugins");
+    let stem = dir.0.join("Stem.wav");
+    write_stem(&stem, 440.0, 1.0);
+
+    let mut client = bl_cli_mcp(&["--autonomous"]);
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "browser.add_to_arrangement",
+                               "args": { "paths": [stem.to_string_lossy()], "at": 0 } }] }),
+    );
+    let tracks = call(&mut client, "query", json!({ "path": "tracks" }));
+    let track = tracks["tracks"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|track| track["name"] == "Stem")
+        .expect("the stem's track")["id"]
+        .clone();
+    let dry = export_float(&mut client, &dir.0.join("dry.wav"));
+    assert!(dry.iter().any(|s| *s != 0.0), "the stem plays");
+
+    let loaded = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "plugin.load",
+                               "args": { "path": bl_test_vst3::bundle(), "track": track } }] }),
+    );
+    let device = loaded["results"][0]["result"]["device"].clone();
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "device.set_param",
+                               "args": { "device": device, "param": bl_test_vst3::GAIN,
+                                         "value": 0.5 } }] }),
+    );
+    let halved = export_float(&mut client, &dir.0.join("halved.wav"));
+    assert_eq!(halved.len(), dry.len());
+    for (n, (out, input)) in halved.iter().zip(&dry).enumerate() {
+        assert_eq!(out.to_bits(), (input * 0.5).to_bits(), "frame {n}");
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let loaded = call(
+            &mut client,
+            "run",
+            json!({ "commands": [{ "command": "plugin.load_au",
+                                   "args": { "type": "aufx", "subtype": "dely",
+                                             "manufacturer": "appl", "track": track } }] }),
+        );
+        let device = loaded["results"][0]["result"]["device"].clone();
+        for (param, value) in [(0, 100.0), (1, 0.01)] {
+            call(
+                &mut client,
+                "run",
+                json!({ "commands": [{ "command": "device.set_param",
+                                       "args": { "device": device, "param": param,
+                                                 "value": value } }] }),
+            );
+        }
+        let both = export_float(&mut client, &dir.0.join("both.wav"));
+        let again = export_float(&mut client, &dir.0.join("again.wav"));
+        assert_eq!(both.len(), dry.len());
+        assert!(both.iter().any(|s| *s != 0.0), "the unit's echo plays");
+        assert!(
+            both.iter()
+                .zip(&halved)
+                .any(|(out, vst3_only)| out != vst3_only),
+            "the unit isn't passed through"
+        );
+        assert!(
+            both.iter()
+                .zip(&again)
+                .all(|(a, b)| a.to_bits() == b.to_bits()),
+            "the same every time"
+        );
+    }
+    assert!(client.into_transport().finish().unwrap().success());
+}
+
 /// Spec: export R15.
 #[test]
 fn without_autonomous_an_export_is_refused_and_writes_nothing() {

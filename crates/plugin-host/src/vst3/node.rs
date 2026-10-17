@@ -50,6 +50,9 @@ pub(crate) struct Status {
     pub(crate) hand_back: AtomicBool,
     /// The plug-in failed a call on the audio thread.
     pub(crate) failed: AtomicBool,
+    /// The host says the device is silent while the node has no plug-in:
+    /// its plug-in failed elsewhere, in an offline render (WP-4.21).
+    pub(crate) silent: AtomicBool,
     /// Changes dropped because a queue was full.
     pub(crate) dropped: AtomicU64,
 }
@@ -779,7 +782,7 @@ impl Node for Vst3Node {
             for event in block.events() {
                 self.keep(event.param.0, event.value);
             }
-            if self.dead {
+            if self.dead || self.status.silent.load(Relaxed) {
                 silence(block);
             }
             return;

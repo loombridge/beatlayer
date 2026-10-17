@@ -82,7 +82,7 @@ pub(crate) fn capture_definition() -> Value {
 pub(crate) fn preview(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
     let parsed: PreviewArgs = step!(args(raw));
     step!(ctx.permit(&[Permission::Read], &[ids::PREVIEW], String::new));
-    if ctx.view_capture && !bl_shell::plugins::has_clap(ctx.shell.editor().document()) {
+    if ctx.view_capture && !bl_shell::plugins::has_plugin(ctx.shell.editor().document()) {
         return ToolOutcome::Defer(Deferred::render(Render {
             kind: RenderKind::Preview(parsed),
             document: ctx.shell.editor().document().clone(),
@@ -121,7 +121,7 @@ pub(crate) fn analyze(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
     step!(ctx.permit(&[Permission::Read], &[ids::ANALYZE], String::new));
     if parsed.preview.is_none()
         && ctx.view_capture
-        && !bl_shell::plugins::has_clap(ctx.shell.editor().document())
+        && !bl_shell::plugins::has_plugin(ctx.shell.editor().document())
     {
         return ToolOutcome::Defer(Deferred::render(Render {
             kind: RenderKind::Analyze(parsed),

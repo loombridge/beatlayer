@@ -61,6 +61,9 @@ pub(crate) struct Status {
     pub(crate) hand_back: AtomicBool,
     /// The unit failed a call on the audio thread.
     pub(crate) failed: AtomicBool,
+    /// The host says the device is silent while the node has no unit: its
+    /// unit failed elsewhere, in an offline render (WP-4.21).
+    pub(crate) silent: AtomicBool,
     /// Events dropped because a list was full.
     pub(crate) dropped: AtomicU64,
     /// The editor's parameter-observer token, so the host's own parameter
@@ -265,7 +268,7 @@ impl Node for AuNode {
             // Not running: keep the changes for it, and pass the input
             // through (or stay silent after a failure).
             self.keep_all(block);
-            if self.failed {
+            if self.failed || self.status.silent.load(Relaxed) {
                 silence(block);
             }
             return;

@@ -107,7 +107,7 @@ fn run(document: &bl_model::Document, media: Arc<dyn MediaLibrary>, job: &Job) -
     let report = export::export(
         document,
         media,
-        None,
+        bl_shell::export::Hosts::default(),
         job,
         &AtomicBool::new(false),
         &mut |_| {},
@@ -589,7 +589,7 @@ fn cancelling_leaves_nothing_behind() {
                 let result = export::export(
                     scene.document(),
                     media_of(fixture),
-                    None,
+                    bl_shell::export::Hosts::default(),
                     &job,
                     &cancel,
                     &mut |done| {
@@ -630,7 +630,7 @@ fn a_failure_leaves_nothing_behind() {
         let result = export::export(
             scene.document(),
             media_of(fixture),
-            None,
+            bl_shell::export::Hosts::default(),
             &job,
             &AtomicBool::new(false),
             &mut |_| {},
@@ -642,7 +642,7 @@ fn a_failure_leaves_nothing_behind() {
     let result = export::export(
         scene.document(),
         media_of(fixture),
-        None,
+        bl_shell::export::Hosts::default(),
         &job(
             temp.0.join("nowhere/mix.wav"),
             FileType::Wav,

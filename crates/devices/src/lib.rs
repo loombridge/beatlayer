@@ -30,25 +30,38 @@
 
 pub mod compressor;
 pub mod delay;
+pub mod dice;
 pub mod eq;
 mod framework;
+pub mod hold;
 pub mod kit;
+pub mod lift;
 pub mod limiter;
+mod midi_fx;
 pub mod polysynth;
+pub mod remap;
 pub mod reverb;
 pub mod sampler;
+pub mod stack;
 pub mod testing;
+pub mod touch;
 pub mod utility;
 
 pub use compressor::{COMPRESSOR, Squeeze, compressor_type};
 pub use delay::{DELAY, delay_type};
+pub use dice::{DICE, dice_type};
 pub use eq::{Contour, EQ, eq_type};
 pub use framework::{Audio, NativeDevice, NativeNode, ParamBank, add};
+pub use hold::{HOLD, hold_type};
 pub use kit::{KitFactory, KitHost};
+pub use lift::{LIFT, lift_type};
 pub use limiter::{Brickwall, limiter_type};
 pub use polysynth::{POLYSYNTH, PolySynth, polysynth_type};
+pub use remap::{REMAP, remap_type};
 pub use reverb::{REVERB, reverb_type};
 pub use sampler::{Sampler, sampler_type};
+pub use stack::{STACK, stack_type};
+pub use touch::{TOUCH, touch_type};
 
 use bl_engine::{DeviceType, Registry};
 
@@ -64,6 +77,12 @@ pub fn register(registry: &mut Registry) {
     utility::register(registry);
     eq::register(registry);
     sampler::register(registry);
+    lift::register(registry);
+    touch::register(registry);
+    dice::register(registry);
+    remap::register(registry);
+    stack::register(registry);
+    hold::register(registry);
 }
 
 /// The native device types Beatlayer ships, for the browser and the shell:

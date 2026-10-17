@@ -68,6 +68,7 @@ pub mod assistant;
 pub mod audio;
 mod automation_record;
 pub mod browser;
+mod chord_learn;
 pub mod clip_view;
 pub mod devices;
 pub mod export;

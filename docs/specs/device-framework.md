@@ -1,7 +1,7 @@
 # The native device framework
 
 - **Status:** implemented (every rule has a passing test)
-- **Work packages:** WP-2.5 (this spec). The device chain, the frame, and preset files are WP-2.4's ([device chains](device-chains.md)); floating device windows are WP-2.5b's; automation lanes and their playback are WP-2.12's; the Info View's help text is WP-2.24's; the first native devices ship with WP-2.16 to 2.18. Plug-ins built on the plug-in kit and compiled in as native devices (R21 to R25) belong to Reagent's own plan
+- **Work packages:** WP-2.5 (this spec). The device chain, the frame, and preset files are WP-2.4's ([device chains](device-chains.md)); floating device windows are WP-2.5b's; automation lanes and their playback are WP-2.12's; the Info View's help text is WP-2.24's; the first native devices ship with WP-2.16 to 2.18. Plug-ins built on the plug-in kit and compiled in as native devices (R21 to R25) belong to Reagent's own plan. The notes a native MIDI effect reads, sends and ends (R26 to R30) are WP-5.30's
 - **Parity-matrix row:** Devices: device parameters, device controls
 - **Checked against:** Live 12.4.6 on macOS, 12 October 2026; [layout.md](../ui-parity/layout.md) L-DEV-001; [the improvements](../05-improvements.md), rules G1 and G2 and IMP-14
 
@@ -14,6 +14,10 @@ A device's body is laid out as fixed bands of controls and stretchable display c
 The Device View draws any described device from its descriptors and layout, the generic UI: a knob for a continuous value or gain, a switch, a chooser, or a number box, each with its name above and its value, and the display cells framed and left for the device to draw in. Dragging a control, double-clicking it, or pressing Delete while it has the keyboard changes the parameter as one undo step named for it. Agents read every parameter's descriptor and value with `device.parameters`.
 
 Beatlayer ships no native device in WP-2.5: three test devices prove the framework.
+
+### MIDI effects
+
+A native device with the MIDI-effect role works on notes rather than audio. It reads the notes that reach it in each stretch, each with its frame, and sends the notes that go on to the next device, on their frames; whatever it doesn't change, it forwards, and the block's audio passes through untouched. Because a MIDI effect can multiply or delay notes, it keeps a table of the notes each input note started, so the input note's note-off, its release velocity and its per-note expressions reach the notes it made and not the key that came in, whatever changed in between. It ends every note it started: the engine asks it to when it is switched off, removed or moved, and nothing it started is left sounding or waiting. Its tables and queues are made with it and fixed in size.
 
 ### Plug-in kit plug-ins
 
@@ -58,6 +62,11 @@ A plug-in built on Loombridge's plug-in kit can be compiled into Beatlayer and r
 - **R23.** Its own commands are device commands, named and served as the CLAP hosting spec's R18 says, from the moment the device is in the set. Running one runs it on the main thread, checked against its schema; the parameters it changed go into the set in the same undo step (an agent's labelled one), and the engine brings them to the node on their frame (R6). A change the plug-in makes outside a command, as from its own window, is one undo step per gesture, named for its parameter (R18). (S7)
 - **R24.** The set holds its values, which win when the set is opened again, and its own state, in the kit's state layout, taken in without an undo step each time the set is saved or the device copied; a reopened set's device starts a new instance from that state. Offline renders pass it through until WP-2.6b, as they pass CLAP plug-ins (the CLAP hosting spec's decisions). (S7)
 - **R25.** The kit's two example plug-ins, Example Gain and Example Sine, join the device list only with `bl-devices`' `kit-examples` feature, which is off by default, so nothing user-facing ships. (S7)
+- **R26.** A native device reads the notes that reach it in each stretch, with their offsets from its first frame, and can send notes on from it: each goes out at an offset within the stretch, in the block's order of offset, a note-off before a note-on on one frame and otherwise in the order sent, without allocating. A note past the out buffer's room is dropped and counted. A MIDI effect forwards what it doesn't change and leaves the block's audio as it came. A block of several hundred notes goes through a chain without allocating, the MIDI clip player's own notes included. (S6)
+- **R27.** A MIDI effect ends every note it started with a matching note-off, on the key and channel it started it on, whatever changes while the note is held: a parameter, a preset, a block boundary. A note-off for a note the device never saw, such as one started while it was switched off, passes through as it came. A note held for later (a strummed note, a delayed note-off) is dropped, not sounded, if its input note ends first. (S6)
+- **R28.** A device switched off ends the notes it started on the first frame of the block in which it goes off, and then passes its input through (device chains R6). A device removed from its chain, or moved relative to the others, is asked once, as the new program takes over, to end its notes: the note-offs enter the chain in front of the device that sat after it, in the first block of the new program, so the devices after it end what it made as they would have. Nothing allocates. (S6)
+- **R29.** A per-note expression (bend, pressure, slide) for a note a MIDI effect moved or generated follows it, to the key and note ID of the note it made; a note the device dropped takes its expressions with it. A note a device generates has a note ID of its own, apart from the IDs controllers give. (S6)
+- **R30.** A MIDI effect's table of notes (1,024) and queue of notes held for later (1,024) are made with it. A note past their room is dropped and counted, and the count is readable (`NativeNode::dropped_notes`). (S6)
 
 ## Tests
 
@@ -87,6 +96,11 @@ A plug-in built on Loombridge's plug-in kit can be compiled into Beatlayer and r
 | R23 | `crates/devices/tests/kit.rs`, `a_command_runs_on_the_main_thread_and_reports_its_changes`; `crates/agent/tests/kit_devices.rs`, `a_kit_plugin_compiled_in_serves_its_commands_as_device_commands` | unit, MCP script, real-time trap count |
 | R24 | `crates/agent/tests/kit_devices.rs`, `a_kit_plugin_compiled_in_serves_its_commands_as_device_commands` | MCP script |
 | R25 | `crates/agent/tests/kit_devices.rs`, `a_kit_plugin_compiled_in_serves_its_commands_as_device_commands` (built with the feature) | MCP script |
+| R26 | `crates/devices/tests/lift.rs`, `several_hundred_notes_in_one_block_go_through_in_order`, `a_note_lands_transposed_on_its_frames`; `crates/devices/tests/stack.rs`, `several_hundred_notes_in_a_block_allocate_nothing`, `a_note_brings_its_shifts_on_the_same_frame` | real-time trap |
+| R27 | `crates/devices/tests/lift.rs`, `a_held_note_ends_where_it_started`; `crates/devices/tests/stack.rs`, `notes_that_have_not_sounded_when_the_key_comes_up_never_do`; `crates/devices/tests/hold.rs`, `a_retriggered_key_ends_the_note_before` | real-time trap |
+| R28 | `crates/devices/tests/lift.rs`, `switching_off_while_a_note_is_held_leaves_nothing_hanging`, `deleting_while_a_note_is_held_leaves_nothing_hanging`, `moving_while_a_note_is_held_leaves_nothing_hanging`; `crates/devices/tests/hold.rs`, `switching_off_or_deleting_with_a_note_sounding_ends_it`; `rtsan/tests/midi_effects.rs` | real-time trap |
+| R29 | `crates/devices/tests/lift.rs`, `expressions_follow_the_transposed_note`, `a_blocked_note_takes_its_expressions_with_it`; `crates/devices/tests/stack.rs`, `per_note_events_give_each_added_note_its_own_id_and_expressions` | real-time trap |
+| R30 | `crates/devices/tests/stack.rs`, `several_hundred_notes_in_a_block_allocate_nothing` | real-time trap |
 
 
 ## Details

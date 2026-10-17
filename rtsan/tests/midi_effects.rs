@@ -1,0 +1,160 @@
+//! A chain of every MIDI effect on the audio thread under RealtimeSanitizer
+//! (WP-5.30): a clip of many notes plays through Lift, Touch, Dice, Remap,
+//! Stack and Hold into a test instrument while the devices are switched off
+//! and on, moved and deleted, and their parameters change. RTSan stops the
+//! process at the first allocation, free, lock, or blocking call on the audio
+//! thread, and the allocation trap fails the test at any heap use it sees.
+
+bl_rt::install_trap!();
+
+use std::sync::Arc;
+
+use bl_core::time::{SampleRate, TICKS_PER_QUARTER, Ticks};
+use bl_engine::testing::{self, Probe};
+use bl_engine::{Collector, Compiler, EngineConfig, NoteKind, TransportCommand, channel};
+use bl_model::{
+    Clip, ClipData, Command, Device, DeviceId, DeviceKind, Editor, MidiData, Note, ParamId,
+    TrackKind,
+};
+
+// Without `--cfg lspk_rtsan` (`rtsan/.cargo/config.toml`), this doesn't build.
+const _: () = assert!(
+    bl_rt::sanitize::ACTIVE,
+    "lspk-rt (through bl-rt) wasn't built with --cfg lspk_rtsan; run `cargo xtask rtsan`"
+);
+
+#[test]
+fn a_chain_of_midi_effects_passes_under_rtsan() {
+    let config = EngineConfig::new(SampleRate::HZ_48000, 256);
+    let probe = Arc::new(Probe::default());
+    let mut collector = Collector::new();
+    let mut registry = testing::registry(&probe);
+    bl_devices::register(&mut registry);
+    let mut compiler = Compiler::new(config, registry, collector.handle());
+    let (mut sender, mut processor, _monitor) = channel(&config);
+
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Midi,
+            name: String::new(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let insert = |editor: &mut Editor, index: usize, device_type: &str| -> DeviceId {
+        let id = editor.new_id();
+        editor
+            .apply(Command::InsertDevice {
+                track,
+                index,
+                device: Device::new(
+                    id,
+                    "",
+                    DeviceKind::Native {
+                        device_type: device_type.to_owned(),
+                    },
+                ),
+            })
+            .unwrap();
+        id
+    };
+    let types = [
+        bl_devices::LIFT,
+        bl_devices::TOUCH,
+        bl_devices::DICE,
+        bl_devices::REMAP,
+        bl_devices::STACK,
+        bl_devices::HOLD,
+    ];
+    let effects: Vec<DeviceId> = types
+        .iter()
+        .enumerate()
+        .map(|(i, t)| insert(&mut editor, i, t))
+        .collect();
+    insert(&mut editor, types.len(), testing::INSTRUMENT);
+
+    // A bar of sixteenth notes on many keys, looping.
+    let sixteenth = Ticks(TICKS_PER_QUARTER / 4);
+    let notes = (0..64u8).map(|i| Note::new(36 + i, sixteenth * i64::from(i), sixteenth * 3, 90));
+    let clip = editor.new_id();
+    editor
+        .apply(Command::CreateClip {
+            track,
+            clip: Clip::new(
+                clip,
+                Ticks::ZERO,
+                Ticks(TICKS_PER_QUARTER * 16),
+                ClipData::Midi(MidiData::new(notes)),
+            ),
+        })
+        .unwrap();
+    sender.send_update(compiler.sync(editor.document()));
+    assert!(sender.flush());
+    sender.transport(TransportCommand::Play);
+
+    let mut change = |editor: &mut Editor, command: Command| {
+        editor.apply(command).unwrap();
+        sender.send_update(compiler.sync(editor.document()));
+        assert!(sender.flush());
+    };
+    for round in 0..800u32 {
+        match round {
+            100 => change(
+                &mut editor,
+                Command::SetDeviceParam {
+                    device: effects[0],
+                    param: ParamId(0),
+                    value: 5.0,
+                },
+            ),
+            200 => change(
+                &mut editor,
+                Command::SetDeviceEnabled {
+                    device: effects[4],
+                    enabled: false,
+                },
+            ),
+            300 => change(
+                &mut editor,
+                Command::SetDeviceEnabled {
+                    device: effects[4],
+                    enabled: true,
+                },
+            ),
+            400 => change(
+                &mut editor,
+                Command::MoveDevice {
+                    device: effects[0],
+                    track,
+                    index: 3,
+                },
+            ),
+            500 => change(&mut editor, Command::RemoveDevice { device: effects[5] }),
+            600 => change(
+                &mut editor,
+                Command::SetDeviceParam {
+                    device: effects[2],
+                    param: ParamId(1),
+                    value: 12.0,
+                },
+            ),
+            _ => {}
+        }
+        bl_rt::rt_test!({
+            processor.process(256);
+        });
+        if round % 50 == 0 {
+            collector.collect();
+        }
+    }
+    let heard = probe.recorded_notes();
+    let ons = heard
+        .iter()
+        .filter(|n| n.event.kind == NoteKind::On)
+        .count();
+    assert!(ons > 100, "{ons} notes reached the instrument");
+    eprintln!("800 blocks through six MIDI effects under RealtimeSanitizer: {ons} note-ons");
+}

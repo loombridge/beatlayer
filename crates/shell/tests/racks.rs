@@ -615,3 +615,27 @@ fn a_chain_and_its_devices_survive_save_and_load() {
     assert_eq!(chain.devices[0].id, device);
     doc.check_invariants().unwrap();
 }
+
+#[test]
+fn a_track_with_a_rack_duplicates_with_new_ids_inside_it() {
+    let Set {
+        mut shell, audio, ..
+    } = set();
+    let (rack, chains) = rack_with_chains(&mut shell, "audio_effect", 1);
+    let inner = add_to_chain(&mut shell, chains[0], effect("Gain")).device;
+    let devices = shell.editor().document().device_count();
+
+    shell
+        .invoke(
+            "track.duplicate_without_clips",
+            json!({ "tracks": [audio] }),
+        )
+        .unwrap();
+
+    let doc = shell.editor().document();
+    doc.check_invariants().unwrap();
+    assert_eq!(doc.device_count(), devices + 2);
+    assert_eq!(doc.chain_ids().len(), 2);
+    assert_eq!(doc.device_track(rack), Some(audio));
+    assert_eq!(doc.device_track(inner), Some(audio));
+}

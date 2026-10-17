@@ -1265,8 +1265,7 @@ impl Command {
             Self::SetSidechainGain { .. } => "Change \"SC Gain\"",
             Self::SetSidechainMix { .. } => "Change \"Mix\"",
             Self::SetSidechainListen { .. } => "Change \"Sidechain Listen\"",
-            // WP-5.1. Beatlayer's own names (racks notes, question 10:
-            // Live's are to observe), after the device ones.
+            // WP-5.1. Beatlayer's own names, after the device ones.
             Self::InsertChainDevice { .. } => "Insert Device",
             Self::MoveDeviceToChain { .. } => "Move Device",
             Self::GroupDevices { .. } => "Group",
@@ -2029,7 +2028,7 @@ impl Document {
                 self.index.clip_track.remove(&clip.id);
             }
             for device in &track.devices {
-                self.index.device_track.remove(&device.id);
+                self.index.remove_device(device);
             }
             doomed.extend(track.children.iter().copied());
         }

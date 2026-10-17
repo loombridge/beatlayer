@@ -727,3 +727,23 @@ fn switching_a_rack_with_its_contents_reaches_every_depth_in_one_step() {
     song.editor.undo().unwrap();
     assert!(song.doc().device(ids[1]).unwrap().enabled);
 }
+
+#[test]
+fn deleting_a_track_forgets_everything_inside_its_racks() {
+    let mut song = Song::new();
+    let outer = song.rack(RackKind::AudioEffect, 1);
+    let chain = outer.chains[0].id;
+    song.insert(song.audio, 0, outer).unwrap();
+    let inner = song.rack(RackKind::AudioEffect, 1);
+    let inner_chain = inner.chains[0].id;
+    song.insert_in(chain, 0, inner).unwrap();
+    let effect = song.device(DeviceRole::AudioEffect);
+    song.insert_in(inner_chain, 0, effect).unwrap();
+
+    song.editor
+        .apply(Command::DeleteTrack { track: song.audio })
+        .unwrap();
+    song.checked();
+    assert_eq!(song.doc().device_count(), 0);
+    assert_eq!(song.doc().chain_ids().len(), 0);
+}

@@ -1504,7 +1504,7 @@ impl Shell {
             .flat_map(|track| {
                 let label = crate::routing::track_label(doc, track.id());
                 track
-                    .devices()
+                    .devices_deep()
                     .filter(|d| self.kit.handles(&d.kind) || crate::plugins::is_clap(doc, d.id))
                     .map(|d| {
                         let listed = if self.kit.handles(&d.kind) {

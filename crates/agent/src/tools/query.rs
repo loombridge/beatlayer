@@ -854,10 +854,10 @@ fn resolve<'a>(document: &'a Document, segments: &[Segment]) -> Result<Found<'a>
             Kind::Device => {
                 let devices: Vec<&Device> = match track {
                     Some(track) if matches!(found, Some(Found::Track(_))) => {
-                        track.devices().collect()
+                        track.devices_deep().collect()
                     }
                     Some(_) => return Err("a device can follow only a track".to_owned()),
-                    None => document.tracks().flat_map(Track::devices).collect(),
+                    None => document.tracks().flat_map(Track::devices_deep).collect(),
                 };
                 Found::Device(pick(
                     *kind,

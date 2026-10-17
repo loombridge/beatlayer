@@ -142,6 +142,9 @@ pub enum ModelError {
     /// The command changes a MIDI clip's settings, and this clip is an audio
     /// clip.
     NotMidiClip(ClipId),
+    /// The command changes a Session clip's launch settings, and this clip
+    /// isn't in a slot.
+    NotSlotClip(ClipId),
     /// A track can't take its input from, or send its output to, this
     /// track: itself, or a track of a kind its chooser doesn't list.
     CannotRoute {
@@ -272,6 +275,10 @@ impl fmt::Display for ModelError {
             Self::InvalidInput(why) => write!(f, "invalid input: {why}"),
             Self::NotAudioClip(id) => write!(f, "{id} is a MIDI clip; this needs an audio clip"),
             Self::NotMidiClip(id) => write!(f, "{id} is an audio clip; this needs a MIDI clip"),
+            Self::NotSlotClip(id) => write!(
+                f,
+                "{id} isn't in a Session slot; launch settings belong to Session clips"
+            ),
             Self::CannotRoute { track, to } => write!(
                 f,
                 "{track} can't take its input from or send its output to {to}: its choosers \

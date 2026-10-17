@@ -35,9 +35,10 @@ use crate::audio::{AudioHost, ConfigureAudio, EngineTransport, ToneSettings};
 use crate::browser::{self, BrowserError, BrowserView, Waker};
 use crate::clip_view::{self, ClipView};
 use crate::commands::{
-    self as ids, DefaultSetArgs, FileReport, FoldNotesArgs, LaneArgs, PathArgs, RelinkArgs,
-    SaveAsArgs, SetResult, SettingsArgs, SwitchArgs, SwitchResult, TemplateArgs, TestToneArgs,
-    TestToneState, ThemeArgs, ViewResult, ViewState, ZoomArgs,
+    self as ids, DefaultLaunchModeArgs, DefaultLaunchQuantizationArgs, DefaultSetArgs, FileReport,
+    FoldNotesArgs, LaneArgs, PathArgs, RelinkArgs, SaveAsArgs, SetResult, SettingsArgs, SwitchArgs,
+    SwitchResult, TemplateArgs, TestToneArgs, TestToneState, ThemeArgs, ViewResult, ViewState,
+    ZoomArgs,
 };
 use crate::devices::{self, DeviceError, DeviceView};
 use crate::files::{ProjectFiles, SetStore, new_set_from};
@@ -69,8 +70,8 @@ use bl_shell_spec::plugins as plugin_ids;
 use bl_shell_spec::session_launch as session_launch_ids;
 use bl_shell_spec::session_view as session_ids;
 use bl_shell_spec::settings::{
-    AgentsPageSettings, AudioPageSettings, DisplayInputSettings, STATE as SETTINGS_STATE,
-    SettingsState,
+    AgentsPageSettings, AudioPageSettings, DisplayInputSettings, LaunchPrefs,
+    STATE as SETTINGS_STATE, SettingsState,
 };
 use bl_shell_spec::tracks as track_ids;
 use bl_shell_spec::transport as transport_ids;
@@ -1226,6 +1227,12 @@ impl Shell {
         self.prefs.create_fades_on_clip_edges.0
     }
 
+    /// The Launch section of Record, Warp & Launch (WP-3.4).
+    #[must_use]
+    pub fn launch_prefs(&self) -> LaunchPrefs {
+        self.prefs.launch
+    }
+
     /// What `settings.state` reports: the Settings window's preferences by
     /// page.
     fn settings_state(&mut self) -> SettingsState {
@@ -1248,6 +1255,7 @@ impl Shell {
             tempo_midi: self.midi.report(),
             create_fades_on_clip_edges: self.create_fades_on_clip_edges(),
             warp_recorded_audio: self.warp_recorded_audio(),
+            launch: self.prefs.launch,
             auto_hide_plug_in_windows: self.auto_hide_plug_in_windows(),
             plug_ins: self.plugin_settings(),
             agents: AgentsPageSettings {
@@ -4221,6 +4229,7 @@ impl Shell {
                     command: id.to_owned(),
                     reason,
                 })?;
+            self.select_on_launch(command);
             return Ok(Value::Null);
         }
         if session_launch_ids::handles(id) {
@@ -4317,6 +4326,7 @@ impl Shell {
                         columns: &columns,
                         scenes: &scenes,
                         edge_fades,
+                        launch_quantization: self.prefs.launch.default_quantization,
                     },
                 )
                 .map_err(|error| match error {
@@ -4621,6 +4631,33 @@ impl Shell {
                 .map(|path| path.to_string_lossy().into_owned()),
             name: self.set_name(),
         })
+    }
+
+    /// Select on Launch and Select Next Scene on Launch (Spec:
+    /// launch-quantisation R16): a launched slot that holds a clip selects
+    /// itself, and a launched scene selects the scene after it, while the
+    /// preferences are on.
+    fn select_on_launch(&mut self, command: engine_session::SessionCommand) {
+        let document = self.editor.document();
+        let target = match command {
+            engine_session::SessionCommand::Launch { track, scene }
+                if self.prefs.launch.select_on_launch && document.slot(track, scene).is_some() =>
+            {
+                json!({ "track": track, "scene": scene })
+            }
+            engine_session::SessionCommand::LaunchScene(scene)
+                if self.prefs.launch.select_next_scene_on_launch =>
+            {
+                let next = document
+                    .scene_position(scene)
+                    .and_then(|at| document.scenes().nth(at + 1));
+                let Some(next) = next else { return };
+                json!({ "scene": next.id })
+            }
+            _ => return,
+        };
+        // A selection that can't be made leaves the one there is.
+        let _ = self.run(session_ids::SELECT, target);
     }
 
     /// Runs one of the launch quantisation's commands (WP-3.2) and the
@@ -5198,6 +5235,36 @@ impl Shell {
             ids::SETTINGS_SET_WARP_RECORDED_AUDIO => {
                 let SwitchArgs { on } = Self::args(id, args)?;
                 self.prefs.warp_recorded_audio = OnByDefault(on);
+                self.save_preferences();
+                Ok(to_value(&SwitchResult { on }))
+            }
+            ids::SETTINGS_SET_DEFAULT_LAUNCH_MODE => {
+                let DefaultLaunchModeArgs { mode } = Self::args(id, args)?;
+                self.prefs.launch.default_mode = mode;
+                self.save_preferences();
+                Ok(Value::Null)
+            }
+            ids::SETTINGS_SET_DEFAULT_LAUNCH_QUANTIZATION => {
+                let DefaultLaunchQuantizationArgs { quantization } = Self::args(id, args)?;
+                self.prefs.launch.default_quantization = quantization;
+                self.save_preferences();
+                Ok(Value::Null)
+            }
+            ids::SETTINGS_SET_SELECT_ON_LAUNCH => {
+                let SwitchArgs { on } = Self::args(id, args)?;
+                self.prefs.launch.select_on_launch = on;
+                self.save_preferences();
+                Ok(to_value(&SwitchResult { on }))
+            }
+            ids::SETTINGS_SET_SELECT_NEXT_SCENE_ON_LAUNCH => {
+                let SwitchArgs { on } = Self::args(id, args)?;
+                self.prefs.launch.select_next_scene_on_launch = on;
+                self.save_preferences();
+                Ok(to_value(&SwitchResult { on }))
+            }
+            ids::SETTINGS_SET_START_RECORDING_ON_SCENE_LAUNCH => {
+                let SwitchArgs { on } = Self::args(id, args)?;
+                self.prefs.launch.start_recording_on_scene_launch = on;
                 self.save_preferences();
                 Ok(to_value(&SwitchResult { on }))
             }

@@ -193,3 +193,178 @@ fn stop_selected_stops_the_tracks_with_a_selected_slot() {
     let result = shell.run(ids::STOP_SELECTED, json!({}));
     assert!(result.is_ok(), "{result:?}");
 }
+
+/// A started headless shell with a MIDI clip in the first slot of the
+/// first MIDI track, and the ids of that track and the first two scenes.
+fn shell_with_a_slot_clip() -> (
+    Shell,
+    bl_model::TrackId,
+    bl_model::SceneId,
+    bl_model::SceneId,
+) {
+    let mut shell = Shell::headless();
+    shell.start_audio();
+    assert!(shell.audio().engine_running());
+    let track = shell
+        .mixer_columns()
+        .into_iter()
+        .find(|track| {
+            shell
+                .editor()
+                .document()
+                .track(*track)
+                .is_some_and(|track| track.kind() == TrackKind::Midi)
+        })
+        .expect("the default set has a MIDI track");
+    let scenes: Vec<_> = shell.editor().document().scenes().map(|s| s.id).collect();
+    shell
+        .run(
+            "session.insert_empty_midi_clip",
+            json!({ "track": track, "scene": scenes[0] }),
+        )
+        .unwrap();
+    (shell, track, scenes[0], scenes[1])
+}
+
+// Spec: launch-quantisation R16.
+#[test]
+fn a_launched_clip_selects_itself_and_a_launched_scene_selects_the_next_one() {
+    let (mut shell, track, first, second) = shell_with_a_slot_clip();
+    let selected = |shell: &mut Shell| shell.run("session.state", json!({})).unwrap();
+
+    // Select on Launch: the launched slot is selected.
+    shell
+        .run("session.launch", json!({ "track": track, "scene": first }))
+        .unwrap();
+    let state = selected(&mut shell);
+    assert_eq!(state["slots"].as_array().unwrap().len(), 1, "{state}");
+    assert_eq!(state["slots"][0]["scene"], json!(first));
+
+    // Select Next Scene on Launch: the scene after the launched one.
+    shell
+        .run("session.launch_scene", json!({ "scene": first }))
+        .unwrap();
+    let state = selected(&mut shell);
+    assert_eq!(state["scenes"], json!([second]), "{state}");
+
+    // Off, a launch leaves the selection as it is.
+    shell
+        .run("settings.set_select_on_launch", json!({ "on": false }))
+        .unwrap();
+    shell
+        .run(
+            "settings.set_select_next_scene_on_launch",
+            json!({ "on": false }),
+        )
+        .unwrap();
+    shell
+        .run("session.select", json!({ "scene": first }))
+        .unwrap();
+    let before = selected(&mut shell);
+    shell
+        .run("session.launch", json!({ "track": track, "scene": first }))
+        .unwrap();
+    shell
+        .run("session.launch_scene", json!({ "scene": first }))
+        .unwrap();
+    assert_eq!(selected(&mut shell), before);
+}
+
+// Spec: launch-quantisation R16.
+#[test]
+fn launching_an_empty_slot_or_the_last_scene_selects_nothing_new() {
+    let (mut shell, track, first, _) = shell_with_a_slot_clip();
+    let scenes: Vec<_> = shell.editor().document().scenes().map(|s| s.id).collect();
+    let last = *scenes.last().unwrap();
+    shell
+        .run("session.select", json!({ "scene": first }))
+        .unwrap();
+    let before = shell.run("session.state", json!({})).unwrap();
+
+    shell
+        .run("session.launch", json!({ "track": track, "scene": last }))
+        .unwrap();
+    shell
+        .run("session.launch_scene", json!({ "scene": last }))
+        .unwrap();
+    assert_eq!(shell.run("session.state", json!({})).unwrap(), before);
+}
+
+// Spec: launch-quantisation R15.
+#[test]
+fn the_launch_defaults_start_as_observed_keep_their_values_and_seed_new_clips() {
+    use bl_shell::settings::LaunchPrefs;
+
+    let mut shell = Shell::headless();
+    assert_eq!(shell.launch_prefs(), LaunchPrefs::default());
+    assert_eq!(
+        shell.launch_prefs().default_mode,
+        bl_model::LaunchMode::Trigger
+    );
+    assert_eq!(shell.launch_prefs().default_quantization, None);
+    assert!(shell.launch_prefs().select_on_launch);
+    assert!(shell.launch_prefs().select_next_scene_on_launch);
+    assert!(!shell.launch_prefs().start_recording_on_scene_launch);
+
+    // Each is a preference: the next start reads what was chosen.
+    shell
+        .run(
+            "settings.set_default_launch_quantization",
+            json!({ "quantization": "quarter" }),
+        )
+        .unwrap();
+    shell
+        .run(
+            "settings.set_default_launch_mode",
+            json!({ "mode": "toggle" }),
+        )
+        .unwrap();
+    shell
+        .run(
+            "settings.set_start_recording_on_scene_launch",
+            json!({ "on": true }),
+        )
+        .unwrap();
+    let chosen = shell.launch_prefs();
+    assert_eq!(chosen.default_mode, bl_model::LaunchMode::Toggle);
+    assert_eq!(
+        chosen.default_quantization,
+        Some(bl_model::LaunchQuantization::Quarter)
+    );
+    assert!(chosen.start_recording_on_scene_launch);
+    let saved = serde_json::to_string(&Preferences {
+        launch: shell.launch_prefs(),
+        ..Preferences::default()
+    })
+    .unwrap();
+    let again: Preferences = serde_json::from_str(&saved).unwrap();
+    assert_eq!(again.launch, shell.launch_prefs());
+    let older: Preferences = serde_json::from_str("{}").unwrap();
+    assert_eq!(older.launch, LaunchPrefs::default(), "an older file");
+    assert_eq!(shell.editor().undo_history().count(), 0, "no undo step");
+
+    // A new clip in a slot starts with the default quantisation.
+    let track = shell
+        .mixer_columns()
+        .into_iter()
+        .find(|track| {
+            shell
+                .editor()
+                .document()
+                .track(*track)
+                .is_some_and(|track| track.kind() == TrackKind::Midi)
+        })
+        .unwrap();
+    let scene = shell.editor().document().scenes().next().unwrap().id;
+    shell
+        .run(
+            "session.insert_empty_midi_clip",
+            json!({ "track": track, "scene": scene }),
+        )
+        .unwrap();
+    let clip = shell.editor().document().slot(track, scene).unwrap();
+    assert_eq!(
+        clip.launch.quantization,
+        Some(bl_model::LaunchQuantization::Quarter)
+    );
+}

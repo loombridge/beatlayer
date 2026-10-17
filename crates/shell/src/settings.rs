@@ -11,8 +11,8 @@ use bl_model::PluginFormat;
 
 pub use bl_shell_spec::midi_io::PortDirection;
 pub use bl_shell_spec::settings::{
-    SettingsPage, ThemeChoice, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, ZOOM_STEPS, zoom_factor,
-    zoom_percent, zoom_step,
+    LaunchPrefs, SettingsPage, ThemeChoice, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, ZOOM_STEPS,
+    zoom_factor, zoom_percent, zoom_step,
 };
 
 use crate::agent::AgentSettings;
@@ -75,6 +75,9 @@ pub struct Preferences {
     /// as Live warps its recordings, and on for preferences saved before the
     /// setting existed.
     pub warp_recorded_audio: OnByDefault,
+    /// The Launch section of Record, Warp & Launch (L-SET-018; WP-3.4),
+    /// with the defaults observed in Live 12.4.3.
+    pub launch: LaunchPrefs,
     /// Auto-Hide Plug-In Windows (Plug-Ins, Plug-In Windows, L-SET-017):
     /// a floating device's window or a plug-in's editor hides while
     /// another track is selected and comes back with its track (WP-2.5b),

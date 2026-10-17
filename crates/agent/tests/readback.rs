@@ -273,6 +273,7 @@ fn fixture() -> Project {
         input: Input::Track {
             track: drums,
             tap: Tap::PreFx,
+            chain: None,
         },
         gain: 0.5,
         mix: 0.25,

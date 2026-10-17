@@ -217,7 +217,7 @@ fn modulator_devices() -> Vec<(String, String)> {
         .filter(|t| bl_model::modulator::is_modulator_kind(&t.kind))
         .filter_map(|t| match t.kind {
             bl_model::DeviceKind::Native { device_type } => Some((device_type, t.name)),
-            bl_model::DeviceKind::Plugin { .. } => None,
+            bl_model::DeviceKind::Plugin { .. } | bl_model::DeviceKind::Rack { .. } => None,
         })
         .collect()
 }

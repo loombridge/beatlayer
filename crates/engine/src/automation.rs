@@ -476,8 +476,11 @@ pub(crate) fn lists(
             );
         }
     }
-    for device in track.devices() {
+    for device in track.devices_deep() {
         lists.insert(NodeKey::Device(device.id), Entries::default());
+        for chain in &device.chains {
+            lists.insert(NodeKey::ChainMixer(chain.id), Entries::default());
+        }
     }
     for (target, automation) in track.automation() {
         if !automation.enabled {
@@ -515,7 +518,7 @@ pub(crate) fn lists(
     // The modulators' slots (WP-5.10) that map this track's nodes' parameters,
     // from any track.
     for owner in document.tracks() {
-        for device in owner.devices() {
+        for device in owner.devices_deep() {
             let Some(&modulator) = rows.get(&device.id) else {
                 continue;
             };
@@ -528,7 +531,7 @@ pub(crate) fn lists(
                         target_node(t, &AutomationTarget::Send { to })
                     }
                     ModTarget::Device { device: d, param }
-                        if track.devices().any(|x| x.id == d) =>
+                        if track.devices_deep().any(|x| x.id == d) =>
                     {
                         (NodeKey::Device(d), param)
                     }
@@ -591,6 +594,14 @@ pub fn target_node(track: TrackId, target: &AutomationTarget) -> (NodeKey, Param
         ),
         AutomationTarget::Send { to } => (NodeKey::Send { track, to }, mixer::route::LEVEL),
         AutomationTarget::Device { device, param } => (NodeKey::Device(device), param),
+        AutomationTarget::Chain { chain, param } => (
+            NodeKey::ChainMixer(chain),
+            match param {
+                MixerParam::Volume => mixer::track::VOLUME,
+                MixerParam::Pan => mixer::track::PAN,
+                MixerParam::Mute => mixer::track::MUTE,
+            },
+        ),
     }
 }
 

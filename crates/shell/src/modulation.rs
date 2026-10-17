@@ -35,8 +35,16 @@ fn travel_of<'a>(
             param: MixerParam::Mute,
         } => (Travel::Switch, f64::from(u8::from(track.mixer().mute))),
         AutomationTarget::Send { to } => (Travel::Send, track.send(to)),
+        AutomationTarget::Chain { chain, param } => {
+            let mixer = &track.find_chain(chain)?.mixer;
+            match param {
+                MixerParam::Volume => (Travel::Fader, mixer.volume),
+                MixerParam::Pan => (Travel::Pan, mixer.pan),
+                MixerParam::Mute => (Travel::Switch, f64::from(u8::from(!mixer.enabled))),
+            }
+        }
         AutomationTarget::Device { device, param } => {
-            let device = track.devices().find(|d| d.id == device)?;
+            let device = track.find_device(device)?;
             let description = devices.description(&device.kind)?.param(param)?;
             let value = device
                 .params
@@ -88,7 +96,7 @@ pub(crate) fn state(
         }
         // Spec: modulation R11, R16. The modulator slots that map this
         // track's parameters, from any track.
-        for modulator in document.tracks().flat_map(|t| t.devices()) {
+        for modulator in document.tracks().flat_map(|t| t.devices_deep()) {
             for mapping in &modulator.mappings {
                 let (track, target) = match mapping.target {
                     ModTarget::Mixer { track, param } => {

@@ -469,6 +469,13 @@ impl TrackMixer {
         [level * left, level * right, level]
     }
 
+    /// Whether the mixer is muted: a track's Track Activator is off, or a
+    /// rack chain's is off or another chain of its rack is soloed.
+    #[must_use]
+    pub(crate) fn muted(&self) -> bool {
+        self.mute
+    }
+
     /// The left and right gains now.
     #[must_use]
     pub fn gains(&self) -> [f64; 2] {

@@ -10,7 +10,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::automation::{AutomationTarget, MixerParam, curve_value};
+use crate::automation::{MixerParam, curve_value};
 use crate::device::{Device, DeviceKind};
 use crate::document::Document;
 use crate::error::ModelError;
@@ -109,29 +109,6 @@ pub enum ModTarget {
         /// Its parameter.
         param: ParamId,
     },
-}
-
-impl ModTarget {
-    /// The same parameter as an automation target of its track `owner`
-    /// (the track holding the device for a device target).
-    #[must_use]
-    pub fn automation(self) -> AutomationTarget {
-        match self {
-            Self::Mixer { param, .. } => AutomationTarget::Mixer { param },
-            Self::Send { to, .. } => AutomationTarget::Send { to },
-            Self::Device { device, param } => AutomationTarget::Device { device, param },
-        }
-    }
-
-    /// The target of `target` on `track`: for a device, `track` isn't used.
-    #[must_use]
-    pub fn of(track: TrackId, target: AutomationTarget) -> Self {
-        match target {
-            AutomationTarget::Mixer { param } => Self::Mixer { track, param },
-            AutomationTarget::Send { to } => Self::Send { track, to },
-            AutomationTarget::Device { device, param } => Self::Device { device, param },
-        }
-    }
 }
 
 /// One slot's mapping: the parameter it modulates.
@@ -328,6 +305,17 @@ pub(crate) fn check_mappings(device: &Device) -> Result<(), ModelError> {
     Ok(())
 }
 
+impl Device {
+    /// Takes the mappings away from this device and every device inside it:
+    /// a copy made alone keeps its settings and no mappings (R19).
+    pub fn clear_mappings(&mut self) {
+        self.mappings.clear();
+        for chain in &mut self.chains {
+            chain.devices.iter_mut().for_each(Self::clear_mappings);
+        }
+    }
+}
+
 impl Document {
     /// Whether the modulator `device` is in Remote Control: it sets what it
     /// maps rather than modulating it (R16).
@@ -340,7 +328,7 @@ impl Document {
     /// Control (R16), if one does.
     #[must_use]
     pub fn held_by(&self, target: ModTarget, except: DeviceId) -> Option<DeviceId> {
-        self.tracks().flat_map(|t| t.devices()).find_map(|d| {
+        self.tracks().flat_map(|t| t.devices_deep()).find_map(|d| {
             (d.id != except
                 && d.enabled
                 && self.in_remote_control(d)
@@ -354,7 +342,7 @@ impl Document {
     pub(crate) fn check_not_held(&self, target: ModTarget) -> Result<(), ModelError> {
         let held = self
             .tracks()
-            .flat_map(|t| t.devices())
+            .flat_map(|t| t.devices_deep())
             .any(|d| self.in_remote_control(d) && d.mappings.iter().any(|m| m.target == target));
         if held {
             Err(ModelError::InvalidInput(
@@ -460,7 +448,7 @@ impl Document {
     pub(crate) fn prune_mappings(&mut self) {
         let stale: Vec<DeviceId> = self
             .tracks()
-            .flat_map(|t| t.devices())
+            .flat_map(|t| t.devices_deep())
             .filter(|d| d.mappings.iter().any(|m| !self.has_target(m.target)))
             .map(|d| d.id)
             .collect();

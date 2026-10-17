@@ -268,6 +268,9 @@ fn fixture() -> Project {
     device.media = Some(ContentHash([9; 32]));
     device.role = DeviceRole::AudioEffect;
     device.params.insert(ParamId(2), 0.75);
+    // B active, with A's values kept (device compare R1, R10).
+    device.b_active = true;
+    device.other_params = Some([(ParamId(2), 0.25)].into_iter().collect());
     device.sidechain = Some(Sidechain {
         enabled: true,
         input: Input::Track {
@@ -315,6 +318,62 @@ fn fixture() -> Project {
             },
         },
     );
+
+    // A rack of two chains: the first with a device and a rack inside it,
+    // every chain setting off its default.
+    let rack: bl_model::DeviceId = editor.new_id();
+    let (loud, quiet): (bl_model::ChainId, bl_model::ChainId) = (editor.new_id(), editor.new_id());
+    let (inside, deeper): (bl_model::DeviceId, bl_model::ChainId) =
+        (editor.new_id(), editor.new_id());
+    let trim: bl_model::DeviceId = editor.new_id();
+    apply(
+        &mut editor,
+        Command::InsertDevice {
+            track: vox,
+            index: 1,
+            device: Device::rack(rack, bl_model::RackKind::AudioEffect)
+                .with_chain(bl_model::Chain::new(loud, "Loud").with_devices(vec![
+                    Device::new(
+                        trim,
+                        "Trim",
+                        DeviceKind::Native {
+                            device_type: "beatlayer.utility".to_owned(),
+                        },
+                    ),
+                    Device::rack(inside, bl_model::RackKind::AudioEffect)
+                        .with_chain(bl_model::Chain::new(deeper, "Deeper")),
+                ]))
+                .with_chain(bl_model::Chain::new(quiet, "Quiet")),
+        },
+    );
+    for command in [
+        Command::SetChainColour {
+            chain: loud,
+            colour: Some(12),
+        },
+        Command::SetChainInfo {
+            chain: loud,
+            info: "the loud one".to_owned(),
+        },
+        Command::SetChainVolume {
+            chain: loud,
+            volume: 0.5,
+        },
+        Command::SetChainPan {
+            chain: loud,
+            pan: -0.25,
+        },
+        Command::SetChainEnabled {
+            chain: quiet,
+            enabled: false,
+        },
+        Command::SetChainSolo {
+            chain: loud,
+            solo: true,
+        },
+    ] {
+        apply(&mut editor, command);
+    }
 
     // Clips: an audio clip with everything a clip saves, a MIDI clip with a
     // loop and notes, and slot clips.
@@ -516,8 +575,30 @@ fn covers(expected: &Value, got: &Value, at: &str) -> Result<(), String> {
     }
 }
 
+/// Every device of `devices` and every device inside their racks, with the
+/// racks' chains.
+fn nested(devices: &[Value], all: &mut Vec<Value>, chains: &mut Vec<Value>) {
+    for device in devices {
+        all.push(device.clone());
+        for chain in device["chains"].as_array().into_iter().flatten() {
+            chains.push(chain.clone());
+            let inside: Vec<Value> = chain["devices"].as_array().cloned().unwrap_or_default();
+            nested(&inside, all, chains);
+        }
+    }
+}
+
+/// Every chain in the document's racks, at any depth.
+fn saved_chains(document: &Value) -> Vec<Value> {
+    let (_, _, devices) = saved_parts(document);
+    devices
+        .iter()
+        .flat_map(|d| d["chains"].as_array().into_iter().flatten().cloned())
+        .collect()
+}
+
 /// Every track's saved form in the document, with its group's tracks left
-/// out, and the clips and devices in it.
+/// out, and the clips and devices in it, those inside racks included.
 fn saved_parts(document: &Value) -> (Vec<Value>, Vec<Value>, Vec<Value>) {
     fn walk(
         track: &Value,
@@ -535,7 +616,9 @@ fn saved_parts(document: &Value) -> (Vec<Value>, Vec<Value>, Vec<Value>) {
                 .flatten()
                 .map(|slot| slot["clip"].clone()),
         );
-        devices.extend(track["devices"].as_array().into_iter().flatten().cloned());
+        let top: Vec<Value> = track["devices"].as_array().cloned().unwrap_or_default();
+        let mut chains = Vec::new();
+        nested(&top, devices, &mut chains);
         tracks.push(own);
         for child in track["children"].as_array().into_iter().flatten() {
             walk(child, tracks, clips, devices);
@@ -616,6 +699,22 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
             &["0.name", "0.tempo", "0.signature"][..],
         ),
         (
+            &devices
+                .iter()
+                .find(|d| d["name"] == "Audio Effect Rack")
+                .unwrap()
+                .clone(),
+            &[
+                "chains.0.colour",
+                "chains.0.info",
+                "chains.0.mixer.volume",
+                "chains.0.mixer.pan",
+                "chains.0.mixer.solo",
+                "chains.1.mixer.enabled",
+                "chains.0.devices.1.chains.0.name",
+            ][..],
+        ),
+        (
             &devices[0],
             &[
                 "own_name",
@@ -625,6 +724,8 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "sidechain",
                 "floating",
                 "media",
+                "b_active",
+                "other_params",
             ][..],
         ),
         (&devices[1], &["mappings", "shape"][..]),
@@ -693,6 +794,10 @@ fn full_query_results_hold_everything_the_set_format_encodes() {
     for device in &devices {
         let got = query(&mut client, json!({ "id": device["id"], "detail": "full" }));
         covers(device, &got["saved"], "device").unwrap();
+    }
+    for chain in saved_chains(&document) {
+        let got = query(&mut client, json!({ "id": chain["id"], "detail": "full" }));
+        covers(&chain, &got["saved"], "chain").unwrap_or_else(|why| panic!("{why}"));
     }
     for (n, scene) in document["scenes"].as_array().unwrap().iter().enumerate() {
         let path = format!("scene {}", n + 1);
@@ -868,6 +973,11 @@ fn every_query_readback_the_command_table_names_is_in_a_real_full_result() {
     let document = serde_json::to_value(&project.document).unwrap();
     let mut client = open(&project, "declared");
     let (tracks, clips, devices) = saved_parts(&document);
+    // The device's whole results too, for the fields listed beside `saved`.
+    let device_results: Vec<Value> = devices
+        .iter()
+        .map(|saved| query(&mut client, json!({ "id": saved["id"], "detail": "full" })))
+        .collect();
     let mut full = |ids: &[Value]| -> Vec<Value> {
         ids.iter()
             .map(|saved| {
@@ -898,7 +1008,11 @@ fn every_query_readback_the_command_table_names_is_in_a_real_full_result() {
             Object::Song => present(&song, field) || present(&song["saved"], field),
             Object::Track => tracks.iter().any(|saved| present(saved, field)),
             Object::Clip => clips.iter().any(|saved| present(saved, field)),
-            Object::Device => devices.iter().any(|saved| present(saved, field)),
+            Object::Device => {
+                devices.iter().any(|saved| present(saved, field))
+                    || (Object::Device.listed().contains(field)
+                        && device_results.iter().any(|result| present(result, field)))
+            }
             Object::Scene => scenes.iter().any(|saved| present(saved, field)),
         };
         if !found {

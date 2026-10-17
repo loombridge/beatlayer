@@ -10,7 +10,7 @@
 //!    it can. The song plays from the range's start, as Play does from an
 //!    insert marker there, with the Arrangement loop off. Plug-in devices
 //!    render with the plug-ins the engine plays, lent for the render
-//!    ([`ClapHost::lend`], WP-2.6b).
+//!    ([`Hosts::lend`], WP-2.6b, WP-4.21).
 //! 2. At a file rate below the engine's, the render is converted down with
 //!    the media converter; otherwise the engine renders at the file's rate.
 //! 3. With Normalize, or Render as Loop, the render goes to a scratch file
@@ -37,7 +37,7 @@ use bl_core::time::{SampleRate, Ticks, TimeSignatureMap};
 use bl_engine::{EngineConfig, MediaLibrary, Offline, Output, Registry, TransportCommand, When};
 use bl_media::{AudioWriter, BitDepth, Dither, EncodeSpec, FileType, MP3_RATES, RateConverter};
 use bl_model::{ContentHash, DeviceId, Document, TrackId};
-use bl_plugin_host::clap::ClapHost;
+pub use bl_plugin_host::Hosts;
 use bl_shell_spec::editing::Position;
 use bl_shell_spec::export::{
     AUDIO, Dither as SpecDither, ExportArgs, ExportResult, FileType as SpecFileType, RangeSource,
@@ -254,8 +254,8 @@ pub fn hidden_beside(path: &Path, kind: &str) -> PathBuf {
 }
 
 /// Runs an export of `document`, with its clips' audio from `media` and its
-/// plug-in devices' plug-ins borrowed from `plugins` (without it, plug-in
-/// devices pass their input through). It checks `cancel` between blocks and
+/// plug-in devices' plug-ins borrowed from `plugins` (a format without a
+/// host passes its input through). It checks `cancel` between blocks and
 /// calls `progress` with the share done, from 0 to 1.
 ///
 /// # Errors
@@ -266,7 +266,7 @@ pub fn hidden_beside(path: &Path, kind: &str) -> PathBuf {
 pub fn export(
     document: &Document,
     media: Arc<dyn MediaLibrary>,
-    plugins: Option<&ClapHost>,
+    plugins: Hosts<'_>,
     job: &Job,
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(f64),
@@ -291,7 +291,7 @@ pub fn export(
 pub fn export_multi(
     renders: &[(&Document, &Job)],
     media: Arc<dyn MediaLibrary>,
-    plugins: Option<&ClapHost>,
+    plugins: Hosts<'_>,
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(f64),
 ) -> Result<Vec<Report>, ExportError> {
@@ -452,7 +452,7 @@ pub struct Rendered {
 
 /// Renders a range of `document` offline, with its clips' audio from
 /// `media` and its plug-in devices' plug-ins borrowed from `plugins` (the
-/// offline plug-in renders spec; a set without a CLAP device borrows
+/// offline plug-in renders spec; a set without a plug-in device borrows
 /// nothing), through the engine code that plays the set on a device
 /// ([`Offline`]): the song plays from the range's start, as Play does from
 /// an insert marker there, with the Arrangement loop off, as fast as the
@@ -477,7 +477,7 @@ pub struct Rendered {
 pub fn render(
     document: &Document,
     media: Arc<dyn MediaLibrary>,
-    plugins: Option<&ClapHost>,
+    plugins: Hosts<'_>,
     spec: &Render,
     longest: f64,
     cancel: &AtomicBool,
@@ -535,27 +535,23 @@ pub fn render(
     // to the render. The loan is made before the render's engine, so the
     // engine, and its nodes holding the plug-ins, go first, however the
     // render ends, and the loan then gives every plug-in back (R4). A set
-    // without a CLAP device borrows nothing: its render never touches the
-    // host or the engine playing.
+    // without a plug-in device borrows nothing: its render never touches
+    // the hosts or the engine playing.
     let loan = plugins
-        .filter(|_| crate::plugins::has_clap(document))
-        .map(ClapHost::lend)
-        .transpose()
-        .map_err(|error| ExportError::Failed(error.to_string()))?;
+        .lend(|format| crate::plugins::has_format(document, format))
+        .map_err(ExportError::Failed)?;
     let mut registry = Registry::new();
     bl_devices::register(&mut registry);
     let kit = bl_devices::kit_host();
     registry.add(kit.factory());
-    if let Some(loan) = &loan {
-        registry.add(loan.factory());
-    }
+    loan.register(&mut registry);
     kit.sync(document);
     let mut offline = Offline::new(config, registry.with_media(media));
     let unhosted = offline.sync(document);
     kit.idle();
     // Spec: offline-plugin-renders R2. A plug-in the engine didn't hand
     // back would render as a pass-through, which isn't what plays.
-    if let Some((device, why)) = loan.as_ref().and_then(|loan| loan.problems().pop()) {
+    if let Some((device, why)) = loan.problems().pop() {
         return Err(ExportError::Failed(format!(
             "the plug-in on {device} couldn't be rendered: {why}"
         )));
@@ -697,7 +693,7 @@ fn interleave(output: &Output<'_>, samples: &mut Vec<f32>) {
 fn run(
     document: &Document,
     media: Arc<dyn MediaLibrary>,
-    plugins: Option<&ClapHost>,
+    plugins: Hosts<'_>,
     job: &Job,
     (partial, scratch): (&Path, &Path),
     cancel: &AtomicBool,
@@ -1066,7 +1062,7 @@ fn prepare_document_for_track(
 pub fn run_command(
     document: &Document,
     media: Arc<dyn MediaLibrary>,
-    plugins: Option<&ClapHost>,
+    plugins: Hosts<'_>,
     selection: Option<(Ticks, Ticks)>,
     selected_tracks: &[TrackId],
     engine_rate: u32,

@@ -81,6 +81,7 @@ impl Midi {
             }],
             delay: 0,
             session: Vec::new(),
+            launches: None,
         };
         self.rig
             .sender

@@ -11,66 +11,10 @@ bl_rt::install_trap!();
 
 mod common;
 
-use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
-
 use bl_core::time::SampleRate;
-use bl_engine::{Node, NodeConfig, NodeFactory, NoteEvent, NoteKind};
+use bl_engine::{NodeConfig, NodeFactory, NoteEvent, NoteKind};
 use bl_plugin_host::clap::{ClapError, ClapHost};
-use common::{FRAMES, GAIN, bundle, config, device, run};
-
-/// The engine's node for a device, running block after block on its own
-/// thread with an input of 1, keeping the last block's first sample.
-struct Engine {
-    stop: Arc<AtomicBool>,
-    last: Arc<Mutex<Option<f32>>>,
-    thread: Option<std::thread::JoinHandle<()>>,
-}
-
-impl Engine {
-    fn start(mut node: Box<dyn Node>) -> Self {
-        let stop = Arc::new(AtomicBool::new(false));
-        let last = Arc::new(Mutex::new(None));
-        let thread = {
-            let (stop, last) = (Arc::clone(&stop), Arc::clone(&last));
-            std::thread::spawn(move || {
-                while !stop.load(Relaxed) {
-                    let out = run(node.as_mut(), &[1.0; FRAMES], &[], &[]);
-                    *last.lock().unwrap() = Some(out.channels[0][FRAMES - 1]);
-                    std::thread::sleep(Duration::from_millis(1));
-                }
-            })
-        };
-        Self {
-            stop,
-            last,
-            thread: Some(thread),
-        }
-    }
-
-    /// Waits for the node's output to settle at `level`.
-    fn settles_at(&self, level: f32) {
-        let until = Instant::now() + Duration::from_secs(5);
-        while *self.last.lock().unwrap() != Some(level) {
-            assert!(
-                Instant::now() < until,
-                "the engine's node never put out {level}: {:?}",
-                self.last.lock().unwrap()
-            );
-            std::thread::sleep(Duration::from_millis(1));
-        }
-    }
-}
-
-impl Drop for Engine {
-    fn drop(&mut self) {
-        self.stop.store(true, Relaxed);
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
-        }
-    }
-}
+use common::{Engine, GAIN, bundle, config, device, run};
 
 /// A host with the test plug-in, and the engine running a device of it at
 /// a gain of 0.5.

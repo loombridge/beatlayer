@@ -9,6 +9,12 @@
 //! it runs [`AuHost::idle`]. The node passes its input through until the
 //! unit arrives.
 //!
+//! Offline renders (exports and agents' previews) borrow the same units
+//! ([`AuHost::lend`], WP-4.21), as `ClapHost::lend` does for CLAP: each
+//! unit comes back from the engine's node, is reactivated for the render's
+//! rate and block size, and when the [`Loan`] ends goes back to the engine
+//! with the state it had.
+//!
 //! Both Audio Units v2 and v3 are hosted through `AUAudioUnit`, the v3
 //! host API, which bridges a v2 component (Apple's built-ins are v2) to it:
 //! instantiation by component description, render blocks, the parameter
@@ -127,6 +133,10 @@ struct Main {
     closing: Vec<(DeviceId, Instance)>,
     /// Counts instances started and let go of.
     generation: u64,
+    /// An offline render has the units ([`AuHost::lend`]).
+    lending: bool,
+    /// Devices the render couldn't borrow a unit for, and why.
+    loan_problems: Vec<(DeviceId, String)>,
 }
 
 /// One device's unit.
@@ -172,7 +182,23 @@ struct Instance {
     pending: Option<Box<ViewControllerBlock>>,
     /// Why the editor couldn't be opened, if it couldn't.
     editor_failure: Option<String>,
+    /// The offline render that has it.
+    lent: Option<Lent>,
 }
+
+/// A unit lent to an offline render: the render's node, and what to give
+/// back to the engine afterwards.
+struct Lent {
+    ends: HostEnds,
+    /// The unit's state before the render, which it gets back.
+    saved: Option<Vec<u8>>,
+    /// Why the engine's node had it refused, if it had.
+    refused: Option<String>,
+}
+
+/// How long a render waits for the engine's node to hand a unit back: a
+/// node does at its next block, a few milliseconds away.
+const HAND_BACK_WAIT: Duration = Duration::from_secs(2);
 
 /// How many parameter events one editor's observer holds for the main
 /// thread before more are dropped. The buffer is reserved when the editor
@@ -490,11 +516,8 @@ impl AuHost {
     pub fn save_state(&self, device: DeviceId) -> Result<PluginState, AuError> {
         let mut guard = lock(&self.inner.main);
         let instance = instance(guard.get()?, device)?;
-        let refused = || AuError::Refused("to save its state".to_owned());
-        // SAFETY: reading the state is a property read on the main thread,
-        // where the unit was made.
-        let state = unsafe { instance.unit.fullStateForDocument() }.ok_or_else(refused)?;
-        let data = plist(&state).ok_or_else(refused)?;
+        let data = state_of(&instance.unit)
+            .ok_or_else(|| AuError::Refused("to save its state".to_owned()))?;
         Ok(PluginState {
             path: String::new(),
             data,
@@ -723,6 +746,121 @@ impl AuHost {
     pub fn generation(&self) -> u64 {
         let mut guard = lock(&self.inner.main);
         guard.get().map_or(0, |main| main.generation)
+    }
+
+    /// Lends the units to an offline render (WP-4.21), as `ClapHost::lend`
+    /// does for CLAP: an export or a preview, rendering on this thread.
+    /// The loan's [`factory`](Loan::factory) goes into the render's
+    /// registry; for each Audio Unit device the render makes a node for, it
+    /// takes the unit back from the engine's node (waiting for that node's
+    /// next block), deactivates it, sets it to the rendered set's parameter
+    /// values, and activates it for the render's rate and block size. A
+    /// device with no unit yet gets one, from its saved state. Meanwhile
+    /// the engine's node passes its input through.
+    ///
+    /// When the loan is dropped, after the render's engine, every unit goes
+    /// back to the engine with the state it had before, activated for the
+    /// engine's rate and block size again; one that failed while rendering
+    /// stays silent in the engine too.
+    ///
+    /// # Errors
+    ///
+    /// [`AuError::WrongThread`] off the host's thread, and
+    /// [`AuError::Lent`] while another loan is out.
+    pub fn lend(&self) -> Result<Loan, AuError> {
+        let mut guard = lock(&self.inner.main);
+        let main = guard.get()?;
+        if main.lending {
+            return Err(AuError::Lent);
+        }
+        main.lending = true;
+        main.loan_problems.clear();
+        Ok(Loan {
+            inner: Arc::clone(&self.inner),
+            _main_thread: std::marker::PhantomData,
+        })
+    }
+}
+
+/// The host's units, lent to an offline render ([`AuHost::lend`]).
+/// Dropping it, on the main thread and after the render's engine, gives
+/// every unit back to the engine.
+pub struct Loan {
+    inner: Arc<Inner>,
+    /// It ends on the main thread, which made it.
+    _main_thread: std::marker::PhantomData<*const ()>,
+}
+
+impl fmt::Debug for Loan {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Loan").finish_non_exhaustive()
+    }
+}
+
+impl Loan {
+    /// The factory for the render's registry: it makes each Audio Unit
+    /// device's node with the device's own unit, borrowed from the engine.
+    #[must_use]
+    pub fn factory(&self) -> LoanFactory {
+        LoanFactory {
+            inner: Arc::clone(&self.inner),
+        }
+    }
+
+    /// The devices whose unit the render couldn't borrow, and why: the
+    /// engine's node didn't hand it back in time. Their nodes pass their
+    /// input through, so the render isn't what the engine plays.
+    #[must_use]
+    pub fn problems(&self) -> Vec<(DeviceId, String)> {
+        let mut guard = lock(&self.inner.main);
+        guard
+            .get()
+            .map(|main| main.loan_problems.clone())
+            .unwrap_or_default()
+    }
+}
+
+impl Drop for Loan {
+    fn drop(&mut self) {
+        let mut guard = lock(&self.inner.main);
+        if let Ok(main) = guard.get() {
+            end_loan(main);
+        }
+    }
+}
+
+/// A loan's factory for an offline render's registry ([`Loan::factory`]).
+pub struct LoanFactory {
+    inner: Arc<Inner>,
+}
+
+impl NodeFactory for LoanFactory {
+    fn create(&self, device: &Device, config: &NodeConfig) -> Option<Box<dyn Node>> {
+        let DeviceKind::Plugin {
+            format: PluginFormat::AudioUnit,
+            ..
+        } = &device.kind
+        else {
+            return None;
+        };
+        let (node, ends) = AuNode::new(config);
+        let mut guard = lock(&self.inner.main);
+        let problem = match guard.get() {
+            Ok(main) if main.lending => borrow(main, device, *config, ends).err(),
+            Ok(_) => Some("the units aren't lent to a render".to_owned()),
+            Err(error) => Some(error.to_string()),
+        };
+        if let (Some(why), Ok(main)) = (problem, guard.get()) {
+            main.loan_problems.push((device.id, why));
+        }
+        Some(Box::new(node))
+    }
+
+    fn device_types(&self) -> Vec<DeviceType> {
+        lock(&self.inner.types)
+            .iter()
+            .map(|t| t.device_type.clone())
+            .collect()
     }
 }
 
@@ -1253,6 +1391,14 @@ fn any_object<T: objc2::Message + ?Sized>(object: &T) -> &AnyObject {
     unsafe { &*std::ptr::from_ref(object).cast::<AnyObject>() }
 }
 
+/// The unit's state as a binary property list, if it will save it.
+fn state_of(unit: &AUAudioUnit) -> Option<Vec<u8>> {
+    // SAFETY: reading the state is a property read on the main thread,
+    // where the unit was made.
+    let state = unsafe { unit.fullStateForDocument() }?;
+    plist(&state)
+}
+
 /// Writes a unit's state as a binary property list.
 fn plist(state: &NSDictionary<NSString, AnyObject>) -> Option<Vec<u8>> {
     // SAFETY: the dictionary comes from the unit; writing it as a property
@@ -1342,6 +1488,134 @@ fn serve(main: &mut Main, request: Request) {
     instance.silenced = false;
 }
 
+/// Lends the device's unit to an offline render's node (WP-4.21): takes it
+/// back from the engine's node, and activates it for the render's settings
+/// with the rendered set's parameter values. A unit that can't be made or
+/// won't activate leaves the node passing its input through; one that
+/// failed while processing leaves it silent.
+fn borrow(
+    main: &mut Main,
+    device: &Device,
+    config: NodeConfig,
+    ends: HostEnds,
+) -> Result<(), String> {
+    if !ensure_instance(main, device) {
+        // Spec: au-hosting R12, as in the engine.
+        return Ok(());
+    }
+    let Some(instance) = main.instances.get_mut(&device.id) else {
+        return Ok(());
+    };
+    if instance.lent.is_some() {
+        return Err("its unit is lent to this render already".to_owned());
+    }
+    // Spec: offline-plugin-renders R4. Its state, to give back.
+    let saved = state_of(&instance.unit);
+    // Spec: offline-plugin-renders R2. The engine's node hands it back at
+    // its next block.
+    if instance.out {
+        for ends in instance.ends.iter().chain(&instance.retired) {
+            ends.status.hand_back.store(true, Relaxed);
+        }
+        let until = Instant::now() + HAND_BACK_WAIT;
+        loop {
+            take_back(instance);
+            if !instance.out {
+                break;
+            }
+            if Instant::now() >= until {
+                return Err(
+                    "the engine playing the set didn't hand its unit back in time".to_owned(),
+                );
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+    let mut lent = Lent {
+        ends,
+        saved,
+        refused: instance.refused.take(),
+    };
+    if instance.silenced {
+        // Spec: offline-plugin-renders R6. Failed, it stays silent.
+        lent.ends.status.silent.store(true, Relaxed);
+        instance.lent = Some(lent);
+        return Ok(());
+    }
+    // Spec: offline-plugin-renders R3. The rendered set's values, and the
+    // render's rate and block size. An open editor's observer is the
+    // originator, so it doesn't report the values as the unit's own.
+    let observer = instance.ends.as_ref().map_or(std::ptr::null_mut(), |ends| {
+        ends.status.observer.load(Relaxed)
+    });
+    lent.ends.status.observer.store(observer, Relaxed);
+    set_values(instance, device);
+    // Spec: au-hosting R12. One that won't activate for the render leaves
+    // its node passing its input through.
+    if let Ok((processor, latency)) = activate(
+        &instance.unit,
+        &config,
+        &instance.params,
+        &instance.descriptors,
+    ) {
+        lent.ends.status.latency.store(latency, Relaxed);
+        if lent.ends.to_node.push(processor).is_ok() {
+            instance.out = true;
+            instance.active_for = Some(config);
+        }
+    }
+    instance.lent = Some(lent);
+    Ok(())
+}
+
+/// Ends a loan: every lent unit goes back to the engine's node with the
+/// state it had, or stays silent if it failed while rendering.
+fn end_loan(main: &mut Main) {
+    if !main.lending {
+        return;
+    }
+    main.lending = false;
+    main.loan_problems.clear();
+    for instance in main.instances.values_mut() {
+        let Some(lent) = &instance.lent else { continue };
+        lent.ends.status.hand_back.store(true, Relaxed);
+        // The render's engine is gone, and its node gave the processor
+        // back as it went.
+        take_back(instance);
+        let Some(lent) = instance.lent.take() else {
+            continue;
+        };
+        let failed = lent.ends.status.failed.load(Relaxed);
+        if instance.out {
+            // A render's node still holds it: it's deactivated once that
+            // node gives it back.
+            instance.retired.push(lent.ends);
+        }
+        // Spec: offline-plugin-renders R4. The state it had; what the
+        // render did to its parameters is dropped, the editor's too.
+        if let Some(saved) = &lent.saved {
+            let _ = load_state(&instance.unit, saved);
+        }
+        if let Some(editor) = &instance.editor
+            && let Ok(mut events) = editor.events.try_lock()
+        {
+            events.clear();
+        }
+        instance.refused = lent.refused;
+        if failed {
+            // Spec: offline-plugin-renders R6, au-hosting R12.
+            instance.silenced = true;
+            instance.failure = Some(
+                "it failed while processing in an offline render; the device is silent".to_owned(),
+            );
+            if let Some(ends) = &instance.ends {
+                ends.status.silent.store(true, Relaxed);
+            }
+        }
+        pump(instance);
+    }
+}
+
 /// Makes the device's unit if it has none. Returns whether it has one; one
 /// that can't be made is recorded as missing.
 fn ensure_instance(main: &mut Main, device: &Device) -> bool {
@@ -1400,6 +1674,7 @@ fn ensure_instance(main: &mut Main, device: &Device) -> bool {
         opening: false,
         pending: None,
         editor_failure: None,
+        lent: None,
     };
     // Spec: au-hosting R9, R11. The saved state first, then the set's
     // parameter values over it.
@@ -1434,6 +1709,7 @@ fn pump(instance: &mut Instance) -> bool {
     if !instance.out
         && instance.refused.is_none()
         && !instance.silenced
+        && instance.lent.is_none()
         && let (Some(ends), Some(config)) = (&mut instance.ends, instance.config)
         && !ends.to_node.is_abandoned()
     {
@@ -1461,7 +1737,13 @@ fn pump(instance: &mut Instance) -> bool {
 /// Takes back the processors nodes handed back and deactivates the unit.
 fn take_back(instance: &mut Instance) -> bool {
     let mut returned = false;
-    for ends in instance.ends.iter_mut().chain(instance.retired.iter_mut()) {
+    let lent = instance.lent.iter_mut().map(|lent| &mut lent.ends);
+    for ends in instance
+        .ends
+        .iter_mut()
+        .chain(instance.retired.iter_mut())
+        .chain(lent)
+    {
         while ends.from_node.pop().is_ok() {
             returned = true;
         }

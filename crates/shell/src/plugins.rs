@@ -143,10 +143,23 @@ pub fn is_au(doc: &Document, device: DeviceId) -> bool {
     })
 }
 
-/// Whether the set has a CLAP device.
+/// Whether the set has a plug-in device of `format`.
 #[must_use]
-pub fn has_clap(doc: &Document) -> bool {
-    !clap_devices(doc).is_empty()
+pub fn has_format(doc: &Document, format: PluginFormat) -> bool {
+    !devices(doc, format).is_empty()
+}
+
+/// Whether the set has a CLAP, VST3 or Audio Unit device: an offline render
+/// of it borrows the engine's plug-ins (offline-plugin-renders R1).
+#[must_use]
+pub fn has_plugin(doc: &Document) -> bool {
+    [
+        PluginFormat::Clap,
+        PluginFormat::Vst3,
+        PluginFormat::AudioUnit,
+    ]
+    .into_iter()
+    .any(|format| has_format(doc, format))
 }
 
 /// Whether `device` is a VST3 plug-in device in `doc`.

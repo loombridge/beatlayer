@@ -9,9 +9,9 @@ Live 12.4.3's keyboard shortcuts, the default keymap Beatlayer binds (D16). Sour
 | Milestone | Shortcuts |
 |---|---|
 | M1 | 137 |
-| M2 | 90 |
+| M2 | 85 |
 | M3 | 39 |
-| M4 | 16 |
+| M4 | 21 |
 | M5 | 10 |
 | M6 | 55 |
 | M7 | 2 |
@@ -397,15 +397,15 @@ The Clip View shows an audio clip's Sample Editor.
 | S-SAMPLE-002 | Open the quantise settings | `Cmd+Shift+U` | `Ctrl+Shift+U` | key | press | M4 | manual 42.11; observed in 12.4.3 (macOS), 10 October 2026: Edit menu |
 | S-SAMPLE-003 | Move the selected warp marker | `Left` or `Right` | `Left` or `Right` | key | press | M4 | manual 42.11 |
 | S-SAMPLE-004 | Select the previous or next warp marker | `Cmd+Left` or `Cmd+Right` | `Ctrl+Left` or `Ctrl+Right` | key | press | M4 | manual 42.11 |
-| S-SAMPLE-005 | Scroll the display to follow playback (unconfirmed) | `Option+Shift+F` | `Ctrl+Shift+F` | key | press | M2 | manual 42.11 |
-| S-SAMPLE-007 | Zoom to the clip selection | `Z` | `Z` | key | press | M2 | manual 42.11 |
-| S-SAMPLE-008 | Zoom back from the clip selection | `X` | `X` | key | press | M2 | manual 42.11 |
+| S-SAMPLE-005 | Scroll the display to follow playback (unconfirmed) | `Option+Shift+F` | `Ctrl+Shift+F` | key | press | M4 | manual 42.11 |
+| S-SAMPLE-007 | Zoom to the clip selection | `Z` | `Z` | key | press | M4 | manual 42.11 |
+| S-SAMPLE-008 | Zoom back from the clip selection | `X` | `X` | key | press | M4 | manual 42.11 |
 | S-SAMPLE-009 | Insert a warp marker | `Cmd+I` | `Ctrl+I` | key | press | M4 | manual 42.11 |
 | S-SAMPLE-010 | Delete the selected warp marker | `Delete` | `Delete` | key | press | M4 | manual 42.11 |
 | S-SAMPLE-011 | Insert a transient | `Cmd+Shift+I` | `Ctrl+Shift+I` | key | press | M4 | manual 42.11 |
 | S-SAMPLE-012 | Delete the selected transient (unconfirmed) | `Cmd+Shift+Delete` | `Ctrl+Shift+Delete` | key | press | M4 | manual 42.11 |
-| S-SAMPLE-013 | Fit the content to the editor's width | `W` | `W` | key | press | M2 | manual 42.11 |
-| S-SAMPLE-014 | Fit the content to the editor's height | `H` | `H` | key | press | M2 | manual 42.11 |
+| S-SAMPLE-013 | Fit the content to the editor's width | `W` | `W` | key | press | M4 | manual 42.11 |
+| S-SAMPLE-014 | Fit the content to the editor's height | `H` | `H` | key | press | M4 | manual 42.11 |
 | S-A11Y-012 | Move the insert marker in the Sample Editor (unconfirmed) | `Option+Left` or `Option+Right` | `Ctrl+Left` or `Ctrl+Right` | key | press | M2 | manual 41.4.1.4 |
 | S-A11Y-013 | Start or extend a time selection in the Sample Editor | `Shift+Left` or `Shift+Right` | `Shift+Left` or `Shift+Right` | key | press | M2 | manual 41.4.1.4 |
 

@@ -45,7 +45,7 @@ Each row's **Notes** name the work packages that build it ("Built in WP-1.8a, WP
 | Keyboard navigation (focus, area jumps, held shortcuts) | M1 onwards | Each view ships with its keyboard path; parity audit in M10. Tab and the neighbour keys by area and track, Wrap Tab Navigation, Outline View in Focus (off, as in Live 12.4.6), menus and context menus from the keyboard, and every command's keyboard path checked against the registry: WP-1.14 ([spec](specs/accessibility.md)). Built in WP-1.7, WP-1.14 |
 | Screen readers (VoiceOver, NVDA, Narrator) | M1 onwards | Orca on Linux as well; audit with screen-reader users in M10. Names, roles, and values for tracks, clips, and faders, and the focus as the keys move it, tested headless through AccessKit ([spec](specs/accessibility.md)). Built in WP-1.14 |
 | Browser: places, search, preview | M1 | Built in WP-1.10 |
-| Browser: preview in sync with tempo, hot-swap | M4 (tempo preview), M5 (hot-swap) | |
+| Browser: preview in sync with tempo, hot-swap | M4 (tempo preview), M5 (hot-swap) | Built in WP-4.18, WP-5.8 |
 | Browser: collections, tags, tag groups, Tag Editor, Quick Tags, filter view, saved searches, columns, history | M6 | |
 | Browser: automatic tagging of samples and plug-ins | M9 | |
 | Browser: similarity search and similar-sample swapping | M9 | Audio embeddings run locally |
@@ -70,21 +70,21 @@ Each row's **Notes** name the work packages that build it ("Built in WP-1.8a, WP
 | Live feature | Milestone | Notes |
 |---|---|---|
 | Clip gain, fades and crossfades, Normalize | M1 | Arrangement playback of clip gain, edge fades, the Start and End markers, and the loop, with Create Fades on Clip Edges' 4 ms: WP-1.4 ([spec](specs/audio-clips.md)). Clips stream from disk, trimming and splitting move the Start marker, and the Create Fades on Clip Edges setting (On, as observed in Live 12.4.6): WP-1.4b. Crossfades and Normalize aren't built yet. Built in WP-1.4, WP-1.4b |
-| Clip pitch, reverse, RAM mode, high-quality interpolation | M4 | |
-| Warp markers, transient markers, pseudo-warp markers | M4 | |
-| Warp modes: Beats, Tones, Texture, Re-Pitch | M4 | Native |
-| Warp modes: Complex, Complex Pro (with formants) | M4 | Through the stretch library in D11; formants and every other warp setting automatable (IMP-09) |
-| Auto-warp long samples, tempo detection, Set 1.1.1 Here, Warp From Here | M4 | |
-| Clip tempo leaders and followers | M4 | |
-| Audio quantise | M4 | |
-| Analysis files (`.asd`) | M4 | Beatlayer keeps its own analysis cache; `.asd` isn't read |
-| Split, Crop, Crop to Time Selection | M1 (split), M4 (crop) | Built in WP-1.8b |
-| Consolidate | M4 | |
-| Slice to New MIDI Track (transients, warp markers, beat divisions, slicing presets) | M4 | |
+| Clip pitch, reverse, RAM mode, high-quality interpolation | M4 | Built in WP-4.2, WP-4.7 |
+| Warp markers, transient markers, pseudo-warp markers | M4 | Built in WP-4.1, WP-4.3, WP-4.10 |
+| Warp modes: Beats, Tones, Texture, Re-Pitch | M4 | Native. Built in WP-4.2, WP-4.4, WP-4.5 |
+| Warp modes: Complex, Complex Pro (with formants) | M4 | Through the stretch library in D11; formants and every other warp setting automatable (IMP-09). Built in WP-4.6, WP-4.8 |
+| Auto-warp long samples, tempo detection, Set 1.1.1 Here, Warp From Here | M4 | Built in WP-4.9 |
+| Clip tempo leaders and followers | M4 | Built in WP-4.11 |
+| Audio quantise | M4 | Built in WP-4.12 |
+| Analysis files (`.asd`) | M4 | Beatlayer keeps its own analysis cache; `.asd` isn't read. Built in WP-4.3 |
+| Split, Crop, Crop to Time Selection | M1 (split), M4 (crop) | Built in WP-1.8b, WP-4.13 |
+| Consolidate | M4 | Built in WP-4.13 |
+| Slice to New MIDI Track (transients, warp markers, beat divisions, slicing presets) | M4 | Built in WP-4.16 |
 | Convert Drums, Melody, or Harmony to New MIDI Track | M9 | On-device ML, with measured accuracy targets (IMP-06) |
 | Stem separation (vocals, drums, bass, others; fast and high-quality modes; files, clips, time selections; merge stems) | M9 | On-device ML on the GPU, with a speed target (IMP-11) |
-| Freeze Track | M4 | |
-| Bounce Track in Place, Bounce to New Track, Bounce Group, Paste Bounced Audio | M4 | Mono sources bounce to mono files (IMP-10) |
+| Freeze Track | M4 | Built in WP-4.14 |
+| Bounce Track in Place, Bounce to New Track, Bounce Group, Paste Bounced Audio | M4 | Mono sources bounce to mono files (IMP-10). Built in WP-4.15 |
 | REX files | Out | The REX SDK is proprietary; in scope only if its terms allow use in a GPL-3.0 application |
 
 ## MIDI editing
@@ -120,8 +120,8 @@ Each row's **Notes** name the work packages that build it ("Built in WP-1.8a, WP
 | MIDI Arrangement Overdub, record quantisation | M2 | Built in WP-2.14 |
 | Session slot recording, Session overdub | M3 | Built in WP-3.11 |
 | Session performance into the Arrangement, Back to Arrangement | M3 | Built in WP-3.13, WP-3.6 |
-| Count-in, metronome sounds and subdivision, metronome only while recording | M2 | A rack as the metronome sound in M5. Built in WP-2.15 |
-| Monitoring In, Auto, Off; Keep Monitoring Latency | M2 | Built in WP-2.13 |
+| Count-in, metronome sounds and subdivision, metronome only while recording | M2 | Built in WP-2.15 |
+| Monitoring In, Auto, Off; Keep Monitoring Latency | M2 (monitoring), M5 (Keep Monitoring Latency) | Built in WP-2.13, WP-5.36 |
 | Recording file type and bit depth, up to 32-bit and 192 kHz | M2 | Built in WP-2.13 |
 | Tempo Follower | M9 | |
 
@@ -133,17 +133,17 @@ Each row's **Notes** name the work packages that build it ("Built in WP-1.8a, WP
 | Group tracks, nested | M1 | Summing in the engine: WP-1.6. Built in WP-1.6, WP-1.9 |
 | Return tracks and sends | M2 | No limit on returns (IMP-01). Sends from audio, MIDI, and group tracks, pre- and post-fader: WP-1.6. Built in WP-2.19 (the knobs, the Pre/Post switches, unlimited returns); returns' own sends with the track context menu |
 | Solo and cue modes, cue output, preview volume | M1 (preview), M3 (cue) | Solo, exclusive solo, and Solo in Place in the engine: WP-1.6. Built in WP-1.6, WP-1.10, WP-3.18 |
-| Split-stereo panning | M5 | |
-| Track delay in milliseconds or samples | M5 | |
+| Split-stereo panning | M5 | Built in WP-5.36 |
+| Track delay in milliseconds or samples | M5 | Built in WP-5.36 |
 | CPU meter, disk overload indicator | M1 | Built in WP-1.3, WP-1.7 |
-| Per-track performance impact | M5 | |
+| Per-track performance impact | M5 | Built in WP-5.38 |
 | Automatic plug-in delay compensation, driver error compensation | M2 | Built in WP-2.11 |
-| Routing taps: before effects, after effects, after mixer; rack chain taps | M2 (track taps), M5 (chain taps) | Built in WP-2.19 |
-| Resampling, MIDI track to MIDI track, multi-output instruments | M2 | Built in WP-2.19 (resampling, track-to-track audio; MIDI routing kept and shown, carried once WP-2.1 plays MIDI); multi-output instruments with the instruments |
+| Routing taps: before effects, after effects, after mixer; rack chain taps | M2 (track taps), M5 (chain taps) | Built in WP-2.19, WP-5.7 |
+| Resampling, MIDI track to MIDI track, multi-output instruments | M2 (resampling, track to track), M5 (multi-output instruments) | Built in WP-2.19 (resampling, track-to-track audio; MIDI routing kept and shown, carried once WP-2.1 plays MIDI); multi-output instruments in WP-5.45 |
 | Sidechain to devices and plug-ins | M2 | WP-2.19b: a device's sidechain section picks its source (Live 12 routes no Audio To into a sidechain), External, Mix, SC Gain, Listen ([routing](specs/routing.md) R22 to R31) |
 | Up to 256 mono inputs and outputs | M2 | Built in WP-2.13 |
-| Multicore and multiprocessor processing | M5 | The parallel graph scheduler in the architecture's "Scheduling and multicore". No package builds it yet, and the capacity target (128 tracks on an M1) needs it; Phase 10 only tunes it |
-| MIDI track output to external MIDI ports and channels (hardware synths) | M5 | Needs the scheduled MIDI output backend (architecture, MIDI I/O), shared with External Instrument and MIDI Clock |
+| Multicore and multiprocessor processing | M5 | The parallel graph scheduler in the architecture's "Scheduling and multicore", which the capacity target (128 tracks on an M1) needs; Phase 10 only tunes it. Built in WP-5.37 |
+| MIDI track output to external MIDI ports and channels (hardware synths) | M5 | Needs the scheduled MIDI output backend (architecture, MIDI I/O), shared with External Instrument and MIDI Clock. Built in WP-5.34 |
 | Surround mixing | Out | Live 12 is stereo apart from one Max device; revisit after 1.0 |
 
 ## Automation and modulation
@@ -154,9 +154,9 @@ Each row's **Notes** name the work packages that build it ("Built in WP-1.8a, WP
 | Curved segments | M2 | Built in WP-2.12 |
 | Session automation recording | M3 | Built in WP-3.12 |
 | Insert shapes, stretch and skew, simplify, lock envelopes, keyboard breakpoint editing | M6 | |
-| Relative modulation on top of automation | M5 | |
-| Modulators: LFO, Shaper, Envelope Follower, Envelope MIDI, Shaper MIDI, Expression Control | M5 | |
-| Macros (16 per rack), variations, randomise, map mode with per-mapping ranges | M5 | |
+| Relative modulation on top of automation | M5 | Built in WP-5.9 |
+| Modulators: LFO, Shaper, Envelope Follower, Envelope MIDI, Shaper MIDI, Expression Control | M5 | Built in WP-5.10, WP-5.11 |
+| Macros (16 per rack), variations, randomise, map mode with per-mapping ranges | M5 | Built in WP-5.4, WP-5.5 |
 | MIDI map mode, key map mode, takeover modes, relative controllers, instant mappings | M7 | |
 | Computer MIDI keyboard | M2 | Built in WP-2.2 |
 
@@ -164,10 +164,10 @@ Each row's **Notes** name the work packages that build it ("Built in WP-1.8a, WP
 
 | Live feature | Milestone | Notes |
 |---|---|---|
-| Instrument, Audio Effect, MIDI Effect, and Drum racks | M5 | |
-| Parallel chains, key, velocity, and chain-select zones with fades, Auto Select | M5 | |
-| Drum Rack pads, choke groups, return chains, extract chains | M5 | |
-| Device A/B compare | M5 | |
+| Instrument, Audio Effect, MIDI Effect, and Drum racks | M5 | Chain strips in the Mixer too. Built in WP-5.1, WP-5.2, WP-5.19 |
+| Parallel chains, key, velocity, and chain-select zones with fades, Auto Select | M5 | Built in WP-5.1, WP-5.3 |
+| Drum Rack pads, choke groups, return chains, extract chains | M5 | Built in WP-5.6 |
+| Device A/B compare | M5 | Built in WP-5.12 |
 | Rename devices, device presets | M2 | Device chains in Live's order, the device frame (activator, fold, Show Preset Name, the context menu), Rename, the device clipboard, Beatlayer preset files with Save Preset, Save as Default Preset, and Hot-Swap Presets: WP-2.4 ([spec](specs/device-chains.md)). Presets load into native devices clamped to their parameters: WP-2.5 ([spec](specs/device-framework.md)); each native device's factory presets ship with it (WP-2.16 to 2.18). Built in WP-2.4, WP-2.5 |
 | Device parameters and controls: knobs, switches, choosers, number boxes, display cells | M2 | The native device framework: parameter descriptors (gains to −∞ dB, every parameter automatable), smoothing, the generic UI drawn from them with Live's drag, reset, undo names, and value formats, the layout of control bands and stretchable display cells (IMP-14), and an oversampler: WP-2.5 ([spec](specs/device-framework.md)). Built in WP-2.5 |
 | "Use Current Scale" on devices | M6 | |
@@ -179,9 +179,9 @@ Each row's **Notes** name the work packages that build it ("Built in WP-1.8a, WP
 |---|---|---|
 | Simpler | M2 | Sampler v1. Built in WP-2.16 |
 | Drift | M2 | Polysynth v1. Built in WP-2.17 |
-| Impulse, Drum Sampler | M5 | |
-| Sampler (multisample, zones, modulation) | M5 | Plus SFZ import |
-| External Instrument | M5 | With hardware latency setting |
+| Impulse, Drum Sampler | M5 | Built in WP-5.17, WP-5.18 |
+| Sampler (multisample, zones, modulation) | M5 | Plus SFZ import. Built in WP-5.13, WP-5.14 |
+| External Instrument | M5 | With hardware latency setting. Built in WP-5.34 |
 | Analog | M8 | |
 | Operator | M8 | FM |
 | Wavetable | M8 | Wavetables generated or open-licensed |
@@ -198,9 +198,9 @@ Each row's **Notes** name the work packages that build it ("Built in WP-1.8a, WP
 | Live device | Milestone | Notes |
 |---|---|---|
 | EQ Eight, Compressor, Limiter, Reverb, Delay, Utility | M2 | Built in WP-2.18a, WP-2.18b |
-| Auto Filter, Auto Pan-Tremolo, Beat Repeat, Channel EQ, Chorus-Ensemble, EQ Three, Erosion, Gate, Grain Delay, Looper, Phaser-Flanger, Redux, Saturator, Tuner | M5 | To Live's current versions: the redesigned Auto Filter (12.2), Saturator's Bass Shaper curve (12.1), and the 12.4 Erosion and Chorus-Ensemble, with its ensemble mode |
-| Align Delay, Drum Buss, Dynamic Tube, Filter Delay, Glue Compressor, Multiband Dynamics, Overdrive, Shifter, Spectrum, Vinyl Distortion | M5 | |
-| External Audio Effect | M5 | With hardware latency setting |
+| Auto Filter, Auto Pan-Tremolo, Beat Repeat, Channel EQ, Chorus-Ensemble, EQ Three, Erosion, Gate, Grain Delay, Looper, Phaser-Flanger, Redux, Saturator, Tuner | M5 | To Live's current versions: the redesigned Auto Filter (12.2), Saturator's Bass Shaper curve (12.1), and the 12.4 Erosion and Chorus-Ensemble, with its ensemble mode. Built in WP-5.20, WP-5.20b, WP-5.20c, WP-5.21, WP-5.23, WP-5.24, WP-5.25, WP-5.26, WP-5.26b, WP-5.28 |
+| Align Delay, Drum Buss, Dynamic Tube, Filter Delay, Glue Compressor, Multiband Dynamics, Overdrive, Shifter, Spectrum, Vinyl Distortion | M5 | Built in WP-5.21, WP-5.22, WP-5.22b, WP-5.23, WP-5.24, WP-5.25, WP-5.27, WP-5.28 |
+| External Audio Effect | M5 | With hardware latency setting. Built in WP-5.35 |
 | Auto Shift (pitch correction) | M8 | |
 | Corpus, Resonators, Vocoder | M8 | |
 | Amp, Cabinet, Pedal | M8 | Cabinet impulse responses recorded or open-licensed |
@@ -214,7 +214,7 @@ Each row's **Notes** name the work packages that build it ("Built in WP-1.8a, WP
 
 | Live device | Milestone | Notes |
 |---|---|---|
-| Arpeggiator, CC Control, Chord, MIDI Monitor, MPE Control, Note Echo, Note Length, Pitch, Random, Rotating Rhythm Generator, Scale, Velocity | M5 | |
+| Arpeggiator, CC Control, Chord, MIDI Monitor, MPE Control, Note Echo, Note Length, Pitch, Random, Rotating Rhythm Generator, Scale, Velocity | M5 | Rotating Rhythm Generator has no package yet: the manual doesn't describe it. Built in WP-5.30, WP-5.31, WP-5.32 |
 | Melodic Steps, Bouncy Notes, Step Arp, SQ Sequencer, Rhythmic Steps (the Sequencer Pack) | M9 | Built with the extension SDK |
 | MIDI Tools Pack (extra rhythmic and melodic generators and transformations) | M9 | Built with the extension SDK as MIDI Tools; list its tools from the pack's product page when the package is planned |
 | Performance Pack (Performer, Variations, Arrangement Looper, Prearranger) | M9 | Built with the extension SDK |
@@ -239,9 +239,9 @@ Each row's **Notes** name the work packages that build it ("Built in WP-1.8a, WP
 | VST3 | M2 | Built in WP-2.7 |
 | Audio Units v2 and v3 | M2 | macOS. Built in WP-2.8 |
 | VST2 | Out | Steinberg no longer licenses the VST2 SDK |
-| Plug-in configure mode, MPE plug-ins, multi-output plug-ins | M2 (MPE, multi-out), M5 (configure mode) | WP-2.6 hosts a CLAP plug-in's main audio ports and one note port, with per-note IDs; MPE and multi-output routing aren't built yet |
+| Plug-in configure mode, MPE plug-ins, multi-output plug-ins | M2 (MPE), M5 (configure mode, multi-out) | WP-2.6 hosts a CLAP plug-in's main audio ports and one note port, with per-note IDs; MPE routing isn't built yet. Multi-output plug-ins: WP-5.45. Configure mode: built in WP-5.40 |
 | (Beatlayer only) CLAP | M2 | Built in WP-2.6 ([spec](specs/clap-hosting.md)); embedded editors with WP-2.10, offline renders with WP-2.6b |
-| (Beatlayer only) LV2 | M5 | Linux |
+| (Beatlayer only) LV2 | M5 | Linux. Built in WP-5.39 |
 
 ## Files and export
 
@@ -250,18 +250,18 @@ Each row's **Notes** name the work packages that build it ("Built in WP-1.8a, WP
 | Sets, templates, Collect All and Save, File Manager (missing files) | M1 (project files), M2 (templates, collect, relink) | Built in WP-0.7, WP-1.7, WP-1.11, WP-2.25 |
 | Crash recovery: the next launch offers the unsaved set | M1 | [Spec](specs/crash-recovery.md). Built in WP-1.11 |
 | (Beatlayer only) Save Continuously, with a history of save points (IMP-05) | M1 (the journal and the option), M6 (the history browser) | Off by default. Built in WP-1.11 |
-| Clip, device preset, and rack preset files | M2 (device presets), M5 (racks), M6 (clips) | Beatlayer's own formats. Built in WP-2.5 |
+| Clip, device preset, and rack preset files | M2 (device presets), M5 (racks), M6 (clips) | Beatlayer's own formats. Built in WP-2.5, WP-5.8 |
 | Live set import (`.als`) | M9 | |
 | Live device and rack preset import (`.adv`, `.adg`) | M9 | Native devices mapped to Beatlayer equivalents |
 | Packs (`.alp`), Max devices (`.amxd`), Move and Note bundles (`.ablbundle`) | Out | Ableton content and closed platforms |
 | Pack a project into one archive, export Session clips as a new set, merge sets | M6 | |
 | Standard MIDI Files, import and export | M2 | Built in WP-2.21 |
 | Audio import: WAV, AIFF, AIFF-C, FLAC, Ogg Vorbis, MP3, M4A (AAC, ALAC), RF64 and BWF over 4 GB | M1 | M4A on every platform, not only macOS. Built in WP-1.1, WP-1.10 |
-| Export: Main, all tracks as stems, selected tracks, one track; include returns and Main effects; mono; normalise | M1 (Main), M2 (one track), M4 (stems, render as loop) | Built in WP-1.12, WP-2.26 |
+| Export: Main, all tracks as stems, selected tracks, one track; include returns and Main effects; mono; normalise | M1 (Main), M2 (one track), M4 (stems, render as loop) | Built in WP-1.12, WP-2.26, WP-4.17 |
 | Export formats: WAV, AIFF, FLAC at 16, 24, or 32 bits; MP3 at 320 kbps | M1 (WAV, AIFF, FLAC), M2 (MP3) | Built in WP-1.12, WP-2.26 |
 | Dither: rectangular, triangular | M1 | Built in WP-1.12 |
 | Dither: POW-r 1, 2, 3 | Out | A licensed proprietary algorithm; Beatlayer's own noise-shaped dither takes its place, built in WP-2.27 |
-| Real-time rendering with external hardware, restart after dropouts | M5 | |
+| Real-time rendering with external hardware, restart after dropouts | M5 | Built in WP-5.35 |
 | Video in the arrangement, video window, video export | M9 | |
 | (Beatlayer only) DAWproject import and export | M6 | |
 | (Beatlayer only) Agent control of every feature through MCP, headless or alongside the app | M1, then every milestone | D17; each feature's commands reach the agent API when the feature ships. Built in WP-0.14, WP-1.15, WP-1.16 |

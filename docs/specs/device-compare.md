@@ -1,0 +1,58 @@
+# Device A/B compare
+
+- **Status:** draft
+- **Work packages:** WP-5.12 (this spec). The device frame, its menu, the device clipboard and presets are [device-chains.md](device-chains.md)'s; a device's parameters and their glide are [device-framework.md](device-framework.md)'s; overriding and re-enabling automation is [automation.md](automation.md)'s; racks are [racks.md](racks.md)'s
+- **Parity-matrix row:** Racks and device features: Device A/B compare
+- **Checked against:** the Live 12 reference manual (online edition), read 17 October 2026; the Live 12 release notes, 12.3 and 12.4
+
+## The behaviour
+
+Every native device holds two states, A and B, each a whole set of its parameter values, and plays the one that's active. A new device starts with the two the same. A change goes to the active state only, so the other keeps what it held: a person can keep a sound in one state while trying changes in the other, and switch to hear the difference. Compare: Switch to B, in the Edit menu and the device's menu or on the P key, makes B active, and the item then reads Compare: Switch to A; Compare: Copy A to B copies the active state over the other, and reads Copy B to A while B is active. While B is active, the device's title bar shows "(B)" after its name.
+
+The two states keep their own values but not their own automation: switching states is a hand move on every parameter the device has an envelope for, so those envelopes are overridden until Re-Enable Automation, and the next switch overrides them again. Copying a device, or saving a preset from it, takes the active state only, in both A and B. Racks and plug-in devices have no A and B, so the Compare items are disabled for them.
+
+This spec covers the two states in the document, the Compare commands, their keys and menu items, what they do to automation, and what a copy, a preset and the set keep. It changes [device-chains.md](device-chains.md) R24, whose Compare items it makes live, in the same package.
+
+## Sources
+
+| ID | Kind | Source | What it shows |
+|---|---|---|---|
+| S1 | Manual | Live 12 reference manual, chapter 23 "Working with Instruments and Effects", section 23.2.2 "Device A/B Comparison" | Every one of Live's own devices has two states, A and B, each storing its own parameter values. A device first loaded has its defaults in both; after a change, B keeps the original values and only A takes the change. Compare: Copy A to B, in the Edit menu, the device's context menu or its Show Options menu, copies A's values to B; Compare: Switch to B, or P, switches to B; while B is active "(B)" follows the device's name in its title bar. Both states reach the Compare commands. They aren't available for racks or plug-ins. Automation isn't shared between the states: switching states disables the automation, switching back doesn't re-enable it, and Re-Enable Automation in a parameter's context menu re-enables it for the state selected, until the next switch. Copying or duplicating a device takes only the selected state's values, for both A and B of the copy, and saving a preset to the User Library does the same |
+| S2 | Release notes | Live 12 release notes, 12.3 (25 November 2025), Device A/B Comparison | The device title bar's Options menu has Compare: Switch to A/B and Compare: Copy A/B to B/A; switching moves between two device states with their own parameter values, and copying copies the current state's settings to the other; P is its key |
+| S3 | Release notes | Live 12 release notes, 12.4 (5 May 2026), Live bug fixes | Switching between a device's A and B states leaves a user preset's name as it was |
+| S4 | Beatlayer | [The UI parity reference](../ui-parity/README.md): [menus.md](../ui-parity/menus.md) M-EDIT-016 and M-EDIT-017 (the Edit menu's Compare items, which read Switch to A and reverse while B is active), C-DEVICE-010 and C-DEVICE-011 (the device menu's); [shortcuts.md](../ui-parity/shortcuts.md) S-DEV-011 (P, in the Device View); [layout.md](../ui-parity/layout.md) L-DEV-005 (the "(B)" after the name) | Where the items, the key and the indicator sit |
+| S5 | Beatlayer | [device-chains.md](device-chains.md) R8, R14 to R16, R20 and R24; [device-framework.md](device-framework.md) R4 and R14; [automation.md](automation.md) R5; [the architecture](../02-architecture.md), "Real-time rules", and decisions D16 and D17 | A parameter edit sends changes, not a new program; device edits are undo steps named as Live names them; copies and presets carry a device's values; continuous values glide; a hand move overrides an envelope; every action is a registered command with a schema, a description and a permission class, and what an agent sets it can read back; no allocation, lock or blocking call on the audio thread |
+
+## Rules
+
+- **R1.** Every native device has two states, A and B, each a value for every one of its parameters, and one of them is active: the device plays the active state's values and its controls show them. A device added, or a device from a set saved before this spec, has both states equal to its values, with A active. Native devices include the modulators ([modulation.md](modulation.md) R12) (Beatlayer's own). (S1)
+- **R2.** A change to a parameter, from any source (a control, `device.set_param`, a macro, an agent), goes to the active state only; the other state keeps its values. (S1)
+- **R3.** Compare: Switch to B (`device.compare_switch`; P, S-DEV-011; the Edit menu's M-EDIT-016 and the device menu's C-DEVICE-010) makes the other state active: every parameter whose value differs between the two moves to the newly active state's value, a continuous one gliding as any change does ([device-framework.md](device-framework.md) R4). While B is active both items read Compare: Switch to A, and the same command and key switch back. Each switch is one undo step, named as the item that ran it (Beatlayer's own). (S1, S2, S4)
+- **R4.** Compare: Copy A to B (`device.compare_copy`; M-EDIT-017, C-DEVICE-011) copies every value of the active state over the other, as one undo step named as the item; what the device plays doesn't change. While B is active both items read Compare: Copy B to A. (S1, S2, S4)
+- **R5.** While B is active, the device's title bar shows "(B)" after its name, in a folded device's strip too; with A active it shows nothing more. The name and the preset name the title shows stay as they are when the state switches. (S1, S3, S4)
+- **R6.** The Edit menu's items, and P, act on the selected device; the device menu's items act on its own device. They're enabled only for a native device: for a rack, a plug-in device, or no selection, the items are shown disabled and P does nothing. P is bound in the Device View's context (S-DEV-011), so the keymap test finds it. (S1, S4)
+- **R7.** Switching states counts as a hand move on every parameter of the device that has an envelope: each such envelope is overridden, as one undo step with the switch ([automation.md](automation.md) R5), whether or not its value differs between the states. `automation.re_enable` and `automation.re_enable_for` put them back under their envelopes in whichever state is active, and the next switch overrides them again. Copy A to B overrides nothing. (S1)
+- **R8.** Copy, Cut and Paste, and Duplicate give the new device the active state's values in both of its states, with A active; moving a device, within its chain or to another track, keeps both states and which one is active ([device-chains.md](device-chains.md) R4). (S1, S5)
+- **R9.** Save Preset and Save as Default Preset write the active state's values only ([device-chains.md](device-chains.md) R16 to R18). Loading a preset into a device sets both states to the preset's values, with A active, as a device starts (Beatlayer's own). (S1, S5)
+- **R10.** The set saves, for each native device, its two states' values and which one is active, writing the inactive state only where it differs from the active one (Beatlayer's own). A set that holds no B loads with B equal to the device's values and A active. (S5)
+- **R11.** `device.compare_switch` and `device.compare_copy` are `edit` commands with schemas, descriptions and permission classes, run by ID through the agent API with the device named, or acting on the selected device when run from a key or a menu item ([device-chains.md](device-chains.md) R20). A command for a device without states is refused, saying why. `device.parameters` reports which state is active and each parameter's value in the other state, and the query tool's `device` gives both states in its `compare` field: that is their readback. (S5)
+- **R12.** Undo and redo of a switch or a copy bring back both states' values and which one was active, and the overrides R7 made. (S5)
+- **R13.** Switching and copying send parameter changes and never a new program ([device-chains.md](device-chains.md) R8), so the device keeps its running state; nothing of it on the audio thread allocates, locks or blocks. (S5)
+
+## Tests
+
+| Rule | Test | Kind |
+|---|---|---|
+| R1 | `crates/model/src/device.rs`, `a_new_device_has_two_equal_states_with_a_active` | unit |
+| R2 | `crates/model/src/command.rs`, `a_change_goes_to_the_active_state_only` | unit |
+| R3 | `crates/shell/tests/device_compare.rs`, `switching_plays_the_other_states_values_in_one_undo_step`; `crates/engine/tests/device_chains.rs`, `a_state_switch_glides_its_continuous_parameters` | unit, engine test under the allocation trap |
+| R4 | `crates/shell/tests/device_compare.rs`, `copy_overwrites_the_other_state_and_reverses_with_b_active` | unit |
+| R5 | `crates/ui/tests/device_view.rs`, `the_title_bar_shows_b_while_b_is_active`; `crates/shell/tests/device_compare.rs`, `switching_keeps_the_preset_name` | UI script, unit |
+| R6 | `crates/ui/tests/keymap.rs`, `every_shortcut_is_bound_or_marked_with_the_milestone_that_binds_it`; `crates/ui/tests/menus.rs`, `compare_items_follow_the_state_and_are_disabled_for_racks_and_plugins` | keymap test, UI script |
+| R7 | `crates/shell/tests/device_compare.rs`, `a_switch_overrides_the_devices_envelopes_and_re_enable_returns_them`, `copy_overrides_nothing` | unit, engine test |
+| R8 | `crates/model/src/command.rs`, `a_copied_device_takes_the_active_state_in_both`, `a_moved_device_keeps_both_states` | unit |
+| R9 | `crates/shell/tests/device_compare.rs`, `a_preset_saves_the_active_state_and_loads_into_both` | unit |
+| R10 | `crates/model/src/repr.rs`, `both_states_save_with_the_set_and_load_back`; `crates/cli/tests/older_sets.rs`, `a_set_without_b_loads_with_b_equal_to_a` | unit |
+| R11 | `crates/model/tests/command_registry.rs`, `every_command_runs_by_id`, `every_command_is_complete`; `crates/cli/tests/agent_device_compare.rs`, `an_agent_switches_copies_and_reads_back_both_states` | unit, agent test |
+| R12 | `crates/shell/tests/device_compare.rs`, `undo_brings_back_both_states_and_the_overrides` | unit |
+| R13 | `crates/engine/tests/device_chains.rs`, `a_state_switch_sends_no_program` (blocks under the allocation trap) | engine test under the allocation trap |

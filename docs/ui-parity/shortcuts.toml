@@ -1442,7 +1442,7 @@ mac = ["Option+Shift+F"]
 win = ["Ctrl+Shift+F"]
 kind = "key"
 trigger = "press"
-milestone = "M2"
+milestone = "M4"
 source = "manual 42.11"
 confirmed = false
 notes = "Section 42.9 gives Alt+Shift+F on Windows for the same command."
@@ -1467,7 +1467,7 @@ mac = ["Z"]
 win = ["Z"]
 kind = "key"
 trigger = "press"
-milestone = "M2"
+milestone = "M4"
 source = "manual 42.11"
 
 [[shortcut]]
@@ -1478,7 +1478,7 @@ mac = ["X"]
 win = ["X"]
 kind = "key"
 trigger = "press"
-milestone = "M2"
+milestone = "M4"
 source = "manual 42.11"
 
 [[shortcut]]
@@ -1535,7 +1535,7 @@ mac = ["W"]
 win = ["W"]
 kind = "key"
 trigger = "press"
-milestone = "M2"
+milestone = "M4"
 source = "manual 42.11"
 
 [[shortcut]]
@@ -1546,7 +1546,7 @@ mac = ["H"]
 win = ["H"]
 kind = "key"
 trigger = "press"
-milestone = "M2"
+milestone = "M4"
 source = "manual 42.11"
 
 [[shortcut]]

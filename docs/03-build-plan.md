@@ -1,6 +1,6 @@
 # 03. Build plan
 
-The build is packaged as work packages (WPs), each sized for one agent session, grouped in phases with explicit dependencies, acceptance criteria, and traps. Phases 0 to 3 are planned package by package. Phases 4 to 10 are planned as epics with package estimates, and each is broken into packages when the phase before it is half done, so the detail reflects what the earlier phases taught. The status table at the end is the live work queue; update it in the same pull request as the work.
+The build is packaged as work packages (WPs), each sized for one agent session, grouped in phases with explicit dependencies, acceptance criteria, and traps. Phases 0 to 5 are planned package by package. Phases 6 to 10 are planned as epics with package estimates, and each is broken into packages when the phase before it is half done, so the detail reflects what the earlier phases taught. The status table at the end is the live work queue; update it in the same pull request as the work.
 
 ## Progress
 
@@ -43,7 +43,7 @@ Phase 0 Foundations ─▶ Phase 1 Playback core (M1) ─▶ Phase 2 Make a trac
                                                                                                           all ─▶ Phase 10 Hardening and 1.0
 ```
 
-Phases 3, 4, and 5 run in parallel once Phase 2 is done. Inside Phase 0, the UI spike (WP-0.8) runs alongside the engine work. Inside Phases 5 and 8, each device is independent of the others once the device framework exists, so separate agents in separate worktrees can build them at the same time.
+Phases 3, 4, and 5 run in parallel once Phase 2 is done; one Phase 4 package, Slice to New MIDI Track (WP-4.16), waits on Phase 5's Drum Rack (WP-5.6). Inside Phase 0, the UI spike (WP-0.8) runs alongside the engine work. Inside Phases 5 and 8, each device is independent of the others once the device framework exists, so separate agents in separate worktrees can build them at the same time.
 
 ## Phase 0: Foundations
 
@@ -248,21 +248,114 @@ Broken into packages on 15 October 2026, with Phase 2 more than half done.
 
 **M3 exit demo:** a live set performed and captured: clips and scenes launched with quantisation and follow actions, and the performance recorded into the Arrangement.
 
-## Phases 4 to 10: epics
+## Phase 4: Warping and audio editing (M4, 0.3)
+
+Goal: work with loops and recordings at any tempo, slice them to MIDI, freeze, and bounce.
+
+Broken into packages on 17 October 2026, with Phase 3 more than half done. The specs are [warping](specs/warping.md), [warp modes](specs/warp-modes.md), [the Sample Editor](specs/sample-editor.md), [audio clip editing](specs/audio-clip-editing.md), [freeze and bounce](specs/freeze-and-bounce.md), [Slice to New MIDI Track](specs/slice-to-midi.md), and the additions to [export](specs/export.md) and [the browser](specs/browser.md). Exporting every track as stems was built in WP-2.26; what's left of export here is Render as Loop. Three packages fill gaps the earlier phases left, which this phase needs: one file writer for processed audio (WP-4.20), offline renders with VST3 and Audio Unit plug-ins (WP-4.21), and the track header's context menu (WP-4.22).
+
+| WP | Package | Size | Depends on | Acceptance in short |
+|---|---|---|---|---|
+| 4.1 | The warp map in the document: the Warp switch, warp markers, a warped clip's markers and loop in beats, the segment BPM, and sets saved before warping | M | | Warp markers insert, move, and delete as one undo step each; a warped clip's markers and loop stay on their beats through a tempo change; a set saved before warping opens with every clip unwarped |
+| 4.2 | Warped playback and Re-Pitch: every clip player follows the warp map through the tempo map; Re-Pitch; only warped clips loop in the Arrangement; the RAM and HiQ switches | L | 4.1 | A loop warped at 90 BPM plays bar-aligned at 120 and 140 BPM in golden renders at any block size; Re-Pitch's pitch follows the tempo ratio within 1 cent; an unwarped Arrangement clip can't loop |
+| 4.3 | Transient detection and the analysis cache: each file's transients kept by content hash; Insert and Delete Transient; pseudo-warp markers | M | 4.1 | The transients of a generated drum loop land within 1 ms of its hits; a file's analysis is reused by content hash and rebuilt when the file changes |
+| 4.4 | Beats mode: Preserve, Transient Loop Mode, Transient Envelope | M | 4.2, 4.3 | At half and double tempo every transient stays on its beat within 1 ms; golden renders of each Preserve and loop mode |
+| 4.5 | Tones and Texture modes: Grain Size, Flux | M | 4.2 | Tones holds a sine's pitch within 1 cent from 0.5× to 2× speed; Grain Size and Flux change the output as the spec's measurements say |
+| 4.6 | Complex and Complex Pro through Signalsmith Stretch (D11), with Formants and Envelope | L | 4.2 | Both hold pitch within 1 cent from 0.5× to 2× speed; Formants keeps a vowel's formants within the spec's tolerance under transposition; no build script downloads code |
+| 4.7 | Clip Transpose and Detune through the warp modes, and Reverse | M | 4.2, 4.20 | Transpose and Detune land within 1 cent in every mode; Reverse plays the clip backwards from a new file, one undo step |
+| 4.8 | Warp settings as automation and clip-envelope targets (IMP-09, G2) | M | 4.4, 4.5, 4.6, 4.7, 3.15 | Every warp-mode parameter has an automation and a clip-envelope target; a golden render with automated Formants |
+| 4.9 | Tempo detection and auto-warp: Auto-Warp Long Samples, Loop/Warp Short Samples, Default Warp Mode; Set 1.1.1 Here, the Warp From Here commands, Warp as x-Bar Loop | M | 4.1, 4.3 | Auto-warp finds the tempo of generated loops within 0.5 BPM; short samples loop and warp as the setting says; each warp command is one undo step |
+| 4.10 | The Sample Editor in the Clip View: the waveform with warp, transient, and pseudo-warp markers; making, moving, and deleting markers by mouse and keys | L | 4.1, 4.3, 2.3 | Every Sample Editor shortcut is bound; dragging a warp marker is one undo step and moves the audio under it; the layout rows match |
+| 4.10b | The audio clip's panels in the Clip View: the Audio panel's controls (L-CLIP-008), the clip header, Edit in an external sample editor, Save Default Clip, and replacing a clip's sample | M | 4.10, 4.2 | Every control in the Audio panel reaches its command and reads back; a sample edited externally and saved replaces the clip's audio, as one undo step |
+| 4.11 | Stretching a warped clip in the Arrangement (S-ARR-006), sliding a clip's contents (I-DRAG-013, I-DRAG-014), and clip tempo leaders and followers | M | 4.2, 2.20 | Shift-dragging a warped clip's end stretches its audio to the new length; sliding moves the audio under a clip that stays put; a leader clip's warp markers drive the set's tempo while it plays, and followers follow |
+| 4.12 | Audio quantise: Quantize on audio clips (Cmd+U and its settings) moves warp markers to the grid | S | 4.3, 4.10 | Quantize at full strength moves each transient's warp marker onto the grid, as one undo step |
+| 4.13 | Crop Clip, Crop Sample, Consolidate, and Consolidate Time to New Scene | M | 4.2, 4.20 | Consolidate renders the selection into one clip per track that nulls against the originals; Crop Sample writes a new file and leaves the original untouched |
+| 4.14 | Freeze Track and unfreezing, including group and return tracks (IMP-19) | L | 4.4, 4.20, 4.21 | A frozen track plays a render that nulls against its live output; its devices refuse edits until it's unfrozen; groups and returns freeze too |
+| 4.15 | Bounce Track in Place, Bounce to New Track, Bounce Group, Paste Bounced Audio, and mono bounces (IMP-10, G3) | L | 4.14 | Each bounce nulls against the source's output; a mono source bounces to a mono file; Paste Bounced Audio places the bounce where it's pasted |
+| 4.16 | Slice to New MIDI Track: by transients, warp markers, or beat divisions, into a Drum Rack of samplers or one sampler in Slice mode | M | 4.3, 5.6, 5.8 | Slicing a generated loop by transients makes one slice per hit, and the new MIDI clip plays them back in order within 1 ms |
+| 4.17 | Export, part 4: Render as Loop | S | 1.12 | A Render as Loop file starts with its own end's tail and nulls against a two-pass reference |
+| 4.18 | Tempo-synced preview in the browser | S | 4.2, 4.9, 1.10 | A 100 BPM loop previews at the set's 120 BPM, and at its own speed with Raw |
+| 4.19 | Warp mode measurements: golden references and measured targets per mode across tempos | M | 4.4, 4.5, 4.6, 4.7 | Each mode meets the spec's targets for pitch error, transient timing, level, and aliasing at 0.5×, 0.75×, 1.5×, and 2× speed |
+| 4.20 | Processed audio files: one writer for Reverse, Crop Sample, Consolidate, Freeze, and Bounce, into the project's processed-samples folders, and the Temporary Folder for a set never saved | S | | A processed file lands in its folder under its own name, written whole or not at all; in a set never saved it goes to the Temporary Folder and moves into the project when the set is first saved |
+| 4.21 | Offline renders with VST3 and Audio Unit plug-ins, as WP-2.6b made them for CLAP | M | 2.6b, 2.7, 2.8 | An export and a preview of a track with a VST3 or Audio Unit device render it as it plays, not passed through |
+| 4.22 | The track header's context menu (C-TRACK), with the items that work today and the rest drawn as their packages need them | M | 1.8b | The menu lists Live's items in Live's order; each working item runs its command; opening it from the keyboard works |
+
+**M4 exit demo:** a remix of unwarped stems at a new tempo: import four unwarped stems at 92 BPM, let auto-warp place their markers, set the song to 124 BPM, slice the drum stem to a new MIDI track, freeze one track and bounce another in place, export, and reopen identically. The export plays every stem in time at 124 BPM. Then an agent does the same through the agent API, headless.
+
+## Phase 5: Racks, modulation, and core devices (M5, 0.4)
+
+Goal: build racks with macros, program drum racks, modulate anything, and use every core effect and MIDI effect.
+
+Broken into packages on 17 October 2026. The specs are [racks](specs/racks.md), [drum racks](specs/drum-racks.md), [macros](specs/macros.md), [modulation](specs/modulation.md), [device A/B compare](specs/device-compare.md), [the multisample sampler](specs/multisampler.md), and [external devices](specs/external-devices.md). Each device package writes its device's spec first, as Phase 2's devices did; the packages for proposed improvements (IMP-15, IMP-20, IMP-24, IMP-25, IMP-26) wait on each improvement's acceptance. Four packages build what several others share: the effect devices' common parts (WP-5.42), device displays (WP-5.43), channel messages between devices (WP-5.44), and multi-output instruments (WP-5.45).
+
+| WP | Package | Size | Depends on | Acceptance in short |
+|---|---|---|---|---|
+| 5.1 | Racks in the document and engine: Instrument, Audio Effect, MIDI Effect, and Drum racks; parallel chains with each chain's mixer; nesting; Group and Ungroup (Cmd+G, Cmd+Shift+G); latency across chains | L | 2.4 | A rack of three chains renders as the sum of its chains rendered alone; Group and Ungroup are one undo step each and keep every device's state; chains of different latency line up |
+| 5.2 | The rack in the Device View: the title bar's view switches, the chain list (Show and Hide Chains), chain selection and solo, the chain's devices | L | 5.1 | The rack's layout rows match; the chain-list keys are bound; soloing a chain silences the others |
+| 5.3 | Zones: key, velocity, and chain-select zones with fade ranges; the zone editor; Auto Select | M | 5.2 | A note outside a chain's key zone doesn't reach it; fades crossfade over their range; Auto Select follows the incoming note |
+| 5.4 | Macros: up to 16, map mode with per-mapping ranges, Randomize, names; stepped and radio-button macro styles (IMP-26) | L | 5.2 | A macro mapped to three parameters moves each between its own minimum and maximum; Randomize skips excluded macros; 16 macros save and load |
+| 5.5 | Macro variations: store, recall, launch, exclude | M | 5.4 | A stored variation recalls every macro's value, and excluded macros keep theirs |
+| 5.6 | Drum Rack: pads and the pad view, a sample dropped on a pad, Receive and Play notes, choke groups, pad mute and solo, return chains, extracting chains | L | 5.2, 2.16 | A sample dropped on a pad plays from its note; pads in a choke group cut each other; a return chain inside the rack receives its pads' sends |
+| 5.7 | Rack chain taps as routing sources | M | 5.1, 2.19 | Another track's Audio From lists each chain of a rack, and records it |
+| 5.8 | Rack presets and hot-swap (Q) in the browser | M | 5.2, 1.10 | A rack saved as a preset reloads identically; Q hot-swaps the selected device from the browser as one undo step |
+| 5.9 | Relative modulation: modulation on top of automation in the engine and the Arrangement, on every parameter, shown on its control | L | 2.12, 3.15 | Modulation and automation on one parameter combine and clamp as the spec says, on their frames; modulation on a plug-in parameter reaches the plug-in |
+| 5.10 | Modulators, part 1: LFO and Shaper, and how a modulator maps to its targets | L | 5.9 | A tempo-synced LFO moves its targets on the beat; Shaper's breakpoints shape its output; mapping and unmapping are undo steps |
+| 5.11 | Modulators, part 2: Envelope Follower, Envelope MIDI, Shaper MIDI, Expression Control | M | 5.10 | Each modulator's spec rules have passing tests, sample-accurate at any block size |
+| 5.12 | Device A/B compare (P, Edit ▸ Compare) | S | 2.5 | A native device's A and B hold separate settings, P switches them, Copy A to B copies, and both save with the set; racks and plug-ins offer no compare, as in Live |
+| 5.13 | Multisample sampler, part 1: zones (key, velocity, sample select), the zone editor, playback and voices | L | 2.16 | Each key and velocity plays the zone that selects it, crossfading over the zone's fades |
+| 5.14 | Multisample sampler, part 2: its remaining tabs (pitch and oscillator, filter and global, modulation, MIDI) and SFZ import | L | 5.13 | An SFZ instrument of generated samples imports with its zones and plays as its file says; every parameter is automatable |
+| 5.15 | The sampler devices' sample displays, and sample editing in them (IMP-28) | L | 5.13 | Each sampler device draws its sample with its markers; trim, reverse, fade, and normalise are one undo step each and leave the source file untouched |
+| 5.15b | The sampler's Warp controls and manual slicing in its display | M | 5.15, 4.2 | A warped sample in the sampler plays at the set's tempo as a warped clip would; slices placed by hand play from their keys |
+| 5.16 | The autosampler (IMP-27) | M | 5.14, 5.34, 2.6b | Autosampling a test synth across three octaves and two velocity layers makes a sampler instrument whose notes match the synth's within the spec's tolerance |
+| 5.17 | Beatlayer's equivalent of Impulse | M | 2.5 | Its spec's rules have passing tests; renders are identical at any block size |
+| 5.18 | Beatlayer's equivalent of Drum Sampler | M | 2.5 | Its spec's rules have passing tests; renders are identical at any block size |
+| 5.19 | Rack chains in the Mixer: each chain's strip beside its track's in the Session mixer, and in Mixer in Arrangement | M | 5.2 | A chain's strip shows and sets the same volume, pan, sends, and switches as its row in the chain list, as one undo step each |
+| 5.20 | Equivalent of Auto Filter | L | 5.42 | Each device's spec rules have passing tests: measured responses within its tolerances, latency reported, renders identical at any block size |
+| 5.20b | Equivalents of Phaser-Flanger and Chorus-Ensemble | M | 5.42 | As 5.20 |
+| 5.20c | Equivalent of Auto Pan-Tremolo | M | 5.42 | As 5.20 |
+| 5.21 | Equivalents of Channel EQ, EQ Three, Gate, and Glue Compressor | L | 5.42 | As 5.20 |
+| 5.22 | Equivalent of Multiband Dynamics | L | 5.42 | As 5.20 |
+| 5.22b | Equivalent of Drum Buss | M | 5.42 | As 5.20 |
+| 5.23 | Equivalents of Saturator, Overdrive, and Dynamic Tube | L | 5.42 | As 5.20 |
+| 5.24 | Equivalents of Erosion, Redux, and Vinyl Distortion | M | 5.42 | As 5.20 |
+| 5.25 | Equivalents of Filter Delay, Grain Delay, and Align Delay | L | 5.42 | As 5.20 |
+| 5.26 | Equivalent of Beat Repeat | M | 5.42 | As 5.20 |
+| 5.26b | Equivalent of Looper | L | 5.42, 4.2 | As 5.20, and a recorded loop dragged out as a clip plays as it was heard |
+| 5.27 | Equivalent of Shifter | L | 5.42, 5.44 | As 5.20 |
+| 5.28 | Equivalents of Spectrum and Tuner, and an oscilloscope (IMP-26) | L | 5.42, 5.43 | As 5.20, with each display's data readable headless |
+| 5.29 | Gain-reduction meters on channel strips, Deactivate All Devices, and Close All Plug-in Windows (IMP-25) | M | 1.9, 4.22 | A compressor's gain reduction shows on its track's strip; Deactivate All Devices is one undo step |
+| 5.30 | MIDI effects, part 1: equivalents of Pitch, Velocity, Random, Scale, Chord, and Note Length, with the note path between devices they need | L | 2.4 | Each MIDI effect's spec rules have passing tests, on the right frames at any block size |
+| 5.31 | MIDI effects, part 2: equivalents of Arpeggiator and Note Echo | L | 5.30 | As 5.30 |
+| 5.32 | MIDI effects, part 3: equivalents of CC Control, MPE Control, and MIDI Monitor | M | 5.30, 5.44 | As 5.30 |
+| 5.33 | Plug-ins as MIDI effects (IMP-24) | M | 5.30, 5.1 | A plug-in note effect before an instrument changes the notes the instrument hears |
+| 5.34 | MIDI out to hardware on a track's MIDI To, and External Instrument with its hardware latency | L | 2.2, 2.19, 5.44 | Notes routed to a MIDI port leave on their frames within the backend's timestamp resolution; External Instrument's latency setting lines its audio up |
+| 5.35 | External Audio Effect with its hardware latency, and real-time export with external hardware | M | 5.34, 2.13, 1.12 | A loopback through External Audio Effect lines up with the track after compensation; an export with external hardware runs in real time and restarts after a dropout |
+| 5.36 | Track Options and latency switches: track delay in milliseconds or samples and Keep Monitoring Latency; split-stereo panning; the Delay Compensation and Reduced Latency When Monitoring switches | L | 1.6, 1.9, 2.11 | A track delay of 10 ms moves the track's output 10 ms against the others; split-stereo pans each channel on its own; each switch changes compensation as the spec says |
+| 5.37 | The multicore scheduler: a real-time worker pool runs independent chain segments in parallel | L | 5.1 | The capacity target in the architecture for 10 minutes without a dropout; renders identical to the single-threaded schedule |
+| 5.38 | Deactivated devices and tracks cost nothing (IMP-15), and per-track performance impact | M | 5.37 | A deactivated device or track takes no CPU; each track's performance impact shows in the Mixer |
+| 5.39 | LV2 hosting on Linux | L | 2.4, 2.9 | A test LV2 plug-in loads, processes, saves and restores its state, and reports its latency |
+| 5.40 | Plug-in configure mode, and remapping the plug-in panel's knobs (IMP-03) | M | 2.10 | Configure mode adds the parameters a person touches to the device panel; the panel's knobs remap and are remembered per plug-in |
+| 5.41 | ARA 2 hosting (IMP-20) | L | 2.7, 2.8, 4.2 | A test ARA 2 plug-in reads a clip's whole audio, and its edits play back |
+| 5.42 | Shared parts for the effect devices: an effects LFO, an envelope follower, seeded randomness, and the device menu's Show Options items and expand toggle | M | 2.5 | Each part's tests pass under the real-time trap; two devices built on them share one implementation |
+| 5.43 | Device displays: a device's display data reaches its display cells and agents, with the EQ's and the compressor's displays drawn | M | 2.5 | The EQ draws its curve and spectrum and the compressor its gain reduction, and an agent reads the same data headless |
+| 5.44 | MIDI channel messages between devices: control change, pitch bend, and channel pressure through device chains | M | 5.30 | A control change sent by one device reaches the next on its frame, and a switched-off device passes it through |
+| 5.45 | Multi-output instruments: an instrument's extra outputs as routing sources | M | 5.1, 2.19 | A plug-in's second stereo output appears in another track's Audio From and records |
+
+**M5 exit demo:** a drum rack beat through a multi-chain effect rack: program a Drum Rack beat from generated samples, with a choke group and a return chain; play it through an Audio Effect Rack of three chains with macros mapped across them and an LFO on a filter; store two macro variations and switch between them during playback; export, and reopen identically. Then an agent does the same through the agent API, headless.
+
+## Phases 6 to 10: epics
 
 Package counts are estimates. [The parity matrix](04-parity-matrix.md) lists every Live feature each phase covers, and [the improvements](05-improvements.md) list what each phase adds beyond Live.
 
 | Phase | Milestone | Epics | Packages |
 |---|---|---|---|
-| 4 Warping and audio editing | M4 | Automatable warp settings, including formants (IMP-09); mono bounces (IMP-10); warp markers; Re-Pitch, Beats, Tones, Texture, Complex, Complex Pro equivalents; transient and tempo detection; auto-warp; tempo leaders and followers; slice to MIDI; audio quantise; clip pitch, reverse, crop; consolidate; freeze; bounce in place, to a new track, and of groups; paste bounced audio; stem export; tempo-synced preview | 18 |
-| 5 Racks, modulation, core devices | M5 | Instrument, drum, audio-effect, and MIDI-effect racks; chains, zones, and chain taps; 16 macros with variations; drum pads, choke groups, and return chains; the modulation system and modulators; A/B compare; the multisample sampler with SFZ import; sample editing in Simpler and Sampler (IMP-28); the autosampler (IMP-27); the remaining core audio effects; every core MIDI effect; external instrument and effect; track delay, split-stereo panning, and per-track performance meters; LV2 hosting; plug-in configure mode | 30 |
 | 6 Editing depth | M6 | The return-tracks scrolling option (IMP-01); save history (IMP-05); hiding plug-ins in the browser (IMP-07); DAWproject import and export; MIDI Tools (transformations and generators); pitch and time utilities; scales and keys; tuning systems; MPE editing; probability, chance, and note-splitting edits; find and select notes; step input; take lanes and comping; linked-track editing; groove pool; locators, copy, insert, and delete time; multi-clip editing; stacked detail views; undo history; second window; browser tags, collections (nested, IMP-07), and filters; the plug-in list's view (IMP-29); themes; project archives and set merging | 25 |
 | 7 Control and sync | M7 | MIDI and key mapping; MIDI clock in and out; MIDI timecode in; Ableton Link 4, including Link Audio; CV tools; the control-surface scripting host; generic controller templates; Push 2 (public interface documentation) and grid controllers | 15 |
 | 8 Sound-design devices | M8 | Wavetable, FM, analogue-modelled, physical-modelling, granular, spectral, and bi-timbral instruments; drum synthesis; hybrid and convolution reverb; multi-stage distortion; vocoder; resonators; amp, cabinet, and pedal; pitch correction; the remaining delays and spectral effects | 40 |
 | 9 Intelligence, interop, extensions | M9 | Stem separation with GPU acceleration and a speed target (IMP-11); audio to MIDI with measured accuracy (IMP-06); similarity search and automatic tagging; tempo follower; Live set and preset import with legacy-device mapping; video tracks and export; the extension SDK; the modular device; extension-built equivalents of Suite's Max devices; a bundled open content library; translations | 30 |
 | 10 Hardening and 1.0 | 1.0 | Plug-in sandbox and Rosetta bridge; scheduler tuning; a plug-in compatibility farm; opt-in crash reports; updates; the user manual and built-in lessons; an accessibility audit with screen-reader users; a security review of plug-in loading and file parsing; Arm builds for Windows and Linux; a legal review | 25 |
 
-Total to 1.0: 90 packages planned in Phases 0 to 3, and about 185 estimated in Phases 4 to 10.
+Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in Phases 6 to 10.
 
 ## Status table
 
@@ -358,3 +451,76 @@ Total to 1.0: 90 packages planned in Phases 0 to 3, and about 185 estimated in P
 | 3.16 | todo |  |  |
 | 3.17 | done | 16 October 2026 | [#55](https://github.com/loombridge/beatlayer/pull/55); the crossfader and per-track A/B assignment |
 | 3.18 | todo |  | Waits on 2.13 for the Cue Out chooser |
+| 4.1 | todo |  |  |
+| 4.2 | todo |  |  |
+| 4.3 | todo |  |  |
+| 4.4 | todo |  |  |
+| 4.5 | todo |  |  |
+| 4.6 | todo |  |  |
+| 4.7 | todo |  |  |
+| 4.8 | todo |  |  |
+| 4.9 | todo |  |  |
+| 4.10 | todo |  |  |
+| 4.10b | todo |  |  |
+| 4.11 | todo |  |  |
+| 4.12 | todo |  |  |
+| 4.13 | todo |  |  |
+| 4.14 | todo |  |  |
+| 4.15 | todo |  |  |
+| 4.16 | todo |  |  |
+| 4.17 | todo |  |  |
+| 4.18 | todo |  |  |
+| 4.19 | todo |  |  |
+| 4.20 | todo |  |  |
+| 4.21 | todo |  |  |
+| 4.22 | todo |  |  |
+| 5.1 | todo |  |  |
+| 5.2 | todo |  |  |
+| 5.3 | todo |  |  |
+| 5.4 | todo |  | The stepped and radio-button styles wait on IMP-26's acceptance |
+| 5.5 | todo |  |  |
+| 5.6 | todo |  |  |
+| 5.7 | todo |  |  |
+| 5.8 | todo |  |  |
+| 5.9 | todo |  |  |
+| 5.10 | todo |  |  |
+| 5.11 | todo |  |  |
+| 5.12 | todo |  |  |
+| 5.13 | todo |  |  |
+| 5.14 | todo |  |  |
+| 5.15 | todo |  |  |
+| 5.15b | todo |  |  |
+| 5.16 | todo |  |  |
+| 5.17 | todo |  |  |
+| 5.18 | todo |  |  |
+| 5.19 | todo |  |  |
+| 5.20 | todo |  |  |
+| 5.20b | todo |  |  |
+| 5.20c | todo |  |  |
+| 5.21 | todo |  |  |
+| 5.22 | todo |  |  |
+| 5.22b | todo |  |  |
+| 5.23 | todo |  |  |
+| 5.24 | todo |  |  |
+| 5.25 | todo |  |  |
+| 5.26 | todo |  |  |
+| 5.26b | todo |  |  |
+| 5.27 | todo |  |  |
+| 5.28 | todo |  | The oscilloscope waits on IMP-26's acceptance |
+| 5.29 | todo |  | Waits on IMP-25's acceptance |
+| 5.30 | todo |  |  |
+| 5.31 | todo |  |  |
+| 5.32 | todo |  |  |
+| 5.33 | todo |  | Waits on IMP-24's acceptance |
+| 5.34 | todo |  |  |
+| 5.35 | todo |  |  |
+| 5.36 | todo |  |  |
+| 5.37 | todo |  |  |
+| 5.38 | todo |  | IMP-15 waits on its acceptance |
+| 5.39 | todo |  |  |
+| 5.40 | todo |  |  |
+| 5.41 | todo |  | Waits on IMP-20's acceptance |
+| 5.42 | todo |  |  |
+| 5.43 | todo |  |  |
+| 5.44 | todo |  |  |
+| 5.45 | todo |  |  |

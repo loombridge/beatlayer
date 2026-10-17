@@ -3,6 +3,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use bl_core::time::{TempoMap, TimeSignatureMap};
 use bl_model::{
     Change, ChangeSet, ContentHash, DeviceId, DeviceKind, Document, Mixer, OrdMap, Output, ParamId,
     SceneId, Tap, Track, TrackId, TrackKind,
@@ -22,6 +23,7 @@ use crate::program::{
 };
 use crate::registry::Registry;
 use crate::routing::{Edge, Graph, Via};
+use crate::session::{SceneMaps, SceneOverride};
 use crate::sidechain::{self, SidechainKey};
 use crate::sources::{ClipSources, Loaded, Loader};
 
@@ -137,7 +139,18 @@ pub struct Compiler {
     registry: Registry,
     gc: GcHandle,
     generation: u64,
+    /// The last document compiled, as the program plays it: with the tempo
+    /// and signature of a launched scene in place of the set's, while one
+    /// holds.
     synced: Option<Document>,
+    /// The last document as the person's set holds it, which a change of
+    /// scene override compiles again (WP-3.5).
+    original: Option<Document>,
+    /// What the audio thread says a launched scene has put in place.
+    scene_override: SceneOverride,
+    /// The part of it the last document still has: a scene whose tempo
+    /// went, or that was deleted, holds nothing.
+    applied: SceneOverride,
     layout: BTreeMap<NodeKey, Placed>,
     sources: ClipSources,
 }
@@ -169,6 +182,9 @@ impl Compiler {
             gc,
             generation: 0,
             synced: None,
+            original: None,
+            scene_override: SceneOverride::default(),
+            applied: SceneOverride::default(),
             layout: BTreeMap::new(),
             sources: ClipSources::default(),
         }
@@ -227,8 +243,54 @@ impl Compiler {
     /// What the audio thread needs to play `document`, given the documents
     /// before it.
     pub fn sync(&mut self, document: &Document) -> Update {
+        let effective = self.effective(document);
+        self.sync_effective(&effective)
+    }
+
+    /// The document as a program plays it: `document` with the tempo and
+    /// signature a launched scene put in place (WP-3.5), if the scene still
+    /// holds them. Remembers `document` for [`Compiler::set_override`].
+    fn effective(&mut self, document: &Document) -> Document {
+        self.original = Some(document.clone());
+        let holds = |scene: SceneId| document.scene(scene);
+        self.applied = SceneOverride {
+            tempo: self
+                .scene_override
+                .tempo
+                .filter(|&(scene, bpm)| holds(scene).is_some_and(|s| s.tempo == Some(bpm))),
+            signature: self.scene_override.signature.filter(|&(scene, signature)| {
+                holds(scene).is_some_and(|s| s.signature == Some(signature))
+            }),
+        };
+        if self.applied.is_none() {
+            return document.clone();
+        }
+        document.with_maps(
+            self.applied.tempo.map(|(_, bpm)| TempoMap::constant(bpm)),
+            self.applied
+                .signature
+                .map(|(_, signature)| TimeSignatureMap::constant(signature)),
+        )
+    }
+
+    /// What the audio thread has put in place from a launched scene,
+    /// compiled again over the last document: the arrangement's clips and
+    /// envelopes land under the tempo it plays at (WP-3.5). Empty before a
+    /// document was synced, or when nothing changed.
+    pub fn set_override(&mut self, scene_override: SceneOverride) -> Update {
+        if self.scene_override == scene_override {
+            return Update::default();
+        }
+        self.scene_override = scene_override;
+        match self.original.clone() {
+            Some(document) => self.sync(&document),
+            None => Update::default(),
+        }
+    }
+
+    fn sync_effective(&mut self, document: &Document) -> Update {
         let Some(old) = self.synced.take() else {
-            return self.compile(document);
+            return self.compile_effective(document);
         };
         let changes = ChangeSet::between(&old, document);
         let mut params = Vec::new();
@@ -305,6 +367,11 @@ impl Compiler {
     /// migrate into it, and every audio track's clip player is sent its
     /// clips.
     pub fn compile(&mut self, document: &Document) -> Update {
+        let effective = self.effective(document);
+        self.compile_effective(&effective)
+    }
+
+    fn compile_effective(&mut self, document: &Document) -> Update {
         let resend = Resend {
             all: true,
             tracks: BTreeSet::new(),
@@ -470,6 +537,34 @@ impl Compiler {
             }
         }
         let (delay_lines, delay_pool) = delay_storage(&build.delays, self.config.channels);
+        // Spec: session-view R23. The set's own maps, the scenes' (made here
+        // so the audio thread allocates nothing to switch to them), and the
+        // ones the program plays under now.
+        let own = self.original.as_ref().unwrap_or(document);
+        let base_tempo = own.settings().tempo.clone();
+        let base_signatures = own.settings().time_signatures.clone();
+        let scene_maps: Vec<SceneMaps> = document
+            .scenes()
+            .filter(|scene| scene.tempo.is_some() || scene.signature.is_some())
+            .map(|scene| SceneMaps {
+                scene: scene.id,
+                tempo: scene.tempo.map(|bpm| (bpm, TempoMap::constant(bpm))),
+                signature: scene
+                    .signature
+                    .map(|signature| (signature, TimeSignatureMap::constant(signature))),
+            })
+            .collect();
+        let held = |scene| scene_maps.iter().find(|maps| maps.scene == scene);
+        let tempo = self
+            .applied
+            .tempo
+            .and_then(|(scene, _)| held(scene)?.tempo.as_ref().map(|(_, map)| map.clone()))
+            .unwrap_or_else(|| document.settings().tempo.clone());
+        let time_signatures = self
+            .applied
+            .signature
+            .and_then(|(scene, _)| held(scene)?.signature.as_ref().map(|(_, map)| map.clone()))
+            .unwrap_or_else(|| document.settings().time_signatures.clone());
         let program = EngineProgram {
             generation,
             base,
@@ -496,8 +591,11 @@ impl Compiler {
             max_frames: self.config.max_frames,
             output: task_of[&document.main_id()],
             ext_outs,
-            tempo: document.settings().tempo.clone(),
-            time_signatures: document.settings().time_signatures.clone(),
+            tempo,
+            time_signatures,
+            base_tempo,
+            base_signatures,
+            scene_maps,
             sample_rate: self.config.sample_rate,
             scene_slots: scene_slots(document),
             note_buffers: [
@@ -605,6 +703,7 @@ impl Compiler {
     /// it after that.
     #[must_use]
     pub fn remember(&mut self, document: &Document) -> Vec<TransportCommand> {
+        self.original = Some(document.clone());
         let old = self.synced.replace(document.clone());
         let mut commands = Vec::new();
         if old.as_ref().is_none_or(|old| {
@@ -624,9 +723,11 @@ impl Compiler {
     /// processor starting without one (WP-1.13). Empty if no document has
     /// been synced yet.
     pub fn reconfigure(&mut self, config: EngineConfig) -> Update {
-        let document = self.synced.take();
+        let document = self.original.take();
         self.config = config;
         self.reset();
+        // The processor that starts has no launched scene's tempo in place.
+        self.scene_override = SceneOverride::default();
         match document {
             Some(document) => self.compile(&document),
             None => Update::default(),
@@ -644,6 +745,7 @@ impl Compiler {
     pub fn reset(&mut self) {
         self.generation = 0;
         self.synced = None;
+        self.original = None;
         self.layout.clear();
         self.sources.reset();
     }
@@ -1217,7 +1319,16 @@ fn needs_program(
             ));
         }
     }
-    let mut recompile = settings || changes.layout;
+    // The maps a scene's tempo and signature put in place travel in the
+    // program too (WP-3.5).
+    let scene_maps = |document: &Document| {
+        document
+            .scenes()
+            .map(|scene| (scene.id, scene.tempo, scene.signature))
+            .collect::<Vec<_>>()
+    };
+    let scenes = !changes.scenes.is_empty() && scene_maps(old) != scene_maps(new);
+    let mut recompile = settings || changes.layout || scenes;
     for (&id, &change) in &changes.tracks {
         match (change, old.track(id), new.track(id)) {
             (Change::Modified, Some(before), Some(after)) => {

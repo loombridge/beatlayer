@@ -20,7 +20,9 @@ use crate::midi::{MidiCounters, MidiIn, TrackMidiInput};
 use crate::node::{NodeData, NodeEvent, NodeKey, ParamValue, TransportInfo};
 use crate::program::{EngineProgram, Resolved};
 use crate::recording::{RecordingPlan, TakeBounds};
-use crate::session::{Playhead, SessionCommand, SessionLauncher, SessionPlayback, SlotStatus};
+use crate::session::{
+    Playhead, SceneOverride, SessionCommand, SessionLauncher, SessionPlayback, SlotStatus,
+};
 use crate::state::{EngineCounters, EngineState, TrackMeter};
 
 /// A parameter change waiting for its frame.
@@ -165,6 +167,12 @@ impl Carry {
     }
 }
 
+/// The frame `frame` of the song under `before` is, under `after`: the
+/// same beat.
+fn same_beat(before: &TempoMap, after: &TempoMap, rate: SampleRate, frame: Frames) -> Frames {
+    after.ticks_to_frames(before.frames_to_ticks(frame, rate), rate)
+}
+
 /// Whether a transport command starts the song from where it's stopped,
 /// which nothing does by itself across a restart (device-changes R7).
 pub(crate) fn starts_playback(command: TransportCommand) -> bool {
@@ -260,6 +268,8 @@ pub struct Processor {
     /// What the tracks' players play this block, rebuilt when the launcher
     /// changes.
     session_playback: Vec<SessionPlayback>,
+    /// The tempo and signature a launched scene put in place (WP-3.5).
+    scene_override: SceneOverride,
     /// The slots' states, published after each block.
     session_status: Vec<SlotStatus>,
     counters: EngineCounters,
@@ -309,6 +319,7 @@ impl Processor {
             swaps: 0,
             session: SessionLauncher::new(config.max_slots),
             session_playback: Vec::with_capacity(config.max_slots),
+            scene_override: SceneOverride::default(),
             session_status: Vec::with_capacity(config.max_slots),
             counters: EngineCounters::default(),
             cpu_load_max: 0.0,
@@ -596,32 +607,29 @@ impl Processor {
     /// move across from the running one, and the running one, with the nodes
     /// that didn't survive, goes to the drop thread.
     fn swap(&mut self, mut program: Program) {
-        let rate = self.config.sample_rate;
         let mut mismatch = None;
+        // Spec: session-view R23. A launched scene's tempo and signature
+        // carry over to the new program, which may have been compiled before
+        // the audio thread applied them.
+        self.align_with_override(program.get_mut());
         match self.program.as_mut() {
             Some(old) => {
                 if !program.get_mut().adopt(old.get_mut()) {
                     mismatch = Some(Some(old.get().generation));
                 }
-                let (before, after) = (&old.get().tempo, &program.get().tempo);
+                let before = old.get().tempo.clone();
+                let after = program.get().tempo.clone();
                 if before != after {
-                    // Keep the playhead on the same beat.
-                    let ticks = before.frames_to_ticks(self.position, rate);
-                    self.position = after.ticks_to_frames(ticks, rate);
-                    for entry in &mut self.scheduled {
-                        entry.frame = after.ticks_to_frames(entry.command.at, rate);
-                    }
+                    self.move_to_tempo(&before, &after);
                 }
             }
             None => {
                 if program.get().base.is_some() {
                     mismatch = Some(None);
                 }
-                let ticks = self.fallback_tempo.frames_to_ticks(self.position, rate);
-                self.position = program.get().tempo.ticks_to_frames(ticks, rate);
-                for entry in &mut self.scheduled {
-                    entry.frame = program.get().tempo.ticks_to_frames(entry.command.at, rate);
-                }
+                let before = self.fallback_tempo.clone();
+                let after = program.get().tempo.clone();
+                self.move_to_tempo(&before, &after);
             }
         }
         if let Some(running) = mismatch {
@@ -633,6 +641,102 @@ impl Processor {
         self.swaps += 1;
         // The loop keeps its bars under the new tempo map.
         self.update_loop_frames();
+    }
+
+    /// Puts the playhead, the scheduled commands, and the Session View's
+    /// frames on the same beats under `after`, a tempo map that replaces
+    /// `before`.
+    fn move_to_tempo(&mut self, before: &TempoMap, after: &TempoMap) {
+        let rate = self.config.sample_rate;
+        // Keep the playhead on the same beat.
+        self.position = same_beat(before, after, rate, self.position);
+        self.session
+            .remap(|frame| same_beat(before, after, rate, frame));
+        for entry in &mut self.scheduled {
+            entry.frame = after.ticks_to_frames(entry.command.at, rate);
+        }
+        // shortcut: transport commands queued for a clock frame (`timed`) keep
+        // their frames across a tempo change, as they did across a program
+        // swap before scenes had tempos; rework them if a command sent for a
+        // frame must follow its beat.
+    }
+
+    /// Makes `program`'s tempo map and time-signature map what the audio
+    /// thread has put in place: the maps of the scene that launched them if
+    /// that scene still holds the same tempo and signature, else the set's.
+    /// Switching among maps the program already holds allocates nothing.
+    fn align_with_override(&mut self, program: &mut EngineProgram) {
+        let held = |scene: SceneId| program.scene_maps.iter().find(|maps| maps.scene == scene);
+        let tempo = self.scene_override.tempo.and_then(|(scene, bpm)| {
+            let (held_bpm, map) = held(scene)?.tempo.as_ref()?;
+            (*held_bpm == bpm).then(|| map.clone())
+        });
+        let signature = self
+            .scene_override
+            .signature
+            .and_then(|(scene, signature)| {
+                let (held_signature, map) = held(scene)?.signature.as_ref()?;
+                (*held_signature == signature).then(|| map.clone())
+            });
+        // A scene that lost its tempo or signature gives the override up.
+        if tempo.is_none() {
+            self.scene_override.tempo = None;
+        }
+        if signature.is_none() {
+            self.scene_override.signature = None;
+        }
+        program.tempo = tempo.unwrap_or_else(|| program.base_tempo.clone());
+        program.time_signatures = signature.unwrap_or_else(|| program.base_signatures.clone());
+    }
+
+    /// Launches `scene`'s own tempo and signature, on the frame it launches
+    /// on: the maps change inside the running program, with no rebuild, and
+    /// everything that holds a frame keeps its beat (WP-3.5, transport R15).
+    fn apply_scene(&mut self, scene: SceneId) {
+        let Some(program) = self.program.as_mut() else {
+            return;
+        };
+        let program = program.get_mut();
+        let Some(maps) = program.scene_maps.iter().find(|maps| maps.scene == scene) else {
+            return;
+        };
+        let (tempo, signature) = (maps.tempo.clone(), maps.signature.clone());
+        let before = program.tempo.clone();
+        if let Some((bpm, map)) = tempo {
+            program.tempo = map;
+            self.scene_override.tempo = Some((scene, bpm));
+        }
+        if let Some((value, map)) = signature {
+            program.time_signatures = map;
+            self.scene_override.signature = Some((scene, value));
+        }
+        let after = program.tempo.clone();
+        if before != after {
+            self.move_to_tempo(&before, &after);
+            self.update_loop_frames();
+        }
+    }
+
+    /// Gives back the set's own tempo and signature, at the playhead: what
+    /// Re-Enable Automation and Back to Arrangement do after a scene
+    /// launched its own.
+    fn clear_scene_override(&mut self) {
+        if self.scene_override.is_none() {
+            return;
+        }
+        self.scene_override = SceneOverride::default();
+        let Some(program) = self.program.as_mut() else {
+            return;
+        };
+        let program = program.get_mut();
+        let before = program.tempo.clone();
+        program.tempo = program.base_tempo.clone();
+        program.time_signatures = program.base_signatures.clone();
+        let after = program.tempo.clone();
+        if before != after {
+            self.move_to_tempo(&before, &after);
+            self.update_loop_frames();
+        }
     }
 
     fn mismatch(&mut self, program: &EngineProgram, running: Option<u64>) {
@@ -876,6 +980,14 @@ impl Processor {
             SessionCommand::StopTrack(track) => self.stop_session(Some(track)),
             SessionCommand::StopAll => self.stop_session(None),
             SessionCommand::SetQuantization(settings) => self.session.set_settings(settings),
+            SessionCommand::MoveToScene(scene) => {
+                let slots = self
+                    .program
+                    .as_ref()
+                    .map_or(&[][..], |program| program.get().scene_slots(scene));
+                self.session.move_to_scene(scene, slots);
+            }
+            SessionCommand::ClearSceneOverride => self.clear_scene_override(),
         }
     }
 
@@ -901,20 +1013,21 @@ impl Processor {
         self.session.launch(track, scene, playhead);
     }
 
-    /// The launch scene's clips: a scene with nothing in it doesn't start the
-    /// transport, so launching an empty scene does nothing (observed in Live
-    /// 12.4.3; what a scene with a clip does while stopped is in the spec's
-    /// "To observe in Live").
+    /// Launches a scene: its clips, all on one grid line, and the tempo and
+    /// signature it holds, on that same frame. A scene with nothing in it
+    /// doesn't start the transport (observed in Live 12.4.3), and its tempo
+    /// applies even then, with the song stopped (observed on 15 October
+    /// 2026).
     fn launch_scene(&mut self, scene: SceneId) {
-        let holds_a_clip = self
-            .program
-            .as_ref()
-            .is_some_and(|program| !program.get().scene_slots(scene).is_empty());
-        if !holds_a_clip {
+        let program = self.program.as_ref().map(Program::get);
+        let holds_a_clip = program.is_some_and(|program| !program.scene_slots(scene).is_empty());
+        let holds_maps =
+            program.is_some_and(|program| program.scene_maps.iter().any(|m| m.scene == scene));
+        if !holds_a_clip && !holds_maps {
             return;
         }
         let was_playing = self.playing;
-        if !was_playing {
+        if holds_a_clip && !was_playing {
             self.play_from_insert_marker();
         }
         let slots = self
@@ -929,7 +1042,19 @@ impl Processor {
             self.position,
             self.config.sample_rate,
         );
-        self.session.launch_scene(scene, slots, playhead);
+        let at = if holds_a_clip {
+            self.session.launch_scene(scene, slots, playhead)
+        } else {
+            self.session.landing(playhead)
+        };
+        if !holds_maps {
+            return;
+        }
+        if at <= self.position {
+            self.apply_scene(scene);
+        } else {
+            self.session.queue_scene(scene, at);
+        }
     }
 
     /// Stops one track's or every track's playing clip on the next grid
@@ -976,6 +1101,11 @@ impl Processor {
     fn apply_due_session(&mut self) {
         if self.playing {
             self.session.apply_due(self.position);
+            // Spec: session-view R22. A launched scene's tempo and signature
+            // apply on its launch frame.
+            while let Some(scene) = self.session.take_due_scene(self.position) {
+                self.apply_scene(scene);
+            }
         }
     }
 
@@ -1346,6 +1476,7 @@ impl Processor {
         self.session.status(&mut self.session_status);
         state.session.clear();
         state.session.extend_from_slice(&self.session_status);
+        state.scene_override = self.scene_override;
         state.meters.clear();
         state.meters_truncated = false;
         if let Some(program) = &self.program {

@@ -690,6 +690,15 @@ impl AudioHost {
         }
     }
 
+    /// The tempo and time signature a launched scene put in place of the
+    /// set's, as the engine last published them (WP-3.5). Nothing while no
+    /// engine runs.
+    pub fn scene_override(&mut self) -> bl_engine::SceneOverride {
+        self.engine
+            .as_mut()
+            .map_or_else(Default::default, |engine| engine.state().scene_override)
+    }
+
     /// Gives the engine what to record while the transport records
     /// (WP-2.13): the armed tracks' inputs and the rings their samples go
     /// to. It replaces any earlier plan; the take that ends drops it, which

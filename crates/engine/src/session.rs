@@ -19,11 +19,14 @@ use core::fmt;
 
 use bl_commands::Context::{self, Session};
 use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};
-use bl_core::time::{Frames, SampleRate, TempoMap, Ticks, TimeSignatureMap};
+use bl_core::time::{Bpm, Frames, SampleRate, TempoMap, Ticks, TimeSignature, TimeSignatureMap};
 use bl_model::{LaunchSettings, SceneId, TrackId};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
+
+/// How many launched scenes can wait for their frame at once (WP-3.5).
+const SCENE_APPLIES: usize = 8;
 
 /// What a slot is doing (WP-3.2). Recording waits for WP-3.11.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -59,6 +62,33 @@ pub struct SessionPlayback {
     pub frame: Frames,
 }
 
+/// The tempo and time signature a launched scene set, which hold until
+/// Re-Enable Automation or Back to Arrangement (WP-3.5). Each names the
+/// scene it came from.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SceneOverride {
+    /// The tempo, in place of the set's tempo map.
+    pub tempo: Option<(SceneId, Bpm)>,
+    /// The time signature, in place of the set's time-signature map.
+    pub signature: Option<(SceneId, TimeSignature)>,
+}
+
+impl SceneOverride {
+    /// Whether neither is set.
+    #[must_use]
+    pub fn is_none(&self) -> bool {
+        self.tempo.is_none() && self.signature.is_none()
+    }
+}
+
+/// The maps a scene's tempo and signature put in place when it launches,
+/// made with the program so that switching to them allocates nothing.
+pub(crate) struct SceneMaps {
+    pub(crate) scene: SceneId,
+    pub(crate) tempo: Option<(Bpm, TempoMap)>,
+    pub(crate) signature: Option<(TimeSignature, TimeSignatureMap)>,
+}
+
 /// A command to the engine's Session View (WP-3.2).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SessionCommand {
@@ -78,6 +108,14 @@ pub enum SessionCommand {
     StopAll,
     /// Sets the global launch quantisation and its switch.
     SetQuantization(LaunchSettings),
+    /// Moves every playing clip whose track has a clip in this scene to that
+    /// scene's slot, playing on without a break: what Capture and Insert
+    /// Scene does once the scene holds copies of the playing clips (WP-3.5).
+    MoveToScene(SceneId),
+    /// Gives back the set's tempo and time signature in place of the ones a
+    /// launched scene set: what Re-Enable Automation and Back to
+    /// Arrangement do (WP-3.5).
+    ClearSceneOverride,
 }
 
 /// The transport as the launcher reads it: where the playhead is, whether
@@ -137,6 +175,9 @@ impl Slot {
 pub(crate) struct SessionLauncher {
     settings: LaunchSettings,
     slots: Vec<Slot>,
+    /// Launched scenes whose tempo and signature wait for their launch
+    /// frame (WP-3.5), with that frame.
+    scenes: Vec<(SceneId, Frames)>,
     /// Launches dropped because every slot was taken.
     pub(crate) overflowed: u64,
 }
@@ -148,6 +189,7 @@ impl SessionLauncher {
         Self {
             settings: LaunchSettings::default(),
             slots: Vec::with_capacity(capacity),
+            scenes: Vec::with_capacity(SCENE_APPLIES),
             overflowed: 0,
         }
     }
@@ -168,6 +210,7 @@ impl SessionLauncher {
     /// (device-changes R7).
     pub(crate) fn clear(&mut self) {
         self.slots.clear();
+        self.scenes.clear();
     }
 
     /// The frame a launch or a stop asked for now waits for: the next line
@@ -194,15 +237,68 @@ impl SessionLauncher {
     /// Launches every slot of `scene` that `slots` names (`(scene, track)`
     /// pairs, from the running program), all on one frame: a scene's clips
     /// start together (observed in Live 12.4.3).
+    /// Returns the frame they start on, which is where the scene's own
+    /// tempo and signature apply.
     pub(crate) fn launch_scene(
         &mut self,
         scene: SceneId,
         slots: &[(SceneId, TrackId)],
         playhead: Playhead<'_>,
-    ) {
+    ) -> Frames {
         let at = self.frame_for(playhead);
         for &(_, track) in slots {
             self.launch_at(track, scene, at);
+        }
+        at
+    }
+
+    /// The frame a launch asked for now lands on, for a scene with no clips
+    /// to launch.
+    pub(crate) fn landing(&self, playhead: Playhead<'_>) -> Frames {
+        self.frame_for(playhead)
+    }
+
+    /// Moves the playing slot of each track that has a slot in `slots`
+    /// (`(scene, track)` pairs of the destination scene) to that scene,
+    /// keeping when it started and any stop it waits for. A slot still
+    /// waiting to start stays where it is.
+    pub(crate) fn move_to_scene(&mut self, scene: SceneId, slots: &[(SceneId, TrackId)]) {
+        for slot in &mut self.slots {
+            if slot.started.is_some() && slots.iter().any(|&(_, track)| track == slot.track) {
+                slot.scene = scene;
+            }
+        }
+    }
+
+    /// Holds `scene`'s tempo and signature for `due`. A later launch of the
+    /// same scene replaces an earlier one; a full list drops the launch.
+    pub(crate) fn queue_scene(&mut self, scene: SceneId, due: Frames) {
+        self.scenes.retain(|&(queued, _)| queued != scene);
+        if self.scenes.len() < self.scenes.capacity() {
+            self.scenes.push((scene, due));
+        } else {
+            self.overflowed += 1;
+        }
+    }
+
+    /// The scene whose launch frame has come at or before `at`, if any,
+    /// oldest first.
+    pub(crate) fn take_due_scene(&mut self, at: Frames) -> Option<SceneId> {
+        let index = (0..self.scenes.len())
+            .filter(|&index| self.scenes[index].1 <= at)
+            .min_by_key(|&index| self.scenes[index].1)?;
+        Some(self.scenes.remove(index).0)
+    }
+
+    /// Moves every frame the launcher holds to where `convert` puts it: the
+    /// tempo map changed, and each frame keeps its beat.
+    pub(crate) fn remap(&mut self, convert: impl Fn(Frames) -> Frames) {
+        for slot in &mut self.slots {
+            slot.started = slot.started.map(&convert);
+            slot.due = slot.due.map(&convert);
+        }
+        for (_, due) in &mut self.scenes {
+            *due = convert(*due);
         }
     }
 
@@ -296,6 +392,7 @@ impl SessionLauncher {
         self.slots
             .iter()
             .filter_map(|slot| slot.due)
+            .chain(self.scenes.iter().map(|&(_, due)| due))
             .filter(|&due| due > at)
             .min()
     }

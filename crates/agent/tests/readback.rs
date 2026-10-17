@@ -377,6 +377,20 @@ fn fixture() -> Project {
             name: "Verse".to_owned(),
         },
     );
+    apply(
+        &mut editor,
+        Command::SetSceneTempo {
+            scene: scenes[0],
+            tempo: Some(Bpm::new(96.0).unwrap()),
+        },
+    );
+    apply(
+        &mut editor,
+        Command::SetSceneTimeSignature {
+            scene: scenes[0],
+            signature: Some(TimeSignature::new(3, 4).unwrap()),
+        },
+    );
     editor.clear_history().unwrap();
     Project::from_editor(&editor, Media::new()).with_launch(LaunchSettings {
         quantization: LaunchQuantization::Bars2,
@@ -545,7 +559,10 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
             &document["main"],
             &["routing.main_out", "routing.cue_out"][..],
         ),
-        (&document["scenes"], &["0.name"][..]),
+        (
+            &document["scenes"],
+            &["0.name", "0.tempo", "0.signature"][..],
+        ),
         (
             &devices[0],
             &[

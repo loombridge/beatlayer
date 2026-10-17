@@ -1295,3 +1295,172 @@ fn an_agent_launches_and_stops_session_clips_by_command_id() {
         "the engine's blocks stay off the heap"
     );
 }
+
+/// Spec: warping R1, R4 to R11, R52. An agent warps a clip, edits its warp
+/// map and reads every change back in the query tool's `clip`, each command
+/// run by ID and one undo step.
+#[test]
+fn an_agent_warps_a_clip_and_reads_it_back() {
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("test-agent").unwrap();
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "track.create",
+              "args": { "id": {"$new": "Loop"}, "kind": "audio", "name": "Loop", "index": 0 } },
+        ] }),
+    );
+    let track = client
+        .transport()
+        .shell
+        .editor()
+        .document()
+        .tracks()
+        .find(|track| track.name() == "Loop")
+        .expect("the track was made")
+        .id();
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "clip.create",
+              "args": { "track": track, "clip": {
+                  "id": {"$new": "Break"}, "name": "Break", "start": 0, "length": 2 * BAR,
+                  "mute": false, "data": { "audio": { "media": "ab".repeat(32) } } } } },
+        ] }),
+    );
+    let clip = client
+        .transport()
+        .shell
+        .editor()
+        .document()
+        .track(track)
+        .unwrap()
+        .clips()
+        .next()
+        .expect("the clip was made")
+        .id;
+    let steps =
+        |client: &mut Client<InProcess>| client.transport().shell.editor().undo_history().len();
+    let audio = |client: &mut Client<InProcess>| {
+        call(client, "query", json!({ "id": clip, "detail": "full" }))["saved"]["data"]["audio"]
+            .clone()
+    };
+    let run = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        let before = steps(client);
+        call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }] }),
+        );
+        assert_eq!(steps(client), before + 1, "{command} is one undo step");
+        audio(client)
+    };
+
+    let unwarped = audio(&mut client);
+    assert!(unwarped.get("warp").is_none() && unwarped.get("warp_markers").is_none());
+
+    // Warp on: one marker at the Start marker, at the set's tempo.
+    let warped = run(
+        &mut client,
+        "clip.set_warp",
+        json!({ "clip": clip, "warp": true }),
+    );
+    assert_eq!(warped["warp"], true);
+    assert_eq!(
+        warped["warp_markers"]["items"],
+        json!([{ "time": 0.0, "beat": 0 }])
+    );
+    assert_eq!(warped["tempo"], 120.0);
+
+    // Insert, move and shift, delete.
+    let inserted = run(
+        &mut client,
+        "clip.insert_warp_marker",
+        json!({ "clips": [clip], "beat": BAR }),
+    );
+    assert_eq!(
+        inserted["warp_markers"]["items"],
+        json!([{ "time": 0.0, "beat": 0 }, { "time": 2.0, "beat": BAR }])
+    );
+    let moved = run(
+        &mut client,
+        "clip.move_warp_markers",
+        json!({ "clips": [clip], "markers": [1], "by": BAR }),
+    );
+    assert_eq!(
+        moved["warp_markers"]["items"][1],
+        json!({ "time": 2.0, "beat": 2 * BAR })
+    );
+    assert_eq!(
+        moved["tempo"], 240.0,
+        "the last marker's segment is the clip's tempo"
+    );
+    let shifted = run(
+        &mut client,
+        "clip.shift_warp_marker",
+        json!({ "clips": [clip], "marker": 1, "by": 0.5 }),
+    );
+    assert_eq!(
+        shifted["warp_markers"]["items"][1],
+        json!({ "time": 2.5, "beat": 2 * BAR })
+    );
+
+    // The BPM field and ×2.
+    let slower = run(
+        &mut client,
+        "clip.set_segment_bpm",
+        json!({ "clip": clip, "marker": 0, "bpm": 60.0 }),
+    );
+    // 60 BPM for 2.5 s: two and a half quarter notes.
+    assert_eq!(
+        slower["warp_markers"]["items"][1]["beat"],
+        2 * 705_600 + 705_600 / 2
+    );
+    let doubled = run(
+        &mut client,
+        "clip.scale_tempo",
+        json!({ "clip": clip, "factor": 2.0 }),
+    );
+    assert_eq!(doubled["tempo"], 480.0);
+    assert_eq!(doubled["warp_markers"]["items"][1]["beat"], 5 * 705_600);
+    let one = run(
+        &mut client,
+        "clip.delete_warp_markers",
+        json!({ "clips": [clip], "markers": [1] }),
+    );
+    assert_eq!(one["warp_markers"]["total"], 1);
+
+    // A warped clip's positions are ticks, in the form the clip shows.
+    let region = run(
+        &mut client,
+        "clip.set_region",
+        json!({ "clip": clip, "start": 705_600, "end": 4 * 705_600, "ticks": true }),
+    );
+    assert_eq!(
+        (region["start"].clone(), region["end"].clone()),
+        (json!(705_600.0), json!(2_822_400.0))
+    );
+    let refused = client
+        .call(
+            "run",
+            json!({ "commands": [{ "command": "clip.set_region",
+                "args": { "clip": clip, "start": 1.5, "end": null } }] }),
+        )
+        .unwrap();
+    assert!(refused.ok().is_err(), "seconds on a warped clip");
+
+    // Warp off keeps the map and turns the markers back to seconds.
+    let off = run(
+        &mut client,
+        "clip.set_warp",
+        json!({ "clip": clip, "warp": false }),
+    );
+    assert!(off.get("warp").is_none());
+    assert_eq!(off["warp_markers"]["total"], 1);
+    assert!(
+        off["start"].as_f64().unwrap() < 10.0,
+        "seconds again: {off}"
+    );
+}

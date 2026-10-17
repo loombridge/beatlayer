@@ -68,7 +68,7 @@ fn a_version_1_set_with_split_audio_clips_loads_and_plays_as_it_did() {
     editor
         .apply(Command::CreateClip {
             track,
-            clip: Clip::new(whole, start, end - start, ClipData::Audio(audio)),
+            clip: Clip::new(whole, start, end - start, ClipData::Audio(audio.clone())),
         })
         .unwrap();
     let expected = render(editor.document());
@@ -116,7 +116,7 @@ fn a_version_1_set_with_split_audio_clips_loads_and_plays_as_it_did() {
     assert_eq!(info.schema, 1);
     let part = loaded.document.clip(right).unwrap();
     assert_eq!(part.offset, Ticks::ZERO);
-    let ClipData::Audio(moved) = part.data else {
+    let ClipData::Audio(moved) = &part.data else {
         unreachable!("an audio clip");
     };
     let tempo = &loaded.document.settings().tempo;
@@ -124,5 +124,74 @@ fn a_version_1_set_with_split_audio_clips_loads_and_plays_as_it_did() {
         moved.start,
         0.125 + (tempo.ticks_to_seconds(split) - tempo.ticks_to_seconds(start))
     );
+    assert_eq!(render(&loaded.document), expected);
+}
+
+// Spec: warping R1, R11. A set saved before warping has no warp field on any
+// clip; it opens with every clip unwarped, its Start, End and loop still
+// seconds in the file, and renders the same to the bit.
+#[test]
+fn a_set_saved_before_warping_opens_unwarped_and_plays_as_it_did() {
+    let mut editor = Editor::new();
+    let tempo = TempoMap::from_breakpoints([
+        (Ticks::ZERO, Bpm::new(120.0).unwrap()),
+        (Ticks::WHOLE * 2, Bpm::new(93.0).unwrap()),
+    ])
+    .unwrap();
+    editor.apply(Command::SetTempo { tempo }).unwrap();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Audio,
+            name: "Audio".to_owned(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    // One clip plays whole, one is looped (which an unwarped clip could be
+    // before warping, and keeps).
+    for (start, audio) in [
+        (Ticks::ZERO, AudioData::new(MEDIA)),
+        (
+            Ticks::WHOLE * 4,
+            AudioData {
+                start: 0.125,
+                end: Some(0.75),
+                looping: true,
+                loop_start: 0.25,
+                loop_end: Some(0.5),
+                ..AudioData::new(MEDIA)
+            },
+        ),
+    ] {
+        let clip = editor.new_id();
+        editor
+            .apply(Command::CreateClip {
+                track,
+                clip: Clip::new(clip, start, Ticks::WHOLE * 3, ClipData::Audio(audio)),
+            })
+            .unwrap();
+    }
+    let expected = render(editor.document());
+    assert!(expected.iter().any(|&s| s != 0.0));
+
+    let project = Project::from_editor(&editor, Media::default());
+    let saved = encode_json(&project, 1).unwrap();
+    let text = String::from_utf8(saved.clone()).unwrap();
+    for field in ["\"warp", "\"tempo\":", "\"signature\""] {
+        let clips = &text[text.find("\"clips\"").unwrap()..];
+        assert!(!clips.contains(field), "an unwarped clip saves {field}");
+    }
+    let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
+    let mut clips = 0;
+    for clip in loaded.document.track(track).unwrap().clips() {
+        let ClipData::Audio(audio) = &clip.data else {
+            unreachable!("an audio clip");
+        };
+        assert!(!audio.warp && audio.warp_markers.is_empty() && audio.tempo.is_none());
+        clips += 1;
+    }
+    assert_eq!(clips, 2);
     assert_eq!(render(&loaded.document), expected);
 }

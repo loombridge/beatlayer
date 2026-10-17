@@ -57,6 +57,7 @@ use objc2_foundation::{
 };
 
 pub use crate::clap::{ParamChange, PluginStatus};
+use crate::drive::Driver;
 use crate::scan::ScannedPlugin;
 
 use super::{AuError, description_id};
@@ -139,6 +140,9 @@ struct Instance {
     params: Vec<(Retained<AUParameter>, f64)>,
     /// The parameters the device type describes, for `plugin.info`.
     visible: Vec<ParamId>,
+    /// Their descriptors, for the node's automation and modulation (the
+    /// modulation spec, R10).
+    descriptors: Vec<ParamDescriptor>,
     /// The node it runs for, and nodes it ran for that haven't given their
     /// processor back yet.
     ends: Option<HostEnds>,
@@ -1375,12 +1379,13 @@ fn ensure_instance(main: &mut Main, device: &Device) -> bool {
         }
     };
     main.missing.remove(&device.id);
-    let (_, params, visible) = describe(&unit);
+    let (descriptors, params, visible) = describe(&unit);
     let mut instance = Instance {
         plugin_id: plugin_id.clone(),
         unit,
         params,
         visible,
+        descriptors,
         ends: None,
         retired: Vec::new(),
         config: None,
@@ -1433,7 +1438,12 @@ fn pump(instance: &mut Instance) -> bool {
         && !ends.to_node.is_abandoned()
     {
         changed = true;
-        match activate(&instance.unit, &config, &instance.params) {
+        match activate(
+            &instance.unit,
+            &config,
+            &instance.params,
+            &instance.descriptors,
+        ) {
             Ok((processor, latency)) => {
                 instance.latency = latency;
                 ends.status.latency.store(latency, Relaxed);
@@ -1518,6 +1528,7 @@ fn activate(
     unit: &Retained<AUAudioUnit>,
     config: &NodeConfig,
     params: &[(Retained<AUParameter>, f64)],
+    descriptors: &[ParamDescriptor],
 ) -> Result<(Processor, u32), String> {
     deactivate(unit);
     let rate = f64::from(config.sample_rate.hz());
@@ -1552,14 +1563,27 @@ fn activate(
         reason = "clamped to 0..=u32::MAX"
     )]
     let latency = (seconds * rate).round().clamp(0.0, f64::from(u32::MAX)) as u32;
+    // Each control starts where the unit is: the set's values and its saved
+    // state are on it before it's activated.
+    let drive = Driver::new(descriptors.iter().map(|descriptor| {
+        let value =
+            params
+                .get(descriptor.id.0 as usize)
+                .map_or(descriptor.default, |(parameter, _)| {
+                    // SAFETY: reading a value is a property read on the thread that
+                    // made the unit.
+                    f64::from(unsafe { parameter.value() })
+                });
+        (descriptor.clone(), false, value)
+    }));
     let processor = Processor::new(
         unit.clone(),
         config,
         params.to_vec(),
+        drive,
         render,
         midi,
-        input_channels,
-        output_channels,
+        (input_channels, output_channels),
     );
     Ok((processor, latency))
 }

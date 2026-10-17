@@ -20,7 +20,7 @@
 
 use std::f32::consts::FRAC_PI_2;
 
-use bl_model::{DeviceId, DeviceRole, TrackId};
+use bl_model::{AutomationTarget, DeviceId, DeviceRole, TrackId};
 use bl_shell::context_menus;
 use bl_shell::device_commands::{
     self as ids, DEVICE_GAP, DeviceFrame, DeviceViewState, FloatingWindow, TITLE_BAR_HEIGHT,
@@ -374,7 +374,14 @@ impl DeviceViewUi {
                     // Right of the sidechain strip and section (WP-2.19b).
                     let mut body = crate::device_panel::body_rect(rect, TITLE_BAR_HEIGHT);
                     body.min.x += ids::sidechain_width(frame);
-                    crate::device_panel::show(ui, theme, frame, panel, body, events);
+                    let track = shell.editor().document().device_track(frame.id);
+                    let played = |param| {
+                        let device = frame.id;
+                        track.and_then(|track| {
+                            shell.played(track, &AutomationTarget::Device { device, param })
+                        })
+                    };
+                    crate::device_panel::show(ui, theme, frame, panel, body, &played, events);
                 }
                 self.title(
                     ui,

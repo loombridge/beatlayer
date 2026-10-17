@@ -21,6 +21,7 @@
 
 pub mod au;
 pub mod clap;
+mod drive;
 pub mod scan;
 pub mod vst3;
 #[cfg(any(target_os = "windows", all(unix, not(target_os = "macos"))))]

@@ -65,6 +65,7 @@ use clack_extensions::state::PluginState as StateExtension;
 use clack_host::prelude::*;
 use lspk_plugin::agent_commands::PluginAgentCommands;
 
+use crate::drive::Driver;
 #[cfg(any(target_os = "windows", all(unix, not(target_os = "macos"))))]
 use crate::window::{EditorWindow, WindowEvent};
 
@@ -1799,11 +1800,19 @@ fn activate(
     };
     let (inputs, outputs) = (channels(true), channels(false));
     let params = plugin.get_extension::<PluginParams>();
-    let mut defaults: Vec<(u32, f64)> = describe::params(&mut plugin)
-        .iter()
-        .map(|p| (p.id.0, p.default))
-        .collect();
+    let descriptors = describe::params(&mut plugin);
+    let mut defaults: Vec<(u32, f64)> = descriptors.iter().map(|p| (p.id.0, p.default)).collect();
     defaults.sort_by_key(|(id, _)| *id);
+    // Each control starts where the plug-in is: the set's values and its
+    // saved state are on it before it's activated (clap-hosting R11).
+    let modulatable = describe::modulatable(&mut plugin);
+    let drive = Driver::new(descriptors.into_iter().map(|p| {
+        let value = params
+            .zip(ClapId::from_raw(p.id.0))
+            .and_then(|(params, id)| params.get_value(&plugin, id))
+            .unwrap_or(p.default);
+        (p.clone(), modulatable.contains(&p.id.0), value)
+    }));
     let max_frames = u32::try_from(config.max_frames.max(1)).unwrap_or(u32::MAX);
     let processor = instance
         .activate(
@@ -1812,6 +1821,7 @@ fn activate(
                 outputs,
                 defaults,
                 params,
+                drive,
             },
             PluginAudioConfiguration {
                 sample_rate: f64::from(config.sample_rate.hz()),

@@ -102,7 +102,7 @@ fn a_plugin_loads_runs_and_keeps_its_state_with_the_set() {
         serde_json::from_value(shell.run("device_view.state", json!({})).unwrap()).unwrap();
     let frame = view.devices.iter().find(|d| d.id == device).unwrap();
     assert!(frame.selected);
-    assert_eq!(frame.panel.as_ref().unwrap().description.params.len(), 6);
+    assert_eq!(frame.panel.as_ref().unwrap().description.params.len(), 8);
     let params: DeviceParameters = serde_json::from_value(
         shell
             .run("device.parameters", json!({ "device": device }))
@@ -519,7 +519,9 @@ fn the_panel_maps_the_plugins_parameters_and_a_remap_is_remembered_per_plugin() 
             "Last Note",
             "Editor Scale",
             "Editor Width",
-            "Editor Height"
+            "Editor Height",
+            "Depth",
+            "Depth Modulation"
         ]
     );
 
@@ -962,4 +964,88 @@ fn a_missing_vst3_plugin_keeps_its_saved_state_through_a_save() {
     );
 
     let _ = std::fs::remove_dir_all(&scratch);
+}
+
+// Spec: modulation R10
+#[test]
+fn modulation_never_writes_a_plugins_value_into_the_set() {
+    let mut shell = Shell::headless();
+    shell.start_audio();
+    assert!(shell.audio().engine_running(), "{:?}", shell.audio());
+    let track = shell.new_id::<bl_model::TrackId>();
+    shell
+        .run(
+            "track.create",
+            json!({ "id": track, "kind": TrackKind::Midi, "name": "Mod", "index": 0 }),
+        )
+        .unwrap();
+    let device = load(&mut shell, track);
+    shell
+        .run(
+            "device.set_param",
+            json!({ "device": device, "param": GAIN, "value": 0.5 }),
+        )
+        .unwrap();
+    wait(&mut shell, device, |i| {
+        i.active && value(i, GAIN) == Some(0.5)
+    });
+    // A plug-in that reports back every value it is given, as some do.
+    shell
+        .plugins()
+        .load_state(device, bl_test_clap::ECHO_PARAMS)
+        .unwrap();
+
+    // A one-bar clip whose envelope holds a quarter of the gain's travel:
+    // the plug-in plays 1.0 while the set's gain is 0.5.
+    let clip = shell.new_id::<bl_model::ClipId>();
+    shell
+        .run(
+            "clip.create",
+            json!({ "track": track, "clip": { "id": clip, "name": "", "start": 0,
+                    "length": 4 * 705_600, "mute": false,
+                    "data": { "midi": { "notes": [] } } } }),
+        )
+        .unwrap();
+    let target = bl_model::AutomationTarget::Device {
+        device,
+        param: ParamId(GAIN),
+    };
+    shell
+        .run(
+            "clip.set_envelope_breakpoint",
+            json!({ "clip": clip, "target": target, "at": 0, "value": 0.25 }),
+        )
+        .unwrap();
+    let history = shell.editor().undo_history().len();
+    let saved = |shell: &Shell| {
+        shell
+            .editor()
+            .document()
+            .device(device)
+            .unwrap()
+            .params
+            .get(&ParamId(GAIN))
+            .copied()
+    };
+
+    shell.run("transport.play", json!({})).unwrap();
+    wait(&mut shell, device, |i| value(i, GAIN) == Some(1.0));
+    // The plug-in goes on reporting what it was given; frames of the app
+    // later, none of it is in the set.
+    for _ in 0..40 {
+        shell.poll();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(saved(&shell), Some(0.5), "the set saves the base");
+    assert_eq!(shell.editor().undo_history().len(), history, "no undo step");
+
+    // Stopped, the plug-in has the base again, and the set is as it was.
+    shell.run("transport.stop", json!({})).unwrap();
+    wait(&mut shell, device, |i| value(i, GAIN) == Some(0.5));
+    for _ in 0..20 {
+        shell.poll();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(saved(&shell), Some(0.5));
+    assert_eq!(shell.editor().undo_history().len(), history);
 }

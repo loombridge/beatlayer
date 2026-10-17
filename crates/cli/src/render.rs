@@ -345,8 +345,11 @@ pub fn run(args: &RenderArgs) -> Outcome {
     if !is_wav {
         return Err("OUTPUT must be a .wav file".into());
     }
-    let (project, info) = bl_project::load(&args.project)
+    let (mut project, info) = bl_project::load(&args.project)
         .map_err(|error| format!("can't open {}: {error}", args.project.display()))?;
+    if info.before_relative_modulation() {
+        bl_devices::relative_clip_envelopes(&mut project.document);
+    }
     let document = &project.document;
     let frames = length(document, args.seconds, args.bars, sample_rate)?;
     let settings = Settings {

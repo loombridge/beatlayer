@@ -4640,6 +4640,27 @@ impl Shell {
             return Ok(outcome.value);
         }
         if id == browser_ids::LOAD_SELECTED
+            && self.browser_view.selected_audio_is_empty()
+            && let Some((device_type, name)) = self.browser_view.selected_device()
+        {
+            // Spec: modulation R12. A modulator selected under the
+            // Modulators label loads as `device.add` adds a device.
+            Self::args::<NoArgs>(id, args)?;
+            return self.run_devices(
+                device_ids::ADD,
+                to_value(&device_ids::AddDeviceArgs {
+                    device: device_ids::NewDevice {
+                        kind: bl_model::DeviceKind::Native { device_type },
+                        name,
+                        role: bl_model::DeviceRole::AudioEffect,
+                        sidechain: false,
+                    },
+                    track: None,
+                    index: None,
+                }),
+            );
+        }
+        if id == browser_ids::LOAD_SELECTED
             && let Some(path) = self.hot_swap_preset()
         {
             // Spec: device-chains R19. Loading a preset while hot-swapping

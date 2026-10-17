@@ -435,8 +435,8 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 2.26 | done | 15 October 2026 | [#2](https://github.com/loombridge/beatlayer/pull/2) and [#47](https://github.com/loombridge/beatlayer/pull/47): export of one track or the selected tracks, and MP3 at 320 kbps ([the spec](specs/export.md)) |
 | 2.27 | done | 15 October 2026 | [#32](https://github.com/loombridge/beatlayer/pull/32): Beatlayer's own Noise Shaped dither for 16- and 24-bit exports ([the spec](specs/export.md)) |
 | 2.28 | done | 13 October 2026 | [#1](https://github.com/loombridge/beatlayer/pull/1): previews and range analyses render on a worker thread in the app |
-| 2.29 | todo |  |  |
-| 2.29b | todo |  |  |
+| 2.29 | todo |  | [#110](https://github.com/loombridge/beatlayer/pull/110): [the spec](specs/midi-controller-data.md) R1 to R9; waits on WP-5.44 |
+| 2.29b | todo |  | [#110](https://github.com/loombridge/beatlayer/pull/110): [the spec](specs/midi-controller-data.md) R10 to R16; waits on WP-2.29 and WP-3.14 |
 | 3.1 | done | 15 October 2026 | [#53](https://github.com/loombridge/beatlayer/pull/53); clip slots and scenes in the document |
 | 3.2 | done | 16 October 2026 | [#62](https://github.com/loombridge/beatlayer/pull/62); clip launching, launch quantisation and stop buttons; [the spec](specs/launch-quantisation.md) |
 | 3.3 | done | 17 October 2026 | [#80](https://github.com/loombridge/beatlayer/pull/80); Trigger, Gate, Toggle and Repeat in the engine, the clip's mode set by command and saved, and `session.release`; the launch buttons don't send the release yet; [the spec](specs/launch-quantisation.md) |

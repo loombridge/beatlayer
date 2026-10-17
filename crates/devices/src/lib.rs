@@ -35,6 +35,7 @@ mod framework;
 pub mod kit;
 pub mod lfo;
 pub mod limiter;
+pub mod modulator;
 pub mod polysynth;
 pub mod reverb;
 pub mod sampler;
@@ -66,6 +67,7 @@ pub fn register(registry: &mut Registry) {
     utility::register(registry);
     eq::register(registry);
     sampler::register(registry);
+    modulator::register(registry);
 }
 
 /// The native device types Beatlayer ships, for the browser and the shell:

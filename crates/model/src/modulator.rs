@@ -32,8 +32,11 @@ pub const MAX_POINTS: usize = 64;
 pub const MODE: ParamId = ParamId(64);
 /// The Polarity switch: Bipolar (0, the default) or Unipolar (1) (R14).
 pub const POLARITY: ParamId = ParamId(65);
+/// The Depth, from 0 % (no effect) to 100 % (full), which scales every
+/// mapping's effect (R13). A parameter of every modulator.
+pub const DEPTH: ParamId = ParamId(66);
 /// The first parameter id a slot owns; each slot has three.
-const SLOT_BASE: u32 = 66;
+const SLOT_BASE: u32 = 67;
 
 /// A slot's Modulation Amount, from −100 % to 100 % (R14).
 #[must_use]

@@ -22,6 +22,7 @@ use crate::layout::header_columns::{IN_OUT, METER, MIXER, TITLE};
 use crate::main_window::UiEvent;
 use crate::mixer::{Place, StripParts};
 use crate::theme::Theme;
+use crate::track_menu::{TrackMenus, rename_edit};
 
 /// One header to draw.
 pub struct Header<'a> {
@@ -46,6 +47,10 @@ pub struct Header<'a> {
     pub foldable: bool,
     /// Whether its height can be dragged.
     pub resizable: bool,
+    /// The menu its title bar opens.
+    pub menus: &'a TrackMenus,
+    /// Whether the keys open that menu for this title bar now (S-CTX-002).
+    pub keys: bool,
 }
 
 /// The ID of a track's title, for tests and focus.
@@ -102,6 +107,8 @@ pub fn header(
         title_selected,
         foldable,
         resizable,
+        menus,
+        keys,
     } = *header;
     let id = track.id();
     let colors = &theme.colors;
@@ -154,6 +161,20 @@ pub fn header(
             json!({ "tracks": [id], "add": add, "title_bars": true }),
         );
     }
+    // WP-4.22: right-clicking the title, or the keys on it, open C-TRACK.
+    menus.title(
+        ui,
+        theme,
+        &title_response,
+        id,
+        (
+            title.left_bottom(),
+            keys || title_response.has_focus(),
+            true,
+        ),
+        shell,
+        events,
+    );
     title_response
         .widget_info(|| WidgetInfo::selected(WidgetType::SelectableLabel, true, selected, name));
     ui.ctx().accesskit_node_builder(title_response.id, |node| {
@@ -215,13 +236,19 @@ pub fn header(
         });
         name_left = fold.right() + 3.0;
     }
-    painter.with_clip_rect(title.shrink(1.0)).text(
-        pos2(name_left, row_top + 7.5),
-        Align2::LEFT_CENTER,
-        name,
-        theme.font(),
-        colors.clip_text.0,
+    let name_rect = Rect::from_min_max(
+        pos2(name_left, row_top),
+        pos2(title.right() - 1.0, row_top + 15.0),
     );
+    if !rename_edit(ui, theme, name_rect, id, name, events) {
+        painter.with_clip_rect(title.shrink(1.0)).text(
+            pos2(name_left, row_top + 7.5),
+            Align2::LEFT_CENTER,
+            name,
+            theme.font(),
+            colors.clip_text.0,
+        );
+    }
 
     // The split line under the header: drag to resize (I-DRAG-018).
     if resizable && !folded {

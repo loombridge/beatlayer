@@ -34,6 +34,7 @@ use crate::layout::mixer::{
 };
 use crate::main_window::UiEvent;
 use crate::theme::Theme;
+use crate::track_menu::{TrackMenus, rename_edit};
 
 /// The mixer's sections as the shell has them.
 #[must_use]
@@ -171,6 +172,8 @@ pub struct MixerUi {
     reveal: Option<(MixerOf, TrackId)>,
     /// The Session View grid's slots (WP-3.7).
     grid: crate::session_view::GridUi,
+    /// The menu a title bar opens (WP-4.22).
+    track_menus: TrackMenus,
 }
 
 impl MixerUi {
@@ -208,7 +211,15 @@ impl MixerUi {
         let layout = SessionLayout::compute(rect, shown.then_some(sections));
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, 0.0, theme.colors.panel.0);
-        title_bars(ui, shell, theme, layout.title_bars, MixerOf::Session);
+        title_bars(
+            ui,
+            &self.track_menus,
+            shell,
+            theme,
+            layout.title_bars,
+            MixerOf::Session,
+            events,
+        );
         // The clip slots and scenes (M3, WP-3.7).
         self.grid.show(ui, shell, theme, &layout, events);
         painter.line_segment(
@@ -254,7 +265,7 @@ impl MixerUi {
                 area.min,
                 pos2(area.right(), area.top() + ARRANGEMENT_TITLE_ROW),
             );
-            title_bars(ui, shell, theme, row, of);
+            title_bars(ui, &self.track_menus, shell, theme, row, of, events);
             area.with_min_y(row.bottom())
         } else {
             area
@@ -524,7 +535,18 @@ fn scroll_into_view(layout: &MixerLayout, index: usize, of: MixerOf, events: &mu
 /// A row of title bars over a mixer's columns: the Session View's top row
 /// (L-SES-002) and the Arrangement mixer's top row, each track's colour and
 /// name.
-fn title_bars(ui: &Ui, shell: &Shell, theme: &Theme, row: Rect, of: MixerOf) {
+///
+/// Right-clicking a title bar opens the track's menu (WP-4.22, C-TRACK); the
+/// keys do the same while the track's column has the keyboard.
+fn title_bars(
+    ui: &mut Ui,
+    menus: &TrackMenus,
+    shell: &Shell,
+    theme: &Theme,
+    row: Rect,
+    of: MixerOf,
+    events: &mut Vec<UiEvent>,
+) {
     let doc = shell.editor().document();
     let columns = shell.mixer_columns();
     let returns: Vec<TrackId> = doc.returns().collect();
@@ -547,12 +569,25 @@ fn title_bars(ui: &Ui, shell: &Shell, theme: &Theme, row: Rect, of: MixerOf) {
             0.0,
             title_colour(theme, track, t.kind()).gamma_multiply(0.82),
         );
-        painter.text(
-            pos2(bar.left() + 4.0, bar.center().y),
-            Align2::LEFT_CENTER,
-            t.name(),
-            theme.small_font(),
-            theme.colors.clip_text.0,
+        if !rename_edit(ui, theme, bar, track, t.name(), events) {
+            painter.text(
+                pos2(bar.left() + 4.0, bar.center().y),
+                Align2::LEFT_CENTER,
+                t.name(),
+                theme.small_font(),
+                theme.colors.clip_text.0,
+            );
+        }
+        let response = ui.interact(bar, Id::new(("mixer-title", of, track)), Sense::click());
+        let focused = ui.memory(|m| m.has_focus(column_id(of, track)));
+        menus.title(
+            ui,
+            theme,
+            &response,
+            track,
+            (bar.left_bottom(), focused, false),
+            shell,
+            events,
         );
     }
 }

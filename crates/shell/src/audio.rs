@@ -348,6 +348,8 @@ pub struct EngineTransport {
     /// The take that last ended, until the next recording starts: the song
     /// frames it covers, which the recorded clips are made from.
     pub take: Option<TakeBounds>,
+    /// The take running now, as far as it has got (WP-3.11).
+    pub take_so_far: Option<TakeBounds>,
 }
 
 /// The audio device the app plays through, the engine that plays the set
@@ -835,6 +837,7 @@ impl AudioHost {
             take_running: state.take_running,
             counting_in: state.counting_in,
             take: state.take,
+            take_so_far: state.take_so_far,
         };
         self.memory
     }

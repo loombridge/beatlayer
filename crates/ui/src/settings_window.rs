@@ -597,9 +597,9 @@ const fn switch_row(label: &'static str, package: &'static str) -> Pending {
 /// The Record section of Record, Warp & Launch, as observed in Live 12.4.6:
 /// none of it is built.
 const RECORD: [Pending; 7] = [
-    chooser_row("File Type", "WP-2.13"),
-    chooser_row("Bit Depth", "WP-2.13"),
-    chooser_row("Count-In", "WP-2.15"),
+    chooser_row("File Type", "WP-2.13").showing("WAV"),
+    chooser_row("Bit Depth", "WP-2.13").showing("24"),
+    chooser_row("Count-In", "WP-2.15").showing("None"),
     Pending {
         label: "Exclusive",
         controls: &[
@@ -609,9 +609,9 @@ const RECORD: [Pending; 7] = [
         package: "WP-2.13",
         value: "",
     },
-    chooser_row("Clip Update Rate", "WP-2.13"),
-    chooser_row("Record Session automation in", "M3"),
-    switch_row("Start Transport With Record", "WP-2.13"),
+    chooser_row("Clip Update Rate", "WP-2.13").showing("1/16"),
+    chooser_row("Record Session automation in", "M3").showing("Armed Tracks"),
+    switch_row("Start Transport With Record", "WP-2.13").showing("On"),
 ];
 
 /// The Warp/Fades rows before Create Fades on Clip Edges, which come with

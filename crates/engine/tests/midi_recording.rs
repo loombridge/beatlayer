@@ -80,6 +80,7 @@ impl Midi {
                 dropped: Arc::clone(&dropped),
             }],
             delay: 0,
+            session: Vec::new(),
         };
         self.rig
             .sender

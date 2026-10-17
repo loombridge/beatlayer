@@ -160,3 +160,28 @@ fn the_launch_rows_of_record_warp_and_launch_are_live() {
             if i.id == "settings.set_select_on_launch" && i.args == json!({ "on": false })
     )));
 }
+
+// Spec: session-recording R12. The Record section's rows show the values
+// Live 12 shows in a new install, though the settings behind them come with
+// later packages.
+#[test]
+fn the_record_rows_show_the_values_live_shows_in_a_new_install() {
+    let mut h = Harness::new(Window::Settings);
+    h.shell
+        .invoke("app.settings", json!({ "page": "record-warp-launch" }))
+        .unwrap();
+    h.shell.take_effects();
+    h.settle();
+
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    for (label, value) in [
+        ("File Type", "WAV"),
+        ("Bit Depth", "24"),
+        ("Count-In", "None"),
+        ("Clip Update Rate", "1/16"),
+        ("Record Session automation in", "Armed Tracks"),
+        ("Start Transport With Record", "On"),
+    ] {
+        assert_eq!(Harness::node(&nodes, label).value, value, "{label}");
+    }
+}

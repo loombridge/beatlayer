@@ -109,7 +109,7 @@ struct SlotRepr {
 
 impl From<&Document> for DocumentRepr {
     fn from(doc: &Document) -> Self {
-        let track = |id: &TrackId| TrackRepr::new(doc, *id);
+        let track = |id: &TrackId| TrackRepr::new(doc, *id, true);
         Self {
             settings: doc.settings.clone(),
             tracks: doc.top.iter().map(track).collect(),
@@ -126,8 +126,20 @@ impl From<Document> for DocumentRepr {
     }
 }
 
+impl Document {
+    /// How the set saves this track, without the tracks inside it if it's a
+    /// group: the same code the set format uses, so a field added to the
+    /// format is in it.
+    #[must_use]
+    pub fn saved_track(&self, id: TrackId) -> Option<impl Serialize> {
+        self.tracks
+            .contains_key(&id)
+            .then(|| TrackRepr::new(self, id, false))
+    }
+}
+
 impl TrackRepr {
-    fn new(doc: &Document, id: TrackId) -> Self {
+    fn new(doc: &Document, id: TrackId, with_children: bool) -> Self {
         let track = doc
             .tracks
             .get(&id)
@@ -158,11 +170,15 @@ impl TrackRepr {
                 .collect(),
             removed_stop_buttons: track.removed_stop_buttons().collect(),
             take_lanes: track.take_lanes().cloned().collect(),
-            children: track
-                .children
-                .iter()
-                .map(|id| Self::new(doc, *id))
-                .collect(),
+            children: if with_children {
+                track
+                    .children
+                    .iter()
+                    .map(|id| Self::new(doc, *id, true))
+                    .collect()
+            } else {
+                Vec::new()
+            },
         }
     }
 }

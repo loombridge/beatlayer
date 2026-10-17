@@ -109,16 +109,23 @@ pub(crate) mod core_audio {
         };
         let mut value = T::default();
         let mut size = size_of::<T>() as u32;
-        let (qualifier_size, qualifier) = match qualifier {
-            Some(string) => (
+        // The qualifier is a pointer to a CFStringRef, so the CFStringRef
+        // must live in a local that outlives the call. Taking the address of
+        // a binding inside a `match` arm pointed at a stack slot that was
+        // gone by the time Core Audio read it, which crashed a release
+        // build at launch.
+        let string_ref: Option<*const CFString> = qualifier.map(std::ptr::from_ref);
+        let (qualifier_size, qualifier) = match &string_ref {
+            Some(string_ref) => (
                 size_of::<*const CFString>() as u32,
-                std::ptr::from_ref(&string).cast::<c_void>(),
+                std::ptr::from_ref(string_ref).cast::<c_void>(),
             ),
             None => (0, std::ptr::null()),
         };
         // SAFETY: the address, size and value are live locals, `T` is the
         // size of the property's value, and the qualifier, when there is
-        // one, is a pointer to a CFStringRef that outlives the call.
+        // one, points at `string_ref`, a CFStringRef in a local that
+        // outlives the call, whose string the caller keeps alive.
         let status = unsafe {
             AudioObjectGetPropertyData(
                 object,
@@ -187,6 +194,27 @@ pub(crate) mod core_audio {
         use cpal::traits::{DeviceTrait, HostTrait};
 
         use super::*;
+
+        /// Every device's UID resolves, again and again: the qualifier
+        /// Core Audio reads must stay alive through each call (a dangling
+        /// one crashed a release build at launch).
+        #[test]
+        fn every_device_resolves_by_its_uid_every_time() {
+            let host = cpal::default_host();
+            let Ok(devices) = host.devices() else {
+                return;
+            };
+            for device in devices {
+                let Ok(id) = device.id() else { continue };
+                let Ok(id) = crate::DeviceId::from_str(&id.to_string()) else {
+                    continue;
+                };
+                let first = of_device(id.local());
+                for _ in 0..200 {
+                    assert_eq!(of_device(id.local()), first, "{}", id.local());
+                }
+            }
+        }
 
         /// Adds up each property of the default output device on its own and
         /// compares with `of_device`. Skips on a machine with no device.

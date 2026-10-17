@@ -1556,6 +1556,25 @@ fn paths() -> BTreeMap<&'static str, Path> {
                 "the Arrangement's per-track Back to Arrangement buttons (WP-3.8)",
             )),
         ),
+        // Session recording (WP-3.11): Session Record is on a shortcut and the
+        // Playback menu; the slots' record buttons arrive with the launching
+        // UI.
+        (
+            "session.record_slot",
+            Exception(LaterView("the Session View's Clip Record buttons (WP-3.8)")),
+        ),
+        (
+            "session.overdub",
+            Exception(Equivalent(
+                "Session Record (`session.record`) overdubs the MIDI clip that plays",
+            )),
+        ),
+        (
+            "session.stop_recording",
+            Exception(Equivalent(
+                "Session Record again (`session.record`) ends the recording",
+            )),
+        ),
         (
             "browser.add_to_arrangement",
             Exception(Equivalent(

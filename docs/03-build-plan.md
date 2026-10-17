@@ -350,7 +350,7 @@ Total to 1.0: 90 packages planned in Phases 0 to 3, and about 185 estimated in P
 | 3.8 | blocked | 16 October 2026 | Waits on 3.6 (3.2 merged since); the grid's launching needs Back to Arrangement's state |
 | 3.9 | todo |  |  |
 | 3.10 | todo |  |  |
-| 3.11 | todo |  | Waits on 2.13 and 2.14 |
+| 3.11 | done | 17 October 2026 | [#86](https://github.com/loombridge/beatlayer/pull/86); armed tracks record into Session slots on the launch grid, and an overdub adds to the MIDI clip that plays, one undo step per loop pass; [the spec](specs/session-recording.md) |
 | 3.12 | todo |  |  |
 | 3.13 | todo |  |  |
 | 3.14 | todo |  |  |

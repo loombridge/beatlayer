@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-330 commands in 31 areas.
+334 commands in 31 areas.
 
 ## Permission classes
 
@@ -266,6 +266,9 @@ Each command has:
 | [`session.larger_quantization`](#sessionlarger_quantization) | Larger Launch Quantization | `read` | `Cmd+2` | `Ctrl+2` |
 | [`session.launch`](#sessionlaunch) | Launch Clip | `read` |  |  |
 | [`session.launch_scene`](#sessionlaunch_scene) | Launch Scene | `read` |  |  |
+| [`session.overdub`](#sessionoverdub) | Overdub Slot | `external` |  |  |
+| [`session.record`](#sessionrecord) | Record to Session | `external` | `Cmd+Shift+F9`; `Cmd+Shift+F9` | `Ctrl+Shift+F9`; `Ctrl+Shift+F9` |
+| [`session.record_slot`](#sessionrecord_slot) | Record into Slot | `external` |  |  |
 | [`session.scroll`](#sessionscroll) | Scroll the Session View | `read` |  |  |
 | [`session.select`](#sessionselect) | Select in the Session View | `read` |  |  |
 | [`session.select_all`](#sessionselect_all) | Select All Slots | `read` | `Cmd+A` | `Ctrl+A` |
@@ -275,6 +278,7 @@ Each command has:
 | [`session.smaller_quantization`](#sessionsmaller_quantization) | Smaller Launch Quantization | `read` | `Cmd+1` | `Ctrl+1` |
 | [`session.state`](#sessionstate) | Session View State | `read` |  |  |
 | [`session.stop_all`](#sessionstop_all) | Stop All Clips | `read` |  |  |
+| [`session.stop_recording`](#sessionstop_recording) | Stop Session Recording | `read` |  |  |
 | [`session.stop_selected`](#sessionstop_selected) | Stop the Selected Tracks' Clips | `read` | `Cmd+Enter` | `Ctrl+Enter` |
 | [`session.stop_track`](#sessionstop_track) | Stop Track | `read` |  |  |
 | [`session.triplet_quantization`](#sessiontriplet_quantization) | Triplet Launch Quantization | `read` | `Cmd+3` | `Ctrl+3` |
@@ -4542,6 +4546,57 @@ Arguments:
 
 Result: nothing (`null`).
 
+#### `session.overdub`
+
+**Overdub Slot**. Permission: `external`. Contexts: `session`.
+
+Records the notes an armed MIDI track plays into the MIDI clip that is playing in the slot (`track`, `scene`), a loop pass at a time: each pass adds its notes to the clip and is one undo step. A clip that does not loop overdubs until it ends. Launch the clip first; audio clips are never overdubbed. Ends like any recording: `session.stop_recording`, or `session.record` again, which pauses the overdub while the clip plays on. Recording captures input devices, so the person is asked first.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track whose slot it is. |
+| `scene` | [`SceneId`](#sceneid) | yes | The scene whose slot it is. |
+
+Result: [`RecordingStarted`](#recordingstarted).
+
+#### `session.record`
+
+**Record to Session**. Permission: `external`. Contexts: `global`, `session`.
+
+The Session Record button (Playback ▸ Record to Session, Cmd+Shift+F9; Ctrl+Shift+F9 on Windows and Linux). Records every armed track into the Session View: a MIDI track whose clip is playing overdubs it, one note pass at a time; any other armed track records a new clip into the selected scene's slot if it is empty, else into the next empty slot below it on that track, and a scene is inserted at the end when there is none. The recording starts on the next line of the launch quantisation grid while the song plays, and from the playhead, after any count-in, while it is stopped, which starts the transport. The clip exists from the start and grows as it records. While a recording is under way the command ends it instead, as pressing the button again does: the new clips play on as loops from the next grid line. Audio goes to the project's Samples/Recorded/; the set must have been saved. Recording captures input devices, including a microphone, so the person is asked first. To end a recording without asking, run `session.stop_recording`.
+
+Default keys:
+
+| Shortcut | macOS | Windows | Context | Action in the reference | Binding |
+|---|---|---|---|---|---|
+| S-SES-012 | `Cmd+Shift+F9` | `Ctrl+Shift+F9` | `session` | Record into the Session View | runs it |
+| S-TRANS-008 | `Cmd+Shift+F9` | `Ctrl+Shift+F9` | `global` | Record into the Session View | runs it |
+
+Arguments: none (send `{}`).
+
+Result: [`RecordingStarted`](#recordingstarted).
+
+#### `session.record_slot`
+
+**Record into Slot**. Permission: `external`. Contexts: `session`.
+
+The Clip Record button in an empty slot of an armed track: records a new clip into that slot (`track`, `scene`), starting on the next grid line, or from the playhead with the transport stopped. The track must be armed and the slot empty: a slot with a clip has a launch button instead, which `session.launch` presses. The clip exists from the start and grows as it records; `session.launch` on the recording slot, or `session.stop_recording`, ends the recording and loops the clip, and `session.stop_track` ends it without looping. Audio goes to the project's Samples/Recorded/. Recording captures input devices, including a microphone, so the person is asked first.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track whose slot it is. |
+| `scene` | [`SceneId`](#sceneid) | yes | The scene whose slot it is. |
+
+Result: [`RecordingStarted`](#recordingstarted).
+
 #### `session.scroll`
 
 **Scroll the Session View**. Permission: `read`. Contexts: `session`.
@@ -4691,6 +4746,18 @@ Result: [`SessionViewState`](#sessionviewstate).
 **Stop All Clips**. Permission: `read`. Contexts: `session`.
 
 Stops every track's playing clip, as Stop All Clips at the Main column's left does: all of them stop on the next line of the launch quantisation grid, as one stop. Launches still queued are dropped, and the transport keeps playing. It changes nothing in the set.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: nothing (`null`).
+
+#### `session.stop_recording`
+
+**Stop Session Recording**. Permission: `read`. Contexts: `global`, `session`.
+
+Ends the Session recording on the next grid line, without asking the person: the new clips it made play on as loops from there, and an overdubbed clip plays on as it was. A clip that is still being recorded is a clip of the length so far, even when nothing was played. Does nothing when no Session recording is under way.
 
 Default keys: none.
 
@@ -6237,6 +6304,9 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`session.duplicate_scene`](#sessionduplicate_scene) | the query tool's `song` | `scenes` |
 | [`session.insert_empty_midi_clip`](#sessioninsert_empty_midi_clip) | the query tool's `track` | `slots` |
 | [`session.insert_scene`](#sessioninsert_scene) | the query tool's `song` | `scenes` |
+| [`session.overdub`](#sessionoverdub) | `transport.state` | `recording.session_slots` |
+| [`session.record`](#sessionrecord) | `transport.state` | `recording.session_slots` |
+| [`session.record_slot`](#sessionrecord_slot) | `transport.state` | `recording.session_slots` |
 | [`set.collect_all_and_save`](#setcollect_all_and_save) | the query tool's `song` | `set.unsaved_changes` |
 | [`set.discard_changes`](#setdiscard_changes) | the query tool's `song` | `set.unsaved_changes` |
 | [`set.new`](#setnew) | the query tool's `song` | `set.name` |
@@ -14004,6 +14074,77 @@ What the last recording that ended came to, in `transport.state`: the same facts
 
 </details>
 
+### `RecordingSlot`
+
+One slot a recording goes into.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track whose slot it is. |
+| `scene` | [`SceneId`](#sceneid) | yes | The scene whose slot it is. |
+| `overdub` | boolean | yes | Whether the slot's playing clip is overdubbed, rather than a new clip recorded. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One slot a recording goes into.",
+  "properties": {
+    "overdub": {
+      "description": "Whether the slot's playing clip is overdubbed, rather than a new clip recorded.",
+      "type": "boolean"
+    },
+    "scene": {
+      "$ref": "#/$defs/SceneId",
+      "description": "The scene whose slot it is."
+    },
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "The track whose slot it is."
+    }
+  },
+  "required": [
+    "track",
+    "scene",
+    "overdub"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `RecordingStarted`
+
+What `session.record`, `session.record_slot` and `session.overdub` return: the slots the recording goes into, or none when `session.record` ended a recording that was under way.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `slots` | array of [`RecordingSlot`](#recordingslot) | yes | The slots the recording goes into. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `session.record`, `session.record_slot` and `session.overdub` return: the slots the recording goes into, or none when `session.record` ended a recording that was under way.",
+  "properties": {
+    "slots": {
+      "description": "The slots the recording goes into.",
+      "items": {
+        "$ref": "#/$defs/RecordingSlot"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "slots"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `RecoverableSet`
 
 A set a crash left unsaved.
@@ -14342,6 +14483,7 @@ The recording under way, in `transport.state`.
 |---|---|---|---|
 | `armed_tracks` | array of [`TrackId`](#trackid) | yes | The armed tracks it records, audio and MIDI. |
 | `dropped_frames` | integer, at least 0 | yes | Frames and MIDI messages dropped so far because the disk or the main thread fell behind. |
+| `session_slots` | array of [`RecordingSlot`](#recordingslot) | yes | The Session slots it records into (WP-3.11); empty for an Arrangement recording. |
 
 <details><summary>JSON Schema</summary>
 
@@ -14361,11 +14503,20 @@ The recording under way, in `transport.state`.
       "format": "uint64",
       "minimum": 0,
       "type": "integer"
+    },
+    "session_slots": {
+      "default": [],
+      "description": "The Session slots it records into (WP-3.11); empty for an Arrangement recording.",
+      "items": {
+        "$ref": "#/$defs/RecordingSlot"
+      },
+      "type": "array"
     }
   },
   "required": [
     "armed_tracks",
-    "dropped_frames"
+    "dropped_frames",
+    "session_slots"
   ],
   "type": "object"
 }

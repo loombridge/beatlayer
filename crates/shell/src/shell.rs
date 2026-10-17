@@ -68,6 +68,7 @@ use bl_shell_spec::notes::{self as note_ids, ClipTab};
 use bl_shell_spec::perception as perception_ids;
 use bl_shell_spec::plugins as plugin_ids;
 use bl_shell_spec::session_launch as session_launch_ids;
+use bl_shell_spec::session_record as session_record_ids;
 use bl_shell_spec::session_view as session_ids;
 use bl_shell_spec::settings::{
     AgentsPageSettings, AudioPageSettings, DisplayInputSettings, LaunchPrefs,
@@ -76,6 +77,8 @@ use bl_shell_spec::settings::{
 use bl_shell_spec::tracks as track_ids;
 use bl_shell_spec::transport as transport_ids;
 use bl_shell_spec::transport::{RecordedFileReport, RecordingReport, RunningRecording};
+
+mod session_recording;
 
 /// The argument a key in a range (F1 to F8) adds to a toggling mixer
 /// command for the track it numbers, counting the mixer's columns from 1;
@@ -438,6 +441,8 @@ pub struct Shell {
     /// How many recordings this session has started: the take number in
     /// their files' names, so two in one second don't share a file.
     recorded_takes: u32,
+    /// The Session recording under way, beside `recording` (WP-3.11).
+    session_run: Option<session_recording::SessionRun>,
     /// The control moves of the automation recording under way (WP-2.12).
     automation_take: crate::automation_record::Take,
     /// Whether automation was recording when the engine was last polled:
@@ -691,6 +696,7 @@ impl Shell {
             recording: None,
             last_recording: None,
             recorded_takes: 0,
+            session_run: None,
             automation_take: crate::automation_record::Take::default(),
             automation_recording: false,
             plug_in_windows: true,
@@ -1650,6 +1656,13 @@ impl Shell {
     /// Lets go of the plug-ins of the set being replaced (WP-2.6): the new
     /// set's plug-in devices load their plug-ins from their saved state.
     fn set_replaced(&mut self) {
+        if self.session_run.take().is_some() {
+            // The recording's document is gone; its take ends unplaced.
+            let _ = self
+                .audio
+                .send_session(bl_engine::SessionCommand::StopRecording);
+            self.recording = None;
+        }
         self.plugins.clear();
         self.au.clear();
         self.vst3.clear();
@@ -3022,10 +3035,15 @@ impl Shell {
     ///
     /// A message if no engine runs.
     pub fn send_transport(&mut self, command: bl_engine::TransportCommand) -> Result<(), String> {
-        if command == bl_engine::TransportCommand::SetRecording(true)
-            && let Err(reason) = self.begin_recording()
-        {
-            self.set_message(reason, true);
+        if command == bl_engine::TransportCommand::SetRecording(true) {
+            // Spec: session-recording R11. One recording at a time: a new
+            // plan would replace the Session recording's.
+            if self.session_run.is_some() {
+                return Err("a Session recording is under way; end it first".to_owned());
+            }
+            if let Err(reason) = self.begin_recording() {
+                self.set_message(reason, true);
+            }
         }
         self.audio.send_transport(command)
     }
@@ -3084,7 +3102,7 @@ impl Shell {
             tracks.clear();
         }
         let (mut plan, mut recording) =
-            crate::recording::start(folder.as_deref(), rate, &tracks, &midi)?;
+            crate::recording::start(folder.as_deref(), rate, &tracks, &midi, Vec::new())?;
         let delay = self
             .audio
             .recording_delay()
@@ -3110,6 +3128,8 @@ impl Shell {
         if let Some(outcome) = recording.poll(engine.running) {
             self.recording = None;
             self.finish_recording(outcome);
+        } else {
+            self.grow_session_clips(engine);
         }
     }
 
@@ -3173,10 +3193,25 @@ impl Shell {
         let files = match files {
             Ok(files) => files,
             Err(error) => {
+                self.abandon_session_recording();
                 self.fail_recording(format!("Recording failed: {error}"));
                 return;
             }
         };
+        if let Some(run) = self.session_run.take() {
+            // Spec: session-recording R7. The clips go into slots.
+            self.finish_session_recording(
+                run,
+                crate::recording::Outcome {
+                    take,
+                    delay,
+                    files: Ok(files),
+                    midi,
+                    dropped,
+                },
+            );
+            return;
+        }
         if files.is_empty() && midi.is_empty() {
             return;
         }
@@ -3304,6 +3339,7 @@ impl Shell {
         self.recording.as_ref().map(|recording| RunningRecording {
             armed_tracks: recording.armed().to_vec(),
             dropped_frames: recording.dropped(),
+            session_slots: self.session_slots(),
         })
     }
 
@@ -3783,6 +3819,18 @@ impl Shell {
             return self.audio.engine_running()
                 && (id != "session.back_to_arrangement" || !self.session_over.is_empty())
                 && engine_session::command_from_args(id, Self::object(args.clone())).is_ok();
+        }
+        if session_record_ids::handles(id) {
+            let args = if args.is_null() {
+                json!({})
+            } else {
+                args.clone()
+            };
+            return self.audio.engine_running()
+                && spec
+                    .args
+                    .as_ref()
+                    .is_some_and(|schema| bl_commands::validate(schema, &args).is_ok());
         }
         if session_launch_ids::handles(id) {
             let args = if args.is_null() {
@@ -4373,7 +4421,15 @@ impl Shell {
                 self.last_launched = Some(scene);
             }
             self.select_on_launch(command);
+            if let engine_session::SessionCommand::LaunchScene(scene) = command {
+                // Spec: session-recording R10. Start Recording on Scene
+                // Launch.
+                self.record_on_scene_launch(scene);
+            }
             return Ok(Value::Null);
+        }
+        if session_record_ids::handles(id) {
+            return self.run_session_record(id, args);
         }
         if session_launch_ids::handles(id) {
             // Spec: launch-quantisation R1, R3, R6, R10. The Control Bar's

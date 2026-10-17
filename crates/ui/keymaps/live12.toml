@@ -2272,7 +2272,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Cmd+Shift+F9"]
 win = ["Ctrl+Shift+F9"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.record", contexts = ["session"] },
+]
 
 [[shortcut]]
 id = "S-SES-013"
@@ -3276,7 +3279,10 @@ trigger = "press"
 milestone = "M3"
 mac = ["Cmd+Shift+F9"]
 win = ["Ctrl+Shift+F9"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "session.record", contexts = ["global", "session"] },
+]
 
 [[shortcut]]
 id = "S-TRANS-009"

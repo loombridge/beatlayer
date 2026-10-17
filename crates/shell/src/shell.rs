@@ -11,8 +11,8 @@ use bl_engine::session as engine_session;
 use bl_engine::transport as engine_transport;
 use bl_media::MediaStore;
 use bl_model::{
-    AudioData, ChangeSet, Clip, ClipData, ContentHash, Editor, Input, LaunchSettings, TakeClip,
-    TakeLane, TrackId, TrackKind, registry as model,
+    AudioData, AutomationTarget, ChangeSet, Clip, ClipData, ContentHash, Editor, Input,
+    LaunchSettings, TakeClip, TakeLane, TrackId, TrackKind, registry as model,
 };
 use bl_project::ProjectFolder;
 use serde::Serialize;
@@ -403,6 +403,12 @@ pub struct Shell {
     /// Insert Scene goes after.
     last_launched: Option<bl_model::SceneId>,
     session_over: Vec<TrackId>,
+    /// The parameters under modulation, as the engine last published them
+    /// (WP-5.9).
+    modulated: Vec<bl_engine::PlayedParam>,
+    /// Whether `modulated` came from a running engine, so it clears when
+    /// the engine stops while values a host set stay.
+    modulating: bool,
     /// The meters the engine last published, one per track (WP-1.9).
     meters: Vec<bl_engine::TrackMeter>,
     /// Whether the meters were the engine's when last polled.
@@ -699,6 +705,8 @@ impl Shell {
             scene_override: bl_engine::SceneOverride::default(),
             last_launched: None,
             session_over: Vec::new(),
+            modulated: Vec::new(),
+            modulating: false,
             meters: Vec::new(),
             metering: false,
             previews: crate::perception::Previews::default(),
@@ -2942,6 +2950,12 @@ impl Shell {
         // Spec: session-view R24. The tracks a Session clip has taken over,
         // which the Back to Arrangement buttons light from.
         self.audio.session_over_into(&mut self.session_over);
+        // Spec: modulation R7. What the modulated controls played in the
+        // last block: the rings and the fader marks draw from it.
+        if running || self.modulating {
+            self.modulating = running;
+            self.audio.modulated_into(&mut self.modulated);
+        }
         let brace = self.editor.document().settings().arrangement_loop;
         self.set_transport(TransportView {
             playing: engine.playing,
@@ -3032,6 +3046,25 @@ impl Shell {
             },
             |(_, signature)| signature,
         )
+    }
+
+    /// Sets the parameters under modulation, for a host with no engine and
+    /// for tests; a running engine's replace them.
+    pub fn set_modulated(&mut self, modulated: Vec<bl_engine::PlayedParam>) {
+        self.modulated = modulated;
+    }
+
+    /// What `target` of `track` played in the last block while a clip's
+    /// modulation acted on it (the modulation spec, R7): its base and the
+    /// value it played, in the parameter's own units. `None` while it plays
+    /// its base.
+    #[must_use]
+    pub fn played(&self, track: TrackId, target: &AutomationTarget) -> Option<(f64, f64)> {
+        let (node, param) = bl_engine::target_node(track, target);
+        self.modulated
+            .iter()
+            .find(|entry| entry.node == node && entry.param == param)
+            .map(|entry| (entry.base, entry.played))
     }
 
     /// The tracks a Session clip has taken over from the Arrangement
@@ -4634,6 +4667,16 @@ impl Shell {
         }
         if perception_ids::handles(id) {
             return self.run_perception(id, args);
+        }
+        if bl_shell_spec::modulation::handles(id) {
+            let bl_shell_spec::modulation::StateArgs { track } = Self::args(id, args)?;
+            return Ok(to_value(&crate::modulation::state(
+                self.editor.document(),
+                &self.devices,
+                track,
+                self.arrangement.transport().position,
+                |track, target| self.played(track, target),
+            )));
         }
         if export_ids::handles(id) {
             // Spec: export R15. The set, its media, the Arrangement's time

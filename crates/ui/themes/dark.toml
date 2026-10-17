@@ -66,6 +66,11 @@ display = "#07080a"
 display_line = "#e4e8ee"
 value_fill = "#4a86e8"
 inactive = "#6a717a"
+# Automation and modulation (WP-5.9): an envelope's line and the LED of a
+# parameter that has one, and a parameter's modulation: the segment of its
+# ring, the mark under its fader, a clip's modulation envelope.
+automation = "#f0a35c"
+modulation = "#b78cf0"
 # Beatlayer's own track colours, given to new tracks in turn.
 track_palette = [
   "#e0675a", "#e8945a", "#e6c35c", "#a8c95a", "#5fbf6e", "#4fbfa3", "#4fb0d6",

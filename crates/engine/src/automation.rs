@@ -17,6 +17,7 @@
 use std::collections::BTreeMap;
 
 use bl_core::time::{SampleRate, TempoMap, Ticks};
+use bl_model::modulation::Travel;
 use bl_model::{AutomationTarget, ClipData, MidiData, MixerParam, ParamId, TrackId, curve_value};
 
 use crate::mixer;
@@ -272,24 +273,61 @@ impl AutomationList {
         Some(&self.envelopes[index].1)
     }
 
-    /// The modulation the node's `param` takes at `frame`: the sum of the
-    /// clips' envelopes playing there (WP-3.15). `None` when no clip
-    /// envelope modulates the parameter, and `Some(0.0)` while they exist
-    /// but none of their clips plays at this frame; a node adds what it
-    /// gets to the parameter's own value and clamps.
+    /// The value the node's `param` plays at `frame`, `base` being its
+    /// value there before modulation (its envelope's, or its control's):
+    /// the clips' envelopes playing at the frame each contribute their
+    /// share of the parameter's travel, the contributions add, and the
+    /// sum moves the base's position on `travel`, clamped to its ends
+    /// (the modulation spec, R3 and R4). With no clip playing, or none
+    /// modulating the parameter, it is `base`, to the bit. The one place a
+    /// parameter's played value is worked out: the holders that macros and
+    /// modulators add change `base` or add to the sum here.
+    // Spec: modulation R3
     #[must_use]
-    pub fn modulation(&self, param: ParamId, frame: i64) -> Option<f64> {
-        let index = self
+    pub fn played(&self, travel: Travel<'_>, param: ParamId, frame: i64, base: f64) -> f64 {
+        let Ok(index) = self
             .modulation
             .binary_search_by_key(&param, |&(param, _)| param)
-            .ok()?;
-        Some(
-            self.modulation[index]
-                .1
+        else {
+            return base;
+        };
+        let sum: f64 = self.modulation[index]
+            .1
+            .iter()
+            .filter_map(|envelope| envelope.value_at(frame))
+            .map(|share| travel.clip_contribution(base, share))
+            .sum();
+        travel.played(base, sum)
+    }
+
+    /// Calls `visit` with the id, base and played value at song `frame` of
+    /// each parameter an envelope drives or a clip modulates, in parameter
+    /// order: for a node that plays the values itself, as a plug-in does.
+    /// `travel_of` gives a parameter's travel (`None` skips it) and
+    /// `control_of` its control's value, the base where no envelope drives
+    /// it. It allocates nothing.
+    pub fn drive<'a>(
+        &self,
+        frame: i64,
+        travel_of: impl Fn(ParamId) -> Option<Travel<'a>>,
+        control_of: impl Fn(ParamId) -> f64,
+        mut visit: impl FnMut(ParamId, f64, f64),
+    ) {
+        let driven = self.envelopes.iter().map(|&(param, _)| param).chain(
+            self.modulation
                 .iter()
-                .filter_map(|envelope| envelope.value_at(frame))
-                .sum(),
-        )
+                .map(|&(param, _)| param)
+                .filter(|&param| self.envelope(param).is_none()),
+        );
+        for param in driven {
+            let Some(travel) = travel_of(param) else {
+                continue;
+            };
+            let base = self
+                .envelope(param)
+                .map_or_else(|| control_of(param), |envelope| envelope.value_at(frame));
+            visit(param, base, self.played(travel, param, frame, base));
+        }
     }
 
     /// Whether any clip envelope modulates `param`: what a node checks
@@ -407,7 +445,7 @@ pub(crate) fn lists(
 /// The node and parameter an automation target names on `track`: its mixer
 /// for a mixer control, its send to a return track, or a device in its
 /// chain.
-fn target_node(track: TrackId, target: &AutomationTarget) -> (NodeKey, ParamId) {
+pub fn target_node(track: TrackId, target: &AutomationTarget) -> (NodeKey, ParamId) {
     match *target {
         AutomationTarget::Mixer { param } => (
             NodeKey::Mixer(track),
@@ -428,6 +466,25 @@ fn target_node(track: TrackId, target: &AutomationTarget) -> (NodeKey, ParamId) 
             },
         ),
     }
+}
+
+/// The value `clip`'s `envelope` holds at song position `at`, in the
+/// envelope's own units, if the clip plays there (the modulation spec, R11):
+/// what a reader that has no engine frame asks for, by the same mapping of
+/// the clip's contents onto the song as the engine's read path.
+#[must_use]
+pub fn clip_envelope_value_at(
+    clip: &bl_model::Clip,
+    envelope: &bl_model::ClipEnvelope,
+    at: Ticks,
+) -> Option<f64> {
+    let ClipData::Midi(midi) = &clip.data else {
+        return None;
+    };
+    played_regions(clip, midi, envelope)
+        .into_iter()
+        .find(|&(from, to, ..)| at >= from && at < to)
+        .and_then(|(from, _, content, _)| envelope.envelope.value_at(content + (at - from)))
 }
 
 /// What one node is sent: the track envelopes driving its parameters and
@@ -467,6 +524,30 @@ mod tests {
                 .collect(),
         )
         .unwrap()
+    }
+
+    // Spec: modulation R3
+    #[test]
+    fn a_list_without_clips_plays_its_base() {
+        let envelope = PlacedEnvelope::placed(
+            &envelope(&[(Ticks::ZERO, 0.25), (Ticks::QUARTER, 0.75)]),
+            &TempoMap::default(),
+            SampleRate::HZ_48000,
+            0,
+        );
+        let list = AutomationList {
+            envelopes: vec![(ParamId(1), envelope)],
+            modulation: Vec::new(),
+        };
+        let mut seen = Vec::new();
+        list.drive(
+            12_000,
+            |_| Some(Travel::Pan),
+            |_| 0.0,
+            |param, base, played| seen.push((param, base, played)),
+        );
+        assert_eq!(seen, [(ParamId(1), 0.5, 0.5)], "no modulation, no change");
+        assert_eq!(list.played(Travel::Pan, ParamId(2), 0, 0.3), 0.3);
     }
 
     // Spec: automation R12

@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-360 commands in 32 areas.
+361 commands in 33 areas.
 
 ## Permission classes
 
@@ -242,6 +242,7 @@ Each command has:
 | [`mixer_view.state`](#mixer_viewstate) | Mixer View State | `read` |  |  |
 | [`mixer_view.toggle`](#mixer_viewtoggle) | Mixer | `read` | `Cmd+Option+M` | `Ctrl+Alt+M` |
 | [`mixer_view.volume`](#mixer_viewvolume) | Mixer Volume | `read` |  |  |
+| [`modulation.state`](#modulationstate) | Modulation State | `read` |  |  |
 | [`note.add`](#noteadd) | Add Note | `edit` |  |  |
 | [`note.delete`](#notedelete) | Delete Notes | `destructive` |  |  |
 | [`note.move`](#notemove) | Move Notes | `edit` |  |  |
@@ -3449,7 +3450,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Export Audio**. Permission: `external`. Contexts: `global`.
 
-Renders the set's Main output (what you hear) or individual tracks to audio files, offline and faster than real time, as the File menu's Export Audio/Video does. `path` is the file to write; `bit_depth` (16, 24, or 32) and `sample_rate` are required. `rendered_track` chooses `main` (the default), `all_tracks`, `selected_tracks`, or a single track `{ "track": <id> }`. With an individual track, `include_return_and_main_effects` includes return tracks and Main devices (unavailable for `main`). Multi-track exports write one file per track beside `path`. The file type follows the extension (`.wav`, `.aif`/`.aiff`, `.flac`, `.mp3`; FLAC holds 16 or 24 bits only) or `file_type`. MP3 writes 320 kbps CBR at one of MP3's sample rates, and ignores `bit_depth` and `dither`. The range is `start` and `length` if given, otherwise the Arrangement's time selection, otherwise the whole set from 1.1.1 to the end of the last clip; it plays straight through, without the Arrangement loop. Below 32 bits, `dither` adds `triangular` noise unless told `rectangular` or `none`. `normalize` brings the highest peak to 0 dBFS. A rate below the engine's is rendered at the engine's and converted down. Files are written under temporary names and appear only when complete. Existing files are refused unless `replace` is true. Playback stops first, and plug-in devices render through the plug-ins the engine plays, lent to the export and handed back afterwards. Changes nothing in the set.
+Renders the set's Main output (what you hear) or individual tracks to audio files, offline and faster than real time, as the File menu's Export Audio/Video does. `path` is the file to write; `bit_depth` (16, 24, or 32) and `sample_rate` are required. `rendered_track` chooses `main` (the default), `all_tracks`, `selected_tracks`, or a single track `{ "track": <id> }`. With an individual track, `include_return_and_main_effects` includes return tracks and Main devices (unavailable for `main`). Multi-track exports write one file per track beside `path`. The file type follows the extension (`.wav`, `.aif`/`.aiff`, `.flac`, `.mp3`; FLAC holds 16 or 24 bits only) or `file_type`. MP3 writes 320 kbps CBR at one of MP3's sample rates, and ignores `bit_depth` and `dither`. `render_as_loop` adds the tail the song leaves after the range's end onto the file's start, so the file loops without a cut tail. The range is `start` and `length` if given, otherwise the Arrangement's time selection, otherwise the whole set from 1.1.1 to the end of the last clip; it plays straight through, without the Arrangement loop. Below 32 bits, `dither` adds `triangular` noise unless told `rectangular` or `none`. `normalize` brings the highest peak to 0 dBFS. A rate below the engine's is rendered at the engine's and converted down. Files are written under temporary names and appear only when complete. Existing files are refused unless `replace` is true. Playback stops first, and plug-in devices render through the plug-ins the engine plays, lent to the export and handed back afterwards. Changes nothing in the set.
 
 Default keys: none.
 
@@ -3465,6 +3466,7 @@ Arguments:
 | `include_return_and_main_effects` | boolean | no | Include return and Main effects when rendering individual tracks. Unavailable (refused) when `rendered_track` is `main`. |
 | `length` | [`Ticks`](#ticks) or null | no | How long the range is, in ticks (705,600 to the quarter note). Left out, to the end of the time selection, or without one to the end of the set's last clip. |
 | `normalize` | boolean | no | Normalize: raise or lower the whole export so its highest peak is at full scale (0 dBFS). |
+| `render_as_loop` | boolean | no | Render as Loop: the song goes on past the range's end as if Stop were pressed there, until the output has stayed below -120 dBFS for 100 ms or 60 s have passed, and that tail is added onto the file's start, wrapping round if it's longer than the range. The file is still exactly the range long. Off unless given. |
 | `rendered_track` | [`RenderedTrack`](#renderedtrack) or null | no | Which track(s) to render: `main` (the default), `all_tracks`, `selected_tracks`, or a single track `{ "track": <id> }`. |
 | `replace` | boolean | no | Replace a file already at `path`. Without it, an existing file is left alone and the export refused. |
 | `start` | [`Position`](#position) or null | no | Where the range starts. Left out, the start of the Arrangement's time selection, or 1.1.1 without one. |
@@ -4146,6 +4148,24 @@ Arguments:
 | `shown` | boolean or null | no | Show it (true) or hide it (false); switches it if left out. |
 
 Result: [`MixerViewState`](#mixerviewstate).
+
+### Area `modulation`
+
+#### `modulation.state`
+
+**Modulation State**. Permission: `read`. Contexts: `global`.
+
+Reports the parameters a track's clips modulate (all tracks' when `track` is left out): for each, the track and the parameter (a mixer control, a send, or a device's parameter), its base (what its automation or its control sets), the value it played in the last block, and the clip envelopes modulating it, each with its value at the play position and what it contributes, as a share of the parameter's travel. A clip envelope modulates by a share: 0 to 1 for a volume or a send, which brings its level down to that share, and −1 to 1 for the rest. It reads back `clip.set_envelope_breakpoint` and the other clip envelope commands. Changes nothing.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) or null | no | The track, or every track when left out. |
+
+Result: [`ModulationState`](#modulationstate).
 
 ### Area `note`
 
@@ -13109,6 +13129,139 @@ What `mixer_view.state` and the other view commands return.
     "crossfader",
     "scene_tempo",
     "return_tracks"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ModulatedParameter`
+
+A parameter a track's clips modulate.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track whose parameter it is. |
+| `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter: a mixer control, a send, or a device's parameter. |
+| `base` | number | yes | Its base, in the parameter's own units: its automation envelope's value or its control's, as the last block played it while the song plays under modulation, and its control's otherwise. |
+| `played` | number | yes | The value it played in the last block; the base while nothing modulates it now. |
+| `sources` | array of [`ModulationSource`](#modulationsource) | yes | The clip envelopes modulating it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A parameter a track's clips modulate.",
+  "properties": {
+    "base": {
+      "description": "Its base, in the parameter's own units: its automation envelope's value or its control's, as the last block played it while the song plays under modulation, and its control's otherwise.",
+      "format": "double",
+      "type": "number"
+    },
+    "played": {
+      "description": "The value it played in the last block; the base while nothing modulates it now.",
+      "format": "double",
+      "type": "number"
+    },
+    "sources": {
+      "description": "The clip envelopes modulating it.",
+      "items": {
+        "$ref": "#/$defs/ModulationSource"
+      },
+      "type": "array"
+    },
+    "target": {
+      "$ref": "#/$defs/AutomationTarget",
+      "description": "The parameter: a mixer control, a send, or a device's parameter."
+    },
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "The track whose parameter it is."
+    }
+  },
+  "required": [
+    "track",
+    "target",
+    "base",
+    "played",
+    "sources"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ModulationSource`
+
+One source modulating a parameter: a clip's envelope.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The clip whose modulation envelope it is. |
+| `share` | number or null | yes | The envelope's value at the play position: a share, from 0 to 1 for a volume or a send's level and from −1 to 1 for the rest; `null` while the clip doesn't play there. |
+| `contribution` | number | yes | What it contributes at the play position, as a share of the parameter's travel; 0 while the clip doesn't play there. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One source modulating a parameter: a clip's envelope.",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The clip whose modulation envelope it is."
+    },
+    "contribution": {
+      "description": "What it contributes at the play position, as a share of the parameter's travel; 0 while the clip doesn't play there.",
+      "format": "double",
+      "type": "number"
+    },
+    "share": {
+      "description": "The envelope's value at the play position: a share, from 0 to 1 for a volume or a send's level and from −1 to 1 for the rest; `null` while the clip doesn't play there.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "clip",
+    "share",
+    "contribution"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ModulationState`
+
+What `modulation.state` reports.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `parameters` | array of [`ModulatedParameter`](#modulatedparameter) | yes | Every parameter a clip's envelope modulates, track by track. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `modulation.state` reports.",
+  "properties": {
+    "parameters": {
+      "description": "Every parameter a clip's envelope modulates, track by track.",
+      "items": {
+        "$ref": "#/$defs/ModulatedParameter"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "parameters"
   ],
   "type": "object"
 }

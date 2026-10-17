@@ -1395,6 +1395,38 @@ mod tests {
     }
 
     #[test]
+    fn a_save_point_reports_the_schema_it_was_written_in() {
+        // Spec: modulation R5. An older set journalled by this build opens
+        // at a save point in this build's form, which mustn't be converted
+        // again.
+        let dir = TestDir::new("schema");
+        let set_path = dir.0.join("Song.blset");
+        std::fs::write(
+            &set_path,
+            include_bytes!("../tests/fixtures/schema-4.blset"),
+        )
+        .unwrap();
+        let (set, project) = SetFile::open(&set_path).unwrap();
+        assert!(set.info().unwrap().before_relative_modulation());
+        let mut autosave = Autosave::start(dir.recovery()).unwrap();
+        autosave.begin(Some(&set)).unwrap();
+        autosave.set_continuous(true);
+        let mut editor = project.editor();
+        let edited = rename(&mut editor, "Edited");
+        autosave.edited(&edited, "Rename Track");
+        autosave.flush().unwrap();
+        let (opened, project) = SetFile::open(&set_path).unwrap();
+        assert_eq!(project, edited);
+        assert!(!opened.info().unwrap().before_relative_modulation());
+        assert!(
+            !crate::load(&set_path)
+                .unwrap()
+                .1
+                .before_relative_modulation()
+        );
+    }
+
+    #[test]
     fn saving_retires_the_journal_and_continuous_save_commits() {
         // Spec: crash-recovery R6, R8, R9, R10
         let dir = TestDir::new("continuous");

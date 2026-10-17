@@ -113,7 +113,7 @@ pub mod testing;
 
 use bl_core::time::SampleRate;
 
-pub use automation::AutomationList;
+pub use automation::{AutomationList, clip_envelope_value_at, target_node};
 pub use clips::{ClipPlayer, MediaLibrary, MediaMap, MediaStreams, OpenedSource, SourceCues};
 pub use compiler::{Compiler, Update};
 pub use engine::{CompileCounts, Engine, Restarter, Sender, channel};
@@ -139,7 +139,7 @@ pub use recording::{
 };
 pub use registry::{DeviceType, NodeFactory, Registry};
 pub use session::{SceneOverride, SessionCommand, SessionPlayback, SlotState, SlotStatus};
-pub use state::{EngineCounters, EngineState, Monitor, TrackMeter};
+pub use state::{EngineCounters, EngineState, Monitor, PlayedParam, TrackMeter};
 
 /// An engine's fixed sizes, chosen when it's made. The audio thread works
 /// within them and allocates nothing, so each is a ceiling: what goes over
@@ -175,13 +175,15 @@ pub struct EngineConfig {
     pub max_slots: usize,
     /// Reports waiting for the main thread.
     pub report_capacity: usize,
+    /// Modulated parameters in [`EngineState::modulated`].
+    pub max_modulated: usize,
 }
 
 impl EngineConfig {
     /// Stereo at `sample_rate`, in blocks of up to `max_frames` frames, with
     /// room for 4,096 queued messages and pending parameter changes, 256
     /// scheduled commands, 1,024 metered tracks, 2,048 Session slots, and
-    /// 1,024 reports.
+    /// 1,024 reports, and 1,024 modulated parameters.
     ///
     /// # Panics
     ///
@@ -204,6 +206,7 @@ impl EngineConfig {
             max_tracks: 1024,
             max_slots: 2048,
             report_capacity: 1024,
+            max_modulated: 1024,
         }
     }
 

@@ -11,7 +11,7 @@
 //! Showing, hiding, scrolling, and focusing the mixer are the
 //! `mixer_view.*` commands. Only the columns in view are built (R17).
 
-use bl_model::{CrossfadeAssign, Document, TrackId, TrackKind};
+use bl_model::{AutomationTarget, CrossfadeAssign, Document, MixerParam, TrackId, TrackKind};
 use bl_shell::arrangement_commands::SELECT_TRACKS;
 use bl_shell::mixer_controls::{
     self as controls, Control, FINE, Switch, meter_position, pan_text, volume_readout,
@@ -34,6 +34,7 @@ use crate::layout::mixer::{
 };
 use crate::main_window::UiEvent;
 use crate::theme::Theme;
+use crate::widgets::{modulated_text, paint_ring_segment, ring_segment};
 
 /// The mixer's sections as the shell has them.
 #[must_use]
@@ -717,6 +718,8 @@ impl StripParts<'_> {
         let Some(level) = control.value(doc, self.track) else {
             return;
         };
+        let modulated = self.played(control);
+        let base = modulated.map_or(level, |(base, _)| base);
         let response = ui.interact(
             rect,
             send_id(self.place, self.track, to),
@@ -743,10 +746,16 @@ impl StripParts<'_> {
             let centre = rect.center();
             let radius = (rect.height().min(rect.width()) * 0.5 - 1.0).max(2.0);
             painter.circle_stroke(centre, radius, Stroke::new(1.0, c.separator.0));
-            let position = controls::send_position(level) as f32;
-            let sweep = std::f32::consts::FRAC_PI_4 * 3.0;
-            let angle = -sweep + 2.0 * sweep * position;
-            let tip = centre + vec2(angle.sin(), -angle.cos()) * radius;
+            let position = controls::send_position(base) as f32;
+            // Spec: modulation R7: the pointer stays at the base.
+            if let Some(segment) = modulated.and_then(|(_, played)| {
+                ring_segment(position, controls::send_position(played) as f32)
+            }) {
+                paint_ring_segment(&painter, self.theme, segment, |at| {
+                    ring_point(centre, radius, at)
+                });
+            }
+            let tip = ring_point(centre, radius, position);
             painter.line_segment([centre, tip], Stroke::new(2.0, c.text.0));
             painter.text(
                 pos2(centre.x, rect.bottom()),
@@ -764,8 +773,11 @@ impl StripParts<'_> {
             ui,
             &response,
             &name,
-            format!("{} dB", controls::send_text(level)),
-            level,
+            modulated_text(
+                format!("{} dB", controls::send_text(base)),
+                modulated.map(|(_, played)| format!("{} dB", controls::send_text(played))),
+            ),
+            base,
             (0.0, 1.0),
         );
     }
@@ -1028,6 +1040,20 @@ impl StripParts<'_> {
         self.shell.editor().document()
     }
 
+    /// A control's base and the value it plays while a clip modulates it.
+    fn played(&self, control: Control) -> Option<(f64, f64)> {
+        let target = match control {
+            Control::Volume => AutomationTarget::Mixer {
+                param: MixerParam::Volume,
+            },
+            Control::Pan => AutomationTarget::Mixer {
+                param: MixerParam::Pan,
+            },
+            Control::Send(to) => AutomationTarget::Send { to },
+        };
+        self.shell.played(self.track, &target)
+    }
+
     /// Esc from a Session strip's control goes to the track's title bar,
     /// which the column stands for (observed in Live 12.4.6; the
     /// accessibility spec, R4). In the Arrangement, Esc is
@@ -1264,7 +1290,8 @@ impl StripParts<'_> {
         let Some(track) = self.doc().track(self.track) else {
             return;
         };
-        let volume = track.mixer().volume;
+        let modulated = self.played(Control::Volume);
+        let volume = modulated.map_or(track.mixer().volume, |(base, _)| base);
         let id = volume_field_id(self.place, self.track);
         let response = ui.interact(rect, id, Sense::click_and_drag());
         self.register(ui, id, crate::focus::Slot::Volume);
@@ -1294,7 +1321,10 @@ impl StripParts<'_> {
             ui,
             &response,
             "Track Volume",
-            volume_spoken(volume),
+            modulated_text(
+                volume_spoken(volume),
+                modulated.map(|(_, played)| volume_spoken(played)),
+            ),
             controls::gain_db(volume).max(-1000.0),
             (-1000.0, controls::TOP_DB),
         );
@@ -1415,7 +1445,8 @@ impl StripParts<'_> {
         let Some(track) = self.doc().track(self.track) else {
             return;
         };
-        let volume = track.mixer().volume;
+        let modulated = self.played(Control::Volume);
+        let volume = modulated.map_or(track.mixer().volume, |(base, _)| base);
         let response = ui.interact(
             rect,
             fader_id(self.place, self.track),
@@ -1432,7 +1463,16 @@ impl StripParts<'_> {
             [pos2(x, rect.top()), pos2(x, rect.bottom())],
             Stroke::new(2.0, c.separator.0),
         );
-        let y = rect.bottom() - rect.height() * controls::fader_position(volume) as f32;
+        let y_of = |gain| rect.bottom() - rect.height() * controls::fader_position(gain) as f32;
+        // Spec: modulation R7: a mark under the thumb at the level it plays.
+        if let Some((_, played)) = modulated {
+            painter.rect_filled(
+                Rect::from_center_size(pos2(x, y_of(played)), vec2(rect.width(), 3.0)),
+                1.0,
+                c.modulation.0,
+            );
+        }
+        let y = y_of(volume);
         let handle = Rect::from_center_size(pos2(x, y), vec2(rect.width(), 5.0));
         let face = if response.dragged() {
             c.accent.0
@@ -1447,7 +1487,10 @@ impl StripParts<'_> {
             ui,
             &response,
             "Track Volume",
-            volume_spoken(volume),
+            modulated_text(
+                volume_spoken(volume),
+                modulated.map(|(_, played)| volume_spoken(played)),
+            ),
             controls::gain_db(volume).max(-1000.0),
             (-1000.0, controls::TOP_DB),
         );
@@ -1458,7 +1501,8 @@ impl StripParts<'_> {
         let Some(track) = self.doc().track(self.track) else {
             return;
         };
-        let pan = track.mixer().pan;
+        let modulated = self.played(Control::Pan);
+        let pan = modulated.map_or(track.mixer().pan, |(base, _)| base);
         let response = ui.interact(
             rect,
             pan_id(self.place, self.track),
@@ -1485,8 +1529,16 @@ impl StripParts<'_> {
             let centre = rect.center();
             let radius = (rect.height().min(rect.width()) * 0.5 - 1.0).max(2.0);
             painter.circle_stroke(centre, radius, Stroke::new(1.0, c.separator.0));
-            let angle = (pan as f32) * std::f32::consts::FRAC_PI_4 * 3.0;
-            let tip = centre + vec2(angle.sin(), -angle.cos()) * radius;
+            let position = |pan: f64| (pan as f32 + 1.0) / 2.0;
+            // Spec: modulation R7: the pointer stays at the base.
+            if let Some(segment) =
+                modulated.and_then(|(_, played)| ring_segment(position(pan), position(played)))
+            {
+                paint_ring_segment(&painter, self.theme, segment, |at| {
+                    ring_point(centre, radius, at)
+                });
+            }
+            let tip = ring_point(centre, radius, position(pan));
             painter.line_segment([centre, tip], Stroke::new(2.0, c.text.0));
         }
         focus_ring(&painter, self.theme, rect, &response);
@@ -1497,7 +1549,8 @@ impl StripParts<'_> {
         } else {
             "Track Pan"
         };
-        self.describe_value(ui, &response, name, pan_text(pan), pan, (-1.0, 1.0));
+        let spoken = modulated_text(pan_text(pan), modulated.map(|(_, played)| pan_text(played)));
+        self.describe_value(ui, &response, name, spoken, pan, (-1.0, 1.0));
         if let Some(triangle) = triangle {
             // Spec: mixer-view R6 (I-CLICK-020): the triangle resets pan.
             let id = Id::new(("mixer-pan-reset", self.place, self.track));
@@ -1724,6 +1777,14 @@ impl StripParts<'_> {
 }
 
 /// The digit a key types, if it's a digit key.
+/// The point at `position` (0 to 1) on the ring of a send or pan knob, which
+/// turns 135 degrees either side of straight up.
+fn ring_point(centre: egui::Pos2, radius: f32, position: f32) -> egui::Pos2 {
+    let sweep = std::f32::consts::FRAC_PI_4 * 3.0;
+    let angle = -sweep + 2.0 * sweep * position;
+    centre + vec2(angle.sin(), -angle.cos()) * radius
+}
+
 fn digit(key: Key) -> Option<char> {
     Some(match key {
         Key::Num0 => '0',

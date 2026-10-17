@@ -670,6 +670,44 @@ fn all_tracks_and_selected_tracks_write_one_file_per_track() {
     );
 }
 
+/// Spec: export R26 (WP-4.17). Each file of a multi-track loop render folds
+/// its own track's tail: a track with a reverb gets the reverb's, and one
+/// without gets nothing added.
+#[test]
+fn each_track_of_a_loop_render_adds_its_own_tail() {
+    let scratch = Scratch::new("loop-tracks");
+    let (mut shell, kick, _) = shell_with_two_tracks(&scratch);
+    shell
+        .run(
+            "device.add",
+            json!({
+                "track": kick,
+                "device": { "kind": { "native": { "device_type": "beatlayer.rotunda" } },
+                            "name": "Reverb", "role": "audio_effect" },
+            }),
+        )
+        .unwrap();
+    // The first half second, 705,600 ticks to the quarter note.
+    for (name, looped) in [("Plain", false), ("Loop", true)] {
+        let result = export(
+            &mut shell,
+            json!({
+                "path": text(&scratch.path(&format!("{name}.wav"))),
+                "rendered_track": "all_tracks",
+                "bit_depth": 32,
+                "sample_rate": 48000,
+                "start": 0,
+                "length": 705_600,
+                "render_as_loop": looped,
+            }),
+        );
+        assert_eq!(result.frames, 24_000);
+    }
+    let read = |name: &str| std::fs::read(scratch.path(name)).unwrap();
+    assert_ne!(read("Plain - Kick.wav"), read("Loop - Kick.wav"));
+    assert_eq!(read("Plain - Bass.wav"), read("Loop - Bass.wav"));
+}
+
 /// Spec: export R10, WP-2.26. Multi-track export cancel and failure leave no partial files.
 #[test]
 fn multi_track_export_cancellation_and_failure_leave_no_partial_files() {
@@ -691,6 +729,7 @@ fn multi_track_export_cancellation_and_failure_leave_no_partial_files() {
         start: Ticks::ZERO,
         length: bl_shell::export::Length::Frames(48000),
         replace: true,
+        render_as_loop: false,
         block: bl_shell::export::BLOCK,
     };
     let job2 = bl_shell::export::Job {
@@ -704,6 +743,7 @@ fn multi_track_export_cancellation_and_failure_leave_no_partial_files() {
         start: Ticks::ZERO,
         length: bl_shell::export::Length::Frames(48000),
         replace: true,
+        render_as_loop: false,
         block: bl_shell::export::BLOCK,
     };
     let mut solo1 = doc.clone();
@@ -747,6 +787,7 @@ fn multi_track_export_cancellation_and_failure_leave_no_partial_files() {
         start: Ticks::ZERO,
         length: bl_shell::export::Length::Frames(48000),
         replace: true,
+        render_as_loop: false,
         block: bl_shell::export::BLOCK,
     };
     let fail_renders = [(&solo1, &job1), (&solo2, &job_fail)];

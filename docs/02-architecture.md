@@ -145,7 +145,7 @@ Each node reports its latency. At every merge point, the compiler delays the ear
 
 ### Parameters, automation, and modulation
 
-Every automatable parameter has an ID, a range, a unit, and a default. Its value in each block is the base value (static or from automation) plus the sum of its modulation sources, clamped to the range. Automation and modulation are evaluated as sample-accurate events, which CLAP and VST3 plug-ins accept directly. Live 12's split between automation (absolute) and modulation (relative, on top) maps onto this model.
+Every automatable parameter has an ID, a range, a unit, and a default. Its value in each block is the base value (static or from automation) plus the sum of its modulation sources, clamped to the range; the sum is taken in the parameter's travel (its position on the control's scale, where a level's, a pan's and a logarithmic frequency's differ), so a modulation is a share of the travel and acts on top of wherever the base is (the modulation spec). Automation and modulation are evaluated as sample-accurate events, which CLAP and VST3 plug-ins accept directly. Live 12's split between automation (absolute) and modulation (relative, on top) maps onto this model.
 
 How WP-2.5 built it for native devices ([the device framework spec](specs/device-framework.md)):
 

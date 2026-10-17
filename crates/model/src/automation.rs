@@ -198,6 +198,14 @@ pub fn envelope_value(points: &[Breakpoint], at: f64) -> Option<f64> {
 }
 
 impl Envelope {
+    /// Replaces every breakpoint's value by `f` of it, leaving positions and
+    /// bends alone.
+    pub(crate) fn map_values(&mut self, f: impl Fn(f64) -> f64) {
+        for point in &mut self.points {
+            point.value = f(point.value);
+        }
+    }
+
     /// Its breakpoints, in position order.
     pub fn points(&self) -> impl ExactSizeIterator<Item = Breakpoint> + '_ {
         self.points.iter().copied()

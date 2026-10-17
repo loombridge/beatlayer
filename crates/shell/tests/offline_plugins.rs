@@ -168,6 +168,7 @@ fn render(
             samples.extend_from_slice(block);
             Ok(())
         },
+        None,
     )?;
     assert_eq!(rendered.heap_operations, 0, "the real-time rules");
     Ok((samples, rendered))
@@ -384,6 +385,7 @@ fn a_plugin_that_fails_mid_export_goes_silent_and_the_export_completes() {
             start: Ticks::ZERO,
             length: Length::Frames(FRAMES),
             replace: false,
+            render_as_loop: false,
             block: export::BLOCK,
         },
         &AtomicBool::new(false),
@@ -445,6 +447,7 @@ fn a_cancelled_export_gives_every_plugin_back() {
             start: Ticks::ZERO,
             length: Length::Frames(FRAMES),
             replace: false,
+            render_as_loop: false,
             block: export::BLOCK,
         },
         &cancel,

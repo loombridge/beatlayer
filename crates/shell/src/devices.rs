@@ -61,6 +61,9 @@ pub struct DeviceView {
     multisamplers: MultisamplerViews,
     /// Each multisampler's selected layers, in the layer list (R11).
     selections: std::collections::BTreeMap<DeviceId, Vec<LayerId>>,
+    /// The multisampler layer whose sample the browser's next load replaces
+    /// (WP-5.13, R10).
+    layer_hot_swap: Option<(DeviceId, LayerId)>,
     /// With Auto Select on, the layers each held key plays (R7): while a
     /// note is held they are the selection.
     held: std::collections::BTreeMap<DeviceId, std::collections::BTreeMap<u8, Vec<LayerId>>>,
@@ -312,6 +315,7 @@ impl DeviceView {
         self.sidechains_shown.retain(exists);
         self.selections.retain(|device, _| exists(device));
         self.held.retain(|device, _| exists(device));
+        self.layer_hot_swap = self.layer_hot_swap.filter(|(device, _)| exists(device));
     }
 
     /// Whether a device's sidechain section is shown.
@@ -469,6 +473,7 @@ impl DeviceView {
         self.multisamplers = views;
         self.selections.clear();
         self.held.clear();
+        self.layer_hot_swap = None;
     }
 
     /// A multisampler's selected layers that are still in it, in list
@@ -478,6 +483,18 @@ impl DeviceView {
     pub fn layer_selection(&self, doc: &Document, device: DeviceId) -> Vec<LayerId> {
         doc.device(device)
             .map_or_else(Vec::new, |d| self.layer_selection_of(d))
+    }
+
+    /// The layer a load from the browser replaces the sample of, if one is
+    /// being hot-swapped.
+    #[must_use]
+    pub fn layer_hot_swap(&self) -> Option<(DeviceId, LayerId)> {
+        self.layer_hot_swap
+    }
+
+    /// Starts or ends hot-swapping a layer's sample.
+    pub fn set_layer_hot_swap(&mut self, layer: Option<(DeviceId, LayerId)>) {
+        self.layer_hot_swap = layer;
     }
 
     /// Picks a multisampler's layers in the list.
@@ -517,7 +534,10 @@ impl DeviceView {
             view: self.multisampler_view(d.id),
             selection: self.layer_selection_of(d),
             layers: d.layers.list.len(),
-            hot_swap: None,
+            hot_swap: self
+                .layer_hot_swap
+                .filter(|(device, _)| *device == d.id)
+                .map(|(_, layer)| layer),
         })
     }
 

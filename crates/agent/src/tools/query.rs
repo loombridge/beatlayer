@@ -358,6 +358,18 @@ impl View<'_> {
             .map(|(param, value)| json!({ "param": param, "value": value }))
             .collect();
         value["params"] = self.page.slice(params);
+        // A multisampler's layers and the options of its layer list
+        // (WP-5.13, R30).
+        if !device.layers.is_default() {
+            let layers: Vec<Value> = device.layers.list.iter().map(|l| json!(l)).collect();
+            value["layers"] = json!({
+                "count": layers.len(),
+                "ram_mode": device.layers.ram_mode,
+                "snap": device.layers.snap,
+                "linear_loop_fades": device.layers.linear_loop_fades,
+                "list": self.page.slice(layers),
+            });
+        }
         if self.detail == Detail::Full {
             value["saved"] = self.saved(device);
         }

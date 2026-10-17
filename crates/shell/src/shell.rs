@@ -312,9 +312,6 @@ pub struct Shell {
     set_path: Option<PathBuf>,
     dirty: bool,
     store: Box<dyn SetStore>,
-    /// The multisampler layer whose sample the browser's next load
-    /// replaces (WP-5.13, R10).
-    layer_hot_swap: Option<(bl_model::DeviceId, bl_model::LayerId)>,
     audio: AudioHost,
     /// The MIDI ports and the computer MIDI keyboard (WP-2.2).
     midi: MidiHost,
@@ -656,7 +653,6 @@ impl Shell {
             set_path: None,
             dirty: false,
             store,
-            layer_hot_swap: None,
             audio,
             midi,
             midi_listed: std::time::Instant::now(),
@@ -4603,7 +4599,7 @@ impl Shell {
             // Spec: multisampler R10. Loading a sample while hot-swapping a
             // layer replaces the layer's.
             Self::args::<NoArgs>(id, args)?;
-            self.layer_hot_swap = None;
+            self.devices.set_layer_hot_swap(None);
             return self.run_multisampler(
                 multisampler_ids::SET_LAYER_SAMPLE,
                 json!({ "device": device, "layer": layer, "path": path.to_string_lossy() }),

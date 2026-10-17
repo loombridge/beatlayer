@@ -130,7 +130,7 @@ impl Shell {
                 let args: HotSwapLayerArgs = Self::args(id, args)?;
                 let device = self.multisampler_target(id, args.device)?;
                 if args.on == Some(false) {
-                    self.layer_hot_swap = None;
+                    self.devices.set_layer_hot_swap(None);
                 } else {
                     let layer = match args.layer {
                         Some(layer) => layer,
@@ -142,7 +142,7 @@ impl Shell {
                     if self.layers_of(device).get(layer).is_none() {
                         return Err(self.failed(id, format!("no layer {}", layer.0)));
                     }
-                    self.layer_hot_swap = Some((device, layer));
+                    self.devices.set_layer_hot_swap(Some((device, layer)));
                 }
                 self.touch();
                 Ok(to_value(&self.multisampler_state(device)))
@@ -155,7 +155,7 @@ impl Shell {
     /// the browser has one file selected (R10): the shell's `Load Selected`
     /// then runs `device.set_layer_sample` and ends the hot-swap.
     pub(super) fn hot_swapped_layer_file(&self) -> Option<(DeviceId, LayerId, PathBuf)> {
-        let (device, layer) = self.layer_hot_swap?;
+        let (device, layer) = self.devices.layer_hot_swap()?;
         match self.browser_view.selected() {
             [one] if one.is_file() => Some((device, layer, one.clone())),
             _ => None,
@@ -237,7 +237,8 @@ impl Shell {
             selection: self.devices.layer_selection(self.editor.document(), device),
             layers: self.layers_of(device).list.len(),
             hot_swap: self
-                .layer_hot_swap
+                .devices
+                .layer_hot_swap()
                 .filter(|(d, _)| *d == device)
                 .map(|(_, layer)| layer),
         }

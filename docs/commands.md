@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-355 commands in 31 areas.
+356 commands in 31 areas.
 
 ## Permission classes
 
@@ -156,6 +156,7 @@ Each command has:
 | [`device.duplicate_layers`](#deviceduplicate_layers) | Duplicate Samples | `edit` |  |  |
 | [`device.fold`](#devicefold) | Fold Device | `read` | `Minus` | `Minus` |
 | [`device.hot_swap`](#devicehot_swap) | Hot-Swap Presets | `read` |  |  |
+| [`device.hot_swap_layer`](#devicehot_swap_layer) | Hot-Swap Sample | `read` |  |  |
 | [`device.insert`](#deviceinsert) | Insert Device | `edit` |  |  |
 | [`device.insert_layers`](#deviceinsert_layers) | Add Samples | `edit` |  |  |
 | [`device.load_preset`](#deviceload_preset) | Load Preset | `external` |  |  |
@@ -2636,6 +2637,24 @@ Arguments:
 | `on` | boolean or null | no | Start (true) or end (false) hot-swapping; switches if left out. |
 
 Result: [`DeviceViewState`](#deviceviewstate).
+
+#### `device.hot_swap_layer`
+
+**Hot-Swap Sample**. Permission: `read`. Contexts: `device-view`.
+
+Starts hot-swapping a layer's sample (`layer`, or the first selected layer), as the zone editor's Hot-Swap Sample button does: the sample the browser then loads (Enter or a double-click on a file) replaces the layer's, keeping its zones and settings, as one undo step. `on: false` ends it. It changes nothing in the set by itself.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) or null | no | The multisampler; the selected device if left out. |
+| `layer` | [`LayerId`](#layerid) or null | no | The layer; the first selected layer if left out. |
+| `on` | boolean or null | no | Start (true) or end (false) hot-swapping; starts if left out. |
+
+Result: [`MultisamplerState`](#multisamplerstate).
 
 #### `device.insert`
 
@@ -13505,6 +13524,7 @@ A multisampler's views and selection, as `device_view.state` reports them (R30).
 | `auto_select` | boolean | yes | Auto Select (R7). |
 | `selection` | array of [`LayerId`](#layerid) | yes | The selected layers, in list order. |
 | `layers` | integer, at least 0 | yes | How many layers it holds. |
+| `hot_swap` | [`LayerId`](#layerid) or null | no | The layer whose sample is being hot-swapped, if one is. |
 
 <details><summary>JSON Schema</summary>
 
@@ -13521,6 +13541,17 @@ A multisampler's views and selection, as `device_view.state` reports them (R30).
       "$ref": "#/$defs/ZoneKind",
       "default": "key",
       "description": "Which zone editor the Key, Vel and Sel chooser shows (R10)."
+    },
+    "hot_swap": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/LayerId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The layer whose sample is being hot-swapped, if one is."
     },
     "layers": {
       "description": "How many layers it holds.",

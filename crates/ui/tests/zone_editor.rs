@@ -458,3 +458,84 @@ fn dropping_samples_on_the_layer_list_adds_them_at_the_drop_point() {
     std::fs::remove_dir_all(&dir).ok();
     assert_eq!(names, ["Layer 1", "Dropped", "Layer 2"]);
 }
+
+fn button_centre(h: &mut Harness, label: &str) -> Pos2 {
+    let nodes = Harness::nodes(&h.settle());
+    let b = nodes
+        .iter()
+        .find(|n| n.label == label && n.role == egui::accesskit::Role::Button)
+        .unwrap_or_else(|| panic!("no {label} button"))
+        .bounds
+        .unwrap();
+    pos2(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32)
+}
+
+// Spec: multisampler R6
+#[test]
+fn the_selector_indicator_drags_the_sample_selector() {
+    let (mut h, device, _) = editor(1);
+    let sel = button_centre(&mut h, "Sel");
+    h.click(sel);
+    h.settle();
+    let areas = areas(editor_rect(&mut h));
+    let per_value = areas.bars.width() / 128.0;
+    let nodes = Harness::nodes(&h.settle());
+    let indicator = nodes
+        .iter()
+        .find(|n| n.label == "Sample Selector")
+        .expect("the select editor shows the selector")
+        .bounds
+        .unwrap();
+    let from = pos2(((indicator.x0 + indicator.x1) / 2.0) as f32, ((indicator.y0 + indicator.y1) / 2.0) as f32);
+    let before = steps(&h);
+    drag(&mut h, from, 20.0 * per_value);
+    let value = h
+        .shell
+        .editor()
+        .document()
+        .device(device)
+        .unwrap()
+        .params
+        .get(&bl_devices::multisampler::SELECTOR)
+        .copied();
+    assert!(value.is_some_and(|v| (19.0..=21.0).contains(&v)), "{value:?}");
+    assert_eq!(steps(&h), before + 1, "one undo step");
+}
+
+// Spec: multisampler R10
+#[test]
+fn the_hot_swap_button_replaces_the_selected_sample() {
+    let (mut h, device, ids) = editor(0);
+    let dir = std::env::temp_dir().join(format!("bl-zone-hot-swap-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let write = |name: &str, frames: usize| {
+        let path = dir.join(name);
+        std::fs::write(
+            &path,
+            bl_media::wav_bytes(&vec![0.5; frames], 1, 48_000, bl_media::BitDepth::Int16, bl_media::Dither::None)
+                .unwrap(),
+        )
+        .unwrap();
+        path
+    };
+    let (old, new) = (write("Old.wav", 4800), write("New.wav", 9600));
+    let _ = ids;
+    h.shell
+        .run("device.add_layers", json!({ "device": device, "paths": [old.to_string_lossy()] }))
+        .unwrap();
+    h.settle();
+    let button = button_centre(&mut h, "Hot-Swap Sample");
+    h.click(button);
+    h.settle();
+    let state = h.shell.run("device_view.state", json!({})).unwrap();
+    assert!(state["devices"][0]["multisampler"]["hot_swap"].is_number(), "hot-swapping");
+    assert!(h.shell.browser_visible(), "the browser shows");
+    h.shell
+        .run("browser.select", json!({ "paths": [new.to_string_lossy()] }))
+        .unwrap();
+    h.shell.run("browser.load_selected", json!({})).unwrap();
+    h.settle();
+    let layer = h.shell.editor().document().device(device).unwrap().layers.list[0].clone();
+    std::fs::remove_dir_all(&dir).ok();
+    assert_eq!(layer.length, 9600, "the chosen sample replaced the layer's");
+}

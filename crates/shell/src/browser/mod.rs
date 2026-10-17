@@ -1064,11 +1064,23 @@ impl BrowserView {
             }
             ids::SELECT => {
                 let SelectArgs { paths, add } = parse(args)?;
+                // A modulator under the Modulators label is named by its
+                // type ID, which isn't a path.
+                let is_device = |p: &str| modulator_devices().iter().any(|(id, _)| id == p);
                 let paths = paths
                     .iter()
-                    .map(|p| absolute(p))
+                    .map(|p| {
+                        if is_device(p) {
+                            Ok(PathBuf::from(p))
+                        } else {
+                            absolute(p)
+                        }
+                    })
                     .collect::<Result<Vec<_>, _>>()?;
-                if let Some(missing) = paths.iter().find(|p| !p.exists()) {
+                if let Some(missing) = paths
+                    .iter()
+                    .find(|p| !p.exists() && !is_device(&p.to_string_lossy()))
+                {
                     return Err(BrowserError::InvalidArgs(format!(
                         "{} doesn't exist",
                         missing.to_string_lossy()

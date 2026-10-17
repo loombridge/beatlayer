@@ -198,22 +198,27 @@ fn remote_control_holds_the_target_between_min_and_max() {
         let got = f64::from(out[step * 32]);
         assert!((got - want).abs() < 1e-4 * want.max(1.0), "step {step}: {got} isn't {want}");
     }
-    // Hand moves of the control change nothing while it is held.
-    rig.apply(Command::SetDeviceParam {
-        device: utility,
-        param: UTILITY_GAIN,
-        value: 0.1,
-    });
-    let again = rig.render(4_800, 64);
+    // Hand moves of the control are refused while it is held.
     assert!(
-        again.iter().zip(&out).all(|(a, b)| (a - b).abs() < 1e-5),
-        "the hold wins over the control"
+        rig.editor
+            .apply(Command::SetDeviceParam {
+                device: utility,
+                param: UTILITY_GAIN,
+                value: 0.1,
+            })
+            .is_err(),
+        "the control is held"
     );
-    // Back in Modulation mode the control is the base again.
+    // Back in Modulation mode the control moves, and is the base again.
     rig.apply(Command::SetDeviceParam {
         device: wave,
         param: MODE,
         value: 0.0,
+    });
+    rig.apply(Command::SetDeviceParam {
+        device: utility,
+        param: UTILITY_GAIN,
+        value: 0.1,
     });
     let back = rig.render(4_800, 64);
     let want = gain_at(position_of(0.1) + 100.0 / 150.0) * factor;

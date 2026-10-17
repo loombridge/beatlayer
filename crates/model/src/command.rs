@@ -1246,6 +1246,10 @@ impl Document {
                 Ok(())
             }
             Command::SetVolume { track, volume } => {
+                self.check_not_held(crate::modulator::ModTarget::Mixer {
+                    track: *track,
+                    param: MixerParam::Volume,
+                })?;
                 check_value("volume", *volume, volume.is_finite() && *volume >= 0.0)?;
                 if self.track_ref(*track)?.mixer.volume != *volume {
                     let track_ref = self.track_mut(*track)?;
@@ -1260,6 +1264,10 @@ impl Document {
                 Ok(())
             }
             Command::SetPan { track, pan } => {
+                self.check_not_held(crate::modulator::ModTarget::Mixer {
+                    track: *track,
+                    param: MixerParam::Pan,
+                })?;
                 check_value("pan", *pan, (-1.0..=1.0).contains(pan))?;
                 if self.track_ref(*track)?.mixer.pan != *pan {
                     let track_ref = self.track_mut(*track)?;
@@ -1274,6 +1282,10 @@ impl Document {
                 Ok(())
             }
             Command::SetMute { track, mute } => {
+                self.check_not_held(crate::modulator::ModTarget::Mixer {
+                    track: *track,
+                    param: MixerParam::Mute,
+                })?;
                 let current = self.track_ref(*track)?;
                 check_kind(current, TrackKind::has_mute_and_solo, NOT_MAIN)?;
                 if current.mixer.mute != *mute {
@@ -1319,6 +1331,10 @@ impl Document {
                 Ok(())
             }
             Command::SetSend { track, to, level } => {
+                self.check_not_held(crate::modulator::ModTarget::Send {
+                    track: *track,
+                    to: *to,
+                })?;
                 check_value("send level", *level, (0.0..=1.0).contains(level))?;
                 let sender = self.track_ref(*track)?;
                 check_kind(sender, TrackKind::has_sends, SENDER)?;
@@ -1664,6 +1680,10 @@ impl Document {
                 value,
             } => {
                 check_value("parameter value", *value, value.is_finite())?;
+                self.check_not_held(crate::modulator::ModTarget::Device {
+                    device: *device,
+                    param: *param,
+                })?;
                 // Spec: modulation R16. Remote Control holds what a
                 // modulator maps; one parameter has one holder.
                 if *param == crate::modulator::MODE && *value >= 0.5 {

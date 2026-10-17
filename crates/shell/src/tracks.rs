@@ -461,6 +461,67 @@ mod tests {
         assert_eq!(editor.undo_history().next(), Some("Duplicate"));
     }
 
+    // Spec: modulation R19
+    #[test]
+    fn a_duplicated_track_maps_its_own_copies() {
+        use bl_model::modulator::{ModTarget, WAVE_MOD};
+        let mut editor = Editor::new();
+        let one = add(&mut editor, TrackKind::Audio, "1 Audio", None);
+        let two = add(&mut editor, TrackKind::Audio, "Other", None);
+        let device = |editor: &mut Editor, track, device_type: &str| {
+            let id: DeviceId = editor.new_id();
+            editor
+                .apply(Command::InsertDevice {
+                    track,
+                    index: 0,
+                    device: Device::new(
+                        id,
+                        device_type,
+                        bl_model::DeviceKind::Native {
+                            device_type: device_type.to_owned(),
+                        },
+                    ),
+                })
+                .unwrap();
+            id
+        };
+        let wave = device(&mut editor, one, WAVE_MOD);
+        let eq = device(&mut editor, one, "beatlayer.eq");
+        let outside = device(&mut editor, two, "beatlayer.eq");
+        let map = |editor: &mut Editor, slot, target| {
+            editor
+                .apply(Command::MapModulator { device: wave, slot, target })
+                .unwrap();
+        };
+        map(&mut editor, 0, ModTarget::Device { device: eq, param: bl_model::ParamId(1) });
+        map(&mut editor, 1, ModTarget::Mixer { track: one, param: bl_model::MixerParam::Pan });
+        map(&mut editor, 2, ModTarget::Device { device: outside, param: bl_model::ParamId(2) });
+        let copies = duplicate_without_clips(&mut editor, &[one], "Duplicate").unwrap();
+        let doc = editor.document();
+        let copy = doc.track(copies[0]).unwrap();
+        let mut devices = copy.devices();
+        let (copy_eq, copy_wave) = {
+            let first = devices.next().unwrap();
+            let second = devices.next().unwrap();
+            if bl_model::modulator::is_modulator_kind(&first.kind) {
+                (second, first)
+            } else {
+                (first, second)
+            }
+        };
+        let targets: Vec<(u8, ModTarget)> =
+            copy_wave.mappings.iter().map(|m| (m.slot, m.target)).collect();
+        assert_eq!(
+            targets,
+            [
+                (0, ModTarget::Device { device: copy_eq.id, param: bl_model::ParamId(1) }),
+                (1, ModTarget::Mixer { track: copies[0], param: bl_model::MixerParam::Pan }),
+            ],
+            "the copies of its targets, and not a target outside the copy"
+        );
+        assert_eq!(doc.device(wave).unwrap().mappings.len(), 3, "the original keeps its own");
+    }
+
     #[test]
     fn group_and_ungroup_tracks_round_trip() {
         let mut editor = Editor::new();

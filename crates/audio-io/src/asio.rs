@@ -429,8 +429,8 @@ impl Backend for AsioBackend {
         // The latencies are valid once the buffers exist. A driver that
         // refuses to say counts as 0, and what it says holds the buffer.
         if let Ok(latencies) = stream.proxy.latencies() {
-            stream.info.input_latency = frames(latencies.in_);
-            stream.info.output_latency = frames(latencies.out);
+            stream.info.input_latency = latency_frames(latencies.in_);
+            stream.info.output_latency = latency_frames(latencies.out);
         }
 
         // SAFETY: the driver only calls back after `start`, so nothing else
@@ -449,7 +449,7 @@ impl Backend for AsioBackend {
 }
 
 /// A latency the driver reports in samples, which can't be negative.
-fn frames(reported: c_long) -> u32 {
+fn latency_frames(reported: c_long) -> u32 {
     u32::try_from(reported).unwrap_or(0)
 }
 
@@ -700,9 +700,9 @@ mod tests {
 
     #[test]
     fn a_drivers_latency_is_its_frames_and_never_negative() {
-        assert_eq!(frames(480), 480);
-        assert_eq!(frames(0), 0);
-        assert_eq!(frames(-1), 0);
+        assert_eq!(latency_frames(480), 480);
+        assert_eq!(latency_frames(0), 0);
+        assert_eq!(latency_frames(-1), 0);
     }
 
     #[test]

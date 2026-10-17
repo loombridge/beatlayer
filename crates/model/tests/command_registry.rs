@@ -284,6 +284,40 @@ fn every_command_runs_by_id() {
         Some("Change \"Routing\"")
     );
 
+    // Ext. Out with a channel, and without one for the first pair.
+    agent.run(
+        "routing.set_output",
+        json!({ "track": drums, "output": { "type": "external", "channel": { "type": "mono", "channel": 3 } } }),
+    );
+    assert_eq!(
+        agent
+            .editor
+            .document()
+            .track(drums)
+            .unwrap()
+            .routing()
+            .output,
+        Output::External {
+            channel: Channel::Mono(3)
+        }
+    );
+    agent.run(
+        "routing.set_output",
+        json!({ "track": drums, "output": { "type": "external" } }),
+    );
+    assert_eq!(
+        agent
+            .editor
+            .document()
+            .track(drums)
+            .unwrap()
+            .routing()
+            .output,
+        Output::External {
+            channel: Channel::Pair(1)
+        }
+    );
+
     // Song settings.
     let changes = agent.run(
         "song.set_tempo",

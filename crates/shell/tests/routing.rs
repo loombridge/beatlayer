@@ -345,6 +345,104 @@ fn the_interface_choosers_list_its_channels_and_the_agent_api_sets_them() {
     );
 }
 
+/// Ext. Out is a live choice of every Audio To that lists it, with a channel
+/// chooser of the interface's outputs, and the agent API sets it
+/// (WP-2.13).
+// Spec: routing R3, R16, R20
+#[test]
+fn ext_out_takes_the_interfaces_outputs_as_its_channel() {
+    let Set {
+        mut shell,
+        audio,
+        returns,
+        ..
+    } = observed_set();
+    let interface = routing::Interface {
+        outputs: 4,
+        ..routing::Interface::default()
+    };
+    let to = |shell: &Shell, track: TrackId, interface: &routing::Interface| match section_with(
+        shell, track, interface,
+    ) {
+        InOut::Clips {
+            output,
+            output_channel,
+            ..
+        }
+        | InOut::Output {
+            output,
+            output_channel,
+        } => (output, output_channel),
+        other => panic!("{other:?}"),
+    };
+
+    // Chosen, it takes the first pair; one undo step.
+    let (output, _) = to(&shell, audio[0], &interface);
+    choose(&mut shell, &output, "Ext. Out");
+    assert_eq!(
+        shell.editor().undo_history().next(),
+        Some("Change \"Routing\"")
+    );
+    let (output, channel) = to(&shell, audio[0], &interface);
+    assert_eq!(output.text, "Ext. Out");
+    assert_eq!(channel.labels(), ["1", "2", "3", "4", "1/2", "3/4"]);
+    assert_eq!(channel.text, "1/2");
+
+    // Dimmed with no device open.
+    let (_, channel) = to(&shell, audio[0], &routing::Interface::default());
+    assert!(!channel.enabled());
+    assert_eq!(channel.text, "1/2");
+
+    // Another channel; choosing Ext. Out again keeps it.
+    let (_, channel) = to(&shell, audio[0], &interface);
+    choose(&mut shell, &channel, "3");
+    let (output, channel) = to(&shell, audio[0], &interface);
+    assert_eq!(channel.text, "3");
+    choose(&mut shell, &output, "Ext. Out");
+    let routing = shell
+        .editor()
+        .document()
+        .track(audio[0])
+        .unwrap()
+        .routing()
+        .clone();
+    assert_eq!(
+        routing.output,
+        Output::External {
+            channel: Channel::Mono(3)
+        }
+    );
+
+    // A return takes it by command, with its channel.
+    shell
+        .run(
+            "routing.set_output",
+            json!({ "track": returns[0], "output": { "type": "external", "channel": { "type": "pair", "channel": 3 } } }),
+        )
+        .unwrap();
+    let (output, channel) = to(&shell, returns[0], &interface);
+    assert_eq!(
+        (output.text.as_str(), channel.text.as_str()),
+        ("Ext. Out", "3/4")
+    );
+
+    // A set opened on a device with fewer outputs keeps the choice, drawn
+    // dimmed (unobserved).
+    let two = routing::Interface {
+        outputs: 2,
+        ..routing::Interface::default()
+    };
+    let (_, channel) = to(&shell, returns[0], &two);
+    assert_eq!((channel.text.as_str(), channel.enabled()), ("3/4", false));
+    shell
+        .run(
+            "routing.set_output",
+            json!({ "track": returns[0], "output": { "type": "external", "channel": { "type": "pair", "channel": 65535 } } }),
+        )
+        .unwrap();
+    assert!(!to(&shell, returns[0], &two).1.enabled(), "no overflow");
+}
+
 // Spec: routing R16, R6
 #[test]
 fn grouped_tracks_list_their_group_and_a_group_lists_its_tracks() {

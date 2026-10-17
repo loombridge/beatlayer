@@ -96,7 +96,13 @@ impl Rig {
     /// A rig whose engine has `input_channels` audio-device input channels,
     /// for tracks whose Audio From is Ext. In (WP-2.13).
     pub fn with_input(max_frames: usize, input_channels: usize) -> Self {
-        Self::configured(max_frames, input_channels, |_| {})
+        Self::configured(max_frames, input_channels, 0, |_| {})
+    }
+
+    /// A rig whose engine has `output_channels` audio-device output
+    /// channels, for tracks whose Audio To is Ext. Out (WP-2.13).
+    pub fn with_output(max_frames: usize, output_channels: usize) -> Self {
+        Self::configured(max_frames, 0, output_channels, |_| {})
     }
 
     /// A rig with `input_channels` audio-device input channels and whatever
@@ -106,22 +112,24 @@ impl Rig {
         input_channels: usize,
         extend: impl FnOnce(&mut Registry),
     ) -> Self {
-        Self::configured(max_frames, input_channels, extend)
+        Self::configured(max_frames, input_channels, 0, extend)
     }
 
     /// A rig with blocks of up to `max_frames` frames at 48 kHz.
     pub fn with_registry(max_frames: usize, extend: impl FnOnce(&mut Registry)) -> Self {
-        Self::configured(max_frames, 0, extend)
+        Self::configured(max_frames, 0, 0, extend)
     }
 
     /// A rig whose registry has the test nodes and whatever `extend` adds.
     fn configured(
         max_frames: usize,
         input_channels: usize,
+        output_channels: usize,
         extend: impl FnOnce(&mut Registry),
     ) -> Self {
         let config = EngineConfig {
             input_channels,
+            output_channels,
             ..EngineConfig::new(RATE, max_frames)
         };
         let probe = Arc::new(Probe::default());

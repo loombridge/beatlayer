@@ -606,6 +606,7 @@ impl Compiler {
             note_buffers: (0..2 + 2 * build.chain_buffers)
                 .map(|_| NoteBuffer::with_capacity(1024))
                 .collect(),
+            releases: crate::program::Releases::new(),
             midi,
         };
         self.generation = generation;

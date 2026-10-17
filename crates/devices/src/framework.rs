@@ -8,8 +8,8 @@ use bl_core::time::{Frames, SampleRate, TempoMap};
 use bl_dsp::LinearSmoother;
 use bl_dsp::smooth::DEFAULT_SMOOTHING_SECONDS;
 use bl_engine::{
-    AutomationList, Block, DeviceType, Node, NodeConfig, NodeData, NodeEvent, NoteEvent,
-    ParamValue, Registry, segments,
+    AutomationList, Block, DeviceType, Node, NodeConfig, NodeData, NodeEvent, NoteBuffer,
+    NoteEvent, ParamValue, Registry, segments,
 };
 use bl_model::modulation::Travel;
 use bl_model::{Device, DeviceDescription, DeviceKind, ParamDescriptor, ParamId};
@@ -25,6 +25,22 @@ pub trait NativeDevice: Send + 'static {
     /// may change; within one, `params` gives every parameter's value frame
     /// by frame ([`ParamBank::ramp`]).
     fn process(&mut self, audio: &mut Audio<'_, '_>, params: &ParamBank);
+
+    /// Ends every note the device started and still holds, by writing a
+    /// note-off for each at offset 0 into `out`, and forgets them. The engine
+    /// calls it while the device is switched off, and on the first block after
+    /// the device was removed or moved (spec: device-framework R32). The
+    /// default writes nothing, for a device that starts no notes.
+    fn release(&mut self, out: &mut NoteBuffer) {
+        let _ = out;
+    }
+
+    /// How many notes the device has dropped since it was made, for lack of
+    /// room in its fixed tables and queues (real-time rule 4). The default is
+    /// none.
+    fn dropped_notes(&self) -> u64 {
+        0
+    }
 
     /// Takes parameter changes while the device is switched off and
     /// doesn't process; `params` already holds them. A device that keeps
@@ -79,6 +95,19 @@ impl<'a> Audio<'_, 'a> {
                 ..*note
             })
         })
+    }
+
+    /// Sends a note on from the stretch, at `note.offset` frames after its
+    /// first frame (clamped into it): the notes go out in order of offset,
+    /// note-offs before note-ons on one frame (spec: device-framework R30).
+    /// A note past the out buffer's room is dropped and counted. Never
+    /// allocates.
+    pub fn send(&mut self, note: NoteEvent) {
+        let offset = note.offset.min(self.range.len().saturating_sub(1) as u32);
+        self.block.insert_note(NoteEvent {
+            offset: offset + self.range.start as u32,
+            ..note
+        });
     }
 
     /// Every channel's samples in the stretch, in order.
@@ -436,6 +465,12 @@ impl<D: NativeDevice> NativeNode<D> {
         &self.params
     }
 
+    /// How many notes the device has dropped for lack of room.
+    #[must_use]
+    pub fn dropped_notes(&self) -> u64 {
+        self.device.dropped_notes()
+    }
+
     /// The device.
     #[must_use]
     pub fn device(&self) -> &D {
@@ -474,6 +509,10 @@ impl<D: NativeDevice> Node for NativeNode<D> {
             self.params.apply_now(event);
         }
         self.device.flush(events, &self.params);
+    }
+
+    fn release(&mut self, out: &mut NoteBuffer) {
+        self.device.release(out);
     }
 
     fn receive_data(&mut self, data: NodeData) {

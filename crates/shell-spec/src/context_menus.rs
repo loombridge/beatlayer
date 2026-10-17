@@ -1,7 +1,8 @@
 //! The context menus, as data: the menu a clip opens and the menu a time
-//! selection opens in the Arrangement (WP-1.8b), and the menu a device's
-//! title bar and Show Options button open (WP-2.4), in Live's order from
-//! the menu reference (C-CLIP-ARR, C-TIME, C-DEVICE), each item tied to its
+//! selection opens in the Arrangement (WP-1.8b), the menu a device's
+//! title bar and Show Options button open (WP-2.4), and the menu a track's
+//! title bar opens (WP-4.22), in Live's order from
+//! the menu reference (C-CLIP-ARR, C-TIME, C-DEVICE, C-TRACK), each item tied to its
 //! shortcut as the menu bar's are ([`Action::Shortcut`]), so it runs the
 //! command the keymap gives that shortcut in the Arrangement, or shows
 //! disabled until a package binds it.
@@ -12,7 +13,8 @@
 
 use crate::arrangement::SET_GRID;
 use crate::devices::{SAVE_DEFAULT_PRESET, SET_FLOATING};
-use crate::menus::{Action, MenuItem, Row, SEPARATOR, items};
+use crate::menus::{Action, IMP_12, MenuItem, Row, SEPARATOR, items};
+use crate::tracks::DUPLICATE_WITHOUT_CLIPS;
 
 use Action::{Command as Cmd, Pending, Shortcut as Key};
 
@@ -158,12 +160,124 @@ pub fn device() -> Vec<MenuItem> {
     items(DEVICE)
 }
 
+const TRACK: &[Row] = &[
+    ("C-TRACK-001", "Cut", Key(&["S-EDIT-001"])),
+    ("C-TRACK-002", "Copy", Key(&["S-EDIT-002"])),
+    ("C-TRACK-003", "Duplicate", Key(&["S-EDIT-004"])),
+    // IMP-12 places it straight after Duplicate.
+    (
+        IMP_12,
+        "Duplicate Track Without Clips",
+        Cmd(DUPLICATE_WITHOUT_CLIPS),
+    ),
+    ("C-TRACK-004", "Delete", Key(&["S-TRACK-018"])),
+    SEPARATOR,
+    ("C-TRACK-005", "Rename", Key(&["S-TRACK-004"])),
+    ("C-TRACK-006", "Edit Info Text", Pending(None)),
+    SEPARATOR,
+    ("C-TRACK-007", "Freeze Track", Pending(Some("S-TRACK-017"))),
+    ("C-TRACK-008", "Bounce Track in Place", Pending(None)),
+    SEPARATOR,
+    ("C-TRACK-009", "Insert Audio Track", Key(&["S-TRACK-001"])),
+    ("C-TRACK-010", "Insert MIDI Track", Key(&["S-TRACK-002"])),
+    ("C-TRACK-011", "Insert Return Track", Key(&["S-TRACK-003"])),
+    ("C-TRACK-012", "Group Tracks", Key(&["S-TRACK-006"])),
+    SEPARATOR,
+    ("C-TRACK-013", "Select Track Content", Pending(None)),
+    SEPARATOR,
+    ("C-TRACK-014", "Save as Default MIDI Track", Pending(None)),
+    SEPARATOR,
+    ("C-TRACK-015", "Colour palette", Pending(None)),
+    SEPARATOR,
+    ("C-TRACK-016", "Assign Track Color to Clips", Pending(None)),
+];
+
+/// What makes a track's menu differ from the base one, C-TRACK-001 to
+/// C-TRACK-016 (C-TRACK-017 to C-TRACK-020).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TrackMenu {
+    /// The track is a group (C-TRACK-017).
+    pub group: bool,
+    /// Several tracks are selected (C-TRACK-018).
+    pub several: bool,
+    /// The menu opens in the Arrangement (C-TRACK-019).
+    pub arrangement: bool,
+    /// The Arrangement has a time selection on the track (C-TRACK-020).
+    pub time_selection: bool,
+}
+
+/// The rows the other states add after row `after`. menus.md doesn't
+/// record where Live puts them: they sit by the items they go with.
+fn track_extras(after: &str, state: TrackMenu) -> Vec<Row> {
+    let mut rows = Vec::new();
+    match after {
+        "C-TRACK-008" => {
+            if state.group {
+                rows.push(("C-TRACK-017c", "Bounce Group to New Track", Pending(None)));
+            }
+            if state.time_selection {
+                rows.push(("C-TRACK-020", "Crop Clip", Pending(Some("S-ARR-003"))));
+            }
+        }
+        "C-TRACK-012" => {
+            if state.group {
+                rows.push(("C-TRACK-017a", "Ungroup Tracks", Key(&["S-TRACK-007"])));
+            }
+            if state.several {
+                rows.push(("C-TRACK-018a", "Link Tracks", Pending(None)));
+                rows.push(("C-TRACK-018b", "Unlink Track(s)", Pending(None)));
+            }
+            if state.arrangement {
+                rows.push(SEPARATOR);
+                rows.push(("C-TRACK-019a", "Show Take Lanes", Pending(None)));
+                rows.push((
+                    "C-TRACK-019b",
+                    "Insert Take Lane",
+                    Pending(Some("S-COMP-004")),
+                ));
+                rows.push(("C-TRACK-019c", "Delete All Take Lanes", Pending(None)));
+            }
+        }
+        "C-TRACK-016" if state.group => rows.push((
+            "C-TRACK-017b",
+            "Assign Track Color to Grouped Tracks and Clips",
+            Pending(None),
+        )),
+        _ => {}
+    }
+    rows
+}
+
+/// The menu a track's title bar opens, by a right-click in the Arrangement's
+/// headers, the Session View, or a mixer (C-TRACK), with the items the
+/// track's `state` adds.
+#[must_use]
+pub fn track(state: TrackMenu) -> Vec<MenuItem> {
+    let mut rows = Vec::with_capacity(TRACK.len() + 8);
+    for &row in TRACK {
+        rows.push(row);
+        rows.extend(track_extras(row.0, state));
+    }
+    items(&rows)
+}
+
 /// The package or milestone that builds a context-menu item shown disabled
 /// for now, for the item to name.
 #[must_use]
 pub fn pending_package(row: &str) -> Option<&'static str> {
     match row {
-        "C-DEVICE-005" | "C-CLIP-ARR-008" => Some("WP-2.24 (the Info View)"),
+        "C-DEVICE-005" | "C-CLIP-ARR-008" | "C-TRACK-006" => Some("WP-2.24 (the Info View)"),
+        "C-TRACK-007" => Some("WP-4.14 (Freeze Track)"),
+        "C-TRACK-008" | "C-TRACK-017c" => Some("WP-4.15 (Bounce Track in Place and Bounce Group)"),
+        "C-TRACK-020" => Some("WP-4.13 (Crop Clip)"),
+        "C-TRACK-018a" | "C-TRACK-018b" => Some("Phase 6 (linked-track editing)"),
+        "C-TRACK-019a" | "C-TRACK-019b" | "C-TRACK-019c" => {
+            Some("Phase 6 (take lanes and comping)")
+        }
+        "C-TRACK-015" | "C-TRACK-016" | "C-TRACK-017b" => {
+            Some("a package not planned yet (track colours)")
+        }
+        "C-TRACK-013" | "C-TRACK-014" => Some("a package not planned yet"),
         "C-DEVICE-010" | "C-DEVICE-011" => Some("milestone M5 (A/B compare)"),
         _ => None,
     }
@@ -223,12 +337,44 @@ mod tests {
         Some(rows)
     }
 
+    const EVERY_STATE: TrackMenu = TrackMenu {
+        group: true,
+        several: true,
+        arrangement: true,
+        time_selection: true,
+    };
+
     #[test]
-    fn the_device_menus_pending_items_name_their_package() {
-        for item in device() {
+    fn the_device_and_track_menus_pending_items_name_their_package() {
+        for item in device().into_iter().chain(track(EVERY_STATE)) {
             if matches!(item.action, Pending(_)) {
                 assert!(pending_package(item.row).is_some(), "{}", item.row);
             }
+        }
+    }
+
+    #[test]
+    fn the_track_menus_other_states_add_the_items_menus_md_lists() {
+        let base = track(TrackMenu::default());
+        let all = track(EVERY_STATE);
+        let added: Vec<_> = all
+            .iter()
+            .filter(|i| !i.is_separator() && !base.iter().any(|b| b.row == i.row))
+            .collect();
+        assert_eq!(added.len(), 9);
+        let Some(text) = std::fs::read_to_string(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../docs/ui-parity/menus.md"),
+        )
+        .ok() else {
+            return;
+        };
+        for item in added {
+            let id = &item.row[..11];
+            let line = text
+                .lines()
+                .find(|l| l.starts_with(&format!("| {id} |")))
+                .unwrap_or_else(|| panic!("{id} isn't in menus.md"));
+            assert!(line.contains(item.label), "{}: {line}", item.label);
         }
     }
 
@@ -238,6 +384,7 @@ mod tests {
             (arrangement_clip(), "(C-CLIP-ARR)"),
             (arrangement_time(), "(C-TIME)"),
             (device(), "(C-DEVICE)"),
+            (track(TrackMenu::default()), "(C-TRACK)"),
         ] {
             let Some(theirs) = reference(heading) else {
                 return;

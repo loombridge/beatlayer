@@ -477,7 +477,7 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 4.19 | todo |  |  |
 | 4.20 | done | 17 October 2026 | [#99](https://github.com/loombridge/beatlayer/pull/99); one writer for processed audio files into `Samples/Processed/<kind>/`, and the Temporary Folder setting for a set never saved, whose files the first save moves into the project; [the spec](specs/audio-clip-editing.md) |
 | 4.21 | todo |  |  |
-| 4.22 | todo |  |  |
+| 4.22 | done | 17 October 2026 | [#108](https://github.com/loombridge/beatlayer/pull/108); right-clicking a track's title bar in the Arrangement, the Session View or a mixer, or S-CTX-002, opens C-TRACK in Live's order: the items with commands work on the selected tracks, Delete and Rename among them, and the rest are disabled and name their package; [the spec](specs/track-context-menu.md) |
 | 5.1 | todo |  |  |
 | 5.2 | todo |  |  |
 | 5.3 | todo |  |  |
@@ -512,7 +512,7 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 5.27 | todo |  |  |
 | 5.28 | todo |  | The oscilloscope waits on IMP-26's acceptance |
 | 5.29 | todo |  | Waits on IMP-25's acceptance |
-| 5.30 | todo |  |  |
+| 5.30 | done | 17 October 2026 | [#109](https://github.com/loombridge/beatlayer/pull/109); the note path between devices (notes sent in order, every note ended when a device is switched off, removed or moved) and six MIDI effects: Lift, Touch, Dice, Remap, Stack and Hold. Step buttons, indicators, Use Current Scale and Stack's menu items wait on display state, Phase 6's scales and device-chains R35 |
 | 5.31 | todo |  |  |
 | 5.32 | todo |  |  |
 | 5.33 | todo |  | Waits on IMP-24's acceptance |

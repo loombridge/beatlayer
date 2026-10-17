@@ -146,9 +146,59 @@ pub struct EngineProgram {
     /// The pair of buffers notes pass along a track's chain in, then a pair
     /// for each rack chain (WP-5.1).
     pub(crate) note_buffers: Vec<NoteBuffer>,
+    /// The note-offs of devices that were removed or moved when this program
+    /// replaced the last, waiting for the first block.
+    pub(crate) releases: Releases,
     /// The MIDI tracks' inputs, and what each received in the last block
     /// (WP-2.2).
     pub(crate) midi: MidiRoutes,
+}
+
+/// How many note-offs a program swap holds for the devices it removed or
+/// moved; more are dropped and counted.
+const RELEASE_ROOM: usize = 256;
+
+/// The note-offs of devices a program swap removed or moved: each is fed to
+/// the chain of its track in front of the node at `at`, in the first block
+/// the program runs, so the instrument below doesn't hang on a note the
+/// device would have ended.
+#[derive(Clone, Debug)]
+pub(crate) struct Releases {
+    /// `(task, at, note-off)`.
+    pending: Vec<(u32, u32, NoteEvent)>,
+    /// Where a node writes its note-offs, before they are sorted into
+    /// `pending`.
+    scratch: NoteBuffer,
+    dropped: u64,
+}
+
+impl Releases {
+    pub(crate) fn new() -> Self {
+        Self {
+            pending: Vec::with_capacity(RELEASE_ROOM),
+            scratch: NoteBuffer::with_capacity(RELEASE_ROOM),
+            dropped: 0,
+        }
+    }
+
+    fn push(&mut self, task: u32, at: u32, note: NoteEvent) {
+        if self.pending.len() < self.pending.capacity() {
+            self.pending.push((task, at, note));
+        } else {
+            self.dropped += 1;
+        }
+    }
+
+    /// Takes the note-offs `node` writes, to feed in front of the node at
+    /// `at` of task `task`.
+    fn take(&mut self, node: &mut dyn Node, task: u32, at: u32) {
+        self.scratch.clear();
+        node.release(&mut self.scratch);
+        for i in 0..self.scratch.notes().len() {
+            let note = self.scratch.notes()[i];
+            self.push(task, at, note);
+        }
+    }
 }
 
 /// A track whose Audio To is Ext. Out: its task, and the device channels it
@@ -696,7 +746,110 @@ impl EngineProgram {
             std::mem::swap(&mut new.node, &mut old.node);
         }
         self.midi.inherit(&mut old.midi);
+        // Note-offs the last swap held that no block has run yet carry over.
+        for &(task, at, note) in &old.releases.pending {
+            self.releases.push(task, at, note);
+        }
+        self.release_departed(old);
         true
+    }
+
+    /// The slot that stands for each step of task `task`'s own chain, in
+    /// order: a device's node, or a rack's first chain mixer, which has its
+    /// place in the slots' order where the rack is (WP-5.1). The notes of
+    /// devices that left a rack's chains aren't ended yet.
+    fn top_slots(&self, task: usize) -> impl Iterator<Item = u32> + '_ {
+        self.steps[self.tasks[task].chain.range()]
+            .iter()
+            .map(|&step| match step {
+                Step::Node(slot) => slot,
+                Step::Rack(rack) => {
+                    self.rack_chains[self.racks[rack as usize].chains.range().start].mixer
+                }
+            })
+    }
+
+    /// Spec: device-framework R32. Asks the devices that left their chain
+    /// in this swap to end their notes: those the swap removed, and those it
+    /// moved relative to the others that stayed. Each device's note-offs
+    /// enter the chain in front of the first node that sat after it, so the
+    /// nodes after it end the notes it made as they would have when it ended
+    /// them itself. Real-time safe: bounded loops, nothing allocated.
+    fn release_departed(&mut self, old: &mut EngineProgram) {
+        // Most swaps remove and move nothing: every device node migrated, in
+        // the order it was in. Skip the search then.
+        let removed = old
+            .slots
+            .iter()
+            .any(|s| matches!(s.key, NodeKey::Device(_)) && s.node.is_some());
+        let reordered = self.migrations.windows(2).any(|w| w[0].from >= w[1].from);
+        if !removed && !reordered {
+            return;
+        }
+        let old_task_of = |old: &EngineProgram, slot: u32| -> Option<usize> {
+            (0..old.tasks.len()).find(|&t| old.top_slots(t).any(|s| s == slot))
+        };
+        // Where, in the new chain of `task`, the device that sat in old slot
+        // `slot` of task `from_task` left a gap: in front of the first node
+        // that sat after it.
+        let gap = |program: &EngineProgram, old: &EngineProgram, task: usize, from_task, slot| {
+            program
+                .top_slots(task)
+                .filter(|&to| {
+                    program.migrations.iter().any(|m| {
+                        m.to == to && m.from < slot && old_task_of(old, m.from) == Some(from_task)
+                    })
+                })
+                .count() as u32
+        };
+        // Removed: the old program still holds the node.
+        for s in 0..old.slots.len() {
+            let slot = s as u32;
+            if !matches!(old.slots[s].key, NodeKey::Device(_)) || old.slots[s].node.is_none() {
+                continue;
+            }
+            let Some(from_task) = old_task_of(old, slot) else {
+                continue;
+            };
+            let Some(task) = self
+                .tasks
+                .iter()
+                .position(|t| t.track == old.tasks[from_task].track)
+            else {
+                continue;
+            };
+            let at = gap(self, old, task, from_task, slot);
+            if let Some(Instance::Device(node)) = old.slots[s].node.as_mut() {
+                self.releases.take(node.as_mut(), task as u32, at);
+            }
+        }
+        // Moved: a node that stayed but now sits before one it sat after.
+        for task in 0..self.tasks.len() {
+            let mut high: Option<(u32, usize)> = None;
+            for i in 0..self.tasks[task].chain.range().len() {
+                let Some(to) = self.top_slots(task).nth(i) else {
+                    continue;
+                };
+                let Some(from) = self.migrations.iter().find(|m| m.to == to).map(|m| m.from) else {
+                    continue;
+                };
+                let Some(from_task) = old_task_of(old, from) else {
+                    continue;
+                };
+                let moved = match high {
+                    Some((h, t)) => from_task != t || from < h,
+                    None => old.tasks[from_task].track != self.tasks[task].track,
+                };
+                high = Some((high.map_or(from, |(h, _)| h.max(from)), from_task));
+                if !moved || !matches!(self.slots[to as usize].key, NodeKey::Device(_)) {
+                    continue;
+                }
+                let at = gap(self, old, task, from_task, from);
+                if let Some(Instance::Device(node)) = self.slots[to as usize].node.as_mut() {
+                    self.releases.take(node.as_mut(), task as u32, at);
+                }
+            }
+        }
     }
 
     /// Runs every task over `frames` frames, the part of the device block
@@ -944,6 +1097,7 @@ impl EngineProgram {
                 });
             }
         }
+        self.releases.pending.clear();
         delivered
     }
 
@@ -1150,6 +1304,21 @@ impl EngineProgram {
         let size = channels * stride;
         let own = buffer * size..(buffer + 1) * size;
         for step_at in steps.range() {
+            // Spec: device-framework R32. The note-offs of devices that left
+            // the track's chain in the swap enter in front of the step that
+            // followed them, ahead of the notes already there. Only the
+            // track's own chain, in task `buffer`, uses the first note pair.
+            if pair == 0 {
+                let at = step_at - steps.range().start;
+                for &(_, _, note) in self
+                    .releases
+                    .pending
+                    .iter()
+                    .filter(|&&(task, to, _)| task as usize == buffer && to as usize == at)
+                {
+                    self.note_buffers[note_idx].insert(note);
+                }
+            }
             let slot = match self.steps[step_at] {
                 Step::Node(slot) => slot,
                 Step::Rack(rack) => {
@@ -1207,6 +1376,9 @@ impl EngineProgram {
             out_buf.clear();
             if bypass {
                 node.flush(pass.scratch);
+                // Spec: device-framework R32. A device switched off ends
+                // the notes it started, on this block's first frame.
+                node.release(out_buf);
                 for &note in in_buf.notes() {
                     out_buf.push(note);
                 }

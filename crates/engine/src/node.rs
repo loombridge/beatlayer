@@ -292,6 +292,17 @@ pub trait Node: Send + 'static {
         drop(data);
     }
 
+    /// Ends every note the node started and still holds, by writing a
+    /// note-off for each at the block's first frame into `out`. The engine
+    /// calls it while the node is switched off, and on the first block after
+    /// the node was removed or moved in its chain, so no instrument further
+    /// down hangs on a note the node would have ended. The node forgets the
+    /// notes: calling it again writes nothing. The default writes nothing,
+    /// for a node that starts no notes.
+    fn release(&mut self, out: &mut NoteBuffer) {
+        let _ = out;
+    }
+
     /// Whether the node played a clip in the block it last processed
     /// (WP-2.13): a track's clip player says so while a clip of its track
     /// sounds, so the track's input routes close under Monitor Auto
@@ -499,6 +510,15 @@ impl<'a> Block<'a> {
     pub fn send_note(&mut self, note: NoteEvent) {
         if let Some(out) = self.notes_out.as_deref_mut() {
             out.push(note);
+        }
+    }
+
+    /// Sends a note on in order of offset, after the notes already at its
+    /// offset, but before any note-on there if it ends a note; otherwise as
+    /// [`send_note`](Self::send_note). Never allocates.
+    pub fn insert_note(&mut self, note: NoteEvent) {
+        if let Some(out) = self.notes_out.as_deref_mut() {
+            out.insert(note);
         }
     }
 

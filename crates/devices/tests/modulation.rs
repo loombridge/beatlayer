@@ -295,3 +295,62 @@ fn the_song_need_not_play_for_a_free_lfo_to_move_its_target() {
         "stopped, it still swings: {low} to {high}"
     );
 }
+
+// Spec: modulation R12, R19
+#[test]
+fn a_modulator_inside_a_rack_chain_modulates_a_device_on_another_track() {
+    use bl_model::rack::{Chain, RackKind};
+    use bl_model::{ChainId, Device, DeviceKind};
+    let factor = factor();
+    let mut rig = Rig::new(64);
+    let source = rig.track(TrackKind::Audio);
+    let target = rig.track(TrackKind::Midi);
+    rig.insert(
+        target,
+        bl_engine::testing::DC,
+        &[(bl_engine::testing::VALUE, 1.0)],
+    );
+    let utility = rig.insert(target, UTILITY, &[]);
+    let mut wave = Device::new(
+        rig.editor.new_id(),
+        "Wave Mod",
+        DeviceKind::Native {
+            device_type: modulator::WAVE_MOD.to_owned(),
+        },
+    );
+    for (param, value) in [
+        (WAVE, 1.0),
+        (RATE_HZ, 10.0),
+        (POLARITY, 1.0),
+        (modulator::amount(0), 100.0),
+    ] {
+        wave.params.insert(param, value);
+    }
+    let wave_id = wave.id;
+    let chain_id: ChainId = rig.editor.new_id();
+    let chain = Chain::new(chain_id, "Chain").with_devices(vec![wave]);
+    let rack = Device::rack(rig.editor.new_id(), RackKind::AudioEffect).with_chain(chain);
+    rig.apply(Command::InsertDevice {
+        track: source,
+        index: 0,
+        device: rack,
+    });
+    rig.apply(Command::MapModulator {
+        device: wave_id,
+        slot: 0,
+        target: ModTarget::Device {
+            device: utility,
+            param: UTILITY_GAIN,
+        },
+    });
+    rig.sender.transport(TransportCommand::Play);
+    let out = rig.render(4_800, 64);
+    for step in [10usize, 80, 140] {
+        let want = gain_at(position_of(1.0) + step as f64 / 150.0) * factor;
+        let got = f64::from(out[step * 32]);
+        assert!(
+            (got - want).abs() < 1e-4 * want.max(1.0),
+            "step {step}: {got} isn't {want}"
+        );
+    }
+}

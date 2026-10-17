@@ -1,7 +1,7 @@
 # Audio clip editing: Reverse, Crop, Consolidate, and Consolidate Time to New Scene
 
 - **Status:** draft
-- **Work packages:** WP-4.7 (Reverse, R7 to R13), WP-4.13 (Crop, Consolidate, and Consolidate Time to New Scene, R14 to R28). The processed files of R1 to R6 are built by whichever of the two lands first, and the other uses them.
+- **Work packages:** WP-4.7 (Reverse, R7 to R13), WP-4.13 (Crop, Consolidate, and Consolidate Time to New Scene, R14 to R28). The processed files of R1 to R6 are WP-4.20's, which both use.
 - **Parity-matrix row:** Audio clips and warping: Clip pitch, reverse, RAM mode, high-quality interpolation (reverse); Split, Crop, Crop to Time Selection (crop); Consolidate
 - **Checked against:** the Live 12 reference manual (online edition), read 17 October 2026, and the UI parity reference's observations of Live 12.4.3 on macOS (10 October 2026)
 
@@ -9,7 +9,7 @@
 
 Four edits make new audio from a clip's audio. **Reverse** gives an audio clip a backwards copy of its file, with its markers mirrored so the clip plays the same stretch of sound backwards; in the Arrangement it reverses a time selection across several clips. **Crop** shortens what a clip holds to what it plays: an audio clip's region is written as a new, shorter file, and a MIDI clip loses the notes outside it. **Consolidate** (Cmd-J) joins the material in a selection into one new clip per track: for audio, a new file rendered from the clips as they play, before the track's devices; for MIDI, one clip holding every note. **Consolidate Time to New Scene** does the same from an Arrangement time selection into the clip slots of a new Session scene, and leaves the Arrangement as it was. None of them changes a source file: each new file goes into the project's `Samples/Processed/` folder, and every edit is one undo step.
 
-This spec covers what each edit does to the clip and to the disk, where its files go, and how undo and the agent API treat it. It leaves to other specs: the warp map and warped playback ([warping](warping.md), [warp modes](warp-modes.md)), and the Clip View's Sample Editor in which the Audio panel's Reverse sits ([sample editor](sample-editor.md), WP-4.10); Clip Transpose and Detune, which WP-4.7 builds beside Reverse ([warp modes](warp-modes.md)); what a frozen track allows ([freeze and bounce](freeze-and-bounce.md)); and the reversing, cropping, and normalising inside the sampler devices' displays, which are their own (IMP-28, WP-5.15). Linked-track editing, which in Live applies Consolidate to every linked track, is Phase 6's.
+This spec covers what each edit does to the clip and to the disk, where its files go, and how undo and the agent API treat it. It leaves to other specs: the warp map and warped playback ([warping](warping.md), [warp modes](warp-modes.md)), and the Clip View's Sample Editor in which the Audio panel's Reverse sits ([sample editor](sample-editor.md), WP-4.10 and WP-4.10b); Clip Transpose and Detune, which WP-4.7 builds beside Reverse ([warp modes](warp-modes.md)); what a frozen track allows ([freeze and bounce](freeze-and-bounce.md)); and the reversing, cropping, and normalising inside the sampler devices' displays, which are their own (IMP-28, WP-5.15). Linked-track editing, which in Live applies Consolidate to every linked track, is Phase 6's.
 
 ## Sources
 

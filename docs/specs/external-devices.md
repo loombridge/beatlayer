@@ -1,7 +1,7 @@
 # External devices: MIDI out to hardware, the external instrument and effect, and exporting with hardware
 
 - **Status:** draft
-- **Work packages:** WP-5.34 (a MIDI track's MIDI To an external port, scheduled MIDI output, the external instrument, and the Delay Compensation switch), WP-5.35 (the external effect, and real-time export with external hardware)
+- **Work packages:** WP-5.34 (a MIDI track's MIDI To an external port, scheduled MIDI output, and the external instrument), WP-5.35 (the external effect, and real-time export with external hardware), WP-5.36 (the Delay Compensation and Reduced Latency When Monitoring switches, R14, which move to [delay compensation](delay-compensation.md) when it builds them)
 - **Parity-matrix row:** Mixing and routing: MIDI track output to external MIDI ports and channels (hardware synths); Instruments: External Instrument; Audio effects: External Audio Effect; Files and export: Real-time rendering with external hardware, restart after dropouts
 - **Checked against:** the Live 12 reference manual (online edition), read 17 October 2026: chapter 17, sections 17.2, 17.2.1, 17.3 (17.3.1, 17.3.1.1, 17.3.3, 17.3.4) and 17.5.2.6; chapter 31, section 31.6 "External Instrument"; chapter 29, section 29.18 "External Audio Effect"; chapter 23, section 23.3 "Device Delay Compensation"; chapter 5, section 5.1.3.5 "Real-Time Rendering"; and Live 12.4.6 on macOS, observed 12 October 2026 (the MIDI To chooser)
 

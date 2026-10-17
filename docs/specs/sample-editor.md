@@ -1,7 +1,7 @@
 # The Sample Editor in the Clip View: the waveform, its markers, editing them by mouse and keys, and the Audio Utilities panel
 
 - **Status:** draft
-- **Work packages:** WP-4.10
+- **Work packages:** WP-4.10 (the editor, its markers and keys: R1 to R13 and R19 to R22), WP-4.10b (the Audio Utilities panel, Edit, Save Default Clip, and replacing a clip's sample: R14 to R18)
 - **Parity-matrix row:** Audio clips and warping: "Warp markers, transient markers, pseudo-warp markers" (editing them in the Clip View); "Clip pitch, reverse, RAM mode, high-quality interpolation" (their controls in the Audio Utilities panel)
 - **Checked against:** the Live 12 reference manual (online edition), read 17 October 2026: chapter 8 (8.1 to 8.1.3, 8.4 to 8.4.7, 8.7, 8.8, 8.10, 8.12, 8.13), chapter 9 (9.1.4, 9.2.3 to 9.2.5.1) and chapter 42 (42.8, 42.10, 42.11); and the UI parity reference's Clip View rows, recorded from Live 12.4.3 on macOS on 10 October 2026
 

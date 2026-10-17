@@ -5,7 +5,7 @@
 //! transaction, so it's one undo step and each part of it is checked as any
 //! edit is.
 
-use bl_model::{Command, Device, Document, EditError, Editor, Output, Track, TrackId, TrackKind};
+use bl_model::{Command, DeviceId, Document, EditError, Editor, Output, Track, TrackId, TrackKind};
 
 use crate::routing::{return_letter, track_label};
 
@@ -153,10 +153,10 @@ fn copy_track(
         })?;
     }
     for (index, device) in source.devices().enumerate() {
-        let copy = Device {
-            id: editor.new_id(),
-            ..device.clone()
-        };
+        // New IDs for the device and everything inside its racks.
+        let mut copy = device.clone();
+        copy.reassign_ids(&mut || editor.new_id::<DeviceId>().0);
+        copy.floating = device.floating;
         editor.apply(Command::InsertDevice {
             track: id,
             index,

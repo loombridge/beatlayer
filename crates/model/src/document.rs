@@ -8,8 +8,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::clip::Clip;
 use crate::device::Device;
-use crate::ids::{ClipId, DeviceId, SceneId, TrackId};
+use crate::ids::{ChainId, ClipId, DeviceId, SceneId, TrackId};
 use crate::metronome::MetronomeSettings;
+use crate::rack::Chain;
 use crate::scene::Scene;
 use crate::shared::Shared;
 use crate::track::{Track, TrackKind};
@@ -190,10 +191,52 @@ pub struct Document {
 pub(crate) struct Index {
     /// The track that holds each clip.
     pub(crate) clip_track: OrdMap<ClipId, TrackId>,
-    /// The track whose chain holds each device.
+    /// The track whose chain holds each device, at any depth: a device in a
+    /// rack's chain belongs to the rack's track.
     pub(crate) device_track: OrdMap<DeviceId, TrackId>,
+    /// The track that holds each rack chain, at any depth (WP-5.1).
+    pub(crate) chain_track: OrdMap<ChainId, TrackId>,
     /// The group that holds each grouped track.
     pub(crate) parent: OrdMap<TrackId, TrackId>,
+}
+
+impl Index {
+    /// Records a device and everything inside it as belonging to `track`.
+    pub(crate) fn add_device(&mut self, device: &Device, track: TrackId) {
+        for device in device.walk() {
+            self.device_track.insert(device.id, track);
+            for chain in &device.chains {
+                self.chain_track.insert(chain.id, track);
+            }
+        }
+    }
+
+    /// Records a rack chain and everything inside it as belonging to
+    /// `track`.
+    pub(crate) fn add_chain(&mut self, chain: &Chain, track: TrackId) {
+        self.chain_track.insert(chain.id, track);
+        for device in &chain.devices {
+            self.add_device(device, track);
+        }
+    }
+
+    /// Forgets a rack chain and everything inside it.
+    pub(crate) fn remove_chain(&mut self, chain: &Chain) {
+        self.chain_track.remove(&chain.id);
+        for device in &chain.devices {
+            self.remove_device(device);
+        }
+    }
+
+    /// Forgets a device and everything inside it.
+    pub(crate) fn remove_device(&mut self, device: &Device) {
+        for device in device.walk() {
+            self.device_track.remove(&device.id);
+            for chain in &device.chains {
+                self.chain_track.remove(&chain.id);
+            }
+        }
+    }
 }
 
 impl Document {
@@ -372,11 +415,70 @@ impl Document {
     #[must_use]
     pub fn device(&self, id: DeviceId) -> Option<&Device> {
         let track = self.tracks.get(self.index.device_track.get(&id)?)?;
+        track.find_device(id)
+    }
+
+    /// The chain with this ID, in a rack at any depth.
+    #[must_use]
+    pub fn chain(&self, id: ChainId) -> Option<&Chain> {
+        let track = self.tracks.get(self.index.chain_track.get(&id)?)?;
+        track.find_chain(id)
+    }
+
+    /// The track that holds a rack's chain.
+    #[must_use]
+    pub fn chain_track(&self, id: ChainId) -> Option<TrackId> {
+        self.index.chain_track.get(&id).copied()
+    }
+
+    /// The rack a chain belongs to.
+    #[must_use]
+    pub fn chain_rack(&self, id: ChainId) -> Option<&Device> {
+        let track = self.tracks.get(self.index.chain_track.get(&id)?)?;
         track
             .devices
             .iter()
-            .find(|device| device.id == id)
-            .map(|device| &**device)
+            .find_map(|device| device.chain_rack(id))
+    }
+
+    /// Where a device sits: its track, the rack chain it is in (none for the
+    /// track's own chain), and its position there.
+    #[must_use]
+    pub fn device_place(&self, id: DeviceId) -> Option<crate::rack::DevicePlace> {
+        let track_id = self.device_track(id)?;
+        let track = self.track(track_id)?;
+        if let Some(index) = track.device_position(id) {
+            return Some(crate::rack::DevicePlace {
+                track: track_id,
+                chain: None,
+                index,
+            });
+        }
+        track
+            .devices_deep()
+            .flat_map(|rack| rack.chains.iter())
+            .find_map(|chain| {
+                let index = chain.devices.iter().position(|d| d.id == id)?;
+                Some(crate::rack::DevicePlace {
+                    track: track_id,
+                    chain: Some(chain.id),
+                    index,
+                })
+            })
+    }
+
+    /// The rack a chain belongs to and the chain's position in the rack's
+    /// list.
+    #[must_use]
+    pub fn chain_place(&self, id: ChainId) -> Option<(DeviceId, usize)> {
+        let rack = self.chain_rack(id)?;
+        let index = rack.chains.iter().position(|c| c.id == id)?;
+        Some((rack.id, index))
+    }
+
+    /// Every chain ID, in ID order.
+    pub fn chain_ids(&self) -> impl ExactSizeIterator<Item = ChainId> + '_ {
+        self.index.chain_track.keys().copied()
     }
 
     /// The track whose chain holds a device.
@@ -402,6 +504,7 @@ impl Document {
         self.tracks.contains_key(&TrackId(id))
             || self.index.clip_track.contains_key(&ClipId(id))
             || self.index.device_track.contains_key(&DeviceId(id))
+            || self.index.chain_track.contains_key(&ChainId(id))
             || self.scenes.iter().any(|scene| scene.id.0 == id)
     }
 
@@ -411,8 +514,9 @@ impl Document {
         let track = self.tracks.get_max().map(|(id, _)| id.0);
         let clip = self.index.clip_track.get_max().map(|(id, _)| id.0);
         let device = self.index.device_track.get_max().map(|(id, _)| id.0);
+        let chain = self.index.chain_track.get_max().map(|(id, _)| id.0);
         let scene = self.scenes.iter().map(|scene| scene.id.0).max();
-        [track, clip, device, scene]
+        [track, clip, device, chain, scene]
             .into_iter()
             .flatten()
             .max()

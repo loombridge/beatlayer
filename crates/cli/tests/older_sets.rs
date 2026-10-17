@@ -127,6 +127,61 @@ fn a_version_1_set_with_split_audio_clips_loads_and_plays_as_it_did() {
     assert_eq!(render(&loaded.document), expected);
 }
 
+// Spec: racks R13
+#[test]
+fn sets_from_before_racks_load_unchanged() {
+    use bl_model::{Device, DeviceKind};
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Audio,
+            name: "Audio".to_owned(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let mut device = Device::new(
+        editor.new_id(),
+        "Utility",
+        DeviceKind::Native {
+            device_type: "beatlayer.utility".to_owned(),
+        },
+    );
+    device.params.insert(bl_model::ParamId(2), 0.5);
+    editor
+        .apply(Command::InsertDevice {
+            track,
+            index: 0,
+            device,
+        })
+        .unwrap();
+    let project = Project {
+        document: editor.document().clone(),
+        ids: editor.ids(),
+        media: Media::default(),
+        windows: bl_model::DeviceWindows::new(),
+        folds: bl_model::ClipFolds::new(),
+        launch: bl_model::LaunchSettings::default(),
+    };
+    // A device that isn't a rack saves no chains, so a set saved before
+    // racks existed is what is saved now.
+    let saved = encode_json(&project, 1).unwrap();
+    let value: Value = serde_json::from_slice(&saved).unwrap();
+    let written = &value["document"]["tracks"][0]["devices"][0];
+    assert!(written.get("chains").is_none(), "{written}");
+    let (loaded, _) = decode_json(&saved, &LoadOptions::default()).unwrap();
+    assert_eq!(loaded.document, project.document);
+    loaded.document.check_invariants().unwrap();
+    assert_eq!(encode_json(&loaded, 1).unwrap(), saved);
+    assert_eq!(
+        loaded.document.device_count(),
+        1,
+        "the lookups find the one device"
+    );
+}
+
 /// A one-bar MIDI clip, on the track from the start of the song.
 fn midi_clip(editor: &mut Editor, track: bl_model::TrackId) -> bl_model::ClipId {
     let clip = editor.new_id();

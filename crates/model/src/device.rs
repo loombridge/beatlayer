@@ -11,6 +11,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{ContentHash, DeviceId, ParamId};
+use crate::rack::{Chain, RackKind};
 use crate::track::Input;
 
 /// The most sample slots a device's media can fill.
@@ -82,6 +83,11 @@ pub struct Device {
         deserialize_with = "media_slots"
     )]
     pub media: Vec<Option<ContentHash>>,
+    /// A rack's chains, in order (WP-5.1). Empty for every device that
+    /// isn't a rack, and left out of the saved set then, so sets saved
+    /// before racks load unchanged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub chains: Vec<Chain>,
 }
 
 /// A plug-in device's own state, as the set file keeps it (WP-2.6).
@@ -284,6 +290,7 @@ impl Device {
             floating: false,
             plugin: None,
             media: Vec::new(),
+            chains: Vec::new(),
         }
     }
 
@@ -371,7 +378,7 @@ impl Device {
 /// Where a device goes in a chain. A chain holds its MIDI effects first,
 /// then its instrument, then its audio effects, as Live's does; only MIDI
 /// tracks hold MIDI effects and instruments, and a chain holds at most one
-/// instrument (racks, which hold more, arrive in milestone M5).
+/// instrument (a rack holds several, one to a chain).
 #[derive(
     Clone,
     Copy,
@@ -440,6 +447,11 @@ pub enum DeviceKind {
         /// ID, an Audio Unit's type, subtype, and manufacturer, or an LV2
         /// URI.
         plugin_id: String,
+    },
+    /// A rack (WP-5.1): a device that holds [`Device::chains`].
+    Rack {
+        /// Which of the four kinds of rack it is.
+        kind: RackKind,
     },
 }
 

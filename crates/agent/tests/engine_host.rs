@@ -318,8 +318,10 @@ fn an_agent_s_arrangement_record_sets_the_recording_up_as_the_ui_s_does() {
     // Spec: recording R1, R2. `transport.set_recording` through the agent API
     // gives the engine the take's rings first, as the Control Bar does: a set
     // that has never been saved can't hold an armed audio track's file, and
-    // the shell says so.
+    // the shell says so. Starting a recording asks first; the person allows
+    // it.
     let mut client = host();
+    client.transport().answer = Box::new(|_| true);
     let track = audio_track(&mut client);
     for (command, args) in [
         (

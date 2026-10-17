@@ -728,7 +728,14 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "other_params",
             ][..],
         ),
-        (&devices[1], &["mappings", "shape"][..]),
+        (
+            &devices
+                .iter()
+                .find(|d| d["kind"]["native"]["device_type"] == bl_model::modulator::CURVE_MOD)
+                .unwrap()
+                .clone(),
+            &["mappings", "shape"][..],
+        ),
         (
             &clips
                 .iter()

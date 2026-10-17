@@ -56,6 +56,7 @@ pub mod arrangement;
 pub mod assistant;
 pub mod audio;
 pub mod browser;
+pub mod capture_midi;
 pub mod commands;
 pub mod context_menus;
 pub mod devices;
@@ -103,6 +104,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     session_view::register(registry)?;
     session_launch::register(registry)?;
     session_record::register(registry)?;
+    capture_midi::register(registry)?;
     plugins::register(registry)?;
     settings::register(registry)?;
     modulation::register(registry)?;

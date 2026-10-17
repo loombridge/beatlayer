@@ -450,7 +450,7 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 3.11 | done | 17 October 2026 | [#86](https://github.com/loombridge/beatlayer/pull/86); armed tracks record into Session slots on the launch grid, and an overdub adds to the MIDI clip that plays, one undo step per loop pass; [the spec](specs/session-recording.md) |
 | 3.12 | todo |  |  |
 | 3.13 | done | 17 October 2026 | [#116](https://github.com/loombridge/beatlayer/pull/116); Session clips played during Arrangement Record are copied to their tracks as one `Record` undo step, with loop settings, mid-take edits split and control moves written with Automation Arm off; [the spec](specs/session-to-arrangement.md) |
-| 3.14 | todo |  | Notes only; its controller data is WP-2.29b |
+| 3.14 | done | 17 October 2026 | [#129](https://github.com/loombridge/beatlayer/pull/129); Capture MIDI brings back the notes played on monitoring MIDI tracks as a new Session clip or into the playing clip, with the observed loop and tempo rules, as one undo step; its controller data is WP-2.29b; [the spec](specs/capture-midi.md) |
 | 3.15 | done | 16 October 2026 | [#61](https://github.com/loombridge/beatlayer/pull/61); clip envelopes in the document and the engine; [the spec](specs/clip-envelopes.md) |
 | 3.16 | done | 17 October 2026 | [#91](https://github.com/loombridge/beatlayer/pull/91); the Clip View's Notes, Envelopes and MPE tabs, the Envelopes tab's editor with its choosers and Linked switch, and the Clip View following the latest selected Session or Arrangement clip; [the spec](specs/clip-envelopes.md) |
 | 3.17 | done | 16 October 2026 | [#55](https://github.com/loombridge/beatlayer/pull/55); the crossfader and per-track A/B assignment |

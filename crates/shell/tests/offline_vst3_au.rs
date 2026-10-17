@@ -242,6 +242,24 @@ fn running(shell: &mut Shell, device: DeviceId, format: Format) -> PluginInfo {
     }
 }
 
+/// The device's plug-in state once its engine node has caught up: the
+/// controller takes a value at once, but the processor only at the node's
+/// next block, so the state is read until it holds still.
+fn settled_state(shell: &mut Shell, device: DeviceId, format: Format) -> bl_model::PluginState {
+    let until = Instant::now() + Duration::from_secs(10);
+    let mut state = format.state(shell, device);
+    let mut still = 0;
+    while still < 10 {
+        assert!(Instant::now() < until, "the {format:?} state never settled");
+        std::thread::sleep(Duration::from_millis(10));
+        shell.poll();
+        let next = format.state(shell, device);
+        still = if next == state { still + 1 } else { 0 };
+        state = next;
+    }
+    state
+}
+
 fn spec(sample_rate: u32, block: usize) -> Render {
     Render {
         start: Ticks::ZERO,
@@ -421,7 +439,7 @@ fn a_render_at_another_rate_and_block_reactivates_the_plugin_and_gives_it_back()
         let engine = format
             .active_for(&shell, device)
             .expect("active for the engine");
-        let state = format.state(&shell, device);
+        let state = settled_state(&mut shell, device, format);
 
         let document = shell.editor().document().clone();
         let mut during = None;
@@ -468,7 +486,7 @@ fn a_cancelled_export_gives_every_plugin_back() {
         let (mut shell, device) = shell_with(&scratch, format, true);
         let live = running(&mut shell, device, format);
         let engine = format.active_for(&shell, device);
-        let state = format.state(&shell, device);
+        let state = settled_state(&mut shell, device, format);
         let document = shell.editor().document().clone();
         let cancel = AtomicBool::new(false);
         let result = export::export(

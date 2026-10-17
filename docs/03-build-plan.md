@@ -347,7 +347,7 @@ Total to 1.0: 90 packages planned in Phases 0 to 3, and about 185 estimated in P
 | 3.5 | done | 17 October 2026 | [#85](https://github.com/loombridge/beatlayer/pull/85); a scene's own tempo and time signature, applied on its launch frame and held until Re-Enable Automation, the Scene View, and Capture and Insert Scene; [the spec](specs/session-view.md) |
 | 3.6 | done | 17 October 2026 | [#82](https://github.com/loombridge/beatlayer/pull/82); Session clips take their track over from the Arrangement, and Back to Arrangement (F10) and the per-track return by command; the buttons are WP-3.8's; [the spec](specs/session-view.md) |
 | 3.7 | done | 15 October 2026 | [#58](https://github.com/loombridge/beatlayer/pull/58); the Session View grid; [the spec](specs/session-view.md) |
-| 3.8 | blocked | 16 October 2026 | Waits on 3.6 (3.2 merged since); the grid's launching needs Back to Arrangement's state |
+| 3.8 | done | 17 October 2026 | [#87](https://github.com/loombridge/beatlayer/pull/87); the grid launches and stops through commands: slot and scene launch buttons, the status row's stop buttons, Stop All Clips, Back to Arrangement, and Enter; [the spec](specs/session-view.md) |
 | 3.9 | todo |  |  |
 | 3.10 | todo |  |  |
 | 3.11 | done | 17 October 2026 | [#86](https://github.com/loombridge/beatlayer/pull/86); armed tracks record into Session slots on the launch grid, and an overdub adds to the MIDI clip that plays, one undo step per loop pass; [the spec](specs/session-recording.md) |

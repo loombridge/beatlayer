@@ -1525,7 +1525,8 @@ fn the_in_out_choosers_and_monitor_route_the_track() {
         routing(&h).input,
         bl_model::Input::Track {
             track: t[3],
-            tap: bl_model::Tap::PostMixer
+            tap: bl_model::Tap::PostMixer,
+            chain: None,
         }
     );
     assert_eq!(h.shell.editor().undo_history().len(), before + 1);

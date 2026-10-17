@@ -235,7 +235,8 @@ fn every_command_runs_by_id() {
         routing.input,
         Input::Track {
             track: reverb,
-            tap: Tap::PostFx
+            tap: Tap::PostFx,
+            chain: None,
         }
     );
     assert_eq!(routing.monitor, Monitor::In);
@@ -998,7 +999,8 @@ fn every_command_runs_by_id() {
             enabled: true,
             input: Input::Track {
                 track: drums,
-                tap: Tap::PostFx
+                tap: Tap::PostFx,
+                chain: None,
             },
             gain: 2.0,
             mix: 0.5,
@@ -1563,6 +1565,7 @@ fn schemas_match_what_commands_serialise() {
                 input: Input::Track {
                     track: TrackId(fresh()),
                     tap: Tap::PreFx,
+                    chain: None,
                 },
                 channel: None,
             },
@@ -1956,6 +1959,7 @@ fn schemas_match_what_commands_serialise() {
                 input: Input::Track {
                     track,
                     tap: Tap::PostMixer,
+                    chain: None,
                 },
             },
         ),

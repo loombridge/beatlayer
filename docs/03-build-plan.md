@@ -484,7 +484,7 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 5.4 | todo |  | The stepped and radio-button styles wait on IMP-26's acceptance |
 | 5.5 | todo |  |  |
 | 5.6 | todo |  |  |
-| 5.7 | todo |  |  |
+| 5.7 | done | 18 October 2026 | [#137](https://github.com/loombridge/beatlayer/pull/137); Audio From takes the Pre FX, Post FX or Post Mixer of any chain of an instrument or audio effect rack, at any depth, with delay compensation and solo, and MIDI tracks with an instrument are sources; [the spec](specs/racks.md) |
 | 5.8 | todo |  |  |
 | 5.9 | done | 17 October 2026 | [#107](https://github.com/loombridge/beatlayer/pull/107); a clip's modulation acts on its parameter's base in the control's travel, on devices, mixer controls, sends and plug-ins, and shows on the control; the Session clip editor's switches wait on 3.12; [the spec](specs/modulation.md) |
 | 5.10 | done | 17 October 2026 | [#133](https://github.com/loombridge/beatlayer/pull/133); the Wave Mod and the Curve Mod map up to eight targets on any track, in Modulation or Remote Control, on a 32-frame grid the same at any block size; [the spec](specs/modulation.md) |

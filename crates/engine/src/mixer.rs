@@ -1140,7 +1140,11 @@ impl Solo {
         match edge.via {
             Via::Output => self.output_muted(edge.from),
             Via::Send => self.send_muted(edge.from, edge.to),
-            Via::Input => edge.tap == Tap::PostMixer && self.output_muted(edge.from),
+            // A chain's taps all come before the track's mixer, so solo never
+            // silences them (the racks spec, R40).
+            Via::Input => {
+                edge.chain.is_none() && edge.tap == Tap::PostMixer && self.output_muted(edge.from)
+            }
             // A device's sidechain hears its sources whatever is soloed, so
             // a soloed track still ducks as it does in the mix (to observe
             // in Live; the routing spec).

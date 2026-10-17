@@ -47,6 +47,11 @@ pub struct DeviceView {
     hot_swap: Option<DeviceId>,
     /// Devices whose sidechain section is shown (WP-2.19b).
     sidechains_shown: BTreeSet<DeviceId>,
+    /// The view each device's display shows, where it has chosen one
+    /// (WP-5.43).
+    display_views: std::collections::BTreeMap<DeviceId, String>,
+    /// The display data the engine's nodes last published (WP-5.43).
+    displays: std::collections::BTreeMap<DeviceId, bl_engine::DisplayData>,
     types: Vec<DeviceType>,
     /// Where floating devices' windows sit (WP-2.5b). A frame outlives
     /// its device's docking and deletion, so undoing either puts the
@@ -100,6 +105,18 @@ pub struct Context<'a> {
     pub auto_hide: bool,
     /// Whether View ▸ Plug-In Windows shows the windows.
     pub windows_shown: bool,
+}
+
+/// The display of a device whose type draws none.
+fn empty_display(device: DeviceId) -> bl_model::DeviceDisplay {
+    bl_model::DeviceDisplay {
+        device,
+        live: false,
+        view: None,
+        series: Vec::new(),
+        markers: Vec::new(),
+        readings: Vec::new(),
+    }
 }
 
 fn parse<T: DeserializeOwned>(args: Value) -> Result<T, DeviceError> {
@@ -253,6 +270,7 @@ impl DeviceView {
             description: DeviceDescription {
                 params: selected,
                 layout,
+                views: Vec::new(),
                 menu_options: Vec::new(),
             },
             plugin: true,
@@ -314,6 +332,8 @@ impl DeviceView {
         self.folded.retain(exists);
         self.expanded.retain(exists);
         self.sidechains_shown.retain(exists);
+        self.display_views.retain(|d, _| exists(d));
+        self.displays.retain(|d, _| exists(d));
     }
 
     /// Whether `device`'s type has an expanded part.
@@ -480,7 +500,44 @@ impl DeviceView {
                     listen: sidechain.listen,
                 }
             }),
+            display_view: self.display_view(d),
         }
+    }
+
+    /// The view `device`'s display shows: the one chosen, or the first its
+    /// description offers; none for a display with one view.
+    fn display_view(&self, device: &Device) -> Option<String> {
+        let views = &self.description(&device.kind)?.views;
+        self.display_views
+            .get(&device.id)
+            .filter(|view| views.contains(view))
+            .or_else(|| views.first())
+            .cloned()
+    }
+
+    /// The display data the engine published, to fill from.
+    pub fn displays_mut(
+        &mut self,
+    ) -> &mut std::collections::BTreeMap<DeviceId, bl_engine::DisplayData> {
+        &mut self.displays
+    }
+
+    /// What `device`'s display shows now: its type's display from the
+    /// device's values and the newest data its node published.
+    #[must_use]
+    pub fn display(&self, device: &Device) -> bl_model::DeviceDisplay {
+        let DeviceKind::Native { device_type } = &device.kind else {
+            return empty_display(device.id);
+        };
+        let data = self.displays.get(&device.id).map(|d| d.values.as_slice());
+        let mut display = self
+            .description(&device.kind)
+            .and_then(|description| {
+                bl_devices::display(device_type, device.id, description, &device.params, data)
+            })
+            .unwrap_or_else(|| empty_display(device.id));
+        display.view = self.display_view(device);
+        display
     }
 
     /// The device a command acts on: `device`, or the selected one.
@@ -522,7 +579,7 @@ impl DeviceView {
                     .is_some_and(|t| device.role.fits(t.kind()))
             }),
             ids::LOAD_PRESET => has_target() && args.get("path").is_some(),
-            ids::PARAMETERS => has_target(),
+            ids::PARAMETERS | ids::DISPLAY | ids::SET_DISPLAY_VIEW => has_target(),
             ids::SET_WINDOW => named
                 .and_then(|device| doc.device(device))
                 .is_some_and(|d| d.floating),
@@ -771,6 +828,27 @@ impl DeviceView {
                 ));
                 outcome.value = to_value(&preset_result(device, &path));
                 return Ok(outcome);
+            }
+            ids::DISPLAY => {
+                let DeviceArgs { device } = parse(args)?;
+                let device = self.target(editor.document(), device)?;
+                let current = editor.document().device(device).expect("the target exists");
+                outcome.value = to_value(&self.display(current));
+                return Ok(outcome);
+            }
+            ids::SET_DISPLAY_VIEW => {
+                let ids::SetDisplayViewArgs { device, view } = parse(args)?;
+                let device = self.target(editor.document(), device)?;
+                let current = editor.document().device(device).expect("the target exists");
+                let offered = self
+                    .description(&current.kind)
+                    .map_or(&[][..], |d| d.views.as_slice());
+                if !offered.contains(&view) {
+                    return Err(DeviceError::InvalidArgs(format!(
+                        "{device}'s display has no view {view:?}; it offers {offered:?}"
+                    )));
+                }
+                self.display_views.insert(device, view);
             }
             ids::PARAMETERS => {
                 let DeviceArgs { device } = parse(args)?;

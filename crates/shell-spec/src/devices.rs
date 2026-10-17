@@ -16,7 +16,7 @@ use bl_commands::Context::{Browser, DeviceView, Global};
 use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_model::device_layout::BODY_HEIGHT;
 use bl_model::{
-    ContentHash, DeviceDescription, DeviceId, DeviceKind, DeviceLayout, DeviceRole,
+    ContentHash, DeviceDescription, DeviceDisplay, DeviceId, DeviceKind, DeviceLayout, DeviceRole,
     ParamDescriptor, ParamId, Tap, TrackId, TrackKind, WindowFrame,
 };
 use schemars::JsonSchema;
@@ -57,6 +57,11 @@ pub const PARAMETERS: &str = "device.parameters";
 /// `device.show_sidechain`: show or hide a device's sidechain section
 /// (WP-2.19b).
 pub const SHOW_SIDECHAIN: &str = "device.show_sidechain";
+/// `device.display`: what a device's display shows now (WP-5.43).
+pub const DISPLAY: &str = "device.display";
+/// `device.set_display_view`: choose the view a device's display shows
+/// (WP-5.43).
+pub const SET_DISPLAY_VIEW: &str = "device.set_display_view";
 
 /// `device.windows`: the floating devices' windows (WP-2.5b).
 pub const WINDOWS: &str = "device.windows";
@@ -92,6 +97,8 @@ pub const IDS: &[&str] = &[
     HOT_SWAP,
     PARAMETERS,
     SHOW_SIDECHAIN,
+    DISPLAY,
+    SET_DISPLAY_VIEW,
     WINDOWS,
     SET_WINDOW,
 ];
@@ -362,6 +369,10 @@ pub struct DeviceFrame {
     pub panel: Option<DevicePanel>,
     /// Its sidechain section, if it has a sidechain input (WP-2.19b).
     pub sidechain: Option<SidechainSection>,
+    /// The view its display shows, if its display has views (WP-5.43): one
+    /// of its description's `views`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_view: Option<String>,
 }
 
 impl DeviceFrame {
@@ -671,6 +682,17 @@ pub struct ShowSidechainArgs {
     pub shown: Option<bool>,
 }
 
+/// Arguments of `device.set_display_view`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetDisplayViewArgs {
+    /// The device; the selected one if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The view, one of the device's description's `views`.
+    pub view: String,
+}
+
 /// Adds the Device View's commands to a registry.
 ///
 /// # Errors
@@ -883,6 +905,33 @@ fn specs() -> Vec<CommandSpec> {
             .permission(Permission::Read)
             .context(DeviceView)
             .args::<ShowSidechainArgs>()
+            .result::<DeviceViewState>(),
+        CommandSpec::new(DISPLAY, "Device Display")
+            .description(
+                "Reports what a device's display shows now, read from the display data its \
+                 node publishes after each block and from its parameters: curves and spectra \
+                 (an EQ's spectrum, its bands' responses and their sum per curve; a \
+                 compressor's transfer curve), the markers on them (an EQ's band dots, a \
+                 compressor's threshold and level), and single readings (a compressor's gain \
+                 reduction and levels), each with its unit and how it reads; the view the \
+                 display shows, if it has views; and whether an engine is publishing (`live`). \
+                 Empty for a device whose type draws no display. Changes nothing.",
+            )
+            .permission(Permission::Read)
+            .context(DeviceView)
+            .args::<DeviceArgs>()
+            .result::<DeviceDisplay>(),
+        CommandSpec::new(SET_DISPLAY_VIEW, "Set Display View")
+            .description(
+                "Chooses the view a device's display shows, as its view buttons do: a \
+                 compressor's Transfer Curve, Activity, or Collapsed. Only a device whose \
+                 display has views takes one, and only one of them. It changes only the view: \
+                 it isn't an undo step, and `device_view.state` and `device.display` report the \
+                 view chosen.",
+            )
+            .permission(Permission::Read)
+            .context(DeviceView)
+            .args::<SetDisplayViewArgs>()
             .result::<DeviceViewState>(),
         CommandSpec::new(WINDOWS, "Floating Device Windows")
             .description(

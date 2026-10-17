@@ -1107,6 +1107,7 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("transport.set_metronome_sound", Exception(metronome_menu)),
         ("transport.set_metronome_rhythm", Exception(metronome_menu)),
         ("transport.set_recording", Exception(recording)),
+        ("transport.stop_recording", Exception(recording)),
         // Tempo breakpoints and time-signature markers (WP-2.20): the
         // arrangement's tempo envelope and marker lane aren't drawn yet, so
         // agents reach these through the agent API until they are.

@@ -167,10 +167,15 @@ impl Entry {
     fn spec(&self) -> CommandSpec {
         // Playback changes nothing in the project or on disk, so it's
         // `read` (D17's permission classes): an agent plays and stops
-        // without asking.
+        // without asking. Recording captures an input device, so it's
+        // `external`; `transport.stop_recording` is how an agent stops free.
+        let permission = match self.action {
+            Action::SetRecording => Permission::External,
+            _ => Permission::Read,
+        };
         let mut spec = CommandSpec::new(self.id, self.label)
             .description(self.description)
-            .permission(Permission::Read)
+            .permission(permission)
             .contexts(self.contexts.iter().copied())
             .result::<()>();
         spec = match self.action {
@@ -293,7 +298,19 @@ const ENTRIES: &[Entry] = &[
             records the notes it receives, and the recording becomes a clip on its track when \
             it ends; a count-in starts it a bar or more later. With MIDI Arrangement Overdub on, \
             recorded notes merge into the MIDI clips already there. Features like Hear \
-            Metronome Only While Recording follow it too.",
+            Metronome Only While Recording follow it too. Recording captures input devices, \
+            including a microphone, so the person is asked first, whichever way you set it: \
+            to stop a recording without asking, run `transport.stop_recording`.",
+    },
+    Entry {
+        id: "transport.stop_recording",
+        action: Action::Run(TransportCommand::SetRecording(false)),
+        label: "Stop Recording",
+        contexts: &[Global],
+        keys: &[],
+        description: "Stops recording, the same as `transport.set_recording` with `recording` \
+            false, and without asking the person. The recording becomes a clip on its track; \
+            playback goes on. It does nothing when the transport isn't recording.",
     },
 ];
 

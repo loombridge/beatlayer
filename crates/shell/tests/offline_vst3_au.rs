@@ -186,13 +186,13 @@ fn load(shell: &mut Shell, track: TrackId, format: Format) -> DeviceId {
         ),
     }
     .unwrap();
-    let mut params = vec![format.param()];
-    #[cfg(target_os = "macos")]
-    if format == Format::AudioUnit {
+    let params = match format {
+        Format::Vst3 => vec![format.param()],
         // Fully wet at a short delay, so the render holds the unit's echo
         // of the ramp.
-        params.push((AU_DELAY_TIME, 0.01));
-    }
+        #[cfg(target_os = "macos")]
+        Format::AudioUnit => vec![format.param(), (AU_DELAY_TIME, 0.01)],
+    };
     for (param, value) in params {
         shell
             .run(

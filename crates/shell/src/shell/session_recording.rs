@@ -469,6 +469,7 @@ impl Shell {
             files,
             midi,
             dropped,
+            launches: _,
         } = outcome;
         let files = files.unwrap_or_default();
         let (Some(take), Some(rate)) = (take, self.audio.sample_rate().and_then(SampleRate::new))

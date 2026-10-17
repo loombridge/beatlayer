@@ -16,8 +16,8 @@ use bl_commands::Context::{Browser, DeviceView, Global};
 use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_model::device_layout::BODY_HEIGHT;
 use bl_model::{
-    ContentHash, DeviceDescription, DeviceId, DeviceKind, DeviceRole, ParamDescriptor, Tap,
-    TrackId, TrackKind, WindowFrame,
+    ContentHash, DeviceDescription, DeviceDisplay, DeviceId, DeviceKind, DeviceLayout, DeviceRole,
+    ParamDescriptor, ParamId, Tap, TrackId, TrackKind, WindowFrame,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -30,6 +30,8 @@ pub const ADD: &str = "device.add";
 pub const SELECT: &str = "device.select";
 /// `device.fold`: fold or unfold a device.
 pub const FOLD: &str = "device.fold";
+/// `device.expand`: show or hide a device's expanded part (WP-5.42).
+pub const EXPAND: &str = "device.expand";
 /// `device.cut`: cut a device to the clipboard.
 pub const CUT: &str = "device.cut";
 /// `device.copy`: copy a device to the clipboard.
@@ -55,6 +57,11 @@ pub const PARAMETERS: &str = "device.parameters";
 /// `device.show_sidechain`: show or hide a device's sidechain section
 /// (WP-2.19b).
 pub const SHOW_SIDECHAIN: &str = "device.show_sidechain";
+/// `device.display`: what a device's display shows now (WP-5.43).
+pub const DISPLAY: &str = "device.display";
+/// `device.set_display_view`: choose the view a device's display shows
+/// (WP-5.43).
+pub const SET_DISPLAY_VIEW: &str = "device.set_display_view";
 
 /// `device.windows`: the floating devices' windows (WP-2.5b).
 pub const WINDOWS: &str = "device.windows";
@@ -71,6 +78,7 @@ pub const IDS: &[&str] = &[
     ADD,
     SELECT,
     FOLD,
+    EXPAND,
     CUT,
     COPY,
     PASTE,
@@ -82,6 +90,8 @@ pub const IDS: &[&str] = &[
     HOT_SWAP,
     PARAMETERS,
     SHOW_SIDECHAIN,
+    DISPLAY,
+    SET_DISPLAY_VIEW,
     WINDOWS,
     SET_WINDOW,
 ];
@@ -129,7 +139,7 @@ pub const SIDECHAIN_SECTION_WIDTH: f32 = 80.0;
 #[must_use]
 pub fn body_width(frame: &DeviceFrame) -> f32 {
     frame.panel.as_ref().map_or(DEFAULT_DEVICE_WIDTH, |panel| {
-        panel.description.layout.docked_size().width
+        panel.layout(frame.expanded).docked_size().width
     })
 }
 
@@ -172,7 +182,7 @@ pub fn docked_width(frame: &DeviceFrame) -> f32 {
 #[must_use]
 pub fn body_height(frame: &DeviceFrame) -> f32 {
     frame.panel.as_ref().map_or(BODY_HEIGHT, |panel| {
-        panel.description.layout.docked_size().height
+        panel.layout(frame.expanded).docked_size().height
     })
 }
 
@@ -192,7 +202,7 @@ pub fn window_grows(frame: &DeviceFrame) -> (bool, bool) {
     frame
         .panel
         .as_ref()
-        .map_or((false, false), |panel| panel.description.layout.grows())
+        .map_or((false, false), |panel| panel.layout(frame.expanded).grows())
 }
 
 /// What the generic UI needs to draw a device (WP-2.5): its type's
@@ -212,6 +222,13 @@ pub struct DevicePanel {
 }
 
 impl DevicePanel {
+    /// The layout as drawn: with the expanded part while `expanded`
+    /// ([`DeviceLayout::shown`]).
+    #[must_use]
+    pub fn layout(&self, expanded: bool) -> DeviceLayout {
+        self.description.layout.shown(expanded)
+    }
+
     /// The value of the parameter at `index` in the description.
     #[must_use]
     pub fn value(&self, index: usize) -> f64 {
@@ -221,6 +238,29 @@ impl DevicePanel {
                 .get(index)
                 .map_or(0.0, |p| p.default)
         })
+    }
+}
+
+impl DeviceFrame {
+    /// The device's own items in its Show Options menu, in the order its
+    /// type lists them: they follow Save as Default Preset (C-DEVICE-015).
+    #[must_use]
+    pub fn menu_options(&self) -> Vec<MenuOption<'_>> {
+        let Some(panel) = &self.panel else {
+            return Vec::new();
+        };
+        let params = &panel.description.params;
+        panel
+            .description
+            .menu_options
+            .iter()
+            .filter_map(|id| params.iter().position(|p| p.id == *id))
+            .map(|index| MenuOption {
+                param: params[index].id,
+                name: &params[index].name,
+                on: panel.value(index) >= 0.5,
+            })
+            .collect()
     }
 }
 
@@ -235,6 +275,10 @@ pub struct ParameterState {
     pub value: f64,
     /// How the value reads, as its control shows it, such as `-6.0 dB`.
     pub text: String,
+    /// Whether it's one of the device's own items in its Show Options menu
+    /// rather than a control in its body (C-DEVICE-015).
+    #[serde(default)]
+    pub menu_option: bool,
 }
 
 /// What `device.parameters` returns.
@@ -245,6 +289,18 @@ pub struct DeviceParameters {
     /// Its parameters, in the order its type lists them; empty if its type
     /// doesn't describe them.
     pub params: Vec<ParameterState>,
+}
+
+/// One of a device's own items in its Show Options menu: a switch its type
+/// marks as a menu option (C-DEVICE-015).
+#[derive(Clone, Debug, PartialEq)]
+pub struct MenuOption<'a> {
+    /// The parameter choosing the item turns over (`device.set_param`).
+    pub param: ParamId,
+    /// The item's label: the parameter's name.
+    pub name: &'a str,
+    /// Whether it's ticked: the switch is on.
+    pub on: bool,
 }
 
 /// One device as the Device View shows it.
@@ -271,6 +327,13 @@ pub struct DeviceFrame {
     pub show_preset_name: bool,
     /// Whether it's folded to its title bar.
     pub folded: bool,
+    /// Whether it has an expanded part, which its title bar's expand
+    /// toggle shows and hides (L-DEV-004; WP-5.42).
+    #[serde(default)]
+    pub expandable: bool,
+    /// Whether its expanded part is shown. Never while it has none.
+    #[serde(default)]
+    pub expanded: bool,
     /// Whether it floats in a window of its own, its place in the chain a
     /// strip (WP-2.5b).
     #[serde(default)]
@@ -289,6 +352,10 @@ pub struct DeviceFrame {
     pub panel: Option<DevicePanel>,
     /// Its sidechain section, if it has a sidechain input (WP-2.19b).
     pub sidechain: Option<SidechainSection>,
+    /// The view its display shows, if its display has views (WP-5.43): one
+    /// of its description's `views`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_view: Option<String>,
 }
 
 /// A device's sidechain section, as its left strip and the section show it
@@ -410,6 +477,18 @@ pub struct DeviceArgs {
 pub struct SelectDeviceArgs {
     /// The device, or `null` to select none.
     pub device: Option<DeviceId>,
+}
+
+/// Arguments of `device.expand`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ExpandDeviceArgs {
+    /// The device; the selected one if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// Show (true) or hide (false) the expanded part; switches if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expanded: Option<bool>,
 }
 
 /// Arguments of `device.fold`.
@@ -573,6 +652,17 @@ pub struct ShowSidechainArgs {
     pub shown: Option<bool>,
 }
 
+/// Arguments of `device.set_display_view`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetDisplayViewArgs {
+    /// The device; the selected one if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The view, one of the device's description's `views`.
+    pub view: String,
+}
+
 /// Adds the Device View's commands to a registry.
 ///
 /// # Errors
@@ -592,7 +682,8 @@ fn specs() -> Vec<CommandSpec> {
             .description(
                 "Reports what the Device View shows: the selected track and its devices in \
                  signal order, each with its title, its own name, its kind and role, whether \
-                 it's on, folded, selected, or being hot-swapped; the selected device; \
+                 it's on, folded, selected, or being hot-swapped, and whether it has an expanded \
+                 part (`expandable`) and shows it (`expanded`); the selected device; \
                  hot-swapping; and whether there's a device to paste. A native device also \
                  lists its parameters' descriptors, its layout, and its values (`panel`); \
                  `device.parameters` reports any device's. Changes nothing.",
@@ -637,6 +728,19 @@ fn specs() -> Vec<CommandSpec> {
             .context(DeviceView)
             .binding("S-DEV-014")
             .args::<FoldDeviceArgs>()
+            .result::<DeviceViewState>(),
+        CommandSpec::new(EXPAND, "Expand Device")
+            .description(
+                "Shows or hides a device's expanded part, as the toggle in its title bar does: \
+                 the extra controls (a modulation section, say) some devices keep out of sight \
+                 until asked; switches unless `expanded` says which. Only devices with an \
+                 expanded part (`expandable` in `device_view.state`) have one. Like folding, it \
+                 changes only the view: it isn't an undo step, and isn't saved with the set. \
+                 The device's width in the chain follows it.",
+            )
+            .permission(Permission::Read)
+            .context(DeviceView)
+            .args::<ExpandDeviceArgs>()
             .result::<DeviceViewState>(),
         CommandSpec::new(CUT, "Cut Device")
             .description(
@@ -771,6 +875,33 @@ fn specs() -> Vec<CommandSpec> {
             .permission(Permission::Read)
             .context(DeviceView)
             .args::<ShowSidechainArgs>()
+            .result::<DeviceViewState>(),
+        CommandSpec::new(DISPLAY, "Device Display")
+            .description(
+                "Reports what a device's display shows now, read from the display data its \
+                 node publishes after each block and from its parameters: curves and spectra \
+                 (an EQ's spectrum, its bands' responses and their sum per curve; a \
+                 compressor's transfer curve), the markers on them (an EQ's band dots, a \
+                 compressor's threshold and level), and single readings (a compressor's gain \
+                 reduction and levels), each with its unit and how it reads; the view the \
+                 display shows, if it has views; and whether an engine is publishing (`live`). \
+                 Empty for a device whose type draws no display. Changes nothing.",
+            )
+            .permission(Permission::Read)
+            .context(DeviceView)
+            .args::<DeviceArgs>()
+            .result::<DeviceDisplay>(),
+        CommandSpec::new(SET_DISPLAY_VIEW, "Set Display View")
+            .description(
+                "Chooses the view a device's display shows, as its view buttons do: a \
+                 compressor's Transfer Curve, Activity, or Collapsed. Only a device whose \
+                 display has views takes one, and only one of them. It changes only the view: \
+                 it isn't an undo step, and `device_view.state` and `device.display` report the \
+                 view chosen.",
+            )
+            .permission(Permission::Read)
+            .context(DeviceView)
+            .args::<SetDisplayViewArgs>()
             .result::<DeviceViewState>(),
         CommandSpec::new(WINDOWS, "Floating Device Windows")
             .description(

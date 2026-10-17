@@ -312,6 +312,7 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("settings.set_auto_hide_plug_in_windows", read("settings.state", "auto_hide_plug_in_windows")),
     ("settings.set_continuous_save", nothing(CONTINUOUS)),
     ("settings.set_create_fades_on_clip_edges", read("settings.state", "create_fades_on_clip_edges")),
+    ("settings.set_temporary_folder", read("settings.state", "file_folder.temporary_folder")),
     ("settings.set_outline_view_in_focus", read("settings.state", "display_input.outline_view_in_focus")),
     ("settings.set_default_launch_mode", read("settings.state", "launch.default_mode")),
     ("settings.set_default_launch_quantization", read("settings.state", "launch.default_quantization")),

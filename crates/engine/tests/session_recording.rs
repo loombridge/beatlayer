@@ -72,6 +72,7 @@ impl Take {
                 scene,
                 overdub: false,
             }],
+            launches: None,
         };
         rig.sender.record(rig.collector.handle().wrap(plan));
         Self {

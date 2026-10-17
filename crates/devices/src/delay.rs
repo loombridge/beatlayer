@@ -4,11 +4,15 @@
 
 use std::f64::consts::TAU;
 
+use bl_core::time::TempoMap;
 use bl_engine::{DeviceType, NodeConfig, Registry};
 use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
-use bl_model::{DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
+use bl_model::{
+    Device, DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit,
+};
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
+use crate::lfo::{Lfo, Rate, Shape, Stereo, Wave};
 
 /// The delay's device type.
 pub const DELAY: &str = "bl.device.reprise";
@@ -204,7 +208,7 @@ fn layout() -> DeviceLayout {
 
 /// Adds the delay to `registry`.
 pub fn register(registry: &mut Registry) {
-    add(registry, delay_type(), |_, config| Delay::new(config));
+    add(registry, delay_type(), Delay::new);
 }
 
 /// How a change of delay time is handled.
@@ -225,6 +229,32 @@ impl Mode {
     }
 }
 
+/// The LFO's waveforms, in the order of the Wave chooser. A waveform's
+/// morph blends toward the next one, except for the random ones.
+const WAVES: [Wave; 7] = [
+    Wave::Sine,
+    Wave::Triangle,
+    Wave::SawUp,
+    Wave::SawDown,
+    Wave::Rectangle,
+    Wave::SampleHold,
+    Wave::Wander,
+];
+
+/// The LFO's shape for the Wave chooser's `index`: its waveform, morphed
+/// toward the next one by `morph` (0 to 1) except for the random waveforms.
+fn lfo_shape(index: usize, morph: f64) -> Shape {
+    let index = index.min(WAVES.len() - 1);
+    Shape {
+        wave: WAVES[index],
+        morph: WAVES
+            .get(index + 1)
+            .filter(|_| index < 5)
+            .map(|to| (*to, morph)),
+        duty: 0.0,
+    }
+}
+
 /// The delay: one line per channel, one LFO, and its settings.
 struct Delay {
     lines: Vec<Line>,
@@ -235,12 +265,12 @@ struct Delay {
 }
 
 impl Delay {
-    fn new(config: &NodeConfig) -> Self {
+    fn new(device: &Device, config: &NodeConfig) -> Self {
         let rate = config.sample_rate.as_f64();
         let len = ((MAX_DELAY_SECONDS + MODULATION_SECONDS + 0.1) * rate).ceil() as usize + 2;
         Self {
             lines: (0..config.channels).map(|_| Line::new(len)).collect(),
-            lfo: Lfo::new(),
+            lfo: Lfo::new(config.sample_rate, device.id.0.get()),
             sample_rate: rate,
             glide: (TRANSITION_SECONDS * rate).max(1.0),
             mod_depth: MODULATION_SECONDS * rate,
@@ -254,6 +284,13 @@ impl NativeDevice for Delay {
             return;
         }
         let settings = Settings::new(audio, params, self.sample_rate, self.glide, self.mod_depth);
+        self.lfo.set(
+            audio,
+            Rate::Hertz(settings.lfo_rate),
+            Stereo::Phase(0.0),
+            0.0,
+        );
+        let tempo = audio.tempo();
         let mut channels = audio.channels_mut();
         let Some(first) = channels.next() else {
             return;
@@ -261,7 +298,7 @@ impl NativeDevice for Delay {
         // shortcut: the delay is stereo, as the manual's is; any channel
         // past the second passes through. Upgrade with a surround layout.
         let second = channels.next();
-        self.render(first, second, &settings, params);
+        self.render(first, second, &settings, params, tempo);
     }
 }
 
@@ -274,12 +311,13 @@ impl Delay {
         mut second: Option<&mut [f32]>,
         settings: &Settings,
         params: &ParamBank,
+        tempo: &TempoMap,
     ) {
         let frames = first.len();
         let has_second = second.is_some();
-        self.lfo.prepare(settings);
         for i in 0..frames {
-            let lfo = self.lfo.step(settings, params, i);
+            let morph = f64::from(settings.ramp(params, LFO_MORPH)[i]) / 100.0;
+            let lfo = self.lfo.step(tempo, i, lfo_shape(settings.wave, morph))[0];
             let modulation =
                 lfo * settings.ramp(params, LFO_DELAY)[i] as f64 / 100.0 * settings.mod_depth;
             let frequency = settings.filter_frequency(params, i, lfo);
@@ -534,87 +572,6 @@ impl Line {
     }
 }
 
-/// The delay's one LFO: its phase, and the pair of random values sample
-/// and hold and wander need.
-struct Lfo {
-    phase: f64,
-    value: f64,
-    next: f64,
-    state: u32,
-    rate: f64,
-}
-
-impl Lfo {
-    fn new() -> Self {
-        let mut lfo = Self {
-            phase: 0.0,
-            value: 0.0,
-            next: 0.0,
-            state: 0x1234_5678,
-            rate: 1.0,
-        };
-        lfo.value = lfo.random();
-        lfo.next = lfo.random();
-        lfo
-    }
-
-    /// Takes the stretch's rate, which the engine doesn't smooth.
-    fn prepare(&mut self, settings: &Settings) {
-        self.rate = settings.lfo_rate.max(0.0);
-    }
-
-    /// Advances the LFO one frame and gives its value, from −1 to 1.
-    fn step(&mut self, settings: &Settings, params: &ParamBank, frame: usize) -> f64 {
-        self.phase += self.rate / settings.rate;
-        if self.phase >= 1.0 {
-            self.phase -= self.phase.floor();
-            self.value = self.next;
-            self.next = self.random();
-        }
-        let morph = f64::from(settings.ramp(params, LFO_MORPH)[frame]) / 100.0;
-        self.value_at(self.phase, settings.wave, morph)
-    }
-
-    /// One waveform's value at `phase`, which runs from 0 to 1.
-    fn raw(&self, wave: usize, phase: f64) -> f64 {
-        match wave {
-            0 => (TAU * phase).sin(),
-            1 => 1.0 - 4.0 * (phase - 0.5).abs(),
-            2 => 2.0 * phase - 1.0,
-            3 => 1.0 - 2.0 * phase,
-            4 => {
-                if phase < 0.5 {
-                    1.0
-                } else {
-                    -1.0
-                }
-            }
-            5 => self.value,
-            6 => self.value + (self.next - self.value) * phase,
-            _ => 0.0,
-        }
-    }
-
-    /// The waveform at `phase`, morphed toward the next one by `morph`.
-    fn value_at(&self, phase: f64, wave: usize, morph: f64) -> f64 {
-        let first = self.raw(wave, phase);
-        if morph <= 0.0 || wave >= 5 {
-            return first;
-        }
-        let second = self.raw(wave + 1, phase);
-        first + (second - first) * morph
-    }
-
-    /// A new random value from −1 to 1, for sample and hold and wander.
-    fn random(&mut self) -> f64 {
-        self.state = self
-            .state
-            .wrapping_mul(1_664_525)
-            .wrapping_add(1_013_904_223);
-        f64::from(self.state >> 8) / f64::from(1 << 24) * 2.0 - 1.0
-    }
-}
-
 /// A band-pass filter for the delay loops, the manual's Freq and Width.
 #[derive(Clone, Copy, Default)]
 struct BandPass {
@@ -652,35 +609,32 @@ impl BandPass {
 
 #[cfg(test)]
 mod tests {
+    use bl_core::time::{Bpm, TempoMap};
+
     use super::*;
 
-    fn lfo() -> Lfo {
-        Lfo {
-            phase: 0.0,
-            value: 0.5,
-            next: -0.5,
-            state: 7,
-            rate: 1.0,
-        }
-    }
-
-    // Spec: delay R6
+    // Spec: delay R8
     #[test]
     fn every_lfo_wave_stays_between_minus_one_and_one() {
-        let lfo = lfo();
-        for wave in 0..=6 {
-            for step in 0..=64 {
-                let phase = f64::from(step) / 64.0;
-                let value = lfo.value_at(phase, wave, 0.0);
-                assert!(
-                    (-1.0..=1.0).contains(&value),
-                    "wave {wave} at {phase}: {value}"
-                );
+        let tempo = TempoMap::constant(Bpm::DEFAULT);
+        let sample_rate = bl_core::time::SampleRate::HZ_48000;
+        for wave in 0..WAVES.len() {
+            for morph in [0.0, 0.5, 1.0] {
+                let mut lfo = Lfo::new(sample_rate, 3);
+                let shape = lfo_shape(wave, morph);
+                for frame in 0..4_800 {
+                    let value = lfo.step(&tempo, frame, shape)[0];
+                    assert!((-1.0..=1.0).contains(&value), "wave {wave}: {value}");
+                }
             }
         }
-        assert!((lfo.value_at(0.25, 0, 0.0) - 1.0).abs() < 1e-9, "the sine");
-        assert!((lfo.value_at(0.75, 0, 0.0) + 1.0).abs() < 1e-9, "the sine");
         // Morphing half-way between the ramp up and the ramp down is flat.
-        assert!(lfo.value_at(0.25, 2, 0.5).abs() < 1e-9, "morphed");
+        let mut lfo = Lfo::new(sample_rate, 3);
+        let shape = lfo_shape(2, 0.5);
+        assert_eq!(shape.morph, Some((Wave::SawDown, 0.5)));
+        assert!(lfo.step(&tempo, 0, shape)[0].abs() < 1e-9, "morphed");
+        // The random waves ignore the morph.
+        assert_eq!(lfo_shape(5, 0.5).morph, None);
+        assert_eq!(lfo_shape(6, 0.5).morph, None);
     }
 }

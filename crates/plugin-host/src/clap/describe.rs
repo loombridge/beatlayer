@@ -20,6 +20,24 @@ pub(crate) fn role<'a>(features: impl Iterator<Item = &'a std::ffi::CStr>) -> De
     }
 }
 
+/// The IDs of the parameters the plug-in marks modulatable: it takes
+/// modulation as events of its own for them (the modulation spec, R10).
+pub(crate) fn modulatable(plugin: &mut PluginMainThreadHandle<'_>) -> Vec<u32> {
+    let Some(ext) = plugin.get_extension::<PluginParams>() else {
+        return Vec::new();
+    };
+    let mut buffer = ParamInfoBuffer::new();
+    let mut ids = Vec::new();
+    for index in 0..ext.count(plugin) {
+        if let Some(info) = ext.get_info(plugin, index, &mut buffer)
+            && info.flags.contains(ParamInfoFlags::IS_MODULATABLE)
+        {
+            ids.push(info.id.get());
+        }
+    }
+    ids
+}
+
 /// The plug-in's parameters that a person can set and automation can move:
 /// every one that is automatable, not hidden, not read-only, and has a
 /// range. Each is a continuous value over its range, or a whole number if

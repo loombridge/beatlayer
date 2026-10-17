@@ -196,6 +196,124 @@ fn screen_readers_read_track_names_clip_names_and_fader_values() {
     assert_eq!(fader.value(), Some("-inf dB"));
 }
 
+// Spec: modulation R7. A modulated control's value reads as its base, with
+// the value it plays, in one wording for a fader, the header's field, a
+// send, pan and a device's knob.
+#[test]
+fn a_modulated_control_reads_its_base_and_played_value() {
+    use bl_devices::testing::{self, UTILITY_GAIN};
+    use bl_model::{AutomationTarget, MixerParam};
+    use bl_shell::mixer_controls::{db_gain, send_text};
+    use bl_ui::device_panel::param_control_id;
+
+    let (mut h, tracks, _) = set();
+    let t = tracks[2];
+    let ret = h.shell.editor().document().returns().next().unwrap();
+    h.shell.set_device_types(testing::device_types());
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [t] }))
+        .unwrap();
+    let utility = testing::utility_type();
+    let added: bl_shell::device_commands::DeviceAdded = serde_json::from_value(
+        h.shell
+            .run(
+                "device.add",
+                json!({ "device": { "kind": utility.kind, "name": utility.name, "role": utility.role } }),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    for (id, args) in [
+        (
+            "mixer.set_volume",
+            json!({ "track": t, "volume": db_gain(-6.0) }),
+        ),
+        ("mixer.set_pan", json!({ "track": t, "pan": 0.0 })),
+        (
+            "mixer.set_send",
+            json!({ "track": t, "to": ret, "level": 0.5 }),
+        ),
+        (
+            "device.set_param",
+            json!({ "device": added.device, "param": UTILITY_GAIN, "value": db_gain(-6.0) }),
+        ),
+    ] {
+        h.shell.run(id, args).unwrap();
+    }
+    let device = |param| AutomationTarget::Device {
+        device: added.device,
+        param,
+    };
+    let mixer = |param| AutomationTarget::Mixer { param };
+    let played = [
+        (mixer(MixerParam::Volume), db_gain(-6.0), db_gain(-12.0)),
+        (mixer(MixerParam::Pan), 0.0, 0.5),
+        (AutomationTarget::Send { to: ret }, 0.5, 0.25),
+        (device(UTILITY_GAIN), db_gain(-6.0), db_gain(-18.0)),
+    ];
+    h.shell.set_modulated(
+        played
+            .iter()
+            .map(|&(target, base, played)| {
+                let (node, param) = bl_engine::target_node(t, &target);
+                bl_engine::PlayedParam {
+                    node,
+                    param,
+                    base,
+                    played,
+                }
+            })
+            .collect(),
+    );
+    let value = |nodes: &BTreeMap<accesskit::NodeId, accesskit::Node>, id: Id| {
+        nodes[&id.accesskit_id()].value().map(str::to_owned)
+    };
+    let nodes = tree(&h.settle());
+    let send = |level: f64| format!("{} dB", send_text(level));
+    // The header's volume field, pan and send, and the Device View's knob.
+    assert_eq!(
+        value(&nodes, volume_field_id(Place::Header, t)).as_deref(),
+        Some("-6.0 dB, modulated to -12.0 dB")
+    );
+    assert_eq!(
+        value(&nodes, pan_id(Place::Header, t)).as_deref(),
+        Some("C, modulated to 25R")
+    );
+    assert_eq!(
+        value(&nodes, send_id(Place::Header, t, ret)),
+        Some(format!("{}, modulated to {}", send(0.5), send(0.25)))
+    );
+    assert_eq!(
+        value(&nodes, param_control_id(added.device, UTILITY_GAIN)).as_deref(),
+        Some("-6.0 dB, modulated to -18.0 dB")
+    );
+    // The Session View's fader, pan and send say the same.
+    h.shell
+        .run("view.toggle_session_arrangement", json!({}))
+        .unwrap();
+    let nodes = tree(&h.settle());
+    let strip = Place::Mixer(MixerOf::Session);
+    assert_eq!(
+        value(&nodes, fader_id(strip, t)).as_deref(),
+        Some("-6.0 dB, modulated to -12.0 dB")
+    );
+    assert_eq!(
+        value(&nodes, pan_id(strip, t)).as_deref(),
+        Some("C, modulated to 25R")
+    );
+    assert_eq!(
+        value(&nodes, send_id(strip, t, ret)),
+        Some(format!("{}, modulated to {}", send(0.5), send(0.25)))
+    );
+    // A control that plays its base reads as before.
+    h.shell.set_modulated(Vec::new());
+    let nodes = tree(&h.settle());
+    assert_eq!(
+        value(&nodes, fader_id(strip, t)).as_deref(),
+        Some("-6.0 dB")
+    );
+}
+
 // Spec: accessibility R2.
 #[test]
 fn the_screen_reader_follows_the_keyboard_focus() {
@@ -1021,6 +1139,53 @@ fn a_sidechained_device(h: &mut Harness) {
         .unwrap();
 }
 
+/// A Squeeze, whose display has views, on the selected audio track.
+fn a_squeeze(h: &mut Harness) {
+    h.shell.set_device_types(bl_devices::device_types());
+    let track = h.shell.editor().document().top_level().nth(2).unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let types = bl_devices::device_types();
+    let t = types
+        .iter()
+        .find(|t| t.name == "Squeeze")
+        .expect("the compressor is offered");
+    h.shell
+        .run(
+            "device.add",
+            json!({ "device": {
+                "kind": t.kind, "name": t.name, "role": t.role, "sidechain": t.sidechain,
+            } }),
+        )
+        .unwrap();
+    h.shell
+        .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
+/// The framework's test effects on audio track 3, the selected track, no
+/// device selected: a device with an expanded part, so it has the expand
+/// toggle (WP-5.42).
+fn an_expandable_device(h: &mut Harness) {
+    h.shell
+        .set_device_types(bl_devices::testing::device_types());
+    let track = h.shell.editor().document().top_level().nth(2).unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let t = bl_devices::testing::effects_type();
+    h.shell
+        .run(
+            "device.add",
+            json!({ "device": { "kind": t.kind, "name": t.name, "role": t.role } }),
+        )
+        .unwrap();
+    h.shell
+        .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
 /// A multisampler with a layer on a MIDI track, selected, its zone editor
 /// open (WP-5.13).
 fn a_multisampler(h: &mut Harness) {
@@ -1399,6 +1564,10 @@ fn paths() -> BTreeMap<&'static str, Path> {
             ),
         ),
         (
+            "settings.set_temporary_folder",
+            settings("file-folder", nothing, "Browse", Key::Enter),
+        ),
+        (
             "settings.set_warp_recorded_audio",
             settings(
                 "record-warp-launch",
@@ -1480,6 +1649,7 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("transport.state", Exception(Query)),
         ("settings.state", Exception(Query)),
         ("view.state", Exception(Query)),
+        ("modulation.state", Exception(Query)),
         ("audio.status", Exception(Query)),
         ("audio.devices", Exception(Query)),
         ("midi.ports", Exception(Query)),
@@ -1759,6 +1929,10 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "device.save_preset",
             main(a_device, device_view, "Save Preset", Key::Enter),
         ),
+        (
+            "device.expand",
+            main(an_expandable_device, device_view, "Expand", Key::Enter),
+        ),
         ("device.set_show_preset_name", Exception(device_menu)),
         ("device.save_default_preset", Exception(device_menu)),
         (
@@ -1965,6 +2139,12 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ),
         ("device_view.state", Exception(Query)),
         ("device.parameters", Exception(Query)),
+        ("device.display", Exception(Query)),
+        // A display's view buttons (device framework R38): Enter on one.
+        (
+            "device.set_display_view",
+            main(a_squeeze, device_view, "Activity view", Key::Enter),
+        ),
         // Floating device windows (WP-2.5b): Float and Dock are
         // `device.set_floating`, on a key and in the device's menu.
         ("device.windows", Exception(Query)),

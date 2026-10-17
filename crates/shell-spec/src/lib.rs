@@ -41,6 +41,8 @@
 //!   (`midi.import_file`, `midi.export_clip`, WP-2.21).
 //! - [`midi_io`]: MIDI ports and the computer MIDI keyboard (`midi.ports`,
 //!   `midi.set_port`, `midi.computer_keyboard_*`, WP-2.2).
+//! - [`modulation`]: what a track's clips modulate (`modulation.state`,
+//!   WP-5.9).
 //! - [`perception`]: how agents hear and see the set (`perception.*`,
 //!   WP-1.16): audio previews, analysis, and view captures.
 //!
@@ -63,6 +65,7 @@ pub mod menus;
 pub mod midi_files;
 pub mod midi_io;
 pub mod mixer_view;
+pub mod modulation;
 pub mod multisampler;
 pub mod notes;
 pub mod perception;
@@ -102,5 +105,6 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     session_record::register(registry)?;
     plugins::register(registry)?;
     settings::register(registry)?;
+    modulation::register(registry)?;
     perception::register(registry)
 }

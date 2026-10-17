@@ -63,14 +63,17 @@ mod changes;
 mod clip;
 mod command;
 mod device;
+pub mod device_display;
 pub mod device_layout;
 mod document;
 mod editor;
 mod error;
+pub mod fader;
 mod ids;
 mod launch;
 mod layers;
 mod metronome;
+pub mod modulation;
 pub mod param;
 pub mod registry;
 mod repr;
@@ -93,6 +96,7 @@ pub use device::{
     Device, DeviceKind, DeviceRole, DeviceWindows, PluginFormat, PluginState, Sidechain,
     WindowFrame,
 };
+pub use device_display::{DeviceDisplay, DisplayMarker, DisplayReading, DisplaySeries};
 pub use device_layout::DeviceLayout;
 pub use document::{ArrangementLoop, Document, Settings};
 pub use editor::{EditError, Editor};

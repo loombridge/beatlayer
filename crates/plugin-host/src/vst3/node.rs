@@ -16,13 +16,17 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering::Relaxed};
 
 use bl_core::time::TICKS_PER_QUARTER;
-use bl_engine::{Block, Node, NodeEvent, NoteEvent, NoteKind, ParamValue};
+use bl_engine::{
+    AutomationList, Block, Node, NodeData, NodeEvent, NoteEvent, NoteKind, ParamValue,
+};
+use bl_model::ParamId;
 use rtrb::{Consumer, Producer, RingBuffer};
 use vst3::Steinberg::Vst::*;
 use vst3::Steinberg::*;
 use vst3::{Class, ComPtr, ComRef, ComWrapper};
 
 use super::ParamMap;
+use crate::drive::Driver;
 
 /// The most channels the node feeds across a plug-in's buses.
 pub(crate) const MAX_CHANNELS: usize = 8;
@@ -50,6 +54,9 @@ pub(crate) struct Status {
     pub(crate) hand_back: AtomicBool,
     /// The plug-in failed a call on the audio thread.
     pub(crate) failed: AtomicBool,
+    /// The host says the device is silent while the node has no plug-in:
+    /// its plug-in failed elsewhere, in an offline render (WP-4.21).
+    pub(crate) silent: AtomicBool,
     /// Changes dropped because a queue was full.
     pub(crate) dropped: AtomicU64,
 }
@@ -87,6 +94,9 @@ pub(crate) struct Active {
     /// The device's plain values, sent to it at the first frame of its
     /// next block.
     pub(crate) pending: Vec<(u32, f64)>,
+    /// Its parameters' automation and modulation, played into it (the
+    /// modulation spec, R10).
+    pub(crate) drive: Driver,
 }
 
 /// A parameter change point in a block: `offset` frames into it.
@@ -510,6 +520,8 @@ pub struct Vst3Node {
     context: ProcessContext,
     /// Changes kept for the plug-in while it isn't running.
     pending: Vec<(u32, ParamValue)>,
+    /// The automation and clip modulation the compiler sent.
+    automation: Option<NodeData>,
     /// Frames processed since the plug-in was activated.
     steady: u64,
     max_frames: usize,
@@ -551,6 +563,7 @@ impl Vst3Node {
             // fills in what the plug-in reads.
             context: unsafe { std::mem::zeroed() },
             pending: Vec::with_capacity(PENDING_CAPACITY),
+            automation: None,
             steady: 0,
             max_frames,
         };
@@ -708,30 +721,57 @@ impl Vst3Node {
 // it, the audio thread runs it, and the main thread's ends are the queues.
 unsafe impl Send for Vst3Node {}
 
-/// Fills a block's parameter changes for the plug-in: the values kept while
-/// it wasn't running at the first frame, then the block's changes on
-/// theirs, as normalized values over each parameter's plain range, with
-/// each value applied kept for `applied`, so the main thread can give the
-/// controller the same values (R5). Free of the node so it borrows only
-/// what it needs, and allocates nothing.
+/// Fills a block's parameter changes for the plug-in: the values
+/// automation and modulation give the parameters they drive, on their
+/// frames (the modulation spec, R10); the values kept while it wasn't
+/// running at the first frame, then the block's changes on theirs, those of
+/// driven parameters only moving their controls; as normalized values over
+/// each parameter's plain range. Each value applied from the document is
+/// kept for `applied`, so the main thread can give the controller the same
+/// values (R5). Free of the node so it borrows only what it needs, and
+/// allocates nothing.
 fn fill_params(
     incoming: &ComWrapper<HostParams>,
     pending: &mut Vec<(u32, ParamValue)>,
     applied: &mut Producer<(u32, f64)>,
-    params: &[ParamMap],
+    active: &mut Active,
+    list: Option<&AutomationList>,
     block: &Block<'_>,
     status: &Status,
 ) {
     incoming.reset();
+    let Active { params, drive, .. } = active;
+    let params: &[ParamMap] = params;
+    let plain_of = |map: &ParamMap, value: ParamValue| match value {
+        ParamValue::Set(value) => value,
+        ParamValue::Default => map.default,
+    };
+    let transport = block.transport();
+    drive.prepare(list, transport);
+    for &(id, value) in pending.iter() {
+        if let Some(map) = params.iter().find(|map| map.id == id) {
+            drive.set_control(id, plain_of(map, value));
+        }
+    }
+    for event in block.events() {
+        if let Some(map) = params.iter().find(|map| map.id == event.param.0) {
+            drive.set_control(event.param.0, plain_of(map, event.value));
+        }
+    }
+    drive.play(list, transport, block.frames(), |play| {
+        if let Some(map) = params.iter().find(|map| map.id == play.id) {
+            let offset = i32::try_from(play.offset).unwrap_or(i32::MAX);
+            incoming.push(play.id, offset, map.normalized(play.played));
+        }
+    });
     for &(id, value) in pending.iter() {
         let Some(map) = params.iter().find(|map| map.id == id) else {
             continue;
         };
-        let plain = match value {
-            ParamValue::Set(value) => value,
-            ParamValue::Default => map.default,
-        };
-        let normalized = map.normalized(plain);
+        if drive.is_driven(id) {
+            continue;
+        }
+        let normalized = map.normalized(plain_of(map, value));
         incoming.push(id, 0, normalized);
         report(applied, status, id, normalized);
     }
@@ -740,12 +780,11 @@ fn fill_params(
         let Some(map) = params.iter().find(|map| map.id == event.param.0) else {
             continue;
         };
-        let plain = match event.value {
-            ParamValue::Set(value) => value,
-            ParamValue::Default => map.default,
-        };
+        if drive.is_driven(event.param.0) {
+            continue;
+        }
         let offset = i32::try_from(event.offset).unwrap_or(i32::MAX);
-        let normalized = map.normalized(plain);
+        let normalized = map.normalized(plain_of(map, event.value));
         incoming.push(event.param.0, offset, normalized);
         report(applied, status, event.param.0, normalized);
     }
@@ -779,7 +818,7 @@ impl Node for Vst3Node {
             for event in block.events() {
                 self.keep(event.param.0, event.value);
             }
-            if self.dead {
+            if self.dead || self.status.silent.load(Relaxed) {
                 silence(block);
             }
             return;
@@ -803,12 +842,17 @@ impl Node for Vst3Node {
 
         // The changes and the notes the plug-in reads, on their frames.
         {
-            let active = self.active.as_ref().expect("the check above");
+            let active = self.active.as_mut().expect("the check above");
+            let list = self
+                .automation
+                .as_ref()
+                .and_then(|data| data.downcast_ref::<AutomationList>());
             fill_params(
                 &self.incoming,
                 &mut self.pending,
                 &mut self.applied,
-                &active.params,
+                active,
+                list,
                 block,
                 &self.status,
             );
@@ -899,6 +943,18 @@ impl Node for Vst3Node {
         // block, at its first frame.
         for event in events {
             self.keep(event.param.0, event.value);
+        }
+    }
+
+    fn receive_data(&mut self, data: NodeData) {
+        if data.downcast_ref::<AutomationList>().is_some() {
+            self.automation = Some(data);
+        }
+    }
+
+    fn modulated(&self, report: &mut dyn FnMut(ParamId, f64, f64)) {
+        if let Some(active) = &self.active {
+            active.drive.modulated(report);
         }
     }
 

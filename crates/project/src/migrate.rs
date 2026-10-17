@@ -18,7 +18,7 @@ use serde_json::{Map, Value};
 use crate::error::LoadError;
 
 /// The schema version this build writes, and the newest it can read.
-pub const SCHEMA_VERSION: u32 = 5;
+pub const SCHEMA_VERSION: u32 = 6;
 
 /// The oldest schema version this build can read, through [`MIGRATIONS`].
 pub const OLDEST_SCHEMA_VERSION: u32 = SCHEMA_VERSION - MIGRATIONS.len() as u32;
@@ -54,6 +54,15 @@ pub const MIGRATIONS: &[Migration] = &[
     },
     Migration {
         from: 4,
+        summary: "a clip envelope's values are modulation (a share of the parameter's travel, or \
+                  of a level's position) rather than parameter units added to the value; a set \
+                  saved before it keeps the old values in the JSON, and the loader's caller \
+                  turns them with the controls' values and the devices' descriptions \
+                  (`SetInfo::before_relative_modulation`; the modulation spec, R5)",
+        apply: Ok,
+    },
+    Migration {
+        from: 5,
         summary: "a device may hold a multisampler's layers, and the set may save what each \
                   multisampler's views show; a set saved before them opens with no layers and \
                   the views a new device has (the multisampler spec, R1 and R2), so the saved \

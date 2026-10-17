@@ -509,27 +509,30 @@ impl MultisamplerUi {
         ui: &mut Ui,
         shell: &Shell,
         theme: &Theme,
-        frame: &DeviceFrame,
-        state: &MultisamplerState,
-        panel: &DevicePanel,
+        (frame, state): (&DeviceFrame, &MultisamplerState),
+        display: Option<&bl_model::DeviceDisplay>,
         body: Rect,
+        played: &dyn Fn(bl_model::ParamId) -> Option<(f64, f64)>,
         events: &mut Vec<UiEvent>,
     ) {
+        let Some(panel) = frame.panel.as_ref() else {
+            return;
+        };
         match state.view.tab {
             SamplerTab::Sample => {
-                self.sample_tab(ui, shell, theme, frame, state, panel, body, events)
+                self.sample_tab(ui, shell, theme, frame, state, panel, body, events);
             }
             SamplerTab::FilterGlobal => {
                 // The envelope and output bands of the layout.
-                let mut shown = panel.clone();
-                if let bl_model::device_layout::LayoutNode::Row(nodes) =
-                    &panel.description.layout.root
+                let mut shown = frame.clone();
+                if let (bl_model::device_layout::LayoutNode::Row(nodes), Some(shown_panel)) =
+                    (&panel.description.layout.root, shown.panel.as_mut())
                 {
                     let keep: Vec<_> = nodes.iter().skip(2).cloned().collect();
-                    shown.description.layout =
+                    shown_panel.description.layout =
                         bl_model::DeviceLayout::new(bl_model::device_layout::LayoutNode::Row(keep));
                 }
-                crate::device_panel::show(ui, theme, frame, &shown, body, events);
+                crate::device_panel::show(ui, theme, &shown, display, body, played, events);
             }
             SamplerTab::PitchOsc | SamplerTab::Modulation | SamplerTab::Midi => {
                 let name = match state.view.tab {
@@ -1104,6 +1107,7 @@ impl MultisamplerUi {
             .map(|(i, name)| Choice {
                 label: (*name).to_owned(),
                 value: i,
+                leds: crate::widgets::NO_LEDS,
             })
             .collect();
         let rect = Rect::from_min_size(pos2(x, top), vec2(74.0, 18.0));
@@ -1216,6 +1220,7 @@ impl MultisamplerUi {
             .map(|(label, value)| Choice {
                 label: (*label).to_owned(),
                 value: *value,
+                leds: crate::widgets::NO_LEDS,
             })
             .collect();
         let rect = Rect::from_min_size(pos2(x, top + row), vec2(110.0, 18.0));
@@ -1249,6 +1254,7 @@ impl MultisamplerUi {
             .map(|(label, value)| Choice {
                 label: (*label).to_owned(),
                 value: *value,
+                leds: crate::widgets::NO_LEDS,
             })
             .collect();
         let rect = Rect::from_min_size(pos2(x, top + row), vec2(140.0, 18.0));

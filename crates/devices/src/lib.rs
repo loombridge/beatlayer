@@ -31,29 +31,64 @@
 
 pub mod compressor;
 pub mod delay;
+pub mod dice;
 pub mod eq;
 mod framework;
+pub mod hold;
 pub mod kit;
+pub mod lfo;
+pub mod lift;
 pub mod limiter;
+mod midi_fx;
 pub mod multisampler;
 pub mod polysynth;
+pub mod remap;
 pub mod reverb;
 pub mod sampler;
+pub mod stack;
 pub mod testing;
+pub mod touch;
 pub mod utility;
 
 pub use compressor::{COMPRESSOR, Squeeze, compressor_type};
 pub use delay::{DELAY, delay_type};
+pub use dice::{DICE, dice_type};
 pub use eq::{Contour, EQ, eq_type};
 pub use framework::{Audio, NativeDevice, NativeNode, ParamBank, add};
+pub use hold::{HOLD, hold_type};
 pub use kit::{KitFactory, KitHost};
+pub use lfo::{Lfo, Rate, Shape, Stereo, Wave};
+pub use lift::{LIFT, lift_type};
 pub use limiter::{Brickwall, limiter_type};
 pub use multisampler::{MULTISAMPLER, Multisampler, multisampler_type};
 pub use polysynth::{POLYSYNTH, PolySynth, polysynth_type};
+pub use remap::{REMAP, remap_type};
 pub use reverb::{REVERB, reverb_type};
 pub use sampler::{Sampler, sampler_type};
+pub use stack::{STACK, stack_type};
+pub use touch::{TOUCH, touch_type};
 
 use bl_engine::{DeviceType, Registry};
+use bl_model::{DeviceDescription, DeviceDisplay, DeviceId, OrdMap, ParamId};
+
+/// The display of the native device `device_type`, if its type draws one
+/// from its parameters and the data its node publishes (the device
+/// framework spec, R36): `values` are the device's set values and `data` the
+/// newest data its node published, if an engine runs.
+#[must_use]
+pub fn display(
+    device_type: &str,
+    device: DeviceId,
+    description: &DeviceDescription,
+    values: &OrdMap<ParamId, f64>,
+    data: Option<&[f32]>,
+) -> Option<DeviceDisplay> {
+    match device_type {
+        EQ => Some(eq::display(device, description, values, data)),
+        COMPRESSOR => Some(compressor::display(device, description, values, data)),
+        _ => None,
+    }
+}
 
 /// Adds Beatlayer's native devices to `registry`: the compressor, the
 /// polysynth, the limiter, the delay, the reverb, Utility, the EQ and the
@@ -68,6 +103,12 @@ pub fn register(registry: &mut Registry) {
     eq::register(registry);
     sampler::register(registry);
     multisampler::register(registry);
+    lift::register(registry);
+    touch::register(registry);
+    dice::register(registry);
+    remap::register(registry);
+    stack::register(registry);
+    hold::register(registry);
 }
 
 /// The native device types Beatlayer ships, for the browser and the shell:
@@ -78,6 +119,19 @@ pub fn device_types() -> Vec<DeviceType> {
     let mut registry = Registry::empty();
     register(&mut registry);
     registry.device_types()
+}
+
+/// Turns the clip envelopes of a set saved before relative modulation into
+/// modulation that plays what they played (the modulation spec, R5), with
+/// Beatlayer's native devices' descriptions. A plug-in's parameters have
+/// none here: its envelopes played nothing before, and keep their values,
+/// clamped.
+pub fn relative_clip_envelopes(document: &mut bl_model::Document) {
+    let types = device_types();
+    document.relative_clip_envelopes(&|device, param| {
+        let kind = types.iter().find(|t| t.kind == device.kind)?;
+        kind.description.param(param).cloned()
+    });
 }
 
 /// A [`KitHost`] with the kit plug-ins compiled into Beatlayer: its

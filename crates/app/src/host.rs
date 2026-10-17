@@ -1304,6 +1304,15 @@ impl Host {
                     ));
                 }
             }
+            Effect::PickTemporaryFolder => {
+                let dialog = rfd::FileDialog::new().set_title("Temporary Folder");
+                if let Some(path) = dialog.pick_folder() {
+                    self.invoke(&Invocation::new(
+                        bl_shell::commands::SETTINGS_SET_TEMPORARY_FOLDER,
+                        json!({ "path": path.to_string_lossy() }),
+                    ));
+                }
+            }
             Effect::OpenSettings => self.open_settings_window(event_loop),
             Effect::CloseSettings => {
                 self.settings = None;
@@ -1317,7 +1326,7 @@ impl Host {
                         .set_fullscreen(on.then_some(Fullscreen::Borderless(None)));
                 }
             }
-            Effect::RenameDevice(_) => {
+            Effect::RenameDevice(_) | Effect::RenameTrack(_) => {
                 if let Some(main) = &self.main {
                     self.main_ui.apply_effect(&main.ctx, &effect);
                     main.window.request_redraw();

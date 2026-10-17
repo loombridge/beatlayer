@@ -75,6 +75,7 @@ mod layers;
 mod metronome;
 pub mod modulation;
 pub mod param;
+pub mod rack;
 pub mod registry;
 mod repr;
 mod routing;
@@ -101,7 +102,9 @@ pub use device_layout::DeviceLayout;
 pub use document::{ArrangementLoop, Document, Settings};
 pub use editor::{EditError, Editor};
 pub use error::ModelError;
-pub use ids::{ClipId, ContentHash, DeviceId, ParamId, ParseContentHashError, SceneId, TrackId};
+pub use ids::{
+    ChainId, ClipId, ContentHash, DeviceId, ParamId, ParseContentHashError, SceneId, TrackId,
+};
 /// The persistent collections the document's public types hold.
 pub use imbl::{OrdMap, Vector};
 pub use launch::{ClipLaunch, LaunchMode, LaunchQuantization, LaunchSettings};
@@ -112,6 +115,7 @@ pub use layers::{
 };
 pub use metronome::{CountIn, MetronomeRhythm, MetronomeSettings, MetronomeSound};
 pub use param::{DeviceDescription, ParamDescriptor, ParamKind, ParamUnit};
+pub use rack::{CHAIN_COLOURS, Chain, ChainMixer, DevicePlace, RackKind};
 pub use repr::{SavedSong, saved_schema};
 pub use scene::{DEFAULT_SCENE_COUNT, SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
 pub use track::{

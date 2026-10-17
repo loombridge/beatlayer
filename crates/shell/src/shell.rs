@@ -1166,7 +1166,7 @@ impl Shell {
             .editor
             .document()
             .tracks()
-            .flat_map(|track| track.devices())
+            .flat_map(|track| track.devices_deep())
             .filter(|device| {
                 matches!(&device.kind, DeviceKind::Native { device_type } if device_type == STACK)
                     && device.params.get(&LEARN).is_some_and(|on| *on >= 0.5)
@@ -1578,7 +1578,7 @@ impl Shell {
             .flat_map(|track| {
                 let label = crate::routing::track_label(doc, track.id());
                 track
-                    .devices()
+                    .devices_deep()
                     .filter(|d| self.kit.handles(&d.kind) || crate::plugins::is_clap(doc, d.id))
                     .map(|d| {
                         let listed = if self.kit.handles(&d.kind) {
@@ -1862,6 +1862,7 @@ impl Shell {
                             sidechain: false,
                         },
                         track,
+                        chain: None,
                         index,
                     }),
                 )?)
@@ -1881,6 +1882,7 @@ impl Shell {
                 let plugin_id = match &device_type.kind {
                     bl_model::DeviceKind::Plugin { plugin_id, .. } => plugin_id.clone(),
                     bl_model::DeviceKind::Native { device_type } => device_type.clone(),
+                    bl_model::DeviceKind::Rack { kind } => kind.name().to_owned(),
                 };
                 Ok(to_value(&plugin_ids::PluginLoaded {
                     device: added.device,
@@ -1920,6 +1922,7 @@ impl Shell {
                             sidechain: false,
                         },
                         track,
+                        chain: None,
                         index,
                     }),
                 )?)
@@ -1939,6 +1942,7 @@ impl Shell {
                 let plugin_id = match &device_type.kind {
                     bl_model::DeviceKind::Plugin { plugin_id, .. } => plugin_id.clone(),
                     bl_model::DeviceKind::Native { device_type } => device_type.clone(),
+                    bl_model::DeviceKind::Rack { kind } => kind.name().to_owned(),
                 };
                 Ok(to_value(&plugin_ids::PluginLoaded {
                     device: added.device,

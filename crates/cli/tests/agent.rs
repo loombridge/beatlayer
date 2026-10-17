@@ -1570,6 +1570,145 @@ fn an_agent_builds_a_multisample_by_command_and_reads_it_back() {
     assert_eq!(layers(&mut client)["count"], 3);
 }
 
+// Spec: racks R17. An agent builds a nested rack by command ID, edits its
+// chains and groups and ungroups devices, and reads each result back
+// through the query tool's `device` object, chains and their IDs included.
+#[test]
+fn an_agent_builds_and_reads_back_a_nested_rack() {
+    let mut client = Client::new(InProcess::new(Agent::headless(false), Shell::headless()));
+    client.initialize("racks").unwrap();
+    let audio = default_tracks(&mut client)[2];
+    let native = |name: &str| {
+        json!({
+            "id": {"$new": name}, "name": name, "enabled": true, "params": [],
+            "kind": { "native": { "device_type": "test.through" } },
+        })
+    };
+
+    // A rack of two chains, the second holding a device and a rack of its
+    // own, and the chains' mixers, in one call.
+    let built = call(
+        &mut client,
+        "run",
+        json!({ "label": "Build a rack", "commands": [
+            { "command": "device.insert", "args": { "track": audio, "index": 0, "device": {
+                "id": {"$new": "outer"}, "name": "Layers", "enabled": true, "params": [],
+                "kind": { "rack": { "kind": "audio_effect" } },
+                "chains": [
+                    { "id": {"$new": "dry"}, "name": "Dry", "devices": [] },
+                    { "id": {"$new": "wet"}, "name": "Wet", "devices": [
+                        native("Delay"),
+                        {
+                            "id": {"$new": "inner"}, "name": "Inner", "enabled": true, "params": [],
+                            "kind": { "rack": { "kind": "audio_effect" } },
+                            "chains": [{ "id": {"$new": "deep"}, "name": "Deep", "devices": [] }],
+                        },
+                    ] },
+                ],
+            } } },
+            { "command": "chain.set_gain", "args": { "chain": {"$ref": "wet"}, "volume": 0.5 } },
+            { "command": "chain.set_pan", "args": { "chain": {"$ref": "wet"}, "pan": -0.5 } },
+            { "command": "chain.set_colour", "args": { "chain": {"$ref": "dry"}, "colour": 7 } },
+            { "command": "chain.set_solo", "args": { "chain": {"$ref": "dry"}, "solo": true } },
+        ] }),
+    );
+    assert_eq!(built["ran"], 5);
+    let ids = &built["ids"];
+    let id = |name: &str| {
+        ids[name]
+            .as_u64()
+            .unwrap_or_else(|| panic!("no `{name}`: {ids}"))
+    };
+    let (outer, dry, wet, inner, deep, delay) = (
+        id("outer"),
+        id("dry"),
+        id("wet"),
+        id("inner"),
+        id("deep"),
+        id("Delay"),
+    );
+
+    // The rack reads back with its chains, their mixers and devices, racks
+    // inside racks included.
+    let rack = call(
+        &mut client,
+        "query",
+        json!({ "id": outer, "detail": "full" }),
+    );
+    let chains = rack["chains"].as_array().unwrap();
+    assert_eq!(chains.len(), 2);
+    assert_eq!(chains[0]["id"].as_u64(), Some(dry));
+    assert_eq!(chains[0]["name"], "Dry");
+    assert_eq!(chains[0]["colour"], 7);
+    assert_eq!(chains[0]["mixer"]["solo"], true);
+    assert_eq!(chains[1]["mixer"]["volume"], 0.5);
+    assert_eq!(chains[1]["mixer"]["pan"], -0.5);
+    let nested = &chains[1]["devices"][1];
+    assert_eq!(nested["id"].as_u64(), Some(inner));
+    assert_eq!(nested["chains"][0]["id"].as_u64(), Some(deep));
+    assert_eq!(
+        rack["saved"]["chains"]["total"], 2,
+        "the saved form pages chains"
+    );
+
+    // A chain is read by its ID, with the rack and track it belongs to, and
+    // so is a device inside a rack.
+    let chain = call(&mut client, "query", json!({ "id": deep }));
+    assert_eq!(chain["name"], "Deep");
+    assert_eq!(chain["rack"].as_u64(), Some(inner));
+    assert_eq!(chain["track"].as_u64(), Some(audio));
+    let device = call(&mut client, "query", json!({ "id": delay }));
+    assert_eq!(device["track"].as_u64(), Some(audio));
+
+    // Group and Ungroup by ID: the delay and the inner rack go in a rack of
+    // their own, in the wet chain, and come out again.
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "device.group", "args": { "devices": [delay, inner] } },
+        ] }),
+    );
+    let wet_chain = call(&mut client, "query", json!({ "id": wet }));
+    let devices = wet_chain["devices"].as_array().unwrap();
+    assert_eq!(devices.len(), 1);
+    let group = devices[0]["id"].as_u64().unwrap();
+    assert_eq!(
+        devices[0]["chains"][0]["devices"].as_array().unwrap().len(),
+        2
+    );
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "device.ungroup", "args": { "device": group } }] }),
+    );
+    let wet_chain = call(&mut client, "query", json!({ "id": wet }));
+    let order: Vec<u64> = wet_chain["devices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["id"].as_u64().unwrap())
+        .collect();
+    assert_eq!(order, [delay, inner]);
+
+    // Deleting a chain is destructive: an agent that isn't autonomous is
+    // refused, and the chain stays.
+    let refused = client
+        .call(
+            "run",
+            json!({ "commands": [{ "command": "chain.remove", "args": { "chain": dry } }] }),
+        )
+        .unwrap();
+    assert!(refused.is_error, "{}", refused.text);
+    assert!(refused.text.contains("destructive"), "{}", refused.text);
+    let rack = call(&mut client, "query", json!({ "id": outer }));
+    assert_eq!(rack["chains"].as_array().unwrap().len(), 2);
+
+    // Undo takes each step back whole.
+    let history = call(&mut client, "query", json!({ "path": "history" }));
+    assert_eq!(history["undo"]["items"][0], "racks: Ungroup");
+}
+
 // Spec: device-chains R34 and R35, device-framework R14 (WP-5.42): an agent
 // adds the framework's test effects, shows and hides its expanded part,
 // switches its own menu option, and reads all of it back, by command ID.

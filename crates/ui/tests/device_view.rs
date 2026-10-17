@@ -246,6 +246,7 @@ fn the_context_menu_lists_lives_items_and_names_later_packages() {
         "Duplicate",
         "Rename",
         "Delete",
+        "Group",
         "Fold",
         "Show Preset Name",
         "Save as Default Preset",
@@ -256,7 +257,6 @@ fn the_context_menu_lists_lives_items_and_names_later_packages() {
     assert!(item("Show Preset Name").label.starts_with('✔'));
     for (label, package) in [
         ("Edit Info Text", "WP-2.24"),
-        ("Group", "M5"),
         ("Compare: Switch to B", "M5"),
         ("Compare: Copy A to B", "M5"),
     ] {

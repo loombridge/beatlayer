@@ -12,7 +12,10 @@ use bl_engine::{
     Collector, Compiler, EngineConfig, Monitor, NodeKey, Processor, Registry, Sender, Update,
     channel,
 };
-use bl_model::{Command, Device, DeviceId, DeviceKind, Editor, ParamId, TrackId, TrackKind};
+use bl_model::{
+    Chain, ChainId, Command, Device, DeviceId, DeviceKind, DeviceRole, Editor, ParamId, RackKind,
+    TrackId, TrackKind,
+};
 
 pub const RATE: SampleRate = SampleRate::HZ_48000;
 
@@ -58,6 +61,95 @@ pub fn device(
         })
         .unwrap();
     id
+}
+
+/// Adds a rack of `kind` with `chains` empty chains at the end of a track's
+/// chain (WP-5.1).
+pub fn rack(
+    editor: &mut Editor,
+    track: TrackId,
+    kind: RackKind,
+    chains: usize,
+) -> (DeviceId, Vec<ChainId>) {
+    let mut rack = Device::rack(editor.new_id(), kind);
+    for n in 0..chains {
+        rack = rack.with_chain(Chain::new(editor.new_id(), format!("Chain {n}")));
+    }
+    let ids = (rack.id, rack.chains.iter().map(|c| c.id).collect());
+    let index = editor.document().track(track).unwrap().devices().len();
+    editor
+        .apply(Command::InsertDevice {
+            track,
+            index,
+            device: rack,
+        })
+        .unwrap();
+    ids
+}
+
+/// Adds a native device with `role` at the end of a rack's chain.
+pub fn in_chain(
+    editor: &mut Editor,
+    chain: ChainId,
+    device_type: &str,
+    role: DeviceRole,
+    params: &[(ParamId, f64)],
+) -> DeviceId {
+    let id = editor.new_id();
+    let mut device = Device::new(
+        id,
+        "",
+        DeviceKind::Native {
+            device_type: device_type.to_owned(),
+        },
+    )
+    .with_role(role);
+    for &(param, value) in params {
+        device.params.insert(param, value);
+    }
+    let index = editor.document().chain(chain).unwrap().devices.len();
+    editor
+        .apply(Command::InsertChainDevice {
+            chain,
+            index,
+            device,
+        })
+        .unwrap();
+    id
+}
+
+/// Adds an audio effect at the end of a rack's chain.
+pub fn effect_in(
+    editor: &mut Editor,
+    chain: ChainId,
+    device_type: &str,
+    params: &[(ParamId, f64)],
+) -> DeviceId {
+    in_chain(editor, chain, device_type, DeviceRole::AudioEffect, params)
+}
+
+/// Adds a rack of `kind` with `chains` empty chains at the end of a rack's
+/// chain.
+pub fn rack_in(
+    editor: &mut Editor,
+    chain: ChainId,
+    kind: RackKind,
+    chains: usize,
+) -> (DeviceId, Vec<ChainId>) {
+    let mut rack = Device::rack(editor.new_id(), kind);
+    for n in 0..chains {
+        rack = rack.with_chain(Chain::new(editor.new_id(), format!("Chain {n}")));
+    }
+    let ids = (rack.id, rack.chains.iter().map(|c| c.id).collect());
+    let index = editor.document().chain(chain).unwrap().devices.len();
+    editor
+        .apply(Command::InsertChainDevice {
+            chain,
+            index,
+            device: rack,
+        })
+        .unwrap();
+    ids
 }
 
 /// A DC device with `value`.

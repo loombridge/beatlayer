@@ -127,7 +127,7 @@ const DEVICE: &[Row] = &[
     ("C-DEVICE-005", "Edit Info Text", Pending(None)),
     SEPARATOR,
     ("C-DEVICE-006", "Delete", Key(&["S-EDIT-005"])),
-    ("C-DEVICE-007", "Group", Pending(Some("S-DEV-001"))),
+    ("C-DEVICE-007", "Group", Key(&["S-DEV-001"])),
     ("C-DEVICE-008", "Fold", Key(&["S-DEV-014"])),
     (IMP_14, "Float", Cmd(SET_FLOATING)),
     (
@@ -278,7 +278,6 @@ pub fn pending_package(row: &str) -> Option<&'static str> {
             Some("a package not planned yet (track colours)")
         }
         "C-TRACK-013" | "C-TRACK-014" => Some("a package not planned yet"),
-        "C-DEVICE-007" => Some("milestone M5 (racks)"),
         "C-DEVICE-010" | "C-DEVICE-011" => Some("milestone M5 (A/B compare)"),
         _ => None,
     }

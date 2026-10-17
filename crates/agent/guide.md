@@ -11,7 +11,7 @@ Every action a person can take in Beatlayer is a command in a registry, with an 
 | `list_commands` | See the areas (`track`, `clip`, `mixer`, `device`, `song`, `transport`, `set`, and more), then list an area's commands or search them by words. |
 | `describe_command` | Read a command's full description and argument schema before you run it for the first time. |
 | `run` | Run one command, or a batch of document edits as one undo step. Set `dry_run` to check without changing anything. |
-| `query` | Read the project: an overview, a track, clip, or device by ID or by a readable path. |
+| `query` | Read the project: an overview, a track, clip, device, scene, Session slot, or automation envelope by ID or by a readable path. |
 | `transport` | Play, stop, continue, and locate the song, move and switch the loop, and check whether the song plays here and where the playhead is. |
 | `schedule` | Run a command when the song reaches a bar and beat, on the exact sample. |
 | `checkpoint` | Save the song under a name, try something, and restore it if you don't like the result. |
@@ -84,6 +84,14 @@ You can't hear the speakers or see the screen, so three tools perceive for you. 
 - **`capture_view`** returns a view as a PNG image: `window`, `arrangement`, `session`, `mixer`, `browser`, `detail` (the Clip or Device View), or `settings`. The view must be on screen; if it isn't, the error names the command that shows it, which you can run, or capture `window` instead. Images are scaled to fit `max_size` pixels (1568 unless you say). Headless (`bl-cli mcp`) there's no window, and the tool says so.
 
 Listen before and after a change, and compare the numbers: for example, `preview` the chorus, turn the bass down, and `analyze` both previews.
+
+## Reading back what you set
+
+Anything you can set, you can read back. `query` with `detail: "full"` returns, under `saved`, everything the set file saves for a track, clip, device, or scene, in the file's own form (the song's settings are under `song`'s `saved`). That covers a track's mixer, crossfader assignment, routing and channels, Monitor, sends, automation and Session slots; a clip's markers, loop, gain, fades and envelopes; a device's parameters, sidechain and state; and the song's tempo map, time signatures, loop, punch, metronome and record switches, and launch quantisation. The default `summary` stays compact. A list comes a page at a time, and a list inside a list shows only its length: read it at the item's own path.
+
+Paths reach the rest: `scene 1` or `scene "Verse"` (scenes count from 1, as the Session View numbers them), `track "Bass" / slot 3` (a track's Session slot, with its clip), and `track "Bass" / automation` (the track's envelopes; `automation "volume"` or `automation "device 41 param 3"` reads one, its points a page at a time with `detail: "full"`).
+
+State the set doesn't save, such as whether the song is recording or what a window shows, is read with the read commands (`transport.state`, `mixer_view.state`, and the other `.state` commands).
 
 ## Good practice
 

@@ -688,6 +688,7 @@ dependencies = [
  "bl-media",
  "bl-model",
  "bl-plugin-host",
+ "bl-project",
  "bl-shell",
  "bl-test-vst3",
  "hound",

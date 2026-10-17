@@ -10,7 +10,7 @@
 
 A clip can carry envelopes of its own — *clip envelopes* — for the parameters of its track: a control of the track's mixer, one of its sends, or a parameter of a device in its chain. Each is a list of breakpoints joined by straight or curved segments, drawn and edited exactly as a track's automation envelopes are, over the clip's contents. A clip envelope isn't the track's automation: while its clip plays it *modulates* the parameter, changing the value the control or the track's own envelope gives, and while the clip doesn't play it contributes nothing. The Envelopes tab's Linked switch chooses whether the envelope follows the clip's own timeline or runs on its own: linked, it plays what the clip's contents play and repeats with the clip's loop, as its notes do; unlinked, it plays once from the clip's start, so an eight-bar fade can run over a one-bar loop.
 
-This spec covers the model, the saving, the commands, and the playback of clip envelopes in the engine, and the Clip View's editor for them. The Clip View's Envelopes tab, where a person draws and edits them, is R8 to R11. It leaves to other documents: a Session clip's automation envelopes, which define values rather than modulating them, and what they do to the Arrangement's automation for the same parameter (WP-3.12); the MIDI controller envelopes of a MIDI clip ("MIDI Ctrl"), which come with the MIDI input path; and an audio clip's envelopes, whose playback waits on warping (Phase 4), because an unwarped clip's contents run at the file's own speed: the document holds them, and nothing plays them.
+This spec covers the model, the saving, the commands, and the playback of clip envelopes in the engine, and the Clip View's editor for them. The Clip View's Envelopes tab, where a person draws and edits them, is R8 to R11. It leaves to other documents: a Session clip's automation envelopes, which define values rather than modulating them, and what they do to the Arrangement's automation for the same parameter (WP-3.12); the MIDI controller envelopes of a MIDI clip ("MIDI Ctrl"), in [midi-controller-data.md](midi-controller-data.md) (WP-2.29); and an audio clip's envelopes, whose playback waits on warping (Phase 4), because an unwarped clip's contents run at the file's own speed: the document holds them, and nothing plays them.
 
 ## Sources
 
@@ -37,7 +37,7 @@ This spec covers the model, the saving, the commands, and the playback of clip e
 
 ## Not built yet
 
-- The device chooser's "MIDI Ctrl" entry and its MIDI controller envelopes (they come with the MIDI input path), and its "Only show adjusted envelopes" filter.
+- The device chooser's "MIDI Ctrl" entry and its MIDI controller envelopes ([midi-controller-data.md](midi-controller-data.md), WP-2.29), and its "Only show adjusted envelopes" filter.
 - A keyboard path for the breakpoints (R11).
 - An audio clip's Envelopes tab: the Clip View shows MIDI clips only until the Sample Editor lands.
 

@@ -1,7 +1,7 @@
 # The random-pitch MIDI effect
 
 - **Status:** implemented (every rule below has a passing test)
-- **Work packages:** WP-5.30. The framework it sits on is WP-2.5 ([the native device framework](device-framework.md)), with the note rules of R26 to R30
+- **Work packages:** WP-5.30. The framework it sits on is WP-2.5 ([the native device framework](device-framework.md)), with the note rules of R30 to R34
 - **Parity-matrix row:** Devices: MIDI effects
 - **Checked against:** the Live 12 reference manual, chapter 30 "Live MIDI Effect Reference", section 30.6 "Random", read on 17 October 2026
 
@@ -16,7 +16,7 @@ Beatlayer's own name for the device is Dice; its look is the device framework's 
 | ID | Kind | Source | What it shows |
 |---|---|---|---|
 | S1 | Manual | Live 12 reference manual, chapter 30 "Live MIDI Effect Reference", section 30.6 "Random" | Chance is how likely a note is to be altered, like a dry/wet control; Choices, from 1 to 24, is how many pitches are possible, and the scale value is the spacing, together making the range; Mode Random picks pitches in no fixed order, Alt cycles through them in a fixed order, one step for each output at 100 % Chance, and at 0 % the input passes unchanged; Sign Add gives higher pitches, Sub lower, Bi both; three lights show whether a note was raised, left alone or lowered; Use Current Scale keeps pitches in the clip's scale |
-| S2 | Beatlayer | [The native device framework](device-framework.md), R26 to R30 | As in the transposing spec |
+| S2 | Beatlayer | [The native device framework](device-framework.md), R30 to R34 | As in the transposing spec |
 | S3 | Beatlayer | [The improvements](../05-improvements.md), rule G2, and the info view spec's D17 | Every parameter is automatable and has a written description |
 | S4 | Beatlayer | [The architecture](../02-architecture.md), "Real-time rules", and the Determinism requirement | No allocation, lock, or blocking call on the audio thread; random choices repeat in an offline render |
 

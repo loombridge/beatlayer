@@ -1,7 +1,7 @@
 # The chord MIDI effect
 
 - **Status:** implemented (every rule below has a passing test)
-- **Work packages:** WP-5.30. The framework it sits on is WP-2.5 ([the native device framework](device-framework.md)), with the note rules of R26 to R30
+- **Work packages:** WP-5.30. The framework it sits on is WP-2.5 ([the native device framework](device-framework.md)), with the note rules of R30 to R34
 - **Parity-matrix row:** Devices: MIDI effects
 - **Checked against:** the Live 12 reference manual, chapter 30 "Live MIDI Effect Reference", section 30.3 "Chord", read on 17 October 2026
 
@@ -16,7 +16,7 @@ Each note and the notes it made end together: when the key comes up, every added
 | ID | Kind | Source | What it shows |
 |---|---|---|---|
 | S1 | Manual | Live 12 reference manual, chapter 30 "Live MIDI Effect Reference", section 30.3 "Chord" | Up to six added pitches, each a Shift control from −36 to +36 semitones, in any order, each with a light that flashes when it sounds; a pitch can be used only once, and a repeat is deactivated; Learn takes a chord held on a MIDI controller, the first key being the root and the rest becoming the shifts in order; each shift has a Velocity from 1 to 200 per cent of the note's and a Chance from 0 to 100 per cent; Strum delays the added notes by up to 400 ms, playing the note first and then Shift 1 to 6 when positive and the reverse when negative; Tension makes a positive strum start slowly and speed up, a negative one the opposite; Crescendo ramps velocity up (positive) or down (negative) along the strum; Use Current Scale reads the shifts in scale degrees; the context menu has Play Duplicate Notes When Strumming and Send Per Note Events to Generated Notes |
-| S2 | Beatlayer | [The native device framework](device-framework.md), R26 to R30 | As in the transposing spec |
+| S2 | Beatlayer | [The native device framework](device-framework.md), R30 to R34 | As in the transposing spec |
 | S3 | Beatlayer | [The improvements](../05-improvements.md), rule G2, and the info view spec's D17 | Every parameter is automatable and has a written description |
 | S4 | Beatlayer | [The architecture](../02-architecture.md), "Real-time rules", and the Determinism requirement | No allocation, lock, or blocking call on the audio thread; random choices repeat in an offline render |
 

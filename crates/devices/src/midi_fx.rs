@@ -1,5 +1,5 @@
 //! What the native MIDI effects share (WP-5.30; the device framework spec,
-//! R26 to R30): a table of the notes each input note started, so an input note-off
+//! R30 to R34): a table of the notes each input note started, so an input note-off
 //! ends the notes it made and its per-note expressions follow them, a queue
 //! of notes held for later, and a note-off for everything still sounding
 //! when the device is switched off, moved or removed. Both are made with the
@@ -345,7 +345,7 @@ impl Router {
     }
 
     /// Writes a note-off at offset 0 for every sounding note, and forgets
-    /// them and the queue (the device framework spec, R28).
+    /// them and the queue (the device framework spec, R32).
     pub(crate) fn release(&mut self, out: &mut NoteBuffer) {
         for entry in &self.entries {
             if let (Some(made), true) = (entry.made, entry.sounding) {

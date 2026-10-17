@@ -1,7 +1,7 @@
 # The scale-map MIDI effect
 
 - **Status:** implemented (every rule below has a passing test)
-- **Work packages:** WP-5.30. The framework it sits on is WP-2.5 ([the native device framework](device-framework.md)), with the note rules of R26 to R30
+- **Work packages:** WP-5.30. The framework it sits on is WP-2.5 ([the native device framework](device-framework.md)), with the note rules of R30 to R34
 - **Parity-matrix row:** Devices: MIDI effects
 - **Checked against:** the Live 12 reference manual, chapter 30 "Live MIDI Effect Reference", section 30.7 "Scale", read on 17 October 2026
 
@@ -16,7 +16,7 @@ Beatlayer's own name for the device is Remap; its look is the device framework's
 | ID | Kind | Source | What it shows |
 |---|---|---|---|
 | S1 | Manual | Live 12 reference manual, chapter 30 "Live MIDI Effect Reference", section 30.7 "Scale" | A 13 by 13 note matrix maps incoming notes (columns) to outgoing notes (rows), starting from the root at the bottom left; Base and Scale Name choosers set the root and the scale, and are unavailable with Use Current Scale; the User scale lets squares be added and removed, and a removed note is no longer output; Transpose moves notes by up to 36 semitones; Fold, for the User scale, maps a note that would land more than six semitones from the original to the nearer octave; Lowest and Range limit which notes are remapped |
-| S2 | Beatlayer | [The native device framework](device-framework.md), R26 to R30 | As in the transposing spec |
+| S2 | Beatlayer | [The native device framework](device-framework.md), R30 to R34 | As in the transposing spec |
 | S3 | Beatlayer | [The improvements](../05-improvements.md), rule G2, and the info view spec's D17 | Every parameter is automatable and has a written description; a choice of one entry can't change, so the framework's rule G2 test refuses it |
 | S4 | Beatlayer | [The architecture](../02-architecture.md), "Real-time rules" | No allocation, lock, or blocking call on the audio thread |
 

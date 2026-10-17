@@ -1,7 +1,7 @@
 # The velocity MIDI effect
 
 - **Status:** implemented (every rule below has a passing test)
-- **Work packages:** WP-5.30. The framework it sits on is WP-2.5 ([the native device framework](device-framework.md)), with the note rules of R26 to R30
+- **Work packages:** WP-5.30. The framework it sits on is WP-2.5 ([the native device framework](device-framework.md)), with the note rules of R30 to R34
 - **Parity-matrix row:** Devices: MIDI effects
 - **Checked against:** the Live 12 reference manual, chapter 30 "Live MIDI Effect Reference", section 30.8 "Velocity", read on 17 October 2026
 
@@ -16,7 +16,7 @@ Beatlayer's own name for the device is Touch; its look is the device framework's
 | ID | Kind | Source | What it shows |
 |---|---|---|---|
 | S1 | Manual | Live 12 reference manual, chapter 30 "Live MIDI Effect Reference", section 30.8 "Velocity" | Velocities from 1 to 127 are reshaped along a curve; the grid's horizontal axis is the input range (Lowest and Range), the vertical axis the output range (Out Low and Out Hi); with Lowest and Out Low at 0 and Range and Out Hi at 127 the effect does nothing; Operation chooses note-on velocity, release velocity, or both; Mode: Clip holds velocities outside the range at its edges, Gate removes them and a light flashes, Fixed gives every note the Out Hi velocity; Random adds random movement to every velocity, bounded by the output range, and a grey area shows its spread; Drive pushes values toward the extremes, loud when positive and soft when negative; Compand expands outputs toward the curve's boundaries when positive and compresses them toward the middle when negative |
-| S2 | Beatlayer | [The native device framework](device-framework.md), R26 to R30 | As in the transposing spec |
+| S2 | Beatlayer | [The native device framework](device-framework.md), R30 to R34 | As in the transposing spec |
 | S3 | Beatlayer | [The improvements](../05-improvements.md), rule G2, and the info view spec's D17 | Every parameter is automatable and has a written description |
 | S4 | Beatlayer | [The architecture](../02-architecture.md), "Real-time rules", and the Determinism requirement | No allocation, lock, or blocking call on the audio thread; random choices repeat in an offline render |
 

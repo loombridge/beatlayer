@@ -28,7 +28,7 @@ pub trait NativeDevice: Send + 'static {
     /// Ends every note the device started and still holds, by writing a
     /// note-off for each at offset 0 into `out`, and forgets them. The engine
     /// calls it while the device is switched off, and on the first block after
-    /// the device was removed or moved (spec: device-framework R28). The
+    /// the device was removed or moved (spec: device-framework R32). The
     /// default writes nothing, for a device that starts no notes.
     fn release(&mut self, out: &mut NoteBuffer) {
         let _ = out;
@@ -98,7 +98,7 @@ impl<'a> Audio<'_, 'a> {
 
     /// Sends a note on from the stretch, at `note.offset` frames after its
     /// first frame (clamped into it): the notes go out in order of offset,
-    /// note-offs before note-ons on one frame (spec: device-framework R26).
+    /// note-offs before note-ons on one frame (spec: device-framework R30).
     /// A note past the out buffer's room is dropped and counted. Never
     /// allocates.
     pub fn send(&mut self, note: NoteEvent) {
@@ -147,6 +147,13 @@ impl<'a> Audio<'_, 'a> {
     #[must_use]
     pub fn song_position(&self) -> Frames {
         Frames(self.block.transport().position.get() + self.range.start as i64)
+    }
+
+    /// Whether the song is playing, so a tempo-synced device locks to the
+    /// song position.
+    #[must_use]
+    pub fn playing(&self) -> bool {
+        self.block.transport().playing
     }
 
     /// One channel's samples in the stretch.

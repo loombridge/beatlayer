@@ -143,7 +143,7 @@ fn a_held_note_ends_where_it_started() {
     }
 }
 
-// Spec: device-framework R28. Switching the device off ends its notes on the
+// Spec: device-framework R32. Switching the device off ends its notes on the
 // frame the block starts.
 #[test]
 fn switching_off_while_a_note_is_held_leaves_nothing_hanging() {
@@ -169,7 +169,7 @@ fn switching_off_while_a_note_is_held_leaves_nothing_hanging() {
     }
 }
 
-// Spec: device-framework R28. Deleting the device ends its notes.
+// Spec: device-framework R32. Deleting the device ends its notes.
 #[test]
 fn deleting_while_a_note_is_held_leaves_nothing_hanging() {
     for size in SIZES {
@@ -192,7 +192,7 @@ fn deleting_while_a_note_is_held_leaves_nothing_hanging() {
     }
 }
 
-// Spec: device-framework R28. Moving the device ends its notes, through the
+// Spec: device-framework R32. Moving the device ends its notes, through the
 // devices that now follow it.
 #[test]
 fn moving_while_a_note_is_held_leaves_nothing_hanging() {
@@ -310,7 +310,7 @@ fn a_blocked_note_takes_its_expressions_with_it() {
     assert!(out.notes().is_empty(), "{:?}", out.notes());
 }
 
-// Spec: device-framework R26. Several hundred notes in a block go through a
+// Spec: device-framework R30. Several hundred notes in a block go through a
 // MIDI effect in order, on their frames, without allocating, and each ends.
 #[test]
 fn several_hundred_notes_in_one_block_go_through_in_order() {
@@ -340,7 +340,7 @@ fn several_hundred_notes_in_one_block_go_through_in_order() {
     }
 }
 
-// Spec: device-framework R28. Moving the device to another track ends its
+// Spec: device-framework R32. Moving the device to another track ends its
 // notes on the track it left, where they sound.
 #[test]
 fn moving_to_another_track_ends_its_notes_on_the_track_it_left() {

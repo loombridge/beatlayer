@@ -198,7 +198,7 @@ fn decay_and_release_velocity_set_the_velocity() {
     );
 }
 
-// Spec: device-framework R28. Switching off, deleting or moving the device
+// Spec: device-framework R32. Switching off, deleting or moving the device
 // while its notes sound leaves nothing hanging.
 #[test]
 fn switching_off_or_deleting_with_a_note_sounding_ends_it() {
@@ -231,7 +231,7 @@ fn switching_off_or_deleting_with_a_note_sounding_ends_it() {
     }
 }
 
-// Spec: device-framework R27. Turning Latch off ends the latched note.
+// Spec: device-framework R31. Turning Latch off ends the latched note.
 #[test]
 fn turning_latch_off_ends_the_latched_note() {
     for size in SIZES {
@@ -253,7 +253,7 @@ fn turning_latch_off_ends_the_latched_note() {
     }
 }
 
-// Spec: device-framework R27. A note-off for a note that went through while
+// Spec: device-framework R31. A note-off for a note that went through while
 // Hold was switched off passes through once it is on again.
 #[test]
 fn a_note_played_while_switched_off_ends_after_switching_on() {

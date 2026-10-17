@@ -1,7 +1,7 @@
 # The transposing MIDI effect
 
 - **Status:** implemented (every rule below has a passing test)
-- **Work packages:** WP-5.30. The framework it sits on is WP-2.5 ([the native device framework](device-framework.md)), with the note rules of R26 to R30; where a MIDI effect sits in a chain is [the device chains spec](device-chains.md)
+- **Work packages:** WP-5.30. The framework it sits on is WP-2.5 ([the native device framework](device-framework.md)), with the note rules of R30 to R34; where a MIDI effect sits in a chain is [the device chains spec](device-chains.md)
 - **Parity-matrix row:** Devices: MIDI effects
 - **Checked against:** the Live 12 reference manual, chapter 30 "Live MIDI Effect Reference", section 30.5 "Pitch", read on 17 October 2026
 
@@ -16,7 +16,7 @@ Beatlayer's own name for the device is Lift; its look is the device framework's 
 | ID | Kind | Source | What it shows |
 |---|---|---|---|
 | S1 | Manual | Live 12 reference manual, chapter 30 "Live MIDI Effect Reference", section 30.5 "Pitch" | Transposes incoming notes by up to 128 semitones either way (30 scale degrees with Use Current Scale); Step Up and Step Down move the value by Step Width, from 1 to 48 semitones; Lowest and Range define a window of keys notes may pass; Mode chooses Block (notes outside are dropped, and a light by Range flashes), Fold (notes outside are moved into the window) or Limit (notes below are raised to the lowest key, notes above lowered to the highest) |
-| S2 | Beatlayer | [The native device framework](device-framework.md), R26 to R30 | A native MIDI effect reads the stretch's notes, forwards what it doesn't change, sends notes in order, ends every note it started, and keeps its expressions with their notes |
+| S2 | Beatlayer | [The native device framework](device-framework.md), R30 to R34 | A native MIDI effect reads the stretch's notes, forwards what it doesn't change, sends notes in order, ends every note it started, and keeps its expressions with their notes |
 | S3 | Beatlayer | [The improvements](../05-improvements.md), rule G2, and the info view spec's D17 | Every parameter is automatable and has a written description |
 | S4 | Beatlayer | [The architecture](../02-architecture.md), "Real-time rules" | No allocation, lock, or blocking call on the audio thread; every buffer is made with the device |
 

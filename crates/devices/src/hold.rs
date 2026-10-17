@@ -171,7 +171,7 @@ impl Hold {
     /// Takes the key `note` lifts off the keys held down. A key Hold never
     /// saw go down, such as one that went down while it was switched off,
     /// passes its note-off through, so the instrument doesn't hang on it
-    /// (spec: device-framework R27).
+    /// (spec: device-framework R31).
     fn take_held(&mut self, note: &NoteEvent) -> Option<Held> {
         let at = self.held.iter().position(|h| {
             h.key.channel == note.channel
@@ -241,7 +241,7 @@ impl NativeDevice for Hold {
             decay: value(params, DECAY_TIME) * rate / 1000.0,
             key_scale: value(params, KEY_SCALE) / 100.0,
         };
-        // Spec: device-framework R27. Latched notes have no end of their own,
+        // Spec: device-framework R31. Latched notes have no end of their own,
         // so turning Latch off ends them.
         if self.latched && !settings.latch {
             self.router.cut(audio, 0, |_| true);

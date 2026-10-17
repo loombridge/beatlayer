@@ -1,7 +1,7 @@
 # The note-length MIDI effect
 
 - **Status:** implemented (every rule below has a passing test)
-- **Work packages:** WP-5.30. The framework it sits on is WP-2.5 ([the native device framework](device-framework.md)), with the note rules of R26 to R30
+- **Work packages:** WP-5.30. The framework it sits on is WP-2.5 ([the native device framework](device-framework.md)), with the note rules of R30 to R34
 - **Parity-matrix row:** Devices: MIDI effects
 - **Checked against:** the Live 12 reference manual, chapter 30 "Live MIDI Effect Reference", section 30.4 "Note Length", read on 17 October 2026
 
@@ -16,7 +16,7 @@ Beatlayer's own name for the device is Hold; its look is the device framework's 
 | ID | Kind | Source | What it shows |
 |---|---|---|---|
 | S1 | Manual | Live 12 reference manual, chapter 30 "Live MIDI Effect Reference", section 30.4 "Note Length" | The trigger source is Note On (the device responds when a note starts) or Note Off (when it is released); in Note On mode Length sets the duration and Gate scales it (100 % is exactly Length, 200 % twice as long), and Length is in milliseconds or in tempo-synced beat divisions; in Note Off mode each note is delayed by its own length so it starts where it would have ended, and then Gate and Length apply; Release Velocity balances the note-on and note-off velocities, and should stay at 0 % for a keyboard that sends no release velocity; Decay Time is how long a note's velocity takes to fall to zero from note-on, and the velocity reached at note-off is the output velocity; Key Scale changes the length by pitch around C3, longer below and shorter above when positive; Latch in Note On mode keeps notes sounding until the next note-on, with Gate and Length unavailable; in Note Off mode it triggers a note once all keys or the sustain pedal are up and a new note-off arrives |
-| S2 | Beatlayer | [The native device framework](device-framework.md), R26 to R30 | As in the transposing spec |
+| S2 | Beatlayer | [The native device framework](device-framework.md), R30 to R34 | As in the transposing spec |
 | S3 | Beatlayer | [The improvements](../05-improvements.md), rule G2, and the info view spec's D17 | Every parameter is automatable and has a written description |
 | S4 | Beatlayer | [The architecture](../02-architecture.md), "Real-time rules"; [the musical time spec](musical-time.md) | No allocation, lock, or blocking call on the audio thread; the tempo map gives the tempo at a song position |
 

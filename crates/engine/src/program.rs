@@ -661,7 +661,7 @@ impl EngineProgram {
         true
     }
 
-    /// Spec: device-framework R28. Asks the devices that left their chain
+    /// Spec: device-framework R32. Asks the devices that left their chain
     /// in this swap to end their notes: those the swap removed, and those it
     /// moved relative to the others that stayed. Each device's note-offs
     /// enter the chain in front of the first node that sat after it, so the
@@ -948,7 +948,7 @@ impl EngineProgram {
 
             // Run the chain in place.
             for (at, &slot) in self.task_nodes[task.nodes.range()].iter().enumerate() {
-                // Spec: device-framework R28. The note-offs of devices that
+                // Spec: device-framework R32. The note-offs of devices that
                 // left the chain in the swap enter in front of the node that
                 // followed them, ahead of the notes already there.
                 for &(_, _, note) in self
@@ -1008,7 +1008,7 @@ impl EngineProgram {
                 out_buf.clear();
                 if bypass {
                     node.flush(scratch);
-                    // Spec: device-framework R28. A device switched off ends
+                    // Spec: device-framework R32. A device switched off ends
                     // the notes it started, on this block's first frame.
                     node.release(out_buf);
                     for &note in in_buf.notes() {

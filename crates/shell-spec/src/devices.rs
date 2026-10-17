@@ -50,6 +50,10 @@ pub const LOAD_PRESET: &str = "device.load_preset";
 /// `device.load_sample`: load an audio file into a device that plays one
 /// sample (WP-2.16).
 pub const LOAD_SAMPLE: &str = "device.load_sample";
+/// `device.swap_to_snapshot`: replace a Strike drum sampler with the Snapshot
+/// sampler, keeping its sample's start and length (one-shot drum sampler
+/// R22).
+pub const SWAP_TO_SNAPSHOT: &str = "device.swap_to_snapshot";
 /// `device.hot_swap`: start or end hot-swapping a device's presets.
 pub const HOT_SWAP: &str = "device.hot_swap";
 /// `device.parameters`: a device's parameters, described, with their values.
@@ -87,6 +91,7 @@ pub const IDS: &[&str] = &[
     SAVE_DEFAULT_PRESET,
     LOAD_PRESET,
     LOAD_SAMPLE,
+    SWAP_TO_SNAPSHOT,
     HOT_SWAP,
     PARAMETERS,
     SHOW_SIDECHAIN,
@@ -323,6 +328,11 @@ pub struct DeviceFrame {
     /// into it (`device.load_sample`, WP-2.16).
     #[serde(default)]
     pub takes_sample: bool,
+    /// Whether its type is the drum sampler, whose context menu offers the
+    /// swap to Snapshot and Save as Default Pad (`device.swap_to_snapshot`,
+    /// one-shot drum sampler R23).
+    #[serde(default)]
+    pub swaps_to_snapshot: bool,
     /// Whether its title shows its preset's or given name.
     pub show_preset_name: bool,
     /// Whether it's folded to its title bar.
@@ -832,6 +842,18 @@ fn specs() -> Vec<CommandSpec> {
             .context(DeviceView)
             .args::<LoadSampleArgs>()
             .result::<LoadSampleResult>(),
+        CommandSpec::new(SWAP_TO_SNAPSHOT, "Swap to Snapshot")
+            .description(
+                "Replaces a Strike drum sampler with the Snapshot sampler in One-Shot mode, as \
+                 Strike's context menu does: the new device takes the old one's place, sample, \
+                 and on or off state, and keeps its sample's Start and Length; every other \
+                 setting is Snapshot's default. One undo step, named Swap to Snapshot, and the \
+                 new device is selected. A device that isn't a Strike drum sampler is refused.",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<DeviceArgs>()
+            .result::<DeviceAdded>(),
         CommandSpec::new(HOT_SWAP, "Hot-Swap Presets")
             .description(
                 "Starts or ends hot-swapping a device's presets, as the title bar's Hot-Swap \

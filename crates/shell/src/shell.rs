@@ -2304,11 +2304,11 @@ impl Shell {
                 command: id.to_owned(),
                 message: format!("no {device}"),
             })?;
-        // Only the sampler plays a sample (the sampler spec, R11).
-        let sampler = bl_model::DeviceKind::Native {
-            device_type: bl_devices::sampler::SAMPLER.to_owned(),
-        };
-        if kind != sampler {
+        // Only the samplers play a sample (the sampler spec, R11).
+        if !matches!(
+            &kind,
+            bl_model::DeviceKind::Native { device_type } if bl_devices::plays_a_sample(device_type)
+        ) {
             return Err(ShellError::Failed {
                 command: id.to_owned(),
                 message: format!("{device} doesn't play a sample"),

@@ -1658,7 +1658,7 @@ impl Voice {
 /// One sample frame at `position` in each channel: linear interpolation
 /// between the neighbouring frames, silence past the end, and a mono sample
 /// on both sides.
-fn read(sample: &SampleData, position: f64) -> (f32, f32) {
+pub(crate) fn read(sample: &SampleData, position: f64) -> (f32, f32) {
     let frames = sample.frames();
     if frames == 0 || position < 0.0 {
         return (0.0, 0.0);
@@ -1682,6 +1682,6 @@ fn read(sample: &SampleData, position: f64) -> (f32, f32) {
 }
 
 /// Milliseconds as whole frames at `rate`.
-fn frames_of(milliseconds: f64, rate: f64) -> u32 {
+pub(crate) fn frames_of(milliseconds: f64, rate: f64) -> u32 {
     (milliseconds.max(0.0) / 1000.0 * rate).round() as u32
 }

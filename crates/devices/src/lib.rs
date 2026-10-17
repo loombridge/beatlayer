@@ -31,6 +31,7 @@
 pub mod compressor;
 pub mod delay;
 pub mod dice;
+pub mod drum_sampler;
 pub mod eq;
 mod framework;
 pub mod hold;
@@ -51,6 +52,7 @@ pub mod utility;
 pub use compressor::{COMPRESSOR, Squeeze, compressor_type};
 pub use delay::{DELAY, delay_type};
 pub use dice::{DICE, dice_type};
+pub use drum_sampler::{DRUM_SAMPLER, DrumSampler, drum_sampler_type};
 pub use eq::{Contour, EQ, eq_type};
 pub use framework::{Audio, NativeDevice, NativeNode, ParamBank, add};
 pub use hold::{HOLD, hold_type};
@@ -67,6 +69,13 @@ pub use touch::{TOUCH, touch_type};
 
 use bl_engine::{DeviceType, Registry};
 use bl_model::{DeviceDescription, DeviceDisplay, DeviceId, OrdMap, ParamId};
+
+/// Whether the native device type `device_type` plays one sample, which
+/// `device.load_sample` gives it: Snapshot and Strike.
+#[must_use]
+pub fn plays_a_sample(device_type: &str) -> bool {
+    matches!(device_type, sampler::SAMPLER | DRUM_SAMPLER)
+}
 
 /// The display of the native device `device_type`, if its type draws one
 /// from its parameters and the data its node publishes (the device
@@ -99,6 +108,7 @@ pub fn register(registry: &mut Registry) {
     utility::register(registry);
     eq::register(registry);
     sampler::register(registry);
+    drum_sampler::register(registry);
     lift::register(registry);
     touch::register(registry);
     dice::register(registry);

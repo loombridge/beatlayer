@@ -5,7 +5,7 @@ use core::fmt;
 use core::ops::Range;
 
 use bl_core::time::{SampleRate, TempoMap, TimeSignatureMap};
-use bl_model::{Channel, ParamId, SceneId, Tap, TrackId};
+use bl_model::{Channel, LaunchMode, ParamId, SceneId, Tap, TrackId};
 
 use crate::midi::{MidiRoutes, TrackMidiInput};
 use crate::mixer::{MeterReading, Route, TrackMixer};
@@ -108,10 +108,11 @@ pub struct EngineProgram {
     pub(crate) tempo: TempoMap,
     pub(crate) time_signatures: TimeSignatureMap,
     pub(crate) sample_rate: SampleRate,
-    /// Every audio and MIDI slot that holds a clip, as `(scene, track)`
-    /// pairs sorted by scene and then track: what a scene launch queues
-    /// (WP-3.2).
-    pub(crate) scene_slots: Vec<(SceneId, TrackId)>,
+    /// Every audio and MIDI slot that holds a clip, as `(scene, track,
+    /// launch mode)` triples sorted by scene and then track: what a scene
+    /// launch queues (WP-3.2) and where a press finds its clip's mode
+    /// (WP-3.3).
+    pub(crate) scene_slots: Vec<(SceneId, TrackId, LaunchMode)>,
     pub(crate) note_buffers: [NoteBuffer; 2],
     /// The MIDI tracks' inputs, and what each received in the last block
     /// (WP-2.2).
@@ -484,12 +485,21 @@ impl EngineProgram {
         &self.tempo
     }
 
-    /// The slots of `scene` that hold a clip, as `(scene, track)` pairs in
-    /// track order: what a scene launch queues.
-    pub(crate) fn scene_slots(&self, scene: SceneId) -> &[(SceneId, TrackId)] {
-        let start = self.scene_slots.partition_point(|&(s, _)| s < scene);
-        let end = start + self.scene_slots[start..].partition_point(|&(s, _)| s == scene);
+    /// The slots of `scene` that hold a clip, as `(scene, track, launch
+    /// mode)` triples in track order: what a scene launch queues.
+    pub(crate) fn scene_slots(&self, scene: SceneId) -> &[(SceneId, TrackId, LaunchMode)] {
+        let start = self.scene_slots.partition_point(|&(s, ..)| s < scene);
+        let end = start + self.scene_slots[start..].partition_point(|&(s, ..)| s == scene);
         &self.scene_slots[start..end]
+    }
+
+    /// The launch mode of the clip in the slot `(track, scene)`, or `None`
+    /// for an empty slot.
+    pub(crate) fn launch_mode(&self, track: TrackId, scene: SceneId) -> Option<LaunchMode> {
+        self.scene_slots(scene)
+            .iter()
+            .find(|&&(_, t, _)| t == track)
+            .map(|&(.., mode)| mode)
     }
 
     /// What a MIDI track's input received in the last block, and whether

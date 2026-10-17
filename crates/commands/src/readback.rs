@@ -191,6 +191,7 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("clip.set_envelope_linked", query(Clip, "envelopes")),
     ("clip.set_fades", query(Clip, "data.audio.fade_in")),
     ("clip.set_gain", query(Clip, "data.audio.gain")),
+    ("clip.set_launch_mode", query(Clip, "launch_mode")),
     ("clip.set_length", query(Clip, "length")),
     ("clip.set_loop", query(Clip, "data.audio.loop_start")),
     ("clip.set_loop_enabled", query(Clip, "data.audio.looping")),

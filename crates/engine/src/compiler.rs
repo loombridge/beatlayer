@@ -4,8 +4,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use bl_model::{
-    Change, ChangeSet, ContentHash, DeviceId, DeviceKind, Document, Mixer, OrdMap, Output, ParamId,
-    SceneId, Tap, Track, TrackId, TrackKind,
+    Change, ChangeSet, ContentHash, DeviceId, DeviceKind, Document, LaunchMode, Mixer, OrdMap,
+    Output, ParamId, SceneId, Tap, Track, TrackId, TrackKind,
 };
 
 use crate::EngineConfig;
@@ -142,19 +142,20 @@ pub struct Compiler {
     sources: ClipSources,
 }
 
-/// Every audio and MIDI slot that holds a clip, as `(scene, track)` pairs
-/// sorted by scene and then track: what a scene launch queues (WP-3.2).
-fn scene_slots(document: &Document) -> Vec<(SceneId, TrackId)> {
+/// Every audio and MIDI slot that holds a clip, as `(scene, track, launch
+/// mode)` triples sorted by scene and then track: what a scene launch
+/// queues (WP-3.2) and where a press reads its clip's mode (WP-3.3).
+fn scene_slots(document: &Document) -> Vec<(SceneId, TrackId, LaunchMode)> {
     let mut slots = Vec::new();
     for track in document.track_order() {
         let Some(track) = document.track(track) else {
             continue;
         };
-        for (scene, _) in track.slots() {
-            slots.push((scene, track.id()));
+        for (scene, clip) in track.slots() {
+            slots.push((scene, track.id(), clip.launch_mode));
         }
     }
-    slots.sort_unstable();
+    slots.sort_unstable_by_key(|&(scene, track, _)| (scene, track));
     slots
 }
 

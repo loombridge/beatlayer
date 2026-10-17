@@ -4317,6 +4317,7 @@ impl Shell {
                         columns: &columns,
                         scenes: &scenes,
                         edge_fades,
+                        launch_mode: self.prefs.default_launch_mode,
                     },
                 )
                 .map_err(|error| match error {

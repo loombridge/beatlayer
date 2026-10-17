@@ -31,6 +31,7 @@ use serde::{Deserialize, Serialize};
 use crate::automation::{AutomationTarget, Envelope};
 use crate::error::ModelError;
 use crate::ids::{ClipId, ContentHash};
+use crate::launch::LaunchMode;
 
 /// The clips whose MIDI Note Editors are folded to the rows that hold notes
 /// (WP-2.3): saved with the set, but not part of the document, so folding
@@ -66,6 +67,11 @@ pub struct Clip {
     /// a set saved before this package holds.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub envelopes: Vec<ClipEnvelope>,
+    /// What a press and a release of the clip's launch button do (WP-3.3);
+    /// only a Session slot's clip is launched. Trigger, which is left out of
+    /// the saved form, for a clip of a set saved before this package.
+    #[serde(default, skip_serializing_if = "LaunchMode::is_default")]
+    pub launch_mode: LaunchMode,
 }
 
 impl Clip {
@@ -81,6 +87,7 @@ impl Clip {
             mute: false,
             data,
             envelopes: Vec::new(),
+            launch_mode: LaunchMode::default(),
         }
     }
 

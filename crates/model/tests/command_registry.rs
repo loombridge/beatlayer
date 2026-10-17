@@ -11,9 +11,9 @@ use bl_model::registry::{self, RunError};
 use bl_model::{
     ArrangementLoop, AudioData, AutomationTarget, Change, ChangeSet, Channel, Clip, ClipData,
     ClipId, Command, ContentHash, CountIn, CrossfadeAssign, Device, DeviceId, DeviceKind,
-    EditError, Editor, Input, MetronomeRhythm, MetronomeSound, MidiData, MixerParam, ModelError,
-    Monitor, Note, Output, ParamId, PluginFormat, SceneId, SendTap, TakeClip, TakeLane, Tap,
-    TrackId, TrackKind,
+    EditError, Editor, Input, LaunchMode, MetronomeRhythm, MetronomeSound, MidiData, MixerParam,
+    ModelError, Monitor, Note, Output, ParamId, PluginFormat, SceneId, SendTap, TakeClip, TakeLane,
+    Tap, TrackId, TrackKind,
 };
 use serde_json::{Value, json};
 
@@ -51,7 +51,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        93,
+        94,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -60,7 +60,7 @@ fn every_document_command_is_registered() {
          WP-2.13 the two for Main Out and Cue Out, WP-3.1 five for scenes and two for slot \
          clips, WP-3.2 set_slot_stop_button, WP-2.12 seven for automation, WP-3.15 six for clip \
          envelopes, WP-3.17 two for the crossfader, WP-2.14 set_midi_overdub, WP-2.13 the \
-         two punch switches, and WP-2.13 add_take_lane"
+         two punch switches, WP-3.3 set_clip_launch_mode, and WP-2.13 add_take_lane"
     );
 
     for op in &ops {
@@ -413,6 +413,10 @@ fn every_command_runs_by_id() {
     );
     agent.run("clip.rename", json!({ "clip": riff, "name": "Riff" }));
     agent.run("clip.set_mute", json!({ "clip": riff, "mute": true }));
+    agent.run(
+        "clip.set_launch_mode",
+        json!({ "clip": riff, "mode": "gate" }),
+    );
     agent.run(
         "clip.set_data",
         json!({ "clip": riff, "data": { "midi": { "notes": [
@@ -1360,6 +1364,13 @@ fn schemas_match_what_commands_serialise() {
             },
         ),
         ("clip.set_mute", Command::SetClipMute { clip, mute: true }),
+        (
+            "clip.set_launch_mode",
+            Command::SetClipLaunchMode {
+                clip,
+                mode: LaunchMode::Gate,
+            },
+        ),
         (
             "clip.set_data",
             Command::SetClipData {

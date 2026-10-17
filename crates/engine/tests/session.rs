@@ -16,8 +16,8 @@ use bl_engine::{
 };
 use bl_media::SampleData;
 use bl_model::{
-    AudioData, Clip, ClipData, Command, ContentHash, Editor, LaunchQuantization, LaunchSettings,
-    MidiData, Note, SceneId, TrackId, TrackKind,
+    AudioData, Clip, ClipData, Command, ContentHash, Editor, LaunchMode, LaunchQuantization,
+    LaunchSettings, MidiData, Note, SceneId, TrackId, TrackKind,
 };
 use common::{RATE, Rig, device, track};
 
@@ -479,5 +479,294 @@ fn a_launched_audio_slot_clip_plays_its_file_from_the_launch_frame() {
     assert_eq!(out[95_999], 0.0);
     for (i, sample) in out[96_000..].iter().enumerate().take(600) {
         assert_eq!(*sample, at(i as i64), "frame {i} of the launch");
+    }
+}
+
+/// A playing rig whose only track holds, in its first scene, a 16-bar MIDI
+/// clip of `mode` with one note that lasts all 16 bars, under `value`.
+fn mode_rig(mode: LaunchMode, value: LaunchQuantization) -> (Rig, TrackId, SceneId) {
+    let mut rig = Rig::new(4096);
+    rig.editor
+        .apply(Command::SetTempo { tempo: tempo() })
+        .unwrap();
+    let track = midi_track(&mut rig);
+    let scene = scene(&rig);
+    let mut clip = Clip::new(
+        rig.editor.new_id(),
+        Ticks::ZERO,
+        BAR * 16,
+        ClipData::Midi(MidiData::new(vec![Note::new(
+            60,
+            Ticks::ZERO,
+            BAR * 16,
+            100,
+        )])),
+    );
+    clip.launch_mode = mode;
+    rig.editor
+        .apply(Command::CreateSlotClip { track, scene, clip })
+        .unwrap();
+    rig.sync();
+    rig.sender
+        .session(SessionCommand::SetQuantization(LaunchSettings {
+            quantization: value,
+            enabled: true,
+        }));
+    rig.sender.transport(TransportCommand::Play);
+    (rig, track, scene)
+}
+
+/// Plays `total` frames in blocks of `block`, sending each command of
+/// `cues` with the playhead exactly on its frame.
+fn cued(rig: &mut Rig, block: usize, total: usize, cues: &[(usize, SessionCommand)]) {
+    let mut at = 0;
+    for &(frame, command) in cues {
+        play(rig, frame - at, block);
+        at = frame;
+        rig.sender.session(command);
+    }
+    play(rig, total - at, block);
+}
+
+const BLOCKS: [usize; 4] = [1, 100, 512, 4096];
+
+// Spec: launch-quantisation R14
+#[test]
+fn a_trigger_press_restarts_the_playing_clip_on_the_grid_line() {
+    for block in BLOCKS {
+        let (mut rig, track, scene) = mode_rig(LaunchMode::Trigger, LaunchQuantization::Bar);
+        let press = SessionCommand::Launch { track, scene };
+        let release = SessionCommand::Release { track, scene };
+        // Starts on 2.1.1; the second press, 130,000 frames in, restarts it
+        // on 3.1.1, and the release changes nothing.
+        cued(
+            &mut rig,
+            block,
+            200_000,
+            &[(24_001, press), (130_000, press), (131_000, release)],
+        );
+        assert_eq!(
+            notes(&mut rig),
+            vec![
+                (96_000, 60, true),
+                (192_000, 60, false),
+                (192_000, 60, true)
+            ],
+            "blocks of {block}"
+        );
+    }
+}
+
+// Spec: launch-quantisation R15, R16
+#[test]
+fn a_gate_clip_stops_on_the_grid_line_after_the_release() {
+    for block in BLOCKS {
+        for (value, press_at, release_at, start, stop) in [
+            // Held across a line: starts on 2.1.1, released in bar 2, stops
+            // on 3.1.1.
+            (LaunchQuantization::Bar, 24_001, 130_000, 96_000, 192_000),
+            // Pressed and released inside one interval: the launch still
+            // fires, and the stop lands on the line after it.
+            (LaunchQuantization::Bar, 24_001, 48_000, 96_000, 192_000),
+            // Quantisation off: starts and stops on the frames of the
+            // press and the release.
+            (LaunchQuantization::None, 24_001, 60_000, 24_001, 60_000),
+            // A quarter grid.
+            (LaunchQuantization::Quarter, 10_000, 40_000, 24_000, 48_000),
+        ] {
+            let (mut rig, track, scene) = mode_rig(LaunchMode::Gate, value);
+            cued(
+                &mut rig,
+                block,
+                200_000,
+                &[
+                    (press_at, SessionCommand::Launch { track, scene }),
+                    (release_at, SessionCommand::Release { track, scene }),
+                ],
+            );
+            assert_eq!(
+                notes(&mut rig),
+                vec![(start, 60, true), (stop, 60, false)],
+                "{value:?} at blocks of {block}"
+            );
+            assert!(rig.monitor.state().playing, "the transport keeps running");
+        }
+    }
+}
+
+// Spec: launch-quantisation R15
+#[test]
+fn a_gate_press_with_the_transport_stopped_starts_it_at_once() {
+    for block in BLOCKS {
+        let mut rig = Rig::new(4096);
+        rig.editor
+            .apply(Command::SetTempo { tempo: tempo() })
+            .unwrap();
+        let track = midi_track(&mut rig);
+        let scene = scene(&rig);
+        let mut clip = Clip::new(
+            rig.editor.new_id(),
+            Ticks::ZERO,
+            BAR * 16,
+            ClipData::Midi(MidiData::new(vec![Note::new(
+                60,
+                Ticks::ZERO,
+                BAR * 16,
+                100,
+            )])),
+        );
+        clip.launch_mode = LaunchMode::Gate;
+        rig.editor
+            .apply(Command::CreateSlotClip { track, scene, clip })
+            .unwrap();
+        rig.sync();
+        cued(
+            &mut rig,
+            block,
+            120_000,
+            &[
+                (0, SessionCommand::Launch { track, scene }),
+                (10_000, SessionCommand::Release { track, scene }),
+            ],
+        );
+        // Released 10,000 frames in, the clip stops on the 2.1.1 line and
+        // the transport runs on.
+        assert_eq!(
+            notes(&mut rig),
+            vec![(0, 60, true), (96_000, 60, false)],
+            "blocks of {block}"
+        );
+        assert!(rig.monitor.state().playing);
+    }
+}
+
+// Spec: launch-quantisation R17
+#[test]
+fn a_toggle_clip_stops_on_the_grid_line_after_its_second_press() {
+    for block in BLOCKS {
+        let (mut rig, track, scene) = mode_rig(LaunchMode::Toggle, LaunchQuantization::Bar);
+        let press = SessionCommand::Launch { track, scene };
+        let release = SessionCommand::Release { track, scene };
+        // Starts on 2.1.1; the second press in bar 2 queues the stop for
+        // 3.1.1; the release changes nothing.
+        cued(
+            &mut rig,
+            block,
+            200_000,
+            &[(24_001, press), (100_000, press), (101_000, release)],
+        );
+        assert_eq!(
+            notes(&mut rig),
+            vec![(96_000, 60, true), (192_000, 60, false)],
+            "blocks of {block}"
+        );
+        // A third press while the stop is queued restarts the clip on that
+        // line instead.
+        let (mut rig, track, scene) = mode_rig(LaunchMode::Toggle, LaunchQuantization::Bar);
+        let press = SessionCommand::Launch { track, scene };
+        cued(
+            &mut rig,
+            block,
+            200_000,
+            &[(24_001, press), (100_000, press), (150_000, press)],
+        );
+        assert_eq!(
+            notes(&mut rig),
+            vec![
+                (96_000, 60, true),
+                (192_000, 60, false),
+                (192_000, 60, true)
+            ],
+            "blocks of {block}"
+        );
+    }
+}
+
+// Spec: launch-quantisation R18
+#[test]
+fn a_held_repeat_clip_restarts_every_step_until_the_release() {
+    for block in BLOCKS {
+        let (mut rig, track, scene) = mode_rig(LaunchMode::Repeat, LaunchQuantization::Quarter);
+        // Pressed a frame past 1.1.1 it starts on the quarter at 24,000,
+        // restarts at 48,000 and 72,000, and the release at 80,000 ends the
+        // quantum it is in, at 96,000.
+        cued(
+            &mut rig,
+            block,
+            130_000,
+            &[
+                (1, SessionCommand::Launch { track, scene }),
+                (80_000, SessionCommand::Release { track, scene }),
+            ],
+        );
+        assert_eq!(
+            notes(&mut rig),
+            vec![
+                (24_000, 60, true),
+                (48_000, 60, false),
+                (48_000, 60, true),
+                (72_000, 60, false),
+                (72_000, 60, true),
+                (96_000, 60, false),
+            ],
+            "blocks of {block}"
+        );
+    }
+}
+
+// Spec: launch-quantisation R18
+#[test]
+fn a_repeat_clip_with_no_quantisation_acts_as_a_trigger() {
+    for block in BLOCKS {
+        let (mut rig, track, scene) = mode_rig(LaunchMode::Repeat, LaunchQuantization::None);
+        cued(
+            &mut rig,
+            block,
+            60_000,
+            &[(10_000, SessionCommand::Launch { track, scene })],
+        );
+        assert_eq!(
+            notes(&mut rig),
+            vec![(10_000, 60, true)],
+            "blocks of {block}"
+        );
+    }
+}
+
+// Spec: launch-quantisation R19
+#[test]
+fn the_mode_is_read_at_each_press_and_release() {
+    for block in BLOCKS {
+        // A Gate clip whose mode becomes Trigger while it plays isn't
+        // touched by the change, and the release then does nothing.
+        let (mut rig, track, scene) = mode_rig(LaunchMode::Gate, LaunchQuantization::Bar);
+        let clip = rig
+            .editor
+            .document()
+            .track(track)
+            .unwrap()
+            .slot(scene)
+            .unwrap()
+            .id;
+        cued(
+            &mut rig,
+            block,
+            130_000,
+            &[(24_001, SessionCommand::Launch { track, scene })],
+        );
+        rig.editor
+            .apply(Command::SetClipLaunchMode {
+                clip,
+                mode: LaunchMode::Trigger,
+            })
+            .unwrap();
+        rig.sync();
+        rig.sender.session(SessionCommand::Release { track, scene });
+        play(&mut rig, 100_000, block);
+        assert_eq!(
+            notes(&mut rig),
+            vec![(96_000, 60, true)],
+            "blocks of {block}"
+        );
     }
 }

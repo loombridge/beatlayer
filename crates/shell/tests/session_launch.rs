@@ -6,7 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
-use bl_model::{LaunchQuantization, LaunchSettings, TrackKind};
+use bl_model::{LaunchMode, LaunchQuantization, LaunchSettings, TrackKind};
 use bl_shell::audio::AudioHost;
 use bl_shell::files::ProjectFiles;
 use bl_shell::session_launch_commands as ids;
@@ -192,4 +192,88 @@ fn stop_selected_stops_the_tracks_with_a_selected_slot() {
         .unwrap();
     let result = shell.run(ids::STOP_SELECTED, json!({}));
     assert!(result.is_ok(), "{result:?}");
+}
+
+// Spec: launch-quantisation R19.
+#[test]
+fn a_new_clip_takes_the_default_launch_mode_and_the_mode_is_one_saved_undo_step() {
+    let scratch = Scratch::new("mode");
+    let mut shell = Shell::new(
+        Preferences {
+            default_launch_mode: LaunchMode::Gate,
+            ..Preferences::default()
+        },
+        None,
+        AudioHost::null(Default::default()),
+        Box::new(ProjectFiles::new()),
+    );
+    let track = shell
+        .mixer_columns()
+        .into_iter()
+        .find(|track| {
+            shell
+                .editor()
+                .document()
+                .track(*track)
+                .is_some_and(|track| track.kind() == TrackKind::Midi)
+        })
+        .expect("the default set has a MIDI track");
+    let scene = shell
+        .editor()
+        .document()
+        .scenes()
+        .next()
+        .expect("a new set has scenes")
+        .id;
+    shell
+        .run(
+            "session.insert_empty_midi_clip",
+            json!({ "track": track, "scene": scene }),
+        )
+        .unwrap();
+    let clip = |shell: &Shell| {
+        shell
+            .editor()
+            .document()
+            .slot(track, scene)
+            .expect("the slot holds a clip")
+            .clone()
+    };
+    assert_eq!(clip(&shell).launch_mode, LaunchMode::Gate);
+    // With the default left alone a new clip is a Trigger clip.
+    assert_eq!(
+        Preferences::default().default_launch_mode,
+        LaunchMode::Trigger
+    );
+
+    // Changing the mode is one undo step, by command ID.
+    let steps = shell.editor().undo_history().len();
+    shell
+        .run(
+            "clip.set_launch_mode",
+            json!({ "clip": clip(&shell).id, "mode": "toggle" }),
+        )
+        .unwrap();
+    assert_eq!(shell.editor().undo_history().len(), steps + 1);
+    assert_eq!(clip(&shell).launch_mode, LaunchMode::Toggle);
+    shell.run("edit.undo", json!({})).unwrap();
+    assert_eq!(clip(&shell).launch_mode, LaunchMode::Gate);
+    shell.run("edit.redo", json!({})).unwrap();
+
+    // It saves with the set and opens with it.
+    let saved = PathBuf::from(
+        shell
+            .run(
+                "set.save_as",
+                json!({ "path": text(&scratch.path("Modes.blset")) }),
+            )
+            .unwrap()["path"]
+            .as_str()
+            .unwrap(),
+    );
+    shell.run("set.new", json!({})).unwrap();
+    shell
+        .run("set.open", json!({ "path": text(&saved) }))
+        .unwrap();
+    assert_eq!(clip(&shell).launch_mode, LaunchMode::Toggle);
 }

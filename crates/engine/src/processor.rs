@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use bl_core::midi::MidiInputEvent;
 use bl_core::time::{Frames, SampleRate, TempoMap, Ticks, TimeSignatureMap};
-use bl_model::{LaunchSettings, ParamId, SceneId, TrackId};
+use bl_model::{LaunchMode, LaunchSettings, ParamId, SceneId, TrackId};
 use bl_rt::log::{Level, Writer};
 use bl_rt::rt_log;
 use rtrb::{Consumer, Producer};
@@ -872,6 +872,7 @@ impl Processor {
     fn session_command(&mut self, command: SessionCommand) {
         match command {
             SessionCommand::Launch { track, scene } => self.launch_slot(track, scene),
+            SessionCommand::Release { track, scene } => self.release_slot(track, scene),
             SessionCommand::LaunchScene(scene) => self.launch_scene(scene),
             SessionCommand::StopTrack(track) => self.stop_session(Some(track)),
             SessionCommand::StopAll => self.stop_session(None),
@@ -898,7 +899,32 @@ impl Processor {
             self.position,
             self.config.sample_rate,
         );
-        self.session.launch(track, scene, playhead);
+        let mode = self.slot_mode(track, scene);
+        self.session.press(track, scene, mode, playhead);
+    }
+
+    /// Releases a slot's launch button: a Gate or Repeat clip stops on the
+    /// grid (the launch quantisation spec, R15 and R18).
+    fn release_slot(&mut self, track: TrackId, scene: SceneId) {
+        let mode = self.slot_mode(track, scene);
+        let playhead = Self::playhead(
+            self.program.as_ref().map(Program::get),
+            &self.fallback_tempo,
+            &self.fallback_time_signatures,
+            self.playing,
+            self.position,
+            self.config.sample_rate,
+        );
+        self.session.release(track, scene, mode, playhead);
+    }
+
+    /// The launch mode of the clip in a slot, read when a button is pressed
+    /// or released; Trigger for a slot with no clip (R19).
+    fn slot_mode(&self, track: TrackId, scene: SceneId) -> LaunchMode {
+        self.program
+            .as_ref()
+            .and_then(|program| program.get().launch_mode(track, scene))
+            .unwrap_or_default()
     }
 
     /// The launch scene's clips: a scene with nothing in it doesn't start the
@@ -976,6 +1002,16 @@ impl Processor {
     fn apply_due_session(&mut self) {
         if self.playing {
             self.session.apply_due(self.position);
+            // Spec: launch-quantisation R18
+            let playhead = Self::playhead(
+                self.program.as_ref().map(Program::get),
+                &self.fallback_tempo,
+                &self.fallback_time_signatures,
+                true,
+                self.position,
+                self.config.sample_rate,
+            );
+            self.session.repeat(playhead);
         }
     }
 

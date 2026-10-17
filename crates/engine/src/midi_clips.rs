@@ -284,9 +284,10 @@ pub struct MidiClipPlayer {
     scratch_notes: Vec<NoteEvent>,
     audible: bool,
     last_position: Option<i64>,
-    /// The Session slot clip sounding in the last block: when the engine
-    /// stops it or another slot takes over, its notes are let go.
-    session: Option<ClipId>,
+    /// The Session slot clip sounding in the last block and the frame it
+    /// launched on: when the engine stops it, restarts it or another slot
+    /// takes over, its notes are let go.
+    session: Option<(ClipId, i64)>,
     rng: Rng,
     next_note_id: u32,
 }
@@ -626,9 +627,9 @@ impl Node for MidiClipPlayer {
                     .find(|clip| clip.scene == Some(entry.scene))
                     .map(|clip| (entry, clip))
             });
-        let launched_id = launched.map(|(_, clip)| clip.id);
+        let launched_id = launched.map(|(entry, clip)| (clip.id, entry.frame.get()));
         if self.session != launched_id {
-            if let Some(old) = self.session {
+            if let Some((old, _)) = self.session {
                 stop_clip_sounding(old, 0, &mut self.sounding, &mut self.scratch_notes);
             }
             self.session = launched_id;

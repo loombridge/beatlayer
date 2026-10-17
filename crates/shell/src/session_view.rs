@@ -15,7 +15,9 @@ use std::path::Path;
 
 use bl_core::time::Ticks;
 use bl_media::MediaStore;
-use bl_model::{AudioData, ChangeSet, Clip, ClipData, ClipId, Editor, MidiData, SceneId, TrackId};
+use bl_model::{
+    AudioData, ChangeSet, Clip, ClipData, ClipId, Editor, LaunchMode, MidiData, SceneId, TrackId,
+};
 use bl_shell_spec::session_view::{
     self as ids, CopyClipArgs, DropFilesArgs, DuplicateSceneArgs, InsertClipArgs, InsertSceneArgs,
     ScrollArgs, SelectArgs, SelectEdge, SelectEdgeArgs, SessionSelectMode, SessionViewState,
@@ -53,6 +55,9 @@ pub struct Context<'a> {
     /// Whether a new clip's edges fade (Settings ▸ Create Fades on Clip
     /// Edges).
     pub edge_fades: bool,
+    /// The launch mode a new clip starts with (Settings ▸ Default Launch
+    /// Mode).
+    pub launch_mode: LaunchMode,
 }
 
 /// What a Session View command changed: its result, the files a drop read
@@ -235,12 +240,13 @@ impl SessionView {
                     .time_signatures
                     .signature_at(Ticks::ZERO)
                     .bar_length();
-                let clip = Clip::new(
+                let mut clip = Clip::new(
                     ctx.editor.new_id(),
                     Ticks::ZERO,
                     bar,
                     ClipData::Midi(MidiData::new(std::iter::empty())),
                 );
+                clip.launch_mode = ctx.launch_mode;
                 let changes = self.edit(ctx.editor, "Insert Empty MIDI Clip", |editor| {
                     model(
                         editor,
@@ -638,6 +644,7 @@ impl SessionView {
                 let mut clip =
                     Clip::new(editor.new_id(), Ticks::ZERO, length, ClipData::Audio(audio));
                 clip.name.clone_from(name);
+                clip.launch_mode = ctx.launch_mode;
                 model(
                     editor,
                     "clip.create_in_slot",

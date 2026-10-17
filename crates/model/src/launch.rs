@@ -175,6 +175,35 @@ impl LaunchQuantization {
     }
 }
 
+/// What a press and a release of a clip's launch button do (WP-3.3): the
+/// clip's launch mode, Trigger unless the person chose another (the observed
+/// Default Launch Mode). The rules are in the launch quantisation spec.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LaunchMode {
+    /// A press starts the clip and it plays on; a second press restarts it.
+    #[default]
+    Trigger,
+    /// A press starts the clip and releasing stops it.
+    Gate,
+    /// A press starts the clip and the next press stops it.
+    Toggle,
+    /// While the button is held the clip restarts every quantisation step.
+    Repeat,
+}
+
+impl LaunchMode {
+    /// Every mode, in the Launch panel's order.
+    pub const ALL: [Self; 4] = [Self::Trigger, Self::Gate, Self::Toggle, Self::Repeat];
+
+    /// Whether the mode is the default, so a clip leaves it out of its saved
+    /// form.
+    #[must_use]
+    pub fn is_default(&self) -> bool {
+        *self == Self::Trigger
+    }
+}
+
 /// The global launch quantisation and its enabled switch (L-CTRL-010,
 /// M-OPT-014): saved with the set, changed by the Options items and their
 /// shortcuts, and no undo step.

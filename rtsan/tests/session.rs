@@ -14,7 +14,8 @@ use bl_engine::{
     Collector, Compiler, EngineConfig, Registry, SessionCommand, TransportCommand, channel,
 };
 use bl_model::{
-    Clip, ClipData, Command, Editor, LaunchQuantization, LaunchSettings, MidiData, Note, TrackKind,
+    Clip, ClipData, Command, Editor, LaunchMode, LaunchQuantization, LaunchSettings, MidiData,
+    Note, TrackKind,
 };
 
 // Without `--cfg lspk_rtsan` (`rtsan/.cargo/config.toml`), this doesn't build.
@@ -55,7 +56,7 @@ fn the_session_views_launching_passes_under_rtsan() {
                 index: usize::from(index),
             })
             .unwrap();
-        let clip = Clip::new(
+        let mut clip = Clip::new(
             editor.new_id(),
             Ticks::ZERO,
             Ticks::WHOLE,
@@ -66,6 +67,8 @@ fn the_session_views_launching_passes_under_rtsan() {
                 100,
             )])),
         );
+        // One track of each mode that acts on a release (WP-3.3).
+        clip.launch_mode = [LaunchMode::Gate, LaunchMode::Repeat][usize::from(index)];
         editor
             .apply(Command::CreateSlotClip { track, scene, clip })
             .unwrap();
@@ -79,6 +82,7 @@ fn the_session_views_launching_passes_under_rtsan() {
         let track = tracks[(round as usize) % tracks.len()];
         let command = match round % 20 {
             0 | 10 => Some(SessionCommand::Launch { track, scene }),
+            2 | 12 => Some(SessionCommand::Release { track, scene }),
             5 | 15 => Some(SessionCommand::StopTrack(track)),
             7 => Some(SessionCommand::LaunchScene(scene)),
             17 => Some(SessionCommand::StopAll),

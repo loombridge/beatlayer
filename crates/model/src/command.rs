@@ -18,6 +18,7 @@ use crate::device::{Device, DeviceRole};
 use crate::document::Document;
 use crate::error::ModelError;
 use crate::ids::{ClipId, ContentHash, DeviceId, ParamId, SceneId, TrackId};
+use crate::launch::LaunchMode;
 use crate::metronome::{CountIn, MetronomeRhythm, MetronomeSound};
 use crate::scene::Scene;
 use crate::shared::Shared;
@@ -503,6 +504,13 @@ pub enum Command {
         /// Whether it's muted.
         mute: bool,
     },
+    /// Sets a clip's launch mode (WP-3.3).
+    SetClipLaunchMode {
+        /// The clip.
+        clip: ClipId,
+        /// What a press and a release of its launch button do.
+        mode: LaunchMode,
+    },
     /// Replaces what a clip plays. The data must match the clip's track.
     SetClipData {
         /// The clip.
@@ -954,6 +962,7 @@ impl Command {
             Self::SetClipLength { .. } => "Resize clip",
             Self::RenameClip { .. } => "Rename clip",
             Self::SetClipMute { .. } => "Mute clip",
+            Self::SetClipLaunchMode { .. } => "Change launch mode",
             Self::SetClipData { .. } => "Edit clip",
             Self::TrimClipStart { .. } => "Resize clip",
             Self::SetClipRegion { .. } => "Change clip region",
@@ -1369,6 +1378,12 @@ impl Document {
             Command::SetClipMute { clip, mute } => {
                 if self.clip_ref(*clip)?.mute != *mute {
                     self.clip_mut(*clip)?.mute = *mute;
+                }
+                Ok(())
+            }
+            Command::SetClipLaunchMode { clip, mode } => {
+                if self.clip_ref(*clip)?.launch_mode != *mode {
+                    self.clip_mut(*clip)?.launch_mode = *mode;
                 }
                 Ok(())
             }

@@ -8,7 +8,7 @@ use bl_agent::client::{Client, InProcess};
 use bl_core::time::{Bpm, Ticks, TimeSignature};
 use bl_model::{
     AudioData, AutomationTarget, Channel, Clip, ClipData, Command, ContentHash, CountIn,
-    CrossfadeAssign, Device, DeviceKind, DeviceRole, Editor, Input, LaunchQuantization,
+    CrossfadeAssign, Device, DeviceKind, DeviceRole, Editor, Input, LaunchMode, LaunchQuantization,
     LaunchSettings, MetronomeRhythm, MetronomeSound, MidiData, MixerParam, Monitor, Note, Output,
     ParamId, SendTap, Sidechain, TakeClip, TakeLane, Tap, TrackId, TrackKind,
 };
@@ -354,6 +354,7 @@ fn fixture() -> Project {
         ClipData::Midi(MidiData::new([note(48, 0), note(50, 88_200)])),
     );
     slot_clip.name = "Loop".to_owned();
+    slot_clip.launch_mode = LaunchMode::Gate;
     apply(
         &mut editor,
         Command::CreateSlotClip {

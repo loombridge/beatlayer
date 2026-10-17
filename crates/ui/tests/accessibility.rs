@@ -1439,6 +1439,12 @@ fn paths() -> BTreeMap<&'static str, Path> {
             )),
         ),
         (
+            "session.release",
+            Exception(LaterView(
+                "the Session View's launch buttons, which send the release (WP-3.8)",
+            )),
+        ),
+        (
             "session.launch_scene",
             Exception(LaterView(
                 "the Session View's scene launch buttons (WP-3.8)",
@@ -1502,6 +1508,7 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("clip.trim_start", Exception(editing)),
         // Views of later milestones.
         ("clip.set_gain", Exception(clip_view)),
+        ("clip.set_launch_mode", Exception(clip_view)),
         ("clip.set_loop", Exception(clip_view)),
         ("clip.set_loop_enabled", Exception(clip_view)),
         ("clip.set_midi_loop", Exception(clip_view)),

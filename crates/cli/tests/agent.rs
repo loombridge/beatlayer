@@ -730,6 +730,10 @@ struct EngineHost {
 
 impl EngineHost {
     fn new(block: usize) -> Self {
+        Self::with_registry(block, Registry::new())
+    }
+
+    fn with_registry(block: usize, registry: Registry) -> Self {
         // Not autonomous: the transport's commands are `read`, so they run
         // without asking anyway.
         let mut client = Client::new(InProcess::new(Agent::headless(false), Shell::headless()));
@@ -737,7 +741,7 @@ impl EngineHost {
         client.transport().agent.set_engine_attached(true);
         Self {
             client,
-            offline: Offline::new(EngineConfig::new(SAMPLE_RATE, block), Registry::new()),
+            offline: Offline::new(EngineConfig::new(SAMPLE_RATE, block), registry),
             block,
             clock: 0,
             samples: Vec::new(),
@@ -787,6 +791,112 @@ impl EngineHost {
 
     fn status(&mut self) -> Value {
         self.call("transport", json!({ "action": "status" }))
+    }
+
+    /// Hands the display data the devices published to the shell, as the
+    /// app's poll of the engine does.
+    fn publish_displays(&mut self) {
+        let mut data = std::collections::BTreeMap::new();
+        self.offline.displays().read_all(&mut data);
+        let shell = &mut self.client.transport().shell;
+        for (device, data) in data {
+            shell.set_device_display_data(device, &data.values);
+        }
+    }
+}
+
+/// An agent reads the Contour's spectrum and the Squeeze's gain reduction
+/// by their device IDs, as the engine published them after the last block,
+/// at any block size (the device framework spec, R26 and R28).
+#[test]
+fn an_agent_reads_a_contours_spectrum_and_a_squeezes_gain_reduction_by_device_id() {
+    for block in [1, 64, 512, 4_096] {
+        let mut registry = Registry::new();
+        bl_devices::register(&mut registry);
+        let mut host = EngineHost::with_registry(block, registry);
+        let device = |index: u32, name: &str, device_type: &str| {
+            json!({ "command": "device.insert",
+                    "args": { "track": {"$ref": "Track"}, "index": index,
+                              "device": { "id": {"$new": name}, "name": name,
+                                          "kind": { "native": { "device_type": device_type } },
+                                          "enabled": true, "params": [] } } })
+        };
+        host.call(
+            "run",
+            json!({ "label": "Add devices", "commands": [
+                { "command": "track.create",
+                  "args": { "id": {"$new": "Track"}, "kind": "audio", "name": "Track", "index": 0 } },
+                device(0, "Tone", bl_engine::nodes::TEST_TONE),
+                device(1, "Contour", bl_devices::eq::EQ),
+                device(2, "Squeeze", bl_devices::compressor::COMPRESSOR),
+                { "command": "device.set_param",
+                  "args": { "device": {"$ref": "Tone"}, "param": 0, "value": 1000.0 } },
+                { "command": "device.set_param",
+                  "args": { "device": {"$ref": "Tone"}, "param": 1, "value": -6.0 } },
+                { "command": "device.set_param",
+                  "args": { "device": {"$ref": "Squeeze"}, "param": 0, "value": -30.0 } },
+            ] }),
+        );
+        let ids: Vec<_> = {
+            let document = host.client.transport().shell.editor().document();
+            let track = document.tracks().find(|t| t.name() == "Track").unwrap();
+            track.devices().map(|d| d.id).collect()
+        };
+        let (contour, squeeze) = (ids[1], ids[2]);
+        host.play_to(16_384);
+        host.publish_displays();
+        let read = |host: &mut EngineHost, device| {
+            let reply = host.call(
+                "run",
+                json!({ "label": "Read", "commands": [
+                    { "command": "device.display", "args": { "device": device } },
+                ] }),
+            );
+            reply["results"][0]["result"].clone()
+        };
+
+        let contour = read(&mut host, contour);
+        assert_eq!(contour["live"], true);
+        let series = |name: &str| {
+            contour["series"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|s| s["name"] == name)
+                .unwrap_or_else(|| panic!("block {block}: no {name} in {contour}"))
+                .clone()
+        };
+        let spectrum: Vec<f64> = series("Spectrum")["values"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_f64().unwrap())
+            .collect();
+        let loudest = spectrum
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.total_cmp(b.1))
+            .unwrap()
+            .0;
+        let centre = 20.0 * (1000.0f64).powf((loudest as f64 + 0.5) / 64.0);
+        assert!(
+            (centre / 1000.0).ln().abs() < 0.2,
+            "block {block}: the 1 kHz tone is read at {centre:.0} Hz"
+        );
+
+        let squeeze = read(&mut host, squeeze);
+        let reduction = squeeze["readings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["name"] == "Gain Reduction")
+            .unwrap_or_else(|| panic!("block {block}: no reduction in {squeeze}"));
+        assert!(
+            reduction["value"].as_f64().unwrap() < -1.0,
+            "block {block}: {reduction}"
+        );
+        assert_eq!(squeeze["view"], "Transfer Curve");
+        assert_eq!(host.offline.heap_operations(), 0, "block {block}");
     }
 }
 

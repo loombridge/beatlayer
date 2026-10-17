@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-339 commands in 32 areas.
+342 commands in 32 areas.
 
 ## Permission classes
 
@@ -149,6 +149,7 @@ Each command has:
 | [`device.add`](#deviceadd) | Add Device | `edit` |  |  |
 | [`device.copy`](#devicecopy) | Copy Device | `read` | `Cmd+C` | `Ctrl+C` |
 | [`device.cut`](#devicecut) | Cut Device | `destructive` | `Cmd+X` | `Ctrl+X` |
+| [`device.display`](#devicedisplay) | Device Display | `read` |  |  |
 | [`device.duplicate`](#deviceduplicate) | Duplicate Device | `edit` | `Cmd+D` | `Ctrl+D` |
 | [`device.expand`](#deviceexpand) | Expand Device | `read` |  |  |
 | [`device.fold`](#devicefold) | Fold Device | `read` | `Minus` | `Minus` |
@@ -164,6 +165,7 @@ Each command has:
 | [`device.save_default_preset`](#devicesave_default_preset) | Save as Default Preset | `external` |  |  |
 | [`device.save_preset`](#devicesave_preset) | Save Preset | `external` |  |  |
 | [`device.select`](#deviceselect) | Select Device | `read` |  |  |
+| [`device.set_display_view`](#deviceset_display_view) | Set Display View | `read` |  |  |
 | [`device.set_enabled`](#deviceset_enabled) | Activate/Deactivate Device | `edit` |  |  |
 | [`device.set_floating`](#deviceset_floating) | Float | `edit` | `Option+F` | `Ctrl+Alt+F` |
 | [`device.set_param`](#deviceset_param) | Set Device Parameter | `edit` |  |  |
@@ -2493,6 +2495,22 @@ Arguments:
 
 Result: [`DeviceViewState`](#deviceviewstate).
 
+#### `device.display`
+
+**Device Display**. Permission: `read`. Contexts: `device-view`.
+
+Reports what a device's display shows now, read from the display data its node publishes after each block and from its parameters: curves and spectra (an EQ's spectrum, its bands' responses and their sum per curve; a compressor's transfer curve), the markers on them (an EQ's band dots, a compressor's threshold and level), and single readings (a compressor's gain reduction and levels), each with its unit and how it reads; the view the display shows, if it has views; and whether an engine is publishing (`live`). Empty for a device whose type draws no display. Changes nothing.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) or null | no | The device; the selected one if left out. |
+
+Result: [`DeviceDisplay`](#devicedisplay).
+
 #### `device.duplicate`
 
 **Duplicate Device**. Permission: `edit`. Contexts: `device-view`.
@@ -2762,6 +2780,23 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `device` | [`DeviceId`](#deviceid) or null | no | The device, or `null` to select none. |
+
+Result: [`DeviceViewState`](#deviceviewstate).
+
+#### `device.set_display_view`
+
+**Set Display View**. Permission: `read`. Contexts: `device-view`.
+
+Chooses the view a device's display shows, as its view buttons do: a compressor's Transfer Curve, Activity, or Collapsed. Only a device whose display has views takes one, and only one of them. It changes only the view: it isn't an undo step, and `device_view.state` and `device.display` report the view chosen.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `view` | string | yes | The view, one of the device's description's `views`. |
+| `device` | [`DeviceId`](#deviceid) or null | no | The device; the selected one if left out. |
 
 Result: [`DeviceViewState`](#deviceviewstate).
 
@@ -9073,6 +9108,7 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
 | `params` | array of [`ParamDescriptor`](#paramdescriptor) | yes | Its parameters. |
 | `layout` | [`DeviceLayout`](#devicelayout) | yes | Where its controls and display cells sit (IMP-14). |
 | `menu_options` | array of [`ParamId`](#paramid) | no | The switches the device lists as its own items in its Show Options menu, after Save as Default Preset (C-DEVICE-015), in this order. They are parameters like any other, but the layout places no control for them. |
+| `views` | array of string | no | The views its display offers, such as `Transfer Curve`, the first being the one it starts in; empty for a display with one view. Which is shown is view state (`device.set_display_view`). |
 
 <details><summary>JSON Schema</summary>
 
@@ -9097,11 +9133,87 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
         "$ref": "#/$defs/ParamDescriptor"
       },
       "type": "array"
+    },
+    "views": {
+      "description": "The views its display offers, such as `Transfer Curve`, the first being the one it starts in; empty for a display with one view. Which is shown is view state (`device.set_display_view`).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
     }
   },
   "required": [
     "params",
     "layout"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `DeviceDisplay`
+
+A device's display now, as `device.display` reports it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `live` | boolean | yes | Whether the device's engine has published its data: `false` while no engine runs or before its first block, when only what its parameters give is here. |
+| `series` | array of [`DisplaySeries`](#displayseries) | yes | Its curves and spectra. |
+| `markers` | array of [`DisplayMarker`](#displaymarker) | yes | Its markers. |
+| `readings` | array of [`DisplayReading`](#displayreading) | yes | Its single readings. |
+| `view` | string or null | no | The view the display is showing, for a device whose display has views. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A device's display now, as `device.display` reports it.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    },
+    "live": {
+      "description": "Whether the device's engine has published its data: `false` while no engine runs or before its first block, when only what its parameters give is here.",
+      "type": "boolean"
+    },
+    "markers": {
+      "description": "Its markers.",
+      "items": {
+        "$ref": "#/$defs/DisplayMarker"
+      },
+      "type": "array"
+    },
+    "readings": {
+      "description": "Its single readings.",
+      "items": {
+        "$ref": "#/$defs/DisplayReading"
+      },
+      "type": "array"
+    },
+    "series": {
+      "description": "Its curves and spectra.",
+      "items": {
+        "$ref": "#/$defs/DisplaySeries"
+      },
+      "type": "array"
+    },
+    "view": {
+      "description": "The view the display is showing, for a device whose display has views.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "device",
+    "live",
+    "series",
+    "markers",
+    "readings"
   ],
   "type": "object"
 }
@@ -9130,6 +9242,7 @@ One device as the Device View shows it.
 | `selected` | boolean | yes | Whether it's the selected device. |
 | `hot_swap` | boolean | yes | Whether it's the device being hot-swapped. |
 | `sidechain` | [`SidechainSection`](#sidechainsection) or null | yes | Its sidechain section, if it has a sidechain input (WP-2.19b). |
+| `display_view` | string or null | no | The view its display shows, if its display has views (WP-5.43): one of its description's `views`. |
 | `panel` | [`DevicePanel`](#devicepanel) or null | no | Its parameters and layout, for the generic UI; left out for a device whose type doesn't describe them. |
 
 <details><summary>JSON Schema</summary>
@@ -9138,6 +9251,13 @@ One device as the Device View shows it.
 {
   "description": "One device as the Device View shows it.",
   "properties": {
+    "display_view": {
+      "description": "The view its display shows, if its display has views (WP-5.43): one of its description's `views`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "enabled": {
       "description": "Whether it's switched on.",
       "type": "boolean"
@@ -9909,6 +10029,194 @@ The Display & Input page's settings.
     "outline_view_in_focus",
     "use_tab_key_to_move_focus",
     "wrap_tab_navigation"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `DisplayMarker`
+
+A point on the display: a band's dot on an EQ's curve, or the level now on a compressor's transfer curve.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | What it is, such as `A1`. |
+| `series` | string | yes | The series whose axes it sits on. |
+| `x` | number | yes | Its place along the axis, in the series' `x_unit`. |
+| `y` | number | yes | Its value, in the series' `unit`. |
+| `text` | string | yes | How it reads, such as `A1 Peak 1.00 kHz 3.0 dB`. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A point on the display: a band's dot on an EQ's curve, or the level now on a compressor's transfer curve.",
+  "properties": {
+    "name": {
+      "description": "What it is, such as `A1`.",
+      "type": "string"
+    },
+    "series": {
+      "description": "The series whose axes it sits on.",
+      "type": "string"
+    },
+    "text": {
+      "description": "How it reads, such as `A1 Peak 1.00 kHz 3.0 dB`.",
+      "type": "string"
+    },
+    "x": {
+      "description": "Its place along the axis, in the series' `x_unit`.",
+      "format": "float",
+      "type": "number"
+    },
+    "y": {
+      "description": "Its value, in the series' `unit`.",
+      "format": "float",
+      "type": "number"
+    }
+  },
+  "required": [
+    "name",
+    "series",
+    "x",
+    "y",
+    "text"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `DisplayReading`
+
+A single reading, such as a gain reduction.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | What it is, such as `Gain Reduction`. |
+| `value` | number | yes | Its value now, in `unit`. |
+| `unit` | string | yes | What it's in, such as `dB`. |
+| `text` | string | yes | How it reads, such as `-4.3 dB`. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A single reading, such as a gain reduction.",
+  "properties": {
+    "name": {
+      "description": "What it is, such as `Gain Reduction`.",
+      "type": "string"
+    },
+    "text": {
+      "description": "How it reads, such as `-4.3 dB`.",
+      "type": "string"
+    },
+    "unit": {
+      "description": "What it's in, such as `dB`.",
+      "type": "string"
+    },
+    "value": {
+      "description": "Its value now, in `unit`.",
+      "format": "float",
+      "type": "number"
+    }
+  },
+  "required": [
+    "name",
+    "value",
+    "unit",
+    "text"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `DisplaySeries`
+
+A curve or a spectrum: values at evenly spaced places along an axis.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | What it is, such as `Spectrum`; the cell draws it by this name. |
+| `unit` | string | yes | What the values are in, such as `dB`. |
+| `x_unit` | string | yes | What the axis is in, such as `Hz`. |
+| `x_range` | array of number, at least 2 | yes | The axis's first and last place. |
+| `log_x` | boolean | yes | Whether the axis is logarithmic. |
+| `y_range` | array of number, at least 2 | yes | The values the cell shows between its bottom and its top. |
+| `detail` | boolean | yes | Whether it's a part of another series, such as one band's response within the curve's sum: drawn faint. |
+| `values` | array of number | yes | The values, from the first place to the last. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A curve or a spectrum: values at evenly spaced places along an axis.",
+  "properties": {
+    "detail": {
+      "default": false,
+      "description": "Whether it's a part of another series, such as one band's response within the curve's sum: drawn faint.",
+      "type": "boolean"
+    },
+    "log_x": {
+      "description": "Whether the axis is logarithmic.",
+      "type": "boolean"
+    },
+    "name": {
+      "description": "What it is, such as `Spectrum`; the cell draws it by this name.",
+      "type": "string"
+    },
+    "unit": {
+      "description": "What the values are in, such as `dB`.",
+      "type": "string"
+    },
+    "values": {
+      "description": "The values, from the first place to the last.",
+      "items": {
+        "format": "float",
+        "type": "number"
+      },
+      "type": "array"
+    },
+    "x_range": {
+      "description": "The axis's first and last place.",
+      "items": {
+        "format": "float",
+        "type": "number"
+      },
+      "maxItems": 2,
+      "minItems": 2,
+      "type": "array"
+    },
+    "x_unit": {
+      "description": "What the axis is in, such as `Hz`.",
+      "type": "string"
+    },
+    "y_range": {
+      "description": "The values the cell shows between its bottom and its top.",
+      "items": {
+        "format": "float",
+        "type": "number"
+      },
+      "maxItems": 2,
+      "minItems": 2,
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "unit",
+    "x_unit",
+    "x_range",
+    "log_x",
+    "y_range",
+    "detail",
+    "values"
   ],
   "type": "object"
 }

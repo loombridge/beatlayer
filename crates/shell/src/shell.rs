@@ -217,6 +217,9 @@ pub enum Effect {
     /// Start renaming a device in its title bar, where the person types the
     /// new name; Return runs `device.rename` with it (WP-2.4).
     RenameDevice(bl_model::DeviceId),
+    /// Start renaming a track in its title bar, where the person types the
+    /// new name; Return runs `track.rename` with it (WP-4.22).
+    RenameTrack(TrackId),
 }
 
 /// Where a gesture that edits the set is (WP-1.8b): see [`Shell::gesture`].
@@ -321,6 +324,8 @@ pub struct Shell {
     /// When the MIDI ports were last listed, so [`Shell::poll`] lists them
     /// again every few seconds and a replugged device shows.
     midi_listed: std::time::Instant,
+    /// The chord Stack's Learn is hearing.
+    chord_learn: crate::chord_learn::ChordLearn,
     prefs: Preferences,
     config_dir: Option<PathBuf>,
     main_view: MainView,
@@ -459,6 +464,9 @@ pub struct Shell {
     session_run: Option<session_recording::SessionRun>,
     /// The control moves of the automation recording under way (WP-2.12).
     automation_take: crate::automation_record::Take,
+    /// What the Session clips that played during the recording under way
+    /// were (WP-3.13).
+    session_watch: crate::session_capture::Watch,
     /// Whether automation was recording when the engine was last polled:
     /// the transport records and plays.
     automation_recording: bool,
@@ -669,6 +677,7 @@ impl Shell {
             audio,
             midi,
             midi_listed: std::time::Instant::now(),
+            chord_learn: crate::chord_learn::ChordLearn::default(),
             settings_open: false,
             prefs,
             config_dir,
@@ -715,6 +724,7 @@ impl Shell {
             recorded_takes: 0,
             session_run: None,
             automation_take: crate::automation_record::Take::default(),
+            session_watch: crate::session_capture::Watch::default(),
             automation_recording: false,
             plug_in_windows: true,
             devices: {
@@ -1141,6 +1151,60 @@ impl Shell {
         self.midi.refresh();
         self.midi_listed = std::time::Instant::now();
         before != self.midi.ports()
+    }
+
+    /// Spec: midi-chord R15. While a Stack device's Learn is on, the keys
+    /// played set its shifts: the first key down is the root and the other
+    /// keys held become Shift 1 to 6 in order, one undo step each time the
+    /// chord changes. Returns whether the set changed.
+    fn learn_chords(&mut self) -> bool {
+        use bl_devices::stack::{LEARN, STACK, shift};
+        use bl_model::{Command, DeviceKind};
+        let learning: Vec<_> = self
+            .editor
+            .document()
+            .tracks()
+            .flat_map(|track| track.devices())
+            .filter(|device| {
+                matches!(&device.kind, DeviceKind::Native { device_type } if device_type == STACK)
+                    && device.params.get(&LEARN).is_some_and(|on| *on >= 0.5)
+            })
+            .map(|device| device.id)
+            .collect();
+        let sender = self.midi.sender().clone();
+        if learning.is_empty() {
+            if self.chord_learn.tapping {
+                sender.set_tap(false);
+                self.chord_learn.tapping = false;
+                self.chord_learn.clear();
+            }
+            return false;
+        }
+        if !self.chord_learn.tapping {
+            sender.set_tap(true);
+            self.chord_learn.tapping = true;
+        }
+        sender.take_notes(&mut self.chord_learn.heard);
+        let Some(shifts) = self.chord_learn.listen() else {
+            return false;
+        };
+        self.edit(|editor| {
+            editor.begin("Learn Chord");
+            for device in learning {
+                for (n, value) in shifts.iter().enumerate() {
+                    let command = Command::SetDeviceParam {
+                        device,
+                        param: shift(n as u32),
+                        value: f64::from(*value),
+                    };
+                    editor
+                        .apply(command)
+                        .expect("a shift takes any whole number in range");
+                }
+            }
+            editor.commit().expect("the learned shifts commit");
+        });
+        true
     }
 
     /// The preferences.
@@ -2065,6 +2129,26 @@ impl Shell {
             .state(doc, devices::shown_track(&self.arrangement, doc))
     }
 
+    /// Sets the display data a device's display draws, as
+    /// [`Shell::poll_engine`] does with the engine's (for a shell without an
+    /// engine, as in tests; while one runs, the next poll takes its data
+    /// instead).
+    pub fn set_device_display_data(&mut self, device: bl_model::DeviceId, values: &[f32]) {
+        let data = self.devices.displays_mut().entry(device).or_default();
+        data.published += 1;
+        data.values.clear();
+        data.values.extend_from_slice(values);
+    }
+
+    /// What `device`'s display shows, as the engine last published it
+    /// (the device framework spec, R36): the cell draws it, a screen reader
+    /// says it. `None` if the set has no such device.
+    #[must_use]
+    pub fn device_display(&self, device: bl_model::DeviceId) -> Option<bl_model::DeviceDisplay> {
+        let device = self.editor.document().device(device)?;
+        Some(self.devices.display(device))
+    }
+
     /// Every floating device's window, on any track (WP-2.5b), for the
     /// app to open, close, and place.
     #[must_use]
@@ -2140,6 +2224,11 @@ impl Shell {
                 &self.kit,
                 &mut self.editor,
             );
+        }
+        if id == device_ids::DISPLAY && self.audio.engine_running() {
+            // Spec: device-framework R37. The newest the nodes published,
+            // for an agent that never polls the engine.
+            self.audio.displays_into(self.devices.displays_mut());
         }
         let user_library = self.browser_view.user_library().map(Path::to_path_buf);
         let zoom = self.zoom();
@@ -2480,6 +2569,7 @@ impl Shell {
         if self.midi_listed.elapsed() >= MIDI_RELIST {
             changed |= self.refresh_midi();
         }
+        changed |= self.learn_chords();
         // Plug-ins' main-thread work (WP-2.6 to WP-2.8), and the changes
         // they made themselves.
         let plugins_changed = self.plugins.idle() | self.au.idle() | self.vst3.idle();
@@ -2938,10 +3028,30 @@ impl Shell {
             // Not a revision: the window redraws while a meter shows a
             // level, and nothing else depends on them.
             self.audio.meters_into(&mut self.meters);
+            // Spec: device-framework R35. The display data the devices'
+            // nodes published, which the device displays draw. Not a
+            // revision either.
+            self.audio.displays_into(self.devices.displays_mut());
         }
         // Spec: launch-quantisation R10. The slots the engine is launching
         // or stopping, which the grid's launch buttons draw.
         self.audio.session_into(&mut self.session_states);
+        // A drag in progress waits: its end is one change, not a split for
+        // every frame of it.
+        if self.recording.is_some()
+            && !self.gesture
+            && let Some(rate) = self.audio.sample_rate().and_then(SampleRate::new)
+        {
+            // Spec: session-to-arrangement R3. The clips that play, as they
+            // were, for the copies a recording makes.
+            self.session_watch.poll(
+                self.editor.document(),
+                &self.session_states,
+                engine.position,
+                &self.editor.document().settings().tempo,
+                rate,
+            );
+        }
         self.scene_override = self.audio.scene_override();
         // Spec: session-view R24. The tracks a Session clip has taken over,
         // which the Back to Arrangement buttons light from.
@@ -3151,6 +3261,7 @@ impl Shell {
         }
         let (mut plan, mut recording) =
             crate::recording::start(folder.as_deref(), rate, &tracks, &midi, Vec::new())?;
+        self.session_watch = crate::session_capture::Watch::default();
         let delay = self
             .audio
             .recording_delay()
@@ -3216,6 +3327,7 @@ impl Shell {
             files,
             midi,
             dropped,
+            launches,
         } = outcome;
         self.last_recording = Some(RecordingReport {
             error: None,
@@ -3256,11 +3368,12 @@ impl Shell {
                     files: Ok(files),
                     midi,
                     dropped,
+                    launches,
                 },
             );
             return;
         }
-        if files.is_empty() && midi.is_empty() {
+        if files.is_empty() && midi.is_empty() && launches.is_empty() {
             return;
         }
         let Some(take) = take else {
@@ -3278,6 +3391,14 @@ impl Shell {
         let end = tempo.frames_to_ticks(take.end - Frames(delay), rate);
         let edge_fades = self.create_fades_on_clip_edges();
         let overdub = self.editor.document().settings().midi_overdub;
+        // shortcut: a take that went round the loop copies no Session
+        // clips; upgrade when Live's behaviour there is observed.
+        let watch = std::mem::take(&mut self.session_watch);
+        let runs = if take.wrap.is_none() {
+            crate::session_capture::runs(&launches, take.end, &tempo, rate)
+        } else {
+            Vec::new()
+        };
         let mut imported = Vec::with_capacity(files.len());
         for file in &files {
             match self.media.import(&file.path) {
@@ -3302,44 +3423,41 @@ impl Shell {
         let applied = match take.wrap {
             None => {
                 let mut placed = std::collections::BTreeSet::new();
-                self.editor
-                    .transact(crate::recording::UNDO_LABEL, |editor| {
-                        for (track, hash, path, _) in &imported {
-                            let id = editor.new_id();
-                            // Spec: audio-clips R7. With Create Fades on Clip Edges
-                            // on, a new recorded clip's edges fade over 4 ms, like a
-                            // dropped file's.
-                            let audio = AudioData::new(*hash);
-                            let audio = if edge_fades {
-                                audio.with_edge_fades()
-                            } else {
-                                audio
-                            };
-                            let mut clip = Clip::new(
-                                id,
-                                start,
-                                end.saturating_sub(start),
-                                ClipData::Audio(audio),
-                            );
-                            clip.name = file_stem(path);
-                            crate::arrangement::placing::clear(
-                                editor, *track, start, end, &placed,
-                            )?;
-                            placed.insert(id);
-                            editor.apply(bl_model::Command::CreateClip {
-                                track: *track,
-                                clip,
-                            })?;
-                        }
-                        crate::recording::place_midi(
-                            editor,
-                            &midi,
-                            take,
-                            rate,
-                            overdub,
-                            &mut placed,
-                        )
-                    })
+                let label = if runs.is_empty() {
+                    crate::recording::UNDO_LABEL
+                } else {
+                    crate::recording::LOOP_UNDO_LABEL
+                };
+                let armed: Vec<TrackId> = imported
+                    .iter()
+                    .map(|(track, ..)| *track)
+                    .chain(midi.iter().map(|take| take.track))
+                    .collect();
+                self.editor.transact(label, |editor| {
+                    for (track, hash, path, _) in &imported {
+                        let id = editor.new_id();
+                        // Spec: audio-clips R7. With Create Fades on Clip Edges
+                        // on, a new recorded clip's edges fade over 4 ms, like a
+                        // dropped file's.
+                        let audio = AudioData::new(*hash);
+                        let audio = if edge_fades {
+                            audio.with_edge_fades()
+                        } else {
+                            audio
+                        };
+                        let mut clip =
+                            Clip::new(id, start, end.saturating_sub(start), ClipData::Audio(audio));
+                        clip.name = file_stem(path);
+                        crate::arrangement::placing::clear(editor, *track, start, end, &placed)?;
+                        placed.insert(id);
+                        editor.apply(bl_model::Command::CreateClip {
+                            track: *track,
+                            clip,
+                        })?;
+                    }
+                    crate::recording::place_midi(editor, &midi, take, rate, overdub, &mut placed)?;
+                    crate::session_capture::place(editor, &watch, &runs, &armed, end)
+                })
             }
             Some(_) => {
                 let frames = files.first().map_or(0, |file| file.frames);
@@ -3700,6 +3818,23 @@ impl Shell {
     /// fit its schema, and nothing about the state rules it out.
     #[must_use]
     pub fn can_invoke(&self, id: &str, args: &Value) -> bool {
+        self.can_invoke_in(id, args, &self.active_contexts())
+    }
+
+    /// The contexts a track's title-bar menu works in (WP-4.22): the active
+    /// ones, with `track-headers` first, because the menu acts on the
+    /// selected title bars whichever view it opened in.
+    #[must_use]
+    pub fn track_menu_contexts(&self) -> Vec<Context> {
+        let mut contexts = self.active_contexts();
+        contexts.retain(|c| *c != Context::TrackHeaders);
+        contexts.insert(0, Context::TrackHeaders);
+        contexts
+    }
+
+    /// [`Shell::can_invoke`] with `active` as the contexts that apply.
+    #[must_use]
+    pub fn can_invoke_in(&self, id: &str, args: &Value, active: &[Context]) -> bool {
         let Some(spec) = self.registry.get(id) else {
             return false;
         };
@@ -3707,7 +3842,6 @@ impl Shell {
             // A drag is under way; keys wait for it (Esc cancels it).
             return false;
         }
-        let active = self.active_contexts();
         if !spec.contexts.iter().any(|context| active.contains(context)) {
             return false;
         }
@@ -3805,6 +3939,12 @@ impl Shell {
         if id == "device.rename" && args.get("name").is_none() {
             // A person names the device in its title bar.
             return self.devices.selected().is_some();
+        }
+        if id == "track.delete" && args.get("track").is_none() {
+            return !self.deletable_tracks().is_empty();
+        }
+        if id == "track.rename" && args.get("name").is_none() {
+            return self.renamable_track(args).is_some();
         }
         if id == device_ids::SET_FLOATING {
             // IMP-14: only native devices float; plug-ins open their own
@@ -4141,6 +4281,34 @@ impl Shell {
         result
     }
 
+    /// The tracks Delete reaches: the selected ones, less Main, which can't
+    /// be deleted.
+    fn deletable_tracks(&self) -> Vec<TrackId> {
+        let doc = self.editor.document();
+        self.arrangement
+            .selected_tracks()
+            .iter()
+            .copied()
+            .filter(|&t| doc.track(t).is_some_and(|t| t.kind() != TrackKind::Main))
+            .collect()
+    }
+
+    /// The track Rename reaches: the one `args` names, else the first
+    /// selected, unless it's Main, whose name is fixed.
+    fn renamable_track(&self, args: &Value) -> Option<TrackId> {
+        let named = args
+            .get("track")
+            .and_then(|v| serde_json::from_value(v.clone()).ok());
+        named
+            .or_else(|| self.arrangement.selected_tracks().first().copied())
+            .filter(|&t| {
+                self.editor
+                    .document()
+                    .track(t)
+                    .is_some_and(|t| t.kind() != TrackKind::Main)
+            })
+    }
+
     /// Runs a command as a person asked for it, from a menu, a key, or a
     /// control: fills in arguments the person didn't give, asks before
     /// losing unsaved changes, and asks for a file where one is needed (as
@@ -4203,6 +4371,47 @@ impl Shell {
             _ if !has("track") && Switch::of_command(id).is_some() => {
                 let switch = Switch::of_command(id).expect("just checked");
                 self.toggle_tracks(id, switch, args)
+            }
+            "track.delete" if !has("track") => {
+                // Spec: track-context-menu R4. Delete acts on every selected
+                // track, as one undo step.
+                let tracks = self.deletable_tracks();
+                if tracks.is_empty() {
+                    return Err(ShellError::Unavailable {
+                        command: id.to_owned(),
+                        reason: "select a track first".to_owned(),
+                    });
+                }
+                let opened = !self.gesture;
+                if opened {
+                    self.begin_gesture(track_ids::DELETE_STEP);
+                }
+                let mut result = Ok(Value::Null);
+                for track in tracks {
+                    // A group's delete took its selected members with it.
+                    if self.editor.document().track(track).is_none() {
+                        continue;
+                    }
+                    result = self.run(id, json!({ "track": track }));
+                    if result.is_err() {
+                        break;
+                    }
+                }
+                if opened {
+                    self.end_gesture();
+                }
+                result
+            }
+            "track.rename" if !has("name") => {
+                let track = self
+                    .renamable_track(&args)
+                    .ok_or_else(|| ShellError::Unavailable {
+                        command: id.to_owned(),
+                        reason: "select a track first".to_owned(),
+                    })?;
+                self.effects.push(Effect::RenameTrack(track));
+                self.touch();
+                Ok(Value::Null)
             }
             "device.rename" if !has("name") => {
                 let args = self.filled_args(id, args)?;
@@ -4400,7 +4609,11 @@ impl Shell {
             let args_floating = args.get("floating") == Some(&Value::Bool(true));
             // Spec: automation R17. With Automation Arm on and the transport
             // recording, a control move is noted for the envelope too.
-            let moved = (self.arrangement.automation_arm() && self.automation_recording)
+            // Spec: session-to-arrangement R5. A Session clip that has taken a
+            // track over writes the moves too, whether or not Automation Arm
+            // is on.
+            let moved = ((self.arrangement.automation_arm() || !self.session_over.is_empty())
+                && self.automation_recording)
                 .then(|| model::command_from_args(id, args.clone()).ok())
                 .flatten()
                 .and_then(|command| {

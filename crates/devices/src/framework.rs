@@ -9,8 +9,8 @@ use bl_dsp::LinearSmoother;
 use bl_dsp::smooth::DEFAULT_SMOOTHING_SECONDS;
 use bl_engine::modbus::{Bus, Control};
 use bl_engine::{
-    AutomationList, Block, DeviceType, Node, NodeConfig, NodeData, NodeEvent, NoteEvent,
-    ParamValue, Registry, segments,
+    AutomationList, Block, DeviceType, DisplayReader, DisplayWriter, Node, NodeConfig, NodeData,
+    NodeEvent, NoteBuffer, NoteEvent, ParamValue, Registry, display_channel, segments,
 };
 use bl_model::modulation::Travel;
 use bl_model::{Device, DeviceDescription, DeviceKind, ParamDescriptor, ParamId};
@@ -26,6 +26,22 @@ pub trait NativeDevice: Send + 'static {
     /// may change; within one, `params` gives every parameter's value frame
     /// by frame ([`ParamBank::ramp`]).
     fn process(&mut self, audio: &mut Audio<'_, '_>, params: &ParamBank);
+
+    /// Ends every note the device started and still holds, by writing a
+    /// note-off for each at offset 0 into `out`, and forgets them. The engine
+    /// calls it while the device is switched off, and on the first block after
+    /// the device was removed or moved (spec: device-framework R32). The
+    /// default writes nothing, for a device that starts no notes.
+    fn release(&mut self, out: &mut NoteBuffer) {
+        let _ = out;
+    }
+
+    /// How many notes the device has dropped since it was made, for lack of
+    /// room in its fixed tables and queues (real-time rule 4). The default is
+    /// none.
+    fn dropped_notes(&self) -> u64 {
+        0
+    }
 
     /// Takes parameter changes while the device is switched off and
     /// doesn't process; `params` already holds them. A device that keeps
@@ -62,6 +78,21 @@ pub trait NativeDevice: Send + 'static {
     /// are already worked out for the stretch.
     fn control(&mut self, modulation: &mut Modulation<'_, '_>, params: &ParamBank) {
         let _ = (modulation, params);
+    }
+    /// How many values the device's display data has (the framework spec,
+    /// R35): 0 for a device with no display to draw from the audio. Asked
+    /// once, when the node is made.
+    fn display_len(&self) -> usize {
+        0
+    }
+
+    /// Writes the display's latest values into `out`, [`display_len`] of
+    /// them, after each block. It runs on the audio thread: it allocates,
+    /// locks and blocks nothing.
+    ///
+    /// [`display_len`]: Self::display_len
+    fn display(&mut self, out: &mut [f32]) {
+        let _ = out;
     }
 }
 
@@ -145,6 +176,19 @@ impl<'a> Audio<'_, 'a> {
                 ..*note
             })
         })
+    }
+
+    /// Sends a note on from the stretch, at `note.offset` frames after its
+    /// first frame (clamped into it): the notes go out in order of offset,
+    /// note-offs before note-ons on one frame (spec: device-framework R30).
+    /// A note past the out buffer's room is dropped and counted. Never
+    /// allocates.
+    pub fn send(&mut self, note: NoteEvent) {
+        let offset = note.offset.min(self.range.len().saturating_sub(1) as u32);
+        self.block.insert_note(NoteEvent {
+            offset: offset + self.range.start as u32,
+            ..note
+        });
     }
 
     /// Every channel's samples in the stretch, in order.
@@ -495,6 +539,9 @@ impl DelayLine {
 pub struct NativeNode<D> {
     device: D,
     params: ParamBank,
+    /// Where the device publishes its display after each block, and the
+    /// reader the compiler takes once.
+    display: Option<(DisplayWriter, Option<DisplayReader>)>,
 }
 
 impl<D: NativeDevice> NativeNode<D> {
@@ -507,9 +554,15 @@ impl<D: NativeDevice> NativeNode<D> {
         values: &Device,
         config: &NodeConfig,
     ) -> Self {
+        let len = device.display_len();
+        let display = (len > 0).then(|| {
+            let (writer, reader) = display_channel(len);
+            (writer, Some(reader))
+        });
         Self {
             device,
             params: ParamBank::new(description, values, config),
+            display,
         }
     }
 
@@ -517,6 +570,12 @@ impl<D: NativeDevice> NativeNode<D> {
     #[must_use]
     pub fn params(&self) -> &ParamBank {
         &self.params
+    }
+
+    /// How many notes the device has dropped for lack of room.
+    #[must_use]
+    pub fn dropped_notes(&self) -> u64 {
+        self.device.dropped_notes()
     }
 
     /// The device.
@@ -555,6 +614,11 @@ impl<D: NativeDevice> Node for NativeNode<D> {
             };
             self.device.process(&mut audio, &self.params);
         }
+        // Spec: device-framework R35. The display's latest values, after
+        // each block.
+        if let Some((writer, _)) = &mut self.display {
+            writer.publish(|out| self.device.display(out));
+        }
     }
 
     fn control(&mut self, ctl: &mut Control<'_>) -> bool {
@@ -588,6 +652,10 @@ impl<D: NativeDevice> Node for NativeNode<D> {
         self.device.flush(events, &self.params);
     }
 
+    fn release(&mut self, out: &mut NoteBuffer) {
+        self.device.release(out);
+    }
+
     fn receive_data(&mut self, data: NodeData) {
         // Automation (WP-2.12) goes to the parameter bank; anything else is
         // the device's own data (WP-2.16).
@@ -604,6 +672,10 @@ impl<D: NativeDevice> Node for NativeNode<D> {
 
     fn latency(&self) -> u32 {
         self.device.latency()
+    }
+
+    fn display(&mut self) -> Option<DisplayReader> {
+        self.display.as_mut().and_then(|(_, reader)| reader.take())
     }
 }
 

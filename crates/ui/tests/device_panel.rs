@@ -269,3 +269,216 @@ fn a_larger_body_grows_only_the_display_cells() {
     };
     assert_eq!(time(&controls), time(&big_controls));
 }
+
+/// A harness with Beatlayer's own devices, and the engine off so the
+/// display data a test sets stays (the engine would publish its own).
+fn display_harness() -> Harness {
+    let mut h = harness();
+    h.shell.set_device_types(bl_devices::device_types());
+    h.shell.run("audio.toggle_engine", json!({})).unwrap();
+    h.frame(vec![]);
+    h
+}
+
+fn add_native(h: &mut Harness, device_type: &str) -> DeviceId {
+    let types = bl_devices::device_types();
+    let t = types
+        .iter()
+        .find(|t| matches!(&t.kind, bl_model::DeviceKind::Native { device_type: d } if d == device_type))
+        .unwrap();
+    add(h, t)
+}
+
+fn set(h: &mut Harness, device: DeviceId, param: bl_model::ParamId, value: f64) {
+    h.shell
+        .invoke(
+            "device.set_param",
+            json!({ "device": device, "param": param, "value": value }),
+        )
+        .unwrap();
+}
+
+/// What was painted inside `cell` in a frame: line paths, circles and
+/// rectangles.
+fn painted(output: &egui::FullOutput, cell: Rect) -> (usize, usize, usize) {
+    fn count(shape: &egui::Shape, cell: Rect, found: &mut (usize, usize, usize)) {
+        // Lines and dots at the cell's edges reach a stroke beyond it.
+        let cell = cell.expand(4.0);
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| count(s, cell, found)),
+            _ if !cell.contains_rect(shape.visual_bounding_rect()) => {}
+            egui::Shape::Path(_) => found.0 += 1,
+            egui::Shape::Circle(_) => found.1 += 1,
+            egui::Shape::Rect(_) => found.2 += 1,
+            _ => {}
+        }
+    }
+    let mut found = (0, 0, 0);
+    for clipped in &output.shapes {
+        count(&clipped.shape, cell, &mut found);
+    }
+    found
+}
+
+/// Where the device's first display cell is drawn in its frame at `frame`.
+fn cell_in(h: &Harness, device: DeviceId, frame: Rect) -> Rect {
+    let state = h.shell.device_view_state();
+    let shown = state.devices.iter().find(|d| d.id == device).unwrap();
+    let mut body = body_rect(frame, TITLE_BAR_HEIGHT);
+    body.min.x += bl_shell::device_commands::sidechain_width(shown);
+    place(shown.panel.as_ref().unwrap(), body).1[0].1
+}
+
+fn cell_rect(h: &mut Harness, device: DeviceId, _name: &str) -> Rect {
+    let frame = frame_of(h, device);
+    cell_in(h, device, frame)
+}
+
+// Spec: device-framework R36, eq R14
+#[test]
+fn the_contours_cell_draws_its_curve_dots_and_spectrum_and_says_them() {
+    use bl_devices::eq::{ANALYSER_BANDS, FREQ, GAIN_SLOT, ON, Q, band_param};
+    let mut h = display_harness();
+    let contour = add_native(&mut h, bl_devices::eq::EQ);
+    let cell = cell_rect(&mut h, contour, "EQ Curve");
+    // Nothing is on and no spectrum: the cell is the framework's black frame.
+    let output = h.frame(vec![]);
+    let (flat, circles, _) = painted(&output, cell);
+    assert_eq!((flat, circles), (1, 0), "the flat curve, no dots");
+
+    for (param, value) in [
+        (band_param(0, 3, ON), 1.0),
+        (band_param(0, 3, FREQ), 1000.0),
+        (band_param(0, 3, GAIN_SLOT), 12.0),
+        (band_param(0, 3, Q), 1.0),
+    ] {
+        set(&mut h, contour, param, value);
+    }
+    let mut bands = vec![-80.0f32; ANALYSER_BANDS];
+    bands[32] = -6.0;
+    h.shell.set_device_display_data(contour, &bands);
+    let output = h.frame(vec![]);
+    let (paths, circles, rects) = painted(&output, cell);
+    assert_eq!(paths, 2, "the sum and the band's curve");
+    assert_eq!(circles, 1, "the band's dot");
+    assert!(rects >= ANALYSER_BANDS, "the spectrum's bars: {rects}");
+    let nodes = Harness::nodes(&output);
+    let node = Harness::node(&nodes, "EQ Curve");
+    assert_eq!(node.role, Role::Image);
+    assert!(
+        node.value.contains("A4 Peak 1.00 kHz 12.0 dB"),
+        "{}",
+        node.value
+    );
+    assert!(node.value.contains("Spectrum peak"), "{}", node.value);
+}
+
+// Spec: device-framework R36, compressor R16
+#[test]
+fn the_squeezes_cell_draws_its_gain_reduction_and_the_chosen_view() {
+    let mut h = display_harness();
+    let squeeze = add_native(&mut h, bl_devices::compressor::COMPRESSOR);
+    let cell = cell_rect(&mut h, squeeze, "Gain Reduction");
+    h.shell
+        .set_device_display_data(squeeze, &[-6.0, -12.0, -15.0]);
+    let output = h.frame(vec![]);
+    let nodes = Harness::nodes(&output);
+    let node = Harness::node(&nodes, "Gain Reduction");
+    assert_eq!(node.role, Role::Image);
+    assert!(
+        node.value.contains("Gain Reduction -6.0 dB"),
+        "{}",
+        node.value
+    );
+    let transfer = painted(&output, cell);
+    assert!(
+        transfer.0 >= 1 && transfer.1 == 2,
+        "the curve, the threshold's and the level's dots: {transfer:?}"
+    );
+    // The three views are buttons, the chosen one selected.
+    assert_eq!(
+        Harness::node(&nodes, "Transfer Curve view").selected,
+        Some(true)
+    );
+    assert_eq!(Harness::node(&nodes, "Activity view").selected, Some(false));
+
+    // Collapsed: only the meter.
+    let button = bounds_of(&nodes, "Collapsed view");
+    h.click(button.center());
+    h.settle();
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    assert_eq!(Harness::node(&nodes, "Collapsed view").selected, Some(true));
+    let output = h.frame(vec![]);
+    let collapsed = painted(&output, cell);
+    assert_eq!(
+        (collapsed.0, collapsed.1),
+        (transfer.0 - 1, 0),
+        "no curve, no dots"
+    );
+    assert_eq!(
+        h.shell.device_view_state().devices[0]
+            .display_view
+            .as_deref(),
+        Some("Collapsed")
+    );
+
+    // Activity: the history of the levels scrolls.
+    let button = bounds_of(&nodes, "Activity view");
+    h.click(button.center());
+    for _ in 0..5 {
+        h.frame(vec![]);
+    }
+    let activity = painted(&h.frame(vec![]), cell);
+    assert!(
+        activity.0 >= 1 && activity.1 == 0,
+        "the input's line: {activity:?}"
+    );
+}
+
+fn bounds_of(nodes: &[common::Node], label: &str) -> Rect {
+    let b = Harness::node(nodes, label).bounds.unwrap();
+    Rect::from_min_max(
+        pos2(b.x0 as f32, b.y0 as f32),
+        pos2(b.x1 as f32, b.y1 as f32),
+    )
+}
+
+// Spec: device-framework R36, R11
+#[test]
+fn a_floating_window_grows_the_display_and_draws_it_there_too() {
+    let mut h = display_harness();
+    let contour = add_native(&mut h, bl_devices::eq::EQ);
+    h.shell
+        .run(
+            "device.set_floating",
+            json!({ "device": contour, "floating": true }),
+        )
+        .unwrap();
+    h.shell
+        .set_device_display_data(contour, &[-40.0; bl_devices::eq::ANALYSER_BANDS]);
+    let (min_width, min_height) = {
+        let state = h.shell.device_view_state();
+        bl_shell::device_commands::window_min_size(&state.devices[0])
+    };
+    h.window = Window::Device(contour);
+    h.size = vec2(min_width, min_height);
+    let docked_cell = cell_in(&h, contour, Rect::from_min_size(Pos2::ZERO, h.size));
+    h.size = vec2(min_width + 300.0, min_height + 200.0);
+    let grown = h.settle();
+    let nodes = Harness::nodes(&grown);
+    let grown_cell = cell_in(&h, contour, Rect::from_min_size(Pos2::ZERO, h.size));
+    assert!(
+        grown_cell.width() > docked_cell.width() + 100.0,
+        "the cell grows with the window"
+    );
+    assert!(
+        Harness::node(&nodes, "EQ Curve")
+            .value
+            .contains("Spectrum peak")
+    );
+    let (paths, _, rects) = painted(&grown, grown_cell);
+    assert!(
+        paths >= 1 && rects >= bl_devices::eq::ANALYSER_BANDS,
+        "drawn at the larger size: {paths} {rects}"
+    );
+}

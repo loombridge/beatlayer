@@ -12,6 +12,7 @@ use bl_model::{
 use crate::EngineConfig;
 use crate::automation;
 use crate::clips::{ClipList, ClipPlayer};
+use crate::display::Displays;
 use crate::gc::{GcHandle, Program};
 use crate::message::{LoopRegion, ParamEvent, Punch, TransportCommand};
 use crate::midi_clips::{MidiClipList, MidiClipPlayer};
@@ -154,6 +155,8 @@ pub struct Compiler {
     /// Where each modulator's rows sit on the last program's bus
     /// (WP-5.10).
     modulator_rows: BTreeMap<DeviceId, u32>,
+    /// The readers of the displays of the devices' nodes.
+    displays: Displays,
 }
 
 /// Every audio and MIDI slot that holds a clip, as `(scene, track, launch
@@ -189,7 +192,15 @@ impl Compiler {
             layout: BTreeMap::new(),
             sources: ClipSources::default(),
             modulator_rows: BTreeMap::new(),
+            displays: Displays::default(),
         }
+    }
+
+    /// The readers of the displays of the nodes this compiler makes, which
+    /// the shell reads the newest values through.
+    #[must_use]
+    pub fn displays(&self) -> Displays {
+        self.displays.clone()
     }
 
     /// Opens clips' sources on a thread of its own from now on, rather than
@@ -628,6 +639,7 @@ impl Compiler {
                 NoteBuffer::with_capacity(1024),
                 NoteBuffer::with_capacity(1024),
             ],
+            releases: crate::program::Releases::new(),
             midi,
             modulators: build.modulators.iter().map(|&(slot, _)| slot).collect(),
             bus: vec![0.0; build.modulators.len() * crate::modbus::ROWS * self.config.max_frames],
@@ -640,6 +652,8 @@ impl Compiler {
             .collect();
         self.generation = generation;
         self.layout = build.layout;
+        self.displays
+            .retain(|device| self.layout.contains_key(&NodeKey::Device(device)));
         self.synced = Some(document.clone());
         let mut update = Update {
             program: Some(self.gc.program(program)),
@@ -916,7 +930,10 @@ impl Compiler {
             let (node, latency) = match self.previous(key, &identity) {
                 Some(from) => (Err(from), self.previous_latency(key, &identity)),
                 None => match self.registry.create(device, &config) {
-                    Some(node) => {
+                    Some(mut node) => {
+                        if let Some(reader) = node.display() {
+                            self.displays.insert(device.id, reader);
+                        }
                         // A new node that plays media gets its decoded audio
                         // with this compile's update (WP-2.16).
                         if let Some(media) = device.media {

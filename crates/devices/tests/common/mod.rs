@@ -3,6 +3,8 @@
 
 #![allow(dead_code, reason = "each test file uses some")]
 
+pub mod chain;
+
 use bl_core::id::Id;
 use bl_core::time::{Frames, SampleRate, TempoMap};
 use bl_engine::{
@@ -165,4 +167,56 @@ pub fn control(
         done += length;
     }
     Rows(rows)
+}
+
+/// A registry holding Beatlayer's native devices.
+pub fn registry() -> Registry {
+    let mut registry = Registry::empty();
+    bl_devices::register(&mut registry);
+    registry
+}
+
+/// A note-on of `key` on frame `offset`, with `id`.
+pub fn note_on(offset: u32, key: u8, velocity: f32, id: Option<u32>) -> bl_engine::NoteEvent {
+    bl_engine::NoteEvent {
+        offset,
+        kind: bl_engine::NoteKind::On,
+        channel: 0,
+        key,
+        velocity,
+        note_id: id,
+    }
+}
+
+/// The note-off that ends `on`, on frame `offset`.
+pub fn note_off(offset: u32, on: &bl_engine::NoteEvent, velocity: f32) -> bl_engine::NoteEvent {
+    bl_engine::NoteEvent {
+        offset,
+        kind: bl_engine::NoteKind::Off,
+        velocity,
+        ..*on
+    }
+}
+
+/// Runs one block of `frames` frames through `node` with `notes` to play, as
+/// a real-time section, and returns the notes it sends on.
+pub fn notes_through(
+    node: &mut dyn Node,
+    notes: &[bl_engine::NoteEvent],
+    frames: usize,
+) -> Vec<bl_engine::NoteEvent> {
+    let mut out = bl_engine::NoteBuffer::with_capacity(8192);
+    let mut data = vec![0.0f32; CHANNELS * frames];
+    let mut block = Block::new(
+        &mut data,
+        CHANNELS,
+        frames,
+        frames,
+        &[],
+        TransportInfo::default(),
+        RATE,
+    )
+    .with_notes(notes, &mut out);
+    bl_rt::rt_test!({ node.process(&mut block) });
+    out.notes().to_vec()
 }

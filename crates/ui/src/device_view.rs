@@ -370,10 +370,11 @@ impl DeviceViewUi {
             |ui| {
                 // Spec: device-framework R15. A described device's body is
                 // its generic panel, at its layout's docked size.
-                if let Some(panel) = frame.panel.as_ref().filter(|_| !strip) {
+                if frame.panel.is_some() && !strip {
                     // Right of the sidechain strip and section (WP-2.19b).
                     let mut body = crate::device_panel::body_rect(rect, TITLE_BAR_HEIGHT);
                     body.min.x += ids::sidechain_width(frame);
+                    let display = shell.device_display(frame.id);
                     let track = shell.editor().document().device_track(frame.id);
                     let played = |param| {
                         let device = frame.id;
@@ -381,7 +382,15 @@ impl DeviceViewUi {
                             shell.played(track, &AutomationTarget::Device { device, param })
                         })
                     };
-                    crate::device_panel::show(ui, theme, frame, panel, body, &played, events);
+                    crate::device_panel::show(
+                        ui,
+                        theme,
+                        frame,
+                        display.as_ref(),
+                        body,
+                        &played,
+                        events,
+                    );
                 }
                 self.title(
                     ui,

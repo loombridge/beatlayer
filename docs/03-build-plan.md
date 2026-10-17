@@ -495,7 +495,7 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 5.15 | todo |  |  |
 | 5.15b | todo |  |  |
 | 5.16 | todo |  |  |
-| 5.17 | todo |  |  |
+| 5.17 | done | 17 October 2026 | [#128](https://github.com/loombridge/beatlayer/pull/128); Kitbag, the eight-slot drum sampler ([the spec](specs/eight-slot-drum-sampler.md)), plays a sample per slot on the white keys C3 to C4, each with its own start, transpose, stretch, filter, saturator, decay, pan and volume, with slot 7 and 8 linked and a device's media now a list of slots; its individual outputs wait on T192 |
 | 5.18 | todo |  |  |
 | 5.19 | todo |  |  |
 | 5.20 | todo |  |  |

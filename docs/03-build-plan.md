@@ -489,7 +489,7 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 5.9 | done | 17 October 2026 | [#107](https://github.com/loombridge/beatlayer/pull/107); a clip's modulation acts on its parameter's base in the control's travel, on devices, mixer controls, sends and plug-ins, and shows on the control; the Session clip editor's switches wait on 3.12; [the spec](specs/modulation.md) |
 | 5.10 | todo |  |  |
 | 5.11 | todo |  |  |
-| 5.12 | todo |  |  |
+| 5.12 | done | 17 October 2026 | [#121](https://github.com/loombridge/beatlayer/pull/121); every native device holds A and B states, switched with P or the Edit and device menus' Compare items as one undo step that glides and overrides its envelopes, copied either way, and saved with the set; racks and plug-ins offer none; [the spec](specs/device-compare.md) |
 | 5.13 | todo |  |  |
 | 5.14 | todo |  |  |
 | 5.15 | todo |  |  |

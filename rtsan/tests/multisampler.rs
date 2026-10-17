@@ -160,7 +160,15 @@ fn a_multisampler_passes_under_rtsan() {
     sender.send_update(compiler.sync(editor.document()));
     sender.transport(TransportCommand::Play);
 
-    let ids: Vec<LayerId> = editor.document().device(id).unwrap().layers.list.iter().map(|l| l.id).collect();
+    let ids: Vec<LayerId> = editor
+        .document()
+        .device(id)
+        .unwrap()
+        .layers
+        .list
+        .iter()
+        .map(|l| l.id)
+        .collect();
     for round in 0..2_000u64 {
         // A zone edit or a layer setting every few blocks: node data, and
         // never a new program.
@@ -191,7 +199,10 @@ fn a_multisampler_passes_under_rtsan() {
         if let Some(command) = command {
             editor.apply(command).unwrap();
             let update = compiler.sync(editor.document());
-            assert!(update.program.is_none(), "an edit of the layers is node data");
+            assert!(
+                update.program.is_none(),
+                "an edit of the layers is node data"
+            );
             sender.send_update(update);
         }
         assert!(sender.flush());
@@ -203,7 +214,10 @@ fn a_multisampler_passes_under_rtsan() {
         }
     }
     let state = monitor.state().clone();
-    assert!(state.meter(track).is_some_and(|[left, _]| left > 0.0), "it plays");
+    assert!(
+        state.meter(track).is_some_and(|[left, _]| left > 0.0),
+        "it plays"
+    );
     eprintln!(
         "2,000 blocks of multisampler playback under RealtimeSanitizer: {} data lists, peak \
          engine load {:.1}%",

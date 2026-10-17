@@ -609,6 +609,7 @@ fn every_transport_command_runs_by_id() {
         "transport.set_recording",
         json!({ "recording": true }),
     );
+    run(&mut rig, "transport.stop_recording", json!({}));
 
     let mut registered: Vec<String> = commands
         .iter()
@@ -661,6 +662,7 @@ fn the_bindings_follow_the_spec() {
         "transport.set_loop",
         "transport.set_loop_enabled",
         "transport.set_recording",
+        "transport.stop_recording",
         "transport.set_metronome_count_in",
         "transport.set_metronome_sound",
         "transport.set_metronome_rhythm",

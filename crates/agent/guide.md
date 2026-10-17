@@ -109,6 +109,8 @@ Some commands' class depends on their arguments. In the Arrangement a clip place
 
 The person can turn on autonomous mode for you in Beatlayer's Settings window, and then destructive and external commands run without asking. If the person declines, nothing changes: don't retry without asking them. Headless (`bl-cli mcp`), there's no one to ask, so these commands are refused unless it was started with `--autonomous`.
 
+Recording captures input devices, a microphone included, so `transport.set_recording` is external and asks first, whichever value it sets. `transport.stop_recording` stops a recording and never asks.
+
 **Your rights go with your token.** When the person first allows you, Beatlayer makes you a token of your own, which the person can copy from your row in the Settings window. Your client sends it as its bearer token, and then you're never asked about again and you're autonomous if the person switched that on, whatever name your client gives. A client that sends the agent server's token instead is asked about each time it connects, and is never autonomous, even with an allowed agent's name.
 
 **The person comes first.** While the person is dragging something in Beatlayer (clips, or a value such as a fader), your calls wait until they let go, then run in the order they came, each its own undo step. So does a scheduled command that fires mid-drag: the sound changes on its sample, and the set follows after the drop.

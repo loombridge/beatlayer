@@ -27,12 +27,15 @@ use std::thread;
 use std::time::{Duration, SystemTime};
 
 use bl_core::time::{Frames, SampleRate, TempoMap, Ticks};
-use bl_engine::{MidiRecordTrack, RecordTrack, RecordedMidi, RecordingPlan, TakeBounds};
+use bl_engine::{
+    MidiRecordTrack, RecordTrack, RecordedMidi, RecordingPlan, SessionTarget, TakeBounds,
+};
 use bl_media::{AudioWriter, BitDepth, Dither, EncodeSpec, FileType};
 use bl_model::{
     Channel, Clip, ClipData, ClipId, Command, EditError, Editor, MidiData, Note, TrackId,
 };
 use rtrb::{Consumer, RingBuffer};
+use std::collections::BTreeMap;
 
 /// Frames of one track's samples the ring between the audio thread and the
 /// writer holds, about 2.7 seconds of stereo at 48 kHz, so a writer that
@@ -154,6 +157,8 @@ pub fn stamp() -> String {
 /// draining the audio tracks' into WAVs under `Samples/Recorded/` in
 /// `folder`, the project's root, 32-bit float at `rate`, and a ring for each
 /// of the `midi` tracks. `folder` is only needed when `tracks` isn't empty.
+/// `session` names the slots a Session recording goes into (WP-3.11); empty
+/// for the Arrangement's.
 ///
 /// # Errors
 ///
@@ -164,6 +169,7 @@ pub fn start(
     rate: SampleRate,
     tracks: &[Track],
     midi: &[TrackId],
+    session: Vec<SessionTarget>,
 ) -> Result<(RecordingPlan, Recording), String> {
     let directory = folder
         .map(|folder| folder.join("Samples").join("Recorded"))
@@ -221,6 +227,7 @@ pub fn start(
             tracks: plan,
             midi: midi_plan,
             delay: 0,
+            session,
         },
         Recording {
             armed: tracks
@@ -331,6 +338,16 @@ impl Recording {
             .chain(self.midi.iter().map(|reading| &reading.dropped))
             .map(|d| d.load(Relaxed))
             .sum()
+    }
+
+    /// The note messages a MIDI track has received so far, as the polls have
+    /// drained them (WP-3.11).
+    #[must_use]
+    pub fn midi_so_far(&self, track: TrackId) -> &[RecordedMidi] {
+        self.midi
+            .iter()
+            .find(|reading| reading.track == track)
+            .map_or(&[], |reading| &reading.messages)
     }
 
     /// Notes the take the engine published, from its state.
@@ -556,6 +573,78 @@ fn notes(messages: &[RecordedMidi], end: Frames, tempo: &TempoMap, rate: SampleR
     notes
 }
 
+/// The notes a MIDI track played in a Session take, placed from the take's
+/// start: the clip a new recording makes starts there (the session recording
+/// spec, R7).
+#[must_use]
+pub fn session_notes(
+    messages: &[RecordedMidi],
+    start: Frames,
+    end: Frames,
+    tempo: &TempoMap,
+    rate: SampleRate,
+) -> Vec<Note> {
+    let origin = tempo.frames_to_ticks(start, rate);
+    notes(messages, end, tempo, rate)
+        .into_iter()
+        .map(|note| Note {
+            start: note.start - origin,
+            ..note
+        })
+        .collect()
+}
+
+/// Sorts the notes an overdub played into the passes of the clip's loop
+/// they fall in, placed where the clip plays them (the session recording
+/// spec, R8). `played` starts are counted from the frame the clip launched
+/// on. A looping clip plays its Start marker to the loop's end, then its
+/// loop again and again; a clip that doesn't loop plays once, so notes past
+/// its end are dropped. A note that would run past the end of its pass is
+/// cut there. The map is in order of pass.
+#[must_use]
+pub fn overdub_passes(
+    data: &MidiData,
+    length: Ticks,
+    played: Vec<Note>,
+) -> BTreeMap<usize, Vec<Note>> {
+    let marker = data.start;
+    let (loop_start, loop_end) = (
+        data.loop_start,
+        data.loop_end
+            .unwrap_or_else(|| (data.loop_start + length).max(data.loop_start + Ticks::QUARTER)),
+    );
+    let (first, rest) = (loop_end - marker, loop_end - loop_start);
+    let end = data.end.unwrap_or(marker + length).min(marker + length);
+    let mut passes: BTreeMap<usize, Vec<Note>> = BTreeMap::new();
+    for note in played {
+        if note.start < Ticks::ZERO {
+            continue;
+        }
+        let (pass, at, limit) = if !data.looping {
+            if marker + note.start >= end {
+                continue;
+            }
+            (0, marker + note.start, end)
+        } else if note.start < first {
+            (0, marker + note.start, loop_end)
+        } else {
+            let past = note.start - first;
+            let pass = 1 + (past.get() / rest.get().max(1)) as usize;
+            (
+                pass,
+                loop_start + Ticks(past.get() % rest.get().max(1)),
+                loop_end,
+            )
+        };
+        passes.entry(pass).or_default().push(Note {
+            start: at,
+            length: note.length.min(limit - at).max(Ticks(1)),
+            ..note
+        });
+    }
+    passes
+}
+
 /// Puts what MIDI tracks recorded into the Arrangement, inside the caller's
 /// transaction: a new clip over the take on each track that received notes,
 /// replacing what was there; or, with `overdub` on, each note merged into
@@ -743,6 +832,7 @@ mod tests {
                 name: file_name("1-Audio", 1, "2026-10-15 180000"),
             }],
             &[],
+            Vec::new(),
         )
         .unwrap();
         let dropped = Arc::clone(&plan.tracks[0].dropped);
@@ -1010,5 +1100,79 @@ mod tests {
         let mut placed = Default::default();
         place_midi(&mut editor, &[], take(0, 1), RATE, false, &mut placed).unwrap();
         assert!(clips(&editor, track).is_empty());
+    }
+
+    /// A looping one-bar clip of `looping` set or not, with no notes.
+    fn bar_clip(looping: bool) -> MidiData {
+        MidiData {
+            looping,
+            ..MidiData::new([])
+        }
+    }
+
+    fn notes_at(starts: &[i64]) -> Vec<Note> {
+        starts
+            .iter()
+            .map(|&start| Note::new(60, Ticks(start), Ticks(1_000), 100))
+            .collect()
+    }
+
+    // Spec: session-recording R8. Notes played over a looping clip fall in
+    // the pass of the loop they started in, placed where that pass plays
+    // them.
+    #[test]
+    fn an_overdub_sorts_notes_into_the_loop_passes_they_started_in() {
+        let bar = Ticks::WHOLE;
+        let passes = overdub_passes(
+            &bar_clip(true),
+            bar,
+            notes_at(&[100, bar.get() + 200, 3 * bar.get() + 300]),
+        );
+        let shape: Vec<(usize, Vec<i64>)> = passes
+            .iter()
+            .map(|(pass, notes)| (*pass, notes.iter().map(|n| n.start.get()).collect()))
+            .collect();
+        assert_eq!(shape, vec![(0, vec![100]), (1, vec![200]), (3, vec![300])]);
+    }
+
+    // Spec: session-recording R8. A clip that doesn't loop overdubs until it
+    // ends, and a note is cut where its pass ends.
+    #[test]
+    fn an_overdub_of_a_clip_that_does_not_loop_stops_at_its_end() {
+        let bar = Ticks::WHOLE;
+        let passes = overdub_passes(&bar_clip(false), bar, notes_at(&[100, bar.get() + 5]));
+        assert_eq!(passes.len(), 1);
+        assert_eq!(passes[&0].len(), 1);
+        let cut = overdub_passes(
+            &bar_clip(true),
+            bar,
+            vec![Note::new(60, Ticks(bar.get() - 10), Ticks(500), 100)],
+        );
+        assert_eq!(cut[&0][0].length, Ticks(10), "cut at the loop's end");
+    }
+
+    // Spec: session-recording R7. A new recording's notes are placed from the
+    // take's start, whatever song frame it began on.
+    #[test]
+    fn a_session_takes_notes_start_from_the_takes_start() {
+        let tempo = TempoMap::default();
+        let take_start = 96_000;
+        let messages = [
+            midi(take_start + 12_000, MidiMessage::note_on(0, 60, 100)),
+            midi(take_start + 24_000, MidiMessage::note_off(0, 60)),
+        ];
+        let found = session_notes(
+            &messages,
+            Frames(take_start),
+            Frames(take_start + 48_000),
+            &tempo,
+            RATE,
+        );
+        assert_eq!(found.len(), 1);
+        assert_eq!(
+            tempo.ticks_to_frames(found[0].start, RATE).get(),
+            12_000,
+            "a quarter second in"
+        );
     }
 }

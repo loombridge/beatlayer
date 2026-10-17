@@ -33,7 +33,7 @@ use serde_json::Value;
 /// How many launched scenes can wait for their frame at once (WP-3.5).
 const SCENE_APPLIES: usize = 8;
 
-/// What a slot is doing (WP-3.2). Recording waits for WP-3.11.
+/// What a slot is doing (WP-3.2, WP-3.11).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SlotState {
     /// A launch or a stop is waiting for the grid.
@@ -42,6 +42,9 @@ pub enum SlotState {
     Playing,
     /// A stop is waiting for the grid.
     QueuedToStop,
+    /// A Session recording goes into the slot, or waits for the grid to
+    /// start (WP-3.11).
+    Recording,
 }
 
 /// One slot's state, as the engine publishes it for the UI.
@@ -53,6 +56,9 @@ pub struct SlotStatus {
     pub scene: SceneId,
     /// What it's doing.
     pub state: SlotState,
+    /// The song frame its clip launched on, while it plays: where an overdub
+    /// finds the clip's own time (WP-3.11).
+    pub started: Option<Frames>,
 }
 
 /// A track a Session clip has taken over from the Arrangement, as its player
@@ -127,6 +133,16 @@ pub enum SessionCommand {
     TrackBackToArrangement(TrackId),
     /// Sets the global launch quantisation and its switch.
     SetQuantization(LaunchSettings),
+    /// Starts the Session recording whose plan ([`RecordingPlan::session`])
+    /// the engine holds: on the next grid line while the song plays, and
+    /// from the playhead, after any count-in, while it's stopped, which
+    /// starts the transport (WP-3.11).
+    ///
+    /// [`RecordingPlan::session`]: crate::RecordingPlan::session
+    Record,
+    /// Ends the Session recording on the next grid line: the new clips it
+    /// made play on as loops from there (WP-3.11).
+    StopRecording,
     /// Moves every playing clip whose track has a clip in this scene to that
     /// scene's slot, playing on without a break: what Capture and Insert
     /// Scene does once the scene holds copies of the playing clips (WP-3.5).
@@ -280,7 +296,7 @@ impl SessionLauncher {
     }
 
     /// The frame a launch or a stop asked for now waits for.
-    fn frame_for(&self, playhead: Playhead<'_>) -> Frames {
+    pub(crate) fn frame_for(&self, playhead: Playhead<'_>) -> Frames {
         playhead.frames(self.line_for(playhead))
     }
 
@@ -411,6 +427,16 @@ impl SessionLauncher {
         }
         for (_, due) in &mut self.marks {
             *due = convert(*due);
+        }
+    }
+
+    /// Launches `(track, scene)` to play from `at`, already worked out: a
+    /// recorded slot that plays on from where its recording ended (WP-3.11).
+    /// A slot the launcher already holds is left alone. It starts in the
+    /// block it is asked in, so no release reads its grid line first.
+    pub(crate) fn launch_at(&mut self, track: TrackId, scene: SceneId, at: Frames) {
+        if self.find_mut(track, scene).is_none() {
+            self.press_at(track, scene, LaunchMode::Trigger, Ticks::ZERO, at);
         }
     }
 
@@ -649,6 +675,7 @@ impl SessionLauncher {
                     track: slot.track,
                     scene: slot.scene,
                     state: slot.state(),
+                    started: slot.started,
                 });
             }
         }

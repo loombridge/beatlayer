@@ -65,6 +65,7 @@ pub mod notes;
 pub mod perception;
 pub mod plugins;
 pub mod session_launch;
+pub mod session_record;
 pub mod session_view;
 pub mod settings;
 pub mod tracks;
@@ -94,6 +95,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     tracks::register(registry)?;
     session_view::register(registry)?;
     session_launch::register(registry)?;
+    session_record::register(registry)?;
     plugins::register(registry)?;
     settings::register(registry)?;
     perception::register(registry)

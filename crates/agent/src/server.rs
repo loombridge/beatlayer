@@ -14,7 +14,9 @@ use bl_shell::perception::PreviewRenderOutcome;
 use bl_shell::perception_commands::{
     self as perception, AnalyzeArgs, AnalyzeResult, CaptureResult, PreviewArgs, View,
 };
-use lspk_agent::{Call, Credential, Media, Outcome, Program, Server, ServerInfo, Session};
+use lspk_agent::{
+    Call, Credential, Media, Outcome, Program, ResultFormat, Server, ServerInfo, Session,
+};
 use serde_json::{Value, json};
 
 use crate::guide;
@@ -382,6 +384,12 @@ impl Agent {
         Self {
             server: Server::new(mode, Beatlayer::default()),
         }
+    }
+
+    /// Writes tool results' text blocks in `format`: compact JSON, the
+    /// default, or TOON where a result holds a long table.
+    pub fn set_result_format(&mut self, format: ResultFormat) {
+        self.server.set_result_format(format);
     }
 
     /// The kit's server, for the transports.

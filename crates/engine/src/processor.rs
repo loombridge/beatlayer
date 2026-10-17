@@ -21,7 +21,8 @@ use crate::node::{NodeData, NodeEvent, NodeKey, ParamValue, TransportInfo};
 use crate::program::{EngineProgram, Resolved};
 use crate::recording::{RecordingPlan, TakeBounds};
 use crate::session::{
-    Playhead, SceneOverride, SessionCommand, SessionLauncher, SessionPlayback, SlotStatus,
+    Playhead, SceneOverride, SessionCommand, SessionLauncher, SessionPlayback, SlotState,
+    SlotStatus,
 };
 use crate::state::{EngineCounters, EngineState, TrackMeter};
 
@@ -74,6 +75,19 @@ struct Take {
     written: u64,
     next: Frames,
     wrap: Option<LoopFrames>,
+}
+
+/// A Session recording asked for (WP-3.11): the grid frame its take starts
+/// at, and, once it's asked to end, the grid frame it ends at and whether
+/// the new clips are launched there.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct SessionTake {
+    start: Frames,
+    stop: Option<Frames>,
+    launch: bool,
+    /// Where the playhead stood at the last part captured: the playhead
+    /// being behind it means the Arrangement loop wrapped.
+    last: Option<Frames>,
 }
 
 /// What one processor hands the next when the engine restarts on a device
@@ -250,6 +264,8 @@ pub struct Processor {
     plan: Option<Owned<RecordingPlan>>,
     /// The take being captured, if playback is running under recording.
     take: Option<Take>,
+    /// The Session recording under way or waiting for the grid (WP-3.11).
+    session_take: Option<SessionTake>,
     /// The take that last ended, kept for the shell to make its clips,
     /// until the next one starts.
     last_take: Option<TakeBounds>,
@@ -309,6 +325,7 @@ impl Processor {
             recording: false,
             plan: None,
             take: None,
+            session_take: None,
             last_take: None,
             timed: Vec::with_capacity(config.max_scheduled),
             pending: Vec::with_capacity(config.max_pending_events),
@@ -479,7 +496,7 @@ impl Processor {
     pub fn park(&mut self) -> Carry {
         // A stream that closes ends the take, like a stop (WP-2.13); the
         // carry hands it to the next processor and the shell.
-        self.end_recording();
+        self.end_recordings();
         let carry = self.carry();
         // Spec: device-changes R1
         self.playing = false;
@@ -830,7 +847,7 @@ impl Processor {
                 self.metronome.stop();
                 // Spec: routing R11; WP-2.13. Stop ends the take, as Live's
                 // Stop ends a recording.
-                self.end_recording();
+                self.end_recordings();
                 if self.playing {
                     self.playing = false;
                 } else {
@@ -845,7 +862,7 @@ impl Processor {
                 if self.playing {
                     self.playing = false;
                     self.metronome.stop();
-                    self.end_recording();
+                    self.end_recordings();
                 } else {
                     self.play_from_insert_marker();
                 }
@@ -858,7 +875,7 @@ impl Processor {
                     self.metronome.stop();
                     // Playback jumps away from the take; it ends here
                     // (WP-2.13).
-                    self.end_recording();
+                    self.end_recordings();
                 }
             }
             // Spec: transport R9
@@ -890,6 +907,29 @@ impl Processor {
                 }
             }
         }
+    }
+
+    /// Ends every recording, as Stop does: the Arrangement's and a Session
+    /// one, which ends where the playhead is rather than on the grid.
+    fn end_recordings(&mut self) {
+        self.end_session_take(false, self.position);
+        self.end_recording();
+    }
+
+    /// Ends the Session recording at `at`, publishing the take for the
+    /// shell. With `launch`, the clips it recorded play on as loops from
+    /// there (WP-3.11).
+    fn end_session_take(&mut self, launch: bool, at: Frames) {
+        if self.session_take.take().is_none() {
+            return;
+        }
+        if launch && let Some(plan) = self.plan.as_mut() {
+            for target in plan.get_mut().session.iter().filter(|t| !t.overdub) {
+                self.session.launch_at(target.track, target.scene, at);
+            }
+        }
+        self.end_take();
+        self.metronome.set_recording(self.recording);
     }
 
     /// Ends the take being captured, publishing what it covers for the
@@ -982,6 +1022,11 @@ impl Processor {
     /// global launch quantisation.
     fn session_command(&mut self, command: SessionCommand) {
         match command {
+            SessionCommand::Launch { track, scene } if self.is_recording_slot(track, scene) => {
+                // Spec: session-recording R4. The launch button of a
+                // recording slot ends the recording and loops the clip.
+                self.stop_session_take(true);
+            }
             SessionCommand::Launch { track, scene } => self.launch_slot(track, scene),
             SessionCommand::Release { track, scene } => self.release_slot(track, scene),
             SessionCommand::LaunchScene(scene) => self.launch_scene(scene),
@@ -997,6 +1042,8 @@ impl Processor {
                 self.session.back_to_arrangement(Some(track));
             }
             SessionCommand::SetQuantization(settings) => self.session.set_settings(settings),
+            SessionCommand::Record => self.record_session(),
+            SessionCommand::StopRecording => self.stop_session_take(true),
             SessionCommand::MoveToScene(scene) => {
                 let slots = self
                     .program
@@ -1006,6 +1053,84 @@ impl Processor {
             }
             SessionCommand::ClearSceneOverride => self.clear_scene_override(),
         }
+    }
+
+    /// Starts the Session recording the plan describes (WP-3.11): on the
+    /// next grid line while the song plays, at once from the playhead while
+    /// it's stopped, when the transport starts too, after any count-in. A
+    /// clip playing on a track that records a new clip stops where the
+    /// recording starts.
+    fn record_session(&mut self) {
+        let targets = self
+            .plan
+            .as_mut()
+            .is_some_and(|plan| !plan.get_mut().session.is_empty());
+        if !targets || self.program.is_none() || self.session_take.is_some() || self.recording {
+            return;
+        }
+        let was_playing = self.playing;
+        self.metronome.set_recording(true);
+        if !was_playing {
+            self.play_from_insert_marker();
+        }
+        let playhead = Self::playhead(
+            self.program.as_ref().map(Program::get),
+            &self.fallback_tempo,
+            &self.fallback_time_signatures,
+            was_playing,
+            self.position,
+            self.config.sample_rate,
+        );
+        let start = self.session.frame_for(playhead);
+        if let Some(plan) = self.plan.as_mut() {
+            for target in plan.get_mut().session.iter().filter(|t| !t.overdub) {
+                self.session.stop(Some(target.track), &[], playhead);
+            }
+        }
+        self.session_take = Some(SessionTake {
+            start,
+            stop: None,
+            launch: false,
+            last: None,
+        });
+    }
+
+    /// Asks the Session recording to end on the next grid line, keeping the
+    /// earlier of two asks (WP-3.11).
+    fn stop_session_take(&mut self, launch: bool) {
+        if self.session_take.is_none() {
+            return;
+        }
+        let playhead = Self::playhead(
+            self.program.as_ref().map(Program::get),
+            &self.fallback_tempo,
+            &self.fallback_time_signatures,
+            self.playing,
+            self.position,
+            self.config.sample_rate,
+        );
+        let mut at = self.session.frame_for(playhead);
+        if let Some(region) = self.loop_frames
+            && self.position < region.end
+            && at > region.end
+        {
+            at = region.end;
+        }
+        if let Some(take) = self.session_take.as_mut() {
+            take.stop = Some(take.stop.map_or(at, |stop| stop.min(at)));
+            take.launch = launch;
+        }
+    }
+
+    /// Whether a Session recording goes into the slot.
+    fn is_recording_slot(&mut self, track: TrackId, scene: SceneId) -> bool {
+        self.session_take.is_some()
+            && self.plan.as_mut().is_some_and(|plan| {
+                plan.get_mut()
+                    .session
+                    .iter()
+                    .any(|t| t.track == track && t.scene == scene)
+            })
     }
 
     /// Launches a slot's clip: on the next grid line while the song plays,
@@ -1115,6 +1240,17 @@ impl Processor {
             .as_ref()
             .map_or(&[][..], |program| program.get().session_tracks.as_slice());
         self.session.stop(track, tracks, playhead);
+        let recorded = self.plan.as_mut().is_some_and(|plan| {
+            plan.get_mut()
+                .session
+                .iter()
+                .any(|t| track.is_none_or(|only| t.track == only))
+        });
+        if recorded {
+            // Spec: session-recording R5. A clip stop ends the recording on
+            // the grid without looping the clip.
+            self.stop_session_take(false);
+        }
     }
 
     /// The transport as the launcher reads it. The maps are borrowed from
@@ -1294,6 +1430,14 @@ impl Processor {
         if let Some(due) = self.session.next_due(self.position) {
             song(due);
         }
+        // Spec: session-recording R3. A Session take starts and ends on its
+        // grid frames.
+        if let Some(take) = self.session_take {
+            song(take.start);
+            if let Some(stop) = take.stop {
+                song(stop);
+            }
+        }
         // Spec: transport R13
         if let Some(region) = self.loop_frames {
             song(region.end);
@@ -1382,7 +1526,8 @@ impl Processor {
             // Spec: metronome R7. With Punch-In on, "only while recording"
             // clicks start at the punch-in point, not at play start.
             self.metronome.set_recording(
-                self.recording && self.punch_frames.start.is_none_or(|at| self.position >= at),
+                (self.recording && self.punch_frames.start.is_none_or(|at| self.position >= at))
+                    || self.session_take.is_some(),
             );
             self.metronome.render_active(
                 Block {
@@ -1421,6 +1566,10 @@ impl Processor {
     /// file holds exactly the take's frames. Real-time safe: copies into
     /// rings made when the engine was, no locks.
     fn capture(&mut self, offset: usize, frames: usize) {
+        if self.session_take.is_some() {
+            self.capture_session(offset, frames);
+            return;
+        }
         if !self.recording || !self.playing || self.metronome.is_counting_in() || frames == 0 {
             return;
         }
@@ -1494,6 +1643,68 @@ impl Processor {
         }
     }
 
+    /// Copies this part of the block's input into the Session recording's
+    /// rings (WP-3.11). The take starts at its grid frame and ends at the
+    /// one it was asked to end on; it ignores the Arrangement's loop and
+    /// punch points, and stamps its MIDI with a frame count that runs on
+    /// through the loop's wraps, so the shell lays the clip out from 0.
+    fn capture_session(&mut self, offset: usize, frames: usize) {
+        let Some(session) = self.session_take else {
+            return;
+        };
+        if !self.playing || self.metronome.is_counting_in() || frames == 0 {
+            return;
+        }
+        if self.plan.is_none() || self.program.is_none() || self.position < session.start {
+            return;
+        }
+        // The Arrangement loop wrapping the playhead moves it back, so a stop
+        // that waited for a grid line the loop never reaches ends where the
+        // loop wraps instead.
+        let wrapped = session.last.is_some_and(|last| self.position < last);
+        if let Some(stop) = session.stop
+            && (wrapped || self.position >= stop)
+        {
+            self.end_session_take(session.launch, if wrapped { self.position } else { stop });
+            return;
+        }
+        if self.take.is_none() {
+            self.last_take = None;
+            self.take = Some(Take {
+                start: self.position,
+                written: 0,
+                next: self.position,
+                wrap: None,
+            });
+        }
+        let Some(take) = self.take else {
+            return;
+        };
+        let delay = self.plan.as_mut().map_or(0, |plan| plan.get_mut().delay);
+        let skip = (delay.max(0) as u64)
+            .saturating_sub(take.written)
+            .min(frames as u64) as usize;
+        let stamp = take.start + Frames(take.written as i64);
+        let captured = match (self.program.as_ref(), self.plan.as_mut()) {
+            (Some(program), Some(plan)) => {
+                plan.get_mut()
+                    .capture(program.get(), stamp, offset, frames, skip)
+            }
+            _ => false,
+        };
+        if !captured {
+            self.end_session_take(false, self.position);
+            return;
+        }
+        if let Some(take) = &mut self.take {
+            take.written += frames as u64;
+            take.next = stamp + Frames(frames as i64);
+        }
+        if let Some(session) = &mut self.session_take {
+            session.last = Some(self.position);
+        }
+    }
+
     /// Ends the block: CPU load, and the state for the UI.
     fn finish(&mut self, began: Instant, frames: usize) {
         let rate = self.config.sample_rate.as_f64();
@@ -1522,6 +1733,11 @@ impl Processor {
         state.loop_region = self.loop_region;
         state.recording = self.recording;
         state.take_running = self.take.is_some();
+        state.take_so_far = self.take.map(|take| TakeBounds {
+            start: take.start,
+            end: take.next,
+            wrap: None,
+        });
         state.counting_in = self.metronome.is_counting_in();
         state.take = self.last_take;
         state.program = self.program.as_ref().map(|p| p.get().generation);
@@ -1530,6 +1746,31 @@ impl Processor {
         state.cpu_load_max = self.cpu_load_max;
         state.counters = self.counters;
         self.session.status(&mut self.session_status);
+        if self.session_take.is_some()
+            && let Some(plan) = self.plan.as_mut()
+        {
+            // Spec: session-recording R2. The slots a recording goes into
+            // show as recording, whatever the launcher says of them.
+            for target in &plan.get_mut().session {
+                let status = SlotStatus {
+                    track: target.track,
+                    scene: target.scene,
+                    state: SlotState::Recording,
+                    started: None,
+                };
+                let found = self
+                    .session_status
+                    .iter()
+                    .position(|s| s.track == target.track && s.scene == target.scene);
+                match found {
+                    Some(i) => self.session_status[i] = status,
+                    None if self.session_status.len() < self.session_status.capacity() => {
+                        self.session_status.push(status);
+                    }
+                    None => {}
+                }
+            }
+        }
         state.session.clear();
         state.session.extend_from_slice(&self.session_status);
         state.scene_override = self.scene_override;

@@ -146,6 +146,19 @@ pub enum Event {
     /// A tool call is complete: its name is a tool of the request's
     /// [`ToolSet`](crate::tools::ToolSet), and its arguments are parsed.
     ToolCall(ToolCall),
+    /// The provider's own count of the tokens the request used, sent once
+    /// the count is known, when the provider reports one.
+    Usage(Usage),
+}
+
+/// The tokens a request used, as the provider counted them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Usage {
+    /// The tokens it was sent: the system prompt, the tools and the
+    /// conversation.
+    pub input: u64,
+    /// The tokens the model answered with.
+    pub output: u64,
 }
 
 /// Why the model stopped.

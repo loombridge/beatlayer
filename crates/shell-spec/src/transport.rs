@@ -151,6 +151,10 @@ pub struct RunningRecording {
     /// Frames and MIDI messages dropped so far because the disk or the main
     /// thread fell behind.
     pub dropped_frames: u64,
+    /// The Session slots it records into (WP-3.11); empty for an
+    /// Arrangement recording.
+    #[serde(default)]
+    pub session_slots: Vec<crate::session_record::RecordingSlot>,
 }
 
 /// A file a recording wrote.

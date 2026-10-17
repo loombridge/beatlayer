@@ -19,7 +19,7 @@ use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 
 use bl_core::midi::MidiMessage;
 use bl_core::time::Frames;
-use bl_model::{Channel, TrackId};
+use bl_model::{Channel, SceneId, TrackId};
 use rtrb::Producer;
 
 use crate::midi::MidiEvent;
@@ -60,6 +60,19 @@ pub struct MidiRecordTrack {
     pub dropped: Arc<AtomicU64>,
 }
 
+/// A Session slot a recording goes into (WP-3.11).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SessionTarget {
+    /// The track whose slot it is.
+    pub track: TrackId,
+    /// The scene whose slot it is.
+    pub scene: SceneId,
+    /// Whether the slot's playing clip is overdubbed rather than a new clip
+    /// recorded; a recorded clip is launched when the take ends, an
+    /// overdubbed one is already playing.
+    pub overdub: bool,
+}
+
 /// What the audio thread records: every armed track's input and its ring.
 pub struct RecordingPlan {
     /// The audio tracks, in the order the shell listed them.
@@ -70,6 +83,11 @@ pub struct RecordingPlan {
     /// latency plus the Driver Error Compensation setting. Negative moves
     /// it later (WP-2.13).
     pub delay: i64,
+    /// The slots a Session recording goes into (WP-3.11); empty for an
+    /// Arrangement recording. A Session take starts and ends on the launch
+    /// grid ([`SessionCommand::Record`](crate::SessionCommand::Record)) and
+    /// ignores the Arrangement's loop and punch points.
+    pub session: Vec<SessionTarget>,
 }
 
 /// The song frames a finished take covers: `start` to `end`, playback that
@@ -202,6 +220,7 @@ impl std::fmt::Debug for RecordingPlan {
             .field("tracks", &self.tracks.len())
             .field("midi", &self.midi.len())
             .field("delay", &self.delay)
+            .field("session", &self.session.len())
             .finish_non_exhaustive()
     }
 }

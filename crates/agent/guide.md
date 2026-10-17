@@ -59,6 +59,10 @@ Positions and lengths in commands are **ticks**: 705,600 to the quarter note, so
 
 Tempos are quarter notes per minute. A new set plays at 120 BPM in 4/4.
 
+## Reading a TOON table
+
+If a result's text looks like `notes[256]{key,start,length,velocity}:` followed by indented lines of values, it's a table in TOON. The header names the field and says how many rows follow; each line below is one row, its values in the header's order, separated by commas. A value that holds a comma, a colon or a quote is in double quotes. A field written `mixer.volume` is the `volume` of the `mixer` object in each row. The rest of the text is `key: value` lines, indented to show what holds what. The same result is always available as JSON in `structuredContent`.
+
 ## The transport
 
 `transport` works the Arrangement's transport, as the Control Bar does. `play` starts from the **insert marker**; `locate` moves the insert marker (with `at`, such as `"5.1.1"`), and while the song plays, playback jumps there. `stop` stops and keeps the position, so `continue` plays on from it; a second `stop` returns to 1.1.1. `status` says whether the song is playing, where the playhead and the insert marker are, and the loop. Playback changes nothing in the set, so it's never an undo step.

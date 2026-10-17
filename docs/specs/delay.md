@@ -96,7 +96,7 @@ or an observation of Live running, as the clean-room policy allows.
 
 - A new Delay starts with Sync on, Link off, Filter off, Freeze off, Ping Pong off, a delay time of one beat (four sixteenths) in Sync and 100 ms in Time, 50 per cent Feedback, 100 per cent Dry/Wet, a Freq of 1 kHz at a Width of Q 2.5, and an LFO of a 1 Hz sine with no movement.
 - Freq runs from 20 Hz to 20 kHz, logarithmically. Width runs from 0.5 to 9 and is the band-pass's Q, so a wider setting passes a wider band. Offset runs from −50 to +50 per cent of the division. The LFO's Rate runs from 0.01 to 40 Hz, and its Delay and Filter amounts from 0 to 100 per cent. The sync buttons run from 1 to 16 sixteenths.
-- The LFO has the free-rate mode only (Rate, in Hz); its Time, Synced, Triplet, Dotted, and Sixteenth rate modes are not built. Its Wander wave is a smoothed random.
+- The LFO is the effects LFO (the device framework spec, R26 and R27), with the free-rate mode only (Rate, in Hz); its Time, Synced, Triplet, Dotted, and Sixteenth rate modes are not built. Its S&H and Wander waves follow the device's own random seed (R29), and Wander is a line between random values.
 - Freeze cycles the buffer at the Feedback setting. Ping Pong crosses the feedback between the channels.
 - The band-pass filters the signal entering each line, feedback included, so the repeats thin out as they decay.
 - The framework does not smooth the delay time: the device reads the time parameters' targets and moves between them itself, over 20 ms in Repitch and Fade. Other continuous parameters take the framework's smoothing as every device does.

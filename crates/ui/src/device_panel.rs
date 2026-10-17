@@ -100,9 +100,15 @@ pub type CellRects = Vec<(String, Rect)>;
 /// [`DeviceLayout::place`]: bl_model::DeviceLayout::place
 #[must_use]
 pub fn place(panel: &DevicePanel, body: Rect) -> (ControlRects, CellRects) {
+    place_shown(panel, false, body)
+}
+
+/// The same for a device whose expanded part shows while `expanded`
+/// (WP-5.42).
+#[must_use]
+pub fn place_shown(panel: &DevicePanel, expanded: bool, body: Rect) -> (ControlRects, CellRects) {
     let placed = panel
-        .description
-        .layout
+        .layout(expanded)
         .place(Size::new(body.width(), body.height()));
     let at = |r: bl_model::device_layout::Rect| {
         Rect::from_min_size(body.min + vec2(r.x, r.y), vec2(r.width, r.height))
@@ -140,7 +146,7 @@ pub fn show(
     events: &mut Vec<UiEvent>,
 ) {
     let c = &theme.colors;
-    let (controls, cells) = place(panel, body);
+    let (controls, cells) = place_shown(panel, frame.expanded, body);
     for (index, (name, rect)) in cells.into_iter().enumerate() {
         // A display cell: black, with a thin border (observed). What it
         // shows is the device's own to draw.

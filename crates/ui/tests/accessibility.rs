@@ -1021,6 +1021,28 @@ fn a_sidechained_device(h: &mut Harness) {
         .unwrap();
 }
 
+/// The framework's test effects on audio track 3, the selected track, no
+/// device selected: a device with an expanded part, so it has the expand
+/// toggle (WP-5.42).
+fn an_expandable_device(h: &mut Harness) {
+    h.shell
+        .set_device_types(bl_devices::testing::device_types());
+    let track = h.shell.editor().document().top_level().nth(2).unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let t = bl_devices::testing::effects_type();
+    h.shell
+        .run(
+            "device.add",
+            json!({ "device": { "kind": t.kind, "name": t.name, "role": t.role } }),
+        )
+        .unwrap();
+    h.shell
+        .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
 /// The keyboard in the Device View, as a click there leaves it.
 fn device_view(h: &mut Harness) {
     h.shell.set_focused_area(bl_shell::Area::Detail);
@@ -1699,6 +1721,10 @@ fn paths() -> BTreeMap<&'static str, Path> {
         (
             "device.save_preset",
             main(a_device, device_view, "Save Preset", Key::Enter),
+        ),
+        (
+            "device.expand",
+            main(an_expandable_device, device_view, "Expand", Key::Enter),
         ),
         ("device.set_show_preset_name", Exception(device_menu)),
         ("device.save_default_preset", Exception(device_menu)),

@@ -5,10 +5,12 @@
 //! tool calls the model made, and their results. Each provider turns the
 //! same conversation into its own format ([`crate::provider`]).
 
+use serde::{Deserialize, Serialize};
+
 use crate::tools::ToolCall;
 
 /// Who a message is from.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Role {
     /// The person, or the results of the model's tool calls.
     User,
@@ -17,7 +19,7 @@ pub enum Role {
 }
 
 /// One message of the conversation.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Message {
     /// Who it's from.
     pub role: Role,
@@ -26,7 +28,7 @@ pub struct Message {
 }
 
 /// One part of a message.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Part {
     /// Text.
     Text(String),
@@ -37,7 +39,7 @@ pub enum Part {
 }
 
 /// What running a tool call returned, ready for the model.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ToolResult {
     /// The ID of the call it answers.
     pub id: String,
@@ -147,7 +149,7 @@ pub enum Event {
 }
 
 /// Why the model stopped.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Stop {
     /// It finished its turn. It answered, called no tools, or called the
     /// ones in the [`Reply`] and has nothing more to say.
@@ -159,7 +161,7 @@ pub enum Stop {
 }
 
 /// One turn's answer, once its stream has ended.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Reply {
     /// The text the model streamed.
     pub text: String,

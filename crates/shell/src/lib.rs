@@ -81,6 +81,7 @@ pub mod perception;
 pub mod permission;
 pub mod placeholders;
 pub mod plugins;
+pub mod processed;
 pub mod recording;
 pub mod routing;
 pub mod scene_fields;

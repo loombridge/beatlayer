@@ -116,6 +116,9 @@ pub const SETTINGS_SET_THEME: &str = "settings.set_theme";
 /// `settings.set_create_fades_on_clip_edges`: switch Create Fades on Clip
 /// Edges.
 pub const SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES: &str = "settings.set_create_fades_on_clip_edges";
+/// `settings.set_temporary_folder`: choose the Temporary Folder on the File &
+/// Folder page (WP-4.20).
+pub const SETTINGS_SET_TEMPORARY_FOLDER: &str = "settings.set_temporary_folder";
 /// `settings.set_warp_recorded_audio`: switch Warp recorded audio (WP-2.13).
 pub const SETTINGS_SET_WARP_RECORDED_AUDIO: &str = "settings.set_warp_recorded_audio";
 /// `settings.set_default_launch_mode`: choose Default Launch Mode (WP-3.4).
@@ -194,6 +197,7 @@ pub const IDS: &[&str] = &[
     SETTINGS_PREVIOUS_PAGE,
     SETTINGS_SET_THEME,
     SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES,
+    SETTINGS_SET_TEMPORARY_FOLDER,
     SETTINGS_SET_WARP_RECORDED_AUDIO,
     SETTINGS_SET_DEFAULT_LAUNCH_MODE,
     SETTINGS_SET_DEFAULT_LAUNCH_QUANTIZATION,
@@ -315,6 +319,22 @@ pub struct DefaultLaunchQuantizationArgs {
     /// the global one, Live's "Global".
     #[serde(default)]
     pub quantization: Option<LaunchQuantization>,
+}
+
+/// Arguments of `settings.set_temporary_folder`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TemporaryFolderArgs {
+    /// The folder's absolute path, or `null` for the default: a `Temporary`
+    /// folder in Beatlayer's application-data folder.
+    pub path: Option<String>,
+}
+
+/// What `settings.set_temporary_folder` returns: the folder in use afterwards.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct TemporaryFolderResult {
+    /// The Temporary Folder's path.
+    pub path: String,
 }
 
 /// Arguments of a command that switches a setting on or off.
@@ -1012,6 +1032,23 @@ fn specs() -> Vec<CommandSpec> {
         .context(Settings)
         .args::<SwitchArgs>()
         .result::<SwitchResult>(),
+        // File & Folder (L-SET-015; WP-4.20): an edit-class preference.
+        CommandSpec::new(SETTINGS_SET_TEMPORARY_FOLDER, "Temporary Folder")
+            .description(
+                "Chooses the Temporary Folder on the Settings window's File & Folder page: where \
+                 the files Reverse, Crop, Consolidate, Freeze and Bounce write go while the set \
+                 has never been saved (the first save moves them into the project's \
+                 `Samples/Processed` folders). `path` is an absolute path, made when it is first \
+                 needed, or `null` for the default, a `Temporary` folder in Beatlayer's \
+                 application-data folder. Files already written stay where they are. Run by a \
+                 person from the Browse button without a `path`, it asks for a folder. The \
+                 setting is kept for the next start, and isn't part of the set or an undo step. \
+                 The result's `path` is the folder in use afterwards.",
+            )
+            .permission(Permission::Edit)
+            .context(Settings)
+            .args::<TemporaryFolderArgs>()
+            .result::<TemporaryFolderResult>(),
         // Record, Warp & Launch, Warp/Fades (IMP-02; WP-2.13).
         CommandSpec::new(SETTINGS_SET_WARP_RECORDED_AUDIO, "Warp Recorded Audio")
             .description(

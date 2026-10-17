@@ -117,6 +117,12 @@ fn every_shell_command_is_on_a_menu_or_a_control() {
         // (L-CLIP-014), and agents reach both.
         commands::VIEW_FOLD_NOTES,
         commands::VIEW_LANE,
+        // The Clip View's Envelopes tab (WP-3.16): the View menu's Content
+        // Editor and Envelope Editor reach view.clip_tab through their keys
+        // (M-VIEW-018, M-VIEW-019, S-CLIPMODE-003, S-CLIPMODE-004), and the
+        // control chooser reaches view.clip_envelope (L-CLIP-017).
+        commands::VIEW_CLIP_TAB,
+        commands::VIEW_CLIP_ENVELOPE,
         // A query for agents, like `transport.state`.
         commands::VIEW_STATE,
     ]

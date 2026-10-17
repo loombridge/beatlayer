@@ -19,11 +19,14 @@
 use std::collections::BTreeSet;
 
 use bl_core::time::{Ticks, TimeSignature, TimeSignatureMap};
-use bl_model::{ClipData, ClipFolds, ClipId, Command, Document, Editor, MidiData, Note};
+use bl_model::{
+    AutomationTarget, ClipData, ClipFolds, ClipId, Command, Document, Editor, MidiData, Note,
+};
 use bl_shell_spec::notes::{
-    self as ids, AddNoteArgs, ClipViewState, DeleteNotesArgs, MoveNotesArgs, NoteEditResult,
-    NoteField, NoteSelectMode, QuantizeNotesArgs, QuantizeSettings, QuantizeSettingsArgs,
-    QuantizeTarget, RampValueArgs, ResizeNotesArgs, SelectNotesArgs, SetValueArgs,
+    self as ids, AddNoteArgs, ClipTab, ClipViewState, DeleteNotesArgs, MoveNotesArgs,
+    NoteEditResult, NoteField, NoteSelectMode, QuantizeNotesArgs, QuantizeSettings,
+    QuantizeSettingsArgs, QuantizeTarget, RampValueArgs, ResizeNotesArgs, SelectNotesArgs,
+    SetValueArgs,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -162,6 +165,13 @@ pub struct ClipView {
     /// What Quantize uses when its arguments leave them out. View state,
     /// like Draw Mode: not part of the set.
     quantize: QuantizeSettings,
+    /// The tab the Clip View shows (L-CLIP-010).
+    tab: ClipTab,
+    /// The parameter whose envelope the Envelopes tab shows.
+    envelope: Option<AutomationTarget>,
+    /// The Session slot's clip most recently selected, which the Clip View
+    /// shows until an Arrangement selection replaces it.
+    session_clip: Option<ClipId>,
 }
 
 impl ClipView {
@@ -250,13 +260,56 @@ impl ClipView {
         }
     }
 
-    /// The clip the note editor shows: the Arrangement's first selected
-    /// clip that holds MIDI notes.
+    /// The tab the Clip View shows.
+    #[must_use]
+    pub fn tab(&self) -> ClipTab {
+        self.tab
+    }
+
+    /// Shows a tab of the Clip View.
+    pub fn set_tab(&mut self, tab: ClipTab) {
+        self.tab = tab;
+    }
+
+    /// The parameter whose envelope the Envelopes tab shows.
+    #[must_use]
+    pub fn envelope(&self) -> Option<AutomationTarget> {
+        self.envelope
+    }
+
+    /// Chooses the parameter whose envelope the Envelopes tab shows.
+    pub fn set_envelope(&mut self, target: Option<AutomationTarget>) {
+        self.envelope = target;
+    }
+
+    /// Shows the Session clip in a slot just selected, in place of the
+    /// Arrangement's selection: the Clip View follows the clip most recently
+    /// selected, from either view.
+    pub fn show_session_clip(&mut self, clip: ClipId) {
+        self.session_clip = Some(clip);
+    }
+
+    /// Goes back to the Arrangement's selection, as selecting a clip there
+    /// does.
+    pub fn show_arranged_clips(&mut self) {
+        self.session_clip = None;
+    }
+
+    /// The clip the Clip View shows: the Session clip most recently
+    /// selected, or else the Arrangement's first selected clip, if it holds
+    /// MIDI notes.
     #[must_use]
     pub fn shown_clip(&self, doc: &Document, arrangement: &ArrangementView) -> Option<ClipId> {
-        arrangement.selected_clips().iter().copied().find(|id| {
+        let holds_notes = |id: &ClipId| {
             doc.clip(*id)
                 .is_some_and(|clip| matches!(clip.data, ClipData::Midi(_)))
+        };
+        self.session_clip.filter(holds_notes).or_else(|| {
+            arrangement
+                .selected_clips()
+                .iter()
+                .copied()
+                .find(holds_notes)
         })
     }
 
@@ -288,6 +341,8 @@ impl ClipView {
             selected: self.selected_notes(doc, arrangement).to_vec(),
             lane: self.lane,
             folded: clip.is_some_and(|clip| self.is_folded(clip)),
+            tab: self.tab,
+            envelope: self.envelope,
         }
     }
 
@@ -295,6 +350,8 @@ impl ClipView {
     pub(crate) fn forget_selection(&mut self) {
         self.selected_clip = None;
         self.selected.clear();
+        self.session_clip = None;
+        self.envelope = None;
     }
 }
 

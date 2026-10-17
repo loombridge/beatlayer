@@ -1,7 +1,7 @@
 # Session View: clip slots and scenes
 
 - **Status:** implemented
-- **Work packages:** WP-3.1, WP-3.7, WP-3.6
+- **Work packages:** WP-3.1, WP-3.7, WP-3.6, WP-3.16 (R25)
 - **Parity-matrix row:** Views and workflow: Session View; Clips and launching
 - **Checked against:** the Live 12 reference manual, chapter 7 "Session View", read 15 October 2026, and Live 12.4.3 on macOS, observed on 15 October 2026.
 
@@ -11,7 +11,7 @@ The Session View is a grid: every audio and MIDI track is a column with one clip
 
 The scenes are held at the document level and the slots in the tracks, so deleting a track deletes its slot clips and leaves the scenes (`track.delete`'s own spec covers it). The user can delete every scene and insert more afterwards; the grid builds and scrolls any number of them, but only `session.scroll` reaches its scenes so far (the wheel doesn't).
 
-This spec covers the grid's structure in the document, the scenes, the clips in slots, and the commands that edit them. It leaves to other packages: launching, the slot states and stop buttons (WP-3.2, [launch-quantisation.md](launch-quantisation.md)); the clip's launch settings (WP-3.4); scene tempo, time signature, and Capture and Insert Scene (WP-3.5); the status row and the Main column's launch buttons (WP-3.8). The grid's drawing, selection, dragging and dropping are rules R15 to R19 (WP-3.7), and Session clips over the Arrangement and Back to Arrangement are rules R20 to R24 (WP-3.6); what it doesn't do yet is under "Not built yet". What a clip holds is [midi-clips.md](midi-clips.md) and [audio-clips.md](audio-clips.md).
+This spec covers the grid's structure in the document, the scenes, the clips in slots, and the commands that edit them. It leaves to other packages: launching, the slot states and stop buttons (WP-3.2, [launch-quantisation.md](launch-quantisation.md)); the clip's launch settings (WP-3.4); scene tempo, time signature, and Capture and Insert Scene (WP-3.5); the status row and the Main column's launch buttons (WP-3.8). The grid's drawing, selection, dragging and dropping are rules R15 to R19 (WP-3.7), and Session clips over the Arrangement and Back to Arrangement are rules R20 to R24 (WP-3.6); the Clip View showing a selected Session clip is R25 (WP-3.16); what it doesn't do yet is under "Not built yet". What a clip holds is [midi-clips.md](midi-clips.md) and [audio-clips.md](audio-clips.md).
 
 ## Sources
 
@@ -53,6 +53,8 @@ This spec covers the grid's structure in the document, the scenes, the clips in 
 - **R22.** Back to Arrangement (`session.back_to_arrangement`, F10, S-TRANS-009, M-PLAY-012) returns every track: their Session clips stop at once, not on the launch grid, launches and stops still queued on them are dropped, and the Arrangement plays from the playhead, clips already underway from their offset; a MIDI note that began before the return isn't restarted. The transport keeps running. The command is disabled while no track is taken over, as in a new or loaded set. (S1, S2, S9)
 - **R23.** `session.back_to_arrangement_track` returns one track the same way and leaves the others; on a taken-over track with nothing playing it just gives the Arrangement back, and on a track nothing took over it changes nothing. (S1, S9)
 - **R24.** The engine publishes the taken-over tracks after every block (`session_over`): the Back to Arrangement button lights while any track is listed, and a track's own button while that track is. A track the set no longer holds is forgotten, and a device restart forgets the takeovers with the playing Session clips. (S3, S9)
+- **R25.** Selecting a Session slot that holds a MIDI clip (`session.select` with a click, I-CLICK-002, or its keys) shows that clip in the Clip View, in place of the Arrangement's selection, and selecting a clip in the Arrangement shows that one instead: the Clip View follows the clip most recently selected, from either view ([piano-roll.md](piano-roll.md) R1). Selecting a slot again shows its clip again, and a slot that holds no MIDI clip leaves the Clip View as it was. (S1)
+
 ## Tests
 
 | Rule | Test | Kind |
@@ -81,10 +83,11 @@ This spec covers the grid's structure in the document, the scenes, the clips in 
 | R22 | `crates/engine/tests/session.rs`, `a_return_drops_a_queued_launch` and `a_launched_clip_silences_the_arrangement_until_a_return`; `crates/engine/src/session.rs`, `a_return_stops_at_once_and_drops_what_is_queued`; `crates/cli/tests/agent.rs`, `an_agent_launches_and_stops_session_clips_by_command_id`; `rtsan/tests/session.rs` | engine, unit, agent and sanitizer test |
 | R23 | `crates/engine/tests/session.rs`, `the_per_track_return_returns_one_track`; `crates/engine/src/session.rs`, `a_return_stops_at_once_and_drops_what_is_queued` | engine and unit test |
 | R24 | `crates/engine/src/session.rs`, `a_deleted_track_is_forgotten`; the engine tests above read `session_over` after each step | unit and engine test |
+| R25 | `crates/shell/tests/clip_view_tabs.rs`, `the_clip_view_follows_the_clip_most_recently_selected_in_either_view` | unit |
 ## Not built yet
 
 - The Back to Arrangement buttons (the Main column's, and the Arrangement's per-track and scrub-area buttons, L-SES-012, L-ARR-007, L-ARR-019) aren't drawn yet (WP-3.8); F10 and both commands work, and `Shell::session_over` gives the buttons their state.
 - A playing Session clip doesn't close its track's input under Monitor Auto ([routing.md](routing.md) R11).
 - The slot, scene and Session-clip context menus (C-SLOT, C-SCENE, C-CLIP-SES), dragging scenes and tracks to reorder them (I-DRAG-006, S-SES-015, S-SES-016), and resizing a track's column (I-DRAG-004) are not built.
-- Insert Empty MIDI Clip makes its clip, but the grid doesn't show it in the Clip View (I-CLICK-004, and a click on a clip's name, I-CLICK-002): [piano-roll.md](piano-roll.md) R1 has the Clip View show "the Arrangement's first selected MIDI clip", so a Session clip isn't shown there yet.
+- Selecting a slot shows a MIDI clip in the Clip View (R25), but a Session audio clip isn't shown there yet: the Sample Editor comes with its own package.
 - A slot doesn't draw its clip's name or waveform; the grid names every slot with its track and scene for assistive technology.

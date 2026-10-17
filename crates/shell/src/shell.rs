@@ -35,10 +35,10 @@ use crate::audio::{AudioHost, ConfigureAudio, EngineTransport, ToneSettings};
 use crate::browser::{self, BrowserError, BrowserView, Waker};
 use crate::clip_view::{self, ClipView};
 use crate::commands::{
-    self as ids, DefaultLaunchModeArgs, DefaultLaunchQuantizationArgs, DefaultSetArgs, FileReport,
-    FoldNotesArgs, LaneArgs, PathArgs, RelinkArgs, SaveAsArgs, SetResult, SettingsArgs, SwitchArgs,
-    SwitchResult, TemplateArgs, TestToneArgs, TestToneState, ThemeArgs, ViewResult, ViewState,
-    ZoomArgs,
+    self as ids, ClipEnvelopeArgs, ClipTabArgs, DefaultLaunchModeArgs,
+    DefaultLaunchQuantizationArgs, DefaultSetArgs, FileReport, FoldNotesArgs, LaneArgs, PathArgs,
+    RelinkArgs, SaveAsArgs, SetResult, SettingsArgs, SwitchArgs, SwitchResult, TemplateArgs,
+    TestToneArgs, TestToneState, ThemeArgs, ViewResult, ViewState, ZoomArgs,
 };
 use crate::devices::{self, DeviceError, DeviceView};
 use crate::files::{ProjectFiles, SetStore, new_set_from};
@@ -64,7 +64,7 @@ use bl_shell_spec::export as export_ids;
 use bl_shell_spec::midi_files as midi_ids;
 use bl_shell_spec::midi_io as midi_io_ids;
 use bl_shell_spec::mixer_view as mixer_ids;
-use bl_shell_spec::notes as note_ids;
+use bl_shell_spec::notes::{self as note_ids, ClipTab};
 use bl_shell_spec::perception as perception_ids;
 use bl_shell_spec::plugins as plugin_ids;
 use bl_shell_spec::session_launch as session_launch_ids;
@@ -468,8 +468,9 @@ fn edit_error(id: &str, failure: EditFailure) -> ShellError {
     }
 }
 
-/// Whether `id` is an automation edit a drag on an automation lane runs as
-/// one undo step (WP-2.12).
+/// Whether `id` is an automation edit a drag on an automation lane, or on a
+/// clip's envelope in the Clip View, runs as one undo step (WP-2.12,
+/// WP-3.16).
 fn is_automation_edit(id: &str) -> bool {
     matches!(
         id,
@@ -477,6 +478,10 @@ fn is_automation_edit(id: &str) -> bool {
             | "automation.set_curve"
             | "automation.move_breakpoint"
             | "automation.delete_breakpoint"
+            | "clip.set_envelope_breakpoint"
+            | "clip.set_envelope_curve"
+            | "clip.move_envelope_breakpoint"
+            | "clip.delete_envelope_breakpoint"
     )
 }
 
@@ -487,6 +492,10 @@ fn automation_label(id: &str) -> &'static str {
         "automation.set_curve" => "Curve Automation Segment",
         "automation.move_breakpoint" => "Move Automation Breakpoint",
         "automation.delete_breakpoint" => "Delete Automation Breakpoint",
+        "clip.set_envelope_curve" => "Curve Envelope Segment",
+        "clip.move_envelope_breakpoint" => "Move Envelope Breakpoint",
+        "clip.delete_envelope_breakpoint" => "Delete Envelope Breakpoint",
+        "clip.set_envelope_breakpoint" => "Add Envelope Breakpoint",
         _ => "Add Automation Breakpoint",
     }
 }
@@ -3440,13 +3449,17 @@ impl Shell {
                     // Note Editor holds the detail area's keys.
                     Area::Detail if self.clip_view.visible() => {
                         contexts.push(Context::ClipView);
-                        contexts.push(Context::NoteEditor);
-                        if !self
-                            .clip_view
-                            .selected_notes(self.editor.document(), &self.arrangement)
-                            .is_empty()
-                        {
-                            contexts.push(Context::NoteSelection);
+                        if self.clip_view.tab() == ClipTab::Envelopes {
+                            contexts.push(Context::Envelope);
+                        } else {
+                            contexts.push(Context::NoteEditor);
+                            if !self
+                                .clip_view
+                                .selected_notes(self.editor.document(), &self.arrangement)
+                                .is_empty()
+                            {
+                                contexts.push(Context::NoteSelection);
+                            }
                         }
                     }
                     Area::Detail => contexts.push(Context::DeviceView),
@@ -4119,6 +4132,49 @@ impl Shell {
     /// is unchanged when a command fails, except that a device that refuses
     /// new audio settings goes back to the previous ones.
     pub fn run(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        let arranged = self.arrangement.selected_clips().to_vec();
+        let slot = self.selected_slot_clip();
+        let result = self.run_command(id, args);
+        if result.is_ok() {
+            self.follow_clip_selection(id, &arranged, slot);
+        }
+        result
+    }
+
+    /// The MIDI clip in the Session slot selected first, if the slot holds
+    /// one.
+    fn selected_slot_clip(&self) -> Option<bl_model::ClipId> {
+        let slot = self.session.first_slot()?;
+        let clip = self.editor.document().slot(slot.track, slot.scene)?;
+        matches!(clip.data, ClipData::Midi(_)).then_some(clip.id)
+    }
+
+    /// Points the Clip View at the clip most recently selected, in the
+    /// Session View or the Arrangement, after the command `id` ran with the
+    /// selections `arranged` and `slot` before it. Selecting again counts:
+    /// clicking the slot that is already selected shows its clip again.
+    fn follow_clip_selection(
+        &mut self,
+        id: &str,
+        arranged: &[bl_model::ClipId],
+        slot: Option<bl_model::ClipId>,
+    ) {
+        let now = self.selected_slot_clip();
+        let picked = matches!(
+            id,
+            session_ids::SELECT | session_ids::SELECT_ALL | session_ids::SELECT_EDGE
+        ) || now != slot;
+        if let Some(clip) = now.filter(|_| picked) {
+            self.clip_view.show_session_clip(clip);
+        } else if (matches!(id, edit_ids::SELECT_CLIPS | edit_ids::SELECT_ALL)
+            || self.arrangement.selected_clips() != arranged)
+            && !self.arrangement.selected_clips().is_empty()
+        {
+            self.clip_view.show_arranged_clips();
+        }
+    }
+
+    fn run_command(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
         if self.edit_gesture.is_some()
             && (model::handles(id)
                 || edit_ids::handles(id)
@@ -5114,6 +5170,39 @@ impl Shell {
                 }
                 let folded = folded.unwrap_or(!self.clip_view.is_folded(clip));
                 self.clip_view.set_folded(clip, folded);
+                Ok(to_value(
+                    &self
+                        .clip_view
+                        .state(self.editor.document(), &self.arrangement),
+                ))
+            }
+            ids::VIEW_CLIP_TAB => {
+                // Spec: piano-roll R1; S-CLIPMODE-001 to 004. View state only.
+                let ClipTabArgs { tab } = Self::args(id, args)?;
+                self.clip_view
+                    .set_tab(tab.unwrap_or_else(|| self.clip_view.tab().next()));
+                Ok(to_value(
+                    &self
+                        .clip_view
+                        .state(self.editor.document(), &self.arrangement),
+                ))
+            }
+            ids::VIEW_CLIP_ENVELOPE => {
+                // Spec: clip-envelopes R8. View state only.
+                let ClipEnvelopeArgs { target } = Self::args(id, args)?;
+                if let Some(target) = target {
+                    let doc = self.editor.document();
+                    let clip = self
+                        .clip_view
+                        .shown_clip(doc, &self.arrangement)
+                        .ok_or_else(|| unavailable("no clip is shown in the Clip View"))?;
+                    let track = doc
+                        .clip_track(clip)
+                        .ok_or_else(|| failed("no track holds the clip".to_owned()))?;
+                    doc.check_automation_target(track, target)
+                        .map_err(|error| failed(error.to_string()))?;
+                }
+                self.clip_view.set_envelope(target);
                 Ok(to_value(
                     &self
                         .clip_view

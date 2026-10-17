@@ -857,6 +857,53 @@ enum Reason {
 
 fn nothing(_: &mut Harness) {}
 
+/// A Session clip on the first MIDI track, selected, with the Clip View on
+/// its Envelopes tab showing Pan (WP-3.16).
+fn envelopes_tab(h: &mut Harness) {
+    let track = h.shell.editor().document().top_level().next().unwrap();
+    let scene = h.shell.editor().document().scenes().next().unwrap().id;
+    h.shell
+        .run(
+            "session.insert_empty_midi_clip",
+            json!({ "track": track, "scene": scene }),
+        )
+        .unwrap();
+    h.shell
+        .run("session.select", json!({ "track": track, "scene": scene }))
+        .unwrap();
+    h.shell.run("view.toggle_clip_view", json!({})).unwrap();
+    h.shell
+        .run("view.clip_tab", json!({ "tab": "envelopes" }))
+        .unwrap();
+    h.shell
+        .run(
+            "view.clip_envelope",
+            json!({ "target": { "type": "mixer", "param": "pan" } }),
+        )
+        .unwrap();
+    h.settle();
+}
+
+/// As [`envelopes_tab`], with a breakpoint on Pan's envelope.
+fn envelopes_tab_with_an_envelope(h: &mut Harness) {
+    envelopes_tab(h);
+    let track = h.shell.editor().document().top_level().next().unwrap();
+    let scene = h.shell.editor().document().scenes().next().unwrap().id;
+    let clip = h.shell.editor().document().slot(track, scene).unwrap().id;
+    h.shell
+        .run(
+            "clip.set_envelope_breakpoint",
+            json!({
+                "clip": clip,
+                "target": { "type": "mixer", "param": "pan" },
+                "at": 0,
+                "value": 0.25
+            }),
+        )
+        .unwrap();
+    h.settle();
+}
+
 /// Shows the tracks' automation lanes, so their choosers are drawn.
 fn automation_mode_on(h: &mut Harness) {
     h.shell
@@ -1057,10 +1104,11 @@ fn paths() -> BTreeMap<&'static str, Path> {
     // later package.
     let note_editor = LaterView("the note editor's keys (the note-editor shortcuts, milestone M2)");
     let clip_launch = LaterView("the Clip View's Launch panel (WP-3.9)");
-    let clip_envelopes = LaterView(
-        "the Clip View's Envelope editor: the Envelopes tab's breakpoint edits and its Linked \
-         switch (the clip envelopes package, milestone M3)",
-    );
+    // The Envelopes tab (WP-3.16): the pointer draws, moves, curves and
+    // deletes breakpoints, and the keys for the breakpoints come with a
+    // later package; its choosers and Linked switch are reached by Tab.
+    let clip_envelopes =
+        LaterView("the Envelopes tab's keys for breakpoints (the clip envelopes package)");
     let device_params = Equivalent(
         "a described device's parameter controls in the Device View: Tab to one, then Up and \
          Down step it and Delete sets its default (the device framework spec, R17)",
@@ -1565,7 +1613,24 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ("clip.move_envelope_breakpoint", Exception(clip_envelopes)),
         ("clip.delete_envelope_breakpoint", Exception(clip_envelopes)),
         ("clip.delete_envelope", Exception(clip_envelopes)),
-        ("clip.set_envelope_linked", Exception(clip_envelopes)),
+        (
+            "clip.set_envelope_linked",
+            main(
+                envelopes_tab_with_an_envelope,
+                device_view,
+                "Linked",
+                Key::Enter,
+            ),
+        ),
+        (
+            "view.clip_envelope",
+            main(
+                envelopes_tab,
+                device_view,
+                "Envelope Control",
+                Key::ArrowDown,
+            ),
+        ),
         ("clip.set_legato", Exception(clip_launch)),
         ("clip.set_launch_quantization", Exception(clip_launch)),
         ("clip.set_velocity_amount", Exception(clip_launch)),

@@ -83,6 +83,7 @@
 bl_rt::install_trap!();
 
 mod automation;
+pub mod capture;
 pub mod clips;
 mod compiler;
 pub mod display;
@@ -95,6 +96,7 @@ mod midi;
 pub mod midi_clips;
 pub mod midi_controllers;
 pub mod mixer;
+pub mod modbus;
 mod node;
 pub mod nodes;
 mod offline;
@@ -116,7 +118,10 @@ pub mod testing;
 use bl_core::time::SampleRate;
 
 pub use automation::{AutomationList, clip_envelope_value_at, target_node};
-pub use clips::{ClipPlayer, MediaLibrary, MediaMap, MediaStreams, OpenedSource, SourceCues};
+pub use capture::{CAPTURE_RING, CapturedMidi};
+pub use clips::{
+    ClipPlayer, MediaLibrary, MediaMap, MediaStreams, OpenedSource, SlotSample, SourceCues,
+};
 pub use compiler::{Compiler, Update};
 pub use display::{DisplayData, DisplayReader, DisplayWriter, Displays, display_channel};
 pub use engine::{CompileCounts, Engine, Restarter, Sender, channel};

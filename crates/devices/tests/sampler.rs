@@ -22,7 +22,7 @@ use bl_devices::sampler::{
 };
 use bl_engine::{
     Block, Collector, DeviceType, EngineConfig, MediaMap, Node, NodeEvent, NoteBuffer, NoteEvent,
-    NoteKind, Offline, ParamValue, Registry, TransportCommand, TransportInfo,
+    NoteKind, Offline, ParamValue, Registry, SlotSample, TransportCommand, TransportInfo,
 };
 use bl_model::param::db_to_gain;
 use bl_model::{
@@ -51,7 +51,10 @@ fn sample(frames: usize, value: impl Fn(usize) -> f32) -> Arc<bl_media::SampleDa
 
 /// Gives `node` the sample, through the collector the engine would.
 fn give(node: &mut dyn Node, collector: &Collector, data: &Arc<bl_media::SampleData>) {
-    node.receive_data(collector.handle().data(Arc::clone(data)));
+    node.receive_data(collector.handle().data(SlotSample {
+        slot: 0,
+        sample: Arc::clone(data),
+    }));
 }
 
 fn note(offset: u32, kind: NoteKind, key: u8, velocity: f32) -> NoteEvent {
@@ -496,7 +499,7 @@ fn the_engine_plays_the_sample_the_set_names() {
         },
     )
     .with_role(DeviceRole::Instrument);
-    device.media = Some(hash);
+    device.set_media(0, Some(hash));
     editor
         .apply(Command::InsertDevice {
             track,

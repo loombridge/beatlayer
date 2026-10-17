@@ -59,6 +59,7 @@ use bl_plugin_host::scan::Scanner;
 use bl_plugin_host::vst3::Vst3Host;
 use bl_shell_spec::arrangement as view_ids;
 use bl_shell_spec::browser as browser_ids;
+use bl_shell_spec::capture_midi as capture_ids;
 use bl_shell_spec::devices as device_ids;
 use bl_shell_spec::editing as edit_ids;
 use bl_shell_spec::export as export_ids;
@@ -79,6 +80,7 @@ use bl_shell_spec::tracks as track_ids;
 use bl_shell_spec::transport as transport_ids;
 use bl_shell_spec::transport::{RecordedFileReport, RecordingReport, RunningRecording};
 
+mod capture;
 mod processed_files;
 mod session_recording;
 
@@ -462,6 +464,9 @@ pub struct Shell {
     recorded_takes: u32,
     /// The Session recording under way, beside `recording` (WP-3.11).
     session_run: Option<session_recording::SessionRun>,
+    /// The notes monitoring MIDI tracks received, for Capture MIDI
+    /// (WP-3.14).
+    capture: bl_engine::capture::Buffer,
     /// The control moves of the automation recording under way (WP-2.12).
     automation_take: crate::automation_record::Take,
     /// What the Session clips that played during the recording under way
@@ -723,6 +728,7 @@ impl Shell {
             last_recording: None,
             recorded_takes: 0,
             session_run: None,
+            capture: bl_engine::capture::Buffer::default(),
             automation_take: crate::automation_record::Take::default(),
             session_watch: crate::session_capture::Watch::default(),
             automation_recording: false,
@@ -2144,6 +2150,15 @@ impl Shell {
             .state(doc, devices::shown_track(&self.arrangement, doc))
     }
 
+    /// The modulator slot whose Map button is lit, if one is (WP-5.10): a
+    /// click on any parameter's control maps it.
+    #[must_use]
+    pub fn armed_map(&self) -> Option<device_ids::ArmedMap> {
+        self.devices
+            .armed()
+            .map(|(device, slot)| device_ids::ArmedMap { device, slot })
+    }
+
     /// Sets the display data a device's display draws, as
     /// [`Shell::poll_engine`] does with the engine's (for a shell without an
     /// engine, as in tests; while one runs, the next poll takes its data
@@ -2291,7 +2306,7 @@ impl Shell {
     /// set records where it is and the device names it by content hash, and
     /// the engine plays it. One undo step.
     fn load_sample(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
-        let device_ids::LoadSampleArgs { device, path } = Self::args(id, args)?;
+        let device_ids::LoadSampleArgs { device, path, slot } = Self::args(id, args)?;
         let device =
             device
                 .or_else(|| self.devices.selected())
@@ -2299,23 +2314,37 @@ impl Shell {
                     command: id.to_owned(),
                     reason: "select a device first".to_owned(),
                 })?;
-        let kind = self
+        let target = self
             .editor
             .document()
             .device(device)
-            .map(|device| device.kind.clone())
+            .cloned()
             .ok_or_else(|| ShellError::InvalidArgs {
                 command: id.to_owned(),
                 message: format!("no {device}"),
             })?;
-        // Only the sampler plays a sample (the sampler spec, R11).
-        let sampler = bl_model::DeviceKind::Native {
-            device_type: bl_devices::sampler::SAMPLER.to_owned(),
-        };
-        if kind != sampler {
+        // Only the sampler and the drum sampler play samples (the sampler
+        // spec, R11).
+        let plays = matches!(
+            &target.kind,
+            bl_model::DeviceKind::Native { device_type } if bl_devices::plays_samples(device_type)
+        );
+        if !plays {
             return Err(ShellError::Failed {
                 command: id.to_owned(),
                 message: format!("{device} doesn't play a sample"),
+            });
+        }
+        // A device with several slots loads into the one selected unless
+        // told which.
+        let slot = slot.unwrap_or_else(|| self.devices.slot_of(&target) as u8);
+        let slots = self.devices.slot_count(&target.kind).max(1);
+        if u32::from(slot) >= slots {
+            return Err(ShellError::InvalidArgs {
+                command: id.to_owned(),
+                message: format!(
+                    "{device} has {slots} sample slots, counted from 0; there is no slot {slot}"
+                ),
             });
         }
         let path = PathBuf::from(path);
@@ -2338,6 +2367,7 @@ impl Shell {
             .apply(bl_model::Command::SetDeviceSample {
                 device,
                 media: Some(media),
+                slot,
             })
             .map_err(|error| ShellError::Failed {
                 command: id.to_owned(),
@@ -2353,6 +2383,7 @@ impl Shell {
         Ok(to_value(&device_ids::LoadSampleResult {
             device,
             media,
+            slot,
             name,
         }))
     }
@@ -2448,6 +2479,26 @@ impl Shell {
         self.devices.hot_swap()?;
         match self.browser_view.selected() {
             [one] if bl_project::preset::is_preset(one) => Some(one.clone()),
+            _ => None,
+        }
+    }
+
+    /// The browser's selection, if it's one audio file and a device that
+    /// plays samples is being hot-swapped: what Enter or a double-click
+    /// loads into the device's selected slot (WP-5.17).
+    fn hot_swap_sample(&self) -> Option<(bl_model::DeviceId, PathBuf)> {
+        let device = self.devices.hot_swap()?;
+        let takes = self.editor.document().device(device).is_some_and(|d| {
+            matches!(
+                &d.kind,
+                bl_model::DeviceKind::Native { device_type }
+                    if bl_devices::plays_samples(device_type)
+            )
+        });
+        match self.browser_view.selected() {
+            [one] if takes && browser::arrange::is_audio(&one.to_string_lossy()) => {
+                Some((device, one.clone()))
+            }
             _ => None,
         }
     }
@@ -3030,6 +3081,7 @@ impl Shell {
     /// R14). Returns the transport it took.
     pub fn poll_engine(&mut self) -> EngineTransport {
         let engine = self.audio.transport_state();
+        self.poll_capture();
         // WP-2.13. A recording's take reaches the shell with the engine's
         // state; the clips are made from it once the writer has finished.
         self.poll_recording(&engine);
@@ -3917,10 +3969,16 @@ impl Shell {
             }
             _ => {}
         }
+        if capture_ids::handles(id) {
+            // Spec: capture-midi R1. Nothing played, nothing to capture.
+            return self.capture_midi_ready() && self.audio.engine_running();
+        }
         if ids::handles(id) || transport_ids::handles(id) {
             return true;
         }
-        if id == browser_ids::LOAD_SELECTED && self.hot_swap_preset().is_some() {
+        if id == browser_ids::LOAD_SELECTED
+            && (self.hot_swap_preset().is_some() || self.hot_swap_sample().is_some())
+        {
             return true;
         }
         if device_ids::handles(id) {
@@ -4541,6 +4599,7 @@ impl Shell {
     /// is unchanged when a command fails, except that a device that refuses
     /// new audio settings goes back to the previous ones.
     pub fn run(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        self.poll_capture();
         let arranged = self.arrangement.selected_clips().to_vec();
         let slot = self.selected_slot_clip();
         let result = self.run_command(id, args);
@@ -4738,6 +4797,9 @@ impl Shell {
         if session_record_ids::handles(id) {
             return self.run_session_record(id, args);
         }
+        if capture_ids::handles(id) {
+            return self.run_capture_midi(id, args);
+        }
         if session_launch_ids::handles(id) {
             // Spec: launch-quantisation R1, R3, R6, R10. The Control Bar's
             // Quantization Menu and the Options items run here, with the
@@ -4891,6 +4953,40 @@ impl Shell {
                 self.touch();
             }
             return Ok(outcome.value);
+        }
+        if id == browser_ids::LOAD_SELECTED
+            && let Some((device, path)) = self.hot_swap_sample()
+        {
+            // Spec: eight-slot-drum-sampler R17. Loading a sample while
+            // hot-swapping a device that plays samples loads it into the
+            // device's selected slot, as dropping it there does.
+            Self::args::<NoArgs>(id, args)?;
+            return self.load_sample(
+                device_ids::LOAD_SAMPLE,
+                json!({ "device": device, "path": path.to_string_lossy() }),
+            );
+        }
+        if id == browser_ids::LOAD_SELECTED
+            && self.browser_view.selected_audio_is_empty()
+            && let Some((device_type, name)) = self.browser_view.selected_device()
+        {
+            // Spec: modulation R12. A modulator selected under the
+            // Modulators label loads as `device.add` adds a device.
+            Self::args::<NoArgs>(id, args)?;
+            return self.run_devices(
+                device_ids::ADD,
+                to_value(&device_ids::AddDeviceArgs {
+                    device: device_ids::NewDevice {
+                        kind: bl_model::DeviceKind::Native { device_type },
+                        name,
+                        role: bl_model::DeviceRole::AudioEffect,
+                        sidechain: false,
+                    },
+                    track: None,
+                    chain: None,
+                    index: None,
+                }),
+            );
         }
         if id == browser_ids::LOAD_SELECTED
             && let Some(path) = self.hot_swap_preset()

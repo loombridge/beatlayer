@@ -388,7 +388,9 @@ pub(crate) fn lists(
         if !automation.enabled {
             continue;
         }
-        let (key, param) = target_node(track.id(), target);
+        let Some((key, param)) = target_node(track.id(), target) else {
+            continue;
+        };
         let envelope = PlacedEnvelope::placed(&automation.envelope, tempo, rate, delay(key));
         if !envelope.is_empty() {
             lists
@@ -406,7 +408,11 @@ pub(crate) fn lists(
             continue;
         }
         for envelope in clip.envelopes() {
-            let (key, param) = target_node(track.id(), &envelope.target);
+            // A MIDI controller envelope is the clip player's, not a node's
+            // parameter.
+            let Some((key, param)) = target_node(track.id(), &envelope.target) else {
+                continue;
+            };
             let placed = PlacedClipEnvelope::placed(clip, envelope, tempo, rate, delay(key));
             if let Some(placed) = placed {
                 lists
@@ -444,9 +450,9 @@ pub(crate) fn lists(
 
 /// The node and parameter an automation target names on `track`: its mixer
 /// for a mixer control, its send to a return track, or a device in its
-/// chain.
-pub fn target_node(track: TrackId, target: &AutomationTarget) -> (NodeKey, ParamId) {
-    match *target {
+/// chain; `None` for a MIDI controller, which no node holds as a parameter.
+pub fn target_node(track: TrackId, target: &AutomationTarget) -> Option<(NodeKey, ParamId)> {
+    Some(match *target {
         AutomationTarget::Mixer { param } => (
             NodeKey::Mixer(track),
             match param {
@@ -465,7 +471,10 @@ pub fn target_node(track: TrackId, target: &AutomationTarget) -> (NodeKey, Param
                 MixerParam::Mute => mixer::track::MUTE,
             },
         ),
-    }
+        AutomationTarget::MidiCc { .. }
+        | AutomationTarget::MidiPitchBend
+        | AutomationTarget::MidiChannelPressure => return None,
+    })
 }
 
 /// The value `clip`'s `envelope` holds at song position `at`, in the

@@ -425,7 +425,7 @@ fn a_clip_round_trips_through_export_and_import() {
     assert_eq!(read.tracks.len(), 1);
     let mut back = read.tracks[0].notes.clone();
     back.sort_by_key(|n| (n.start, n.key));
-    let mut expected: Vec<bl_model::Note> = original.iter().copied().collect();
+    let mut expected: Vec<bl_model::Note> = original.iter().cloned().collect();
     expected.sort_by_key(|n| (n.start, n.key));
     assert_eq!(back, expected);
     assert!((read.tempo.bpm_at(Ticks::ZERO).get() - 97.5).abs() < 0.01);

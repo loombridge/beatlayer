@@ -3181,7 +3181,7 @@ impl Shell {
     /// its base.
     #[must_use]
     pub fn played(&self, track: TrackId, target: &AutomationTarget) -> Option<(f64, f64)> {
-        let (node, param) = bl_engine::target_node(track, target);
+        let (node, param) = bl_engine::target_node(track, target)?;
         self.modulated
             .iter()
             .find(|entry| entry.node == node && entry.param == param)
@@ -5712,7 +5712,8 @@ impl Shell {
                     let track = doc
                         .clip_track(clip)
                         .ok_or_else(|| failed("no track holds the clip".to_owned()))?;
-                    doc.check_automation_target(track, target)
+                    let shown = doc.clip(clip).ok_or_else(|| failed(format!("no {clip}")))?;
+                    doc.check_clip_target(track, shown, target)
                         .map_err(|error| failed(error.to_string()))?;
                 }
                 self.clip_view.set_envelope(target);

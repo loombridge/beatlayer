@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::automation::{
     AutomationTarget, MixerParam, PointError, check_bend, entry, override_device, override_target,
 };
-use crate::clip::{AudioData, Clip, ClipData, ClipEnvelope, MidiData, TakeLane, clip_entry};
+use crate::clip::{AudioData, Clip, ClipData, ClipEnvelope, MidiData, Note, TakeLane, clip_entry};
 use crate::device::{Device, DeviceRole};
 use crate::document::Document;
 use crate::error::ModelError;
@@ -711,12 +711,14 @@ pub enum Command {
         clip: ClipId,
         /// The parameter of the clip's track the envelope modulates: a
         /// control of its mixer, one of its sends, or a parameter of a
-        /// device in its chain.
+        /// device in its chain; or, in a MIDI clip, a MIDI controller
+        /// (`midi.cc`, `midi.pitch_bend` or `midi.channel_pressure`).
         target: AutomationTarget,
         /// Where the breakpoint sits, in ticks from the beginning of the
         /// clip's contents, as a note's start is: 0 or later.
         at: Ticks,
-        /// The value there, in the parameter's own units.
+        /// The value there, in the parameter's own units; a MIDI
+        /// controller's own range (0 to 127, pitch bend -8192 to 8191).
         value: f64,
     },
     /// Curves the segment starting at one of a clip envelope's breakpoints,
@@ -2240,8 +2242,11 @@ impl Document {
     /// names a parameter of the track it's on (WP-3.15, as automation R11
     /// drops a device's envelopes when it leaves a track).
     fn keep_fitting_envelopes(&self, track: TrackId, clip: &mut Clip) {
-        clip.envelopes
-            .retain(|envelope| self.check_automation_target(track, envelope.target).is_ok());
+        let envelopes = std::mem::take(&mut clip.envelopes);
+        clip.envelopes = envelopes
+            .into_iter()
+            .filter(|envelope| self.check_clip_target(track, clip, envelope.target).is_ok())
+            .collect();
     }
 
     /// Removes a clip from the Arrangement lane or the Session slot it sits
@@ -2637,14 +2642,40 @@ impl Document {
 
     /// Checks that `target` names a parameter of the clip's track: a control
     /// of its mixer, one of its sends, or a parameter of a device in its
-    /// chain (WP-3.15).
+    /// chain (WP-3.15), or a MIDI controller of a MIDI clip (WP-2.29, R1 and
+    /// R6).
     fn check_clip_envelope_target(
         &self,
         clip: ClipId,
         target: AutomationTarget,
     ) -> Result<(), ModelError> {
         let track = self.clip_owner(clip)?;
-        self.check_automation_target(track, target)
+        self.check_clip_target(track, self.clip_ref(clip)?, target)
+    }
+
+    /// Checks `target` for an envelope of `clip`, which is on `track`: a
+    /// parameter of the track, or a MIDI controller (a number a clip holds,
+    /// on a MIDI clip).
+    pub fn check_clip_target(
+        &self,
+        track: TrackId,
+        clip: &Clip,
+        target: AutomationTarget,
+    ) -> Result<(), ModelError> {
+        if !target.is_midi() {
+            return self.check_automation_target(track, target);
+        }
+        if clip.data.is_audio() {
+            return Err(ModelError::NotMidiClip(clip.id));
+        }
+        if let AutomationTarget::MidiCc { number } = target {
+            check_value(
+                "MIDI controller number",
+                f64::from(number),
+                AutomationTarget::is_clip_controller(number),
+            )?;
+        }
+        Ok(())
     }
 
     /// Sets the value of `target` at `at` on the clip's envelope for it,
@@ -2660,8 +2691,8 @@ impl Document {
         if at < Ticks::ZERO {
             return Err(ModelError::NegativePosition(at));
         }
-        check_value("clip envelope value", value, value.is_finite())?;
         self.check_clip_envelope_target(clip, target)?;
+        check_clip_envelope_value(target, value)?;
         clip_entry(&mut self.clip_mut(clip)?.envelopes, target)
             .envelope
             .set(at, value);
@@ -2707,10 +2738,10 @@ impl Document {
         if to < Ticks::ZERO {
             return Err(ModelError::NegativePosition(to));
         }
-        if let Some(value) = value {
-            check_value("clip envelope value", value, value.is_finite())?;
-        }
         self.check_clip_envelope_target(clip, target)?;
+        if let Some(value) = value {
+            check_clip_envelope_value(target, value)?;
+        }
         let envelope = self
             .clip_ref(clip)?
             .envelope(&target)
@@ -3190,6 +3221,11 @@ impl Document {
                     return Err(ModelError::ChainHasNoMixer(chain));
                 }
             }
+            AutomationTarget::MidiCc { .. }
+            | AutomationTarget::MidiPitchBend
+            | AutomationTarget::MidiChannelPressure => {
+                return Err(ModelError::MidiControllerNotAParameter);
+            }
         }
         Ok(())
     }
@@ -3601,6 +3637,19 @@ pub(crate) fn check_value(what: &'static str, value: f64, ok: bool) -> Result<()
     }
 }
 
+/// Checks the value of a clip envelope's breakpoint: a number, and for a MIDI
+/// controller inside the controller's range (the MIDI controller data spec,
+/// R1 and R6).
+pub(crate) fn check_clip_envelope_value(
+    target: AutomationTarget,
+    value: f64,
+) -> Result<(), ModelError> {
+    let in_range = target
+        .midi_range()
+        .map_or(value.is_finite(), |(min, max)| (min..=max).contains(&value));
+    check_value("clip envelope value", value, in_range)
+}
+
 /// The breakpoints that [`TempoMap::from_breakpoints`] rebuilds `tempo`
 /// from: each segment's starting tempo, and, where a segment arrives at a
 /// tempo the next one doesn't start at (a jump), a second breakpoint at the
@@ -3647,6 +3696,16 @@ pub(crate) fn check_clip_fits(track: &Track, data: &ClipData) -> Result<(), Mode
     }
 }
 
+/// Whether a note's pressure points obey the MIDI controller data spec's R2:
+/// each from the note's start to before its end, 0 to 127, in order with none
+/// at the same place.
+fn pressure_fits(note: &Note) -> bool {
+    note.pressure
+        .iter()
+        .all(|point| point.value <= 127 && point.at >= Ticks::ZERO && point.at < note.length)
+        && note.pressure.windows(2).all(|pair| pair[0].at < pair[1].at)
+}
+
 /// Checks a clip or note's start and length.
 pub(crate) fn check_extent(start: Ticks, length: Ticks) -> Result<(), ModelError> {
     if start.is_negative() {
@@ -3681,6 +3740,7 @@ pub(crate) fn check_clip_data(data: &ClipData) -> Result<(), ModelError> {
                     || !(1..=127).contains(&note.release_velocity)
                     || !note.probability.is_finite()
                     || !(0.0..=1.0).contains(&note.probability)
+                    || !pressure_fits(note)
                 {
                     return Err(ModelError::InvalidNote { index });
                 }

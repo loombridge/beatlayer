@@ -612,8 +612,20 @@ impl MidiData {
     }
 }
 
+/// One point of a note's pressure (WP-2.29): from `at` after the note's
+/// start the note's key is pressed to `value`, until the next point.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PressurePoint {
+    /// Where it takes effect, counted from the note's start: 0 or more and
+    /// before the note's length.
+    pub at: Ticks,
+    /// The pressure, from 0 to 127.
+    #[schemars(range(max = 127))]
+    pub value: u8,
+}
+
 /// A note in a MIDI clip.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Note {
     /// The MIDI key, from 0 to 127. Middle C (C3 in Live) is 60.
     #[schemars(range(max = 127))]
@@ -647,6 +659,11 @@ pub struct Note {
     /// Whether the note is switched off, so it stays in place but doesn't play.
     #[serde(default, skip_serializing_if = "is_false")]
     pub mute: bool,
+    /// The note's own pressure, played as polyphonic pressure over its
+    /// length: points in order of `at`, none at the same place. A note with
+    /// none plays no pressure.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pressure: Vec<PressurePoint>,
 }
 
 impl Note {
@@ -662,6 +679,7 @@ impl Note {
             probability: 1.0,
             velocity_deviation: 0,
             mute: false,
+            pressure: Vec::new(),
         }
     }
 }
@@ -677,6 +695,7 @@ impl Default for Note {
             probability: 1.0,
             velocity_deviation: 0,
             mute: false,
+            pressure: Vec::new(),
         }
     }
 }

@@ -255,7 +255,7 @@ fn a_modulated_control_reads_its_base_and_played_value() {
         played
             .iter()
             .map(|&(target, base, played)| {
-                let (node, param) = bl_engine::target_node(t, &target);
+                let (node, param) = bl_engine::target_node(t, &target).unwrap();
                 bl_engine::PlayedParam {
                     node,
                     param,

@@ -6,6 +6,7 @@ use std::collections::BTreeSet;
 
 use crate::automation::AutomationTarget;
 use crate::clip::Clip;
+use crate::command::check_clip_envelope_value;
 use crate::document::Document;
 use crate::error::ModelError;
 use crate::ids::TrackId;
@@ -77,8 +78,13 @@ impl Document {
             if !seen.insert(envelope.target) {
                 return Err(ModelError::DuplicateEnvelope { clip: clip.id });
             }
-            self.check_automation_target(id, envelope.target)?;
+            self.check_clip_target(id, clip, envelope.target)?;
             envelope.envelope.check()?;
+            if envelope.target.is_midi() {
+                for point in envelope.envelope.points() {
+                    check_clip_envelope_value(envelope.target, point.value)?;
+                }
+            }
         }
         Ok(())
     }

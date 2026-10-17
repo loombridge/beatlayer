@@ -1,6 +1,6 @@
 # MIDI controller data in clips: MIDI Ctrl envelopes, per-note pressure, and recording them
 
-- **Status:** draft
+- **Status:** partial (WP-2.29: R1 to R9 are implemented and tested; WP-2.29b, R10 to R16, is not built yet)
 - **Work packages:** WP-2.29 (the model, saving, commands, playback and the Envelopes tab's MIDI Ctrl entry: R1 to R9; playback reaches devices through WP-5.44's path for channel messages, and MIDI To's output comes with WP-5.34) and WP-2.29b (recording controllers into clips: Arrangement Record, Session recording and Capture MIDI: R10 to R16)
 - **Parity-matrix row:** Clips and launching: MIDI controller clip envelopes (MIDI Ctrl)
 - **Checked against:** Live 12.4.3 on macOS, 17 October 2026
@@ -57,4 +57,13 @@ This spec covers what a clip holds, how it plays and saves, the commands that ed
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 to R16 | Named in WP-2.29 and WP-2.29b's pull requests | |
+| R1 | `crates/model/tests/midi_controller_data.rs`, `controller_envelopes_are_edited_by_command_id_one_undo_step_each`, `a_controller_or_value_that_breaks_the_rules_is_refused`; `crates/model/src/repr.rs`, `controller_envelopes_and_note_pressure_save_with_the_clip_and_load_back` | unit |
+| R2 | `crates/model/tests/midi_controller_data.rs`, `a_notes_pressure_points_must_lie_in_order_inside_the_note`; `crates/engine/tests/midi_controllers.rs`, `per_note_pressure_arrives_as_polyphonic_pressure_on_the_note` | unit, golden render |
+| R3 | `crates/engine/tests/midi_controllers.rs`, `a_step_reaches_the_device_on_its_frame_before_the_note_on_there`, `a_flat_stretch_sends_nothing`, `a_slope_sends_a_stream_at_least_every_five_milliseconds`, `per_note_pressure_arrives_as_polyphonic_pressure_on_the_note`, `an_unlinked_envelope_runs_once_from_the_clip_start_while_the_loop_repeats` | golden render |
+| R4 | `crates/engine/tests/midi_controllers.rs`, `stopping_sends_no_controller_back_to_rest` | golden render |
+| R5 | `crates/engine/tests/midi_controllers.rs`, every test (block sizes 1, 100, 512 and 4,096 give the same messages; every block runs under the allocation trap) | golden render |
+| R6 | `crates/model/tests/midi_controller_data.rs`, `controller_envelopes_are_edited_by_command_id_one_undo_step_each`, `a_controller_or_value_that_breaks_the_rules_is_refused` | unit |
+| R7 | `crates/model/src/repr.rs`, `controller_envelopes_and_note_pressure_save_with_the_clip_and_load_back` | unit |
+| R8 | `crates/ui/tests/clip_envelope.rs`, `midi_ctrl_lists_the_controllers_and_dots_the_ones_with_envelopes`; `crates/ui/src/clip_envelope.rs`, `pitch_bend_is_drawn_centred_and_the_others_from_the_bottom` | UI script, unit |
+| R9 | `crates/agent/tests/readback.rs`, `full_query_results_hold_everything_the_set_format_encodes` | unit |
+| R10 to R16 | Named in WP-2.29b's pull request | |

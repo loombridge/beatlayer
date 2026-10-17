@@ -93,6 +93,7 @@ mod message;
 mod metronome;
 mod midi;
 pub mod midi_clips;
+pub mod midi_controllers;
 pub mod mixer;
 mod node;
 pub mod nodes;

@@ -338,3 +338,30 @@ fn a_strum_never_drops_the_note_that_came_in() {
     assert_eq!(on(64), off(64), "and ends: {heard:?}");
     assert!(nothing_hangs(&heard));
 }
+
+// Spec: midi-chord R8. A strummed note that falls due before its key comes
+// up sounds until the key comes up, whatever the block size: the key coming
+// up in the same block doesn't drop it.
+#[test]
+fn a_strummed_note_due_before_the_key_comes_up_sounds_at_every_block_size() {
+    use bl_core::time::{TICKS_PER_QUARTER, Ticks};
+    for size in SIZES {
+        let mut chain = Chain::new(4096);
+        // Shifts +4 and +7, strummed over 10 ms: 0, 240 and 480 frames.
+        chain.effect(STACK, &[(STRUM, 10.0), (TENSION, 0.0)]);
+        // A key held for 375 frames.
+        let short = bl_model::Note::new(60, Ticks::ZERO, Ticks(TICKS_PER_QUARTER / 64), 100);
+        chain.clip(4, [short]);
+        chain.sync();
+        chain.play();
+        chain.run(BEAT_FRAMES as usize, size);
+        let heard = chain.heard();
+        assert!(nothing_hangs(&heard), "size {size}: {heard:?}");
+        let ons: Vec<(i64, u8)> = heard
+            .iter()
+            .filter(|h| h.1 == NoteKind::On)
+            .map(|h| (h.0, h.2))
+            .collect();
+        assert_eq!(ons, [(0, 60), (240, 64)], "size {size}");
+    }
+}

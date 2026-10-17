@@ -157,3 +157,10 @@ fn random_stays_in_the_output_range_and_repeats() {
         "they vary: {ons:?}"
     );
 }
+
+// Spec: midi-velocity R4. A velocity on the window's edge is inside it.
+#[test]
+fn gate_keeps_a_velocity_on_the_window_edge() {
+    let heard = velocities(&[(LOWEST, 100.0), (RANGE, 27.0), (MODE, 1.0)], 512);
+    assert_eq!(heard.len(), 4, "{heard:?}");
+}

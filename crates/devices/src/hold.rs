@@ -126,10 +126,11 @@ pub fn register(registry: &mut Registry) {
     add(registry, hold_type(), |_, _| Hold {
         router: Router::new(),
         held: Vec::with_capacity(HELD_ROOM),
+        latched: false,
     });
 }
 
-/// A key held down in Note Off mode.
+/// A key held down.
 #[derive(Clone, Copy)]
 struct Held {
     key: Key,
@@ -141,6 +142,8 @@ struct Held {
 struct Hold {
     router: Router,
     held: Vec<Held>,
+    /// Whether Latch was on in the last stretch.
+    latched: bool,
 }
 
 /// One block's settings.
@@ -165,6 +168,19 @@ impl Settings {
 }
 
 impl Hold {
+    /// Takes the key `note` lifts off the keys held down. A key Hold never
+    /// saw go down, such as one that went down while it was switched off,
+    /// passes its note-off through, so the instrument doesn't hang on it
+    /// (spec: device-framework R27).
+    fn take_held(&mut self, note: &NoteEvent) -> Option<Held> {
+        let at = self.held.iter().position(|h| {
+            h.key.channel == note.channel
+                && h.key.key == note.key
+                && (h.key.id.is_none() || note.note_id.is_none() || h.key.id == note.note_id)
+        })?;
+        Some(self.held.remove(at))
+    }
+
     /// Starts a note for the key that went `key`, which sounds for
     /// `settings`' length unless latched.
     fn start(
@@ -225,12 +241,16 @@ impl NativeDevice for Hold {
             decay: value(params, DECAY_TIME) * rate / 1000.0,
             key_scale: value(params, KEY_SCALE) / 100.0,
         };
+        // Spec: device-framework R27. Latched notes have no end of their own,
+        // so turning Latch off ends them.
+        if self.latched && !settings.latch {
+            self.router.cut(audio, 0, |_| true);
+        }
+        self.latched = settings.latch;
         for note in audio.notes() {
+            self.router.advance(audio, note.offset);
             match (note.kind, settings.note_off) {
-                (NoteKind::On, false) => {
-                    self.start(audio, &settings, &note, note.velocity);
-                }
-                (NoteKind::On, true) => {
+                (NoteKind::On, note_off) => {
                     if self.held.len() < HELD_ROOM {
                         self.held.push(Held {
                             key: Key::of(&note),
@@ -238,18 +258,15 @@ impl NativeDevice for Hold {
                             velocity: note.velocity,
                         });
                     }
+                    if !note_off {
+                        self.start(audio, &settings, &note, note.velocity);
+                    }
                 }
                 (NoteKind::Off, true) => {
-                    let Some(at) = self.held.iter().position(|h| {
-                        h.key.channel == note.channel
-                            && h.key.key == note.key
-                            && (h.key.id.is_none()
-                                || note.note_id.is_none()
-                                || h.key.id == note.note_id)
-                    }) else {
+                    let Some(held) = self.take_held(&note) else {
+                        audio.send(note);
                         continue;
                     };
-                    let held = self.held.remove(at);
                     let elapsed = self.router.now() + i64::from(note.offset) - held.since;
                     let pressed = if settings.decay > 0.0 {
                         held.velocity * (1.0 - elapsed as f64 / settings.decay).max(0.0) as f32
@@ -267,7 +284,11 @@ impl NativeDevice for Hold {
                         self.start(audio, &settings, &source, mixed.clamp(1.0 / 127.0, 1.0));
                     }
                 }
-                (NoteKind::Off, false) => {}
+                (NoteKind::Off, false) => {
+                    if self.take_held(&note).is_none() {
+                        audio.send(note);
+                    }
+                }
                 (NoteKind::Choke, _) => self.router.end(audio, &note, note.velocity),
                 (NoteKind::Expression { .. }, _) => self.router.expression(audio, &note),
             }

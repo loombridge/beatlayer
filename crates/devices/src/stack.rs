@@ -192,6 +192,7 @@ impl NativeDevice for Stack {
         let per_note = value(params, PER_NOTE) >= 0.5;
         let rate = audio.sample_rate().as_f64();
         for note in audio.notes() {
+            self.router.advance(audio, note.offset);
             match note.kind {
                 NoteKind::On => {
                     // The note that came in, then the shifts that sound.

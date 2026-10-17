@@ -122,7 +122,9 @@ impl Curve {
     /// The velocity (1 to 127) `velocity` (0 to 1) comes out as, or `None`
     /// if Gate drops it.
     fn apply(&self, velocity: f32, rng: &mut Rng) -> Option<f32> {
-        let input = f64::from(velocity) * 127.0;
+        // Whole steps, so a velocity of 64 / 127 isn't judged 63.99… by
+        // Gate and Clip.
+        let input = (f64::from(velocity) * 127.0).round();
         let out = if self.mode == 2 {
             self.out_high
         } else {

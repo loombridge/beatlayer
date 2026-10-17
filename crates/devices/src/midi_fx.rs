@@ -174,11 +174,23 @@ impl Router {
         true
     }
 
+    /// Sends what is due before `offset` frames into the stretch. Call it
+    /// before handling an input note there, so the note sees the queue as it
+    /// stands on its own frame, whatever the block size.
+    pub(crate) fn advance(&mut self, audio: &mut Audio<'_, '_>, offset: u32) {
+        self.send_due(audio, self.now + i64::from(offset));
+    }
+
     /// Sends what is due in the stretch, and moves the clock past it. Call
     /// it once at the end of each stretch.
     pub(crate) fn finish(&mut self, audio: &mut Audio<'_, '_>) {
+        self.send_due(audio, self.now + audio.frames() as i64);
+        self.now += audio.frames() as i64;
+    }
+
+    /// Sends what is due before `end` on the device's clock.
+    fn send_due(&mut self, audio: &mut Audio<'_, '_>, end: i64) {
         let start = self.now;
-        let end = start + audio.frames() as i64;
         let mut kept = 0;
         for i in 0..self.queue.len() {
             let due = self.queue[i];
@@ -191,7 +203,6 @@ impl Router {
             }
         }
         self.queue.truncate(kept);
-        self.now = end;
     }
 
     /// Marks the entry `note` belongs to: a note-on is sounding, a

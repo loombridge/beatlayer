@@ -339,3 +339,54 @@ fn several_hundred_notes_in_one_block_go_through_in_order() {
         assert!(heard.iter().all(|h| h.2 >= 1 && h.2 <= 100));
     }
 }
+
+// Spec: device-framework R28. Moving the device to another track ends its
+// notes on the track it left, where they sound.
+#[test]
+fn moving_to_another_track_ends_its_notes_on_the_track_it_left() {
+    use bl_devices::touch::{MODE as TOUCH_MODE, OPERATION, OUT_HIGH, TOUCH};
+    for size in SIZES {
+        let mut chain = Chain::new(4096);
+        let lift = chain.effect(LIFT, &[(PITCH, 2.0)]);
+        chain.clip(4, [note(60, 0, 2)]);
+        let first = chain.track;
+        let other = chain.editor.new_id();
+        chain
+            .editor
+            .apply(Command::CreateTrack {
+                id: other,
+                kind: bl_model::TrackKind::Midi,
+                name: String::new(),
+                parent: None,
+                index: 1,
+            })
+            .unwrap();
+        // The other track's instrument hears its note-offs at release
+        // velocity 10, so the test can tell the two tracks apart.
+        chain.track = other;
+        chain.insert(0, bl_engine::testing::INSTRUMENT, &[]);
+        chain.insert(
+            0,
+            TOUCH,
+            &[(OPERATION, 1.0), (TOUCH_MODE, 2.0), (OUT_HIGH, 10.0)],
+        );
+        chain.track = first;
+        chain.sync();
+        chain.play();
+        chain.run(BEAT_FRAMES as usize, size);
+        chain.apply(Command::MoveDevice {
+            device: lift,
+            track: other,
+            index: 0,
+        });
+        chain.run(3 * BEAT_FRAMES as usize, size);
+        let heard = chain.heard();
+        assert!(nothing_hangs(&heard), "size {size}: {heard:?}");
+        let off = heard
+            .iter()
+            .find(|h| h.1 == NoteKind::Off && h.2 == 62)
+            .unwrap_or_else(|| panic!("size {size}: no off for 62 in {heard:?}"));
+        assert_eq!(off.0, BEAT_FRAMES, "size {size}");
+        assert_eq!(off.3, 0.0, "size {size}: it ended on the other track");
+    }
+}

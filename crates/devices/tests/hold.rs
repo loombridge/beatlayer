@@ -230,3 +230,54 @@ fn switching_off_or_deleting_with_a_note_sounding_ends_it() {
         }
     }
 }
+
+// Spec: device-framework R27. Turning Latch off ends the latched note.
+#[test]
+fn turning_latch_off_ends_the_latched_note() {
+    for size in SIZES {
+        let mut chain = Chain::new(4096);
+        let hold = chain.effect(HOLD, &[(LATCH, 1.0)]);
+        chain.clip(4, [note(60, 0, 1)]);
+        chain.sync();
+        chain.play();
+        chain.run(2 * BEAT_FRAMES as usize, size);
+        chain.set(hold, LATCH, 0.0);
+        chain.run(2 * BEAT_FRAMES as usize, size);
+        let heard = chain.heard();
+        assert!(nothing_hangs(&heard), "size {size}: {heard:?}");
+        assert_eq!(
+            times(&heard, NoteKind::Off),
+            [2 * BEAT_FRAMES],
+            "size {size}"
+        );
+    }
+}
+
+// Spec: device-framework R27. A note-off for a note that went through while
+// Hold was switched off passes through once it is on again.
+#[test]
+fn a_note_played_while_switched_off_ends_after_switching_on() {
+    for size in SIZES {
+        let mut chain = Chain::new(4096);
+        let hold = chain.effect(HOLD, &[]);
+        chain.clip(4, [note(60, 0, 2)]);
+        chain.apply(Command::SetDeviceEnabled {
+            device: hold,
+            enabled: false,
+        });
+        chain.play();
+        chain.run(BEAT_FRAMES as usize, size);
+        chain.apply(Command::SetDeviceEnabled {
+            device: hold,
+            enabled: true,
+        });
+        chain.run(3 * BEAT_FRAMES as usize, size);
+        let heard = chain.heard();
+        assert!(nothing_hangs(&heard), "size {size}: {heard:?}");
+        assert_eq!(
+            times(&heard, NoteKind::Off),
+            [2 * BEAT_FRAMES],
+            "size {size}"
+        );
+    }
+}

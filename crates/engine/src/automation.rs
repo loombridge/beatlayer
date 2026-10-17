@@ -373,9 +373,14 @@ impl AutomationList {
                     .map(|&(param, _)| param)
                     .filter(|&param| self.envelope(param).is_none()),
             )
-            .chain(self.mapped.iter().map(|&(param, _)| param).filter(|&param| {
-                self.envelope(param).is_none() && !self.modulates_by_clip(param)
-            }));
+            .chain(
+                self.mapped
+                    .iter()
+                    .map(|&(param, _)| param)
+                    .filter(|&param| {
+                        self.envelope(param).is_none() && !self.modulates_by_clip(param)
+                    }),
+            );
         for param in driven {
             let Some(travel) = travel_of(param) else {
                 continue;
@@ -522,7 +527,9 @@ pub(crate) fn lists(
                     ModTarget::Send { track: t, to } if t == track.id() => {
                         target_node(t, &AutomationTarget::Send { to })
                     }
-                    ModTarget::Device { device: d, param } if track.devices().any(|x| x.id == d) => {
+                    ModTarget::Device { device: d, param }
+                        if track.devices().any(|x| x.id == d) =>
+                    {
                         (NodeKey::Device(d), param)
                     }
                     _ => continue,

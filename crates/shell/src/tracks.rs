@@ -214,8 +214,14 @@ fn map_copies(
     devices: &[(DeviceId, DeviceId)],
 ) -> Result<(), EditError> {
     use bl_model::modulator::ModTarget;
-    let track_copy = |original: TrackId| tracks.iter().find(|(_, o)| *o == original).map(|(c, _)| *c);
-    let device_copy = |original: DeviceId| devices.iter().find(|(o, _)| *o == original).map(|(_, c)| *c);
+    let track_copy =
+        |original: TrackId| tracks.iter().find(|(_, o)| *o == original).map(|(c, _)| *c);
+    let device_copy = |original: DeviceId| {
+        devices
+            .iter()
+            .find(|(o, _)| *o == original)
+            .map(|(_, c)| *c)
+    };
     for &(original, copy) in devices {
         let mappings = editor
             .document()
@@ -490,12 +496,37 @@ mod tests {
         let outside = device(&mut editor, two, "beatlayer.eq");
         let map = |editor: &mut Editor, slot, target| {
             editor
-                .apply(Command::MapModulator { device: wave, slot, target })
+                .apply(Command::MapModulator {
+                    device: wave,
+                    slot,
+                    target,
+                })
                 .unwrap();
         };
-        map(&mut editor, 0, ModTarget::Device { device: eq, param: bl_model::ParamId(1) });
-        map(&mut editor, 1, ModTarget::Mixer { track: one, param: bl_model::MixerParam::Pan });
-        map(&mut editor, 2, ModTarget::Device { device: outside, param: bl_model::ParamId(2) });
+        map(
+            &mut editor,
+            0,
+            ModTarget::Device {
+                device: eq,
+                param: bl_model::ParamId(1),
+            },
+        );
+        map(
+            &mut editor,
+            1,
+            ModTarget::Mixer {
+                track: one,
+                param: bl_model::MixerParam::Pan,
+            },
+        );
+        map(
+            &mut editor,
+            2,
+            ModTarget::Device {
+                device: outside,
+                param: bl_model::ParamId(2),
+            },
+        );
         let copies = duplicate_without_clips(&mut editor, &[one], "Duplicate").unwrap();
         let doc = editor.document();
         let copy = doc.track(copies[0]).unwrap();
@@ -509,17 +540,36 @@ mod tests {
                 (first, second)
             }
         };
-        let targets: Vec<(u8, ModTarget)> =
-            copy_wave.mappings.iter().map(|m| (m.slot, m.target)).collect();
+        let targets: Vec<(u8, ModTarget)> = copy_wave
+            .mappings
+            .iter()
+            .map(|m| (m.slot, m.target))
+            .collect();
         assert_eq!(
             targets,
             [
-                (0, ModTarget::Device { device: copy_eq.id, param: bl_model::ParamId(1) }),
-                (1, ModTarget::Mixer { track: copies[0], param: bl_model::MixerParam::Pan }),
+                (
+                    0,
+                    ModTarget::Device {
+                        device: copy_eq.id,
+                        param: bl_model::ParamId(1)
+                    }
+                ),
+                (
+                    1,
+                    ModTarget::Mixer {
+                        track: copies[0],
+                        param: bl_model::MixerParam::Pan
+                    }
+                ),
             ],
             "the copies of its targets, and not a target outside the copy"
         );
-        assert_eq!(doc.device(wave).unwrap().mappings.len(), 3, "the original keeps its own");
+        assert_eq!(
+            doc.device(wave).unwrap().mappings.len(),
+            3,
+            "the original keeps its own"
+        );
     }
 
     #[test]

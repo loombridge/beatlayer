@@ -71,7 +71,12 @@ impl Rig {
         id
     }
 
-    fn insert(&mut self, track: TrackId, device_type: &str, params: &[(bl_model::ParamId, f64)]) -> DeviceId {
+    fn insert(
+        &mut self,
+        track: TrackId,
+        device_type: &str,
+        params: &[(bl_model::ParamId, f64)],
+    ) -> DeviceId {
         let id = self.editor.new_id();
         let mut device = bl_model::Device::new(
             id,
@@ -115,7 +120,11 @@ fn rig(block: usize, modulator_params: &[(bl_model::ParamId, f64)]) -> (Rig, Dev
     let mut rig = Rig::new(block);
     let source = rig.track(TrackKind::Audio);
     let target = rig.track(TrackKind::Midi);
-    rig.insert(target, bl_engine::testing::DC, &[(bl_engine::testing::VALUE, 1.0)]);
+    rig.insert(
+        target,
+        bl_engine::testing::DC,
+        &[(bl_engine::testing::VALUE, 1.0)],
+    );
     let utility = rig.insert(target, UTILITY, &[]);
     let mut params = vec![
         (WAVE, 1.0),
@@ -141,7 +150,11 @@ fn rig(block: usize, modulator_params: &[(bl_model::ParamId, f64)]) -> (Rig, Dev
 fn factor() -> f64 {
     let mut rig = Rig::new(64);
     let target = rig.track(TrackKind::Midi);
-    rig.insert(target, bl_engine::testing::DC, &[(bl_engine::testing::VALUE, 1.0)]);
+    rig.insert(
+        target,
+        bl_engine::testing::DC,
+        &[(bl_engine::testing::VALUE, 1.0)],
+    );
     rig.insert(target, UTILITY, &[]);
     rig.sender.transport(TransportCommand::Play);
     f64::from(rig.render(512, 64)[500])
@@ -149,12 +162,20 @@ fn factor() -> f64 {
 
 /// The gain at position `position` on the utility's gain travel.
 fn gain_at(position: f64) -> f64 {
-    let descriptor = utility_type().description.param(UTILITY_GAIN).unwrap().clone();
+    let descriptor = utility_type()
+        .description
+        .param(UTILITY_GAIN)
+        .unwrap()
+        .clone();
     descriptor.denormalize(position)
 }
 
 fn position_of(gain: f64) -> f64 {
-    utility_type().description.param(UTILITY_GAIN).unwrap().normalize(gain)
+    utility_type()
+        .description
+        .param(UTILITY_GAIN)
+        .unwrap()
+        .normalize(gain)
 }
 
 // Spec: modulation R14, R20
@@ -168,7 +189,10 @@ fn an_lfo_on_one_track_modulates_another_on_its_frames() {
         rig.sender.transport(TransportCommand::Play);
         renders.push(rig.render(4_800, block));
     }
-    assert!(renders[0] == renders[1] && renders[1] == renders[2], "the same at any block size");
+    assert!(
+        renders[0] == renders[1] && renders[1] == renders[2],
+        "the same at any block size"
+    );
     // At each grid frame the gain is the control's position (0 dB) moved by
     // the wave's output, the share 32·k / 4,800 of the cycle.
     let out = &renders[0];
@@ -176,7 +200,10 @@ fn an_lfo_on_one_track_modulates_another_on_its_frames() {
         let share = step as f64 / 150.0;
         let want = gain_at(position_of(1.0) + share) * factor;
         let got = f64::from(out[step * 32]);
-        assert!((got - want).abs() < 1e-4 * want.max(1.0), "step {step}: {got} isn't {want}");
+        assert!(
+            (got - want).abs() < 1e-4 * want.max(1.0),
+            "step {step}: {got} isn't {want}"
+        );
     }
     assert!(out[4_000] > out[100], "it rises through the cycle");
 }
@@ -185,18 +212,24 @@ fn an_lfo_on_one_track_modulates_another_on_its_frames() {
 #[test]
 fn remote_control_holds_the_target_between_min_and_max() {
     let factor = factor();
-    let (mut rig, wave, utility) = rig(64, &[
-        (MODE, 1.0),
-        (modulator::min(0), 20.0),
-        (modulator::max(0), 60.0),
-    ]);
+    let (mut rig, wave, utility) = rig(
+        64,
+        &[
+            (MODE, 1.0),
+            (modulator::min(0), 20.0),
+            (modulator::max(0), 60.0),
+        ],
+    );
     rig.sender.transport(TransportCommand::Play);
     let out = rig.render(4_800, 64);
     for step in [1usize, 40, 100, 149] {
         let share = step as f64 / 150.0;
         let want = gain_at(0.2 + 0.4 * share) * factor;
         let got = f64::from(out[step * 32]);
-        assert!((got - want).abs() < 1e-4 * want.max(1.0), "step {step}: {got} isn't {want}");
+        assert!(
+            (got - want).abs() < 1e-4 * want.max(1.0),
+            "step {step}: {got} isn't {want}"
+        );
     }
     // Hand moves of the control are refused while it is held.
     assert!(
@@ -222,7 +255,10 @@ fn remote_control_holds_the_target_between_min_and_max() {
     });
     let back = rig.render(4_800, 64);
     let want = gain_at(position_of(0.1) + 100.0 / 150.0) * factor;
-    assert!((f64::from(back[100 * 32]) - want).abs() < 1e-4, "the control's value is the base again");
+    assert!(
+        (f64::from(back[100 * 32]) - want).abs() < 1e-4,
+        "the control's value is the base again"
+    );
 }
 
 // Spec: modulation R15, R20
@@ -251,6 +287,11 @@ fn a_mapping_edit_reaches_the_target_without_a_new_program() {
 fn the_song_need_not_play_for_a_free_lfo_to_move_its_target() {
     let (mut rig, _, _) = rig(64, &[]);
     let out = rig.render(4_800, 64);
-    let (low, high) = out.iter().fold((f32::MAX, f32::MIN), |(l, h), &s| (l.min(s), h.max(s)));
-    assert!(high > low * 1.2, "stopped, it still swings: {low} to {high}");
+    let (low, high) = out
+        .iter()
+        .fold((f32::MAX, f32::MIN), |(l, h), &s| (l.min(s), h.max(s)));
+    assert!(
+        high > low * 1.2,
+        "stopped, it still swings: {low} to {high}"
+    );
 }

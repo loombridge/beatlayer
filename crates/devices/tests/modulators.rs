@@ -12,8 +12,8 @@ use bl_core::time::{Frames, TempoMap};
 use bl_devices::modulator::{RATE_HZ, WAVE, curve_mod_type, wave_mod_type};
 use bl_engine::modbus::NOT_HELD;
 use bl_engine::{Registry, TransportInfo};
-use bl_model::modulator::{self, CURVE_MOD, DEPTH, MODE, POLARITY, WAVE_MOD};
 use bl_model::ParamId;
+use bl_model::modulator::{self, CURVE_MOD, DEPTH, MODE, POLARITY, WAVE_MOD};
 use common::{control, device, node, noise, run};
 
 fn registry() -> Registry {
@@ -58,7 +58,14 @@ fn depth_scales_the_effect_from_none_to_full() {
             (POLARITY, 1.0),
             (DEPTH, depth),
         ]);
-        let rows = control(node.as_mut(), 4_800, 512, &[], &TempoMap::default(), PLAYING);
+        let rows = control(
+            node.as_mut(),
+            4_800,
+            512,
+            &[],
+            &TempoMap::default(),
+            PLAYING,
+        );
         rows.contribution(0).iter().copied().fold(0.0, f32::max)
     };
     assert_eq!(reach(0.0), 0.0, "0 % has no effect");
@@ -77,9 +84,16 @@ fn unipolar_adds_from_the_base_and_bipolar_swings_round_it() {
             (POLARITY, polarity),
             (DEPTH, 100.0),
         ]);
-        control(node.as_mut(), 4_800, 512, &[], &TempoMap::default(), PLAYING)
-            .contribution(0)
-            .to_vec()
+        control(
+            node.as_mut(),
+            4_800,
+            512,
+            &[],
+            &TempoMap::default(),
+            PLAYING,
+        )
+        .contribution(0)
+        .to_vec()
     };
     let up = rows(1.0, 100.0);
     assert!(up.iter().all(|&c| (0.0..=1.0).contains(&c)), "one way, up");
@@ -92,9 +106,15 @@ fn unipolar_adds_from_the_base_and_bipolar_swings_round_it() {
     let (low, high) = swing
         .iter()
         .fold((0.0f32, 0.0f32), |(l, h), &c| (l.min(c), h.max(c)));
-    assert!(low < -0.9 && high > 0.9, "both ways round the base: {low} {high}");
     assert!(
-        swing.iter().zip(&up).all(|(s, u)| (s - (2.0 * u - 1.0)).abs() < 1e-6),
+        low < -0.9 && high > 0.9,
+        "both ways round the base: {low} {high}"
+    );
+    assert!(
+        swing
+            .iter()
+            .zip(&up)
+            .all(|(s, u)| (s - (2.0 * u - 1.0)).abs() < 1e-6),
         "the swing is 2u − 1"
     );
 }
@@ -108,23 +128,48 @@ fn remote_control_holds_the_target_between_min_and_max() {
         (modulator::max(0), 60.0),
         (modulator::amount(0), 100.0),
     ]);
-    let rows = control(node.as_mut(), 4_800, 512, &[], &TempoMap::default(), PLAYING);
+    let rows = control(
+        node.as_mut(),
+        4_800,
+        512,
+        &[],
+        &TempoMap::default(),
+        PLAYING,
+    );
     assert!(
         rows.contribution(0).iter().all(|&c| c == 0.0),
         "a held target gets no contribution"
     );
     let hold = rows.hold(0);
-    assert!(hold.iter().all(|&h| (0.2 - 1e-6..=0.6 + 1e-6).contains(&h)), "between Min and Max");
-    let (low, high) = hold.iter().fold((1.0f32, 0.0f32), |(l, h), &v| (l.min(v), h.max(v)));
-    assert!(low < 0.21 && high > 0.59, "and it travels all of it: {low} {high}");
+    assert!(
+        hold.iter().all(|&h| (0.2 - 1e-6..=0.6 + 1e-6).contains(&h)),
+        "between Min and Max"
+    );
+    let (low, high) = hold
+        .iter()
+        .fold((1.0f32, 0.0f32), |(l, h), &v| (l.min(v), h.max(v)));
+    assert!(
+        low < 0.21 && high > 0.59,
+        "and it travels all of it: {low} {high}"
+    );
     // Min above Max inverts.
     let mut node = ramp(&[
         (MODE, 1.0),
         (modulator::min(0), 60.0),
         (modulator::max(0), 20.0),
     ]);
-    let rows = control(node.as_mut(), 4_800, 512, &[], &TempoMap::default(), PLAYING);
-    assert!(rows.hold(0)[100] > rows.hold(0)[4_000], "the ramp now falls");
+    let rows = control(
+        node.as_mut(),
+        4_800,
+        512,
+        &[],
+        &TempoMap::default(),
+        PLAYING,
+    );
+    assert!(
+        rows.hold(0)[100] > rows.hold(0)[4_000],
+        "the ramp now falls"
+    );
     // In Modulation mode nothing is held.
     let mut node = ramp(&[]);
     let rows = control(node.as_mut(), 512, 512, &[], &TempoMap::default(), PLAYING);

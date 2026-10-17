@@ -421,8 +421,8 @@ impl ParamBank {
             if envelope.is_some() && !held {
                 slot.smoother.snap(descriptor.clamp(base));
             }
-            slot.modulated = (modulates && (held || played != descriptor.clamp(base)))
-                .then_some((base, played));
+            slot.modulated =
+                (modulates && (held || played != descriptor.clamp(base))).then_some((base, played));
         }
     }
 

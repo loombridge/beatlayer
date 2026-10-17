@@ -13,8 +13,8 @@ use bl_devices::modulator::{
     HOLD, PHASE, RATE_BEATS, RATE_HZ, RESTART, SHAPE, STEPS, TIME_MODE, WAVE, WAVES, wave_mod_type,
 };
 use bl_engine::{Node, Registry, TransportInfo};
-use bl_model::modulator::{self, POLARITY};
 use bl_model::ParamId;
+use bl_model::modulator::{self, POLARITY};
 use common::{control, device, node, set};
 
 fn registry() -> Registry {
@@ -59,13 +59,19 @@ fn every_waveform_keeps_to_its_range_and_repeats_at_the_rate() {
             out.iter().all(|&v| (0.0..=1.0).contains(&v)),
             "{name} keeps to 0 to 1"
         );
-        let (low, high) = out.iter().fold((1.0f32, 0.0f32), |(l, h), &v| (l.min(v), h.max(v)));
-        assert!(high - low > 0.2 || index >= 5, "{name} moves: {low} to {high}");
+        let (low, high) = out
+            .iter()
+            .fold((1.0f32, 0.0f32), |(l, h), &v| (l.min(v), h.max(v)));
+        assert!(
+            high - low > 0.2 || index >= 5,
+            "{name} moves: {low} to {high}"
+        );
         if index < 5 {
             // The deterministic waves repeat to the frame.
             for i in 0..CYCLE {
                 assert!(
-                    (out[i] - out[i + CYCLE]).abs() < 1e-5 && (out[i] - out[i + 2 * CYCLE]).abs() < 1e-5,
+                    (out[i] - out[i + CYCLE]).abs() < 1e-5
+                        && (out[i] - out[i + 2 * CYCLE]).abs() < 1e-5,
                     "{name} repeats at frame {i}"
                 );
             }
@@ -134,12 +140,22 @@ fn a_synced_lfo_locks_to_the_song_position() {
             (RATE_BEATS, 3.0),
             (PHASE, 0.0),
         ]);
-        control(node.as_mut(), 256, 64, &[], &TempoMap::default(), playing(position))
-            .contribution(0)
-            .to_vec()
+        control(
+            node.as_mut(),
+            256,
+            64,
+            &[],
+            &TempoMap::default(),
+            playing(position),
+        )
+        .contribution(0)
+        .to_vec()
     };
     let here = synced(1_000);
-    assert!(here == synced(1_000 + 24_000), "a beat later, the same place in the cycle");
+    assert!(
+        here == synced(1_000 + 24_000),
+        "a beat later, the same place in the cycle"
+    );
     assert!(here == synced(1_000 + 5 * 24_000));
     assert!(here != synced(1_000 + 12_000), "half a beat on, another");
     // At 80 BPM a beat is longer; the cycle follows it.
@@ -163,23 +179,40 @@ fn hold_freezes_and_r_restarts_from_phase() {
     // Hold: frozen while on, and on from where it stopped when released.
     let mut node = wave(&[(WAVE, 1.0), (RATE_HZ, 10.0)]);
     let events = [set(1_000, HOLD, 1.0), set(2_000, HOLD, 0.0)];
-    let out = control(node.as_mut(), 3_000, 512, &events, &TempoMap::default(), playing(0))
-        .contribution(0)
-        .to_vec();
+    let out = control(
+        node.as_mut(),
+        3_000,
+        512,
+        &events,
+        &TempoMap::default(),
+        playing(0),
+    )
+    .contribution(0)
+    .to_vec();
     // The ramp worked out for the grid point after the event holds.
     let held = out[1_100];
     assert!(
         out[1_100..2_000].iter().all(|&v| (v - held).abs() < 1e-6),
         "frozen while held"
     );
-    assert!(out[2_300] > held && out[2_300] - held < 0.1, "carries on from the held value");
+    assert!(
+        out[2_300] > held && out[2_300] - held < 0.1,
+        "carries on from the held value"
+    );
 
     // R: turning it on starts the cycle again from Phase.
     let mut node = wave(&[(WAVE, 1.0), (RATE_HZ, 10.0), (PHASE, 25.0)]);
     let events = [set(2_000, RESTART, 1.0)];
-    let out = control(node.as_mut(), 3_000, 512, &events, &TempoMap::default(), playing(0))
-        .contribution(0)
-        .to_vec();
+    let out = control(
+        node.as_mut(),
+        3_000,
+        512,
+        &events,
+        &TempoMap::default(),
+        playing(0),
+    )
+    .contribution(0)
+    .to_vec();
     assert!((out[0] - 0.25).abs() < 0.01, "starts at Phase: {}", out[0]);
     assert!(out[1_990] > 0.6, "ran on: {}", out[1_990]);
     assert!(
@@ -201,7 +234,14 @@ fn random_parts_repeat_from_the_transport_start() {
     for wave_index in [5.0, 6.0, 7.0, 8.0] {
         let mut node = wave(&[(WAVE, wave_index), (bl_devices::modulator::JITTER, 30.0)]);
         // The engine runs a while stopped, then the transport starts.
-        control(node.as_mut(), 1_000, 256, &[], &TempoMap::default(), stopped);
+        control(
+            node.as_mut(),
+            1_000,
+            256,
+            &[],
+            &TempoMap::default(),
+            stopped,
+        );
         let first = play(node.as_mut());
         // It stops and starts again: the same values from the start.
         control(node.as_mut(), 700, 256, &[], &TempoMap::default(), stopped);

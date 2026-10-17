@@ -189,7 +189,7 @@ pub fn show(
                     .get(value(bl_model::modulator::GRID_DIVISIONS) as usize)
                     .map_or(4, |&(_, n)| n);
                 let snap = value(bl_model::modulator::SNAP) >= 0.5;
-                crate::mapping::curve_cell(ui, theme, frame, points, rect, grid, snap, events);
+                crate::mapping::curve_cell(ui, theme, frame, points, rect, (grid, snap), events);
             }
         }
         // Spec: device-framework R36. The device's own drawing fills its

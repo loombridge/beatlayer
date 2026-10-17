@@ -99,12 +99,15 @@ fn gain_knob(rig: &mut Rig) -> Rect {
         .panel
         .clone()
         .unwrap();
-    place(&panel, body_rect(frame, bl_shell::device_commands::TITLE_BAR_HEIGHT))
-        .0
-        .into_iter()
-        .find(|(p, _, _)| *p == UTILITY_GAIN)
-        .unwrap()
-        .2
+    place(
+        &panel,
+        body_rect(frame, bl_shell::device_commands::TITLE_BAR_HEIGHT),
+    )
+    .0
+    .into_iter()
+    .find(|(p, _, _)| *p == UTILITY_GAIN)
+    .unwrap()
+    .2
 }
 
 fn shapes(output: &FullOutput) -> Vec<Shape> {
@@ -124,9 +127,9 @@ fn shapes(output: &FullOutput) -> Vec<Shape> {
 /// Whether anything inside `rect` was filled with the mapping tint.
 fn tinted(h: &Harness, output: &FullOutput, rect: Rect) -> bool {
     let tint = h.theme.colors.mapping.0.gamma_multiply(0.3);
-    shapes(output)
-        .into_iter()
-        .any(|s| matches!(s, Shape::Rect(r) if r.fill == tint && rect.contains_rect(r.rect.shrink(0.5))))
+    shapes(output).into_iter().any(
+        |s| matches!(s, Shape::Rect(r) if r.fill == tint && rect.contains_rect(r.rect.shrink(0.5))),
+    )
 }
 
 // Spec: modulation R15
@@ -135,7 +138,10 @@ fn map_arms_tints_and_maps_the_clicked_parameter_in_one_undo_step() {
     let mut rig = rig();
     let knob = gain_knob(&mut rig);
     let before = rig.h.frame(vec![]);
-    assert!(!tinted(&rig.h, &before, knob), "nothing is tinted before Map is lit");
+    assert!(
+        !tinted(&rig.h, &before, knob),
+        "nothing is tinted before Map is lit"
+    );
     let map = node_rect(&mut rig.h, "Map 1");
     rig.h.click(map.center());
     assert_eq!(
@@ -144,7 +150,10 @@ fn map_arms_tints_and_maps_the_clicked_parameter_in_one_undo_step() {
         "the button is lit"
     );
     let lit = rig.h.frame(vec![]);
-    assert!(tinted(&rig.h, &lit, knob), "another device's parameter is tinted");
+    assert!(
+        tinted(&rig.h, &lit, knob),
+        "another device's parameter is tinted"
+    );
     // The modulator's own parameters aren't targets.
     let wave_frame = rig.h.shell.device_view_state();
     assert!(wave_frame.armed_map.is_some());
@@ -157,7 +166,10 @@ fn map_arms_tints_and_maps_the_clicked_parameter_in_one_undo_step() {
             param: UTILITY_GAIN
         }
     );
-    assert!(rig.h.shell.armed_map().is_none(), "mapping puts the button out");
+    assert!(
+        rig.h.shell.armed_map().is_none(),
+        "mapping puts the button out"
+    );
     assert_eq!(
         rig.h.shell.editor().undo_history().next(),
         Some("Map Modulator"),
@@ -165,7 +177,10 @@ fn map_arms_tints_and_maps_the_clicked_parameter_in_one_undo_step() {
     );
     // The knob keeps its value: a click while lit didn't also turn it.
     let after = rig.h.frame(vec![]);
-    assert!(!tinted(&rig.h, &after, knob), "the tint goes with the button");
+    assert!(
+        !tinted(&rig.h, &after, knob),
+        "the tint goes with the button"
+    );
     rig.h.shell.run("edit.undo", json!({})).unwrap();
     assert!(mappings(&rig.h, rig.wave).is_empty());
     // The slot shows the target it maps.
@@ -177,7 +192,11 @@ fn map_arms_tints_and_maps_the_clicked_parameter_in_one_undo_step() {
         .find(|d| d.id == rig.wave)
         .and_then(|d| d.modulator.clone())
         .unwrap();
-    assert!(modulator.mappings[0].label.ends_with("/ Gain"), "{}", modulator.mappings[0].label);
+    assert!(
+        modulator.mappings[0].label.ends_with("/ Gain"),
+        "{}",
+        modulator.mappings[0].label
+    );
 }
 
 // Spec: modulation R15
@@ -190,7 +209,11 @@ fn esc_disarms_map() {
     let undo = rig.h.shell.editor().undo_history().count();
     rig.h.key(Key::Escape, Modifiers::NONE);
     assert!(rig.h.shell.armed_map().is_none(), "Esc puts it out");
-    assert_eq!(rig.h.shell.editor().undo_history().count(), undo, "and changes nothing");
+    assert_eq!(
+        rig.h.shell.editor().undo_history().count(),
+        undo,
+        "and changes nothing"
+    );
     assert!(mappings(&rig.h, rig.wave).is_empty());
     // The button again does the same.
     rig.h.click(map.center());
@@ -215,7 +238,10 @@ fn unmap_removes_the_mapping() {
     let unmap = node_rect(&mut rig.h, "Unmap 1");
     rig.h.click(unmap.center());
     assert!(mappings(&rig.h, rig.wave).is_empty());
-    assert_eq!(rig.h.shell.editor().undo_history().next(), Some("Unmap Modulator"));
+    assert_eq!(
+        rig.h.shell.editor().undo_history().next(),
+        Some("Unmap Modulator")
+    );
 }
 
 /// The Curve Mod's shape display and its device.
@@ -239,7 +265,10 @@ fn shape(h: &Harness, device: DeviceId) -> Vec<ShapePoint> {
 }
 
 fn drag(h: &mut Harness, from: Pos2, to: Pos2, modifiers: Modifiers) {
-    h.frame(vec![Event::ModifiersChanged(modifiers), Event::PointerMoved(from)]);
+    h.frame(vec![
+        Event::ModifiersChanged(modifiers),
+        Event::PointerMoved(from),
+    ]);
     h.frame(vec![Event::PointerButton {
         pos: from,
         button: PointerButton::Primary,
@@ -263,33 +292,66 @@ fn drag(h: &mut Harness, from: Pos2, to: Pos2, modifiers: Modifiers) {
 #[test]
 fn shaper_display_adds_moves_curves_and_deletes_breakpoints() {
     let (mut rig, curve, area) = curve_rig();
-    assert_eq!(shape(&rig.h, curve).len(), 3, "a new Curve Mod plays the triangle");
+    assert_eq!(
+        shape(&rig.h, curve).len(),
+        3,
+        "a new Curve Mod plays the triangle"
+    );
     // The plot area sits above the cell's bottom controls.
     let plot = Rect::from_min_max(area.min, pos2(area.max.x, area.max.y));
-    let at = |x: f32, y: f32| pos2(plot.left() + plot.width() * x, plot.bottom() - plot.height() * y);
+    let at = |x: f32, y: f32| {
+        pos2(
+            plot.left() + plot.width() * x,
+            plot.bottom() - plot.height() * y,
+        )
+    };
     // A click adds a breakpoint, one undo step.
     rig.h.click(at(0.25, 0.8));
     let added = shape(&rig.h, curve);
     assert_eq!(added.len(), 4);
-    assert!(added.iter().any(|p| (p.x - 0.25).abs() < 0.05 && (p.y - 0.8).abs() < 0.1));
-    assert_eq!(rig.h.shell.editor().undo_history().next(), Some("Edit Shape"));
+    assert!(
+        added
+            .iter()
+            .any(|p| (p.x - 0.25).abs() < 0.05 && (p.y - 0.8).abs() < 0.1)
+    );
+    assert_eq!(
+        rig.h.shell.editor().undo_history().next(),
+        Some("Edit Shape")
+    );
     // Dragging a breakpoint moves it, as one step.
     let steps = rig.h.shell.editor().undo_history().count();
-    let index = added.iter().position(|p| (p.x - 0.25).abs() < 0.05).unwrap();
+    let index = added
+        .iter()
+        .position(|p| (p.x - 0.25).abs() < 0.05)
+        .unwrap();
     let from = at(added[index].x as f32, added[index].y as f32);
     drag(&mut rig.h, from, at(0.35, 0.3), Modifiers::NONE);
     let moved = shape(&rig.h, curve);
-    assert!((moved[index].x - 0.35).abs() < 0.06 && (moved[index].y - 0.3).abs() < 0.12, "{:?}", moved[index]);
-    assert_eq!(rig.h.shell.editor().undo_history().count(), steps + 1, "one undo step for the drag");
+    assert!(
+        (moved[index].x - 0.35).abs() < 0.06 && (moved[index].y - 0.3).abs() < 0.12,
+        "{:?}",
+        moved[index]
+    );
+    assert_eq!(
+        rig.h.shell.editor().undo_history().count(),
+        steps + 1,
+        "one undo step for the drag"
+    );
     // Alt-dragging a segment curves it.
     let mid = at(0.15, 0.2);
     drag(&mut rig.h, mid, mid + vec2(0.0, -30.0), Modifiers::ALT);
-    assert!(shape(&rig.h, curve).iter().any(|p| p.bend != 0.0), "a segment curved");
+    assert!(
+        shape(&rig.h, curve).iter().any(|p| p.bend != 0.0),
+        "a segment curved"
+    );
     // Shift-clicking a breakpoint deletes it.
     let now = shape(&rig.h, curve);
     let victim = now[index];
     let at_point = at(victim.x as f32, victim.y as f32);
-    rig.h.frame(vec![Event::ModifiersChanged(Modifiers::SHIFT), Event::PointerMoved(at_point)]);
+    rig.h.frame(vec![
+        Event::ModifiersChanged(Modifiers::SHIFT),
+        Event::PointerMoved(at_point),
+    ]);
     for pressed in [true, false] {
         rig.h.frame(vec![Event::PointerButton {
             pos: at_point,
@@ -306,5 +368,8 @@ fn shaper_display_adds_moves_curves_and_deletes_breakpoints() {
     assert!(shape(&rig.h, curve).is_empty());
     let preset = node_rect(&mut rig.h, "Shape preset 1");
     rig.h.click(preset.center());
-    assert_eq!(shape(&rig.h, curve), bl_model::modulator::shape_preset(1).unwrap());
+    assert_eq!(
+        shape(&rig.h, curve),
+        bl_model::modulator::shape_preset(1).unwrap()
+    );
 }

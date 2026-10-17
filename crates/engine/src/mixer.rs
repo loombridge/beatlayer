@@ -567,13 +567,7 @@ impl Node for TrackMixer {
         for segment in segments(block.events(), block.frames()) {
             self.apply(segment.events);
             match driven {
-                Some(list) => self.scale_envelopes(
-                    block,
-                    segment.range.clone(),
-                    song,
-                    list,
-                    bus,
-                ),
+                Some(list) => self.scale_envelopes(block, segment.range.clone(), song, list, bus),
                 None => {
                     let (mut after, mut crossfader) = (self.gains, self.crossfader);
                     for frame in segment.range.clone() {
@@ -668,10 +662,7 @@ impl TrackMixer {
             crossfader.next();
         }
         self.crossfader = crossfader;
-        let (last, last_song) = (
-            range.end - 1,
-            from.map(|from| from + range.end as i64 - 1),
-        );
+        let (last, last_song) = (range.end - 1, from.map(|from| from + range.end as i64 - 1));
         for (index, ramp) in self.gains.iter_mut().enumerate() {
             *ramp = Ramp::at(gain_at(
                 list, last_song, bus, last, index, controls, fixed_pan,
@@ -709,9 +700,15 @@ fn gain_at(
     if played(list, song, bus, at, track::MUTE, mute).1 != 0.0 {
         return 0.0;
     }
-    let level = played(list, song, bus, at, track::VOLUME, volume).1.max(0.0);
+    let level = played(list, song, bus, at, track::VOLUME, volume)
+        .1
+        .max(0.0);
     let [left, right] = fixed_pan.unwrap_or_else(|| {
-        pan_gains(played(list, song, bus, at, track::PAN, pan).1.clamp(-1.0, 1.0))
+        pan_gains(
+            played(list, song, bus, at, track::PAN, pan)
+                .1
+                .clamp(-1.0, 1.0),
+        )
     });
     match index {
         0 => level * left,
@@ -1457,7 +1454,14 @@ mod tests {
             value: ParamValue::Set(1.0),
         }];
         let mut to = vec![0.0f32; 2 * 1000];
-        route.mix(&mut to, &from, planar(2, 1000, 1000), None, Bus::EMPTY, &events);
+        route.mix(
+            &mut to,
+            &from,
+            planar(2, 1000, 1000),
+            None,
+            Bus::EMPTY,
+            &events,
+        );
         assert!(to[..10].iter().all(|&s| s == 0.25));
         assert!(to[10..970].windows(2).all(|w| w[1] < w[0]), "a glide down");
         assert!(to[969..1000].iter().all(|&s| s == 0.0));

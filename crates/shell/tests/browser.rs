@@ -206,10 +206,19 @@ fn the_sidebar_lists_live_s_labels_without_ableton_s_services() {
 #[test]
 fn the_modulators_label_lists_the_two_modulators() {
     let mut shell = Shell::headless();
-    let state: BrowserState = run(&mut shell, ids::OPEN_PLACE, json!({ "label": "modulators" }));
+    let state: BrowserState = run(
+        &mut shell,
+        ids::OPEN_PLACE,
+        json!({ "label": "modulators" }),
+    );
     let names: Vec<&str> = state.rows.iter().map(|row| row.name.as_str()).collect();
     assert_eq!(names, ["Wave Mod", "Curve Mod"]);
-    assert!(state.rows.iter().all(|row| row.kind == bl_shell_spec::browser::ItemKind::Device));
+    assert!(
+        state
+            .rows
+            .iter()
+            .all(|row| row.kind == bl_shell_spec::browser::ItemKind::Device)
+    );
     assert!(state.note.is_none());
     // The search narrows the list by name.
     let found: BrowserState = run(&mut shell, ids::SEARCH, json!({ "query": "curve" }));

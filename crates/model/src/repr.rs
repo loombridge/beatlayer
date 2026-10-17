@@ -537,7 +537,11 @@ mod tests {
                 },
             },
         ];
-        wave.shape = Some(vec![ShapePoint { x: 0.0, y: 0.5, bend: 0.25 }]);
+        wave.shape = Some(vec![ShapePoint {
+            x: 0.0,
+            y: 0.5,
+            bend: 0.25,
+        }]);
         doc.apply(&Command::InsertDevice {
             track: audio,
             index: 1,
@@ -549,9 +553,16 @@ mod tests {
         assert_eq!(back.device(wave.id).unwrap().mappings, wave.mappings);
         assert_eq!(back.device(wave.id).unwrap().shape, wave.shape);
         // A mapping that names a parameter the set lacks doesn't load.
-        let stale = json.replacen(&format!("\"device\":{}", target.0.get()), "\"device\":777777", 1);
+        let stale = json.replacen(
+            &format!("\"device\":{}", target.0.get()),
+            "\"device\":777777",
+            1,
+        );
         let loaded: Document = serde_json::from_str(&stale).unwrap();
-        assert!(loaded.device(wave.id).unwrap().mappings.len() == 1, "the stale mapping went");
+        assert!(
+            loaded.device(wave.id).unwrap().mappings.len() == 1,
+            "the stale mapping went"
+        );
     }
 
     #[test]

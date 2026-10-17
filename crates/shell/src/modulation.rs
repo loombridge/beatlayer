@@ -63,10 +63,8 @@ pub(crate) fn state(
         .tracks()
         .filter(|t| track.is_none_or(|id| t.id() == id))
     {
-        let mut targets: BTreeMap<
-            AutomationTarget,
-            (Vec<ModulationSource>, Vec<ModulatorSource>),
-        > = BTreeMap::new();
+        let mut targets: BTreeMap<AutomationTarget, (Vec<ModulationSource>, Vec<ModulatorSource>)> =
+            BTreeMap::new();
         for clip in owner.clips() {
             for envelope in clip.envelopes() {
                 let Some((travel, control)) =
@@ -76,11 +74,16 @@ pub(crate) fn state(
                 };
                 let (base, _) = played(owner.id(), &envelope.target).unwrap_or((control, control));
                 let share = clip_envelope_value_at(clip, envelope, at);
-                targets.entry(envelope.target).or_default().0.push(ModulationSource {
-                    clip: clip.id,
-                    share,
-                    contribution: share.map_or(0.0, |share| travel.clip_contribution(base, share)),
-                });
+                targets
+                    .entry(envelope.target)
+                    .or_default()
+                    .0
+                    .push(ModulationSource {
+                        clip: clip.id,
+                        share,
+                        contribution: share
+                            .map_or(0.0, |share| travel.clip_contribution(base, share)),
+                    });
             }
         }
         // Spec: modulation R11, R16. The modulator slots that map this
@@ -115,10 +118,10 @@ pub(crate) fn state(
                 .iter()
                 .find(|m| m.remote_control)
                 .map(|m| m.device);
-            if let ([only], true) = (modulators.as_mut_slice(), sources.is_empty()) {
-                if !only.remote_control {
-                    only.contribution = Some(travel.position(played) - travel.position(base));
-                }
+            if let ([only], true) = (modulators.as_mut_slice(), sources.is_empty())
+                && !only.remote_control
+            {
+                only.contribution = Some(travel.position(played) - travel.position(base));
             }
             parameters.push(ModulatedParameter {
                 track: owner.id(),

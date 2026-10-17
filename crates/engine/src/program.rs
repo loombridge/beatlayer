@@ -8,8 +8,8 @@ use bl_core::time::{Bpm, SampleRate, TempoMap, TimeSignature, TimeSignatureMap};
 use bl_model::{Channel, LaunchMode, ParamId, SceneId, Tap, TrackId};
 
 use crate::midi::{MidiRoutes, TrackMidiInput};
-use crate::modbus::{Bus, Control, ROWS};
 use crate::mixer::{MeterReading, Route, TrackMixer};
+use crate::modbus::{Bus, Control, ROWS};
 use crate::node::{
     Block, Node, NodeData, NodeEvent, NodeKey, NoteBuffer, NoteEvent, ParamValue, TransportInfo,
 };

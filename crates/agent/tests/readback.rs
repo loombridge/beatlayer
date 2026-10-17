@@ -286,6 +286,35 @@ fn fixture() -> Project {
             device,
         },
     );
+    // A Curve Mod mapping that device, with a shape of its own.
+    let curve: bl_model::DeviceId = editor.new_id();
+    let mut modulator = Device::new(
+        curve,
+        "Curve Mod",
+        DeviceKind::Native {
+            device_type: bl_model::modulator::CURVE_MOD.to_owned(),
+        },
+    );
+    modulator.shape = Some(bl_model::modulator::shape_preset(6).unwrap());
+    apply(
+        &mut editor,
+        Command::InsertDevice {
+            track: vox,
+            index: 1,
+            device: modulator,
+        },
+    );
+    apply(
+        &mut editor,
+        Command::MapModulator {
+            device: curve,
+            slot: 2,
+            target: bl_model::modulator::ModTarget::Device {
+                device: compressor,
+                param: ParamId(2),
+            },
+        },
+    );
 
     // Clips: an audio clip with everything a clip saves, a MIDI clip with a
     // loop and notes, and slot clips.
@@ -598,6 +627,7 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "media",
             ][..],
         ),
+        (&devices[1], &["mappings", "shape"][..]),
         (
             &clips
                 .iter()

@@ -6,11 +6,11 @@
 //! it (`modulator.map`). Esc, or the button again, puts the button out.
 //! Everything here runs a registered command.
 
+use bl_model::DeviceId;
 use bl_model::modulator::{
     ModTarget, ShapePoint, shape_preset, shape_value, with_bend, with_point_added,
     with_point_moved, without_point,
 };
-use bl_model::DeviceId;
 use bl_shell::Invocation;
 use bl_shell::device_commands::{ArmedMap, DeviceFrame, MappingRow, ModulatorFrame};
 use egui::accesskit::Role;
@@ -125,52 +125,79 @@ pub fn preset_button_id(device: DeviceId, number: u8) -> Id {
     Id::new(("modulator-preset", device, number))
 }
 
-/// A small text button; returns whether it was pressed.
-fn button(
-    ui: &mut Ui,
-    theme: &Theme,
+/// A small text button.
+struct Button<'a> {
     rect: Rect,
     id: Id,
-    text: &str,
+    text: &'a str,
+    /// Whether it is lit, in the mapping colour.
     lit: bool,
     enabled: bool,
-    name: &str,
-) -> bool {
-    let c = &theme.colors;
-    let response = ui.interact(rect, id, if enabled { Sense::click() } else { Sense::hover() });
-    crate::focus::register(ui.ctx(), id, bl_shell::Area::Detail, None);
-    let pressed = enabled
-        && (response.clicked() || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter))));
-    let face = if lit {
-        c.mapping.0
-    } else if response.hovered() && enabled {
-        c.control_hover.0
-    } else {
-        c.control.0
-    };
-    let ink = match (lit, enabled) {
-        (true, _) => c.accent_text.0,
-        (false, true) => c.text.0,
-        (false, false) => c.text_dim.0,
-    };
-    ui.painter().rect_filled(rect, theme.sizes.corner, face);
-    ui.painter()
-        .text(rect.center(), Align2::CENTER_CENTER, text, theme.small_font(), ink);
-    if response.has_focus() && crate::focus::outlined(ui.ctx()) {
-        ui.painter().rect_stroke(
-            rect.expand(1.5),
-            theme.sizes.corner,
-            Stroke::new(1.0, c.focus.0),
-            StrokeKind::Outside,
+    /// Its name for assistive technology.
+    name: &'a str,
+}
+
+impl Button<'_> {
+    /// Draws the button; returns whether it was pressed.
+    fn show(&self, ui: &mut Ui, theme: &Theme) -> bool {
+        let c = &theme.colors;
+        let Self {
+            rect,
+            id,
+            text,
+            lit,
+            enabled,
+            name,
+        } = *self;
+        let response = ui.interact(
+            rect,
+            id,
+            if enabled {
+                Sense::click()
+            } else {
+                Sense::hover()
+            },
         );
+        crate::focus::register(ui.ctx(), id, bl_shell::Area::Detail, None);
+        let pressed = enabled
+            && (response.clicked()
+                || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter))));
+        let face = if lit {
+            c.mapping.0
+        } else if response.hovered() && enabled {
+            c.control_hover.0
+        } else {
+            c.control.0
+        };
+        let ink = match (lit, enabled) {
+            (true, _) => c.accent_text.0,
+            (false, true) => c.text.0,
+            (false, false) => c.text_dim.0,
+        };
+        ui.painter().rect_filled(rect, theme.sizes.corner, face);
+        ui.painter().text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            text,
+            theme.small_font(),
+            ink,
+        );
+        if response.has_focus() && crate::focus::outlined(ui.ctx()) {
+            ui.painter().rect_stroke(
+                rect.expand(1.5),
+                theme.sizes.corner,
+                Stroke::new(1.0, c.focus.0),
+                StrokeKind::Outside,
+            );
+        }
+        let name = name.to_owned();
+        ui.ctx().accesskit_node_builder(id, |node| {
+            node.set_role(Role::Button);
+            node.set_label(name);
+            node.set_selected(lit);
+        });
+        pressed
     }
-    let name = name.to_owned();
-    ui.ctx().accesskit_node_builder(id, |node| {
-        node.set_role(Role::Button);
-        node.set_label(name);
-        node.set_selected(lit);
-    });
-    pressed
 }
 
 /// A modulator's slot, in a cell above its Amount, Min and Max: the target
@@ -200,38 +227,42 @@ pub fn mapping_cell(
         Align2::LEFT_CENTER,
         label,
         theme.small_font(),
-        if mapped.is_some() { c.text.0 } else { c.text_dim.0 },
+        if mapped.is_some() {
+            c.text.0
+        } else {
+            c.text_dim.0
+        },
     );
     let row = inner.top() + 16.0;
     let map = Rect::from_min_size(pos2(inner.left(), row), vec2(46.0, 16.0));
     let unmap = Rect::from_min_size(pos2(inner.left() + 52.0, row), vec2(54.0, 16.0));
     let lit = modulator.armed == Some(slot);
     let n = slot + 1;
-    if button(
-        ui,
-        theme,
-        map,
-        map_button_id(frame.id, slot),
-        "Map",
+    let pressed = Button {
+        rect: map,
+        id: map_button_id(frame.id, slot),
+        text: "Map",
         lit,
-        frame.enabled,
-        &format!("Map {n}"),
-    ) {
+        enabled: frame.enabled,
+        name: &format!("Map {n}"),
+    }
+    .show(ui, theme);
+    if pressed {
         events.push(UiEvent::Invoke(Invocation::new(
             "modulator.arm_map",
             json!({ "device": frame.id, "slot": slot }),
         )));
     }
-    if button(
-        ui,
-        theme,
-        unmap,
-        unmap_button_id(frame.id, slot),
-        "Unmap",
-        false,
-        mapped.is_some(),
-        &format!("Unmap {n}"),
-    ) {
+    let pressed = Button {
+        rect: unmap,
+        id: unmap_button_id(frame.id, slot),
+        text: "Unmap",
+        lit: false,
+        enabled: mapped.is_some(),
+        name: &format!("Unmap {n}"),
+    }
+    .show(ui, theme);
+    if pressed {
         events.push(UiEvent::Invoke(Invocation::new(
             "modulator.unmap",
             json!({ "device": frame.id, "slot": slot }),
@@ -256,20 +287,22 @@ enum Drag {
 /// Alt/Option-dragging a segment curves it, Shift-clicking a breakpoint
 /// deletes it; Clear and six presets sit along its top. `grid` is the number
 /// of divisions of the cycle and `snap` whether breakpoints snap to them.
-#[expect(clippy::too_many_arguments, reason = "the cell's inputs")]
 pub fn curve_cell(
     ui: &mut Ui,
     theme: &Theme,
     frame: &DeviceFrame,
     points: &[ShapePoint],
     cell: Rect,
-    grid: u32,
-    snap: bool,
+    (grid, snap): (u32, bool),
     events: &mut Vec<UiEvent>,
 ) {
     let c = &theme.colors;
     let device = frame.id;
-    let ink = if frame.enabled { c.accent.0 } else { c.inactive.0 };
+    let ink = if frame.enabled {
+        c.accent.0
+    } else {
+        c.inactive.0
+    };
     // Clear and the presets along the top, the grid's choosers below
     // (the cell's own bottom band).
     let top = cell.top() + 3.0;
@@ -290,7 +323,16 @@ pub fn curve_cell(
         } else {
             format!("Shape preset {number}")
         };
-        if button(ui, theme, rect, preset_button_id(device, number), &text, false, frame.enabled, &name) {
+        let pressed = Button {
+            rect,
+            id: preset_button_id(device, number),
+            text: &text,
+            lit: false,
+            enabled: frame.enabled,
+            name: &name,
+        }
+        .show(ui, theme);
+        if pressed {
             let points = if number == 0 {
                 Vec::new()
             } else {
@@ -383,7 +425,8 @@ pub fn curve_cell(
         }
     }
     let drag: Option<Drag> = ui.data(|d| d.get_temp(drag_id));
-    if let (Some(drag), true, Some(at)) = (drag, response.dragged(), response.interact_pointer_pos())
+    if let (Some(drag), true, Some(at)) =
+        (drag, response.dragged(), response.interact_pointer_pos())
     {
         match drag {
             Drag::Move(index) => {

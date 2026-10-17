@@ -358,10 +358,14 @@ impl Compiler {
                 (change, old.device(id), document.device(id))
                 && before.shape != after.shape
             {
-                let shape = after.shape.clone().unwrap_or_else(bl_model::modulator::default_shape);
-                update
-                    .data
-                    .push((NodeKey::Device(id), self.gc.data(crate::modbus::Shape(shape))));
+                let shape = after
+                    .shape
+                    .clone()
+                    .unwrap_or_else(bl_model::modulator::default_shape);
+                update.data.push((
+                    NodeKey::Device(id),
+                    self.gc.data(crate::modbus::Shape(shape)),
+                ));
             }
         }
         for track in document.tracks() {

@@ -533,7 +533,10 @@ impl BrowserView {
                 })
                 .collect();
             if items.is_empty() {
-                self.note = Some(format!("Nothing matches \u{201c}{}\u{201d}.", self.search.trim()));
+                self.note = Some(format!(
+                    "Nothing matches \u{201c}{}\u{201d}.",
+                    self.search.trim()
+                ));
             }
             self.rows = Rows::Items(items);
             self.cursor = self.selected.last().and_then(|path| self.position_of(path));
@@ -928,7 +931,9 @@ impl BrowserView {
     #[must_use]
     pub fn selected_device(&self) -> Option<(String, String)> {
         let selected = self.selected.last()?.to_string_lossy().into_owned();
-        modulator_devices().into_iter().find(|(id, _)| *id == selected)
+        modulator_devices()
+            .into_iter()
+            .find(|(id, _)| *id == selected)
     }
 
     /// Whether no audio file is selected.

@@ -441,14 +441,16 @@ fn a_vst3_parameter_takes_the_played_value() {
         .param(ParamId(bl_test_vst3::GAIN))
         .unwrap();
     let id = ParamId(bl_test_vst3::GAIN);
-    let played = |frame: i64| list.played(
+    let played = |frame: i64| {
+        list.played(
             Travel::Param(gain),
             id,
             Some(frame),
             0.5,
             bl_engine::modbus::Bus::EMPTY,
             0,
-        );
+        )
+    };
 
     // Every VST3 parameter is given the value it plays, as a parameter
     // change on the block's first frame and on each song frame that is a

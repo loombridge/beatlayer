@@ -721,16 +721,30 @@ fn every_command_runs_by_id() {
         json!({ "device": wave, "slot": 1,
             "target": { "type": "mixer", "track": reverb, "param": "volume" } }),
     );
-    assert_eq!(agent.editor.document().device(wave).unwrap().mappings.len(), 2);
+    assert_eq!(
+        agent.editor.document().device(wave).unwrap().mappings.len(),
+        2
+    );
     agent.run(
         "modulator.set_shape",
         json!({ "device": wave, "points": [
             { "x": 0.0, "y": 0.0 }, { "x": 0.5, "y": 1.0, "bend": 0.5 } ] }),
     );
     agent.run("modulator.unmap", json!({ "device": wave, "slot": 1 }));
-    assert_eq!(agent.editor.document().device(wave).unwrap().mappings.len(), 1);
+    assert_eq!(
+        agent.editor.document().device(wave).unwrap().mappings.len(),
+        1
+    );
     agent.run("device.remove", json!({ "device": victim }));
-    assert!(agent.editor.document().device(wave).unwrap().mappings.is_empty());
+    assert!(
+        agent
+            .editor
+            .document()
+            .device(wave)
+            .unwrap()
+            .mappings
+            .is_empty()
+    );
     agent.run("device.remove", json!({ "device": wave }));
 
     // A device with a sidechain input (WP-2.19b), listening to another

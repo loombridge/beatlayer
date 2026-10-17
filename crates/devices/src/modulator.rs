@@ -20,8 +20,7 @@ use bl_model::device_layout::{
     BODY_HEIGHT, ControlBand, DeviceLayout, DisplayCell, LayoutNode, Widget,
 };
 use bl_model::modulator::{
-    self, CURVE_MOD, DEPTH, MODE, POLARITY, SLOTS, ShapePoint, WAVE_MOD, default_shape,
-    shape_value,
+    self, CURVE_MOD, DEPTH, MODE, POLARITY, SLOTS, ShapePoint, WAVE_MOD, default_shape, shape_value,
 };
 use bl_model::{DeviceDescription, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
 
@@ -93,7 +92,6 @@ pub const DIVISIONS: [(&str, f64); 9] = [
 /// The Curve Mod's trigger modes.
 pub const TRIGGER_MODES: [&str; 3] = ["Loop", "1-Shot", "Manual"];
 
-
 /// The Wave Mod's type.
 #[must_use]
 pub fn wave_mod_type() -> DeviceType {
@@ -110,9 +108,8 @@ pub fn wave_mod_type() -> DeviceType {
     ];
     params.extend(shared_params());
     params.extend(mapping_params());
-    DeviceType::native(WAVE_MOD, "Wave Mod", DeviceRole::AudioEffect).with_description(
-        DeviceDescription::new(params).with_layout(wave_layout()),
-    )
+    DeviceType::native(WAVE_MOD, "Wave Mod", DeviceRole::AudioEffect)
+        .with_description(DeviceDescription::new(params).with_layout(wave_layout()))
 }
 
 /// The Curve Mod's type.
@@ -139,9 +136,8 @@ pub fn curve_mod_type() -> DeviceType {
     ];
     params.extend(shared_params());
     params.extend(mapping_params());
-    DeviceType::native(CURVE_MOD, "Curve Mod", DeviceRole::AudioEffect).with_description(
-        DeviceDescription::new(params).with_layout(curve_layout()),
-    )
+    DeviceType::native(CURVE_MOD, "Curve Mod", DeviceRole::AudioEffect)
+        .with_description(DeviceDescription::new(params).with_layout(curve_layout()))
 }
 
 /// The parameters both modulators share.
@@ -234,16 +230,15 @@ fn mapping_params() -> Vec<ParamDescriptor> {
 fn mapping_cells() -> (LayoutNode, LayoutNode) {
     let cell = |slot: u8| {
         LayoutNode::Cell(
-            DisplayCell::new(&format!("Mapping {}", slot + 1), 180.0, BODY_HEIGHT, 1.0).with_bottom(
-                ControlBand::stacked(
+            DisplayCell::new(&format!("Mapping {}", slot + 1), 180.0, BODY_HEIGHT, 1.0)
+                .with_bottom(ControlBand::stacked(
                     62.0,
                     &[
                         (modulator::amount(slot), Widget::Knob),
                         (modulator::min(slot), Widget::Knob),
                         (modulator::max(slot), Widget::Knob),
                     ],
-                ),
-            ),
+                )),
         )
     };
     (cell(0), LayoutNode::Row((1..SLOTS).map(cell).collect()))
@@ -303,12 +298,11 @@ fn curve_layout() -> DeviceLayout {
             (SMOOTH, Widget::Knob),
         ],
     );
-    let display = DisplayCell::new("Curve", 200.0, BODY_HEIGHT, 2.0).with_bottom(
-        ControlBand::stacked(
+    let display =
+        DisplayCell::new("Curve", 200.0, BODY_HEIGHT, 2.0).with_bottom(ControlBand::stacked(
             44.0,
             &[(GRID_DIVISIONS, Widget::Chooser), (SNAP, Widget::Toggle)],
-        ),
-    );
+        ));
     let rate = ControlBand::stacked(
         BODY_HEIGHT,
         &[
@@ -484,7 +478,12 @@ impl<S: Source> Modulator<S> {
             },
             f,
         };
-        let hz = e.param(params, RATE_HZ) * if e.param(params, TIMES_TEN) >= 0.5 { 10.0 } else { 1.0 };
+        let hz = e.param(params, RATE_HZ)
+            * if e.param(params, TIMES_TEN) >= 0.5 {
+                10.0
+            } else {
+                1.0
+            };
         let beats = DIVISIONS[(e.param(params, RATE_BEATS) as usize).min(DIVISIONS.len() - 1)].1;
         let c = Common {
             rate: if e.param(params, TIME_MODE) >= 0.5 {
@@ -532,11 +531,13 @@ impl<S: Source> NativeDevice for Modulator<S> {
         self.was_playing = playing;
         let index = |id: ParamId| params.index(id).expect("the description holds it");
         let (depth, mode, polarity) = (index(DEPTH), index(MODE), index(POLARITY));
-        let amounts: [usize; SLOTS as usize] = std::array::from_fn(|s| index(modulator::amount(s as u8)));
+        let amounts: [usize; SLOTS as usize] =
+            std::array::from_fn(|s| index(modulator::amount(s as u8)));
         let mins: [usize; SLOTS as usize] = std::array::from_fn(|s| index(modulator::min(s as u8)));
-        let maxes: [usize; SLOTS as usize] = std::array::from_fn(|s| index(modulator::max(s as u8)));
+        let maxes: [usize; SLOTS as usize] =
+            std::array::from_fn(|s| index(modulator::max(s as u8)));
         for f in 0..modulation.frames() {
-            if self.clock % GRID == 0 {
+            if self.clock.is_multiple_of(GRID) {
                 if self.primed {
                     self.from = self.to;
                 } else {
@@ -668,8 +669,14 @@ impl WaveSource {
             let step = (self.random.next_bipolar()) * 0.25;
             let walked = self.walk + step;
             // Reflect at the ends so the walk stays within 0 to 1.
-            self.walk = if walked < 0.0 { -walked } else if walked > 1.0 { 2.0 - walked } else { walked }
-                .clamp(0.0, 1.0);
+            self.walk = if walked < 0.0 {
+                -walked
+            } else if walked > 1.0 {
+                2.0 - walked
+            } else {
+                walked
+            }
+            .clamp(0.0, 1.0);
         }
         self.cycle = cycle;
     }
@@ -684,7 +691,11 @@ impl WaveSource {
         self.advance_to(cycle as i64);
         let frac = total - cycle;
         let random = matches!(wave, 5..=8);
-        let bent = if random { frac } else { frac.powf(4f64.powf(-shape)) };
+        let bent = if random {
+            frac
+        } else {
+            frac.powf(4f64.powf(-shape))
+        };
         let mut w = match wave {
             0 => 0.5 - 0.5 * (std::f64::consts::TAU * bent).cos(),
             1 => bent,

@@ -41,7 +41,13 @@ pub const GRID_DIVISIONS: ParamId = ParamId(13);
 /// The Curve Mod's Snap: breakpoints snap to the grid (R23).
 pub const SNAP: ParamId = ParamId(14);
 /// The Grid's choices: each one's name and its divisions of the cycle.
-pub const GRIDS: [(&str, u32); 5] = [("1/2", 2), ("1/4", 4), ("1/8", 8), ("1/16", 16), ("1/32", 32)];
+pub const GRIDS: [(&str, u32); 5] = [
+    ("1/2", 2),
+    ("1/4", 4),
+    ("1/8", 8),
+    ("1/16", 16),
+    ("1/32", 32),
+];
 /// The first parameter id a slot owns; each slot has three.
 const SLOT_BASE: u32 = 67;
 
@@ -198,7 +204,11 @@ pub fn shape_preset(number: u8) -> Option<Vec<ShapePoint>> {
             for i in 0..4u32 {
                 let (x, y) = (f64::from(i) / 4.0, f64::from(i) / 3.0);
                 steps.push(p(x + if i == 0 { 0.0 } else { MIN_GAP }, y, 0.0));
-                steps.push(p(f64::from(i + 1) / 4.0 - if i == 3 { 0.0 } else { MIN_GAP }, y, 0.0));
+                steps.push(p(
+                    f64::from(i + 1) / 4.0 - if i == 3 { 0.0 } else { MIN_GAP },
+                    y,
+                    0.0,
+                ));
             }
             steps
         }
@@ -231,7 +241,11 @@ pub fn with_point_moved(points: &[ShapePoint], index: usize, x: f64, y: f64) -> 
     let Some(point) = out.get_mut(index) else {
         return out;
     };
-    let low = if index == 0 { 0.0 } else { points[index - 1].x + MIN_GAP };
+    let low = if index == 0 {
+        0.0
+    } else {
+        points[index - 1].x + MIN_GAP
+    };
     let high = points.get(index + 1).map_or(1.0, |next| next.x - MIN_GAP);
     point.x = x.clamp(low, high.max(low));
     point.y = y.clamp(0.0, 1.0);
@@ -269,7 +283,9 @@ pub fn default_shape() -> Vec<ShapePoint> {
 /// or two that aren't in order with a gap between them.
 pub(crate) fn check_shape(points: &[ShapePoint]) -> Result<(), ModelError> {
     if points.len() > MAX_POINTS {
-        return Err(ModelError::InvalidInput("a shape holds at most 64 breakpoints"));
+        return Err(ModelError::InvalidInput(
+            "a shape holds at most 64 breakpoints",
+        ));
     }
     for (index, point) in points.iter().enumerate() {
         let ok = [point.x, point.y].iter().all(|v| (0.0..=1.0).contains(v))
@@ -326,6 +342,7 @@ impl Document {
     pub fn held_by(&self, target: ModTarget, except: DeviceId) -> Option<DeviceId> {
         self.tracks().flat_map(|t| t.devices()).find_map(|d| {
             (d.id != except
+                && d.enabled
                 && self.in_remote_control(d)
                 && d.mappings.iter().any(|m| m.target == target))
             .then_some(d.id)
@@ -335,9 +352,10 @@ impl Document {
     /// Refuses a hand move of `target` while a modulator in Remote Control
     /// holds it (R16).
     pub(crate) fn check_not_held(&self, target: ModTarget) -> Result<(), ModelError> {
-        let held = self.tracks().flat_map(|t| t.devices()).any(|d| {
-            self.in_remote_control(d) && d.mappings.iter().any(|m| m.target == target)
-        });
+        let held = self
+            .tracks()
+            .flat_map(|t| t.devices())
+            .any(|d| self.in_remote_control(d) && d.mappings.iter().any(|m| m.target == target));
         if held {
             Err(ModelError::InvalidInput(
                 "a modulator in Remote Control holds that parameter",
@@ -354,7 +372,8 @@ impl Document {
         match target {
             ModTarget::Mixer { track, .. } => self.track(track).is_some(),
             ModTarget::Send { track, to } => {
-                self.track(track).is_some_and(|t| t.kind().has_sends()) && self.returns().any(|r| r == to)
+                self.track(track).is_some_and(|t| t.kind().has_sends())
+                    && self.returns().any(|r| r == to)
             }
             ModTarget::Device { device, .. } => self.device(device).is_some(),
         }
@@ -379,9 +398,15 @@ impl Document {
             return Err(ModelError::InvalidInput("the parameter isn't in the set"));
         }
         if matches!(target, ModTarget::Device { device: d, .. } if d == device) {
-            return Err(ModelError::InvalidInput("a modulator doesn't map its own parameters"));
+            return Err(ModelError::InvalidInput(
+                "a modulator doesn't map its own parameters",
+            ));
         }
-        if current.mappings.iter().any(|m| m.target == target && m.slot != slot) {
+        if current
+            .mappings
+            .iter()
+            .any(|m| m.target == target && m.slot != slot)
+        {
             return Err(ModelError::InvalidInput(
                 "a modulator doesn't map one parameter twice",
             ));
@@ -417,7 +442,8 @@ impl Document {
         points: &[ShapePoint],
     ) -> Result<(), ModelError> {
         let current = self.device_ref(device)?;
-        let is_curve = matches!(&current.kind, DeviceKind::Native { device_type } if device_type == CURVE_MOD);
+        let is_curve =
+            matches!(&current.kind, DeviceKind::Native { device_type } if device_type == CURVE_MOD);
         if !is_curve {
             return Err(ModelError::InvalidInput("only a Curve Mod has a shape"));
         }
@@ -441,7 +467,13 @@ impl Document {
         for id in stale {
             let kept: Vec<Mapping> = self
                 .device(id)
-                .map(|d| d.mappings.iter().copied().filter(|m| self.has_target(m.target)).collect())
+                .map(|d| {
+                    d.mappings
+                        .iter()
+                        .copied()
+                        .filter(|m| self.has_target(m.target))
+                        .collect()
+                })
                 .unwrap_or_default();
             if let Ok(device) = self.device_mut(id) {
                 device.mappings = kept;
@@ -470,10 +502,21 @@ mod tests {
         assert_eq!(shape_value(&points, 2.0), 1.0, "past the end it holds");
         assert_eq!(shape_value(&[], 0.5), 0.0, "no points, no output");
         let curved = [
-            ShapePoint { x: 0.0, y: 0.0, bend: 1.0 },
-            ShapePoint { x: 1.0, y: 1.0, bend: 0.0 },
+            ShapePoint {
+                x: 0.0,
+                y: 0.0,
+                bend: 1.0,
+            },
+            ShapePoint {
+                x: 1.0,
+                y: 1.0,
+                bend: 0.0,
+            },
         ];
-        assert!(shape_value(&curved, 0.5) < 0.5, "a positive bend bows below the line");
+        assert!(
+            shape_value(&curved, 0.5) < 0.5,
+            "a positive bend bows below the line"
+        );
     }
 
     #[test]
@@ -481,7 +524,11 @@ mod tests {
         let mut points = shape_preset(1).unwrap();
         points = with_point_added(&points, 0.5, 0.9);
         assert_eq!(points.len(), 3);
-        assert_eq!(points, with_point_added(&points, 0.5 + MIN_GAP / 2.0, 0.1), "a gap is kept");
+        assert_eq!(
+            points,
+            with_point_added(&points, 0.5 + MIN_GAP / 2.0, 0.1),
+            "a gap is kept"
+        );
         points = with_point_moved(&points, 1, 2.0, -3.0);
         assert!(check_shape(&points).is_ok(), "{points:?}");
         assert!(points[1].x < points[2].x && points[1].y == 0.0);
@@ -565,7 +612,12 @@ mod document_tests {
         }
     }
 
-    fn map(editor: &mut Editor, device: DeviceId, slot: u8, target: ModTarget) -> Result<(), String> {
+    fn map(
+        editor: &mut Editor,
+        device: DeviceId,
+        slot: u8,
+        target: ModTarget,
+    ) -> Result<(), String> {
         editor
             .apply(Command::MapModulator {
                 device,
@@ -581,20 +633,48 @@ mod document_tests {
     fn a_modulator_maps_any_track_but_not_itself() {
         let mut set = set();
         let (wave, target) = (set.wave, set.target);
-        let on = |param| ModTarget::Device { device: target, param: ParamId(param) };
+        let on = |param| ModTarget::Device {
+            device: target,
+            param: ParamId(param),
+        };
         map(&mut set.editor, wave, 0, on(1)).unwrap();
-        map(&mut set.editor,
+        map(
+            &mut set.editor,
             wave,
             1,
-            ModTarget::Mixer { track: set.other, param: MixerParam::Pan },
+            ModTarget::Mixer {
+                track: set.other,
+                param: MixerParam::Pan,
+            },
         )
         .unwrap();
-        map(&mut set.editor, wave, 2, ModTarget::Send { track: set.other, to: set.ret }).unwrap();
+        map(
+            &mut set.editor,
+            wave,
+            2,
+            ModTarget::Send {
+                track: set.other,
+                to: set.ret,
+            },
+        )
+        .unwrap();
         assert!(
-            map(&mut set.editor, wave, 3, ModTarget::Device { device: wave, param: ParamId(1) }).is_err(),
+            map(
+                &mut set.editor,
+                wave,
+                3,
+                ModTarget::Device {
+                    device: wave,
+                    param: ParamId(1)
+                }
+            )
+            .is_err(),
             "not its own parameters"
         );
-        assert!(map(&mut set.editor, wave, 3, on(1)).is_err(), "not one parameter twice");
+        assert!(
+            map(&mut set.editor, wave, 3, on(1)).is_err(),
+            "not one parameter twice"
+        );
         // A second modulator may modulate the same parameter.
         let second = device(&mut set.editor, set.audio, WAVE_MOD);
         map(&mut set.editor, second, 0, on(1)).unwrap();
@@ -609,18 +689,36 @@ mod document_tests {
         let mut set = set();
         let wave = set.wave;
         for slot in 0..SLOTS {
-            map(&mut set.editor,
+            map(
+                &mut set.editor,
                 wave,
                 slot,
-                ModTarget::Device { device: set.target, param: ParamId(u32::from(slot)) },
+                ModTarget::Device {
+                    device: set.target,
+                    param: ParamId(u32::from(slot)),
+                },
             )
             .unwrap();
         }
-        assert_eq!(set.editor.document().device(wave).unwrap().mappings.len(), 8);
+        assert_eq!(
+            set.editor.document().device(wave).unwrap().mappings.len(),
+            8
+        );
         // A slot takes a new target in place of its old one.
-        map(&mut set.editor, wave, 0, ModTarget::Mixer { track: set.audio, param: MixerParam::Volume })
-            .unwrap();
-        assert_eq!(set.editor.document().device(wave).unwrap().mappings.len(), 8);
+        map(
+            &mut set.editor,
+            wave,
+            0,
+            ModTarget::Mixer {
+                track: set.audio,
+                param: MixerParam::Volume,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            set.editor.document().device(wave).unwrap().mappings.len(),
+            8
+        );
     }
 
     // Spec: modulation R19
@@ -628,25 +726,75 @@ mod document_tests {
     fn a_deleted_target_takes_its_mapping() {
         let mut set = set();
         let (wave, target) = (set.wave, set.target);
-        map(&mut set.editor, wave, 0, ModTarget::Device { device: target, param: ParamId(1) }).unwrap();
-        map(&mut set.editor, wave, 1, ModTarget::Mixer { track: set.other, param: MixerParam::Volume })
-            .unwrap();
-        map(&mut set.editor, wave, 2, ModTarget::Mixer { track: set.audio, param: MixerParam::Volume })
-            .unwrap();
+        map(
+            &mut set.editor,
+            wave,
+            0,
+            ModTarget::Device {
+                device: target,
+                param: ParamId(1),
+            },
+        )
+        .unwrap();
+        map(
+            &mut set.editor,
+            wave,
+            1,
+            ModTarget::Mixer {
+                track: set.other,
+                param: MixerParam::Volume,
+            },
+        )
+        .unwrap();
+        map(
+            &mut set.editor,
+            wave,
+            2,
+            ModTarget::Mixer {
+                track: set.audio,
+                param: MixerParam::Volume,
+            },
+        )
+        .unwrap();
         // A target moved to another track keeps its mapping.
         set.editor
-            .apply(Command::MoveDevice { device: target, track: set.audio, index: 0 })
+            .apply(Command::MoveDevice {
+                device: target,
+                track: set.audio,
+                index: 0,
+            })
             .unwrap();
-        assert_eq!(set.editor.document().device(wave).unwrap().mappings.len(), 3);
+        assert_eq!(
+            set.editor.document().device(wave).unwrap().mappings.len(),
+            3
+        );
         // Deleting the device and the track take theirs in the same undo step.
-        set.editor.apply(Command::RemoveDevice { device: target }).unwrap();
-        assert_eq!(set.editor.document().device(wave).unwrap().mappings.len(), 2);
-        set.editor.apply(Command::DeleteTrack { track: set.other }).unwrap();
-        let slots: Vec<u8> =
-            set.editor.document().device(wave).unwrap().mappings.iter().map(|m| m.slot).collect();
+        set.editor
+            .apply(Command::RemoveDevice { device: target })
+            .unwrap();
+        assert_eq!(
+            set.editor.document().device(wave).unwrap().mappings.len(),
+            2
+        );
+        set.editor
+            .apply(Command::DeleteTrack { track: set.other })
+            .unwrap();
+        let slots: Vec<u8> = set
+            .editor
+            .document()
+            .device(wave)
+            .unwrap()
+            .mappings
+            .iter()
+            .map(|m| m.slot)
+            .collect();
         assert_eq!(slots, [2]);
         set.editor.undo().unwrap();
-        assert_eq!(set.editor.document().device(wave).unwrap().mappings.len(), 2, "one step");
+        assert_eq!(
+            set.editor.document().device(wave).unwrap().mappings.len(),
+            2,
+            "one step"
+        );
     }
 
     // Spec: modulation R16
@@ -655,22 +803,49 @@ mod document_tests {
         let mut set = set();
         let (wave, target) = (set.wave, set.target);
         let second = device(&mut set.editor, set.audio, WAVE_MOD);
-        let on = ModTarget::Device { device: target, param: ParamId(1) };
+        let on = ModTarget::Device {
+            device: target,
+            param: ParamId(1),
+        };
         for who in [wave, second] {
             map(&mut set.editor, who, 0, on).unwrap();
         }
         let hold = |editor: &mut Editor, device| {
-            editor.apply(Command::SetDeviceParam { device, param: MODE, value: 1.0 })
+            editor.apply(Command::SetDeviceParam {
+                device,
+                param: MODE,
+                value: 1.0,
+            })
         };
         hold(&mut set.editor, wave).unwrap();
-        assert!(hold(&mut set.editor, second).is_err(), "the second can't hold it too");
+        assert!(
+            hold(&mut set.editor, second).is_err(),
+            "the second can't hold it too"
+        );
         // Mapping while in Remote Control is refused too.
-        let other = ModTarget::Device { device: target, param: ParamId(2) };
+        let other = ModTarget::Device {
+            device: target,
+            param: ParamId(2),
+        };
         map(&mut set.editor, wave, 1, other).unwrap();
-        set.editor.apply(Command::UnmapModulator { device: wave, slot: 0 }).unwrap();
+        set.editor
+            .apply(Command::UnmapModulator {
+                device: wave,
+                slot: 0,
+            })
+            .unwrap();
         hold(&mut set.editor, second).unwrap();
-        assert!(map(&mut set.editor, wave, 0, on).is_err(), "held by another in Remote Control");
-        let third = ModTarget::Device { device: target, param: ParamId(3) };
-        assert!(map(&mut set.editor, wave, 2, third).is_ok(), "an unheld parameter maps");
+        assert!(
+            map(&mut set.editor, wave, 0, on).is_err(),
+            "held by another in Remote Control"
+        );
+        let third = ModTarget::Device {
+            device: target,
+            param: ParamId(3),
+        };
+        assert!(
+            map(&mut set.editor, wave, 2, third).is_ok(),
+            "an unheld parameter maps"
+        );
     }
 }

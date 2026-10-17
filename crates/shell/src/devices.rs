@@ -379,7 +379,8 @@ impl DeviceView {
         if !is_modulator_kind(&d.kind) {
             return None;
         }
-        let curve = matches!(&d.kind, DeviceKind::Native { device_type } if device_type == CURVE_MOD);
+        let curve =
+            matches!(&d.kind, DeviceKind::Native { device_type } if device_type == CURVE_MOD);
         Some(ModulatorFrame {
             mappings: d
                 .mappings
@@ -390,7 +391,10 @@ impl DeviceView {
                     label: self.target_label(doc, m.target),
                 })
                 .collect(),
-            armed: self.armed.filter(|(device, _)| *device == d.id).map(|(_, slot)| slot),
+            armed: self
+                .armed
+                .filter(|(device, _)| *device == d.id)
+                .map(|(_, slot)| slot),
             shape: curve.then(|| d.shape.clone().unwrap_or_else(default_shape)),
         })
     }
@@ -398,16 +402,18 @@ impl DeviceView {
     /// How a mapping's slot names its target: a device's title and the
     /// parameter's name, or a track's label and its control.
     fn target_label(&self, doc: &Document, target: bl_model::modulator::ModTarget) -> String {
-        use bl_model::modulator::ModTarget;
         use bl_model::MixerParam;
+        use bl_model::modulator::ModTarget;
         match target {
-            ModTarget::Device { device, param } => doc.device(device).map_or_else(String::new, |d| {
-                let name = self
-                    .description(&d.kind)
-                    .and_then(|description| description.param(param))
-                    .map_or_else(|| format!("Parameter {}", param.0), |p| p.name.clone());
-                format!("{} / {name}", d.title())
-            }),
+            ModTarget::Device { device, param } => {
+                doc.device(device).map_or_else(String::new, |d| {
+                    let name = self
+                        .description(&d.kind)
+                        .and_then(|description| description.param(param))
+                        .map_or_else(|| format!("Parameter {}", param.0), |p| p.name.clone());
+                    format!("{} / {name}", d.title())
+                })
+            }
             ModTarget::Mixer { track, param } => format!(
                 "{} {}",
                 crate::routing::track_label(doc, track),
@@ -889,14 +895,20 @@ impl DeviceView {
                 return Ok(outcome);
             }
             ids::ARM_MAP => {
-                let ArmMapArgs { device, slot, armed } = parse(args)?;
+                let ArmMapArgs {
+                    device,
+                    slot,
+                    armed,
+                } = parse(args)?;
                 let device = self.target(editor.document(), device)?;
                 if !editor
                     .document()
                     .device(device)
                     .is_some_and(|d| bl_model::modulator::is_modulator_kind(&d.kind))
                 {
-                    return Err(DeviceError::Unavailable(format!("{device} isn't a modulator")));
+                    return Err(DeviceError::Unavailable(format!(
+                        "{device} isn't a modulator"
+                    )));
                 }
                 if slot >= bl_model::modulator::SLOTS {
                     return Err(DeviceError::InvalidArgs(format!(

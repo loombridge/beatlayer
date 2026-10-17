@@ -301,14 +301,15 @@ impl Node for ClapNode {
                     input.param(event.offset, event.param.0, value);
                 }
             }
-            d.drive.play(list, song, frames, block.modulation(), |play| {
-                if play.modulatable {
-                    input.param(play.offset, play.id, play.base);
-                    input.param_mod(play.offset, play.id, play.played - play.base);
-                } else {
-                    input.param(play.offset, play.id, play.played);
-                }
-            });
+            d.drive
+                .play(list, song, frames, block.modulation(), |play| {
+                    if play.modulatable {
+                        input.param(play.offset, play.id, play.base);
+                        input.param_mod(play.offset, play.id, play.played - play.base);
+                    } else {
+                        input.param(play.offset, play.id, play.played);
+                    }
+                });
         });
         self.pending.clear();
         for note in block.notes() {

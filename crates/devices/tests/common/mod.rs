@@ -129,7 +129,7 @@ pub fn control(
 ) -> Rows {
     use bl_engine::modbus::{Bus, Control, ROWS};
 
-    let mut rows = vec![Vec::with_capacity(frames); ROWS];
+    let mut rows: Vec<Vec<f32>> = (0..ROWS).map(|_| Vec::with_capacity(frames)).collect();
     let mut done = 0;
     while done < frames {
         let length = block.min(frames - done);

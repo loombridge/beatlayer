@@ -9,8 +9,8 @@ use bl_core::time::{Frames, SampleRate, TempoMap};
 use bl_model::{DeviceId, ParamId, TrackId};
 use rtgc::{ArcGc, LocalRtGc};
 
-use crate::modbus::{Bus, Control};
 use crate::display::DisplayReader;
+use crate::modbus::{Bus, Control};
 use crate::session::SessionPlayback;
 
 /// What a node is in the document, which stays the same from one compile to

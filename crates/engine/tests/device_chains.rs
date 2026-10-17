@@ -211,3 +211,58 @@ fn factories_offer_device_types_with_their_roles() {
     assert!(Registry::new().device_types().is_empty());
     assert_eq!(Registry::new().device_type(&gain.kind), None::<DeviceType>);
 }
+
+// Spec: multisampler R31
+#[test]
+fn a_zone_edit_sends_data_and_no_program() {
+    let mut rig = Rig::new(FRAMES);
+    let audio = track(&mut rig.editor, TrackKind::Audio, None);
+    let sampler = device(&mut rig.editor, audio, THROUGH, &[]);
+    rig.sync();
+    rig.block(FRAMES);
+    let layer = bl_model::Layer::new(
+        bl_model::LayerId(1),
+        "Kick",
+        bl_model::ContentHash([1; 32]),
+        48_000,
+        48_000,
+        1,
+    );
+    // Adding a layer, moving its zone and changing its settings each send
+    // the node its layers as data; none makes a program or a node.
+    for command in [
+        Command::InsertLayers {
+            device: sampler,
+            index: None,
+            layers: vec![layer],
+        },
+        Command::SetLayerZones {
+            device: sampler,
+            kind: bl_model::ZoneKind::Key,
+            zones: vec![bl_model::LayerZone {
+                layer: bl_model::LayerId(1),
+                zone: bl_model::Zone::new(36, 48),
+            }],
+        },
+        Command::UpdateLayers {
+            device: sampler,
+            layers: vec![bl_model::LayerId(1)],
+            settings: bl_model::LayerSettings {
+                root_key: Some(40),
+                ..Default::default()
+            },
+        },
+    ] {
+        let synced = rig.apply(command.clone());
+        assert!(!synced.program, "{command:?} sent a program");
+        assert_eq!(synced.data, 1, "{command:?} sent the layers");
+        rig.block(FRAMES);
+    }
+    // An edit of something else sends none.
+    let synced = rig.apply(Command::RenameDevice {
+        device: sampler,
+        name: "Drums".to_owned(),
+    });
+    assert_eq!((synced.program, synced.data), (false, 0));
+    assert_eq!(rig_made(&rig), 1, "no node was made for the edits");
+}

@@ -520,6 +520,73 @@ pub enum Distribution {
     AroundRootKey,
 }
 
+/// The tab a multisampler shows in its body (R1); Zone isn't one, since it
+/// opens the zone editor above the Device View instead.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SamplerTab {
+    /// The selected layer's waveform and playback.
+    #[default]
+    Sample,
+    /// Pitch and the modulation oscillator.
+    PitchOsc,
+    /// The filter and the global controls.
+    FilterGlobal,
+    /// The auxiliary envelope and the LFOs.
+    Modulation,
+    /// The MIDI sources.
+    Midi,
+}
+
+/// How tall the zone editor's rows are (R10): a right-click offers Small,
+/// Medium and Large, which change only the view.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum EditorSize {
+    /// The smallest rows.
+    Small,
+    /// The default rows.
+    #[default]
+    Medium,
+    /// The tallest rows.
+    Large,
+}
+
+/// What a multisampler's views show, saved with the set but no part of the
+/// document, so changing it is no undo step (R1).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MultisamplerView {
+    /// The tab in the body.
+    #[serde(default)]
+    pub tab: SamplerTab,
+    /// Whether the zone editor shows above the Device View.
+    #[serde(default)]
+    pub zone_editor: bool,
+    /// Which zone editor the Key, Vel and Sel chooser shows (R10).
+    #[serde(default = "key_editor")]
+    pub editor: ZoneKind,
+    /// The zone editor's row size.
+    #[serde(default)]
+    pub size: EditorSize,
+    /// Auto Select (R7).
+    #[serde(default)]
+    pub auto_select: bool,
+}
+
+fn key_editor() -> ZoneKind {
+    ZoneKind::Key
+}
+
+impl Default for ZoneKind {
+    fn default() -> Self {
+        Self::Key
+    }
+}
+
+/// Each multisampler's view, as a set saves them beside its document.
+pub type MultisamplerViews = std::collections::BTreeMap<crate::ids::DeviceId, MultisamplerView>;
+
 /// The layers a multisampler holds and the settings of the layer list that
 /// aren't parameters (R2, R19, R20, R23).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]

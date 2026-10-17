@@ -7,6 +7,9 @@
 //! migrations, as the song [`fixture_project`] builds. Fixtures are never
 //! rewritten once merged; a new schema version adds its own.
 //!
+//! Version 5 (WP-5.13) added a multisampler's layers and what its views show;
+//! a set saved before it opens with none.
+//!
 //! Version 1 is the first. Version 2 (WP-1.4b) moved audio clips' offsets
 //! into their Start markers. Version 3 (WP-3.1) added the Session View's
 //! scenes and the clips in their slots; a set saved before it opens with the
@@ -255,6 +258,7 @@ fn fixture_project() -> Project {
         windows: bl_model::DeviceWindows::new(),
         folds: bl_model::ClipFolds::new(),
         launch: bl_model::LaunchSettings::default(),
+        multisamplers: bl_model::MultisamplerViews::new(),
     }
 }
 
@@ -460,6 +464,7 @@ static FAKE_MIGRATIONS: &[Migration] = &[
     MIGRATIONS[0],
     MIGRATIONS[1],
     MIGRATIONS[2],
+    MIGRATIONS[3],
 ];
 
 /// The scaffold migrates an old file: the invented version 0 fixture loads

@@ -39,6 +39,7 @@ pub mod peaks;
 mod resample;
 mod rf64;
 mod sample_data;
+mod sampler_chunk;
 mod store;
 pub mod stream;
 
@@ -51,6 +52,7 @@ pub use hash::{ContentHash, ParseContentHashError};
 pub use peaks::{PeakCache, PeakCacheOptions, PeakEvent, PeakStatus, Peaks};
 pub use resample::{RateConverter, convert_sample_rate, converted_len};
 pub use sample_data::SampleData;
+pub use sampler_chunk::{SamplerInfo, read_sampler_info};
 pub use store::{MediaEntry, MediaStatus, MediaStore};
 pub use stream::{
     AudioSource, Filled, MemorySource, PlanarMut, Source, StreamConfig, StreamId, StreamSource,

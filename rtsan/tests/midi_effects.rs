@@ -155,6 +155,8 @@ fn a_chain_of_midi_effects_passes_under_rtsan() {
         .iter()
         .filter(|n| n.event.kind == NoteKind::On)
         .count();
-    assert!(ons > 100, "{ons} notes reached the instrument");
+    // 800 blocks of 256 frames at 120 BPM play 34 of the clip's sixteenths:
+    // at least one note-on each reaches the instrument.
+    assert!(ons >= 34, "{ons} notes reached the instrument");
     eprintln!("800 blocks through six MIDI effects under RealtimeSanitizer: {ons} note-ons");
 }

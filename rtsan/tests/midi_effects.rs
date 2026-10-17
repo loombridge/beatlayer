@@ -8,13 +8,15 @@
 bl_rt::install_trap!();
 
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
+use bl_core::midi::{MidiInputEvent, MidiMessage, MidiSource};
 use bl_core::time::{SampleRate, TICKS_PER_QUARTER, Ticks};
 use bl_engine::testing::{self, Probe};
-use bl_engine::{Collector, Compiler, EngineConfig, NoteKind, TransportCommand, channel};
+use bl_engine::{Collector, Compiler, EngineConfig, NoInput, NoteKind, TransportCommand, channel};
 use bl_model::{
-    Clip, ClipData, Command, Device, DeviceId, DeviceKind, Editor, MidiData, Note, ParamId,
-    TrackKind,
+    Clip, ClipData, Command, Device, DeviceId, DeviceKind, Editor, Input, MidiData, Monitor, Note,
+    ParamId, TrackKind,
 };
 
 // Without `--cfg lspk_rtsan` (`rtsan/.cargo/config.toml`), this doesn't build.
@@ -159,4 +161,120 @@ fn a_chain_of_midi_effects_passes_under_rtsan() {
     // at least one note-on each reaches the instrument.
     assert!(ons >= 34, "{ons} notes reached the instrument");
     eprintln!("800 blocks through six MIDI effects under RealtimeSanitizer: {ons} note-ons");
+}
+
+// Spec: device-framework R39. Control changes, pitch bends and channel
+// pressure from monitored input go through two MIDI effects, one of them
+// switched off and on again, into a test instrument.
+#[test]
+fn channel_messages_pass_under_rtsan() {
+    let config = EngineConfig::new(SampleRate::HZ_48000, 256);
+    let probe = Arc::new(Probe::default());
+    let mut collector = Collector::new();
+    let mut registry = testing::registry(&probe);
+    bl_devices::register(&mut registry);
+    let mut compiler = Compiler::new(config, registry, collector.handle());
+    let (mut sender, mut processor, _monitor) = channel(&config);
+    let (input, engine_end) = bl_midi_io::input_queue(4096);
+    processor.set_midi_input(engine_end);
+
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    for command in [
+        Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Midi,
+            name: String::new(),
+            parent: None,
+            index: 0,
+        },
+        Command::SetInput {
+            track,
+            input: Input::ComputerKeyboard,
+            channel: None,
+        },
+        Command::SetMonitor {
+            track,
+            monitor: Monitor::In,
+        },
+    ] {
+        editor.apply(command).unwrap();
+    }
+    let mut effects = Vec::new();
+    for (index, device_type) in [bl_devices::LIFT, bl_devices::STACK, testing::INSTRUMENT]
+        .into_iter()
+        .enumerate()
+    {
+        let id = editor.new_id();
+        editor
+            .apply(Command::InsertDevice {
+                track,
+                index,
+                device: Device::new(
+                    id,
+                    "",
+                    DeviceKind::Native {
+                        device_type: device_type.to_owned(),
+                    },
+                ),
+            })
+            .unwrap();
+        effects.push(id);
+    }
+    sender.send_update(compiler.sync(editor.document()));
+    assert!(sender.flush());
+
+    let start = Instant::now();
+    let period = Duration::from_nanos(256 * 1_000_000_000 / 48_000);
+    let mut messages = 0;
+    for round in 0..600u32 {
+        let enabled = !(200..400).contains(&round);
+        if round == 200 || round == 400 {
+            editor
+                .apply(Command::SetDeviceEnabled {
+                    device: effects[0],
+                    enabled,
+                })
+                .unwrap();
+            sender.send_update(compiler.sync(editor.document()));
+            assert!(sender.flush());
+        }
+        // A burst of messages stamped inside the previous block: a note,
+        // then eighty controller, bend and pressure messages, which
+        // fit a track's input.
+        let block = start + period * round;
+        let stamp = block - period / 2;
+        let send = |message: MidiMessage| {
+            input.send(MidiInputEvent {
+                source: MidiSource::ComputerKeyboard,
+                time: stamp,
+                message,
+            });
+        };
+        send(MidiMessage::note_on(0, 36 + (round % 48) as u8, 100));
+        for i in 0..80u8 {
+            let value = i % 128;
+            for bytes in [[0xB0, 1, value], [0xE0, value, 64], [0xD0, value, 0]] {
+                let len = if bytes[0] == 0xD0 { 2 } else { 3 };
+                send(MidiMessage::from_bytes(&bytes[..len]).unwrap());
+            }
+        }
+        bl_rt::rt_test!({
+            processor.process_at(256, &NoInput, block);
+        });
+        // The instrument's record holds 4,096 events: read it every block.
+        messages += probe
+            .recorded_notes()
+            .iter()
+            .filter(|n| n.event.kind.is_message())
+            .count();
+        if round % 50 == 0 {
+            collector.collect();
+        }
+    }
+    assert!(
+        messages > 100_000,
+        "{messages} messages reached the instrument"
+    );
+    eprintln!("600 blocks of channel messages under RealtimeSanitizer: {messages} heard");
 }

@@ -1,0 +1,19 @@
+# Offline renders with plug-ins (WP-2.6b)
+
+Exports and agents' renders play a set's CLAP devices through the plug-in instances the live engine plays, so a plug-in device renders as it sounds instead of passing its input through.
+
+## Rules
+
+| Rule | What happens | Test |
+|---|---|---|
+| R1 | A render of a set with a CLAP device takes a loan of the engine's plug-ins (`ClapHost::lend`). A set without one borrows nothing and never touches the host or the engine playing. | `bl-shell::offline_plugins an_export_renders_the_plugin_as_the_engine_plays_it`, `a_set_without_a_plugin_renders_without_borrowing_from_the_host` |
+| R2 | For each lent plug-in, the engine's node hands its processor back at its next block, waiting at most 2 s, and passes its input through until the loan ends. A plug-in not handed back in time fails the render with a clear error rather than exporting pass-through audio. | `bl-plugin-host::offline a_plugin_the_engine_doesnt_hand_back_is_a_problem_for_the_render` |
+| R3 | On the main thread, a lent plug-in is deactivated, its state saved, set to the rendered set's values, and activated for the render's rate and maximum block size. A device with no instance yet (headless `bl-cli export`) gets one from its saved state. | `bl-shell::offline_plugins a_render_at_another_rate_and_block_reactivates_the_plugin_and_gives_it_back`, `bl-plugin-host::offline a_device_without_a_plugin_yet_gets_one_from_its_saved_state` |
+| R4 | When the loan drops, which happens after the render's engine however the render ends (cancel included), each plug-in returns to the engine. Its pre-render state is reloaded and it is reactivated at the engine's settings. Parameter changes it made during the render are dropped. | `a_cancelled_export_gives_every_plugin_back`, `bl-plugin-host::offline a_loan_dropped_before_the_renders_node_still_gives_the_plugin_back`, `bl-engine offline::tests::a_dropped_engine_frees_its_nodes_on_the_spot` |
+| R5 | Renders with plug-ins are exact: bit-identical to the engine's processor, and the same at any block size, run after run. Every render block runs under the allocation trap. | `renders_with_a_plugin_are_the_same_every_time_and_at_any_block_size`, `bl-cli::export_plugins bl_cli_export_renders_through_the_sets_plugin` |
+| R6 | A plug-in that fails while processing in a render is silent for the rest of the render, and the export completes. In the engine it then stays silent, with a status saying it failed in an offline render, until a state load or a new node clears it. | `a_plugin_that_fails_mid_export_goes_silent_and_the_export_completes`, `bl-plugin-host::offline a_plugin_that_fails_while_rendering_goes_silent_there_and_in_the_engine` |
+| R7 | `export.audio` stops the transport first and leaves it stopped. | `a_preview_waits_for_the_song_to_stop_and_an_export_stops_it` |
+| R8 | `perception.preview`, and `perception.analyze` over a range, are refused (`Unavailable`, telling the agent to run `transport.stop`) while the transport plays a set with a CLAP device. Without a CLAP device, previews render during playback as before. | `a_preview_waits_for_the_song_to_stop_and_an_export_stops_it` |
+| R9 | `PluginStatus::active_for` reports the rate and block size a plug-in is active for. | `a_render_at_another_rate_and_block_reactivates_the_plugin_and_gives_it_back` |
+| R10 | Plug-in kit plug-ins compiled in as native devices render offline through their own instances, made from the set's values; nothing is borrowed from the engine. | `an_export_renders_a_kit_device_and_stays_off_the_heap`, `renders_with_a_kit_device_are_the_same_every_time_and_at_any_block_size` |
+| R11 | VST3 and Audio Unit devices aren't rendered offline yet: an export or an agent's render passes their input through. | not yet tested separately |

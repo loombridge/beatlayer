@@ -26,6 +26,9 @@ pub const SENDS: &str = "mixer_view.sends";
 pub const VOLUME: &str = "mixer_view.volume";
 /// `mixer_view.crossfader`: show or hide the Crossfader section.
 pub const CROSSFADER: &str = "mixer_view.crossfader";
+/// `mixer_view.scene_tempo`: show or hide the Main column's scene tempo and
+/// time signature fields.
+pub const SCENE_TEMPO: &str = "mixer_view.scene_tempo";
 /// `mixer_view.return_tracks`: show or hide the return tracks' columns.
 pub const RETURN_TRACKS: &str = "mixer_view.return_tracks";
 /// `mixer_view.scroll`: scroll a mixer's columns sideways.
@@ -42,6 +45,7 @@ pub const IDS: &[&str] = &[
     SENDS,
     VOLUME,
     CROSSFADER,
+    SCENE_TEMPO,
     RETURN_TRACKS,
     SCROLL,
     FOCUS,
@@ -95,6 +99,10 @@ pub struct MixerViewState {
     /// Whether the Crossfader section shows: the tracks' A/B assign buttons
     /// and Main's crossfader. Hidden in a new set.
     pub crossfader: bool,
+    /// Whether the Session View's Main column shows the scenes' tempo and
+    /// time signature fields (View > Scene Tempo and Time Signature). Hidden
+    /// in a new set.
+    pub scene_tempo: bool,
     /// Whether the return tracks' columns show.
     pub return_tracks: bool,
 }
@@ -215,6 +223,17 @@ fn specs() -> Vec<CommandSpec> {
              Main's column, the crossfader itself. Hidden in a new set. Switches unless \
              `shown` says which. Changes only the view; the assign and the position are in \
              the set (`mixer.set_crossfade_assign`, `mixer.set_crossfader`).",
+        )
+        .context(Global)
+        .args::<SectionArgs>(),
+        view(
+            SCENE_TEMPO,
+            "Scene Tempo and Time Signature",
+            "Shows or hides the Session View's scene tempo and time signature fields, at the \
+             left of the Main track's column, as View > Scene Tempo and Time Signature does. \
+             Hidden in a new set. Switches unless `shown` says which. Changes only the view; a \
+             scene's own tempo and signature are in the set (`scene.set_tempo`, \
+             `scene.set_time_signature`).",
         )
         .context(Global)
         .args::<SectionArgs>(),

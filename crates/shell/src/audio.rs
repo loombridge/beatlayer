@@ -692,6 +692,15 @@ impl AudioHost {
         }
     }
 
+    /// The tempo and time signature a launched scene put in place of the
+    /// set's, as the engine last published them (WP-3.5). Nothing while no
+    /// engine runs.
+    pub fn scene_override(&mut self) -> bl_engine::SceneOverride {
+        self.engine
+            .as_mut()
+            .map_or_else(Default::default, |engine| engine.state().scene_override)
+    }
+
     /// The tracks a Session clip has taken over from the Arrangement
     /// (WP-3.6) as the engine last published them: the Back to Arrangement
     /// buttons light from this. Empty once every track returned, and while no

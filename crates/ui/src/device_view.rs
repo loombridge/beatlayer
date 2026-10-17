@@ -374,7 +374,16 @@ impl DeviceViewUi {
                     // Right of the sidechain strip and section (WP-2.19b).
                     let mut body = crate::device_panel::body_rect(rect, TITLE_BAR_HEIGHT);
                     body.min.x += ids::sidechain_width(frame);
-                    crate::device_panel::show(ui, theme, frame, panel, body, events);
+                    let display = shell.device_display(frame.id);
+                    crate::device_panel::show(
+                        ui,
+                        theme,
+                        frame,
+                        panel,
+                        display.as_ref(),
+                        body,
+                        events,
+                    );
                 }
                 self.title(
                     ui,

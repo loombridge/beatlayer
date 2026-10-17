@@ -14,6 +14,7 @@ use rtrb::{Producer, PushError, RingBuffer};
 
 use crate::EngineConfig;
 use crate::compiler::{Compiler, Update};
+use crate::display::Displays;
 use crate::gc::{Collector, DROP_PERIOD, DropThread, GcHandle, Owned};
 use crate::message::{Message, ParamEvent, Report, ScheduledCommand, TransportCommand, When};
 use crate::node::{NodeData, NodeKey};
@@ -353,6 +354,7 @@ pub struct Engine {
     override_sent: SceneOverride,
     gc: GcHandle,
     counts: Arc<Counts>,
+    displays: Displays,
     // Dropped last, after the compiler thread has let go of everything.
     drop_thread: DropThread,
 }
@@ -397,6 +399,7 @@ impl Engine {
             (None, None)
         };
         let mut compiler = Compiler::new(config, registry, gc.clone());
+        let displays = compiler.displays();
         let counts = Arc::new(Counts::default());
         let (requests, receiver) = mpsc::channel();
         // Spec: audio-clips R17. Clips' sources open on a thread of their
@@ -426,6 +429,7 @@ impl Engine {
             gc,
             counts,
             drop_thread,
+            displays,
         };
         Ok((engine, processor))
     }
@@ -568,6 +572,13 @@ impl Engine {
             self.request(Request::Override(scene_override));
         }
         self.monitor.state()
+    }
+
+    /// The display data the running program's devices publish after each
+    /// block (the device framework spec, R26).
+    #[must_use]
+    pub fn displays(&self) -> &Displays {
+        &self.displays
     }
 
     /// Reports from the audio thread since the last call.

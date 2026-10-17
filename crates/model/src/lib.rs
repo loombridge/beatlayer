@@ -63,6 +63,7 @@ mod changes;
 mod clip;
 mod command;
 mod device;
+pub mod device_display;
 pub mod device_layout;
 mod document;
 mod editor;
@@ -92,6 +93,7 @@ pub use device::{
     Device, DeviceKind, DeviceRole, DeviceWindows, PluginFormat, PluginState, Sidechain,
     WindowFrame,
 };
+pub use device_display::{DeviceDisplay, DisplayMarker, DisplayReading, DisplaySeries};
 pub use device_layout::DeviceLayout;
 pub use document::{ArrangementLoop, Document, Settings};
 pub use editor::{EditError, Editor};

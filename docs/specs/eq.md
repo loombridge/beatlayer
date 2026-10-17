@@ -1,7 +1,7 @@
 # The parametric EQ
 
-- **Status:** partial (every rule below has a passing test; the Scale field, Audition, and the device's own panel are not built yet)
-- **Work packages:** WP-2.18a, part 1. The framework it sits on is WP-2.5 ([the native device framework](device-framework.md)); the compressor is WP-2.18a, part 2, and the limiter is part 3; the reverb, delay, and Utility are WP-2.18b
+- **Status:** partial (every rule below has a passing test; the Scale field, Audition, and the dots' gestures are not built yet)
+- **Work packages:** WP-2.18a, part 1; WP-5.43 (the display, R12 to R14). The framework it sits on is WP-2.5 ([the native device framework](device-framework.md)); the compressor is WP-2.18a, part 2, and the limiter is part 3; the reverb, delay, and Utility are WP-2.18b
 - **Parity-matrix row:** Devices: EQ Eight
 - **Checked against:** the Live 12 reference manual, chapter 29 "Live Audio Effect Reference", section 29.15 "EQ Eight", read on 15 October 2026
 
@@ -51,6 +51,9 @@ or an observation of Live running, as the clean-room policy allows.
 - **R9.** Analyze switches the analyser: while it is on the analyser measures the output, and while it is off it measures nothing and the audio passes the filters as ever. (S1, R2)
 - **R10.** Gain scales the output, after the filters, as a gain that reaches −∞ dB (rule G1) and is automatable like every parameter (rule G2). (S2)
 - **R11.** Nothing the device does on the audio thread allocates, locks, or blocks: each channel's band states, the oversamplers, and the analyser's window, FFT buffers, and twiddles are made with the device. (S3, S4)
+- **R12.** Contour publishes the analyser's last window, its 64 bands in dB, after each block, through the framework's display data (the device framework spec, R26), whatever the block's size. (S3, S4)
+- **R13.** Contour's display (device framework R27) holds, while Analyze is on and an engine publishes, the spectrum: the 64 bands over 20 Hz to 20 kHz, each at its centre. It holds, for each curve in use (one in Stereo mode, left and right in L/R, mid and side in M/S), the sum of its switched-on bands' responses in dB at 96 places along 20 Hz to 20 kHz, logarithmically, and each such band's own response; and a marker for each switched-on band at its frequency and its gain (0 dB for a band that has none), reading as its name, type, frequency and gain. The responses are the bands' analytic curves (R3, with Adaptive Q's rise, R5), worked out at 48 kHz. (S1)
+- **R14.** The device's display cell draws the spectrum behind the curves while Analyze is on, each curve in the accent with the bands' own responses faint, and a dot for each marker, and says them to a screen reader. The dots' gestures and Audition are not built. (S1)
 
 ## Tests
 
@@ -67,9 +70,12 @@ or an observation of Live running, as the clean-room policy allows.
 | R9 | `crates/devices/tests/eq.rs`, `the_analyser_reports_the_outputs_spectrum` | unit, real-time trap |
 | R10 | `crates/devices/tests/eq.rs`, `the_output_gain_scales_the_finished_signal`; `crates/devices/tests/rules.rs`, `every_gain_parameter_reaches_minus_infinity` | unit, real-time trap |
 | R11 | `crates/devices/tests/rules.rs`, `every_parameter_is_automatable_to_the_frame`; every test in `crates/devices/tests/eq.rs` runs its blocks as real-time sections under the allocation trap | unit, real-time trap |
+| R12 | `crates/shell/tests/device_displays.rs`, `the_contours_spectrum_and_the_squeezes_gain_reduction_are_published_after_every_block`; `rtsan/tests/device_displays.rs`, `displays_publish_after_every_block_under_rtsan` | unit, real-time trap, RTSan |
+| R13 | `crates/shell/tests/device_displays.rs`, `an_agent_reads_a_display_from_its_parameters_and_from_the_newest_data`; `crates/cli/tests/agent.rs`, `an_agent_reads_a_contours_spectrum_and_a_squeezes_gain_reduction_by_device_id` | unit, MCP script |
+| R14 | `crates/ui/tests/device_panel.rs`, `the_contours_cell_draws_its_curve_dots_and_spectrum_and_says_them`, `a_floating_window_grows_the_display_and_draws_it_there_too` | UI script |
 
 ## Not built yet
 
 - The Scale field, which scales the gain of every gain-bearing band.
 - Audition, which plays one band alone while its dot is held; it is a display gesture.
-- The device's own panel: the framework draws a display cell as a black frame, so the curve, the band dots, and the spectrum are not drawn. The analyser's data is reachable headlessly (`Contour::analyser`).
+- The dots' gestures: dragging a dot to set its band's frequency and gain (and Q, where the band has no gain), switching a band on by clicking in the display, and the band editing the Edit switch chooses between the curves.

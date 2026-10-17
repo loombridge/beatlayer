@@ -30,6 +30,11 @@ pub struct DeviceDescription {
     pub params: Vec<ParamDescriptor>,
     /// Where its controls and display cells sit (IMP-14).
     pub layout: DeviceLayout,
+    /// The views its display offers, such as `Transfer Curve`, the first
+    /// being the one it starts in; empty for a display with one view. Which
+    /// is shown is view state (`device.set_display_view`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub views: Vec<String>,
 }
 
 // Every value in a description is a finite number (`check`), so equality is
@@ -42,7 +47,19 @@ impl DeviceDescription {
     #[must_use]
     pub fn new(params: Vec<ParamDescriptor>) -> Self {
         let layout = DeviceLayout::generic(&params);
-        Self { params, layout }
+        Self {
+            params,
+            layout,
+            views: Vec::new(),
+        }
+    }
+
+    /// The same, with a display that offers `views`, the first the one it
+    /// starts in.
+    #[must_use]
+    pub fn with_views(mut self, views: &[&str]) -> Self {
+        self.views = views.iter().map(|v| (*v).to_owned()).collect();
+        self
     }
 
     /// The same, with its own layout.

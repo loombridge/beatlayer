@@ -43,6 +43,7 @@ pub mod browser;
 pub mod clip_envelope;
 pub mod clip_view;
 pub mod control_bar;
+pub mod device_display;
 pub mod device_panel;
 pub mod device_view;
 pub mod focus;

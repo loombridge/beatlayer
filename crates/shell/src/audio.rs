@@ -855,6 +855,19 @@ impl AudioHost {
         }
     }
 
+    /// Copies the display data the engine's devices last published into
+    /// `out`, reusing its capacity (the device framework spec, R26). Empty
+    /// while no engine runs.
+    pub fn displays_into(
+        &self,
+        out: &mut std::collections::BTreeMap<bl_model::DeviceId, bl_engine::DisplayData>,
+    ) {
+        match self.engine.as_ref() {
+            Some(engine) => engine.displays().read_all(out),
+            None => out.clear(),
+        }
+    }
+
     /// Switches the engine on or off: off closes the device, on reopens it
     /// with the current settings.
     ///

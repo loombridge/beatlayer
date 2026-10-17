@@ -1,7 +1,7 @@
 # The native device framework
 
 - **Status:** implemented (every rule has a passing test)
-- **Work packages:** WP-2.5 (this spec). The device chain, the frame, and preset files are WP-2.4's ([device chains](device-chains.md)); floating device windows are WP-2.5b's; automation lanes and their playback are WP-2.12's; the Info View's help text is WP-2.24's; the first native devices ship with WP-2.16 to 2.18. Plug-ins built on the plug-in kit and compiled in as native devices (R21 to R25) belong to Reagent's own plan
+- **Work packages:** WP-2.5 (this spec); WP-5.43 (device displays, R26 to R29). The device chain, the frame, and preset files are WP-2.4's ([device chains](device-chains.md)); floating device windows are WP-2.5b's; automation lanes and their playback are WP-2.12's; the Info View's help text is WP-2.24's; the first native devices ship with WP-2.16 to 2.18. Plug-ins built on the plug-in kit and compiled in as native devices (R21 to R25) belong to Reagent's own plan
 - **Parity-matrix row:** Devices: device parameters, device controls
 - **Checked against:** Live 12.4.6 on macOS, 12 October 2026; [layout.md](../ui-parity/layout.md) L-DEV-001; [the improvements](../05-improvements.md), rules G1 and G2 and IMP-14
 
@@ -12,6 +12,8 @@ Every native device is built on one framework. A device type describes each of i
 A device's body is laid out as fixed bands of controls and stretchable display cells (IMP-14). Docked, every part has its own size, which is the device's width in the chain; given more room, as a floating window (WP-2.5b) gives it, only the display cells grow, shared by their weights, and the controls keep their size and stay pinned to their edges. A device with no display cell doesn't grow.
 
 The Device View draws any described device from its descriptors and layout, the generic UI: a knob for a continuous value or gain, a switch, a chooser, or a number box, each with its name above and its value, and the display cells framed and left for the device to draw in. Dragging a control, double-clicking it, or pressing Delete while it has the keyboard changes the parameter as one undo step named for it. Agents read every parameter's descriptor and value with `device.parameters`.
+
+A device with a display also publishes the display's latest data after each block, through a lock-free handoff made with its node, as the engine publishes its meters, and the shell reads the newest. A device type turns that data and its parameters into what its display shows: curves and spectra, markers on them, and single readings. The display cell draws them inside the framework's frame, growing with a floating window, and a screen reader says them; agents read the same with `device.display`. A display can offer views, one shown at a time, which is view state.
 
 Beatlayer ships no native device in WP-2.5: three test devices prove the framework.
 
@@ -58,6 +60,10 @@ A plug-in built on Loombridge's plug-in kit can be compiled into Beatlayer and r
 - **R23.** Its own commands are device commands, named and served as the CLAP hosting spec's R18 says, from the moment the device is in the set. Running one runs it on the main thread, checked against its schema; the parameters it changed go into the set in the same undo step (an agent's labelled one), and the engine brings them to the node on their frame (R6). A change the plug-in makes outside a command, as from its own window, is one undo step per gesture, named for its parameter (R18). (S7)
 - **R24.** The set holds its values, which win when the set is opened again, and its own state, in the kit's state layout, taken in without an undo step each time the set is saved or the device copied; a reopened set's device starts a new instance from that state. Offline renders pass it through until WP-2.6b, as they pass CLAP plug-ins (the CLAP hosting spec's decisions). (S7)
 - **R25.** The kit's two example plug-ins, Example Gain and Example Sine, join the device list only with `bl-devices`' `kit-examples` feature, which is off by default, so nothing user-facing ships. (S7)
+- **R26.** A device with a display publishes its display data (a fixed number of values its type lays out) after each block, through a lock-free triple buffer made with its node; the compiler takes the reader when it makes the node, and the shell reads the newest, with a count of the blocks that published. Nothing on the audio thread allocates, locks, or blocks, at any block size, and a device that leaves the program loses its reader. (S6)
+- **R27.** A device type works out its display from its parameters' values and the newest data: curves and spectra (values over an axis), markers on them, and single readings, each with its unit and how it reads. The display cell draws them inside its frame (R15) in place of the black frame alone, in the accent and in grey while the device is switched off (R20), and a floating window's larger cell draws them at its size (R11). The cell is an image in the accessibility tree whose name is the cell's and whose value says the readings, the highest point of a spectrum, and the markers. (S2, S3)
+- **R28.** `device.display` reports a device's display by its ID: the series, markers and readings, the view shown, and whether an engine is publishing (`live`). Without an engine it holds what the parameters give; for a device whose type draws no display it is empty. It is a `read` command. (S6)
+- **R29.** A display can offer views, listed in its description with the first the one it starts in. `device.set_display_view` chooses one (a `read` command: it changes only the view, so it isn't an undo step); `device_view.state` gives each device's frame the view shown, and the cell draws buttons that choose a view, each reachable from the keyboard. A view the display doesn't offer is refused. (S2)
 
 ## Tests
 
@@ -87,6 +93,10 @@ A plug-in built on Loombridge's plug-in kit can be compiled into Beatlayer and r
 | R23 | `crates/devices/tests/kit.rs`, `a_command_runs_on_the_main_thread_and_reports_its_changes`; `crates/agent/tests/kit_devices.rs`, `a_kit_plugin_compiled_in_serves_its_commands_as_device_commands` | unit, MCP script, real-time trap count |
 | R24 | `crates/agent/tests/kit_devices.rs`, `a_kit_plugin_compiled_in_serves_its_commands_as_device_commands` | MCP script |
 | R25 | `crates/agent/tests/kit_devices.rs`, `a_kit_plugin_compiled_in_serves_its_commands_as_device_commands` (built with the feature) | MCP script |
+| R26 | `crates/engine/src/display.rs`, `the_reader_sees_the_newest_publication`; `crates/shell/tests/device_displays.rs`, `the_contours_spectrum_and_the_squeezes_gain_reduction_are_published_after_every_block`; `rtsan/tests/device_displays.rs`, `displays_publish_after_every_block_under_rtsan` | unit, real-time trap, RTSan |
+| R27 | `crates/ui/tests/device_panel.rs`, `the_contours_cell_draws_its_curve_dots_and_spectrum_and_says_them`, `the_squeezes_cell_draws_its_gain_reduction_and_the_chosen_view`, `a_floating_window_grows_the_display_and_draws_it_there_too` | UI script |
+| R28 | `crates/shell/tests/device_displays.rs`, `an_agent_reads_a_display_from_its_parameters_and_from_the_newest_data`; `crates/cli/tests/agent.rs`, `an_agent_reads_a_contours_spectrum_and_a_squeezes_gain_reduction_by_device_id` | unit, MCP script, real-time trap count |
+| R29 | `crates/shell/tests/device_displays.rs`, `the_squeezes_view_is_view_state_that_agents_set_and_read`; `crates/ui/tests/device_panel.rs`, `the_squeezes_cell_draws_its_gain_reduction_and_the_chosen_view`; `crates/ui/tests/accessibility.rs`, `every_m1_command_is_reachable_from_the_keyboard` | unit, UI script |
 
 
 ## Details

@@ -1,7 +1,7 @@
 # The compressor
 
-- **Status:** partial
-- **Work packages:** WP-2.18a (part 2; the compressor with sidechain)
+- **Status:** implemented (every rule has a passing test)
+- **Work packages:** WP-2.18a (part 2; the compressor with sidechain); WP-5.43 (the display, R14 to R16)
 - **Parity-matrix row:** Devices: EQ Eight, Compressor, Limiter, Reverb, Delay, Utility
 - **Checked against:** Live 12's reference manual, chapter 29 "Live Audio Effect Reference", section 29.9 "Compressor" and its sidechain section, read 15 October 2026; Live 12.4.6 on macOS, observed 12 October 2026 (the sidechain and device controls); the parameter ranges and defaults are Beatlayer's own
 
@@ -9,7 +9,7 @@
 
 Squeeze is Beatlayer's compressor: it turns a signal's gain down above a threshold, by a ratio that reaches infinity, over a knee; it can expand above the threshold instead, detect peaks or an RMS level, shape its envelope linearly or logarithmically, look ahead, compensate its output with Makeup, blend the compressed and dry signals with Dry/Wet, and listen to another track through its sidechain section, whose own SC Filter hears only a band of it.
 
-The detector hears what the engine hands the device on its sidechain (WP-2.19b: another track through the sidechain's gain and mix, or the device's own input), and the curve turns its level into a gain, over the knee: compression turns the gain down by the ratio, expansion turns it up. The gain falls with the Attack time constant and recovers with the Release one, or a signal-dependent time with Auto Release. The device's two channels share one gain reduction, the larger of the two. The signal is delayed by the look-ahead, so the gain has begun to fall when a peak comes out, and that delay is the device's latency for delay compensation (WP-2.11). This spec covers the device's behaviour, not the drawing of its display cell (the gain reduction meter, the transfer curve and the view buttons), which belongs to the device panel's display work; the framework (parameters, smoothing, layout, automation) is the [device framework spec](device-framework.md), and the sidechain's section, source and mix are the [routing spec](routing.md)'s (R22 to R31).
+The detector hears what the engine hands the device on its sidechain (WP-2.19b: another track through the sidechain's gain and mix, or the device's own input), and the curve turns its level into a gain, over the knee: compression turns the gain down by the ratio, expansion turns it up. The gain falls with the Attack time constant and recovers with the Release one, or a signal-dependent time with Auto Release. The device's two channels share one gain reduction, the larger of the two. The signal is delayed by the look-ahead, so the gain has begun to fall when a peak comes out, and that delay is the device's latency for delay compensation (WP-2.11). The display cell shows the gain reduction as a meter, and the transfer curve or the activity as its view says (R14 to R16); the framework (parameters, smoothing, layout, automation) is the [device framework spec](device-framework.md), and the sidechain's section, source and mix are the [routing spec](routing.md)'s (R22 to R31).
 
 ## Sources
 
@@ -35,6 +35,9 @@ The detector hears what the engine hands the device on its sidechain (WP-2.19b: 
 - **R11.** Out is the output gain, reaching −∞ dB (rule G1); Dry/Wet blends the compressed and dry signals, and at 0 % the device is effectively bypassed. (S1, S4)
 - **R12.** With External on, the detector hears the sidechain's key: another track's signal through SC Gain and Mix, or the device's own input with Mix, as the routing spec's R24 says; with External off it hears its own input. A key above the threshold turns the device's gain down, so one track ducks under another. (S2, routing R24)
 - **R13.** SC Filter, its Type (Low Pass, Band Pass, High Pass), Freq and Res filter what the detector hears, so only a band of it triggers the device. Beatlayer's types and ranges are its own, and the filter acts on the trigger only. (S2, S3)
+- **R14.** Squeeze publishes three values after each block, through the framework's display data (the device framework spec, R26), whatever the block's size: the gain now in dB, and the detector's input and the output's peaks since the last block in dB. (S1, S3)
+- **R15.** Squeeze's display (device framework R27) holds, with an engine publishing, the readings Gain Reduction, Input and Output in dB; always, the Transfer Curve, the output level for each input level from −60 dB to 0 dB, a point to the dB, from the threshold, ratio, knee and mode; and the markers Threshold, on the curve at the threshold, and Level, on it at the detector's input level now. (S1)
+- **R16.** The display offers the views Transfer Curve, Activity and Collapsed, in that order, and starts in the first; the view shown is view state (device framework R29). Every view draws the gain reduction as a meter down the cell's right edge, in dB of reduction over 24 dB. Transfer Curve draws the curve with the two markers; Activity draws the input's level scrolling to the left, with the gain reduction hanging from the top; Collapsed draws the meter alone. The views' buttons sit along the cell's top-right corner. (S1, S3)
 
 ## Tests
 
@@ -52,4 +55,7 @@ The detector hears what the engine hands the device on its sidechain (WP-2.19b: 
 | R11 | `crates/devices/tests/compressor.rs`, `dry_wet_mixes_the_compressed_and_dry_signals` | unit, real-time trap |
 | R12 | `crates/devices/tests/compressor.rs`, `a_sidechain_key_ducks_the_input`; `crates/engine/tests/sidechain.rs`, `a_device_hears_its_source_through_gain_and_mix_and_listen_plays_it` | unit, real-time trap |
 | R13 | `crates/devices/tests/compressor.rs`, `the_sc_filter_hears_only_its_band` | unit, real-time trap |
+| R14 | `crates/shell/tests/device_displays.rs`, `the_contours_spectrum_and_the_squeezes_gain_reduction_are_published_after_every_block`; `rtsan/tests/device_displays.rs`, `displays_publish_after_every_block_under_rtsan` | unit, real-time trap, RTSan |
+| R15 | `crates/shell/tests/device_displays.rs`, `the_squeezes_view_is_view_state_that_agents_set_and_read`; `crates/cli/tests/agent.rs`, `an_agent_reads_a_contours_spectrum_and_a_squeezes_gain_reduction_by_device_id` | unit, MCP script |
+| R16 | `crates/ui/tests/device_panel.rs`, `the_squeezes_cell_draws_its_gain_reduction_and_the_chosen_view`; `crates/shell/tests/device_displays.rs`, `the_squeezes_view_is_view_state_that_agents_set_and_read` | UI script, unit |
 | G1, G2 | `crates/devices/tests/rules.rs` over the shipped types | real-time trap |

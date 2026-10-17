@@ -8,8 +8,8 @@ use bl_core::time::{Frames, SampleRate, TempoMap};
 use bl_dsp::LinearSmoother;
 use bl_dsp::smooth::DEFAULT_SMOOTHING_SECONDS;
 use bl_engine::{
-    AutomationList, Block, DeviceType, Node, NodeConfig, NodeData, NodeEvent, NoteEvent,
-    ParamValue, Registry, segments,
+    AutomationList, Block, DeviceType, DisplayReader, DisplayWriter, Node, NodeConfig, NodeData,
+    NodeEvent, NoteEvent, ParamValue, Registry, display_channel, segments,
 };
 use bl_model::{Device, DeviceDescription, DeviceKind, ParamDescriptor, ParamId};
 
@@ -46,6 +46,22 @@ pub trait NativeDevice: Send + 'static {
     /// (WP-2.11).
     fn latency(&self) -> u32 {
         0
+    }
+
+    /// How many values the device's display data has (the framework spec,
+    /// R26): 0 for a device with no display to draw from the audio. Asked
+    /// once, when the node is made.
+    fn display_len(&self) -> usize {
+        0
+    }
+
+    /// Writes the display's latest values into `out`, [`display_len`] of
+    /// them, after each block. It runs on the audio thread: it allocates,
+    /// locks and blocks nothing.
+    ///
+    /// [`display_len`]: Self::display_len
+    fn display(&mut self, out: &mut [f32]) {
+        let _ = out;
     }
 }
 
@@ -380,6 +396,9 @@ impl DelayLine {
 pub struct NativeNode<D> {
     device: D,
     params: ParamBank,
+    /// Where the device publishes its display after each block, and the
+    /// reader the compiler takes once.
+    display: Option<(DisplayWriter, Option<DisplayReader>)>,
 }
 
 impl<D: NativeDevice> NativeNode<D> {
@@ -392,9 +411,15 @@ impl<D: NativeDevice> NativeNode<D> {
         values: &Device,
         config: &NodeConfig,
     ) -> Self {
+        let len = device.display_len();
+        let display = (len > 0).then(|| {
+            let (writer, reader) = display_channel(len);
+            (writer, Some(reader))
+        });
         Self {
             device,
             params: ParamBank::new(description, values, config),
+            display,
         }
     }
 
@@ -435,6 +460,11 @@ impl<D: NativeDevice> Node for NativeNode<D> {
             };
             self.device.process(&mut audio, &self.params);
         }
+        // Spec: device-framework R26. The display's latest values, after
+        // each block.
+        if let Some((writer, _)) = &mut self.display {
+            writer.publish(|out| self.device.display(out));
+        }
     }
 
     fn flush(&mut self, events: &[NodeEvent]) {
@@ -456,6 +486,10 @@ impl<D: NativeDevice> Node for NativeNode<D> {
 
     fn latency(&self) -> u32 {
         self.device.latency()
+    }
+
+    fn display(&mut self) -> Option<DisplayReader> {
+        self.display.as_mut().and_then(|(_, reader)| reader.take())
     }
 }
 

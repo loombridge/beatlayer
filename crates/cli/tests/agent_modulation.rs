@@ -89,3 +89,78 @@ fn an_agent_reads_a_parameters_base_played_value_and_sources() {
     assert_eq!(other["results"][0]["result"]["parameters"], json!([]));
     assert!(client.into_transport().finish().unwrap().success());
 }
+
+// Spec: modulation R18
+#[test]
+fn an_agent_maps_a_modulator_and_reads_its_mappings_back() {
+    let mut client = bl_cli_mcp();
+    let device = |track: &str, name: &str, device_type: &str| {
+        json!({ "command": "device.insert",
+                "args": { "track": {"$ref": track}, "index": 0,
+                          "device": { "id": {"$new": name}, "name": name,
+                                      "kind": { "native": { "device_type": device_type } },
+                                      "enabled": true, "params": [] } } })
+    };
+    let made = call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "track.create",
+              "args": { "id": {"$new": "Mod"}, "kind": "audio", "name": "Mod", "index": 0 } },
+            { "command": "track.create",
+              "args": { "id": {"$new": "Voice"}, "kind": "audio", "name": "Voice", "index": 1 } },
+            device("Mod", "Wave", "beatlayer.wave_mod"),
+            device("Voice", "Utility", "beatlayer.utility"),
+            { "command": "modulator.map",
+              "args": { "device": {"$ref": "Wave"}, "slot": 0,
+                        "target": { "type": "device", "device": {"$ref": "Utility"}, "param": 9 } } },
+            { "command": "modulator.map",
+              "args": { "device": {"$ref": "Wave"}, "slot": 1,
+                        "target": { "type": "mixer", "track": {"$ref": "Voice"}, "param": "volume" } } },
+        ] }),
+    );
+    let results = made["results"].as_array().unwrap();
+    assert_eq!(results.len(), 6, "{made}");
+    let wave = call(&mut client, "query", json!({ "path": "device \"Wave\"" }));
+    let mappings = wave["mappings"].as_array().unwrap();
+    assert_eq!(mappings.len(), 2, "{wave}");
+    assert_eq!(mappings[0]["slot"], 0);
+    assert_eq!(mappings[0]["target"]["type"], "device");
+    assert_eq!(mappings[0]["target"]["param"], 9);
+    assert_eq!(mappings[1]["target"]["type"], "mixer");
+    // The state query names the slot among a parameter's modulators.
+    let state = &call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "modulation.state", "args": {} }] }),
+    )["results"][0]["result"];
+    let parameters = state["parameters"].as_array().unwrap();
+    assert_eq!(parameters.len(), 2, "{state}");
+    assert!(
+        parameters
+            .iter()
+            .all(|p| p["modulators"][0]["remote_control"] == false),
+        "{state}"
+    );
+    // Unmap takes one away, and the Mod switch holds the other.
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "modulator.unmap", "args": { "device": {"$ref": "Wave"}, "slot": 1 } },
+            { "command": "device.set_param",
+              "args": { "device": {"$ref": "Wave"}, "param": 64, "value": 1.0 } },
+        ] }),
+    );
+    let wave = call(&mut client, "query", json!({ "path": "device \"Wave\"" }));
+    assert_eq!(wave["mappings"].as_array().unwrap().len(), 1);
+    let state = &call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "modulation.state", "args": {} }] }),
+    )["results"][0]["result"];
+    let held = &state["parameters"][0];
+    assert_eq!(held["modulators"][0]["remote_control"], true, "{state}");
+    assert!(held["held_by"].is_number(), "{state}");
+    assert!(client.into_transport().finish().unwrap().success());
+}

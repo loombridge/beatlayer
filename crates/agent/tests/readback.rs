@@ -265,7 +265,7 @@ fn fixture() -> Project {
     device.enabled = false;
     device.show_preset_name = false;
     device.floating = true;
-    device.media = Some(ContentHash([9; 32]));
+    device.set_media(0, Some(ContentHash([9; 32])));
     device.role = DeviceRole::AudioEffect;
     device.params.insert(ParamId(2), 0.75);
     // B active, with A's values kept (device compare R1, R10).
@@ -288,6 +288,35 @@ fn fixture() -> Project {
             track: vox,
             index: 0,
             device,
+        },
+    );
+    // A Curve Mod mapping that device, with a shape of its own.
+    let curve: bl_model::DeviceId = editor.new_id();
+    let mut modulator = Device::new(
+        curve,
+        "Curve Mod",
+        DeviceKind::Native {
+            device_type: bl_model::modulator::CURVE_MOD.to_owned(),
+        },
+    );
+    modulator.shape = Some(bl_model::modulator::shape_preset(6).unwrap());
+    apply(
+        &mut editor,
+        Command::InsertDevice {
+            track: vox,
+            index: 1,
+            device: modulator,
+        },
+    );
+    apply(
+        &mut editor,
+        Command::MapModulator {
+            device: curve,
+            slot: 2,
+            target: bl_model::modulator::ModTarget::Device {
+                device: compressor,
+                param: ParamId(2),
+            },
         },
     );
 
@@ -699,6 +728,14 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "b_active",
                 "other_params",
             ][..],
+        ),
+        (
+            &devices
+                .iter()
+                .find(|d| d["kind"]["native"]["device_type"] == bl_model::modulator::CURVE_MOD)
+                .unwrap()
+                .clone(),
+            &["mappings", "shape"][..],
         ),
         (
             &clips

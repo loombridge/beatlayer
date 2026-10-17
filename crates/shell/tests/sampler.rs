@@ -114,7 +114,7 @@ fn sample_of(shell: &Shell, device: DeviceId) -> Option<ContentHash> {
         .document()
         .device(device)
         .expect("the sampler")
-        .media
+        .media_at(0)
 }
 
 // Spec: sampler R11

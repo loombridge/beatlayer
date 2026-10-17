@@ -36,6 +36,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+use bl_rt::Workgroup;
 use rtrb::{Consumer, RingBuffer};
 
 use crate::power::{ClockJump, PowerEvent, PowerMonitor};
@@ -55,13 +56,19 @@ pub type BackendFactory = Box<dyn FnOnce() -> Result<Box<dyn Backend>, Error> + 
 /// and been dropped, before the next `open`.
 pub trait StreamClient: Send + 'static {
     /// Makes the callback for a stream that has just opened, with what it
-    /// actually runs at. The stream starts once it returns. An error closes
-    /// the stream, and the supervisor tries again later.
+    /// actually runs at, and the audio workgroup its audio thread works in
+    /// (macOS), for the client's own real-time threads to join. The stream
+    /// starts once it returns. An error closes the stream, and the
+    /// supervisor tries again later.
     ///
     /// # Errors
     ///
     /// If the client can't run at `info`'s settings.
-    fn open(&mut self, info: &StreamInfo) -> Result<Box<dyn AudioCallback>, Error>;
+    fn open(
+        &mut self,
+        info: &StreamInfo,
+        workgroup: Option<Workgroup>,
+    ) -> Result<Box<dyn AudioCallback>, Error>;
 
     /// The stream the last `open` made a callback for has stopped, and its
     /// callback has been dropped.
@@ -924,7 +931,7 @@ impl Worker {
         {
             self.names.insert(device.id.clone(), device.name.clone());
         }
-        let callback = self.client.open(&info)?;
+        let callback = self.client.open(&info, stream.workgroup())?;
         if handoff.push(callback).is_err() {
             unreachable!("a new hand-off has room for one callback");
         }
@@ -1031,7 +1038,11 @@ mod tests {
     }
 
     impl StreamClient for Client {
-        fn open(&mut self, info: &StreamInfo) -> Result<Box<dyn AudioCallback>, Error> {
+        fn open(
+            &mut self,
+            info: &StreamInfo,
+            _workgroup: Option<Workgroup>,
+        ) -> Result<Box<dyn AudioCallback>, Error> {
             if self.refuse.swap(false, Relaxed) {
                 self.log.lock().unwrap().push("refused".to_owned());
                 return Err(Error::new(ErrorKind::Backend, "the client refused"));

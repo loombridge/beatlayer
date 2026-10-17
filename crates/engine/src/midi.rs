@@ -28,6 +28,7 @@ use bl_core::time::SampleRate;
 use bl_model::{Document, Input, TrackId, TrackKind};
 use rtrb::Consumer;
 
+use crate::disjoint::Shared;
 use crate::node::{NoteBuffer, NoteEvent, NoteExpression, NoteKind};
 use crate::program::Task;
 
@@ -159,7 +160,7 @@ impl Route {
 /// in the last block.
 #[derive(Debug, Default)]
 pub(crate) struct MidiRoutes {
-    routes: Vec<Route>,
+    routes: Shared<Route>,
 }
 
 impl MidiRoutes {
@@ -192,7 +193,9 @@ impl MidiRoutes {
                 })
             })
             .collect();
-        Self { routes }
+        Self {
+            routes: Shared::new(routes),
+        }
     }
 
     /// What `track`'s input received in the last block, if it's a MIDI
@@ -208,7 +211,7 @@ impl MidiRoutes {
     }
 
     fn clear(&mut self) {
-        for route in &mut self.routes {
+        for route in self.routes.iter_mut() {
             route.events.clear();
         }
     }
@@ -218,7 +221,7 @@ impl MidiRoutes {
     /// it took, or no longer monitors, ends them in its first block. Real-time
     /// safe: it swaps buffers.
     pub(crate) fn inherit(&mut self, old: &mut Self) {
-        for route in &mut self.routes {
+        for route in self.routes.iter_mut() {
             let Some(was) = old.routes.iter_mut().find(|r| r.track == route.track) else {
                 continue;
             };
@@ -232,10 +235,16 @@ impl MidiRoutes {
     /// the block into `notes`, merged with the notes already there, at
     /// offsets counted from `from`; ends the held notes first if the route
     /// changed. A track that doesn't monitor adds nothing.
-    pub(crate) fn play(&mut self, track: TrackId, from: u32, until: u32, notes: &mut NoteBuffer) {
-        let Some(route) = self.routes.iter_mut().find(|r| r.track == track) else {
+    ///
+    /// The tracks' tasks run at once on a pool of workers, each playing its
+    /// own track's route, which no other task reaches.
+    pub(crate) fn play(&self, track: TrackId, from: u32, until: u32, notes: &mut NoteBuffer) {
+        let Some(at) = self.routes.iter().position(|r| r.track == track) else {
             return;
         };
+        // SAFETY: a route belongs to its track's task, which is the one
+        // thread playing it in this block.
+        let route = unsafe { self.routes.element(at) };
         if route.release {
             // Spec: midi-io R26
             route.release = false;
@@ -458,7 +467,7 @@ impl MidiIn {
             };
             let mut matched = false;
             if let Some(routes) = routes.as_deref_mut() {
-                for route in &mut routes.routes {
+                for route in routes.routes.iter_mut() {
                     if route.takes(&event) {
                         matched = true;
                         if route.push(placed) {

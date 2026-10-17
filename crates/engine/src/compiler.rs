@@ -12,6 +12,7 @@ use bl_model::{
 use crate::EngineConfig;
 use crate::automation;
 use crate::clips::{ClipList, ClipPlayer};
+use crate::disjoint::Shared;
 use crate::display::Displays;
 use crate::gc::{GcHandle, Program};
 use crate::message::{LoopRegion, ParamEvent, Punch, TransportCommand};
@@ -19,11 +20,12 @@ use crate::midi_clips::{MidiClipList, MidiClipPlayer};
 use crate::mixer::{self, Route, Solo, TrackMixer, route};
 use crate::node::{NodeData, NodeKey, NoteBuffer, ParamValue};
 use crate::program::{
-    DeviceInput, DeviceSidechain, EngineProgram, ExtOut, Input, Instance, Migration, NO_DELAY,
-    NodeSlot, Rack, RackChain, RackMode, Span, Step, Task, delay_storage,
+    DeviceInput, DeviceSidechain, EngineProgram, ExtOut, Input, Instance, MergeCursor, Migration,
+    NO_DELAY, NodeSlot, Rack, RackChain, RackMode, Span, Step, Task, delay_storage,
 };
 use crate::registry::Registry;
 use crate::routing::{Edge, Graph, Via};
+use crate::sched::Sched;
 use crate::session::{SceneMaps, SceneOverride};
 use crate::sidechain::{self, SidechainKey};
 use crate::sources::{ClipSources, Loaded, Loader};
@@ -575,27 +577,26 @@ impl Compiler {
             generation,
             base,
             index: build.layout.iter().map(|(&key, p)| (key, p.slot)).collect(),
-            slots: build.slots,
+            slots: Shared::new(build.slots),
             migrations: build.migrations,
             order,
             task_dependents: dependents.iter().flatten().copied().collect(),
+            sched: Sched::new(tasks, build.racks.len(), build.rack_chains.len()),
             tasks: with_dependents(build.tasks, &dependents),
             task_inputs: build.inputs,
             steps: build.steps,
-            merge: Vec::with_capacity(build.rack_chains.len()),
+            merge: Shared::new(vec![MergeCursor::default(); build.rack_chains.len()]),
             racks: build.racks,
             rack_chains: build.rack_chains,
-            sidechain_pool: vec![0.0; build.sidechains.len() * size],
+            sidechain_pool: Shared::new(vec![0.0; build.sidechains.len() * size]),
             sidechains: build.sidechains,
             sidechain_inputs: build.sidechain_inputs,
-            pool: vec![0.0; (tasks + build.chain_buffers as usize) * size],
-            tap_pool: vec![0.0; kept as usize * size],
+            pool: Shared::new(vec![0.0; (tasks + build.chain_buffers as usize) * size]),
+            tap_pool: Shared::new(vec![0.0; kept as usize * size]),
             delay_lines,
             delay_pool,
-            delay_scratch: vec![0.0; size],
             device_input: vec![0.0; self.config.input_channels * self.config.max_frames],
             device_input_channels: self.config.input_channels,
-            device_scratch: vec![0.0; size],
             channels: self.config.channels,
             max_frames: self.config.max_frames,
             output: task_of[&document.main_id()],
@@ -614,9 +615,11 @@ impl Compiler {
                 .into_iter()
                 .filter(|&id| document.track(id).is_some_and(|t| t.kind().holds_clips()))
                 .collect(),
-            note_buffers: (0..2 + 2 * build.chain_buffers)
-                .map(|_| NoteBuffer::with_capacity(1024))
-                .collect(),
+            note_buffers: Shared::new(
+                (0..2 * (tasks as u32 + build.chain_buffers))
+                    .map(|_| NoteBuffer::with_capacity(1024))
+                    .collect(),
+            ),
             releases: crate::program::Releases::new(),
             midi,
         };
@@ -1029,6 +1032,8 @@ impl Compiler {
         let start = build.rack_chains.len() as u32;
         build.rack_chains.extend(chains);
         build.racks.push(Rack {
+            // The task is pushed once its chain is built, in this place.
+            task: build.tasks.len() as u32,
             mode: match kind {
                 RackKind::AudioEffect => RackMode::Audio,
                 RackKind::Instrument | RackKind::Drum => RackMode::Instrument,
@@ -2154,8 +2159,16 @@ mod tests {
                 program.order = program.ready_order();
                 assert_ne!(program.order, (0..5).collect::<Vec<_>>());
             }
-            let mut scratch = Vec::new();
-            program.run(64, 0, &[], &mut scratch, TransportInfo::default(), &[]);
+            let mut lane = crate::sched::Lane::new(f.compiler.config());
+            let block = crate::program::Blk {
+                frames: 64,
+                from: 0,
+                until: 64,
+                events: &[],
+                transport: TransportInfo::default(),
+                session: &[],
+            };
+            program.run(None, &mut lane, block);
             program.output(0, 64).to_vec()
         };
         let in_order = render(&mut f, false);

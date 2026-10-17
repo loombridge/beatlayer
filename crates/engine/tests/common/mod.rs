@@ -9,8 +9,8 @@ use std::sync::Arc;
 use bl_core::time::SampleRate;
 use bl_engine::testing::{self, Probe};
 use bl_engine::{
-    Collector, Compiler, EngineConfig, Monitor, NodeKey, Processor, Registry, Sender, Update,
-    channel,
+    Collector, Compiler, EngineConfig, Monitor, NodeKey, Pool, PoolConfig, PoolMonitor, Processor,
+    Registry, Sender, Update, channel,
 };
 use bl_model::{
     Chain, ChainId, Command, Device, DeviceId, DeviceKind, DeviceRole, Editor, ParamId, RackKind,
@@ -168,6 +168,19 @@ pub fn full_depth() -> bool {
     }
 }
 
+/// How many workers the rigs run tasks with, beside the test's thread: the
+/// `BL_TEST_WORKERS` variable, none if unset. Running a test file with it set
+/// (`BL_TEST_WORKERS=3 cargo nextest run -p bl-engine`) checks that
+/// everything it asserts holds when the pool runs the tasks (WP-5.37).
+pub fn test_workers() -> usize {
+    match std::env::var("BL_TEST_WORKERS").as_deref() {
+        Ok(workers) if !workers.is_empty() => workers
+            .parse()
+            .unwrap_or_else(|_| panic!("BL_TEST_WORKERS is `{workers}`: set it to a number")),
+        _ => 0,
+    }
+}
+
 /// An engine's three ends and a compiler, all on the test's thread.
 pub struct Rig {
     pub editor: Editor,
@@ -177,6 +190,8 @@ pub struct Rig {
     pub sender: Sender,
     pub processor: Processor,
     pub monitor: Monitor,
+    /// The pool of workers the processor runs tasks with, if it has one.
+    pub pool: Option<PoolMonitor>,
 }
 
 impl Rig {
@@ -229,7 +244,14 @@ impl Rig {
         let mut registry = testing::registry(&probe);
         extend(&mut registry);
         let compiler = Compiler::new(config, registry, collector.handle());
-        let (sender, processor, monitor) = channel(&config);
+        let (sender, mut processor, monitor) = channel(&config);
+        let workers = test_workers();
+        let pool = (workers > 0).then(|| {
+            let pool = Pool::start(&config, &PoolConfig::plain(workers)).unwrap();
+            let monitor = pool.monitor();
+            processor.set_pool(Some(pool));
+            monitor
+        });
         Self {
             editor: Editor::new(),
             probe,
@@ -238,7 +260,23 @@ impl Rig {
             sender,
             processor,
             monitor,
+            pool,
         }
+    }
+
+    /// A rig that runs its tasks on `workers` workers beside the test's
+    /// thread, whatever `BL_TEST_WORKERS` says; `0` runs them on the one.
+    pub fn with_workers(max_frames: usize, workers: usize) -> Self {
+        let mut rig = Self::configured(max_frames, 0, 0, |_| {});
+        let config = *rig.processor.config();
+        rig.processor.set_pool(None);
+        rig.pool = (workers > 0).then(|| {
+            let pool = Pool::start(&config, &PoolConfig::plain(workers)).unwrap();
+            let monitor = pool.monitor();
+            rig.processor.set_pool(Some(pool));
+            monitor
+        });
+        rig
     }
 
     /// Syncs the document, sends the update, and says what it held.

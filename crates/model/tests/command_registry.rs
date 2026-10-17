@@ -9,8 +9,8 @@ use bl_commands::{Registry, args_schema, tagged_variant, validate};
 use bl_core::time::{Bpm, TempoMap, Ticks, TimeSignature, TimeSignatureMap};
 use bl_model::registry::{self, RunError};
 use bl_model::{
-    ArrangementLoop, AudioData, AutomationTarget, Change, ChangeSet, Channel, Clip, ClipData,
-    ClipId, ClipLaunch, Command, ContentHash, CountIn, CrossfadeAssign, Device, DeviceId,
+    ArrangementLoop, AudioData, AutomationTarget, Chain, ChainId, Change, ChangeSet, Channel, Clip,
+    ClipData, ClipId, ClipLaunch, Command, ContentHash, CountIn, CrossfadeAssign, Device, DeviceId,
     DeviceKind, EditError, Editor, Input, LaunchMode, LaunchQuantization, MetronomeRhythm,
     MetronomeSound, MidiData, MixerParam, ModelError, Monitor, Note, Output, ParamId, PluginFormat,
     SceneId, SendTap, TakeClip, TakeLane, Tap, TrackId, TrackKind,
@@ -51,7 +51,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        99,
+        114,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -61,8 +61,8 @@ fn every_document_command_is_registered() {
          clips, WP-3.2 set_slot_stop_button, WP-2.12 seven for automation, WP-3.15 six for clip \
          envelopes, WP-3.17 two for the crossfader, WP-2.14 set_midi_overdub, WP-2.13 the \
          two punch switches, WP-2.13 add_take_lane, WP-3.4 three for a clip's launch \
-         settings, WP-3.5 two for a scene's tempo and signature, and WP-3.3 \
-         set_clip_launch_mode"
+         settings, WP-3.5 two for a scene's tempo and signature, WP-3.3 \
+         set_clip_launch_mode, and WP-5.1 fifteen for racks and their chains"
     );
 
     for op in &ops {
@@ -723,6 +723,121 @@ fn every_command_runs_by_id() {
         "device.set_sidechain_listen",
         json!({ "device": duck, "listen": true }),
     );
+    // Racks (WP-5.1): a rack with a chain, a second chain added with a
+    // device in it, a device moved in and switched on and off with
+    // everything inside, and the chain's controls.
+    let rack: DeviceId = agent.new_id();
+    let first: ChainId = agent.new_id();
+    agent.run(
+        "device.insert",
+        json!({ "track": reverb, "index": 0, "device": {
+            "id": rack, "name": "Audio Effect Rack", "enabled": true, "params": [],
+            "kind": { "rack": { "kind": "audio_effect" } },
+            "chains": [{ "id": first, "name": "Dry", "devices": [] }],
+        } }),
+    );
+    let second: ChainId = agent.new_id();
+    let inner: DeviceId = agent.new_id();
+    agent.run(
+        "chain.add",
+        json!({ "rack": rack, "index": 1, "chain": {
+            "id": second, "name": "Wet", "devices": [{
+                "id": inner, "name": "Verb", "enabled": true, "params": [],
+                "kind": { "native": { "device_type": "beatlayer.verb" } },
+            }],
+        } }),
+    );
+    let tail: DeviceId = agent.new_id();
+    agent.run(
+        "device.insert_in_chain",
+        json!({ "chain": first, "index": 0, "device": {
+            "id": tail, "name": "Tail", "enabled": true, "params": [],
+            "kind": { "native": { "device_type": "beatlayer.tail" } },
+        } }),
+    );
+    agent.run(
+        "device.move_to_chain",
+        json!({ "device": eq, "chain": second, "index": 1 }),
+    );
+    assert_eq!(agent.editor.document().chain_track(second), Some(reverb));
+    agent.run(
+        "device.set_enabled_all",
+        json!({ "device": rack, "enabled": false }),
+    );
+    assert!(
+        [rack, tail, inner, eq].iter().all(|d| !agent
+            .editor
+            .document()
+            .device(*d)
+            .unwrap()
+            .enabled)
+    );
+    agent.run("chain.rename", json!({ "chain": first, "name": "Direct" }));
+    agent.run("chain.set_colour", json!({ "chain": first, "colour": 12 }));
+    agent.run(
+        "chain.set_info",
+        json!({ "chain": first, "info": "no verb" }),
+    );
+    agent.run("chain.set_gain", json!({ "chain": first, "volume": 0.5 }));
+    agent.run("chain.set_pan", json!({ "chain": first, "pan": -0.25 }));
+    agent.run(
+        "chain.set_enabled",
+        json!({ "chain": first, "enabled": false }),
+    );
+    agent.run("chain.set_solo", json!({ "chain": second, "solo": true }));
+    agent.run(
+        "chain.move",
+        json!({ "chain": second, "rack": rack, "index": 0 }),
+    );
+    let direct = agent.editor.document().chain(first).unwrap();
+    assert_eq!(
+        (direct.name.as_str(), direct.colour, direct.info.as_str()),
+        ("Direct", Some(12), "no verb")
+    );
+    assert_eq!((direct.mixer.volume, direct.mixer.pan), (0.5, -0.25));
+    assert!(!direct.mixer.enabled);
+    let order: Vec<ChainId> = agent
+        .editor
+        .document()
+        .device(rack)
+        .unwrap()
+        .chains
+        .iter()
+        .map(|c| c.id)
+        .collect();
+    assert_eq!(order, [second, first]);
+    // A device moves out of a rack with `device.move`, and the rest of a
+    // chain goes with it when it's deleted.
+    agent.run(
+        "device.move",
+        json!({ "device": eq, "track": reverb, "index": 1 }),
+    );
+    agent.run("chain.remove", json!({ "chain": second }));
+    assert!(agent.editor.document().chain(second).is_none());
+    assert!(agent.editor.document().device(inner).is_none());
+    assert!(agent.editor.document().device(eq).is_some());
+    agent.run("device.remove", json!({ "device": rack }));
+    assert!(agent.editor.document().device(tail).is_none());
+    // Group and Ungroup, as agents run them.
+    let wrap: DeviceId = agent.new_id();
+    let wrapped: ChainId = agent.new_id();
+    agent.run(
+        "device.wrap_in_rack",
+        json!({ "devices": [eq], "rack": {
+            "id": wrap, "name": "Audio Effect Rack", "enabled": true, "params": [],
+            "kind": { "rack": { "kind": "audio_effect" } },
+            "chains": [{ "id": wrapped, "name": "Tone", "devices": [] }],
+        } }),
+    );
+    let place = agent.editor.document().device_place(eq).unwrap();
+    assert_eq!(place.chain, Some(wrapped));
+    agent.run("device.unwrap_rack", json!({ "device": wrap }));
+    assert_eq!(
+        agent.editor.document().device_place(eq).unwrap().chain,
+        None
+    );
+    assert!(agent.editor.document().device(wrap).is_none());
+
     let sidechain = agent
         .editor
         .document()
@@ -1024,6 +1139,7 @@ fn schemas_match_what_commands_serialise() {
     let track = TrackId(fresh());
     let clip = ClipId(fresh());
     let device = DeviceId(fresh());
+    let fresh_id = fresh();
     let scene = SceneId(fresh());
     let scene_copy = SceneId(fresh());
     let notes = MidiData::new([Note::new(127, Ticks::ZERO, Ticks::QUARTER, 1)]);
@@ -1584,6 +1700,115 @@ fn schemas_match_what_commands_serialise() {
             },
         ),
         (
+            "device.insert_in_chain",
+            Command::InsertChainDevice {
+                chain: ChainId(fresh_id),
+                index: 1,
+                device: Device::new(
+                    DeviceId(fresh_id),
+                    "Verb",
+                    DeviceKind::Native {
+                        device_type: "beatlayer.verb".to_owned(),
+                    },
+                ),
+            },
+        ),
+        (
+            "device.move_to_chain",
+            Command::MoveDeviceToChain {
+                device,
+                chain: ChainId(fresh_id),
+                index: 1,
+            },
+        ),
+        (
+            "device.set_enabled_all",
+            Command::SetDeviceEnabledAll {
+                device,
+                enabled: false,
+            },
+        ),
+        (
+            "device.wrap_in_rack",
+            Command::GroupDevices {
+                devices: vec![device],
+                rack: Device::rack(DeviceId(fresh_id), bl_model::RackKind::AudioEffect)
+                    .with_chain(Chain::new(ChainId(fresh_id), "Chain")),
+            },
+        ),
+        ("device.unwrap_rack", Command::UngroupDevice { device }),
+        (
+            "chain.add",
+            Command::AddChain {
+                rack: device,
+                index: 1,
+                chain: Chain::new(ChainId(fresh_id), "Wet"),
+            },
+        ),
+        (
+            "chain.remove",
+            Command::RemoveChain {
+                chain: ChainId(fresh_id),
+            },
+        ),
+        (
+            "chain.move",
+            Command::MoveChain {
+                chain: ChainId(fresh_id),
+                rack: device,
+                index: 1,
+            },
+        ),
+        (
+            "chain.rename",
+            Command::RenameChain {
+                chain: ChainId(fresh_id),
+                name: "Wet".to_owned(),
+            },
+        ),
+        (
+            "chain.set_colour",
+            Command::SetChainColour {
+                chain: ChainId(fresh_id),
+                colour: Some(3),
+            },
+        ),
+        (
+            "chain.set_info",
+            Command::SetChainInfo {
+                chain: ChainId(fresh_id),
+                info: "sums with the dry chain".to_owned(),
+            },
+        ),
+        (
+            "chain.set_gain",
+            Command::SetChainVolume {
+                chain: ChainId(fresh_id),
+                volume: 0.5,
+            },
+        ),
+        (
+            "chain.set_pan",
+            Command::SetChainPan {
+                chain: ChainId(fresh_id),
+                pan: -0.5,
+            },
+        ),
+        (
+            "chain.set_enabled",
+            Command::SetChainEnabled {
+                chain: ChainId(fresh_id),
+                enabled: false,
+            },
+        ),
+        (
+            "chain.set_solo",
+            Command::SetChainSolo {
+                chain: ChainId(fresh_id),
+                solo: true,
+            },
+        ),
+        (
             "transport.set_punch_in",
             Command::SetPunchIn { enabled: true },
         ),
@@ -1920,6 +2145,10 @@ fn bindings_follow_the_spec() {
         bindings("transport.set_metronome_enabled"),
         ["S-TRANS-011 toggles enabled"]
     );
+    assert_eq!(
+        bindings("device.set_enabled_all"),
+        ["S-DEV-003 toggles enabled"]
+    );
 
     // Spec: command-bindings R7
     let bound: BTreeSet<&str> = commands
@@ -1945,6 +2174,8 @@ fn bindings_follow_the_spec() {
         // Beatlayer's own key, Option-F on macOS (IMP-14, S-DEV-015).
         "device.set_floating",
         "transport.set_metronome_enabled",
+        // WP-5.1: Option-click on a rack's Device Activator (S-DEV-003).
+        "device.set_enabled_all",
     ]
     .into_iter()
     .collect();

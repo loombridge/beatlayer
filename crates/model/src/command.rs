@@ -11,36 +11,90 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::automation::{
-    AutomationTarget, MixerParam, PointError, check_bend, drop_device, entry, override_target,
+    AutomationTarget, MixerParam, PointError, check_bend, entry, override_target,
 };
 use crate::clip::{AudioData, Clip, ClipData, ClipEnvelope, MidiData, TakeLane, clip_entry};
 use crate::device::{Device, DeviceRole};
 use crate::document::Document;
 use crate::error::ModelError;
-use crate::ids::{ClipId, ContentHash, DeviceId, ParamId, SceneId, TrackId};
+use crate::ids::{ChainId, ClipId, ContentHash, DeviceId, ParamId, SceneId, TrackId};
 use crate::launch::{ClipLaunch, LaunchMode, LaunchQuantization};
 use crate::metronome::{CountIn, MetronomeRhythm, MetronomeSound};
+use crate::rack::{CHAIN_COLOURS, Chain};
 use crate::scene::{SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
 use crate::shared::Shared;
 use crate::track::{
     Channel, CrossfadeAssign, Input, Mixer, Monitor, Output, SendTap, Track, TrackKind,
 };
 
-/// Drops from every clip on a track the envelopes naming `device`'s
-/// parameters: they modulate a parameter of a device that left the chain,
-/// as the track's own automation for it goes too (automation R11,
-/// WP-3.15).
-fn drop_device_envelopes(track: &mut Track, device: DeviceId) {
-    let names_device = |envelope: &ClipEnvelope| matches!(envelope.target, AutomationTarget::Device { device: d, .. } if d == device);
-    let ids: Vec<ClipId> = track
+/// What left a track: devices and rack chains.
+#[derive(Default)]
+struct Gone {
+    devices: BTreeSet<DeviceId>,
+    chains: BTreeSet<ChainId>,
+}
+
+impl Gone {
+    /// A device, and everything inside it.
+    fn device(device: &Device) -> Self {
+        let mut gone = Self::default();
+        gone.add_device(device);
+        gone
+    }
+
+    /// A chain, and everything inside it.
+    fn chain(chain: &Chain) -> Self {
+        let mut gone = Self::default();
+        gone.add_chain(chain);
+        gone
+    }
+
+    fn add_device(&mut self, device: &Device) {
+        for device in device.walk() {
+            self.devices.insert(device.id);
+            device.chains.iter().for_each(|chain| {
+                self.chains.insert(chain.id);
+            });
+        }
+    }
+
+    fn add_chain(&mut self, chain: &Chain) {
+        self.chains.insert(chain.id);
+        chain
+            .devices
+            .iter()
+            .for_each(|device| self.add_device(device));
+    }
+}
+
+/// Forgets everything a track holds for what left it: the envelopes on the
+/// track, and the clip envelopes that modulate their parameters (automation
+/// R11, WP-3.15).
+fn forget(track: &mut Track, gone: &Gone) {
+    for target in track.automation.keys().copied().collect::<Vec<_>>() {
+        let names_gone = match target {
+            AutomationTarget::Device { device, .. } => gone.devices.contains(&device),
+            AutomationTarget::Chain { chain, .. } => gone.chains.contains(&chain),
+            _ => false,
+        };
+        if names_gone {
+            track.automation.remove(&target);
+        }
+    }
+    let names_gone = |envelope: &ClipEnvelope| match envelope.target {
+        AutomationTarget::Device { device, .. } => gone.devices.contains(&device),
+        AutomationTarget::Chain { chain, .. } => gone.chains.contains(&chain),
+        _ => false,
+    };
+    let clips: Vec<ClipId> = track
         .clips()
         .chain(track.slots().map(|(_, clip)| clip))
-        .filter(|clip| clip.envelopes.iter().any(names_device))
+        .filter(|clip| clip.envelopes.iter().any(names_gone))
         .map(|clip| clip.id)
         .collect();
-    for id in ids {
+    for id in clips {
         if let Some(clip) = track.clip_mut(id) {
-            clip.envelopes.retain(|e| !names_device(e));
+            clip.envelopes.retain(|e| !names_gone(e));
         }
     }
 }
@@ -944,6 +998,141 @@ pub enum Command {
         /// Whether to listen.
         listen: bool,
     },
+
+    /// Inserts a new device at `index` in a rack's chain, keeping the chain
+    /// in order for its kind of rack (WP-5.1). The chain may be in a rack
+    /// at any depth.
+    InsertChainDevice {
+        /// The chain.
+        chain: ChainId,
+        /// Where it goes in the chain, from 0 to the chain's length.
+        index: usize,
+        /// The device, with a new ID.
+        device: Device,
+    },
+    /// Moves a device to `index` in a rack's chain, from a track's chain or
+    /// another chain, keeping its settings and running state. `index`
+    /// counts positions after the device is taken out of its current place.
+    /// A rack can't be moved into its own chains.
+    MoveDeviceToChain {
+        /// The device.
+        device: DeviceId,
+        /// The chain it moves to.
+        chain: ChainId,
+        /// Where it goes in that chain.
+        index: usize,
+    },
+    /// Wraps devices of one chain in a new rack (Group, Cmd-G): the rack
+    /// takes the first device's place, holding one chain that holds the
+    /// devices in their order, each keeping its settings and running state.
+    /// The chain they were in must stay in order for its kind.
+    GroupDevices {
+        /// The devices, all in one chain of a track or a rack. Not empty.
+        devices: Vec<DeviceId>,
+        /// The new rack, with a new ID, of a kind that can hold the devices,
+        /// with exactly one chain, with a new ID and no devices.
+        rack: Device,
+    },
+    /// Takes a rack with one chain, or none, apart (Ungroup, Cmd-Shift-G):
+    /// the chain's devices take the rack's place in order, keeping their
+    /// settings and running state, and the rack, its chain and its mixer
+    /// go. A rack with no chain is just deleted.
+    UngroupDevice {
+        /// The rack.
+        device: DeviceId,
+    },
+    /// Switches a device and every device inside it, at any depth, on or
+    /// off: Option-click on a rack's Device Activator.
+    SetDeviceEnabledAll {
+        /// The device, usually a rack.
+        device: DeviceId,
+        /// Whether they're on.
+        enabled: bool,
+    },
+    /// Adds a chain at `index` in a rack's list of chains, empty or holding
+    /// devices.
+    AddChain {
+        /// The rack.
+        rack: DeviceId,
+        /// Where the chain goes in the rack's list, from 0 to its length.
+        index: usize,
+        /// The chain, with a new ID, and new IDs for its devices. An empty
+        /// `name` becomes its first device's title, or `Chain` with none.
+        chain: Chain,
+    },
+    /// Deletes a chain from its rack, with its devices.
+    RemoveChain {
+        /// The chain.
+        chain: ChainId,
+    },
+    /// Moves a chain to `index` in a rack's list of chains, within its rack
+    /// or into another, keeping its devices' settings and running state.
+    /// `index` counts positions after the chain is taken out of its
+    /// current place. A chain can't go into a rack it holds.
+    MoveChain {
+        /// The chain.
+        chain: ChainId,
+        /// The rack it moves to.
+        rack: DeviceId,
+        /// Where it goes in the rack's list of chains.
+        index: usize,
+    },
+    /// Renames a chain. An empty name gives it the name a chain has without
+    /// one: its first device's title, or `Chain`.
+    RenameChain {
+        /// The chain.
+        chain: ChainId,
+        /// The new name.
+        name: String,
+    },
+    /// Colours a chain with a swatch of the palette of 5 rows of 14
+    /// (0 to 69), or `null` to clear its colour.
+    SetChainColour {
+        /// The chain.
+        chain: ChainId,
+        /// The swatch, or `null` for none.
+        colour: Option<u8>,
+    },
+    /// Sets a chain's info text (Edit Info Text). Empty clears it.
+    SetChainInfo {
+        /// The chain.
+        chain: ChainId,
+        /// The text.
+        info: String,
+    },
+    /// Sets a chain's Volume as linear gain (finite, at least 0; 1 is
+    /// 0 dB, 0 is −∞ dB). Chains of a MIDI effect rack have none.
+    SetChainVolume {
+        /// The chain.
+        chain: ChainId,
+        /// The gain.
+        volume: f64,
+    },
+    /// Sets a chain's Pan from −1 (left) to 1 (right). Chains of a MIDI
+    /// effect rack have none.
+    SetChainPan {
+        /// The chain.
+        chain: ChainId,
+        /// The position.
+        pan: f64,
+    },
+    /// Switches a chain's Chain Activator: a chain that's off adds nothing
+    /// to its rack's output.
+    SetChainEnabled {
+        /// The chain.
+        chain: ChainId,
+        /// Whether it's on.
+        enabled: bool,
+    },
+    /// Solos a chain: while any chain of a rack is soloed, the rack's
+    /// unsoloed chains add nothing. It leaves every other rack and every
+    /// track as it is.
+    SetChainSolo {
+        /// The chain.
+        chain: ChainId,
+        /// Whether it's soloed.
+        solo: bool,
+    },
 }
 
 impl Command {
@@ -1076,6 +1265,22 @@ impl Command {
             Self::SetSidechainGain { .. } => "Change \"SC Gain\"",
             Self::SetSidechainMix { .. } => "Change \"Mix\"",
             Self::SetSidechainListen { .. } => "Change \"Sidechain Listen\"",
+            // WP-5.1. Beatlayer's own names, after the device ones.
+            Self::InsertChainDevice { .. } => "Insert Device",
+            Self::MoveDeviceToChain { .. } => "Move Device",
+            Self::GroupDevices { .. } => "Group",
+            Self::UngroupDevice { .. } => "Ungroup",
+            Self::SetDeviceEnabledAll { .. } => "Change \"Device On\"",
+            Self::AddChain { .. } => "Insert Chain",
+            Self::RemoveChain { .. } => "Delete Chain",
+            Self::MoveChain { .. } => "Move Chain",
+            Self::RenameChain { .. } => "Change \"Chain Name\"",
+            Self::SetChainColour { .. } => "Change Chain Color",
+            Self::SetChainInfo { .. } => "Change Chain Info Text",
+            Self::SetChainVolume { .. } => "Change chain volume",
+            Self::SetChainPan { .. } => "Change chain pan",
+            Self::SetChainEnabled { .. } => "Change \"Chain On\"",
+            Self::SetChainSolo { .. } => "Solo chain",
         }
     }
 
@@ -1087,7 +1292,11 @@ impl Command {
             Self::CreateTrack { id, .. } => vec![id.0],
             Self::CreateClip { clip, .. } => vec![clip.id.0],
             Self::CreateSlotClip { clip, .. } => vec![clip.id.0],
-            Self::InsertDevice { device, .. } => vec![device.id.0],
+            Self::InsertDevice { device, .. } | Self::InsertChainDevice { device, .. } => {
+                device.ids()
+            }
+            Self::AddChain { chain, .. } => chain.ids(),
+            Self::GroupDevices { rack, .. } => rack.ids(),
             Self::CreateScene { id, .. } => vec![id.0],
             Self::DuplicateScene { id, clips, .. } => {
                 let mut ids = vec![id.0];
@@ -1556,14 +1765,9 @@ impl Document {
             } => self.insert_device(*track, *index, device),
             Command::RemoveDevice { device } => {
                 let owner = self.device_owner(*device)?;
-                let chain = &mut self.track_mut(owner)?.devices;
-                let position = position_in(chain, |d| d.id == *device)
-                    .ok_or(ModelError::NoSuchDevice(*device))?;
-                chain.remove(position);
-                self.index.device_track.remove(device);
-                let track = self.track_mut(owner)?;
-                drop_device(&mut track.automation, *device);
-                drop_device_envelopes(track, *device);
+                let removed = self.take_device(*device)?;
+                self.index.remove_device(&removed);
+                forget(self.track_mut(owner)?, &Gone::device(&removed));
                 Ok(())
             }
             Command::MoveDevice {
@@ -1659,6 +1863,97 @@ impl Document {
             Command::SetSidechainListen { device, listen } => {
                 self.edit_sidechain(*device, |s| s.listen = *listen)
             }
+            Command::InsertChainDevice {
+                chain,
+                index,
+                device,
+            } => self.insert_chain_device(*chain, *index, device),
+            Command::MoveDeviceToChain {
+                device,
+                chain,
+                index,
+            } => self.move_device_to_chain(*device, *chain, *index),
+            Command::GroupDevices { devices, rack } => self.group_devices(devices, rack),
+            Command::UngroupDevice { device } => self.ungroup_device(*device),
+            Command::SetDeviceEnabledAll { device, enabled } => {
+                if self
+                    .device_ref(*device)?
+                    .walk()
+                    .any(|d| d.enabled != *enabled)
+                {
+                    self.device_mut(*device)?
+                        .walk_mut(&mut |device| device.enabled = *enabled);
+                }
+                Ok(())
+            }
+            Command::AddChain { rack, index, chain } => self.add_chain(*rack, *index, chain),
+            Command::RemoveChain { chain } => {
+                let owner = self.chain_owner(*chain)?;
+                let removed = self
+                    .rack_holding_mut(*chain)?
+                    .remove_chain(*chain)
+                    .ok_or(ModelError::NoSuchChain(*chain))?;
+                self.index.remove_chain(&removed);
+                forget(self.track_mut(owner)?, &Gone::chain(&removed));
+                Ok(())
+            }
+            Command::MoveChain { chain, rack, index } => self.move_chain(*chain, *rack, *index),
+            Command::RenameChain { chain, name } => {
+                let current = self.chain_ref(*chain)?;
+                let name = if name.is_empty() {
+                    default_chain_name(current)
+                } else {
+                    name.clone()
+                };
+                if current.name != name {
+                    self.chain_mut(*chain)?.name = name;
+                }
+                Ok(())
+            }
+            Command::SetChainColour { chain, colour } => {
+                if let Some(colour) = colour {
+                    check_value("chain colour", f64::from(*colour), *colour < CHAIN_COLOURS)?;
+                }
+                if self.chain_ref(*chain)?.colour != *colour {
+                    self.chain_mut(*chain)?.colour = *colour;
+                }
+                Ok(())
+            }
+            Command::SetChainInfo { chain, info } => {
+                if self.chain_ref(*chain)?.info != *info {
+                    self.chain_mut(*chain)?.info.clone_from(info);
+                }
+                Ok(())
+            }
+            Command::SetChainVolume { chain, volume } => {
+                check_value("volume", *volume, volume.is_finite() && *volume >= 0.0)?;
+                self.edit_chain_mixer(*chain, MixerParam::Volume, true, |m| {
+                    let changed = m.volume != *volume;
+                    m.volume = *volume;
+                    changed
+                })
+            }
+            Command::SetChainPan { chain, pan } => {
+                check_value("pan", *pan, (-1.0..=1.0).contains(pan))?;
+                self.edit_chain_mixer(*chain, MixerParam::Pan, true, |m| {
+                    let changed = m.pan != *pan;
+                    m.pan = *pan;
+                    changed
+                })
+            }
+            Command::SetChainEnabled { chain, enabled } => {
+                self.edit_chain_mixer(*chain, MixerParam::Mute, false, |m| {
+                    let changed = m.enabled != *enabled;
+                    m.enabled = *enabled;
+                    changed
+                })
+            }
+            Command::SetChainSolo { chain, solo } => {
+                if self.chain_ref(*chain)?.mixer.solo != *solo {
+                    self.chain_mut(*chain)?.mixer.solo = *solo;
+                }
+                Ok(())
+            }
         }
     }
 
@@ -1733,7 +2028,7 @@ impl Document {
                 self.index.clip_track.remove(&clip.id);
             }
             for device in &track.devices {
-                self.index.device_track.remove(&device.id);
+                self.index.remove_device(device);
             }
             doomed.extend(track.children.iter().copied());
         }
@@ -2462,13 +2757,70 @@ impl Document {
         index: usize,
         device: &Device,
     ) -> Result<(), ModelError> {
-        self.check_fresh(device.id.0)?;
+        self.check_all_fresh(device.ids())?;
         check_device(device)?;
         let chain = &mut self.track_mut(track)?.devices;
         insert_at(chain, index, Shared::new(device.clone()))?;
-        self.index.device_track.insert(device.id, track);
+        self.index.add_device(device, track);
         check_chain(self.track_ref(track)?)?;
         self.check_routing(track)
+    }
+
+    fn insert_chain_device(
+        &mut self,
+        chain: ChainId,
+        index: usize,
+        device: &Device,
+    ) -> Result<(), ModelError> {
+        let track = self.chain_owner(chain)?;
+        self.check_all_fresh(device.ids())?;
+        check_device(device)?;
+        let devices = &mut self.chain_mut(chain)?.devices;
+        check_index(index, devices.len())?;
+        devices.insert(index, device.clone());
+        self.index.add_device(device, track);
+        check_chain(self.track_ref(track)?)?;
+        self.check_routing(track)
+    }
+
+    fn check_all_fresh(&self, ids: Vec<Id>) -> Result<(), ModelError> {
+        ids.into_iter().try_for_each(|id| self.check_fresh(id))
+    }
+
+    /// Takes a device out of the chain it sits in, a track's or a rack's,
+    /// leaving the lookups and the track's automation as they were.
+    fn take_device(&mut self, id: DeviceId) -> Result<Device, ModelError> {
+        let owner = self.device_owner(id)?;
+        let track = self.track_mut(owner)?;
+        if let Some(at) = position_in(&track.devices, |d| d.id == id) {
+            return Ok((*track.devices.remove(at)).clone());
+        }
+        let at = track
+            .devices
+            .iter()
+            .position(|d| d.find(id).is_some())
+            .ok_or(ModelError::NoSuchDevice(id))?;
+        track
+            .devices
+            .get_mut(at)
+            .map(Shared::make_mut)
+            .and_then(|rack| rack.remove_nested(id))
+            .ok_or(ModelError::NoSuchDevice(id))
+    }
+
+    /// Brings the lookups and the automation up to date with a device that
+    /// moved from `from`'s chains to `to`'s.
+    fn settle_move(
+        &mut self,
+        from: TrackId,
+        to: TrackId,
+        moved: &Device,
+    ) -> Result<(), ModelError> {
+        if from != to {
+            self.index.add_device(moved, to);
+            forget(self.track_mut(from)?, &Gone::device(moved));
+        }
+        Ok(())
     }
 
     fn move_device(
@@ -2479,22 +2831,203 @@ impl Document {
     ) -> Result<(), ModelError> {
         let owner = self.device_owner(id)?;
         self.track_ref(track)?;
-        let old_position = self
-            .track_ref(owner)?
-            .device_position(id)
-            .ok_or(ModelError::NoSuchDevice(id))?;
-        if owner == track && old_position == index {
+        if owner == track && self.track_ref(owner)?.device_position(id) == Some(index) {
             return Ok(());
         }
-        let device = self.track_mut(owner)?.devices.remove(old_position);
-        insert_at(&mut self.track_mut(track)?.devices, index, device)?;
-        self.index.device_track.insert(id, track);
-        if owner != track {
-            let from = self.track_mut(owner)?;
-            drop_device(&mut from.automation, id);
-            drop_device_envelopes(from, id);
-        }
+        let device = self.take_device(id)?;
+        insert_at(
+            &mut self.track_mut(track)?.devices,
+            index,
+            Shared::new(device.clone()),
+        )?;
+        self.settle_move(owner, track, &device)?;
         check_chain(self.track_ref(track)?)
+    }
+
+    /// Puts `device` at `index` in the chain it belongs to: a rack's chain,
+    /// or the track's own.
+    fn put_device(
+        &mut self,
+        track: TrackId,
+        chain: Option<ChainId>,
+        index: usize,
+        device: Device,
+    ) -> Result<(), ModelError> {
+        match chain {
+            None => insert_at(
+                &mut self.track_mut(track)?.devices,
+                index,
+                Shared::new(device),
+            ),
+            Some(chain) => {
+                let devices = &mut self.chain_mut(chain)?.devices;
+                check_index(index, devices.len())?;
+                devices.insert(index, device);
+                Ok(())
+            }
+        }
+    }
+
+    fn group_devices(&mut self, devices: &[DeviceId], rack: &Device) -> Result<(), ModelError> {
+        let Some(&first) = devices.first() else {
+            return Err(ModelError::BadGroup("there are no devices to group"));
+        };
+        if rack.rack_kind().is_none()
+            || rack.chains.len() != 1
+            || !rack.chains[0].devices.is_empty()
+        {
+            return Err(ModelError::BadGroup(
+                "the new rack must hold exactly one empty chain",
+            ));
+        }
+        self.check_all_fresh(rack.ids())?;
+        check_device(rack)?;
+        let place = self
+            .device_place(first)
+            .ok_or(ModelError::NoSuchDevice(first))?;
+        let mut positions = Vec::with_capacity(devices.len());
+        for &id in devices {
+            let there = self.device_place(id).ok_or(ModelError::NoSuchDevice(id))?;
+            if (there.track, there.chain) != (place.track, place.chain) {
+                return Err(ModelError::BadGroup(
+                    "the devices to group must be in one chain",
+                ));
+            }
+            positions.push((there.index, id));
+        }
+        positions.sort_unstable();
+        positions.dedup();
+        if positions.len() != devices.len() {
+            return Err(ModelError::BadGroup("a device is listed twice"));
+        }
+        let mut grouped = rack.clone();
+        for &(_, id) in &positions {
+            grouped.chains[0].devices.push(self.take_device(id)?);
+        }
+        self.put_device(place.track, place.chain, positions[0].0, grouped.clone())?;
+        self.index.add_device(&grouped, place.track);
+        check_chain(self.track_ref(place.track)?)?;
+        self.check_routing(place.track)
+    }
+
+    fn ungroup_device(&mut self, id: DeviceId) -> Result<(), ModelError> {
+        let rack = self.device_ref(id)?;
+        if rack.rack_kind().is_none() {
+            return Err(ModelError::NotARack(id));
+        }
+        if rack.chains.len() > 1 {
+            return Err(ModelError::BadGroup(
+                "a rack of several chains can't be taken apart",
+            ));
+        }
+        let place = self.device_place(id).ok_or(ModelError::NoSuchDevice(id))?;
+        let rack = self.take_device(id)?;
+        let mut gone = Gone::default();
+        gone.devices.insert(id);
+        self.index.device_track.remove(&id);
+        let mut inside = Vec::new();
+        if let Some(chain) = rack.chains.into_iter().next() {
+            gone.chains.insert(chain.id);
+            self.index.chain_track.remove(&chain.id);
+            inside = chain.devices;
+        }
+        for (offset, device) in inside.into_iter().enumerate() {
+            self.put_device(place.track, place.chain, place.index + offset, device)?;
+        }
+        forget(self.track_mut(place.track)?, &gone);
+        check_chain(self.track_ref(place.track)?)
+    }
+
+    fn move_device_to_chain(
+        &mut self,
+        id: DeviceId,
+        chain: ChainId,
+        index: usize,
+    ) -> Result<(), ModelError> {
+        let owner = self.device_owner(id)?;
+        let track = self.chain_owner(chain)?;
+        if self.device_ref(id)?.find_chain(chain).is_some() {
+            return Err(ModelError::RackIntoItself(id));
+        }
+        let device = self.take_device(id)?;
+        let devices = &mut self.chain_mut(chain)?.devices;
+        check_index(index, devices.len())?;
+        devices.insert(index, device.clone());
+        self.settle_move(owner, track, &device)?;
+        check_chain(self.track_ref(track)?)
+    }
+
+    fn add_chain(&mut self, rack: DeviceId, index: usize, chain: &Chain) -> Result<(), ModelError> {
+        let owner = self.device_owner(rack)?;
+        if self.device_ref(rack)?.rack_kind().is_none() {
+            return Err(ModelError::NotARack(rack));
+        }
+        self.check_all_fresh(chain.ids())?;
+        chain.devices.iter().try_for_each(check_device)?;
+        let mut chain = chain.clone();
+        if chain.name.is_empty() {
+            chain.name = default_chain_name(&chain);
+        }
+        let chains = &mut self.device_mut(rack)?.chains;
+        check_index(index, chains.len())?;
+        chains.insert(index, chain.clone());
+        self.index.add_chain(&chain, owner);
+        check_chain(self.track_ref(owner)?)?;
+        self.check_routing(owner)
+    }
+
+    fn move_chain(&mut self, id: ChainId, rack: DeviceId, index: usize) -> Result<(), ModelError> {
+        let from = self.chain_owner(id)?;
+        let to = self.device_owner(rack)?;
+        if self.device_ref(rack)?.rack_kind().is_none() {
+            return Err(ModelError::NotARack(rack));
+        }
+        if self.chain_ref(id)?.devices_deep().any(|d| d.id == rack) {
+            return Err(ModelError::RackIntoItself(rack));
+        }
+        let moved = self
+            .rack_holding_mut(id)?
+            .remove_chain(id)
+            .ok_or(ModelError::NoSuchChain(id))?;
+        let chains = &mut self.device_mut(rack)?.chains;
+        check_index(index, chains.len())?;
+        chains.insert(index, moved.clone());
+        if from != to {
+            self.index.add_chain(&moved, to);
+            forget(self.track_mut(from)?, &Gone::chain(&moved));
+        }
+        check_chain(self.track_ref(to)?)
+    }
+
+    /// Edits a chain's mixer with `edit`, which says whether it changed
+    /// anything; a change moves the control by hand, which turns its
+    /// envelope off. `audio`: the control is one a MIDI effect rack's chains
+    /// lack.
+    fn edit_chain_mixer(
+        &mut self,
+        chain: ChainId,
+        param: MixerParam,
+        audio: bool,
+        edit: impl FnOnce(&mut crate::rack::ChainMixer) -> bool,
+    ) -> Result<(), ModelError> {
+        let owner = self.chain_owner(chain)?;
+        if audio
+            && self
+                .chain_rack(chain)
+                .and_then(Device::rack_kind)
+                .is_some_and(|kind| !kind.chains_have_volume_and_pan())
+        {
+            return Err(ModelError::ChainHasNoMixer(chain));
+        }
+        let mut mixer = self.chain_ref(chain)?.mixer;
+        if edit(&mut mixer) {
+            self.chain_mut(chain)?.mixer = mixer;
+            override_target(
+                &mut self.track_mut(owner)?.automation,
+                &AutomationTarget::Chain { chain, param },
+            );
+        }
+        Ok(())
     }
 
     // The Main track's Song Tempo envelope and the arrangement's
@@ -2591,8 +3124,22 @@ impl Document {
             }
             AutomationTarget::Device { device, .. } => {
                 let track_ref = self.track_ref(track)?;
-                if track_ref.device_position(device).is_none() {
+                if track_ref.find_device(device).is_none() {
                     return Err(ModelError::DeviceNotInTrack { device, track });
+                }
+            }
+            AutomationTarget::Chain { chain, param } => {
+                let track_ref = self.track_ref(track)?;
+                let rack = track_ref
+                    .devices
+                    .iter()
+                    .find_map(|d| d.chain_rack(chain))
+                    .ok_or(ModelError::ChainNotInTrack { chain, track })?;
+                let no_mixer = rack
+                    .rack_kind()
+                    .is_some_and(|kind| !kind.chains_have_volume_and_pan());
+                if no_mixer && param != MixerParam::Mute {
+                    return Err(ModelError::ChainHasNoMixer(chain));
                 }
             }
         }
@@ -2845,6 +3392,37 @@ impl Document {
         self.device_track(id).ok_or(ModelError::NoSuchDevice(id))
     }
 
+    fn chain_owner(&self, id: ChainId) -> Result<TrackId, ModelError> {
+        self.chain_track(id).ok_or(ModelError::NoSuchChain(id))
+    }
+
+    fn chain_ref(&self, id: ChainId) -> Result<&Chain, ModelError> {
+        self.chain(id).ok_or(ModelError::NoSuchChain(id))
+    }
+
+    /// The chain's track's top-level device that holds the chain, to change
+    /// in place.
+    fn rack_holding_mut(&mut self, id: ChainId) -> Result<&mut Device, ModelError> {
+        let owner = self.chain_owner(id)?;
+        let track = self.track_mut(owner)?;
+        let at = track
+            .devices
+            .iter()
+            .position(|d| d.find_chain(id).is_some())
+            .ok_or(ModelError::NoSuchChain(id))?;
+        track
+            .devices
+            .get_mut(at)
+            .map(Shared::make_mut)
+            .ok_or(ModelError::NoSuchChain(id))
+    }
+
+    fn chain_mut(&mut self, id: ChainId) -> Result<&mut Chain, ModelError> {
+        self.rack_holding_mut(id)?
+            .find_chain_mut(id)
+            .ok_or(ModelError::NoSuchChain(id))
+    }
+
     fn device_ref(&self, id: DeviceId) -> Result<&Device, ModelError> {
         self.device(id).ok_or(ModelError::NoSuchDevice(id))
     }
@@ -2866,10 +3444,14 @@ impl Document {
     fn device_mut(&mut self, id: DeviceId) -> Result<&mut Device, ModelError> {
         let owner = self.device_owner(id)?;
         let chain = &mut self.track_mut(owner)?.devices;
-        let position = position_in(chain, |d| d.id == id).ok_or(ModelError::NoSuchDevice(id))?;
+        let position = chain
+            .iter()
+            .position(|d| d.find(id).is_some())
+            .ok_or(ModelError::NoSuchDevice(id))?;
         chain
             .get_mut(position)
             .map(Shared::make_mut)
+            .and_then(|device| device.find_mut(id))
             .ok_or(ModelError::NoSuchDevice(id))
     }
 
@@ -2963,7 +3545,7 @@ fn automation_point_error(error: PointError) -> ModelError {
     }
 }
 
-fn check_value(what: &'static str, value: f64, ok: bool) -> Result<(), ModelError> {
+pub(crate) fn check_value(what: &'static str, value: f64, ok: bool) -> Result<(), ModelError> {
     if ok {
         Ok(())
     } else {
@@ -3168,8 +3750,14 @@ pub(crate) fn check_take_lane(lane: &TakeLane) -> Result<(), ModelError> {
     Ok(())
 }
 
-/// Checks a device's parameter values.
+/// Checks a device's parameter values, and, for a rack, its chains and the
+/// devices in them.
 pub(crate) fn check_device(device: &Device) -> Result<(), ModelError> {
+    crate::rack::check_racks(device)?;
+    device.walk().try_for_each(check_one_device)
+}
+
+fn check_one_device(device: &Device) -> Result<(), ModelError> {
     if device.floating && !device.can_float() {
         return Err(ModelError::CannotFloat(device.id));
     }
@@ -3208,7 +3796,10 @@ pub(crate) fn check_chain(track: &Track) -> Result<(), ModelError> {
         }
         last = Some(device.role);
     }
-    Ok(())
+    track
+        .devices
+        .iter()
+        .try_for_each(|d| crate::rack::check_racks(d))
 }
 
 /// Checks mixer values against the track's kind.
@@ -3247,13 +3838,25 @@ pub(crate) fn check_send_level(level: f64) -> Result<(), ModelError> {
 }
 
 fn insert_at<T: Clone>(list: &mut Vector<T>, index: usize, value: T) -> Result<(), ModelError> {
-    if index > list.len() {
-        return Err(ModelError::IndexOutOfRange {
-            index,
-            len: list.len(),
-        });
-    }
+    check_index(index, list.len())?;
     list.insert(index, value);
+    Ok(())
+}
+
+/// The name a chain has without one given (the racks spec, R8): its first
+/// device's title, or `Chain` while it holds none.
+fn default_chain_name(chain: &Chain) -> String {
+    chain
+        .devices
+        .first()
+        .map_or("Chain", |device| device.title())
+        .to_owned()
+}
+
+fn check_index(index: usize, len: usize) -> Result<(), ModelError> {
+    if index > len {
+        return Err(ModelError::IndexOutOfRange { index, len });
+    }
     Ok(())
 }
 

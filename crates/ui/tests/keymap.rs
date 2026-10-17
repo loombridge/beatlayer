@@ -274,6 +274,48 @@ fn float_s_key_reaches_float_in_the_device_view_and_fades_in_the_arrangement() {
     assert_eq!(hit(Platform::Mac, cmd_option, &devices), None);
 }
 
+// Spec: racks R9, R11. Group and Ungroup have their keys in the Device View
+// (S-DEV-001, S-DEV-002), and the Edit menu's items reach them there.
+#[test]
+fn the_group_and_ungroup_keys_reach_their_commands_in_the_device_view() {
+    let keymap = Keymap::live12();
+    let devices = [Context::DeviceView, Context::Global];
+    let hit = |platform, m, contexts: &[Context]| {
+        keymap
+            .resolve(platform, Key::G, m, contexts)
+            .map(|hit| hit.command.id.clone())
+    };
+    for (platform, group, ungroup) in [
+        (
+            Platform::Mac,
+            mods(true, false, false, false),
+            mods(true, false, false, true),
+        ),
+        (
+            Platform::Other,
+            mods(false, true, false, false),
+            mods(false, true, false, true),
+        ),
+    ] {
+        assert_eq!(
+            hit(platform, group, &devices).as_deref(),
+            Some("device.group"),
+            "{platform:?}"
+        );
+        assert_eq!(
+            hit(platform, ungroup, &devices).as_deref(),
+            Some("device.ungroup"),
+            "{platform:?}"
+        );
+        // Elsewhere the same keys are the Arrangement's (Group Tracks).
+        assert_ne!(
+            hit(platform, group, &[Context::Arrangement, Context::Global]).as_deref(),
+            Some("device.group"),
+            "{platform:?}"
+        );
+    }
+}
+
 #[test]
 fn keys_resolve_to_commands_in_their_contexts() {
     // Spec: app-shell R16.

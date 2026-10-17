@@ -369,9 +369,11 @@ impl Loader {
             }
         }
         for device in repr.devices {
-            self.claim(device.id.0)?;
+            for used in device.ids() {
+                self.claim(used)?;
+            }
             check_device(&device)?;
-            self.index.device_track.insert(device.id, id);
+            self.index.add_device(&device, id);
             track.devices.push_back(Shared::new(device));
         }
         check_chain(&track)?;
@@ -447,7 +449,7 @@ mod tests {
     use crate::command::Command;
     use crate::device::{Device, DeviceKind};
     use crate::editor::Editor;
-    use crate::ids::{ClipId, ContentHash, ParamId, SceneId, TrackId};
+    use crate::ids::{ClipId, ContentHash, DeviceId, ParamId, SceneId, TrackId};
     use crate::track::TrackKind;
     use crate::{DEFAULT_SCENE_COUNT, Document, Settings};
 
@@ -535,6 +537,107 @@ mod tests {
             value["settings"],
             serde_json::to_value(Settings::default()).unwrap()
         );
+    }
+
+    // Spec: racks R13
+    #[test]
+    fn racks_save_and_load_with_every_chain() {
+        use crate::rack::{Chain, RackKind};
+        let (mut doc, [_, audio, _]) = song();
+        let mut editor = Editor::from_document(doc.clone(), bl_core::id::IdAllocator::new());
+        let (rack, inner, tail): (DeviceId, DeviceId, DeviceId) =
+            (editor.new_id(), editor.new_id(), editor.new_id());
+        let (wet, dry, deep): (crate::ChainId, crate::ChainId, crate::ChainId) =
+            (editor.new_id(), editor.new_id(), editor.new_id());
+        let mut wet_chain = Chain::new(wet, "Wet").with_devices(vec![
+            Device::rack(inner, RackKind::AudioEffect).with_chain(Chain::new(deep, "Deep")),
+            Device::new(
+                tail,
+                "Tail",
+                DeviceKind::Native {
+                    device_type: "beatlayer.utility".to_owned(),
+                },
+            ),
+        ]);
+        wet_chain.colour = Some(12);
+        wet_chain.info = "the wet one".to_owned();
+        wet_chain.mixer.volume = 0.5;
+        wet_chain.mixer.pan = -0.25;
+        wet_chain.mixer.enabled = false;
+        wet_chain.mixer.solo = true;
+        let device = Device::rack(rack, RackKind::AudioEffect)
+            .with_chain(wet_chain)
+            .with_chain(Chain::new(dry, "Dry"));
+        editor
+            .apply(Command::InsertDevice {
+                track: audio,
+                index: 1,
+                device,
+            })
+            .unwrap();
+        doc = editor.document().clone();
+
+        let value = serde_json::to_value(&doc).unwrap();
+        let saved = &value["tracks"][0]["children"][0]["devices"][1];
+        assert_eq!(saved["kind"], json!({ "rack": { "kind": "audio_effect" } }));
+        assert_eq!(saved["chains"][0]["name"], json!("Wet"));
+        assert_eq!(saved["chains"][0]["colour"], json!(12));
+        assert_eq!(saved["chains"][0]["info"], json!("the wet one"));
+        assert_eq!(
+            saved["chains"][0]["mixer"],
+            json!({ "volume": 0.5, "pan": -0.25, "enabled": false, "solo": true })
+        );
+        // A chain at its defaults writes none of them, and a device that
+        // isn't a rack writes no chains.
+        assert_eq!(
+            saved["chains"][1],
+            json!({ "id": dry.0.get(), "name": "Dry", "mixer": {}, "devices": [] })
+        );
+        assert!(
+            value["tracks"][0]["children"][0]["devices"][0]
+                .get("chains")
+                .is_none()
+        );
+        let back: Document = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(back, doc);
+        back.check_invariants().unwrap();
+        assert_eq!(serde_json::to_value(&back).unwrap(), value);
+        // The lookups find every device and chain at every depth.
+        for chain in [wet, dry, deep] {
+            assert_eq!(back.chain_track(chain), Some(audio));
+        }
+        for device in [rack, inner, tail] {
+            assert_eq!(back.device_track(device), Some(audio));
+        }
+
+        // What a damaged file does: a chain ID used twice, a pan out of
+        // range, a MIDI effect in an audio effect rack, and a rack whose
+        // role isn't its kind's are all refused.
+        let broken = |edit: &dyn Fn(&mut Value)| {
+            let mut v = value.clone();
+            edit(&mut v);
+            load(v).unwrap_err()
+        };
+        let error = broken(&|v| {
+            v["tracks"][0]["children"][0]["devices"][1]["chains"][1]["id"] = json!(wet.0.get());
+        });
+        assert!(error.contains("more than once"), "{error}");
+        let error = broken(&|v| {
+            v["tracks"][0]["children"][0]["devices"][1]["chains"][0]["mixer"]["pan"] = json!(2.0);
+        });
+        assert!(error.contains("pan"), "{error}");
+        let error = broken(&|v| {
+            v["tracks"][0]["children"][0]["devices"][1]["chains"][1]["devices"] = json!([{
+                "id": 9_999, "name": "Arp", "enabled": true, "params": [],
+                "role": "midi_effect",
+                "kind": { "native": { "device_type": "test.arp" } },
+            }]);
+        });
+        assert!(error.contains("can't hold"), "{error}");
+        let error = broken(&|v| {
+            v["tracks"][0]["children"][0]["devices"][1]["role"] = json!("midi_effect");
+        });
+        assert!(error.contains("role"), "{error}");
     }
 
     // Spec: device-chains R1

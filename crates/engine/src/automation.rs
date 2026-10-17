@@ -529,7 +529,7 @@ pub(crate) fn lists(
                 continue;
             };
             for mapping in &device.mappings {
-                let (key, param) = match mapping.target {
+                let target = match mapping.target {
                     ModTarget::Mixer { track: t, param } if t == track.id() => {
                         target_node(t, &AutomationTarget::Mixer { param })
                     }
@@ -539,9 +539,12 @@ pub(crate) fn lists(
                     ModTarget::Device { device: d, param }
                         if track.devices_deep().any(|x| x.id == d) =>
                     {
-                        (NodeKey::Device(d), param)
+                        Some((NodeKey::Device(d), param))
                     }
                     _ => continue,
+                };
+                let Some((key, param)) = target else {
+                    continue;
                 };
                 if let Some(entries) = lists.get_mut(&key) {
                     entries

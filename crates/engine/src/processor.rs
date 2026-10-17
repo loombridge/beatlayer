@@ -1128,6 +1128,12 @@ impl Processor {
     /// there, so the next part starts at the loop's start.
     fn render(&mut self, offset: usize, length: usize) {
         let stride = self.config.max_frames;
+        // Every device channel, so a count-in or a part that plays fewer
+        // of them leaves no earlier block's Ext. Out behind.
+        for c in 0..self.config.output_channels {
+            let to = c * stride + offset;
+            self.ext_output[to..to + length].fill(0.0);
+        }
         if self.metronome.is_counting_in() {
             for c in 0..self.config.channels {
                 let to = c * stride + offset;
@@ -1168,10 +1174,6 @@ impl Processor {
                 }
                 // Spec: routing R3. A channel the device lacks plays nothing.
                 self.ext_width = program.ext_width().min(self.config.output_channels);
-                for c in 0..self.ext_width {
-                    let to = c * stride + offset;
-                    self.ext_output[to..to + length].fill(0.0);
-                }
                 program.mix_external(&mut self.ext_output, self.ext_width, stride, offset, length);
             }
             None => {

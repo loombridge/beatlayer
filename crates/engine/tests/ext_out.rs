@@ -16,7 +16,8 @@ bl_rt::install_trap!();
 mod common;
 
 use bl_commands::Registry as Commands;
-use bl_model::{TrackId, TrackKind, registry};
+use bl_engine::TransportCommand;
+use bl_model::{Command, CountIn, TrackId, TrackKind, registry};
 use common::{Rig, dc, track};
 use serde_json::{Value, json};
 
@@ -174,4 +175,25 @@ fn mute_silences_a_track_on_ext_out() {
     );
     rig.sync();
     assert_eq!(settled(&mut rig).1, [0.0, 0.0]);
+}
+
+// Spec: routing R3; metronome R5 (WP-2.13). A count-in plays only the
+// clicks, so it leaves no earlier block on the device's channels.
+#[test]
+fn a_count_in_leaves_nothing_on_ext_out() {
+    let (mut rig, a) = rig_with_dc(2, 0.5);
+    for command in [
+        Command::SetMetronomeEnabled { enabled: true },
+        Command::SetMetronomeCountIn {
+            count_in: CountIn::Bars1,
+        },
+    ] {
+        rig.editor.apply(command).unwrap();
+    }
+    ext_out(&mut rig.editor, a, json!({ "type": "pair", "channel": 1 }));
+    rig.sync();
+    assert_eq!(settled(&mut rig).1, [0.5, 0.5]);
+    rig.sender.transport(TransportCommand::Play);
+    let (_, ext) = settled(&mut rig);
+    assert!(ext.iter().all(|&s| s == 0.0), "{ext:?}");
 }

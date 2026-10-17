@@ -89,6 +89,8 @@ pub struct MidiCounters {
     pub dropped: u64,
     /// Times the block clock locked again after a gap.
     pub relocks: u64,
+    /// Note messages Capture MIDI's ring had no room for (WP-3.14).
+    pub capture_dropped: u64,
 }
 
 /// Which source a route takes.
@@ -210,6 +212,14 @@ impl MidiRoutes {
             })
     }
 
+    /// What each monitoring track's input received in the last block.
+    pub(crate) fn monitored_inputs(&self) -> impl Iterator<Item = (TrackId, &[MidiEvent])> {
+        self.routes
+            .iter()
+            .filter(|route| route.monitored)
+            .map(|route| (route.track, route.events.as_slice()))
+    }
+
     fn clear(&mut self) {
         for route in self.routes.iter_mut() {
             route.events.clear();
@@ -280,6 +290,9 @@ impl MidiRoutes {
                     value,
                 };
                 notes.insert(note(offset, pressure, channel, key, 0.0));
+            } else if let Some(message) = NoteEvent::from_message(offset, &event.message) {
+                // Spec: device-framework R39
+                notes.insert(message);
             }
         }
     }

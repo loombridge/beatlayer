@@ -9,8 +9,8 @@ use std::sync::Arc;
 use bl_core::time::{SampleRate, TICKS_PER_QUARTER, Ticks};
 use bl_engine::testing::{self, Probe, RecordedNote};
 use bl_engine::{
-    Collector, Compiler, EngineConfig, Monitor, NoteKind, Processor, Sender, TransportCommand,
-    Update, channel,
+    Collector, Compiler, EngineConfig, Monitor, NoteKind, Processor, Registry, Sender,
+    TransportCommand, Update, channel,
 };
 use bl_model::{
     Clip, ClipData, Command, Device, DeviceId, DeviceKind, Editor, MidiData, Note, ParamId,
@@ -40,11 +40,18 @@ impl Chain {
     /// A MIDI track holding a test instrument, in a song that plays blocks
     /// of up to `max_frames` frames.
     pub fn new(max_frames: usize) -> Self {
+        Self::with_registry(max_frames, |_| {})
+    }
+
+    /// As [`new`](Self::new), with `extend` adding device types to the
+    /// registry.
+    pub fn with_registry(max_frames: usize, extend: impl FnOnce(&mut Registry)) -> Self {
         let config = EngineConfig::new(RATE, max_frames);
         let probe = Arc::new(Probe::default());
         let collector = Collector::new();
         let mut registry = testing::registry(&probe);
         bl_devices::register(&mut registry);
+        extend(&mut registry);
         let compiler = Compiler::new(config, registry, collector.handle());
         let (sender, processor, monitor) = channel(&config);
         let mut editor = Editor::new();
@@ -220,7 +227,7 @@ pub fn nothing_hangs(heard: &[Heard]) -> bool {
         match kind {
             NoteKind::On => *sounding.entry(key).or_default() += 1,
             NoteKind::Off | NoteKind::Choke => *sounding.entry(key).or_default() -= 1,
-            NoteKind::Expression { .. } => {}
+            _ => {}
         }
     }
     sounding.values().all(|&n| n <= 0)

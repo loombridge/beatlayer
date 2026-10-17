@@ -45,6 +45,13 @@ const PENDING_CAPACITY: usize = 512;
 /// applied to its component, so the controller's are the device's.
 const APPLIED_CAPACITY: usize = 256;
 
+/// The MIDI controller numbers VST3 gives a channel's pressure and pitch
+/// bend beside the 128 control changes, and how many there are
+/// (`ControllerNumbers`).
+const AFTER_TOUCH: usize = 128;
+const PITCH_BEND: usize = 129;
+pub(crate) const CONTROLLERS: usize = 130;
+
 /// What a node and the main thread both see.
 #[derive(Debug, Default)]
 pub(crate) struct Status {
@@ -91,6 +98,9 @@ pub(crate) struct Active {
     pub(crate) out_channels: [usize; MAX_BUSES],
     /// Its parameters, for the plain-to-normalized conversion.
     pub(crate) params: Vec<ParamMap>,
+    /// The parameter its controller maps each channel's MIDI controller to
+    /// (`IMidiMapping`), at `channel * CONTROLLERS + controller`.
+    pub(crate) midi: Vec<Option<u32>>,
     /// The device's plain values, sent to it at the first frame of its
     /// next block.
     pub(crate) pending: Vec<(u32, f64)>,
@@ -424,7 +434,11 @@ impl HostEvents {
         match note.kind {
             // Per-note expressions wait for MPE hosting (the parity
             // matrix's note): a plug-in's note port takes them then.
-            NoteKind::Expression { .. } => return false,
+            // Channel messages go in as parameter changes.
+            NoteKind::Expression { .. }
+            | NoteKind::Control { .. }
+            | NoteKind::PitchBend { .. }
+            | NoteKind::ChannelPressure { .. } => return false,
             NoteKind::On => {
                 event.r#type = Event_::EventTypes_::kNoteOnEvent as u16;
                 event.__field0 = Event__type0 {
@@ -758,12 +772,18 @@ fn fill_params(
             drive.set_control(event.param.0, plain_of(map, event.value));
         }
     }
-    drive.play(list, transport, block.frames(), |play| {
-        if let Some(map) = params.iter().find(|map| map.id == play.id) {
-            let offset = i32::try_from(play.offset).unwrap_or(i32::MAX);
-            incoming.push(play.id, offset, map.normalized(play.played));
-        }
-    });
+    drive.play(
+        list,
+        transport,
+        block.frames(),
+        block.modulation(),
+        |play| {
+            if let Some(map) = params.iter().find(|map| map.id == play.id) {
+                let offset = i32::try_from(play.offset).unwrap_or(i32::MAX);
+                incoming.push(play.id, offset, map.normalized(play.played));
+            }
+        },
+    );
     for &(id, value) in pending.iter() {
         let Some(map) = params.iter().find(|map| map.id == id) else {
             continue;
@@ -792,6 +812,25 @@ fn fill_params(
     if dropped > 0 {
         status.dropped.fetch_add(dropped, Relaxed);
     }
+}
+
+/// The parameter and normalized value a channel message sets in the plug-in,
+/// if its controller maps the message's controller to one.
+fn mapped(map: &[Option<u32>], note: &NoteEvent) -> Option<(u32, f64)> {
+    let message = note.message()?;
+    let (controller, value) = match message.status() & 0xF0 {
+        0xB0 => (
+            usize::from(message.data1()),
+            f64::from(message.data2()) / 127.0,
+        ),
+        0xD0 => (AFTER_TOUCH, f64::from(message.data1()) / 127.0),
+        _ => {
+            let raw = i32::from(message.data1()) | i32::from(message.data2()) << 7;
+            (PITCH_BEND, f64::from(raw) / 16383.0)
+        }
+    };
+    let at = usize::from(note.channel & 0x0F) * CONTROLLERS + controller;
+    Some((map.get(at).copied().flatten()?, value))
 }
 
 /// Reports an applied value to the main thread; past the queue's room it's
@@ -859,7 +898,18 @@ impl Node for Vst3Node {
         }
         self.events_in.reset();
         for note in block.notes() {
-            self.events_in.push_note(note);
+            if note.kind.is_message() {
+                // Spec: vst3-hosting R18. A plug-in reads a channel message
+                // as the parameter its controller maps it to.
+                let map = &self.active.as_ref().expect("the check above").midi;
+                if let Some((id, value)) = mapped(map, note) {
+                    let offset = i32::try_from(note.offset).unwrap_or(i32::MAX);
+                    // shortcut: appended after the block's own changes, so a message earlier than an automation point of the same parameter is out of order; sort the queue if a plug-in maps an automated parameter.
+                    self.incoming.push(id, offset, value);
+                }
+            } else {
+                self.events_in.push_note(note);
+            }
         }
         self.events_out.reset();
         self.outgoing.reset();

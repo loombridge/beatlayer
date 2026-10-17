@@ -167,6 +167,12 @@ How WP-2.5 built it for native devices ([the device framework spec](specs/device
 - **The layout model** (`bl_model::device_layout`, IMP-14) is bands of controls and display cells in rows and columns. `DeviceLayout::place` lays it out at any size of at least its docked size, giving extra room only to the cells; the Device View places it at its docked size, and WP-2.5b's floating windows at theirs.
 - **The generic UI** (`bl_ui::device_panel`) draws any described device from `device_view.state`'s panel, and runs `device.set_param` for each change; `device.parameters` gives agents the same descriptors.
 
+How WP-5.10 added modulators ([the modulation spec](specs/modulation.md), R12 to R23):
+
+- **A modulator is a device that works before the tracks do.** The compiler lists the program's modulators in song order. Before the tasks run, `EngineProgram::run` calls each modulator's `Node::control` over the block's frames, with the block's parameter events; the device writes, for each of its eight slots, two rows of one value per frame on the program's bus (`bl_engine::modbus`): what the slot contributes to its target in Modulation mode and the position it holds the target at in Remote Control mode. A modulator's output is worked out on a 32-frame grid counted from the transport's start and ramped between grid points, so the rows are the same at any block size, and the random parts are seeded per device and reseeded when the transport starts.
+- **Targets read the bus.** The compiler gives each target node, on any track, the list of bus rows that map each of its parameters (`AutomationList`); `ParamBank::advance`, the mixer and a send's route add the rows to the clips' modulation in the parameter's travel, and a hold replaces the base. A mapping edit sends the affected lists as node data without a new program. A plug-in's driven parameters read the same rows.
+- **Mappings are the document's.** A mapping lives on its modulator (`Device::mappings`), names its target by track, send or device, goes with its target when it is deleted, and follows a device that moves.
+
 ### The mixer
 
 How the mixer works, as WP-1.6 built it ([the mixer spec](specs/mixer.md)):

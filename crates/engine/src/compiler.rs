@@ -11,7 +11,7 @@ use bl_model::{
 
 use crate::EngineConfig;
 use crate::automation;
-use crate::clips::{ClipList, ClipPlayer};
+use crate::clips::{ClipList, ClipPlayer, SlotSample};
 use crate::disjoint::Shared;
 use crate::display::Displays;
 use crate::gc::{GcHandle, Program};
@@ -79,7 +79,7 @@ enum Identity {
     /// A device. Its media is part of what it is (WP-2.16): a device whose
     /// sample changed is a new node, and one the set keeps gets its audio
     /// sent again.
-    Device(DeviceKind, Option<ContentHash>),
+    Device(DeviceKind, Vec<Option<ContentHash>>),
     Player,
     MidiPlayer,
     Mixer,
@@ -154,6 +154,9 @@ pub struct Compiler {
     scene_override: SceneOverride,
     layout: BTreeMap<NodeKey, Placed>,
     sources: ClipSources,
+    /// Where each modulator's rows sit on the last program's bus
+    /// (WP-5.10).
+    modulator_rows: BTreeMap<DeviceId, u32>,
     /// The readers of the displays of the devices' nodes.
     displays: Displays,
 }
@@ -190,6 +193,7 @@ impl Compiler {
             scene_override: SceneOverride::default(),
             layout: BTreeMap::new(),
             sources: ClipSources::default(),
+            modulator_rows: BTreeMap::new(),
             displays: Displays::default(),
         }
     }
@@ -347,6 +351,25 @@ impl Compiler {
         // have gone the same way. A new tempo map moved every envelope, so
         // every track's goes again.
         let all = old.settings().tempo != document.settings().tempo;
+        // Spec: modulation R15, R19. A mapping made, removed or taken away
+        // with its target, or a modulator that came or went, changes the
+        // lists of the nodes it reaches, and the rows they name.
+        let mapped = modulator_mappings(&old) != modulator_mappings(document);
+        for (&id, &change) in &changes.devices {
+            if let (Change::Modified, Some(before), Some(after)) =
+                (change, old.device(id), document.device(id))
+                && before.shape != after.shape
+            {
+                let shape = after
+                    .shape
+                    .clone()
+                    .unwrap_or_else(bl_model::modulator::default_shape);
+                update.data.push((
+                    NodeKey::Device(id),
+                    self.gc.data(crate::modbus::Shape(shape)),
+                ));
+            }
+        }
         for track in document.tracks() {
             let id = track.id();
             let differs = match (old.track(id), document.track(id)) {
@@ -356,11 +379,16 @@ impl Compiler {
                 _ => false,
             };
             let clips_changed = tracks.contains(&id);
-            if all || differs || clips_changed {
+            if all || differs || clips_changed || mapped {
                 // The track whose envelopes or clips changed gets every
                 // list, so an empty one clears what a node had; a tempo map
                 // that moved them only sends the ones that drive something.
-                self.send_automation(document, id, !differs && !clips_changed, &mut update);
+                self.send_automation(
+                    document,
+                    id,
+                    !differs && !clips_changed && !mapped,
+                    &mut update,
+                );
             }
         }
         update
@@ -622,7 +650,15 @@ impl Compiler {
             ),
             releases: crate::program::Releases::new(),
             midi,
+            modulators: build.modulators.iter().map(|&(slot, _)| slot).collect(),
+            bus: vec![0.0; build.modulators.len() * crate::modbus::ROWS * self.config.max_frames],
         };
+        self.modulator_rows = build
+            .modulators
+            .iter()
+            .enumerate()
+            .map(|(row, &(_, device))| (device, row as u32))
+            .collect();
         self.generation = generation;
         self.layout = build.layout;
         self.displays
@@ -646,15 +682,16 @@ impl Compiler {
         // made it; a device whose media the library doesn't hold plays
         // silence and is reported missing.
         let rate = self.config.sample_rate;
-        for &(device, media) in &build.media {
+        for &(device, slot, media) in &build.media {
             match self
                 .registry
                 .media()
                 .and_then(|library| library.sample(media, rate))
             {
-                Some(sample) => update
-                    .data
-                    .push((NodeKey::Device(device), self.gc.data(sample))),
+                Some(sample) => update.data.push((
+                    NodeKey::Device(device),
+                    self.gc.data(SlotSample { slot, sample }),
+                )),
                 None => update.missing.push(media),
             }
         }
@@ -702,9 +739,13 @@ impl Compiler {
             return;
         };
         let rate = self.config.sample_rate;
-        for (key, list) in automation::lists(document, track.id(), rate, |key| {
-            i64::from(self.layout.get(&key).map_or(0, |placed| placed.delay))
-        }) {
+        for (key, list) in automation::lists(
+            document,
+            track.id(),
+            rate,
+            |key| i64::from(self.layout.get(&key).map_or(0, |placed| placed.delay)),
+            &self.modulator_rows,
+        ) {
             if driving_only && list.is_empty() {
                 continue;
             }
@@ -950,7 +991,7 @@ impl Compiler {
                 continue;
             }
             let key = NodeKey::Device(device.id);
-            let identity = Identity::Device(device.kind.clone(), device.media);
+            let identity = Identity::Device(device.kind.clone(), device.media.clone());
             let (node, latency) = match self.previous(key, &identity) {
                 Some(from) => (Err(from), self.previous_latency(key, &identity)),
                 None => match self.registry.create(device, &config) {
@@ -960,8 +1001,10 @@ impl Compiler {
                         }
                         // A new node that plays media gets its decoded audio
                         // with this compile's update (WP-2.16).
-                        if let Some(media) = device.media {
-                            build.media.push((device.id, media));
+                        for (slot, media) in device.media.iter().enumerate() {
+                            if let Some(media) = *media {
+                                build.media.push((device.id, slot, media));
+                            }
                         }
                         let latency = node.latency();
                         (Ok(Instance::Device(node)), latency)
@@ -973,6 +1016,12 @@ impl Compiler {
                 },
             };
             let slot = claim(build, key, identity, !device.enabled, latency, node);
+            // Spec: modulation R20. A modulator works its rows out before
+            // any task runs.
+            if bl_model::modulator::is_modulator_kind(&device.kind) {
+                build.slots[slot as usize].modulator = true;
+                build.modulators.push((slot, device.id));
+            }
             steps.push(Step::Node(slot));
             if let Some(settings) = &device.sidechain {
                 let sources = sidechain_inputs.remove(&device.id).unwrap_or_default();
@@ -1147,6 +1196,7 @@ fn claim(
         // device is switched on again.
         latency: if bypass { 0 } else { latency },
         delay: 0,
+        modulator: false,
     });
     build.layout.insert(
         key,
@@ -1187,9 +1237,13 @@ struct Build {
     sidechains: Vec<DeviceSidechain>,
     sidechain_inputs: Vec<Input>,
     unhosted: Vec<DeviceId>,
+    /// The modulators' slots and devices, in the order their rows sit on the
+    /// bus (WP-5.10).
+    modulators: Vec<(u32, DeviceId)>,
     /// Devices new in this program that play media, with the media they
-    /// name: their decoded audio goes with this compile's update (WP-2.16).
-    media: Vec<(DeviceId, ContentHash)>,
+    /// name, one entry per filled sample slot: their decoded audio goes
+    /// with this compile's update (WP-2.16).
+    media: Vec<(DeviceId, usize, ContentHash)>,
     /// Tracks whose clip player is new in this program.
     new_players: BTreeSet<TrackId>,
     /// The state of routes and players that migrate in, which an edit may
@@ -1579,6 +1633,17 @@ fn needs_program(
     // View's slots are the exception: which slots hold a clip travels in the
     // program's scene table, which a scene launch reads (WP-3.2).
     recompile || scene_slots(old) != scene_slots(new)
+}
+
+/// Every modulator in track and chain order with its mappings: what decides
+/// which rows the nodes' lists name (WP-5.10).
+fn modulator_mappings(document: &Document) -> Vec<(DeviceId, Vec<bl_model::modulator::Mapping>)> {
+    document
+        .tracks()
+        .flat_map(|track| track.devices_deep())
+        .filter(|device| bl_model::modulator::is_modulator_kind(&device.kind))
+        .map(|device| (device.id, device.mappings.clone()))
+        .collect()
 }
 
 /// Parameter changes for the mixers of the chains of racks that changed

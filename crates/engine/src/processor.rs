@@ -10,6 +10,7 @@ use bl_rt::rt_log;
 use rtrb::{Consumer, Producer};
 
 use crate::EngineConfig;
+use crate::capture::CapturedMidi;
 use crate::gc::{Owned, Program};
 use crate::message::{
     Action, LoopRegion, Message, ParamEvent, Punch, Report, ScheduledCommand, TransportCommand,
@@ -297,6 +298,9 @@ pub struct Processor {
     log: Writer,
     /// MIDI input from the MIDI threads (WP-2.2).
     midi: MidiIn,
+    /// The notes monitoring MIDI tracks received, for Capture MIDI
+    /// (WP-3.14).
+    captured: Producer<CapturedMidi>,
 }
 
 impl Processor {
@@ -305,6 +309,7 @@ impl Processor {
         queue: Consumer<Message>,
         reports: Producer<Report>,
         state: triple_buffer::Input<EngineState>,
+        captured: Producer<CapturedMidi>,
     ) -> Self {
         Self {
             queue,
@@ -347,6 +352,7 @@ impl Processor {
             cpu_load_max: 0.0,
             log: Writer::new(),
             midi: MidiIn::new(config.sample_rate),
+            captured,
             config,
         }
     }
@@ -489,6 +495,7 @@ impl Processor {
             self.fire_due(done);
             let length = self.until_next_event(done, frames - done);
             self.capture(done, length);
+            self.log_captured(done, length);
             self.render(done, length);
             done += length;
         }
@@ -1704,6 +1711,36 @@ impl Processor {
         if let Some(take) = &mut self.take {
             take.written += frames as u64;
             take.next = self.position + Frames(frames as i64);
+        }
+    }
+
+    /// Copies the notes the monitoring MIDI tracks received in the frames
+    /// `offset..offset + frames` of the block into Capture MIDI's ring,
+    /// stamped with the engine clock and, while the song plays, the song
+    /// frame (WP-3.14).
+    fn log_captured(&mut self, offset: usize, frames: usize) {
+        let Some(program) = self.program.as_ref() else {
+            return;
+        };
+        let song = (self.playing && !self.metronome.is_counting_in()).then_some(self.position);
+        for (track, events) in program.get().midi.monitored_inputs() {
+            for event in events {
+                let at = event.offset as usize;
+                let note = event.message.is_note_on() || event.message.is_note_off();
+                if !note || at < offset || at >= offset + frames {
+                    continue;
+                }
+                let into = (at - offset) as i64;
+                let logged = CapturedMidi {
+                    track,
+                    clock: self.clock + at as u64,
+                    song: song.map(|position| position + Frames(into)),
+                    message: event.message,
+                };
+                if self.captured.push(logged).is_err() {
+                    self.midi.counters.capture_dropped += 1;
+                }
+            }
         }
     }
 

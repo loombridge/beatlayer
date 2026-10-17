@@ -11,6 +11,7 @@ use bl_model::{Channel, LaunchMode, ParamId, SceneId, Tap, TrackId};
 use crate::disjoint::Shared;
 use crate::midi::{MidiRoutes, TrackMidiInput};
 use crate::mixer::{MeterReading, Route, TrackMixer};
+use crate::modbus::{Bus, Control, ROWS};
 use crate::node::{
     Block, Node, NodeData, NodeEvent, NodeKey, NoteBuffer, NoteEvent, NoteKind, ParamValue,
     TransportInfo,
@@ -149,6 +150,13 @@ pub struct EngineProgram {
     /// The pair of buffers notes pass along a track's chain in, one pair for
     /// each task, then a pair for each rack chain (WP-5.1).
     pub(crate) note_buffers: Shared<NoteBuffer>,
+    /// The slots of the modulators, in the order their rows sit on the bus:
+    /// run before any task, each over the block's frames (WP-5.10).
+    pub(crate) modulators: Vec<u32>,
+    /// The modulators' rows: [`ROWS`] per modulator, one value per frame,
+    /// `max_frames` apart. Worked out before the tasks run, and only read
+    /// while they do.
+    pub(crate) bus: Vec<f32>,
     /// The note-offs of devices that were removed or moved when this program
     /// replaced the last, waiting for the first block.
     pub(crate) releases: Releases,
@@ -322,6 +330,10 @@ pub(crate) struct NodeSlot {
     /// The frames a parameter change aimed at this node is held back, so
     /// automation lines up with the compensated audio (WP-2.11).
     pub(crate) delay: u32,
+    /// Whether the node is a modulator: [`EngineProgram::run`] works its
+    /// output out before the tasks (WP-5.10), and it leaves the chain's
+    /// signal as it is.
+    pub(crate) modulator: bool,
 }
 
 /// A node that moves from the program before into this one.
@@ -872,10 +884,21 @@ impl EngineProgram {
     ) -> u64 {
         block.frames = block.frames.min(self.max_frames);
         block.until = block.from + block.frames as u32;
-        let delivered = match pool {
-            Some(pool) => pool.run(self, lane, &block),
-            None => self.run_serial(lane, &block),
-        };
+        // Spec: modulation R20. The modulators work their rows out first, on
+        // this thread alone; the tasks only read them.
+        let modulated = self.run_modulators(
+            block.frames,
+            block.from,
+            block.until,
+            block.events,
+            &mut lane.events,
+            block.transport,
+        );
+        let delivered = modulated
+            + match pool {
+                Some(pool) => pool.run(self, lane, &block),
+                None => self.run_serial(lane, &block),
+            };
         self.releases.pending.clear();
         delivered
     }
@@ -956,6 +979,7 @@ impl EngineProgram {
                     notes: &[],
                     notes_out: Some(turn.notes(notes)),
                     session,
+                    modulation: Bus::new(&self.bus, stride, frames),
                 });
             }
         }
@@ -996,7 +1020,14 @@ impl EngineProgram {
             );
             if let Some(Instance::Route(route)) = turn.slot(device.route).node.as_mut() {
                 route.set_playing_clip(playing_clip);
-                route.mix(turn.buffer(t), &lane.device, shape, None, &lane.events);
+                route.mix(
+                    turn.buffer(t),
+                    &lane.device,
+                    shape,
+                    None,
+                    Bus::EMPTY,
+                    &lane.events,
+                );
             }
         }
 
@@ -1025,9 +1056,11 @@ impl EngineProgram {
                 let (line, ring) = turn.delay(input.delay);
                 let held = &mut lane.delay[..size];
                 delay_into(line, ring, held, theirs, channels, stride, frames);
-                route.mix(turn.buffer(t), held, shape, song, &lane.events);
+                let bus = Bus::new(&self.bus, stride, frames);
+                route.mix(turn.buffer(t), held, shape, song, bus, &lane.events);
             } else {
-                route.mix(turn.buffer(t), theirs, shape, song, &lane.events);
+                let bus = Bus::new(&self.bus, stride, frames);
+                route.mix(turn.buffer(t), theirs, shape, song, bus, &lane.events);
             }
         }
 
@@ -1074,7 +1107,52 @@ impl EngineProgram {
                 notes: &[],
                 notes_out: None,
                 session,
+                modulation: Bus::new(&self.bus, stride, frames),
             });
+        }
+        delivered
+    }
+
+    /// Works out every modulator's rows over `frames` frames, in the order of
+    /// their rows, before any task runs (WP-5.10; the modulation spec, R20).
+    /// A modulator switched off, or one that doesn't give rows, leaves its
+    /// rows idle. Returns how many changes reached a modulator.
+    fn run_modulators(
+        &mut self,
+        frames: usize,
+        from: u32,
+        until: u32,
+        events: &[Resolved],
+        scratch: &mut Vec<NodeEvent>,
+        transport: TransportInfo,
+    ) -> u64 {
+        let stride = self.max_frames;
+        let mut delivered = 0;
+        for m in 0..self.modulators.len() {
+            let slot = self.modulators[m];
+            delivered += gather(events, slot, from, until, scratch);
+            let (earlier, rest) = self.bus.split_at_mut(m * ROWS * stride);
+            let mut ctl = Control {
+                frames,
+                events: scratch.as_slice(),
+                transport,
+                sample_rate: self.sample_rate,
+                tempo: &self.tempo,
+                earlier: Bus::new(earlier, stride, frames),
+                out: &mut rest[..ROWS * stride],
+                stride,
+            };
+            let NodeSlot { node, bypass, .. } = &mut self.slots[slot as usize];
+            let Some(node) = node.as_mut().and_then(Instance::as_node) else {
+                ctl.idle();
+                continue;
+            };
+            if *bypass {
+                node.flush(ctl.events);
+                ctl.idle();
+            } else if !node.control(&mut ctl) {
+                ctl.idle();
+            }
         }
         delivered
     }
@@ -1121,9 +1199,23 @@ impl EngineProgram {
                 let (line, ring) = turn.delay(input.delay);
                 let held = &mut lane.delay[..size];
                 delay_into(line, ring, held, theirs, channels, stride, frames);
-                route.mix(turn.sidechain_mut(at), held, shape, None, &lane.events);
+                route.mix(
+                    turn.sidechain_mut(at),
+                    held,
+                    shape,
+                    None,
+                    Bus::EMPTY,
+                    &lane.events,
+                );
             } else {
-                route.mix(turn.sidechain_mut(at), theirs, shape, None, &lane.events);
+                route.mix(
+                    turn.sidechain_mut(at),
+                    theirs,
+                    shape,
+                    None,
+                    Bus::EMPTY,
+                    &lane.events,
+                );
             }
         }
         delivered
@@ -1472,11 +1564,21 @@ impl EngineProgram {
                     }
                 }
             }
+            let [in_buf, out_buf] = turn.note_pair(pair + note_idx, pair + 1 - note_idx);
+            // A modulator worked out its rows before the tasks ran and
+            // leaves the chain's audio and notes as they are.
+            if turn.slot(slot).modulator {
+                out_buf.clear();
+                for &note in in_buf.notes() {
+                    out_buf.push(note);
+                }
+                note_idx = 1 - note_idx;
+                continue;
+            }
             pass.delivered += gather(block.events, slot, block.from, block.until, pass.scratch);
             let Some(node) = turn.slot(slot).node.as_mut().and_then(Instance::as_node) else {
                 continue;
             };
-            let [in_buf, out_buf] = turn.note_pair(pair + note_idx, pair + 1 - note_idx);
             out_buf.clear();
             if bypass {
                 node.flush(pass.scratch);
@@ -1502,6 +1604,7 @@ impl EngineProgram {
                 notes: in_buf.notes(),
                 notes_out: Some(out_buf),
                 session: block.session,
+                modulation: Bus::new(&self.bus, stride, frames),
             });
             note_idx = 1 - note_idx;
             // Sidechain Listen: the device's output is what it heard.
@@ -1675,6 +1778,7 @@ impl EngineProgram {
                     notes: &[],
                     notes_out: None,
                     session: block.session,
+                    modulation: Bus::new(&self.bus, stride, frames),
                 });
             } else {
                 mixer.flush(pass.scratch);

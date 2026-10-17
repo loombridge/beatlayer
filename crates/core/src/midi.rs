@@ -80,6 +80,13 @@ impl MidiMessage {
         &self.bytes[..usize::from(self.len)]
     }
 
+    /// The status byte and two data bytes, with 0 for any the message
+    /// lacks.
+    #[must_use]
+    pub const fn padded(&self) -> [u8; 3] {
+        self.bytes
+    }
+
     /// The status byte.
     #[must_use]
     pub const fn status(&self) -> u8 {

@@ -62,7 +62,7 @@ Each row's **Notes** name the work packages that build it ("Built in WP-1.8a, WP
 | Scene tempo and time signature | M3 | Built in WP-3.5 |
 | Clip envelopes, linked and unlinked | M3 | ([spec](specs/clip-envelopes.md)). Built in WP-3.15 |
 | Capture and Insert Scene | M3 | Built in WP-3.5 |
-| Capture MIDI | M3 | Built in WP-3.14 (notes); its controller data in WP-2.29b |
+| Capture MIDI | M3 | ([spec](specs/capture-midi.md)). Built in WP-3.14 (notes); its controller data in WP-2.29b |
 | MIDI controller clip envelopes (MIDI Ctrl), per-note pressure, and recording controller data | M2 | ([spec](specs/midi-controller-data.md)). WP-2.29 and WP-2.29b |
 | Crossfader A/B | M3 | Built in WP-3.17 |
 

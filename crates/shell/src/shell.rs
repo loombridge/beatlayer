@@ -3589,13 +3589,12 @@ impl Shell {
         // which the Back to Arrangement buttons light from.
         self.audio.session_over_into(&mut self.session_over);
         // Spec: modulation R7. What the modulated controls played in the
-        // last block: the rings and the fader marks draw from it.
+        // last block: the rings and the fader marks draw from it. Spec:
+        // racks R37. The chains processing, which Auto Select follows,
+        // clear with them when the engine stops.
         if running || self.modulating {
             self.modulating = running;
             self.audio.modulated_into(&mut self.modulated);
-        }
-        // Spec: racks R37. Auto Select follows the chains that process.
-        if running {
             self.audio.processing_into(&mut self.processing);
         }
         if self

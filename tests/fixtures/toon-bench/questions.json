@@ -192,7 +192,7 @@
     "question": "What is the sum of the velocity of all notes?"
   },
   {
-    "answer": "35",
+    "answer": "41",
     "fixture": "commands_clip",
     "id": "commands-total",
     "question": "How many commands are listed?"
@@ -234,7 +234,7 @@
     "question": "What are the names of the properties of the command's arguments, alphabetically?"
   },
   {
-    "answer": "22",
+    "answer": "23",
     "fixture": "describe_clip_create",
     "id": "describe-defs",
     "question": "How many definitions does the argument schema hold under $defs?"

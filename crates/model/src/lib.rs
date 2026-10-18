@@ -124,4 +124,4 @@ pub use track::{
     Channel, CrossfadeAssign, Input, Mixer, Monitor, Output, Routing, SendTap, Tap, Track,
     TrackKind,
 };
-pub use warp::WarpMarker;
+pub use warp::{TRANSIENT_MATCH, TransientEdits, WarpMarker};

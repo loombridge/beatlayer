@@ -327,6 +327,10 @@ fn audio_data(byte: u8) -> AudioData {
             looping: byte % 4 == 1,
             loop_start: ticks as f64,
             loop_end: Some((50 * ticks) as f64),
+            transient_edits: bl_model::TransientEdits {
+                added: vec![0.5, 1.0],
+                removed: vec![f64::from(byte) / 128.0],
+            },
             ..audio
         };
     }

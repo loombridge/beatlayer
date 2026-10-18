@@ -433,6 +433,8 @@ pub fn run(args: Args) -> Result<(), String> {
     if !args.null_audio {
         shell.use_midi_backend(Box::new(bl_midi_io::MidirBackend::new()));
     }
+    // The files' analyses are kept beside the peaks (WP-4.3).
+    shell.use_platform_analysis_cache();
     shell.start_audio();
     if let Some(error) = prefs_error {
         shell.set_message(error, true);

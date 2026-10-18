@@ -38,6 +38,9 @@ serde = { version = "1.0.228", default-features = false, features = ["std", "der
 serde_json = "1"
 
 [dev-dependencies]
+# The analysis cache runs in the background beside blocks rendered under the
+# allocation trap (WP-4.3).
+bl-analysis.workspace = true
 # The stress test plays through the null device, which counts dropouts and
 # heap use on its audio thread.
 bl-audio-io.workspace = true

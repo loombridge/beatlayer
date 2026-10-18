@@ -29,7 +29,7 @@ use crate::shared::Shared;
 use crate::track::{
     Channel, CrossfadeAssign, Input, Mixer, Monitor, Output, SendTap, Track, TrackKind,
 };
-use crate::warp::MarkerAt;
+use crate::warp::{MarkerAt, TransientEdits};
 
 /// What left a track: devices and rack chains.
 #[derive(Default)]
@@ -713,6 +713,63 @@ pub enum Command {
         /// beat the map already places it. Give this or `beat`.
         #[serde(default)]
         time: Option<f64>,
+        /// Also put markers at the transients either side of the new one
+        /// (WP-4.3): Cmd (Ctrl) held on a pseudo-warp marker. Needs one clip.
+        #[serde(default)]
+        pin_neighbours: bool,
+        /// The clip's transients, as times in the file, that `pin_neighbours`
+        /// looks among. Left out, the app uses the clip's current ones.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        transients: Option<Vec<f64>>,
+    },
+    /// Puts warp markers in a range of a warped clip's contents (WP-4.3): at
+    /// every transient in it, or at its start and its end when it holds none.
+    InsertWarpMarkers {
+        /// The warped audio clip.
+        clip: ClipId,
+        /// The start of the range, in ticks from the clip's 1.1.1.
+        from: Ticks,
+        /// The end of the range, in ticks, after `from`.
+        to: Ticks,
+        /// The clip's transients, as times in the file, that the range is
+        /// searched for. Left out, the app uses the clip's current ones.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        transients: Option<Vec<f64>>,
+    },
+    /// Puts a transient into an audio clip's file at a time (WP-4.3).
+    InsertTransient {
+        /// The audio clip.
+        clip: ClipId,
+        /// The time in the file, in seconds.
+        #[schemars(range(min = 0.0))]
+        time: f64,
+    },
+    /// Takes transients out of an audio clip (WP-4.3).
+    DeleteTransients {
+        /// The audio clip.
+        clip: ClipId,
+        /// The transients to take out, by their times in the file as
+        /// `clip.transients` lists them.
+        times: Vec<f64>,
+    },
+    /// Takes away an audio clip's transient edits (WP-4.3): the ones made by
+    /// hand go, and the detected ones taken away come back.
+    ResetTransients {
+        /// The audio clip.
+        clip: ClipId,
+    },
+    /// Moves a transient to another time in the file (WP-4.3); no audio
+    /// changes.
+    MoveTransient {
+        /// The audio clip.
+        clip: ClipId,
+        /// The transient's time in the file, in seconds, as `clip.transients`
+        /// lists it.
+        #[schemars(range(min = 0.0))]
+        from: f64,
+        /// Where it goes, in seconds.
+        #[schemars(range(min = 0.0))]
+        to: f64,
     },
     /// Moves warp markers by the same ticks, each keeping its time in the
     /// file (WP-4.1).
@@ -1472,6 +1529,11 @@ impl Command {
             // Beatlayer's name the edit.
             Self::SetClipWarp { .. } => "Switch Warp",
             Self::InsertWarpMarker { .. } => "Insert Warp Marker",
+            Self::InsertWarpMarkers { .. } => "Insert Warp Markers",
+            Self::InsertTransient { .. } => "Insert Transient",
+            Self::DeleteTransients { .. } => "Delete Transient",
+            Self::ResetTransients { .. } => "Reset Transients",
+            Self::MoveTransient { .. } => "Move Transient",
             Self::MoveWarpMarkers { .. } | Self::ShiftWarpMarker { .. } => "Move Warp Marker",
             Self::DeleteWarpMarkers { .. } => "Delete Warp Marker",
             Self::SetSegmentBpm { .. } | Self::ScaleTempo { .. } => "Change clip tempo",
@@ -1981,8 +2043,17 @@ impl Document {
                 let owner = self.clip_owner(*clip)?;
                 check_clip_fits(self.track_ref(owner)?, data)?;
                 check_clip_data(data)?;
-                if self.clip_ref(*clip)?.data != *data {
-                    self.clip_mut(*clip)?.data = data.clone();
+                let mut data = data.clone();
+                // Transient edits belong to the file they were made on
+                // (the warping spec, R27).
+                if let (ClipData::Audio(next), ClipData::Audio(now)) =
+                    (&mut data, &self.clip_ref(*clip)?.data)
+                    && next.media != now.media
+                {
+                    next.transient_edits = TransientEdits::default();
+                }
+                if self.clip_ref(*clip)?.data != data {
+                    self.clip_mut(*clip)?.data = data;
                 }
                 Ok(())
             }
@@ -2043,7 +2114,13 @@ impl Document {
                 let set_tempo = self.settings.tempo.bpm_at(at);
                 self.edit_markers_with(*clip, |audio| audio.with_warp(*warp, set_tempo))
             }
-            Command::InsertWarpMarker { clips, beat, time } => {
+            Command::InsertWarpMarker {
+                clips,
+                beat,
+                time,
+                pin_neighbours,
+                transients,
+            } => {
                 let at = match (beat, time) {
                     (Some(beat), None) => MarkerAt::Beat(*beat),
                     (None, Some(time)) => MarkerAt::Time(*time),
@@ -2053,7 +2130,41 @@ impl Document {
                         ));
                     }
                 };
-                self.edit_each(clips, |audio| audio.with_marker_inserted(at))
+                if !*pin_neighbours {
+                    return self.edit_each(clips, |audio| audio.with_marker_inserted(at));
+                }
+                if clips.len() != 1 {
+                    return Err(ModelError::InvalidInput(
+                        "pin_neighbours works on one clip, whose transients it reads",
+                    ));
+                }
+                let transients = transients.as_deref().unwrap_or_default();
+                self.edit_each(clips, |audio| {
+                    audio.with_marker_inserted_pinned(at, transients)
+                })
+            }
+            Command::InsertWarpMarkers {
+                clip,
+                from,
+                to,
+                transients,
+            } => {
+                let transients = transients.as_deref().unwrap_or_default();
+                self.edit_markers_with(*clip, |audio| {
+                    audio.with_markers_in_range(*from, *to, transients)
+                })
+            }
+            Command::InsertTransient { clip, time } => {
+                self.edit_markers_with(*clip, |audio| audio.with_transient_inserted(*time))
+            }
+            Command::DeleteTransients { clip, times } => {
+                self.edit_markers_with(*clip, |audio| audio.with_transients_deleted(times))
+            }
+            Command::ResetTransients { clip } => {
+                self.edit_markers_with(*clip, |audio| Ok(audio.with_transients_reset()))
+            }
+            Command::MoveTransient { clip, from, to } => {
+                self.edit_markers_with(*clip, |audio| audio.with_transient_moved(*from, *to))
             }
             Command::MoveWarpMarkers { clips, markers, by } => {
                 self.edit_each(clips, |audio| audio.with_markers_moved(markers, *by))

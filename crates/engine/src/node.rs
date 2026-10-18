@@ -57,6 +57,13 @@ pub enum NodeKey {
     /// which make what the device's detector hears. Its parameters are
     /// [`sidechain`](crate::sidechain).
     Sidechain(DeviceId),
+    /// A track's cue switch in Cue mode (WP-3.18): the route that carries its
+    /// signal after its devices into the Cue Out's task. Its parameters are
+    /// [`mixer::route`](crate::mixer::route); solo mute is the switch off.
+    Cue(TrackId),
+    /// The mixer of the Cue Out's task, whose volume is the Cue Volume. Its
+    /// parameters are [`mixer::track`](crate::mixer::track).
+    CueMixer,
     /// The mixer of a rack's chain, after the chain's devices (WP-5.1): its
     /// Volume, Pan, and Chain Activator, which solo mutes. Its parameters are
     /// [`mixer::track`](crate::mixer::track).
@@ -92,6 +99,8 @@ impl fmt::Display for NodeKey {
             Self::DeviceInput(track) => write!(f, "the interface input of {track}"),
             Self::SidechainInput(device) => write!(f, "the sidechain input of {device}"),
             Self::Sidechain(device) => write!(f, "the sidechain of {device}"),
+            Self::Cue(track) => write!(f, "the cue switch of {track}"),
+            Self::CueMixer => f.write_str("the mixer of the Cue Out"),
             Self::ChainMixer(chain) => write!(f, "the mixer of {chain}"),
             Self::ChainNotes(chain) => write!(f, "the notes of {chain}"),
             Self::ChainSend { chain, to } => write!(f, "the send from {chain} to {to}"),

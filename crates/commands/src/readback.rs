@@ -334,6 +334,8 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("mixer.set_send_tap", query(Track, "mixer.tap")),
     ("mixer.set_solo", query(Track, "mixer.solo")),
     ("mixer.set_solo_in_place", query(Song, "settings.solo_in_place")),
+    ("mixer.set_cue_mode", query(Song, "settings.cue_mode")),
+    ("mixer.set_cue_volume", query(Song, "settings.cue_volume")),
     ("mixer.set_volume", query(Track, "mixer.volume")),
     ("mixer.solo_exclusive", query(Track, "mixer.solo")),
     ("modulator.map", query(Device, "mappings")),

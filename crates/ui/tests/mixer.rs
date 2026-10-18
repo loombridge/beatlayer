@@ -305,9 +305,11 @@ fn every_strip_has_its_controls_where_live_has_them() {
     assert!(inside(&nodes, "A Return", "Solo").is_some());
     assert!(inside(&nodes, "Main", "Track Activator").is_none());
     assert!(inside(&nodes, "Main", "Solo").is_none());
-    let cue = inside(&nodes, "Main", "Cue Volume").unwrap();
-    assert!(cue.disabled && cue.description.contains("Phase 3"));
-    assert!(inside(&nodes, "Main", "Solo/Cue Mode").unwrap().disabled);
+    // The Cue Volume knob works; the Solo/Cue button is dimmed and reads
+    // Solo while Cue Out and Main Out share 1/2, as in a new set (observed).
+    assert!(!inside(&nodes, "Main", "Cue Volume").unwrap().disabled);
+    let button = inside(&nodes, "Main", "Solo/Cue Mode").unwrap();
+    assert!(button.disabled && button.value == "Solo");
     assert!(inside(&nodes, "Main", "Track Volume").is_some());
     // Each return's Pre/Post switch, on Main's column, Post in a new set
     // (observed).
@@ -808,6 +810,103 @@ fn double_click_delete_keys_and_the_triangle() {
         key(&mut h, Key::ArrowUp, Modifiers::NONE);
     }
     assert_eq!(db(&h), 6.0, "it stops at the top");
+}
+
+// Spec: mixer-view R7; mixer S5, S10 (WP-3.18). The Solo/Cue button on
+// Main's strip switches the tracks' Solo switches to Cue switches, with no
+// undo step, once Cue Out and Main Out are apart; the Cue Volume knob drags,
+// steps and resets, each an undo step (observed 18 October 2026).
+#[test]
+fn the_solo_cue_button_and_the_cue_volume_knob_work_on_main_s_strip() {
+    let mut h = session();
+    let t = tracks(&h.shell);
+    let undo = |h: &Harness| h.shell.editor().undo_history().len();
+    let cue_mode = |h: &Harness| h.shell.editor().document().settings().cue_mode;
+    let volume = |h: &Harness| h.shell.editor().document().settings().cue_volume;
+
+    // Dimmed and inert while the outputs overlap, and so are Options ▸ Solo
+    // Switches and Cue Switches, with Solo Switches ticked.
+    let button = control(&mut h, "Main", "Solo/Cue Mode");
+    click(&mut h, button.center(), Modifiers::NONE);
+    assert!(!cue_mode(&h));
+    let (solo_switches, cue_switches) = (menu_item(&h, "M-OPT-023"), menu_item(&h, "M-OPT-024"));
+    assert!(!solo_switches.enabled && !cue_switches.enabled);
+    assert_eq!(
+        (solo_switches.checked, cue_switches.checked),
+        (Some(true), Some(false))
+    );
+
+    h.shell
+        .run(
+            "routing.set_cue_out",
+            json!({ "channel": { "type": "pair", "channel": 3 } }),
+        )
+        .unwrap();
+    let nodes = tree(&mut h);
+    let node = inside(&nodes, "Main", "Solo/Cue Mode").unwrap();
+    assert!(!node.disabled && node.value == "Solo");
+    assert!(inside(&nodes, "3 Audio", "Solo").is_some());
+    assert!(menu_item(&h, "M-OPT-023").enabled && menu_item(&h, "M-OPT-024").enabled);
+
+    // Cue Switches from the menu is the same setting as the button.
+    let steps = undo(&h);
+    let item = menu_item(&h, "M-OPT-024");
+    let invocation = item.invocation.unwrap();
+    h.shell.run(&invocation.id, invocation.args).unwrap();
+    assert!(cue_mode(&h));
+    assert_eq!(
+        (
+            menu_item(&h, "M-OPT-023").checked,
+            menu_item(&h, "M-OPT-024").checked
+        ),
+        (Some(false), Some(true))
+    );
+    click(&mut h, button.center(), Modifiers::NONE);
+    assert!(!cue_mode(&h), "the button toggles back");
+    assert_eq!(menu_item(&h, "M-OPT-023").checked, Some(true));
+    click(&mut h, button.center(), Modifiers::NONE);
+    assert!(cue_mode(&h));
+    assert_eq!(undo(&h), steps, "switching the mode is no undo step");
+    let nodes = tree(&mut h);
+    assert_eq!(
+        inside(&nodes, "Main", "Solo/Cue Mode").unwrap().value,
+        "Cue"
+    );
+    // The tracks' Solo switches are Cue switches now, and set the same flag.
+    assert!(inside(&nodes, "3 Audio", "Solo").is_none());
+    let cue = control(&mut h, "3 Audio", "Cue");
+    click(&mut h, cue.center(), Modifiers::NONE);
+    assert!(mixer(&h.shell, t[2]).solo);
+    let nodes = tree(&mut h);
+    assert_eq!(inside(&nodes, "3 Audio", "Cue").unwrap().value, "on");
+    click(&mut h, button.center(), Modifiers::NONE);
+    assert!(!cue_mode(&h));
+
+    // The knob: a drag up moves it along the fader's scale to +6 dB in one
+    // undo step, the Status Bar names it, and a double-click resets it.
+    let knob = control(&mut h, "Main", "Cue Volume");
+    let steps = undo(&h);
+    drag(
+        &mut h,
+        knob.center(),
+        &[vec2(0.0, -1.0); 30],
+        Modifiers::NONE,
+        |_| (),
+    );
+    assert!((controls::gain_db(volume(&h)) - 6.0).abs() < 1e-9);
+    assert_eq!(undo(&h), steps + 1);
+    assert_eq!(
+        h.shell.editor().undo_history().next(),
+        Some(controls::CUE_VOLUME_GESTURE)
+    );
+    double_click(&mut h, knob.center());
+    assert_eq!(volume(&h), 1.0);
+    // Up and Down step a dB; Delete resets.
+    click(&mut h, knob.center(), Modifiers::NONE);
+    key(&mut h, Key::ArrowDown, Modifiers::NONE);
+    assert!((controls::gain_db(volume(&h)) + 1.0).abs() < 1e-9);
+    key(&mut h, Key::Delete, Modifiers::NONE);
+    assert_eq!(volume(&h), 1.0);
 }
 
 // Spec: mixer-view R7.

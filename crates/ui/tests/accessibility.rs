@@ -2995,6 +2995,11 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "mixer.set_send_tap",
             main(nothing, session_main, "Return A Pre/Post", Key::Enter),
         ),
+        // Main's Cue Volume knob (WP-3.18): Up and Down step it.
+        (
+            "mixer.set_cue_volume",
+            main(nothing, session_main, "Cue Volume", Key::ArrowDown),
+        ),
         // The Crossfader section (WP-3.17): Main's crossfader and each
         // track's A and B buttons. Live's own key for them and their place
         // in the mixers' Tab order, with the section shown, aren't observed
@@ -3172,7 +3177,7 @@ fn on_menus(keymap: &Keymap) -> BTreeMap<String, String> {
         for menu in menu_bar(platform) {
             for item in menu.walk().filter(|item| item.is_shown()) {
                 let ids: Vec<String> = match item.action {
-                    Action::Command(id) => vec![id.to_owned()],
+                    Action::Command(id) | Action::Choice(id, _) => vec![id.to_owned()],
                     Action::Shortcut(shortcuts) => shortcuts
                         .iter()
                         .filter_map(|s| keymap.command_for(s, &every_context))

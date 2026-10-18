@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-474 commands in 36 areas.
+476 commands in 36 areas.
 
 ## Permission classes
 
@@ -311,6 +311,8 @@ Each command has:
 | [`mixer.set_arm`](#mixerset_arm) | Arm Track | `edit` | `C` | `C` |
 | [`mixer.set_crossfade_assign`](#mixerset_crossfade_assign) | Assign Crossfade | `edit` |  |  |
 | [`mixer.set_crossfader`](#mixerset_crossfader) | Set Crossfader | `edit` |  |  |
+| [`mixer.set_cue_mode`](#mixerset_cue_mode) | Cue Switches | `edit` |  |  |
+| [`mixer.set_cue_volume`](#mixerset_cue_volume) | Set Cue Volume | `edit` |  |  |
 | [`mixer.set_mute`](#mixerset_mute) | Activate/Deactivate Track | `edit` | `0`; `F1..F8` | `0`; `F1..F8` |
 | [`mixer.set_pan`](#mixerset_pan) | Set Track Pan | `edit` |  |  |
 | [`mixer.set_send`](#mixerset_send) | Set Send Level | `edit` |  |  |
@@ -5562,6 +5564,38 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `mixer.set_cue_mode`
+
+**Cue Switches**. Permission: `edit`. Contexts: `global`.
+
+Switches Cue mode, as the Main strip's Solo/Cue button and the Options menu's Solo Switches and Cue Switches do: with `enabled` true, every track's Solo switch becomes a Cue switch (`mixer.set_solo` sets it) that feeds the Cue Out at the Cue Volume (`mixer.set_cue_volume`) instead of silencing the other tracks, and Main plays what the activators leave. A cue-switched track is heard on the Cue Out after its devices and before its volume, pan and activator. It needs a Cue Out that shares no output channel with Main Out (`routing.set_cue_out`, `routing.set_main_out`): turning it on with an overlap is refused, and an overlap made later switches it off in effect. A new set is in Solo mode. The mode is saved with the set and is no undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `enabled` | boolean | yes | Whether the Solo switches are Cue switches. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `mixer.set_cue_volume`
+
+**Set Cue Volume**. Permission: `edit`. Contexts: `global`.
+
+Sets the Preview/Cue Volume knob on Main's strip, which scales the Cue Out in Cue mode, as a linear gain from 0 (-inf dB) to 1.995 (+6 dB); 1 (0 dB) is where a new set starts. The engine glides to the new value over 20 ms. The volume is saved with the set, and each change is one undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `volume` | number from 0 to 1.9952623149688795 | yes | The gain: 1 is unity (0 dB, where a new set starts) and 0 silence, up to 1.995 (+6 dB). |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `mixer.set_mute`
 
 **Activate/Deactivate Track**. Permission: `edit`. Contexts: `track-headers`, `session`, `arrangement`.
@@ -5640,7 +5674,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Solo Track**. Permission: `edit`. Contexts: `track-headers`, `session`, `arrangement`.
 
-Solos or unsolos one track, leaving other tracks' solo switches as they are, as a Cmd-click (Ctrl-click) on a Solo switch does; to solo one track alone, use `mixer.solo_exclusive`. While any track is soloed, only soloed tracks, the groups that hold them, and the tracks inside soloed groups are heard. Return tracks stay audible if Solo in Place is on (`mixer.set_solo_in_place`); soloing a return silences every other track's output but keeps their sends to it. Every track but Main can be soloed.
+Solos or unsolos one track, leaving other tracks' solo switches as they are, as a Cmd-click (Ctrl-click) on a Solo switch does; to solo one track alone, use `mixer.solo_exclusive`. While any track is soloed, only soloed tracks, the groups that hold them, and the tracks inside soloed groups are heard. Return tracks stay audible if Solo in Place is on (`mixer.set_solo_in_place`); soloing a return silences every other track's output but keeps their sends to it. In Cue mode (`mixer.set_cue_mode`) the switch is the track's Cue switch and silences nothing. Every track but Main can be soloed.
 
 Default keys:
 
@@ -9060,6 +9094,8 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`mixer.set_arm`](#mixerset_arm) | the query tool's `track` | `mixer.arm` |
 | [`mixer.set_crossfade_assign`](#mixerset_crossfade_assign) | the query tool's `track` | `mixer.crossfade` |
 | [`mixer.set_crossfader`](#mixerset_crossfader) | the query tool's `song` | `settings.crossfader` |
+| [`mixer.set_cue_mode`](#mixerset_cue_mode) | the query tool's `song` | `settings.cue_mode` |
+| [`mixer.set_cue_volume`](#mixerset_cue_volume) | the query tool's `song` | `settings.cue_volume` |
 | [`mixer.set_mute`](#mixerset_mute) | the query tool's `track` | `mixer.mute` |
 | [`mixer.set_pan`](#mixerset_pan) | the query tool's `track` | `mixer.pan` |
 | [`mixer.set_send`](#mixerset_send) | the query tool's `track` | `sends` |

@@ -1603,6 +1603,7 @@ fn schemas_match_what_commands_serialise() {
         (
             "clip.set_envelope_breakpoint",
             Command::SetClipEnvelopeBreakpoint {
+                kind: bl_model::EnvelopeKind::Modulation,
                 clip,
                 target: AutomationTarget::Mixer {
                     param: MixerParam::Volume,
@@ -1614,6 +1615,7 @@ fn schemas_match_what_commands_serialise() {
         (
             "clip.set_envelope_curve",
             Command::SetClipEnvelopeCurve {
+                kind: bl_model::EnvelopeKind::Modulation,
                 clip,
                 target: AutomationTarget::Device {
                     device,
@@ -1626,6 +1628,7 @@ fn schemas_match_what_commands_serialise() {
         (
             "clip.move_envelope_breakpoint",
             Command::MoveClipEnvelopeBreakpoint {
+                kind: bl_model::EnvelopeKind::Modulation,
                 clip,
                 target: AutomationTarget::Mixer {
                     param: MixerParam::Pan,
@@ -1638,6 +1641,7 @@ fn schemas_match_what_commands_serialise() {
         (
             "clip.delete_envelope_breakpoint",
             Command::DeleteClipEnvelopeBreakpoint {
+                kind: bl_model::EnvelopeKind::Modulation,
                 clip,
                 target: AutomationTarget::Mixer {
                     param: MixerParam::Mute,
@@ -1648,6 +1652,7 @@ fn schemas_match_what_commands_serialise() {
         (
             "clip.delete_envelope",
             Command::DeleteClipEnvelope {
+                kind: bl_model::EnvelopeKind::Modulation,
                 clip,
                 target: AutomationTarget::Send {
                     to: TrackId(fresh()),
@@ -1657,6 +1662,7 @@ fn schemas_match_what_commands_serialise() {
         (
             "clip.set_envelope_linked",
             Command::SetClipEnvelopeLinked {
+                kind: bl_model::EnvelopeKind::Modulation,
                 clip,
                 target: AutomationTarget::Mixer {
                     param: MixerParam::Volume,

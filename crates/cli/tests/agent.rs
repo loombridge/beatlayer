@@ -2248,6 +2248,86 @@ fn an_agent_switches_strikes_menu_options_and_swaps_it_to_snapshot_by_command_id
     assert_eq!(mode["value"], json!(1.0), "Snapshot in One-Shot mode");
 }
 
+// Spec: digital-degradation R9, bit-crusher R10, vinyl-distortion R8
+// (WP-5.24): an agent adds Degrade, Crush and Wax, sets a parameter of each
+// by ID, reads them back, and finds them as they were when the set is saved
+// and reopened.
+#[test]
+fn an_agent_sets_the_lo_fi_effects_by_id_and_finds_them_after_a_save_and_reopen() {
+    use bl_devices::{crusher, degrade, wax};
+
+    let dir = TempDir::new("lo-fi");
+    let mut client = bl_cli_mcp(&["--autonomous"]);
+    let track = default_tracks(&mut client)[2];
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{
+            "command": "arrangement.select_tracks",
+            "args": { "tracks": [track] },
+        }] }),
+    );
+    // Each device, with one parameter changed from its default.
+    let devices = [
+        (degrade::degrade_type(), degrade::STEREO_WIDTH, 80.0),
+        (crusher::crusher_type(), crusher::BITS, 5.0),
+        (wax::wax_type(), wax::CRACKLE_DENSITY, 40.0),
+    ];
+    let mut ids = Vec::new();
+    for (device_type, param, value) in &devices {
+        let added = call(
+            &mut client,
+            "run",
+            json!({ "commands": [{
+                "command": "device.add",
+                "args": { "track": track, "device": {
+                    "kind": device_type.kind, "name": device_type.name, "role": device_type.role,
+                } },
+            }] }),
+        );
+        let device = added["results"][0]["result"]["device"].clone();
+        call(
+            &mut client,
+            "run",
+            json!({ "commands": [{
+                "command": "device.set_param",
+                "args": { "device": device, "param": param, "value": value },
+            }] }),
+        );
+        ids.push(device);
+    }
+    let read = |client: &mut Client<Stdio>, device: &Value| {
+        let read = call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": "device.parameters", "args": { "device": device } }] }),
+        );
+        read["results"][0]["result"]["params"].clone()
+    };
+    let before: Vec<Value> = ids.iter().map(|id| read(&mut client, id)).collect();
+    for (params, (device_type, param, value)) in before.iter().zip(&devices) {
+        let params = params.as_array().unwrap();
+        assert_eq!(params.len(), device_type.description.params.len());
+        let changed = params.iter().find(|p| p["id"] == json!(param)).unwrap();
+        assert_eq!(changed["value"], json!(value), "{}", device_type.name);
+        assert!(params.iter().all(|p| p["automatable"] == json!(true)));
+    }
+
+    let saved = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "set.save_as",
+                               "args": { "path": dir.0.join("Lo-Fi.blset").to_string_lossy() } }] }),
+    );
+    let set = saved_path(&saved);
+    assert!(client.into_transport().finish().unwrap().success());
+
+    let mut reopened = bl_cli_mcp(&["--set", &set.to_string_lossy()]);
+    for (id, params) in ids.iter().zip(&before) {
+        assert_eq!(&read(&mut reopened, id), params);
+    }
+}
+
 /// Spec: warping R1, R4 to R11, R52. An agent warps a clip, edits its warp
 /// map and reads every change back in the query tool's `clip`, each command
 /// run by ID and one undo step.

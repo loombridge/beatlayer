@@ -1715,6 +1715,15 @@ fn paths() -> BTreeMap<&'static str, Path> {
             ),
         ),
         (
+            "settings.set_record_session_automation_in",
+            settings(
+                "record-warp-launch",
+                nothing,
+                "Record Session automation in",
+                Key::ArrowDown,
+            ),
+        ),
+        (
             "settings.set_auto_hide_plug_in_windows",
             settings("plug-ins", nothing, "Auto-Hide Plug-In Windows", Key::Enter),
         ),

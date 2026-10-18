@@ -4,7 +4,6 @@
 
 use std::collections::BTreeSet;
 
-use crate::automation::AutomationTarget;
 use crate::clip::Clip;
 use crate::device::DeviceRole;
 use crate::document::Document;
@@ -74,10 +73,18 @@ impl Document {
     /// a clip put on the track, must pass.
     pub(crate) fn check_clip_envelopes(&self, id: TrackId, clip: &Clip) -> Result<(), ModelError> {
         self.track_ref(id)?;
-        let mut seen: BTreeSet<AutomationTarget> = BTreeSet::new();
+        let mut seen = BTreeSet::new();
+        let in_slot = self
+            .track_ref(id)?
+            .slots()
+            .any(|(_, slotted)| slotted.id == clip.id);
         for envelope in clip.envelopes() {
-            if !seen.insert(envelope.target) {
+            if !seen.insert((envelope.target, envelope.kind)) {
                 return Err(ModelError::DuplicateEnvelope { clip: clip.id });
+            }
+            // An Arrangement clip's envelopes only modulate (WP-3.12).
+            if envelope.kind == crate::EnvelopeKind::Automation && !in_slot {
+                return Err(ModelError::NotSlotClip(clip.id));
             }
             self.check_automation_target(id, envelope.target)?;
             envelope.envelope.check()?;

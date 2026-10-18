@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-403 commands in 34 areas.
+404 commands in 34 areas.
 
 ## Permission classes
 
@@ -370,6 +370,7 @@ Each command has:
 | [`settings.set_default_launch_mode`](#settingsset_default_launch_mode) | Default Launch Mode | `edit` |  |  |
 | [`settings.set_default_launch_quantization`](#settingsset_default_launch_quantization) | Default Launch Quantization | `edit` |  |  |
 | [`settings.set_outline_view_in_focus`](#settingsset_outline_view_in_focus) | Outline View in Focus | `edit` |  |  |
+| [`settings.set_record_session_automation_in`](#settingsset_record_session_automation_in) | Record Session Automation in | `edit` |  |  |
 | [`settings.set_select_next_scene_on_launch`](#settingsset_select_next_scene_on_launch) | Select Next Scene on Launch | `edit` |  |  |
 | [`settings.set_select_on_launch`](#settingsset_select_on_launch) | Select on Launch | `edit` |  |  |
 | [`settings.set_start_recording_on_scene_launch`](#settingsset_start_recording_on_scene_launch) | Start Recording on Scene Launch | `edit` |  |  |
@@ -2261,6 +2262,7 @@ Arguments:
 |---|---|---|---|
 | `clip` | [`ClipId`](#clipid) | yes | The clip. |
 | `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter of the clip's track. |
+| `kind` | [`EnvelopeKind`](#envelopekind) | no | Which of the clip's envelopes for the parameter: `modulation` (the default) or a Session clip's `automation`. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -2279,6 +2281,7 @@ Arguments:
 | `clip` | [`ClipId`](#clipid) | yes | The clip. |
 | `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter of the clip's track. |
 | `at` | [`Ticks`](#ticks) | yes | Where the breakpoint is. |
+| `kind` | [`EnvelopeKind`](#envelopekind) | no | Which of the clip's envelopes for the parameter: `modulation` (the default) or a Session clip's `automation`. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -2368,6 +2371,7 @@ Arguments:
 | `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter of the clip's track. |
 | `at` | [`Ticks`](#ticks) | yes | Where the breakpoint is now. |
 | `to` | [`Ticks`](#ticks) | yes | Where it goes: 0 or later, and not where another breakpoint of the same envelope already is. |
+| `kind` | [`EnvelopeKind`](#envelopekind) | no | Which of the clip's envelopes for the parameter: `modulation` (the default) or a Session clip's `automation`. |
 | `value` | number or null | no | The value it takes there, in the parameter's own units, or `null` (or nothing) to keep the value it has. |
 
 Result: [`ChangeSet`](#changeset).
@@ -2479,6 +2483,7 @@ Arguments:
 | `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter of the clip's track the envelope modulates: a control of its mixer, one of its sends, or a parameter of a device in its chain. |
 | `at` | [`Ticks`](#ticks) | yes | Where the breakpoint sits, in ticks from the beginning of the clip's contents, as a note's start is: 0 or later. |
 | `value` | number | yes | The value there, in the parameter's own units. |
+| `kind` | [`EnvelopeKind`](#envelopekind) | no | Which of the clip's envelopes for the parameter: `modulation` (the default) or a Session clip's `automation`. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -2498,6 +2503,7 @@ Arguments:
 | `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter of the clip's track. |
 | `at` | [`Ticks`](#ticks) | yes | Where the segment starts: the breakpoint there. |
 | `bend` | number | yes | The bend, from −1 to 1: 0 is the straight line, and the sign chooses which side the segment bows to. |
+| `kind` | [`EnvelopeKind`](#envelopekind) | no | Which of the clip's envelopes for the parameter: `modulation` (the default) or a Session clip's `automation`. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -2516,6 +2522,7 @@ Arguments:
 | `clip` | [`ClipId`](#clipid) | yes | The clip. |
 | `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter of the clip's track. |
 | `linked` | boolean | yes | Whether the envelope follows the clip's timeline. |
+| `kind` | [`EnvelopeKind`](#envelopekind) | no | Which of the clip's envelopes for the parameter: `modulation` (the default) or a Session clip's `automation`. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -6419,6 +6426,22 @@ Arguments:
 
 Result: [`SwitchResult`](#switchresult).
 
+#### `settings.set_record_session_automation_in`
+
+**Record Session Automation in**. Permission: `edit`. Contexts: `settings`.
+
+Chooses Record Session automation in on the Settings window's Record, Warp & Launch page: `armed_tracks` (the default, Live's) records the control moves of a Session recording into the clips of the armed tracks, `all_tracks` into the playing clip of every track. Moves are recorded only while Automation Arm is on (`arrangement.automation_arm`). The setting is kept for the next start, and isn't part of the set or an undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `tracks` | [`SessionAutomationTracks`](#sessionautomationtracks) | yes | `armed_tracks` or `all_tracks`. |
+
+Result: nothing (`null`).
+
 #### `settings.set_select_next_scene_on_launch`
 
 **Select Next Scene on Launch**. Permission: `edit`. Contexts: `settings`.
@@ -7676,6 +7699,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`settings.set_default_launch_mode`](#settingsset_default_launch_mode) | `settings.state` | `launch.default_mode` |
 | [`settings.set_default_launch_quantization`](#settingsset_default_launch_quantization) | `settings.state` | `launch.default_quantization` |
 | [`settings.set_outline_view_in_focus`](#settingsset_outline_view_in_focus) | `settings.state` | `display_input.outline_view_in_focus` |
+| [`settings.set_record_session_automation_in`](#settingsset_record_session_automation_in) | `settings.state` | `record_session_automation_in` |
 | [`settings.set_select_next_scene_on_launch`](#settingsset_select_next_scene_on_launch) | `settings.state` | `launch.select_next_scene_on_launch` |
 | [`settings.set_select_on_launch`](#settingsset_select_on_launch) | `settings.state` | `launch.select_on_launch` |
 | [`settings.set_start_recording_on_scene_launch`](#settingsset_start_recording_on_scene_launch) | `settings.state` | `launch.start_recording_on_scene_launch` |
@@ -9998,6 +10022,8 @@ An envelope a clip carries for a parameter of its track: the parameter it modula
 |---|---|---|---|
 | `target` | [`AutomationTarget`](#automationtarget) | yes | The parameter it modulates: a control of the clip's track's mixer, a send, or a parameter of a device in its chain. |
 | `envelope` | [`Envelope`](#envelope) | yes | Its breakpoints, in position order: positions are ticks from the beginning of the clip's contents, like a note's start. |
+| `enabled` | boolean | no | Whether an automation envelope drives its parameter: a control moved by hand while the clip plays turns it off until the clip launches again or Re-Enable Automation. Always true for a modulation envelope. |
+| `kind` | [`EnvelopeKind`](#envelopekind) | no | Whether it modulates the parameter or sets it (WP-3.12). A clip can hold one of each kind for a parameter. |
 | `linked` | boolean | no | Whether it follows the clip's region and loop (`true`, the Linked switch's default) or plays once from the clip's start (`false`). |
 
 <details><summary>JSON Schema</summary>
@@ -10006,9 +10032,17 @@ An envelope a clip carries for a parameter of its track: the parameter it modula
 {
   "description": "An envelope a clip carries for a parameter of its track: the parameter it modulates, its breakpoints, and whether it follows the clip's timeline (`linked`, the default) or runs once from the clip's start (`false`).",
   "properties": {
+    "enabled": {
+      "description": "Whether an automation envelope drives its parameter: a control moved by hand while the clip plays turns it off until the clip launches again or Re-Enable Automation. Always true for a modulation envelope.",
+      "type": "boolean"
+    },
     "envelope": {
       "$ref": "#/$defs/Envelope",
       "description": "Its breakpoints, in position order: positions are ticks from the beginning of the clip's contents, like a note's start."
+    },
+    "kind": {
+      "$ref": "#/$defs/EnvelopeKind",
+      "description": "Whether it modulates the parameter or sets it (WP-3.12). A clip can hold one of each kind for a parameter."
     },
     "linked": {
       "description": "Whether it follows the clip's region and loop (`true`, the Linked switch's default) or plays once from the clip's start (`false`).",
@@ -12264,6 +12298,37 @@ A parameter's envelope: breakpoints joined by straight or curved segments, in po
     "points"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `EnvelopeKind`
+
+What a clip envelope does: `modulation` (the default) moves the value the control or the track's automation gives by a share of the parameter's travel; `automation` (a Session clip's) sets the value outright while the clip plays.
+
+One of:
+
+- `"modulation"`: Moves the parameter's own value, in modulation's units.
+- `"automation"`: Sets the parameter's value, in the parameter's own units.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a clip envelope does: `modulation` (the default) moves the value the control or the track's automation gives by a share of the parameter's travel; `automation` (a Session clip's) sets the value outright while the clip plays.",
+  "oneOf": [
+    {
+      "const": "modulation",
+      "description": "Moves the parameter's own value, in modulation's units.",
+      "type": "string"
+    },
+    {
+      "const": "automation",
+      "description": "Sets the parameter's value, in the parameter's own units.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -18643,6 +18708,37 @@ One of:
 
 </details>
 
+### `SessionAutomationTracks`
+
+Record Session automation in (Record, Warp & Launch, L-SET-018; WP-3.12): which tracks a Session recording writes control moves into the clips of.
+
+One of:
+
+- `"armed_tracks"`: The armed tracks only: Live's default, as observed.
+- `"all_tracks"`: Every track with a Session clip playing.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Record Session automation in (Record, Warp & Launch, L-SET-018; WP-3.12): which tracks a Session recording writes control moves into the clips of.",
+  "oneOf": [
+    {
+      "const": "armed_tracks",
+      "description": "The armed tracks only: Live's default, as observed.",
+      "type": "string"
+    },
+    {
+      "const": "all_tracks",
+      "description": "Every track with a Session clip playing.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `SessionSelectMode`
 
 How a click changes the selection (the Session View's own modifier click rules).
@@ -19005,6 +19101,7 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
 | `create_fades_on_clip_edges` | boolean | yes | Record, Warp & Launch: Create Fades on Clip Edges, as `settings.set_create_fades_on_clip_edges` sets it. |
 | `warp_recorded_audio` | boolean | yes | Record, Warp & Launch: Warp Recorded Audio, as `settings.set_warp_recorded_audio` sets it. |
 | `launch` | [`LaunchPrefs`](#launchprefs) | yes | Record, Warp & Launch: the Launch section, as the `settings.set_default_launch_*`, `settings.set_select_on_launch`, `settings.set_select_next_scene_on_launch` and `settings.set_start_recording_on_scene_launch` commands set it. |
+| `record_session_automation_in` | [`SessionAutomationTracks`](#sessionautomationtracks) | yes | Record, Warp & Launch: Record Session automation in, as `settings.set_record_session_automation_in` sets it. |
 | `file_folder` | [`FileFolderSettings`](#filefoldersettings) | yes | File & Folder: the Temporary Folder, as `settings.set_temporary_folder` sets it. |
 | `auto_hide_plug_in_windows` | boolean | yes | Plug-Ins: Auto-Hide Plug-In Windows, as `settings.set_auto_hide_plug_in_windows` sets it. |
 | `plug_ins` | [`PluginSettings`](#pluginsettings) | yes | Plug-Ins: how the Browser shows plug-ins, as `plugin.settings` sets it. |
@@ -19057,6 +19154,10 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
       "$ref": "#/$defs/PluginSettings",
       "description": "Plug-Ins: how the Browser shows plug-ins, as `plugin.settings` sets it."
     },
+    "record_session_automation_in": {
+      "$ref": "#/$defs/SessionAutomationTracks",
+      "description": "Record, Warp & Launch: Record Session automation in, as `settings.set_record_session_automation_in` sets it."
+    },
     "tempo_midi": {
       "$ref": "#/$defs/MidiPortsResult",
       "description": "Tempo & MIDI: the MIDI ports' switches and the computer MIDI keyboard, the same as `midi.ports` reports."
@@ -19079,6 +19180,7 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
     "create_fades_on_clip_edges",
     "warp_recorded_audio",
     "launch",
+    "record_session_automation_in",
     "file_folder",
     "auto_hide_plug_in_windows",
     "plug_ins",

@@ -971,7 +971,12 @@ impl EngineProgram {
         } = *block;
         // Where the block sits in the song, for the automation a route plays
         // (WP-2.12): no time while the song is stopped.
-        let song = transport.playing.then(|| transport.position.get());
+        let song = transport.playing.then(|| crate::automation::Song {
+            frame: transport.position.get(),
+            session,
+            tempo: &self.tempo,
+            rate: self.sample_rate,
+        });
         let shape = crate::mixer::Planar {
             channels,
             stride,

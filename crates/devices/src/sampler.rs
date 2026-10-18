@@ -1385,7 +1385,7 @@ fn voice_cycle(s: &Settings, key: u8) -> f64 {
 
 /// The LFO waveform at `phase` (0 to 1): -1 to 1. `random` is the value
 /// the Random waveform holds for its cycle.
-fn lfo_shape(wave: usize, phase: f64, random: f32) -> f32 {
+pub(crate) fn lfo_shape(wave: usize, phase: f64, random: f32) -> f32 {
     match wave {
         1 => {
             if phase < 0.5 {
@@ -1404,7 +1404,7 @@ fn lfo_shape(wave: usize, phase: f64, random: f32) -> f32 {
 
 /// The next value of the LFO's Random waveform: a new value in -1 to 1
 /// each cycle.
-fn random(state: &mut u32) -> f32 {
+pub(crate) fn random(state: &mut u32) -> f32 {
     *state ^= *state << 13;
     *state ^= *state >> 17;
     *state ^= *state << 5;

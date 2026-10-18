@@ -253,6 +253,7 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("device.edit_sample", query(Device, "sample_edits")),
     ("device.duplicate_layers", query(Device, "layers")),
     ("device.group", query(Track, "devices")),
+    ("device.import_sfz", query(Device, "layers")),
     ("device.insert", query(Track, "devices")),
     ("device.insert_in_chain", query(Device, "chains")),
     ("device.insert_layers", query(Device, "layers")),

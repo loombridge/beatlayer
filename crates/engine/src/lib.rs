@@ -86,6 +86,7 @@ mod automation;
 pub mod capture;
 pub mod clips;
 mod compiler;
+pub mod controller_take;
 mod disjoint;
 pub mod display;
 mod engine;

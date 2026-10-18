@@ -22,19 +22,23 @@
 //! the parametric EQ ([`eq`], WP-2.18a), the algorithmic reverb
 //! ([`reverb`]), the limiter ([`limiter`]), the tempo-synced delay
 //! ([`delay`]) and the Utility device ([`utility`], WP-2.18b); [`register`]
-//! adds them to the engine. The instruments are the polysynth
+//! adds them to the engine, with the three delays of WP-5.25
+//! ([`filter_delay`], [`grain_delay`], [`alignment_delay`]). The instruments are the polysynth
 //! ([`polysynth`], WP-2.17), the sampler ([`sampler`], WP-2.16) and the
 //! eight-slot drum sampler ([`kitbag`], WP-5.17). The
 //! rest of the core effects ship with WP-2.18. [`testing`] has the devices
 //! the framework's tests use. The kit's two example plug-ins join the
 //! device list with the `kit-examples` feature, off by default.
 
+pub mod alignment_delay;
 pub mod compressor;
 pub mod delay;
 pub mod dice;
 pub mod drum_sampler;
 pub mod eq;
+pub mod filter_delay;
 mod framework;
+pub mod grain_delay;
 pub mod hold;
 pub mod kit;
 pub mod kitbag;
@@ -52,12 +56,15 @@ pub mod testing;
 pub mod touch;
 pub mod utility;
 
+pub use alignment_delay::{ALIGNMENT_DELAY, alignment_delay_type};
 pub use compressor::{COMPRESSOR, Squeeze, compressor_type};
 pub use delay::{DELAY, delay_type};
 pub use dice::{DICE, dice_type};
 pub use drum_sampler::{DRUM_SAMPLER, DrumSampler, drum_sampler_type};
 pub use eq::{Contour, EQ, eq_type};
+pub use filter_delay::{FILTER_DELAY, filter_delay_type};
 pub use framework::{Audio, Modulation, NativeDevice, NativeNode, ParamBank, add};
+pub use grain_delay::{GRAIN_DELAY, grain_delay_type};
 pub use hold::{HOLD, hold_type};
 pub use kit::{KitFactory, KitHost};
 pub use kitbag::{KITBAG, Kitbag, kitbag_type};
@@ -102,6 +109,9 @@ pub fn register(registry: &mut Registry) {
     polysynth::register(registry);
     limiter::register(registry);
     delay::register(registry);
+    filter_delay::register(registry);
+    grain_delay::register(registry);
+    alignment_delay::register(registry);
     reverb::register(registry);
     utility::register(registry);
     eq::register(registry);

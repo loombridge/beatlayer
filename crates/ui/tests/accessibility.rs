@@ -2363,6 +2363,14 @@ fn paths() -> BTreeMap<&'static str, Path> {
             )),
         ),
         (
+            "device.import_sfz",
+            Exception(Equivalent(
+                "`browser.load_selected`, which Enter runs on a selected SFZ instrument in the \
+                 browser and loads as a multisampler (multisampler R47); this form names the \
+                 file, the track or the device",
+            )),
+        ),
+        (
             "device.add_layers",
             Exception(Gap(
                 "adding samples to the layer list is a drop of files on the zone editor; the \

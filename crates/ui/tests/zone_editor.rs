@@ -568,3 +568,58 @@ fn the_hot_swap_button_replaces_the_selected_sample() {
     std::fs::remove_dir_all(&dir).ok();
     assert_eq!(layer.length, 9600, "the chosen sample replaced the layer's");
 }
+
+/// The generated instrument `tests/fixtures/gen/gen_media.py --sfz` writes.
+fn sine_kit() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/sfz/Sine Bank.sfz")
+}
+
+// Spec: multisampler R47
+#[test]
+fn an_sfz_dropped_on_the_zone_editor_adds_its_regions_as_one_undo_step() {
+    let (mut h, device, _) = editor(2);
+    let before = steps(&h);
+    let areas = areas(editor_rect(&mut h));
+    h.frame(vec![Event::PointerMoved(pos2(
+        areas.list.left() + 20.0,
+        areas.bars.top() + 4.0,
+    ))]);
+    h.dropped.push(std::sync::Arc::new(DroppedFile(sine_kit())));
+    h.settle();
+    let names: Vec<String> = h
+        .shell
+        .editor()
+        .document()
+        .device(device)
+        .unwrap()
+        .layers
+        .list
+        .iter()
+        .map(|l| l.name.clone())
+        .collect();
+    assert_eq!(
+        names,
+        [
+            "Layer 1", "Layer 2", "low_soft", "low_hard", "mid_a", "mid_b", "high"
+        ],
+        "the regions come after the layers there"
+    );
+    assert_eq!(
+        steps(&h),
+        before + 1,
+        "{:?}",
+        h.shell.editor().undo_history().collect::<Vec<_>>()
+    );
+    h.shell.run("edit.undo", json!({})).unwrap();
+    assert_eq!(
+        h.shell
+            .editor()
+            .document()
+            .device(device)
+            .unwrap()
+            .layers
+            .list
+            .len(),
+        2
+    );
+}

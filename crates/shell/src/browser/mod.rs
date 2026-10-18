@@ -32,7 +32,7 @@ pub use bl_shell_spec::browser::Part;
 use bl_shell_spec::browser::{
     self as ids, AddToArrangementArgs, BrowserState, FocusArgs, FolderArgs, IndexState, Item,
     ItemKind, Label, LabelInfo, MAX_PREVIEW_VOLUME, OpenFolderArgs, OpenPlaceArgs, PreviewArgs,
-    PreviewState, SearchArgs, Section, SelectArgs, SetPreviewArgs, StateArgs,
+    PreviewState, SearchArgs, Section, SelectArgs, SetPreviewArgs, ShowFileArgs, StateArgs,
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -1317,6 +1317,77 @@ impl BrowserView {
                 } else if self.preview_active() {
                     self.stop_preview(ctx.audio);
                 }
+                outcome.value = state(self, ctx.audio);
+            }
+            ids::SHOW_FILE => {
+                // Spec: sample-editor R2. Show in Browser: the place the file
+                // lies in, opened down to it, with the file selected.
+                let ShowFileArgs { path, clip } = parse(args)?;
+                let path = match (path, clip) {
+                    (Some(path), None) => absolute(&path)?,
+                    (None, Some(clip)) => {
+                        let media = match ctx.editor.document().clip(clip).map(|c| &c.data) {
+                            Some(bl_model::ClipData::Audio(audio)) => audio.media,
+                            Some(_) => {
+                                return Err(BrowserError::InvalidArgs(
+                                    "the clip isn't an audio clip".to_owned(),
+                                ));
+                            }
+                            None => {
+                                return Err(BrowserError::InvalidArgs(format!(
+                                    "no clip has the ID {}",
+                                    clip.0
+                                )));
+                            }
+                        };
+                        ctx.media
+                            .entry(bl_media::ContentHash::from_bytes(media.0))
+                            .map(|entry| entry.path)
+                            .ok_or_else(|| {
+                                BrowserError::Unavailable(
+                                    "the media store doesn't know the clip's file".to_owned(),
+                                )
+                            })?
+                    }
+                    _ => {
+                        return Err(BrowserError::InvalidArgs(
+                            "give `path` or `clip`, not both".to_owned(),
+                        ));
+                    }
+                };
+                if !path.is_file() {
+                    return Err(BrowserError::InvalidArgs(format!(
+                        "{} isn't a file",
+                        path.to_string_lossy()
+                    )));
+                }
+                let Some((label, root)) = self
+                    .roots()
+                    .into_iter()
+                    .find(|(_, root)| path.starts_with(root))
+                else {
+                    return Err(BrowserError::Unavailable(format!(
+                        "{} lies in none of the browser's places: add its folder with \
+                         `browser.add_folder` first",
+                        path.to_string_lossy()
+                    )));
+                };
+                self.label = label;
+                self.search.clear();
+                for folder in path.ancestors().skip(1) {
+                    if folder == root {
+                        break;
+                    }
+                    self.listings.remove(folder);
+                    self.open.insert(folder.to_path_buf());
+                }
+                self.rebuild();
+                self.selected = vec![path.clone()];
+                self.cursor = self.position_of(&path);
+                if self.preview_active() {
+                    self.stop_preview(ctx.audio);
+                }
+                outcome.show_browser = true;
                 outcome.value = state(self, ctx.audio);
             }
             ids::ADD_FOLDER => {

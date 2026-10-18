@@ -9,7 +9,7 @@
 //! the command reference; `bl-shell` runs them by ID. The behaviour they follow
 //! is in the arrangement view spec.
 
-use bl_commands::Context::{Arrangement, Global, TrackHeaders};
+use bl_commands::Context::{Arrangement, Global, SampleEditor, TrackHeaders};
 use bl_commands::{Binding, CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_core::time::Ticks;
 use bl_model::{AutomationTarget, ClipId, TrackId};
@@ -681,12 +681,14 @@ fn specs() -> Vec<CommandSpec> {
              Arrangement View turns the page whenever the playhead leaves the view, so the \
              playhead stays in sight. Scrolling sideways by hand, or clicking the beat-time \
              ruler, pauses it until playback starts or stops, or a click lands in the track \
-             lanes or the scrub area; `paused` does the same directly. With no arguments it \
+             lanes or the scrub area; `paused` does the same directly. The Sample Editor \
+             follows playback on the same switch (Option-Shift-F there too). With no arguments it \
              toggles Follow, which also resumes it. Changes only the view.",
         )
-        .contexts([Global, Arrangement])
+        .contexts([Global, Arrangement, SampleEditor])
         .binding("S-ZOOM-005")
         .binding("S-ARR-023")
+        .binding("S-SAMPLE-005")
         .args::<FollowArgs>(),
         view(
             OVERVIEW,

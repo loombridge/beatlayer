@@ -284,6 +284,20 @@ impl ArrangementUi {
         self.lanes_key = None;
     }
 
+    /// The peaks of a media file if they're ready, asking for them if nobody
+    /// has: the Sample Editor draws its waveform from the same library the
+    /// Arrangement does (sample editor R4). It also lets the library take
+    /// the source's news, so peaks become ready while the Session View
+    /// shows.
+    pub fn peaks_of(&mut self, media: bl_model::ContentHash) -> Option<Arc<bl_media::Peaks>> {
+        let mut shared = lock(&self.shared);
+        self.library.update(&mut shared.atlas);
+        match self.library.get(media, &mut shared.atlas) {
+            peaks::Known::Ready { peaks, .. } => Some(Arc::clone(peaks)),
+            _ => None,
+        }
+    }
+
     /// What the last frame built: the rows and clips on screen, out of how
     /// many.
     #[must_use]

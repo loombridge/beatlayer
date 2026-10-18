@@ -222,6 +222,37 @@ const WIDGET: &[(&str, &str)] = &[
         "the Clip View's note editor: Shift-Up and Shift-Down transpose the selected notes by \
          an octave (`note.move`)",
     ),
+    // WP-4.10: the Sample Editor reads its arrow keys itself, because each
+    // shortcut has two keys that act differently and the keymap gives a
+    // shortcut one command with one set of arguments; each runs a
+    // registered command.
+    (
+        "S-SAMPLE-003",
+        "the Clip View's Sample Editor: Left and Right move the selected warp markers by one \
+         step of the editing grid (`clip.move_warp_markers`)",
+    ),
+    (
+        "S-SAMPLE-004",
+        "the Clip View's Sample Editor: Cmd-Left and Cmd-Right select the previous or next \
+         warp marker (`clip_view.select_warp_markers`)",
+    ),
+    (
+        "S-SAMPLE-006",
+        "the Clip View's Sample Editor: with the Start marker selected, Shift-Left and \
+         Shift-Right move the clip's region by one step of the editing grid \
+         (`clip.set_region`)",
+    ),
+    (
+        "S-A11Y-012",
+        "the Clip View's Sample Editor: Option-Left and Option-Right (Ctrl on Windows) move \
+         the insert marker by one step of the editing grid (`clip_view.set_insert_marker`)",
+    ),
+    (
+        "S-A11Y-013",
+        "the Clip View's Sample Editor: with nothing selected, Shift-Left and Shift-Right \
+         start or extend a time selection by one step of the editing grid \
+         (`clip_view.select_time`)",
+    ),
     // WP-3.7: the Session View grid reads its arrows, Page keys, Home and
     // End, and Esc itself, because each shortcut has keys that act
     // differently and the keymap gives a shortcut one command with one set of

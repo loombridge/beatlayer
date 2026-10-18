@@ -3153,8 +3153,19 @@ fn bindings_follow_the_spec() {
         "device.set_enabled_all",
         // WP-5.2: Rename in a rack's chain list (S-EDIT-008).
         "chain.rename",
+        // WP-4.10: the Sample Editor's keys that name no argument but the
+        // clip (S-SAMPLE-009 to S-SAMPLE-012).
+        "clip.insert_warp_marker",
+        "clip.delete_warp_markers",
+        "clip.insert_transient",
+        "clip.delete_transients",
     ]
     .into_iter()
     .collect();
     assert_eq!(bound, expected, "only these commands have Live shortcuts");
+    // Spec: sample-editor R10
+    assert_eq!(bindings("clip.insert_warp_marker"), ["S-SAMPLE-009"]);
+    assert_eq!(bindings("clip.delete_warp_markers"), ["S-SAMPLE-010"]);
+    assert_eq!(bindings("clip.insert_transient"), ["S-SAMPLE-011"]);
+    assert_eq!(bindings("clip.delete_transients"), ["S-SAMPLE-012"]);
 }

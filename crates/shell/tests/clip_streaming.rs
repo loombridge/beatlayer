@@ -88,8 +88,8 @@ fn add(shell: &mut Shell, path: &Path) -> AudioData {
         .clips()
         .find(|c| c.start == Ticks::ZERO)
         .unwrap();
-    match clip.data {
-        ClipData::Audio(audio) => audio,
+    match &clip.data {
+        ClipData::Audio(audio) => audio.clone(),
         ClipData::Midi(_) => unreachable!("an audio clip"),
     }
 }

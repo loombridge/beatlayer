@@ -71,6 +71,7 @@ mod error;
 pub mod fader;
 mod ids;
 mod launch;
+mod layers;
 mod metronome;
 pub mod modulation;
 pub mod modulator;
@@ -82,6 +83,7 @@ mod routing;
 mod scene;
 mod shared;
 mod track;
+mod warp;
 
 pub use automation::{
     Automation, AutomationTarget, Breakpoint, Envelope, MixerParam, TrackAutomation, curve_value,
@@ -108,6 +110,11 @@ pub use ids::{
 /// The persistent collections the document's public types hold.
 pub use imbl::{OrdMap, Vector};
 pub use launch::{ClipLaunch, LaunchMode, LaunchQuantization, LaunchSettings};
+pub use layers::{
+    DEFAULT_ROOT_KEY, Distribution, EditorSize, FadeMode, LAYER_GAIN_MAX, Layer, LayerId,
+    LayerSettings, LayerSort, LayerZone, Layers, MultisamplerView, MultisamplerViews, ReleaseMode,
+    SamplerTab, SustainMode, Zone, ZoneKind, snap_to_zero_crossing,
+};
 pub use metronome::{CountIn, MetronomeRhythm, MetronomeSettings, MetronomeSound};
 pub use param::{DeviceDescription, ParamDescriptor, ParamKind, ParamUnit};
 pub use rack::{CHAIN_COLOURS, Chain, ChainMixer, DevicePlace, RackKind};
@@ -117,3 +124,4 @@ pub use track::{
     Channel, CrossfadeAssign, Input, Mixer, Monitor, Output, Routing, SendTap, Tap, Track,
     TrackKind,
 };
+pub use warp::WarpMarker;

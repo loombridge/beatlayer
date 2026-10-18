@@ -19,6 +19,9 @@ use crate::document::Document;
 use crate::error::ModelError;
 use crate::ids::{ChainId, ClipId, ContentHash, DeviceId, ParamId, SceneId, TrackId};
 use crate::launch::{ClipLaunch, LaunchMode, LaunchQuantization};
+use crate::layers::{
+    Distribution, Layer, LayerId, LayerSettings, LayerSort, LayerZone, Layers, ZoneKind,
+};
 use crate::metronome::{CountIn, MetronomeRhythm, MetronomeSound};
 use crate::rack::{CHAIN_COLOURS, Chain, RackKind};
 use crate::scene::{SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
@@ -26,6 +29,7 @@ use crate::shared::Shared;
 use crate::track::{
     Channel, CrossfadeAssign, Input, Mixer, Monitor, Output, SendTap, Track, TrackKind,
 };
+use crate::warp::MarkerAt;
 
 /// What left a track: devices and rack chains.
 #[derive(Default)]
@@ -605,25 +609,35 @@ pub enum Command {
         /// The audio clip.
         clip: ClipId,
         /// The Start marker, in seconds into the file: 0 or more. While the
-        /// loop is on, it must be before the loop brace's end.
-        #[schemars(range(min = 0.0))]
+        /// loop is on, it must be before the loop brace's end. A warped
+        /// clip's is whole ticks of its contents (`ticks` true).
         start: f64,
         /// The End marker, in seconds into the file, after `start`; `null`
         /// (or nothing) for the end of the file.
         #[serde(default)]
         end: Option<f64>,
+        /// Whether `start` and `end` are ticks of a warped clip's contents
+        /// instead of seconds in the file of an unwarped one: they must be
+        /// the form the clip shows.
+        #[serde(default)]
+        ticks: bool,
     },
     /// Moves an audio clip's loop brace, leaving its Loop switch as it is.
     SetClipLoop {
         /// The audio clip.
         clip: ClipId,
-        /// Where the brace starts, in seconds into the file: 0 or more.
-        #[schemars(range(min = 0.0))]
+        /// Where the brace starts, in seconds into the file: 0 or more. A
+        /// warped clip's is whole ticks of its contents (`ticks` true).
         start: f64,
         /// Where it ends, in seconds into the file, after `start`; `null`
         /// (or nothing) for the end of the file.
         #[serde(default)]
         end: Option<f64>,
+        /// Whether `start` and `end` are ticks of a warped clip's contents
+        /// instead of seconds in the file of an unwarped one: they must be
+        /// the form the clip shows.
+        #[serde(default)]
+        ticks: bool,
     },
     /// Moves a MIDI clip's Start and End markers: where in its contents it
     /// starts playing, and where it stops while its loop is off.
@@ -674,6 +688,81 @@ pub enum Command {
         /// The fade-out's length in seconds up to the clip's end: 0 for none.
         #[schemars(range(min = 0.0))]
         fade_out: f64,
+    },
+    /// Switches an audio clip's Warp on or off (WP-4.1): its Start and End
+    /// markers and loop brace convert through the warp map and it keeps its
+    /// place and length.
+    SetClipWarp {
+        /// The audio clip.
+        clip: ClipId,
+        /// Whether the clip follows the set's tempo through its warp map.
+        warp: bool,
+    },
+    /// Adds a warp marker to each of the warped clips, at the same place
+    /// (WP-4.1): at a beat of the clip's contents, or at a time in its file.
+    InsertWarpMarker {
+        /// The warped audio clips: their files must be as long as each
+        /// other's.
+        clips: Vec<ClipId>,
+        /// The beat, in ticks from the clip's 1.1.1, to put the marker on,
+        /// at the time in the file the map already places there. Give this
+        /// or `time`.
+        #[serde(default)]
+        beat: Option<Ticks>,
+        /// The time in the file, in seconds, to put the marker at, on the
+        /// beat the map already places it. Give this or `beat`.
+        #[serde(default)]
+        time: Option<f64>,
+    },
+    /// Moves warp markers by the same ticks, each keeping its time in the
+    /// file (WP-4.1).
+    MoveWarpMarkers {
+        /// The warped audio clips: their files must be as long as each
+        /// other's.
+        clips: Vec<ClipId>,
+        /// The markers to move, by their place in the map, the first being 0.
+        markers: Vec<usize>,
+        /// How far to move them, in ticks: negative moves them earlier.
+        by: Ticks,
+    },
+    /// Moves one warp marker's time in the file, keeping its beat (WP-4.1).
+    ShiftWarpMarker {
+        /// The warped audio clips: their files must be as long as each
+        /// other's.
+        clips: Vec<ClipId>,
+        /// The marker, by its place in the map, the first being 0.
+        marker: usize,
+        /// How far to move its time in the file, in seconds: negative moves
+        /// it earlier.
+        by: f64,
+    },
+    /// Deletes warp markers (WP-4.1).
+    DeleteWarpMarkers {
+        /// The warped audio clips: their files must be as long as each
+        /// other's.
+        clips: Vec<ClipId>,
+        /// The markers to delete, by their place in the map, the first being 0.
+        markers: Vec<usize>,
+    },
+    /// Sets a warped clip's BPM field (WP-4.1).
+    SetSegmentBpm {
+        /// The warped audio clip.
+        clip: ClipId,
+        /// The marker whose segment to set, by its place in the map, the
+        /// first being 0: `null` (or nothing) for the first segment's tempo,
+        /// which scales every segment.
+        #[serde(default)]
+        marker: Option<usize>,
+        /// The tempo in BPM: positive, and from 1 to 1,000 for the clip's.
+        bpm: f64,
+    },
+    /// Multiplies every tempo of a warped clip by a factor, Live's ×2 and ÷2
+    /// (WP-4.1).
+    ScaleTempo {
+        /// The warped audio clip.
+        clip: ClipId,
+        /// What to multiply by: 2 for ×2, 0.5 for ÷2.
+        factor: f64,
     },
     /// Switches a Session clip's Legato: on, it takes over the play position
     /// of the clip playing on its track when it launches.
@@ -1005,6 +1094,129 @@ pub enum Command {
         #[serde(default)]
         slot: u8,
     },
+    /// Adds layers to a multisampler (WP-5.13; the multisampler spec, R3), at
+    /// `index` or at the end. Each layer's own `id` is ignored: the device
+    /// gives each the next of its layer IDs, in order, and they read back
+    /// from the device's layers. Every setting must be in range.
+    InsertLayers {
+        /// The device.
+        device: DeviceId,
+        /// Where in the layer list the first goes, or `null` for the end.
+        index: Option<usize>,
+        /// The layers.
+        layers: Vec<Layer>,
+    },
+    /// Removes layers from a multisampler.
+    DeleteLayers {
+        /// The device.
+        device: DeviceId,
+        /// The layers to remove.
+        layers: Vec<LayerId>,
+    },
+    /// Copies layers, each copy straight after its original with a new ID.
+    DuplicateLayers {
+        /// The device.
+        device: DeviceId,
+        /// The layers to copy.
+        layers: Vec<LayerId>,
+    },
+    /// Renames a layer.
+    RenameLayer {
+        /// The device.
+        device: DeviceId,
+        /// The layer.
+        layer: LayerId,
+        /// Its new name.
+        name: String,
+    },
+    /// Moves layers, keeping their order, so the first sits at `index`
+    /// among the layers that stay.
+    MoveLayers {
+        /// The device.
+        device: DeviceId,
+        /// The layers to move.
+        layers: Vec<LayerId>,
+        /// Where the first goes among the layers left.
+        index: usize,
+    },
+    /// Sorts a multisampler's layers.
+    SortLayers {
+        /// The device.
+        device: DeviceId,
+        /// What to sort by.
+        by: LayerSort,
+        /// Whether the largest comes first.
+        descending: bool,
+    },
+    /// Sets one kind of zone of layers (R10): the key, velocity or sample
+    /// select zone, with its fades. Every zone must hold at least one value
+    /// of its scale (keys 0 to 127, velocities 1 to 127, select 0 to 127)
+    /// and its fades stay inside it.
+    SetLayerZones {
+        /// The device.
+        device: DeviceId,
+        /// Which zone.
+        kind: ZoneKind,
+        /// Each layer's new zone.
+        zones: Vec<LayerZone>,
+    },
+    /// Changes settings of layers, exactly as given with no snapping to
+    /// zero crossings (`device.set_layer` snaps while Snap is on): Root Key,
+    /// Detune, Volume, Pan, the markers, Link, the loop modes, the loop's
+    /// Crossfade and Detune. Settings left out stay as they were; one
+    /// setting out of range refuses the whole change.
+    UpdateLayers {
+        /// The device.
+        device: DeviceId,
+        /// The layers to change.
+        layers: Vec<LayerId>,
+        /// The settings to set.
+        settings: LayerSettings,
+    },
+    /// Replaces a layer's sample, keeping its zones and settings, and its
+    /// markers in the same places relative to the sample's length. A layer
+    /// whose media the store doesn't hold plays silence.
+    SetLayerMedia {
+        /// The device.
+        device: DeviceId,
+        /// The layer.
+        layer: LayerId,
+        /// The new sample, by content hash.
+        media: ContentHash,
+        /// Its length in frames at its own rate.
+        length: u64,
+        /// Its own rate in hertz.
+        sample_rate: u32,
+        /// Its channels.
+        channels: u8,
+    },
+    /// Spreads layers' ranges (R12): equally over the range of the zone
+    /// editor in view (`kind`), or key zones around the layers' root keys,
+    /// without fades. With one layer or none listed, every layer.
+    DistributeLayers {
+        /// The device.
+        device: DeviceId,
+        /// The layers to spread.
+        layers: Vec<LayerId>,
+        /// How to spread them.
+        how: Distribution,
+        /// The zone editor in view: which zone `equally` spreads.
+        kind: ZoneKind,
+    },
+    /// Sets the options of a multisampler's layer list that aren't
+    /// parameters: RAM Mode, Snap, and the title bar's Use Constant Power
+    /// Fade for Loops (`linear_loop_fades`: true when it's off). Options
+    /// left out stay as they were.
+    SetLayerOptions {
+        /// The device.
+        device: DeviceId,
+        /// RAM Mode: decode every layer whole into memory.
+        ram_mode: Option<bool>,
+        /// Snap: markers land on zero crossings.
+        snap: Option<bool>,
+        /// Whether loop crossfades are linear rather than constant-power.
+        linear_loop_fades: Option<bool>,
+    },
     /// Sets where a device's sidechain listens: its sidechain section's
     /// Source, with its channel. The device must have a sidechain input.
     SetSidechainInput {
@@ -1256,6 +1468,13 @@ impl Command {
             Self::SetClipLoopEnabled { .. } => "Switch clip loop",
             Self::SetClipGain { .. } => "Change clip gain",
             Self::SetClipFades { .. } => "Change clip fades",
+            // WP-4.1. Live's undo names for the warp edits are to observe;
+            // Beatlayer's name the edit.
+            Self::SetClipWarp { .. } => "Switch Warp",
+            Self::InsertWarpMarker { .. } => "Insert Warp Marker",
+            Self::MoveWarpMarkers { .. } | Self::ShiftWarpMarker { .. } => "Move Warp Marker",
+            Self::DeleteWarpMarkers { .. } => "Delete Warp Marker",
+            Self::SetSegmentBpm { .. } | Self::ScaleTempo { .. } => "Change clip tempo",
             // WP-3.4. Live's undo names for the Launch panel's controls are
             // to observe; Beatlayer's name the edit.
             Self::SetClipLegato { .. } => "Switch Legato",
@@ -1313,6 +1532,26 @@ impl Command {
             Self::SetShape { .. } => "Edit Shape",
             Self::SetDeviceSample { media: Some(_), .. } => "Load Sample",
             Self::SetDeviceSample { media: None, .. } => "Clear Sample",
+            // WP-5.13: Live's names for the layer list's items where it has
+            // them (S6); the rest are Beatlayer's own.
+            Self::InsertLayers { .. } => "Add Samples",
+            Self::DeleteLayers { .. } => "Delete",
+            Self::DuplicateLayers { .. } => "Duplicate",
+            Self::RenameLayer { .. } => "Rename",
+            Self::MoveLayers { .. } => "Move Samples",
+            Self::SortLayers { .. } => "Sort Samples",
+            Self::SetLayerZones { .. } => "Change Zones",
+            Self::UpdateLayers { .. } => "Change Sample Settings",
+            Self::SetLayerMedia { .. } => "Replace Sample",
+            Self::DistributeLayers {
+                how: Distribution::Equally,
+                ..
+            } => "Distribute Ranges Equally",
+            Self::DistributeLayers {
+                how: Distribution::AroundRootKey,
+                ..
+            } => "Distribute Ranges Around Root Key",
+            Self::SetLayerOptions { .. } => "Change Sample Options",
             // WP-2.19b, as Live 12.4.6 names them (observed); Listen's is to
             // observe.
             Self::SetSidechainInput { .. } => "Change \"Routing\"",
@@ -1748,14 +1987,30 @@ impl Document {
                 Ok(())
             }
             Command::TrimClipStart { clip, start } => self.trim_clip_start(*clip, *start),
-            Command::SetClipRegion { clip, start, end } => self.edit_markers(*clip, |audio| {
-                audio.start = *start;
-                audio.end = *end;
-            }),
-            Command::SetClipLoop { clip, start, end } => self.edit_markers(*clip, |audio| {
-                audio.loop_start = *start;
-                audio.loop_end = *end;
-            }),
+            Command::SetClipRegion {
+                clip,
+                start,
+                end,
+                ticks,
+            } => {
+                self.check_form(*clip, *ticks)?;
+                self.edit_markers(*clip, |audio| {
+                    audio.start = *start;
+                    audio.end = *end;
+                })
+            }
+            Command::SetClipLoop {
+                clip,
+                start,
+                end,
+                ticks,
+            } => {
+                self.check_form(*clip, *ticks)?;
+                self.edit_markers(*clip, |audio| {
+                    audio.loop_start = *start;
+                    audio.loop_end = *end;
+                })
+            }
             Command::SetMidiClipRegion { clip, start, end } => {
                 self.edit_midi_markers(*clip, |midi| {
                     midi.start = *start;
@@ -1783,6 +2038,38 @@ impl Document {
                 audio.fade_in = *fade_in;
                 audio.fade_out = *fade_out;
             }),
+            Command::SetClipWarp { clip, warp } => {
+                let at = self.clip_ref(*clip)?.start;
+                let set_tempo = self.settings.tempo.bpm_at(at);
+                self.edit_markers_with(*clip, |audio| audio.with_warp(*warp, set_tempo))
+            }
+            Command::InsertWarpMarker { clips, beat, time } => {
+                let at = match (beat, time) {
+                    (Some(beat), None) => MarkerAt::Beat(*beat),
+                    (None, Some(time)) => MarkerAt::Time(*time),
+                    _ => {
+                        return Err(ModelError::InvalidInput(
+                            "give the warp marker's `beat` or its `time`, not both or neither",
+                        ));
+                    }
+                };
+                self.edit_each(clips, |audio| audio.with_marker_inserted(at))
+            }
+            Command::MoveWarpMarkers { clips, markers, by } => {
+                self.edit_each(clips, |audio| audio.with_markers_moved(markers, *by))
+            }
+            Command::ShiftWarpMarker { clips, marker, by } => {
+                self.edit_each(clips, |audio| audio.with_marker_shifted(*marker, *by))
+            }
+            Command::DeleteWarpMarkers { clips, markers } => {
+                self.edit_each(clips, |audio| audio.with_markers_deleted(markers))
+            }
+            Command::SetSegmentBpm { clip, marker, bpm } => {
+                self.edit_markers_with(*clip, |audio| audio.with_segment_bpm(*marker, *bpm))
+            }
+            Command::ScaleTempo { clip, factor } => {
+                self.edit_markers_with(*clip, |audio| audio.with_tempo_scaled(*factor))
+            }
             Command::SetClipLegato { clip, legato } => {
                 self.edit_launch(*clip, |launch| launch.legato = *legato)
             }
@@ -1992,6 +2279,75 @@ impl Document {
                 }
                 Ok(())
             }
+            Command::InsertLayers {
+                device,
+                index,
+                layers,
+            } => self.edit_layers(*device, |l| l.insert(*index, layers).map(drop)),
+            Command::DeleteLayers { device, layers } => {
+                self.edit_layers(*device, |l| l.remove(layers))
+            }
+            Command::DuplicateLayers { device, layers } => {
+                self.edit_layers(*device, |l| l.duplicate(layers).map(drop))
+            }
+            Command::RenameLayer {
+                device,
+                layer,
+                name,
+            } => self.edit_layers(*device, |l| l.rename(*layer, name)),
+            Command::MoveLayers {
+                device,
+                layers,
+                index,
+            } => self.edit_layers(*device, |l| l.moved(layers, *index)),
+            Command::SortLayers {
+                device,
+                by,
+                descending,
+            } => self.edit_layers(*device, |l| {
+                l.sort(*by, *descending);
+                Ok(())
+            }),
+            Command::SetLayerZones {
+                device,
+                kind,
+                zones,
+            } => {
+                let zones: Vec<_> = zones.iter().map(|z| (z.layer, z.zone)).collect();
+                self.edit_layers(*device, |l| l.set_zones(*kind, &zones))
+            }
+            Command::UpdateLayers {
+                device,
+                layers,
+                settings,
+            } => self.edit_layers(*device, |l| l.update(layers, settings)),
+            Command::SetLayerMedia {
+                device,
+                layer,
+                media,
+                length,
+                sample_rate,
+                channels,
+            } => self.edit_layers(*device, |l| {
+                l.replace_media(*layer, *media, *length, *sample_rate, *channels)
+            }),
+            Command::DistributeLayers {
+                device,
+                layers,
+                how,
+                kind,
+            } => self.edit_layers(*device, |l| l.distribute(layers, *how, *kind)),
+            Command::SetLayerOptions {
+                device,
+                ram_mode,
+                snap,
+                linear_loop_fades,
+            } => self.edit_layers(*device, |l| {
+                l.ram_mode = ram_mode.unwrap_or(l.ram_mode);
+                l.snap = snap.unwrap_or(l.snap);
+                l.linear_loop_fades = linear_loop_fades.unwrap_or(l.linear_loop_fades);
+                Ok(())
+            }),
             Command::SetSidechainInput { device, input } => {
                 let input = input.clone();
                 self.edit_sidechain(*device, |s| s.input = input)?;
@@ -2104,6 +2460,21 @@ impl Document {
                 Ok(())
             }
         }
+    }
+
+    /// Changes a multisampler's layers with `edit`, which either succeeds or
+    /// leaves them as they were.
+    fn edit_layers(
+        &mut self,
+        id: DeviceId,
+        edit: impl FnOnce(&mut Layers) -> Result<(), ModelError>,
+    ) -> Result<(), ModelError> {
+        let mut layers = self.device_ref(id)?.layers.clone();
+        edit(&mut layers)?;
+        if self.device_ref(id)?.layers != layers {
+            self.device_mut(id)?.layers = layers;
+        }
+        Ok(())
     }
 
     /// Changes a device's sidechain settings with `edit`, if it has a
@@ -2653,13 +3024,69 @@ impl Document {
         id: ClipId,
         edit: impl FnOnce(&mut AudioData),
     ) -> Result<(), ModelError> {
+        self.edit_markers_with(id, |audio| {
+            let mut next = audio.clone();
+            edit(&mut next);
+            Ok(next)
+        })
+    }
+
+    /// Replaces an audio clip's data with what `edit` makes of it, if the
+    /// result is valid and its markers are in order.
+    fn edit_markers_with(
+        &mut self,
+        id: ClipId,
+        edit: impl FnOnce(&AudioData) -> Result<AudioData, ModelError>,
+    ) -> Result<(), ModelError> {
         let ClipData::Audio(current) = &self.clip_ref(id)?.data else {
             return Err(ModelError::NotAudioClip(id));
         };
-        let mut next = *current;
-        edit(&mut next);
+        let next = edit(current)?;
         check_marker_order(&next)?;
         self.edit_audio(id, |audio| *audio = next)
+    }
+
+    /// Makes the same edit to each of `clips`, or to none if it's refused for
+    /// one (the warping spec, R11): the files must be as long as each other's,
+    /// which the app shell checks, since the document doesn't hold the media.
+    fn edit_each(
+        &mut self,
+        clips: &[ClipId],
+        edit: impl Fn(&AudioData) -> Result<AudioData, ModelError>,
+    ) -> Result<(), ModelError> {
+        if clips.is_empty() {
+            return Err(ModelError::InvalidInput("name at least one clip"));
+        }
+        let mut edited = Vec::with_capacity(clips.len());
+        for &id in clips {
+            let ClipData::Audio(current) = &self.clip_ref(id)?.data else {
+                return Err(ModelError::NotAudioClip(id));
+            };
+            let next = edit(current)?;
+            check_marker_order(&next)?;
+            check_audio(&next)?;
+            edited.push((id, next));
+        }
+        for (id, next) in edited {
+            self.edit_audio(id, |audio| *audio = next)?;
+        }
+        Ok(())
+    }
+
+    /// Checks that a command's positions are in the form the audio clip
+    /// shows: ticks if it is warped, seconds if not (the warping spec, R4).
+    fn check_form(&self, id: ClipId, ticks: bool) -> Result<(), ModelError> {
+        match &self.clip_ref(id)?.data {
+            ClipData::Audio(audio) if audio.warp != ticks => {
+                Err(ModelError::InvalidInput(if audio.warp {
+                    "this clip is warped: its positions are ticks of its contents, so pass `ticks` true"
+                } else {
+                    "this clip isn't warped: its positions are seconds in its file, so leave `ticks` false"
+                }))
+            }
+            ClipData::Audio(_) => Ok(()),
+            ClipData::Midi(_) => Err(ModelError::NotAudioClip(id)),
+        }
     }
 
     /// Changes the launch settings of the Session clip `id`.
@@ -2693,7 +3120,7 @@ impl Document {
         let ClipData::Audio(current) = &self.clip_ref(id)?.data else {
             return Err(ModelError::NotAudioClip(id));
         };
-        let mut next = *current;
+        let mut next = current.clone();
         edit(&mut next);
         check_audio(&next)?;
         if next != *current {
@@ -3851,17 +4278,34 @@ pub(crate) fn check_midi_marker_order(midi: &MidiData) -> Result<(), ModelError>
 /// finite and not negative.
 pub(crate) fn check_audio(audio: &AudioData) -> Result<(), ModelError> {
     let at_least_zero = |value: f64| value.is_finite() && value >= 0.0;
-    check_value("clip start", audio.start, at_least_zero(audio.start))?;
-    if let Some(end) = audio.end {
-        check_value("clip end", end, end.is_finite() && end > 0.0)?;
+    if audio.warp {
+        // A warped clip's markers are whole ticks of its contents, which may
+        // be negative (the warping spec, R2 and R4).
+        let tick = |value: f64| value.is_finite() && value.fract() == 0.0;
+        check_value("clip start", audio.start, tick(audio.start))?;
+        if let Some(end) = audio.end {
+            check_value("clip end", end, tick(end))?;
+        }
+        check_value("loop start", audio.loop_start, tick(audio.loop_start))?;
+        if let Some(end) = audio.loop_end {
+            check_value("loop end", end, tick(end) && end > audio.loop_start)?;
+        }
+    } else {
+        check_value("clip start", audio.start, at_least_zero(audio.start))?;
+        if let Some(end) = audio.end {
+            check_value("clip end", end, end.is_finite() && end > 0.0)?;
+        }
+        check_value(
+            "loop start",
+            audio.loop_start,
+            at_least_zero(audio.loop_start),
+        )?;
+        if let Some(end) = audio.loop_end {
+            check_value("loop end", end, end.is_finite() && end > audio.loop_start)?;
+        }
     }
-    check_value(
-        "loop start",
-        audio.loop_start,
-        at_least_zero(audio.loop_start),
-    )?;
-    if let Some(end) = audio.loop_end {
-        check_value("loop end", end, end.is_finite() && end > audio.loop_start)?;
+    if audio.warp || !audio.warp_markers.is_empty() {
+        audio.warp_map()?;
     }
     check_value("clip gain", audio.gain, at_least_zero(audio.gain))?;
     check_value(
@@ -3931,6 +4375,7 @@ fn check_one_device(device: &Device) -> Result<(), ModelError> {
     for value in device.params.values().chain(device.other_params().values()) {
         check_value("parameter value", *value, value.is_finite())?;
     }
+    device.layers.check()?;
     crate::modulator::check_mappings(device)?;
     if let Some(shape) = &device.shape {
         crate::modulator::check_shape(shape)?;
@@ -4051,6 +4496,7 @@ mod tests {
     use crate::ids::ContentHash;
     use crate::scene::DEFAULT_SCENE_COUNT;
     use crate::track::Routing;
+    use crate::warp::WarpMarker;
 
     /// A document and the allocator for its IDs.
     struct Song {
@@ -4690,8 +5136,8 @@ mod tests {
         let mut song = Song::new();
         let track = song.track(TrackKind::Audio, None);
         let clip = song.clip(track, 0);
-        let audio = |song: &Song| match song.doc.clip(clip).unwrap().data {
-            ClipData::Audio(audio) => audio,
+        let audio = |song: &Song| match &song.doc.clip(clip).unwrap().data {
+            ClipData::Audio(audio) => audio.clone(),
             ClipData::Midi(_) => unreachable!("an audio clip"),
         };
         // A new clip plays the whole file once, at 0 dB, with no fades.
@@ -4701,12 +5147,14 @@ mod tests {
             clip,
             start: 0.5,
             end: Some(2.0),
+            ticks: false,
         })
         .unwrap();
         song.apply(Command::SetClipLoop {
             clip,
             start: 1.0,
             end: Some(1.5),
+            ticks: false,
         })
         .unwrap();
         song.apply(Command::SetClipLoopEnabled {
@@ -4744,11 +5192,13 @@ mod tests {
                 clip,
                 start: -0.1,
                 end: None,
+                ticks: false,
             },
             Command::SetClipRegion {
                 clip,
                 start: 1.0,
                 end: Some(1.0),
+                ticks: false,
             },
             // The Start marker must stay before the loop's end while the
             // loop is on.
@@ -4756,16 +5206,19 @@ mod tests {
                 clip,
                 start: 1.5,
                 end: None,
+                ticks: false,
             },
             Command::SetClipLoop {
                 clip,
                 start: 0.25,
                 end: Some(0.5),
+                ticks: false,
             },
             Command::SetClipLoop {
                 clip,
                 start: f64::NAN,
                 end: None,
+                ticks: false,
             },
             Command::SetClipGain {
                 clip,
@@ -4799,6 +5252,7 @@ mod tests {
             clip,
             start: 1.75,
             end: None,
+            ticks: false,
         })
         .unwrap();
         // And then the loop can't come on.
@@ -4921,7 +5375,7 @@ mod tests {
         assert_eq!(EDGE_FADE, 0.004);
         let plain = AudioData::new(ContentHash([1; 32]));
         assert_eq!((plain.fade_in, plain.fade_out), (0.0, 0.0));
-        let faded = plain.with_edge_fades();
+        let faded = plain.clone().with_edge_fades();
         assert_eq!((faded.fade_in, faded.fade_out), (EDGE_FADE, EDGE_FADE));
         assert_eq!(
             AudioData {
@@ -5056,8 +5510,8 @@ mod tests {
         let mut song = Song::new();
         let track = song.track(TrackKind::Audio, None);
         let clip = song.clip(track, 4);
-        let audio = |song: &Song| match song.doc.clip(clip).unwrap().data {
-            ClipData::Audio(audio) => audio,
+        let audio = |song: &Song| match &song.doc.clip(clip).unwrap().data {
+            ClipData::Audio(audio) => audio.clone(),
             ClipData::Midi(_) => unreachable!("an audio clip"),
         };
         // At 120 BPM a quarter note is half a second: trimming two quarters
@@ -5115,6 +5569,7 @@ mod tests {
             clip,
             start: 0.0,
             end: Some(1.5),
+            ticks: false,
         })
         .unwrap();
         song.apply(Command::TrimClipStart {
@@ -5130,6 +5585,7 @@ mod tests {
                 clip,
                 start: 2.0,
                 end: Some(1.5),
+                ticks: false,
             }),
             ModelError::InvalidValue { .. }
         ));
@@ -5149,6 +5605,89 @@ mod tests {
             }),
             ModelError::AudioClipOffset(Ticks::QUARTER)
         );
+    }
+
+    // Spec: warping R5. A warped clip's markers are ticks of its contents,
+    // so a trim or a split moves the Start marker by the ticks the edge
+    // moved and a loop wraps it exactly.
+    #[test]
+    fn trimming_and_splitting_a_warped_clip_move_its_start_marker_in_ticks() {
+        let q = Ticks::QUARTER.get();
+        let tempo = TempoMap::default();
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        let clip = song.fresh();
+        // The file's start falls a quarter note before 1.1.1: one marker at
+        // half a second, at 120 BPM.
+        let warped = AudioData {
+            warp: true,
+            warp_markers: vec![WarpMarker {
+                time: 0.5,
+                beat: Ticks::ZERO,
+            }],
+            tempo: Some(120.0),
+            looping: true,
+            loop_start: 0.0,
+            loop_end: Some(4.0 * q as f64),
+            ..AudioData::new(ContentHash([7; 32]))
+        };
+        let start = Ticks::WHOLE;
+        song.apply(Command::CreateClip {
+            track,
+            clip: Clip::new(
+                clip,
+                start,
+                Ticks::WHOLE * 12,
+                ClipData::Audio(warped.clone()),
+            ),
+        })
+        .unwrap();
+        let marker = |song: &Song| match &song.doc.clip(clip).unwrap().data {
+            ClipData::Audio(audio) => audio.start,
+            ClipData::Midi(_) => unreachable!("an audio clip"),
+        };
+        let trim = |song: &mut Song, to: Ticks| {
+            song.apply(Command::TrimClipStart { clip, start: to })
+                .unwrap();
+        };
+        // Within the brace: the marker moves by the ticks, exactly.
+        trim(&mut song, start + Ticks(q + 12_345));
+        assert_eq!(marker(&song), (q + 12_345) as f64);
+        // Past the brace's end, it wraps by whole lengths of it.
+        trim(&mut song, start + Ticks(4 * q + 3));
+        assert_eq!(marker(&song), 3.0, "one loop on");
+        trim(&mut song, start + Ticks(9 * q + 7));
+        assert_eq!(marker(&song), (q + 7) as f64, "two loops and a quarter on");
+        // Back to the left, down to the start of the file and no further:
+        // that is a quarter note before the Start marker's beat 0.
+        let earliest = song.doc.clip(clip).unwrap().earliest_start(&tempo);
+        trim(&mut song, earliest);
+        assert_eq!(marker(&song), -(q as f64));
+        song.reject(Command::TrimClipStart {
+            clip,
+            start: earliest - Ticks(1),
+        });
+        // A split plays what the whole did: the part's marker is the whole's
+        // moved by the ticks, with no float error however far it goes.
+        let whole = Clip::new(clip, start, Ticks::WHOLE * 12, ClipData::Audio(warped));
+        for at in [1, 4 * q + 5, 7 * q + 1, 40 * q + 123_457] {
+            let part = whole.part(start + Ticks(at), whole.end(), &tempo);
+            let ClipData::Audio(moved) = &part.data else {
+                unreachable!("an audio clip");
+            };
+            let length = 4 * q;
+            let expected = if at < length {
+                at
+            } else {
+                (at - length) % length
+            };
+            assert_eq!(moved.start, expected as f64, "split {at} ticks in");
+            // The waveform carries on, until a wrap moves the marker round:
+            // the file starts where it did.
+            if at < length {
+                assert_eq!(part.origin(&tempo), whole.origin(&tempo));
+            }
+        }
     }
 
     // Spec: audio-clips R16. As observed in Live 12.4.6: a looped clip
@@ -5173,11 +5712,11 @@ mod tests {
                 clip,
                 Ticks::ZERO,
                 Ticks::WHOLE * 24,
-                ClipData::Audio(looped),
+                ClipData::Audio(looped.clone()),
             ),
         })
         .unwrap();
-        let start = |song: &Song| match song.doc.clip(clip).unwrap().data {
+        let start = |song: &Song| match &song.doc.clip(clip).unwrap().data {
             ClipData::Audio(audio) => audio.start,
             ClipData::Midi(_) => unreachable!("an audio clip"),
         };
@@ -5200,7 +5739,7 @@ mod tests {
         // know, so the marker can't wrap.
         let to_end = AudioData {
             loop_end: None,
-            ..looped
+            ..looped.clone()
         };
         let whole = Clip::new(
             clip,
@@ -5248,7 +5787,7 @@ mod tests {
             ClipId(Id::new(9).unwrap()),
             Ticks::WHOLE,
             Ticks::WHOLE * 2,
-            ClipData::Audio(audio),
+            ClipData::Audio(audio.clone()),
         );
         let at = Ticks::WHOLE * 2 + Ticks::QUARTER;
         let part = whole.part(at, whole.end(), &tempo);

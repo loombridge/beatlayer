@@ -14,6 +14,9 @@ bl-media.workspace = true
 # version rubato's FFT resampler already brings in, so nothing new enters
 # the build.
 realfft = "3.5.0"
+# The background pool for the analysis cache, the version bl-media's peak
+# cache already uses.
+rayon = "1.12.0"
 
 [lints]
 workspace = true

@@ -852,10 +852,12 @@ impl Sampler {
         let velocity = note.velocity.clamp(0.0, 1.0);
         // Glide's monophonic mode takes the sounding voice over: the new
         // note glides from its pitch, keeping its position and envelope.
-        // Slices don't glide: they play at the sample's own rate.
+        // Slices don't glide: they play at the sample's own rate, and an
+        // audition starts a voice of its own at the root pitch.
         if s.glide
             && !s.glide_portamento
             && !sliced
+            && audition.is_none()
             && let Some(voice) = self.newest_playing()
         {
             voice.key = note.key;
@@ -894,7 +896,7 @@ impl Sampler {
         }
         self.counter += 1;
         let counter = self.counter;
-        let from = if s.glide {
+        let from = if s.glide && audition.is_none() {
             self.last_pitch.unwrap_or(pitch)
         } else {
             pitch
@@ -933,7 +935,9 @@ impl Sampler {
         voice.lfo_random = random(&mut self.rng[slot]);
         self.filter.reset_voice(slot, &self.filter_params);
         self.voices[slot] = voice;
-        self.last_pitch = Some(pitch);
+        if audition.is_none() {
+            self.last_pitch = Some(pitch);
+        }
     }
 
     /// A click in the display (R54): the button going down starts a voice

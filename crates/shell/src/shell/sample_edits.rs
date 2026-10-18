@@ -690,7 +690,7 @@ impl Shell {
             sampler::TRANSPOSE,
             (60.0 - f64::from(layer.root_key)).clamp(-48.0, 48.0),
         );
-        set(sampler::DETUNE, layer.detune);
+        set(sampler::DETUNE, layer.detune.clamp(-50.0, 50.0));
         if layer.sustain != SustainMode::Off {
             let region = (layer.end - layer.start).max(1) as f64;
             set(sampler::LOOP, 1.0);
@@ -718,6 +718,24 @@ impl Shell {
         }
         if layer.release != bl_model::ReleaseMode::Off {
             dropped.push("the layer's release mode".to_owned());
+        }
+        // Snapshot's loop always ends at the region's end, plays forwards
+        // and has no detune of its own.
+        if layer.sustain != SustainMode::Off && layer.loop_end != layer.end {
+            dropped.push("the layer's Loop End".to_owned());
+        }
+        if layer.sustain == SustainMode::BackAndForth {
+            dropped.push("the layer's back-and-forth loop".to_owned());
+        }
+        if layer.sustain != SustainMode::Off && layer.loop_detune != 0.0 {
+            dropped.push("the layer's loop detune".to_owned());
+        }
+        if old.layers.list.len() == 1
+            && (layer.key != bl_model::Zone::whole(bl_model::ZoneKind::Key)
+                || layer.velocity != bl_model::Zone::whole(bl_model::ZoneKind::Velocity)
+                || layer.select != bl_model::Zone::whole(bl_model::ZoneKind::Select))
+        {
+            dropped.push("the layer's zones".to_owned());
         }
         new
     }

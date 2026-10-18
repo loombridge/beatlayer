@@ -190,19 +190,19 @@ impl Displays {
         };
         let peaks = Peaks::from_samples(&audio).ok().map(Arc::new);
         let total = audio.frames().max(1) as f64;
-        let kept = self
-            .states
-            .remove(&device)
-            .filter(|s| s.media == media && s.layer == layer);
-        let (first, span, vertical, channels, auditioning) = match &kept {
+        let old = self.states.remove(&device);
+        // A held audition outlives the reload, so the button's release
+        // still ends it.
+        let auditioning = old.as_ref().is_some_and(|s| s.auditioning);
+        let kept = old.filter(|s| s.media == media && s.layer == layer);
+        let (first, span, vertical, channels) = match &kept {
             Some(s) => (
                 s.first.min(total - 1.0),
                 s.span.min(total),
                 s.vertical,
                 s.channels,
-                s.auditioning,
             ),
-            None => (0.0, total, 1.0, Channels::Both, false),
+            None => (0.0, total, 1.0, Channels::Both),
         };
         self.states.insert(
             device,
@@ -531,7 +531,8 @@ impl Displays {
                 }
             }
         }
-        if !down && let Some(press) = state.press.take() {
+        if !down {
+            state.press = None;
             if state.auditioning {
                 state.auditioning = false;
                 invoke(
@@ -539,9 +540,6 @@ impl Displays {
                     "device.audition_sample",
                     json!({ "device": device, "layer": shown.layer, "down": false }),
                 );
-            }
-            if press.shift && !press.moved && state.selection.is_none() {
-                state.selection = None;
             }
         }
         // Esc clears the selection (R54).

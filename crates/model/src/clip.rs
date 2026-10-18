@@ -32,7 +32,7 @@ use crate::automation::{AutomationTarget, Envelope};
 use crate::error::ModelError;
 use crate::ids::{ClipId, ContentHash};
 use crate::launch::ClipLaunch;
-use crate::warp::WarpMarker;
+use crate::warp::{TransientEdits, WarpMarker};
 
 /// The clips whose MIDI Note Editors are folded to the rows that hold notes
 /// (WP-2.3): saved with the set, but not part of the document, so folding
@@ -484,6 +484,11 @@ pub struct AudioData {
     /// `null` (or nothing) means the song's signature at the clip's start.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signature: Option<TimeSignature>,
+    /// The clip's edits to its file's detected transients (the warping spec,
+    /// R23): none unless given. They belong to the file, so replacing the
+    /// file drops them (R27).
+    #[serde(default, skip_serializing_if = "TransientEdits::is_empty")]
+    pub transient_edits: TransientEdits,
 }
 
 impl AudioData {
@@ -506,6 +511,7 @@ impl AudioData {
             warp_markers: Vec::new(),
             tempo: None,
             signature: None,
+            transient_edits: TransientEdits::default(),
         }
     }
 

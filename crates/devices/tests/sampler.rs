@@ -1096,6 +1096,43 @@ fn a_click_auditions_from_its_point_and_ending_it_fades_the_voice_out() {
 
 // Spec: multisampler R54
 #[test]
+fn with_glide_on_a_click_starts_a_voice_of_its_own() {
+    use bl_engine::Audition;
+    let ramp = sample(48_000, |i| 0.25 + i as f32 / 96_000.0);
+    let collector = Collector::new();
+    let mut node = sampler(&[(GLIDE, 1.0), (GLIDE_MODE, 0.0), (GLIDE_TIME, 10.0)], 512);
+    give(node.as_mut(), &collector, &ramp);
+    let audition = |down| {
+        collector.handle().data(Audition {
+            layer: None,
+            from: 0.5,
+            down,
+        })
+    };
+    // A held note an octave up, which the click mustn't take over.
+    run_notes(node.as_mut(), 512, &[note(0, NoteKind::On, 72, 1.0)]);
+    node.receive_data(audition(true));
+    let both = run_notes(node.as_mut(), 512, &[]);
+    node.receive_data(audition(false));
+    run_notes(node.as_mut(), 512, &[]);
+    run_notes(node.as_mut(), 512, &[]);
+    let held = run_notes(node.as_mut(), 512, &[]);
+    // The held note plays on alone once the audition has faded, so the
+    // audition was a voice of its own.
+    assert!(held[0].iter().all(|v| *v > 0.0), "the held note sounds on");
+    let at = |frame: f64| 0.25 + frame / 96_000.0;
+    // The held voice is two blocks in at an octave up when the click lands;
+    // the audition plays at the sample's own pitch from half way.
+    let expected = at(2.0 * 522.0) + at(24_010.0);
+    assert!(
+        (f64::from(both[0][10]) - expected).abs() < 1e-2,
+        "{} against {expected}",
+        both[0][10]
+    );
+}
+
+// Spec: multisampler R54
+#[test]
 fn slice_boundaries_are_what_the_device_cuts() {
     use bl_devices::slice_boundaries;
     // A click every 4,800 frames, the transients Slice By finds.

@@ -324,9 +324,7 @@ fn a_racks_default_preset_starts_new_racks_of_its_kind() {
     )
     .unwrap();
     assert!(
-        saved
-            .path
-            .ends_with("a-library/Defaults/Instruments/Instrument Rack.blpreset"),
+        Path::new(&saved.path).ends_with("a-library/Defaults/Instruments/Instrument Rack.blpreset"),
         "{}",
         saved.path
     );

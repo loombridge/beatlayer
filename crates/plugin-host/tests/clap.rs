@@ -567,7 +567,16 @@ fn other_parameters_take_the_played_value() {
         host.factory().device_types()
     };
     let gain = types[0].description.param(ParamId(GAIN)).unwrap();
-    let played = |frame: i64| list.played(Travel::Param(gain), ParamId(GAIN), frame, 0.5);
+    let played = |frame: i64| {
+        list.played(
+            Travel::Param(gain),
+            ParamId(GAIN),
+            Some(frame),
+            0.5,
+            bl_engine::modbus::Bus::EMPTY,
+            0,
+        )
+    };
 
     // Not a modulatable parameter: the plug-in is given the value played,
     // as a parameter value, on the block's first frame and on each song

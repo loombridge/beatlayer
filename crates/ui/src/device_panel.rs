@@ -21,6 +21,7 @@
 use std::f32::consts::PI;
 
 use bl_model::device_layout::{Size, Widget};
+use bl_model::modulator::ModTarget;
 use bl_model::{DeviceDisplay, DeviceId, ParamDescriptor, ParamId, ParamKind};
 use bl_shell::Invocation;
 use bl_shell::device_commands as ids;
@@ -173,6 +174,30 @@ pub fn show(
             continue;
         }
         let _ = ui.interact(rect, id, Sense::hover());
+        // Spec: modulation R15, R23. A modulator's cells show its slots'
+        // mappings and, for the Curve Mod, its shape.
+        if let Some(modulator) = &frame.modulator {
+            let slot = name
+                .strip_prefix("Mapping ")
+                .and_then(|n| n.parse::<u8>().ok());
+            if let Some(slot) = slot {
+                crate::mapping::mapping_cell(ui, theme, frame, modulator, slot - 1, rect, events);
+            } else if let Some(points) = modulator.shape.as_ref().filter(|_| name == "Curve") {
+                let value = |param: ParamId| {
+                    panel
+                        .description
+                        .params
+                        .iter()
+                        .position(|p| p.id == param)
+                        .map_or(0.0, |i| panel.value(i))
+                };
+                let grid = bl_model::modulator::GRIDS
+                    .get(value(bl_model::modulator::GRID_DIVISIONS) as usize)
+                    .map_or(4, |&(_, n)| n);
+                let snap = value(bl_model::modulator::SNAP) >= 0.5;
+                crate::mapping::curve_cell(ui, theme, frame, points, rect, (grid, snap), events);
+            }
+        }
         // Spec: device-framework R36. The device's own drawing fills its
         // first cell, and a screen reader hears its readings.
         let shown = display.filter(|d| index == 0 && has_drawing(d));
@@ -216,6 +241,19 @@ pub fn show(
             Widget::Toggle => control.toggle(ui, theme, events),
             Widget::Chooser => control.chooser(ui, theme, events),
         }
+        // Spec: modulation R15. While a Map button is lit, every parameter
+        // but the modulator's own is a target.
+        crate::mapping::overlay(
+            ui,
+            theme,
+            rect,
+            param_control_id(frame.id, param),
+            ModTarget::Device {
+                device: frame.id,
+                param,
+            },
+            events,
+        );
     }
 }
 

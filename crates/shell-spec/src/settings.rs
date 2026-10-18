@@ -266,6 +266,18 @@ impl Default for LaunchPrefs {
     }
 }
 
+/// Record Session automation in (Record, Warp & Launch, L-SET-018; WP-3.12):
+/// which tracks a Session recording writes control moves into the clips of.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionAutomationTracks {
+    /// The armed tracks only: Live's default, as observed.
+    #[default]
+    ArmedTracks,
+    /// Every track with a Session clip playing.
+    AllTracks,
+}
+
 /// The Agents page's settings. The server's token and each allowed agent's
 /// are never reported, only whether the server has one.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -315,6 +327,9 @@ pub struct SettingsState {
     /// `settings.set_select_next_scene_on_launch` and
     /// `settings.set_start_recording_on_scene_launch` commands set it.
     pub launch: LaunchPrefs,
+    /// Record, Warp & Launch: Record Session automation in, as
+    /// `settings.set_record_session_automation_in` sets it.
+    pub record_session_automation_in: SessionAutomationTracks,
     /// File & Folder: the Temporary Folder, as `settings.set_temporary_folder`
     /// sets it.
     pub file_folder: FileFolderSettings,

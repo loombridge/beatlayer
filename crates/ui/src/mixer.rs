@@ -11,6 +11,7 @@
 //! Showing, hiding, scrolling, and focusing the mixer are the
 //! `mixer_view.*` commands. Only the columns in view are built (R17).
 
+use bl_model::modulator::ModTarget;
 use bl_model::{AutomationTarget, CrossfadeAssign, Document, MixerParam, TrackId, TrackKind};
 use bl_shell::arrangement_commands::SELECT_TRACKS;
 use bl_shell::mixer_controls::{
@@ -580,6 +581,7 @@ fn title_bars(
             );
         }
         let response = ui.interact(bar, Id::new(("mixer-title", of, track)), Sense::click());
+        crate::rack_view::focus_track_under_drag(ui, shell, track, bar, events);
         let focused = ui.memory(|m| m.has_focus(column_id(of, track)));
         menus.title(
             ui,
@@ -741,6 +743,29 @@ impl StripParts<'_> {
     /// A send knob (R5; the routing spec): drags, keys, and a double-click
     /// as the other value controls, from −∞ to 0 dB.
     pub fn send(
+        &self,
+        ui: &mut Ui,
+        rect: Rect,
+        to: TrackId,
+        index: usize,
+        events: &mut Vec<UiEvent>,
+    ) {
+        self.send_knob(ui, rect, to, index, events);
+        // Spec: modulation R15. A lit Map button maps the send's level.
+        crate::mapping::overlay(
+            ui,
+            self.theme,
+            rect,
+            send_id(self.place, self.track, to),
+            ModTarget::Send {
+                track: self.track,
+                to,
+            },
+            events,
+        );
+    }
+
+    fn send_knob(
         &self,
         ui: &mut Ui,
         rect: Rect,
@@ -1477,6 +1502,22 @@ impl StripParts<'_> {
     /// The fader (R6): a relative drag moves the handle a point per point
     /// of drag along the meter's scale, which the handle sits on.
     pub fn fader(&self, ui: &mut Ui, rect: Rect, events: &mut Vec<UiEvent>) {
+        self.fader_control(ui, rect, events);
+        // Spec: modulation R15. A lit Map button maps the track's volume.
+        crate::mapping::overlay(
+            ui,
+            self.theme,
+            rect,
+            fader_id(self.place, self.track),
+            ModTarget::Mixer {
+                track: self.track,
+                param: MixerParam::Volume,
+            },
+            events,
+        );
+    }
+
+    fn fader_control(&self, ui: &mut Ui, rect: Rect, events: &mut Vec<UiEvent>) {
         let Some(track) = self.doc().track(self.track) else {
             return;
         };
@@ -1533,6 +1574,28 @@ impl StripParts<'_> {
 
     /// The pan control (R6), with its reset triangle above it in a strip.
     pub fn pan(&self, ui: &mut Ui, rect: Rect, triangle: Option<Rect>, events: &mut Vec<UiEvent>) {
+        self.pan_control(ui, rect, triangle, events);
+        // Spec: modulation R15. A lit Map button maps the track's pan.
+        crate::mapping::overlay(
+            ui,
+            self.theme,
+            rect,
+            pan_id(self.place, self.track),
+            ModTarget::Mixer {
+                track: self.track,
+                param: MixerParam::Pan,
+            },
+            events,
+        );
+    }
+
+    fn pan_control(
+        &self,
+        ui: &mut Ui,
+        rect: Rect,
+        triangle: Option<Rect>,
+        events: &mut Vec<UiEvent>,
+    ) {
         let Some(track) = self.doc().track(self.track) else {
             return;
         };
@@ -1617,6 +1680,24 @@ impl StripParts<'_> {
     /// show nothing in its place; a deactivated activator shows its number
     /// on grey (observed).
     pub fn switch(&self, ui: &mut Ui, switch: Switch, rect: Rect, events: &mut Vec<UiEvent>) {
+        self.switch_control(ui, switch, rect, events);
+        // Spec: modulation R15. A lit Map button maps the Track Activator.
+        if switch == Switch::Activator && switch.on_track(self.doc(), self.track) {
+            crate::mapping::overlay(
+                ui,
+                self.theme,
+                rect,
+                switch_id(self.place, switch, self.track),
+                ModTarget::Mixer {
+                    track: self.track,
+                    param: MixerParam::Mute,
+                },
+                events,
+            );
+        }
+    }
+
+    fn switch_control(&self, ui: &mut Ui, switch: Switch, rect: Rect, events: &mut Vec<UiEvent>) {
         let doc = self.doc();
         if !switch.on_track(doc, self.track) {
             return;

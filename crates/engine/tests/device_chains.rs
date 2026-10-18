@@ -115,6 +115,7 @@ fn a_chain_edit_makes_only_the_nodes_it_adds() {
             device: second,
             params: [(GAIN_PARAM, 0.25)].into_iter().collect(),
             name: "Quiet".to_owned(),
+            shape: None,
         },
     ] {
         let synced = rig.apply(command.clone());
@@ -210,4 +211,162 @@ fn factories_offer_device_types_with_their_roles() {
     // until WP-2.5.
     assert!(Registry::new().device_types().is_empty());
     assert_eq!(Registry::new().device_type(&gain.kind), None::<DeviceType>);
+}
+
+// Spec: multisampler R31
+#[test]
+fn a_zone_edit_sends_data_and_no_program() {
+    let mut rig = Rig::new(FRAMES);
+    let audio = track(&mut rig.editor, TrackKind::Audio, None);
+    let sampler = device(&mut rig.editor, audio, THROUGH, &[]);
+    rig.sync();
+    rig.block(FRAMES);
+    let layer = bl_model::Layer::new(
+        bl_model::LayerId(1),
+        "Kick",
+        bl_model::ContentHash([1; 32]),
+        48_000,
+        48_000,
+        1,
+    );
+    // Adding a layer, moving its zone and changing its settings each send
+    // the node its layers as data; none makes a program or a node.
+    for command in [
+        Command::InsertLayers {
+            device: sampler,
+            index: None,
+            layers: vec![layer],
+        },
+        Command::SetLayerZones {
+            device: sampler,
+            kind: bl_model::ZoneKind::Key,
+            zones: vec![bl_model::LayerZone {
+                layer: bl_model::LayerId(1),
+                zone: bl_model::Zone::new(36, 48),
+            }],
+        },
+        Command::UpdateLayers {
+            device: sampler,
+            layers: vec![bl_model::LayerId(1)],
+            settings: bl_model::LayerSettings {
+                root_key: Some(40),
+                ..Default::default()
+            },
+        },
+    ] {
+        let synced = rig.apply(command.clone());
+        assert!(!synced.program, "{command:?} sent a program");
+        assert_eq!(synced.data, 1, "{command:?} sent the layers");
+        rig.block(FRAMES);
+    }
+    // An edit of something else sends none.
+    let synced = rig.apply(Command::RenameDevice {
+        device: sampler,
+        name: "Drums".to_owned(),
+    });
+    assert_eq!((synced.program, synced.data), (false, 0));
+    assert_eq!(rig_made(&rig), 1, "no node was made for the edits");
+}
+
+/// A media library over a store that counts what a sampler asks of it.
+struct Counting {
+    store: std::sync::Arc<bl_media::MediaStore>,
+    whole: std::sync::atomic::AtomicUsize,
+    progressive: std::sync::atomic::AtomicUsize,
+}
+
+impl bl_engine::MediaLibrary for Counting {
+    fn open(
+        &self,
+        media: bl_model::ContentHash,
+        rate: bl_core::time::SampleRate,
+        start: u64,
+    ) -> Option<bl_engine::OpenedSource> {
+        bl_engine::MediaLibrary::open(&*self.store, media, rate, start)
+    }
+
+    fn sample(
+        &self,
+        media: bl_model::ContentHash,
+        rate: bl_core::time::SampleRate,
+    ) -> Option<std::sync::Arc<bl_media::SampleData>> {
+        self.whole.fetch_add(1, Relaxed);
+        bl_engine::MediaLibrary::sample(&*self.store, media, rate)
+    }
+
+    fn progressive(
+        &self,
+        media: bl_model::ContentHash,
+        rate: bl_core::time::SampleRate,
+        head: usize,
+    ) -> Option<std::sync::Arc<bl_media::ProgressiveSample>> {
+        self.progressive.fetch_add(1, Relaxed);
+        bl_engine::MediaLibrary::progressive(&*self.store, media, rate, head)
+    }
+}
+
+// Spec: multisampler R23
+#[test]
+fn a_long_layer_is_read_in_the_background_with_ram_mode_off() {
+    let dir = std::env::temp_dir().join(format!("bl-engine-long-layer-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("Long.wav");
+    let samples = vec![0.25f32; 12 * 48_000];
+    std::fs::write(
+        &path,
+        bl_media::wav_bytes(
+            &samples,
+            1,
+            48_000,
+            bl_media::BitDepth::Int16,
+            bl_media::Dither::None,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let store = std::sync::Arc::new(bl_media::MediaStore::new());
+    let hash = store.import(&path).unwrap();
+    let media = bl_model::ContentHash(*hash.as_bytes());
+    let library = std::sync::Arc::new(Counting {
+        store,
+        whole: Default::default(),
+        progressive: Default::default(),
+    });
+    let mut rig = Rig::with_registry(FRAMES, |registry| registry.set_media(library.clone()));
+    let audio = track(&mut rig.editor, TrackKind::Audio, None);
+    let sampler = device(&mut rig.editor, audio, THROUGH, &[]);
+    rig.sync();
+    let layer = bl_model::Layer::new(bl_model::LayerId(1), "Long", media, 12 * 48_000, 48_000, 1);
+    let insert = Command::InsertLayers {
+        device: sampler,
+        index: None,
+        layers: vec![layer],
+    };
+    rig.apply(insert);
+    assert_eq!(
+        library.progressive.load(Relaxed),
+        1,
+        "a layer over ten seconds is read behind its start"
+    );
+    assert_eq!(library.whole.load(Relaxed), 0);
+    // An edit that sends the layers again shares what's being read.
+    rig.apply(Command::SetLayerZones {
+        device: sampler,
+        kind: bl_model::ZoneKind::Key,
+        zones: vec![bl_model::LayerZone {
+            layer: bl_model::LayerId(1),
+            zone: bl_model::Zone::new(10, 20),
+        }],
+    });
+    assert_eq!(library.progressive.load(Relaxed), 1, "not read again");
+    // RAM Mode decodes it whole.
+    rig.apply(Command::SetLayerOptions {
+        device: sampler,
+        ram_mode: Some(true),
+        snap: None,
+        linear_loop_fades: None,
+    });
+    assert_eq!(library.progressive.load(Relaxed), 1);
+    assert_eq!(library.whole.load(Relaxed), 1, "RAM Mode on holds it whole");
+    std::fs::remove_dir_all(&dir).ok();
 }

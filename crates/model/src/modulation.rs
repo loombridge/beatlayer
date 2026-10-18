@@ -176,7 +176,10 @@ impl Document {
                 else {
                     continue;
                 };
-                for envelope in &mut envelopes {
+                for envelope in envelopes
+                    .iter_mut()
+                    .filter(|envelope| envelope.kind == crate::EnvelopeKind::Modulation)
+                {
                     envelope.envelope.map_values(|old| match envelope.target {
                         AutomationTarget::Mixer { param } => {
                             let mixer = &track.mixer;

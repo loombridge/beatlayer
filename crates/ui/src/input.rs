@@ -7,7 +7,7 @@ use bl_shell::{Invocation, Shell};
 use egui::{Event, Key, RawInput};
 use serde_json::{Value, json};
 
-use crate::keymap::{Keymap, LATCH_HOLD_SECONDS, Mods, Platform, Trigger};
+use crate::keymap::{Hit, Keymap, LATCH_HOLD_SECONDS, Mods, Platform, Trigger};
 
 /// A key the dispatcher took, kept until it's released.
 #[derive(Clone, Debug)]
@@ -177,16 +177,21 @@ impl KeyDispatcher {
                 return true;
             }
             let mods = Mods::from_egui(*modifiers, self.platform);
-            let Some(hit) = keymap.resolve(self.platform, *key, mods, &contexts) else {
+            let args_of = |hit: &Hit<'_>| {
+                let mut fields = hit.command.args.clone();
+                // F1 to F8 switch the track their number names (the mixer
+                // view spec, R9): the shell turns the number into the track.
+                if let (Some(index), Some(_)) = (hit.index, hit.command.toggles.as_ref()) {
+                    fields.insert(bl_shell::KEY_TRACK_NUMBER.to_owned(), Value::from(index));
+                }
+                Value::Object(fields)
+            };
+            let Some(hit) = keymap.resolve_with(self.platform, *key, mods, &contexts, |hit| {
+                shell.can_invoke(&hit.command.id, &args_of(hit))
+            }) else {
                 return true;
             };
-            let mut fields = hit.command.args.clone();
-            // F1 to F8 switch the track their number names (the mixer view
-            // spec, R9): the shell turns the number into the track.
-            if let (Some(index), Some(_)) = (hit.index, hit.command.toggles.as_ref()) {
-                fields.insert(bl_shell::KEY_TRACK_NUMBER.to_owned(), Value::from(index));
-            }
-            let args = Value::Object(fields);
+            let args = args_of(&hit);
             if !shell.can_invoke(&hit.command.id, &args) {
                 return true;
             }

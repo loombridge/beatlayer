@@ -501,3 +501,107 @@ fn platform_items_and_corrected_keys_follow_the_reference() {
     assert_eq!(video.win, ["Ctrl+Alt+Shift+V"]);
     assert!(matches!(video.status, Status::Pending { .. }));
 }
+
+// Spec: racks R20. Plus shows the selected rack's chain list and Minus hides
+// it (S-DEV-012, S-DEV-013); Minus is Fold (S-DEV-014) where the list isn't
+// shown.
+#[test]
+fn plus_and_minus_show_and_hide_chains_and_minus_folds_otherwise() {
+    let keymap = Keymap::live12();
+    let devices = [Context::DeviceView, Context::Global];
+    for platform in [Platform::Mac, Platform::Other] {
+        let plus = keymap
+            .resolve(
+                platform,
+                Key::Plus,
+                mods(false, false, false, false),
+                &devices,
+            )
+            .unwrap();
+        assert_eq!(plus.entry.id, "S-DEV-012");
+        assert_eq!(plus.command.id, "rack.set_view");
+        assert_eq!(plus.command.args["view"], "chain_list");
+        assert_eq!(plus.command.args["shown"], true);
+        // `=` carries Plus on most keyboards.
+        assert_eq!(
+            keymap
+                .resolve(
+                    platform,
+                    Key::Equals,
+                    mods(false, false, false, false),
+                    &devices
+                )
+                .unwrap()
+                .entry
+                .id,
+            "S-DEV-012"
+        );
+        let minus = |runs: &dyn Fn(&str) -> bool| {
+            keymap
+                .resolve_with(
+                    platform,
+                    Key::Minus,
+                    mods(false, false, false, false),
+                    &devices,
+                    |hit| runs(&hit.command.id),
+                )
+                .map(|hit| (hit.entry.id.clone(), hit.command.id.clone()))
+        };
+        // While the chain list shows, Hide Chains runs; where it can't, Fold.
+        assert_eq!(
+            minus(&|_| true),
+            Some(("S-DEV-013".to_owned(), "rack.set_view".to_owned()))
+        );
+        assert_eq!(
+            minus(&|id| id == "device.fold"),
+            Some(("S-DEV-014".to_owned(), "device.fold".to_owned()))
+        );
+        // With neither able, the first still decides, so the key is refused.
+        assert_eq!(minus(&|_| false).unwrap().0, "S-DEV-013");
+    }
+}
+
+// Spec: racks R22. S solos the selected chain while a chain list has the
+// focus (S-SES-023), and the edit keys act on the chains there.
+#[test]
+fn s_solos_the_selected_chain() {
+    let keymap = Keymap::live12();
+    let chains = [Context::RackChains, Context::DeviceView, Context::Global];
+    let plain = mods(false, false, false, false);
+    for platform in [Platform::Mac, Platform::Other] {
+        let hit = |key, m| {
+            keymap
+                .resolve(platform, key, m, &chains)
+                .map(|hit| hit.command.id.clone())
+        };
+        assert_eq!(hit(Key::S, plain).as_deref(), Some("chain.solo"));
+        assert_eq!(hit(Key::Delete, plain).as_deref(), Some("chain.delete"));
+        // Without the chain list's focus, S is not the chain's.
+        assert_ne!(
+            keymap
+                .resolve(
+                    platform,
+                    Key::S,
+                    plain,
+                    &[Context::DeviceView, Context::Global]
+                )
+                .map(|hit| hit.command.id.clone())
+                .as_deref(),
+            Some("chain.solo")
+        );
+        let command = if platform == Platform::Mac {
+            mods(true, false, false, false)
+        } else {
+            mods(false, true, false, false)
+        };
+        for (key, id) in [
+            (Key::C, "chain.copy"),
+            (Key::X, "chain.cut"),
+            (Key::V, "chain.paste"),
+            (Key::D, "chain.duplicate"),
+            (Key::R, "chain.rename"),
+        ] {
+            assert_eq!(hit(key, command).as_deref(), Some(id), "{key:?}");
+        }
+    }
+}

@@ -30,6 +30,8 @@ pub enum ModelError {
     NoLayers(DeviceId),
     /// The device has no sidechain input to set.
     NoSidechain(DeviceId),
+    /// The device has no routing to external hardware to set.
+    NoExternal(DeviceId),
     /// The device has no MIDI sidechain input to set.
     NoMidiSidechain(DeviceId),
     /// The device isn't in this track's chain, so the track has no such
@@ -241,6 +243,14 @@ pub enum ModelError {
     },
     /// The chain is a MIDI effect rack's, which has no volume or pan.
     ChainHasNoMixer(ChainId),
+    /// The chain has a note, choke group, send or output only a drum rack's
+    /// chains have, and isn't in a drum rack (or is a return chain with a
+    /// drum chain's settings).
+    NotADrumChain(ChainId),
+    /// A drum rack's return chains must come after its drum chains.
+    ReturnChainOrder(DeviceId),
+    /// A drum rack holds at most six return chains.
+    TooManyReturnChains(DeviceId),
     /// What was asked to group or ungroup can't be: the devices aren't all
     /// in one chain, or the rack isn't one new rack with one empty chain, or
     /// the rack to take apart holds several chains.
@@ -273,6 +283,15 @@ impl fmt::Display for ModelError {
             Self::ChainNotInTrack { chain, track } => {
                 write!(f, "{chain} isn't in {track}'s chain")
             }
+            Self::NotADrumChain(id) => write!(
+                f,
+                "{id} has a note, choke group, send or output that only a drum rack's chains \
+                 can have, in the way it has it"
+            ),
+            Self::ReturnChainOrder(id) => {
+                write!(f, "{id}'s return chains must come after its drum chains")
+            }
+            Self::TooManyReturnChains(id) => write!(f, "{id} holds at most six return chains"),
             Self::BadGroup(what) => f.write_str(what),
             Self::ChainHasNoMixer(id) => write!(
                 f,
@@ -300,6 +319,7 @@ impl fmt::Display for ModelError {
                 f.write_str("the document's object IDs leave no room for the objects it needs")
             }
             Self::NoSidechain(id) => write!(f, "{id} has no sidechain input"),
+            Self::NoExternal(id) => write!(f, "{id} has no routing to external hardware"),
             Self::NoMidiSidechain(id) => write!(f, "{id} has no MIDI sidechain input"),
             Self::DeviceNotInTrack { device, track } => {
                 write!(f, "{device} isn't in {track}'s chain")

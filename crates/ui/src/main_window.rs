@@ -69,6 +69,10 @@ pub enum UiEvent {
     /// A device's value control gained (true) or lost (false) the keyboard
     /// focus, for [`Shell::set_value_focused`] (WP-2.5).
     FocusValue(bool),
+    /// The pointer is over something with a line for the Status Bar, such
+    /// as a drum rack's pad (`Some`), or left it (`None`), for
+    /// [`Shell::set_hint`] (WP-5.6).
+    StatusHint(Option<String>),
 }
 
 /// What the Info View is showing: the control under the pointer, the
@@ -1329,13 +1333,39 @@ fn look(element: Element, shell: &Shell) -> Look {
             on: shell.main_view() == MainView::Arrangement,
             ..Look::default()
         },
-        Element::Message => match shell.message() {
-            Some(message) => Look {
+        Element::MidiIndicators => {
+            // Spec: midi-io R25; external-devices R7. The number holds the
+            // two lamps: 1 for the input's, 2 for the output's.
+            let (input, output) = shell.midi_indicators();
+            let lit = |on: bool, what: &str| if on { what.to_owned() } else { String::new() };
+            Look {
+                number: Some(f64::from(u8::from(input) | u8::from(output) << 1)),
+                value: Some(
+                    [lit(input, "receiving"), lit(output, "sending")]
+                        .into_iter()
+                        .filter(|s| !s.is_empty())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                ),
+                description: Some(
+                    "The upper light flashes when MIDI reaches a track's input, the lower \
+                     when a track sends MIDI to a port."
+                        .to_owned(),
+                ),
+                ..Look::default()
+            }
+        }
+        Element::Message => match (shell.message(), shell.hint()) {
+            (Some(message), _) => Look {
                 text: Some(message.text.clone()),
                 on: message.error,
                 ..Look::default()
             },
-            None => Look {
+            (None, Some(hint)) => Look {
+                text: Some(hint.to_owned()),
+                ..Look::default()
+            },
+            (None, None) => Look {
                 text: Some(String::new()),
                 ..Look::default()
             },

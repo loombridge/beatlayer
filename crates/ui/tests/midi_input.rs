@@ -185,3 +185,53 @@ fn a_note_ends_when_the_window_loses_the_keyboard() {
     h.key(Key::A, Modifiers::NONE);
     assert_eq!(played(&mut queue).len(), 2);
 }
+
+// Spec: midi-io R25; external-devices R7
+#[test]
+fn the_output_indicator_lights_when_a_message_leaves() {
+    use std::time::{Duration, Instant};
+
+    use bl_core::midi::{MidiMessage, MidiOutputEvent, PortId};
+
+    let mut h = Harness::new(Window::Main);
+    let test = TestBackend::new();
+    test.add_port(Direction::Output, "Synth");
+    h.shell.use_midi_backend(Box::new(test.clone()));
+    h.shell
+        .run(
+            "midi.set_port",
+            json!({ "direction": "output", "name": "Synth", "track": true }),
+        )
+        .unwrap();
+    let mut engine = h.shell.midi().output().attach(16);
+    h.settle();
+    let indicators = |h: &mut Harness| {
+        // The host polls the shell every frame.
+        h.shell.poll();
+        let nodes = Harness::nodes(&h.settle());
+        Harness::node(&nodes, "MIDI Track Input and Output Indicators")
+            .value
+            .clone()
+    };
+    assert_eq!(indicators(&mut h), "", "dark until a message leaves");
+
+    // The engine queues a message for the port; the output thread sends it,
+    // and the lower lamp lights.
+    engine
+        .push(MidiOutputEvent {
+            port: PortId::from_name("Synth"),
+            time: Instant::now(),
+            message: MidiMessage::note_on(0, 60, 100),
+        })
+        .unwrap();
+    let began = Instant::now();
+    while test.sent("Synth").is_empty() && began.elapsed() < Duration::from_secs(2) {
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(test.sent("Synth").len(), 1);
+    assert_eq!(indicators(&mut h), "sending");
+
+    // A moment later it goes dark again.
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(indicators(&mut h), "");
+}

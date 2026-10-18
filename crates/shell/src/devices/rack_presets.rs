@@ -332,6 +332,7 @@ impl DeviceView {
                         chain: None,
                         index: None,
                     },
+                    &self.types,
                 );
                 let ready = Ready {
                     device,

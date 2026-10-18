@@ -20,6 +20,7 @@ use crate::clip::{
 use crate::device::{Device, DeviceRole};
 use crate::document::Document;
 use crate::error::ModelError;
+use crate::external::{ExternalPort, HardwareLatency};
 use crate::follow::FollowPatch;
 use crate::ids::{ChainId, ClipId, ContentHash, DeviceId, ParamId, SceneId, TrackId};
 use crate::launch::{ClipLaunch, LaunchMode, LaunchQuantization};
@@ -27,12 +28,12 @@ use crate::layers::{
     Distribution, Layer, LayerId, LayerSettings, LayerSort, LayerZone, Layers, ZoneKind,
 };
 use crate::metronome::{CountIn, MetronomeRhythm, MetronomeSound};
-use crate::rack::{CHAIN_COLOURS, Chain, RackKind};
+use crate::rack::{CHAIN_COLOURS, Chain, ChainSend, RackKind, Receive};
 use crate::sample_edits::{SampleEdit, SampleRange};
 use crate::scene::{SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
 use crate::shared::Shared;
 use crate::track::{
-    Channel, CrossfadeAssign, Input, Mixer, Monitor, Output, SendTap, Track, TrackKind,
+    Channel, CrossfadeAssign, Input, MidiTo, Mixer, Monitor, Output, SendTap, Track, TrackKind,
 };
 use crate::warp::{MarkerAt, TransientEdits};
 use crate::warp_settings::{BeatsUpdate, ComplexProUpdate, TextureUpdate, TonesUpdate, WarpMode};
@@ -81,30 +82,33 @@ impl Gone {
 /// track, and the clip envelopes that modulate their parameters (automation
 /// R11, WP-3.15).
 fn forget(track: &mut Track, gone: &Gone) {
+    forget_where(track, |target| match *target {
+        AutomationTarget::Device { device, .. } => gone.devices.contains(&device),
+        AutomationTarget::Chain { chain, .. } => gone.chains.contains(&chain),
+        AutomationTarget::ChainSend { chain, to } => {
+            gone.chains.contains(&chain) || gone.chains.contains(&to)
+        }
+        _ => false,
+    });
+}
+
+/// Forgets the track's envelopes, and its clips' envelopes, whose targets
+/// `names_gone` picks.
+fn forget_where(track: &mut Track, names_gone: impl Fn(&AutomationTarget) -> bool) {
     for target in track.automation.keys().copied().collect::<Vec<_>>() {
-        let names_gone = match target {
-            AutomationTarget::Device { device, .. } => gone.devices.contains(&device),
-            AutomationTarget::Chain { chain, .. } => gone.chains.contains(&chain),
-            _ => false,
-        };
-        if names_gone {
+        if names_gone(&target) {
             track.automation.remove(&target);
         }
     }
-    let names_gone = |envelope: &ClipEnvelope| match envelope.target {
-        AutomationTarget::Device { device, .. } => gone.devices.contains(&device),
-        AutomationTarget::Chain { chain, .. } => gone.chains.contains(&chain),
-        _ => false,
-    };
     let clips: Vec<ClipId> = track
         .clips()
         .chain(track.slots().map(|(_, clip)| clip))
-        .filter(|clip| clip.envelopes.iter().any(names_gone))
+        .filter(|clip| clip.envelopes.iter().any(|e| names_gone(&e.target)))
         .map(|clip| clip.id)
         .collect();
     for id in clips {
         if let Some(clip) = track.clip_mut(id) {
-            clip.envelopes.retain(|e| !names_gone(e));
+            clip.envelopes.retain(|e| !names_gone(&e.target));
         }
     }
 }
@@ -517,8 +521,10 @@ pub enum Command {
     SetMidiOutput {
         /// The MIDI track.
         track: TrackId,
-        /// Another MIDI track, or `null` (or nothing) for No Output.
-        to: Option<TrackId>,
+        /// Another MIDI track (its ID), an output port with its channel
+        /// (`{ "name": "Synth", "channel": 1 }`), or `null` (or nothing) for
+        /// No Output.
+        to: Option<MidiTo>,
     },
     /// Sets Main's Main Out: the audio interface's output channels the Main
     /// mix goes to, as a stereo pair.
@@ -1511,6 +1517,28 @@ pub enum Command {
         /// Whether to listen.
         listen: bool,
     },
+    /// Sets an external device's routing (WP-5.34): the settings given
+    /// change, the others stay. The device must declare routing to external
+    /// hardware.
+    SetExternal {
+        /// The device.
+        device: DeviceId,
+        /// MIDI To: `none` for No Output, or `port` with the MIDI output
+        /// port's name.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        midi_to: Option<ExternalPort>,
+        /// The MIDI channel, 1 to 16.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[schemars(range(min = 1, max = 16))]
+        channel: Option<u8>,
+        /// Audio From: the audio interface's inputs it comes back on.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        audio_from: Option<Channel>,
+        /// Hardware Latency with its unit: the unit switch is the unit
+        /// given, so switching the unit sends the converted value.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        hardware_latency: Option<HardwareLatency>,
+    },
 
     /// Inserts a new device at `index` in a rack's chain, keeping the chain
     /// in order for its kind of rack (WP-5.1). The chain may be in a rack
@@ -1645,6 +1673,47 @@ pub enum Command {
         chain: ChainId,
         /// Whether it's soloed.
         solo: bool,
+    },
+    /// Sets the note a drum chain answers (drum racks R1): one note, or all
+    /// notes, which pass as they came.
+    SetChainReceive {
+        /// The drum chain.
+        chain: ChainId,
+        /// What it answers.
+        receive: Receive,
+    },
+    /// Sets the note a drum chain passes on to its devices, from 0 to 127.
+    SetChainPlay {
+        /// The drum chain.
+        chain: ChainId,
+        /// The note.
+        play: u8,
+    },
+    /// Puts a drum chain in a choke group, from 1 to 16, or in none.
+    SetChainChoke {
+        /// The drum chain.
+        chain: ChainId,
+        /// The group, or `null` for none.
+        choke: Option<u8>,
+    },
+    /// Sets a drum chain's send to one of its rack's return chains as
+    /// linear gain (finite, at least 0; 0 is −∞ dB). Moving it by hand turns
+    /// off its automation envelope.
+    SetChainSend {
+        /// The drum chain.
+        chain: ChainId,
+        /// The return chain.
+        to: ChainId,
+        /// The gain.
+        level: f64,
+    },
+    /// Sets where a return chain sends its output: one of the set's return
+    /// tracks, or `null` for the rack's own output.
+    SetChainAudioTo {
+        /// The return chain.
+        chain: ChainId,
+        /// The return track, or `null`.
+        track: Option<TrackId>,
     },
 }
 
@@ -1835,6 +1904,15 @@ impl Command {
             Self::SetSidechainGain { .. } => "Change \"SC Gain\"",
             Self::SetSidechainMix { .. } => "Change \"Mix\"",
             Self::SetSidechainListen { .. } => "Change \"Sidechain Listen\"",
+            // WP-5.34: a routing change is named as Live names one; Hardware
+            // Latency's is to observe.
+            Self::SetExternal {
+                midi_to: None,
+                channel: None,
+                audio_from: None,
+                ..
+            } => "Change \"Hardware Latency\"",
+            Self::SetExternal { .. } => "Change \"Routing\"",
             // WP-5.1. Beatlayer's own names, after the device ones.
             Self::InsertChainDevice { .. } => "Insert Device",
             Self::MoveDeviceToChain { .. } => "Move Device",
@@ -1851,6 +1929,11 @@ impl Command {
             Self::SetChainPan { .. } => "Change chain pan",
             Self::SetChainEnabled { .. } => "Change \"Chain On\"",
             Self::SetChainSolo { .. } => "Solo chain",
+            Self::SetChainReceive { .. } => "Change Receive",
+            Self::SetChainPlay { .. } => "Change Play",
+            Self::SetChainChoke { .. } => "Change Choke",
+            Self::SetChainSend { .. } => "Change chain send",
+            Self::SetChainAudioTo { .. } => "Change Audio To",
         }
     }
 
@@ -2209,7 +2292,7 @@ impl Document {
                 self.edit_routing(*track, |routing| routing.output = output)
             }
             Command::SetMidiOutput { track, to } => {
-                self.edit_routing(*track, |routing| routing.midi_output = *to)
+                self.edit_routing(*track, |routing| routing.midi_output = to.clone())
             }
             Command::SetMainOut { channel } => {
                 self.set_main_channel(*channel, |routing| &mut routing.main_out)
@@ -2824,6 +2907,45 @@ impl Document {
             Command::SetSidechainListen { device, listen } => {
                 self.edit_sidechain(*device, |s| s.listen = *listen)
             }
+            Command::SetExternal {
+                device,
+                midi_to,
+                channel,
+                audio_from,
+                hardware_latency,
+            } => {
+                let mut external = self
+                    .device_ref(*device)?
+                    .external
+                    .clone()
+                    .ok_or(ModelError::NoExternal(*device))?;
+                match midi_to {
+                    Some(ExternalPort::None) => external.port = None,
+                    Some(ExternalPort::Port { name }) => external.port = Some(name.clone()),
+                    None => {}
+                }
+                external.channel = channel.unwrap_or(external.channel);
+                external.audio_from = audio_from.unwrap_or(external.audio_from);
+                if let Some(latency) = hardware_latency {
+                    check_value(
+                        "hardware latency",
+                        match *latency {
+                            HardwareLatency::Milliseconds { value } => value,
+                            HardwareLatency::Samples { value } => f64::from(value),
+                        },
+                        latency.is_valid(),
+                    )?;
+                    external.hardware_latency = *latency;
+                }
+                crate::routing::check_port(
+                    external.port.as_deref().unwrap_or("-"),
+                    external.channel,
+                )?;
+                if Some(&external) != self.device_ref(*device)?.external.as_ref() {
+                    self.device_mut(*device)?.external = Some(external);
+                }
+                Ok(())
+            }
             Command::InsertChainDevice {
                 chain,
                 index,
@@ -2850,10 +2972,11 @@ impl Document {
             Command::AddChain { rack, index, chain } => self.add_chain(*rack, *index, chain),
             Command::RemoveChain { chain } => {
                 let owner = self.chain_owner(*chain)?;
-                let removed = self
-                    .rack_holding_mut(*chain)?
+                let rack = self.rack_holding_mut(*chain)?;
+                let removed = rack
                     .remove_chain(*chain)
                     .ok_or(ModelError::NoSuchChain(*chain))?;
+                rack.prune_sends();
                 self.index.remove_chain(&removed);
                 self.forget_in(owner, &Gone::chain(&removed))?;
                 self.prune_mappings();
@@ -2915,6 +3038,54 @@ impl Document {
                     self.chain_mut(*chain)?.mixer.solo = *solo;
                 }
                 Ok(())
+            }
+            Command::SetChainReceive { chain, receive } => {
+                if let Receive::Note(note) = receive {
+                    check_value("receive note", f64::from(*note), *note < 128)?;
+                }
+                self.edit_drum_chain(*chain, false, |c| c.receive = *receive)
+            }
+            Command::SetChainPlay { chain, play } => {
+                check_value("play note", f64::from(*play), *play < 128)?;
+                self.edit_drum_chain(*chain, false, |c| c.play = *play)
+            }
+            Command::SetChainChoke { chain, choke } => {
+                if let Some(group) = choke {
+                    check_value("choke group", f64::from(*group), (1..=16).contains(group))?;
+                }
+                self.edit_drum_chain(*chain, false, |c| c.choke = *choke)
+            }
+            Command::SetChainSend { chain, to, level } => {
+                check_value("send level", *level, level.is_finite() && *level >= 0.0)?;
+                let owner = self.chain_owner(*chain)?;
+                let rack = self
+                    .chain_rack(*chain)
+                    .ok_or(ModelError::NoSuchChain(*chain))?;
+                if !rack.chains.iter().any(|c| c.is_return && c.id == *to) {
+                    return Err(ModelError::NoSuchChain(*to));
+                }
+                self.edit_drum_chain(*chain, false, |c| {
+                    match c.sends.iter_mut().find(|s| s.to == *to) {
+                        Some(send) => send.level = *level,
+                        None => c.sends.push(ChainSend {
+                            to: *to,
+                            level: *level,
+                        }),
+                    }
+                })?;
+                self.track_mut(owner)?
+                    .override_target(&AutomationTarget::ChainSend {
+                        chain: *chain,
+                        to: *to,
+                    });
+                Ok(())
+            }
+            Command::SetChainAudioTo { chain, track } => {
+                if let Some(track) = track {
+                    check_kind(self.track_ref(*track)?, |k| k == TrackKind::Return, RETURN)?;
+                }
+                self.edit_drum_chain(*chain, true, |c| c.audio_to = *track)?;
+                self.check_routing(self.chain_owner(*chain)?)
             }
         }
     }
@@ -3020,6 +3191,29 @@ impl Document {
                 .collect();
             for sender in senders {
                 self.track_mut(sender)?.sends.remove(&id);
+            }
+            // A drum rack's return chain sent to it goes back to the rack's
+            // own output (drum racks R8).
+            let holders: Vec<TrackId> = self
+                .tracks
+                .iter()
+                .filter(|(_, track)| {
+                    track
+                        .devices_deep()
+                        .any(|d| d.chains.iter().any(|c| c.audio_to == Some(id)))
+                })
+                .map(|(&holder, _)| holder)
+                .collect();
+            for holder in holders {
+                for device in &mut self.track_mut(holder)?.devices {
+                    Shared::make_mut(device).walk_mut(&mut |rack| {
+                        for chain in &mut rack.chains {
+                            if chain.audio_to == Some(id) {
+                                chain.audio_to = None;
+                            }
+                        }
+                    });
+                }
             }
         }
         Ok(())
@@ -4081,6 +4275,11 @@ impl Document {
         if chain.name.is_empty() {
             chain.name = default_chain_name(&chain);
         }
+        // Only a drum rack's chains keep their notes, sends and outputs.
+        chain.fit_to(self.device_ref(rack)?);
+        if let Some(track) = chain.audio_to {
+            check_kind(self.track_ref(track)?, |k| k == TrackKind::Return, RETURN)?;
+        }
         let chains = &mut self.device_mut(rack)?.chains;
         check_index(index, chains.len())?;
         chains.insert(index, chain.clone());
@@ -4098,24 +4297,34 @@ impl Document {
         if self.chain_ref(id)?.devices_deep().any(|d| d.id == rack) {
             return Err(ModelError::RackIntoItself(rack));
         }
-        let moved = self
-            .rack_holding_mut(id)?
-            .remove_chain(id)
-            .ok_or(ModelError::NoSuchChain(id))?;
+        let holder = self.rack_holding_mut(id)?;
+        let holder_id = holder.id;
+        let mut moved = holder.remove_chain(id).ok_or(ModelError::NoSuchChain(id))?;
+        // A chain keeps its notes and sends only in a drum rack, and a
+        // return chain only among the return chains.
+        moved.fit_to(self.device_ref(rack)?);
         let chains = &mut self.device_mut(rack)?.chains;
         check_index(index, chains.len())?;
         chains.insert(index, moved.clone());
+        self.device_mut(holder_id)?.prune_sends();
+        self.device_mut(rack)?.prune_sends();
         // Only instrument and audio effect racks' chains are tapped (the
         // racks spec, R38).
         if !matches!(
-            self.device_ref(rack)?.rack_kind(),
-            Some(RackKind::Instrument | RackKind::AudioEffect)
+            (self.device_ref(rack)?.rack_kind(), moved.is_return),
+            (Some(RackKind::Instrument | RackKind::AudioEffect), _) | (Some(RackKind::Drum), true)
         ) {
             self.forget_chain_taps(&BTreeSet::from([id]));
         }
         if from != to {
             self.index.add_chain(&moved, to);
             self.forget_in(from, &Gone::chain(&moved))?;
+        } else if holder_id != rack {
+            // Its sends, and those to it, stayed in the rack it left.
+            forget_where(
+                self.track_mut(from)?,
+                |target| matches!(*target, AutomationTarget::ChainSend { chain, to } if chain == id || to == id),
+            );
         }
         check_chain(self.track_ref(to)?)
     }
@@ -4145,6 +4354,30 @@ impl Document {
             self.chain_mut(chain)?.mixer = mixer;
             self.track_mut(owner)?
                 .override_target(&AutomationTarget::Chain { chain, param });
+        }
+        Ok(())
+    }
+
+    /// Edits a drum rack's chain with `edit`: a drum chain, or with
+    /// `returns` a return chain. Leaves the set as it was if the rack
+    /// wouldn't hold the result.
+    fn edit_drum_chain(
+        &mut self,
+        chain: ChainId,
+        returns: bool,
+        edit: impl FnOnce(&mut Chain),
+    ) -> Result<(), ModelError> {
+        let rack = self
+            .chain_rack(chain)
+            .ok_or(ModelError::NoSuchChain(chain))?;
+        let current = self.chain_ref(chain)?;
+        if rack.rack_kind() != Some(RackKind::Drum) || current.is_return != returns {
+            return Err(ModelError::NotADrumChain(chain));
+        }
+        let mut edited = current.clone();
+        edit(&mut edited);
+        if edited != *current {
+            *self.chain_mut(chain)? = edited;
         }
         Ok(())
     }
@@ -4259,6 +4492,20 @@ impl Document {
                     .is_some_and(|kind| !kind.chains_have_volume_and_pan());
                 if no_mixer && param != MixerParam::Mute {
                     return Err(ModelError::ChainHasNoMixer(chain));
+                }
+            }
+            AutomationTarget::ChainSend { chain, to } => {
+                let track_ref = self.track_ref(track)?;
+                let rack = track_ref
+                    .devices
+                    .iter()
+                    .find_map(|d| d.chain_rack(chain))
+                    .ok_or(ModelError::ChainNotInTrack { chain, track })?;
+                let sends = rack.rack_kind() == Some(RackKind::Drum)
+                    && rack.chains.iter().any(|c| c.id == chain && !c.is_return)
+                    && rack.chains.iter().any(|c| c.id == to && c.is_return);
+                if !sends {
+                    return Err(ModelError::NotADrumChain(chain));
                 }
             }
             AutomationTarget::MidiCc { .. }

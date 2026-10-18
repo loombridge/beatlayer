@@ -721,6 +721,15 @@ pub(crate) fn lists(
         lists.insert(NodeKey::Device(device.id), Entries::default());
         for chain in &device.chains {
             lists.insert(NodeKey::ChainMixer(chain.id), Entries::default());
+            for send in &chain.sends {
+                lists.insert(
+                    NodeKey::ChainSend {
+                        chain: chain.id,
+                        to: send.to,
+                    },
+                    Entries::default(),
+                );
+            }
         }
     }
     for (target, automation) in track.automation() {
@@ -887,6 +896,9 @@ pub fn target_node(track: TrackId, target: &AutomationTarget) -> Option<(NodeKey
                 MixerParam::Mute => mixer::track::MUTE,
             },
         ),
+        AutomationTarget::ChainSend { chain, to } => {
+            (NodeKey::ChainSend { chain, to }, mixer::route::LEVEL)
+        }
         AutomationTarget::MidiCc { .. }
         | AutomationTarget::MidiPitchBend
         | AutomationTarget::MidiChannelPressure => return None,

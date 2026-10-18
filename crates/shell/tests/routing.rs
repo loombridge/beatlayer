@@ -5,7 +5,7 @@
 //! and 4, returns A-Reverb and B-Delay, and Main. The behaviour is in the
 //! routing spec.
 
-use bl_model::{Channel, Input, Monitor, Output, Tap, TrackId, TrackKind};
+use bl_model::{Channel, Input, MidiTo, Monitor, Output, Tap, TrackId, TrackKind};
 use bl_shell::Shell;
 use bl_shell::routing::{self, Chooser, InOut, return_letter, track_label};
 use serde_json::json;
@@ -794,4 +794,159 @@ fn chain_taps_read_rack_chain_and_tap_in_signal_order() {
         "a nested rack straight after the chain that holds it"
     );
     assert_eq!(channel.labels().len(), 3 + 4 * 3);
+}
+
+// Spec: external-devices R1, R2
+#[test]
+fn midi_to_lists_the_output_ports_before_configure() {
+    let Set {
+        mut shell, midi, ..
+    } = observed_set();
+    let interface = routing::Interface {
+        midi_outputs: vec!["Synth".to_owned(), "Drum Box".to_owned()],
+        ..routing::Interface::default()
+    };
+    let to = |shell: &Shell, interface: &routing::Interface| match section_with(
+        shell, midi[0], interface,
+    ) {
+        InOut::Clips {
+            output,
+            output_channel,
+            ..
+        } => (output, output_channel),
+        other => panic!("not a clip track's section: {other:?}"),
+    };
+
+    // The ports come first, in the system's order, then Configure… ─ the
+    // other MIDI tracks ─ No Output, which stays the default.
+    let (output, channel) = to(&shell, &interface);
+    assert_eq!(
+        output.labels(),
+        [
+            "Synth",
+            "Drum Box",
+            "Configure…",
+            "─",
+            "2-MIDI",
+            "─",
+            "No Output"
+        ]
+    );
+    assert_eq!(output.text, "No Output");
+    assert_eq!(channel.labels(), Vec::<&str>::new());
+
+    // Choosing a port takes channel 1, and lists 1 to 16.
+    choose(&mut shell, &output, "Synth");
+    let (output, channel) = to(&shell, &interface);
+    assert_eq!(output.text, "Synth");
+    assert_eq!(channel.text, "1");
+    assert_eq!(channel.labels().len(), 16);
+    assert_eq!(
+        shell
+            .editor()
+            .document()
+            .track(midi[0])
+            .unwrap()
+            .routing()
+            .midi_output,
+        Some(MidiTo::port("Synth"))
+    );
+
+    // Another channel, then the same port again: it keeps the channel.
+    choose(&mut shell, &channel, "7");
+    let (output, _) = to(&shell, &interface);
+    choose(&mut shell, &output, "Synth");
+    let (_, channel) = to(&shell, &interface);
+    assert_eq!(channel.text, "7");
+
+    // A track in its place has Track In alone, and each change is one undo
+    // step.
+    choose(&mut shell, &output, "2-MIDI");
+    let (output, channel) = to(&shell, &interface);
+    assert_eq!(output.text, "2-MIDI");
+    assert_eq!(channel.labels(), ["Track In"]);
+    shell.invoke("edit.undo", json!({})).unwrap();
+    let (output, channel) = to(&shell, &interface);
+    assert_eq!(
+        (output.text.as_str(), channel.text.as_str()),
+        ("Synth", "7")
+    );
+
+    // The port goes, or its Track switch turns off: the track keeps its
+    // name, dimmed, and sends nowhere.
+    let gone = routing::Interface::default();
+    let (output, _) = to(&shell, &gone);
+    assert_eq!(output.labels()[0], "Synth");
+    assert!(output.run_for("Synth").is_none(), "the name is dimmed");
+    assert_eq!(output.text, "Synth");
+}
+
+// Spec: drum-racks R10
+#[test]
+fn a_drum_rack_offers_its_return_chains_taps() {
+    let Set {
+        mut shell,
+        midi,
+        audio,
+        ..
+    } = observed_set();
+    select(&mut shell, midi[0]);
+    let (rack, drums) = add_rack(&mut shell, None, "drum", "instrument", "Drums", &["Kick"]);
+    let gain = bl_engine::testing::gain_type();
+    let made: bl_shell::device_commands::ChainAdded = serde_json::from_value(
+        shell
+            .invoke(
+                "chain.create",
+                json!({ "rack": rack, "returns": true,
+                        "device": { "kind": gain.kind, "name": "Gain", "role": gain.role } }),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    shell
+        .invoke(
+            "chain.rename",
+            json!({ "chain": made.chain, "name": "Reverb" }),
+        )
+        .unwrap();
+    let (input, ..) = clips(&shell, audio[0]);
+    choose(&mut shell, &input, "1-MIDI");
+    let (_, channel, ..) = clips(&shell, audio[0]);
+    assert_eq!(
+        channel.labels(),
+        [
+            "Pre FX",
+            "Post FX",
+            "Post Mixer",
+            "Drums | Reverb | Pre FX",
+            "Drums | Reverb | Post FX",
+            "Drums | Reverb | Post Mixer",
+        ],
+        "the return chain's three taps, and none of the drum chains'"
+    );
+    choose(&mut shell, &channel, "Drums | Reverb | Post Mixer");
+    assert_eq!(
+        shell
+            .editor()
+            .document()
+            .track(audio[0])
+            .unwrap()
+            .routing()
+            .input,
+        Input::Track {
+            track: midi[0],
+            tap: Tap::PostMixer,
+            chain: Some(made.chain),
+        }
+    );
+    // A drum chain can't be tapped.
+    assert!(
+        shell
+            .invoke(
+                "routing.set_input",
+                json!({ "track": audio[0], "input":
+                    { "type": "track", "track": midi[0], "tap": "pre_fx", "chain": drums[0] } }),
+            )
+            .is_err()
+    );
 }

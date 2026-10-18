@@ -510,6 +510,88 @@ mod tests {
         serde_json::from_value(value).map_err(|error| error.to_string())
     }
 
+    // Spec: drum-racks R27
+    #[test]
+    fn drum_racks_save_and_load_with_returns() {
+        use crate::{Chain, ChainId, DeviceId, RackKind, Receive};
+        let (mut doc, [_, audio, ret]) = song();
+        let (rack, pad, hat, reverb): (DeviceId, ChainId, ChainId, ChainId) = (
+            DeviceId(bl_core::id::Id::new(900).unwrap()),
+            ChainId(bl_core::id::Id::new(901).unwrap()),
+            ChainId(bl_core::id::Id::new(902).unwrap()),
+            ChainId(bl_core::id::Id::new(903).unwrap()),
+        );
+        // A drum rack holds instruments, so it sits on a MIDI track.
+        let midi = TrackId(bl_core::id::Id::new(904).unwrap());
+        for command in [
+            Command::CreateTrack {
+                id: midi,
+                kind: TrackKind::Midi,
+                name: "Drums".to_owned(),
+                parent: None,
+                index: 0,
+            },
+            Command::InsertDevice {
+                track: midi,
+                index: 0,
+                device: Device::rack(rack, RackKind::Drum)
+                    .with_chain(Chain::for_pad(pad, "Kick", 36))
+                    .with_chain(Chain::for_pad(hat, "Hat", 42))
+                    .with_chain(Chain::new_return(reverb, "Reverb")),
+            },
+            Command::SetChainReceive {
+                chain: hat,
+                receive: Receive::Note(46),
+            },
+            Command::SetChainPlay {
+                chain: hat,
+                play: 61,
+            },
+            Command::SetChainChoke {
+                chain: hat,
+                choke: Some(1),
+            },
+            Command::SetChainSend {
+                chain: pad,
+                to: reverb,
+                level: 0.5,
+            },
+            Command::SetChainAudioTo {
+                chain: reverb,
+                track: Some(ret),
+            },
+            Command::SetAutomationBreakpoint {
+                track: midi,
+                target: AutomationTarget::ChainSend {
+                    chain: pad,
+                    to: reverb,
+                },
+                at: Ticks::ZERO,
+                value: 0.25,
+            },
+        ] {
+            doc.apply(&command).unwrap();
+        }
+        let _ = audio;
+        let value = serde_json::to_value(&doc).unwrap();
+        let back = load(value.clone()).unwrap();
+        assert_eq!(back, doc);
+        let chains = &value["tracks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["id"] == json!(midi))
+            .unwrap()["devices"][0]["chains"];
+        // A chain with its defaults saves none of a drum chain's fields.
+        assert!(chains[0].get("play").is_none() && chains[0].get("choke").is_none());
+        assert_eq!(chains[1]["receive"], json!({ "note": 46 }));
+        assert_eq!(chains[1]["play"], json!(61));
+        assert_eq!(chains[1]["choke"], json!(1));
+        assert_eq!(chains[0]["sends"], json!([{ "to": reverb, "level": 0.5 }]));
+        assert_eq!(chains[2]["is_return"], json!(true));
+        assert_eq!(chains[2]["audio_to"], json!(ret));
+    }
+
     // Spec: modulation R19
     #[test]
     fn modulator_mappings_save_with_the_set_and_load_back() {
@@ -1666,6 +1748,113 @@ mod tests {
         assert!(
             error.contains("nonzero") || error.contains("zero"),
             "{error}"
+        );
+    }
+    // Spec: external-devices R2, R15
+    #[test]
+    fn a_midi_to_port_saves_and_a_set_without_one_opens_as_before() {
+        use crate::external::HardwareLatency;
+        use crate::track::MidiTo;
+
+        let mut editor = Editor::new();
+        let mut track = |kind| {
+            let id = editor.new_id();
+            editor
+                .apply(Command::CreateTrack {
+                    id,
+                    kind,
+                    name: "T".to_owned(),
+                    parent: None,
+                    index: 0,
+                })
+                .unwrap();
+            id
+        };
+        let (keys, bass) = (track(TrackKind::Midi), track(TrackKind::Midi));
+        let outboard = editor.new_id();
+        let mut set = |to| {
+            editor
+                .apply(Command::SetMidiOutput { track: keys, to })
+                .unwrap();
+            serde_json::to_value(editor.document()).unwrap()
+        };
+        // A set saved before MIDI out: no MIDI To is left out, a track is its
+        // bare ID.
+        let none = set(None);
+        let routing = |value: &Value| value["tracks"][1]["routing"]["midi_output"].clone();
+        assert_eq!(routing(&none), Value::Null);
+        let by_track = set(Some(MidiTo::Track(bass)));
+        assert_eq!(routing(&by_track), json!(bass.0.get()));
+        let by_port = set(Some(MidiTo::Port {
+            name: "Synth".to_owned(),
+            channel: 3,
+        }));
+        assert_eq!(routing(&by_port), json!({ "name": "Synth", "channel": 3 }));
+        for (value, expected) in [
+            (none, None),
+            (by_track, Some(MidiTo::Track(bass))),
+            (
+                by_port,
+                Some(MidiTo::Port {
+                    name: "Synth".to_owned(),
+                    channel: 3,
+                }),
+            ),
+        ] {
+            let back = load(value).unwrap();
+            assert_eq!(back.track(keys).unwrap().routing().midi_output, expected);
+            back.check_invariants().unwrap();
+        }
+        // A port needs a name and a channel from 1 to 16.
+        for (name, channel) in [("", 1), ("Synth", 0), ("Synth", 17)] {
+            let to = Some(MidiTo::Port {
+                name: name.to_owned(),
+                channel,
+            });
+            assert!(
+                editor
+                    .apply(Command::SetMidiOutput { track: keys, to })
+                    .is_err()
+            );
+        }
+
+        // The external device's settings save with the set and load back.
+        editor
+            .apply(Command::InsertDevice {
+                track: keys,
+                index: 0,
+                device: Device::new(
+                    outboard,
+                    "Hardware",
+                    DeviceKind::Native {
+                        device_type: "beatlayer.test".to_owned(),
+                    },
+                )
+                .with_external(),
+            })
+            .unwrap();
+        let saved = serde_json::to_value(editor.document()).unwrap();
+        assert_eq!(
+            saved["tracks"][1]["devices"][0]["external"],
+            json!({}),
+            "a new device's routing is all defaults"
+        );
+        editor
+            .apply(Command::SetExternal {
+                device: outboard,
+                midi_to: None,
+                channel: Some(2),
+                audio_from: None,
+                hardware_latency: Some(HardwareLatency::Samples { value: 64 }),
+            })
+            .unwrap();
+        let back = load(serde_json::to_value(editor.document()).unwrap()).unwrap();
+        assert_eq!(&back, editor.document());
+        let external = back.device(outboard).unwrap().external.clone().unwrap();
+        assert_eq!(external.channel, 2);
+        assert_eq!(
+            external.hardware_latency,
+            HardwareLatency::Samples { value: 64 }
         );
     }
 }

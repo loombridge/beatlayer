@@ -61,6 +61,23 @@ pub enum NodeKey {
     /// Volume, Pan, and Chain Activator, which solo mutes. Its parameters are
     /// [`mixer::track`](crate::mixer::track).
     ChainMixer(ChainId),
+    /// The note routing of a drum rack's chain, which passes on the notes
+    /// its Receive answers at its Play note and remembers what sounds for
+    /// its choke group (the drum racks spec, R2, R4). Its parameters are
+    /// [`drum::param`](crate::drum::param).
+    ChainNotes(ChainId),
+    /// A drum chain's send to one of its rack's return chains, taken after
+    /// the chain's mixer (R6). Its parameters are
+    /// [`mixer::route`](crate::mixer::route).
+    ChainSend {
+        /// The drum chain.
+        chain: ChainId,
+        /// The return chain.
+        to: ChainId,
+    },
+    /// A drum rack's return chain's output into a return track (R8). Its
+    /// parameters are [`mixer::route`](crate::mixer::route).
+    ChainOutput(ChainId),
 }
 
 impl fmt::Display for NodeKey {
@@ -76,6 +93,9 @@ impl fmt::Display for NodeKey {
             Self::SidechainInput(device) => write!(f, "the sidechain input of {device}"),
             Self::Sidechain(device) => write!(f, "the sidechain of {device}"),
             Self::ChainMixer(chain) => write!(f, "the mixer of {chain}"),
+            Self::ChainNotes(chain) => write!(f, "the notes of {chain}"),
+            Self::ChainSend { chain, to } => write!(f, "the send from {chain} to {to}"),
+            Self::ChainOutput(chain) => write!(f, "the output of {chain}"),
         }
     }
 }
@@ -474,6 +494,10 @@ pub struct Block<'a> {
     /// What the device's detector hears from its sidechain input, planar
     /// with the block's channels and stride, while its sidechain is on.
     pub(crate) sidechain: Option<&'a [f32]>,
+    /// What an external device brings back from the audio interface: the
+    /// input channels it is set to, planar with the block's channels and
+    /// stride (WP-5.34). `None` for every other device.
+    pub(crate) external: Option<&'a [f32]>,
     /// The notes the device plays in this block, in order of offset
     /// (WP-2.6). The engine sends none yet: MIDI clips and inputs reach
     /// devices with WP-2.1 and 2.2.
@@ -537,6 +561,7 @@ impl<'a> Block<'a> {
             sample_rate,
             tempo: &DEFAULT_TEMPO,
             sidechain: None,
+            external: None,
             notes: &[],
             notes_out: None,
             session: &[],
@@ -614,6 +639,25 @@ impl<'a> Block<'a> {
         );
         Self {
             sidechain: Some(sidechain),
+            ..self
+        }
+    }
+
+    /// The same block with what an external device brings back from the
+    /// interface: planar, with the block's channels and stride. For tests of
+    /// nodes outside a program.
+    ///
+    /// # Panics
+    ///
+    /// If `external` is too short.
+    #[must_use]
+    pub fn with_external(self, external: &'a [f32]) -> Self {
+        assert!(
+            self.channels == 0 || external.len() >= (self.channels - 1) * self.stride + self.frames,
+            "the external input is shorter than the block"
+        );
+        Self {
+            external: Some(external),
             ..self
         }
     }
@@ -743,6 +787,20 @@ impl<'a> Block<'a> {
         assert!(index < self.channels, "channel {index} out of range");
         let start = index * self.stride;
         self.sidechain.map(|data| &data[start..start + self.frames])
+    }
+
+    /// What an external device brings back on one channel (WP-5.34): the
+    /// audio interface's input channels it is set to, a pair as left and
+    /// right and a single channel on both sides, silence where the interface
+    /// lacks the channel. `None` for a device that isn't an external one.
+    ///
+    /// # Panics
+    ///
+    /// If `index` isn't less than [`channels`](Self::channels).
+    pub fn external(&self, index: usize) -> Option<&'a [f32]> {
+        assert!(index < self.channels, "channel {index} out of range");
+        let start = index * self.stride;
+        self.external.map(|data| &data[start..start + self.frames])
     }
 
     /// One channel's samples, writable.

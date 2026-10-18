@@ -70,6 +70,7 @@ use bl_shell_spec::midi_io as midi_io_ids;
 use bl_shell_spec::mixer_view as mixer_ids;
 use bl_shell_spec::multisampler as multisampler_ids;
 use bl_shell_spec::notes::{self as note_ids, ClipTab};
+use bl_shell_spec::pads as pad_ids;
 use bl_shell_spec::perception as perception_ids;
 use bl_shell_spec::plugins as plugin_ids;
 use bl_shell_spec::session_launch as session_launch_ids;
@@ -345,6 +346,11 @@ pub struct Shell {
     /// When the MIDI ports were last listed, so [`Shell::poll`] lists them
     /// again every few seconds and a replugged device shows.
     midi_listed: std::time::Instant,
+    /// The counts of messages that reached tracks' inputs and left for
+    /// ports when [`Shell::poll`] last looked, and when each last changed
+    /// while the indicator still lit (external-devices R7).
+    midi_seen: (u64, u64),
+    midi_lit: [Option<std::time::Instant>; 2],
     /// The chord a Chord device's Learn is hearing.
     chord_learn: crate::chord_learn::ChordLearn,
     prefs: Preferences,
@@ -365,6 +371,8 @@ pub struct Shell {
     value_focused: bool,
     effects: Vec<Effect>,
     message: Option<Message>,
+    /// What the pointer is over says about itself, while there's no message.
+    hint: Option<String>,
     revision: u64,
     agent_status: AgentServerStatus,
     /// The built-in assistant's API keys (WP-2.23): the OS keychain, or an
@@ -655,6 +663,9 @@ fn snapshot(editor: &Editor) -> Editor {
 /// How often [`Shell::poll`] lists the MIDI ports again.
 const MIDI_RELIST: std::time::Duration = std::time::Duration::from_secs(2);
 
+/// How long a MIDI indicator stays lit after a message.
+const MIDI_LAMP: std::time::Duration = std::time::Duration::from_millis(120);
+
 impl Shell {
     /// A shell with these preferences, saving them to `config_dir` (or
     /// nowhere), playing through `audio`, and opening and saving sets
@@ -683,7 +694,14 @@ impl Shell {
         // hardware. The queue has no engine yet; each engine attaches its own.
         let (midi_sender, _) = bl_midi_io::input_queue(1);
         audio.set_midi(midi_sender.clone());
-        let midi = MidiHost::new(Box::new(bl_midi_io::NullBackend), midi_sender, &prefs.midi);
+        let midi_output = bl_midi_io::OutputBus::new();
+        audio.set_midi_output(midi_output.clone());
+        let midi = MidiHost::new(
+            Box::new(bl_midi_io::NullBackend),
+            midi_sender,
+            midi_output,
+            &prefs.midi,
+        );
         let browser_view = BrowserView::new(&prefs.browser, Waker::default());
         audio.set_preview_gain(prefs.browser.preview_volume as f32);
         // Spec: file-management R1. A saved default set is what a new set
@@ -736,6 +754,8 @@ impl Shell {
             audio,
             midi,
             midi_listed: std::time::Instant::now(),
+            midi_seen: (0, 0),
+            midi_lit: [None; 2],
             chord_learn: crate::chord_learn::ChordLearn::default(),
             settings_open: false,
             prefs,
@@ -750,6 +770,7 @@ impl Shell {
             value_focused: false,
             effects: Vec::new(),
             message: None,
+            hint: None,
             revision: 0,
             agent_status: AgentServerStatus::default(),
             keychain: Arc::new(OsKeychain::new()),
@@ -1270,7 +1291,40 @@ impl Shell {
             inputs,
             outputs,
             midi_inputs: self.midi.input_names(),
+            midi_outputs: self.midi.output_names(),
         }
+    }
+
+    /// Lights the Control Bar's MIDI indicators for a moment when messages
+    /// have reached tracks' inputs or left for ports since the last call;
+    /// returns whether either changed (midi-io R25; external-devices R7).
+    fn track_midi_activity(&mut self) -> bool {
+        let now = std::time::Instant::now();
+        let seen = (
+            self.midi.sender().stats().snapshot().to_tracks,
+            self.midi.output().stats().snapshot().sent,
+        );
+        let counts = [(seen.0, self.midi_seen.0), (seen.1, self.midi_seen.1)];
+        let mut changed = false;
+        for (lit, (new, old)) in self.midi_lit.iter_mut().zip(counts) {
+            if new != old {
+                *lit = Some(now);
+                changed = true;
+            } else if lit.is_some_and(|since| now.duration_since(since) >= MIDI_LAMP) {
+                *lit = None;
+                changed = true;
+            }
+        }
+        self.midi_seen = seen;
+        changed
+    }
+
+    /// Whether the Control Bar's MIDI track input and output indicators are
+    /// lit: a message reached a track's input, or left for a port, a moment
+    /// ago (L-CTRL-026).
+    #[must_use]
+    pub fn midi_indicators(&self) -> (bool, bool) {
+        (self.midi_lit[0].is_some(), self.midi_lit[1].is_some())
     }
 
     /// Plays MIDI through `backend` from now on: the platform's MIDI system
@@ -1278,7 +1332,8 @@ impl Shell {
     /// the preferences hold.
     pub fn use_midi_backend(&mut self, backend: Box<dyn bl_midi_io::MidiBackend>) {
         let sender = self.midi.sender().clone();
-        self.midi = MidiHost::new(backend, sender, &self.prefs.midi);
+        let output = self.midi.output().clone();
+        self.midi = MidiHost::new(backend, sender, output, &self.prefs.midi);
     }
 
     /// The MIDI ports and the computer MIDI keyboard.
@@ -1686,6 +1741,22 @@ impl Shell {
             action: None,
         });
         self.touch();
+    }
+
+    /// The line the Status Bar shows while it has no message: what the
+    /// pointer is over says about itself, such as a drum rack's pad
+    /// (WP-5.6).
+    #[must_use]
+    pub fn hint(&self) -> Option<&str> {
+        self.hint.as_deref()
+    }
+
+    /// Sets, or with `None` clears, the Status Bar's hint.
+    pub fn set_hint(&mut self, hint: Option<String>) {
+        if self.hint != hint {
+            self.hint = hint;
+            self.touch();
+        }
     }
 
     /// Clears the Status Bar's message.
@@ -2462,6 +2533,12 @@ impl Shell {
         if id == device_ids::LOAD_SAMPLE {
             return self.load_sample(id, args);
         }
+        if id == pad_ids::PAD_DROP {
+            return self.pad_drop(args);
+        }
+        if id == pad_ids::PAD_HOT_SWAP_SAMPLE {
+            return self.pad_hot_swap_sample(args);
+        }
         if matches!(
             id,
             device_ids::CUT
@@ -2503,6 +2580,14 @@ impl Shell {
             },
         );
         let outcome = result.map_err(|error| device_error(id, error))?;
+        // Spec: drum-racks R5. A held Preview button plays its chain.
+        for &(chain, on) in &outcome.previews {
+            self.audio.send_param(
+                bl_engine::NodeKey::ChainNotes(chain),
+                bl_engine::drum::param::PREVIEW,
+                f64::from(u8::from(on)),
+            );
+        }
         // Spec: racks R42. Samples a rack or chain preset brought in.
         for file in &outcome.media {
             self.store.add_media(file.hash, &file.path, file.size);
@@ -2532,6 +2617,75 @@ impl Shell {
         }
         self.touch();
         Ok(outcome.value)
+    }
+
+    /// Drops samples, a device or a preset on a pad of a drum rack
+    /// (`pad.drop`, the drum racks spec, R14 to R16): the media store takes
+    /// the files, the set records where they are, and the pad's chains play
+    /// them. One undo step.
+    fn pad_drop(&mut self, args: Value) -> Result<Value, ShellError> {
+        let id = pad_ids::PAD_DROP;
+        let args: pad_ids::PadDropArgs = Self::args(id, args)?;
+        let mut samples = Vec::with_capacity(args.samples.len());
+        for path in &args.samples {
+            let path = PathBuf::from(path);
+            let hash = self
+                .media
+                .import(&path)
+                .map_err(|error| ShellError::Failed {
+                    command: id.to_owned(),
+                    message: format!("{}: {error}", path.display()),
+                })?;
+            let entry = self.media.entry(hash).ok_or_else(|| ShellError::Failed {
+                command: id.to_owned(),
+                message: "the media store lost the file".to_owned(),
+            })?;
+            let media = bl_model::ContentHash(*hash.as_bytes());
+            self.store.add_media(media, &entry.path, entry.size);
+            samples.push(devices::PadSample {
+                media,
+                name: file_stem(&entry.path),
+            });
+        }
+        let user_library = self.browser_view.user_library().map(Path::to_path_buf);
+        let dropped = self
+            .devices
+            .pad_drop(&mut self.editor, user_library.as_deref(), args, &samples)
+            .map_err(|error| device_error(id, error))?;
+        self.dirty = true;
+        self.document_changed();
+        self.touch();
+        Ok(to_value(&dropped))
+    }
+
+    /// A pad's Hot-Swap Sample button (`pad.hot_swap_sample`, the drum racks
+    /// spec, R19): the pad becomes the hot-swap target and the browser opens
+    /// the folder of the sample it plays.
+    fn pad_hot_swap_sample(&mut self, args: Value) -> Result<Value, ShellError> {
+        let id = pad_ids::PAD_HOT_SWAP_SAMPLE;
+        let args: pad_ids::PadHotSwapArgs = Self::args(id, args)?;
+        let media = self
+            .devices
+            .pad_sample_of(self.editor.document(), args.rack, args.note)
+            .map_err(|error| device_error(id, error))?
+            .ok_or_else(|| ShellError::Unavailable {
+                command: id.to_owned(),
+                reason: "the pad's chain plays no sample".to_owned(),
+            })?;
+        let state = self.run_devices(pad_ids::PAD_HOT_SWAP, to_value(&args))?;
+        let folder = self
+            .media
+            .entry(bl_media::ContentHash::from_bytes(media.0))
+            .and_then(|entry| entry.path.parent().map(Path::to_path_buf));
+        if let Some(folder) = folder {
+            self.browser = true;
+            self.run_browser(
+                browser_ids::OPEN_FOLDER,
+                json!({ "path": folder, "open": true, "keep_others": true }),
+            )
+            .ok();
+        }
+        Ok(state)
     }
 
     /// Loads a file into a device that plays one sample
@@ -2884,6 +3038,37 @@ impl Shell {
     /// The browser's selection, if it's one audio file and a device that
     /// plays samples is being hot-swapped: what Enter or a double-click
     /// loads into the device's selected slot (WP-5.17).
+    fn pad_hot_swap_drop(
+        &self,
+        rack: bl_model::DeviceId,
+        note: u8,
+    ) -> Option<pad_ids::PadDropArgs> {
+        let selected = self.browser_view.selected();
+        let samples: Vec<String> = selected
+            .iter()
+            .filter(|p| browser::arrange::is_audio(&p.to_string_lossy()))
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect();
+        let preset = match selected {
+            [one]
+                if samples.is_empty()
+                    && one
+                        .extension()
+                        .is_some_and(|e| e == bl_project::preset::PRESET_EXTENSION) =>
+            {
+                Some(one.to_string_lossy().into_owned())
+            }
+            _ => None,
+        };
+        (!samples.is_empty() || preset.is_some()).then(|| pad_ids::PadDropArgs {
+            rack: Some(rack),
+            note,
+            samples,
+            preset,
+            ..Default::default()
+        })
+    }
+
     fn hot_swap_sample(&self) -> Option<(bl_model::DeviceId, PathBuf)> {
         let device = self.devices.hot_swap()?;
         let takes = self.editor.document().device(device).is_some_and(|d| {
@@ -3034,6 +3219,7 @@ impl Shell {
             changed |= self.refresh_midi();
         }
         changed |= self.learn_chords();
+        changed |= self.track_midi_activity();
         // Plug-ins' main-thread work (WP-2.6 to WP-2.8), and the changes
         // they made themselves.
         changed |= self.poll_plugin_scan();
@@ -3513,6 +3699,15 @@ impl Shell {
             // nodes published, which the device displays draw. Not a
             // revision either.
             self.audio.displays_into(self.devices.displays_mut());
+        }
+        // Spec: drum-racks R20. With Auto Select on, a drum rack's chain
+        // list selects each chain a note reaches.
+        if running {
+            let mut hits = std::collections::BTreeMap::new();
+            self.audio.chain_hits_into(&mut hits);
+            if self.devices.auto_select(self.editor.document(), &hits) {
+                self.touch();
+            }
         }
         // Spec: launch-quantisation R10. The slots the engine is launching
         // or stopping, which the grid's launch buttons draw.
@@ -5540,6 +5735,26 @@ impl Shell {
                 self.touch();
             }
             return Ok(outcome.value);
+        }
+        if id == browser_ids::LOAD_SELECTED
+            && let Some((rack, note)) = self.devices.hot_swap_pad_target()
+            && let Some(drop) = self.pad_hot_swap_drop(rack, note)
+        {
+            // Spec: drum-racks R18. With a pad the target, what the browser
+            // loads lands on the pad as a drop would.
+            Self::args::<NoArgs>(id, args)?;
+            return self.pad_drop(to_value(&drop));
+        }
+        if id == browser_ids::LOAD_SELECTED
+            && self.devices.hot_swap_pad_target().is_some()
+            && self.browser_view.selected_plugin().is_some()
+        {
+            // Spec: drum-racks R18. A plug-in can't go onto a pad from here
+            // yet; loading it in the rack's place would lose the kit.
+            return Err(ShellError::Failed {
+                command: id.to_owned(),
+                message: "a pad being hot-swapped takes samples and presets; drag the plug-in onto the pad".to_owned(),
+            });
         }
         if id == browser_ids::LOAD_SELECTED
             && let Some(plugin) = self.browser_view.selected_plugin().cloned()

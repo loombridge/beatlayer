@@ -876,7 +876,14 @@ const ENTRIES: &[Entry] = &[
         contexts: &[Session, Arrangement],
         keys: &[],
         description: "Sets where a MIDI track's MIDI goes, as its MIDI To chooser does: \
-            another MIDI track (its Track In), or `null` for No Output (a new MIDI track's).",
+            another MIDI track (give its ID; it arrives at its Track In), an output port \
+            (`{ \"name\": \"Synth\", \"channel\": 1 }`: the port's name as `midi.ports` lists \
+            it, with its Track switch on, and the channel to send on, 1 to 16), or `null` for \
+            No Output (a new MIDI track's). A track sends to a port the notes and controller, \
+            pitch bend and pressure messages that reach the end of its device \
+            chain (a track with an instrument sends none, the instrument playing them), at \
+            the moment their frame is heard at the audio interface's output; it keeps a missing \
+            port's name and sends again when the port returns. Choosing a port takes channel 1.",
     },
     Entry {
         id: "routing.set_main_out",
@@ -2102,6 +2109,29 @@ const ENTRIES: &[Entry] = &[
             the bass compressor's source to the kick's track and switch External on.",
     },
     Entry {
+        id: "device.set_external",
+        action: Action::Apply("set_external"),
+        label: "Set External Device",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sets the routing of a device that works with hardware outside the \
+            computer (the External Instrument), as the choosers in its title bar do; give only \
+            the settings to change. `midi_to` is `{ \"type\": \"none\" }` (No Output, a new \
+            device's) or `{ \"type\": \"port\", \"name\": ... }` with a MIDI output port's \
+            name as `midi.ports` lists it, with its Track switch on; `channel` is the MIDI \
+            channel to send on, 1 to 16 (1 on a new device); `audio_from` is the audio \
+            interface's inputs the hardware's sound comes back on, a channel or a pair \
+            (`{ \"type\": \"pair\", \"channel\": 1 }`, the first pair on a new device); \
+            `hardware_latency` is the delay the hardware adds that the computer can't detect, \
+            in the unit the unit switch is on: `{ \"unit\": \"milliseconds\", \"value\": 12.5 }` \
+            (0 to 1000, kept in milliseconds when the sample rate changes) or `{ \"unit\": \
+            \"samples\", \"value\": 600 }` (0 to 192000, kept in samples); to switch the unit, \
+            send the converted value. Each change recompiles the song's audio, so these are \
+            settings, not parameters. Read them back in the query tool's `device` result, \
+            under `external`.",
+    },
+    Entry {
         id: "device.set_midi_sidechain_source",
         action: Action::Apply("set_midi_sidechain_source"),
         label: "Set MIDI Sidechain Source",
@@ -2196,7 +2226,7 @@ const ENTRIES: &[Entry] = &[
         permission: Permission::Edit,
         contexts: &[DeviceView],
         keys: &[],
-        description: "Adds a chain to a rack at `index` in the rack's list of chains, where 0 is first. The chain has a new ID from the project, a `name` (left empty, a chain made with a device in it is named after the device's title and an empty one `Chain`), an optional `colour` (0 to 69), `info` text, a `mixer` (leave it out for a new chain's: `volume` 1, `pan` 0, `enabled` true, `solo` false) and its `devices`, each with a new ID, in the order for the kind of rack. An empty chain passes its input straight to its mixer, which makes a dry path. One undo step.",
+        description: "Adds a chain to a rack at `index` in the rack's list of chains, where 0 is first. The chain has a new ID from the project, a `name` (left empty, a chain made with a device in it is named after the device's title and an empty one `Chain`), an optional `colour` (0 to 69), `info` text, a `mixer` (leave it out for a new chain's: `volume` 1, `pan` 0, `enabled` true, `solo` false) and its `devices`, each with a new ID, in the order for the kind of rack. A drum rack's chain also takes `receive`, `play`, `choke` and `sends`, and `is_return` makes it one of the rack's return chains (up to six, after the drum chains, audio effects only; a new one has `audio_to` null, which is the rack's own output); any other rack's chain keeps none of these. An empty chain passes its input straight to its mixer, which makes a dry path. One undo step.",
     },
     Entry {
         id: "chain.remove",
@@ -2278,6 +2308,51 @@ const ENTRIES: &[Entry] = &[
         contexts: &[DeviceView],
         keys: &[],
         description: "Solos or unsolos a chain: while any chain of a rack is soloed, the rack's unsoloed chains add nothing. It leaves every other rack and every track as it is.",
+    },
+    Entry {
+        id: "chain.set_receive",
+        action: Action::Apply("set_chain_receive"),
+        label: "Change Receive",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sets the note a drum rack's chain answers: `receive` is `{\"note\": n}` for one MIDI note from 0 to 127 (Live's octave numbering: C3 is 60, and a pad's chain answers its pad's note, 36 for C1 on the first pad) or `\"all_notes\"`, which passes every note as it came and leaves the chain's Play and Choke unused. A note-on reaches every chain that answers it; a note no chain answers sounds nothing, and a note-off follows its note-on to the chains it reached whatever Receive says by then. The chain moves to its new note's pad at once. Only a drum rack's drum chains have a Receive. One undo step.",
+    },
+    Entry {
+        id: "chain.set_play",
+        action: Action::Apply("set_chain_play"),
+        label: "Change Play",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sets the note a drum rack's chain passes on to its devices, from 0 to 127 (60 is C3, which plays a sampler's sample at its own pitch and is a new chain's), at the velocity it came with. Unused while the chain's Receive is all notes. Only a drum rack's drum chains have a Play. One undo step.",
+    },
+    Entry {
+        id: "chain.set_choke",
+        action: Action::Apply("set_chain_choke"),
+        label: "Change Choke",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Puts a drum rack's chain in a choke group from 1 to 16, or in none with null: a note that reaches a chain in a group silences every other chain in that group by fading their output over 5 ms, and a chain doesn't choke itself. Unused while the chain's Receive is all notes. One undo step.",
+    },
+    Entry {
+        id: "chain.set_send",
+        action: Action::Apply("set_chain_send"),
+        label: "Set Chain Send",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sets a drum rack's drum chain's send to one of the rack's return chains (`to`) as linear gain: 0 is -inf dB and a new send's level, 1 is 0 dB. The send is taken after the chain's Volume, Pan and activator, and glides to a new value over 20 ms. Moving it by hand turns off its automation envelope. One undo step.",
+    },
+    Entry {
+        id: "chain.set_audio_to",
+        action: Action::Apply("set_chain_audio_to"),
+        label: "Change Audio To",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sets where a drum rack's return chain sends its output: `track` is one of the set's return tracks, whose input it then adds to as a send does (that return runs after the drum rack's track), or null for the rack's own output, which is a new return chain's. Deleting the return track sends the chain back to the rack's output. One undo step.",
     },
     Entry {
         id: "device.wrap_in_rack",

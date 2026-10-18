@@ -9,8 +9,8 @@ use std::time::Instant;
 
 use bl_core::midi::{MidiInputEvent, MidiMessage, MidiSource};
 use bl_midi_io::{
-    ComputerKeyboard, Direction, InputSender, KeyboardKey, MidiBackend, MidiPorts, PortState,
-    PortSwitches,
+    ComputerKeyboard, Direction, InputSender, KeyboardKey, MidiBackend, MidiPorts, OutputBus,
+    PortState, PortSwitches,
 };
 use bl_shell_spec::midi_io::{
     KeyboardInfo, KeyboardKeyResult, MidiPortsResult, PortDirection, PortInfo,
@@ -64,10 +64,16 @@ fn info(state: PortState) -> PortInfo {
 
 impl MidiHost {
     /// The ports of `backend` with the switches `prefs` kept, the keyboard
-    /// as they left it, and `sender` as the way to the engine.
+    /// as they left it, `sender` as the way to the engine, and `output` the
+    /// way from it.
     #[must_use]
-    pub fn new(backend: Box<dyn MidiBackend>, sender: InputSender, prefs: &MidiPrefs) -> Self {
-        let mut ports = MidiPorts::new(backend, sender.clone());
+    pub fn new(
+        backend: Box<dyn MidiBackend>,
+        sender: InputSender,
+        output: OutputBus,
+        prefs: &MidiPrefs,
+    ) -> Self {
+        let mut ports = MidiPorts::new(backend, sender.clone()).with_output(output);
         for port in &prefs.ports {
             ports.remember(
                 direction(port.direction),
@@ -120,6 +126,25 @@ impl MidiHost {
     #[must_use]
     pub fn ports(&self) -> Vec<PortInfo> {
         self.ports.ports().into_iter().map(info).collect()
+    }
+
+    /// The names of the output ports the system offers whose Track switch
+    /// is on, in the order the settings list them: what a MIDI track's MIDI
+    /// To and an external instrument's choose from.
+    #[must_use]
+    pub fn output_names(&self) -> Vec<String> {
+        self.ports()
+            .into_iter()
+            .filter(|p| p.direction == PortDirection::Output && p.track)
+            .map(|p| p.name)
+            .collect()
+    }
+
+    /// The bus from the engine to the output ports, for the audio host to
+    /// attach a queue to whenever an engine starts.
+    #[must_use]
+    pub fn output(&self) -> &OutputBus {
+        self.ports.output()
     }
 
     /// The names of the input ports the system offers, in the order the

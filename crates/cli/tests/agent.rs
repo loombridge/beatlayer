@@ -3608,6 +3608,107 @@ fn an_agent_auto_warps_and_fixes_a_downbeat_by_command_id() {
     assert_eq!(defaults["warp_markers"].as_array().unwrap().len(), 2);
 }
 
+// Spec: external-devices R2, R15, R28
+#[test]
+fn an_agent_routes_an_external_instrument_and_reads_it_back() {
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("hardware-agent").unwrap();
+    let tracks = default_tracks(&mut client);
+    let run = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        let result = call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }] }),
+        );
+        result["results"][0].clone()
+    };
+
+    // A MIDI track's MIDI To, with a port and a channel.
+    run(
+        &mut client,
+        "routing.set_midi_output",
+        json!({ "track": tracks[0], "to": { "name": "Synth", "channel": 3 } }),
+    );
+    let track = call(
+        &mut client,
+        "query",
+        json!({ "id": tracks[0], "detail": "full" }),
+    );
+    assert_eq!(
+        track["saved"]["routing"]["midi_output"],
+        json!({ "name": "Synth", "channel": 3 })
+    );
+
+    // The external instrument: added, routed, and its Hardware Latency set
+    // in samples and then in milliseconds, each read back.
+    let hardware = bl_devices::hardware_instrument_type();
+    run(
+        &mut client,
+        "arrangement.select_tracks",
+        json!({ "tracks": [tracks[0]] }),
+    );
+    let added = run(
+        &mut client,
+        "device.add",
+        json!({ "device": { "kind": hardware.kind, "name": hardware.name,
+                            "role": hardware.role } }),
+    );
+    let device = added["result"]["device"].clone();
+    let external = |client: &mut Client<InProcess>| {
+        call(client, "query", json!({ "id": device, "detail": "full" }))["saved"]["external"]
+            .clone()
+    };
+    assert_eq!(external(&mut client), json!({}), "a new device's defaults");
+    run(
+        &mut client,
+        "device.set_external",
+        json!({ "device": device, "midi_to": { "type": "port", "name": "Synth" },
+                "channel": 4, "audio_from": { "type": "pair", "channel": 3 } }),
+    );
+    run(
+        &mut client,
+        "device.set_external",
+        json!({ "device": device, "hardware_latency": { "unit": "samples", "value": 600 } }),
+    );
+    assert_eq!(
+        external(&mut client),
+        json!({ "port": "Synth", "channel": 4, "audio_from": { "type": "pair", "channel": 3 },
+                "hardware_latency": { "unit": "samples", "value": 600 } })
+    );
+    run(
+        &mut client,
+        "device.set_external",
+        json!({ "device": device, "hardware_latency": { "unit": "milliseconds", "value": 12.5 } }),
+    );
+    assert_eq!(
+        external(&mut client)["hardware_latency"],
+        json!({ "unit": "milliseconds", "value": 12.5 })
+    );
+
+    // A bad request changes nothing, and each change is one undo step.
+    let refused = client
+        .call(
+            "run",
+            json!({ "commands": [{ "command": "device.set_external",
+                "args": { "device": device, "channel": 17 } }] }),
+        )
+        .expect("the call reaches the server")
+        .ok();
+    assert!(refused.is_err(), "channel 17 is refused");
+    assert_eq!(external(&mut client)["channel"], json!(4));
+    let history = call(&mut client, "query", json!({ "path": "history" }));
+    assert_eq!(
+        history["undo"]["items"],
+        json!([
+            "hardware-agent: Set External Device",
+            "hardware-agent: Set External Device",
+            "hardware-agent: Set External Device",
+            "hardware-agent: Add Device",
+            "hardware-agent: Set MIDI Output",
+        ])
+    );
+}
+
 // Spec: saturator R1, R13 and R15, overdrive R1, R7 and R9, tube-distortion
 // R1, R10 and R12 (WP-5.23): an agent adds Saturator, Overdrive and Dynamic Tube, reads their
 // parameters, sets some by ID, shows Saturator's expanded part, reads each
@@ -3828,4 +3929,110 @@ fn an_agent_inserts_triband_by_its_type_and_sets_and_reads_its_parameters_by_id(
         json!("Mid Above Ratio")
     );
     assert!(params.iter().all(|p| p["automatable"] == json!(true)));
+}
+
+// Spec: drum-racks R27. An agent builds a kit by command ID: a drum rack
+// with pads, a choke group, a send to a return chain and a drop on a pad,
+// and reads each chain's Receive, Play, Choke and sends and the rack's
+// returns back through the query tool's `device` object.
+#[test]
+fn an_agent_builds_a_kit_and_reads_it_back() {
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("kit").unwrap();
+    let midi = default_tracks(&mut client)[0];
+    let effect = json!({
+        "id": {"$new": "fx"}, "name": "Through", "enabled": true, "params": [],
+        "kind": { "native": { "device_type": "test.through" } },
+    });
+    let built = call(
+        &mut client,
+        "run",
+        json!({ "label": "Build a kit", "commands": [
+            { "command": "device.insert", "args": { "track": midi, "index": 0, "device": {
+                "id": {"$new": "kit"}, "name": "Drums", "enabled": true, "params": [],
+                "role": "instrument", "kind": { "rack": { "kind": "drum" } },
+                "chains": [
+                    { "id": {"$new": "kick"}, "name": "Kick", "devices": [] },
+                    { "id": {"$new": "hat"}, "name": "Hat", "devices": [],
+                      "receive": { "note": 42 } },
+                    { "id": {"$new": "room"}, "name": "Room", "devices": [effect],
+                      "is_return": true },
+                ],
+            } } },
+            { "command": "chain.set_play", "args": { "chain": {"$ref": "kick"}, "play": 62 } },
+            { "command": "chain.set_choke", "args": { "chain": {"$ref": "hat"}, "choke": 1 } },
+            { "command": "chain.set_receive", "args": { "chain": {"$ref": "hat"},
+                                                         "receive": { "note": 46 } } },
+            { "command": "chain.set_send", "args": { "chain": {"$ref": "kick"},
+                                                       "to": {"$ref": "room"}, "level": 0.5 } },
+        ] }),
+    );
+    assert_eq!(built["ran"], 5);
+    let id = |name: &str| built["ids"][name].as_u64().unwrap();
+    let rack = call(
+        &mut client,
+        "query",
+        json!({ "id": id("kit"), "detail": "full" }),
+    );
+    let chains = rack["chains"].as_array().unwrap();
+    assert_eq!(
+        chains.len(),
+        2,
+        "the drum chains; the return chain is `returns`"
+    );
+    assert_eq!(chains[0]["receive"], json!({ "note": 36 }));
+    assert_eq!(chains[0]["play"], 62);
+    assert_eq!(chains[0]["choke"], json!(null));
+    assert_eq!(chains[0]["sends"][0]["to"].as_u64(), Some(id("room")));
+    assert_eq!(chains[0]["sends"][0]["level"], 0.5);
+    assert_eq!(chains[1]["receive"], json!({ "note": 46 }));
+    assert_eq!(chains[1]["choke"], 1);
+    let returns = rack["returns"].as_array().unwrap();
+    assert_eq!(returns.len(), 1);
+    assert_eq!(returns[0]["id"].as_u64(), Some(id("room")));
+    assert_eq!(returns[0]["audio_to"], json!(null));
+    // The pad view and the pads' state read back from the Device View.
+    let run_one = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        let out = call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }] }),
+        );
+        out["results"][0]["result"].clone()
+    };
+    run_one(
+        &mut client,
+        "arrangement.select_tracks",
+        json!({ "tracks": [midi] }),
+    );
+    run_one(
+        &mut client,
+        "pad.select",
+        json!({ "rack": id("kit"), "note": 36 }),
+    );
+    run_one(
+        &mut client,
+        "pad.set_mute",
+        json!({ "rack": id("kit"), "note": 36 }),
+    );
+    let state = run_one(&mut client, "device_view.state", json!({}));
+    let frame = &state["devices"][0]["rack"];
+    assert_eq!(frame["pads"]["first"], 36);
+    assert_eq!(frame["pads"]["selected"], 36);
+    assert_eq!(frame["pads"]["pads"][0]["mute"], "on");
+    assert_eq!(
+        frame["chains"][2]["output"]["audio_to_label"],
+        "Rack Output"
+    );
+    // A pad takes a device by command ID, one undo step.
+    let dropped = run_one(
+        &mut client,
+        "pad.drop",
+        json!({ "rack": id("kit"), "note": 36,
+                "device": { "kind": { "native": { "device_type": "test.through" } },
+                            "name": "Through", "role": "audio_effect" } }),
+    );
+    assert_eq!(dropped["notes"], json!([36]));
+    let history = call(&mut client, "query", json!({ "path": "history" }));
+    assert_eq!(history["undo"]["items"][0], "kit: Drop on Pad");
 }

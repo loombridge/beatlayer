@@ -16,6 +16,7 @@ use crate::EngineConfig;
 use crate::capture::{CAPTURE_RING, CapturedMidi};
 use crate::compiler::{Compiler, Update};
 use crate::display::Displays;
+use crate::drum::ChainHits;
 use crate::gc::{Collector, DROP_PERIOD, DropThread, GcHandle, Owned};
 use crate::message::{Message, ParamEvent, Report, ScheduledCommand, TransportCommand, When};
 use crate::node::{NodeData, NodeKey};
@@ -91,6 +92,11 @@ impl Sender {
         for event in update.params {
             self.push(Message::Param(event));
         }
+    }
+
+    /// Sends the audio device's output latency in frames now (WP-5.34).
+    pub fn output_latency(&mut self, frames: u32) {
+        self.push(Message::OutputLatency(frames));
     }
 
     /// Sends a parameter change.
@@ -217,6 +223,12 @@ enum Request {
     /// The latency a device's node reports now, from a plug-in that
     /// changed its own (WP-2.7).
     Latency(DeviceId, u32),
+    /// The audio interface's output latency and round trip in frames now
+    /// (WP-5.34).
+    RoundTrip {
+        output: u32,
+        round_trip: u32,
+    },
     Transport(TransportCommand, When),
     Schedule(ScheduledCommand),
     Cancel(u64),
@@ -320,6 +332,7 @@ impl std::fmt::Debug for Request {
             Self::Param(_) => "Param",
             Self::Data(..) => "Data",
             Self::Latency(..) => "Latency",
+            Self::RoundTrip { .. } => "RoundTrip",
             Self::Transport(..) => "Transport",
             Self::Schedule(_) => "Schedule",
             Self::Cancel(_) => "Cancel",
@@ -367,6 +380,7 @@ pub struct Engine {
     gc: GcHandle,
     counts: Arc<Counts>,
     displays: Displays,
+    hits: ChainHits,
     // Dropped last, after the compiler thread has let go of everything.
     drop_thread: DropThread,
 }
@@ -412,6 +426,7 @@ impl Engine {
         };
         let mut compiler = Compiler::new(config, registry, gc.clone());
         let displays = compiler.displays();
+        let hits = compiler.chain_hits();
         let counts = Arc::new(Counts::default());
         let (requests, receiver) = mpsc::channel();
         // Spec: audio-clips R17. Clips' sources open on a thread of their
@@ -443,6 +458,7 @@ impl Engine {
             counts,
             drop_thread,
             displays,
+            hits,
         };
         Ok((engine, processor))
     }
@@ -513,6 +529,16 @@ impl Engine {
     /// (WP-2.7; delay-compensation R6).
     pub fn set_device_latency(&self, device: DeviceId, frames: u32) {
         self.request(Request::Latency(device, frames));
+    }
+
+    /// Reports the audio interface's latency now, in frames: `output`, the
+    /// output latency it reports, which MIDI to ports is sent after, and
+    /// `round_trip`, its reported output and input latency plus Driver
+    /// Error Compensation, which the external devices report to delay
+    /// compensation, so a change reaches the running song (the external
+    /// devices spec, R4, R13).
+    pub fn set_latency(&self, output: u32, round_trip: u32) {
+        self.request(Request::RoundTrip { output, round_trip });
     }
 
     /// Wraps a value as node data, to send with [`Engine::send_data`].
@@ -593,6 +619,13 @@ impl Engine {
     #[must_use]
     pub fn displays(&self) -> &Displays {
         &self.displays
+    }
+
+    /// How many notes have reached each drum chain of the running program
+    /// (the drum racks spec, R20).
+    #[must_use]
+    pub fn chain_hits(&self) -> &ChainHits {
+        &self.hits
     }
 
     /// Reports from the audio thread since the last call.
@@ -728,6 +761,16 @@ fn compile_loop(
                 Request::Data(key, data) => {
                     if let Some(sender) = sender.as_mut() {
                         sender.send_data(key, data);
+                    }
+                }
+                Request::RoundTrip { output, round_trip } => {
+                    if let Some(sender) = sender.as_mut() {
+                        sender.output_latency(output);
+                        let update = compiler.round_trip(round_trip);
+                        if update.program.is_some() {
+                            counts.programs.fetch_add(1, Relaxed);
+                        }
+                        sender.send_update(update);
                     }
                 }
                 Request::Latency(device, frames) => {

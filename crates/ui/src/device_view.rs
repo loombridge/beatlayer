@@ -620,6 +620,9 @@ impl DeviceViewUi {
                 } else if let (Some(section), false) = (&frame.midi_sidechain, strip) {
                     crate::sidechain::draw_midi(ui, shell, theme, frame.id, section, rect, events);
                 }
+                if let (Some(section), false) = (&frame.external, strip) {
+                    crate::external::draw(ui, shell, theme, frame.id, section, rect, events);
+                }
             },
         );
     }
@@ -1026,6 +1029,19 @@ impl DeviceViewUi {
                 None => response,
             };
             crate::menus::take_focus_first(ui, &response);
+            // Spec: drum-racks R25 (C-DEVICE-013). Group to Drum Rack sits
+            // beside Group when there are devices to group; Live offers it
+            // with several selected, and the Device View selects one at a
+            // time, so it is offered for a chain of more than one.
+            if item.row == "C-DEVICE-007"
+                && shell.device_view_state().devices.len() > 1
+                && shell.can_invoke(bl_shell::pad_commands::GROUP_TO_DRUM_RACK, &json!({}))
+            {
+                let drum = context_menus::group_to_drum_rack();
+                let response =
+                    crate::menus::item(ui, &drum, shell, &self.keymap, self.platform, events);
+                crate::menus::take_focus_first(ui, &response);
+            }
         }
         // Spec: multisampler R29. The multisampler's own options follow the
         // device's (C-DEVICE-015).

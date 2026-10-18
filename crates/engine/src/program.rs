@@ -9,6 +9,7 @@ use bl_model::{Channel, LaunchMode, ParamId, SceneId, Tap, TrackId};
 
 use crate::midi::{MidiRoutes, TrackMidiInput};
 use crate::mixer::{MeterReading, Route, TrackMixer};
+use crate::modbus::{Bus, Control, ROWS};
 use crate::node::{
     Block, Node, NodeData, NodeEvent, NodeKey, NoteBuffer, NoteEvent, NoteKind, ParamValue,
     TransportInfo,
@@ -146,6 +147,12 @@ pub struct EngineProgram {
     /// The pair of buffers notes pass along a track's chain in, then a pair
     /// for each rack chain (WP-5.1).
     pub(crate) note_buffers: Vec<NoteBuffer>,
+    /// The slots of the modulators, in the order their rows sit on the bus:
+    /// run before any task, each over the block's frames (WP-5.10).
+    pub(crate) modulators: Vec<u32>,
+    /// The modulators' rows: [`ROWS`] per modulator, one value per frame,
+    /// `max_frames` apart.
+    pub(crate) bus: Vec<f32>,
     /// The note-offs of devices that were removed or moved when this program
     /// replaced the last, waiting for the first block.
     pub(crate) releases: Releases,
@@ -302,6 +309,21 @@ pub(crate) struct RackChain {
     /// The delay line that holds the chain's output back to its rack's
     /// latency (R16), or [`NO_DELAY`].
     pub(crate) delay: u32,
+    /// The chain's buffers in `tap_pool` for its signal at the rack's input
+    /// (Pre FX), after its devices (Post FX) and after its mixer (Post
+    /// Mixer), for routes that tap it (R38).
+    pub(crate) taps: [Option<u32>; 3],
+}
+
+impl RackChain {
+    /// The index of a tap in [`RackChain::taps`].
+    pub(crate) fn tap_index(tap: Tap) -> usize {
+        match tap {
+            Tap::PreFx => 0,
+            Tap::PostFx => 1,
+            Tap::PostMixer => 2,
+        }
+    }
 }
 
 /// A node in a program, or the place for one that migrates in.
@@ -317,6 +339,10 @@ pub(crate) struct NodeSlot {
     /// The frames a parameter change aimed at this node is held back, so
     /// automation lines up with the compensated audio (WP-2.11).
     pub(crate) delay: u32,
+    /// Whether the node is a modulator: [`EngineProgram::run`] works its
+    /// output out before the tasks (WP-5.10), and it leaves the chain's
+    /// signal as it is.
+    pub(crate) modulator: bool,
 }
 
 /// A node that moves from the program before into this one.
@@ -348,10 +374,16 @@ pub(crate) struct Input {
     pub(crate) from: u32,
     /// Where in that task the signal is taken.
     pub(crate) tap: Tap,
+    /// The rack chain, in `rack_chains`, whose signal at `tap` it carries
+    /// instead of the task's own, or [`NO_CHAIN`].
+    pub(crate) chain: u32,
     /// The delay line its signal is delayed through to line it up with the
     /// destination's other inputs (WP-2.11), or [`NO_DELAY`].
     pub(crate) delay: u32,
 }
+
+/// An input that carries a task's own signal, not a rack chain's.
+pub(crate) const NO_CHAIN: u32 = u32::MAX;
 
 /// A task's own input taken from the audio interface, Ext. In (WP-2.13):
 /// the device channels it hears, through a route whose Monitor gate opens
@@ -878,7 +910,7 @@ impl EngineProgram {
             stride,
             frames,
         };
-        let mut delivered = 0;
+        let mut delivered = self.run_modulators(frames, from, until, events, scratch, transport);
         for position in 0..self.order.len() {
             let t = self.order[position] as usize;
             let task = self.tasks[t];
@@ -912,6 +944,7 @@ impl EngineProgram {
                         notes: &[],
                         notes_out: Some(&mut self.note_buffers[0]),
                         session,
+                        modulation: Bus::new(&self.bus, stride, frames),
                     });
                 }
             }
@@ -969,6 +1002,7 @@ impl EngineProgram {
                         &self.device_scratch,
                         shape,
                         None,
+                        Bus::EMPTY,
                         scratch,
                     );
                 }
@@ -986,22 +1020,24 @@ impl EngineProgram {
                 };
                 route.set_playing_clip(playing_clip);
                 let source = input.from as usize;
-                let kept = match input.tap {
-                    Tap::PreFx => self.tasks[source].pre_fx,
-                    Tap::PostFx => self.tasks[source].post_fx,
-                    Tap::PostMixer => None,
+                // The task's own Post Mixer is its buffer in `pool`; every
+                // other tap, a rack chain's included, a copy in `tap_pool`.
+                let kept = match (input.chain, input.tap) {
+                    (NO_CHAIN, Tap::PostMixer) => None,
+                    (NO_CHAIN, Tap::PreFx) => self.tasks[source].pre_fx,
+                    (NO_CHAIN, Tap::PostFx) => self.tasks[source].post_fx,
+                    (chain, tap) => {
+                        self.rack_chains[chain as usize].taps[RackChain::tap_index(tap)]
+                    }
+                };
+                let direct = input.chain == NO_CHAIN && input.tap == Tap::PostMixer;
+                let (pool, at) = match kept {
+                    Some(buffer) => (&self.tap_pool, buffer as usize * size),
+                    None if direct => (&self.pool, source * size),
+                    None => continue,
                 };
                 if input.delay != NO_DELAY {
                     // Hold the source back, then add what comes out.
-                    let at = match (input.tap, kept) {
-                        (Tap::PostMixer, _) => source * size,
-                        (_, Some(buffer)) => buffer as usize * size,
-                        (_, None) => continue,
-                    };
-                    let pool = match (input.tap, kept) {
-                        (Tap::PostMixer, _) => &self.pool,
-                        _ => &self.tap_pool,
-                    };
                     delay_into(
                         &mut self.delay_lines[input.delay as usize],
                         &mut self.delay_pool,
@@ -1016,31 +1052,32 @@ impl EngineProgram {
                         &self.delay_scratch[..size],
                         shape,
                         song,
+                        Bus::new(&self.bus, stride, frames),
+                        scratch,
+                    );
+                } else if direct {
+                    let theirs = source * size..(source + 1) * size;
+                    let Ok([mine, theirs]) = self.pool.get_disjoint_mut([own.clone(), theirs])
+                    else {
+                        continue;
+                    };
+                    route.mix(
+                        mine,
+                        theirs,
+                        shape,
+                        song,
+                        Bus::new(&self.bus, stride, frames),
                         scratch,
                     );
                 } else {
-                    match (input.tap, kept) {
-                        (Tap::PostMixer, _) => {
-                            let theirs = source * size..(source + 1) * size;
-                            let Ok([mine, theirs]) =
-                                self.pool.get_disjoint_mut([own.clone(), theirs])
-                            else {
-                                continue;
-                            };
-                            route.mix(mine, theirs, shape, song, scratch);
-                        }
-                        (_, Some(buffer)) => {
-                            let theirs = buffer as usize * size..(buffer as usize + 1) * size;
-                            route.mix(
-                                &mut self.pool[own.clone()],
-                                &self.tap_pool[theirs],
-                                shape,
-                                song,
-                                scratch,
-                            );
-                        }
-                        (_, None) => {}
-                    }
+                    route.mix(
+                        &mut self.pool[own.clone()],
+                        &self.tap_pool[at..at + size],
+                        shape,
+                        song,
+                        Bus::new(&self.bus, stride, frames),
+                        scratch,
+                    );
                 }
             }
 
@@ -1094,10 +1131,55 @@ impl EngineProgram {
                     notes: &[],
                     notes_out: None,
                     session,
+                    modulation: Bus::new(&self.bus, stride, frames),
                 });
             }
         }
         self.releases.pending.clear();
+        delivered
+    }
+
+    /// Works out every modulator's rows over `frames` frames, in the order of
+    /// their rows, before any task runs (WP-5.10; the modulation spec, R20).
+    /// A modulator switched off, or one that doesn't give rows, leaves its
+    /// rows idle. Returns how many changes reached a modulator.
+    fn run_modulators(
+        &mut self,
+        frames: usize,
+        from: u32,
+        until: u32,
+        events: &[Resolved],
+        scratch: &mut Vec<NodeEvent>,
+        transport: TransportInfo,
+    ) -> u64 {
+        let stride = self.max_frames;
+        let mut delivered = 0;
+        for m in 0..self.modulators.len() {
+            let slot = self.modulators[m];
+            delivered += gather(events, slot, from, until, scratch);
+            let (earlier, rest) = self.bus.split_at_mut(m * ROWS * stride);
+            let mut ctl = Control {
+                frames,
+                events: scratch.as_slice(),
+                transport,
+                sample_rate: self.sample_rate,
+                tempo: &self.tempo,
+                earlier: Bus::new(earlier, stride, frames),
+                out: &mut rest[..ROWS * stride],
+                stride,
+            };
+            let NodeSlot { node, bypass, .. } = &mut self.slots[slot as usize];
+            let Some(node) = node.as_mut().and_then(Instance::as_node) else {
+                ctl.idle();
+                continue;
+            };
+            if *bypass {
+                node.flush(ctl.events);
+                ctl.idle();
+            } else if !node.control(&mut ctl) {
+                ctl.idle();
+            }
+        }
         delivered
     }
 
@@ -1162,6 +1244,7 @@ impl EngineProgram {
                     &self.delay_scratch[..size],
                     shape,
                     None,
+                    Bus::EMPTY,
                     scratch,
                 );
             } else {
@@ -1170,6 +1253,7 @@ impl EngineProgram {
                     theirs,
                     shape,
                     None,
+                    Bus::EMPTY,
                     scratch,
                 );
             }
@@ -1177,7 +1261,17 @@ impl EngineProgram {
         delivered
     }
 
-    /// Copies `frames` frames of the task buffer at `own` into the tap
+    /// Fills `frames` frames of the tap buffer `buffer` with silence.
+    fn silence(&mut self, buffer: u32, frames: usize) {
+        let size = self.channels * self.max_frames;
+        let kept = buffer as usize * size;
+        for c in 0..self.channels {
+            let at = kept + c * self.max_frames;
+            self.tap_pool[at..at + frames].fill(0.0);
+        }
+    }
+
+    /// Copies `frames` frames of the pool buffer at `own` into the tap
     /// buffer `buffer`.
     fn keep(&mut self, buffer: u32, own: usize, frames: usize) {
         let size = self.channels * self.max_frames;
@@ -1364,6 +1458,20 @@ impl EngineProgram {
                     }
                 }
             }
+            // A modulator worked out its rows before the tasks ran and
+            // leaves the chain's audio and notes as they are.
+            if self.slots[slot as usize].modulator {
+                let [in_buf, out_buf] = self
+                    .note_buffers
+                    .get_disjoint_mut([pair + note_idx, pair + 1 - note_idx])
+                    .expect("the pair's buffers are two");
+                out_buf.clear();
+                for &note in in_buf.notes() {
+                    out_buf.push(note);
+                }
+                note_idx = 1 - note_idx;
+                continue;
+            }
             pass.delivered += gather(pass.events, slot, pass.from, pass.until, pass.scratch);
             let NodeSlot { node, .. } = &mut self.slots[slot as usize];
             let Some(node) = node.as_mut().and_then(Instance::as_node) else {
@@ -1400,6 +1508,7 @@ impl EngineProgram {
                 notes: in_buf.notes(),
                 notes_out: Some(out_buf),
                 session: pass.session,
+                modulation: Bus::new(&self.bus, stride, frames),
             });
             note_idx = 1 - note_idx;
             // Sidechain Listen: the device's output is what it heard.
@@ -1478,6 +1587,16 @@ impl EngineProgram {
                 let edge = own + c * stride;
                 self.pool[edge..edge + frames].fill(0.0);
             }
+            for i in chains.range() {
+                let chain = self.rack_chains[i];
+                if let Some(kept) = chain.taps[RackChain::tap_index(Tap::PreFx)] {
+                    self.keep(
+                        kept,
+                        (first_chain_buffer + chain.buffer as usize) * size,
+                        frames,
+                    );
+                }
+            }
         }
         let merge_from = self.merge.len();
         for i in chains.range() {
@@ -1486,6 +1605,9 @@ impl EngineProgram {
             let at = at_buffer * size;
             let chain_pair = 2 + 2 * chain.buffer as usize;
             let end = self.run_steps(pass, task, chain.steps, at_buffer, chain_pair, 0);
+            if audio && let Some(kept) = chain.taps[RackChain::tap_index(Tap::PostFx)] {
+                self.keep(kept, at, frames);
+            }
             pass.delivered += gather(
                 pass.events,
                 chain.mixer,
@@ -1513,6 +1635,7 @@ impl EngineProgram {
                         notes: &[],
                         notes_out: None,
                         session: pass.session,
+                        modulation: Bus::new(&self.bus, stride, frames),
                     });
                 } else {
                     mixer.flush(pass.scratch);
@@ -1520,6 +1643,9 @@ impl EngineProgram {
                 muted = mixer.muted();
             }
             if audio {
+                if let Some(kept) = chain.taps[RackChain::tap_index(Tap::PostMixer)] {
+                    self.keep(kept, at, frames);
+                }
                 if chain.delay != NO_DELAY {
                     delay_in_place(
                         &mut self.delay_lines[chain.delay as usize],
@@ -1568,6 +1694,11 @@ impl EngineProgram {
     fn flush_rack(&mut self, pass: &mut Pass<'_>, task: Task, rack: usize) {
         for i in self.racks[rack].chains.range() {
             let chain = self.rack_chains[i];
+            // A rack that is off carries nothing to a route tapping its
+            // chains.
+            for kept in chain.taps.into_iter().flatten() {
+                self.silence(kept, pass.frames);
+            }
             for at in chain.steps.range() {
                 match self.steps[at] {
                     Step::Rack(inner) => self.flush_rack(pass, task, inner as usize),

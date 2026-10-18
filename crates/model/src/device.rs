@@ -11,6 +11,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::ids::{ContentHash, DeviceId, ParamId};
+use crate::modulator::{Mapping, ShapePoint};
 use crate::rack::{Chain, RackKind};
 use crate::track::Input;
 
@@ -95,6 +96,14 @@ pub struct Device {
         deserialize_with = "media_slots"
     )]
     pub media: Vec<Option<ContentHash>>,
+    /// The parameters a modulator maps, one per slot (the modulation spec,
+    /// R19). Left out of the saved set for a device that maps none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mappings: Vec<Mapping>,
+    /// The breakpoints of a Curve Mod's shape (R23); `None` plays the
+    /// default shape. Left out of the saved set while it is the default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shape: Option<Vec<ShapePoint>>,
     /// A rack's chains, in order (WP-5.1). Empty for every device that
     /// isn't a rack, and left out of the saved set then, so sets saved
     /// before racks load unchanged.
@@ -304,6 +313,8 @@ impl Device {
             floating: false,
             plugin: None,
             media: Vec::new(),
+            mappings: Vec::new(),
+            shape: None,
             chains: Vec::new(),
         }
     }

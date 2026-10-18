@@ -3,12 +3,12 @@
 
 use bl_commands::Context::Global;
 use bl_commands::{CommandSpec, Permission, RegisterError, Registry};
-use bl_model::{AutomationTarget, ClipId, TrackId};
+use bl_model::{AutomationTarget, ClipId, DeviceId, TrackId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// `modulation.state`: the parameters a track's clips modulate, with what
-/// each played in the last block and what modulates it.
+/// `modulation.state`: the parameters a track's clips and the modulators act
+/// on, with what each played in the last block and what modulates it.
 pub const STATE: &str = "modulation.state";
 
 /// Every command [`register`] adds.
@@ -43,7 +43,24 @@ pub struct ModulationSource {
     pub contribution: f64,
 }
 
-/// A parameter a track's clips modulate.
+/// One modulator slot acting on a parameter (WP-5.10).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ModulatorSource {
+    /// The modulator device.
+    pub device: DeviceId,
+    /// Its slot, from 0 to 7.
+    pub slot: u8,
+    /// Whether the modulator is in Remote Control, holding the parameter
+    /// rather than modulating it.
+    pub remote_control: bool,
+    /// What it contributes now, as a share of the parameter's travel, when
+    /// it is the only source and the engine's published values tell: `null`
+    /// when several sources act together (the engine publishes their sum) or
+    /// when it holds the parameter.
+    pub contribution: Option<f64>,
+}
+
+/// A parameter a track's clips or modulators act on.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ModulatedParameter {
     /// The track whose parameter it is.
@@ -59,6 +76,12 @@ pub struct ModulatedParameter {
     pub played: f64,
     /// The clip envelopes modulating it.
     pub sources: Vec<ModulationSource>,
+    /// The modulator slots mapping it.
+    #[serde(default)]
+    pub modulators: Vec<ModulatorSource>,
+    /// The modulator in Remote Control that holds it, if one does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub held_by: Option<DeviceId>,
 }
 
 /// What `modulation.state` reports.
@@ -77,15 +100,17 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     registry.register(
         CommandSpec::new(STATE, "Modulation State")
             .description(
-                "Reports the parameters a track's clips modulate (all tracks' when `track` is \
-                 left out): for each, the track and the parameter (a mixer control, a send, or \
-                 a device's parameter), its base (what its automation or its control sets), \
-                 the value it played in the last block, and the clip envelopes modulating it, \
-                 each with its value at the play position and what it contributes, as a share \
-                 of the parameter's travel. A clip envelope modulates by a share: 0 to 1 for a \
+                "Reports the parameters a track's clips and the modulators act on (all tracks' \
+                 when `track` is left out): for each, the track and the parameter (a mixer \
+                 control, a send, or a device's parameter), its base (what its automation, a \
+                 modulator in Remote Control or its control sets), the value it played in the \
+                 last block, the clip envelopes modulating it, each with its value at the play \
+                 position and what it contributes, as a share of the parameter's travel, the \
+                 modulator slots mapping it (`modulators`), and the modulator that holds it in \
+                 Remote Control (`held_by`). A clip envelope modulates by a share: 0 to 1 for a \
                  volume or a send, which brings its level down to that share, and −1 to 1 for \
                  the rest. It reads back `clip.set_envelope_breakpoint` and the other clip \
-                 envelope commands. Changes nothing.",
+                 envelope commands, and `modulator.map`. Changes nothing.",
             )
             .permission(Permission::Read)
             .context(Global)

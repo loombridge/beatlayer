@@ -1,0 +1,82 @@
+# Copies docs/ to the repository's GitHub wiki after every push to main that
+# changes it, and on demand from the Actions tab. `cargo xtask wiki` writes the
+# pages (xtask/src/wiki.rs says how documents become pages); this job commits
+# them to the wiki's own repository if anything changed.
+#
+# docs/ stays the source: a change to a document goes through a pull request
+# here, and the next run overwrites any edit made on the wiki itself.
+#
+# Every third-party action is pinned to a full commit SHA, with its version in
+# a comment. Update the SHA and the comment together.
+
+name: Wiki
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "xtask/src/wiki.rs"
+      - ".github/workflows/wiki.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# One run at a time, in order, so an older run never overwrites a newer one.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  wiki:
+    name: copy docs to the wiki
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # xtask needs no system packages, so the toolchain is all this job installs.
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install --no-self-update
+
+      - name: Restore the dependency cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          cache-bin: false
+
+      - name: Check out the wiki
+        env:
+          TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          auth=$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)
+          echo "::add-mask::$auth"
+          git -c http.extraheader="AUTHORIZATION: basic $auth" \
+            clone --depth 1 "https://github.com/$REPO.wiki.git" "$RUNNER_TEMP/wiki"
+
+      - name: Write the pages
+        run: cargo xtask wiki "$RUNNER_TEMP/wiki"
+
+      - name: Commit and push any change
+        env:
+          TOKEN: ${{ github.token }}
+          SHA: ${{ github.sha }}
+        working-directory: ${{ runner.temp }}/wiki
+        run: |
+          git add --all -- "*.md"
+          if git diff --cached --quiet; then
+            echo "The wiki already matches docs/ at $SHA."
+            exit 0
+          fi
+          git -c user.name=Loombridge -c user.email=code@loombridge.io \
+            commit --quiet --message "Copy docs/ at ${SHA:0:7}"
+          auth=$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)
+          echo "::add-mask::$auth"
+          git -c http.extraheader="AUTHORIZATION: basic $auth" push origin HEAD
+          git show --stat --format='%s' HEAD | tail -1

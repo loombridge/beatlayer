@@ -20,7 +20,7 @@ use crate::error::ModelError;
 use crate::ids::{ChainId, ClipId, ContentHash, DeviceId, ParamId, SceneId, TrackId};
 use crate::launch::{ClipLaunch, LaunchMode, LaunchQuantization};
 use crate::metronome::{CountIn, MetronomeRhythm, MetronomeSound};
-use crate::rack::{CHAIN_COLOURS, Chain};
+use crate::rack::{CHAIN_COLOURS, Chain, RackKind};
 use crate::scene::{SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
 use crate::shared::Shared;
 use crate::track::{
@@ -1681,6 +1681,7 @@ impl Document {
                 input,
                 channel,
             } => {
+                self.check_instrument_source(*track, input)?;
                 let input = input.clone();
                 let channel = *channel;
                 self.edit_routing(*track, |routing| {
@@ -1857,7 +1858,7 @@ impl Document {
                 let owner = self.device_owner(*device)?;
                 let removed = self.take_device(*device)?;
                 self.index.remove_device(&removed);
-                forget(self.track_mut(owner)?, &Gone::device(&removed));
+                self.forget_in(owner, &Gone::device(&removed))?;
                 self.prune_mappings();
                 Ok(())
             }
@@ -2041,7 +2042,7 @@ impl Document {
                     .remove_chain(*chain)
                     .ok_or(ModelError::NoSuchChain(*chain))?;
                 self.index.remove_chain(&removed);
-                forget(self.track_mut(owner)?, &Gone::chain(&removed));
+                self.forget_in(owner, &Gone::chain(&removed))?;
                 self.prune_mappings();
                 Ok(())
             }
@@ -2968,7 +2969,7 @@ impl Document {
     ) -> Result<(), ModelError> {
         if from != to {
             self.index.add_device(moved, to);
-            forget(self.track_mut(from)?, &Gone::device(moved));
+            self.forget_in(from, &Gone::device(moved))?;
         }
         Ok(())
     }
@@ -3084,7 +3085,7 @@ impl Document {
         for (offset, device) in inside.into_iter().enumerate() {
             self.put_device(place.track, place.chain, place.index + offset, device)?;
         }
-        forget(self.track_mut(place.track)?, &gone);
+        self.forget_in(place.track, &gone)?;
         check_chain(self.track_ref(place.track)?)
     }
 
@@ -3142,9 +3143,17 @@ impl Document {
         let chains = &mut self.device_mut(rack)?.chains;
         check_index(index, chains.len())?;
         chains.insert(index, moved.clone());
+        // Only instrument and audio effect racks' chains are tapped (the
+        // racks spec, R38).
+        if !matches!(
+            self.device_ref(rack)?.rack_kind(),
+            Some(RackKind::Instrument | RackKind::AudioEffect)
+        ) {
+            self.forget_chain_taps(&BTreeSet::from([id]));
+        }
         if from != to {
             self.index.add_chain(&moved, to);
-            forget(self.track_mut(from)?, &Gone::chain(&moved));
+            self.forget_in(from, &Gone::chain(&moved))?;
         }
         check_chain(self.track_ref(to)?)
     }
@@ -3536,6 +3545,14 @@ impl Document {
             .get_mut(&scene)
             .map(Shared::make_mut)
             .ok_or(ModelError::NoSuchClip(id))
+    }
+
+    /// Forgets what a track held for the devices and chains that left it,
+    /// and the inputs that tapped those chains.
+    fn forget_in(&mut self, track: TrackId, gone: &Gone) -> Result<(), ModelError> {
+        forget(self.track_mut(track)?, gone);
+        self.forget_chain_taps(&gone.chains);
+        Ok(())
     }
 
     fn device_owner(&self, id: DeviceId) -> Result<TrackId, ModelError> {

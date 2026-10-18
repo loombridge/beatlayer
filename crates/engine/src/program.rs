@@ -315,6 +315,21 @@ pub(crate) struct RackChain {
     /// The delay line that holds the chain's output back to its rack's
     /// latency (R16), or [`NO_DELAY`].
     pub(crate) delay: u32,
+    /// The chain's buffers in `tap_pool` for its signal at the rack's input
+    /// (Pre FX), after its devices (Post FX) and after its mixer (Post
+    /// Mixer), for routes that tap it (R38).
+    pub(crate) taps: [Option<u32>; 3],
+}
+
+impl RackChain {
+    /// The index of a tap in [`RackChain::taps`].
+    pub(crate) fn tap_index(tap: Tap) -> usize {
+        match tap {
+            Tap::PreFx => 0,
+            Tap::PostFx => 1,
+            Tap::PostMixer => 2,
+        }
+    }
 }
 
 /// A node in a program, or the place for one that migrates in.
@@ -365,10 +380,16 @@ pub(crate) struct Input {
     pub(crate) from: u32,
     /// Where in that task the signal is taken.
     pub(crate) tap: Tap,
+    /// The rack chain, in `rack_chains`, whose signal at `tap` it carries
+    /// instead of the task's own, or [`NO_CHAIN`].
+    pub(crate) chain: u32,
     /// The delay line its signal is delayed through to line it up with the
     /// destination's other inputs (WP-2.11), or [`NO_DELAY`].
     pub(crate) delay: u32,
 }
+
+/// An input that carries a task's own signal, not a rack chain's.
+pub(crate) const NO_CHAIN: u32 = u32::MAX;
 
 /// A task's own input taken from the audio interface, Ext. In (WP-2.13):
 /// the device channels it hears, through a route whose Monitor gate opens
@@ -1039,17 +1060,21 @@ impl EngineProgram {
             };
             route.set_playing_clip(playing_clip);
             let source = input.from as usize;
-            let kept = match input.tap {
-                Tap::PreFx => self.tasks[source].pre_fx,
-                Tap::PostFx => self.tasks[source].post_fx,
-                Tap::PostMixer => None,
+            // The task's own Post Mixer is its buffer in `pool`; every other
+            // tap, a rack chain's included, a copy in `tap_pool`.
+            let kept = match (input.chain, input.tap) {
+                (NO_CHAIN, Tap::PostMixer) => None,
+                (NO_CHAIN, Tap::PreFx) => self.tasks[source].pre_fx,
+                (NO_CHAIN, Tap::PostFx) => self.tasks[source].post_fx,
+                (chain, tap) => self.rack_chains[chain as usize].taps[RackChain::tap_index(tap)],
             };
-            let theirs = match (input.tap, kept) {
+            let theirs = match kept {
+                Some(buffer) => turn.kept(buffer),
                 // A task can't feed itself its own mixer's output.
-                (Tap::PostMixer, _) if source == t => continue,
-                (Tap::PostMixer, _) => turn.finished(source),
-                (_, Some(buffer)) => turn.kept(buffer),
-                (_, None) => continue,
+                None if input.chain == NO_CHAIN && input.tap == Tap::PostMixer && source != t => {
+                    turn.finished(source)
+                }
+                None => continue,
             };
             if input.delay != NO_DELAY {
                 // Hold the source back, then add what comes out.
@@ -1221,7 +1246,16 @@ impl EngineProgram {
         delivered
     }
 
-    /// Copies `frames` frames of task `own`'s buffer into the tap buffer
+    /// Fills `frames` frames of the tap buffer `buffer` with silence.
+    fn silence(&self, turn: &Turn<'_>, buffer: u32, frames: usize) {
+        let to = turn.keep(buffer);
+        for c in 0..self.channels {
+            let at = c * self.max_frames;
+            to[at..at + frames].fill(0.0);
+        }
+    }
+
+    /// Copies `frames` frames of the pool buffer `own` into the tap buffer
     /// `buffer`.
     fn keep(&self, turn: &Turn<'_>, buffer: u32, own: usize, frames: usize) {
         let from = turn.buffer(own);
@@ -1681,6 +1715,17 @@ impl EngineProgram {
                 let edge = c * stride;
                 turn.buffer(buffer)[edge..edge + frames].fill(0.0);
             }
+            for i in chains.range() {
+                let chain = self.rack_chains[i];
+                if let Some(kept) = chain.taps[RackChain::tap_index(Tap::PreFx)] {
+                    self.keep(
+                        &turn,
+                        kept,
+                        self.tasks.len() + chain.buffer as usize,
+                        frames,
+                    );
+                }
+            }
         }
         let count = chains.range().len();
         match pass.wake {
@@ -1755,6 +1800,9 @@ impl EngineProgram {
         let at_buffer = self.tasks.len() + chain.buffer as usize;
         let chain_pair = 2 * self.tasks.len() + 2 * chain.buffer as usize;
         let end = self.run_steps(pass, task, chain.steps, at_buffer, chain_pair, 0);
+        if audio && let Some(kept) = chain.taps[RackChain::tap_index(Tap::PostFx)] {
+            self.keep(&turn, kept, at_buffer, frames);
+        }
         pass.delivered += gather(
             block.events,
             chain.mixer,
@@ -1784,6 +1832,9 @@ impl EngineProgram {
                 mixer.flush(pass.scratch);
             }
             muted = mixer.muted();
+        }
+        if audio && let Some(kept) = chain.taps[RackChain::tap_index(Tap::PostMixer)] {
+            self.keep(&turn, kept, at_buffer, frames);
         }
         if audio && chain.delay != NO_DELAY {
             let (line, ring) = turn.delay(chain.delay);
@@ -1845,6 +1896,11 @@ impl EngineProgram {
         let block = pass.block;
         for i in self.racks[rack].chains.range() {
             let chain = self.rack_chains[i];
+            // A rack that is off carries nothing to a route tapping its
+            // chains.
+            for kept in chain.taps.into_iter().flatten() {
+                self.silence(&turn, kept, block.frames);
+            }
             for at in chain.steps.range() {
                 match self.steps[at] {
                     Step::Rack(inner) => self.flush_rack(pass, task, inner as usize),

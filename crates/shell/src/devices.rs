@@ -601,7 +601,7 @@ impl DeviceView {
             panel: self.panel(d),
             sidechain: d.sidechain.as_ref().map(|sidechain| {
                 let (source, tap) = match &sidechain.input {
-                    bl_model::Input::Track { track, tap } => {
+                    bl_model::Input::Track { track, tap, .. } => {
                         (crate::routing::track_label(doc, *track), Some(*tap))
                     }
                     _ => ("No Input".to_owned(), None),

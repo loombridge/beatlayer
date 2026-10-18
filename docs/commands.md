@@ -12179,7 +12179,7 @@ The index of the places' files, built in the background.
 
 ### `Input`
 
-Where a track takes its input from. Audio tracks: `external` (Ext. In, the audio interface's inputs, with its `channel`; a new audio track's), `resampling` (the Main output), `track` (another audio track, a return, or Main, tapped at `tap`), or `none` (No Input). MIDI tracks: `all_ins` (every MIDI input; a new MIDI track's), `computer_keyboard`, `port` (one MIDI input, by its name as the MIDI settings list it), `track` (another MIDI track), or `none`.
+Where a track takes its input from. Audio tracks: `external` (Ext. In, the audio interface's inputs, with its `channel`; a new audio track's), `resampling` (the Main output), `track` (another audio track, a MIDI track with an instrument, a return, or Main, tapped at `tap`; with a `chain` of an instrument or audio effect rack on that track, that chain's signal at `tap`), or `none` (No Input). MIDI tracks: `all_ins` (every MIDI input; a new MIDI track's), `computer_keyboard`, `port` (one MIDI input, by its name as the MIDI settings list it), `track` (another MIDI track), or `none`.
 
 One of:
 
@@ -12189,13 +12189,13 @@ One of:
 - an object with `type` = `"computer_keyboard"`: The computer MIDI keyboard. MIDI tracks only.
 - an object with `type` = `"port"`, `name` (string): One MIDI input port, by the name the MIDI system gives it. MIDI tracks only. The track keeps the name while the port is away and receives again when a port of that name returns.
 - an object with `type` = `"resampling"`: Resampling: the Main output. Audio tracks only.
-- an object with `type` = `"track"`, `track` ([`TrackId`](#trackid)), `tap` ([`Tap`](#tap)): Another track's signal.
+- an object with `type` = `"track"`, `track` ([`TrackId`](#trackid)), `chain` ([`ChainId`](#chainid) or null), `tap` ([`Tap`](#tap)): Another track's signal.
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "Where a track takes its input from. Audio tracks: `external` (Ext. In, the audio interface's inputs, with its `channel`; a new audio track's), `resampling` (the Main output), `track` (another audio track, a return, or Main, tapped at `tap`), or `none` (No Input). MIDI tracks: `all_ins` (every MIDI input; a new MIDI track's), `computer_keyboard`, `port` (one MIDI input, by its name as the MIDI settings list it), `track` (another MIDI track), or `none`.",
+  "description": "Where a track takes its input from. Audio tracks: `external` (Ext. In, the audio interface's inputs, with its `channel`; a new audio track's), `resampling` (the Main output), `track` (another audio track, a MIDI track with an instrument, a return, or Main, tapped at `tap`; with a `chain` of an instrument or audio effect rack on that track, that chain's signal at `tap`), or `none` (No Input). MIDI tracks: `all_ins` (every MIDI input; a new MIDI track's), `computer_keyboard`, `port` (one MIDI input, by its name as the MIDI settings list it), `track` (another MIDI track), or `none`.",
   "oneOf": [
     {
       "description": "No Input.",
@@ -12287,6 +12287,17 @@ One of:
     {
       "description": "Another track's signal.",
       "properties": {
+        "chain": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChainId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "A chain of an instrument or audio effect rack on that track, at any depth, whose signal is taken at `tap` instead of the track's own (the racks spec, R38 to R41)."
+        },
         "tap": {
           "$ref": "#/$defs/Tap",
           "description": "Where in that track the signal is taken: Post Mixer if it's left out."

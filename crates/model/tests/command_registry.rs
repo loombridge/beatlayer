@@ -52,7 +52,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        148,
+        151,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -65,9 +65,9 @@ fn every_document_command_is_registered() {
          settings, WP-3.5 two for a scene's tempo and signature, WP-3.3 \
          set_clip_launch_mode, WP-4.1 seven for the warp map, WP-4.3 five for transients and ranged warp markers, WP-5.1 fifteen for racks and \
          their chains, WP-5.12 the two Compare commands, WP-5.10 map_modulator, \
-         unmap_modulator and set_shape, WP-5.13 eleven for a multisampler's layers, \
-         WP-3.10 the two for follow actions, and WP-4.2 four for the warp mode and the RAM and \
-         HiQ switches"
+         unmap_modulator and set_shape, WP-5.13 eleven for a multisampler's layers, WP-5.15 \
+         three for a sample's edits, WP-3.10 the two for follow actions, and WP-4.2 four for the \
+         warp mode and the RAM and HiQ switches"
     );
 
     for op in &ops {
@@ -977,6 +977,60 @@ fn every_command_runs_by_id() {
     agent.run(
         "device.distribute_layers",
         json!({ "device": eq, "layers": [], "how": "equally", "kind": "key" }),
+    );
+    // WP-5.15: a layer's edits, and a processed copy that holds them.
+    agent.run(
+        "device.add_sample_edit",
+        json!({ "device": eq, "layer": 3, "edit": { "kind": "cut", "range": { "from": 0, "to": 6000 } } }),
+    );
+    assert_eq!(
+        agent
+            .editor
+            .document()
+            .device(eq)
+            .unwrap()
+            .layers
+            .get(bl_model::LayerId(3))
+            .unwrap()
+            .length,
+        90_000
+    );
+    agent.run(
+        "device.add_sample_edit",
+        json!({ "device": eq, "layer": null, "edit": { "kind": "reverse" } }),
+    );
+    assert_eq!(
+        agent
+            .editor
+            .document()
+            .device(eq)
+            .unwrap()
+            .sample_edits
+            .len(),
+        1
+    );
+    agent.run(
+        "device.clear_sample_edits",
+        json!({ "device": eq, "layer": null, "length": 0 }),
+    );
+    assert!(
+        agent
+            .editor
+            .document()
+            .device(eq)
+            .unwrap()
+            .sample_edits
+            .is_empty()
+    );
+    agent.run(
+        "device.set_processed_layer_sample",
+        json!({ "device": eq, "layer": 3,
+            "media": "0707070707070707070707070707070707070707070707070707070707070707",
+            "length": 90000, "crop": null }),
+    );
+    agent.run(
+        "device.clear_sample_edits",
+        json!({ "device": eq, "layer": 3, "length": 96000 }),
     );
     agent.run(
         "device.delete_layers",
@@ -2266,6 +2320,38 @@ fn schemas_match_what_commands_serialise() {
                 layers: vec![],
                 how: bl_model::Distribution::AroundRootKey,
                 kind: bl_model::ZoneKind::Key,
+            },
+        ),
+        (
+            "device.add_sample_edit",
+            Command::AddSampleEdit {
+                device,
+                layer: None,
+                edit: bl_model::SampleEdit {
+                    kind: bl_model::SampleEditKind::FadeOut,
+                    range: Some(bl_model::SampleRange { from: 10, to: 20 }),
+                },
+            },
+        ),
+        (
+            "device.clear_sample_edits",
+            Command::ClearSampleEdits {
+                device,
+                layer: Some(bl_model::LayerId(1)),
+                length: 1000,
+            },
+        ),
+        (
+            "device.set_processed_layer_sample",
+            Command::SetProcessedLayerSample {
+                device,
+                layer: bl_model::LayerId(1),
+                media: ContentHash([6u8; 32]),
+                length: 900,
+                crop: Some(bl_model::SampleRange {
+                    from: 100,
+                    to: 1000,
+                }),
             },
         ),
         (

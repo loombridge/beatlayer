@@ -2986,6 +2986,190 @@ fn an_agent_sets_the_warp_mode_and_its_switches_and_reads_them_back() {
     );
 }
 
+// Spec: multisampler R63. An agent edits the samples of Snapshot and of a
+// multisampler by command ID, reverts and converts them, and reads each
+// result back through the query tool's `device` object.
+#[test]
+fn an_agent_edits_a_sample_and_reads_the_edits_back() {
+    let dir = TempDir::new("sample-edits");
+    let file = dir.0.join("Stem.wav");
+    write_stem(&file, 220.0);
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    // Commands that need the shell run one to a call.
+    let one = |client: &mut Client<InProcess>, command: &str, args: Value| -> Value {
+        call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }] }),
+        )["results"][0]["result"]
+            .clone()
+    };
+    let refused = |client: &mut Client<InProcess>, command: &str, args: Value| -> bool {
+        client
+            .call(
+                "run",
+                json!({ "commands": [{ "command": command, "args": args }] }),
+            )
+            .unwrap()
+            .ok()
+            .is_err()
+    };
+    let add = |client: &mut Client<InProcess>, name: &str, device_type: &str| {
+        one(
+            client,
+            "track.create",
+            json!({ "id": {"$new": name}, "kind": "midi", "name": name, "index": 0 }),
+        );
+        let track = {
+            let document = client.transport().shell.editor().document();
+            document.tracks().find(|t| t.name() == name).unwrap().id()
+        };
+        one(
+            client,
+            "arrangement.select_tracks",
+            json!({ "tracks": [track] }),
+        );
+        one(
+            client,
+            "device.add",
+            json!({ "device": {
+                "kind": { "native": { "device_type": device_type } },
+                "name": name, "role": "instrument" } }),
+        );
+        let document = client.transport().shell.editor().document();
+        document.track(track).unwrap().devices().next().unwrap().id
+    };
+    let snapshot = add(&mut client, "Snap", "beatlayer.snapshot");
+    let mosaic = add(&mut client, "Mosaic", "beatlayer.mosaic");
+    one(
+        &mut client,
+        "device.load_sample",
+        json!({ "device": snapshot, "path": file.to_string_lossy() }),
+    );
+    one(
+        &mut client,
+        "device.add_layers",
+        json!({ "device": mosaic, "paths": [file.to_string_lossy()] }),
+    );
+    let device = |client: &mut Client<InProcess>, id: bl_model::DeviceId| -> Value {
+        call(
+            client,
+            "query",
+            json!({ "path": format!("device {}", id.0.get()), "detail": "full" }),
+        )
+    };
+    let layer = client
+        .transport()
+        .shell
+        .editor()
+        .document()
+        .device(mosaic)
+        .unwrap()
+        .layers
+        .list[0]
+        .id;
+
+    // Edits by ID: Snapshot's list reads back under `saved.sample_edits`, the
+    // layer's under its own `edits`.
+    let cut = one(
+        &mut client,
+        "device.edit_sample",
+        json!({ "device": snapshot, "kind": "cut", "range": { "from": 0, "to": 12_000 } }),
+    );
+    assert_eq!(cut["length"], 36_000);
+    one(
+        &mut client,
+        "device.edit_sample",
+        json!({ "device": snapshot, "kind": "fade_out" }),
+    );
+    let trim = one(
+        &mut client,
+        "device.edit_sample",
+        json!({ "device": mosaic, "layer": layer, "kind": "trim",
+                "range": { "from": 6_000, "to": 30_000 } }),
+    );
+    assert_eq!(trim["length"], 24_000);
+    let read = device(&mut client, snapshot);
+    let edits = read["saved"]["sample_edits"]["items"].as_array().unwrap();
+    assert_eq!(edits.len(), 2);
+    assert_eq!(edits[0]["kind"], "cut");
+    let read = device(&mut client, mosaic);
+    let item = &read["layers"]["list"]["items"][0];
+    assert_eq!(item["edits"][0]["kind"], "trim");
+    assert_eq!(item["length"], 24_000);
+    assert_eq!(item["end"], 24_000, "the layer's markers followed the trim");
+
+    // A selection past the sample is refused and changes nothing; so does
+    // Crop in a set that has never been saved.
+    assert!(refused(
+        &mut client,
+        "device.edit_sample",
+        json!({ "device": snapshot, "kind": "trim", "range": { "from": 0, "to": 90_000 } }),
+    ));
+    assert!(refused(
+        &mut client,
+        "device.crop_sample",
+        json!({ "device": snapshot })
+    ));
+    assert_eq!(
+        device(&mut client, snapshot)["saved"]["sample_edits"]["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+
+    // Auditioning is a read and changes nothing.
+    let before = client.transport().shell.editor().document().clone();
+    one(
+        &mut client,
+        "device.audition_sample",
+        json!({ "device": snapshot, "from": 0.5 }),
+    );
+    one(
+        &mut client,
+        "device.audition_sample",
+        json!({ "device": snapshot, "down": false }),
+    );
+    assert_eq!(*client.transport().shell.editor().document(), before);
+
+    // Revert clears both lists; the conversion keeps the sample.
+    one(
+        &mut client,
+        "device.edit_sample",
+        json!({ "device": snapshot, "revert": true }),
+    );
+    one(
+        &mut client,
+        "device.edit_sample",
+        json!({ "device": mosaic, "layer": layer, "revert": true }),
+    );
+    assert!(
+        device(&mut client, snapshot)["saved"]
+            .get("sample_edits")
+            .is_none()
+    );
+    assert_eq!(
+        device(&mut client, mosaic)["layers"]["list"]["items"][0]["length"],
+        48_000
+    );
+    let converted = one(
+        &mut client,
+        "device.convert",
+        json!({ "device": snapshot, "to": "multisampler" }),
+    );
+    let new: u64 = converted["device"].as_u64().unwrap();
+    let read = call(
+        &mut client,
+        "query",
+        json!({ "path": format!("device {new}") }),
+    );
+    assert_eq!(
+        read["layers"]["count"], 1,
+        "Snapshot is a multisampler of one layer now"
+    );
+}
+
 // Spec: saturator R1, R13 and R15, overdrive R1, R7 and R9, tube-distortion
 // R1, R10 and R12 (WP-5.23): an agent adds Singe, Grit and Valve, reads their
 // parameters, sets some by ID, shows Singe's expanded part, reads each

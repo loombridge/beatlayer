@@ -1341,6 +1341,72 @@ const ENTRIES: &[Entry] = &[
             leave 1 to 1,000 BPM.",
     },
     Entry {
+        id: "clip.set_1_1_1_here",
+        action: Action::Apply("set_one_one_one_here"),
+        label: "Set 1.1.1 Here",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Makes a point of a warped audio clip's file its 1.1.1, the downbeat of its \
+            first bar: at the selected warp marker (`marker`, its place in the map, the first \
+            being 0) or at the Sample Editor's insert marker (`beat`, ticks from the clip's \
+            current 1.1.1, or `time`, seconds in the file); give one of the three. A warp \
+            marker is made there if there was none. Every marker, the End marker and the loop \
+            brace then move by the same ticks, so no segment changes tempo and each keeps its \
+            place in the audio, and the Start marker goes to 1.1.1. Refused for a clip that \
+            isn't warped, or if the End marker or the loop brace would end up before 1.1.1. \
+            One undo step.",
+    },
+    Entry {
+        id: "clip.warp_from_here",
+        action: Action::Apply("warp_from_here"),
+        label: "Warp From Here",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Warps a warped audio clip from a point on: at the selected warp marker \
+            (`marker`) or at a new one at the insert marker (`beat` or `time`, as for \
+            `clip.set_1_1_1_here`). The markers before it stay and those after it are replaced. \
+            `method` is `auto`, a marker on the first beat of every bar after the point from \
+            the tempo found there; `start_at`, the same starting from the tempo `bpm`, the set's \
+            tempo at the point unless given, which settles whether a beat is counted at double \
+            or half the speed; `straight`, which deletes the markers after the point and sets \
+            the clip's tempo to the tempo found after it; or `bpm`, which deletes them and sets \
+            the clip's tempo to `bpm`, the set's tempo at the point unless given. The file's \
+            tempo and beats come from its analysis (`analysis` gives them), so every method but \
+            `bpm` is refused while it is not ready. Refused for a clip that isn't warped. One \
+            undo step.",
+    },
+    Entry {
+        id: "clip.warp_as_loop",
+        action: Action::Apply("warp_as_loop"),
+        label: "Warp as Loop",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Warps a warped audio clip's whole file as a loop of 1, 2, 4, 8, 16 or 32 \
+            bars of 4/4, the number whose tempo is nearest the set's tempo at the clip's start: \
+            a warp marker at the start of the file on 1.1.1 and one at its end on the last \
+            bar's end, the Start and End markers and the loop brace on the whole file, the loop \
+            on, and that tempo as the clip's. The clip keeps its place and length in the \
+            arrangement. Refused for a clip that isn't warped, or while the file's analysis is \
+            not ready. One undo step.",
+    },
+    Entry {
+        id: "clip.warp_selection_as_loop",
+        action: Action::Apply("warp_selection_as_loop"),
+        label: "Warp Selection as Loop",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Warps the part of a warped audio clip's file from `from` to `to` \
+            (seconds in the file) as a loop of 1, 2, 4, 8, 16 or 32 bars of 4/4, the number \
+            whose tempo is nearest the set's tempo at the clip's start: a warp marker at each \
+            end of the part, the Start and End markers and the loop brace on it, the loop on. \
+            The clip keeps its place and length in the arrangement. Refused for a clip that \
+            isn't warped. One undo step.",
+    },
+    Entry {
         id: "clip.set_warp_mode",
         action: Action::Apply("set_clip_warp_mode"),
         label: "Set Warp Mode",
@@ -1837,14 +1903,18 @@ const ENTRIES: &[Entry] = &[
         permission: Permission::Edit,
         contexts: &[DeviceView],
         keys: &[],
-        description: "Maps one of a modulator's eight slots (`slot`, 0 to 7) to a parameter, as \
-            the slot's Map button and a click on the parameter's control do. `target` is a mixer \
-            control (`volume`, `pan` or `mute`) or a send of any track, or a parameter of any \
-            device on any track, but not a parameter of the modulator itself. The slot's earlier \
-            mapping is replaced; one modulator doesn't map one parameter twice. A modulator in \
-            Remote Control can't map a parameter another modulator in Remote Control holds. The \
-            mapping is saved with the set, goes with its target when that is deleted, and shows \
-            in the `mappings` field of the query tool's `device`. One undo step (Map Modulator).",
+        description: "Maps one of a modulator's slots (`slot`, 0 to 7; the Expression Control's are 0 to 4) \
+            to a parameter, as the slot's Map button and a click on the parameter's control do. \
+            `target` is a mixer control (`volume`, `pan` or `mute`) or a send of any track, or a \
+            parameter of any device on any track, but not a parameter of the modulator itself. \
+            The slot's earlier mapping is replaced; one modulator doesn't map one parameter \
+            twice. A modulator in Remote Control can't map a parameter another modulator in \
+            Remote Control holds. A modulator driven by audio, notes or MIDI (the Envelope Follower, \
+            Envelope MIDI, Shaper MIDI and Expression Control) doesn't map another modulator's parameters, nor \
+            one on a track that feeds its own track, which would make the two tracks wait on each \
+            other. The mapping is saved with the set, goes with its target when that is deleted, \
+            and shows in the `mappings` field of the query tool's `device`. One undo step (Map \
+            Modulator).",
     },
     Entry {
         id: "modulator.unmap",
@@ -1853,7 +1923,8 @@ const ENTRIES: &[Entry] = &[
         permission: Permission::Edit,
         contexts: &[DeviceView],
         keys: &[],
-        description: "Removes the mapping of a modulator's slot (`slot`, 0 to 7), as its Unmap \
+        description: "Removes the mapping of a modulator's slot (`slot`, 0 to 7; the Expression Control's \
+            are 0 to 4), as its Unmap \
             button does: the parameter plays its own value again from the next frame. A slot \
             with no mapping stays as it is. One undo step (Unmap Modulator).",
     },
@@ -1864,12 +1935,13 @@ const ENTRIES: &[Entry] = &[
         permission: Permission::Edit,
         contexts: &[DeviceView],
         keys: &[],
-        description: "Replaces the breakpoint shape of a Curve Mod, as every edit of its display \
-            does (adding, moving, bending or deleting a breakpoint, Clear and the six presets). \
-            `points` lists up to 64 breakpoints in order along the cycle, each with `x` (its \
-            place, 0 to 1), `y` (the output there, 0 to 1) and `bend` (of the segment starting \
-            there, from -1 to 1, 0 straight). An empty list outputs 0. One undo step (Edit \
-            Shape).",
+        description: "Replaces the breakpoint shape of a Shaper or a Shaper MIDI, as every edit \
+            of its display does (adding, moving, bending or deleting a breakpoint, making one \
+            the sustain breakpoint, Clear and the six presets). `points` lists up to 64 \
+            breakpoints in order along the cycle, each with `x` (its place, 0 to 1), `y` (the \
+            output there, 0 to 1), `bend` (of the segment starting there, from -1 to 1, 0 \
+            straight) and `sustain` (true on the Shaper MIDI's sustain breakpoint, at most one in \
+            a shape). An empty list outputs 0. One undo step (Edit Shape).",
     },
     Entry {
         id: "device.compare_switch",
@@ -2059,6 +2131,20 @@ const ENTRIES: &[Entry] = &[
             plays as before; the device only listens to it. The detector hears it only while \
             External is on (`device.set_sidechain_enabled`). To make a kick duck a bass, set \
             the bass compressor's source to the kick's track and switch External on.",
+    },
+    Entry {
+        id: "device.set_midi_sidechain_source",
+        action: Action::Apply("set_midi_sidechain_source"),
+        label: "Set MIDI Sidechain Source",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sets the MIDI track a device's MIDI sidechain listens to, as the MIDI \
+            source chooser in its sidechain parameters does: `track` is a MIDI track (the \
+            device's own track too), or left out for No Input, a new device's. The device \
+            hears the notes and channel messages that track's clips and input play, before \
+            its own devices change them; the track still plays as before. Only devices that \
+            declare a MIDI sidechain input have one. Deleting the track leaves No Input.",
     },
     Entry {
         id: "device.set_sidechain_enabled",

@@ -1,4 +1,4 @@
-//! Contour, the native parametric EQ (WP-2.18a, part 1; the eq spec): each
+//! EQ Eight, the native parametric EQ (WP-2.18a, part 1; the eq spec): each
 //! filter type against its analytic curve, the Stereo, L/R, and M/S modes,
 //! Adaptive Q, the oversampled path, and the analyser.
 
@@ -34,13 +34,13 @@ fn registry() -> Registry {
     registry
 }
 
-/// A Contour of `params`, up to `max_frames` at a time.
+/// An EQ Eight of `params`, up to `max_frames` at a time.
 fn contour(params: &[(ParamId, f64)], max_frames: usize) -> Box<dyn Node> {
     let device_type: DeviceType = eq_type();
     node(&registry(), &device(&device_type, params), max_frames)
 }
 
-/// A Contour whose analyser the test can read.
+/// An EQ Eight whose analyser the test can read.
 fn analysed(params: &[(ParamId, f64)], max_frames: usize) -> NativeNode<Contour> {
     let device_type: DeviceType = eq_type();
     let values = device(&device_type, params);
@@ -228,7 +228,7 @@ fn worst_error(out: &[f32], reference: &[f32]) -> f32 {
 fn the_eq_is_described_and_laid_out() {
     let device_type: DeviceType = eq_type();
     device_type.description.check().unwrap();
-    assert_eq!(device_type.name, "Contour");
+    assert_eq!(device_type.name, "EQ Eight");
     assert_eq!(device_type.description.params.len(), 85);
     assert!(matches!(
         device_type.kind,

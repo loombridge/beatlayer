@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-432 commands in 35 areas.
+442 commands in 35 areas.
 
 ## Permission classes
 
@@ -138,6 +138,7 @@ Each command has:
 | [`chain.solo`](#chainsolo) | Solo Chain | `edit` | `S` | `S` |
 | [`clip.create`](#clipcreate) | Create Clip | `edit` |  |  |
 | [`clip.create_in_slot`](#clipcreate_in_slot) | Create Clip in Slot | `edit` |  |  |
+| [`clip.defaults`](#clipdefaults) | Clip Defaults | `read` |  |  |
 | [`clip.delete`](#clipdelete) | Delete Clip | `destructive` |  |  |
 | [`clip.delete_envelope`](#clipdelete_envelope) | Clear Envelope | `edit` |  |  |
 | [`clip.delete_envelope_breakpoint`](#clipdelete_envelope_breakpoint) | Delete Envelope Breakpoint | `edit` |  |  |
@@ -154,7 +155,9 @@ Each command has:
 | [`clip.move_warp_markers`](#clipmove_warp_markers) | Move Warp Markers | `edit` |  |  |
 | [`clip.rename`](#cliprename) | Rename Clip | `edit` | `Cmd+R` | `Ctrl+R` |
 | [`clip.reset_transients`](#clipreset_transients) | Reset Transients | `edit` |  |  |
+| [`clip.save_default`](#clipsave_default) | Save Default Clip | `external` |  |  |
 | [`clip.scale_tempo`](#clipscale_tempo) | Scale Clip Tempo | `edit` |  |  |
+| [`clip.set_1_1_1_here`](#clipset_1_1_1_here) | Set 1.1.1 Here | `edit` |  |  |
 | [`clip.set_data`](#clipset_data) | Replace Clip Contents | `edit` |  |  |
 | [`clip.set_envelope_breakpoint`](#clipset_envelope_breakpoint) | Add Envelope Breakpoint | `edit` |  |  |
 | [`clip.set_envelope_curve`](#clipset_envelope_curve) | Curve Envelope Segment | `edit` |  |  |
@@ -182,6 +185,9 @@ Each command has:
 | [`clip.shift_warp_marker`](#clipshift_warp_marker) | Shift Warp Marker | `edit` |  |  |
 | [`clip.transients`](#cliptransients) | Clip Transients | `read` |  |  |
 | [`clip.trim_start`](#cliptrim_start) | Trim Clip Start | `edit` |  |  |
+| [`clip.warp_as_loop`](#clipwarp_as_loop) | Warp as Loop | `edit` |  |  |
+| [`clip.warp_from_here`](#clipwarp_from_here) | Warp From Here | `edit` |  |  |
+| [`clip.warp_selection_as_loop`](#clipwarp_selection_as_loop) | Warp Selection as Loop | `edit` |  |  |
 | [`clip_view.quantize_settings`](#clip_viewquantize_settings) | Quantize Settings | `read` |  |  |
 | [`clip_view.select_notes`](#clip_viewselect_notes) | Select Notes | `read` |  |  |
 | [`device.add`](#deviceadd) | Add Device | `edit` |  |  |
@@ -236,6 +242,7 @@ Each command has:
 | [`device.set_layer_options`](#deviceset_layer_options) | Change Sample Options | `edit` |  |  |
 | [`device.set_layer_sample`](#deviceset_layer_sample) | Replace Sample | `external` |  |  |
 | [`device.set_layer_zone`](#deviceset_layer_zone) | Change Zones | `edit` |  |  |
+| [`device.set_midi_sidechain_source`](#deviceset_midi_sidechain_source) | Set MIDI Sidechain Source | `edit` |  |  |
 | [`device.set_multisampler_view`](#deviceset_multisampler_view) | Set Multisampler View | `read` |  |  |
 | [`device.set_param`](#deviceset_param) | Set Device Parameter | `edit` |  |  |
 | [`device.set_processed_layer_sample`](#deviceset_processed_layer_sample) | Replace With Processed Copy | `edit` |  |  |
@@ -251,7 +258,7 @@ Each command has:
 | [`device.show_sidechain`](#deviceshow_sidechain) | Show Sidechain | `read` |  |  |
 | [`device.snap_layer_markers`](#devicesnap_layer_markers) | Snap Markers | `edit` |  |  |
 | [`device.sort_layers`](#devicesort_layers) | Sort Samples | `edit` |  |  |
-| [`device.swap_to_snapshot`](#deviceswap_to_snapshot) | Swap to Snapshot | `edit` |  |  |
+| [`device.swap_to_snapshot`](#deviceswap_to_snapshot) | Swap to Simpler | `edit` |  |  |
 | [`device.ungroup`](#deviceungroup) | Ungroup | `edit` | `Cmd+Shift+G` | `Ctrl+Shift+G` |
 | [`device.unwrap_rack`](#deviceunwrap_rack) | Take a Rack Apart | `edit` |  |  |
 | [`device.update_layers`](#deviceupdate_layers) | Change Sample Settings | `edit` |  |  |
@@ -393,10 +400,13 @@ Each command has:
 | [`settings.next_page`](#settingsnext_page) | Next Settings Page | `read` | `Option+Tab` | `Ctrl+Tab` |
 | [`settings.previous_page`](#settingsprevious_page) | Previous Settings Page | `read` | `Option+Shift+Tab` | `Ctrl+Shift+Tab` |
 | [`settings.set_auto_hide_plug_in_windows`](#settingsset_auto_hide_plug_in_windows) | Auto-Hide Plug-In Windows | `edit` |  |  |
+| [`settings.set_auto_warp_long_samples`](#settingsset_auto_warp_long_samples) | Auto-Warp Long Samples | `edit` |  |  |
 | [`settings.set_continuous_save`](#settingsset_continuous_save) | Save Continuously | `edit` |  |  |
 | [`settings.set_create_fades_on_clip_edges`](#settingsset_create_fades_on_clip_edges) | Create Fades on Clip Edges | `edit` |  |  |
 | [`settings.set_default_launch_mode`](#settingsset_default_launch_mode) | Default Launch Mode | `edit` |  |  |
 | [`settings.set_default_launch_quantization`](#settingsset_default_launch_quantization) | Default Launch Quantization | `edit` |  |  |
+| [`settings.set_default_warp_mode`](#settingsset_default_warp_mode) | Default Warp Mode | `edit` |  |  |
+| [`settings.set_loop_warp_short_samples`](#settingsset_loop_warp_short_samples) | Loop/Warp Short Samples | `edit` |  |  |
 | [`settings.set_outline_view_in_focus`](#settingsset_outline_view_in_focus) | Outline View in Focus | `edit` |  |  |
 | [`settings.set_record_session_automation_in`](#settingsset_record_session_automation_in) | Record Session Automation in | `edit` |  |  |
 | [`settings.set_select_next_scene_on_launch`](#settingsset_select_next_scene_on_launch) | Select Next Scene on Launch | `edit` |  |  |
@@ -1827,7 +1837,7 @@ Result: nothing (`null`).
 
 **Load Selected Item**. Permission: `external`. Contexts: `browser`.
 
-Loads the browser's selected audio files into the Arrangement, as Enter or a double-click does: onto the selected track at the insert marker if it's an audio track, otherwise onto a new audio track below the last one, one after another, as one undo step. A clip placed over part of another replaces that part, so when a clip on that track ends after the insert marker it's destructive as well as external. While a device is being hot-swapped (`device.hot_swap`), a selected preset loads into it instead, and so does a selected audio file, if the device plays samples (the sampler, or the eight-slot drum sampler, into its selected slot: `device.load_sample`). Reads the files, outside the project.
+Loads the browser's selected audio files into the Arrangement, as Enter or a double-click does: onto the selected track at the insert marker if it's an audio track, otherwise onto a new audio track below the last one, one after another, as one undo step. A clip placed over part of another replaces that part, so when a clip on that track ends after the insert marker it's destructive as well as external. While a device is being hot-swapped (`device.hot_swap`), a selected preset loads into it instead, and so does a selected audio file, if the device plays samples (the sampler, or the eight-slot drum sampler, into its selected slot: `device.load_sample`). With one plug-in selected it loads that plug-in instead, as `plugin.load` does: onto the selected track (a new track when none is), an instrument onto a new MIDI track when the selected track holds audio, or in place of the device being hot-swapped. Reads the files, outside the project.
 
 Default keys:
 
@@ -1843,7 +1853,7 @@ Result: [`AddResult`](#addresult).
 
 **Open Folder**. Permission: `external`. Contexts: `browser`.
 
-Opens or closes a folder in the browser's content pane, listing its folders and audio files indented under it. Opening a folder closes the other open folders it isn't inside, unless `keep_others` (Cmd or Ctrl held). Right and Left do this on the selected folder. Changes nothing, but reads folders outside the project.
+Opens or closes a folder in the browser's content pane, listing its folders and audio files indented under it (in the Plug-Ins label, a vendor's folder and its plug-ins). Opening a folder closes the other open folders it isn't inside, unless `keep_others` (Cmd or Ctrl held). Right and Left do this on the selected folder. Changes nothing, but reads folders outside the project.
 
 Default keys: none.
 
@@ -1926,7 +1936,7 @@ Result: [`BrowserState`](#browserstate).
 
 **Select in Browser**. Permission: `external`. Contexts: `browser`.
 
-Selects items in the browser's content pane by path, replacing the selection or, with `add`, adding to it, as clicking, Shift-clicking, and Up and Down do. While the Preview switch is on, selecting one audio file previews it through the audio device; selecting anything else stops the preview. Changes nothing in the set.
+Selects items in the browser's content pane by path (or, in the Plug-Ins label, by the row's key), replacing the selection or, with `add`, adding to it, as clicking, Shift-clicking, and Up and Down do. While the Preview switch is on, selecting one audio file previews it through the audio device; selecting anything else stops the preview. Changes nothing in the set.
 
 Default keys: none.
 
@@ -2393,6 +2403,22 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `clip.defaults`
+
+**Clip Defaults**. Permission: `read`. Contexts: `clip-view`.
+
+Reads the defaults saved for an audio clip's file by `clip.save_default`: its `file`, the `<sample file name>.beatlayer-clip` beside the sample, and the `defaults` in it, or `null` when none are saved or the file does not hold settings for this content. Changes nothing.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The audio clip. |
+
+Result: [`SavedDefaults`](#saveddefaults).
+
 #### `clip.delete`
 
 **Delete Clip**. Permission: `destructive`. Contexts: `arrangement`.
@@ -2683,6 +2709,22 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `clip.save_default`
+
+**Save Default Clip**. Permission: `external`. Contexts: `clip-view`.
+
+Saves an audio clip's Warp switch, warp markers and tempo, warp mode and mode controls (which hold its Transpose and Detune), and gain as its file's defaults, as the Save button in the clip's title bar does: into a small file of Beatlayer's own, `<sample file name>.beatlayer-clip`, beside the sample, so the defaults travel with it, replacing any saved before. A clip made from the file afterwards (dropped from the browser, loaded with Enter or imported) starts with them and is not auto-warped; clips already in the set don't change. Fails with the reason, and writes nothing, if the folder can't be written or the clip's file isn't known. Changes nothing in the set and is no undo step; writes a file outside the project.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The audio clip. |
+
+Result: [`SavedDefaults`](#saveddefaults).
+
 #### `clip.scale_tempo`
 
 **Scale Clip Tempo**. Permission: `edit`. Contexts: `clip-view`.
@@ -2697,6 +2739,25 @@ Arguments:
 |---|---|---|---|
 | `clip` | [`ClipId`](#clipid) | yes | The warped audio clip. |
 | `factor` | number | yes | What to multiply by: 2 for ×2, 0.5 for ÷2. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `clip.set_1_1_1_here`
+
+**Set 1.1.1 Here**. Permission: `edit`. Contexts: `clip-view`.
+
+Makes a point of a warped audio clip's file its 1.1.1, the downbeat of its first bar: at the selected warp marker (`marker`, its place in the map, the first being 0) or at the Sample Editor's insert marker (`beat`, ticks from the clip's current 1.1.1, or `time`, seconds in the file); give one of the three. A warp marker is made there if there was none. Every marker, the End marker and the loop brace then move by the same ticks, so no segment changes tempo and each keeps its place in the audio, and the Start marker goes to 1.1.1. Refused for a clip that isn't warped, or if the End marker or the loop brace would end up before 1.1.1. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The warped audio clip. |
+| `beat` | [`Ticks`](#ticks) or null | no | The Sample Editor's insert marker as a beat, in ticks from the clip's 1.1.1: a warp marker is made there, at the time the map already places it. |
+| `marker` | integer or null | no | The selected warp marker, by its place in the map, the first being 0. |
+| `time` | number or null | no | The insert marker as a time in the file, in seconds: a warp marker is made there, on the beat the map already places it. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -3190,6 +3251,63 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `clip.warp_as_loop`
+
+**Warp as Loop**. Permission: `edit`. Contexts: `clip-view`.
+
+Warps a warped audio clip's whole file as a loop of 1, 2, 4, 8, 16 or 32 bars of 4/4, the number whose tempo is nearest the set's tempo at the clip's start: a warp marker at the start of the file on 1.1.1 and one at its end on the last bar's end, the Start and End markers and the loop brace on the whole file, the loop on, and that tempo as the clip's. The clip keeps its place and length in the arrangement. Refused for a clip that isn't warped, or while the file's analysis is not ready. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The warped audio clip. |
+| `analysis` | [`FileBeats`](#filebeats) or null | no | The file's length. Left out, the app reads it from the file, and refuses while the file's analysis is not ready. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `clip.warp_from_here`
+
+**Warp From Here**. Permission: `edit`. Contexts: `clip-view`.
+
+Warps a warped audio clip from a point on: at the selected warp marker (`marker`) or at a new one at the insert marker (`beat` or `time`, as for `clip.set_1_1_1_here`). The markers before it stay and those after it are replaced. `method` is `auto`, a marker on the first beat of every bar after the point from the tempo found there; `start_at`, the same starting from the tempo `bpm`, the set's tempo at the point unless given, which settles whether a beat is counted at double or half the speed; `straight`, which deletes the markers after the point and sets the clip's tempo to the tempo found after it; or `bpm`, which deletes them and sets the clip's tempo to `bpm`, the set's tempo at the point unless given. The file's tempo and beats come from its analysis (`analysis` gives them), so every method but `bpm` is refused while it is not ready. Refused for a clip that isn't warped. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The warped audio clip. |
+| `method` | [`WarpFrom`](#warpfrom) | yes | How the audio after the point is warped. |
+| `analysis` | [`FileBeats`](#filebeats) or null | no | The file's tempo and beats. Left out, the app uses the file's analysis, and refuses while it is not ready. |
+| `beat` | [`Ticks`](#ticks) or null | no | The Sample Editor's insert marker as a beat, in ticks from the clip's 1.1.1: a warp marker is made there, at the time the map already places it. |
+| `bpm` | number or null | no | The tempo for `start_at` and `bpm`: the set's tempo at the point unless given. |
+| `marker` | integer or null | no | The selected warp marker, by its place in the map, the first being 0. |
+| `time` | number or null | no | The insert marker as a time in the file, in seconds: a warp marker is made there, on the beat the map already places it. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `clip.warp_selection_as_loop`
+
+**Warp Selection as Loop**. Permission: `edit`. Contexts: `clip-view`.
+
+Warps the part of a warped audio clip's file from `from` to `to` (seconds in the file) as a loop of 1, 2, 4, 8, 16 or 32 bars of 4/4, the number whose tempo is nearest the set's tempo at the clip's start: a warp marker at each end of the part, the Start and End markers and the loop brace on it, the loop on. The clip keeps its place and length in the arrangement. Refused for a clip that isn't warped. One undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The warped audio clip. |
+| `from` | number, at least 0 | yes | The start of the part, in seconds in the file. |
+| `to` | number, at least 0 | yes | The end of the part, in seconds, after `from`. |
+
+Result: [`ChangeSet`](#changeset).
+
 ### Area `clip_view`
 
 #### `clip_view.quantize_settings`
@@ -3291,7 +3409,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Audition Sample**. Permission: `read`. Contexts: `device-view`.
 
-Plays a sampler's sample from a point through the device, as a click in its display does: `from` is the start as a share of the sample from 0 to 1, `layer` a multisampler's layer (its first selected layer if left out). The voice plays at the sample's root pitch (C3 for Snapshot, the layer's root key for the multisampler) through the device's settings, and goes on until the same command comes with `down: false`, as the button's release. It needs the audio engine on; `sent` says whether it was. It changes nothing in the set.
+Plays a sampler's sample from a point through the device, as a click in its display does: `from` is the start as a share of the sample from 0 to 1, `layer` a multisampler's layer (its first selected layer if left out). The voice plays at the sample's root pitch (C3 for Simpler, the layer's root key for the multisampler) through the device's settings, and goes on until the same command comes with `down: false`, as the button's release. It needs the audio engine on; `sent` says whether it was. It changes nothing in the set.
 
 Default keys: none.
 
@@ -3364,7 +3482,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Convert Sampler**. Permission: `edit`. Contexts: `device-view`.
 
-Converts Snapshot to a multisampler (`to: multisampler`) or a multisampler to Snapshot (`to: snapshot`), keeping the device's place in its chain, its name, its on or off state and its sample, as one undo step. Snapshot becomes one layer with every zone whole, its region as Sample Start and Sample End, its loop as a sustain loop and its edits, with its envelope, volume and pan as the multisampler's; a multisampler becomes Snapshot in Classic mode playing its first layer. Slicing and One-Shot, and layers past the first, don't carry over, and the result's `dropped` names what didn't. The new device has a new ID, which the result gives.
+Converts Simpler to a multisampler (`to: multisampler`) or a multisampler to Simpler (`to: snapshot`), keeping the device's place in its chain, its name, its on or off state and its sample, as one undo step. Simpler becomes one layer with every zone whole, its region as Sample Start and Sample End, its loop as a sustain loop and its edits, with its envelope, volume and pan as the multisampler's; a multisampler becomes Simpler in Classic mode playing its first layer. Slicing and One-Shot, and layers past the first, don't carry over, and the result's `dropped` names what didn't. The new device has a new ID, which the result gives.
 
 Default keys: none.
 
@@ -3401,7 +3519,7 @@ Result: [`DeviceViewState`](#deviceviewstate).
 
 **Crop Sample**. Permission: `edit`. Contexts: `device-view`.
 
-Removes the sample outside Snapshot's region, or outside a multisampler layer's Sample Start and Sample End, by writing a processed copy: a WAV with the sample's edits applied, at its rate and channels, in the project's `Samples/Processed/Crop/` folder. The device or layer then plays the copy, with its edit list empty and the region the whole of it, as one undo step; the original file stays as it was. A set that has never been saved has no project folder, and the command is refused with a message in the Status Bar. The copy is the sample's new media, which reads back in the device's `media` or the layer's `media`.
+Removes the sample outside Simpler's region, or outside a multisampler layer's Sample Start and Sample End, by writing a processed copy: a WAV with the sample's edits applied, at its rate and channels, in the project's `Samples/Processed/Crop/` folder. The device or layer then plays the copy, with its edit list empty and the region the whole of it, as one undo step; the original file stays as it was. A set that has never been saved has no project folder, and the command is refused with a message in the Status Bar. The copy is the sample's new media, which reads back in the device's `media` or the layer's `media`.
 
 Default keys: none.
 
@@ -3527,7 +3645,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Edit Sample**. Permission: `edit`. Contexts: `device-view`.
 
-Edits a sampler's sample without writing a file, as the sample display's context menu does: `kind` is `trim` (keep the selection), `cut` (remove it and close the gap), `reverse`, `fade_in`, `fade_out` (a straight line in gain over the selection) or `normalize` (scale the selection so its largest magnitude reaches 0 dBFS). `range` is the selection, `from` to `to` in frames of the sample as the earlier edits left it, at its own rate; left out it is the whole sample, except for trim and cut, which need one. The edit joins the sample's list, kept with the set and applied to the file's audio in order; the file is never written. A multisampler's `layer` (its first selected layer if left out) keeps its markers on the audio they marked: those after a cut move earlier by its length, those inside it to its start, and those outside a trim to its nearer end; Snapshot's Start, Length and Loop are shares of the sample and stay. `revert: true` clears the list instead. One undo step named for the edit. The list reads back as `sample_edits` in the query tool's `device` result for Snapshot and as `edits` in each layer of `layers` for the multisampler.
+Edits a sampler's sample without writing a file, as the sample display's context menu does: `kind` is `trim` (keep the selection), `cut` (remove it and close the gap), `reverse`, `fade_in`, `fade_out` (a straight line in gain over the selection) or `normalize` (scale the selection so its largest magnitude reaches 0 dBFS). `range` is the selection, `from` to `to` in frames of the sample as the earlier edits left it, at its own rate; left out it is the whole sample, except for trim and cut, which need one. The edit joins the sample's list, kept with the set and applied to the file's audio in order; the file is never written. A multisampler's `layer` (its first selected layer if left out) keeps its markers on the audio they marked: those after a cut move earlier by its length, those inside it to its start, and those outside a trim to its nearer end; Simpler's Start, Length and Loop are shares of the sample and stay. `revert: true` clears the list instead. One undo step named for the edit. The list reads back as `sample_edits` in the query tool's `device` result for Simpler and as `edits` in each layer of `layers` for the multisampler.
 
 Default keys: none.
 
@@ -3537,7 +3655,7 @@ Arguments:
 |---|---|---|---|
 | `device` | [`DeviceId`](#deviceid) or null | no | The sampler device; the selected device if left out. |
 | `kind` | [`SampleEditKind`](#sampleeditkind) or null | no | What the edit does. Leave it out with `revert`. |
-| `layer` | [`LayerId`](#layerid) or null | no | A multisampler's layer; its first selected layer if left out. Snapshot has one sample and no layers. |
+| `layer` | [`LayerId`](#layerid) or null | no | A multisampler's layer; its first selected layer if left out. Simpler has one sample and no layers. |
 | `range` | [`SampleRange`](#samplerange) or null | no | The selection it acts on, in frames of the sample as the earlier edits left it, at its own rate. Left out it acts on the whole sample; Trim and Cut need one. |
 | `revert` | boolean | no | Clears the sample's edit list instead of adding to it. |
 
@@ -4184,6 +4302,23 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `device.set_midi_sidechain_source`
+
+**Set MIDI Sidechain Source**. Permission: `edit`. Contexts: `device-view`.
+
+Sets the MIDI track a device's MIDI sidechain listens to, as the MIDI source chooser in its sidechain parameters does: `track` is a MIDI track (the device's own track too), or left out for No Input, a new device's. The device hears the notes and channel messages that track's clips and input play, before its own devices change them; the track still plays as before. Only devices that declare a MIDI sidechain input have one. Deleting the track leaves No Input.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `track` | [`TrackId`](#trackid) or null | no | The MIDI track whose notes and channel messages the device hears (its own track too), or `None` for No Input. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `device.set_multisampler_view`
 
 **Set Multisampler View**. Permission: `read`. Contexts: `device-view`.
@@ -4378,7 +4513,7 @@ Arguments:
 | `device` | [`DeviceId`](#deviceid) | yes | The device. |
 | `params` | array of pair of [`ParamId`](#paramid) and number | yes | The parameter values, as `[parameter, value]` pairs, each finite and each parameter once. |
 | `name` | string | yes | The name the title bar shows while Show Preset Name is on, such as the preset's; empty for the device's own name. |
-| `shape` | array or null | no | A Curve Mod's breakpoint shape (the modulation spec, R23), which a preset of one holds; `null` for the default shape. |
+| `shape` | array or null | no | A Shaper's breakpoint shape (the modulation spec, R23), which a preset of one holds; `null` for the default shape. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -4403,7 +4538,7 @@ Result: [`FloatingWindows`](#floatingwindows).
 
 **Show Sidechain**. Permission: `read`. Contexts: `device-view`.
 
-Shows or hides a device's sidechain section, as the toggle at the top of the device's left strip does; switches unless `shown` says which. Only devices with a sidechain input have one. It changes only the view: it isn't an undo step. The section's settings are the set's: `device.set_sidechain_input`, `device.set_sidechain_enabled`, `device.set_sidechain_mix`, `device.set_sidechain_gain`, and `device.set_sidechain_listen`.
+Shows or hides a device's sidechain section, as the toggle at the top of the device's left strip does; switches unless `shown` says which. Only devices with a sidechain input or a MIDI sidechain input have one. It changes only the view: it isn't an undo step. The section's settings are the set's: `device.set_sidechain_input`, `device.set_sidechain_enabled`, `device.set_sidechain_mix`, `device.set_sidechain_gain`, and `device.set_sidechain_listen`; the MIDI sidechain's, `device.set_midi_sidechain_source`.
 
 Default keys: none.
 
@@ -4454,9 +4589,9 @@ Result: [`ChangeSet`](#changeset).
 
 #### `device.swap_to_snapshot`
 
-**Swap to Snapshot**. Permission: `edit`. Contexts: `device-view`.
+**Swap to Simpler**. Permission: `edit`. Contexts: `device-view`.
 
-Replaces a Strike drum sampler with the Snapshot sampler in One-Shot mode, as Strike's context menu does: the new device takes the old one's place, sample, and on or off state, and keeps its sample's Start and Length; every other setting is Snapshot's default. One undo step, named Swap to Snapshot, and the new device is selected. A device that isn't a Strike drum sampler is refused.
+Replaces a Drum Sampler with Simpler in One-Shot mode, as Drum Sampler's context menu does: the new device takes the old one's place, sample, and on or off state, and keeps its sample's Start and Length; every other setting is Simpler's default. One undo step, named Swap to Simpler, and the new device is selected. A device that isn't a Drum Sampler is refused.
 
 Default keys: none.
 
@@ -5390,7 +5525,7 @@ Result: [`DeviceViewState`](#deviceviewstate).
 
 **Map Modulator**. Permission: `edit`. Contexts: `device-view`.
 
-Maps one of a modulator's eight slots (`slot`, 0 to 7) to a parameter, as the slot's Map button and a click on the parameter's control do. `target` is a mixer control (`volume`, `pan` or `mute`) or a send of any track, or a parameter of any device on any track, but not a parameter of the modulator itself. The slot's earlier mapping is replaced; one modulator doesn't map one parameter twice. A modulator in Remote Control can't map a parameter another modulator in Remote Control holds. The mapping is saved with the set, goes with its target when that is deleted, and shows in the `mappings` field of the query tool's `device`. One undo step (Map Modulator).
+Maps one of a modulator's slots (`slot`, 0 to 7; the Expression Control's are 0 to 4) to a parameter, as the slot's Map button and a click on the parameter's control do. `target` is a mixer control (`volume`, `pan` or `mute`) or a send of any track, or a parameter of any device on any track, but not a parameter of the modulator itself. The slot's earlier mapping is replaced; one modulator doesn't map one parameter twice. A modulator in Remote Control can't map a parameter another modulator in Remote Control holds. A modulator driven by audio, notes or MIDI (the Envelope Follower, Envelope MIDI, Shaper MIDI and Expression Control) doesn't map another modulator's parameters, nor one on a track that feeds its own track, which would make the two tracks wait on each other. The mapping is saved with the set, goes with its target when that is deleted, and shows in the `mappings` field of the query tool's `device`. One undo step (Map Modulator).
 
 Default keys: none.
 
@@ -5408,7 +5543,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Edit Shape**. Permission: `edit`. Contexts: `device-view`.
 
-Replaces the breakpoint shape of a Curve Mod, as every edit of its display does (adding, moving, bending or deleting a breakpoint, Clear and the six presets). `points` lists up to 64 breakpoints in order along the cycle, each with `x` (its place, 0 to 1), `y` (the output there, 0 to 1) and `bend` (of the segment starting there, from -1 to 1, 0 straight). An empty list outputs 0. One undo step (Edit Shape).
+Replaces the breakpoint shape of a Shaper or a Shaper MIDI, as every edit of its display does (adding, moving, bending or deleting a breakpoint, making one the sustain breakpoint, Clear and the six presets). `points` lists up to 64 breakpoints in order along the cycle, each with `x` (its place, 0 to 1), `y` (the output there, 0 to 1), `bend` (of the segment starting there, from -1 to 1, 0 straight) and `sustain` (true on the Shaper MIDI's sustain breakpoint, at most one in a shape). An empty list outputs 0. One undo step (Edit Shape).
 
 Default keys: none.
 
@@ -5416,7 +5551,7 @@ Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `device` | [`DeviceId`](#deviceid) | yes | The Curve Mod device. |
+| `device` | [`DeviceId`](#deviceid) | yes | The Shaper device. |
 | `points` | array of [`ShapePoint`](#shapepoint) | yes | The breakpoints, in order along the cycle (at most 64), each with its place and output from 0 to 1 and the bend of the segment starting there, from −1 to 1. |
 
 Result: [`ChangeSet`](#changeset).
@@ -5425,7 +5560,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Unmap Modulator**. Permission: `edit`. Contexts: `device-view`.
 
-Removes the mapping of a modulator's slot (`slot`, 0 to 7), as its Unmap button does: the parameter plays its own value again from the next frame. A slot with no mapping stays as it is. One undo step (Unmap Modulator).
+Removes the mapping of a modulator's slot (`slot`, 0 to 7; the Expression Control's are 0 to 4), as its Unmap button does: the parameter plays its own value again from the next frame. A slot with no mapping stays as it is. One undo step (Unmap Modulator).
 
 Default keys: none.
 
@@ -5709,7 +5844,7 @@ Result: [`PluginLoaded`](#pluginloaded).
 
 **Rescan Plug-Ins**. Permission: `external`. Contexts: `global`, `device-view`.
 
-Scans the plug-ins in `paths` (or each format's system plug-in folders) again, ignoring the cache and clearing the blocklist for them, as the Rescan button does. Returns `plugin.scan`'s report.
+Scans the plug-ins in `paths` (or each format's system plug-in folders) again, ignoring the cache and clearing the blocklist for them, as the Rescan button does. Returns `plugin.scan`'s report; with `background`, returns at once and the browser lists what was found when the scan is done.
 
 Default keys: none.
 
@@ -5717,6 +5852,7 @@ Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
+| `background` | boolean | no | Scan the system folders in the background and return at once, with an empty report, as the Settings window's Rescan button does; the browser lists what was found when it's done. |
 | `paths` | array or null | no | The files or folders to scan; each format's system plug-in folders if left out. |
 
 Result: [`PluginScan`](#pluginscan).
@@ -5725,7 +5861,7 @@ Result: [`PluginScan`](#pluginscan).
 
 **Scan Plug-Ins**. Permission: `external`. Contexts: `global`, `device-view`.
 
-Finds the plug-ins installed on this machine and describes each one: its format, its file, its identifier, name, vendor, version, and role in a chain. Scans the files or folders in `paths`, or each format's own system plug-in folders (CLAP's and VST3's conventions, and on macOS Apple's Audio Units') when `paths` is left out. Plug-ins of every hosted format are scanned. Each one is loaded in a separate process with a timeout, so a plug-in that crashes or hangs is put on a blocklist with the reason instead of taking Beatlayer down; a file whose size and modification time are unchanged is answered from the cache. Reads plug-in files outside the project, so an agent asks first.
+Finds the plug-ins installed on this machine and describes each one: its format, its file, its identifier, name, vendor, version, and role in a chain. Scans the files or folders in `paths` for every hosted format, or, when `paths` is left out, the system plug-in folders of CLAP and of the formats the Plug-Ins settings switch on (`plugin.settings`: `vst3_system_folders`, and on macOS `use_audio_units_v2`). The app also runs this at start, in the background, and when one of those switches turns on. Each one is loaded in a separate process with a timeout, so a plug-in that crashes or hangs is put on a blocklist with the reason instead of taking Beatlayer down; a file whose size and modification time are unchanged is answered from the cache. Reads plug-in files outside the project, so an agent asks first.
 
 Default keys: none.
 
@@ -5733,6 +5869,7 @@ Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
+| `background` | boolean | no | Scan the system folders in the background and return at once, with an empty report, as the Settings window's Rescan button does; the browser lists what was found when it's done. |
 | `paths` | array or null | no | The files or folders to scan; each format's system plug-in folders if left out. |
 
 Result: [`PluginScan`](#pluginscan).
@@ -5776,7 +5913,7 @@ Result: [`PluginInfo`](#plugininfo).
 
 **Plug-In Settings**. Permission: `edit`. Contexts: `global`.
 
-Reads or changes how the browser shows plug-ins (IMP-07): `hidden` is the plug-ins to hide, as `format/plugin_id` keys; `show_hidden` whether hidden plug-ins still show; and `format_preference` the format to prefer when a plug-in exists in several. Fields left out are unchanged. Returns the settings. A set that uses a hidden plug-in still loads it.
+Reads or changes how the browser shows plug-ins (IMP-07): `hidden` is the plug-ins to hide, as `format/plugin_id` keys; `show_hidden` whether hidden plug-ins still show; and `format_preference` the format to prefer when a plug-in exists in several. Also the Plug-In Sources switches of Settings ▸ Plug-Ins: `use_audio_units_v2`, `use_audio_units_v3` and `vst3_system_folders`, all off in a new install; the browser lists a format's plug-ins only while its switch is on (CLAP has none and is always listed), and turning one on scans that format in the background. Fields left out are unchanged. Returns the settings. A set that uses a hidden plug-in still loads it.
 
 Default keys: none.
 
@@ -5787,6 +5924,9 @@ Arguments:
 | `format_preference` | [`PluginFormat`](#pluginformat) or null | no | The format to prefer when a plug-in exists in several. |
 | `hidden` | array or null | no | The hidden plug-ins to remember, as `format/plugin_id` keys (IMP-07); empty hides none. |
 | `show_hidden` | boolean or null | no | Whether the browser shows hidden plug-ins. |
+| `use_audio_units_v2` | boolean or null | no | Use Audio Units v2 (Settings ▸ Plug-Ins): scan and list Audio Units on macOS. Turning it on scans them. |
+| `use_audio_units_v3` | boolean or null | no | Use Audio Units v3 (Settings ▸ Plug-Ins). Kept; app-extension Audio Units aren't scanned yet. |
+| `vst3_system_folders` | boolean or null | no | Use VST3 Plug-In System Folders (Settings ▸ Plug-Ins): scan and list the VST3 plug-ins in the format's system folders. Turning it on scans them. |
 
 Result: [`PluginSettings`](#pluginsettings).
 
@@ -6906,6 +7046,22 @@ Arguments:
 
 Result: [`SwitchResult`](#switchresult).
 
+#### `settings.set_auto_warp_long_samples`
+
+**Auto-Warp Long Samples**. Permission: `edit`. Contexts: `settings`.
+
+Switches Auto-Warp Long Samples on the Settings window's Record, Warp & Launch page; it's on in a new install, as Live's is. While it's on, a new audio clip of a long sample, one of 60 seconds or more, is warped with a warp marker on the first beat of every bar its analysis finds, and its 1.1.1 on the first beat; off, it is left unwarped. Clips already in the set keep their settings. The setting is kept for the next start, and isn't part of the set or an undo step. The result's `on` is the setting afterwards.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether the setting is on. |
+
+Result: [`SwitchResult`](#switchresult).
+
 #### `settings.set_continuous_save`
 
 **Save Continuously**. Permission: `edit`. Contexts: `settings`.
@@ -6967,6 +7123,38 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `quantization` | [`LaunchQuantization`](#launchquantization) or null | no | The quantisation new clips start with; `null` (or nothing) follows the global one, Live's "Global". |
+
+Result: nothing (`null`).
+
+#### `settings.set_default_warp_mode`
+
+**Default Warp Mode**. Permission: `edit`. Contexts: `settings`.
+
+Chooses Default Warp Mode on the Settings window's Record, Warp & Launch page: the warp mode (`beats`, `tones`, `texture`, `re_pitch`, `complex` or `complex_pro`) a new warped clip takes. It's `beats` in a new install, as Live's is. Clips already in the set keep their modes. The setting is kept for the next start, and isn't part of the set or an undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `mode` | [`DefaultWarpMode`](#defaultwarpmode) | yes | The warp mode a new warped clip takes. |
+
+Result: nothing (`null`).
+
+#### `settings.set_loop_warp_short_samples`
+
+**Loop/Warp Short Samples**. Permission: `edit`. Contexts: `settings`.
+
+Chooses Loop/Warp Short Samples on the Settings window's Record, Warp & Launch page: what a new audio clip of a short sample, one under 60 seconds, gets when it is dropped from the browser, loaded with Enter or imported. `unwarped_one_shot` leaves Warp and the loop off; `warped_one_shot` warps it as a loop of whole bars, the loop off; `warped_loop` does the same with the loop on; `auto`, what a new install has, makes a warped loop when the file's analysis finds a steady beat that fits 1, 2, 4, 8 or 16 bars, and an unwarped one-shot otherwise. Clips already in the set keep their settings. The setting is kept for the next start, and isn't part of the set or an undo step.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `mode` | [`LoopWarpShortSamples`](#loopwarpshortsamples) | yes | What a new clip of a short sample gets. |
 
 Result: nothing (`null`).
 
@@ -8125,7 +8313,9 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.move_warp_markers`](#clipmove_warp_markers) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.rename`](#cliprename) | the query tool's `clip` | `name` |
 | [`clip.reset_transients`](#clipreset_transients) | `clip.transients` | `transients` |
+| [`clip.save_default`](#clipsave_default) | `clip.defaults` | `defaults` |
 | [`clip.scale_tempo`](#clipscale_tempo) | the query tool's `clip` | `data.audio.tempo` |
+| [`clip.set_1_1_1_here`](#clipset_1_1_1_here) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.set_data`](#clipset_data) | the query tool's `clip` | `data` |
 | [`clip.set_envelope_breakpoint`](#clipset_envelope_breakpoint) | the query tool's `clip` | `envelopes` |
 | [`clip.set_envelope_curve`](#clipset_envelope_curve) | the query tool's `clip` | `envelopes` |
@@ -8152,6 +8342,9 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.set_warp_settings`](#clipset_warp_settings) | the query tool's `clip` | `data.audio.warp_settings` |
 | [`clip.shift_warp_marker`](#clipshift_warp_marker) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.trim_start`](#cliptrim_start) | the query tool's `clip` | `offset` |
+| [`clip.warp_as_loop`](#clipwarp_as_loop) | the query tool's `clip` | `data.audio.warp_markers` |
+| [`clip.warp_from_here`](#clipwarp_from_here) | the query tool's `clip` | `data.audio.warp_markers` |
+| [`clip.warp_selection_as_loop`](#clipwarp_selection_as_loop) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`device.add`](#deviceadd) | the query tool's `track` | `devices` |
 | [`device.add_layers`](#deviceadd_layers) | the query tool's `device` | `layers` |
 | [`device.add_sample_edit`](#deviceadd_sample_edit) | the query tool's `device` | `sample_edits` |
@@ -8190,6 +8383,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.set_layer_options`](#deviceset_layer_options) | the query tool's `device` | `layers` |
 | [`device.set_layer_sample`](#deviceset_layer_sample) | the query tool's `device` | `layers` |
 | [`device.set_layer_zone`](#deviceset_layer_zone) | the query tool's `device` | `layers` |
+| [`device.set_midi_sidechain_source`](#deviceset_midi_sidechain_source) | the query tool's `device` | `midi_sidechain.source` |
 | [`device.set_param`](#deviceset_param) | the query tool's `device` | `params` |
 | [`device.set_processed_layer_sample`](#deviceset_processed_layer_sample) | the query tool's `device` | `layers` |
 | [`device.set_sample`](#deviceset_sample) | the query tool's `device` | `media` |
@@ -8279,9 +8473,12 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`set.save`](#setsave) | the query tool's `song` | `set.unsaved_changes` |
 | [`set.save_as`](#setsave_as) | the query tool's `song` | `set.path` |
 | [`settings.set_auto_hide_plug_in_windows`](#settingsset_auto_hide_plug_in_windows) | `settings.state` | `auto_hide_plug_in_windows` |
+| [`settings.set_auto_warp_long_samples`](#settingsset_auto_warp_long_samples) | `settings.state` | `warp.auto_warp_long_samples` |
 | [`settings.set_create_fades_on_clip_edges`](#settingsset_create_fades_on_clip_edges) | `settings.state` | `create_fades_on_clip_edges` |
 | [`settings.set_default_launch_mode`](#settingsset_default_launch_mode) | `settings.state` | `launch.default_mode` |
 | [`settings.set_default_launch_quantization`](#settingsset_default_launch_quantization) | `settings.state` | `launch.default_quantization` |
+| [`settings.set_default_warp_mode`](#settingsset_default_warp_mode) | `settings.state` | `warp.default_warp_mode` |
+| [`settings.set_loop_warp_short_samples`](#settingsset_loop_warp_short_samples) | `settings.state` | `warp.loop_warp_short_samples` |
 | [`settings.set_outline_view_in_focus`](#settingsset_outline_view_in_focus) | `settings.state` | `display_input.outline_view_in_focus` |
 | [`settings.set_record_session_automation_in`](#settingsset_record_session_automation_in) | `settings.state` | `record_session_automation_in` |
 | [`settings.set_select_next_scene_on_launch`](#settingsset_select_next_scene_on_launch) | `settings.state` | `launch.select_next_scene_on_launch` |
@@ -10946,6 +11143,72 @@ One of:
 
 </details>
 
+### `ClipDefaults`
+
+An audio clip's saved defaults: its Warp switch, warp markers and tempo, warp mode and the mode controls (which hold its Transpose and Detune), and gain. Times in the markers are as in `data.audio.warp_markers`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `warp` | boolean | yes | The Warp switch. |
+| `warp_markers` | array of [`WarpMarker`](#warpmarker) | yes | The warp markers. |
+| `tempo` | number or null | yes | The clip's tempo in BPM; given whenever there are markers. |
+| `warp_mode` | [`WarpMode`](#warpmode) | yes | The warp mode. |
+| `warp_settings` | [`WarpSettings`](#warpsettings) | yes | Every mode's controls. |
+| `gain` | number | yes | The gain, as a linear gain. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "An audio clip's saved defaults: its Warp switch, warp markers and tempo, warp mode and the mode controls (which hold its Transpose and Detune), and gain. Times in the markers are as in `data.audio.warp_markers`.",
+  "properties": {
+    "gain": {
+      "description": "The gain, as a linear gain.",
+      "format": "double",
+      "type": "number"
+    },
+    "tempo": {
+      "description": "The clip's tempo in BPM; given whenever there are markers.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "warp": {
+      "description": "The Warp switch.",
+      "type": "boolean"
+    },
+    "warp_markers": {
+      "description": "The warp markers.",
+      "items": {
+        "$ref": "#/$defs/WarpMarker"
+      },
+      "type": "array"
+    },
+    "warp_mode": {
+      "$ref": "#/$defs/WarpMode",
+      "description": "The warp mode."
+    },
+    "warp_settings": {
+      "$ref": "#/$defs/WarpSettings",
+      "description": "Every mode's controls."
+    }
+  },
+  "required": [
+    "warp",
+    "warp_markers",
+    "tempo",
+    "warp_mode",
+    "warp_settings",
+    "gain"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ClipEnvelope`
 
 An envelope a clip carries for a parameter of its track: the parameter it modulates, its breakpoints, and whether it follows the clip's timeline (`linked`, the default) or runs once from the clip's start (`false`).
@@ -11573,8 +11836,8 @@ What `device.convert` makes.
 
 One of:
 
-- `"snapshot"`: Snapshot, from a multisampler.
-- `"multisampler"`: A multisampler, from Snapshot.
+- `"snapshot"`: Simpler, from a multisampler.
+- `"multisampler"`: A multisampler, from Simpler.
 
 <details><summary>JSON Schema</summary>
 
@@ -11584,12 +11847,12 @@ One of:
   "oneOf": [
     {
       "const": "snapshot",
-      "description": "Snapshot, from a multisampler.",
+      "description": "Simpler, from a multisampler.",
       "type": "string"
     },
     {
       "const": "multisampler",
-      "description": "A multisampler, from Snapshot.",
+      "description": "A multisampler, from Simpler.",
       "type": "string"
     }
   ]
@@ -11721,6 +11984,61 @@ One of:
 
 </details>
 
+### `DefaultWarpMode`
+
+Default Warp Mode (Record, Warp & Launch, Warp/Fades, L-SET-018): the warp mode a new warped clip takes (the warping spec, R29 and R33).
+
+One of:
+
+- `"beats"`: Beats. What a new install has.
+- `"tones"`: Tones.
+- `"texture"`: Texture.
+- `"re_pitch"`: Re-Pitch.
+- `"complex"`: Complex.
+- `"complex_pro"`: Complex Pro.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Default Warp Mode (Record, Warp & Launch, Warp/Fades, L-SET-018): the warp mode a new warped clip takes (the warping spec, R29 and R33).",
+  "oneOf": [
+    {
+      "const": "beats",
+      "description": "Beats. What a new install has.",
+      "type": "string"
+    },
+    {
+      "const": "tones",
+      "description": "Tones.",
+      "type": "string"
+    },
+    {
+      "const": "texture",
+      "description": "Texture.",
+      "type": "string"
+    },
+    {
+      "const": "re_pitch",
+      "description": "Re-Pitch.",
+      "type": "string"
+    },
+    {
+      "const": "complex",
+      "description": "Complex.",
+      "type": "string"
+    },
+    {
+      "const": "complex_pro",
+      "description": "Complex Pro.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `Device`
 
 A device in a track's chain: a native instrument or effect, or a plug-in.
@@ -11738,12 +12056,13 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 | `layers` | [`Layers`](#layers) | no | A multisampler's layers and the options of its layer list (WP-5.13, the multisampler spec, R2). Left out of the saved set for a device that holds none. |
 | `mappings` | array of [`Mapping`](#mapping) | no | The parameters a modulator maps, one per slot (the modulation spec, R19). Left out of the saved set for a device that maps none. |
 | `media` | array of [`ContentHash`](#contenthash) or null | no | The media the device plays, by content hash, one entry per sample slot (WP-2.16, WP-5.17): the sampler's sample is slot 0, the eight-slot drum sampler's slots are 0 to 7. The media store holds each like a clip's audio (the sampler spec, R11). A slot with no sample is `None`, and the list never ends in one. Left out of the saved set for a device that plays none; a set saved before slots existed holds one hash, which loads as slot 0. |
+| `midi_sidechain` | [`MidiSidechain`](#midisidechain) or null | no | The device's MIDI sidechain input, if its type declares one (the routing spec, R32): a MIDI track whose notes and channel messages the device hears beside its audio. Left out of the saved set for a device without one. |
 | `other_params` | array or null | no | The values of the state that isn't active, in the same form as [`params`](Self::params) (device compare R1, R10). `None` while the two states are equal, as a new device's are, and left out of the saved set then. Use [`other_params`](Self::other_params) to read it. |
 | `own_name` | string | no | The device's own name, such as `Auto Filter`, which the title bar shows while Show Preset Name is off. Empty while it's the same as [`name`](Self::name), and left out of the saved set then. |
 | `plugin` | [`PluginState`](#pluginstate) or null | no | A plug-in's own state and where it was loaded from (WP-2.6), as last saved with the set. Left out of the saved set for a native device, and for a plug-in until the set is first saved with it. |
 | `role` | [`DeviceRole`](#devicerole) | no | Where it goes in a chain: MIDI effects, then the instrument, then audio effects. Audio effects aren't marked in the saved set. |
 | `sample_edits` | array of [`SampleEdit`](#sampleedit) | no | The edits made to the sample in slot 0 (WP-5.15, IMP-28; the multisampler spec, R55): applied in order to the media, which the file is never written for. A multisampler's layers hold their own. Loading another sample clears them. Left out of the saved set while there are none. |
-| `shape` | array or null | no | The breakpoints of a Curve Mod's shape (R23); `None` plays the default shape. Left out of the saved set while it is the default. |
+| `shape` | array or null | no | The breakpoints of a Shaper's shape (R23); `None` plays the default shape. Left out of the saved set while it is the default. |
 | `show_preset_name` | boolean | no | Whether the title bar shows the preset's or the given name (on, as a new device is) or the device's own name: the context menu's Show Preset Name. Left out of the saved set while on. |
 | `sidechain` | [`Sidechain`](#sidechain) or null | no | The device's sidechain input, if its type declares one (WP-2.19b): where its detector can listen other than its own input. Left out of the saved set for a device without one. |
 
@@ -11804,6 +12123,17 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
         ]
       },
       "type": "array"
+    },
+    "midi_sidechain": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MidiSidechain"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The device's MIDI sidechain input, if its type declares one (the routing spec, R32): a MIDI track whose notes and channel messages the device hears beside its audio. Left out of the saved set for a device without one."
     },
     "name": {
       "description": "The name the title bar shows while Show Preset Name is on: the device's own name until a preset or Rename gives it another.",
@@ -11875,7 +12205,7 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
       "type": "array"
     },
     "shape": {
-      "description": "The breakpoints of a Curve Mod's shape (R23); `None` plays the default shape. Left out of the saved set while it is the default.",
+      "description": "The breakpoints of a Shaper's shape (R23); `None` plays the default shape. Left out of the saved set while it is the default.",
       "items": {
         "$ref": "#/$defs/ShapePoint"
       },
@@ -12097,7 +12427,7 @@ One device as the Device View shows it.
 | `role` | [`DeviceRole`](#devicerole) | yes | Where it goes in a chain. |
 | `enabled` | boolean | yes | Whether it's switched on. |
 | `takes_sample` | boolean | yes | Whether its type plays one sample, so a sample dropped on it loads into it (`device.load_sample`, WP-2.16). |
-| `swaps_to_snapshot` | boolean | yes | Whether its type is the drum sampler, whose context menu offers the swap to Snapshot and Save as Default Pad (`device.swap_to_snapshot`, one-shot drum sampler R23). |
+| `swaps_to_snapshot` | boolean | yes | Whether its type is the drum sampler, whose context menu offers the swap to Simpler and Save as Default Pad (`device.swap_to_snapshot`, one-shot drum sampler R23). |
 | `show_preset_name` | boolean | yes | Whether its title shows its preset's or given name. |
 | `folded` | boolean | yes | Whether it's folded to its title bar. |
 | `expandable` | boolean | yes | Whether it has an expanded part, which its title bar's expand toggle shows and hides (L-DEV-004; WP-5.42). |
@@ -12108,6 +12438,7 @@ One device as the Device View shows it.
 | `hot_swap` | boolean | yes | Whether it's the device being hot-swapped. |
 | `sidechain` | [`SidechainSection`](#sidechainsection) or null | yes | Its sidechain section, if it has a sidechain input (WP-2.19b). |
 | `display_view` | string or null | no | The view its display shows, if its display has views (WP-5.43): one of its description's `views`. |
+| `midi_sidechain` | [`MidiSidechainSection`](#midisidechainsection) or null | no | Its MIDI sidechain section, if it has a MIDI sidechain input (WP-5.27). |
 | `modulator` | [`ModulatorFrame`](#modulatorframe) or null | no | For a modulator, what it maps and which Map button is armed (WP-5.10). |
 | `multisampler` | [`MultisamplerState`](#multisamplerstate) or null | no | A multisampler's views and selected layers (WP-5.13, R30); left out for any other device. |
 | `panel` | [`DevicePanel`](#devicepanel) or null | no | Its parameters and layout, for the generic UI; left out for a device whose type doesn't describe them. |
@@ -12165,6 +12496,17 @@ One device as the Device View shows it.
     "kind": {
       "$ref": "#/$defs/DeviceKind",
       "description": "What it is."
+    },
+    "midi_sidechain": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MidiSidechainSection"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Its MIDI sidechain section, if it has a MIDI sidechain input (WP-5.27)."
     },
     "modulator": {
       "anyOf": [
@@ -12239,7 +12581,7 @@ One device as the Device View shows it.
     },
     "swaps_to_snapshot": {
       "default": false,
-      "description": "Whether its type is the drum sampler, whose context menu offers the swap to Snapshot and Save as Default Pad (`device.swap_to_snapshot`, one-shot drum sampler R23).",
+      "description": "Whether its type is the drum sampler, whose context menu offers the swap to Simpler and Save as Default Pad (`device.swap_to_snapshot`, one-shot drum sampler R23).",
       "type": "boolean"
     },
     "takes_sample": {
@@ -13773,6 +14115,54 @@ What `export.audio` returns.
 
 </details>
 
+### `FileBeats`
+
+A file's tempo and beats from its analysis, as `clip.transients` reports readiness: `seconds` is the file's length, `bpm` its tempo, `beats` the times in seconds of its beats, in order.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `seconds` | number | yes | The file's length in seconds. |
+| `beats` | array of number | yes | The times in seconds of its beats, in increasing order. |
+| `bpm` | number or null | no | Its tempo in BPM, or `null` if it has no rhythm to measure. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A file's tempo and beats from its analysis, as `clip.transients` reports readiness: `seconds` is the file's length, `bpm` its tempo, `beats` the times in seconds of its beats, in order.",
+  "properties": {
+    "beats": {
+      "description": "The times in seconds of its beats, in increasing order.",
+      "items": {
+        "format": "double",
+        "type": "number"
+      },
+      "type": "array"
+    },
+    "bpm": {
+      "description": "Its tempo in BPM, or `null` if it has no rhythm to measure.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "seconds": {
+      "description": "The file's length in seconds.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "seconds",
+    "beats"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `FileFolderSettings`
 
 File & Folder's settings in `settings.state`.
@@ -14621,12 +15011,13 @@ One row of the content pane.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `path` | string | yes | Its path on disk. |
+| `path` | string | yes | Its path on disk; in the Plug-Ins label, the row's key instead: a vendor folder's is `plug-ins:/` and the vendor, a plug-in's is its file, `#`, and its identifier (the plug-in scanning spec, R11). |
 | `name` | string | yes | Its name, as the Name column shows it. |
 | `kind` | [`ItemKind`](#itemkind) | yes | What it is. |
 | `depth` | integer from 0 to 65535 | yes | How deep it's indented: 0 at the top of the list. |
 | `open` | boolean | yes | For a folder, whether it's open. |
 | `folder` | string or null | no | In search results, the folder it's in, relative to its place. |
+| `format` | [`PluginFormat`](#pluginformat) or null | no | For a plug-in, its format, which the row's badge shows (the plug-in scanning spec, R11). |
 
 <details><summary>JSON Schema</summary>
 
@@ -14648,6 +15039,17 @@ One row of the content pane.
         "null"
       ]
     },
+    "format": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PluginFormat"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "For a plug-in, its format, which the row's badge shows (the plug-in scanning spec, R11)."
+    },
     "kind": {
       "$ref": "#/$defs/ItemKind",
       "description": "What it is."
@@ -14662,7 +15064,7 @@ One row of the content pane.
       "type": "boolean"
     },
     "path": {
-      "description": "Its path on disk.",
+      "description": "Its path on disk; in the Plug-Ins label, the row's key instead: a vendor folder's is `plug-ins:/` and the vendor, a plug-in's is its file, `#`, and its identifier (the plug-in scanning spec, R11).",
       "type": "string"
     }
   },
@@ -16188,6 +16590,49 @@ One of:
 
 </details>
 
+### `LoopWarpShortSamples`
+
+Loop/Warp Short Samples (Record, Warp & Launch, Warp/Fades, L-SET-018): what a new clip of a short sample gets (the warping spec, R29 and R32).
+
+One of:
+
+- `"unwarped_one_shot"`: Warp and the loop off.
+- `"warped_one_shot"`: Warped, the loop off.
+- `"warped_loop"`: Warped, the loop on over the whole file.
+- `"auto"`: A loop when its analysis finds a steady beat that fits whole bars, a one-shot otherwise. What a new install has.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Loop/Warp Short Samples (Record, Warp & Launch, Warp/Fades, L-SET-018): what a new clip of a short sample gets (the warping spec, R29 and R32).",
+  "oneOf": [
+    {
+      "const": "unwarped_one_shot",
+      "description": "Warp and the loop off.",
+      "type": "string"
+    },
+    {
+      "const": "warped_one_shot",
+      "description": "Warped, the loop off.",
+      "type": "string"
+    },
+    {
+      "const": "warped_loop",
+      "description": "Warped, the loop on over the whole file.",
+      "type": "string"
+    },
+    {
+      "const": "auto",
+      "description": "A loop when its analysis finds a steady beat that fits whole bars, a one-shot otherwise. What a new install has.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `LoudnessResult`
 
 Loudness, as EBU R 128 reports it (ITU-R BS.1770-4).
@@ -16799,6 +17244,72 @@ What `midi.ports` returns.
 
 </details>
 
+### `MidiSidechain`
+
+A device's MIDI sidechain input: `source`, the MIDI track whose notes and channel messages the device hears, or absent for No Input.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `source` | [`TrackId`](#trackid) or null | no | The MIDI track it listens to, or `None` (No Input), as on a new device. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A device's MIDI sidechain input: `source`, the MIDI track whose notes and channel messages the device hears, or absent for No Input.",
+  "properties": {
+    "source": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TrackId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The MIDI track it listens to, or `None` (No Input), as on a new device."
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `MidiSidechainSection`
+
+A device's MIDI sidechain section, in the same left strip as a sidechain's (WP-5.27; the routing spec, R34): the toggle shows the section, which holds the MIDI source chooser.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `shown` | boolean | yes | Whether the section is shown, by the toggle at the top of the device's left strip. It changes only the view. |
+| `source` | string | yes | What the MIDI source chooser shows: a MIDI track's label (`1-MIDI`) or `No Input`. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A device's MIDI sidechain section, in the same left strip as a sidechain's (WP-5.27; the routing spec, R34): the toggle shows the section, which holds the MIDI source chooser.",
+  "properties": {
+    "shown": {
+      "description": "Whether the section is shown, by the toggle at the top of the device's left strip. It changes only the view.",
+      "type": "boolean"
+    },
+    "source": {
+      "description": "What the MIDI source chooser shows: a MIDI track's label (`1-MIDI`) or `No Input`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "shown",
+    "source"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `MixerOf`
 
 Which view's mixer: the Session View's or the Arrangement View's.
@@ -17191,7 +17702,7 @@ What a modulator's panel shows beside its parameters (WP-5.10; the modulation sp
 |---|---|---|---|
 | `mappings` | array of [`MappingRow`](#mappingrow) | yes | Its mappings, by slot. |
 | `armed` | integer or null | no | The slot whose Map button is lit, while a click on a parameter maps it. |
-| `shape` | array or null | no | A Curve Mod's breakpoint shape (the default one until it is edited); left out for a modulator that has none. |
+| `shape` | array or null | no | A Shaper's breakpoint shape (the default one until it is edited); left out for a modulator that has none. |
 
 <details><summary>JSON Schema</summary>
 
@@ -17217,7 +17728,7 @@ What a modulator's panel shows beside its parameters (WP-5.10; the modulation sp
       "type": "array"
     },
     "shape": {
-      "description": "A Curve Mod's breakpoint shape (the default one until it is edited); left out for a modulator that has none.",
+      "description": "A Shaper's breakpoint shape (the default one until it is edited); left out for a modulator that has none.",
       "items": {
         "$ref": "#/$defs/ShapePoint"
       },
@@ -17420,6 +17931,7 @@ The device `device.add` adds.
 |---|---|---|---|
 | `kind` | [`DeviceKind`](#devicekind) | yes | What it is: a native device's type ID or a plug-in's format and ID. |
 | `name` | string | yes | Its own name, such as the browser lists it. |
+| `midi_sidechain` | boolean | no | Whether it has a MIDI sidechain input, as its type declares (WP-5.27). |
 | `role` | [`DeviceRole`](#devicerole) | no | Where it goes in a chain. |
 | `sidechain` | boolean | no | Whether it has a sidechain input, as its type declares (WP-2.19b). |
 
@@ -17433,6 +17945,10 @@ The device `device.add` adds.
     "kind": {
       "$ref": "#/$defs/DeviceKind",
       "description": "What it is: a native device's type ID or a plug-in's format and ID."
+    },
+    "midi_sidechain": {
+      "description": "Whether it has a MIDI sidechain input, as its type declares (WP-5.27).",
+      "type": "boolean"
     },
     "name": {
       "description": "Its own name, such as the browser lists it.",
@@ -18580,6 +19096,9 @@ What `plugin.settings` returns.
 |---|---|---|---|
 | `hidden` | array of string | yes | The hidden plug-ins, as `format/plugin_id` keys. |
 | `show_hidden` | boolean | yes | Whether the browser shows hidden plug-ins. |
+| `use_audio_units_v2` | boolean | yes | Use Audio Units v2. |
+| `use_audio_units_v3` | boolean | yes | Use Audio Units v3. |
+| `vst3_system_folders` | boolean | yes | Use VST3 Plug-In System Folders. |
 | `format_preference` | [`PluginFormat`](#pluginformat) or null | no | The preferred format, if one is chosen. |
 
 <details><summary>JSON Schema</summary>
@@ -18609,11 +19128,26 @@ What `plugin.settings` returns.
     "show_hidden": {
       "description": "Whether the browser shows hidden plug-ins.",
       "type": "boolean"
+    },
+    "use_audio_units_v2": {
+      "description": "Use Audio Units v2.",
+      "type": "boolean"
+    },
+    "use_audio_units_v3": {
+      "description": "Use Audio Units v3.",
+      "type": "boolean"
+    },
+    "vst3_system_folders": {
+      "description": "Use VST3 Plug-In System Folders.",
+      "type": "boolean"
     }
   },
   "required": [
     "hidden",
-    "show_hidden"
+    "show_hidden",
+    "use_audio_units_v2",
+    "use_audio_units_v3",
+    "vst3_system_folders"
   ],
   "type": "object"
 }
@@ -20101,7 +20635,7 @@ What `device.edit_sample` returns.
 | `device` | [`DeviceId`](#deviceid) | yes | The sampler device. |
 | `edits` | array of [`SampleEdit`](#sampleedit) | yes | The sample's edit list now. |
 | `length` | integer, at least 0 | yes | The edited sample's length in frames at its own rate. |
-| `layer` | [`LayerId`](#layerid) or null | no | The layer edited; none for Snapshot's sample. |
+| `layer` | [`LayerId`](#layerid) or null | no | The layer edited; none for Simpler's sample. |
 
 <details><summary>JSON Schema</summary>
 
@@ -20129,7 +20663,7 @@ What `device.edit_sample` returns.
           "type": "null"
         }
       ],
-      "description": "The layer edited; none for Snapshot's sample."
+      "description": "The layer edited; none for Simpler's sample."
     },
     "length": {
       "description": "The edited sample's length in frames at its own rate.",
@@ -20159,7 +20693,7 @@ What `device.crop_sample` and `device.reverse_sample` return.
 | `media` | [`ContentHash`](#contenthash) | yes | The processed copy, now the sample's media. |
 | `path` | string | yes | Where the copy is in the project folder. |
 | `length` | integer, at least 0 | yes | Its length in frames at its own rate. |
-| `layer` | [`LayerId`](#layerid) or null | no | The layer; none for Snapshot's sample. |
+| `layer` | [`LayerId`](#layerid) or null | no | The layer; none for Simpler's sample. |
 
 <details><summary>JSON Schema</summary>
 
@@ -20180,7 +20714,7 @@ What `device.crop_sample` and `device.reverse_sample` return.
           "type": "null"
         }
       ],
-      "description": "The layer; none for Snapshot's sample."
+      "description": "The layer; none for Simpler's sample."
     },
     "length": {
       "description": "Its length in frames at its own rate.",
@@ -20292,6 +20826,53 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `SavedDefaults`
+
+What `clip.save_default` and `clip.defaults` return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The clip. |
+| `file` | string | yes | The defaults file beside the clip's sample, where the defaults are or would be kept. |
+| `defaults` | [`ClipDefaults`](#clipdefaults) or null | yes | The file's saved defaults; `null` when none are saved, or the file beside the sample is not whole, not of the current format, or was saved for other content. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `clip.save_default` and `clip.defaults` return.",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The clip."
+    },
+    "defaults": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ClipDefaults"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The file's saved defaults; `null` when none are saved, or the file beside the sample is not whole, not of the current format, or was saved for other content."
+    },
+    "file": {
+      "description": "The defaults file beside the clip's sample, where the defaults are or would be kept.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "clip",
+    "file",
+    "defaults"
+  ],
+  "type": "object"
 }
 ```
 
@@ -20924,6 +21505,7 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
 | `tempo_midi` | [`MidiPortsResult`](#midiportsresult) | yes | Tempo & MIDI: the MIDI ports' switches and the computer MIDI keyboard, the same as `midi.ports` reports. |
 | `create_fades_on_clip_edges` | boolean | yes | Record, Warp & Launch: Create Fades on Clip Edges, as `settings.set_create_fades_on_clip_edges` sets it. |
 | `warp_recorded_audio` | boolean | yes | Record, Warp & Launch: Warp Recorded Audio, as `settings.set_warp_recorded_audio` sets it. |
+| `warp` | [`WarpPrefs`](#warpprefs) | yes | Record, Warp & Launch: Loop/Warp Short Samples, Auto-Warp Long Samples and Default Warp Mode. |
 | `launch` | [`LaunchPrefs`](#launchprefs) | yes | Record, Warp & Launch: the Launch section, as the `settings.set_default_launch_*`, `settings.set_select_on_launch`, `settings.set_select_next_scene_on_launch` and `settings.set_start_recording_on_scene_launch` commands set it. |
 | `record_session_automation_in` | [`SessionAutomationTracks`](#sessionautomationtracks) | yes | Record, Warp & Launch: Record Session automation in, as `settings.set_record_session_automation_in` sets it. |
 | `file_folder` | [`FileFolderSettings`](#filefoldersettings) | yes | File & Folder: the Temporary Folder, as `settings.set_temporary_folder` sets it. |
@@ -20990,6 +21572,10 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
       "$ref": "#/$defs/ThemeChoice",
       "description": "Theme & Colors: the theme, as `settings.set_theme` takes it."
     },
+    "warp": {
+      "$ref": "#/$defs/WarpPrefs",
+      "description": "Record, Warp & Launch: Loop/Warp Short Samples, Auto-Warp Long Samples and Default Warp Mode."
+    },
     "warp_recorded_audio": {
       "description": "Record, Warp & Launch: Warp Recorded Audio, as `settings.set_warp_recorded_audio` sets it.",
       "type": "boolean"
@@ -21003,6 +21589,7 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
     "tempo_midi",
     "create_fades_on_clip_edges",
     "warp_recorded_audio",
+    "warp",
     "launch",
     "record_session_automation_in",
     "file_folder",
@@ -21167,24 +21754,29 @@ A region the import left out.
 
 ### `ShapePoint`
 
-One breakpoint of a Curve Mod's shape (R23): a place in the cycle, the output there, and the bend of the segment starting at it.
+One breakpoint of a Shaper's shape (R23): a place in the cycle, the output there, and the bend of the segment starting at it.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `x` | number | yes | Where in the cycle, from 0 (its start) to 1 (its end). |
 | `y` | number | yes | The output there, from 0 to 1. |
 | `bend` | number | no | The bend of the segment starting here, from −1 to 1, by the automation spec's curve law; 0 is straight. |
+| `sustain` | boolean | no | Whether it is the Shaper MIDI's sustain breakpoint (R26): at most one in a shape. |
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "One breakpoint of a Curve Mod's shape (R23): a place in the cycle, the output there, and the bend of the segment starting at it.",
+  "description": "One breakpoint of a Shaper's shape (R23): a place in the cycle, the output there, and the bend of the segment starting at it.",
   "properties": {
     "bend": {
       "description": "The bend of the segment starting here, from −1 to 1, by the automation spec's curve law; 0 is straight.",
       "format": "double",
       "type": "number"
+    },
+    "sustain": {
+      "description": "Whether it is the Shaper MIDI's sustain breakpoint (R26): at most one in a shape.",
+      "type": "boolean"
     },
     "x": {
       "description": "Where in the cycle, from 0 (its start) to 1 (its end).",
@@ -22996,6 +23588,49 @@ What `view.state` returns: what the view commands switch, without switching any 
 
 </details>
 
+### `WarpFrom`
+
+How Warp From Here warps what follows its point (the warping spec, R39).
+
+One of:
+
+- `"auto"`: Warp From Here: a marker on every bar after it, from the tempo found there.
+- `"start_at"`: Warp From Here (Start At …): the same, starting from the tempo `bpm` (the set's tempo there unless given).
+- `"straight"`: Warp From Here (Straight): no markers after it, the clip's tempo the tempo found after it.
+- `"bpm"`: Warp … BPM From Here: no markers after it, the clip's tempo `bpm` (the set's tempo there unless given).
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How Warp From Here warps what follows its point (the warping spec, R39).",
+  "oneOf": [
+    {
+      "const": "auto",
+      "description": "Warp From Here: a marker on every bar after it, from the tempo found there.",
+      "type": "string"
+    },
+    {
+      "const": "start_at",
+      "description": "Warp From Here (Start At …): the same, starting from the tempo `bpm` (the set's tempo there unless given).",
+      "type": "string"
+    },
+    {
+      "const": "straight",
+      "description": "Warp From Here (Straight): no markers after it, the clip's tempo the tempo found after it.",
+      "type": "string"
+    },
+    {
+      "const": "bpm",
+      "description": "Warp … BPM From Here: no markers after it, the clip's tempo `bpm` (the set's tempo there unless given).",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `WarpMarker`
 
 A warp marker: `time`, seconds into the audio file, plays on `beat`, in ticks (705,600 to the quarter note) counted from the clip's 1.1.1 (negative before it).
@@ -23082,6 +23717,49 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `WarpPrefs`
+
+The first three rows of the Warp/Fades section (L-SET-018; WP-4.9), with the defaults observed in Live 12.4.6. They are preferences, kept between starts and not saved with a set.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `loop_warp_short_samples` | [`LoopWarpShortSamples`](#loopwarpshortsamples) | yes | Loop/Warp Short Samples, as `settings.set_loop_warp_short_samples` sets it. |
+| `auto_warp_long_samples` | boolean | yes | Auto-Warp Long Samples, as `settings.set_auto_warp_long_samples` sets it. |
+| `default_warp_mode` | [`DefaultWarpMode`](#defaultwarpmode) | yes | Default Warp Mode, as `settings.set_default_warp_mode` sets it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The first three rows of the Warp/Fades section (L-SET-018; WP-4.9), with the defaults observed in Live 12.4.6. They are preferences, kept between starts and not saved with a set.",
+  "properties": {
+    "auto_warp_long_samples": {
+      "default": true,
+      "description": "Auto-Warp Long Samples, as `settings.set_auto_warp_long_samples` sets it.",
+      "type": "boolean"
+    },
+    "default_warp_mode": {
+      "$ref": "#/$defs/DefaultWarpMode",
+      "default": "beats",
+      "description": "Default Warp Mode, as `settings.set_default_warp_mode` sets it."
+    },
+    "loop_warp_short_samples": {
+      "$ref": "#/$defs/LoopWarpShortSamples",
+      "default": "auto",
+      "description": "Loop/Warp Short Samples, as `settings.set_loop_warp_short_samples` sets it."
+    }
+  },
+  "required": [
+    "loop_warp_short_samples",
+    "auto_warp_long_samples",
+    "default_warp_mode"
+  ],
+  "type": "object"
 }
 ```
 

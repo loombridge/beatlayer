@@ -10,6 +10,7 @@ use imbl::Vector;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::auto_warp::{FileBeats, LOOP_BARS, WarpFrom, WarpPoint, nearest_bars};
 use crate::automation::{
     AutomationTarget, MixerParam, PointError, check_bend, entry, override_device,
 };
@@ -849,6 +850,62 @@ pub enum Command {
         /// What to multiply by: 2 for ×2, 0.5 for ÷2.
         factor: f64,
     },
+    /// Makes a point of a warped clip's file its 1.1.1 (WP-4.9, the warping
+    /// spec R38): a warp marker is there, made if there was none, and every
+    /// marker, the End marker and the loop brace move by the same ticks, so
+    /// no segment's tempo changes; the Start marker goes to 1.1.1.
+    SetOneOneOneHere {
+        /// The warped audio clip.
+        clip: ClipId,
+        /// Where: the selected marker or the insert marker.
+        #[serde(flatten)]
+        at: WarpPoint,
+    },
+    /// Warps a warped clip from a point on (WP-4.9, R39): the markers up to
+    /// it stay and those after it are replaced as `method` says.
+    WarpFromHere {
+        /// The warped audio clip.
+        clip: ClipId,
+        /// Where: the selected marker or the insert marker.
+        #[serde(flatten)]
+        at: WarpPoint,
+        /// How the audio after the point is warped.
+        method: WarpFrom,
+        /// The tempo for `start_at` and `bpm`: the set's tempo at the point
+        /// unless given.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bpm: Option<f64>,
+        /// The file's tempo and beats. Left out, the app uses the file's
+        /// analysis, and refuses while it is not ready.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        analysis: Option<FileBeats>,
+    },
+    /// Warps a warped clip's whole file as a loop of whole bars (WP-4.9,
+    /// R40): a marker at the file's start on 1.1.1 and one at its end, the
+    /// loop brace over the file, the loop on. The bar count is the one of 1,
+    /// 2, 4, 8, 16 and 32 whose tempo is nearest the set's at the clip's
+    /// start.
+    WarpAsLoop {
+        /// The warped audio clip.
+        clip: ClipId,
+        /// The file's length. Left out, the app reads it from the file, and
+        /// refuses while the file's analysis is not ready.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        analysis: Option<FileBeats>,
+    },
+    /// Warps the part of a warped clip's file from `from` to `to` as a loop
+    /// of whole bars (WP-4.9, R40): markers at its ends, the loop brace on
+    /// it, the loop on.
+    WarpSelectionAsLoop {
+        /// The warped audio clip.
+        clip: ClipId,
+        /// The start of the part, in seconds in the file.
+        #[schemars(range(min = 0.0))]
+        from: f64,
+        /// The end of the part, in seconds, after `from`.
+        #[schemars(range(min = 0.0))]
+        to: f64,
+    },
     /// Sets a warped or unwarped audio clip's warp mode (WP-4.2).
     SetClipWarpMode {
         /// The audio clip.
@@ -1170,7 +1227,7 @@ pub enum Command {
         /// The name the title bar shows while Show Preset Name is on, such
         /// as the preset's; empty for the device's own name.
         name: String,
-        /// A Curve Mod's breakpoint shape (the modulation spec, R23), which
+        /// A Shaper's breakpoint shape (the modulation spec, R23), which
         /// a preset of one holds; `null` for the default shape.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         shape: Option<Vec<crate::modulator::ShapePoint>>,
@@ -1229,10 +1286,10 @@ pub enum Command {
         /// The slot, from 0 to 7.
         slot: u8,
     },
-    /// Replaces the breakpoint shape of a Curve Mod (R23): every edit of
+    /// Replaces the breakpoint shape of a Shaper (R23): every edit of
     /// its display, Clear and the presets make a new list.
     SetShape {
-        /// The Curve Mod device.
+        /// The Shaper device.
         device: DeviceId,
         /// The breakpoints, in order along the cycle (at most 64), each with
         /// its place and output from 0 to 1 and the bend of the segment
@@ -1351,7 +1408,7 @@ pub enum Command {
     },
     /// Adds an edit to the end of a sample's edit list (WP-5.15, R55): a
     /// layer's, or with no `layer` the sample in slot 0 of a device such as
-    /// Snapshot. A layer's length and markers follow the audio (R56). The
+    /// Simpler. A layer's length and markers follow the audio (R56). The
     /// selection must be a span of the sample as the earlier edits left it;
     /// a layer's is checked here, a device's by `device.edit_sample`, which
     /// knows the sample.
@@ -1434,6 +1491,16 @@ pub enum Command {
         device: DeviceId,
         /// Whether the sidechain is on.
         enabled: bool,
+    },
+    /// Sets the MIDI track a device's MIDI sidechain listens to, or none.
+    /// The device must have a MIDI sidechain input.
+    SetMidiSidechainSource {
+        /// The device.
+        device: DeviceId,
+        /// The MIDI track whose notes and channel messages the device
+        /// hears (its own track too), or `None` for No Input.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        track: Option<TrackId>,
     },
     /// Sets a device's sidechain gain, as linear gain (finite, at least 0).
     SetSidechainGain {
@@ -1682,6 +1749,10 @@ impl Command {
             Self::MoveWarpMarkers { .. } | Self::ShiftWarpMarker { .. } => "Move Warp Marker",
             Self::DeleteWarpMarkers { .. } => "Delete Warp Marker",
             Self::SetSegmentBpm { .. } | Self::ScaleTempo { .. } => "Change clip tempo",
+            // WP-4.9. Live's undo names are to observe.
+            Self::SetOneOneOneHere { .. } => "Set 1.1.1 Here",
+            Self::WarpFromHere { .. } => "Warp From Here",
+            Self::WarpAsLoop { .. } | Self::WarpSelectionAsLoop { .. } => "Warp as Loop",
             // WP-4.2. Live's names for these are to observe.
             Self::SetClipWarpMode { .. } => "Change Warp Mode",
             Self::SetClipWarpSettings { .. } => "Change Warp Settings",
@@ -1773,7 +1844,9 @@ impl Command {
             Self::SetLayerOptions { .. } => "Change Sample Options",
             // WP-2.19b, as Live 12.4.6 names them (observed); Listen's is to
             // observe.
-            Self::SetSidechainInput { .. } => "Change \"Routing\"",
+            Self::SetSidechainInput { .. } | Self::SetMidiSidechainSource { .. } => {
+                "Change \"Routing\""
+            }
             Self::SetSidechainEnabled { .. } => "Change \"Sidechain On\"",
             Self::SetSidechainGain { .. } => "Change \"SC Gain\"",
             Self::SetSidechainMix { .. } => "Change \"Mix\"",
@@ -2384,6 +2457,44 @@ impl Document {
             Command::ScaleTempo { clip, factor } => {
                 self.edit_markers_with(*clip, |audio| audio.with_tempo_scaled(*factor))
             }
+            Command::SetOneOneOneHere { clip, at } => {
+                self.edit_markers_with(*clip, |audio| audio.with_1_1_1_here(at))
+            }
+            Command::WarpFromHere {
+                clip,
+                at,
+                method,
+                bpm,
+                analysis,
+            } => {
+                let set_bpm = self.set_bpm_at(*clip, Some(at))?;
+                self.edit_markers_with(*clip, |audio| {
+                    audio.with_warp_from_here(at, *method, *bpm, set_bpm, analysis.as_ref())
+                })
+            }
+            Command::WarpAsLoop { clip, analysis } => {
+                let seconds =
+                    analysis
+                        .as_ref()
+                        .map(|file| file.seconds)
+                        .ok_or(ModelError::InvalidInput(
+                            "give the file's length in `analysis`",
+                        ))?;
+                let set_bpm = self.set_bpm_at(*clip, None)?;
+                self.edit_markers_with(*clip, |audio| {
+                    audio.require_warp()?;
+                    let bars = nearest_bars(&LOOP_BARS, seconds, set_bpm);
+                    audio.warped_as_loop(0.0, seconds, bars, true)
+                })
+            }
+            Command::WarpSelectionAsLoop { clip, from, to } => {
+                let set_bpm = self.set_bpm_at(*clip, None)?;
+                self.edit_markers_with(*clip, |audio| {
+                    audio.require_warp()?;
+                    let bars = nearest_bars(&LOOP_BARS, to - from, set_bpm);
+                    audio.warped_as_loop(*from, *to, bars, true)
+                })
+            }
             Command::SetClipLegato { clip, legato } => {
                 self.edit_launch(*clip, |launch| launch.legato = *legato)
             }
@@ -2726,6 +2837,16 @@ impl Document {
             Command::SetSidechainInput { device, input } => {
                 let input = input.clone();
                 self.edit_sidechain(*device, |s| s.input = input)?;
+                self.check_routing(self.device_owner(*device)?)
+            }
+            Command::SetMidiSidechainSource { device, track } => {
+                let mut sidechain = self
+                    .device_ref(*device)?
+                    .midi_sidechain
+                    .clone()
+                    .ok_or(ModelError::NoMidiSidechain(*device))?;
+                sidechain.source = *track;
+                self.device_mut(*device)?.midi_sidechain = Some(sidechain);
                 self.check_routing(self.device_owner(*device)?)
             }
             Command::SetSidechainEnabled { device, enabled } => {
@@ -3422,6 +3543,26 @@ impl Document {
         let next = edit(current)?;
         check_marker_order(&next)?;
         self.edit_audio(id, |audio| *audio = next)
+    }
+
+    /// The set's tempo, in BPM, where a warped clip plays the point `at`
+    /// (the clip's start without one): the warping spec, R39 and R40.
+    fn set_bpm_at(&self, id: ClipId, at: Option<&WarpPoint>) -> Result<f64, ModelError> {
+        let clip = self.clip_ref(id)?;
+        let ClipData::Audio(audio) = &clip.data else {
+            return Err(ModelError::NotAudioClip(id));
+        };
+        let beat = at.and_then(|at| match (at.marker, at.beat, at.time) {
+            (Some(marker), None, None) => audio.warp_markers.get(marker).map(|m| m.beat),
+            (None, Some(beat), None) => Some(beat),
+            (None, None, Some(time)) => audio
+                .warp_map()
+                .ok()
+                .map(|map| Ticks(map.time_to_beat(time).round() as i64)),
+            _ => None,
+        });
+        let played = beat.map_or(Ticks::ZERO, |beat| Ticks(beat.get() - audio.start as i64));
+        Ok(self.settings.tempo.bpm_at(clip.start + played).get())
     }
 
     /// Makes the same edit to each of `clips`, or to none if it's refused for

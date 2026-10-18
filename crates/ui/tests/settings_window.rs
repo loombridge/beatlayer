@@ -247,3 +247,67 @@ fn the_test_tone_switch_plays_and_stops() {
         "closing the window stops the tone"
     );
 }
+
+// Spec: warping R29. The Warp/Fades section's first three rows are live, in
+// Live's order, each running its command and showing what the shell keeps.
+#[test]
+fn the_warp_fades_rows_are_live_in_lives_order() {
+    let mut h = Harness::new(Window::Settings);
+    h.shell
+        .invoke("app.settings", json!({ "page": "record-warp-launch" }))
+        .unwrap();
+    h.shell.take_effects();
+    h.settle();
+
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    let mut tops = Vec::new();
+    for label in [
+        "Loop/Warp Short Samples",
+        "Auto-Warp Long Samples",
+        "Default Warp Mode",
+    ] {
+        let node = Harness::node(&nodes, label);
+        assert!(!node.disabled, "{label} is live");
+        tops.push(node.bounds.unwrap().y0);
+    }
+    assert_eq!(
+        Harness::node(&nodes, "Loop/Warp Short Samples").value,
+        "Auto"
+    );
+    assert_eq!(Harness::node(&nodes, "Default Warp Mode").value, "Beats");
+    assert_eq!(
+        Harness::node(&nodes, "Auto-Warp Long Samples").toggled,
+        Some(true)
+    );
+    let fades = Harness::node(&nodes, "Create Fades on Clip Edges");
+    tops.push(fades.bounds.unwrap().y0);
+    assert!(tops.windows(2).all(|pair| pair[0] < pair[1]), "{tops:?}");
+
+    // A focused chooser steps to the next choice, a switch toggles.
+    h.accesskit(
+        Id::new(("chooser", "loop-warp-short-samples")),
+        Action::Focus,
+    );
+    h.key(Key::ArrowUp, Modifiers::NONE);
+    h.accesskit(Id::new(("switch", "auto-warp-long-samples")), Action::Click);
+    h.accesskit(Id::new(("chooser", "default-warp-mode")), Action::Focus);
+    h.key(Key::ArrowDown, Modifiers::NONE);
+    h.settle();
+    let prefs = h.shell.warp_prefs();
+    assert_eq!(prefs.loop_warp_short_samples.label(), "Warped Loop");
+    assert!(!prefs.auto_warp_long_samples);
+    assert_eq!(prefs.default_warp_mode.label(), "Tones");
+    for id in [
+        "settings.set_loop_warp_short_samples",
+        "settings.set_auto_warp_long_samples",
+        "settings.set_default_warp_mode",
+    ] {
+        assert!(
+            h.events.iter().any(|e| matches!(
+                e,
+                bl_ui::main_window::UiEvent::Invoke(i) if i.id == id
+            )),
+            "{id}"
+        );
+    }
+}

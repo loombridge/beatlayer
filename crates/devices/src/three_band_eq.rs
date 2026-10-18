@@ -1,4 +1,4 @@
-//! Triad, the native three-band EQ (WP-5.21; the three-band-eq spec): a
+//! EQ Three, the native three-band EQ (WP-5.21; the three-band-eq spec): a
 //! low, a mid and a high band, each with its gain (to silence, up to +6 dB)
 //! and its On switch, split at FreqLo and FreqHi by crossovers of 24 or 48
 //! dB per octave, and a signal light for each band.
@@ -20,7 +20,7 @@ use crate::eq::{Type, coeffs};
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 use crate::sections::{Biquad, Coeffs, REFRESH_FRAMES};
 
-/// Triad's device type.
+/// EQ Three's device type.
 pub const THREE_BAND_EQ: &str = "beatlayer.triad";
 
 /// Gain Low, Gain Mid, Gain High: each band's gain, a linear factor from
@@ -67,7 +67,7 @@ const Q_LR8: [f64; 4] = [
     0.541_196_100_146_197,
 ];
 
-/// Triad's device type.
+/// EQ Three's device type.
 #[must_use]
 pub fn three_band_eq_type() -> DeviceType {
     let gain =
@@ -113,7 +113,7 @@ pub fn three_band_eq_type() -> DeviceType {
         ParamDescriptor::choice(SLOPE, "Slope", &SLOPES, 0)
             .describe("How steeply the bands part: 24 or 48 dB per octave."),
     ];
-    DeviceType::native(THREE_BAND_EQ, "Triad", DeviceRole::AudioEffect)
+    DeviceType::native(THREE_BAND_EQ, "EQ Three", DeviceRole::AudioEffect)
         .with_description(DeviceDescription::new(params).with_layout(layout()))
 }
 
@@ -140,7 +140,7 @@ fn layout() -> DeviceLayout {
     ]))
 }
 
-/// Adds Triad to `registry`.
+/// Adds EQ Three to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, three_band_eq_type(), |_, config| {
         Triad::new(config)
@@ -215,7 +215,7 @@ struct Chain {
     align: Split,
 }
 
-/// Triad's audio-thread half.
+/// EQ Three's audio-thread half.
 pub struct Triad {
     rate: f64,
     chains: [Chain; 2],
@@ -228,7 +228,7 @@ pub struct Triad {
 }
 
 impl Triad {
-    /// A Triad for `config`.
+    /// An EQ Three for `config`.
     #[must_use]
     pub fn new(config: &NodeConfig) -> Self {
         let rate = config.sample_rate.as_f64();

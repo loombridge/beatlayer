@@ -1,4 +1,4 @@
-//! Bond, the native bus compressor (WP-5.21; the bus-compressor spec): the
+//! Glue Compressor, the native bus compressor (WP-5.21; the bus-compressor spec): the
 //! static curve at several ratios, the attack and release time constants,
 //! Auto Release, Range, Makeup, Soft Clip and its light, Dry/Wet,
 //! Oversampling and its latency, and a sidechain key that ducks the input.
@@ -83,7 +83,7 @@ fn expected_reduction(level: f64, threshold: f64, ratio: f64) -> f64 {
     }
 }
 
-/// The settled gain in dB of a steady `level` dB signal through a Bond of
+/// The settled gain in dB of a steady `level` dB signal through a Glue Compressor of
 /// `params`, the attack short.
 fn settled_gain(params: &[(ParamId, f64)], level: f64) -> f64 {
     let mut all = vec![(ATTACK, 0.01)];
@@ -132,7 +132,7 @@ fn the_knee_narrows_as_the_ratio_rises() {
     assert!(knee_db(2.0) > knee_db(4.0) && knee_db(4.0) > knee_db(20.0));
 }
 
-/// The reduction in dB, frame by frame, of `input` through a Bond.
+/// The reduction in dB, frame by frame, of `input` through a Glue Compressor.
 fn reductions(params: &[(ParamId, f64)], input: &[f32]) -> Vec<f64> {
     let out = stream(bond(params, 4096).as_mut(), input, None, 4096);
     out.iter()
@@ -244,7 +244,7 @@ fn sine(hz: f64, amplitude: f64, frames: usize) -> Vec<f32> {
 /// The light and gain reduction a block of `input` leaves published.
 fn published(params: &[(ParamId, f64)], input: &[f32]) -> (f32, f32) {
     let mut node = bond(params, input.len());
-    let mut reader = node.display().expect("Bond publishes a display");
+    let mut reader = node.display().expect("Glue Compressor publishes a display");
     run(node.as_mut(), input, None, &[]);
     let values = reader.read().values.clone();
     (values[0], values[1])

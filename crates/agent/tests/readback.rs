@@ -312,6 +312,7 @@ fn fixture() -> Project {
         mix: 0.25,
         listen: true,
     });
+    device.midi_sidechain = Some(bl_model::MidiSidechain { source: Some(keys) });
     apply(
         &mut editor,
         Command::InsertDevice {
@@ -320,11 +321,11 @@ fn fixture() -> Project {
             device,
         },
     );
-    // A Curve Mod mapping that device, with a shape of its own.
+    // A Shaper mapping that device, with a shape of its own.
     let curve: bl_model::DeviceId = editor.new_id();
     let mut modulator = Device::new(
         curve,
-        "Curve Mod",
+        "Shaper",
         DeviceKind::Native {
             device_type: bl_model::modulator::CURVE_MOD.to_owned(),
         },
@@ -778,6 +779,7 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "automation.1.enabled",
                 "automation.0.target",
                 "devices.0.sidechain.input",
+                "devices.0.midi_sidechain.source",
                 "take_lanes.0.clips.1.data.gain",
                 "clips.0",
             ][..],
@@ -825,6 +827,7 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "show_preset_name",
                 "params",
                 "sidechain",
+                "midi_sidechain",
                 "floating",
                 "media",
                 "layers",

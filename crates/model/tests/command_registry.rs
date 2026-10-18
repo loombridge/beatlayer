@@ -11,10 +11,11 @@ use bl_model::registry::{self, RunError};
 use bl_model::{
     ArrangementLoop, AudioData, AutomationTarget, BeatsUpdate, Chain, ChainId, Change, ChangeSet,
     Channel, Clip, ClipData, ClipId, ClipLaunch, Command, ComplexProUpdate, ContentHash, CountIn,
-    CrossfadeAssign, Device, DeviceId, DeviceKind, EditError, Editor, FollowAction, FollowActions,
-    FollowPatch, Input, LaunchMode, LaunchQuantization, MetronomeRhythm, MetronomeSound, MidiData,
-    MixerParam, ModelError, Monitor, Note, Output, ParamId, PluginFormat, Preserve, SceneId,
-    SendTap, TakeClip, TakeLane, Tap, TonesUpdate, TrackId, TrackKind, WarpMode,
+    CrossfadeAssign, Device, DeviceId, DeviceKind, EditError, Editor, FileBeats, FollowAction,
+    FollowActions, FollowPatch, Input, LaunchMode, LaunchQuantization, MetronomeRhythm,
+    MetronomeSound, MidiData, MixerParam, ModelError, Monitor, Note, Output, ParamId, PluginFormat,
+    Preserve, SceneId, SendTap, TakeClip, TakeLane, Tap, TonesUpdate, TrackId, TrackKind, WarpFrom,
+    WarpMode, WarpPoint,
 };
 use serde_json::{Value, json};
 
@@ -52,7 +53,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        153,
+        158,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -66,8 +67,10 @@ fn every_document_command_is_registered() {
          set_clip_launch_mode, WP-4.1 seven for the warp map, WP-4.3 five for transients and ranged warp markers, WP-5.1 fifteen for racks and \
          their chains, WP-5.12 the two Compare commands, WP-5.10 map_modulator, \
          unmap_modulator and set_shape, WP-5.13 eleven for a multisampler's layers, WP-5.15 \
-         three for a sample's edits, WP-3.10 the two for follow actions, and WP-4.2 four for the \
-         warp mode and the RAM and HiQ switches"
+         three for a sample's edits, WP-3.10 the two for follow actions, WP-4.2 four for the \
+         warp mode and the RAM and HiQ switches, WP-5.27 set_midi_sidechain_source, and \
+         WP-4.9 four for auto-warp, and WP-3.18 the \
+         two for Cue mode and the Cue Volume"
     );
 
     for op in &ops {
@@ -696,6 +699,26 @@ fn every_command_runs_by_id() {
         !audio.warp && audio.warp_markers.len() == 2,
         "the map stays"
     );
+    // Auto-warp's commands (WP-4.9).
+    agent.run("clip.set_warp", json!({ "clip": loop_clip, "warp": true }));
+    agent.run(
+        "clip.set_1_1_1_here",
+        json!({ "clip": loop_clip, "marker": 0 }),
+    );
+    agent.run(
+        "clip.warp_from_here",
+        json!({ "clip": loop_clip, "marker": 0, "method": "bpm", "bpm": 100.0 }),
+    );
+    let file = json!({ "seconds": 4.0, "bpm": null, "beats": [] });
+    agent.run(
+        "clip.warp_as_loop",
+        json!({ "clip": loop_clip, "analysis": file }),
+    );
+    agent.run(
+        "clip.warp_selection_as_loop",
+        json!({ "clip": loop_clip, "from": 0.5, "to": 2.5 }),
+    );
+    assert!(warped(&agent).looping);
     agent.run("clip.delete", json!({ "clip": loop_clip }));
     assert!(agent.editor.document().clip(loop_clip).is_none());
 
@@ -1057,7 +1080,7 @@ fn every_command_runs_by_id() {
     agent.run(
         "device.insert",
         json!({ "track": drums, "index": 0, "device": {
-            "id": wave, "name": "Curve Mod", "enabled": true, "params": [],
+            "id": wave, "name": "Shaper", "enabled": true, "params": [],
             "kind": { "native": { "device_type": "beatlayer.curve_mod" } },
         } }),
     );
@@ -1135,6 +1158,20 @@ fn every_command_runs_by_id() {
     agent.run(
         "device.set_sidechain_listen",
         json!({ "device": duck, "listen": true }),
+    );
+    // A device with a MIDI sidechain input, listening to a MIDI track.
+    let hear: DeviceId = agent.new_id();
+    agent.run(
+        "device.insert",
+        json!({ "track": reverb, "index": 0, "device": {
+            "id": hear, "name": "Hear", "enabled": true, "params": [],
+            "kind": { "native": { "device_type": "beatlayer.hear" } },
+            "midi_sidechain": {},
+        } }),
+    );
+    agent.run(
+        "device.set_midi_sidechain_source",
+        json!({ "device": hear }),
     );
     // Racks (WP-5.1): a rack with a chain, a second chain added with a
     // device in it, a device moved in and switched on and off with
@@ -2125,6 +2162,48 @@ fn schemas_match_what_commands_serialise() {
             Command::ScaleTempo { clip, factor: 0.5 },
         ),
         (
+            "clip.set_1_1_1_here",
+            Command::SetOneOneOneHere {
+                clip,
+                at: WarpPoint {
+                    marker: Some(0),
+                    ..WarpPoint::default()
+                },
+            },
+        ),
+        (
+            "clip.warp_from_here",
+            Command::WarpFromHere {
+                clip,
+                at: WarpPoint {
+                    beat: Some(Ticks::WHOLE),
+                    ..WarpPoint::default()
+                },
+                method: WarpFrom::StartAt,
+                bpm: Some(100.0),
+                analysis: Some(FileBeats {
+                    seconds: 4.0,
+                    bpm: Some(120.0),
+                    beats: vec![0.0, 0.5, 1.0],
+                }),
+            },
+        ),
+        (
+            "clip.warp_as_loop",
+            Command::WarpAsLoop {
+                clip,
+                analysis: None,
+            },
+        ),
+        (
+            "clip.warp_selection_as_loop",
+            Command::WarpSelectionAsLoop {
+                clip,
+                from: 0.5,
+                to: 2.5,
+            },
+        ),
+        (
             "clip.set_legato",
             Command::SetClipLegato { clip, legato: true },
         ),
@@ -2417,6 +2496,13 @@ fn schemas_match_what_commands_serialise() {
             Command::SetSidechainListen {
                 device,
                 listen: true,
+            },
+        ),
+        (
+            "device.set_midi_sidechain_source",
+            Command::SetMidiSidechainSource {
+                device,
+                track: None,
             },
         ),
         (

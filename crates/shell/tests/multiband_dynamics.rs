@@ -1,4 +1,4 @@
-//! Triband, the native multiband dynamics, in the shell (WP-5.22; the
+//! Multiband Dynamics, the native multiband dynamics, in the shell (WP-5.22; the
 //! multiband-dynamics spec, R17): a set with the device saves and reopens
 //! with every parameter, and `device.parameters` reads them back. Driven
 //! through `Shell::run`, as an agent drives it, on bl-project's real set
@@ -77,7 +77,7 @@ fn a_set_with_triband_reopens_with_every_parameter() {
                 json!({
                     "device": {
                         "kind": DeviceKind::Native { device_type: MULTIBAND_DYNAMICS.to_owned() },
-                        "name": "Triband",
+                        "name": "Multiband Dynamics",
                         "role": DeviceRole::AudioEffect,
                     }
                 }),

@@ -1,4 +1,4 @@
-//! Hold, the note-length MIDI effect (WP-5.30; the MIDI note length spec): the
+//! Note Length, the note-length MIDI effect (WP-5.30; the MIDI note length spec): the
 //! two trigger sources, Length in milliseconds or beat divisions, Gate,
 //! Release Velocity, Decay Time, Key Scale and Latch. Every block is a
 //! real-time section under the allocation trap.
@@ -254,7 +254,7 @@ fn turning_latch_off_ends_the_latched_note() {
 }
 
 // Spec: device-framework R31. A note-off for a note that went through while
-// Hold was switched off passes through once it is on again.
+// Note Length was switched off passes through once it is on again.
 #[test]
 fn a_note_played_while_switched_off_ends_after_switching_on() {
     for size in SIZES {

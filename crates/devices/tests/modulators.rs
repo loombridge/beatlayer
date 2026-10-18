@@ -19,6 +19,10 @@ use common::{control, device, node, noise, run};
 fn registry() -> Registry {
     let mut registry = Registry::empty();
     bl_devices::modulator::register(&mut registry);
+    bl_devices::level_mod::register(&mut registry);
+    bl_devices::gate_mod::register(&mut registry);
+    bl_devices::strike_mod::register(&mut registry);
+    bl_devices::play_mod::register(&mut registry);
     registry
 }
 
@@ -27,7 +31,7 @@ const PLAYING: TransportInfo = TransportInfo {
     position: Frames(0),
 };
 
-/// A Wave Mod's node on the rising ramp at 10 Hz (a 4,800-frame cycle) with
+/// A LFO's node on the rising ramp at 10 Hz (a 4,800-frame cycle) with
 /// `params` over those.
 fn ramp(params: &[(ParamId, f64)]) -> Box<dyn bl_engine::Node> {
     let mut all = vec![(WAVE, 1.0), (RATE_HZ, 10.0)];
@@ -38,7 +42,28 @@ fn ramp(params: &[(ParamId, f64)]) -> Box<dyn bl_engine::Node> {
 // Spec: modulation R12
 #[test]
 fn modulators_pass_their_audio_and_notes_untouched() {
-    for (kind, device_type) in [(WAVE_MOD, wave_mod_type()), (CURVE_MOD, curve_mod_type())] {
+    use bl_devices::{gate_mod, level_mod, play_mod, strike_mod};
+    use bl_engine::NoteKind;
+    use common::{note_off, note_on, notes_through};
+
+    let types = [
+        (WAVE_MOD, wave_mod_type()),
+        (CURVE_MOD, curve_mod_type()),
+        (modulator::LEVEL_MOD, level_mod::level_mod_type()),
+        (modulator::GATE_MOD, gate_mod::gate_mod_type()),
+        (modulator::STRIKE_MOD, strike_mod::strike_mod_type()),
+        (modulator::PLAY_MOD, play_mod::play_mod_type()),
+    ];
+    let on = note_on(10, 60, 0.8, Some(7));
+    let notes = [
+        on,
+        bl_engine::NoteEvent {
+            kind: NoteKind::PitchBend { value: 0.5 },
+            ..on
+        },
+        note_off(300, &on, 0.4),
+    ];
+    for (kind, device_type) in types {
         let mut node = node(&registry(), &device(&device_type, &[]), 512);
         let input = noise(512);
         let out = run(node.as_mut(), &input, &[]);
@@ -46,6 +71,17 @@ fn modulators_pass_their_audio_and_notes_untouched() {
             out.iter().all(|channel| *channel == input),
             "{kind} left the audio as it was"
         );
+        // The modulators of the notes and MIDI send every note on; the
+        // others, which sit in an audio chain, send none or the same.
+        let sent = notes_through(node.as_mut(), &notes, 512);
+        if device_type.role == bl_model::DeviceRole::MidiEffect {
+            assert_eq!(sent, notes.to_vec(), "{kind} left the notes as they were");
+        } else {
+            assert!(
+                sent.is_empty() || sent == notes.to_vec(),
+                "{kind} changed the notes"
+            );
+        }
     }
 }
 

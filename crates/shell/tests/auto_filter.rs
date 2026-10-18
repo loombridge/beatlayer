@@ -1,4 +1,4 @@
-//! Sweep, the native Auto Filter, in the shell (WP-5.20; the auto-filter
+//! Auto Filter, the native Auto Filter, in the shell (WP-5.20; the auto-filter
 //! spec, R16): a set with the device saves and reopens with every
 //! parameter, and `device.parameters` reads them back. Driven through
 //! `Shell::run`, as an agent drives it, on bl-project's real set files.
@@ -84,7 +84,7 @@ fn a_set_with_sweep_reopens_with_every_parameter() {
                 json!({
                     "device": {
                         "kind": DeviceKind::Native { device_type: AUTO_FILTER.to_owned() },
-                        "name": "Sweep",
+                        "name": "Auto Filter",
                         "role": DeviceRole::AudioEffect,
                     }
                 }),

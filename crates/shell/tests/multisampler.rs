@@ -103,7 +103,7 @@ fn add_multisampler(shell: &mut Shell) -> DeviceId {
                 json!({
                     "device": {
                         "kind": DeviceKind::Native { device_type: MULTISAMPLER.to_owned() },
-                        "name": "Mosaic",
+                        "name": "Sampler",
                         "role": DeviceRole::Instrument,
                     }
                 }),
@@ -607,7 +607,7 @@ fn the_title_shows_the_first_layers_name() {
     };
     assert_eq!(
         title(&mut shell),
-        "Mosaic",
+        "Sampler",
         "the device's own name with no layers"
     );
     let file = scratch.path("Strings.wav");

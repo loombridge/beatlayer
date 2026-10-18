@@ -1,4 +1,4 @@
-//! Strike, the one-shot drum sampler, on the audio thread under
+//! Drum Sampler, the one-shot drum sampler, on the audio thread under
 //! RealtimeSanitizer (WP-5.18): a clip of many notes plays a sample through
 //! each of its nine playback effects in turn, with the filter on and the
 //! modulation route moving it, while its parameters change. RTSan stops the
@@ -126,7 +126,7 @@ fn every_playback_effect_passes_under_rtsan() {
     assert_eq!(state.counters.events_overflowed, 0);
     assert!(state.counters.events_applied > 100);
     eprintln!(
-        "1,800 blocks of Strike through all nine effects under RealtimeSanitizer: {} parameter \
+        "1,800 blocks of Drum Sampler through all nine effects under RealtimeSanitizer: {} parameter \
          changes, peak engine load {:.1}%",
         state.counters.events_applied,
         state.cpu_load_max * 100.0

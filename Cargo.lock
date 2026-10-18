@@ -1056,6 +1056,7 @@ dependencies = [
  "bl-model",
  "bl-project",
  "bl-shell",
+ "bl-test-clap",
  "bytemuck",
  "egui",
  "egui-wgpu",

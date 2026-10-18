@@ -1,4 +1,4 @@
-//! Degrade, the native digital-degradation effect (WP-5.24; the digital
+//! Erosion, the native digital-degradation effect (WP-5.24; the digital
 //! degradation spec): a short delay moved by a sine and by band-filtered
 //! noise.
 
@@ -13,12 +13,12 @@ use bl_engine::Node;
 use bl_model::{DeviceKind, ParamId};
 use common::{RATE, db, device, node, noise, sine, spectrum, stream};
 
-/// A Degrade of `params`, for blocks of up to 4,096 frames.
+/// An Erosion of `params`, for blocks of up to 4,096 frames.
 fn degrade(params: &[(ParamId, f64)]) -> Box<dyn Node> {
     node(&common::registry(), &device(&degrade_type(), params), 4_096)
 }
 
-/// `input` on both channels through a Degrade, in `block`-sized blocks.
+/// `input` on both channels through an Erosion, in `block`-sized blocks.
 fn render(params: &[(ParamId, f64)], input: &[f32], block: usize) -> Vec<Vec<f32>> {
     stream(
         degrade(params).as_mut(),
@@ -183,7 +183,7 @@ fn the_display_shows_the_inputs_spectrum() {
         &Default::default(),
         Some(&[-20.0; 64]),
     )
-    .expect("Degrade draws a display");
+    .expect("Erosion draws a display");
     assert!(shown.live);
     assert_eq!(shown.series("Spectrum").unwrap().values.len(), 64);
     let idle = bl_devices::display(

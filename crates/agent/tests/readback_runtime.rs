@@ -156,6 +156,15 @@ fn each_settings_command_reads_back_from_settings_state() {
     assert_eq!(before["create_fades_on_clip_edges"], true);
     assert_eq!(before["warp_recorded_audio"], true);
     assert_eq!(before["auto_hide_plug_in_windows"], true);
+    // Spec: warping R29. What a new install has.
+    assert_eq!(
+        before["warp"],
+        json!({
+            "loop_warp_short_samples": "auto",
+            "auto_warp_long_samples": true,
+            "default_warp_mode": "beats",
+        })
+    );
     assert_eq!(
         before["launch"],
         json!({
@@ -168,7 +177,13 @@ fn each_settings_command_reads_back_from_settings_state() {
     );
     assert_eq!(
         before["plug_ins"],
-        json!({ "hidden": [], "show_hidden": false })
+        json!({
+            "hidden": [],
+            "show_hidden": false,
+            "use_audio_units_v2": false,
+            "use_audio_units_v3": false,
+            "vst3_system_folders": false,
+        })
     );
     assert_eq!(before["display_input"]["outline_view_in_focus"], true);
     assert_eq!(before["display_input"]["zoom_percent"], 100);
@@ -191,6 +206,21 @@ fn each_settings_command_reads_back_from_settings_state() {
         &mut client,
         "settings.set_warp_recorded_audio",
         json!({ "on": false }),
+    );
+    run(
+        &mut client,
+        "settings.set_loop_warp_short_samples",
+        json!({ "mode": "warped_one_shot" }),
+    );
+    run(
+        &mut client,
+        "settings.set_auto_warp_long_samples",
+        json!({ "on": false }),
+    );
+    run(
+        &mut client,
+        "settings.set_default_warp_mode",
+        json!({ "mode": "complex_pro" }),
     );
     run(
         &mut client,
@@ -225,7 +255,14 @@ fn each_settings_command_reads_back_from_settings_state() {
     run(
         &mut client,
         "plugin.settings",
-        json!({ "hidden": ["vst3/example"], "show_hidden": true, "format_preference": "clap" }),
+        json!({
+            "hidden": ["vst3/example"],
+            "show_hidden": true,
+            "format_preference": "clap",
+            "use_audio_units_v2": true,
+            "use_audio_units_v3": true,
+            "vst3_system_folders": true,
+        }),
     );
     run(
         &mut client,
@@ -257,6 +294,14 @@ fn each_settings_command_reads_back_from_settings_state() {
     assert_eq!(state["warp_recorded_audio"], false);
     assert_eq!(state["auto_hide_plug_in_windows"], false);
     assert_eq!(
+        state["warp"],
+        json!({
+            "loop_warp_short_samples": "warped_one_shot",
+            "auto_warp_long_samples": false,
+            "default_warp_mode": "complex_pro",
+        })
+    );
+    assert_eq!(
         state["launch"],
         json!({
             "default_mode": "gate",
@@ -268,7 +313,14 @@ fn each_settings_command_reads_back_from_settings_state() {
     );
     assert_eq!(
         state["plug_ins"],
-        json!({ "hidden": ["vst3/example"], "show_hidden": true, "format_preference": "clap" })
+        json!({
+            "hidden": ["vst3/example"],
+            "show_hidden": true,
+            "format_preference": "clap",
+            "use_audio_units_v2": true,
+            "use_audio_units_v3": true,
+            "vst3_system_folders": true,
+        })
     );
     assert_eq!(
         state["display_input"],

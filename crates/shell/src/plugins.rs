@@ -350,10 +350,11 @@ pub fn scan_report(
     scanner: &Scanner,
     paths: Option<&[PathBuf]>,
     fresh: bool,
+    formats: &[PluginFormat],
     hidden: &BTreeSet<String>,
 ) -> PluginScan {
     let mut report = ScanReport::default();
-    for &format in SCANNED_FORMATS {
+    for &format in formats {
         let format_paths: Vec<PathBuf> = match paths {
             Some(paths) => paths.to_vec(),
             None => system_paths(format),
@@ -398,6 +399,24 @@ pub fn scan_report(
         scanned: report.scanned,
         cached: report.cached,
     }
+}
+
+/// The formats the browser lists and a scan of the system folders covers
+/// (WP-2.9b; the plug-in scanning spec, R12): CLAP always (Live has no
+/// CLAP, so no switch), VST3 with Use VST3 Plug-In System Folders, and
+/// Audio Units with Use Audio Units v2 on macOS.
+#[must_use]
+pub fn listed_formats(prefs: &crate::settings::Preferences) -> Vec<PluginFormat> {
+    SCANNED_FORMATS
+        .iter()
+        .copied()
+        .filter(|format| match format {
+            PluginFormat::Clap => true,
+            PluginFormat::Vst3 => prefs.vst3_system_folders,
+            PluginFormat::AudioUnit => prefs.use_audio_units_v2,
+            PluginFormat::Lv2 => false,
+        })
+        .collect()
 }
 
 /// Every plug-in `doc` uses, grouped by format and ID, for `plugin.list`

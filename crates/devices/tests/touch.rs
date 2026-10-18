@@ -1,4 +1,4 @@
-//! Touch, the velocity MIDI effect (WP-5.30; the MIDI velocity spec): the curve
+//! Velocity, the velocity MIDI effect (WP-5.30; the MIDI velocity spec): the curve
 //! from the input window to the output range, the operation, the three modes,
 //! Random, Drive and Compand. Every block is a real-time section under the
 //! allocation trap.

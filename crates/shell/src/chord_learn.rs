@@ -1,5 +1,5 @@
-//! Learn for Stack, the chord MIDI effect (WP-5.30; the MIDI chord spec): while
-//! a Stack device's Learn is on, the keys played set its shifts.
+//! Learn for Chord, the chord MIDI effect (WP-5.30; the MIDI chord spec): while
+//! a Chord device's Learn is on, the keys played set its shifts.
 
 use bl_core::midi::MidiMessage;
 use bl_devices::stack::learn;

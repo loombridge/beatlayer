@@ -1,4 +1,4 @@
-//! Filter sections and the spectrum analyser that Contour and the other
+//! Filter sections and the spectrum analyser that EQ Eight and the other
 //! EQs share: a second-order section in transposed direct form II, the
 //! magnitude response of its coefficients, and an FFT analyser of 64
 //! logarithmic bands.

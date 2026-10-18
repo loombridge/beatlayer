@@ -645,7 +645,8 @@ fn a_drum_racks_selector_stays_at_zero() {
         DeviceRole::Instrument,
         &[],
     );
-    notes(&mut rig, midi, &[(20, 0.0, 0.5, 100)]);
+    // The chain's Receive note (drum racks spec, R1), which it answers.
+    notes(&mut rig, midi, &[(36, 0.0, 0.5, 100)]);
     rig.apply(Command::SetDeviceParam {
         device: rack_id,
         param: CHAIN_SELECTOR,

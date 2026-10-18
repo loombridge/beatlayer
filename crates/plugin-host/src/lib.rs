@@ -18,8 +18,8 @@
 //!   machine in a child process with a timeout, blocklists the ones that
 //!   fail, and caches what it found by path and modification time.
 //! - [`window`]: host windows for plug-in editors (WP-2.10), an HWND on
-//!   Windows and an X11 window elsewhere but macOS, with the editor's view
-//!   embedded as a child.
+//!   Windows, an AppKit utility panel on macOS, and an X11 window
+//!   elsewhere, with the editor's view embedded as a child.
 
 pub mod au;
 pub mod clap;
@@ -27,7 +27,6 @@ mod drive;
 mod lend;
 pub mod scan;
 pub mod vst3;
-#[cfg(any(target_os = "windows", all(unix, not(target_os = "macos"))))]
 pub mod window;
 
 pub use lend::{Hosts, Loans};

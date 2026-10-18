@@ -2,9 +2,9 @@
 //! CLAP editor opens in a window Beatlayer owns, with the plug-in's view
 //! embedded into it, the display's scale reaches the plug-in, the editor
 //! resizes — as the person drags it, and as the plug-in asks the host
-//! itself — and it closes again. Windows and X11 only: macOS editors keep
-//! floating in the plug-in's own window until its host-window embedding
-//! lands. On Linux these need an X display; CI runs them under Xvfb.
+//! itself — and it closes again. Windows and X11 only: on macOS a window
+//! opens only on the main thread, which `tests/mac_editor.rs` runs on. On
+//! Linux these need an X display; CI runs them under Xvfb.
 
 #![cfg(any(target_os = "windows", all(unix, not(target_os = "macos"))))]
 

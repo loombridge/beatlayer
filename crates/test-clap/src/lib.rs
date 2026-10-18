@@ -32,7 +32,8 @@
 //!   so a host that sent one anyway would be heard.
 //! - **Editor.** A window that draws nothing, so tests open and close it
 //!   headless: floating in any windowing API, and embedded into the host's
-//!   window on the platforms that build one (win32 and x11; WP-2.10). What
+//!   window (win32 and x11; WP-2.10). In the [`EMBED_ONLY`] state it embeds
+//!   only, and on macOS it embeds (cocoa) only then. What
 //!   the host tells it about the window — the display's scale (`set_scale`)
 //!   and the size it sets (`set_size`) — it reports back as its
 //!   [`EDITOR_SCALE`], [`EDITOR_WIDTH`] and [`EDITOR_HEIGHT`] parameters,
@@ -112,6 +113,10 @@ pub const ASK_RESIZE: &[u8] = b"ASK:RESIZE";
 /// A state that makes the plug-in report every parameter value it is given
 /// back to the host as its own change, as some plug-ins do.
 pub const ECHO_PARAMS: &[u8] = b"ECHO:PARAMS";
+/// A state that makes its editor embed only, never float, as most JUCE
+/// CLAPs' editors on macOS do: it supports the platform's embedded API
+/// (`cocoa` on macOS too) and refuses a floating window.
+pub const EMBED_ONLY: &[u8] = b"EMBED:ONLY";
 /// The size [`ASK_RESIZE`] asks for, in physical pixels.
 pub const ASK_RESIZE_WIDTH: u32 = 500;
 /// The height [`ASK_RESIZE`] asks for, in physical pixels.
@@ -148,6 +153,8 @@ pub struct Shared<'a> {
     failure: AtomicU8,
     /// [`ECHO_PARAMS`] was loaded.
     echo: AtomicBool,
+    /// Its editor embeds only ([`EMBED_ONLY`]).
+    embed_only: AtomicBool,
 }
 
 impl Shared<'_> {
@@ -305,6 +312,7 @@ impl DefaultPluginFactory for GainEcho {
             editor_height: AtomicU32::new(0),
             failure: AtomicU8::new(NO_FAILURE),
             echo: AtomicBool::new(false),
+            embed_only: AtomicBool::new(false),
         })
     }
 
@@ -642,6 +650,10 @@ impl PluginStateImpl for MainThread<'_> {
             shared.echo.store(true, Relaxed);
             return Ok(());
         }
+        if bytes == EMBED_ONLY {
+            shared.embed_only.store(true, Relaxed);
+            return Ok(());
+        }
         if bytes == ASK_RESIZE {
             shared.ask_resize(ASK_RESIZE_WIDTH, ASK_RESIZE_HEIGHT);
             return Ok(());
@@ -678,26 +690,29 @@ impl PluginLatencyImpl for MainThread<'_> {
 }
 
 /// The windowing API an embedded editor uses on this platform: `win32` on
-/// Windows and `x11` on the other X11 platforms; macOS editors only float
-/// for now, so it refuses to embed there (WP-2.10).
+/// Windows, `cocoa` on macOS, and `x11` on the other X11 platforms.
 fn embed_api() -> Option<GuiApiType<'static>> {
-    #[cfg(target_os = "windows")]
-    {
-        Some(GuiApiType::WIN32)
-    }
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        Some(GuiApiType::X11)
-    }
-    #[cfg(not(any(target_os = "windows", all(unix, not(target_os = "macos")))))]
-    {
-        None
+    GuiApiType::default_for_current_platform()
+}
+
+impl MainThread<'_> {
+    /// Whether its editor opens this way: floating in any API unless it
+    /// embeds only; embedded in the platform's API on Windows and X11, and
+    /// on macOS only while it embeds only, since an AppKit window needs
+    /// the main thread and the test harness runs tests on others.
+    fn opens(&self, configuration: GuiConfiguration<'_>) -> bool {
+        let embed_only = self.shared.embed_only.load(Relaxed);
+        if configuration.is_floating {
+            return !embed_only;
+        }
+        (embed_only || !cfg!(target_os = "macos"))
+            && embed_api().is_some_and(|api| api == configuration.api_type)
     }
 }
 
 impl PluginGuiImpl for MainThread<'_> {
     fn is_api_supported(&self, configuration: GuiConfiguration<'_>) -> bool {
-        configuration.is_floating || embed_api().is_some_and(|api| api == configuration.api_type)
+        self.opens(configuration)
     }
 
     fn get_preferred_api(&self) -> Option<GuiConfiguration<'_>> {
@@ -705,8 +720,7 @@ impl PluginGuiImpl for MainThread<'_> {
     }
 
     fn create(&self, configuration: GuiConfiguration<'_>) -> Result<(), PluginError> {
-        if configuration.is_floating || embed_api().is_some_and(|api| api == configuration.api_type)
-        {
+        if self.opens(configuration) {
             Ok(())
         } else {
             Err(PluginError::Message("this editor doesn't embed that way"))

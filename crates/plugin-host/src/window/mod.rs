@@ -6,8 +6,9 @@
 //! Windows builds one as an HWND, at the scale of the monitor it's shown on
 //! (per-monitor DPI); Linux and the other X11 platforms build an X11
 //! window, which a Wayland session serves through XWayland, as plug-in
-//! editors there draw into X11. macOS isn't built yet: its editors keep
-//! floating in the plug-in's own window.
+//! editors there draw into X11. macOS builds an AppKit utility panel with
+//! an `NSView` the editor's view is added to; AppKit makes it only on the
+//! main thread, and its sizes are in points (CLAP's `cocoa` API).
 //!
 //! [`EditorWindow::open`] makes the window, [`EditorWindow::handle`] is the
 //! parent the plug-in's view is embedded into, [`EditorWindow::scale`] is
@@ -25,6 +26,11 @@ use win32 as platform;
 mod x11;
 #[cfg(all(unix, not(target_os = "macos")))]
 use x11 as platform;
+
+#[cfg(target_os = "macos")]
+mod mac;
+#[cfg(target_os = "macos")]
+use mac as platform;
 
 pub use clack_extensions::gui::GuiSize;
 
@@ -58,6 +64,19 @@ impl EditorWindow {
         platform::Window::open(title, size, resizable).map(Self)
     }
 
+    /// Whether a window can be made on this thread: on macOS only the main
+    /// thread makes windows; elsewhere any thread can.
+    pub fn can_open() -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            objc2::MainThreadMarker::new().is_some()
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            true
+        }
+    }
+
     /// The parent window the plug-in's view is embedded into
     /// (`set_parent`).
     pub fn handle(&self) -> clack_extensions::gui::Window<'static, '_> {
@@ -69,8 +88,8 @@ impl EditorWindow {
         self.0.scale()
     }
 
-    /// Its client size, in physical pixels: what it was last made, or what
-    /// the person last left it.
+    /// Its client size, in physical pixels (points on macOS): what it was
+    /// last made, or what the person last left it.
     pub fn size(&self) -> GuiSize {
         self.0.size()
     }
@@ -92,7 +111,9 @@ impl EditorWindow {
     }
 }
 
-#[cfg(test)]
+// On macOS a window opens only on the main thread, where the harness's
+// tests don't run; `tests/mac_editor.rs` covers it there.
+#[cfg(all(test, not(target_os = "macos")))]
 mod tests {
     //! The window layer itself, on the platforms that build windows: a
     //! window opens, resizes, and reports a close. On Linux these need an X

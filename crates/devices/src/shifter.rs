@@ -888,7 +888,6 @@ impl Shifter {
 }
 
 impl NativeDevice for Shifter {
-    #[allow(clippy::too_many_lines)]
     fn process(&mut self, audio: &mut Audio<'_, '_>, params: &ParamBank) {
         let frames = audio.frames();
         let channels = audio.channels().min(2);

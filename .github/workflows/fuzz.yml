@@ -1,0 +1,131 @@
+# Runs every fuzz target in fuzz/ for a bounded time once a week, and on
+# demand from the Actions tab, so a regression in a file reader turns up
+# without anyone remembering to fuzz by hand.
+#
+# The targets come from `cargo fuzz list`, so a target added to
+# fuzz/Cargo.toml runs here with no change to this file. Each target runs in
+# its own job on Linux, seeded with the fixtures named in fuzz/README.md and
+# with its dictionary from fuzz/dictionaries/ when one exists. A crash, leak,
+# timeout, or out-of-memory input fails the job and is uploaded as an artefact
+# named after the target, kept for 30 days: turn it into a regression test
+# before fixing it (fuzz/README.md).
+#
+# Not on pull requests: fuzzing finds problems by running long, and a short
+# run on every change would cost minutes without finding much.
+#
+# cargo-fuzz needs a nightly toolchain, pinned here to a dated one so a new
+# nightly can't break the run on its own; update NIGHTLY when it gets old.
+# cargo-fuzz is installed from crates.io at a pinned version with its own
+# lock file. Every third-party action is pinned to a full commit SHA, with its
+# version in a comment. Update the SHA and the comment together.
+
+name: Fuzz
+
+on:
+  schedule:
+    # Mondays at 03:23 UTC, after the nightly build.
+    - cron: "23 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: How long to run each target, in seconds
+        required: false
+        default: "900"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  NIGHTLY: nightly-2026-10-09
+  CARGO_FUZZ_VERSION: 0.13.2
+
+jobs:
+  targets:
+    name: list the targets
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      targets: ${{ steps.list.outputs.targets }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Read from fuzz/Cargo.toml, as `cargo fuzz list` does, without
+      # installing cargo-fuzz for one list.
+      - name: List the targets
+        id: list
+        run: |
+          targets=$(python3 -c '
+          import json, tomllib
+          with open("fuzz/Cargo.toml", "rb") as f:
+              print(json.dumps(sorted(b["name"] for b in tomllib.load(f)["bin"])))
+          ')
+          echo "Targets: $targets"
+          echo "targets=$targets" >> "$GITHUB_OUTPUT"
+
+  fuzz:
+    name: fuzz (${{ matrix.target }})
+    needs: targets
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.targets.outputs.targets) }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the nightly toolchain and cargo-fuzz
+        run: |
+          rustup toolchain install --no-self-update --profile minimal "$NIGHTLY"
+          cargo "+$NIGHTLY" install --locked "cargo-fuzz@$CARGO_FUZZ_VERSION"
+          cargo "+$NIGHTLY" fuzz --version
+
+      - name: Build the target
+        working-directory: fuzz
+        env:
+          TARGET: ${{ matrix.target }}
+        run: cargo "+$NIGHTLY" fuzz build "$TARGET"
+
+      # libFuzzer stops at the first crash, writing its input to
+      # artifacts/<target>/. -timeout counts a single input that takes longer
+      # than 30 s as a hang.
+      - name: Fuzz
+        working-directory: fuzz
+        env:
+          TARGET: ${{ matrix.target }}
+          SECONDS_PER_TARGET: ${{ inputs.seconds || '900' }}
+        run: |
+          seeds=()
+          case "$TARGET" in
+            set_file | set_json) seeds+=(../crates/project/tests/fixtures) ;;
+          esac
+          options=(-max_total_time="$SECONDS_PER_TARGET" -timeout=30 -print_final_stats=1)
+          if [ -f "dictionaries/$TARGET.dict" ]; then
+            options+=(-dict="dictionaries/$TARGET.dict")
+          fi
+          mkdir -p "corpus/$TARGET"
+          cargo "+$NIGHTLY" fuzz run "$TARGET" "corpus/$TARGET" "${seeds[@]}" -- "${options[@]}"
+
+      - name: Upload the crash
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-crash-${{ matrix.target }}
+          path: fuzz/artifacts/${{ matrix.target }}/
+          retention-days: 30
+          if-no-files-found: ignore

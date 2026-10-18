@@ -9,6 +9,11 @@ Fuzz targets for Beatlayer's file readers, run with [cargo-fuzz](https://github.
 | `sfz` | Bytes as read from an `.sfz` file: comments, `#define`, headers and opcodes (no `#include` files) | No panic. Every region it reads has zones, a detune and a pan inside the layers' ranges. |
 | `set_file` | Bytes as read from a `.blset` file: zstd, its checksum, the JSON, migrations, and the document model's rules | No panic. Anything the loader accepts saves again, loads back as the same song, and gives an editor that hands out an unused ID. |
 | `set_json` | The JSON inside a set, skipping the compression and checksum that random bytes rarely get through | The same |
+| `sfz` | Bytes as read from an `.sfz` file: comments, `#define`s, headers and opcodes | No panic. Every region keeps its key, velocity, detune and pan ranges. |
+
+## In CI
+
+The Fuzz workflow (`.github/workflows/fuzz.yml`) runs every target listed in `Cargo.toml` for 15 minutes each, every Monday and on demand from the Actions tab, seeded and with dictionaries as below. A crash fails the run and is uploaded as the artefact `fuzz-crash-<target>`. A new target needs no change to the workflow, unless it takes seeds from somewhere: add those to its Fuzz step.
 
 ## Run them
 

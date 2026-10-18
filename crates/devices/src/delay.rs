@@ -574,7 +574,7 @@ impl Line {
 
 /// A band-pass filter for the delay loops, the manual's Freq and Width.
 #[derive(Clone, Copy, Default)]
-struct BandPass {
+pub(crate) struct BandPass {
     b0: f32,
     b1: f32,
     b2: f32,
@@ -586,7 +586,7 @@ struct BandPass {
 
 impl BandPass {
     /// Sets its coefficients for `freq` and `bandwidth`.
-    fn set(&mut self, freq: f64, bandwidth: f64, rate: f64) {
+    pub(crate) fn set(&mut self, freq: f64, bandwidth: f64, rate: f64) {
         let w0 = TAU * freq / rate;
         let (sin, cos) = w0.sin_cos();
         let alpha = sin / (2.0 * bandwidth.max(0.1));
@@ -599,11 +599,22 @@ impl BandPass {
     }
 
     /// One sample through it.
-    fn process(&mut self, sample: f32) -> f32 {
+    pub(crate) fn process(&mut self, sample: f32) -> f32 {
         let out = self.b0 * sample + self.z1;
         self.z1 = self.b1 * sample - self.a1 * out + self.z2;
         self.z2 = self.b2 * sample - self.a2 * out;
         out
+    }
+
+    /// The RMS of its output for white noise of unit variance, so noise can
+    /// be scaled to a known level whatever the filter's width.
+    pub(crate) fn noise_gain(&self) -> f64 {
+        let (a1, a2) = (f64::from(self.a1), f64::from(self.a2));
+        // The variance and lag-2 covariance of the all-pole half, which the
+        // numerator `b0 (1 - z^-2)` then differences.
+        let variance = (1.0 + a2) / ((1.0 - a2) * ((1.0 + a2).powi(2) - a1 * a1));
+        let lag_two = (a1 * a1 / (1.0 + a2) - a2) * variance;
+        f64::from(self.b0) * (2.0 * (variance - lag_two)).sqrt()
     }
 }
 

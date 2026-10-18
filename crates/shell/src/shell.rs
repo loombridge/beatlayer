@@ -37,9 +37,9 @@ use crate::clip_view::{self, ClipView};
 use crate::commands::{
     self as ids, ClipEnvelopeArgs, ClipTabArgs, DefaultLaunchModeArgs,
     DefaultLaunchQuantizationArgs, DefaultSetArgs, FileReport, FoldNotesArgs, LaneArgs, PathArgs,
-    RelinkArgs, SaveAsArgs, SetResult, SettingsArgs, SwitchArgs, SwitchResult, TemplateArgs,
-    TemporaryFolderArgs, TemporaryFolderResult, TestToneArgs, TestToneState, ThemeArgs, ViewResult,
-    ViewState, ZoomArgs,
+    RecordSessionAutomationInArgs, RelinkArgs, SaveAsArgs, SetResult, SettingsArgs, SwitchArgs,
+    SwitchResult, TemplateArgs, TemporaryFolderArgs, TemporaryFolderResult, TestToneArgs,
+    TestToneState, ThemeArgs, ViewResult, ViewState, ZoomArgs,
 };
 use crate::devices::{self, DeviceError, DeviceView};
 use crate::files::{ProjectFiles, SetStore, new_set_from};
@@ -221,6 +221,9 @@ pub enum Effect {
     /// Start renaming a device in its title bar, where the person types the
     /// new name; Return runs `device.rename` with it (WP-2.4).
     RenameDevice(bl_model::DeviceId),
+    /// Start renaming a chain in its row of the chain list; Return runs
+    /// `chain.rename` with the new name (WP-5.2).
+    RenameChain(bl_model::ChainId),
     /// Start renaming a track in its title bar, where the person types the
     /// new name; Return runs `track.rename` with it (WP-4.22).
     RenameTrack(TrackId),
@@ -471,6 +474,10 @@ pub struct Shell {
     capture: bl_engine::capture::Buffer,
     /// The control moves of the automation recording under way (WP-2.12).
     automation_take: crate::automation_record::Take,
+    /// The control moves of the Session recording under way (WP-3.12).
+    session_automation: crate::automation_record::SessionTake,
+    /// The song frame the Session recording's take began on, once it has.
+    session_take_start: Option<Frames>,
     /// What the Session clips that played during the recording under way
     /// were (WP-3.13).
     session_watch: crate::session_capture::Watch,
@@ -732,6 +739,8 @@ impl Shell {
             session_run: None,
             capture: bl_engine::capture::Buffer::default(),
             automation_take: crate::automation_record::Take::default(),
+            session_automation: crate::automation_record::SessionTake::default(),
+            session_take_start: None,
             session_watch: crate::session_capture::Watch::default(),
             automation_recording: false,
             plug_in_windows: true,
@@ -1327,6 +1336,13 @@ impl Shell {
         }
     }
 
+    /// Record Session automation in (Record, Warp & Launch; WP-3.12): which
+    /// tracks a Session recording writes control moves into the clips of.
+    #[must_use]
+    pub fn record_session_automation_in(&self) -> crate::settings::SessionAutomationTracks {
+        self.prefs.record_session_automation_in
+    }
+
     /// Whether Warp recorded audio is on (IMP-02). Clips have no warp fields
     /// yet, so recorded clips play unwarped either way.
     #[must_use]
@@ -1373,6 +1389,7 @@ impl Shell {
                 temporary_folder: self.temporary_folder().to_string_lossy().into_owned(),
             },
             launch: self.prefs.launch,
+            record_session_automation_in: self.prefs.record_session_automation_in,
             auto_hide_plug_in_windows: self.auto_hide_plug_in_windows(),
             plug_ins: self.plugin_settings(),
             agents: AgentsPageSettings {
@@ -2281,6 +2298,8 @@ impl Shell {
         if outcome.document_changed {
             self.dirty = true;
             self.document_changed();
+        } else if outcome.view_changed {
+            self.dirty = true;
         }
         if let Some(message) = outcome.message {
             self.set_message(message, false);
@@ -3728,6 +3747,7 @@ impl Shell {
         // The control a drag moved is let go (automation R17).
         self.automation_take
             .release(self.arrangement.transport().position);
+        self.release_session_moves();
     }
 
     /// The effects commands have asked for since the last call.
@@ -3792,7 +3812,14 @@ impl Shell {
                             }
                         }
                     }
-                    Area::Detail => contexts.push(Context::DeviceView),
+                    Area::Detail => {
+                        // Spec: racks R22. A chain list with the focus
+                        // takes S and the edit keys.
+                        if self.devices.chain_list_focus() {
+                            contexts.push(Context::RackChains);
+                        }
+                        contexts.push(Context::DeviceView);
+                    }
                     Area::ControlBar | Area::StatusBar | Area::Assistant => {}
                 }
                 if self.prefs.tab_navigation {
@@ -4035,6 +4062,10 @@ impl Shell {
         if id == "device.rename" && args.get("name").is_none() {
             // A person names the device in its title bar.
             return self.devices.selected().is_some();
+        }
+        if id == "chain.rename" && args.get("name").is_none() {
+            // A person names the chain in its row.
+            return self.devices.selected_chains(self.editor.document()).len() == 1;
         }
         if id == "track.delete" && args.get("track").is_none() {
             return !self.deletable_tracks().is_empty();
@@ -4528,6 +4559,24 @@ impl Shell {
                 self.touch();
                 Ok(Value::Null)
             }
+            "chain.rename" if !has("name") => {
+                let chain = args
+                    .get("chain")
+                    .and_then(|v| serde_json::from_value(v.clone()).ok())
+                    .or_else(|| {
+                        self.devices
+                            .selected_chains(self.editor.document())
+                            .first()
+                            .copied()
+                    })
+                    .ok_or_else(|| ShellError::Unavailable {
+                        command: id.to_owned(),
+                        reason: "select a chain first".to_owned(),
+                    })?;
+                self.effects.push(Effect::RenameChain(chain));
+                self.touch();
+                Ok(Value::Null)
+            }
             _ if device_ids::ON_SELECTED.contains(&id) && !has("device") => {
                 let args = self.filled_args(id, args)?;
                 self.run(id, args)
@@ -4806,6 +4855,23 @@ impl Shell {
                 .and_then(|command| {
                     crate::automation_record::moved(self.editor.document(), &command)
                 });
+            // Spec: session-automation R1. With Automation Arm on and a
+            // Session recording running, a control move is noted for the
+            // clip it goes into.
+            let session_moved = (self.arrangement.automation_arm() && self.session_run.is_some())
+                .then(|| model::command_from_args(id, args.clone()).ok())
+                .flatten()
+                .and_then(|command| {
+                    let (track, target, value) =
+                        crate::automation_record::moved(self.editor.document(), &command)?;
+                    let before = crate::modulation::control_value(
+                        self.editor.document(),
+                        &self.devices,
+                        track,
+                        &target,
+                    )?;
+                    Some((track, target, before, value))
+                });
             let changes =
                 model::run(&mut self.editor, id, args).map_err(|error| ShellError::Failed {
                     command: id.to_owned(),
@@ -4818,6 +4884,9 @@ impl Shell {
                     self.arrangement.transport().position,
                     value,
                 );
+            }
+            if let Some((track, target, before, value)) = session_moved {
+                self.note_session_move(track, target, before, value);
             }
             if id == bl_model::registry::RE_ENABLE_AUTOMATION {
                 // Spec: session-view R23. A launched scene's tempo and
@@ -4875,6 +4944,7 @@ impl Shell {
                 self.last_launched = Some(scene);
             }
             self.select_on_launch(command);
+            self.re_enable_launched_automation(command);
             if let engine_session::SessionCommand::LaunchScene(scene) = command {
                 // Spec: session-recording R10. Start Recording on Scene
                 // Launch.
@@ -5469,6 +5539,14 @@ impl Shell {
                     ..current
                 }
             }
+            session_launch_ids::SET_FOLLOW_ACTIONS_ENABLED => {
+                let session_launch_ids::SetFollowActionsEnabledArgs { enabled } =
+                    Self::args(id, args)?;
+                LaunchSettings {
+                    follow_actions: enabled.unwrap_or(!current.follow_actions),
+                    ..current
+                }
+            }
             session_launch_ids::STOP_SELECTED => {
                 Self::args::<NoArgs>(id, args)?;
                 // Spec: launch-quantisation R6. Every track with a selected
@@ -5543,6 +5621,7 @@ impl Shell {
                 self.editor = editor;
                 self.store.close();
                 self.devices.set_windows(bl_model::DeviceWindows::new());
+                self.devices.set_rack_views(bl_model::RackViewMap::new());
                 self.devices
                     .set_multisampler_views(bl_model::MultisamplerViews::new());
                 self.clip_view.set_folds(bl_model::ClipFolds::new());
@@ -5571,6 +5650,8 @@ impl Shell {
                 // Spec: device-chains R29. Floating windows reopen where
                 // they were saved.
                 self.devices.set_windows(self.store.windows());
+                // Spec: racks R19. So do the views each rack shows.
+                self.devices.set_rack_views(self.store.rack_views());
                 self.devices
                     .set_multisampler_views(self.store.multisampler_views());
                 // Spec: piano-roll. Folded note editors too.
@@ -5623,6 +5704,7 @@ impl Shell {
                     &mut self.editor,
                 );
                 self.store.set_windows(self.devices.windows().clone());
+                self.store.set_rack_views(self.devices.rack_views().clone());
                 self.store
                     .set_multisampler_views(self.devices.multisampler_views().clone());
                 self.store.set_folds(self.clip_view.folds().clone());
@@ -5642,6 +5724,7 @@ impl Shell {
                     &mut self.editor,
                 );
                 self.store.set_windows(self.devices.windows().clone());
+                self.store.set_rack_views(self.devices.rack_views().clone());
                 self.store
                     .set_multisampler_views(self.devices.multisampler_views().clone());
                 self.store.set_folds(self.clip_view.folds().clone());
@@ -5756,6 +5839,7 @@ impl Shell {
                     &mut self.editor,
                 );
                 self.store.set_windows(self.devices.windows().clone());
+                self.store.set_rack_views(self.devices.rack_views().clone());
                 self.store
                     .set_multisampler_views(self.devices.multisampler_views().clone());
                 self.store.set_folds(self.clip_view.folds().clone());
@@ -6115,6 +6199,12 @@ impl Shell {
                 self.prefs.launch.start_recording_on_scene_launch = on;
                 self.save_preferences();
                 Ok(to_value(&SwitchResult { on }))
+            }
+            ids::SETTINGS_SET_RECORD_SESSION_AUTOMATION_IN => {
+                let RecordSessionAutomationInArgs { tracks } = Self::args(id, args)?;
+                self.prefs.record_session_automation_in = tracks;
+                self.save_preferences();
+                Ok(Value::Null)
             }
             ids::SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS => {
                 let SwitchArgs { on } = Self::args(id, args)?;

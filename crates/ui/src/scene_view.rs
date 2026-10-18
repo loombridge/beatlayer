@@ -1,8 +1,7 @@
 //! The Scene View (WP-3.5; layout.md L-SES-011): the detail area's contents
 //! while a scene is selected in the Session View. A title bar with the
 //! scene's name or number, then its Tempo and Signature fields, then the
-//! follow-action controls, drawn in place and pending until WP-3.10 makes
-//! them live.
+//! follow-action controls (WP-3.10).
 
 use bl_model::SceneId;
 use bl_shell::Shell;
@@ -115,34 +114,21 @@ pub fn show(
         events,
     );
 
-    // The follow-action controls, drawn in place and pending until WP-3.10.
-    let follow = row + vec2(200.0, 0.0);
-    let id = Id::new("scene-view-follow-action");
-    for (index, (what, text)) in [
-        ("Follow Action", "Follow Action"),
-        ("Follow Action A", "A  Next"),
-        ("Follow Action B", "B  No Action"),
-        ("Chance A", "100 %"),
-        ("Chance B", "0 %"),
-        ("Follow Time", "Longest  1x (1.1.0)"),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        let at = follow + vec2(0.0, index as f32 * (FIELD.y + 2.0));
-        painter.text(
-            pos2(at.x, at.y + FIELD.y / 2.0),
-            Align2::LEFT_CENTER,
-            text,
-            theme.small_font(),
-            c.text_dim.0,
-        );
-        let item = id.with(index);
-        ui.ctx().accesskit_node_builder(item, |node| {
-            node.set_role(Role::Button);
-            node.set_label(format!("{label} {what}"));
-            node.set_disabled();
-            node.set_description("Not built yet: arrives with WP-3.10.".to_owned());
-        });
-    }
+    // Spec: follow-actions R14. The follow-action controls, at the right of
+    // the scene's tempo and signature.
+    let follow = shell
+        .editor()
+        .document()
+        .scene(scene)
+        .map_or_else(Default::default, |scene| scene.follow);
+    crate::follow_controls::show(
+        ui,
+        theme,
+        row + vec2(200.0, 0.0),
+        crate::follow_controls::Owner::Scene(scene),
+        &follow,
+        &format!("{label} "),
+        shell.editor().document().scenes().len(),
+        events,
+    );
 }

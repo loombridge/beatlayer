@@ -5,14 +5,14 @@
 //! Launch mode, Legato, Quantize and Velocity edit the clip through
 //! `clip.set_launch_mode`, `clip.set_legato`, `clip.set_launch_quantization`
 //! and `clip.set_velocity_amount`, the commands agents run, and read the
-//! clip's saved launch settings back. The follow-action controls are drawn
-//! in place and pending until WP-3.10, and so are the nudge buttons: what
-//! nudge does isn't recorded yet. The MIDI Bank, Sub and Pgm fields wait
+//! clip's saved launch settings back. The follow-action controls above them
+//! edit through `clip.set_follow_actions` (WP-3.10). The nudge buttons are
+//! drawn in place and pending: what nudge does isn't recorded yet. The MIDI Bank, Sub and Pgm fields wait
 //! for an answer to what they do. The layout follows L-CLIP-005's order;
 //! the reference didn't measure the tab, so the sizes are the manual's
 //! reading, not pixel parity.
 
-use bl_model::{ClipId, LaunchMode, LaunchQuantization};
+use bl_model::{ClipData, ClipId, LaunchMode, LaunchQuantization};
 use bl_shell::{Area, Invocation, Shell};
 use egui::accesskit::{self, Role};
 use egui::{Align2, Id, Rect, Sense, Ui, Vec2, WidgetInfo, WidgetType, pos2, vec2};
@@ -134,7 +134,23 @@ pub fn show(
     }
 
     let left = rect.left() + 8.0;
-    let mut y = rect.top() + SELECTOR + 6.0;
+    // Spec: follow-actions R13. Follow Action, its actions A and B with
+    // their chances, and the follow time, from the first row down.
+    let document = shell.editor().document();
+    let loop_off = !document.clip(clip).is_some_and(|clip| match &clip.data {
+        ClipData::Midi(midi) => midi.looping,
+        ClipData::Audio(audio) => audio.looping,
+    });
+    let mut y = crate::follow_controls::show(
+        ui,
+        theme,
+        pos2(left, rect.top() + SELECTOR + 6.0),
+        crate::follow_controls::Owner::Clip(clip, loop_off),
+        &launch.follow,
+        "",
+        document.scenes().len(),
+        events,
+    );
     let painter = ui.painter_at(rect);
     let mut row = |label: &str| {
         let at = pos2(rect.left() + CONTROLS_AT, y);
@@ -148,55 +164,6 @@ pub fn show(
         y += ROW;
         at
     };
-    let later = "Not built yet: arrives with WP-3.10.";
-
-    // Follow Action, its actions A and B with their chances, and Linked
-    // with the multiplier it shows (the recorded defaults).
-    let at = row("");
-    pending(
-        ui,
-        theme,
-        "Follow Action",
-        Rect::from_min_size(at, CONTROL),
-        "Follow Action",
-        later,
-    );
-    for (name, action, chance) in [("A", "Next", "100 %"), ("B", "No Action", "0 %")] {
-        let at = row(&format!("Action {name}"));
-        pending(
-            ui,
-            theme,
-            &format!("Follow Action {name}"),
-            Rect::from_min_size(at, CONTROL),
-            action,
-            later,
-        );
-        pending(
-            ui,
-            theme,
-            &format!("Chance {name}"),
-            Rect::from_min_size(at + vec2(CONTROL.x + 6.0, 0.0), SMALL),
-            chance,
-            later,
-        );
-    }
-    let at = row("Follow Time");
-    pending(
-        ui,
-        theme,
-        "Follow Time Linked",
-        Rect::from_min_size(at, SMALL),
-        "Linked",
-        later,
-    );
-    pending(
-        ui,
-        theme,
-        "Follow Time Multiplier",
-        Rect::from_min_size(at + vec2(SMALL.x + 6.0, 0.0), SMALL),
-        "1x",
-        later,
-    );
 
     let command = |id: &str, field: &str, value: serde_json::Value| {
         UiEvent::Invoke(Invocation::new(id, json!({ "clip": clip, field: value })))

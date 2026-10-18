@@ -760,8 +760,7 @@ fn fill_params(
         ParamValue::Set(value) => value,
         ParamValue::Default => map.default,
     };
-    let transport = block.transport();
-    drive.prepare(list, transport);
+    drive.prepare(list, block);
     for &(id, value) in pending.iter() {
         if let Some(map) = params.iter().find(|map| map.id == id) {
             drive.set_control(id, plain_of(map, value));
@@ -772,18 +771,12 @@ fn fill_params(
             drive.set_control(event.param.0, plain_of(map, event.value));
         }
     }
-    drive.play(
-        list,
-        transport,
-        block.frames(),
-        block.modulation(),
-        |play| {
-            if let Some(map) = params.iter().find(|map| map.id == play.id) {
-                let offset = i32::try_from(play.offset).unwrap_or(i32::MAX);
-                incoming.push(play.id, offset, map.normalized(play.played));
-            }
-        },
-    );
+    drive.play(list, block, |play| {
+        if let Some(map) = params.iter().find(|map| map.id == play.id) {
+            let offset = i32::try_from(play.offset).unwrap_or(i32::MAX);
+            incoming.push(play.id, offset, map.normalized(play.played));
+        }
+    });
     for &(id, value) in pending.iter() {
         let Some(map) = params.iter().find(|map| map.id == id) else {
             continue;

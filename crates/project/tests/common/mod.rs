@@ -403,6 +403,7 @@ impl Recipe {
             ids,
             media,
             windows: bl_model::DeviceWindows::new(),
+            rack_views: bl_model::RackViewMap::new(),
             folds: bl_model::ClipFolds::new(),
             // WP-5.13: what each multisampler's views show saves beside the
             // song.
@@ -416,6 +417,7 @@ impl Recipe {
                     bl_model::LaunchQuantization::Bars2
                 },
                 enabled: !self.id_skip.is_multiple_of(3),
+                follow_actions: !self.id_skip.is_multiple_of(5),
             },
         }
     }

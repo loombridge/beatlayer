@@ -14,7 +14,8 @@ use bl_model::{
     Device, DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit,
 };
 
-use crate::eq::{Biquad, Type, coeffs};
+use crate::eq::{Type, coeffs};
+use crate::sections::{Biquad, Coeffs};
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 
 /// Crush's device type.
@@ -144,7 +145,7 @@ fn quantise(x: f32, bits: u32, power: f32, offset: f32) -> f32 {
 }
 
 /// A 4th-order low-pass at `corner` Hz: two stages.
-fn low_pass(corner: f64, rate: f64) -> [crate::eq::Coeffs; 2] {
+fn low_pass(corner: f64, rate: f64) -> [Coeffs; 2] {
     let corner = corner.min(rate * MAX_CORNER);
     BUTTERWORTH_Q.map(|q| coeffs(Type::HighCut12, corner, 0.0, q, rate))
 }

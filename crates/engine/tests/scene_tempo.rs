@@ -296,6 +296,7 @@ fn a_scenes_signature_moves_the_bar_lines_the_next_launch_waits_for() {
         .session(SessionCommand::SetQuantization(LaunchSettings {
             quantization: LaunchQuantization::Bar,
             enabled: true,
+            ..LaunchSettings::default()
         }));
     rig.sender.transport(TransportCommand::Play);
     play(&mut rig, 24_001, 256);

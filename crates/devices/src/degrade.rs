@@ -19,7 +19,7 @@ use bl_model::{
 };
 
 use crate::delay::BandPass;
-use crate::eq::{ANALYSER_BANDS, Analyser, spectrum_series};
+use crate::sections::{ANALYSER_BANDS, Analyser, spectrum_series};
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 
 /// Degrade's device type.

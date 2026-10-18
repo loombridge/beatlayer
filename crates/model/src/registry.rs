@@ -1282,6 +1282,27 @@ const ENTRIES: &[Entry] = &[
             step; launching doesn't read it yet.",
     },
     Entry {
+        id: "clip.set_follow_actions",
+        action: Action::Apply("set_clip_follow_actions"),
+        label: "Set Clip Follow Actions",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Changes a Session clip's follow actions, as the Launch Properties panel \
+            does (`clip` is the ID of a clip that sits in a slot). `enabled` is the Follow Action switch; `action_a` and \
+            `action_b` are one of `no_action`, `stop`, `play_again`, `previous`, `next`, `first`, \
+            `last`, `any`, `other` and `jump`; `chance_a` is action A's chance in whole percent, \
+            0 to 100, and action B has the rest; `jump_a` and `jump_b` are the slot (scene) \
+            numbers Jump goes to, 1 up to the number of scenes, and 0 for none, where Jump stops \
+            the clip; `linked` is Linked: the follow time is the multiplier times the clip's loop, or the clip's end when its Loop switch is off; Unlinked: `time`; `multiplier` is the Linked multiplier, a whole number from \
+            1; and `time` is the Unlinked follow time in ticks, from a sixteenth (a bar is \
+            2822400 ticks in 4/4). Fields left out stay as they are, and a number past its \
+            limit is held at the limit. One undo step. The defaults are off, A Next, B No \
+            Action, 100 %, Linked, 1x, one bar. While the song plays the action runs when the \
+            follow time has passed after the clip started, and the global switch \
+            (`session.set_follow_actions_enabled`) must be on.",
+    },
+    Entry {
         id: "clip.set_envelope_breakpoint",
         action: Action::Apply("set_clip_envelope_breakpoint"),
         label: "Add Envelope Breakpoint",
@@ -1490,6 +1511,28 @@ const ENTRIES: &[Entry] = &[
             left out or null switches the scene's tempo off, as double-clicking the field or \
             Return to Default does, so launching it leaves the set's tempo as it is. One undo \
             step.",
+    },
+    Entry {
+        id: "scene.set_follow_actions",
+        action: Action::Apply("set_scene_follow_actions"),
+        label: "Set Scene Follow Actions",
+        permission: Permission::Edit,
+        contexts: &[Session],
+        keys: &[],
+        description: "Changes a scene's follow actions, as the Scene View does: what the scene \
+            does after it was launched, over the scenes as a clip's do over its track's slots. \
+            `enabled` is the Follow Action switch; `action_a` and \
+            `action_b` are one of `no_action`, `stop`, `play_again`, `previous`, `next`, `first`, \
+            `last`, `any`, `other` and `jump`; `chance_a` is action A's chance in whole percent, \
+            0 to 100, and action B has the rest; `jump_a` and `jump_b` are the slot (scene) \
+            numbers Jump goes to, 1 up to the number of scenes, and 0 for none, where Jump stops \
+            the scene; `linked` is Longest (on by default): the follow time is the multiplier times the scene's longest clip; off: `time`; `multiplier` is the Linked multiplier, a whole number from \
+            1; and `time` is the Unlinked follow time in ticks, from a sixteenth (a bar is \
+            2822400 ticks in 4/4). Fields left out stay as they are, and a number past its \
+            limit is held at the limit. One undo step. The defaults are off, A Next, B No \
+            Action, 100 %, Linked, 1x, one bar. While the song plays the action runs when the \
+            follow time has passed after the scene started, and the global switch \
+            (`session.set_follow_actions_enabled`) must be on.",
     },
     Entry {
         id: "scene.set_time_signature",
@@ -1713,6 +1756,105 @@ const ENTRIES: &[Entry] = &[
             ignore it. The set keeps the reference, so it reopens playing the same file. Null \
             clears the slot, one undo step named Clear Sample. To load a file from disk as a \
             person does, use `device.load_sample`.",
+    },
+    Entry {
+        id: "device.insert_layers",
+        action: Action::Apply("insert_layers"),
+        label: "Add Samples",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Adds layers to a multisampler at `index` (`null` for the end), each a sample named by content hash with its zones (every zone whole and unfaded in a new layer), Root Key, loop points and levels. The multisampler gives each layer the next of its own layer IDs, in order, ignoring the `id` you send; read them back from the device's `layers` in the query tool's `device` result. A sample must be in the media store to play; to add files from disk as a person does, use `device.add_layers`. One undo step.",
+    },
+    Entry {
+        id: "device.delete_layers",
+        action: Action::Apply("delete_layers"),
+        label: "Delete Samples",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Removes the listed layers from a multisampler, as the layer list's Delete does. A layer that isn't there refuses the whole command. One undo step.",
+    },
+    Entry {
+        id: "device.duplicate_layers",
+        action: Action::Apply("duplicate_layers"),
+        label: "Duplicate Samples",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Copies the listed layers, each copy straight after its original with the next layer ID, as the layer list's Duplicate does. One undo step.",
+    },
+    Entry {
+        id: "device.rename_layer",
+        action: Action::Apply("rename_layer"),
+        label: "Rename Sample",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Renames a layer, as the layer list's Rename does. The name is what the title bar shows for the first layer while Show Preset Name is on.",
+    },
+    Entry {
+        id: "device.move_layers",
+        action: Action::Apply("move_layers"),
+        label: "Move Samples",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Moves the listed layers, keeping their order, so the first sits at `index` among the layers that stay; the list's order decides Round Robin's turns and which layer a sort leaves first.",
+    },
+    Entry {
+        id: "device.sort_layers",
+        action: Action::Apply("sort_layers"),
+        label: "Sort Samples",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sorts a multisampler's layers by name, key, velocity or selector (the lowest value of that zone), ascending or `descending`, as the layer list's sorting items do. Layers that tie keep their order.",
+    },
+    Entry {
+        id: "device.set_layer_zone",
+        action: Action::Apply("set_layer_zones"),
+        label: "Change Zones",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sets one kind of zone (`key` 0 to 127, `velocity` 1 to 127, or `select` 0 to 127) of the listed layers, each with its own `low`, `high` and fades (`fade_low` and `fade_high`, how many values each fade spans). A zone holds at least one value and its fades stay inside it. In a fade the layer is silent at the zone's edge and reaches full level at the fade's inner edge, linearly or constant-power as the device's Fade Mode says. One undo step, as one drag in the zone editor is.",
+    },
+    Entry {
+        id: "device.update_layers",
+        action: Action::Apply("update_layers"),
+        label: "Change Sample Settings",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Changes settings of the listed layers exactly as given, without snapping markers to zero crossings (`device.set_layer` does that while Snap is on): `root_key`, `detune`, `volume` (a linear gain, up to +24 dB), `pan`, `start`, `end`, `link`, `sustain` and `release` modes, `loop_start`, `loop_end`, `release_loop` (frames of the sample at its own rate), `crossfade_ms` and `loop_detune`. Settings left out stay as they were. The markers must stay ordered: Start, Loop Start, Loop End, Release Loop and End, inside the sample. One setting out of range refuses the whole command.",
+    },
+    Entry {
+        id: "device.set_layer_media",
+        action: Action::Apply("set_layer_media"),
+        label: "Replace Sample",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Replaces one layer's sample with another already in the media store, keeping the layer's zones and settings and its markers at the same share of the new length, as hot-swapping a sample does. `length`, `sample_rate` and `channels` describe the new sample. To pick a file from disk, use `device.set_layer_sample`.",
+    },
+    Entry {
+        id: "device.distribute_layers",
+        action: Action::Apply("distribute_layers"),
+        label: "Distribute Ranges",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Spreads the listed layers' ranges, in list order and without fades: `equally` gives each an equal share of the range of the zone named by `kind` (keys from 0 to 127, velocities 1 to 127, select 0 to 127), and `around_root_key` splits the keyboard between the layers' root keys, layers that share a root dividing its zone. With one layer or none listed, every layer. One undo step.",
+    },
+    Entry {
+        id: "device.set_layer_options",
+        action: Action::Apply("set_layer_options"),
+        label: "Change Sample Options",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sets the multisampler options that aren't parameters: `ram_mode` (decode every layer whole into memory; off, long layers stream from disk), `snap` (markers set afterwards land on zero crossings of the left channel) and `linear_loop_fades` (the title bar's Use Constant Power Fade for Loops, off when true). Options left out stay as they were.",
     },
     Entry {
         id: "device.set_sidechain_input",

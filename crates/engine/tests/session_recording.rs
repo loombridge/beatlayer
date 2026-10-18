@@ -325,6 +325,7 @@ fn without_quantisation_a_take_runs_from_press_to_press() {
         .session(SessionCommand::SetQuantization(bl_model::LaunchSettings {
             quantization: bl_model::LaunchQuantization::Bar,
             enabled: false,
+            ..bl_model::LaunchSettings::default()
         }));
     take.rig.sender.transport(TransportCommand::Play);
     take.blocks(10);

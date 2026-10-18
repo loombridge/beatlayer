@@ -527,24 +527,36 @@ impl GridUi {
             "session.stop_all",
             json!({}),
         );
-        // The global follow-action switch: drawn in place, disabled until
-        // WP-3.10 brings follow actions.
+        // Spec: follow-actions R8. The global follow-action switch (L-SES-008):
+        // outlined in the accent colour while follow actions are on.
+        let on = shell.launch_settings().follow_actions;
         let follow = main.follow.shrink(4.0);
         painter.rect_stroke(
             follow,
             theme.sizes.corner,
-            Stroke::new(1.0, colours.pending.0),
+            Stroke::new(
+                1.0,
+                if on {
+                    colours.accent.0
+                } else {
+                    colours.pending.0
+                },
+            ),
             StrokeKind::Inside,
         );
-        let id = Id::new("session-follow-actions");
-        ui.interact(main.follow, id, Sense::hover());
-        ui.ctx().accesskit_node_builder(id, |node| {
-            node.set_role(Role::Button);
-            node.set_label("Enable Follow Actions Globally".to_owned());
-            node.set_disabled();
-            node.set_description("Not built yet: arrives with WP-3.10.".to_owned());
-            node.set_bounds(bounds(main.follow));
-        });
+        let press = ui.interact(
+            main.follow,
+            Id::new("session-follow-actions"),
+            Sense::click(),
+        );
+        self.button(
+            &press,
+            "Enable Follow Actions Globally",
+            on,
+            events,
+            "session.set_follow_actions_enabled",
+            json!({}),
+        );
         // Back to Arrangement lights while a Session clip has taken a track
         // over from the Arrangement (L-SES-012).
         let lit = !shell.session_over().is_empty();

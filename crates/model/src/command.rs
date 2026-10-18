@@ -17,8 +17,12 @@ use crate::clip::{AudioData, Clip, ClipData, ClipEnvelope, MidiData, TakeLane, c
 use crate::device::{Device, DeviceRole};
 use crate::document::Document;
 use crate::error::ModelError;
+use crate::follow::FollowPatch;
 use crate::ids::{ChainId, ClipId, ContentHash, DeviceId, ParamId, SceneId, TrackId};
 use crate::launch::{ClipLaunch, LaunchMode, LaunchQuantization};
+use crate::layers::{
+    Distribution, Layer, LayerId, LayerSettings, LayerSort, LayerZone, Layers, ZoneKind,
+};
 use crate::metronome::{CountIn, MetronomeRhythm, MetronomeSound};
 use crate::rack::{CHAIN_COLOURS, Chain, RackKind};
 use crate::scene::{SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
@@ -289,6 +293,15 @@ pub enum Command {
         scene: SceneId,
         /// The tempo, or `None` for none of its own.
         tempo: Option<Bpm>,
+    },
+    /// Changes a scene's follow actions: the fields given change and the
+    /// others stay (WP-3.10).
+    SetSceneFollowActions {
+        /// The scene.
+        scene: SceneId,
+        /// The fields to change.
+        #[serde(flatten)]
+        patch: FollowPatch,
     },
     /// Gives a scene a time signature to set when it is launched, or
     /// switches it off with `None` (WP-3.5).
@@ -778,6 +791,15 @@ pub enum Command {
         #[serde(default)]
         quantization: Option<LaunchQuantization>,
     },
+    /// Changes a Session clip's follow actions: the fields given change and
+    /// the others stay (WP-3.10).
+    SetClipFollowActions {
+        /// The clip, which sits in a Session slot.
+        clip: ClipId,
+        /// The fields to change.
+        #[serde(flatten)]
+        patch: FollowPatch,
+    },
     /// Sets how much the velocity of the note that launches a Session clip
     /// changes its volume.
     SetClipVelocityAmount {
@@ -1091,6 +1113,129 @@ pub enum Command {
         #[serde(default)]
         slot: u8,
     },
+    /// Adds layers to a multisampler (WP-5.13; the multisampler spec, R3), at
+    /// `index` or at the end. Each layer's own `id` is ignored: the device
+    /// gives each the next of its layer IDs, in order, and they read back
+    /// from the device's layers. Every setting must be in range.
+    InsertLayers {
+        /// The device.
+        device: DeviceId,
+        /// Where in the layer list the first goes, or `null` for the end.
+        index: Option<usize>,
+        /// The layers.
+        layers: Vec<Layer>,
+    },
+    /// Removes layers from a multisampler.
+    DeleteLayers {
+        /// The device.
+        device: DeviceId,
+        /// The layers to remove.
+        layers: Vec<LayerId>,
+    },
+    /// Copies layers, each copy straight after its original with a new ID.
+    DuplicateLayers {
+        /// The device.
+        device: DeviceId,
+        /// The layers to copy.
+        layers: Vec<LayerId>,
+    },
+    /// Renames a layer.
+    RenameLayer {
+        /// The device.
+        device: DeviceId,
+        /// The layer.
+        layer: LayerId,
+        /// Its new name.
+        name: String,
+    },
+    /// Moves layers, keeping their order, so the first sits at `index`
+    /// among the layers that stay.
+    MoveLayers {
+        /// The device.
+        device: DeviceId,
+        /// The layers to move.
+        layers: Vec<LayerId>,
+        /// Where the first goes among the layers left.
+        index: usize,
+    },
+    /// Sorts a multisampler's layers.
+    SortLayers {
+        /// The device.
+        device: DeviceId,
+        /// What to sort by.
+        by: LayerSort,
+        /// Whether the largest comes first.
+        descending: bool,
+    },
+    /// Sets one kind of zone of layers (R10): the key, velocity or sample
+    /// select zone, with its fades. Every zone must hold at least one value
+    /// of its scale (keys 0 to 127, velocities 1 to 127, select 0 to 127)
+    /// and its fades stay inside it.
+    SetLayerZones {
+        /// The device.
+        device: DeviceId,
+        /// Which zone.
+        kind: ZoneKind,
+        /// Each layer's new zone.
+        zones: Vec<LayerZone>,
+    },
+    /// Changes settings of layers, exactly as given with no snapping to
+    /// zero crossings (`device.set_layer` snaps while Snap is on): Root Key,
+    /// Detune, Volume, Pan, the markers, Link, the loop modes, the loop's
+    /// Crossfade and Detune. Settings left out stay as they were; one
+    /// setting out of range refuses the whole change.
+    UpdateLayers {
+        /// The device.
+        device: DeviceId,
+        /// The layers to change.
+        layers: Vec<LayerId>,
+        /// The settings to set.
+        settings: LayerSettings,
+    },
+    /// Replaces a layer's sample, keeping its zones and settings, and its
+    /// markers in the same places relative to the sample's length. A layer
+    /// whose media the store doesn't hold plays silence.
+    SetLayerMedia {
+        /// The device.
+        device: DeviceId,
+        /// The layer.
+        layer: LayerId,
+        /// The new sample, by content hash.
+        media: ContentHash,
+        /// Its length in frames at its own rate.
+        length: u64,
+        /// Its own rate in hertz.
+        sample_rate: u32,
+        /// Its channels.
+        channels: u8,
+    },
+    /// Spreads layers' ranges (R12): equally over the range of the zone
+    /// editor in view (`kind`), or key zones around the layers' root keys,
+    /// without fades. With one layer or none listed, every layer.
+    DistributeLayers {
+        /// The device.
+        device: DeviceId,
+        /// The layers to spread.
+        layers: Vec<LayerId>,
+        /// How to spread them.
+        how: Distribution,
+        /// The zone editor in view: which zone `equally` spreads.
+        kind: ZoneKind,
+    },
+    /// Sets the options of a multisampler's layer list that aren't
+    /// parameters: RAM Mode, Snap, and the title bar's Use Constant Power
+    /// Fade for Loops (`linear_loop_fades`: true when it's off). Options
+    /// left out stay as they were.
+    SetLayerOptions {
+        /// The device.
+        device: DeviceId,
+        /// RAM Mode: decode every layer whole into memory.
+        ram_mode: Option<bool>,
+        /// Snap: markers land on zero crossings.
+        snap: Option<bool>,
+        /// Whether loop crossfades are linear rather than constant-power.
+        linear_loop_fades: Option<bool>,
+    },
     /// Sets where a device's sidechain listens: its sidechain section's
     /// Source, with its channel. The device must have a sidechain input.
     SetSidechainInput {
@@ -1354,6 +1499,8 @@ impl Command {
             Self::SetClipLegato { .. } => "Switch Legato",
             Self::SetClipLaunchQuantization { .. } => "Change clip quantization",
             Self::SetClipVelocityAmount { .. } => "Change velocity amount",
+            // WP-3.10. Live's undo names are to observe.
+            Self::SetClipFollowActions { .. } => "Change follow actions",
             // WP-3.15. Live's undo names for clip envelope edits are to
             // observe; Beatlayer's name the edit.
             Self::SetClipEnvelopeBreakpoint { .. } => "Add Envelope Breakpoint",
@@ -1370,6 +1517,7 @@ impl Command {
             Self::DuplicateScene { .. } => "Duplicate scene",
             Self::RenameScene { .. } => "Rename scene",
             Self::SetSceneTempo { .. } => "Change scene tempo",
+            Self::SetSceneFollowActions { .. } => "Change follow actions",
             Self::SetSceneTimeSignature { .. } => "Change scene time signature",
             Self::CreateSlotClip { .. } => "Create clip",
             Self::MoveSlotClip { .. } => "Move clip",
@@ -1406,6 +1554,26 @@ impl Command {
             Self::SetShape { .. } => "Edit Shape",
             Self::SetDeviceSample { media: Some(_), .. } => "Load Sample",
             Self::SetDeviceSample { media: None, .. } => "Clear Sample",
+            // WP-5.13: Live's names for the layer list's items where it has
+            // them (S6); the rest are Beatlayer's own.
+            Self::InsertLayers { .. } => "Add Samples",
+            Self::DeleteLayers { .. } => "Delete",
+            Self::DuplicateLayers { .. } => "Duplicate",
+            Self::RenameLayer { .. } => "Rename",
+            Self::MoveLayers { .. } => "Move Samples",
+            Self::SortLayers { .. } => "Sort Samples",
+            Self::SetLayerZones { .. } => "Change Zones",
+            Self::UpdateLayers { .. } => "Change Sample Settings",
+            Self::SetLayerMedia { .. } => "Replace Sample",
+            Self::DistributeLayers {
+                how: Distribution::Equally,
+                ..
+            } => "Distribute Ranges Equally",
+            Self::DistributeLayers {
+                how: Distribution::AroundRootKey,
+                ..
+            } => "Distribute Ranges Around Root Key",
+            Self::SetLayerOptions { .. } => "Change Sample Options",
             // WP-2.19b, as Live 12.4.6 names them (observed); Listen's is to
             // observe.
             Self::SetSidechainInput { .. } => "Change \"Routing\"",
@@ -1930,6 +2098,12 @@ impl Document {
             Command::SetClipLaunchQuantization { clip, quantization } => {
                 self.edit_launch(*clip, |launch| launch.quantization = *quantization)
             }
+            Command::SetClipFollowActions { clip, patch } => {
+                let targets = self.scenes.len();
+                let mut result = Ok(());
+                self.edit_launch(*clip, |launch| result = launch.follow.apply(patch, targets))?;
+                result
+            }
             Command::SetClipVelocityAmount { clip, amount } => {
                 if !(0.0..=1.0).contains(amount) {
                     return Err(ModelError::InvalidInput(
@@ -1976,6 +2150,20 @@ impl Document {
             }
             Command::RenameScene { scene, name } => self.rename_scene(*scene, name),
             Command::SetSceneTempo { scene, tempo } => self.set_scene_tempo(*scene, *tempo),
+            Command::SetSceneFollowActions { scene, patch } => {
+                let targets = self.scenes.len();
+                let position = self
+                    .scene_position(*scene)
+                    .ok_or(ModelError::NoSuchScene(*scene))?;
+                let mut next = self.scenes[position].follow;
+                next.apply(patch, targets)?;
+                if let Some(scene) = self.scenes.get_mut(position)
+                    && scene.follow != next
+                {
+                    scene.follow = next;
+                }
+                Ok(())
+            }
             Command::SetSceneTimeSignature { scene, signature } => {
                 self.set_scene_signature(*scene, *signature)
             }
@@ -2133,6 +2321,75 @@ impl Document {
                 }
                 Ok(())
             }
+            Command::InsertLayers {
+                device,
+                index,
+                layers,
+            } => self.edit_layers(*device, |l| l.insert(*index, layers).map(drop)),
+            Command::DeleteLayers { device, layers } => {
+                self.edit_layers(*device, |l| l.remove(layers))
+            }
+            Command::DuplicateLayers { device, layers } => {
+                self.edit_layers(*device, |l| l.duplicate(layers).map(drop))
+            }
+            Command::RenameLayer {
+                device,
+                layer,
+                name,
+            } => self.edit_layers(*device, |l| l.rename(*layer, name)),
+            Command::MoveLayers {
+                device,
+                layers,
+                index,
+            } => self.edit_layers(*device, |l| l.moved(layers, *index)),
+            Command::SortLayers {
+                device,
+                by,
+                descending,
+            } => self.edit_layers(*device, |l| {
+                l.sort(*by, *descending);
+                Ok(())
+            }),
+            Command::SetLayerZones {
+                device,
+                kind,
+                zones,
+            } => {
+                let zones: Vec<_> = zones.iter().map(|z| (z.layer, z.zone)).collect();
+                self.edit_layers(*device, |l| l.set_zones(*kind, &zones))
+            }
+            Command::UpdateLayers {
+                device,
+                layers,
+                settings,
+            } => self.edit_layers(*device, |l| l.update(layers, settings)),
+            Command::SetLayerMedia {
+                device,
+                layer,
+                media,
+                length,
+                sample_rate,
+                channels,
+            } => self.edit_layers(*device, |l| {
+                l.replace_media(*layer, *media, *length, *sample_rate, *channels)
+            }),
+            Command::DistributeLayers {
+                device,
+                layers,
+                how,
+                kind,
+            } => self.edit_layers(*device, |l| l.distribute(layers, *how, *kind)),
+            Command::SetLayerOptions {
+                device,
+                ram_mode,
+                snap,
+                linear_loop_fades,
+            } => self.edit_layers(*device, |l| {
+                l.ram_mode = ram_mode.unwrap_or(l.ram_mode);
+                l.snap = snap.unwrap_or(l.snap);
+                l.linear_loop_fades = linear_loop_fades.unwrap_or(l.linear_loop_fades);
+                Ok(())
+            }),
             Command::SetSidechainInput { device, input } => {
                 let input = input.clone();
                 self.edit_sidechain(*device, |s| s.input = input)?;
@@ -2245,6 +2502,21 @@ impl Document {
                 Ok(())
             }
         }
+    }
+
+    /// Changes a multisampler's layers with `edit`, which either succeeds or
+    /// leaves them as they were.
+    fn edit_layers(
+        &mut self,
+        id: DeviceId,
+        edit: impl FnOnce(&mut Layers) -> Result<(), ModelError>,
+    ) -> Result<(), ModelError> {
+        let mut layers = self.device_ref(id)?.layers.clone();
+        edit(&mut layers)?;
+        if self.device_ref(id)?.layers != layers {
+            self.device_mut(id)?.layers = layers;
+        }
+        Ok(())
     }
 
     /// Changes a device's sidechain settings with `edit`, if it has a
@@ -4145,6 +4417,7 @@ fn check_one_device(device: &Device) -> Result<(), ModelError> {
     for value in device.params.values().chain(device.other_params().values()) {
         check_value("parameter value", *value, value.is_finite())?;
     }
+    device.layers.check()?;
     crate::modulator::check_mappings(device)?;
     if let Some(shape) = &device.shape {
         crate::modulator::check_shape(shape)?;
@@ -4262,6 +4535,7 @@ mod tests {
     use crate::changes::ChangeSet;
     use crate::clip::{EDGE_FADE_SECONDS as EDGE_FADE, MidiData, Note, TakeClip};
     use crate::device::{DeviceKind, DeviceRole, PluginFormat};
+    use crate::follow::FollowAction;
     use crate::ids::ContentHash;
     use crate::scene::DEFAULT_SCENE_COUNT;
     use crate::track::Routing;
@@ -7573,6 +7847,70 @@ mod tests {
             }),
             ModelError::NotSlotClip(placed)
         );
+    }
+
+    // Spec: follow-actions R1, R3, R4, R7, R17
+    #[test]
+    fn follow_actions_are_set_per_clip_and_scene_and_only_on_a_slot_clip() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        let scene = song.doc.scenes().next().unwrap().id;
+        let clip: ClipId = song.fresh();
+        song.apply(Command::CreateSlotClip {
+            track,
+            scene,
+            clip: Clip::new(clip, Ticks::ZERO, Ticks::WHOLE, audio()),
+        })
+        .unwrap();
+        let patch = FollowPatch {
+            enabled: Some(true),
+            action_a: Some(FollowAction::Jump),
+            jump_a: Some(99),
+            linked: Some(false),
+            time: Some(Ticks::ZERO),
+            ..FollowPatch::default()
+        };
+        song.apply(Command::SetClipFollowActions { clip, patch })
+            .unwrap();
+        let follow = song.doc.clip(clip).unwrap().launch.follow;
+        assert_eq!(
+            (
+                follow.enabled,
+                follow.action_a,
+                follow.jump_a,
+                follow.linked
+            ),
+            (true, FollowAction::Jump, DEFAULT_SCENE_COUNT as u32, false),
+            "a jump target is held at the number of scenes"
+        );
+        assert_eq!(follow.time, crate::FOLLOW_TIME_MIN);
+        song.apply(Command::SetSceneFollowActions { scene, patch })
+            .unwrap();
+        assert_eq!(song.doc.scene(scene).unwrap().follow, follow);
+
+        let placed: ClipId = song.fresh();
+        song.apply(Command::CreateClip {
+            track,
+            clip: Clip::new(placed, Ticks::ZERO, Ticks::WHOLE, audio()),
+        })
+        .unwrap();
+        assert_eq!(
+            song.reject(Command::SetClipFollowActions {
+                clip: placed,
+                patch
+            }),
+            ModelError::NotSlotClip(placed)
+        );
+        assert!(matches!(
+            song.reject(Command::SetClipFollowActions {
+                clip,
+                patch: FollowPatch {
+                    chance_a: Some(101),
+                    ..FollowPatch::default()
+                }
+            }),
+            ModelError::InvalidValue { .. }
+        ));
     }
 
     // Spec: session-view R10, R11

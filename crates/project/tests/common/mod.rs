@@ -90,6 +90,9 @@ enum Step {
         plugin: Option<(PluginFormat, String)>,
         enabled: bool,
         params: Vec<(u32, f64)>,
+        /// A multisampler's layers (WP-5.13): each a key zone's low key and
+        /// width, a root key, and a volume.
+        layers: Vec<(u8, u8, u8, f64)>,
     },
 }
 
@@ -215,9 +218,10 @@ fn step() -> impl Strategy<Value = Step> {
             plugin(),
             any::<bool>(),
             prop::collection::vec((any::<u32>(), finite()), 0..6),
+            prop::collection::vec((0u8..=127, 0u8..=127, 0u8..=127, 0.0..15.0), 0..4),
         )
-            .prop_map(|(track, name, plugin, enabled, params)| Step::Device {
-                track, name, plugin, enabled, params,
+            .prop_map(|(track, name, plugin, enabled, params, layers)| Step::Device {
+                track, name, plugin, enabled, params, layers,
             }),
     ]
 }
@@ -379,12 +383,30 @@ impl Recipe {
             })
             .collect();
 
+        let multisamplers: bl_model::MultisamplerViews = document
+            .tracks()
+            .flat_map(|track| track.devices())
+            .filter(|device| !device.layers.is_default())
+            .map(|device| {
+                (
+                    device.id,
+                    bl_model::MultisamplerView {
+                        zone_editor: self.id_skip.is_multiple_of(2),
+                        tab: bl_model::SamplerTab::FilterGlobal,
+                        ..Default::default()
+                    },
+                )
+            })
+            .collect();
         Project {
             document,
             ids,
             media,
             windows: bl_model::DeviceWindows::new(),
             folds: bl_model::ClipFolds::new(),
+            // WP-5.13: what each multisampler's views show saves beside the
+            // song.
+            multisamplers,
             // WP-3.2: the global launch quantisation and its switch save
             // beside the song.
             launch: bl_model::LaunchSettings {
@@ -394,6 +416,7 @@ impl Recipe {
                     bl_model::LaunchQuantization::Bars2
                 },
                 enabled: !self.id_skip.is_multiple_of(3),
+                follow_actions: !self.id_skip.is_multiple_of(5),
             },
         }
     }
@@ -550,6 +573,7 @@ fn apply(editor: &mut Editor, step: &Step) {
             plugin,
             enabled,
             params,
+            layers,
         } => {
             let track = *track.get(&tracks);
             let index = doc.track(track).unwrap().devices().len();
@@ -567,11 +591,37 @@ fn apply(editor: &mut Editor, step: &Step) {
             for &(param, value) in params {
                 device.params.insert(ParamId(param), value);
             }
+            let id = device.id;
             let _ = editor.apply(Command::InsertDevice {
                 track,
                 index,
                 device,
             });
+            let layers: Vec<bl_model::Layer> = layers
+                .iter()
+                .enumerate()
+                .map(|(i, &(low, width, root, volume))| {
+                    let mut layer = bl_model::Layer::new(
+                        bl_model::LayerId(1),
+                        format!("Layer {i}"),
+                        ContentHash([low; 32]),
+                        48_000,
+                        48_000,
+                        1,
+                    );
+                    layer.key = bl_model::Zone::new(low, low.saturating_add(width).min(127));
+                    layer.root_key = root;
+                    layer.volume = volume;
+                    layer
+                })
+                .collect();
+            if !layers.is_empty() {
+                let _ = editor.apply(Command::InsertLayers {
+                    device: id,
+                    index: None,
+                    layers,
+                });
+            }
         }
     }
 }

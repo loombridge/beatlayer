@@ -24,11 +24,10 @@ use bl_project::preset::{self, Preset};
 use bl_shell_spec::arrangement as view_ids;
 use bl_shell_spec::devices::{
     self as ids, AddDeviceArgs, ChainAdded, ChainArgs, DeviceAdded, DeviceArgs, DeviceFrame,
-    DevicePanel, DeviceParameters, DeviceViewState, ExpandDeviceArgs, FloatingWindow,
-    FloatingWindows, FoldDeviceArgs, GroupArgs, Grouped, HotSwap, HotSwapArgs, LoadPresetArgs,
-    ParameterState, PasteChainArgs, PasteDeviceArgs, PresetResult, SavePresetArgs,
-    ExternalSection, SelectDeviceArgs, SelectSlotArgs, SetWindowArgs, ShowSidechainArgs,
-    SidechainSection,
+    DevicePanel, DeviceParameters, DeviceViewState, ExpandDeviceArgs, ExternalSection,
+    FloatingWindow, FloatingWindows, FoldDeviceArgs, GroupArgs, Grouped, HotSwap, HotSwapArgs,
+    LoadPresetArgs, ParameterState, PasteChainArgs, PasteDeviceArgs, PresetResult, SavePresetArgs,
+    SelectDeviceArgs, SelectSlotArgs, SetWindowArgs, ShowSidechainArgs, SidechainSection,
     Ungrouped,
 };
 use bl_shell_spec::devices::{ArmMapArgs, ArmedMap, MappingRow, ModulatorFrame};

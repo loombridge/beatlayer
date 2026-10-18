@@ -612,7 +612,10 @@ impl Compiler {
         // as its audio would be held back on the way into Main.
         for track in document.tracks() {
             if track.kind() == TrackKind::Midi {
-                midi.set_compensation(track.id(), main_compensation(&build, document, &task_of, track.id()));
+                midi.set_compensation(
+                    track.id(),
+                    main_compensation(&build, document, &task_of, track.id()),
+                );
             }
         }
         // Automation is placed with each node's delay in it (WP-2.11), so

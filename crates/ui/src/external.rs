@@ -57,10 +57,7 @@ pub fn rows(frame: Rect) -> [Rect; 5] {
         Rect::from_min_size(pos2(section.left(), top), vec2(section.width(), ROW))
     };
     let latency = row(3);
-    let unit = Rect::from_min_size(
-        pos2(latency.right() - 22.0, latency.top()),
-        vec2(22.0, ROW),
-    );
+    let unit = Rect::from_min_size(pos2(latency.right() - 22.0, latency.top()), vec2(22.0, ROW));
     let latency = Rect::from_min_max(latency.min, pos2(unit.left() - 2.0, latency.bottom()));
     [row(0), row(1), row(2), latency, unit]
 }
@@ -100,7 +97,9 @@ fn at(latency: HardwareLatency, position: f64) -> HardwareLatency {
 
 fn set_latency(device: DeviceId, latency: HardwareLatency) -> Invocation {
     let value = match latency {
-        HardwareLatency::Milliseconds { value } => json!({ "unit": "milliseconds", "value": value }),
+        HardwareLatency::Milliseconds { value } => {
+            json!({ "unit": "milliseconds", "value": value })
+        }
         HardwareLatency::Samples { value } => json!({ "unit": "samples", "value": value }),
     };
     Invocation::new(
@@ -242,7 +241,13 @@ pub fn draw(
         Stroke::new(1.0, c.separator.0),
         StrokeKind::Inside,
     );
-    painter.text(unit.center(), Align2::CENTER_CENTER, label, theme.small_font(), c.text.0);
+    painter.text(
+        unit.center(),
+        Align2::CENTER_CENTER,
+        label,
+        theme.small_font(),
+        c.text.0,
+    );
     focus_ring(ui, theme, unit, &response);
     describe(ui, id, Role::Button, "Hardware Latency Unit", label);
 }
@@ -264,7 +269,13 @@ mod tests {
         let samples = HardwareLatency::Samples { value: 0 };
         assert_eq!(at(samples, 0.5), HardwareLatency::Samples { value: 96_000 });
         assert!((position(HardwareLatency::Samples { value: 48_000 }) - 0.25).abs() < 1e-12);
-        assert_eq!(latency_text(HardwareLatency::Milliseconds { value: 12.5 }), "12.50 ms");
-        assert_eq!(latency_text(HardwareLatency::Samples { value: 600 }), "600 smp");
+        assert_eq!(
+            latency_text(HardwareLatency::Milliseconds { value: 12.5 }),
+            "12.50 ms"
+        );
+        assert_eq!(
+            latency_text(HardwareLatency::Samples { value: 600 }),
+            "600 smp"
+        );
     }
 }

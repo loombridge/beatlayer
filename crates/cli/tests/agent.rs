@@ -1757,7 +1757,11 @@ fn an_agent_routes_an_external_instrument_and_reads_it_back() {
         "routing.set_midi_output",
         json!({ "track": tracks[0], "to": { "name": "Synth", "channel": 3 } }),
     );
-    let track = call(&mut client, "query", json!({ "id": tracks[0], "detail": "full" }));
+    let track = call(
+        &mut client,
+        "query",
+        json!({ "id": tracks[0], "detail": "full" }),
+    );
     assert_eq!(
         track["saved"]["routing"]["midi_output"],
         json!({ "name": "Synth", "channel": 3 })

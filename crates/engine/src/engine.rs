@@ -224,7 +224,10 @@ enum Request {
     Latency(DeviceId, u32),
     /// The audio interface's output latency and round trip in frames now
     /// (WP-5.34).
-    RoundTrip { output: u32, round_trip: u32 },
+    RoundTrip {
+        output: u32,
+        round_trip: u32,
+    },
     Transport(TransportCommand, When),
     Schedule(ScheduledCommand),
     Cancel(u64),

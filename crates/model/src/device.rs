@@ -10,10 +10,10 @@ use imbl::OrdMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::external::External;
 use crate::ids::{ContentHash, DeviceId, ParamId};
 use crate::modulator::{Mapping, ShapePoint};
 use crate::rack::{Chain, RackKind};
-use crate::external::External;
 use crate::track::Input;
 
 /// The most sample slots a device's media can fill.

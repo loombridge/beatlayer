@@ -1209,7 +1209,10 @@ impl AudioHost {
             / 1000.0;
         let round_trip =
             i64::from(latency.input) + i64::from(latency.output) + compensation.round() as i64;
-        (latency.output, u32::try_from(round_trip.max(0)).unwrap_or(u32::MAX))
+        (
+            latency.output,
+            u32::try_from(round_trip.max(0)).unwrap_or(u32::MAX),
+        )
     }
 
     /// Tells the engine the device's latency when it has changed since it

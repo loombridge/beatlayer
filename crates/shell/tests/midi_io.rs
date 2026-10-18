@@ -848,8 +848,21 @@ fn a_track_keeps_a_missing_ports_name_and_sends_again_when_it_returns() {
     rig.shell.refresh_midi();
     assert_eq!(rig.shell.midi().output_names(), Vec::<String>::new());
     rig.play_settled("Keys A", [0x90, 62, 100]);
-    assert!(wait_for(|| rig.shell.midi().output().stats().snapshot().unrouted >= 1));
-    let routing = rig.shell.editor().document().track(rig.track).unwrap().routing();
+    assert!(wait_for(|| rig
+        .shell
+        .midi()
+        .output()
+        .stats()
+        .snapshot()
+        .unrouted
+        >= 1));
+    let routing = rig
+        .shell
+        .editor()
+        .document()
+        .track(rig.track)
+        .unwrap()
+        .routing();
     assert_eq!(
         routing.midi_output,
         Some(bl_model::MidiTo::Port {
@@ -874,6 +887,13 @@ fn a_track_keeps_a_missing_ports_name_and_sends_again_when_it_returns() {
     );
     let unrouted = rig.shell.midi().output().stats().snapshot().unrouted;
     rig.play_settled("Keys A", [0x90, 65, 100]);
-    assert!(wait_for(|| rig.shell.midi().output().stats().snapshot().unrouted > unrouted));
+    assert!(wait_for(|| rig
+        .shell
+        .midi()
+        .output()
+        .stats()
+        .snapshot()
+        .unrouted
+        > unrouted));
     assert_eq!(rig.test.sent("Synth").len(), 1);
 }

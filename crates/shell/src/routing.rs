@@ -670,7 +670,9 @@ fn audio_to(doc: &Document, track: TrackId) -> Chooser {
 /// a port takes channel 1, and choosing the same port again keeps its
 /// channel.
 fn midi_to(doc: &Document, track: TrackId, ports: &[String]) -> Chooser {
-    let to = doc.track(track).and_then(|t| t.routing().midi_output.clone());
+    let to = doc
+        .track(track)
+        .and_then(|t| t.routing().midi_output.clone());
     let set = |value: Value| {
         Invocation::new(
             "routing.set_midi_output",
@@ -684,9 +686,10 @@ fn midi_to(doc: &Document, track: TrackId, ports: &[String]) -> Chooser {
     let mut entries = Vec::new();
     for name in ports {
         let run = match &to {
-            Some(MidiTo::Port { name: kept, channel }) if kept == name => {
-                set(json!({ "name": name, "channel": channel }))
-            }
+            Some(MidiTo::Port {
+                name: kept,
+                channel,
+            }) if kept == name => set(json!({ "name": name, "channel": channel })),
             _ => set(json!({ "name": name, "channel": 1 })),
         };
         entries.push(Entry::choice(name, run, chosen_port == Some(name.as_str())));
@@ -958,7 +961,10 @@ pub fn external_choosers(
     for name in &interface.midi_outputs {
         midi_to.push(Entry::choice(
             name,
-            set_external(device, json!({ "midi_to": { "type": "port", "name": name } })),
+            set_external(
+                device,
+                json!({ "midi_to": { "type": "port", "name": name } }),
+            ),
             kept == Some(name.as_str()),
         ));
     }

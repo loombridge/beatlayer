@@ -97,8 +97,7 @@ impl HardwareLatency {
                 value: self.frames(sample_rate),
             },
             Self::Samples { value } => Self::Milliseconds {
-                value: (f64::from(value) * 1000.0 / f64::from(sample_rate.max(1)) * 100.0)
-                    .round()
+                value: (f64::from(value) * 1000.0 / f64::from(sample_rate.max(1)) * 100.0).round()
                     / 100.0,
             },
         }
@@ -189,7 +188,10 @@ mod tests {
 
     #[test]
     fn a_new_devices_routing_is_left_out_of_the_saved_set() {
-        assert_eq!(serde_json::to_value(External::default()).unwrap(), serde_json::json!({}));
+        assert_eq!(
+            serde_json::to_value(External::default()).unwrap(),
+            serde_json::json!({})
+        );
         let kept = External {
             port: Some("Synth".to_owned()),
             channel: 4,

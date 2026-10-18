@@ -2075,7 +2075,10 @@ impl Document {
                     )?;
                     external.hardware_latency = *latency;
                 }
-                crate::routing::check_port(external.port.as_deref().unwrap_or("-"), external.channel)?;
+                crate::routing::check_port(
+                    external.port.as_deref().unwrap_or("-"),
+                    external.channel,
+                )?;
                 if Some(&external) != self.device_ref(*device)?.external.as_ref() {
                     self.device_mut(*device)?.external = Some(external);
                 }

@@ -272,7 +272,8 @@ impl MidiPorts {
             return;
         }
         if entry.output {
-            self.output.set_track(self.owner, port, entry.switches.track);
+            self.output
+                .set_track(self.owner, port, entry.switches.track);
             return;
         }
         let opened = match entry.direction {

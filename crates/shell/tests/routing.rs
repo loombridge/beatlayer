@@ -822,7 +822,15 @@ fn midi_to_lists_the_output_ports_before_configure() {
     let (output, channel) = to(&shell, &interface);
     assert_eq!(
         output.labels(),
-        ["Synth", "Drum Box", "Configure…", "─", "2-MIDI", "─", "No Output"]
+        [
+            "Synth",
+            "Drum Box",
+            "Configure…",
+            "─",
+            "2-MIDI",
+            "─",
+            "No Output"
+        ]
     );
     assert_eq!(output.text, "No Output");
     assert_eq!(channel.labels(), Vec::<&str>::new());
@@ -834,7 +842,13 @@ fn midi_to_lists_the_output_ports_before_configure() {
     assert_eq!(channel.text, "1");
     assert_eq!(channel.labels().len(), 16);
     assert_eq!(
-        shell.editor().document().track(midi[0]).unwrap().routing().midi_output,
+        shell
+            .editor()
+            .document()
+            .track(midi[0])
+            .unwrap()
+            .routing()
+            .midi_output,
         Some(MidiTo::port("Synth"))
     );
 
@@ -853,7 +867,10 @@ fn midi_to_lists_the_output_ports_before_configure() {
     assert_eq!(channel.labels(), ["Track In"]);
     shell.invoke("edit.undo", json!({})).unwrap();
     let (output, channel) = to(&shell, &interface);
-    assert_eq!((output.text.as_str(), channel.text.as_str()), ("Synth", "7"));
+    assert_eq!(
+        (output.text.as_str(), channel.text.as_str()),
+        ("Synth", "7")
+    );
 
     // The port goes, or its Track switch turns off: the track keeps its
     // name, dimmed, and sends nowhere.

@@ -262,7 +262,11 @@ fn out_message(note: &NoteEvent, channel: u8) -> Option<MidiMessage> {
     let seven = |value: f32| (value.clamp(0.0, 1.0) * 127.0).round() as u8;
     let key = note.key & 0x7F;
     match note.kind {
-        NoteKind::On => Some(MidiMessage::note_on(channel, key, seven(note.velocity).max(1))),
+        NoteKind::On => Some(MidiMessage::note_on(
+            channel,
+            key,
+            seven(note.velocity).max(1),
+        )),
         NoteKind::Off | NoteKind::Choke => {
             MidiMessage::from_bytes(&[0x80 | channel, key, seven(note.velocity)])
         }
@@ -271,9 +275,9 @@ fn out_message(note: &NoteEvent, channel: u8) -> Option<MidiMessage> {
             value,
         } => MidiMessage::from_bytes(&[0xA0 | channel, key, seven(value)]),
         NoteKind::Expression { .. } => None,
-        NoteKind::Control { .. } | NoteKind::PitchBend { .. } | NoteKind::ChannelPressure { .. } => {
-            NoteEvent { channel, ..*note }.message()
-        }
+        NoteKind::Control { .. }
+        | NoteKind::PitchBend { .. }
+        | NoteKind::ChannelPressure { .. } => NoteEvent { channel, ..*note }.message(),
     }
 }
 
@@ -339,11 +343,7 @@ impl MidiRoutes {
             if track.kind() == TrackKind::Midi
                 && let Some(MidiTo::Port { name, channel }) = &track.routing().midi_output
             {
-                outs.push(OutRoute::new(
-                    OutOwner::Track(entry.track),
-                    name,
-                    *channel,
-                ));
+                outs.push(OutRoute::new(OutOwner::Track(entry.track), name, *channel));
             }
             // Spec: external-devices R10
             for device in track.devices_deep() {
@@ -456,7 +456,10 @@ impl MidiRoutes {
                 .iter_mut()
                 .map(|r| (r.port, r.channel, std::mem::take(&mut r.held))),
         );
-        let total = held.iter().map(|&(.., keys)| keys.count_ones() as usize).sum();
+        let total = held
+            .iter()
+            .map(|&(.., keys)| keys.count_ones() as usize)
+            .sum();
         let mut offs = Vec::with_capacity(total);
         for (port, channel, keys) in held {
             push_offs(&mut offs, &mut 0, (port, channel, 0), keys);

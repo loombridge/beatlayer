@@ -606,8 +606,7 @@ impl<'a> Block<'a> {
     #[must_use]
     pub fn with_external(self, external: &'a [f32]) -> Self {
         assert!(
-            self.channels == 0
-                || external.len() >= (self.channels - 1) * self.stride + self.frames,
+            self.channels == 0 || external.len() >= (self.channels - 1) * self.stride + self.frames,
             "the external input is shorter than the block"
         );
         Self {

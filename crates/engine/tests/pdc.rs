@@ -677,10 +677,7 @@ impl Loopback {
 /// track playing -0.5 on Ext. Out 3/4, and an external instrument bringing
 /// 3/4 back, on an interface with four channels each way and 300 frames of
 /// round trip.
-fn loopback_rig(
-    rate: bl_core::time::SampleRate,
-    latency: bl_model::HardwareLatency,
-) -> Rig {
+fn loopback_rig(rate: bl_core::time::SampleRate, latency: bl_model::HardwareLatency) -> Rig {
     use bl_model::{Channel, External};
     use common::dc;
 
@@ -752,10 +749,26 @@ fn an_external_instruments_round_trip_lines_up_at_main() {
     // Hardware Latency in milliseconds follows the sample rate, and in
     // samples it doesn't.
     for (rate, latency, hardware) in [
-        (SampleRate::HZ_48000, HardwareLatency::Milliseconds { value: 4.0 }, 192),
-        (SampleRate::HZ_48000, HardwareLatency::Samples { value: 100 }, 100),
-        (SampleRate::HZ_96000, HardwareLatency::Milliseconds { value: 4.0 }, 384),
-        (SampleRate::HZ_96000, HardwareLatency::Samples { value: 100 }, 100),
+        (
+            SampleRate::HZ_48000,
+            HardwareLatency::Milliseconds { value: 4.0 },
+            192,
+        ),
+        (
+            SampleRate::HZ_48000,
+            HardwareLatency::Samples { value: 100 },
+            100,
+        ),
+        (
+            SampleRate::HZ_96000,
+            HardwareLatency::Milliseconds { value: 4.0 },
+            384,
+        ),
+        (
+            SampleRate::HZ_96000,
+            HardwareLatency::Samples { value: 100 },
+            100,
+        ),
     ] {
         let total = LOOPBACK_ROUND_TRIP as usize + hardware;
         // The reference reaches Main `total` frames late, and the
@@ -809,7 +822,10 @@ fn a_round_trip_that_changes_reaches_the_running_song() {
     rig.sender.send_update(update);
     assert!(rig.sender.flush());
     let out = rig.render(512, 64);
-    let delayed = out.iter().position(|&s| s.abs() > 1e-6).unwrap_or(out.len());
+    let delayed = out
+        .iter()
+        .position(|&s| s.abs() > 1e-6)
+        .unwrap_or(out.len());
     // The new delay line starts empty: silence for 300 frames, then the
     // reference.
     assert_eq!(delayed, 300, "{delayed}");

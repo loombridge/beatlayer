@@ -12,8 +12,9 @@ use bl_model::{
     ArrangementLoop, AudioData, AutomationTarget, Chain, ChainId, Change, ChangeSet, Channel, Clip,
     ClipData, ClipId, ClipLaunch, Command, ContentHash, CountIn, CrossfadeAssign, Device, DeviceId,
     DeviceKind, EditError, Editor, ExternalPort, HardwareLatency, Input, LaunchMode,
-    LaunchQuantization, MetronomeRhythm, MetronomeSound, MidiData, MidiTo, MixerParam, ModelError, Monitor, Note, Output, ParamId, PluginFormat,
-    SceneId, SendTap, TakeClip, TakeLane, Tap, TrackId, TrackKind,
+    LaunchQuantization, MetronomeRhythm, MetronomeSound, MidiData, MidiTo, MixerParam, ModelError,
+    Monitor, Note, Output, ParamId, PluginFormat, SceneId, SendTap, TakeClip, TakeLane, Tap,
+    TrackId, TrackKind,
 };
 use serde_json::{Value, json};
 
@@ -255,13 +256,22 @@ fn every_command_runs_by_id() {
         json!({ "track": keys, "to": { "name": "Synth", "channel": 3 } }),
     );
     assert_eq!(
-        agent.editor.document().track(keys).unwrap().routing().midi_output,
+        agent
+            .editor
+            .document()
+            .track(keys)
+            .unwrap()
+            .routing()
+            .midi_output,
         Some(MidiTo::Port {
             name: "Synth".to_owned(),
             channel: 3
         })
     );
-    agent.run("routing.set_midi_output", json!({ "track": keys, "to": bass }));
+    agent.run(
+        "routing.set_midi_output",
+        json!({ "track": keys, "to": bass }),
+    );
     // Ext. In with a channel, and Main's Main Out (WP-2.13): the agent API
     // sets both, as an agent recording from an interface would.
     agent.run(
@@ -854,7 +864,15 @@ fn every_command_runs_by_id() {
         json!({ "device": outboard, "midi_to": { "type": "none" } }),
     );
     assert_eq!(
-        agent.editor.document().device(outboard).unwrap().external.as_ref().unwrap().port,
+        agent
+            .editor
+            .document()
+            .device(outboard)
+            .unwrap()
+            .external
+            .as_ref()
+            .unwrap()
+            .port,
         None
     );
     // Racks (WP-5.1): a rack with a chain, a second chain added with a

@@ -153,7 +153,12 @@ impl Notes {
         );
         if slow > 0 {
             let other = track(&mut rig.editor, TrackKind::Audio, None);
-            device(&mut rig.editor, other, DELAY, &[(DELAY_FRAMES, f64::from(slow))]);
+            device(
+                &mut rig.editor,
+                other,
+                DELAY,
+                &[(DELAY_FRAMES, f64::from(slow))],
+            );
         }
         rig.sync();
         rig.apply(Command::SetInput {
@@ -237,7 +242,10 @@ fn the_instrument_ends_its_notes_when_its_device_goes() {
     notes.run();
     notes.run();
     notes.run();
-    assert_eq!(notes.output.pop().unwrap().message.padded(), [0x91, 60, 100]);
+    assert_eq!(
+        notes.output.pop().unwrap().message.padded(),
+        [0x91, 60, 100]
+    );
     let device = notes
         .rig
         .editor

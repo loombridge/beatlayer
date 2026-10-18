@@ -40,7 +40,12 @@ fn the_external_instrument_is_described_and_its_choosers_list_the_interface() {
     assert_eq!(t.name, "Hardware Instrument");
     assert_eq!(t.role, DeviceRole::Instrument);
     assert!(t.external && !t.sidechain);
-    let gain = t.description.params.iter().find(|p| p.name == "Gain").unwrap();
+    let gain = t
+        .description
+        .params
+        .iter()
+        .find(|p| p.name == "Gain")
+        .unwrap();
     assert_eq!(gain.default, 1.0, "0 dB");
     assert!(matches!(
         &t.kind,
@@ -56,7 +61,10 @@ fn the_external_instrument_is_described_and_its_choosers_list_the_interface() {
     let external = document.device(device).unwrap().external.clone().unwrap();
     assert_eq!(external, bl_model::External::default());
     assert_eq!(external.port, None);
-    assert_eq!((external.channel, external.audio_from), (1, Channel::Pair(1)));
+    assert_eq!(
+        (external.channel, external.audio_from),
+        (1, Channel::Pair(1))
+    );
 
     // The choosers list what the interface and the MIDI system offer: the
     // ports, No Output, Configure…; the single input channels, then the
@@ -94,11 +102,21 @@ fn the_external_instrument_is_described_and_its_choosers_list_the_interface() {
         shell.invoke(&run.id, run.args).unwrap();
         assert_eq!(shell.editor().undo_history().len(), steps + 1);
     }
-    let external = shell.editor().document().device(device).unwrap().external.clone().unwrap();
-    assert_eq!(external.port.as_deref(), Some("Synth"));
-    assert_eq!((external.channel, external.audio_from), (9, Channel::Pair(3)));
-    let choosers = routing::external_choosers(shell.editor().document(), device, &interface)
+    let external = shell
+        .editor()
+        .document()
+        .device(device)
+        .unwrap()
+        .external
+        .clone()
         .unwrap();
+    assert_eq!(external.port.as_deref(), Some("Synth"));
+    assert_eq!(
+        (external.channel, external.audio_from),
+        (9, Channel::Pair(3))
+    );
+    let choosers =
+        routing::external_choosers(shell.editor().document(), device, &interface).unwrap();
     assert_eq!(choosers.midi_to.text, "Synth");
     assert_eq!(choosers.audio_from.text, "3/4");
 
@@ -125,7 +143,15 @@ fn the_external_instrument_is_described_and_its_choosers_list_the_interface() {
         assert_eq!(result.is_ok(), ok, "{value}");
     }
     assert_eq!(
-        shell.editor().document().device(device).unwrap().external.as_ref().unwrap().hardware_latency,
+        shell
+            .editor()
+            .document()
+            .device(device)
+            .unwrap()
+            .external
+            .as_ref()
+            .unwrap()
+            .hardware_latency,
         HardwareLatency::Samples { value: 192_000 }
     );
 }
@@ -185,13 +211,18 @@ fn an_offline_render_silences_the_external_devices_and_names_them() {
     let preview = shell.run(perception_commands::PREVIEW, json!({})).unwrap();
     let notes = preview["rendered"]["notes"].as_array().unwrap();
     assert!(
-        notes.iter().any(|n| n.as_str().is_some_and(|n| n.starts_with(&name))),
+        notes
+            .iter()
+            .any(|n| n.as_str().is_some_and(|n| n.starts_with(&name))),
         "{notes:?}"
     );
 
     // A switched-off device is named in neither.
     shell
-        .run("device.set_enabled", json!({ "device": device, "enabled": false }))
+        .run(
+            "device.set_enabled",
+            json!({ "device": device, "enabled": false }),
+        )
         .unwrap();
     let result = shell
         .run(

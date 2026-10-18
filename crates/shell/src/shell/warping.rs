@@ -348,29 +348,29 @@ impl Shell {
 
         let mut new_markers: Vec<WarpMarker> = audio.warp_markers.clone();
         for (line, t) in chosen_matches {
-            let current_beat = match new_markers
-                .iter()
-                .find(|m| (m.time - t).abs() <= TRANSIENT_MATCH)
-            {
-                Some(m) => m.beat,
-                None => Ticks(map.time_to_beat(t).round() as i64),
-            };
-            let new_beat = crate::clip_view::toward(current_beat, line, amount);
-            if let Some(m) = new_markers
+            let mut next = new_markers.clone();
+            if let Some(m) = next
                 .iter_mut()
                 .find(|m| (m.time - t).abs() <= TRANSIENT_MATCH)
             {
-                m.beat = new_beat;
+                m.beat = crate::clip_view::toward(m.beat, line, amount);
             } else {
-                new_markers.push(WarpMarker {
+                let beat = Ticks(map.time_to_beat(t).round() as i64);
+                next.push(WarpMarker {
                     time: t,
-                    beat: new_beat,
+                    beat: crate::clip_view::toward(beat, line, amount),
                 });
+                next.sort_by(|a, b| a.time.total_cmp(&b.time));
+            }
+            // A marker that would reach or pass a neighbour, such as a late
+            // first hit landing on the marker at 1.1.1, stays where it is.
+            if next
+                .windows(2)
+                .all(|pair| pair[0].time < pair[1].time && pair[0].beat < pair[1].beat)
+            {
+                new_markers = next;
             }
         }
-
-        new_markers.sort_by(|a, b| a.time.total_cmp(&b.time));
-        new_markers.dedup_by(|b, a| (a.time - b.time).abs() <= TRANSIENT_MATCH);
 
         if new_markers == audio.warp_markers {
             return Ok(Value::Null);

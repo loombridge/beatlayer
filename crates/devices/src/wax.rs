@@ -1,4 +1,4 @@
-//! Wax, the native vinyl-distortion effect (WP-5.24; the vinyl distortion
+//! Vinyl Distortion, the native vinyl-distortion effect (WP-5.24; the vinyl distortion
 //! spec): two band-limited distortions, one adding even harmonics (the
 //! tracing model) and one odd harmonics, in opposite phase between the
 //! channels (the pinch), under one drive, and a crackle of random clicks.
@@ -18,7 +18,7 @@ use crate::degrade::q_for_octaves;
 use crate::delay::BandPass;
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 
-/// Wax's device type.
+/// Vinyl Distortion's device type.
 pub const WAX: &str = "beatlayer.wax";
 
 /// Tracing Drive: how much even-harmonic distortion the tracing model adds.
@@ -77,7 +77,7 @@ const MAX_DENSITY: f64 = 250.0;
 /// How often the bands' coefficients are worked out, in frames.
 const REFRESH_FRAMES: u64 = 16;
 
-/// The Wax device type.
+/// The Vinyl Distortion device type.
 #[must_use]
 pub fn wax_type() -> DeviceType {
     let width = |id, name: &str| {
@@ -148,11 +148,11 @@ pub fn wax_type() -> DeviceType {
             (CRACKLE_VOLUME, Widget::Knob),
         ]),
     ]));
-    DeviceType::native(WAX, "Wax", DeviceRole::AudioEffect)
+    DeviceType::native(WAX, "Vinyl Distortion", DeviceRole::AudioEffect)
         .with_description(DeviceDescription::new(params).with_layout(layout))
 }
 
-/// Adds Wax to `registry`.
+/// Adds Vinyl Distortion to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, wax_type(), Wax::new);
 }
@@ -172,7 +172,7 @@ struct Channel {
     click: f32,
 }
 
-/// Wax's audio-thread half.
+/// Vinyl Distortion's audio-thread half.
 pub struct Wax {
     rate: f64,
     channels: Vec<Channel>,

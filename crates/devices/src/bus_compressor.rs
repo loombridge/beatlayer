@@ -1,4 +1,4 @@
-//! Bond, the native bus compressor (WP-5.21; the bus-compressor spec):
+//! Glue Compressor, the native bus compressor (WP-5.21; the bus-compressor spec):
 //! Threshold, Ratio (the knee sharpens as the ratio rises, with no knee
 //! control of its own), Attack in ms, Release in seconds or Auto, Range,
 //! Makeup, Soft Clip, Dry/Wet, the gain reduction and clip readings,
@@ -9,7 +9,7 @@
 //! The detector hears the key (`Audio::sidechain`, or the device's own
 //! input) through the SC EQ when it's on, as the larger of the two
 //! channels' magnitudes. The static curve turns its level in dB into a
-//! reduction in dB (Squeeze's gain computer, with a knee that narrows with
+//! reduction in dB (Compressor's gain computer, with a knee that narrows with
 //! the ratio), capped by Range; the reduction rises with Attack and falls
 //! with Release, both time constants of the reduction in dB. The gain is the
 //! reduction taken off, plus Makeup, then Soft Clip, then the dry signal
@@ -33,7 +33,7 @@ use crate::dynamics::{SC_TYPES, ScFilter, curve_db, level_db, step_of};
 use crate::framework::{Audio, DelayLine, NativeDevice, ParamBank, add};
 use crate::sections::REFRESH_FRAMES;
 
-/// Bond's device type.
+/// Glue Compressor's device type.
 pub const BUS_COMPRESSOR: &str = "beatlayer.bond";
 
 /// Threshold: the level above which the gain turns down, in dB.
@@ -104,7 +104,7 @@ pub fn reduction_db(level_db: f64, threshold: f64, ratio: f64) -> f64 {
     )
 }
 
-/// Bond's device type.
+/// Glue Compressor's device type.
 #[must_use]
 pub fn bus_compressor_type() -> DeviceType {
     let params = vec![
@@ -161,7 +161,7 @@ pub fn bus_compressor_type() -> DeviceType {
              compression and Soft Clip; it costs a little latency and processing.",
         ),
     ];
-    DeviceType::native(BUS_COMPRESSOR, "Bond", DeviceRole::AudioEffect)
+    DeviceType::native(BUS_COMPRESSOR, "Glue Compressor", DeviceRole::AudioEffect)
         .with_sidechain()
         .with_description(
             DeviceDescription::new(params)
@@ -208,7 +208,7 @@ fn layout() -> DeviceLayout {
     ]))
 }
 
-/// Adds Bond to `registry`.
+/// Adds Glue Compressor to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, bus_compressor_type(), |device, config| {
         Bond::new(device, config)
@@ -227,7 +227,7 @@ fn soft_clip(x: f32, ceiling: f32) -> f32 {
     ceiling * (x / ceiling).tanh()
 }
 
-/// Bond's audio-thread half.
+/// Glue Compressor's audio-thread half.
 pub struct Bond {
     rate: f64,
     /// Each frame's gain, Makeup included.

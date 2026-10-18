@@ -9,7 +9,7 @@
 
 The alignment delay delays the signal on each side by a set amount, set in one of three ways: a time in milliseconds, a number of samples, or a distance in metres or feet that sound covers in that time, for which the temperature of the air matters. Link gives the right side the left side's delay.
 
-Beatlayer's own name for the device is Plumb. It runs on the device framework with the generic controls and no display. The delay is the effect, so the device reports no latency and the engine's delay compensation does not hold the other tracks back to meet it. Where it sits in a chain is [the device chains spec](device-chains.md).
+The device takes Live's name, Align Delay. It runs on the device framework with the generic controls and no display. The delay is the effect, so the device reports no latency and the engine's delay compensation does not hold the other tracks back to meet it. Where it sits in a chain is [the device chains spec](device-chains.md).
 
 ## Sources
 
@@ -45,6 +45,6 @@ Beatlayer's own name for the device is Plumb. It runs on the device framework wi
 
 ## Defaults, ranges and details
 
-- A new Plumb is in Time mode with Link off, both sides at 0, metres, °C and 20 °C.
+- A new Align Delay is in Time mode with Link off, both sides at 0, metres, °C and 20 °C.
 - The delay line is as long as the longer of 96,000 frames and one second, so a time or distance within the ranges fits at rates up to 96 kHz (a distance of 300 m at −30 °C is 0.96 s); above that a delay is held at the line's length.
 - Beatlayer's own, where the manual gives no figure: every range and default above, the rounding to whole frames, the speed-of-sound formula, the separate unit controls, and the cut on a change.

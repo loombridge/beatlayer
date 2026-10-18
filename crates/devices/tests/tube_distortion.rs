@@ -1,4 +1,4 @@
-//! Valve, the native tube distortion (WP-5.23; the tube distortion spec):
+//! Dynamic Tube, the native tube distortion (WP-5.23; the tube distortion spec):
 //! the three models' distortion against level and Bias, Tone, the envelope
 //! and its times, Hi-Quality and its latency, the display, and renders that
 //! don't depend on the block size.
@@ -24,7 +24,7 @@ fn registry() -> Registry {
     registry
 }
 
-/// A Valve of `params`, up to `max_frames` at a time.
+/// A Dynamic Tube of `params`, up to `max_frames` at a time.
 fn valve(params: &[(ParamId, f64)], max_frames: usize) -> Box<dyn Node> {
     let device_type: DeviceType = tube_type();
     node(&registry(), &device(&device_type, params), max_frames)
@@ -50,7 +50,7 @@ fn magnitude(samples: &[f32], bin: usize) -> f64 {
 }
 
 /// The harmonic distortion, in dB, of a 1 kHz sine of `amplitude` through a
-/// Valve of `params`: harmonics 2 to 9 against the fundamental, over 4,800
+/// Dynamic Tube of `params`: harmonics 2 to 9 against the fundamental, over 4,800
 /// frames (100 cycles) after the envelope has settled.
 fn distortion_db(params: &[(ParamId, f64)], amplitude: f64) -> f64 {
     let frames = 24_000;
@@ -83,7 +83,11 @@ fn the_tube_is_described_and_laid_out() {
         }
     );
     assert_eq!(device_type.description.menu_options, vec![HI_QUALITY]);
-    assert!(bl_devices::device_types().iter().any(|t| t.name == "Valve"));
+    assert!(
+        bl_devices::device_types()
+            .iter()
+            .any(|t| t.name == "Dynamic Tube")
+    );
     assert_eq!(valve(&[], 64).latency(), 0, "no latency without Hi-Quality");
 }
 
@@ -153,7 +157,7 @@ fn through(driven: f64, level: f64) -> f64 {
     (driven + 0.15 + level).tanh() - (0.15 + level).tanh()
 }
 
-/// The output of a Valve (Model C, Bias 0, Envelope 100 %) for `steps`:
+/// The output of a Dynamic Tube (Model C, Bias 0, Envelope 100 %) for `steps`:
 /// each a constant input held for the frames it names.
 fn follow(attack_ms: f64, release_ms: f64, steps: &[(f32, usize)]) -> Vec<f32> {
     let params = [

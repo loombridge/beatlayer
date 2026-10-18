@@ -525,7 +525,7 @@ fn the_panel_maps_the_plugins_parameters_and_a_remap_is_remembered_per_plugin() 
         ]
     );
 
-    // Remap the first knob to the plug-in's third parameter.
+    // Scale the first knob to the plug-in's third parameter.
     let remapped: DeviceViewState = serde_json::from_value(
         shell
             .run(

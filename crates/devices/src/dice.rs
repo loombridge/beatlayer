@@ -1,4 +1,4 @@
-//! Dice, the random-pitch MIDI effect (WP-5.30; the MIDI random pitch spec):
+//! Random, the random-pitch MIDI effect (WP-5.30; the MIDI random pitch spec):
 //! moves some notes by a random number of steps up, down or both, chosen
 //! from a fixed set, or cycling through the set in order.
 //!
@@ -11,7 +11,7 @@ use bl_model::{DeviceDescription, DeviceRole, ParamDescriptor, ParamId, ParamUni
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 use crate::midi_fx::{Key, Router, seed, value};
 
-/// The Dice device type's id.
+/// The Random device type's id.
 pub const DICE: &str = "beatlayer.dice";
 
 /// How likely each note is to move, in per cent.
@@ -32,10 +32,10 @@ pub const MODES: [&str; 2] = ["Random", "Alt"];
 /// The Sign choices.
 pub const SIGNS: [&str; 3] = ["Add", "Sub", "Bi"];
 
-/// Dice's device type.
+/// Random's device type.
 #[must_use]
 pub fn dice_type() -> DeviceType {
-    DeviceType::native(DICE, "Dice", DeviceRole::MidiEffect).with_description(
+    DeviceType::native(DICE, "Random", DeviceRole::MidiEffect).with_description(
         DeviceDescription::new(vec![
             ParamDescriptor::continuous(CHANCE, "Chance", (0.0, 100.0), 100.0, ParamUnit::Percent)
                 .decimals(0)
@@ -60,7 +60,7 @@ pub fn dice_type() -> DeviceType {
     )
 }
 
-/// Adds Dice to `registry`.
+/// Adds Random to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, dice_type(), |device, _| Dice {
         router: Router::new(),

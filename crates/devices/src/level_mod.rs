@@ -1,4 +1,4 @@
-//! The Level Mod (WP-5.11; the modulation spec, R24): Beatlayer's equivalent
+//! The Envelope Follower (WP-5.11; the modulation spec, R24): Beatlayer's equivalent
 //! of an Envelope Follower device. An audio effect that passes its audio
 //! through untouched and turns the level of the signal it hears into a
 //! control signal for the parameters it maps.
@@ -50,7 +50,7 @@ const FLOOR_DB: f32 = -60.0;
 /// The values the node publishes: Direct and S.C. in dB, and the level.
 const DISPLAY_VALUES: usize = 3;
 
-/// The Level Mod's type.
+/// The Envelope Follower's type.
 #[must_use]
 pub fn level_mod_type() -> DeviceType {
     let names: Vec<&str> = DIVISIONS.iter().map(|d| d.0).collect();
@@ -84,7 +84,7 @@ pub fn level_mod_type() -> DeviceType {
             "How far the modulator reaches: 0 % none, 100 % full.",
         ),
     ));
-    DeviceType::native(LEVEL_MOD, "Level Mod", DeviceRole::AudioEffect)
+    DeviceType::native(LEVEL_MOD, "Envelope Follower", DeviceRole::AudioEffect)
         .with_sidechain()
         .with_description(DeviceDescription::new(params).with_layout(layout()))
 }
@@ -119,7 +119,7 @@ fn layout() -> DeviceLayout {
     .with_expanded(rest)
 }
 
-/// Adds the Level Mod to `registry`.
+/// Adds the Envelope Follower to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, level_mod_type(), |_, config| {
         LevelMod::new(config.sample_rate.as_f64(), config.max_frames)
@@ -275,7 +275,7 @@ impl LevelMod {
     }
 }
 
-/// The Level Mod's display (R24): Direct and S.C. in dB, and the level it
+/// The Envelope Follower's display (R24): Direct and S.C. in dB, and the level it
 /// outputs as a share, from what its node published.
 #[must_use]
 pub fn display(

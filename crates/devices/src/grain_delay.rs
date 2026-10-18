@@ -1,4 +1,4 @@
-//! Scatter, the grain delay (WP-5.25; the grain delay spec): the input is
+//! Grain Delay, the grain delay (WP-5.25; the grain delay spec): the input is
 //! read back in short overlapping grains, each at its own pitch and a
 //! little off the delay time, and the result can feed back.
 
@@ -14,7 +14,7 @@ use bl_model::{
 use crate::delay::{Line, MAX_DELAY_SECONDS, sixteenth_frames};
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 
-/// Scatter's device type.
+/// Grain Delay's device type.
 pub const GRAIN_DELAY: &str = "bl.device.scatter";
 
 /// Sync: beat divisions on, free milliseconds off.
@@ -65,7 +65,7 @@ const RANDOM_PITCH_SEMITONES: f64 = 12.0;
 /// ones that outlast a rise in Frequency.
 const GRAINS: usize = 8;
 
-/// Scatter's type: Beatlayer's own name and look, Live's parameters (the
+/// Grain Delay's type: Beatlayer's own look, Live's parameters (the
 /// grain delay spec).
 #[must_use]
 pub fn grain_delay_type() -> DeviceType {
@@ -110,7 +110,7 @@ pub fn grain_delay_type() -> DeviceType {
         ParamDescriptor::choice(Y_AXIS, "Y Axis", &names, AXES.len() - 1)
             .describe("The parameter the X–Y display's vertical axis moves."),
     ];
-    DeviceType::native(GRAIN_DELAY, "Scatter", DeviceRole::AudioEffect)
+    DeviceType::native(GRAIN_DELAY, "Grain Delay", DeviceRole::AudioEffect)
         .with_description(DeviceDescription::new(params).with_layout(layout()))
 }
 
@@ -146,7 +146,7 @@ fn layout() -> DeviceLayout {
     ]))
 }
 
-/// Adds Scatter to `registry`.
+/// Adds Grain Delay to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, grain_delay_type(), Scatter::new);
 }
@@ -163,7 +163,7 @@ struct Grain {
     ratio: f64,
 }
 
-/// Scatter: a delay line a channel, and the grains reading them.
+/// Grain Delay: a delay line a channel, and the grains reading them.
 struct Scatter {
     lines: Vec<Line>,
     /// The longest delay a grain reads at, in frames.

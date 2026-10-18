@@ -1,4 +1,4 @@
-//! Cascade, the native polysynth (WP-2.17, part 1; the polysynth spec): the
+//! Drift, the native polysynth (WP-2.17, part 1; the polysynth spec): the
 //! oscillators' aliasing, the low-pass filters against their prototypes,
 //! the envelopes' timing, polyphony and stealing, and the voice budget.
 //!
@@ -43,7 +43,7 @@ fn cascade() -> DeviceType {
         .find(|device_type| {
             matches!(&device_type.kind, DeviceKind::Native { device_type } if device_type == POLYSYNTH)
         })
-        .expect("Cascade is registered")
+        .expect("Drift is registered")
 }
 
 fn on(offset: u32, key: u8, velocity: f32) -> NoteEvent {

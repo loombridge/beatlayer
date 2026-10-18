@@ -1,4 +1,4 @@
-//! Mosaic, the native multisampler (WP-5.13 and WP-5.14; the multisampler
+//! Sampler, the native multisampler (WP-5.13 and WP-5.14; the multisampler
 //! spec, R4 to R9 and R15 to R46): a list of sample layers, each with a key
 //! zone, a velocity zone and a sample select zone, played by notes through
 //! zone fades, Round Robin, sustain and release loops, a volume envelope with
@@ -149,7 +149,7 @@ const REFERENCE_HZ: f32 = 440.0;
 const SINC_TAPS: usize = 32;
 const SINC_PHASES: usize = 2048;
 
-/// The Mosaic device type.
+/// The Sampler device type.
 #[must_use]
 pub fn multisampler_type() -> DeviceType {
     let time = |id, name: &str, default: f64| {
@@ -269,7 +269,7 @@ pub fn multisampler_type() -> DeviceType {
         ),
     ];
     params.extend(crate::multisampler_tabs::params());
-    DeviceType::native(MULTISAMPLER, "Mosaic", DeviceRole::Instrument)
+    DeviceType::native(MULTISAMPLER, "Sampler", DeviceRole::Instrument)
         .with_description(DeviceDescription::new(params).with_layout(layout()))
 }
 

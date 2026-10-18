@@ -1,4 +1,4 @@
-//! The Gate Mod (WP-5.11; the modulation spec, R25): Beatlayer's equivalent
+//! The Envelope MIDI (WP-5.11; the modulation spec, R25): Beatlayer's equivalent
 //! of an Envelope MIDI device. A MIDI effect that passes its notes through
 //! untouched and turns them into an ADSR envelope for the parameters it
 //! maps.
@@ -63,7 +63,7 @@ pub const LOOP_MODES: [&str; 4] = ["Free", "Sync", "Loop", "Echo"];
 /// The peak under which echoes stop.
 const ECHO_FLOOR: f64 = 1.0 / 256.0;
 
-/// The Gate Mod's type.
+/// The Envelope MIDI's type.
 #[must_use]
 pub fn gate_mod_type() -> DeviceType {
     let names: Vec<&str> = DIVISIONS.iter().map(|d| d.0).collect();
@@ -135,7 +135,7 @@ pub fn gate_mod_type() -> DeviceType {
             "How far the modulator reaches: 0 % none, 100 % full.",
         ),
     ));
-    DeviceType::native(GATE_MOD, "Gate Mod", DeviceRole::MidiEffect)
+    DeviceType::native(GATE_MOD, "Envelope MIDI", DeviceRole::MidiEffect)
         .with_description(DeviceDescription::new(params).with_layout(layout()))
 }
 
@@ -183,7 +183,7 @@ fn layout() -> DeviceLayout {
     .with_expanded(rest)
 }
 
-/// Adds the Gate Mod to `registry`.
+/// Adds the Envelope MIDI to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, gate_mod_type(), |_, config| {
         GateMod::new(config.sample_rate.as_f64())
@@ -452,7 +452,7 @@ impl NativeDevice for GateMod {
     }
 }
 
-/// The Gate Mod's display (R25): the envelope as its controls set it, with
+/// The Envelope MIDI's display (R25): the envelope as its controls set it, with
 /// a held key's sustain drawn as long as the attack and decay together, and
 /// its level now and trigger LED from what its node published.
 #[must_use]

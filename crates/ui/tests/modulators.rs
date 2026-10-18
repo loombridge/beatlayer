@@ -1,7 +1,7 @@
 //! Mapping a modulator in the UI (WP-5.10), headless: the Map button lights
 //! and tints every parameter it can map, a click on one maps it as one undo
-//! step, Esc puts the button out, Unmap removes the mapping, and the Curve
-//! Mod's display adds, moves, curves and deletes breakpoints. Spec:
+//! step, Esc puts the button out, Unmap removes the mapping, and the
+//! Shaper's display adds, moves, curves and deletes breakpoints. Spec:
 //! modulation R15, R19, R23.
 
 mod common;
@@ -43,7 +43,7 @@ fn add(h: &mut Harness, kind: &bl_model::DeviceKind, name: &str) -> DeviceId {
     added.device
 }
 
-/// A track holding a test utility and a Wave Mod, shown in the Device View.
+/// A track holding a test utility and an LFO, shown in the Device View.
 fn rig() -> Rig {
     let mut h = Harness::with_title_bar(Window::Main);
     h.shell.run("audio.toggle_engine", json!({})).unwrap();
@@ -244,7 +244,7 @@ fn unmap_removes_the_mapping() {
     );
 }
 
-/// The Curve Mod's shape display and its device.
+/// The Shaper's shape display and its device.
 fn curve_rig() -> (Rig, DeviceId, Rect) {
     let mut rig = rig();
     let curve_type = bl_devices::modulator::curve_mod_type();
@@ -292,7 +292,7 @@ fn shaper_display_adds_moves_curves_and_deletes_breakpoints() {
     assert_eq!(
         shape(&rig.h, curve).len(),
         3,
-        "a new Curve Mod plays the triangle"
+        "a new Shaper plays the triangle"
     );
     // The plot area sits above the cell's bottom controls.
     let plot = Rect::from_min_max(area.min, pos2(area.max.x, area.max.y));
@@ -371,7 +371,7 @@ fn shaper_display_adds_moves_curves_and_deletes_breakpoints() {
     );
 }
 
-/// The Strike Mod's shape display, on a MIDI track.
+/// The Shaper MIDI's shape display, on a MIDI track.
 fn strike_rig() -> (Rig, DeviceId, Rect) {
     let mut rig = rig();
     let midi = rig
@@ -412,7 +412,7 @@ fn strike_display_marks_the_sustain_breakpoint_with_a_cmd_click() {
     assert_eq!(
         start.iter().filter(|p| p.sustain).count(),
         1,
-        "a new Strike Mod has a sustain breakpoint"
+        "a new Shaper MIDI has a sustain breakpoint"
     );
     let at = |p: &ShapePoint| {
         pos2(

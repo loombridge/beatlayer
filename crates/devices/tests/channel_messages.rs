@@ -119,7 +119,7 @@ fn a_switched_off_device_passes_messages_through() {
         let messages: Vec<_> = heard.iter().filter(|h| h.1.is_message()).collect();
         assert_eq!(messages.len(), 3, "block size {size}: {heard:?}");
         assert!(messages.iter().all(|h| h.0 == 0), "{heard:?}");
-        assert_eq!(heard[0].2, 60, "the note isn't lifted while Lift is off");
+        assert_eq!(heard[0].2, 60, "the note isn't lifted while Pitch is off");
     }
 }
 

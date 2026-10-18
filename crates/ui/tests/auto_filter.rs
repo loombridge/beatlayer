@@ -1,4 +1,4 @@
-//! Sweep, the native Auto Filter, in the Device View (WP-5.20; the
+//! Auto Filter, the native Auto Filter, in the Device View (WP-5.20; the
 //! auto-filter spec, R12 and R13), headless: its own items in the device's
 //! menu, no expand toggle, and its display cell drawn from the newest data.
 
@@ -138,7 +138,7 @@ fn the_filter_cell_has_no_expand_toggle_and_draws_the_curves_and_readings() {
             .devices
             .iter()
             .all(|d| d.id != sweep || !d.expandable),
-        "Sweep has no expanded part"
+        "Auto Filter has no expanded part"
     );
     h.shell
         .set_device_display_data(sweep, &[2_000.0, 500.0, 1.0]);

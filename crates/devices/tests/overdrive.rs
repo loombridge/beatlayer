@@ -1,4 +1,4 @@
-//! Grit, the native overdrive (WP-5.23; the overdrive spec): the band-pass's
+//! Overdrive, the native overdrive (WP-5.23; the overdrive spec): the band-pass's
 //! centre and width, the distortion at Drive 0%, Tone, Dynamics across a
 //! Drive sweep, Dry/Wet, the display, and renders that don't depend on the
 //! block size.
@@ -20,7 +20,7 @@ fn registry() -> Registry {
     registry
 }
 
-/// A Grit of `params`, up to `max_frames` at a time.
+/// An Overdrive of `params`, up to `max_frames` at a time.
 fn grit(params: &[(ParamId, f64)], max_frames: usize) -> Box<dyn Node> {
     let device_type: DeviceType = overdrive_type();
     node(&registry(), &device(&device_type, params), max_frames)
@@ -96,7 +96,11 @@ fn the_overdrive_is_described_and_laid_out() {
         }
     );
     assert_eq!(device_type.description.params.len(), 6);
-    assert!(bl_devices::device_types().iter().any(|t| t.name == "Grit"));
+    assert!(
+        bl_devices::device_types()
+            .iter()
+            .any(|t| t.name == "Overdrive")
+    );
     assert_eq!(grit(&[], 64).latency(), 0, "no latency");
 }
 

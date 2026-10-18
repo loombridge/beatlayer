@@ -7,9 +7,9 @@
 
 ## The behaviour
 
-Hold changes how long notes sound, and can start notes when keys come up instead of when they go down. In Note On mode each note starts when its key goes down and lasts Length times Gate, in milliseconds or in beat divisions at the tempo of the moment; the key coming up is ignored. In Note Off mode a note starts when its key comes up and then lasts Length times Gate, with its velocity worked out from how long the key was held (Decay Time) and mixed with the key's release velocity (Release Velocity). Key Scale makes notes shorter or longer by pitch around middle C. Latch keeps a note sounding until the next one starts.
+Note Length changes how long notes sound, and can start notes when keys come up instead of when they go down. In Note On mode each note starts when its key goes down and lasts Length times Gate, in milliseconds or in beat divisions at the tempo of the moment; the key coming up is ignored. In Note Off mode a note starts when its key comes up and then lasts Length times Gate, with its velocity worked out from how long the key was held (Decay Time) and mixed with the key's release velocity (Release Velocity). Key Scale makes notes shorter or longer by pitch around middle C. Latch keeps a note sounding until the next one starts.
 
-Beatlayer's own name for the device is Hold; its look is the device framework's generic controls. Notes held for later wait in a queue made with the device, and every one ends: when the device is switched off, moved or deleted, its sounding notes end at once and nothing waits. This spec covers the device only.
+The device takes Live's name, Note Length; its look is the device framework's generic controls. Notes held for later wait in a queue made with the device, and every one ends: when the device is switched off, moved or deleted, its sounding notes end at once and nothing waits. This spec covers the device only.
 
 ## Sources
 
@@ -25,13 +25,13 @@ Beatlayer's own name for the device is Hold; its look is the device framework's 
 - **R1.** In Note On mode a note starts on its frame and ends Length later, on an exact frame, whatever the length of the note that came in; the key coming up is ignored. (S1)
 - **R2.** The sounding length is Length times Gate, with Gate from 1 to 200 per cent. (S1)
 - **R3.** With Sync on, Length is a beat division (1/32 to two bars) worked out at the tempo of the stretch the note starts in, so the same note lasts twice as long at 60 BPM as at 120. (S1, S4)
-- **R4.** In Note Off mode a note starts on the frame its key comes up and lasts Length times Gate from there. A key coming up that Hold never saw go down starts nothing. (S1)
+- **R4.** In Note Off mode a note starts on the frame its key comes up and lasts Length times Gate from there. A key coming up that Note Length never saw go down starts nothing. (S1)
 - **R5.** Key Scale multiplies the length by 2 to the power of −Key Scale times the distance of the key from middle C (key 60) in octaves: positive values lengthen notes below middle C and shorten those above, negative values the opposite. (S1)
 - **R6.** A note that starts on a key still sounding from an earlier note ends that earlier note first, on the same frame, and the earlier note's own end no longer happens. (S1)
 - **R7.** With Latch on in Note On mode, a note sounds until the next note starts, and Length and Gate do nothing. In Note Off mode a latched note starts once every key is up. (S1)
 - **R8.** In Note Off mode the note's velocity is the velocity of the key when it went down, falling in a straight line to zero over Decay Time while it is held (no fall at a Decay Time of 0), then mixed with the key's release velocity by Release Velocity per cent. (S1)
-- **R9.** Every parameter is set by `device.set_param` and read by `device.parameters` through the agent API, a change is one undo step, and the device's preset is saved under `Presets/MIDI Effects/Hold/`. (S3)
-- **R10.** Every parameter is automatable and has a description, and nothing Hold does on the audio thread allocates, locks, or blocks. (S3, S4)
+- **R9.** Every parameter is set by `device.set_param` and read by `device.parameters` through the agent API, a change is one undo step, and the device's preset is saved under `Presets/MIDI Effects/Note Length/`. (S3)
+- **R10.** Every parameter is automatable and has a description, and nothing Note Length does on the audio thread allocates, locks, or blocks. (S3, S4)
 
 ## Tests
 
@@ -50,7 +50,7 @@ Beatlayer's own name for the device is Hold; its look is the device framework's 
 
 ## Defaults, ranges and details
 
-- A new Hold starts in Note On mode with Sync off, Length 200 ms, Length Division 1/8, Gate 100 %, Release Velocity 0 %, Decay Time 0 ms (no decay), Key Scale 0 and Latch off. The manual states no ranges or defaults for Length or Gate; Length runs from 1 ms to 10 s, logarithmically, and Gate from 1 to 200 per cent.
-- The manual doesn't say what Hold does to a note that is sounding when the transport stops. Here it ends at its own time, as a note does anywhere else; a stop doesn't cut it. The clip player's own note-offs at a stop are ignored in Note On mode.
+- A new Note Length starts in Note On mode with Sync off, Length 200 ms, Length Division 1/8, Gate 100 %, Release Velocity 0 %, Decay Time 0 ms (no decay), Key Scale 0 and Latch off. The manual states no ranges or defaults for Length or Gate; Length runs from 1 ms to 10 s, logarithmically, and Gate from 1 to 200 per cent.
+- The manual doesn't say what Note Length does to a note that is sounding when the transport stops. Here it ends at its own time, as a note does anywhere else; a stop doesn't cut it. The clip player's own note-offs at a stop are ignored in Note On mode.
 - A latched Note Off trigger fires when the last held key comes up; the sustain pedal isn't read.
-- Release velocity of the notes Hold ends in Note On mode is 64 of 127.
+- Release velocity of the notes Note Length ends in Note On mode is 64 of 127.

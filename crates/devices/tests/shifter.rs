@@ -1,4 +1,4 @@
-//! Veer, the native Shifter (WP-5.27; the pitch-and-frequency-shifter spec):
+//! Shifter, the native Shifter (WP-5.27; the pitch-and-frequency-shifter spec):
 //! the three modes against the spec's numbers, Spread and Wide, the LFO and
 //! the envelope follower, the delay, the MIDI sidechain's notes, glide and
 //! pitch bend, and renders that repeat at any block size. Every block runs
@@ -152,7 +152,7 @@ fn db(ratio: f64) -> f64 {
 fn veer_is_described_with_a_midi_sidechain_an_expanded_part_and_a_latency() {
     let device_type = shifter_type();
     device_type.description.check().unwrap();
-    assert_eq!(device_type.name, "Veer");
+    assert_eq!(device_type.name, "Shifter");
     assert!(device_type.midi_sidechain && !device_type.sidechain);
     assert!(matches!(
         device_type.kind,

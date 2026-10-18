@@ -1,6 +1,6 @@
 //! A chain of every MIDI effect on the audio thread under RealtimeSanitizer
-//! (WP-5.30): a clip of many notes plays through Lift, Touch, Dice, Remap,
-//! Stack and Hold into a test instrument while the devices are switched off
+//! (WP-5.30): a clip of many notes plays through Pitch, Velocity, Random, Scale,
+//! Chord and Note Length into a test instrument while the devices are switched off
 //! and on, moved and deleted, and their parameters change. RTSan stops the
 //! process at the first allocation, free, lock, or blocking call on the audio
 //! thread, and the allocation trap fails the test at any heap use it sees.

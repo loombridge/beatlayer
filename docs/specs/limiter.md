@@ -7,7 +7,7 @@
 
 ## The behaviour
 
-Brickwall is Beatlayer's limiter: a look-ahead brickwall peak limiter that keeps a signal's output at or below a ceiling, for the Main track or any track. The user sets the ceiling, the input gain, the release time (or lets the device choose it), the look-ahead time, the ceiling mode, how the two channels share their gain reduction, and whether they are left/right or mid/side.
+Limiter is Beatlayer's limiter: a look-ahead brickwall peak limiter that keeps a signal's output at or below a ceiling, for the Main track or any track. The user sets the ceiling, the input gain, the release time (or lets the device choose it), the look-ahead time, the ceiling mode, how the two channels share their gain reduction, and whether they are left/right or mid/side.
 
 The device delays the signal by the look-ahead time and, over that same window, follows the least gain the signal needs, so the gain has already fallen to a peak's gain by the time the peak comes out. The gain falls at once, so no sample passes the ceiling, and recovers over the Release time. In True Peak mode the device detects peaks at four times the sample rate, so inter-sample peaks are held too. This spec covers the device's behaviour; the device framework (parameters, smoothing, layout, automation) is the [device framework spec](device-framework.md), and delay compensation is WP-2.11.
 
@@ -21,7 +21,7 @@ The device delays the signal by the look-ahead time and, over that same window, 
 
 ## Rules
 
-- **R1.** Beatlayer ships Brickwall, an audio-effect device type of its own name and layout, described like any native device: every parameter has a descriptor and a place in the layout. (S2, device-framework)
+- **R1.** Beatlayer ships Limiter, an audio-effect device type of its own layout, described like any native device: every parameter has a descriptor and a place in the layout. (S2, device-framework)
 - **R2.** Ceiling, in dB, from −18 to 0 dB (default −0.3 dB), is the highest level the output reaches in Standard mode: the sample peak of the output never passes it, while a signal whose peaks are all below it is left alone. (S1)
 - **R3.** Release, in milliseconds, from 1 to 1000 ms (default 100 ms, logarithmic), is the time constant of the gain's recovery after a peak; a short release is louder and a long one smoother. Auto Release picks a fast time just after a peak and a slow one once a reduction has been held; with Auto on the Release control is ignored. (S1)
 - **R4.** Ceiling Mode offers Standard, Soft Clip, and True Peak, Standard by default. True Peak detects peaks at four times the sample rate and holds the inter-sample peak at the ceiling, leaving a little headroom for the reconstruction filters. Soft Clip rounds peaks off near the ceiling, so the output stays below it. (S1, S3)

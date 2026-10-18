@@ -1,4 +1,4 @@
-//! Dice, the random-pitch MIDI effect (WP-5.30; the MIDI random pitch spec):
+//! Random, the random-pitch MIDI effect (WP-5.30; the MIDI random pitch spec):
 //! chance, choices, interval, the two modes and the three signs, seeded so a
 //! render repeats. Every block is a real-time section under the allocation
 //! trap.
@@ -11,7 +11,7 @@ use bl_devices::dice::{CHANCE, CHOICES, DICE, INTERVAL, MODE, SIGN};
 use bl_engine::NoteKind;
 use common::chain::{BEAT_FRAMES, Chain, note, nothing_hangs};
 
-/// Eight notes of middle C, a beat each, played through Dice.
+/// Eight notes of middle C, a beat each, played through Random.
 fn render(params: &[(bl_model::ParamId, f64)], size: usize) -> Vec<(i64, NoteKind, u8, f32)> {
     let mut chain = Chain::new(4096);
     chain.effect(DICE, params);

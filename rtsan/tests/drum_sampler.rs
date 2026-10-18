@@ -41,7 +41,7 @@ fn the_drum_samplers_notes_on_every_slot_pass_under_rtsan() {
     let id: bl_model::DeviceId = editor.new_id();
     let mut device = Device::new(
         id,
-        "Kitbag",
+        "Impulse",
         DeviceKind::Native {
             device_type: KITBAG.to_owned(),
         },

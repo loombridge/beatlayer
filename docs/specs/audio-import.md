@@ -39,7 +39,7 @@ Beatlayer's own rules sit alongside Live's here, because "decodes the file" need
 
 Signal-to-error ratio below 15 kHz, in dB, of each lossy fixture against its source, as measured on 10 October 2026, and the limit the tests hold it to. Encoders low-pass the top octave on purpose, which is why the ratio is measured below 15 kHz. The fixtures and their encoders are listed in `tests/fixtures/media/manifest.json`.
 
-| Codec and encoder | Sine | Sweep | Noise | Clipped | Silence |
+| Codec and encoder | Sine | Auto Filter | Noise | Clipped | Silence |
 |---|---|---|---|---|---|
 | MP3, LAME 3.100, 320 kbit/s CBR and V0 | 77.2 and 71.5 (limit 65) | 78.6 (limit 70) | 17.3 (limit 14) | 37.4 (limit 32) | digital zero (limit −90 dBFS) |
 | Vorbis, libvorbis through libsndfile 1.2.2, quality 0.9 | 41.0 (limit 36) | 36.9 (limit 32) | 20.0 (limit 16) | 40.6 (limit 35) | digital zero (limit −90 dBFS) |

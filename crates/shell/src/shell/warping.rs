@@ -194,25 +194,42 @@ impl Shell {
             Command::InsertWarpMarker {
                 clips,
                 pin_neighbours: true,
-                transients: None,
+                transients,
                 ..
             } => {
                 // The model refuses several clips, whose transients differ.
                 if let [clip] = clips[..] {
-                    args["transients"] = json!(self.ready_transients(id, clip)?);
+                    self.fill_transients(id, clip, transients, &mut args)?;
                 }
             }
             Command::InsertWarpMarkers {
                 clip,
-                transients: None,
+                to,
+                transients,
                 ..
-            } => args["transients"] = json!(self.ready_transients(id, clip)?),
+            } => {
+                self.fill_transients(id, clip, transients, &mut args)?;
+                // A range with no transients gets markers at its ends, so its
+                // end must lie in the file.
+                let end = match self.editor.document().clip(clip).map(|c| &c.data) {
+                    Some(ClipData::Audio(audio)) => audio
+                        .warp_map()
+                        .ok()
+                        .map(|map| map.beat_to_time(to.get() as f64)),
+                    _ => None,
+                };
+                if let Some(end) = end {
+                    self.check_in_file(id, clip, end)?;
+                }
+            }
             Command::InsertTransient { clip, time } => {
                 self.check_in_file(id, clip, time)?;
+                self.check_no_transient_at(id, clip, time, None)?;
             }
             Command::MoveTransient { clip, from, to } => {
                 self.check_in_file(id, clip, to)?;
                 self.check_transients_exist(id, clip, &[from])?;
+                self.check_no_transient_at(id, clip, to, Some(from))?;
             }
             Command::DeleteTransients { clip, times } => {
                 self.check_transients_exist(id, clip, &times)?;
@@ -272,6 +289,51 @@ impl Shell {
                     .to_owned()
             }),
         })
+    }
+
+    /// Fills in the clip's transients for a warp-marker command that left
+    /// them out, or checks that those given lie in the file.
+    fn fill_transients(
+        &mut self,
+        id: &str,
+        clip: ClipId,
+        transients: Option<Vec<f64>>,
+        args: &mut Value,
+    ) -> Result<(), ShellError> {
+        match transients {
+            None => args["transients"] = json!(self.ready_transients(id, clip)?),
+            Some(given) => {
+                for time in given {
+                    self.check_in_file(id, clip, time)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Refuses a time where the clip already shows a transient, other than
+    /// the one at `except`: the two would show as one, and deleting it would
+    /// leave the detected one.
+    fn check_no_transient_at(
+        &mut self,
+        id: &str,
+        clip: ClipId,
+        time: f64,
+        except: Option<f64>,
+    ) -> Result<(), ShellError> {
+        let (_, shown) = self.shown_transients(id, clip)?;
+        let near = |a: f64, b: f64| (a - b).abs() <= TRANSIENT_MATCH;
+        if let Some(at) = shown
+            .transients
+            .iter()
+            .find(|&&t| near(t, time) && !except.is_some_and(|e| near(t, e)))
+        {
+            return Err(ShellError::Failed {
+                command: id.to_owned(),
+                message: format!("the clip already has a transient at {at} s"),
+            });
+        }
+        Ok(())
     }
 
     /// Refuses a time past the end of the clip's file, where the store knows

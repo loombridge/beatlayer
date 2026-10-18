@@ -2805,6 +2805,15 @@ impl Shell {
             .map(|(hash, path)| (bl_model::ContentHash(*hash.as_bytes()), path))
             .collect();
         self.store.relink(&found);
+        // A relinked file's failed analysis is made again (R20).
+        for (hash, _) in &found {
+            let hash = bl_media::ContentHash::from_bytes(hash.0);
+            if let Some(cache) = &self.analysis {
+                cache.forget(hash);
+            }
+            self.analysed.remove(&hash);
+        }
+        self.start_analyses();
         found.len()
     }
 

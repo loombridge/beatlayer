@@ -284,9 +284,22 @@ fn transient_edits_are_one_step_saved_and_reset() {
     assert_eq!(steps(&shell), start + 2);
     assert!(!times(&mut shell, clip).contains(&detected[3]));
 
-    // Only a transient that exists can be deleted or moved, and one can't
-    // be put past the end of the two-second file; a refusal is no step.
+    // Only a transient that exists can be deleted or moved, none can be put
+    // on another or past the end of the two-second file, and a range's
+    // markers can't either; a refusal is no step.
     for (command, args) in [
+        (
+            "clip.insert_transient",
+            json!({ "clip": clip, "time": detected[0] }),
+        ),
+        (
+            "clip.move_transient",
+            json!({ "clip": clip, "from": 0.1, "to": detected[0] }),
+        ),
+        (
+            "clip.insert_warp_markers",
+            json!({ "clip": clip, "from": 0, "to": 8 * Ticks::QUARTER.get() }),
+        ),
         (
             "clip.delete_transients",
             json!({ "clip": clip, "times": [0.37] }),

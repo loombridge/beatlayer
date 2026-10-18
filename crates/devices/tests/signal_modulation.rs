@@ -316,6 +316,7 @@ fn a_mapping_that_would_loop_tracks_is_refused() {
         input: Input::Track {
             track: target,
             tap: Tap::PostMixer,
+            chain: None,
         },
     });
     rig.render(2_048, 64);

@@ -14,8 +14,8 @@ use bl_engine::{
     Collector, Compiler, EngineConfig, Registry, SessionCommand, TransportCommand, channel,
 };
 use bl_model::{
-    Clip, ClipData, Command, Editor, LaunchMode, LaunchQuantization, LaunchSettings, MidiData,
-    Note, TrackKind,
+    Clip, ClipData, Command, Editor, FollowAction, FollowActions, FollowPatch, LaunchMode,
+    LaunchQuantization, LaunchSettings, MidiData, Note, TrackKind,
 };
 
 // Without `--cfg lspk_rtsan` (`rtsan/.cargo/config.toml`), this doesn't build.
@@ -69,11 +69,32 @@ fn the_session_views_launching_passes_under_rtsan() {
         );
         // One track of each mode that acts on a release (WP-3.3).
         clip.launch.mode = [LaunchMode::Gate, LaunchMode::Repeat][usize::from(index)];
+        // Follow actions that fire every sixteenth, so their arming, draws
+        // and launches run under the sanitizer too (WP-3.10).
+        clip.launch.follow = FollowActions {
+            enabled: true,
+            action_a: FollowAction::Any,
+            action_b: FollowAction::PlayAgain,
+            chance_a: 50,
+            linked: false,
+            time: Ticks::SIXTEENTH,
+            ..FollowActions::default()
+        };
         editor
             .apply(Command::CreateSlotClip { track, scene, clip })
             .unwrap();
         tracks.push(track);
     }
+    editor
+        .apply(Command::SetSceneFollowActions {
+            scene,
+            patch: FollowPatch {
+                enabled: Some(true),
+                action_a: Some(FollowAction::PlayAgain),
+                ..FollowPatch::default()
+            },
+        })
+        .unwrap();
     sender.send_update(compiler.sync(editor.document()));
     sender.transport(TransportCommand::Play);
 
@@ -91,10 +112,12 @@ fn the_session_views_launching_passes_under_rtsan() {
             1 => Some(SessionCommand::SetQuantization(LaunchSettings {
                 quantization: LaunchQuantization::None,
                 enabled: true,
+                ..LaunchSettings::default()
             })),
             3 => Some(SessionCommand::SetQuantization(LaunchSettings {
                 quantization: LaunchQuantization::SixteenthTriplet,
                 enabled: true,
+                ..LaunchSettings::default()
             })),
             4 => Some(SessionCommand::SetQuantization(LaunchSettings::default())),
             13 => Some(SessionCommand::SetQuantization(LaunchSettings {

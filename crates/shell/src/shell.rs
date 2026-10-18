@@ -37,9 +37,9 @@ use crate::clip_view::{self, ClipView};
 use crate::commands::{
     self as ids, ClipEnvelopeArgs, ClipTabArgs, DefaultLaunchModeArgs,
     DefaultLaunchQuantizationArgs, DefaultSetArgs, FileReport, FoldNotesArgs, LaneArgs, PathArgs,
-    RelinkArgs, SaveAsArgs, SetResult, SettingsArgs, SwitchArgs, SwitchResult, TemplateArgs,
-    TemporaryFolderArgs, TemporaryFolderResult, TestToneArgs, TestToneState, ThemeArgs, ViewResult,
-    ViewState, ZoomArgs,
+    RecordSessionAutomationInArgs, RelinkArgs, SaveAsArgs, SetResult, SettingsArgs, SwitchArgs,
+    SwitchResult, TemplateArgs, TemporaryFolderArgs, TemporaryFolderResult, TestToneArgs,
+    TestToneState, ThemeArgs, ViewResult, ViewState, ZoomArgs,
 };
 use crate::devices::{self, DeviceError, DeviceView};
 use crate::files::{ProjectFiles, SetStore, new_set_from};
@@ -66,6 +66,7 @@ use bl_shell_spec::export as export_ids;
 use bl_shell_spec::midi_files as midi_ids;
 use bl_shell_spec::midi_io as midi_io_ids;
 use bl_shell_spec::mixer_view as mixer_ids;
+use bl_shell_spec::multisampler as multisampler_ids;
 use bl_shell_spec::notes::{self as note_ids, ClipTab};
 use bl_shell_spec::perception as perception_ids;
 use bl_shell_spec::plugins as plugin_ids;
@@ -81,6 +82,7 @@ use bl_shell_spec::transport as transport_ids;
 use bl_shell_spec::transport::{RecordedFileReport, RecordingReport, RunningRecording};
 
 mod capture;
+mod multisampler;
 mod processed_files;
 mod session_recording;
 
@@ -469,6 +471,10 @@ pub struct Shell {
     capture: bl_engine::capture::Buffer,
     /// The control moves of the automation recording under way (WP-2.12).
     automation_take: crate::automation_record::Take,
+    /// The control moves of the Session recording under way (WP-3.12).
+    session_automation: crate::automation_record::SessionTake,
+    /// The song frame the Session recording's take began on, once it has.
+    session_take_start: Option<Frames>,
     /// What the Session clips that played during the recording under way
     /// were (WP-3.13).
     session_watch: crate::session_capture::Watch,
@@ -730,6 +736,8 @@ impl Shell {
             session_run: None,
             capture: bl_engine::capture::Buffer::default(),
             automation_take: crate::automation_record::Take::default(),
+            session_automation: crate::automation_record::SessionTake::default(),
+            session_take_start: None,
             session_watch: crate::session_capture::Watch::default(),
             automation_recording: false,
             plug_in_windows: true,
@@ -1325,6 +1333,13 @@ impl Shell {
         }
     }
 
+    /// Record Session automation in (Record, Warp & Launch; WP-3.12): which
+    /// tracks a Session recording writes control moves into the clips of.
+    #[must_use]
+    pub fn record_session_automation_in(&self) -> crate::settings::SessionAutomationTracks {
+        self.prefs.record_session_automation_in
+    }
+
     /// Whether Warp recorded audio is on (IMP-02). Clips have no warp fields
     /// yet, so recorded clips play unwarped either way.
     #[must_use]
@@ -1371,6 +1386,7 @@ impl Shell {
                 temporary_folder: self.temporary_folder().to_string_lossy().into_owned(),
             },
             launch: self.prefs.launch,
+            record_session_automation_in: self.prefs.record_session_automation_in,
             auto_hide_plug_in_windows: self.auto_hide_plug_in_windows(),
             plug_ins: self.plugin_settings(),
             agents: AgentsPageSettings {
@@ -2870,6 +2886,7 @@ impl Shell {
             && (model::handles(id)
                 || edit_ids::handles(id)
                 || device_ids::handles(id)
+                || multisampler_ids::handles(id)
                 || self.is_device_command(id)
                 || track_ids::handles(id)
                 || note_ids::handles(id)
@@ -3677,7 +3694,7 @@ impl Shell {
                                     start,
                                     length: ticks(pass.song_start + Frames(pass.frames as i64))
                                         .saturating_sub(start),
-                                    data,
+                                    data: data.clone(),
                                 }],
                             },
                         })?;
@@ -3725,6 +3742,7 @@ impl Shell {
         // The control a drag moved is let go (automation R17).
         self.automation_take
             .release(self.arrangement.transport().position);
+        self.release_session_moves();
     }
 
     /// The effects commands have asked for since the last call.
@@ -3977,7 +3995,9 @@ impl Shell {
             return true;
         }
         if id == browser_ids::LOAD_SELECTED
-            && (self.hot_swap_preset().is_some() || self.hot_swap_sample().is_some())
+            && (self.hot_swap_preset().is_some()
+                || self.hot_swapped_layer_file().is_some()
+                || self.hot_swap_sample().is_some())
         {
             return true;
         }
@@ -4642,12 +4662,94 @@ impl Shell {
         }
     }
 
+    /// Spec: warping R7, R11. A warp marker edit on several clips needs
+    /// files as long as each other's, and a marker can't leave its file; the
+    /// document doesn't hold the media, so the check is made here, when the
+    /// media store knows the files' lengths.
+    fn check_warp_files(&self, id: &str, args: &Value) -> Result<(), ShellError> {
+        use bl_model::Command;
+        let refuse = |message: String| ShellError::Failed {
+            command: id.to_owned(),
+            message,
+        };
+        let Ok(command) = model::command_from_args(id, args.clone()) else {
+            return Ok(());
+        };
+        let document = self.editor.document();
+        // Each clip's file length in seconds, where the store knows it.
+        let length = |clip: &bl_model::ClipId| {
+            let Some(bl_model::ClipData::Audio(audio)) = document.clip(*clip).map(|c| &c.data)
+            else {
+                return None;
+            };
+            let info = self
+                .media
+                .info(bl_media::ContentHash::from_bytes(audio.media.0))
+                .ok()?;
+            Some(info.frames? as f64 / f64::from(info.sample_rate))
+        };
+        let (clips, places) =
+            match &command {
+                Command::InsertWarpMarker { clips, .. }
+                | Command::ShiftWarpMarker { clips, .. } => (clips, true),
+                Command::MoveWarpMarkers { clips, .. }
+                | Command::DeleteWarpMarkers { clips, .. } => (clips, false),
+                _ => return Ok(()),
+            };
+        let lengths: Vec<Option<f64>> = clips.iter().map(length).collect();
+        let known: Vec<f64> = lengths.iter().flatten().copied().collect();
+        if known.len() == clips.len()
+            && known
+                .windows(2)
+                .any(|pair| (pair[0] - pair[1]).abs() > 1e-9)
+        {
+            return Err(refuse(
+                "the clips' files aren't all as long as each other's".to_owned(),
+            ));
+        }
+        if !places {
+            return Ok(());
+        }
+        for (&clip, length) in clips.iter().zip(lengths) {
+            let Some(bl_model::ClipData::Audio(audio)) = document.clip(clip).map(|c| &c.data)
+            else {
+                continue;
+            };
+            let at = match &command {
+                // A shift moves a marker from where it is.
+                Command::ShiftWarpMarker { marker, by, .. } => {
+                    audio.warp_markers.get(*marker).map(|m| m.time + by)
+                }
+                Command::InsertWarpMarker {
+                    time: Some(time), ..
+                } => Some(*time),
+                // A marker put on a beat goes at the time the map places it.
+                Command::InsertWarpMarker {
+                    beat: Some(beat), ..
+                } => audio
+                    .warp_map()
+                    .ok()
+                    .map(|map| map.beat_to_time(beat.get() as f64)),
+                _ => None,
+            };
+            if let (Some(at), Some(length)) = (at, length)
+                && at > length + 1e-9
+            {
+                return Err(refuse(format!(
+                    "the marker would leave the file, which is {length} seconds long"
+                )));
+            }
+        }
+        Ok(())
+    }
+
     fn run_command(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
         if self.edit_gesture.is_some()
             && (model::handles(id)
                 || edit_ids::handles(id)
                 || note_ids::handles(id)
                 || device_ids::handles(id)
+                || multisampler_ids::handles(id)
                 || self.is_device_command(id)
                 || track_ids::handles(id)
                 || midi_ids::handles(id)
@@ -4705,6 +4807,7 @@ impl Shell {
             return self.run_device_command(id, device, command, args);
         }
         if model::handles(id) {
+            self.check_warp_files(id, &args)?;
             let args_floating = args.get("floating") == Some(&Value::Bool(true));
             // Spec: automation R17. With Automation Arm on and the transport
             // recording, a control move is noted for the envelope too.
@@ -4718,6 +4821,23 @@ impl Shell {
                 .and_then(|command| {
                     crate::automation_record::moved(self.editor.document(), &command)
                 });
+            // Spec: session-automation R1. With Automation Arm on and a
+            // Session recording running, a control move is noted for the
+            // clip it goes into.
+            let session_moved = (self.arrangement.automation_arm() && self.session_run.is_some())
+                .then(|| model::command_from_args(id, args.clone()).ok())
+                .flatten()
+                .and_then(|command| {
+                    let (track, target, value) =
+                        crate::automation_record::moved(self.editor.document(), &command)?;
+                    let before = crate::modulation::control_value(
+                        self.editor.document(),
+                        &self.devices,
+                        track,
+                        &target,
+                    )?;
+                    Some((track, target, before, value))
+                });
             let changes =
                 model::run(&mut self.editor, id, args).map_err(|error| ShellError::Failed {
                     command: id.to_owned(),
@@ -4730,6 +4850,9 @@ impl Shell {
                     self.arrangement.transport().position,
                     value,
                 );
+            }
+            if let Some((track, target, before, value)) = session_moved {
+                self.note_session_move(track, target, before, value);
             }
             if id == bl_model::registry::RE_ENABLE_AUTOMATION {
                 // Spec: session-view R23. A launched scene's tempo and
@@ -4787,6 +4910,7 @@ impl Shell {
                 self.last_launched = Some(scene);
             }
             self.select_on_launch(command);
+            self.re_enable_launched_automation(command);
             if let engine_session::SessionCommand::LaunchScene(scene) = command {
                 // Spec: session-recording R10. Start Recording on Scene
                 // Launch.
@@ -4955,6 +5079,18 @@ impl Shell {
             return Ok(outcome.value);
         }
         if id == browser_ids::LOAD_SELECTED
+            && let Some((device, layer, path)) = self.hot_swapped_layer_file()
+        {
+            // Spec: multisampler R10. Loading a sample while hot-swapping a
+            // layer replaces the layer's.
+            Self::args::<NoArgs>(id, args)?;
+            self.devices.set_layer_hot_swap(None);
+            return self.run_multisampler(
+                multisampler_ids::SET_LAYER_SAMPLE,
+                json!({ "device": device, "layer": layer, "path": path.to_string_lossy() }),
+            );
+        }
+        if id == browser_ids::LOAD_SELECTED
             && let Some((device, path)) = self.hot_swap_sample()
         {
             // Spec: eight-slot-drum-sampler R17. Loading a sample while
@@ -5000,6 +5136,9 @@ impl Shell {
             self.document_changed();
             self.touch();
             return Ok(to_value(&loaded));
+        }
+        if multisampler_ids::handles(id) {
+            return self.run_multisampler(id, args);
         }
         if device_ids::handles(id) {
             return self.run_devices(id, args);
@@ -5118,6 +5257,11 @@ impl Shell {
             midi_io_ids::COMPUTER_KEYBOARD_KEY => {
                 let args = Self::args::<midi_io_ids::KeyArgs>(id, args)?;
                 let result = self.midi.key(&args.key, args.pressed).map_err(failed)?;
+                // Spec: multisampler R7. Auto Select follows the note.
+                if let Some(note) = result.note {
+                    let velocity = self.midi.keyboard_info().velocity;
+                    self.follow_note(note, velocity, args.pressed);
+                }
                 to_value(&result)
             }
             _ => return Err(ShellError::UnknownCommand(id.to_owned())),
@@ -5361,6 +5505,14 @@ impl Shell {
                     ..current
                 }
             }
+            session_launch_ids::SET_FOLLOW_ACTIONS_ENABLED => {
+                let session_launch_ids::SetFollowActionsEnabledArgs { enabled } =
+                    Self::args(id, args)?;
+                LaunchSettings {
+                    follow_actions: enabled.unwrap_or(!current.follow_actions),
+                    ..current
+                }
+            }
             session_launch_ids::STOP_SELECTED => {
                 Self::args::<NoArgs>(id, args)?;
                 // Spec: launch-quantisation R6. Every track with a selected
@@ -5435,6 +5587,8 @@ impl Shell {
                 self.editor = editor;
                 self.store.close();
                 self.devices.set_windows(bl_model::DeviceWindows::new());
+                self.devices
+                    .set_multisampler_views(bl_model::MultisamplerViews::new());
                 self.clip_view.set_folds(bl_model::ClipFolds::new());
                 self.set_path = None;
                 self.dirty = false;
@@ -5461,6 +5615,8 @@ impl Shell {
                 // Spec: device-chains R29. Floating windows reopen where
                 // they were saved.
                 self.devices.set_windows(self.store.windows());
+                self.devices
+                    .set_multisampler_views(self.store.multisampler_views());
                 // Spec: piano-roll. Folded note editors too.
                 self.clip_view.set_folds(self.store.folds());
                 self.saved = snapshot(&editor);
@@ -5511,6 +5667,8 @@ impl Shell {
                     &mut self.editor,
                 );
                 self.store.set_windows(self.devices.windows().clone());
+                self.store
+                    .set_multisampler_views(self.devices.multisampler_views().clone());
                 self.store.set_folds(self.clip_view.folds().clone());
                 let warnings = self.store.save(&path, &self.editor).map_err(failed)?;
                 self.saved_as(path, &warnings);
@@ -5528,6 +5686,8 @@ impl Shell {
                     &mut self.editor,
                 );
                 self.store.set_windows(self.devices.windows().clone());
+                self.store
+                    .set_multisampler_views(self.devices.multisampler_views().clone());
                 self.store.set_folds(self.clip_view.folds().clone());
                 self.store.set_temporary_folder(self.temporary_folder());
                 let (path, warnings) = self
@@ -5640,6 +5800,8 @@ impl Shell {
                     &mut self.editor,
                 );
                 self.store.set_windows(self.devices.windows().clone());
+                self.store
+                    .set_multisampler_views(self.devices.multisampler_views().clone());
                 self.store.set_folds(self.clip_view.folds().clone());
                 let files = self.store.collect().map_err(failed)?;
                 let warnings = self.store.save(&path, &self.editor).map_err(failed)?;
@@ -5997,6 +6159,12 @@ impl Shell {
                 self.prefs.launch.start_recording_on_scene_launch = on;
                 self.save_preferences();
                 Ok(to_value(&SwitchResult { on }))
+            }
+            ids::SETTINGS_SET_RECORD_SESSION_AUTOMATION_IN => {
+                let RecordSessionAutomationInArgs { tracks } = Self::args(id, args)?;
+                self.prefs.record_session_automation_in = tracks;
+                self.save_preferences();
+                Ok(Value::Null)
             }
             ids::SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS => {
                 let SwitchArgs { on } = Self::args(id, args)?;

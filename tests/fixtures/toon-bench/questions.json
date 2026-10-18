@@ -192,7 +192,7 @@
     "question": "What is the sum of the velocity of all notes?"
   },
   {
-    "answer": "28",
+    "answer": "36",
     "fixture": "commands_clip",
     "id": "commands-total",
     "question": "How many commands are listed?"
@@ -216,7 +216,7 @@
     "question": "What is the label of the command clip.set_gain?"
   },
   {
-    "answer": "17",
+    "answer": "20",
     "fixture": "commands_clip",
     "id": "commands-set-prefix",
     "question": "How many command ids start with clip.set_?"
@@ -234,7 +234,7 @@
     "question": "What are the names of the properties of the command's arguments, alphabetically?"
   },
   {
-    "answer": "21",
+    "answer": "25",
     "fixture": "describe_clip_create",
     "id": "describe-defs",
     "question": "How many definitions does the argument schema hold under $defs?"

@@ -459,7 +459,7 @@ fn splitting_keeps_what_each_part_plays() {
     assert_eq!(
         bl_model::AudioData {
             start: whole.start,
-            ..*moved
+            ..moved.clone()
         },
         *whole
     );

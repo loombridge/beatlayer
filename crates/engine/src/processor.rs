@@ -1300,6 +1300,12 @@ impl Processor {
                 self.config.sample_rate,
             );
             self.session.repeat(playhead);
+            // Spec: follow-actions R2. A follow due at this frame runs
+            // before the scene maps and the clips below read the launcher.
+            if let Some(program) = self.program.as_ref() {
+                self.session
+                    .run_follow(program.get(), playhead, self.position);
+            }
             // Spec: session-view R22. A launched scene's tempo and signature
             // apply on its launch frame.
             while let Some(scene) = self.session.take_due_scene(self.position) {

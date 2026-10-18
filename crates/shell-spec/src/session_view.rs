@@ -43,6 +43,11 @@ pub const COPY_CLIP_TO_SLOT: &str = "session.copy_clip_to_slot";
 pub const DELETE: &str = "session.delete";
 /// `session.deactivate`: deactivate (or reactivate) the selected clips (0).
 pub const DEACTIVATE: &str = "session.deactivate";
+/// `session.toggle_follow_actions`: switch the selected clips' follow actions
+/// on or off (S-SES-013).
+pub const TOGGLE_FOLLOW_ACTIONS: &str = "session.toggle_follow_actions";
+/// `session.create_follow_action_chain`: chain the selected clips (S-SES-014).
+pub const CREATE_FOLLOW_ACTION_CHAIN: &str = "session.create_follow_action_chain";
 /// `session.drop_files`: drop audio files into a slot.
 pub const DROP_FILES: &str = "session.drop_files";
 /// `session.focus`: move the keyboard focus to the Session View.
@@ -63,6 +68,8 @@ pub const IDS: &[&str] = &[
     COPY_CLIP_TO_SLOT,
     DELETE,
     DEACTIVATE,
+    TOGGLE_FOLLOW_ACTIONS,
+    CREATE_FOLLOW_ACTION_CHAIN,
     DROP_FILES,
     FOCUS,
 ];
@@ -370,6 +377,32 @@ fn specs() -> Vec<CommandSpec> {
             .permission(Permission::Edit)
             .context(Session)
             .binding("S-SES-018")
+            .args::<NoArgs>()
+            .result::<ChangeSet>(),
+        CommandSpec::new(TOGGLE_FOLLOW_ACTIONS, "Toggle Follow Actions")
+            .description(
+                "Switches the Follow Action switch of the selected slots' clips on, or off when \
+             they are all on already, as Shift+Enter does: with some on and some off, they all \
+             go on. One undo step.",
+            )
+            .permission(Permission::Edit)
+            .context(Session)
+            .binding("S-SES-013")
+            .args::<NoArgs>()
+            .result::<ChangeSet>(),
+        CommandSpec::new(CREATE_FOLLOW_ACTION_CHAIN, "Create Follow Action Chain")
+            .description(
+                "Chains the selected slots' clips, as the clip menu's Create Follow Action Chain \
+             (Cmd+Shift+Enter) does, a chain for each track in scene order: every clip gets \
+             Follow Action on, A Next at 100 %, B No Action and Linked 1x, so each launches the \
+             one after it when it ends. Where the next clip of the selection isn't the next \
+             slot, the clip gets A Jump to its slot instead, and the last clip jumps to the \
+             first, so the chain loops within the selection. Loop switches don't change. One \
+             undo step.",
+            )
+            .permission(Permission::Edit)
+            .context(Session)
+            .binding("S-SES-014")
             .args::<NoArgs>()
             .result::<ChangeSet>(),
         CommandSpec::new(DROP_FILES, "Drop Files into a Slot")

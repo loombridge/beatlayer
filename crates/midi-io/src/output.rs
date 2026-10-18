@@ -183,13 +183,6 @@ impl OutputBus {
     pub(crate) fn clear(&self, owner: u64) {
         lock(&self.shared.table).retain(|slot| slot.owner != owner);
     }
-
-    /// Hands every queued message to its port; returns how many it took.
-    /// For tests that want the messages sent now.
-    #[doc(hidden)]
-    pub fn drain(&self) -> usize {
-        self.shared.drain()
-    }
 }
 
 impl Shared {

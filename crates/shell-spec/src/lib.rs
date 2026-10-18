@@ -30,6 +30,7 @@
 //!   bar's menu.
 //! - [`multisampler`]: the multisampler's commands that need the shell
 //!   (WP-5.13): adding layers from files, Snap, Normalize, and its views.
+//! - [`pads`]: a drum rack's pad view and the commands on pads (WP-5.6).
 //! - [`tracks`]: Duplicate Track Without Clips (WP-2.19b, IMP-12).
 //! - [`session_launch`]: the global launch quantisation and its enabled
 //!   switch (WP-3.2), which the Control Bar's Quantization Menu shows.
@@ -70,6 +71,7 @@ pub mod mixer_view;
 pub mod modulation;
 pub mod multisampler;
 pub mod notes;
+pub mod pads;
 pub mod perception;
 pub mod plugins;
 pub mod session_launch;

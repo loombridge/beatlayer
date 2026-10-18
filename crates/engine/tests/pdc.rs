@@ -24,7 +24,7 @@ use bl_model::{
     AudioData, Chain, ChainId, Clip, ClipData, Command, ContentHash, Device, DeviceId, DeviceKind,
     Editor, RackKind, TrackId, TrackKind, registry,
 };
-use common::{Rig, device, effect_in, rack, rack_in, track};
+use common::{Rig, device, drum_rack, effect_in, rack, rack_in, track};
 use serde_json::{Value, json};
 
 /// The latency the test device adds.
@@ -831,4 +831,43 @@ fn a_round_trip_that_changes_reaches_the_running_song() {
     assert_eq!(delayed, 300, "{delayed}");
     // The same figure again changes nothing.
     assert!(rig.compiler.round_trip(300).program.is_none());
+}
+
+// Spec: drum-racks R22, delay-compensation R2. A drum rack's sum is a
+// summing point for its chains, its return chains and every send into one:
+// each chain's output waits for the slowest chain, the sends take the chains
+// there, and the rack's output waits for the slowest return chain it sums.
+#[test]
+fn a_drum_racks_chains_returns_and_sends_line_up() {
+    use bl_engine::testing::{DC, VALUE};
+    for size in [1, 64, 512, 4096] {
+        let mut rig = Rig::new(4096);
+        let midi = track(&mut rig.editor, TrackKind::Midi, None);
+        let (_, chains, returns) = drum_rack(&mut rig.editor, midi, 2, 1);
+        // Chain 0 has no latency, chain 1 has 300 frames; the return chain
+        // adds 200 to what the sends bring it.
+        for chain in &chains {
+            effect_in(&mut rig.editor, *chain, DC, &[(VALUE, 1.0)]);
+        }
+        effect_in(&mut rig.editor, chains[1], DELAY, &[(DELAY_FRAMES, 300.0)]);
+        effect_in(&mut rig.editor, returns[0], DELAY, &[(DELAY_FRAMES, 200.0)]);
+        // The send is set before the program is made, so it needs no glide.
+        let send = Command::SetChainSend {
+            chain: chains[0],
+            to: returns[0],
+            level: 1.0,
+        };
+        rig.editor.apply(send).unwrap();
+        rig.sync();
+        let out = rig.render(2048, size);
+        let edge = out.iter().position(|s| s.abs() > 1e-6).unwrap();
+        assert_eq!(
+            edge, 500,
+            "block size {size}: 300 for the slowest chain, 200 for the return"
+        );
+        assert!(
+            out[edge..].iter().all(|s| *s == 3.0),
+            "block size {size}: both chains and the return arrive together"
+        );
+    }
 }

@@ -68,6 +68,23 @@ pub enum NodeKey {
     /// Volume, Pan, and Chain Activator, which solo mutes. Its parameters are
     /// [`mixer::track`](crate::mixer::track).
     ChainMixer(ChainId),
+    /// The note routing of a drum rack's chain, which passes on the notes
+    /// its Receive answers at its Play note and remembers what sounds for
+    /// its choke group (the drum racks spec, R2, R4). Its parameters are
+    /// [`drum::param`](crate::drum::param).
+    ChainNotes(ChainId),
+    /// A drum chain's send to one of its rack's return chains, taken after
+    /// the chain's mixer (R6). Its parameters are
+    /// [`mixer::route`](crate::mixer::route).
+    ChainSend {
+        /// The drum chain.
+        chain: ChainId,
+        /// The return chain.
+        to: ChainId,
+    },
+    /// A drum rack's return chain's output into a return track (R8). Its
+    /// parameters are [`mixer::route`](crate::mixer::route).
+    ChainOutput(ChainId),
 }
 
 impl fmt::Display for NodeKey {
@@ -85,6 +102,9 @@ impl fmt::Display for NodeKey {
             Self::Cue(track) => write!(f, "the cue switch of {track}"),
             Self::CueMixer => f.write_str("the mixer of the Cue Out"),
             Self::ChainMixer(chain) => write!(f, "the mixer of {chain}"),
+            Self::ChainNotes(chain) => write!(f, "the notes of {chain}"),
+            Self::ChainSend { chain, to } => write!(f, "the send from {chain} to {to}"),
+            Self::ChainOutput(chain) => write!(f, "the output of {chain}"),
         }
     }
 }

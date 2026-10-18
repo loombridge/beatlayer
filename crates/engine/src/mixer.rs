@@ -875,6 +875,16 @@ impl Route {
         }
     }
 
+    /// Takes the parameter changes of a block in which the route mixes
+    /// nothing, such as the send of a chain in a rack that is off, so it
+    /// comes back with what was set meanwhile.
+    pub(crate) fn flush(&mut self, events: &[NodeEvent]) {
+        for event in events {
+            self.set(event.param, event.value);
+        }
+        self.gain = Ramp::at(self.target());
+    }
+
     /// Adds `frames` frames of `from` into `to`, both planar with
     /// `channels` channels `stride` apart, scaled by the route's gain, with
     /// `events` taking effect on their frames. `song` is the song frame of
@@ -1160,7 +1170,7 @@ impl Solo {
     pub fn edge_muted(&self, edge: &Edge) -> bool {
         match edge.via {
             Via::Output => self.output_muted(edge.from),
-            Via::Send => self.send_muted(edge.from, edge.to),
+            Via::Send | Via::Chain(_) => self.send_muted(edge.from, edge.to),
             // A chain's taps all come before the track's mixer, so solo never
             // silences them (the racks spec, R40).
             Via::Input => {

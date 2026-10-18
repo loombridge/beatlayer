@@ -1,4 +1,4 @@
-//! Separate Stems to New Audio Tracks' dialog (WP-9.1; the stem separation
+//! Separate Stems to New Audio Tracks' dialog (IMP-11; the stem separation
 //! spec, R1 to R7): a modal over the main window, in four steps the shell
 //! keeps (`stems.status`'s `dialog`).
 //!

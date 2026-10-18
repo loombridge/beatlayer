@@ -3134,7 +3134,7 @@ fn paths() -> BTreeMap<&'static str, Path> {
             "clip.move_to_slot",
             Exception(LaterView("the Session grid and its menus (WP-3.7)")),
         ),
-        // Separate Stems' dialog (WP-9.1).
+        // Separate Stems' dialog (IMP-11).
         ("stems.status", Exception(Query)),
         (
             "stems.install",

@@ -1,4 +1,4 @@
-//! Stem separation (WP-9.1, IMP-11): Separate Stems to New Audio Tracks,
+//! Stem separation (IMP-11): Separate Stems to New Audio Tracks,
 //! and the packages it needs, downloaded on first use.
 //!
 //! [`register`] adds the commands' specs; `bl-shell` runs them. The

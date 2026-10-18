@@ -34,7 +34,7 @@ bl-ui.workspace = true
 # no egui default fonts (the UI bundles its own), and winit's Wayland
 # decorations without title text (the titled variant pulls in an
 # unmaintained crate). `links` opens a link in the system's browser, such
-# as the stem separation packages' project pages (WP-9.1).
+# as the stem separation packages' project pages (IMP-11).
 egui = { version = "=0.36.2", default-features = false }
 egui-winit = { version = "=0.36.2", default-features = false, features = [
     "accesskit",

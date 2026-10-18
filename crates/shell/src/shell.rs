@@ -420,7 +420,7 @@ pub struct Shell {
     /// Processed files being written, with the edits that land when each is
     /// whole (WP-4.20).
     processed: Vec<processed_files::Pending>,
-    /// Stem separation's download, separation, and dialog (WP-9.1).
+    /// Stem separation's download, separation, and dialog (IMP-11).
     stems: stems::StemsState,
     /// The sample being auditioned from a click in a display (WP-5.15,
     /// R54): its device and layer, while the button is down. Not saved.

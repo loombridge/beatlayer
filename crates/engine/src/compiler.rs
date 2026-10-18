@@ -1854,6 +1854,7 @@ fn needs_program(
                     || before.enabled != after.enabled
                     || before.media != after.media
                     || was.map(|s| &s.input) != is.map(|s| &s.input)
+                    || before.midi_sidechain != after.midi_sidechain
                 {
                     recompile = true;
                 }

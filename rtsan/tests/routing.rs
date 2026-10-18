@@ -498,7 +498,7 @@ fn midi_sidechains_pass_under_rtsan() {
     sender.send_update(compiler.sync(editor.document()));
     sender.transport(TransportCommand::Play);
 
-    let mut programs = 0u64;
+    let mut programs = 1u64;
     for round in 0..2_000u64 {
         let command = match round {
             20 => Some(Command::SetMidiSidechainSource {
@@ -545,7 +545,7 @@ fn midi_sidechains_pass_under_rtsan() {
     assert_eq!(state.counters.events_unrouted, 0);
     assert_eq!(state.counters.migration_mismatches, 0);
     assert_eq!(state.swaps, programs);
-    assert!(programs >= 6, "{programs} programs");
+    assert!(programs >= 7, "{programs} programs");
     eprintln!(
         "2,000 blocks of MIDI sidechains under RealtimeSanitizer: {} swaps, \
          peak engine load {:.1}%",

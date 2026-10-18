@@ -247,6 +247,17 @@ fn deleting_the_source_leaves_no_input_and_undo_brings_it_back() {
     );
 }
 
+// Spec: routing R32
+#[test]
+fn changing_the_source_after_the_song_is_compiled_takes_effect() {
+    let mut rig = Rig::new(512);
+    let (_, _, probe) = song(&mut rig, true);
+    listen(&mut rig.editor, probe, None);
+    rig.sync();
+    let out = play(&mut rig, 512);
+    assert!(out.iter().all(|&s| s == 0.0), "No Input: nothing is heard");
+}
+
 // Spec: routing R33
 #[test]
 fn a_source_that_would_close_a_loop_carries_nothing() {

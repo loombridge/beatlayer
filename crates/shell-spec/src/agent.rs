@@ -8,11 +8,11 @@
 //! when it connects: a client that connects with the server's token is
 //! asked about each time and is never autonomous, whatever name it gives.
 //!
-//! The settings live in the preferences and show in the Settings window,
-//! on the Agents page: a page of its own, straight after Plug-Ins, because
-//! Live has no agent settings. They change what agents may do, so only a
-//! person changes them: the agent API refuses every command in this module,
-//! whatever the agent's permissions.
+//! The settings live in the preferences (the tokens in the OS keychain)
+//! and show in the Settings window, on the Agents page: a page of its own,
+//! straight after Plug-Ins, because Live has no agent settings. They change
+//! what agents may do, so only a person changes them: the agent API refuses
+//! every command in this module, whatever the agent's permissions.
 
 use bl_commands::Context::Settings;
 use bl_commands::{CommandSpec, Permission, RegisterError, Registry};
@@ -56,22 +56,23 @@ pub const DEFAULT_PORT: u16 = 37_420;
 /// The path the agent server serves the agent API at.
 pub const ENDPOINT_PATH: &str = "/mcp";
 
-/// A token: a secret kept in the preferences that never shows in a debug
-/// print, a log, or a command's result. It's compared in constant time
-/// where requests are checked (the agent API's HTTP server).
+/// A token: a secret kept in the OS keychain that never shows in a debug
+/// print, a log, a command's result, or the preferences' file. It's compared
+/// in constant time where requests are checked (the agent API's HTTP
+/// server).
 ///
 /// Its text is reached only through [`Secret::expose`], so every place that
-/// reveals a token names it: the preferences' file, the HTTP server's
-/// check, and the Settings window's token fields, where the person sees
-/// the server's token and each allowed agent's (WP-1.15c).
+/// reveals a token names it: the keychain entry, the HTTP server's check,
+/// and the Settings window's token fields, where the person sees the
+/// server's token and each allowed agent's (WP-1.15c).
 #[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct Secret(String);
 
 impl Secret {
-    /// The token's text, to put in the preferences' file, show to the
-    /// person in the Settings window, or check a request against. Never put
-    /// it in a command's result, a log, or a debug print.
+    /// The token's text, to put in the keychain, show to the person in the
+    /// Settings window, or check a request against. Never put it in a
+    /// command's result, a log, a debug print, or a settings file.
     #[must_use]
     pub fn expose(&self) -> &str {
         &self.0
@@ -118,7 +119,10 @@ impl PartialEq<Secret> for String {
     }
 }
 
-/// The agent server's settings, kept in the preferences.
+/// The agent server's settings, kept in the preferences, but for the tokens,
+/// which are kept in the OS keychain. The tokens are never written to the
+/// preferences' file; one read from an older file, which had them, is
+/// moved to the keychain.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(default)]
 pub struct AgentSettings {
@@ -130,6 +134,7 @@ pub struct AgentSettings {
     /// The server's token: the bearer token an agent connects with before
     /// the person has allowed it, or while it hasn't been given its own.
     /// Empty until the server is first switched on.
+    #[serde(skip_serializing)]
     #[schemars(skip)]
     pub token: Secret,
     /// The agents the person has allowed to connect, in the order they were
@@ -184,7 +189,7 @@ pub struct AgentClient {
     /// it is this agent, whatever name its client gives, and only such a
     /// request has this agent's rights (connecting without being asked, and
     /// autonomous mode).
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     #[schemars(skip)]
     pub token: Secret,
 }
@@ -411,11 +416,21 @@ mod tests {
             !printed.contains("aaaa") && !printed.contains("bbbb"),
             "{printed}"
         );
-        // The preferences keep them, and read them back.
+        // The preferences' file never gets them (they're in the keychain),
+        // but one written before that still reads, so they can be moved.
         let saved = serde_json::to_string(&settings).unwrap();
+        assert!(
+            !saved.contains("aaaa") && !saved.contains("bbbb") && !saved.contains("token"),
+            "{saved}"
+        );
         let read: AgentSettings = serde_json::from_str(&saved).unwrap();
-        assert_eq!(read, settings);
-        assert_eq!(read.clients[0].token, "b".repeat(64));
+        assert_eq!(read.clients[0].name, "claude-code");
+        assert!(read.token.is_empty() && read.clients[0].token.is_empty());
+        let older = r#"{ "token": "cccc", "clients": [
+            { "name": "goose", "autonomous": false, "token": "dddd" } ] }"#;
+        let read: AgentSettings = serde_json::from_str(older).unwrap();
+        assert_eq!(read.token, "cccc".to_owned());
+        assert_eq!(read.clients[0].token, "dddd".to_owned());
         // The Settings window shows a token through `expose`, the only way
         // to its text: `Secret` isn't `Display`, and doesn't deref to its
         // text, so it can't slip into a `format!` or a `&str` unnamed. Each

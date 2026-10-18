@@ -51,7 +51,8 @@ pub struct Preferences {
     /// The Settings page shown last.
     pub settings_page: SettingsPage,
     /// The agent server: whether it runs, its port and token, and the
-    /// agents allowed to connect (WP-1.15).
+    /// agents allowed to connect (WP-1.15). Its tokens are in the OS
+    /// keychain, never here.
     pub agent: AgentSettings,
     /// The built-in assistant's provider, base URL and model (WP-2.23,
     /// part 4). Its API key is in the OS keychain, never here.

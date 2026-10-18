@@ -8,7 +8,8 @@
 //! Each provider names the account its key lives under
 //! ([`OpenAi::ACCOUNT`](crate::provider::OpenAi::ACCOUNT) and the others),
 //! all of them under one service, [`SERVICE`], so a person can find them in
-//! their keychain app.
+//! their keychain app. The agent server's tokens use the same keychain under
+//! a service of their own ([`OsKeychain::for_service`]).
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -64,19 +65,35 @@ impl std::error::Error for KeychainError {}
 
 /// The OS keychain: macOS Keychain, Windows Credential Manager, the Secret
 /// Service on Linux.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct OsKeychain;
+#[derive(Clone, Copy, Debug)]
+pub struct OsKeychain {
+    /// The service its entries live under.
+    service: &'static str,
+}
+
+impl Default for OsKeychain {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl OsKeychain {
-    /// The OS keychain.
+    /// The OS keychain, for the assistant's API keys under [`SERVICE`].
     #[must_use]
     pub fn new() -> Self {
-        Self
+        Self::for_service(SERVICE)
+    }
+
+    /// The OS keychain, for entries under another service, such as the
+    /// agent server's tokens.
+    #[must_use]
+    pub fn for_service(service: &'static str) -> Self {
+        Self { service }
     }
 
     /// The entry for `account`, with the platform's store behind it.
     fn entry(&self, account: &str) -> Result<keyring::Entry, KeychainError> {
-        keyring::Entry::new(SERVICE, account).map_err(map_error)
+        keyring::Entry::new(self.service, account).map_err(map_error)
     }
 }
 

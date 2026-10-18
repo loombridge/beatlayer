@@ -384,6 +384,16 @@ pub struct Shell {
     hint: Option<String>,
     revision: u64,
     agent_status: AgentServerStatus,
+    /// Where the agent server's tokens are kept: the OS keychain in the
+    /// app, an in-memory one in tests, or nowhere until one is given, when
+    /// they last only as long as the shell ([`Shell::use_agent_keychain`]).
+    agent_keychain: Option<Arc<dyn Keychain>>,
+    /// The tokens as the keychain last held them, so they're written only
+    /// when they change.
+    agent_tokens_stored: Option<agent::StoredTokens>,
+    /// Whether the preferences came with tokens in them, from a file
+    /// written before the tokens moved to the keychain.
+    agent_tokens_in_file: bool,
     /// The built-in assistant's API keys (WP-2.23): the OS keychain, or an
     /// in-memory stand-in in tests and headless runs. The keys are never in
     /// the preferences.
@@ -816,6 +826,9 @@ impl Shell {
             hint: None,
             revision: 0,
             agent_status: AgentServerStatus::default(),
+            agent_keychain: None,
+            agent_tokens_stored: None,
+            agent_tokens_in_file: false,
             keychain: Arc::new(OsKeychain::new()),
             assistant_key_set: false,
             assistant_log: Vec::new(),
@@ -873,6 +886,7 @@ impl Shell {
             device_commands_key: Vec::new(),
             plugins_generation: 0,
         };
+        shell.agent_tokens_in_file = !agent::StoredTokens::of(&shell.prefs.agent).is_empty();
         shell.give_agents_tokens();
         shell.publish_plugins();
         shell
@@ -976,19 +990,97 @@ impl Shell {
     }
 
     /// Makes each allowed agent that has no token of its own one (an agent
-    /// allowed before agents had them), and keeps them (WP-1.15b).
+    /// allowed before agents had them, or one whose token the keychain
+    /// lost), and the server one while it's on (WP-1.15b). The caller keeps
+    /// them.
     fn give_agents_tokens(&mut self) {
-        let mut made = false;
         for client in &mut self.prefs.agent.clients {
             if client.token.is_empty()
                 && let Ok(token) = agent::new_token()
             {
                 client.token = token.into();
-                made = true;
             }
         }
-        if made {
+        if self.prefs.agent.server
+            && self.prefs.agent.token.is_empty()
+            && let Ok(token) = agent::new_token()
+        {
+            self.prefs.agent.token = token.into();
+        }
+    }
+
+    /// Keeps the agent server's tokens in `keychain` from now on: the OS
+    /// keychain in the app, an in-memory one in tests. Reads the tokens it
+    /// holds, moves any that the preferences' file still had into it and
+    /// rewrites the file without them, and makes the ones still missing.
+    ///
+    /// If the keychain can't be read or written, the Status Bar says so and
+    /// the tokens last only until Beatlayer quits; the agents keep being
+    /// allowed, and are given new tokens at the next start.
+    pub fn use_agent_keychain(&mut self, keychain: Arc<dyn Keychain>) {
+        let stored = match keychain.read(agent::KEYCHAIN_ACCOUNT) {
+            Ok(Some(text)) => agent::StoredTokens::parse(&text),
+            Ok(None) => Ok(agent::StoredTokens::default()),
+            Err(error) => Err(error.to_string()),
+        };
+        self.agent_keychain = Some(keychain);
+        match stored {
+            Ok(stored) => {
+                stored.apply(&mut self.prefs.agent);
+                self.agent_tokens_stored = Some(stored);
+            }
+            Err(error) => {
+                self.agent_tokens_stored = None;
+                self.set_message(
+                    format!("Couldn't read the agent tokens from the keychain: {error}"),
+                    true,
+                );
+            }
+        }
+        self.give_agents_tokens();
+        if self.store_agent_tokens() && self.agent_tokens_in_file {
+            // Only once the keychain has them: the file loses its copy.
+            self.agent_tokens_in_file = false;
             self.save_preferences();
+        }
+    }
+
+    /// Writes the agent server's tokens to the keychain if they changed
+    /// since it was last read or written. Returns whether the keychain now
+    /// holds them; a failure shows in the Status Bar.
+    fn store_agent_tokens(&mut self) -> bool {
+        let Some(keychain) = &self.agent_keychain else {
+            return false;
+        };
+        let tokens = agent::StoredTokens::of(&self.prefs.agent);
+        if self.agent_tokens_stored.as_ref() == Some(&tokens) {
+            return true;
+        }
+        // No tokens, and a keychain that couldn't be read: nothing to keep,
+        // and nothing worth a message about.
+        if tokens.is_empty() && self.agent_tokens_stored.is_none() {
+            return true;
+        }
+        let written = if tokens.is_empty() {
+            keychain.delete(agent::KEYCHAIN_ACCOUNT)
+        } else {
+            keychain.write(agent::KEYCHAIN_ACCOUNT, &tokens.to_text())
+        };
+        match written {
+            Ok(()) => {
+                self.agent_tokens_stored = Some(tokens);
+                true
+            }
+            Err(error) => {
+                self.set_message(
+                    format!(
+                        "Couldn't keep the agent tokens in the keychain: {error}. They last \
+                         until Beatlayer quits."
+                    ),
+                    true,
+                );
+                false
+            }
         }
     }
 
@@ -4500,9 +4592,12 @@ impl Shell {
         std::mem::take(&mut self.effects)
     }
 
-    /// Writes the preferences to the config directory, if there is one. A
+    /// Writes the preferences to the config directory, if there is one, and
+    /// the agent server's tokens to their keychain, if one is in use
+    /// ([`Shell::use_agent_keychain`]); the file never holds the tokens. A
     /// failure shows in the Status Bar.
     pub fn save_preferences(&mut self) {
+        self.store_agent_tokens();
         let Some(dir) = &self.config_dir else {
             return;
         };

@@ -85,6 +85,7 @@ mod capture;
 mod multisampler;
 mod processed_files;
 mod session_recording;
+mod warping;
 
 /// The argument a key in a range (F1 to F8) adds to a toggling mixer
 /// command for the track it numbers, counting the mixer's columns from 1;
@@ -394,6 +395,13 @@ pub struct Shell {
     /// Processed files being written, with the edits that land when each is
     /// whole (WP-4.20).
     processed: Vec<processed_files::Pending>,
+    /// How files are analysed (WP-4.3): in memory only until the app says
+    /// otherwise.
+    analysis_options: bl_analysis::cache::AnalysisOptions,
+    /// The analysis cache, made when first used.
+    analysis: Option<bl_analysis::cache::AnalysisCache>,
+    /// The files whose analysis has been started this session.
+    analysed: std::collections::HashSet<bl_media::ContentHash>,
     /// The Arrangement's clipboard (WP-1.8b), kept across sets as Live
     /// keeps it, and never part of a set.
     clipboard: Option<Clipboard>,
@@ -697,6 +705,9 @@ impl Shell {
             browser_view,
             media,
             processed: Vec::new(),
+            analysis_options: bl_analysis::cache::AnalysisOptions::memory_only(),
+            analysis: None,
+            analysed: std::collections::HashSet::new(),
             registry,
             editor,
             saved,
@@ -1638,6 +1649,7 @@ impl Shell {
         // finds its device's.
         self.kit.sync(self.editor.document());
         self.audio.sync(self.editor.document());
+        self.start_analyses();
         self.refresh_device_commands(false);
     }
 
@@ -2845,6 +2857,15 @@ impl Shell {
             .map(|(hash, path)| (bl_model::ContentHash(*hash.as_bytes()), path))
             .collect();
         self.store.relink(&found);
+        // A relinked file's failed analysis is made again (R20).
+        for (hash, _) in &found {
+            let hash = bl_media::ContentHash::from_bytes(hash.0);
+            if let Some(cache) = &self.analysis {
+                cache.forget(hash);
+            }
+            self.analysed.remove(&hash);
+        }
+        self.start_analyses();
         found.len()
     }
 
@@ -4768,11 +4789,7 @@ impl Shell {
             else {
                 return None;
             };
-            let info = self
-                .media
-                .info(bl_media::ContentHash::from_bytes(audio.media.0))
-                .ok()?;
-            Some(info.frames? as f64 / f64::from(info.sample_rate))
+            self.file_seconds(audio)
         };
         let (clips, places) =
             match &command {
@@ -4894,6 +4911,7 @@ impl Shell {
         }
         if model::handles(id) {
             self.check_warp_files(id, &args)?;
+            let args = self.prepare_warping(id, args)?;
             let args_floating = args.get("floating") == Some(&Value::Bool(true));
             // Spec: automation R17. With Automation Arm on and the transport
             // recording, a control move is noted for the envelope too.
@@ -5237,6 +5255,9 @@ impl Shell {
         }
         if perception_ids::handles(id) {
             return self.run_perception(id, args);
+        }
+        if bl_shell_spec::warping::handles(id) {
+            return self.run_warping(id, args);
         }
         if bl_shell_spec::modulation::handles(id) {
             let bl_shell_spec::modulation::StateArgs { track } = Self::args(id, args)?;

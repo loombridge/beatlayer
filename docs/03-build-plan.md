@@ -457,7 +457,7 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 3.18 | todo |  | Waits on 2.13 for the Cue Out chooser |
 | 4.1 | done | 18 October 2026 | [#101](https://github.com/loombridge/beatlayer/pull/101); the Warp switch, warp markers, a warped clip's markers and loop in ticks, the segment BPM and seven commands for them, with sets saved before warping opening unwarped; [the spec](specs/warping.md) |
 | 4.2 | todo |  |  |
-| 4.3 | todo |  |  |
+| 4.3 | done | 18 October 2026 | [#169](https://github.com/loombridge/beatlayer/pull/169); each audio file's transients found in the background and kept by content hash in an `Analysis` folder beside the peaks, a clip's transient edits saved with the set, `clip.transients` to read them, and markers over a range and pseudo-warp markers with `pin_neighbours`; [the spec](specs/warping.md) |
 | 4.4 | todo |  |  |
 | 4.5 | todo |  |  |
 | 4.6 | todo |  |  |
@@ -502,9 +502,9 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 5.20b | todo |  |  |
 | 5.20c | todo |  |  |
 | 5.21 | done | 18 October 2026 | [#148](https://github.com/loombridge/beatlayer/pull/148); Strip, Triad, Shutter and Bond, the channel EQ, three-band EQ, gate and bus compressor ([channel EQ](specs/channel-eq.md), [three-band EQ](specs/three-band-eq.md), [gate](specs/gate.md), [bus compressor](specs/bus-compressor.md)), with sidechains, look-ahead and oversampling latency, and gain reduction readable for the meters |
-| 5.22 | todo |  |  |
+| 5.22 | done | 18 October 2026 | [#149](https://github.com/loombridge/beatlayer/pull/149); Triband, the multiband dynamics ([the spec](specs/multiband-dynamics.md)), runs three bands split by zero-latency Linkwitz-Riley crossovers, each compressing or expanding above and below its own thresholds, with Time, Amount, per-band solos and a sidechain that drives every band's detector, and per-band gain reduction readable for the meters; reporting it through T168's hook waits |
 | 5.22b | todo |  |  |
-| 5.23 | todo |  |  |
+| 5.23 | done | 18 October 2026 | [#156](https://github.com/loombridge/beatlayer/pull/156); Singe, Grit and Valve, the saturator, overdrive and tube distortion ([saturator](specs/saturator.md), [overdrive](specs/overdrive.md), [tube distortion](specs/tube-distortion.md)), with Singe's eight curves, Color filters and Waveshaper, and Hi-Quality oversampling with its latency reported; the level-over-curve, Color-curve and X–Y drawings wait |
 | 5.24 | done | 18 October 2026 | [#155](https://github.com/loombridge/beatlayer/pull/155); Degrade, Crush and Wax, the digital-degradation effect, bit-crusher and vinyl distortion ([digital degradation](specs/digital-degradation.md), [bit-crusher](specs/bit-crusher.md), [vinyl distortion](specs/vinyl-distortion.md)), with seeded noise, jitter and crackle and the input's spectrum in Degrade's display; its X–Y drag waits |
 | 5.25 | done | 18 October 2026 | [#158](https://github.com/loombridge/beatlayer/pull/158); Trident, Scatter and Plumb, the filter, grain and alignment delays ([filter delay](specs/filter-delay.md), [grain delay](specs/grain-delay.md), [alignment delay](specs/alignment-delay.md)), sharing Reprise's line and synced timing, with Scatter's seeded spray and random pitch and its X–Y axes as parameters; displays wait |
 | 5.26 | done | 18 October 2026 | [#161](https://github.com/loombridge/beatlayer/pull/161); Stutter, the equivalent of Beat Repeat ([beat repeat](specs/beat-repeat.md)), capturing on the song's beat grid through the tempo map with seeded Chance and Variation, its Grid, Pitch, filter, Decay and three output modes; most ranges Beatlayer's own until Live is observed |

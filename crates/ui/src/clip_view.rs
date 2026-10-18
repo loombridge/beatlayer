@@ -595,7 +595,7 @@ fn grabbed(
 fn notes_at(notes: &[Note], places: &[u32]) -> Vec<Note> {
     places
         .iter()
-        .filter_map(|place| notes.get(*place as usize).copied())
+        .filter_map(|place| notes.get(*place as usize).cloned())
         .collect()
 }
 
@@ -1226,7 +1226,7 @@ impl ClipViewUi {
                 // off.
                 Some((place, NoteZone::End)) => {
                     let places = grabbed(shell, doc, arrangement, clip, place, events);
-                    let note = notes[place as usize];
+                    let note = &notes[place as usize];
                     let end = note.start + note.length;
                     let shortest = if arrangement.grid().snap {
                         arrangement.grid_ticks(doc)
@@ -1245,7 +1245,7 @@ impl ClipViewUi {
                 // the selection it belongs to.
                 Some((place, NoteZone::Body)) => {
                     let places = grabbed(shell, doc, arrangement, clip, place, events);
-                    let note = notes[place as usize];
+                    let note = &notes[place as usize];
                     self.drag = Some(NoteDrag::Move {
                         clip,
                         limits: move_limits(&notes_at(notes, &places)),

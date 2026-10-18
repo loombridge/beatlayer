@@ -30,6 +30,9 @@ pub const TRIPLET_QUANTIZATION: &str = "session.triplet_quantization";
 /// `session.set_quantization_enabled`: turn quantised launching on or off
 /// (S-SES-027, M-OPT-014).
 pub const SET_QUANTIZATION_ENABLED: &str = "session.set_quantization_enabled";
+/// `session.set_follow_actions_enabled`: Enable Follow Actions Globally,
+/// the switch at the right of Main's status row (L-SES-008).
+pub const SET_FOLLOW_ACTIONS_ENABLED: &str = "session.set_follow_actions_enabled";
 /// `session.stop_selected`: stop the clips of the tracks with a selected
 /// slot (S-SES-006).
 pub const STOP_SELECTED: &str = "session.stop_selected";
@@ -46,6 +49,7 @@ pub const IDS: &[&str] = &[
     LARGER_QUANTIZATION,
     TRIPLET_QUANTIZATION,
     SET_QUANTIZATION_ENABLED,
+    SET_FOLLOW_ACTIONS_ENABLED,
     STOP_SELECTED,
     LAUNCH_SELECTED,
 ];
@@ -70,6 +74,16 @@ pub struct SetQuantizationArgs {
 pub struct SetQuantizationEnabledArgs {
     /// Whether launches and stops are quantised; left out, the switch goes
     /// to the other state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+}
+
+/// Arguments of `session.set_follow_actions_enabled`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetFollowActionsEnabledArgs {
+    /// Whether follow actions run; left out, the switch goes to the other
+    /// state.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enabled: Option<bool>,
 }
@@ -159,6 +173,21 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .context(Session)
             .binding(Binding::new("S-SES-027").toggles("enabled"))
             .args::<SetQuantizationEnabledArgs>()
+            .result::<LaunchSettings>(),
+    )?;
+    registry.register(
+        CommandSpec::new(SET_FOLLOW_ACTIONS_ENABLED, "Enable Follow Actions Globally")
+            .description(
+                "Turns every clip's and scene's follow actions on or off (`enabled`; left out, \
+                 the switch goes to the other state), as the Enable Follow Actions Globally \
+                 switch in Main's status row does. Off, no follow action runs, whatever a \
+                 clip's or scene's own Follow Action switch says; a clip that started while it \
+                 was off follows nothing until it starts again. On by default. Saved with the \
+                 set beside the launch quantisation, and no undo step.",
+            )
+            .permission(Permission::Read)
+            .context(Session)
+            .args::<SetFollowActionsEnabledArgs>()
             .result::<LaunchSettings>(),
     )?;
     registry.register(

@@ -10,7 +10,8 @@ use bl_model::{
     AudioData, AutomationTarget, Channel, Clip, ClipData, Command, ContentHash, CountIn,
     CrossfadeAssign, Device, DeviceKind, DeviceRole, Editor, Input, LaunchMode, LaunchQuantization,
     LaunchSettings, MetronomeRhythm, MetronomeSound, MidiData, MixerParam, Monitor, Note, Output,
-    ParamId, SendTap, Sidechain, TakeClip, TakeLane, Tap, TrackId, TrackKind,
+    ParamId, PressurePoint, SendTap, Sidechain, TakeClip, TakeLane, Tap, TrackId, TrackKind,
+    WarpMarker,
 };
 use bl_project::{Media, Project};
 use bl_shell::Shell;
@@ -28,6 +29,10 @@ fn note(key: u8, start: i64) -> Note {
         probability: 0.5,
         velocity_deviation: 7,
         mute: false,
+        pressure: vec![PressurePoint {
+            at: Ticks(88_200),
+            value: 64,
+        }],
     }
 }
 
@@ -266,6 +271,21 @@ fn fixture() -> Project {
     device.show_preset_name = false;
     device.floating = true;
     device.set_media(0, Some(ContentHash([9; 32])));
+    // A multisampler's layers and options (WP-5.13).
+    device.layers = bl_model::Layers {
+        list: vec![bl_model::Layer::new(
+            bl_model::LayerId(1),
+            "Kick",
+            ContentHash([5; 32]),
+            48_000,
+            48_000,
+            1,
+        )],
+        last_id: 1,
+        ram_mode: true,
+        snap: true,
+        linear_loop_fades: true,
+    };
     device.role = DeviceRole::AudioEffect;
     device.params.insert(ParamId(2), 0.75);
     // B active, with A's values kept (device compare R1, R10).
@@ -384,14 +404,28 @@ fn fixture() -> Project {
         Ticks(2 * BAR),
         ClipData::Audio(AudioData {
             media: ContentHash([7; 32]),
-            start: 0.5,
-            end: Some(3.0),
+            // Warped (WP-4.1), so its markers and brace are ticks.
+            start: 352_800.0,
+            end: Some(2_116_800.0),
             looping: true,
-            loop_start: 1.0,
-            loop_end: Some(2.5),
+            loop_start: 705_600.0,
+            loop_end: Some(1_764_000.0),
             gain: 0.5,
             fade_in: 0.25,
             fade_out: 0.5,
+            warp: true,
+            warp_markers: vec![
+                WarpMarker {
+                    time: 0.25,
+                    beat: Ticks(-176_400),
+                },
+                WarpMarker {
+                    time: 2.0,
+                    beat: Ticks(BAR),
+                },
+            ],
+            tempo: Some(100.0),
+            signature: Some(TimeSignature::new(3, 4).unwrap()),
         }),
     );
     audio.name = "Verse vox".to_owned();
@@ -406,6 +440,7 @@ fn fixture() -> Project {
     apply(
         &mut editor,
         Command::SetClipEnvelopeBreakpoint {
+            kind: bl_model::EnvelopeKind::Modulation,
             clip: audio.id,
             target: volume,
             at: Ticks(0),
@@ -428,11 +463,38 @@ fn fixture() -> Project {
     );
     midi.name = "Chords".to_owned();
     midi.offset = Ticks(88_200);
+    let midi_id = midi.id;
     apply(
         &mut editor,
         Command::CreateClip {
             track: keys,
             clip: midi,
+        },
+    );
+    // MIDI controller envelopes (WP-2.29): a modulation wheel one and an
+    // unlinked pitch bend one.
+    for (target, value) in [
+        (AutomationTarget::MidiCc { number: 1 }, 100.0),
+        (AutomationTarget::MidiPitchBend, -4096.0),
+    ] {
+        apply(
+            &mut editor,
+            Command::SetClipEnvelopeBreakpoint {
+                clip: midi_id,
+                kind: bl_model::EnvelopeKind::Modulation,
+                target,
+                at: Ticks(88_200),
+                value,
+            },
+        );
+    }
+    apply(
+        &mut editor,
+        Command::SetClipEnvelopeLinked {
+            clip: midi_id,
+            kind: bl_model::EnvelopeKind::Modulation,
+            target: AutomationTarget::MidiPitchBend,
+            linked: false,
         },
     );
     let scenes: Vec<_> = editor.document().scenes().map(|scene| scene.id).collect();
@@ -474,6 +536,24 @@ fn fixture() -> Project {
             amount: 0.5,
         },
     );
+    let follow = bl_model::FollowPatch {
+        enabled: Some(true),
+        ..bl_model::FollowPatch::default()
+    };
+    apply(
+        &mut editor,
+        Command::SetClipFollowActions {
+            clip: slot_clip_id,
+            patch: follow,
+        },
+    );
+    apply(
+        &mut editor,
+        Command::SetSceneFollowActions {
+            scene: scenes[0],
+            patch: follow,
+        },
+    );
     apply(
         &mut editor,
         Command::SetSlotStopButton {
@@ -507,6 +587,7 @@ fn fixture() -> Project {
     Project::from_editor(&editor, Media::new()).with_launch(LaunchSettings {
         quantization: LaunchQuantization::Bars2,
         enabled: false,
+        ..LaunchSettings::default()
     })
 }
 
@@ -725,6 +806,10 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "sidechain",
                 "floating",
                 "media",
+                "layers",
+                "layers.ram_mode",
+                "layers.snap",
+                "layers.linear_loop_fades",
                 "b_active",
                 "other_params",
             ][..],
@@ -754,6 +839,11 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "data.audio.gain",
                 "data.audio.fade_in",
                 "data.audio.fade_out",
+                "data.audio.warp",
+                "data.audio.warp_markers.0.time",
+                "data.audio.warp_markers.1.beat",
+                "data.audio.tempo",
+                "data.audio.signature",
             ][..],
         ),
         (
@@ -783,6 +873,8 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
     }
 }
 
+// Spec: midi-controller-data R9. The fixture's MIDI clip holds controller
+// envelopes and a note with pressure points.
 #[test]
 fn full_query_results_hold_everything_the_set_format_encodes() {
     let project = fixture();

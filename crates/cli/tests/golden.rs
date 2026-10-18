@@ -111,6 +111,71 @@ fn the_block_size_changes_nothing() {
     }
 }
 
+// WP-5.37: the multicore scheduler. A pool of workers running the tasks
+// renders every fixture the same to the bit, at every block size, with
+// every worker's blocks under the allocation trap too.
+#[test]
+fn every_fixture_renders_bit_identically_with_workers() {
+    for fixture in fixtures() {
+        let reference = fixture.render();
+        for block in [1, 100, 512, 4096] {
+            let other = fixture.render_with_workers(block, 3);
+            assert!(other.problems().is_empty(), "{:?}", other.problems());
+            assert!(
+                reference.same_bits(&other),
+                "{} in blocks of {block} on three workers differs from one thread",
+                fixture.name,
+            );
+        }
+    }
+}
+
+// WP-5.37: and so does the capacity target's song, 128 tracks with an EQ and
+// a compressor each.
+#[test]
+fn a_128_track_set_renders_bit_identically_with_workers() {
+    use std::sync::Arc;
+
+    use bl_cli::render::{Cue, Script, Settings, interleave, render_launching_with_workers};
+    use bl_core::time::SampleRate;
+    use bl_engine::MediaMap;
+
+    let (editor, tracks) = bl_cli::capacity::song(128);
+    assert_eq!(tracks.len(), 128);
+    for block in [1, 100, 512, 4096] {
+        // A fifth of a second; a block a frame makes a block per frame, so
+        // fewer of those.
+        let frames = if block == 1 { 1_000 } else { 9_600 };
+        let settings = Settings {
+            sample_rate: SampleRate::HZ_48000,
+            block,
+            frames,
+        };
+        let render = |workers| {
+            let mut samples = Vec::new();
+            let script = Script {
+                schedule: &[],
+                cues: &[Cue::PLAY],
+                launches: &[],
+            };
+            let summary = render_launching_with_workers(
+                editor.document(),
+                Arc::new(MediaMap::new()),
+                &script,
+                &settings,
+                workers,
+                |output| interleave(output, &mut samples),
+            );
+            assert_eq!(summary.heap_operations, 0);
+            samples.iter().map(|s| s.to_bits()).collect::<Vec<_>>()
+        };
+        let alone = render(0);
+        assert!(alone.iter().any(|&bits| bits != 0), "the song is silent");
+        assert_eq!(render(3), alone, "blocks of {block}, three workers");
+        assert_eq!(render(7), alone, "blocks of {block}, seven workers");
+    }
+}
+
 /// The reference platform needs every bit; elsewhere, anything below −96
 /// dBFS passes, so a change has to be larger to fail there.
 #[test]

@@ -161,6 +161,84 @@ fn on() -> bool {
     true
 }
 
+/// One of the views a rack's frame can show (racks spec, R18).
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum RackView {
+    /// The Macro Controls ([macros](../../docs/specs/macros.md), WP-5.4).
+    Macros,
+    /// The chain list.
+    ChainList,
+    /// The selected chain's devices.
+    Devices,
+}
+
+/// Which of a rack's views are shown (racks spec, R19): all of them in a new
+/// rack. It's view state kept beside the set's document ([`RackViewMap`]), so
+/// changing it is never an undo step.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[schemars(
+    description = "Which views of a rack are shown: `macros` (the Macro Controls), `chain_list` \
+                   and `devices` (the selected chain's devices). All on in a new rack."
+)]
+pub struct RackViews {
+    /// The Macro Controls.
+    #[serde(default = "on")]
+    pub macros: bool,
+    /// The chain list.
+    #[serde(default = "on")]
+    pub chain_list: bool,
+    /// The selected chain's devices.
+    #[serde(default = "on")]
+    pub devices: bool,
+}
+
+impl Default for RackViews {
+    fn default() -> Self {
+        Self {
+            macros: true,
+            chain_list: true,
+            devices: true,
+        }
+    }
+}
+
+impl RackViews {
+    /// Whether `view` is shown.
+    #[must_use]
+    pub fn shown(self, view: RackView) -> bool {
+        match view {
+            RackView::Macros => self.macros,
+            RackView::ChainList => self.chain_list,
+            RackView::Devices => self.devices,
+        }
+    }
+
+    /// The same views with `view` shown or hidden.
+    #[must_use]
+    pub fn with(mut self, view: RackView, shown: bool) -> Self {
+        match view {
+            RackView::Macros => self.macros = shown,
+            RackView::ChainList => self.chain_list = shown,
+            RackView::Devices => self.devices = shown,
+        }
+        self
+    }
+
+    /// Whether every view is hidden, so the rack folds into its view column
+    /// (racks spec, R19).
+    #[must_use]
+    pub fn all_hidden(self) -> bool {
+        !(self.macros || self.chain_list || self.devices)
+    }
+}
+
+/// Which views each rack shows, as a set saves them beside its document
+/// (racks spec, R19). A rack with every view shown has no entry.
+pub type RackViewMap = std::collections::BTreeMap<DeviceId, RackViews>;
+
 /// Where a device sits: in its track's chain (`chain` is `None`) or in a
 /// rack's chain, and at which position, counting from 0.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

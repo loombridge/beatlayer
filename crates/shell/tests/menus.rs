@@ -99,6 +99,9 @@ fn every_shell_command_is_on_a_menu_or_a_control() {
         commands::SETTINGS_SET_SELECT_ON_LAUNCH,
         commands::SETTINGS_SET_SELECT_NEXT_SCENE_ON_LAUNCH,
         commands::SETTINGS_SET_START_RECORDING_ON_SCENE_LAUNCH,
+        // The same page's Record Session automation in chooser (the Session
+        // automation spec, R5).
+        commands::SETTINGS_SET_RECORD_SESSION_AUTOMATION_IN,
         // The Plug-Ins page's switch (the device chains spec, R31).
         commands::SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS,
         // The Display & Input page's Zoom (interface-zoom R4).

@@ -326,7 +326,7 @@ impl View<'_> {
         if let ClipData::Midi(midi) = &clip.data
             && self.detail == Detail::Full
         {
-            let mut notes: Vec<_> = midi.notes.iter().copied().collect();
+            let mut notes: Vec<_> = midi.notes.iter().cloned().collect();
             notes.sort_by_key(|note| (note.start, note.key));
             value["content"]["notes"] = self.page.slice(notes);
         }
@@ -402,6 +402,18 @@ impl View<'_> {
             .map(|(param, value)| json!({ "param": param, "value": value }))
             .collect();
         value["params"] = self.page.slice(params);
+        // A multisampler's layers and the options of its layer list
+        // (WP-5.13, R30).
+        if !device.layers.is_default() {
+            let layers: Vec<Value> = device.layers.list.iter().map(|l| json!(l)).collect();
+            value["layers"] = json!({
+                "count": layers.len(),
+                "ram_mode": device.layers.ram_mode,
+                "snap": device.layers.snap,
+                "linear_loop_fades": device.layers.linear_loop_fades,
+                "list": self.page.slice(layers),
+            });
+        }
         // Spec: modulation R18. A modulator's mappings, which
         // `modulator.map` and `modulator.unmap` change, and a Curve Mod's
         // shape.
@@ -594,6 +606,9 @@ fn target_label(target: &AutomationTarget) -> String {
                 .and_then(|name| name.as_str().map(str::to_owned))
                 .unwrap_or_default()
         ),
+        AutomationTarget::MidiCc { number } => format!("midi cc {number}"),
+        AutomationTarget::MidiPitchBend => "midi pitch bend".to_owned(),
+        AutomationTarget::MidiChannelPressure => "midi channel pressure".to_owned(),
     }
 }
 

@@ -739,6 +739,10 @@ impl DeviceView {
                 &d.kind,
                 DeviceKind::Native { device_type } if bl_devices::plays_samples(device_type)
             ),
+            swaps_to_snapshot: matches!(
+                &d.kind,
+                DeviceKind::Native { device_type } if device_type == bl_devices::DRUM_SAMPLER
+            ),
             show_preset_name: d.show_preset_name,
             folded: self.folded.contains(&d.id),
             expandable: self.expandable(d),
@@ -1131,6 +1135,14 @@ impl DeviceView {
                 outcome.value = to_value(&added);
                 return Ok(outcome);
             }
+            ids::SWAP_TO_SNAPSHOT => {
+                let DeviceArgs { device } = parse(args)?;
+                let device = self.target(editor.document(), device)?;
+                let added = self.swap_to_snapshot(editor, device)?;
+                outcome.document_changed = true;
+                outcome.value = to_value(&added);
+                return Ok(outcome);
+            }
             ids::GROUP => {
                 let args: GroupArgs = parse(args)?;
                 let grouped = self.group(editor, args)?;
@@ -1320,6 +1332,67 @@ impl DeviceView {
         }
         outcome.value = state(self, editor, arrangement);
         Ok(outcome)
+    }
+
+    /// Replaces the Strike drum sampler `device` with Snapshot in One-Shot
+    /// mode (`device.swap_to_snapshot`; one-shot drum sampler R22): the
+    /// same place, sample and on or off state, and the same Start and
+    /// Length, in one undo step.
+    fn swap_to_snapshot(
+        &mut self,
+        editor: &mut Editor,
+        device: DeviceId,
+    ) -> Result<DeviceAdded, DeviceError> {
+        use bl_devices::{drum_sampler, sampler};
+        let doc = editor.document();
+        let old = doc.device(device).expect("the target exists");
+        let strike = drum_sampler::drum_sampler_type();
+        if old.kind != strike.kind {
+            return Err(DeviceError::Unavailable(format!(
+                "{device} isn't a drum sampler"
+            )));
+        }
+        let place = doc.device_place(device).expect("the target has a place");
+        let kept = |id| {
+            strike
+                .description
+                .value(&old.params, id)
+                .expect("Strike describes it")
+        };
+        let (enabled, media) = (old.enabled, old.media.clone());
+        let (start, length) = (kept(drum_sampler::START), kept(drum_sampler::LENGTH));
+        let id: DeviceId = editor.new_id();
+        let mut snapshot = sampler::sampler_type().device(id);
+        snapshot.enabled = enabled;
+        snapshot.media = media;
+        snapshot.params.insert(sampler::MODE, 1.0);
+        snapshot.params.insert(sampler::START, start);
+        snapshot.params.insert(sampler::LENGTH, length);
+        // A chain holds one instrument, so the old one goes first.
+        editor
+            .transact("Swap to Snapshot", |editor| {
+                editor.apply(Command::RemoveDevice { device })?;
+                match place.chain {
+                    None => editor.apply(Command::InsertDevice {
+                        track: place.track,
+                        index: place.index,
+                        device: snapshot,
+                    }),
+                    Some(chain) => editor.apply(Command::InsertChainDevice {
+                        chain,
+                        index: place.index,
+                        device: snapshot,
+                    }),
+                }
+            })
+            .map_err(|e| DeviceError::Failed(e.to_string()))?;
+        self.selected = Some(id);
+        Ok(DeviceAdded {
+            device: id,
+            track: place.track,
+            new_track: false,
+            default_preset: None,
+        })
     }
 
     /// Adds a device as a person does (`device.add`).

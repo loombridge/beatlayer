@@ -83,7 +83,7 @@ pub const TYPES: [&str; 8] = [
 
 /// A band's response: the eight [`TYPES`], by their index.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Type {
+pub(crate) enum Type {
     LowCut48,
     LowCut12,
     LowShelf,
@@ -334,7 +334,7 @@ pub fn make(config: &NodeConfig) -> Contour {
 
 /// A biquad's coefficients, normalised so `a0` is 1.
 #[derive(Clone, Copy, Default)]
-struct Coeffs {
+pub(crate) struct Coeffs {
     b0: f32,
     b1: f32,
     b2: f32,
@@ -345,8 +345,8 @@ struct Coeffs {
 /// One second-order section: its coefficients and its state, transposed
 /// direct form II.
 #[derive(Clone, Copy, Default)]
-struct Biquad {
-    c: Coeffs,
+pub(crate) struct Biquad {
+    pub(crate) c: Coeffs,
     z1: f32,
     z2: f32,
 }
@@ -354,7 +354,7 @@ struct Biquad {
 impl Biquad {
     /// Its output for `x`, advancing its state.
     #[inline]
-    fn process(&mut self, x: f32) -> f32 {
+    pub(crate) fn process(&mut self, x: f32) -> f32 {
         let y = flush(self.c.b0 * x + self.z1);
         self.z1 = flush(self.c.b1 * x - self.c.a1 * y + self.z2);
         self.z2 = flush(self.c.b2 * x - self.c.a2 * y);
@@ -374,7 +374,7 @@ fn flush(x: f32) -> f32 {
 /// A shelf's `q` is the Q of the cookbook's `alpha` in place of its slope
 /// `S`, and a cut filter's is its resonance; the 48 dB cuts are four
 /// identical stages, so their curve is a plain cascade.
-fn coeffs(kind: Type, freq: f64, gain_db: f64, q: f64, rate: f64) -> Coeffs {
+pub(crate) fn coeffs(kind: Type, freq: f64, gain_db: f64, q: f64, rate: f64) -> Coeffs {
     let w0 = TAU * (freq / rate).clamp(1.0e-6, 0.49);
     let (sin, cos) = w0.sin_cos();
     let amplitude = 10f64.powf(gain_db / 40.0);

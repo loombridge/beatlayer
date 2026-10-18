@@ -832,6 +832,24 @@ impl DeviceViewUi {
             }
             crate::menus::take_focus_first(ui, &response);
         }
+        // Strike's own items after its switches (31.4.5): the swap to
+        // Snapshot, and Save as Default Pad, which the Drum Rack's pads
+        // (T145) bring.
+        if frame.swaps_to_snapshot {
+            let response = ui.button("Swap to Snapshot");
+            crate::menus::register_item(ui.ctx(), &response);
+            if response.clicked() {
+                invoke(events, ids::SWAP_TO_SNAPSHOT, json!({ "device": frame.id }));
+                ui.close();
+            }
+            crate::menus::take_focus_first(ui, &response);
+            let text = "Not built yet: arrives with the Drum Rack's pads (T145).";
+            let pad = ui.add_enabled(false, egui::Button::new("Save as Default Pad"));
+            ui.ctx().accesskit_node_builder(pad.id, |node| {
+                node.set_description(text.to_owned());
+            });
+            pad.on_disabled_hover_text(text);
+        }
     }
 
     /// Dragging a device's title bar moves it: a line shows where it would

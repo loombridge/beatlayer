@@ -33,6 +33,7 @@
 pub mod compressor;
 pub mod delay;
 pub mod dice;
+pub mod drum_sampler;
 pub mod eq;
 mod framework;
 pub mod hold;
@@ -56,6 +57,7 @@ pub mod utility;
 pub use compressor::{COMPRESSOR, Squeeze, compressor_type};
 pub use delay::{DELAY, delay_type};
 pub use dice::{DICE, dice_type};
+pub use drum_sampler::{DRUM_SAMPLER, DrumSampler, drum_sampler_type};
 pub use eq::{Contour, EQ, eq_type};
 pub use framework::{Audio, Modulation, NativeDevice, NativeNode, ParamBank, add};
 pub use hold::{HOLD, hold_type};
@@ -108,6 +110,7 @@ pub fn register(registry: &mut Registry) {
     eq::register(registry);
     sampler::register(registry);
     multisampler::register(registry);
+    drum_sampler::register(registry);
     kitbag::register(registry);
     modulator::register(registry);
     lift::register(registry);
@@ -142,11 +145,14 @@ pub fn relative_clip_envelopes(document: &mut bl_model::Document) {
 }
 
 /// Whether the native device type `device_type` plays samples that
-/// `device.load_sample` loads into it: the sampler and the eight-slot drum
-/// sampler.
+/// `device.load_sample` loads into it: the sampler and the two drum
+/// samplers.
 #[must_use]
 pub fn plays_samples(device_type: &str) -> bool {
-    device_type == sampler::SAMPLER || device_type == kitbag::KITBAG
+    matches!(
+        device_type,
+        sampler::SAMPLER | kitbag::KITBAG | DRUM_SAMPLER
+    )
 }
 
 /// A [`KitHost`] with the kit plug-ins compiled into Beatlayer: its

@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-390 commands in 34 areas.
+391 commands in 34 areas.
 
 ## Permission classes
 
@@ -218,6 +218,7 @@ Each command has:
 | [`device.show_sidechain`](#deviceshow_sidechain) | Show Sidechain | `read` |  |  |
 | [`device.snap_layer_markers`](#devicesnap_layer_markers) | Snap Markers | `edit` |  |  |
 | [`device.sort_layers`](#devicesort_layers) | Sort Samples | `edit` |  |  |
+| [`device.swap_to_snapshot`](#deviceswap_to_snapshot) | Swap to Snapshot | `edit` |  |  |
 | [`device.ungroup`](#deviceungroup) | Ungroup | `edit` | `Cmd+Shift+G` | `Ctrl+Shift+G` |
 | [`device.unwrap_rack`](#deviceunwrap_rack) | Take a Rack Apart | `edit` |  |  |
 | [`device.update_layers`](#deviceupdate_layers) | Change Sample Settings | `edit` |  |  |
@@ -3779,6 +3780,22 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `device.swap_to_snapshot`
+
+**Swap to Snapshot**. Permission: `edit`. Contexts: `device-view`.
+
+Replaces a Strike drum sampler with the Snapshot sampler in One-Shot mode, as Strike's context menu does: the new device takes the old one's place, sample, and on or off state, and keeps its sample's Start and Length; every other setting is Snapshot's default. One undo step, named Swap to Snapshot, and the new device is selected. A device that isn't a Strike drum sampler is refused.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) or null | no | The device; the selected one if left out. |
+
+Result: [`DeviceAdded`](#deviceadded).
+
 #### `device.ungroup`
 
 **Ungroup**. Permission: `edit`. Contexts: `device-view`.
@@ -7338,6 +7355,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.set_state`](#deviceset_state) | the query tool's `device` | `params` |
 | [`device.snap_layer_markers`](#devicesnap_layer_markers) | the query tool's `device` | `layers` |
 | [`device.sort_layers`](#devicesort_layers) | the query tool's `device` | `layers` |
+| [`device.swap_to_snapshot`](#deviceswap_to_snapshot) | the query tool's `track` | `devices` |
 | [`device.ungroup`](#deviceungroup) | the query tool's `track` | `devices` |
 | [`device.unwrap_rack`](#deviceunwrap_rack) | the query tool's `track` | `devices` |
 | [`device.update_layers`](#deviceupdate_layers) | the query tool's `device` | `layers` |
@@ -10565,6 +10583,7 @@ One device as the Device View shows it.
 | `role` | [`DeviceRole`](#devicerole) | yes | Where it goes in a chain. |
 | `enabled` | boolean | yes | Whether it's switched on. |
 | `takes_sample` | boolean | yes | Whether its type plays one sample, so a sample dropped on it loads into it (`device.load_sample`, WP-2.16). |
+| `swaps_to_snapshot` | boolean | yes | Whether its type is the drum sampler, whose context menu offers the swap to Snapshot and Save as Default Pad (`device.swap_to_snapshot`, one-shot drum sampler R23). |
 | `show_preset_name` | boolean | yes | Whether its title shows its preset's or given name. |
 | `folded` | boolean | yes | Whether it's folded to its title bar. |
 | `expandable` | boolean | yes | Whether it has an expanded part, which its title bar's expand toggle shows and hides (L-DEV-004; WP-5.42). |
@@ -10692,6 +10711,11 @@ One device as the Device View shows it.
       ],
       "description": "Its sidechain section, if it has a sidechain input (WP-2.19b)."
     },
+    "swaps_to_snapshot": {
+      "default": false,
+      "description": "Whether its type is the drum sampler, whose context menu offers the swap to Snapshot and Save as Default Pad (`device.swap_to_snapshot`, one-shot drum sampler R23).",
+      "type": "boolean"
+    },
     "takes_sample": {
       "default": false,
       "description": "Whether its type plays one sample, so a sample dropped on it loads into it (`device.load_sample`, WP-2.16).",
@@ -10710,6 +10734,7 @@ One device as the Device View shows it.
     "role",
     "enabled",
     "takes_sample",
+    "swaps_to_snapshot",
     "show_preset_name",
     "folded",
     "expandable",

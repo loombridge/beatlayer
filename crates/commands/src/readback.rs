@@ -241,6 +241,7 @@ pub const READBACK: &[(&str, Readback)] = &[
     ("device.rename", query(Device, "name")),
     ("device.rename_layer", query(Device, "layers")),
     ("device.save_default_preset", nothing(FILE)),
+    ("device.swap_to_snapshot", query(Track, "devices")),
     ("device.save_preset", nothing(FILE)),
     ("device.set_enabled", query(Device, "enabled")),
     ("device.set_enabled_all", query(Device, "chains")),

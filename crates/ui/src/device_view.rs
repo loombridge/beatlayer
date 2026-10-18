@@ -601,6 +601,8 @@ impl DeviceViewUi {
                 }
                 if let (Some(section), false) = (&frame.sidechain, strip) {
                     crate::sidechain::draw(ui, shell, theme, frame.id, section, rect, events);
+                } else if let (Some(section), false) = (&frame.midi_sidechain, strip) {
+                    crate::sidechain::draw_midi(ui, shell, theme, frame.id, section, rect, events);
                 }
             },
         );

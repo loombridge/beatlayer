@@ -1421,6 +1421,16 @@ pub enum Command {
         /// Whether the sidechain is on.
         enabled: bool,
     },
+    /// Sets the MIDI track a device's MIDI sidechain listens to, or none.
+    /// The device must have a MIDI sidechain input.
+    SetMidiSidechainSource {
+        /// The device.
+        device: DeviceId,
+        /// The MIDI track whose notes and channel messages the device
+        /// hears (its own track too), or `None` for No Input.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        track: Option<TrackId>,
+    },
     /// Sets a device's sidechain gain, as linear gain (finite, at least 0).
     SetSidechainGain {
         /// The device.
@@ -1757,7 +1767,9 @@ impl Command {
             Self::SetLayerOptions { .. } => "Change Sample Options",
             // WP-2.19b, as Live 12.4.6 names them (observed); Listen's is to
             // observe.
-            Self::SetSidechainInput { .. } => "Change \"Routing\"",
+            Self::SetSidechainInput { .. } | Self::SetMidiSidechainSource { .. } => {
+                "Change \"Routing\""
+            }
             Self::SetSidechainEnabled { .. } => "Change \"Sidechain On\"",
             Self::SetSidechainGain { .. } => "Change \"SC Gain\"",
             Self::SetSidechainMix { .. } => "Change \"Mix\"",
@@ -2687,6 +2699,16 @@ impl Document {
             Command::SetSidechainInput { device, input } => {
                 let input = input.clone();
                 self.edit_sidechain(*device, |s| s.input = input)?;
+                self.check_routing(self.device_owner(*device)?)
+            }
+            Command::SetMidiSidechainSource { device, track } => {
+                let mut sidechain = self
+                    .device_ref(*device)?
+                    .midi_sidechain
+                    .clone()
+                    .ok_or(ModelError::NoMidiSidechain(*device))?;
+                sidechain.source = *track;
+                self.device_mut(*device)?.midi_sidechain = Some(sidechain);
                 self.check_routing(self.device_owner(*device)?)
             }
             Command::SetSidechainEnabled { device, enabled } => {

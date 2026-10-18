@@ -236,6 +236,7 @@ Each command has:
 | [`device.set_layer_options`](#deviceset_layer_options) | Change Sample Options | `edit` |  |  |
 | [`device.set_layer_sample`](#deviceset_layer_sample) | Replace Sample | `external` |  |  |
 | [`device.set_layer_zone`](#deviceset_layer_zone) | Change Zones | `edit` |  |  |
+| [`device.set_midi_sidechain_source`](#deviceset_midi_sidechain_source) | Set MIDI Sidechain Source | `edit` |  |  |
 | [`device.set_multisampler_view`](#deviceset_multisampler_view) | Set Multisampler View | `read` |  |  |
 | [`device.set_param`](#deviceset_param) | Set Device Parameter | `edit` |  |  |
 | [`device.set_processed_layer_sample`](#deviceset_processed_layer_sample) | Replace With Processed Copy | `edit` |  |  |
@@ -4182,6 +4183,23 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `device.set_midi_sidechain_source`
+
+**Set MIDI Sidechain Source**. Permission: `edit`. Contexts: `device-view`.
+
+Sets the MIDI track a device's MIDI sidechain listens to, as the MIDI source chooser in its sidechain parameters does: `track` is a MIDI track (the device's own track too), or left out for No Input, a new device's. The device hears the notes and channel messages that track's clips and input play, before its own devices change them; the track still plays as before. Only devices that declare a MIDI sidechain input have one. Deleting the track leaves No Input.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `track` | [`TrackId`](#trackid) or null | no | The MIDI track whose notes and channel messages the device hears (its own track too), or `None` for No Input. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `device.set_multisampler_view`
 
 **Set Multisampler View**. Permission: `read`. Contexts: `device-view`.
@@ -4401,7 +4419,7 @@ Result: [`FloatingWindows`](#floatingwindows).
 
 **Show Sidechain**. Permission: `read`. Contexts: `device-view`.
 
-Shows or hides a device's sidechain section, as the toggle at the top of the device's left strip does; switches unless `shown` says which. Only devices with a sidechain input have one. It changes only the view: it isn't an undo step. The section's settings are the set's: `device.set_sidechain_input`, `device.set_sidechain_enabled`, `device.set_sidechain_mix`, `device.set_sidechain_gain`, and `device.set_sidechain_listen`.
+Shows or hides a device's sidechain section, as the toggle at the top of the device's left strip does; switches unless `shown` says which. Only devices with a sidechain input or a MIDI sidechain input have one. It changes only the view: it isn't an undo step. The section's settings are the set's: `device.set_sidechain_input`, `device.set_sidechain_enabled`, `device.set_sidechain_mix`, `device.set_sidechain_gain`, and `device.set_sidechain_listen`; the MIDI sidechain's, `device.set_midi_sidechain_source`.
 
 Default keys: none.
 
@@ -8156,6 +8174,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.set_layer_options`](#deviceset_layer_options) | the query tool's `device` | `layers` |
 | [`device.set_layer_sample`](#deviceset_layer_sample) | the query tool's `device` | `layers` |
 | [`device.set_layer_zone`](#deviceset_layer_zone) | the query tool's `device` | `layers` |
+| [`device.set_midi_sidechain_source`](#deviceset_midi_sidechain_source) | the query tool's `device` | `midi_sidechain.source` |
 | [`device.set_param`](#deviceset_param) | the query tool's `device` | `params` |
 | [`device.set_processed_layer_sample`](#deviceset_processed_layer_sample) | the query tool's `device` | `layers` |
 | [`device.set_sample`](#deviceset_sample) | the query tool's `device` | `media` |
@@ -11702,6 +11721,7 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 | `layers` | [`Layers`](#layers) | no | A multisampler's layers and the options of its layer list (WP-5.13, the multisampler spec, R2). Left out of the saved set for a device that holds none. |
 | `mappings` | array of [`Mapping`](#mapping) | no | The parameters a modulator maps, one per slot (the modulation spec, R19). Left out of the saved set for a device that maps none. |
 | `media` | array of [`ContentHash`](#contenthash) or null | no | The media the device plays, by content hash, one entry per sample slot (WP-2.16, WP-5.17): the sampler's sample is slot 0, the eight-slot drum sampler's slots are 0 to 7. The media store holds each like a clip's audio (the sampler spec, R11). A slot with no sample is `None`, and the list never ends in one. Left out of the saved set for a device that plays none; a set saved before slots existed holds one hash, which loads as slot 0. |
+| `midi_sidechain` | [`MidiSidechain`](#midisidechain) or null | no | The device's MIDI sidechain input, if its type declares one (the routing spec, R32): a MIDI track whose notes and channel messages the device hears beside its audio. Left out of the saved set for a device without one. |
 | `other_params` | array or null | no | The values of the state that isn't active, in the same form as [`params`](Self::params) (device compare R1, R10). `None` while the two states are equal, as a new device's are, and left out of the saved set then. Use [`other_params`](Self::other_params) to read it. |
 | `own_name` | string | no | The device's own name, such as `Auto Filter`, which the title bar shows while Show Preset Name is off. Empty while it's the same as [`name`](Self::name), and left out of the saved set then. |
 | `plugin` | [`PluginState`](#pluginstate) or null | no | A plug-in's own state and where it was loaded from (WP-2.6), as last saved with the set. Left out of the saved set for a native device, and for a plug-in until the set is first saved with it. |
@@ -11768,6 +11788,17 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
         ]
       },
       "type": "array"
+    },
+    "midi_sidechain": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MidiSidechain"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The device's MIDI sidechain input, if its type declares one (the routing spec, R32): a MIDI track whose notes and channel messages the device hears beside its audio. Left out of the saved set for a device without one."
     },
     "name": {
       "description": "The name the title bar shows while Show Preset Name is on: the device's own name until a preset or Rename gives it another.",
@@ -12072,6 +12103,7 @@ One device as the Device View shows it.
 | `hot_swap` | boolean | yes | Whether it's the device being hot-swapped. |
 | `sidechain` | [`SidechainSection`](#sidechainsection) or null | yes | Its sidechain section, if it has a sidechain input (WP-2.19b). |
 | `display_view` | string or null | no | The view its display shows, if its display has views (WP-5.43): one of its description's `views`. |
+| `midi_sidechain` | [`MidiSidechainSection`](#midisidechainsection) or null | no | Its MIDI sidechain section, if it has a MIDI sidechain input (WP-5.27). |
 | `modulator` | [`ModulatorFrame`](#modulatorframe) or null | no | For a modulator, what it maps and which Map button is armed (WP-5.10). |
 | `multisampler` | [`MultisamplerState`](#multisamplerstate) or null | no | A multisampler's views and selected layers (WP-5.13, R30); left out for any other device. |
 | `panel` | [`DevicePanel`](#devicepanel) or null | no | Its parameters and layout, for the generic UI; left out for a device whose type doesn't describe them. |
@@ -12129,6 +12161,17 @@ One device as the Device View shows it.
     "kind": {
       "$ref": "#/$defs/DeviceKind",
       "description": "What it is."
+    },
+    "midi_sidechain": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MidiSidechainSection"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Its MIDI sidechain section, if it has a MIDI sidechain input (WP-5.27)."
     },
     "modulator": {
       "anyOf": [
@@ -16763,6 +16806,72 @@ What `midi.ports` returns.
 
 </details>
 
+### `MidiSidechain`
+
+A device's MIDI sidechain input: `source`, the MIDI track whose notes and channel messages the device hears, or absent for No Input.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `source` | [`TrackId`](#trackid) or null | no | The MIDI track it listens to, or `None` (No Input), as on a new device. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A device's MIDI sidechain input: `source`, the MIDI track whose notes and channel messages the device hears, or absent for No Input.",
+  "properties": {
+    "source": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TrackId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The MIDI track it listens to, or `None` (No Input), as on a new device."
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `MidiSidechainSection`
+
+A device's MIDI sidechain section, in the same left strip as a sidechain's (WP-5.27; the routing spec, R34): the toggle shows the section, which holds the MIDI source chooser.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `shown` | boolean | yes | Whether the section is shown, by the toggle at the top of the device's left strip. It changes only the view. |
+| `source` | string | yes | What the MIDI source chooser shows: a MIDI track's label (`1-MIDI`) or `No Input`. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A device's MIDI sidechain section, in the same left strip as a sidechain's (WP-5.27; the routing spec, R34): the toggle shows the section, which holds the MIDI source chooser.",
+  "properties": {
+    "shown": {
+      "description": "Whether the section is shown, by the toggle at the top of the device's left strip. It changes only the view.",
+      "type": "boolean"
+    },
+    "source": {
+      "description": "What the MIDI source chooser shows: a MIDI track's label (`1-MIDI`) or `No Input`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "shown",
+    "source"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `MixerOf`
 
 Which view's mixer: the Session View's or the Arrangement View's.
@@ -17384,6 +17493,7 @@ The device `device.add` adds.
 |---|---|---|---|
 | `kind` | [`DeviceKind`](#devicekind) | yes | What it is: a native device's type ID or a plug-in's format and ID. |
 | `name` | string | yes | Its own name, such as the browser lists it. |
+| `midi_sidechain` | boolean | no | Whether it has a MIDI sidechain input, as its type declares (WP-5.27). |
 | `role` | [`DeviceRole`](#devicerole) | no | Where it goes in a chain. |
 | `sidechain` | boolean | no | Whether it has a sidechain input, as its type declares (WP-2.19b). |
 
@@ -17397,6 +17507,10 @@ The device `device.add` adds.
     "kind": {
       "$ref": "#/$defs/DeviceKind",
       "description": "What it is: a native device's type ID or a plug-in's format and ID."
+    },
+    "midi_sidechain": {
+      "description": "Whether it has a MIDI sidechain input, as its type declares (WP-5.27).",
+      "type": "boolean"
     },
     "name": {
       "description": "Its own name, such as the browser lists it.",

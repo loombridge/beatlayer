@@ -1350,8 +1350,14 @@ impl DeviceViewUi {
                     .count();
                 events.push(UiEvent::BeginNamedGesture("Move Chain".to_owned()));
                 // The rack's own dragged chains go to the end first, so each
-                // move below lands among chains that stay put.
-                let last = rack.chains.len().saturating_sub(1);
+                // move below lands among chains that stay put: in a drum
+                // rack, the end of its drum chains, before its returns.
+                let last = rack
+                    .chains
+                    .iter()
+                    .filter(|c| c.output.is_none())
+                    .count()
+                    .saturating_sub(1);
                 for chain in drag
                     .chains
                     .iter()

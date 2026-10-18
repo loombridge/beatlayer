@@ -519,3 +519,47 @@ fn the_view_column_shows_input_output_send_and_return() {
         "a return chain has Audio To"
     );
 }
+
+// Spec: drum-racks R7, racks R5
+#[test]
+fn dragged_drum_chains_stay_before_the_return_chains() {
+    let mut h = harness();
+    let (rack, chains) = kit(&mut h, &[36, 37, 38, 39]);
+    h.shell
+        .invoke(
+            "chain.create",
+            json!({ "rack": rack, "device": gain("Gain"), "returns": true }),
+        )
+        .unwrap();
+    for (chain, mode) in [(chains[0], "replace"), (chains[1], "toggle")] {
+        h.shell
+            .run("chain.select", json!({ "chain": chain, "mode": mode }))
+            .unwrap();
+    }
+    h.settle();
+    let layout = layout_of(&mut h, rack);
+    let rows = &layout.chain_list.as_ref().unwrap().rows;
+    // The first two dragged to just above the fourth.
+    drag(
+        &mut h,
+        rows[0].name.center(),
+        pos2(rows[0].name.center().x, rows[3].row.top() + 1.0),
+    );
+    let order: Vec<ChainId> = h
+        .shell
+        .editor()
+        .document()
+        .device(rack)
+        .unwrap()
+        .chains
+        .iter()
+        .filter(|c| !c.is_return)
+        .map(|c| c.id)
+        .collect();
+    assert_eq!(order, [chains[2], chains[0], chains[1], chains[3]]);
+    assert!(
+        h.shell.message().is_none_or(|m| !m.error),
+        "{:?}",
+        h.shell.message()
+    );
+}

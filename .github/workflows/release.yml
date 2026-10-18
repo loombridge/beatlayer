@@ -1,8 +1,13 @@
 # Builds Beatlayer's release packages when a `v*` tag is pushed: a DMG holding
 # Beatlayer.app on macOS, an MSI on Windows, and an AppImage and a tarball on
-# Linux. It attaches them to a GitHub release that is left as a **draft** and a
-# **pre-release**, for a person to review and publish by hand. It never
-# publishes on its own. Before anything builds, the tag must be `v` followed by
+# Linux. It attaches them to a GitHub release that is left as a **draft**, for
+# a person to review and publish by hand. It never publishes on its own.
+#
+# Each package is attached twice: once named for the release
+# (beatlayer-v0.1.0-aarch64-apple-darwin.dmg) and once under a name that never
+# changes (beatlayer-macos-arm64.dmg), so that
+# https://github.com/loombridge/beatlayer/releases/latest/download/<name>
+# always gives the newest published release. The README links to those. Before anything builds, the tag must be `v` followed by
 # the workspace version (`cargo xtask release-check`).
 #
 # A manual run (`gh workflow run release.yml`, or the Actions tab) builds the
@@ -81,18 +86,22 @@ jobs:
             os: macos-15
             target: aarch64-apple-darwin
             exe: ""
+            # The platform part of the package's unchanging name.
+            platform: macos-arm64
             packager-target: aarch64-apple-darwin
             packager-sha256: 934703947b24b4b4bb11ddd08f5ab93d84956378278711261b7b8a210e08fd14
           - name: Windows x64
             os: windows-2025
             target: x86_64-pc-windows-msvc
             exe: .exe
+            platform: windows-x64
             packager-target: x86_64-pc-windows-msvc
             packager-sha256: 24e25795c002e357ffadf9c5e990ba289215537286bcbea652a5967400782a3b
           - name: Linux x64
             os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
             exe: ""
+            platform: linux-x64
             # The static musl build runs whatever the runner's glibc.
             packager-target: x86_64-unknown-linux-musl
             packager-sha256: f33514070c58a44c4a7ecdc31349957a2a2b21cfab03109200842a1d78d9439d
@@ -180,6 +189,7 @@ jobs:
       - name: Name the packages for the release
         env:
           TARGET: ${{ matrix.target }}
+          PLATFORM: ${{ matrix.platform }}
         run: |
           # A manual run has a branch ref, whose slashes are not file names.
           ref="${GITHUB_REF_NAME//\//-}"
@@ -193,7 +203,8 @@ jobs:
             esac
             n=$((n + 1))
             cp "$file" "dist/beatlayer-${ref}-${TARGET}.${extension}"
-            echo "$file -> dist/beatlayer-${ref}-${TARGET}.${extension}"
+            cp "$file" "dist/beatlayer-${PLATFORM}.${extension}"
+            echo "$file -> dist/beatlayer-${ref}-${TARGET}.${extension}, dist/beatlayer-${PLATFORM}.${extension}"
           done
           if [ "$n" -eq 0 ]; then
             echo "::error::cargo xtask package left no packages in target/packages"
@@ -229,9 +240,11 @@ jobs:
           path: dist
           merge-multiple: true
 
-      # The release is created as a draft and a pre-release, and stays both:
-      # nothing in this workflow publishes it. Re-running the workflow for the
-      # same tag replaces the assets on the existing draft.
+      # The release is created as a draft, and stays one: nothing in this
+      # workflow publishes it. It is not a pre-release, because
+      # releases/latest skips pre-releases and the README's links go there.
+      # Re-running the workflow for the same tag replaces the assets on the
+      # existing draft.
       - name: Create the draft release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -240,7 +253,6 @@ jobs:
           if ! gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
             gh release create "$GITHUB_REF_NAME" \
               --draft \
-              --prerelease \
               --title "Beatlayer $GITHUB_REF_NAME" \
               --notes-file RELEASE-NOTES.md
           fi

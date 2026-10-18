@@ -204,7 +204,10 @@ fn an_offline_render_silences_the_external_devices_and_names_them() {
         )
         .unwrap();
     let result: ExportResult = serde_json::from_value(result).unwrap();
-    assert_eq!(result.silenced_external_devices, std::slice::from_ref(&name));
+    assert_eq!(
+        result.silenced_external_devices,
+        std::slice::from_ref(&name)
+    );
     assert!(result.peak_dbfs.is_some(), "the clip still plays");
 
     // So does a preview, in its notes.

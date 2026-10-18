@@ -193,7 +193,7 @@ pub fn registry(probe: &Arc<Probe>) -> Registry {
         })
     });
     let p = Arc::clone(probe);
-    registry.add_device(external_type(), move |_, _| {
+    registry.add_native(EXTERNAL, move |_, _| {
         Box::new(External {
             _tracked: Tracked::new(&p),
         })

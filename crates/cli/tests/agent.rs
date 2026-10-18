@@ -1668,3 +1668,68 @@ fn an_agent_expands_a_device_and_switches_its_menu_option_by_command_id() {
         (json!(1.0), json!(true), json!(true))
     );
 }
+
+// Spec: multiband-dynamics R18, device-framework R14 (WP-5.22): an agent
+// inserts Triband by its type, sets its parameters by ID, a band's among
+// them, and reads every one back with its descriptor.
+#[test]
+fn an_agent_inserts_triband_by_its_type_and_sets_and_reads_its_parameters_by_id() {
+    use bl_devices::multiband_dynamics::{
+        ABOVE_RATIO, HIGH, HIGH_FREQ, LOW_ON, MID, MULTIBAND_DYNAMICS, SOLO, band_param,
+    };
+
+    let mut shell = Shell::headless();
+    shell.set_device_types(bl_devices::device_types());
+    let mut client = Client::new(InProcess::new(Agent::headless(true), shell));
+    client.initialize("triband-agent").unwrap();
+    let track = default_tracks(&mut client)[2];
+    let set = |param: bl_model::ParamId, value: f64| {
+        json!({ "command": "device.set_param",
+                "args": { "device": {"$ref": "Triband"}, "param": param, "value": value } })
+    };
+    let reply = call(
+        &mut client,
+        "run",
+        json!({ "label": "Add Triband", "commands": [
+            { "command": "device.insert",
+              "args": { "track": track, "index": 0,
+                        "device": { "id": {"$new": "Triband"}, "name": "Triband",
+                                    "kind": { "native": { "device_type": MULTIBAND_DYNAMICS } },
+                                    "enabled": true, "params": [] } } },
+            set(LOW_ON, 0.0),
+            set(HIGH_FREQ, 3_000.0),
+            set(band_param(MID, ABOVE_RATIO), 4.0),
+            set(band_param(HIGH, SOLO), 1.0),
+        ] }),
+    );
+    let device = reply["ids"]["Triband"].clone();
+    let read = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "device.parameters", "args": { "device": device } }] }),
+    );
+    let params = read["results"][0]["result"]["params"].as_array().unwrap();
+    assert_eq!(params.len(), 45, "every parameter is listed");
+    let get = |id: bl_model::ParamId| {
+        params
+            .iter()
+            .find(|p| p["id"] == json!(id.0))
+            .unwrap_or_else(|| panic!("parameter {id:?}"))
+            .clone()
+    };
+    let values: Vec<_> = [
+        LOW_ON,
+        HIGH_FREQ,
+        band_param(MID, ABOVE_RATIO),
+        band_param(HIGH, SOLO),
+    ]
+    .iter()
+    .map(|id| get(*id)["value"].clone())
+    .collect();
+    assert_eq!(values, [json!(0.0), json!(3_000.0), json!(4.0), json!(1.0)]);
+    assert_eq!(
+        get(band_param(MID, ABOVE_RATIO))["name"],
+        json!("Mid Above Ratio")
+    );
+    assert!(params.iter().all(|p| p["automatable"] == json!(true)));
+}

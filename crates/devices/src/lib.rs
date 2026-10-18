@@ -21,7 +21,8 @@
 //! Beatlayer ships its first native devices: the compressor ([`compressor`]),
 //! the parametric EQ ([`eq`], WP-2.18a), the algorithmic reverb
 //! ([`reverb`]), the limiter ([`limiter`]), the tempo-synced delay
-//! ([`delay`]) and the Utility device ([`utility`], WP-2.18b); [`register`]
+//! ([`delay`]), the Utility device ([`utility`], WP-2.18b) and the multiband
+//! dynamics ([`multiband_dynamics`], WP-5.22); [`register`]
 //! adds them to the engine. The instruments are the polysynth
 //! ([`polysynth`], WP-2.17), the sampler ([`sampler`], WP-2.16) and the
 //! eight-slot drum sampler ([`kitbag`], WP-5.17). The
@@ -41,6 +42,7 @@ pub mod lfo;
 pub mod lift;
 pub mod limiter;
 mod midi_fx;
+pub mod multiband_dynamics;
 pub mod polysynth;
 pub mod remap;
 pub mod reverb;
@@ -61,6 +63,7 @@ pub use kitbag::{KITBAG, Kitbag, kitbag_type};
 pub use lfo::{Lfo, Rate, Shape, Stereo, Wave};
 pub use lift::{LIFT, lift_type};
 pub use limiter::{Brickwall, limiter_type};
+pub use multiband_dynamics::{MULTIBAND_DYNAMICS, Triband, multiband_dynamics_type};
 pub use polysynth::{POLYSYNTH, PolySynth, polysynth_type};
 pub use remap::{REMAP, remap_type};
 pub use reverb::{REVERB, reverb_type};
@@ -86,6 +89,12 @@ pub fn display(
     match device_type {
         EQ => Some(eq::display(device, description, values, data)),
         COMPRESSOR => Some(compressor::display(device, description, values, data)),
+        MULTIBAND_DYNAMICS => Some(multiband_dynamics::display(
+            device,
+            description,
+            values,
+            data,
+        )),
         _ => None,
     }
 }
@@ -109,6 +118,7 @@ pub fn register(registry: &mut Registry) {
     remap::register(registry);
     stack::register(registry);
     hold::register(registry);
+    multiband_dynamics::register(registry);
 }
 
 /// The native device types Beatlayer ships, for the browser and the shell:

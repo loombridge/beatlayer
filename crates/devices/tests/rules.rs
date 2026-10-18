@@ -48,9 +48,29 @@ fn every_gain_parameter_reaches_minus_infinity() {
             assert_eq!(param.denormalize(0.0), 0.0, "{who}: the control's bottom");
             assert_eq!(param.format(0.0), MINUS_INFINITY_DB, "{who}");
             assert_eq!(param.parse("-inf"), Some(0.0), "{who}");
-            // Where the gain acts on the audio, at −∞ the audio is silent.
+            // Where the gain acts on the audio, at −∞ the audio is silent. A
+            // gain that acts on one band of Triband does so with the same gain
+            // of its other bands: all at −∞, the device is silent.
+            let band_gain = |p: &bl_model::ParamDescriptor| {
+                p.name.split_once(' ').map(|(_, gain)| gain.to_owned())
+            };
+            let group: Vec<_> = if device_type.name == "Triband" && band_gain(param).is_some() {
+                let same = |p: &&bl_model::ParamDescriptor| {
+                    p.is_gain() && band_gain(p) == band_gain(param)
+                };
+                device_type
+                    .description
+                    .params
+                    .iter()
+                    .filter(same)
+                    .map(|p| p.id)
+                    .collect()
+            } else {
+                vec![param.id]
+            };
+            let silenced: Vec<_> = group.iter().map(|id| (*id, 0.0)).collect();
             let mut at_default = node(&registry, &device(&device_type, &[]), 256);
-            let mut at_silence = node(&registry, &device(&device_type, &[(param.id, 0.0)]), 256);
+            let mut at_silence = node(&registry, &device(&device_type, &silenced), 256);
             let open = run(at_default.as_mut(), &input, &[]);
             let shut = run(at_silence.as_mut(), &input, &[]);
             if shut != open {

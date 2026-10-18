@@ -485,7 +485,7 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 5.3 | todo |  |  |
 | 5.4 | todo |  | The stepped and radio-button styles wait on IMP-26's acceptance |
 | 5.5 | todo |  |  |
-| 5.6 | todo |  |  |
+| 5.6 | done | 18 October 2026 | [#196](https://github.com/loombridge/beatlayer/pull/196); a Drum Rack routes each note to the chains that receive it, at their Play notes, with choke groups, pad mute, solo and preview, sends into up to six return chains that sum into the rack or reach a return track, and a 4 by 4 pad view taking drops of samples, devices and presets; dragging chains out of the Session mixer waits on WP-5.19; [the spec](specs/drum-racks.md) |
 | 5.7 | done | 18 October 2026 | [#137](https://github.com/loombridge/beatlayer/pull/137); Audio From takes the Pre FX, Post FX or Post Mixer of any chain of an instrument or audio effect rack, at any depth, with delay compensation and solo, and MIDI tracks with an instrument are sources; [the spec](specs/racks.md) |
 | 5.8 | done | 18 October 2026 | [#181](https://github.com/loombridge/beatlayer/pull/181); racks and chains save as presets with their plug-ins' state and samples, the browser lists empty racks and native devices under their labels, and Q hot-swaps a device, rack or chain in one undo step; Esc and leaving the browser don't end hot-swap yet, and the Macro Controls join presets with WP-5.4; [the spec](specs/racks.md) |
 | 5.9 | done | 17 October 2026 | [#107](https://github.com/loombridge/beatlayer/pull/107); a clip's modulation acts on its parameter's base in the control's travel, on devices, mixer controls, sends and plug-ins, and shows on the control; the Session clip editor's switches wait on 3.12; [the spec](specs/modulation.md) |

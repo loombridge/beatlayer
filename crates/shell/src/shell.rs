@@ -3254,7 +3254,19 @@ impl Shell {
     /// when woken; a failure shows in the Status Bar. Returns whether
     /// anything a window shows changed.
     pub fn poll(&mut self) -> bool {
-        let polled = self.browser_view.poll(&mut self.audio);
+        self.analysis_cache();
+        let warping = auto_warp::Warping {
+            prefs: self.prefs.warp,
+            analysis: self.analysis.as_ref(),
+        };
+        let set_bpm = self
+            .editor
+            .document()
+            .settings()
+            .tempo
+            .bpm_at(self.arrangement.transport().position)
+            .get();
+        let polled = self.browser_view.poll(&mut self.audio, warping, set_bpm);
         if let Some(error) = polled.error {
             self.set_message(error, true);
         }

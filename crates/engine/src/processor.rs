@@ -418,6 +418,28 @@ impl Processor {
         self.program.as_ref().map(Program::get)
     }
 
+    /// The tempo map the processor converts ticks with.
+    #[must_use]
+    pub fn tempo_map(&self) -> &TempoMap {
+        self.program()
+            .map_or(&self.fallback_tempo, EngineProgram::tempo)
+    }
+
+    /// The time-signature map the processor reads bar lines from.
+    #[must_use]
+    pub fn time_signatures(&self) -> &TimeSignatureMap {
+        self.program().map_or(
+            &self.fallback_time_signatures,
+            EngineProgram::time_signatures,
+        )
+    }
+
+    /// The global launch quantisation and its switch.
+    #[must_use]
+    pub fn launch(&self) -> LaunchSettings {
+        self.session.settings()
+    }
+
     /// Gives the processor the consuming end of the MIDI input queue, which
     /// the MIDI device layer (`bl-midi-io`) and the computer MIDI keyboard
     /// fill (`docs/specs/midi-io.md`, R14). Call it before the processor

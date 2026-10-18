@@ -28,10 +28,91 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
+use bl_core::time::{Frames, SampleRate, TempoMap, Ticks, TimeSignatureMap};
+use bl_model::LaunchSettings;
+pub use bl_stretch::{Marker, WarpMap};
 use rtrb::{Consumer, Producer, RingBuffer};
 
 use crate::gc::GcHandle;
 use crate::node::NodeData;
+
+/// Ticks a tempo of 1 BPM covers in a second.
+const TICKS_PER_SECOND_PER_BPM: f64 = 705_600.0 / 60.0;
+
+/// A warped preview to play (WP-4.18; spec: browser R19, R20, R23).
+pub struct WarpedPreview {
+    /// Audio samples in memory.
+    pub samples: Box<dyn PreviewSamples>,
+    /// The file's warp map.
+    pub map: WarpMap,
+    /// The start beat in ticks.
+    pub start: f64,
+    /// The end beat in ticks.
+    pub end: f64,
+    /// Where the loop starts in ticks.
+    pub loop_start: f64,
+    /// Where the loop ends in ticks.
+    pub loop_end: f64,
+    /// File sample rate in frames per second.
+    pub sample_rate: f64,
+    /// Set tempo in BPM when transport is stopped.
+    pub tempo: f64,
+}
+
+impl std::fmt::Debug for WarpedPreview {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WarpedPreview")
+            .field("start", &self.start)
+            .field("end", &self.end)
+            .field("loop_start", &self.loop_start)
+            .field("loop_end", &self.loop_end)
+            .field("tempo", &self.tempo)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Transport state for a warped preview (WP-4.18; spec: browser R20, R22).
+#[derive(Clone, Copy, Debug)]
+pub struct PreviewTransport<'a> {
+    /// Whether the song is playing.
+    pub playing: bool,
+    /// Song position of the block's first frame.
+    pub song_position: Frames,
+    /// The running tempo map.
+    pub tempo_map: &'a TempoMap,
+    /// The running time signature map.
+    pub time_signatures: &'a TimeSignatureMap,
+    /// Loop region in song frames, if looping.
+    pub loop_frames: Option<(Frames, Frames)>,
+    /// Device sample rate.
+    pub sample_rate: SampleRate,
+    /// Global launch settings for launch quantisation.
+    pub launch: LaunchSettings,
+}
+
+/// The file's sample at `position`, through a Catmull-Rom cubic, silence
+/// outside the file.
+fn read_sample(samples: &dyn PreviewSamples, channel: usize, position: f64) -> f32 {
+    let count = samples.channel_count();
+    let channel_data = samples.channel(channel.min(count - 1));
+    let at = |i: i64| {
+        usize::try_from(i)
+            .ok()
+            .and_then(|idx| channel_data.get(idx))
+            .copied()
+            .map_or(0.0, f64::from)
+    };
+    let floor = position.floor();
+    let t = position - floor;
+    let i = floor as i64;
+    let (a, b, c, d) = (at(i - 1), at(i), at(i + 1), at(i + 2));
+    let (m1, m2) = (0.5 * (c - a), 0.5 * (d - b));
+    let sample = (2.0 * t.powi(3) - 3.0 * t * t + 1.0) * b
+        + (t.powi(3) - 2.0 * t * t + t) * m1
+        + (-2.0 * t.powi(3) + 3.0 * t * t) * c
+        + (t.powi(3) - t * t) * m2;
+    sample as f32
+}
 
 /// Audio a preview plays: planar channels of equal length at the device's
 /// sample rate. Reading it must be real-time safe.
@@ -176,10 +257,16 @@ impl std::fmt::Display for PreviewError {
 
 impl std::error::Error for PreviewError {}
 
-/// One queued play.
+/// What a queued preview message can ask for.
+enum MessageKind {
+    Play(NodeData),
+    Scrub(f64),
+}
+
+/// One queued preview message.
 struct Message {
     generation: u64,
-    data: NodeData,
+    kind: MessageKind,
 }
 
 /// A preview's main-thread half. See the [module docs](self).
@@ -238,9 +325,50 @@ impl PreviewControl {
         }
         let data = self.gc.data(samples);
         self.producer
-            .push(Message { generation, data })
+            .push(Message {
+                generation,
+                kind: MessageKind::Play(data),
+            })
             .map_err(|_| PreviewError::QueueFull)?;
         Ok(generation)
+    }
+
+    /// Plays `warped` from the start, replacing any preview playing or
+    /// queued. Wraps the audio for the collector, which allocates, so call it
+    /// off the audio thread (WP-4.18; spec: browser R19, R23).
+    ///
+    /// # Errors
+    ///
+    /// [`PreviewError`] if the audio is empty or the queue is full.
+    pub fn play_warped(&mut self, warped: Box<WarpedPreview>) -> Result<u64, PreviewError> {
+        let generation = self.shared.generation.fetch_add(1, Ordering::AcqRel) + 1;
+        if warped.samples.channel_count() == 0 || warped.samples.frames() == 0 {
+            return Err(PreviewError::Empty);
+        }
+        let data = self.gc.data(warped);
+        self.producer
+            .push(Message {
+                generation,
+                kind: MessageKind::Play(data),
+            })
+            .map_err(|_| PreviewError::QueueFull)?;
+        Ok(generation)
+    }
+
+    /// Scrubs a playing warped preview to `beat` in ticks (WP-4.18; spec: browser R22).
+    ///
+    /// # Errors
+    ///
+    /// [`PreviewError`] if the queue is full.
+    pub fn scrub(&mut self, beat: f64) -> Result<(), PreviewError> {
+        let generation = self.shared.generation.load(Ordering::Acquire);
+        self.producer
+            .push(Message {
+                generation,
+                kind: MessageKind::Scrub(beat),
+            })
+            .map_err(|_| PreviewError::QueueFull)?;
+        Ok(())
     }
 
     /// Stops the preview, fading it out, and drops any still queued.
@@ -280,6 +408,18 @@ pub fn status(shared: &PreviewShared) -> PreviewStatus {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+enum PlayingContent {
+    Raw,
+    Warped {
+        started: bool,
+        start_frame: Option<Frames>,
+        beat_offset: f64,
+        elapsed_ticks: f64,
+        pending_scrub: Option<(f64, Option<Ticks>)>,
+    },
+}
+
 /// A preview being played.
 struct Playing {
     generation: u64,
@@ -287,13 +427,60 @@ struct Playing {
     position: usize,
     /// While it fades out: the frames of fade left.
     fade: Option<usize>,
+    content: PlayingContent,
 }
 
 impl Playing {
+    fn new(generation: u64, data: NodeData, transport: Option<PreviewTransport<'_>>) -> Self {
+        let content = if let Some(warped) = data.downcast_ref::<Box<WarpedPreview>>() {
+            let (started, start_frame) = match transport {
+                Some(t) if t.playing => {
+                    let song_tick = Ticks(
+                        t.tempo_map
+                            .seconds_to_ticks_exact(
+                                t.song_position.get() as f64 / t.sample_rate.as_f64(),
+                            )
+                            .round() as i64,
+                    );
+                    let (bar_idx, offset) = t.time_signatures.bar_at(song_tick);
+                    if offset == Ticks::ZERO {
+                        (true, Some(t.song_position))
+                    } else {
+                        let next_bar_tick = t.time_signatures.bar_start(bar_idx + 1);
+                        let next_bar_frame =
+                            t.tempo_map.ticks_to_frames(next_bar_tick, t.sample_rate);
+                        (false, Some(next_bar_frame))
+                    }
+                }
+                _ => (true, None),
+            };
+            PlayingContent::Warped {
+                started,
+                start_frame,
+                beat_offset: warped.start - warped.loop_start,
+                elapsed_ticks: 0.0,
+                pending_scrub: None,
+            }
+        } else {
+            PlayingContent::Raw
+        };
+        Self {
+            generation,
+            data,
+            position: 0,
+            fade: None,
+            content,
+        }
+    }
+
     fn samples(&self) -> Option<&dyn PreviewSamples> {
-        self.data
-            .downcast_ref::<Box<dyn PreviewSamples>>()
-            .map(AsRef::as_ref)
+        if let Some(warped) = self.data.downcast_ref::<Box<WarpedPreview>>() {
+            Some(warped.samples.as_ref())
+        } else {
+            self.data
+                .downcast_ref::<Box<dyn PreviewSamples>>()
+                .map(AsRef::as_ref)
+        }
     }
 
     /// How many frames it plays in a block of `frames`.
@@ -306,7 +493,14 @@ impl Playing {
     }
 
     /// Adds this block of it into one output channel.
-    fn mix(&self, out_index: usize, out: &mut [f32], frames: usize, gains: (f32, f32)) {
+    fn mix(
+        &self,
+        out_index: usize,
+        out: &mut [f32],
+        frames: usize,
+        gains: (f32, f32),
+        transport: Option<PreviewTransport<'_>>,
+    ) {
         let Some(samples) = self.samples() else {
             return;
         };
@@ -314,38 +508,249 @@ impl Playing {
         if count == 0 {
             return;
         }
-        let source = samples.channel(out_index.min(count - 1));
-        let played = self.frames_in(frames).min(out.len());
-        let Some(source) = source.get(self.position..self.position + played) else {
-            return;
-        };
         let (from, to) = gains;
         let step = if frames > 0 {
             (to - from) / frames as f32
         } else {
             0.0
         };
-        for (i, (out, sample)) in out.iter_mut().zip(source).enumerate() {
-            let mut gain = from + step * i as f32;
-            if let Some(fade) = self.fade {
-                gain *= fade.saturating_sub(i) as f32 / FADE_FRAMES as f32;
+
+        match self.content {
+            PlayingContent::Raw => {
+                let source = samples.channel(out_index.min(count - 1));
+                let played = self.frames_in(frames).min(out.len());
+                let Some(source) = source.get(self.position..self.position + played) else {
+                    return;
+                };
+                for (i, (out, sample)) in out.iter_mut().zip(source).enumerate() {
+                    let mut gain = from + step * i as f32;
+                    if let Some(fade) = self.fade {
+                        gain *= fade.saturating_sub(i) as f32 / FADE_FRAMES as f32;
+                    }
+                    *out += sample * gain;
+                }
             }
-            *out += sample * gain;
+            PlayingContent::Warped {
+                mut started,
+                start_frame,
+                mut beat_offset,
+                mut elapsed_ticks,
+                mut pending_scrub,
+            } => {
+                let Some(warped) = self.data.downcast_ref::<Box<WarpedPreview>>() else {
+                    return;
+                };
+                let loop_len = (warped.loop_end - warped.loop_start).max(1.0);
+                for i in 0..frames.min(out.len()) {
+                    let (can_play, delta_ticks) = match transport {
+                        Some(t) if t.playing => {
+                            let song_frame = t.song_position + Frames(i as i64);
+                            let song_tick_f64 = t.tempo_map.seconds_to_ticks_exact(
+                                song_frame.get() as f64 / t.sample_rate.as_f64(),
+                            );
+                            let song_tick = Ticks(song_tick_f64.round() as i64);
+                            if !started {
+                                if let Some(target) = start_frame {
+                                    if song_frame < target {
+                                        (false, 0.0)
+                                    } else {
+                                        started = true;
+                                        let t0 = song_tick_f64;
+                                        let t1 = t.tempo_map.seconds_to_ticks_exact(
+                                            (song_frame + Frames(1)).get() as f64
+                                                / t.sample_rate.as_f64(),
+                                        );
+                                        (true, (t1 - t0).max(0.0))
+                                    }
+                                } else {
+                                    started = true;
+                                    let t0 = song_tick_f64;
+                                    let t1 = t.tempo_map.seconds_to_ticks_exact(
+                                        (song_frame + Frames(1)).get() as f64
+                                            / t.sample_rate.as_f64(),
+                                    );
+                                    (true, (t1 - t0).max(0.0))
+                                }
+                            } else {
+                                if let Some((scrub_beat, target_tick)) = pending_scrub
+                                    && target_tick.is_none_or(|target| song_tick >= target)
+                                {
+                                    beat_offset = (scrub_beat - warped.loop_start) - elapsed_ticks;
+                                    pending_scrub = None;
+                                }
+                                let t0 = song_tick_f64;
+                                let t1 = t.tempo_map.seconds_to_ticks_exact(
+                                    (song_frame + Frames(1)).get() as f64 / t.sample_rate.as_f64(),
+                                );
+                                (true, (t1 - t0).max(0.0))
+                            }
+                        }
+                        Some(t) => {
+                            let dt = (1.0 / t.sample_rate.as_f64())
+                                * warped.tempo
+                                * TICKS_PER_SECOND_PER_BPM;
+                            (true, dt)
+                        }
+                        None => {
+                            let dt = (1.0 / warped.sample_rate)
+                                * warped.tempo
+                                * TICKS_PER_SECOND_PER_BPM;
+                            (true, dt)
+                        }
+                    };
+                    if can_play {
+                        let beat =
+                            warped.loop_start + (beat_offset + elapsed_ticks).rem_euclid(loop_len);
+                        let file_time = warped.map.beat_to_time(beat);
+                        let file_pos = file_time * warped.sample_rate;
+                        let sample = read_sample(samples, out_index, file_pos);
+                        let mut gain = from + step * i as f32;
+                        if let Some(fade) = self.fade {
+                            gain *= fade.saturating_sub(i) as f32 / FADE_FRAMES as f32;
+                        }
+                        out[i] += sample * gain;
+                        elapsed_ticks += delta_ticks;
+                    }
+                }
+            }
         }
     }
 
     /// Moves on by a block; returns whether it has finished.
-    fn advance(&mut self, frames: usize) -> bool {
-        let played = self.frames_in(frames);
-        self.position += played;
-        if let Some(fade) = &mut self.fade {
-            *fade = fade.saturating_sub(played);
-            if *fade == 0 {
-                return true;
+    fn advance(&mut self, frames: usize, transport: Option<PreviewTransport<'_>>) -> bool {
+        match &mut self.content {
+            PlayingContent::Raw => {
+                let played = self.frames_in(frames);
+                self.position += played;
+                if let Some(fade) = &mut self.fade {
+                    *fade = fade.saturating_sub(played);
+                    if *fade == 0 {
+                        return true;
+                    }
+                }
+                self.samples()
+                    .is_none_or(|samples| self.position >= samples.frames())
+            }
+            PlayingContent::Warped {
+                started,
+                start_frame,
+                beat_offset,
+                elapsed_ticks,
+                pending_scrub,
+            } => {
+                let Some(warped) = self.data.downcast_ref::<Box<WarpedPreview>>() else {
+                    return true;
+                };
+                for i in 0..frames {
+                    match transport {
+                        Some(t) if t.playing => {
+                            let song_frame = t.song_position + Frames(i as i64);
+                            let song_tick_f64 = t.tempo_map.seconds_to_ticks_exact(
+                                song_frame.get() as f64 / t.sample_rate.as_f64(),
+                            );
+                            let song_tick = Ticks(song_tick_f64.round() as i64);
+                            if !*started {
+                                if let Some(target) = *start_frame {
+                                    if song_frame < target {
+                                        continue;
+                                    }
+                                    *started = true;
+                                } else {
+                                    *started = true;
+                                }
+                            }
+                            if let Some((scrub_beat, target_tick)) = *pending_scrub
+                                && target_tick.is_none_or(|target| song_tick >= target)
+                            {
+                                *beat_offset = (scrub_beat - warped.loop_start) - *elapsed_ticks;
+                                *pending_scrub = None;
+                            }
+                            let t0 = song_tick_f64;
+                            let t1 = t.tempo_map.seconds_to_ticks_exact(
+                                (song_frame + Frames(1)).get() as f64 / t.sample_rate.as_f64(),
+                            );
+                            *elapsed_ticks += (t1 - t0).max(0.0);
+                        }
+                        Some(t) => {
+                            *started = true;
+                            let dt = (1.0 / t.sample_rate.as_f64())
+                                * warped.tempo
+                                * TICKS_PER_SECOND_PER_BPM;
+                            *elapsed_ticks += dt;
+                        }
+                        None => {
+                            *started = true;
+                            let dt = (1.0 / warped.sample_rate)
+                                * warped.tempo
+                                * TICKS_PER_SECOND_PER_BPM;
+                            *elapsed_ticks += dt;
+                        }
+                    }
+                }
+                if let Some(fade) = &mut self.fade {
+                    *fade = fade.saturating_sub(frames);
+                    if *fade == 0 {
+                        return true;
+                    }
+                }
+                false
             }
         }
-        self.samples()
-            .is_none_or(|samples| self.position >= samples.frames())
+    }
+
+    fn scrub(&mut self, target_beat: f64, transport: Option<PreviewTransport<'_>>) {
+        let PlayingContent::Warped {
+            beat_offset,
+            elapsed_ticks,
+            pending_scrub,
+            ..
+        } = &mut self.content
+        else {
+            return;
+        };
+        let Some(warped) = self.data.downcast_ref::<Box<WarpedPreview>>() else {
+            return;
+        };
+        if let Some(t) = transport
+            && t.playing
+            && t.launch.enabled
+        {
+            let song_tick = Ticks(
+                t.tempo_map
+                    .seconds_to_ticks_exact(t.song_position.get() as f64 / t.sample_rate.as_f64())
+                    .round() as i64,
+            );
+            let target_line = t.launch.next_line(song_tick, t.time_signatures);
+            *pending_scrub = Some((target_beat, Some(target_line)));
+        } else {
+            *beat_offset = (target_beat - warped.loop_start) - *elapsed_ticks;
+            *pending_scrub = None;
+        }
+    }
+
+    fn position(&self) -> u64 {
+        match &self.content {
+            PlayingContent::Raw => self.position as u64,
+            PlayingContent::Warped {
+                beat_offset,
+                elapsed_ticks,
+                ..
+            } => {
+                if let Some(warped) = self.data.downcast_ref::<Box<WarpedPreview>>() {
+                    let loop_len = (warped.loop_end - warped.loop_start).max(1.0);
+                    let current_beat =
+                        warped.loop_start + (beat_offset + elapsed_ticks).rem_euclid(loop_len);
+                    let file_time = warped.map.beat_to_time(current_beat);
+                    (file_time * warped.sample_rate).max(0.0).round() as u64
+                } else {
+                    0
+                }
+            }
+        }
+    }
+
+    fn length(&self) -> u64 {
+        self.samples().map_or(0, |s| s.frames() as u64)
     }
 }
 
@@ -373,26 +778,45 @@ impl PreviewVoice {
     /// safe: no allocation, free, lock, or system call. What it lets go of,
     /// the collector frees.
     pub fn render<'a>(&mut self, frames: usize, outputs: impl Iterator<Item = &'a mut [f32]>) {
-        self.take_messages();
+        self.render_with_transport(frames, outputs, None);
+    }
+
+    /// Adds a block of `frames` frames into `outputs`, syncing with
+    /// `transport` if given (WP-4.18; spec: browser R20, R23).
+    pub fn render_with_transport<'a>(
+        &mut self,
+        frames: usize,
+        outputs: impl Iterator<Item = &'a mut [f32]>,
+        transport: Option<PreviewTransport<'_>>,
+    ) {
+        self.take_messages(transport);
         let target = self.shared.gain();
         let gains = (self.last_gain, target);
         if self.current.is_some() || self.fading.is_some() {
             for (index, out) in outputs.enumerate() {
                 if let Some(playing) = &self.fading {
-                    playing.mix(index, out, frames, gains);
+                    playing.mix(index, out, frames, gains, transport);
                 }
                 if let Some(playing) = &self.current {
-                    playing.mix(index, out, frames, gains);
+                    playing.mix(index, out, frames, gains, transport);
                 }
             }
         }
         self.last_gain = target;
         // Dropping what finished only lowers its reference count: the
         // collector holds it and frees it on the drop thread.
-        if self.fading.as_mut().is_some_and(|p| p.advance(frames)) {
+        if self
+            .fading
+            .as_mut()
+            .is_some_and(|p| p.advance(frames, transport))
+        {
             self.fading = None;
         }
-        if self.current.as_mut().is_some_and(|p| p.advance(frames)) {
+        if self
+            .current
+            .as_mut()
+            .is_some_and(|p| p.advance(frames, transport))
+        {
             self.current = None;
         }
         self.report();
@@ -400,14 +824,22 @@ impl PreviewVoice {
 
     /// Takes queued plays, keeping the newest, and starts or stops what the
     /// newest generation asks for.
-    fn take_messages(&mut self) {
-        let mut newest: Option<Message> = None;
+    fn take_messages(&mut self, transport: Option<PreviewTransport<'_>>) {
+        let mut newest_play: Option<Message> = None;
+        let mut newest_scrub: Option<f64> = None;
         while let Ok(message) = self.consumer.pop() {
-            if newest
-                .as_ref()
-                .is_none_or(|n| message.generation > n.generation)
-            {
-                newest = Some(message);
+            match message.kind {
+                MessageKind::Play(_) => {
+                    if newest_play
+                        .as_ref()
+                        .is_none_or(|n| message.generation > n.generation)
+                    {
+                        newest_play = Some(message);
+                    }
+                }
+                MessageKind::Scrub(beat) => {
+                    newest_scrub = Some(beat);
+                }
             }
         }
         // Loaded after the queue: a play is queued after its generation is
@@ -424,27 +856,27 @@ impl PreviewVoice {
             // one goes straight away.
             self.fading = Some(old);
         }
-        if let Some(message) = newest.filter(|m| m.generation == wanted) {
+        if let Some(message) = newest_play.filter(|m| m.generation == wanted) {
+            let MessageKind::Play(data) = message.kind else {
+                unreachable!()
+            };
             self.shared
                 .started
                 .store(message.generation, Ordering::Release);
-            self.current = Some(Playing {
-                generation: message.generation,
-                data: message.data,
-                position: 0,
-                fade: None,
-            });
+            self.current = Some(Playing::new(message.generation, data, transport));
+        }
+        if let Some(scrub_beat) = newest_scrub
+            && let Some(playing) = &mut self.current
+        {
+            playing.scrub(scrub_beat, transport);
         }
     }
 
     fn report(&self) {
-        let (generation, position, length) = self.current.as_ref().map_or((0, 0, 0), |p| {
-            (
-                p.generation,
-                p.position as u64,
-                p.samples().map_or(0, |s| s.frames() as u64),
-            )
-        });
+        let (generation, position, length) = self
+            .current
+            .as_ref()
+            .map_or((0, 0, 0), |p| (p.generation, p.position(), p.length()));
         self.shared.position.store(position, Ordering::Relaxed);
         self.shared.length.store(length, Ordering::Relaxed);
         self.shared.playing.store(generation, Ordering::Release);
@@ -586,5 +1018,181 @@ mod tests {
             control.play(Box::new(PreviewBuffer::new(vec![vec![]]).unwrap())),
             Err(PreviewError::Empty)
         );
+    }
+
+    fn warped_fixture(frames: usize, bpm: f64) -> Box<WarpedPreview> {
+        let channels = vec![vec![0.5f32; frames]];
+        let samples = Box::new(PreviewBuffer::new(channels).unwrap());
+        let beats = (frames as f64 / 48_000.0 * bpm * (705_600.0 / 60.0)).round();
+        let map = WarpMap::new(
+            vec![
+                bl_stretch::Marker { time: 0.0, beat: 0 },
+                bl_stretch::Marker {
+                    time: frames as f64 / 48_000.0,
+                    beat: beats as i64,
+                },
+            ],
+            bpm,
+        )
+        .unwrap();
+        Box::new(WarpedPreview {
+            samples,
+            map,
+            start: 0.0,
+            end: beats,
+            loop_start: 0.0,
+            loop_end: beats,
+            sample_rate: 48_000.0,
+            tempo: bpm,
+        })
+    }
+
+    // Spec: browser R20.
+    #[test]
+    fn a_warped_preview_starts_on_the_next_bar_and_keeps_to_the_beat() {
+        let collector = Collector::new();
+        let shared = Arc::new(PreviewShared::default());
+        let (mut control, mut voice) = preview_channel(collector.handle(), shared);
+        let tempo_map = TempoMap::constant(bl_core::time::Bpm::new(120.0).unwrap());
+        let time_signatures = TimeSignatureMap::constant(bl_core::time::TimeSignature::FOUR_FOUR);
+        let sample_rate = SampleRate::new(48_000).unwrap();
+        let launch = LaunchSettings::default();
+
+        let warped = warped_fixture(192_000, 120.0);
+        control.play_warped(warped).unwrap();
+
+        // 1 bar at 120 BPM, 48 kHz is 96,000 frames.
+        // If song is currently at frame 10,000, it should wait until frame 96,000.
+        let mut out = [vec![0.0f32; 128]];
+        let transport_wait = PreviewTransport {
+            playing: true,
+            song_position: Frames(10_000),
+            tempo_map: &tempo_map,
+            time_signatures: &time_signatures,
+            loop_frames: None,
+            sample_rate,
+            launch,
+        };
+        voice.render_with_transport(
+            128,
+            out.iter_mut().map(Vec::as_mut_slice),
+            Some(transport_wait),
+        );
+        assert!(out[0].iter().all(|s| *s == 0.0), "silent before next bar");
+
+        // Now render at the bar line (frame 96,000).
+        let transport_start = PreviewTransport {
+            playing: true,
+            song_position: Frames(96_000),
+            tempo_map: &tempo_map,
+            time_signatures: &time_signatures,
+            loop_frames: None,
+            sample_rate,
+            launch,
+        };
+        voice.render_with_transport(
+            128,
+            out.iter_mut().map(Vec::as_mut_slice),
+            Some(transport_start),
+        );
+        assert!(out[0].iter().any(|s| *s > 0.0), "starts on bar line");
+        assert_eq!(control.status().position, 128);
+
+        // Scrubbing with quantisation moves on next quantisation step.
+        control.scrub(705_600.0).unwrap();
+        let transport_mid = PreviewTransport {
+            playing: true,
+            song_position: Frames(96_128),
+            tempo_map: &tempo_map,
+            time_signatures: &time_signatures,
+            loop_frames: None,
+            sample_rate,
+            launch,
+        };
+        voice.render_with_transport(
+            128,
+            out.iter_mut().map(Vec::as_mut_slice),
+            Some(transport_mid),
+        );
+        // Still near the start before quantisation step.
+        assert!(control.status().position < 10_000);
+
+        // On the next bar line (frame 192,000), the scrub takes effect.
+        let transport_quant = PreviewTransport {
+            playing: true,
+            song_position: Frames(192_000),
+            tempo_map: &tempo_map,
+            time_signatures: &time_signatures,
+            loop_frames: None,
+            sample_rate,
+            launch,
+        };
+        voice.render_with_transport(
+            128,
+            out.iter_mut().map(Vec::as_mut_slice),
+            Some(transport_quant),
+        );
+        // Position jumped forward to 1 beat (24,000 frames) plus block offset!
+        assert!(control.status().position >= 24_000);
+    }
+
+    // Spec: browser R23.
+    #[test]
+    fn a_warped_preview_plays_loops_and_stops_without_the_heap() {
+        let mut collector = Collector::new();
+        let shared = Arc::new(PreviewShared::default());
+        let (mut control, mut voice) = preview_channel(collector.handle(), shared);
+        let tempo_map = TempoMap::constant(bl_core::time::Bpm::new(120.0).unwrap());
+        let time_signatures = TimeSignatureMap::constant(bl_core::time::TimeSignature::FOUR_FOUR);
+        let sample_rate = SampleRate::new(48_000).unwrap();
+        let launch = LaunchSettings::default();
+
+        let warped = warped_fixture(48_000, 120.0);
+        control.play_warped(warped).unwrap();
+
+        let mut out = vec![vec![0.0f32; 128]; 2];
+        let transport = PreviewTransport {
+            playing: false,
+            song_position: Frames(0),
+            tempo_map: &tempo_map,
+            time_signatures: &time_signatures,
+            loop_frames: None,
+            sample_rate,
+            launch,
+        };
+
+        // Render, loop, scrub, stop under the allocation trap.
+        bl_rt::rt_test!({
+            for _ in 0..10 {
+                voice.render_with_transport(
+                    128,
+                    out.iter_mut().map(Vec::as_mut_slice),
+                    Some(transport),
+                );
+            }
+        });
+        assert!(out[0].iter().any(|s| *s != 0.0));
+
+        control.scrub(1000.0).unwrap();
+        bl_rt::rt_test!({
+            voice.render_with_transport(
+                128,
+                out.iter_mut().map(Vec::as_mut_slice),
+                Some(transport),
+            );
+        });
+
+        control.stop();
+        bl_rt::rt_test!({
+            for _ in 0..4 {
+                voice.render_with_transport(
+                    128,
+                    out.iter_mut().map(Vec::as_mut_slice),
+                    Some(transport),
+                );
+            }
+        });
+        assert!(!voice.is_active());
+        collector.collect();
     }
 }

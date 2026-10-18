@@ -1,8 +1,8 @@
 # The browser: places, search, preview, and dragging files to the Arrangement
 
-- **Status:** partial (R1 to R17 each have a passing test; R18 to R23 are WP-4.18's)
+- **Status:** partial (R1 to R23 each have a passing test)
 - **Work packages:** WP-1.10 (R1 to R17); WP-4.18 (tempo-synced preview and the Raw switch, R18 to R23). Collections, tags, the Filter View, extra columns, and the browser's history are M6; hot-swapping is M5; the Cue output (headphones) is M3, and previews don't use it yet (WP-3.18 built Cue mode, [mixer](mixer.md) R24 to R27); streaming long previews from disk builds on WP-1.3's streaming later; the Main track's Preview/Cue Volume knob is a set setting since WP-3.18 ([mixer](mixer.md) R27), and the preview keeps its own volume until previews take it
-- **Parity-matrix row:** Browser: places, search, preview; Solo and cue modes, cue output, preview volume (the preview part)
+- **Parity-matrix row:** Browser: places, search, preview; Browser: preview in sync with tempo, hot-swap (the tempo preview part); Solo and cue modes, cue output, preview volume (the preview part)
 - **Checked against:** Live 12.4.3, through the UI parity reference recorded on 10 October 2026, and the Live 12 reference manual as published on 11 October 2026
 
 ## The behaviour

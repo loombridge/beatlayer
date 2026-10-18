@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-485 commands in 37 areas.
+487 commands in 37 areas.
 
 ## Permission classes
 
@@ -111,9 +111,11 @@ Each command has:
 | [`browser.open_place`](#browseropen_place) | Open Browser Label | `external` |  |  |
 | [`browser.preview`](#browserpreview) | Preview | `external` |  |  |
 | [`browser.remove_folder`](#browserremove_folder) | Remove from Sidebar | `edit` |  |  |
+| [`browser.scrub_preview`](#browserscrub_preview) | Scrub Preview | `external` |  |  |
 | [`browser.search`](#browsersearch) | Browser Search | `external` |  |  |
 | [`browser.select`](#browserselect) | Select in Browser | `external` |  |  |
 | [`browser.set_preview`](#browserset_preview) | Browser File Preview | `edit` |  |  |
+| [`browser.set_raw`](#browserset_raw) | Raw Preview | `edit` |  |  |
 | [`browser.show_file`](#browsershow_file) | Show in Browser | `external` |  |  |
 | [`browser.state`](#browserstate) | Browser State | `external` |  |  |
 | [`browser.stop_preview`](#browserstop_preview) | Stop Preview | `read` |  |  |
@@ -1959,6 +1961,23 @@ Arguments:
 
 Result: [`BrowserState`](#browserstate).
 
+#### `browser.scrub_preview`
+
+**Scrub Preview**. Permission: `external`. Contexts: `browser`.
+
+Moves a playing warped preview to `position` (in seconds) or `fraction` (0 to 1). While the transport runs it moves on the next step of the global launch quantisation; while stopped it moves at once. With Raw on or on an unwarped preview, does nothing.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `fraction` | number or null | no | Where in the preview to scrub to, as a fraction from 0 (the start) to 1 (the end). Give this or `position`. |
+| `position` | number or null | no | Where in the preview to scrub to, in seconds from its start. Give this or `fraction`. |
+
+Result: [`PreviewState`](#previewstate).
+
 #### `browser.search`
 
 **Browser Search**. Permission: `external`. Contexts: `global`, `browser`, `browser-search`.
@@ -2007,6 +2026,22 @@ Arguments:
 |---|---|---|---|
 | `on` | boolean or null | no | The Preview switch. Left out with `volume` left out too, it toggles. |
 | `volume` | number or null | no | The preview volume as a linear gain, from 0 (silence) to 2 (about +6 dB); values outside are brought within it. |
+
+Result: [`PreviewState`](#previewstate).
+
+#### `browser.set_raw`
+
+**Raw Preview**. Permission: `edit`. Contexts: `global`, `browser`.
+
+Sets the browser's Raw switch (`raw`): with Raw on, previews play once from the start at the file's original tempo; with Raw off, audio files preview at the set's tempo and loop. With no arguments it toggles the switch. Kept for the next start.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `raw` | boolean or null | no | The Raw switch. Left out, it toggles. |
 
 Result: [`PreviewState`](#previewstate).
 
@@ -9374,9 +9409,11 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`browser.open_place`](#browseropen_place) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.preview`](#browserpreview) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.remove_folder`](#browserremove_folder) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
+| [`browser.scrub_preview`](#browserscrub_preview) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.search`](#browsersearch) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.select`](#browserselect) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.set_preview`](#browserset_preview) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
+| [`browser.set_raw`](#browserset_raw) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.show_file`](#browsershow_file) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`browser.state`](#browserstate) | a query of its own: it reads the Browser, and is `external` for the files it lists |
 | [`chain.save_preset`](#chainsave_preset) | writes a file outside the set; the set doesn't change |
@@ -21553,6 +21590,7 @@ The preview: the switch, the volume, and what plays.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `on` | boolean | yes | Whether the Preview switch is on: selecting an audio file previews it. |
+| `raw` | boolean | yes | Whether the Raw switch is on: previews play once at their original speed. |
 | `volume` | number | yes | The preview volume as a linear gain: 0 is silence, 1 unity (0 dB), 2 about +6 dB. |
 | `position_seconds` | number | yes | How far it has played, in seconds. |
 | `length_seconds` | number | yes | How long it is, in seconds. |
@@ -21593,6 +21631,10 @@ The preview: the switch, the volume, and what plays.
       "format": "double",
       "type": "number"
     },
+    "raw": {
+      "description": "Whether the Raw switch is on: previews play once at their original speed.",
+      "type": "boolean"
+    },
     "volume": {
       "description": "The preview volume as a linear gain: 0 is silence, 1 unity (0 dB), 2 about +6 dB.",
       "format": "double",
@@ -21601,6 +21643,7 @@ The preview: the switch, the volume, and what plays.
   },
   "required": [
     "on",
+    "raw",
     "volume",
     "position_seconds",
     "length_seconds"

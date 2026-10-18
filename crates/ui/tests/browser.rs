@@ -15,7 +15,7 @@ use bl_shell::Area;
 use bl_shell::browser::Part;
 use bl_shell::browser::places::create_user_library;
 use bl_shell::browser_commands::{self as ids, Label};
-use bl_ui::browser::{add_folder_id, label_id, list_id, search_id};
+use bl_ui::browser::{add_folder_id, label_id, list_id, raw_toggle_id, search_id};
 use bl_ui::keymap::{Keymap, Mods, Platform};
 use bl_ui::main_window::UiEvent;
 use common::{Harness, Window, command};
@@ -529,6 +529,29 @@ fn the_preview_strip_follows_the_preview() {
     h.click(toggle.center());
     assert!(!h.shell.browser_view().preview_on());
     assert_eq!(h.shell.browser_preview().playing, None);
+}
+
+// Spec: browser R18.
+#[test]
+fn the_raw_switch_sits_in_the_preview_strip() {
+    let scratch = Scratch::new("raw-strip");
+    let (mut h, _) = harness(&scratch);
+    let output = h.settle();
+    let nodes = Harness::nodes(&output);
+    let raw = nodes
+        .iter()
+        .find(|n| n.role == Role::CheckBox && n.label == "Raw")
+        .expect("the Raw switch");
+    assert_eq!(raw.selected, Some(false));
+    let raw_bounds = raw.bounds.expect("Raw bounds");
+    // Sits at the right end of the preview strip (y 748, right around x 307).
+    assert!((raw_bounds.y0 - 748.0).abs() < 1.0);
+    assert!((raw_bounds.x1 - 307.0).abs() < 1.0);
+
+    // Clicking it toggles raw on.
+    let toggle = h.ctx.read_response(raw_toggle_id()).unwrap().rect;
+    h.click(toggle.center());
+    assert!(h.shell.browser_preview().raw);
 }
 
 /// Where a drop in the lanes lands at the default zoom: 30 points a bar

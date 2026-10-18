@@ -42,7 +42,8 @@ use bl_audio_io::{
 };
 use bl_core::time::{SampleRate, Ticks};
 use bl_engine::preview::{
-    PreviewControl, PreviewSamples, PreviewShared, PreviewStatus, PreviewVoice, preview_channel,
+    PreviewControl, PreviewSamples, PreviewShared, PreviewStatus, PreviewTransport, PreviewVoice,
+    WarpedPreview, preview_channel,
 };
 use bl_engine::{
     Collector, DROP_PERIOD, DropThread, Engine, EngineConfig, MediaLibrary, MediaStreams, Pool,
@@ -287,7 +288,22 @@ impl AudioCallback for EngineCallback {
             }
         }
         if let Some(preview) = &mut self.preview {
-            preview.render(ctx.frames, output.iter_mut());
+            let transport = self.processor.as_ref().map(|p| PreviewTransport {
+                playing: p.playing(),
+                song_position: p.position(),
+                tempo_map: p.tempo_map(),
+                time_signatures: p.time_signatures(),
+                loop_frames: p.loop_region().map(|r| {
+                    (
+                        p.tempo_map()
+                            .ticks_to_frames(r.start, p.config().sample_rate),
+                        p.tempo_map().ticks_to_frames(r.end, p.config().sample_rate),
+                    )
+                }),
+                sample_rate: p.config().sample_rate,
+                launch: p.launch(),
+            });
+            preview.render_with_transport(ctx.frames, output.iter_mut(), transport);
         }
         let busy = u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX);
         let audio = ctx.frames as u64 * 1_000_000_000 / u64::from(ctx.sample_rate.max(1));
@@ -1357,6 +1373,24 @@ impl AudioHost {
             .as_mut()
             .ok_or("the audio device isn't running")?;
         preview.play(samples).map_err(|e| e.to_string())
+    }
+
+    /// Plays a warped browser preview through the open stream (WP-4.18; spec: browser R19).
+    pub fn play_warped_preview(&mut self, warped: Box<WarpedPreview>) -> Result<u64, String> {
+        let preview = self
+            .preview
+            .as_mut()
+            .ok_or("the audio device isn't running")?;
+        preview.play_warped(warped).map_err(|e| e.to_string())
+    }
+
+    /// Scrubs the browser's playing warped preview to `beat` in ticks (WP-4.18; spec: browser R22).
+    pub fn scrub_preview(&mut self, beat: f64) -> Result<(), String> {
+        let preview = self
+            .preview
+            .as_mut()
+            .ok_or("the audio device isn't running")?;
+        preview.scrub(beat).map_err(|e| e.to_string())
     }
 
     /// Stops the browser's preview, fading it out.

@@ -186,7 +186,7 @@ pub struct RecordingReport {
     pub clips_made: bool,
     /// The audio files it wrote, one per armed audio track that was played.
     pub files: Vec<RecordedFileReport>,
-    /// The MIDI tracks that received notes.
+    /// The MIDI tracks that received notes or controllers.
     pub midi_tracks: Vec<TrackId>,
     /// Frames and MIDI messages dropped: the recording ended early.
     pub dropped_frames: u64,

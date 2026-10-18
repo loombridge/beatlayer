@@ -84,6 +84,7 @@ use bl_shell_spec::transport::{RecordedFileReport, RecordingReport, RunningRecor
 mod capture;
 mod multisampler;
 mod processed_files;
+mod sample_edits;
 mod session_recording;
 mod warping;
 
@@ -390,6 +391,9 @@ pub struct Shell {
     /// Processed files being written, with the edits that land when each is
     /// whole (WP-4.20).
     processed: Vec<processed_files::Pending>,
+    /// The sample being auditioned from a click in a display (WP-5.15,
+    /// R54): its device and layer, while the button is down. Not saved.
+    auditioning: Option<(bl_model::DeviceId, Option<bl_model::LayerId>)>,
     /// How files are analysed (WP-4.3): in memory only until the app says
     /// otherwise.
     analysis_options: bl_analysis::cache::AnalysisOptions,
@@ -690,6 +694,7 @@ impl Shell {
             browser_view,
             media,
             processed: Vec::new(),
+            auditioning: None,
             analysis_options: bl_analysis::cache::AnalysisOptions::memory_only(),
             analysis: None,
             analysed: std::collections::HashSet::new(),

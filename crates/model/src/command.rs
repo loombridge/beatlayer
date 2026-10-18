@@ -27,6 +27,7 @@ use crate::layers::{
 };
 use crate::metronome::{CountIn, MetronomeRhythm, MetronomeSound};
 use crate::rack::{CHAIN_COLOURS, Chain, RackKind};
+use crate::sample_edits::{SampleEdit, SampleRange};
 use crate::scene::{SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
 use crate::shared::Shared;
 use crate::track::{
@@ -1294,6 +1295,47 @@ pub enum Command {
         /// Its channels.
         channels: u8,
     },
+    /// Adds an edit to the end of a sample's edit list (WP-5.15, R55): a
+    /// layer's, or with no `layer` the sample in slot 0 of a device such as
+    /// Snapshot. A layer's length and markers follow the audio (R56). The
+    /// selection must be a span of the sample as the earlier edits left it;
+    /// a layer's is checked here, a device's by `device.edit_sample`, which
+    /// knows the sample.
+    AddSampleEdit {
+        /// The device.
+        device: DeviceId,
+        /// The layer, or `null` for the device's own sample.
+        layer: Option<LayerId>,
+        /// The edit.
+        edit: SampleEdit,
+    },
+    /// Clears a sample's edit list (R58). The sample is `length` frames long
+    /// again, which a layer's markers keep their share of; a device's own
+    /// sample ignores `length`.
+    ClearSampleEdits {
+        /// The device.
+        device: DeviceId,
+        /// The layer, or `null` for the device's own sample.
+        layer: Option<LayerId>,
+        /// The unedited sample's length in frames at its own rate.
+        length: u64,
+    },
+    /// Replaces a layer's sample with a processed copy of its edited sample
+    /// (R59), which holds the edits already: the list empties. `crop` is the
+    /// span of the edited sample the copy keeps, which moves the markers as
+    /// a Trim does; a copy of the whole sample leaves them in place.
+    SetProcessedLayerSample {
+        /// The device.
+        device: DeviceId,
+        /// The layer.
+        layer: LayerId,
+        /// The copy, by content hash.
+        media: ContentHash,
+        /// Its length in frames at its own rate.
+        length: u64,
+        /// The edited sample's span the copy keeps, or `null` for all of it.
+        crop: Option<SampleRange>,
+    },
     /// Spreads layers' ranges (R12): equally over the range of the zone
     /// editor in view (`kind`), or key zones around the layers' root keys,
     /// without fades. With one layer or none listed, every layer.
@@ -1665,6 +1707,10 @@ impl Command {
             Self::SetLayerZones { .. } => "Change Zones",
             Self::UpdateLayers { .. } => "Change Sample Settings",
             Self::SetLayerMedia { .. } => "Replace Sample",
+            Self::AddSampleEdit { edit, .. } => edit.kind.name(),
+            Self::ClearSampleEdits { .. } => "Revert Edits",
+            Self::SetProcessedLayerSample { crop: Some(_), .. } => "Crop",
+            Self::SetProcessedLayerSample { crop: None, .. } => "Reverse",
             Self::DistributeLayers {
                 how: Distribution::Equally,
                 ..
@@ -2521,6 +2567,42 @@ impl Document {
             } => self.edit_layers(*device, |l| {
                 l.replace_media(*layer, *media, *length, *sample_rate, *channels)
             }),
+            Command::AddSampleEdit {
+                device,
+                layer: Some(layer),
+                edit,
+            } => self.edit_layers(*device, |l| l.add_edit(*layer, *edit)),
+            Command::AddSampleEdit {
+                device,
+                layer: None,
+                edit,
+            } => {
+                // Whether the selection fits the sample is for the caller
+                // that knows it; this checks the edit itself.
+                edit.length_after(u64::MAX)?;
+                self.device_mut(*device)?.sample_edits.push(*edit);
+                Ok(())
+            }
+            Command::ClearSampleEdits {
+                device,
+                layer: Some(layer),
+                length,
+            } => self.edit_layers(*device, |l| l.clear_edits(*layer, *length)),
+            Command::ClearSampleEdits {
+                device,
+                layer: None,
+                ..
+            } => {
+                self.device_mut(*device)?.sample_edits.clear();
+                Ok(())
+            }
+            Command::SetProcessedLayerSample {
+                device,
+                layer,
+                media,
+                length,
+                crop,
+            } => self.edit_layers(*device, |l| l.set_processed(*layer, *media, *length, *crop)),
             Command::DistributeLayers {
                 device,
                 layers,

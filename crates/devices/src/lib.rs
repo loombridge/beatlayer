@@ -105,7 +105,7 @@ pub use overdrive::{OVERDRIVE, overdrive_type};
 pub use polysynth::{POLYSYNTH, PolySynth, polysynth_type};
 pub use remap::{REMAP, remap_type};
 pub use reverb::{REVERB, reverb_type};
-pub use sampler::{Sampler, sampler_type};
+pub use sampler::{Sampler, sampler_type, slice_boundaries};
 pub use saturator::{SATURATOR, saturator_type};
 pub use shifter::{SHIFTER, shifter_type};
 pub use stack::{STACK, stack_type};

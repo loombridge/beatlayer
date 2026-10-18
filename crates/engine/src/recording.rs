@@ -10,9 +10,9 @@
 //! take is over.
 //!
 //! An armed MIDI track records the same way, without a file: the audio
-//! thread copies the note messages its input received into a ring of
-//! [`RecordedMidi`] stamped with the song frame they landed on, and the
-//! shell makes the clip from them when the take ends (WP-2.14).
+//! thread copies the note and controller messages its input received into a
+//! ring of [`RecordedMidi`] stamped with the song frame they landed on, and
+//! the shell makes the clip from them when the take ends (WP-2.14, WP-2.29b).
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
@@ -22,6 +22,7 @@ use bl_core::time::Frames;
 use bl_model::{Channel, SceneId, TrackId};
 use rtrb::Producer;
 
+use crate::controller_take::is_controller;
 use crate::midi::MidiEvent;
 use crate::program::EngineProgram;
 use crate::session::SessionEvent;
@@ -41,17 +42,18 @@ pub struct RecordTrack {
     pub dropped: Arc<AtomicU64>,
 }
 
-/// A note message an armed MIDI track received, and the song frame it
-/// landed on.
+/// A note or controller message an armed MIDI track received, and the song
+/// frame it landed on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RecordedMidi {
     /// The song frame, to the sample the input placed the message on.
     pub frame: Frames,
-    /// A note-on or a note-off.
+    /// A note-on or a note-off, or a controller message
+    /// ([`is_recorded`]).
     pub message: MidiMessage,
 }
 
-/// One recorded MIDI track: the ring its note messages go to.
+/// One recorded MIDI track: the ring its messages go to.
 pub struct MidiRecordTrack {
     /// The track, for the report.
     pub track: TrackId,
@@ -132,7 +134,7 @@ impl RecordingPlan {
     /// tracks, `offset..offset + frames` of the device's input (`planar`
     /// holds `device` channels `stride` frames apart; a track whose Audio
     /// From names a channel the device doesn't have records silence, as it
-    /// hears), and for MIDI tracks, the note messages their input received
+    /// hears), and for MIDI tracks, the note and controller messages their input received
     /// in that part, stamped `position` for the part's first frame. The
     /// audio tracks leave out the part's first `skip` frames, which the
     /// recording's delay moves it past (WP-2.13).
@@ -156,7 +158,7 @@ impl RecordingPlan {
         );
         let in_part = |event: &&MidiEvent| {
             let at = event.offset as usize;
-            at >= offset && at < offset + frames && is_note(&event.message)
+            at >= offset && at < offset + frames && is_recorded(&event.message)
         };
         let mut fits = true;
         for track in &mut self.tracks {
@@ -219,9 +221,10 @@ impl RecordingPlan {
     }
 }
 
-/// Whether a message is one a recorded clip keeps: a note-on or a note-off.
-fn is_note(message: &MidiMessage) -> bool {
-    message.is_note_on() || message.is_note_off()
+/// Whether a message is one a recorded clip keeps: a note-on or a note-off,
+/// or a controller (the MIDI controller data spec, R10).
+pub(crate) fn is_recorded(message: &MidiMessage) -> bool {
+    message.is_note_on() || message.is_note_off() || is_controller(message)
 }
 
 impl RecordTrack {

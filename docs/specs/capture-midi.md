@@ -7,7 +7,7 @@
 
 ## The behaviour
 
-While Beatlayer runs, it remembers the notes played on every MIDI track that monitors its input, whether or not the transport runs and whether or not anything records. Capture MIDI (Create ▸ Capture MIDI, and the Control Bar's button) turns what was remembered into a MIDI clip on each track that was played, with the notes' velocities and timing. It needs no Record press first. It is disabled until a note has been played, and capturing empties the memory.
+While Beatlayer runs, it remembers the notes and controllers played on every MIDI track that monitors its input, whether or not the transport runs and whether or not anything records. Capture MIDI (Create ▸ Capture MIDI, and the Control Bar's button) turns what was remembered into a MIDI clip on each track that was played, with the notes' velocities and timing. It needs no Record press first. It is disabled until a note has been played, and capturing empties the memory.
 
 A track with a clip playing, with the transport running, takes the notes into that clip. Any other track gets a new clip in a Session slot, which then launches. With the transport stopped, the first note lands on 1.1.1 and the song's tempo may change to the tempo that was played; with it running, the tempo stays.
 
@@ -27,7 +27,7 @@ This spec covers what is remembered, where the clip goes, how long it is and wha
 
 ## Rules
 
-- **R1.** The engine logs each note-on and note-off a MIDI track's input receives while the track monitors (its Monitor switch is In, or Auto and it is armed), on the sample it landed on, with the transport stopped or running; other messages are not logged. The shell keeps at most 4,096 messages per track, the oldest going first, until a capture or a recording uses them: a running recording discards what is played during it. Capture MIDI is enabled when the buffer holds a note-on, and refused otherwise, with the Control Bar's button and Create ▸ Capture MIDI disabled. A track's note-off alone enables nothing. (S1, S2, S4, S7)
+- **R1.** The engine logs each note-on and note-off a MIDI track's input receives while the track monitors (its Monitor switch is In, or Auto and it is armed), and its controller messages ([midi-controller-data](midi-controller-data.md) R10), on the sample they landed on, with the transport stopped or running; other messages are not logged. The shell keeps at most 4,096 messages per track, the oldest controller message going first and, with none left, the oldest note, until a capture or a recording uses them: a running recording discards what is played during it. Capture MIDI is enabled when the buffer holds a note-on (controllers alone enable nothing), and refused otherwise, with the Control Bar's button and Create ▸ Capture MIDI disabled. A track's note-off alone enables nothing. (S1, S2, S4, S7)
 - **R2.** Each note-on starts a note on its key and the next note-off on that key (or a note-on on it again) ends it, so a note has its velocity, its release velocity (64 when the note-off had none) and its length. A note still held ends with the track's last message. A note-off with nothing held is ignored. The clip has no channel. (S1)
 - **R3.** With the transport stopped, the first note-on of all the captured tracks is at 1.1.1, and a note's position is its time from there at the tempo of R6. A new clip's loop is on: it ends on the bar line at or after the last note-on, and is as many whole bars as cover the span from the first note-on of the last phrase to its last note-on, at least one. A note-on exactly on the loop's end stays in the clip after it. The clip's length is the loop's end, its Start marker is the loop's start, and notes before the loop stay in the clip. (S1, S4)
 - **R4.** Each track that was played gets one clip. A MIDI track with a clip playing while the transport runs takes the notes into that clip (R5). Any other track gets a new clip in the slot of the selected scene if it is empty, else in the next empty slot below on that track, else in a scene added at the end, which later tracks share. The new clip launches as `session.launch` does, and the slot is selected. (S2, S3)
@@ -36,7 +36,7 @@ This spec covers what is remembered, where the clip goes, how long it is and wha
 - **R7.** With the transport running, the tempo stays. A new clip is placed on the song's bar grid: its start is the bar line at or before the first note, and a note stands at its song position, to the sample through the tempo map. Notes played before the transport started are placed by their distance in time from the first note that has a song position. (S6)
 - **R8.** A phrase is the notes after the last silence of two bars between note-ons, at the song's tempo when the capture began. The loop covers the last phrase, and earlier notes stay before it. (S4)
 - **R9.** `midi.capture` (permission class `edit`) is Create ▸ Capture MIDI and the Control Bar's Capture MIDI button. It is one undo step named `Capture MIDI` that holds the tempo change, any scene it added, and the clips. It returns the clips made or joined and the new tempo, and `transport.state` reads `capture_midi_ready` back. (S2)
-- **R10.** Control changes, pitch bend and pressure are not captured: only notes are logged, and they do not enable the command. (S7)
+- **R10.** Control changes, pitch bend and pressure are captured as [midi-controller-data](midi-controller-data.md) R15 says: kept up to the last note-off, as envelopes and note pressure of the clip, and they do not enable the command. (S7)
 
 ## Beatlayer's own choices
 
@@ -51,7 +51,7 @@ This spec covers what is remembered, where the clip goes, how long it is and wha
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | `crates/engine/tests/capture_midi.rs`, `notes_played_with_the_transport_stopped_are_logged_on_their_exact_samples`, `a_track_that_does_not_monitor_logs_nothing`, `a_full_ring_drops_notes_and_counts_them`; `crates/engine/src/capture.rs`, `the_buffer_keeps_the_latest_and_a_lone_note_off_enables_nothing`; `crates/shell/tests/capture_midi.rs`, `a_capture_makes_a_clip_in_the_selected_slot_in_one_undo_step`; `crates/ui/tests/capture_midi.rs`, `the_button_and_the_command_are_disabled_with_nothing_played` | frame by frame, unit, UI script |
+| R1 | `crates/engine/tests/capture_midi.rs`, `notes_played_with_the_transport_stopped_are_logged_on_their_exact_samples`, `a_track_that_does_not_monitor_logs_nothing`, `a_full_ring_drops_notes_and_counts_them`; `crates/engine/src/capture.rs`, `the_buffer_keeps_the_latest_and_a_lone_note_off_enables_nothing`, `a_sweep_of_a_controller_never_pushes_a_note_out_of_the_buffer`; `crates/shell/tests/capture_midi.rs`, `a_capture_makes_a_clip_in_the_selected_slot_in_one_undo_step`; `crates/ui/tests/capture_midi.rs`, `the_button_and_the_command_are_disabled_with_nothing_played` | frame by frame, unit, UI script |
 | R2 | `crates/engine/src/capture.rs`, `notes_pair_and_a_held_note_ends_with_the_last_message`; `crates/engine/tests/capture_midi.rs`, `a_captured_phrase_plays_back_on_the_samples_it_was_played_on` | unit, render |
 | R3 | `crates/engine/src/capture.rs`, `the_loop_is_the_bars_that_cover_the_first_note_on_to_the_last`, `an_earlier_phrase_stays_before_the_loop`; `crates/engine/tests/capture_midi.rs`, `a_captured_phrase_plays_back_on_the_samples_it_was_played_on` | unit, render |
 | R4 | `crates/shell/tests/capture_midi.rs`, `a_taken_slot_sends_the_clip_to_the_next_empty_one_or_a_new_scene`, `a_playing_clip_takes_the_notes_of_a_later_capture` | unit |
@@ -60,6 +60,6 @@ This spec covers what is remembered, where the clip goes, how long it is and wha
 | R7 | `crates/shell/tests/capture_midi.rs`, `a_playing_clip_takes_the_notes_of_a_later_capture` (the tempo stays) | unit |
 | R8 | `crates/engine/src/capture.rs`, `an_earlier_phrase_stays_before_the_loop` | unit |
 | R9 | `crates/shell/tests/capture_midi.rs`, `a_capture_makes_a_clip_in_the_selected_slot_in_one_undo_step`; `crates/shell-spec/src/capture_midi.rs`, `every_listed_id_is_registered_and_complete` | unit |
-| R10 | `crates/engine/tests/capture_midi.rs`, `notes_played_with_the_transport_stopped_are_logged_on_their_exact_samples` (the controller is not logged) | frame by frame |
+| R10 | `crates/engine/tests/capture_midi.rs`, `notes_played_with_the_transport_stopped_are_logged_on_their_exact_samples` (the controller is logged); `crates/shell/tests/capture_midi.rs` is unchanged; `crates/shell/tests/midi_controller_recording.rs`, `capture_midi_keeps_the_controllers_up_to_the_last_note_off` (controllers alone leave the command disabled) | frame by frame, shell |
 
 The engine tests run every block under the allocation trap, and the shell test checks that the stream's `heap_operations` stays 0.

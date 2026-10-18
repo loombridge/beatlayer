@@ -13,20 +13,28 @@ something to rely on yet, and keep your own copy of anything you care about.
 
 - Arrange audio and MIDI clips on tracks in the Arrangement View, and edit
   notes in the piano roll.
+- Launch clips and scenes in the Session View, with follow actions.
+- Warp audio clips to the set's tempo.
+- Build instrument, effect and drum racks.
 - Make sound with Beatlayer's own instruments and effects.
 - Host CLAP and VST3 plug-ins on every platform, and Audio Unit plug-ins on
   macOS.
 - Record audio and MIDI.
 - Automate parameters, and route audio through sends, returns and sidechains.
 - Export a set to WAV or MP3.
+- Separate an audio clip into drums, bass, vocals and the rest, on the CPU,
+  after a one-time download of the open-source model it uses.
 - Drive the whole app from outside through the agent API, or from the built-in
   assistant, which uses the same commands you do.
 
 ## Not there yet
 
-- Session View is only partly there.
-- There is no warping.
-- There are no racks.
+- Warping plays every clip the way Re-Pitch does: Beats, Tones, Texture,
+  Complex and Complex Pro sound the same as Re-Pitch for now, and a clip's
+  Transpose and Detune aren't there yet.
+- Racks have no macro controls yet.
+- Recording a Session into the Arrangement is only partly there.
+- Stem separation runs on the CPU only.
 - The set format may change between builds, so a set saved by one build may
   not open in the next.
 

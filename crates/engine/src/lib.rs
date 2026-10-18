@@ -86,6 +86,7 @@ mod automation;
 pub mod capture;
 pub mod clips;
 mod compiler;
+mod disjoint;
 pub mod display;
 mod engine;
 mod gc;
@@ -106,6 +107,7 @@ mod program;
 pub mod recording;
 mod registry;
 pub mod routing;
+mod sched;
 pub mod session;
 pub mod sidechain;
 mod sources;
@@ -150,6 +152,7 @@ pub use recording::{
     LaunchLog, MidiRecordTrack, RecordTrack, RecordedMidi, RecordingPlan, SessionTarget, TakeBounds,
 };
 pub use registry::{DeviceType, NodeFactory, Registry};
+pub use sched::{Pool, PoolConfig, PoolMonitor};
 pub use session::{
     SceneOverride, SessionCommand, SessionEvent, SessionPlayback, SlotState, SlotStatus,
     StoppedClip,

@@ -68,6 +68,10 @@ pub enum NodeKey {
     /// Volume, Pan, and Chain Activator, which solo mutes. Its parameters are
     /// [`mixer::track`](crate::mixer::track).
     ChainMixer(ChainId),
+    /// The filter at a rack chain's input (WP-5.3): its key, velocity and
+    /// chain select zones, which reach it as parameter changes numbered by
+    /// [`zones`](crate::zones).
+    ChainZones(ChainId),
     /// The note routing of a drum rack's chain, which passes on the notes
     /// its Receive answers at its Play note and remembers what sounds for
     /// its choke group (the drum racks spec, R2, R4). Its parameters are
@@ -102,6 +106,7 @@ impl fmt::Display for NodeKey {
             Self::Cue(track) => write!(f, "the cue switch of {track}"),
             Self::CueMixer => f.write_str("the mixer of the Cue Out"),
             Self::ChainMixer(chain) => write!(f, "the mixer of {chain}"),
+            Self::ChainZones(chain) => write!(f, "the zones of {chain}"),
             Self::ChainNotes(chain) => write!(f, "the notes of {chain}"),
             Self::ChainSend { chain, to } => write!(f, "the send from {chain} to {to}"),
             Self::ChainOutput(chain) => write!(f, "the output of {chain}"),

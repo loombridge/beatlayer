@@ -1111,6 +1111,28 @@ fn a_device(h: &mut Harness) {
         .unwrap();
 }
 
+/// As [`a_rack`], with its chain select editor shown (WP-5.3).
+fn a_rack_with_the_zone_editor(h: &mut Harness) {
+    a_rack(h);
+    let track = h.shell.editor().document().top_level().nth(2).unwrap();
+    let rack = h
+        .shell
+        .editor()
+        .document()
+        .track(track)
+        .unwrap()
+        .devices()
+        .last()
+        .unwrap()
+        .id;
+    h.shell
+        .run(
+            "rack.set_zone_editor",
+            json!({ "rack": rack, "editor": "select" }),
+        )
+        .unwrap();
+}
+
 /// The test plug-in on audio track 3, the selected track, once it offers
 /// its editor, with no device selected (WP-2.10).
 fn a_plugin(h: &mut Harness) {
@@ -2448,6 +2470,23 @@ fn paths() -> BTreeMap<&'static str, Path> {
             Exception(Equivalent(
                 "the chain's Solo button, or S in the chain list (`chain.solo`)",
             )),
+        ),
+        (
+            "chain.set_zone",
+            main(
+                a_rack_with_the_zone_editor,
+                device_view,
+                "Pad 0 to 0, body",
+                Key::ArrowRight,
+            ),
+        ),
+        (
+            "rack.set_zone_editor",
+            main(a_rack, device_view, "Chain", Key::Enter),
+        ),
+        (
+            "rack.set_auto_select",
+            main(a_rack, device_view, "Auto Select", Key::Enter),
         ),
         (
             "chain.select",

@@ -595,7 +595,8 @@ fn grouping_and_chain_edits_make_only_new_nodes() {
     assert_eq!(made(&rig), 4);
 
     // Group wraps two devices in a rack: the rack's one chain is the only
-    // node new to the set.
+    // thing new to the set, with its mixer, its zones and the rack's chain
+    // selector (WP-5.3): no device's node.
     let rack_id: DeviceId = rig.editor.new_id();
     let chain: ChainId = rig.editor.new_id();
     let grouped =
@@ -607,7 +608,11 @@ fn grouping_and_chain_edits_make_only_new_nodes() {
         })
         .program
     );
-    assert_eq!(new_nodes(&mut rig), 1, "only the chain's mixer is new");
+    assert_eq!(
+        new_nodes(&mut rig),
+        3,
+        "only the chain's mixer and zones and the rack's selector are new"
+    );
     assert_eq!(made(&rig), 4, "no device node was made anew");
     assert_eq!(settled(&mut rig, 64), 0.5);
 
@@ -619,8 +624,9 @@ fn grouping_and_chain_edits_make_only_new_nodes() {
     assert_eq!(new_nodes(&mut rig), 0);
     assert_eq!(made(&rig), 4);
 
-    // A rack with a chain makes the chain's mixer; a chain added with a
-    // device makes its mixer and the device.
+    // A rack with a chain makes the chain's mixer, its zones and the rack's
+    // selector; a chain added with a device makes its mixer, its zones and
+    // the device.
     let rack_id: DeviceId = rig.editor.new_id();
     let first: ChainId = rig.editor.new_id();
     rig.apply(Command::InsertDevice {
@@ -628,7 +634,7 @@ fn grouping_and_chain_edits_make_only_new_nodes() {
         index: 4,
         device: Device::rack(rack_id, RackKind::AudioEffect).with_chain(Chain::new(first, "A")),
     });
-    assert_eq!(new_nodes(&mut rig), 1);
+    assert_eq!(new_nodes(&mut rig), 3);
     let second: ChainId = rig.editor.new_id();
     let tail: DeviceId = rig.editor.new_id();
     rig.apply(Command::AddChain {
@@ -642,7 +648,7 @@ fn grouping_and_chain_edits_make_only_new_nodes() {
             },
         )]),
     });
-    assert_eq!(new_nodes(&mut rig), 2);
+    assert_eq!(new_nodes(&mut rig), 3);
     assert_eq!(made(&rig), 5);
 
     // Moving a device into a rack, between racks and out again, and a chain

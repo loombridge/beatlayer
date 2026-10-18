@@ -6,7 +6,7 @@ use core::ops::Range;
 use std::panic::{self, AssertUnwindSafe};
 
 use bl_core::time::{Bpm, SampleRate, TempoMap, TimeSignature, TimeSignatureMap};
-use bl_model::{Channel, LaunchMode, ParamId, SceneId, Tap, TrackId};
+use bl_model::{ChainId, Channel, LaunchMode, ParamId, SceneId, Tap, TrackId};
 
 use crate::disjoint::Shared;
 use crate::drum::DrumNotes;
@@ -21,6 +21,7 @@ use crate::sched::{Lane, Pool, Sched, Wake};
 use crate::session::{SceneMaps, SessionPlayback};
 use crate::sidechain::SidechainKey;
 use crate::state::PlayedParam;
+use crate::zones::{ChainSelector, ZoneFilter};
 
 /// A compiled song, ready to run on the audio thread: a flat array of
 /// nodes, the tasks that run them, the buffers they work in, and the order
@@ -86,6 +87,10 @@ pub struct EngineProgram {
     /// Where a MIDI effect rack merges its chains' notes: the buffer and the
     /// next note of each chain, one cursor for every chain in the program.
     pub(crate) merge: Shared<MergeCursor>,
+    /// The selector's value on each frame of the block, for each rack:
+    /// `max_frames` values at the rack's place in `racks`, which the rack
+    /// writes and its chains read (WP-5.3).
+    pub(crate) selects: Shared<f32>,
     /// The sidechains of the devices each task runs (WP-2.19b).
     pub(crate) sidechains: Vec<DeviceSidechain>,
     /// What each sidechain sums into its buffer.
@@ -261,6 +266,11 @@ pub(crate) enum Instance {
     Route(Box<Route>),
     /// A device's sidechain settings, which make what its detector hears.
     Sidechain(Box<SidechainKey>),
+    /// A rack's chain selector (WP-5.3), which the rack runs before its
+    /// chains.
+    Selector(Box<ChainSelector>),
+    /// The filter at a rack chain's input (WP-5.3).
+    Zones(Box<ZoneFilter>),
     /// A drum chain's note routing (the drum racks spec, R2, R4).
     Drum(Box<DrumNotes>),
 }
@@ -271,7 +281,8 @@ impl Instance {
         match self {
             Self::Device(node) => Some(node.as_mut()),
             Self::Mixer(mixer) => Some(mixer.as_mut()),
-            Self::Route(_) | Self::Sidechain(_) | Self::Drum(_) => None,
+            Self::Selector(selector) => Some(selector.as_mut()),
+            Self::Route(_) | Self::Sidechain(_) | Self::Zones(_) | Self::Drum(_) => None,
         }
     }
 
@@ -281,7 +292,7 @@ impl Instance {
             Self::Device(node) => node.modulated(report),
             Self::Mixer(mixer) => Node::modulated(mixer.as_ref(), report),
             Self::Route(route) => route.modulated(report),
-            Self::Sidechain(_) | Self::Drum(_) => {}
+            Self::Sidechain(_) | Self::Selector(_) | Self::Zones(_) | Self::Drum(_) => {}
         }
     }
 
@@ -292,7 +303,8 @@ impl Instance {
             Self::Device(node) => node.receive_data(data),
             Self::Mixer(mixer) => mixer.receive_data(data),
             Self::Route(route) => route.receive_data(data),
-            Self::Sidechain(_) | Self::Drum(_) => drop(data),
+            Self::Selector(selector) => selector.receive_data(data),
+            Self::Sidechain(_) | Self::Zones(_) | Self::Drum(_) => drop(data),
         }
     }
 }
@@ -339,6 +351,9 @@ pub(crate) struct Rack {
     pub(crate) bypass: bool,
     /// The frames the rack adds, which are its slowest chain's (R16).
     pub(crate) latency: u32,
+    /// The slot of the rack's chain selector (R33); the rack's place in
+    /// `racks` is also its place in `selects`.
+    pub(crate) selector: u32,
 }
 
 impl Rack {
@@ -369,6 +384,8 @@ pub(crate) struct RackChain {
     pub(crate) steps: Span,
     /// The slot of the chain's mixer.
     pub(crate) mixer: u32,
+    /// The slot of the filter at the chain's input (R31).
+    pub(crate) zones: u32,
     /// The chain's own audio buffer in the pool (after the tasks') and its
     /// pair of note buffers (after the track's).
     pub(crate) buffer: u32,
@@ -870,6 +887,21 @@ impl EngineProgram {
                     });
                 }
             });
+        }
+    }
+
+    /// Adds to `out`, up to its capacity, the chains the last block found
+    /// processing (WP-5.3, R37), in the order of the program's racks.
+    /// Real-time safe: `out` was made with room for them.
+    pub(crate) fn processing(&self, out: &mut Vec<ChainId>) {
+        for chain in &self.rack_chains {
+            let slot = &self.slots[chain.zones as usize];
+            if let (NodeKey::ChainZones(id), Some(Instance::Zones(zones))) = (slot.key, &slot.node)
+                && zones.processing()
+                && out.len() < out.capacity()
+            {
+                out.push(id);
+            }
         }
     }
 
@@ -1722,6 +1754,25 @@ impl<'p> Turn<'p> {
         }
     }
 
+    /// The selector's values for rack `rack` (in `racks`), to write.
+    fn selects_mut(&self, rack: usize) -> &'p mut [f32] {
+        let size = self.program.max_frames;
+        // SAFETY: only the rack's owner writes them, before its chains run.
+        unsafe {
+            self.program
+                .selects
+                .elements(rack * size..(rack + 1) * size)
+        }
+    }
+
+    /// The selector's values for rack `rack`, to read.
+    fn selects(&self, rack: usize) -> &'p [f32] {
+        let size = self.program.max_frames;
+        // SAFETY: the rack's owner wrote them before its chains ran, and
+        // nothing writes them until the block is over.
+        unsafe { self.program.selects.view(rack * size..(rack + 1) * size) }
+    }
+
     /// The merge cursor of rack chain `index` (in `rack_chains`).
     fn cursor(&self, index: usize) -> &'p mut MergeCursor {
         // SAFETY: one cursor per chain, and only its rack's owner and the
@@ -1960,10 +2011,24 @@ impl EngineProgram {
         let (channels, stride, frames) = (self.channels, self.max_frames, block.frames);
         let audio = mode != RackMode::Midi;
         let notes = mode != RackMode::Audio;
-        // Every chain takes the rack's input.
+        let filter_ctrl = self.run_selector(pass, rack, buffer);
+        let selector = &turn.selects(rack)[..frames];
+        // Every chain takes the rack's input through its zones (R31 to R33).
         for i in chains.range() {
             let chain = self.rack_chains[i];
             let at = self.tasks.len() + chain.buffer as usize;
+            let block = pass.block;
+            pass.delivered += gather(
+                block.events,
+                chain.zones,
+                block.from,
+                block.until,
+                pass.scratch,
+            );
+            let Some(Instance::Zones(zones)) = turn.slot(chain.zones).node.as_mut() else {
+                continue;
+            };
+            zones.apply(pass.scratch);
             for c in 0..channels {
                 let edge = c * stride;
                 let to = &mut turn.buffer(at)[edge..edge + frames];
@@ -1972,6 +2037,9 @@ impl EngineProgram {
                 } else {
                     to.fill(0.0);
                 }
+            }
+            if mode == RackMode::Audio {
+                zones.gate(selector, turn.buffer(at), channels, stride);
             }
             if notes {
                 let to = 2 * self.tasks.len() + 2 * chain.buffer as usize;
@@ -1991,9 +2059,13 @@ impl EngineProgram {
                     }
                     _ => {
                         to.clear();
-                        for &note in from.notes() {
-                            to.push(note);
-                        }
+                        zones.filter(
+                            selector,
+                            from.notes(),
+                            to,
+                            filter_ctrl,
+                            mode == RackMode::Midi,
+                        );
                     }
                 }
             }
@@ -2084,6 +2156,40 @@ impl EngineProgram {
             self.merge_notes(&turn, chains, out);
         }
         1 - note_idx
+    }
+
+    /// Works out rack `rack`'s chain selector for every frame of the block
+    /// into `selects`, for its chains to read (R33), and returns whether the
+    /// chain select zones filter messages other than notes (R31).
+    fn run_selector(&self, pass: &mut Pass<'_>, rack: usize, buffer: usize) -> bool {
+        let turn = pass.turn;
+        let block = pass.block;
+        let (channels, stride, frames) = (self.channels, self.max_frames, block.frames);
+        let slot = self.racks[rack].selector;
+        pass.delivered += gather(block.events, slot, block.from, block.until, pass.scratch);
+        let Some(Instance::Selector(selector)) = turn.slot(slot).node.as_mut() else {
+            turn.selects_mut(rack)[..frames].fill(0.0);
+            return false;
+        };
+        selector.process(&mut Block {
+            data: turn.buffer(buffer),
+            channels,
+            frames,
+            stride,
+            events: pass.scratch.as_slice(),
+            transport: block.transport,
+            sample_rate: self.sample_rate,
+            tempo: &self.tempo,
+            sidechain: None,
+            notes: &[],
+            notes_out: None,
+            session: block.session,
+            modulation: turn.bus(frames),
+            rows: None,
+            external: None,
+        });
+        turn.selects_mut(rack)[..frames].copy_from_slice(selector.values(frames));
+        selector.filters_ctrl()
     }
 
     /// Spec: drum-racks R4. A note-on that reaches a chain in a choke group
@@ -2208,7 +2314,7 @@ impl EngineProgram {
             if let Some(kept) = to.taps[RackChain::tap_index(Tap::PreFx)] {
                 self.keep(&turn, kept, at, frames);
             }
-            self.run_chain_at(pass, task, true, j);
+            self.run_chain_at(pass, task, rack, true, j);
         }
     }
 
@@ -2220,14 +2326,22 @@ impl EngineProgram {
         self.run_chain_at(
             pass,
             task,
+            rack,
             mode != RackMode::Midi,
             chains.start as usize + i,
         );
     }
 
-    /// Runs the chain at `index` in `rack_chains`; `audio` if it carries
-    /// audio, not a MIDI effect rack's notes alone.
-    fn run_chain_at(&self, pass: &mut Pass<'_>, task: Task, audio: bool, index: usize) {
+    /// Runs the chain at `index` in `rack_chains`, of rack `rack`; `audio`
+    /// if it carries audio, not a MIDI effect rack's notes alone.
+    fn run_chain_at(
+        &self,
+        pass: &mut Pass<'_>,
+        task: Task,
+        rack: usize,
+        audio: bool,
+        index: usize,
+    ) {
         let chain = self.rack_chains[index];
         let turn = pass.turn;
         let block = pass.block;
@@ -2269,6 +2383,10 @@ impl EngineProgram {
                 mixer.flush(pass.scratch);
             }
             muted = mixer.muted();
+        }
+        if audio && let Some(Instance::Zones(zones)) = turn.slot(chain.zones).node.as_mut() {
+            let selector = &turn.selects(rack)[..frames];
+            zones.scale(selector, turn.buffer(at_buffer), channels, stride);
         }
         if audio && let Some(kept) = chain.taps[RackChain::tap_index(Tap::PostMixer)] {
             self.keep(&turn, kept, at_buffer, frames);
@@ -2332,8 +2450,30 @@ impl EngineProgram {
     fn flush_rack(&self, pass: &mut Pass<'_>, task: Task, rack: usize) {
         let turn = pass.turn;
         let block = pass.block;
+        let selector = self.racks[rack].selector;
+        pass.delivered += gather(
+            block.events,
+            selector,
+            block.from,
+            block.until,
+            pass.scratch,
+        );
+        if let Some(Instance::Selector(node)) = turn.slot(selector).node.as_mut() {
+            node.flush(pass.scratch);
+        }
         for i in self.racks[rack].all().range() {
             let chain = self.rack_chains[i];
+            pass.delivered += gather(
+                block.events,
+                chain.zones,
+                block.from,
+                block.until,
+                pass.scratch,
+            );
+            if let Some(Instance::Zones(zones)) = turn.slot(chain.zones).node.as_mut() {
+                zones.apply(pass.scratch);
+                zones.idle();
+            }
             // A rack that is off carries nothing to a route tapping its
             // chains.
             for kept in chain.taps.into_iter().flatten() {

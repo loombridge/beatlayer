@@ -413,6 +413,20 @@ fn fixture() -> Project {
     ] {
         apply(&mut editor, command);
     }
+    // The first chain's chain select zone, off a new chain's (WP-5.3).
+    apply(
+        &mut editor,
+        Command::SetChainZone {
+            chain: loud,
+            kind: bl_model::ZoneKind::Select,
+            zone: bl_model::Zone {
+                low: 2,
+                high: 20,
+                fade_low: 4,
+                fade_high: 6,
+            },
+        },
+    );
 
     // Clips: an audio clip with everything a clip saves, a MIDI clip with a
     // loop and notes, and slot clips.
@@ -822,6 +836,7 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "chains.0.mixer.volume",
                 "chains.0.mixer.pan",
                 "chains.0.mixer.solo",
+                "chains.0.zones.select",
                 "chains.1.mixer.enabled",
                 "chains.0.devices.1.chains.0.name",
             ][..],
@@ -1165,4 +1180,37 @@ fn every_query_readback_the_command_table_names_is_in_a_real_full_result() {
         "the fixture's full results lack:\n{}",
         missing.join("\n")
     );
+}
+
+// Spec: racks R36. A chain's zones, with their fades, read back through the
+// query tool: in its summary, and in the rack's chains.
+#[test]
+fn a_chains_zones_read_back() {
+    let project = fixture();
+    let mut client = open(&project, "zones");
+    let document = serde_json::to_value(&project.document).unwrap();
+    let (_, _, devices) = saved_parts(&document);
+    let rack = devices
+        .iter()
+        .find(|d| d["name"] == "Audio Effect Rack")
+        .unwrap();
+    let chain = rack["chains"][0]["id"].clone();
+    let got = query(&mut client, json!({ "id": chain }));
+    assert_eq!(
+        got["zones"]["select"],
+        json!({ "low": 2, "high": 20, "fade_low": 4, "fade_high": 6 })
+    );
+    // A chain nobody changed reports a new chain's zones, fades included.
+    let other = query(&mut client, json!({ "id": rack["chains"][1]["id"] }));
+    assert_eq!(
+        other["zones"],
+        json!({
+            "key": { "low": 0, "high": 127, "fade_low": 0, "fade_high": 0 },
+            "velocity": { "low": 1, "high": 127, "fade_low": 0, "fade_high": 0 },
+            "select": { "low": 0, "high": 0, "fade_low": 0, "fade_high": 0 },
+        })
+    );
+    // The rack's own object lists its chains with theirs.
+    let object = query(&mut client, json!({ "id": rack["id"] }));
+    assert_eq!(object["chains"][0]["zones"], got["zones"]);
 }

@@ -9,13 +9,13 @@
 //! command (`chain.*`, `rack.set_view`), so the keyboard, a screen reader
 //! and an agent reach the same ones.
 
-use bl_model::{ChainId, DeviceId, RackView};
+use bl_model::{ChainId, DeviceId, RackView, ZoneKind};
 use bl_shell::context_menus::{self, CHAIN_COLOUR_ROW};
 use bl_shell::device_commands::{
     CHAIN_DROP_AREA_HEIGHT, CHAIN_ROW_HEIGHT, ChainRow, DEVICE_GAP, DeviceFrame,
     RACK_CHAIN_LIST_WIDTH, RACK_COLUMN_WIDTH, RACK_EMPTY_DEVICES_WIDTH, RACK_END_BRACKET_WIDTH,
-    RACK_MACROS_WIDTH, RackFrame, TITLE_BAR_HEIGHT, frame_width, rack_chain_list_width,
-    rack_pads_width,
+    RACK_LIST_HEADER_HEIGHT, RACK_MACROS_WIDTH, RACK_ZONE_EDITOR_WIDTH, RackFrame,
+    TITLE_BAR_HEIGHT, frame_width, rack_chain_list_width, rack_pads_width,
 };
 use bl_shell::pad_commands::{DRUM_IO_WIDTH, DRUM_SEND_WIDTH, RETURN_HEADING_HEIGHT};
 use bl_shell::{Area, Invocation, Shell};
@@ -28,6 +28,7 @@ use serde_json::json;
 
 use crate::device_view::DeviceViewUi;
 use crate::main_window::UiEvent;
+use crate::multisampler::{Handle, bar_parts, drag_zone, note_name, value_at, x_of};
 use crate::theme::Theme;
 
 /// The size of the chain list's round and square buttons.
@@ -97,11 +98,29 @@ pub struct ReturnSectionRects {
     pub drop_area: Rect,
 }
 
+/// A button in the header above a rack's chain list (racks spec, R35, R37).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ZoneButton {
+    /// Shows the key, velocity (Vel) or chain select (Chain) editor.
+    Editor(ZoneKind),
+    /// Hide: closes the zone editor.
+    Hide,
+    /// Auto Select.
+    AutoSelect,
+}
+
 /// Where a rack's chain list and its rows sit.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ChainListRects {
     /// The whole list.
     pub area: Rect,
+    /// The part below the header, which the rows scroll in.
+    pub rows_area: Rect,
+    /// The header above the rows; empty for a rack whose chains have no
+    /// zones.
+    pub header: Rect,
+    /// The header's buttons.
+    pub buttons: Vec<(ZoneButton, Rect)>,
     /// A row per chain shown, those scrolled out of the list included: a
     /// drum rack's return chains' rows only while the Return switch is on.
     pub rows: Vec<ChainRowRects>,
@@ -111,6 +130,25 @@ pub struct ChainListRects {
     pub returns: Option<ReturnSectionRects>,
     /// The height of everything the list holds, for scrolling.
     pub content_height: f32,
+}
+
+/// Where a rack's zone editor and its rows sit (racks spec, R35).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ZoneEditorRects {
+    /// The whole editor.
+    pub area: Rect,
+    /// The zone it shows.
+    pub kind: ZoneKind,
+    /// The strip above the scale that holds the chain selector, in the
+    /// chain select editor.
+    pub selector: Rect,
+    /// The scale.
+    pub scale: Rect,
+    /// The span of the scale across the editor, as tall as the editor: what
+    /// [`crate::multisampler::x_of`] maps values onto.
+    pub bars: Rect,
+    /// A row per chain, level with the chain list's.
+    pub rows: Vec<(ChainId, Rect)>,
 }
 
 /// Where each part of a rack sits in its frame.
@@ -124,6 +162,8 @@ pub struct RackLayout {
     pub pads: Option<crate::drum_view::PadLayout>,
     /// The chain list, while it's shown.
     pub chain_list: Option<ChainListRects>,
+    /// The zone editor, while one is shown.
+    pub zone_editor: Option<ZoneEditorRects>,
     /// The devices view, while it's shown.
     pub devices: Option<Rect>,
     /// The selected chain's devices.
@@ -235,6 +275,7 @@ pub fn layout(rack: &RackFrame, rect: Rect, scroll: f32) -> RackLayout {
             pads: None,
             macros: None,
             chain_list: None,
+            zone_editor: None,
             devices: None,
             device_frames: Vec::new(),
             bracket: None,
@@ -272,6 +313,9 @@ pub fn layout(rack: &RackFrame, rect: Rect, scroll: f32) -> RackLayout {
         .views
         .chain_list
         .then(|| chain_list(rack, part(rack_chain_list_width(rack)), scroll));
+    let zone_editor = rack
+        .zone_editor()
+        .map(|kind| zone_editor(rack, kind, part(RACK_ZONE_EDITOR_WIDTH), scroll));
     let mut devices = None;
     let mut device_frames = Vec::new();
     let mut bracket = None;
@@ -299,9 +343,115 @@ pub fn layout(rack: &RackFrame, rect: Rect, scroll: f32) -> RackLayout {
         pads,
         macros,
         chain_list,
+        zone_editor,
         devices,
         device_frames,
         bracket,
+    }
+}
+
+/// How tall the header above the chain list is for `rack`.
+fn header_height(rack: &RackFrame) -> f32 {
+    if rack.has_zones() {
+        RACK_LIST_HEADER_HEIGHT
+    } else {
+        0.0
+    }
+}
+
+/// The header's buttons in `header`: Key, Vel and Chain as the rack's chains
+/// have those zones, and Hide, on the first line; Auto Select on the second.
+fn header_buttons(rack: &RackFrame, header: Rect) -> Vec<(ZoneButton, Rect)> {
+    if !rack.has_zones() {
+        return Vec::new();
+    }
+    let at = |x: f32, line: f32, width: f32| {
+        Rect::from_min_size(
+            pos2(header.left() + x, header.top() + line),
+            vec2(width, 13.0),
+        )
+    };
+    let first: Vec<ZoneButton> = rack
+        .kind
+        .zone_kinds()
+        .iter()
+        .map(|kind| ZoneButton::Editor(*kind))
+        .chain([ZoneButton::Hide])
+        .collect();
+    let mut buttons: Vec<_> = first
+        .into_iter()
+        .enumerate()
+        .map(|(n, button)| (button, at(4.0 + n as f32 * 33.0, 3.0, 30.0)))
+        .collect();
+    buttons.push((ZoneButton::AutoSelect, at(4.0, 18.0, 66.0)));
+    buttons
+}
+
+/// What a header button reads.
+#[must_use]
+pub fn zone_button_name(button: ZoneButton) -> &'static str {
+    match button {
+        ZoneButton::Editor(ZoneKind::Key) => "Key",
+        ZoneButton::Editor(ZoneKind::Velocity) => "Vel",
+        ZoneButton::Editor(ZoneKind::Select) => "Chain",
+        ZoneButton::Hide => "Hide",
+        ZoneButton::AutoSelect => "Auto Select",
+    }
+}
+
+/// The ID of one of a rack's header buttons.
+#[must_use]
+pub fn zone_button_id(rack: DeviceId, button: ZoneButton) -> Id {
+    Id::new(("rack-zone-button", rack, zone_button_name(button)))
+}
+
+/// The ID of a part of a chain's zone bar in the zone editor: `body`, `low`,
+/// `high`, `fade-low` or `fade-high`.
+#[must_use]
+pub fn zone_bar_id(chain: ChainId, part: &str) -> Id {
+    Id::new(("rack-zone-bar", chain, part))
+}
+
+/// The ID of the chain selector's indicator.
+#[must_use]
+pub fn selector_indicator_id(rack: DeviceId) -> Id {
+    Id::new(("rack-chain-selector", rack))
+}
+
+fn zone_editor(rack: &RackFrame, kind: ZoneKind, area: Rect, scroll: f32) -> ZoneEditorRects {
+    let header = header_height(rack);
+    let selector = Rect::from_min_max(
+        pos2(area.left() + 4.0, area.top() + 2.0),
+        pos2(area.right() - 4.0, area.top() + 16.0),
+    );
+    let scale = Rect::from_min_max(
+        pos2(area.left() + 4.0, area.top() + 17.0),
+        pos2(area.right() - 4.0, area.top() + header.max(18.0) - 1.0),
+    );
+    let bars = Rect::from_min_max(
+        pos2(area.left() + 4.0, area.top()),
+        pos2(area.right() - 4.0, area.bottom()),
+    );
+    let mut y = area.top() + header + 2.0 - scroll;
+    let rows = rack
+        .chains
+        .iter()
+        .map(|chain| {
+            let row = Rect::from_min_max(
+                pos2(area.left() + 2.0, y),
+                pos2(area.right() - 2.0, y + CHAIN_ROW_HEIGHT - 2.0),
+            );
+            y += CHAIN_ROW_HEIGHT;
+            (chain.id, row)
+        })
+        .collect();
+    ZoneEditorRects {
+        area,
+        kind,
+        selector,
+        scale,
+        bars,
+        rows,
     }
 }
 
@@ -310,7 +460,9 @@ fn chain_list(rack: &RackFrame, area: Rect, scroll: f32) -> ChainListRects {
     let io = drum && rack.views.input_output;
     let returns = rack.chains.iter().filter(|c| c.output.is_some()).count();
     let sends = if drum && rack.views.send { returns } else { 0 };
-    let mut y = area.top() + 2.0 - scroll;
+    let header = Rect::from_min_size(area.min, vec2(area.width(), header_height(rack)));
+    let rows_area = Rect::from_min_max(pos2(area.left(), header.bottom()), area.max);
+    let mut y = rows_area.top() + 2.0 - scroll;
     let next = |chain: &ChainRow, y: &mut f32| {
         let row = Rect::from_min_max(
             pos2(area.left() + 2.0, *y),
@@ -347,10 +499,13 @@ fn chain_list(rack: &RackFrame, area: Rect, scroll: f32) -> ChainListRects {
     }
     ChainListRects {
         area,
+        rows_area,
+        header,
+        buttons: header_buttons(rack, header),
         rows,
         drop_area,
         returns: section,
-        content_height: y + scroll - area.top() + 4.0,
+        content_height: y + scroll - rows_area.top() + 4.0,
     }
 }
 
@@ -520,6 +675,17 @@ pub fn click_mode(modifiers: Modifiers) -> &'static str {
     }
 }
 
+/// A drag on a chain's zone bar under way (racks spec, R35).
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct RackZoneDrag {
+    chain: ChainId,
+    kind: ZoneKind,
+    handle: Handle,
+    start_x: f32,
+    zone: bl_model::Zone,
+    delta: i32,
+}
+
 /// A chain's name being typed in its row.
 pub(crate) struct ChainRenaming {
     pub chain: ChainId,
@@ -569,6 +735,9 @@ impl DeviceViewUi {
         }
         if let Some(list) = &layout.chain_list {
             self.chain_list(ui, shell, theme, frame, rack, list, events);
+        }
+        if let Some(zones) = &layout.zone_editor {
+            self.zone_editor(ui, theme, frame, rack, zones, events);
         }
         if let Some(area) = layout.devices {
             painter.rect_filled(area, 0.0, c.panel.0.gamma_multiply(0.7));
@@ -782,7 +951,7 @@ impl DeviceViewUi {
         if area_response.hovered() || ui.rect_contains_pointer(list.area) {
             let delta = ui.input(|i| i.smooth_scroll_delta.y);
             if delta != 0.0 {
-                let max = (content - list.area.height()).max(0.0);
+                let max = (content - list.rows_area.height()).max(0.0);
                 let now = (self.chain_scroll(frame.id) - delta).clamp(0.0, max);
                 self.chain_scrolls.insert(frame.id, now);
             }
@@ -793,13 +962,441 @@ impl DeviceViewUi {
             let Some(row) = rack.chains.iter().find(|c| c.id == rects.chain) else {
                 continue;
             };
-            if rects.row.bottom() < list.area.top() || rects.row.top() > list.area.bottom() {
+            if rects.row.bottom() < list.rows_area.top()
+                || rects.row.top() > list.rows_area.bottom()
+            {
                 continue;
             }
             self.chain_row(ui, shell, theme, rack, row, rects, list, events);
         }
         self.return_section(ui, theme, frame, rack, list, events);
         self.chain_drop(ui, theme, frame, rack, list, drag.as_deref(), events);
+        self.zone_header(ui, theme, frame, rack, list, events);
+    }
+
+    /// The buttons above the chain list: Key, Vel, Chain and Hide, and Auto
+    /// Select (racks spec, R35, R37).
+    fn zone_header(
+        &self,
+        ui: &mut Ui,
+        theme: &Theme,
+        frame: &DeviceFrame,
+        rack: &RackFrame,
+        list: &ChainListRects,
+        events: &mut Vec<UiEvent>,
+    ) {
+        if list.buttons.is_empty() {
+            return;
+        }
+        let c = &theme.colors;
+        let painter = ui.painter_at(list.header);
+        painter.rect_filled(list.header, 0.0, c.panel.0);
+        for (button, at) in &list.buttons {
+            let id = zone_button_id(frame.id, *button);
+            let response = ui.interact(*at, id, Sense::click());
+            crate::focus::register(ui.ctx(), id, Area::Detail, None);
+            let on = match button {
+                ZoneButton::Editor(kind) => rack.zone_editor() == Some(*kind),
+                ZoneButton::Hide => rack.zone_editor().is_none(),
+                ZoneButton::AutoSelect => rack.views.auto_select,
+            };
+            if response.clicked()
+                || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter)))
+            {
+                match button {
+                    ZoneButton::Editor(kind) => invoke(
+                        events,
+                        "rack.set_zone_editor",
+                        json!({ "rack": frame.id, "editor": kind }),
+                    ),
+                    ZoneButton::Hide => {
+                        invoke(events, "rack.set_zone_editor", json!({ "rack": frame.id }));
+                    }
+                    ZoneButton::AutoSelect => invoke(
+                        events,
+                        "rack.set_auto_select",
+                        json!({ "rack": frame.id, "on": !on }),
+                    ),
+                }
+            }
+            let face = if on {
+                c.accent.0
+            } else if response.hovered() {
+                c.control_hover.0
+            } else {
+                c.window.0
+            };
+            painter.rect_filled(*at, theme.sizes.corner, face);
+            let name = zone_button_name(*button);
+            painter.text(
+                at.center(),
+                Align2::CENTER_CENTER,
+                name,
+                theme.small_font(),
+                if on { c.accent_text.0 } else { c.text_dim.0 },
+            );
+            if response.has_focus() && crate::focus::outlined(ui.ctx()) {
+                painter.rect_stroke(
+                    at.expand(1.5),
+                    theme.sizes.corner,
+                    Stroke::new(1.0, c.focus.0),
+                    StrokeKind::Outside,
+                );
+            }
+            response.widget_info(|| WidgetInfo::selected(WidgetType::Button, true, on, name));
+            ui.ctx().accesskit_node_builder(id, |node| {
+                node.set_role(Role::Button);
+                node.set_label(name.to_owned());
+                node.set_description(
+                    match button {
+                        ZoneButton::Editor(_) => "Shows this zone editor beside the chain list",
+                        ZoneButton::Hide => "Closes the zone editor",
+                        ZoneButton::AutoSelect => {
+                            "Selects the chains that are processing in the chain list"
+                        }
+                    }
+                    .to_owned(),
+                );
+            });
+        }
+    }
+
+    /// The zone editor right of the chain list (racks spec, R35): the scale
+    /// over a row per chain, each with its zone bar, and in the chain select
+    /// editor the draggable chain selector above the scale.
+    fn zone_editor(
+        &mut self,
+        ui: &mut Ui,
+        theme: &Theme,
+        frame: &DeviceFrame,
+        rack: &RackFrame,
+        zones: &ZoneEditorRects,
+        events: &mut Vec<UiEvent>,
+    ) {
+        let c = &theme.colors;
+        let kind = zones.kind;
+        let painter = ui.painter_at(zones.area);
+        painter.rect_filled(zones.area, 0.0, c.window.0.gamma_multiply(0.5));
+        let group = Id::new(("rack-zone-editor", frame.id));
+        ui.interact(zones.area, group, Sense::hover());
+        ui.ctx().accesskit_node_builder(group, |node| {
+            node.set_role(Role::Group);
+            node.set_label(format!(
+                "{} Zone Editor of {}",
+                match kind {
+                    ZoneKind::Key => "Key",
+                    ZoneKind::Velocity => "Velocity",
+                    ZoneKind::Select => "Chain Select",
+                },
+                frame.title
+            ));
+        });
+        // The scale.
+        let ruler_id = Id::new(("rack-zone-scale", frame.id));
+        let ruler = ui.interact(zones.scale, ruler_id, Sense::click());
+        let (first, last) = kind.range();
+        for value in (first..=last).step_by(1) {
+            let tick = match kind {
+                ZoneKind::Key => value % 12 == 0,
+                ZoneKind::Velocity | ZoneKind::Select => value % 32 == 0 || value == last,
+            };
+            if !tick {
+                continue;
+            }
+            let x = x_of(zones.bars, kind, f32::from(value));
+            painter.line_segment(
+                [
+                    pos2(x, zones.scale.bottom() - 4.0),
+                    pos2(x, zones.scale.bottom()),
+                ],
+                Stroke::new(1.0, c.text_dim.0),
+            );
+            let label = match kind {
+                ZoneKind::Key if value % 36 == 0 => Some(note_name(value)),
+                ZoneKind::Key => None,
+                _ => Some(value.to_string()),
+            };
+            if let Some(label) = label {
+                painter.text(
+                    pos2(x + 1.0, zones.scale.top()),
+                    Align2::LEFT_TOP,
+                    label,
+                    theme.small_font(),
+                    c.text_dim.0,
+                );
+            }
+        }
+        if kind == ZoneKind::Select {
+            // Chain Selector Filters MIDI Ctrl is in the chain select
+            // ruler's context menu (racks spec, R31).
+            ruler.context_menu(|ui| {
+                let mut on = rack.filters_midi_ctrl;
+                if ui
+                    .checkbox(&mut on, "Chain Selector Filters MIDI Ctrl")
+                    .changed()
+                {
+                    invoke(
+                        events,
+                        "device.set_param",
+                        json!({
+                            "device": frame.id,
+                            "param": bl_model::FILTER_MIDI_CTRL,
+                            "value": f64::from(u8::from(on)),
+                        }),
+                    );
+                    ui.close();
+                }
+            });
+            self.chain_selector(ui, theme, frame, rack, zones, events);
+        }
+        // A row per chain, level with the chain list's.
+        for (chain, (id, row)) in rack.chains.iter().zip(&zones.rows) {
+            debug_assert_eq!(chain.id, *id);
+            if row.bottom() < zones.area.top() + RACK_LIST_HEADER_HEIGHT
+                || row.top() > zones.area.bottom()
+            {
+                continue;
+            }
+            self.zone_bar(ui, theme, zones, chain, *row, events);
+        }
+        self.update_zone_drag(ui, zones, events);
+    }
+
+    /// The chain selector's indicator above the scale: dragging it sets the
+    /// rack's chain selector (racks spec, R33, R35), the drag one undo step.
+    fn chain_selector(
+        &self,
+        ui: &mut Ui,
+        theme: &Theme,
+        frame: &DeviceFrame,
+        rack: &RackFrame,
+        zones: &ZoneEditorRects,
+        events: &mut Vec<UiEvent>,
+    ) {
+        let c = &theme.colors;
+        let kind = zones.kind;
+        let x = x_of(zones.bars, kind, f32::from(rack.selector) + 0.5);
+        let id = selector_indicator_id(frame.id);
+        let at = Rect::from_center_size(
+            pos2(x, zones.selector.center().y),
+            vec2(10.0, zones.selector.height()),
+        );
+        let response = ui.interact(at.union(zones.selector), id, Sense::click_and_drag());
+        crate::focus::register(ui.ctx(), id, Area::Detail, None);
+        let painter = ui.painter_at(zones.area);
+        painter.add(Shape::convex_polygon(
+            vec![
+                pos2(x - 5.0, zones.selector.top() + 1.0),
+                pos2(x + 5.0, zones.selector.top() + 1.0),
+                pos2(x, zones.selector.bottom()),
+            ],
+            c.focus.0,
+            Stroke::NONE,
+        ));
+        painter.line_segment(
+            [
+                pos2(x, zones.selector.bottom()),
+                pos2(x, zones.area.bottom()),
+            ],
+            Stroke::new(1.0, c.focus.0.gamma_multiply(0.6)),
+        );
+        ui.ctx().accesskit_node_builder(id, |node| {
+            node.set_role(Role::Slider);
+            node.set_label("Chain Selector".to_owned());
+            node.set_value(rack.selector.to_string());
+        });
+        if response.has_focus() {
+            // The keyboard's form of the drag: Left and Right step the
+            // selector, each press its own undo step.
+            let step = ui.input_mut(|i| {
+                i32::from(i.consume_key(Modifiers::NONE, Key::ArrowRight))
+                    - i32::from(i.consume_key(Modifiers::NONE, Key::ArrowLeft))
+            });
+            let value = (i32::from(rack.selector) + step).clamp(0, 127);
+            if step != 0 && value != i32::from(rack.selector) {
+                invoke(
+                    events,
+                    "device.set_param",
+                    json!({
+                        "device": frame.id,
+                        "param": bl_model::CHAIN_SELECTOR,
+                        "value": value,
+                    }),
+                );
+            }
+        }
+        if response.drag_started() {
+            events.push(UiEvent::BeginNamedGesture(
+                "Change \"Chain Selector\"".to_owned(),
+            ));
+        }
+        if (response.dragged() || response.clicked())
+            && let Some(pointer) = ui.input(|i| i.pointer.latest_pos())
+        {
+            let value = value_at(zones.bars, kind, pointer.x);
+            if value != i32::from(rack.selector) {
+                invoke(
+                    events,
+                    "device.set_param",
+                    json!({
+                        "device": frame.id,
+                        "param": bl_model::CHAIN_SELECTOR,
+                        "value": value,
+                    }),
+                );
+            }
+        }
+        if response.drag_stopped() {
+            events.push(UiEvent::EndGesture);
+        }
+    }
+
+    /// One chain's zone bar: its shape, and the handles for its edges, its
+    /// body and its fades (racks spec, R35).
+    fn zone_bar(
+        &mut self,
+        ui: &mut Ui,
+        theme: &Theme,
+        zones: &ZoneEditorRects,
+        chain: &ChainRow,
+        row: Rect,
+        events: &mut Vec<UiEvent>,
+    ) {
+        let c = &theme.colors;
+        let kind = zones.kind;
+        let zone = chain.zones.get(kind);
+        let parts = bar_parts(zones.bars, row, kind, zone);
+        let painter = ui.painter_at(Rect::from_min_max(
+            pos2(
+                zones.area.left(),
+                zones.area.top() + RACK_LIST_HEADER_HEIGHT,
+            ),
+            zones.area.max,
+        ));
+        painter.rect_filled(row, theme.sizes.corner, c.control.0.gamma_multiply(0.6));
+        let (left, right) = (parts.body.left(), parts.body.right());
+        let fade_left = x_of(
+            zones.bars,
+            kind,
+            f32::from(zone.low) + f32::from(zone.fade_low),
+        );
+        let fade_right = x_of(
+            zones.bars,
+            kind,
+            f32::from(zone.high) + 1.0 - f32::from(zone.fade_high),
+        );
+        let (top, bottom) = (row.top() + 2.0, row.bottom() - 1.0);
+        let colour = chain.colour.map_or(c.control_hover.0, |n| swatch(theme, n));
+        painter.add(Shape::convex_polygon(
+            vec![
+                pos2(left, bottom),
+                pos2(fade_left.max(left), top),
+                pos2(fade_right.min(right).max(fade_left), top),
+                pos2(right, bottom),
+            ],
+            colour,
+            Stroke::new(1.0, c.separator.0),
+        ));
+        let name = format!(
+            "{} {}",
+            chain.name,
+            crate::multisampler::zone_text(kind, zone)
+        );
+        // Later widgets sit above earlier ones where they overlap: the body
+        // first, then the edges over it, then the fade handles.
+        for (part, rect, handle) in [
+            ("body", parts.body, Handle::Body),
+            ("low", parts.low, Handle::Low),
+            ("high", parts.high, Handle::High),
+            ("fade-low", parts.fade_low, Handle::FadeLow),
+            ("fade-high", parts.fade_high, Handle::FadeHigh),
+        ] {
+            let id = zone_bar_id(chain.id, part);
+            let response = ui.interact(rect.intersect(zones.area), id, Sense::click_and_drag());
+            if matches!(handle, Handle::Low | Handle::High) {
+                let _ = response
+                    .clone()
+                    .on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
+            }
+            ui.ctx().accesskit_node_builder(id, |node| {
+                node.set_role(Role::Slider);
+                node.set_label(format!("{name}, {part}"));
+                node.set_description(
+                    "Left and Right move this edge, the zone or this fade by one value".to_owned(),
+                );
+            });
+            // The keyboard's form of the drag: Left and Right move the part
+            // by a value, each press its own undo step.
+            crate::focus::register(ui.ctx(), id, Area::Detail, None);
+            if response.has_focus() {
+                let step = ui.input_mut(|i| {
+                    i32::from(i.consume_key(Modifiers::NONE, Key::ArrowRight))
+                        - i32::from(i.consume_key(Modifiers::NONE, Key::ArrowLeft))
+                });
+                if step != 0 {
+                    invoke(
+                        events,
+                        "chain.set_zone",
+                        json!({
+                            "chain": chain.id,
+                            "kind": kind,
+                            "zone": drag_zone(zone, handle, step, kind),
+                        }),
+                    );
+                }
+                if crate::focus::outlined(ui.ctx()) {
+                    painter.rect_stroke(
+                        rect.expand(1.0),
+                        0.0,
+                        Stroke::new(1.0, c.focus.0),
+                        StrokeKind::Outside,
+                    );
+                }
+            }
+            if response.drag_started()
+                && let Some(pointer) = ui.input(|i| i.pointer.press_origin())
+            {
+                self.zone_drag = Some(RackZoneDrag {
+                    chain: chain.id,
+                    kind,
+                    handle,
+                    start_x: pointer.x,
+                    zone,
+                    delta: 0,
+                });
+                events.push(UiEvent::BeginGesture("Change Chain Zone"));
+            }
+        }
+    }
+
+    /// Carries a drag on a zone on: the zone follows the pointer as the
+    /// handle moves it, and the release ends the one undo step.
+    fn update_zone_drag(&mut self, ui: &Ui, zones: &ZoneEditorRects, events: &mut Vec<UiEvent>) {
+        let Some(drag) = self.zone_drag.as_mut() else {
+            return;
+        };
+        let (pointer, down) = ui.input(|i| (i.pointer.latest_pos(), i.pointer.primary_down()));
+        if let Some(pointer) = pointer {
+            let (low, high) = drag.kind.range();
+            let per_value = zones.bars.width() / (f32::from(high - low) + 1.0);
+            let delta = ((pointer.x - drag.start_x) / per_value).round() as i32;
+            if delta != drag.delta {
+                drag.delta = delta;
+                invoke(
+                    events,
+                    "chain.set_zone",
+                    json!({
+                        "chain": drag.chain,
+                        "kind": drag.kind,
+                        "zone": drag_zone(drag.zone, drag.handle, delta, drag.kind),
+                    }),
+                );
+            }
+        }
+        if !down {
+            self.zone_drag = None;
+            events.push(UiEvent::EndGesture);
+        }
     }
 
     /// Up and Down step the selection while the chain list has the focus
@@ -842,7 +1439,7 @@ impl DeviceViewUi {
         events: &mut Vec<UiEvent>,
     ) {
         let c = &theme.colors;
-        let clip = list.area;
+        let clip = list.rows_area;
         let painter = ui.painter_at(clip);
         let id = row_id(row.id);
         let response = ui.interact(rects.row.intersect(clip), id, Sense::click_and_drag());

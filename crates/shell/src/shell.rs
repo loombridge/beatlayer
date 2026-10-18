@@ -460,6 +460,9 @@ pub struct Shell {
     /// Whether `modulated` came from a running engine, so it clears when
     /// the engine stops while values a host set stay.
     modulating: bool,
+    /// The rack chains the engine found processing in its last block
+    /// (WP-5.3), which a rack's Auto Select selects.
+    processing: Vec<bl_model::ChainId>,
     /// The meters the engine last published, one per track (WP-1.9).
     meters: Vec<bl_engine::TrackMeter>,
     /// Whether the meters were the engine's when last polled.
@@ -830,6 +833,7 @@ impl Shell {
             last_launched: None,
             session_over: Vec::new(),
             modulated: Vec::new(),
+            processing: Vec::new(),
             modulating: false,
             meters: Vec::new(),
             metering: false,
@@ -3844,10 +3848,19 @@ impl Shell {
         // which the Back to Arrangement buttons light from.
         self.audio.session_over_into(&mut self.session_over);
         // Spec: modulation R7. What the modulated controls played in the
-        // last block: the rings and the fader marks draw from it.
+        // last block: the rings and the fader marks draw from it. Spec:
+        // racks R37. The chains processing, which Auto Select follows,
+        // clear with them when the engine stops.
         if running || self.modulating {
             self.modulating = running;
             self.audio.modulated_into(&mut self.modulated);
+            self.audio.processing_into(&mut self.processing);
+        }
+        if self
+            .devices
+            .follow_processing(self.editor.document(), &self.processing)
+        {
+            self.touch();
         }
         // Spec: sample-editor R11. Starting or stopping playback lets the
         // Sample Editor follow it again.
@@ -3944,6 +3957,12 @@ impl Shell {
             },
             |(_, signature)| signature,
         )
+    }
+
+    /// Sets the chains processing, for a host with no engine and for tests;
+    /// a running engine's replace them.
+    pub fn set_processing(&mut self, processing: Vec<bl_model::ChainId>) {
+        self.processing = processing;
     }
 
     /// Sets the parameters under modulation, for a host with no engine and

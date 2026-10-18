@@ -165,7 +165,9 @@ impl Plan {
     /// The segment covering song frame `frame`.
     #[must_use]
     pub fn at(&self, frame: i64) -> Option<&Segment> {
-        let after = self.segments.partition_point(|segment| segment.frame <= frame);
+        let after = self
+            .segments
+            .partition_point(|segment| segment.frame <= frame);
         let segment = self.segments.get(after.checked_sub(1)?)?;
         (frame < segment.until).then_some(segment)
     }
@@ -293,7 +295,10 @@ pub fn turn(channels: &[&[f32]], from: usize, to: usize) -> usize {
     while above < to - 1 && !changes(above) {
         above += 1;
     }
-    let (below, above) = (changes(below).then_some(below), changes(above).then_some(above));
+    let (below, above) = (
+        changes(below).then_some(below),
+        changes(above).then_some(above),
+    );
     match (below, above) {
         (Some(low), Some(high)) => {
             if middle - low <= high - middle {
@@ -351,7 +356,10 @@ mod tests {
         let plan = |loop_mode| Plan::new(vec![segment], loop_mode, 100, 48_000.0);
         let off = plan(Loop::Off).stretches(1.0);
         assert_eq!(off.len(), 2);
-        assert_eq!((off[0].frame, off[0].position, off[0].slope), (0.0, 100.0, 1.0));
+        assert_eq!(
+            (off[0].frame, off[0].position, off[0].slope),
+            (0.0, 100.0, 1.0)
+        );
         assert_eq!((off[1].frame, off[1].slope), (500.0, 1.0));
         assert!(off[1].position.is_nan(), "silence until the next segment");
         let forward = plan(Loop::Forward).stretches(1.0);
@@ -376,7 +384,12 @@ mod tests {
     fn a_far_along_next_segment_cuts_the_own_audio_short() {
         // 1,000 file frames of own audio, but the next segment begins 200
         // song frames later: the own audio is cut there.
-        let plan = Plan::new(vec![segment(0, 200, 0.0, 1_000.0, 500.0)], Loop::Forward, 100, 48_000.0);
+        let plan = Plan::new(
+            vec![segment(0, 200, 0.0, 1_000.0, 500.0)],
+            Loop::Forward,
+            100,
+            48_000.0,
+        );
         assert_eq!(
             plan.stretches(1.0),
             vec![Stretch {
@@ -388,7 +401,12 @@ mod tests {
         // Twice as fast reads the file twice as fast, so the same 1,000
         // frames run out 500 song frames in: the fill starts there, and the
         // segment's span cuts it before that.
-        let plan = Plan::new(vec![segment(0, 600, 0.0, 1_000.0, 500.0)], Loop::Forward, 100, 48_000.0);
+        let plan = Plan::new(
+            vec![segment(0, 600, 0.0, 1_000.0, 500.0)],
+            Loop::Forward,
+            100,
+            48_000.0,
+        );
         let stretches = plan.stretches(2.0);
         assert_eq!(
             stretches[0],
@@ -398,7 +416,10 @@ mod tests {
                 slope: 2.0
             }
         );
-        assert_eq!(stretches[1].frame, 500.0, "the own audio runs out at 1000/2");
+        assert_eq!(
+            stretches[1].frame, 500.0,
+            "the own audio runs out at 1000/2"
+        );
         assert_eq!(stretches[1].position, 500.0);
         assert_eq!(stretches[1].slope, 2.0);
     }
@@ -407,10 +428,20 @@ mod tests {
     // falls to silence over 10 ms.
     #[test]
     fn transient_envelope_holds_then_falls_over_10_ms() {
-        let plan = Plan::new(vec![segment(0, 48_000, 0.0, 48_000.0, 24_000.0)], Loop::Off, 100, 48_000.0);
+        let plan = Plan::new(
+            vec![segment(0, 48_000, 0.0, 48_000.0, 24_000.0)],
+            Loop::Off,
+            100,
+            48_000.0,
+        );
         assert_eq!(plan.level(0), 1.0);
         assert_eq!(plan.level(47_999), 1.0);
-        let plan = Plan::new(vec![segment(0, 48_000, 0.0, 48_000.0, 24_000.0)], Loop::Off, 50, 48_000.0);
+        let plan = Plan::new(
+            vec![segment(0, 48_000, 0.0, 48_000.0, 24_000.0)],
+            Loop::Off,
+            50,
+            48_000.0,
+        );
         // Held for the first half, then falling over 480 frames (10 ms).
         assert_eq!(plan.level(24_000), 1.0, "the hold ends there");
         assert_eq!(plan.level(23_999), 1.0);
@@ -418,7 +449,12 @@ mod tests {
         assert_eq!(plan.level(24_480), 0.0);
         assert_eq!(plan.level(47_000), 0.0);
         // At 0 the fall starts at once.
-        let plan = Plan::new(vec![segment(0, 48_000, 0.0, 48_000.0, 24_000.0)], Loop::Off, 0, 48_000.0);
+        let plan = Plan::new(
+            vec![segment(0, 48_000, 0.0, 48_000.0, 24_000.0)],
+            Loop::Off,
+            0,
+            48_000.0,
+        );
         assert_eq!(plan.level(0), 1.0, "it starts falling at once");
         assert!((plan.level(240) - 0.5).abs() < 1e-9);
         assert_eq!(plan.level(480), 0.0);
@@ -428,10 +464,18 @@ mod tests {
     // when that comes first.
     #[test]
     fn a_short_segment_falls_by_its_next_beginning() {
-        let plan = Plan::new(vec![segment(0, 100, 0.0, 100.0, 50.0)], Loop::Off, 0, 48_000.0);
+        let plan = Plan::new(
+            vec![segment(0, 100, 0.0, 100.0, 50.0)],
+            Loop::Off,
+            0,
+            48_000.0,
+        );
         assert_eq!(plan.level(0), 1.0);
         assert!((plan.level(50) - 0.5).abs() < 1e-9);
-        assert!((plan.level(99) - 0.01).abs() < 1e-9, "the fall is cut at the segment's end");
+        assert!(
+            (plan.level(99) - 0.01).abs() < 1e-9,
+            "the fall is cut at the segment's end"
+        );
     }
 
     // Spec: warp-modes R15. The turn is the sign change of the channels' sum
@@ -453,7 +497,11 @@ mod tests {
         // The channels' sum decides: a second channel flips the sign change.
         let up: Vec<f32> = (0..100).map(|i| i as f32).collect();
         let down: Vec<f32> = (0..100).map(|i| -(i as f32)).collect();
-        assert_eq!(turn(&[up.as_slice(), down.as_slice()], 0, 100), 50, "the sum is flat, so the middle");
+        assert_eq!(
+            turn(&[up.as_slice(), down.as_slice()], 0, 100),
+            50,
+            "the sum is flat, so the middle"
+        );
         // No crossing at all: the middle.
         let steady = vec![1.0_f32; 100];
         assert_eq!(turn(&[steady.as_slice()], 0, 100), 50);

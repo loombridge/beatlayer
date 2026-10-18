@@ -24,12 +24,14 @@
 use std::sync::Arc;
 
 use bl_core::time::{SampleRate, TempoMap, Ticks};
-use bl_media::stream::{AudioSource, PlanarMut, Transition};
 use bl_media::SampleData;
-use bl_model::{AudioData, BeatsSettings, Clip, Preserve as ClipPreserve, TransientLoopMode};
+use bl_media::stream::{AudioSource, PlanarMut, Transition};
 use bl_model::WarpMode as ClipWarpMode;
+use bl_model::{AudioData, BeatsSettings, Clip, Preserve as ClipPreserve, TransientLoopMode};
 use bl_stretch::beats::{self, Loop, Plan, Preserve, Segment};
-use bl_stretch::{Beats, Interpolation, Piece, RePitch, Request, WarpMap, WarpMode, WarpTable, Window};
+use bl_stretch::{
+    Beats, Interpolation, Piece, RePitch, Request, WarpMap, WarpMode, WarpTable, Window,
+};
 
 use crate::clip_source::WINDOW_FRAMES;
 
@@ -471,8 +473,7 @@ impl Contents {
             TransientLoopMode::LoopForward => Loop::Forward,
             TransientLoopMode::LoopBackAndForth => Loop::BackAndForth,
         };
-        let frame_of =
-            |tick: i64| rate * tempo.ticks_to_seconds(Ticks(tick));
+        let frame_of = |tick: i64| rate * tempo.ticks_to_seconds(Ticks(tick));
         let end = clip.end().get();
         let mut segments: Vec<Segment> = Vec::new();
         let mut tick = clip.start.get();
@@ -504,7 +505,14 @@ impl Contents {
             } else {
                 reaches.round() as i64
             };
-            self.pass_segments(&mut segments, (tick, stop), beat, preserve, media.transients, &frame_of);
+            self.pass_segments(
+                &mut segments,
+                (tick, stop),
+                beat,
+                preserve,
+                media.transients,
+                &frame_of,
+            );
             if stop >= end {
                 break;
             }
@@ -525,7 +533,8 @@ impl Contents {
         }
         let needs_fill = loop_mode != Loop::Off
             && segments.iter().any(|segment| {
-                segment.end > segment.position && segment.end - segment.position < (segment.until - segment.frame) as f64
+                segment.end > segment.position
+                    && segment.end - segment.position < (segment.until - segment.frame) as f64
             });
         if needs_fill && let Some(samples) = (media.samples)() {
             let channels: Vec<&[f32]> = samples.channels().collect();
@@ -533,12 +542,7 @@ impl Contents {
                 segment.turn = segment_turn(segment, &channels, samples.frames());
             }
         }
-        Plan::new(
-            segments,
-            loop_mode,
-            settings.transient_envelope,
-            rate,
-        )
+        Plan::new(segments, loop_mode, settings.transient_envelope, rate)
     }
 
     /// Adds the segments of one pass through the contents, over song ticks
@@ -953,7 +957,9 @@ impl WarpScratch {
             return (n, sound);
         }
         let old_positions = match launched {
-            Some(launch) => past.warped.launched(positions.tempo(), launch, positions.rate()),
+            Some(launch) => past
+                .warped
+                .launched(positions.tempo(), launch, positions.rate()),
             None => past.warped.positions(),
         };
         let (old_n, old_sound) = self.paint(
@@ -1141,7 +1147,6 @@ fn load(
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use bl_core::time::{Bpm, TempoMap};
@@ -1213,7 +1218,8 @@ mod tests {
             (Ticks::WHOLE * 6, Bpm::new(180.0).unwrap()),
         ])
         .unwrap();
-        let warped = Warped::new(&c, &audio, &tempo, rate, Some(48_000 * 60), true, &media()).unwrap();
+        let warped =
+            Warped::new(&c, &audio, &tempo, rate, Some(48_000 * 60), true, &media()).unwrap();
         assert!(warped.table.pieces().len() > 4, "a ramp takes many pieces");
         let r = 48_000.0;
         let start = tempo.ticks_to_frames(c.start, rate).get();

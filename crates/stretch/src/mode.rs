@@ -169,7 +169,6 @@ fn read(request: &Request<'_>, window: &Window<'_>, out: &mut [f32], stride: usi
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

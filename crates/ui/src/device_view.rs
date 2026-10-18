@@ -164,11 +164,27 @@ fn sample_drop(
     if !takes {
         return;
     }
-    invoke(
-        events,
-        ids::LOAD_SAMPLE,
-        json!({ "device": device, "path": path }),
-    );
+    // Dropped on a sample slot's cell, it loads into that slot; anywhere
+    // else on the device, into the selected one (WP-5.17).
+    let slot = state
+        .devices
+        .iter()
+        .find(|frame| frame.id == *device)
+        .and_then(|frame| {
+            let panel = frame.panel.as_ref()?;
+            let rect = placed.iter().find(|(id, _)| id == device)?.1;
+            let mut body = crate::device_panel::body_rect(rect, TITLE_BAR_HEIGHT);
+            body.min.x += ids::sidechain_width(frame);
+            let (_, cells) = crate::device_panel::place_shown(panel, frame.expanded, body);
+            cells
+                .into_iter()
+                .find_map(|(_, cell, slot)| slot.filter(|_| cell.contains(pointer)))
+        });
+    let mut args = json!({ "device": device, "path": path });
+    if let Some(slot) = slot {
+        args["slot"] = json!(slot);
+    }
+    invoke(events, ids::LOAD_SAMPLE, args);
 }
 
 impl DeviceViewUi {
@@ -750,6 +766,24 @@ impl DeviceViewUi {
                 ui.close();
             }
             crate::menus::take_focus_first(ui, &response);
+        }
+        // Strike's own items after its switches (31.4.5): the swap to
+        // Snapshot, and Save as Default Pad, which the Drum Rack's pads
+        // (T145) bring.
+        if frame.swaps_to_snapshot {
+            let response = ui.button("Swap to Snapshot");
+            crate::menus::register_item(ui.ctx(), &response);
+            if response.clicked() {
+                invoke(events, ids::SWAP_TO_SNAPSHOT, json!({ "device": frame.id }));
+                ui.close();
+            }
+            crate::menus::take_focus_first(ui, &response);
+            let text = "Not built yet: arrives with the Drum Rack's pads (T145).";
+            let pad = ui.add_enabled(false, egui::Button::new("Save as Default Pad"));
+            ui.ctx().accesskit_node_builder(pad.id, |node| {
+                node.set_description(text.to_owned());
+            });
+            pad.on_disabled_hover_text(text);
         }
     }
 

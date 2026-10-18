@@ -18,6 +18,7 @@
 
 use crate::assistant::VIEW_TOGGLE_ASSISTANT;
 use crate::browser::{ADD_FOLDER as BROWSER_ADD_FOLDER, SET_PREVIEW as BROWSER_PREVIEW};
+use crate::capture_midi::CAPTURE as CAPTURE_MIDI;
 use crate::commands::{
     APP_ABOUT, APP_HIDE, APP_QUIT, APP_SETTINGS, AUDIO_TOGGLE_ENGINE, FOCUS_ARRANGEMENT,
     FOCUS_CONTROL_BAR, FOCUS_NEXT, FOCUS_NEXT_NEIGHBOR, FOCUS_PREVIOUS, FOCUS_PREVIOUS_NEIGHBOR,
@@ -403,7 +404,7 @@ const CREATE: &[Row] = &[
         "Insert Empty MIDI Clip",
         Key(&["S-SES-007", "S-ARR-037"]),
     ),
-    ("M-CREATE-009", "Capture MIDI", Pending(None)),
+    ("M-CREATE-009", "Capture MIDI", Cmd(CAPTURE_MIDI)),
     SEPARATOR,
     ("M-CREATE-010", "Create Fade", Key(&["S-ARR-008"])),
     SEPARATOR,

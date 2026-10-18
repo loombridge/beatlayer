@@ -23,26 +23,31 @@
 //! ([`reverb`]), the limiter ([`limiter`]), the tempo-synced delay
 //! ([`delay`]) and the Utility device ([`utility`], WP-2.18b); [`register`]
 //! adds them to the engine. The instruments are the polysynth
-//! ([`polysynth`], WP-2.17) and the sampler ([`sampler`], WP-2.16). The
+//! ([`polysynth`], WP-2.17), the sampler ([`sampler`], WP-2.16) and the
+//! eight-slot drum sampler ([`kitbag`], WP-5.17). The
 //! rest of the core effects ship with WP-2.18. [`testing`] has the devices
 //! the framework's tests use. The kit's two example plug-ins join the
 //! device list with the `kit-examples` feature, off by default.
 
+pub mod auto_filter;
 pub mod bus_compressor;
 pub mod channel_eq;
 pub mod compressor;
 pub mod delay;
 pub mod dice;
+pub mod drum_sampler;
 mod dynamics;
 pub mod eq;
 mod framework;
 pub mod gate;
 pub mod hold;
 pub mod kit;
+pub mod kitbag;
 pub mod lfo;
 pub mod lift;
 pub mod limiter;
 mod midi_fx;
+pub mod modulator;
 pub mod polysynth;
 pub mod remap;
 pub mod reverb;
@@ -54,16 +59,19 @@ pub mod three_band_eq;
 pub mod touch;
 pub mod utility;
 
+pub use auto_filter::{AUTO_FILTER, AutoFilter, auto_filter_type};
 pub use bus_compressor::{BUS_COMPRESSOR, Bond, bus_compressor_type};
 pub use channel_eq::{CHANNEL_EQ, Strip, channel_eq_type};
 pub use compressor::{COMPRESSOR, Squeeze, compressor_type};
 pub use delay::{DELAY, delay_type};
 pub use dice::{DICE, dice_type};
+pub use drum_sampler::{DRUM_SAMPLER, DrumSampler, drum_sampler_type};
 pub use eq::{Contour, EQ, eq_type};
-pub use framework::{Audio, NativeDevice, NativeNode, ParamBank, add};
+pub use framework::{Audio, Modulation, NativeDevice, NativeNode, ParamBank, add};
 pub use gate::{GATE, Shutter, gate_type};
 pub use hold::{HOLD, hold_type};
 pub use kit::{KitFactory, KitHost};
+pub use kitbag::{KITBAG, Kitbag, kitbag_type};
 pub use lfo::{Lfo, Rate, Shape, Stereo, Wave};
 pub use lift::{LIFT, lift_type};
 pub use limiter::{Brickwall, limiter_type};
@@ -97,13 +105,15 @@ pub fn display(
         BUS_COMPRESSOR => Some(bus_compressor::display(device, description, values, data)),
         GATE => Some(gate::display(device, description, values, data)),
         THREE_BAND_EQ => Some(three_band_eq::display(device, description, values, data)),
+        AUTO_FILTER => Some(auto_filter::display(device, description, values, data)),
+        bl_model::modulator::WAVE_MOD => Some(modulator::wave_display(device, description, values)),
         _ => None,
     }
 }
 
 /// Adds Beatlayer's native devices to `registry`: the compressor, the
-/// polysynth, the limiter, the delay, the reverb, Utility, the EQ and the
-/// sampler.
+/// polysynth, the limiter, the delay, the reverb, Utility, the EQ, the
+/// sampler and the eight-slot drum sampler.
 pub fn register(registry: &mut Registry) {
     compressor::register(registry);
     polysynth::register(registry);
@@ -117,17 +127,21 @@ pub fn register(registry: &mut Registry) {
     gate::register(registry);
     bus_compressor::register(registry);
     sampler::register(registry);
+    drum_sampler::register(registry);
+    kitbag::register(registry);
+    modulator::register(registry);
     lift::register(registry);
     touch::register(registry);
     dice::register(registry);
     remap::register(registry);
     stack::register(registry);
     hold::register(registry);
+    auto_filter::register(registry);
 }
 
 /// The native device types Beatlayer ships, for the browser and the shell:
 /// the compressor, the polysynth, the limiter, the delay, the reverb,
-/// Utility, the EQ and the sampler.
+/// Utility, the EQ, the sampler and the eight-slot drum sampler.
 #[must_use]
 pub fn device_types() -> Vec<DeviceType> {
     let mut registry = Registry::empty();
@@ -146,6 +160,17 @@ pub fn relative_clip_envelopes(document: &mut bl_model::Document) {
         let kind = types.iter().find(|t| t.kind == device.kind)?;
         kind.description.param(param).cloned()
     });
+}
+
+/// Whether the native device type `device_type` plays samples that
+/// `device.load_sample` loads into it: the sampler and the two drum
+/// samplers.
+#[must_use]
+pub fn plays_samples(device_type: &str) -> bool {
+    matches!(
+        device_type,
+        sampler::SAMPLER | kitbag::KITBAG | DRUM_SAMPLER
+    )
 }
 
 /// A [`KitHost`] with the kit plug-ins compiled into Beatlayer: its

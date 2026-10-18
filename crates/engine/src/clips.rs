@@ -97,6 +97,18 @@ pub trait MediaLibrary: Send + Sync {
     }
 }
 
+/// A decoded sample for one of a device's sample slots: what the compiler
+/// sends a node that plays media, once per filled slot (WP-2.16, WP-5.17).
+/// The sampler has the one slot, 0.
+#[derive(Clone)]
+pub struct SlotSample {
+    /// The slot, as the device's [`media`](bl_model::Device::media) list
+    /// numbers them.
+    pub slot: usize,
+    /// The audio, at the engine's rate.
+    pub sample: Arc<SampleData>,
+}
+
 /// A source in memory over `data`, which is at the engine's rate.
 fn in_memory(data: Arc<SampleData>) -> OpenedSource {
     OpenedSource {
@@ -332,6 +344,10 @@ impl Geometry {
         rate: SampleRate,
         length: Option<u64>,
     ) -> Self {
+        // Spec: warping R1. Until warped playback (WP-4.2) follows the map
+        // through the tempo, a warped clip plays as an unwarped one does,
+        // over the region its map converts to seconds in the file.
+        let audio = &*audio.in_seconds();
         let frames =
             |seconds: f64| u64::try_from(rate.seconds_to_frames(seconds).get()).unwrap_or(0);
         let start = tempo.ticks_to_frames(clip.start, rate).get();
@@ -1077,6 +1093,62 @@ mod tests {
         assert_eq!(short.level(6), 0.5 * 6.0 / 12.0);
         assert_eq!(short.level(8), 0.5 * 8.0 / 12.0);
         assert_eq!(short.level(10), 0.5 * 6.0 / 12.0);
+    }
+
+    // Spec: warping R1. Until warped playback, a warped clip plays as an
+    // unwarped one over the region its map converts to seconds.
+    #[test]
+    fn a_warped_clip_plays_its_region_converted_to_seconds() {
+        use bl_core::time::Ticks;
+        use bl_model::WarpMarker;
+        let rate = SampleRate::HZ_48000;
+        let tempo = TempoMap::default();
+        let q = Ticks::QUARTER.get();
+        let hash = ContentHash([1; 32]);
+        // The file's second 0.5 is the clip's 1.1.1 at 120 BPM; the markers
+        // and brace are ticks of the contents.
+        let warped = AudioData {
+            warp: true,
+            warp_markers: vec![WarpMarker {
+                time: 0.5,
+                beat: Ticks::ZERO,
+            }],
+            tempo: Some(120.0),
+            start: q as f64,
+            end: Some(5.0 * q as f64),
+            looping: true,
+            loop_start: 2.0 * q as f64,
+            loop_end: Some(4.0 * q as f64),
+            ..AudioData::new(hash)
+        };
+        // The same region in seconds: a quarter note is half a second.
+        let unwarped = AudioData {
+            start: 1.0,
+            end: Some(3.0),
+            looping: true,
+            loop_start: 1.5,
+            loop_end: Some(2.5),
+            ..AudioData::new(hash)
+        };
+        let id = ClipId(bl_core::id::Id::new(1).unwrap());
+        let geometry = |audio: &AudioData| {
+            let clip = Clip::new(
+                id,
+                Ticks::WHOLE,
+                Ticks::WHOLE * 2,
+                ClipData::Audio(audio.clone()),
+            );
+            Geometry::of(&clip, audio, &tempo, rate, Some(480_000))
+        };
+        assert_eq!(geometry(&warped), geometry(&unwarped));
+        // Unwarped, the same numbers are seconds, so the two differ.
+        let as_seconds = AudioData {
+            warp: false,
+            warp_markers: Vec::new(),
+            tempo: None,
+            ..warped
+        };
+        assert_ne!(geometry(&as_seconds), geometry(&unwarped));
     }
 
     // Spec: audio-clips R3, R16

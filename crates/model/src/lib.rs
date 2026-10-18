@@ -73,6 +73,7 @@ mod ids;
 mod launch;
 mod metronome;
 pub mod modulation;
+pub mod modulator;
 pub mod param;
 pub mod rack;
 pub mod registry;
@@ -81,6 +82,7 @@ mod routing;
 mod scene;
 mod shared;
 mod track;
+mod warp;
 
 pub use automation::{
     Automation, AutomationTarget, Breakpoint, Envelope, MixerParam, TrackAutomation, curve_value,
@@ -93,8 +95,8 @@ pub use clip::{
 };
 pub use command::Command;
 pub use device::{
-    Device, DeviceKind, DeviceRole, DeviceWindows, PluginFormat, PluginState, Sidechain,
-    WindowFrame,
+    Device, DeviceKind, DeviceRole, DeviceWindows, MAX_MEDIA_SLOTS, PluginFormat, PluginState,
+    Sidechain, WindowFrame,
 };
 pub use device_display::{DeviceDisplay, DisplayMarker, DisplayReading, DisplaySeries};
 pub use device_layout::DeviceLayout;
@@ -116,3 +118,4 @@ pub use track::{
     Channel, CrossfadeAssign, Input, Mixer, Monitor, Output, Routing, SendTap, Tap, Track,
     TrackKind,
 };
+pub use warp::WarpMarker;

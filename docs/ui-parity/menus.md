@@ -144,7 +144,7 @@ Commands the manual places in the Edit menu that didn't show with this focus, an
 | M-CREATE-007 | Consolidate Time to New Scene | | | disabled | |
 | | — | | | | |
 | M-CREATE-008 | Insert Empty MIDI Clip | ⇧⌘M | S-SES-007, S-ARR-037 | disabled | Enabled in the empty slot's and time selection's context menus. A new clip is one bar long in the time signature in force at the time (observed in 12.4.3 (macOS), 15 October 2026) |
-| M-CREATE-009 | Capture MIDI | | | disabled | Same as the Control Bar's Capture MIDI button. Disabled until notes have been played, then enabled (observed in 12.4.3 (macOS), 15 October 2026) |
+| M-CREATE-009 | Capture MIDI | | | disabled | Same as the Control Bar's Capture MIDI button. Disabled until notes have been played, then enabled (observed in 12.4.3 (macOS), 15 October 2026). Runs `midi.capture` ([capture MIDI](../specs/capture-midi.md)) |
 | | — | | | | |
 | M-CREATE-010 | Create Fade | ⌥⌘F | S-ARR-008 | disabled | The manual names it Create Fade In/Out or Create Crossfade depending on the selection |
 | | — | | | | |
@@ -718,7 +718,7 @@ Other states:
 |---|---|---|
 | C-DEVICE-013 | Group to Drum Rack (several devices selected) | manual 25.2 |
 | C-DEVICE-014 | Lock to (a control surface) | manual 34 |
-| C-DEVICE-015 | Device-specific options (for example Mono Sidechain on the filter device, MPE settings on MPE plug-ins) | manual 23.2.1, 12.6 |
+| C-DEVICE-015 | Device-specific options (for example Mono Sidechain on the filter device, MPE settings on MPE plug-ins; the Drum Sampler's Enable Per-Note Pitch Bend, Envelope Follows Pitch, a swap to Simpler, and Save as Default Pad) | manual 23.2.1, 12.6, 31.4.5 |
 
 ### Crossfader (C-XFADE)
 

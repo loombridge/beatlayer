@@ -455,6 +455,7 @@ pub fn state(shell: &Shell, engine: EngineTransport) -> TransportState {
         automation_arm: shell.arrangement().automation_arm(),
         recording: shell.running_recording(),
         last_recording: shell.last_recording().cloned(),
+        capture_midi_ready: shell.capture_midi_ready(),
     }
 }
 

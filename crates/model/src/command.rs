@@ -20,12 +20,13 @@ use crate::error::ModelError;
 use crate::ids::{ChainId, ClipId, ContentHash, DeviceId, ParamId, SceneId, TrackId};
 use crate::launch::{ClipLaunch, LaunchMode, LaunchQuantization};
 use crate::metronome::{CountIn, MetronomeRhythm, MetronomeSound};
-use crate::rack::{CHAIN_COLOURS, Chain};
+use crate::rack::{CHAIN_COLOURS, Chain, RackKind};
 use crate::scene::{SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
 use crate::shared::Shared;
 use crate::track::{
     Channel, CrossfadeAssign, Input, Mixer, Monitor, Output, SendTap, Track, TrackKind,
 };
+use crate::warp::MarkerAt;
 
 /// What left a track: devices and rack chains.
 #[derive(Default)]
@@ -605,25 +606,35 @@ pub enum Command {
         /// The audio clip.
         clip: ClipId,
         /// The Start marker, in seconds into the file: 0 or more. While the
-        /// loop is on, it must be before the loop brace's end.
-        #[schemars(range(min = 0.0))]
+        /// loop is on, it must be before the loop brace's end. A warped
+        /// clip's is whole ticks of its contents (`ticks` true).
         start: f64,
         /// The End marker, in seconds into the file, after `start`; `null`
         /// (or nothing) for the end of the file.
         #[serde(default)]
         end: Option<f64>,
+        /// Whether `start` and `end` are ticks of a warped clip's contents
+        /// instead of seconds in the file of an unwarped one: they must be
+        /// the form the clip shows.
+        #[serde(default)]
+        ticks: bool,
     },
     /// Moves an audio clip's loop brace, leaving its Loop switch as it is.
     SetClipLoop {
         /// The audio clip.
         clip: ClipId,
-        /// Where the brace starts, in seconds into the file: 0 or more.
-        #[schemars(range(min = 0.0))]
+        /// Where the brace starts, in seconds into the file: 0 or more. A
+        /// warped clip's is whole ticks of its contents (`ticks` true).
         start: f64,
         /// Where it ends, in seconds into the file, after `start`; `null`
         /// (or nothing) for the end of the file.
         #[serde(default)]
         end: Option<f64>,
+        /// Whether `start` and `end` are ticks of a warped clip's contents
+        /// instead of seconds in the file of an unwarped one: they must be
+        /// the form the clip shows.
+        #[serde(default)]
+        ticks: bool,
     },
     /// Moves a MIDI clip's Start and End markers: where in its contents it
     /// starts playing, and where it stops while its loop is off.
@@ -674,6 +685,81 @@ pub enum Command {
         /// The fade-out's length in seconds up to the clip's end: 0 for none.
         #[schemars(range(min = 0.0))]
         fade_out: f64,
+    },
+    /// Switches an audio clip's Warp on or off (WP-4.1): its Start and End
+    /// markers and loop brace convert through the warp map and it keeps its
+    /// place and length.
+    SetClipWarp {
+        /// The audio clip.
+        clip: ClipId,
+        /// Whether the clip follows the set's tempo through its warp map.
+        warp: bool,
+    },
+    /// Adds a warp marker to each of the warped clips, at the same place
+    /// (WP-4.1): at a beat of the clip's contents, or at a time in its file.
+    InsertWarpMarker {
+        /// The warped audio clips: their files must be as long as each
+        /// other's.
+        clips: Vec<ClipId>,
+        /// The beat, in ticks from the clip's 1.1.1, to put the marker on,
+        /// at the time in the file the map already places there. Give this
+        /// or `time`.
+        #[serde(default)]
+        beat: Option<Ticks>,
+        /// The time in the file, in seconds, to put the marker at, on the
+        /// beat the map already places it. Give this or `beat`.
+        #[serde(default)]
+        time: Option<f64>,
+    },
+    /// Moves warp markers by the same ticks, each keeping its time in the
+    /// file (WP-4.1).
+    MoveWarpMarkers {
+        /// The warped audio clips: their files must be as long as each
+        /// other's.
+        clips: Vec<ClipId>,
+        /// The markers to move, by their place in the map, the first being 0.
+        markers: Vec<usize>,
+        /// How far to move them, in ticks: negative moves them earlier.
+        by: Ticks,
+    },
+    /// Moves one warp marker's time in the file, keeping its beat (WP-4.1).
+    ShiftWarpMarker {
+        /// The warped audio clips: their files must be as long as each
+        /// other's.
+        clips: Vec<ClipId>,
+        /// The marker, by its place in the map, the first being 0.
+        marker: usize,
+        /// How far to move its time in the file, in seconds: negative moves
+        /// it earlier.
+        by: f64,
+    },
+    /// Deletes warp markers (WP-4.1).
+    DeleteWarpMarkers {
+        /// The warped audio clips: their files must be as long as each
+        /// other's.
+        clips: Vec<ClipId>,
+        /// The markers to delete, by their place in the map, the first being 0.
+        markers: Vec<usize>,
+    },
+    /// Sets a warped clip's BPM field (WP-4.1).
+    SetSegmentBpm {
+        /// The warped audio clip.
+        clip: ClipId,
+        /// The marker whose segment to set, by its place in the map, the
+        /// first being 0: `null` (or nothing) for the first segment's tempo,
+        /// which scales every segment.
+        #[serde(default)]
+        marker: Option<usize>,
+        /// The tempo in BPM: positive, and from 1 to 1,000 for the clip's.
+        bpm: f64,
+    },
+    /// Multiplies every tempo of a warped clip by a factor, Live's ×2 and ÷2
+    /// (WP-4.1).
+    ScaleTempo {
+        /// The warped audio clip.
+        clip: ClipId,
+        /// What to multiply by: 2 for ×2, 0.5 for ÷2.
+        factor: f64,
     },
     /// Switches a Session clip's Legato: on, it takes over the play position
     /// of the clip playing on its track when it launches.
@@ -922,6 +1008,10 @@ pub enum Command {
         /// The name the title bar shows while Show Preset Name is on, such
         /// as the preset's; empty for the device's own name.
         name: String,
+        /// A Curve Mod's breakpoint shape (the modulation spec, R23), which
+        /// a preset of one holds; `null` for the default shape.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        shape: Option<Vec<crate::modulator::ShapePoint>>,
     },
     /// Floats a device in a window of its own, or docks it back in the
     /// Device View (IMP-14, WP-2.5b). Only native devices float.
@@ -959,6 +1049,34 @@ pub enum Command {
         /// The value, in the parameter's own units.
         value: f64,
     },
+    /// Maps a slot of a modulator to a parameter (the modulation spec, R15):
+    /// the Map button's gesture. The slot's earlier mapping goes.
+    MapModulator {
+        /// The modulator device.
+        device: DeviceId,
+        /// The slot, from 0 to 7.
+        slot: u8,
+        /// The parameter to map: a mixer control or send of any track, or a
+        /// parameter of any device but the modulator's own.
+        target: crate::modulator::ModTarget,
+    },
+    /// Removes the mapping of a modulator's slot (R15): the Unmap button.
+    UnmapModulator {
+        /// The modulator device.
+        device: DeviceId,
+        /// The slot, from 0 to 7.
+        slot: u8,
+    },
+    /// Replaces the breakpoint shape of a Curve Mod (R23): every edit of
+    /// its display, Clear and the presets make a new list.
+    SetShape {
+        /// The Curve Mod device.
+        device: DeviceId,
+        /// The breakpoints, in order along the cycle (at most 64), each with
+        /// its place and output from 0 to 1 and the bend of the segment
+        /// starting there, from −1 to 1.
+        points: Vec<crate::modulator::ShapePoint>,
+    },
     /// Sets the media a device plays, by content hash (WP-2.16): the
     /// sampler's sample, which the media store holds like a clip's audio.
     SetDeviceSample {
@@ -968,6 +1086,10 @@ pub enum Command {
         /// store is where the audio comes from; a device given media the
         /// store doesn't hold is silent.
         media: Option<ContentHash>,
+        /// The sample slot to set: 0, the only one the sampler has, unless
+        /// given; the eight-slot drum sampler's are 0 to 7 (WP-5.17).
+        #[serde(default)]
+        slot: u8,
     },
     /// Sets where a device's sidechain listens: its sidechain section's
     /// Source, with its channel. The device must have a sidechain input.
@@ -1220,6 +1342,13 @@ impl Command {
             Self::SetClipLoopEnabled { .. } => "Switch clip loop",
             Self::SetClipGain { .. } => "Change clip gain",
             Self::SetClipFades { .. } => "Change clip fades",
+            // WP-4.1. Live's undo names for the warp edits are to observe;
+            // Beatlayer's name the edit.
+            Self::SetClipWarp { .. } => "Switch Warp",
+            Self::InsertWarpMarker { .. } => "Insert Warp Marker",
+            Self::MoveWarpMarkers { .. } | Self::ShiftWarpMarker { .. } => "Move Warp Marker",
+            Self::DeleteWarpMarkers { .. } => "Delete Warp Marker",
+            Self::SetSegmentBpm { .. } | Self::ScaleTempo { .. } => "Change clip tempo",
             // WP-3.4. Live's undo names for the Launch panel's controls are
             // to observe; Beatlayer's name the edit.
             Self::SetClipLegato { .. } => "Switch Legato",
@@ -1271,6 +1400,10 @@ impl Command {
             Self::SetDeviceParam { .. } => "Change parameter",
             // WP-2.16. Live's undo name for loading a Simpler sample is to
             // observe; Beatlayer's names the edit.
+            // WP-5.10: Beatlayer's own names.
+            Self::MapModulator { .. } => "Map Modulator",
+            Self::UnmapModulator { .. } => "Unmap Modulator",
+            Self::SetShape { .. } => "Edit Shape",
             Self::SetDeviceSample { media: Some(_), .. } => "Load Sample",
             Self::SetDeviceSample { media: None, .. } => "Clear Sample",
             // WP-2.19b, as Live 12.4.6 names them (observed); Listen's is to
@@ -1432,7 +1565,11 @@ impl Document {
                 parent,
                 index,
             } => self.create_track(*id, *kind, name, *parent, *index),
-            Command::DeleteTrack { track } => self.delete_track(*track),
+            Command::DeleteTrack { track } => {
+                self.delete_track(*track)?;
+                self.prune_mappings();
+                Ok(())
+            }
             Command::MoveTrack {
                 track,
                 parent,
@@ -1445,6 +1582,10 @@ impl Document {
                 Ok(())
             }
             Command::SetVolume { track, volume } => {
+                self.check_not_held(crate::modulator::ModTarget::Mixer {
+                    track: *track,
+                    param: MixerParam::Volume,
+                })?;
                 check_value("volume", *volume, volume.is_finite() && *volume >= 0.0)?;
                 if self.track_ref(*track)?.mixer.volume != *volume {
                     let track_ref = self.track_mut(*track)?;
@@ -1459,6 +1600,10 @@ impl Document {
                 Ok(())
             }
             Command::SetPan { track, pan } => {
+                self.check_not_held(crate::modulator::ModTarget::Mixer {
+                    track: *track,
+                    param: MixerParam::Pan,
+                })?;
                 check_value("pan", *pan, (-1.0..=1.0).contains(pan))?;
                 if self.track_ref(*track)?.mixer.pan != *pan {
                     let track_ref = self.track_mut(*track)?;
@@ -1473,6 +1618,10 @@ impl Document {
                 Ok(())
             }
             Command::SetMute { track, mute } => {
+                self.check_not_held(crate::modulator::ModTarget::Mixer {
+                    track: *track,
+                    param: MixerParam::Mute,
+                })?;
                 let current = self.track_ref(*track)?;
                 check_kind(current, TrackKind::has_mute_and_solo, NOT_MAIN)?;
                 if current.mixer.mute != *mute {
@@ -1518,6 +1667,10 @@ impl Document {
                 Ok(())
             }
             Command::SetSend { track, to, level } => {
+                self.check_not_held(crate::modulator::ModTarget::Send {
+                    track: *track,
+                    to: *to,
+                })?;
                 check_value("send level", *level, (0.0..=1.0).contains(level))?;
                 let sender = self.track_ref(*track)?;
                 check_kind(sender, TrackKind::has_sends, SENDER)?;
@@ -1621,6 +1774,7 @@ impl Document {
                 input,
                 channel,
             } => {
+                self.check_instrument_source(*track, input)?;
                 let input = input.clone();
                 let channel = *channel;
                 self.edit_routing(*track, |routing| {
@@ -1687,14 +1841,30 @@ impl Document {
                 Ok(())
             }
             Command::TrimClipStart { clip, start } => self.trim_clip_start(*clip, *start),
-            Command::SetClipRegion { clip, start, end } => self.edit_markers(*clip, |audio| {
-                audio.start = *start;
-                audio.end = *end;
-            }),
-            Command::SetClipLoop { clip, start, end } => self.edit_markers(*clip, |audio| {
-                audio.loop_start = *start;
-                audio.loop_end = *end;
-            }),
+            Command::SetClipRegion {
+                clip,
+                start,
+                end,
+                ticks,
+            } => {
+                self.check_form(*clip, *ticks)?;
+                self.edit_markers(*clip, |audio| {
+                    audio.start = *start;
+                    audio.end = *end;
+                })
+            }
+            Command::SetClipLoop {
+                clip,
+                start,
+                end,
+                ticks,
+            } => {
+                self.check_form(*clip, *ticks)?;
+                self.edit_markers(*clip, |audio| {
+                    audio.loop_start = *start;
+                    audio.loop_end = *end;
+                })
+            }
             Command::SetMidiClipRegion { clip, start, end } => {
                 self.edit_midi_markers(*clip, |midi| {
                     midi.start = *start;
@@ -1722,6 +1892,38 @@ impl Document {
                 audio.fade_in = *fade_in;
                 audio.fade_out = *fade_out;
             }),
+            Command::SetClipWarp { clip, warp } => {
+                let at = self.clip_ref(*clip)?.start;
+                let set_tempo = self.settings.tempo.bpm_at(at);
+                self.edit_markers_with(*clip, |audio| audio.with_warp(*warp, set_tempo))
+            }
+            Command::InsertWarpMarker { clips, beat, time } => {
+                let at = match (beat, time) {
+                    (Some(beat), None) => MarkerAt::Beat(*beat),
+                    (None, Some(time)) => MarkerAt::Time(*time),
+                    _ => {
+                        return Err(ModelError::InvalidInput(
+                            "give the warp marker's `beat` or its `time`, not both or neither",
+                        ));
+                    }
+                };
+                self.edit_each(clips, |audio| audio.with_marker_inserted(at))
+            }
+            Command::MoveWarpMarkers { clips, markers, by } => {
+                self.edit_each(clips, |audio| audio.with_markers_moved(markers, *by))
+            }
+            Command::ShiftWarpMarker { clips, marker, by } => {
+                self.edit_each(clips, |audio| audio.with_marker_shifted(*marker, *by))
+            }
+            Command::DeleteWarpMarkers { clips, markers } => {
+                self.edit_each(clips, |audio| audio.with_markers_deleted(markers))
+            }
+            Command::SetSegmentBpm { clip, marker, bpm } => {
+                self.edit_markers_with(*clip, |audio| audio.with_segment_bpm(*marker, *bpm))
+            }
+            Command::ScaleTempo { clip, factor } => {
+                self.edit_markers_with(*clip, |audio| audio.with_tempo_scaled(*factor))
+            }
             Command::SetClipLegato { clip, legato } => {
                 self.edit_launch(*clip, |launch| launch.legato = *legato)
             }
@@ -1797,7 +1999,8 @@ impl Document {
                 let owner = self.device_owner(*device)?;
                 let removed = self.take_device(*device)?;
                 self.index.remove_device(&removed);
-                forget(self.track_mut(owner)?, &Gone::device(&removed));
+                self.forget_in(owner, &Gone::device(&removed))?;
+                self.prune_mappings();
                 Ok(())
             }
             Command::MoveDevice {
@@ -1823,9 +2026,11 @@ impl Document {
                 device,
                 params,
                 name,
+                shape,
             } => {
                 let mut loaded = self.device_ref(*device)?.clone();
                 loaded.set_both(params.clone());
+                loaded.shape.clone_from(shape);
                 loaded.set_name(name);
                 check_device(&loaded)?;
                 if loaded != *self.device_ref(*device)? {
@@ -1855,6 +2060,25 @@ impl Document {
                 value,
             } => {
                 check_value("parameter value", *value, value.is_finite())?;
+                self.check_not_held(crate::modulator::ModTarget::Device {
+                    device: *device,
+                    param: *param,
+                })?;
+                // Spec: modulation R16. Remote Control holds what a
+                // modulator maps; one parameter has one holder.
+                if *param == crate::modulator::MODE && *value >= 0.5 {
+                    let current = self.device_ref(*device)?;
+                    if current
+                        .mappings
+                        .iter()
+                        .any(|m| self.held_by(m.target, *device).is_some())
+                    {
+                        return Err(ModelError::InvalidInput(
+                            "another modulator in Remote Control already holds a parameter this \
+                             one maps",
+                        ));
+                    }
+                }
                 if self.device_ref(*device)?.params.get(param) != Some(value) {
                     let owner = self.device_owner(*device)?;
                     self.device_mut(*device)?.set_param(*param, *value);
@@ -1868,6 +2092,13 @@ impl Document {
                 }
                 Ok(())
             }
+            Command::MapModulator {
+                device,
+                slot,
+                target,
+            } => self.map_modulator(*device, *slot, *target),
+            Command::UnmapModulator { device, slot } => self.unmap_modulator(*device, *slot),
+            Command::SetShape { device, points } => self.set_shape(*device, points),
             Command::CompareSwitch { device } => {
                 if !self.device_ref(*device)?.can_compare() {
                     return Err(ModelError::NoCompare(*device));
@@ -1886,9 +2117,19 @@ impl Document {
                 }
                 Ok(())
             }
-            Command::SetDeviceSample { device, media } => {
-                if self.device_ref(*device)?.media != *media {
-                    self.device_mut(*device)?.media = *media;
+            Command::SetDeviceSample {
+                device,
+                media,
+                slot,
+            } => {
+                check_value(
+                    "sample slot",
+                    f64::from(*slot),
+                    usize::from(*slot) < crate::device::MAX_MEDIA_SLOTS,
+                )?;
+                if self.device_ref(*device)?.media_at(usize::from(*slot)) != *media {
+                    self.device_mut(*device)?
+                        .set_media(usize::from(*slot), *media);
                 }
                 Ok(())
             }
@@ -1942,7 +2183,8 @@ impl Document {
                     .remove_chain(*chain)
                     .ok_or(ModelError::NoSuchChain(*chain))?;
                 self.index.remove_chain(&removed);
-                forget(self.track_mut(owner)?, &Gone::chain(&removed));
+                self.forget_in(owner, &Gone::chain(&removed))?;
+                self.prune_mappings();
                 Ok(())
             }
             Command::MoveChain { chain, rack, index } => self.move_chain(*chain, *rack, *index),
@@ -2552,13 +2794,69 @@ impl Document {
         id: ClipId,
         edit: impl FnOnce(&mut AudioData),
     ) -> Result<(), ModelError> {
+        self.edit_markers_with(id, |audio| {
+            let mut next = audio.clone();
+            edit(&mut next);
+            Ok(next)
+        })
+    }
+
+    /// Replaces an audio clip's data with what `edit` makes of it, if the
+    /// result is valid and its markers are in order.
+    fn edit_markers_with(
+        &mut self,
+        id: ClipId,
+        edit: impl FnOnce(&AudioData) -> Result<AudioData, ModelError>,
+    ) -> Result<(), ModelError> {
         let ClipData::Audio(current) = &self.clip_ref(id)?.data else {
             return Err(ModelError::NotAudioClip(id));
         };
-        let mut next = *current;
-        edit(&mut next);
+        let next = edit(current)?;
         check_marker_order(&next)?;
         self.edit_audio(id, |audio| *audio = next)
+    }
+
+    /// Makes the same edit to each of `clips`, or to none if it's refused for
+    /// one (the warping spec, R11): the files must be as long as each other's,
+    /// which the app shell checks, since the document doesn't hold the media.
+    fn edit_each(
+        &mut self,
+        clips: &[ClipId],
+        edit: impl Fn(&AudioData) -> Result<AudioData, ModelError>,
+    ) -> Result<(), ModelError> {
+        if clips.is_empty() {
+            return Err(ModelError::InvalidInput("name at least one clip"));
+        }
+        let mut edited = Vec::with_capacity(clips.len());
+        for &id in clips {
+            let ClipData::Audio(current) = &self.clip_ref(id)?.data else {
+                return Err(ModelError::NotAudioClip(id));
+            };
+            let next = edit(current)?;
+            check_marker_order(&next)?;
+            check_audio(&next)?;
+            edited.push((id, next));
+        }
+        for (id, next) in edited {
+            self.edit_audio(id, |audio| *audio = next)?;
+        }
+        Ok(())
+    }
+
+    /// Checks that a command's positions are in the form the audio clip
+    /// shows: ticks if it is warped, seconds if not (the warping spec, R4).
+    fn check_form(&self, id: ClipId, ticks: bool) -> Result<(), ModelError> {
+        match &self.clip_ref(id)?.data {
+            ClipData::Audio(audio) if audio.warp != ticks => {
+                Err(ModelError::InvalidInput(if audio.warp {
+                    "this clip is warped: its positions are ticks of its contents, so pass `ticks` true"
+                } else {
+                    "this clip isn't warped: its positions are seconds in its file, so leave `ticks` false"
+                }))
+            }
+            ClipData::Audio(_) => Ok(()),
+            ClipData::Midi(_) => Err(ModelError::NotAudioClip(id)),
+        }
     }
 
     /// Changes the launch settings of the Session clip `id`.
@@ -2592,7 +2890,7 @@ impl Document {
         let ClipData::Audio(current) = &self.clip_ref(id)?.data else {
             return Err(ModelError::NotAudioClip(id));
         };
-        let mut next = *current;
+        let mut next = current.clone();
         edit(&mut next);
         check_audio(&next)?;
         if next != *current {
@@ -2811,6 +3109,8 @@ impl Document {
         insert_at(chain, index, Shared::new(device.clone()))?;
         self.index.add_device(device, track);
         check_chain(self.track_ref(track)?)?;
+        // Spec: modulation R19. A mapping to a parameter the set lacks goes.
+        self.prune_mappings();
         self.check_routing(track)
     }
 
@@ -2866,7 +3166,7 @@ impl Document {
     ) -> Result<(), ModelError> {
         if from != to {
             self.index.add_device(moved, to);
-            forget(self.track_mut(from)?, &Gone::device(moved));
+            self.forget_in(from, &Gone::device(moved))?;
         }
         Ok(())
     }
@@ -2982,7 +3282,7 @@ impl Document {
         for (offset, device) in inside.into_iter().enumerate() {
             self.put_device(place.track, place.chain, place.index + offset, device)?;
         }
-        forget(self.track_mut(place.track)?, &gone);
+        self.forget_in(place.track, &gone)?;
         check_chain(self.track_ref(place.track)?)
     }
 
@@ -3040,9 +3340,17 @@ impl Document {
         let chains = &mut self.device_mut(rack)?.chains;
         check_index(index, chains.len())?;
         chains.insert(index, moved.clone());
+        // Only instrument and audio effect racks' chains are tapped (the
+        // racks spec, R38).
+        if !matches!(
+            self.device_ref(rack)?.rack_kind(),
+            Some(RackKind::Instrument | RackKind::AudioEffect)
+        ) {
+            self.forget_chain_taps(&BTreeSet::from([id]));
+        }
         if from != to {
             self.index.add_chain(&moved, to);
-            forget(self.track_mut(from)?, &Gone::chain(&moved));
+            self.forget_in(from, &Gone::chain(&moved))?;
         }
         check_chain(self.track_ref(to)?)
     }
@@ -3436,6 +3744,14 @@ impl Document {
             .ok_or(ModelError::NoSuchClip(id))
     }
 
+    /// Forgets what a track held for the devices and chains that left it,
+    /// and the inputs that tapped those chains.
+    fn forget_in(&mut self, track: TrackId, gone: &Gone) -> Result<(), ModelError> {
+        forget(self.track_mut(track)?, gone);
+        self.forget_chain_taps(&gone.chains);
+        Ok(())
+    }
+
     fn device_owner(&self, id: DeviceId) -> Result<TrackId, ModelError> {
         self.device_track(id).ok_or(ModelError::NoSuchDevice(id))
     }
@@ -3471,7 +3787,7 @@ impl Document {
             .ok_or(ModelError::NoSuchChain(id))
     }
 
-    fn device_ref(&self, id: DeviceId) -> Result<&Device, ModelError> {
+    pub(crate) fn device_ref(&self, id: DeviceId) -> Result<&Device, ModelError> {
         self.device(id).ok_or(ModelError::NoSuchDevice(id))
     }
 
@@ -3489,7 +3805,7 @@ impl Document {
         Ok(())
     }
 
-    fn device_mut(&mut self, id: DeviceId) -> Result<&mut Device, ModelError> {
+    pub(crate) fn device_mut(&mut self, id: DeviceId) -> Result<&mut Device, ModelError> {
         let owner = self.device_owner(id)?;
         let chain = &mut self.track_mut(owner)?.devices;
         let position = chain
@@ -3732,17 +4048,34 @@ pub(crate) fn check_midi_marker_order(midi: &MidiData) -> Result<(), ModelError>
 /// finite and not negative.
 pub(crate) fn check_audio(audio: &AudioData) -> Result<(), ModelError> {
     let at_least_zero = |value: f64| value.is_finite() && value >= 0.0;
-    check_value("clip start", audio.start, at_least_zero(audio.start))?;
-    if let Some(end) = audio.end {
-        check_value("clip end", end, end.is_finite() && end > 0.0)?;
+    if audio.warp {
+        // A warped clip's markers are whole ticks of its contents, which may
+        // be negative (the warping spec, R2 and R4).
+        let tick = |value: f64| value.is_finite() && value.fract() == 0.0;
+        check_value("clip start", audio.start, tick(audio.start))?;
+        if let Some(end) = audio.end {
+            check_value("clip end", end, tick(end))?;
+        }
+        check_value("loop start", audio.loop_start, tick(audio.loop_start))?;
+        if let Some(end) = audio.loop_end {
+            check_value("loop end", end, tick(end) && end > audio.loop_start)?;
+        }
+    } else {
+        check_value("clip start", audio.start, at_least_zero(audio.start))?;
+        if let Some(end) = audio.end {
+            check_value("clip end", end, end.is_finite() && end > 0.0)?;
+        }
+        check_value(
+            "loop start",
+            audio.loop_start,
+            at_least_zero(audio.loop_start),
+        )?;
+        if let Some(end) = audio.loop_end {
+            check_value("loop end", end, end.is_finite() && end > audio.loop_start)?;
+        }
     }
-    check_value(
-        "loop start",
-        audio.loop_start,
-        at_least_zero(audio.loop_start),
-    )?;
-    if let Some(end) = audio.loop_end {
-        check_value("loop end", end, end.is_finite() && end > audio.loop_start)?;
+    if audio.warp || !audio.warp_markers.is_empty() {
+        audio.warp_map()?;
     }
     check_value("clip gain", audio.gain, at_least_zero(audio.gain))?;
     check_value(
@@ -3811,6 +4144,10 @@ fn check_one_device(device: &Device) -> Result<(), ModelError> {
     }
     for value in device.params.values().chain(device.other_params().values()) {
         check_value("parameter value", *value, value.is_finite())?;
+    }
+    crate::modulator::check_mappings(device)?;
+    if let Some(shape) = &device.shape {
+        crate::modulator::check_shape(shape)?;
     }
     if !device.can_compare() && (device.b_active || device.other_params.is_some()) {
         return Err(ModelError::NoCompare(device.id));
@@ -3928,6 +4265,7 @@ mod tests {
     use crate::ids::ContentHash;
     use crate::scene::DEFAULT_SCENE_COUNT;
     use crate::track::Routing;
+    use crate::warp::WarpMarker;
 
     /// A document and the allocator for its IDs.
     struct Song {
@@ -4567,8 +4905,8 @@ mod tests {
         let mut song = Song::new();
         let track = song.track(TrackKind::Audio, None);
         let clip = song.clip(track, 0);
-        let audio = |song: &Song| match song.doc.clip(clip).unwrap().data {
-            ClipData::Audio(audio) => audio,
+        let audio = |song: &Song| match &song.doc.clip(clip).unwrap().data {
+            ClipData::Audio(audio) => audio.clone(),
             ClipData::Midi(_) => unreachable!("an audio clip"),
         };
         // A new clip plays the whole file once, at 0 dB, with no fades.
@@ -4578,12 +4916,14 @@ mod tests {
             clip,
             start: 0.5,
             end: Some(2.0),
+            ticks: false,
         })
         .unwrap();
         song.apply(Command::SetClipLoop {
             clip,
             start: 1.0,
             end: Some(1.5),
+            ticks: false,
         })
         .unwrap();
         song.apply(Command::SetClipLoopEnabled {
@@ -4621,11 +4961,13 @@ mod tests {
                 clip,
                 start: -0.1,
                 end: None,
+                ticks: false,
             },
             Command::SetClipRegion {
                 clip,
                 start: 1.0,
                 end: Some(1.0),
+                ticks: false,
             },
             // The Start marker must stay before the loop's end while the
             // loop is on.
@@ -4633,16 +4975,19 @@ mod tests {
                 clip,
                 start: 1.5,
                 end: None,
+                ticks: false,
             },
             Command::SetClipLoop {
                 clip,
                 start: 0.25,
                 end: Some(0.5),
+                ticks: false,
             },
             Command::SetClipLoop {
                 clip,
                 start: f64::NAN,
                 end: None,
+                ticks: false,
             },
             Command::SetClipGain {
                 clip,
@@ -4676,6 +5021,7 @@ mod tests {
             clip,
             start: 1.75,
             end: None,
+            ticks: false,
         })
         .unwrap();
         // And then the loop can't come on.
@@ -4798,7 +5144,7 @@ mod tests {
         assert_eq!(EDGE_FADE, 0.004);
         let plain = AudioData::new(ContentHash([1; 32]));
         assert_eq!((plain.fade_in, plain.fade_out), (0.0, 0.0));
-        let faded = plain.with_edge_fades();
+        let faded = plain.clone().with_edge_fades();
         assert_eq!((faded.fade_in, faded.fade_out), (EDGE_FADE, EDGE_FADE));
         assert_eq!(
             AudioData {
@@ -4933,8 +5279,8 @@ mod tests {
         let mut song = Song::new();
         let track = song.track(TrackKind::Audio, None);
         let clip = song.clip(track, 4);
-        let audio = |song: &Song| match song.doc.clip(clip).unwrap().data {
-            ClipData::Audio(audio) => audio,
+        let audio = |song: &Song| match &song.doc.clip(clip).unwrap().data {
+            ClipData::Audio(audio) => audio.clone(),
             ClipData::Midi(_) => unreachable!("an audio clip"),
         };
         // At 120 BPM a quarter note is half a second: trimming two quarters
@@ -4992,6 +5338,7 @@ mod tests {
             clip,
             start: 0.0,
             end: Some(1.5),
+            ticks: false,
         })
         .unwrap();
         song.apply(Command::TrimClipStart {
@@ -5007,6 +5354,7 @@ mod tests {
                 clip,
                 start: 2.0,
                 end: Some(1.5),
+                ticks: false,
             }),
             ModelError::InvalidValue { .. }
         ));
@@ -5026,6 +5374,89 @@ mod tests {
             }),
             ModelError::AudioClipOffset(Ticks::QUARTER)
         );
+    }
+
+    // Spec: warping R5. A warped clip's markers are ticks of its contents,
+    // so a trim or a split moves the Start marker by the ticks the edge
+    // moved and a loop wraps it exactly.
+    #[test]
+    fn trimming_and_splitting_a_warped_clip_move_its_start_marker_in_ticks() {
+        let q = Ticks::QUARTER.get();
+        let tempo = TempoMap::default();
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        let clip = song.fresh();
+        // The file's start falls a quarter note before 1.1.1: one marker at
+        // half a second, at 120 BPM.
+        let warped = AudioData {
+            warp: true,
+            warp_markers: vec![WarpMarker {
+                time: 0.5,
+                beat: Ticks::ZERO,
+            }],
+            tempo: Some(120.0),
+            looping: true,
+            loop_start: 0.0,
+            loop_end: Some(4.0 * q as f64),
+            ..AudioData::new(ContentHash([7; 32]))
+        };
+        let start = Ticks::WHOLE;
+        song.apply(Command::CreateClip {
+            track,
+            clip: Clip::new(
+                clip,
+                start,
+                Ticks::WHOLE * 12,
+                ClipData::Audio(warped.clone()),
+            ),
+        })
+        .unwrap();
+        let marker = |song: &Song| match &song.doc.clip(clip).unwrap().data {
+            ClipData::Audio(audio) => audio.start,
+            ClipData::Midi(_) => unreachable!("an audio clip"),
+        };
+        let trim = |song: &mut Song, to: Ticks| {
+            song.apply(Command::TrimClipStart { clip, start: to })
+                .unwrap();
+        };
+        // Within the brace: the marker moves by the ticks, exactly.
+        trim(&mut song, start + Ticks(q + 12_345));
+        assert_eq!(marker(&song), (q + 12_345) as f64);
+        // Past the brace's end, it wraps by whole lengths of it.
+        trim(&mut song, start + Ticks(4 * q + 3));
+        assert_eq!(marker(&song), 3.0, "one loop on");
+        trim(&mut song, start + Ticks(9 * q + 7));
+        assert_eq!(marker(&song), (q + 7) as f64, "two loops and a quarter on");
+        // Back to the left, down to the start of the file and no further:
+        // that is a quarter note before the Start marker's beat 0.
+        let earliest = song.doc.clip(clip).unwrap().earliest_start(&tempo);
+        trim(&mut song, earliest);
+        assert_eq!(marker(&song), -(q as f64));
+        song.reject(Command::TrimClipStart {
+            clip,
+            start: earliest - Ticks(1),
+        });
+        // A split plays what the whole did: the part's marker is the whole's
+        // moved by the ticks, with no float error however far it goes.
+        let whole = Clip::new(clip, start, Ticks::WHOLE * 12, ClipData::Audio(warped));
+        for at in [1, 4 * q + 5, 7 * q + 1, 40 * q + 123_457] {
+            let part = whole.part(start + Ticks(at), whole.end(), &tempo);
+            let ClipData::Audio(moved) = &part.data else {
+                unreachable!("an audio clip");
+            };
+            let length = 4 * q;
+            let expected = if at < length {
+                at
+            } else {
+                (at - length) % length
+            };
+            assert_eq!(moved.start, expected as f64, "split {at} ticks in");
+            // The waveform carries on, until a wrap moves the marker round:
+            // the file starts where it did.
+            if at < length {
+                assert_eq!(part.origin(&tempo), whole.origin(&tempo));
+            }
+        }
     }
 
     // Spec: audio-clips R16. As observed in Live 12.4.6: a looped clip
@@ -5050,11 +5481,11 @@ mod tests {
                 clip,
                 Ticks::ZERO,
                 Ticks::WHOLE * 24,
-                ClipData::Audio(looped),
+                ClipData::Audio(looped.clone()),
             ),
         })
         .unwrap();
-        let start = |song: &Song| match song.doc.clip(clip).unwrap().data {
+        let start = |song: &Song| match &song.doc.clip(clip).unwrap().data {
             ClipData::Audio(audio) => audio.start,
             ClipData::Midi(_) => unreachable!("an audio clip"),
         };
@@ -5077,7 +5508,7 @@ mod tests {
         // know, so the marker can't wrap.
         let to_end = AudioData {
             loop_end: None,
-            ..looped
+            ..looped.clone()
         };
         let whole = Clip::new(
             clip,
@@ -5125,7 +5556,7 @@ mod tests {
             ClipId(Id::new(9).unwrap()),
             Ticks::WHOLE,
             Ticks::WHOLE * 2,
-            ClipData::Audio(audio),
+            ClipData::Audio(audio.clone()),
         );
         let at = Ticks::WHOLE * 2 + Ticks::QUARTER;
         let part = whole.part(at, whole.end(), &tempo);
@@ -5432,6 +5863,7 @@ mod tests {
             device,
             params: params.clone(),
             name: "Warm".to_owned(),
+            shape: None,
         })
         .unwrap();
         let loaded = song.doc.device(device).unwrap();
@@ -5443,6 +5875,7 @@ mod tests {
                 device,
                 params: bad,
                 name: String::new(),
+                shape: None,
             }),
             ModelError::InvalidValue { .. }
         ));
@@ -7313,6 +7746,7 @@ mod tests {
             device,
             params: [(ParamId(2), 1.0)].into_iter().collect(),
             name: String::new(),
+            shape: None,
         })
         .unwrap();
         let d = song.doc.device(device).unwrap();

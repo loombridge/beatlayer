@@ -50,6 +50,13 @@ pub const LOAD_PRESET: &str = "device.load_preset";
 /// `device.load_sample`: load an audio file into a device that plays one
 /// sample (WP-2.16).
 pub const LOAD_SAMPLE: &str = "device.load_sample";
+/// `device.swap_to_snapshot`: replace a Strike drum sampler with the Snapshot
+/// sampler, keeping its sample's start and length (one-shot drum sampler
+/// R22).
+pub const SWAP_TO_SNAPSHOT: &str = "device.swap_to_snapshot";
+/// `device.select_slot`: select a sample slot of a device that has them
+/// (WP-5.17).
+pub const SELECT_SLOT: &str = "device.select_slot";
 /// `device.hot_swap`: start or end hot-swapping a device's presets.
 pub const HOT_SWAP: &str = "device.hot_swap";
 /// `device.parameters`: a device's parameters, described, with their values.
@@ -63,6 +70,9 @@ pub const DISPLAY: &str = "device.display";
 /// (WP-5.43).
 pub const SET_DISPLAY_VIEW: &str = "device.set_display_view";
 
+/// `modulator.arm_map`: arm or disarm a modulator slot's Map button
+/// (WP-5.10).
+pub const ARM_MAP: &str = "modulator.arm_map";
 /// `device.group`: wrap the selected devices, or chains, in a new rack
 /// (WP-5.1).
 pub const GROUP: &str = "device.group";
@@ -108,11 +118,14 @@ pub const IDS: &[&str] = &[
     SAVE_DEFAULT_PRESET,
     LOAD_PRESET,
     LOAD_SAMPLE,
+    SWAP_TO_SNAPSHOT,
+    SELECT_SLOT,
     HOT_SWAP,
     PARAMETERS,
     SHOW_SIDECHAIN,
     DISPLAY,
     SET_DISPLAY_VIEW,
+    ARM_MAP,
     WINDOWS,
     SET_WINDOW,
     GROUP,
@@ -248,6 +261,17 @@ pub struct DevicePanel {
     /// target that opens the plug-in's editor. False for a native device.
     #[serde(default)]
     pub plugin: bool,
+    /// For a device with sample slots (WP-5.17): the slot whose controls
+    /// the panel shows, a view setting that isn't saved with the set.
+    #[serde(default)]
+    pub selected_slot: u32,
+    /// For a device with sample slots: whether each slot holds a sample.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub loaded_slots: Vec<bool>,
+    /// For a device with sample slots: the key each slot plays, as Live
+    /// names notes (`C3`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub slot_keys: Vec<String>,
 }
 
 impl DevicePanel {
@@ -360,6 +384,11 @@ pub struct DeviceFrame {
     /// into it (`device.load_sample`, WP-2.16).
     #[serde(default)]
     pub takes_sample: bool,
+    /// Whether its type is the drum sampler, whose context menu offers the
+    /// swap to Snapshot and Save as Default Pad (`device.swap_to_snapshot`,
+    /// one-shot drum sampler R23).
+    #[serde(default)]
+    pub swaps_to_snapshot: bool,
     /// Whether its title shows its preset's or given name.
     pub show_preset_name: bool,
     /// Whether it's folded to its title bar.
@@ -393,6 +422,38 @@ pub struct DeviceFrame {
     /// of its description's `views`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_view: Option<String>,
+    /// For a modulator, what it maps and which Map button is armed
+    /// (WP-5.10).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modulator: Option<ModulatorFrame>,
+}
+
+/// What a modulator's panel shows beside its parameters (WP-5.10; the
+/// modulation spec, R15, R19, R23).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ModulatorFrame {
+    /// Its mappings, by slot.
+    pub mappings: Vec<MappingRow>,
+    /// The slot whose Map button is lit, while a click on a parameter maps
+    /// it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub armed: Option<u8>,
+    /// A Curve Mod's breakpoint shape (the default one until it is edited);
+    /// left out for a modulator that has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shape: Option<Vec<bl_model::modulator::ShapePoint>>,
+}
+
+/// One slot's mapping as its panel names it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct MappingRow {
+    /// The slot, from 0 to 7.
+    pub slot: u8,
+    /// The parameter it maps.
+    pub target: bl_model::modulator::ModTarget,
+    /// The target's device and parameter, or track and control, by name,
+    /// as the slot shows them.
+    pub label: String,
 }
 
 impl DeviceFrame {
@@ -499,6 +560,19 @@ pub struct DeviceViewState {
     pub hot_swap: Option<HotSwap>,
     /// Whether the clipboard holds a device to paste.
     pub can_paste: bool,
+    /// The Map button that is lit, on any track: a click on any parameter's
+    /// control maps it to the slot (WP-5.10).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub armed_map: Option<ArmedMap>,
+}
+
+/// A lit Map button.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ArmedMap {
+    /// The modulator.
+    pub device: DeviceId,
+    /// Its slot.
+    pub slot: u8,
 }
 
 /// Hot-swapping, while it lasts.
@@ -734,6 +808,22 @@ pub struct LoadSampleArgs {
     pub device: Option<DeviceId>,
     /// The audio file to load into the device.
     pub path: String,
+    /// The sample slot to load it into, counted from 0; the slot the
+    /// panel has selected for a device with several, and 0 for one with
+    /// one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot: Option<u8>,
+}
+
+/// Arguments of `device.select_slot`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SelectSlotArgs {
+    /// The device; the selected one if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The slot, counted from 0.
+    pub slot: u32,
 }
 
 /// What `device.load_sample` returns.
@@ -744,6 +834,9 @@ pub struct LoadSampleResult {
     /// The sample's media, by content hash: what the device and the set
     /// name it by.
     pub media: ContentHash,
+    /// The slot that took it, counted from 0.
+    #[serde(default)]
+    pub slot: u8,
     /// The file's name, for messages.
     pub name: String,
 }
@@ -770,6 +863,20 @@ pub struct ShowSidechainArgs {
     /// Show (true) or hide (false); switches if left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shown: Option<bool>,
+}
+
+/// Arguments of `modulator.arm_map`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ArmMapArgs {
+    /// The modulator; the selected device if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The slot, from 0 to 7.
+    pub slot: u8,
+    /// Arm (true) or disarm (false); switches if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub armed: Option<bool>,
 }
 
 /// Arguments of `device.set_display_view`.
@@ -949,16 +1056,45 @@ fn specs() -> Vec<CommandSpec> {
             .result::<PresetResult>(),
         CommandSpec::new(LOAD_SAMPLE, "Load Sample")
             .description(
-                "Loads an audio file into a device that plays one sample (the sampler), as \
-                 dropping the file on the device does: the file goes into the set's media \
-                 store, named by its content hash, and the device keeps that reference, so the \
-                 set reopens playing it. One undo step, named Load Sample. Reads a file outside \
-                 the project. A device whose type doesn't play a sample is refused.",
+                "Loads an audio file into a device that plays samples (the sampler, or the \
+                 eight-slot drum sampler), as dropping the file on the device does: the file \
+                 goes into the set's media store, named by its content hash, and the device \
+                 keeps that reference, so the set reopens playing it. `slot` says which of a \
+                 device's sample slots takes it (counted from 0); left out, it is the slot \
+                 selected in the panel, or the only one. One undo step, named Load Sample. \
+                 Reads a file outside the project. A device whose type doesn't play a sample, \
+                 or a slot it doesn't have, is refused. `device.set_sample` with a null `media` \
+                 clears a slot.",
             )
             .permission(Permission::External)
             .context(DeviceView)
             .args::<LoadSampleArgs>()
             .result::<LoadSampleResult>(),
+        CommandSpec::new(SWAP_TO_SNAPSHOT, "Swap to Snapshot")
+            .description(
+                "Replaces a Strike drum sampler with the Snapshot sampler in One-Shot mode, as \
+                 Strike's context menu does: the new device takes the old one's place, sample, \
+                 and on or off state, and keeps its sample's Start and Length; every other \
+                 setting is Snapshot's default. One undo step, named Swap to Snapshot, and the \
+                 new device is selected. A device that isn't a Strike drum sampler is refused.",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<DeviceArgs>()
+            .result::<DeviceAdded>(),
+        CommandSpec::new(SELECT_SLOT, "Select Sample Slot")
+            .description(
+                "Selects one of a device's sample slots, as clicking its cell in the panel \
+                 does: the panel then shows that slot's controls, and a sample loaded without \
+                 naming a slot goes into it. Only a device with sample slots has any (the \
+                 eight-slot drum sampler has eight, counted from 0). It changes only the \
+                 view: it isn't an undo step, and isn't saved with the set. The selected slot \
+                 is `selected_slot` in the device's panel (`device.state`).",
+            )
+            .permission(Permission::Read)
+            .context(DeviceView)
+            .args::<SelectSlotArgs>()
+            .result::<DeviceViewState>(),
         CommandSpec::new(HOT_SWAP, "Hot-Swap Presets")
             .description(
                 "Starts or ends hot-swapping a device's presets, as the title bar's Hot-Swap \
@@ -1093,6 +1229,20 @@ fn specs() -> Vec<CommandSpec> {
             .permission(Permission::Read)
             .context(DeviceView)
             .args::<SetDisplayViewArgs>()
+            .result::<DeviceViewState>(),
+        CommandSpec::new(ARM_MAP, "Map")
+            .description(
+                "Lights or puts out a modulator slot's Map button, as clicking it does. While \
+                 one is lit, every parameter in the set that can be mapped is tinted, and \
+                 clicking one maps it to the slot (`modulator.map`); Esc, or the button again \
+                 (`armed`: false), puts it out and changes nothing. Lighting a button puts out \
+                 the one that was lit. It changes only the view: it isn't an undo step, and \
+                 `device_view.state` reports the lit button in `armed_map`. Only a modulator \
+                 has slots.",
+            )
+            .permission(Permission::Read)
+            .context(DeviceView)
+            .args::<ArmMapArgs>()
             .result::<DeviceViewState>(),
         CommandSpec::new(WINDOWS, "Floating Device Windows")
             .description(

@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-365 commands in 33 areas.
+379 commands in 34 areas.
 
 ## Permission classes
 
@@ -135,11 +135,15 @@ Each command has:
 | [`clip.delete`](#clipdelete) | Delete Clip | `destructive` |  |  |
 | [`clip.delete_envelope`](#clipdelete_envelope) | Clear Envelope | `edit` |  |  |
 | [`clip.delete_envelope_breakpoint`](#clipdelete_envelope_breakpoint) | Delete Envelope Breakpoint | `edit` |  |  |
+| [`clip.delete_warp_markers`](#clipdelete_warp_markers) | Delete Warp Markers | `edit` |  |  |
+| [`clip.insert_warp_marker`](#clipinsert_warp_marker) | Insert Warp Marker | `edit` |  |  |
 | [`clip.move`](#clipmove) | Move Clip | `edit` |  |  |
 | [`clip.move_by`](#clipmove_by) | Move Clips | `edit` |  |  |
 | [`clip.move_envelope_breakpoint`](#clipmove_envelope_breakpoint) | Move Envelope Breakpoint | `edit` |  |  |
 | [`clip.move_to_slot`](#clipmove_to_slot) | Move Clip to Slot | `edit` |  |  |
+| [`clip.move_warp_markers`](#clipmove_warp_markers) | Move Warp Markers | `edit` |  |  |
 | [`clip.rename`](#cliprename) | Rename Clip | `edit` | `Cmd+R` | `Ctrl+R` |
+| [`clip.scale_tempo`](#clipscale_tempo) | Scale Clip Tempo | `edit` |  |  |
 | [`clip.set_data`](#clipset_data) | Replace Clip Contents | `edit` |  |  |
 | [`clip.set_envelope_breakpoint`](#clipset_envelope_breakpoint) | Add Envelope Breakpoint | `edit` |  |  |
 | [`clip.set_envelope_curve`](#clipset_envelope_curve) | Curve Envelope Segment | `edit` |  |  |
@@ -156,7 +160,10 @@ Each command has:
 | [`clip.set_midi_region`](#clipset_midi_region) | Set MIDI Clip Start and End | `edit` |  |  |
 | [`clip.set_mute`](#clipset_mute) | Activate/Deactivate Clip | `edit` | `0` | `0` |
 | [`clip.set_region`](#clipset_region) | Set Clip Start and End | `edit` |  |  |
+| [`clip.set_segment_bpm`](#clipset_segment_bpm) | Set Warp Segment BPM | `edit` |  |  |
 | [`clip.set_velocity_amount`](#clipset_velocity_amount) | Set Clip Velocity Amount | `edit` |  |  |
+| [`clip.set_warp`](#clipset_warp) | Clip Warp On/Off | `edit` |  |  |
+| [`clip.shift_warp_marker`](#clipshift_warp_marker) | Shift Warp Marker | `edit` |  |  |
 | [`clip.trim_start`](#cliptrim_start) | Trim Clip Start | `edit` |  |  |
 | [`clip_view.quantize_settings`](#clip_viewquantize_settings) | Quantize Settings | `read` |  |  |
 | [`clip_view.select_notes`](#clip_viewselect_notes) | Select Notes | `read` |  |  |
@@ -184,6 +191,7 @@ Each command has:
 | [`device.save_default_preset`](#devicesave_default_preset) | Save as Default Preset | `external` |  |  |
 | [`device.save_preset`](#devicesave_preset) | Save Preset | `external` |  |  |
 | [`device.select`](#deviceselect) | Select Device | `read` |  |  |
+| [`device.select_slot`](#deviceselect_slot) | Select Sample Slot | `read` |  |  |
 | [`device.set_display_view`](#deviceset_display_view) | Set Display View | `read` |  |  |
 | [`device.set_enabled`](#deviceset_enabled) | Activate/Deactivate Device | `edit` |  |  |
 | [`device.set_enabled_all`](#deviceset_enabled_all) | Switch Device and Contents | `edit` | `Option+click a device activator` | `Alt+click a device activator` |
@@ -199,6 +207,7 @@ Each command has:
 | [`device.set_state`](#deviceset_state) | Set Device State | `edit` |  |  |
 | [`device.set_window`](#deviceset_window) | Move Device Window | `read` |  |  |
 | [`device.show_sidechain`](#deviceshow_sidechain) | Show Sidechain | `read` |  |  |
+| [`device.swap_to_snapshot`](#deviceswap_to_snapshot) | Swap to Snapshot | `edit` |  |  |
 | [`device.ungroup`](#deviceungroup) | Ungroup | `edit` | `Cmd+Shift+G` | `Ctrl+Shift+G` |
 | [`device.unwrap_rack`](#deviceunwrap_rack) | Take a Rack Apart | `edit` |  |  |
 | [`device.windows`](#devicewindows) | Floating Device Windows | `read` |  |  |
@@ -216,6 +225,7 @@ Each command has:
 | [`focus.previous_neighbor`](#focusprevious_neighbor) | Previous Neighbor | `read` | `Option+Shift+Tab` | `Ctrl+Shift+Tab` |
 | [`focus.toggle_tab_navigation`](#focustoggle_tab_navigation) | Use Tab Key to Move Focus | `read` |  |  |
 | [`focus.toggle_wrap_navigation`](#focustoggle_wrap_navigation) | Wrap Keyboard Navigation | `read` |  |  |
+| [`midi.capture`](#midicapture) | Capture MIDI | `edit` |  |  |
 | [`midi.computer_keyboard_key`](#midicomputer_keyboard_key) | Computer Keyboard Key | `read` |  |  |
 | [`midi.computer_keyboard_octave`](#midicomputer_keyboard_octave) | Computer Keyboard Octave | `read` |  |  |
 | [`midi.computer_keyboard_velocity`](#midicomputer_keyboard_velocity) | Computer Keyboard Velocity | `read` |  |  |
@@ -247,6 +257,10 @@ Each command has:
 | [`mixer_view.toggle`](#mixer_viewtoggle) | Mixer | `read` | `Cmd+Option+M` | `Ctrl+Alt+M` |
 | [`mixer_view.volume`](#mixer_viewvolume) | Mixer Volume | `read` |  |  |
 | [`modulation.state`](#modulationstate) | Modulation State | `read` |  |  |
+| [`modulator.arm_map`](#modulatorarm_map) | Map | `read` |  |  |
+| [`modulator.map`](#modulatormap) | Map Modulator | `edit` |  |  |
+| [`modulator.set_shape`](#modulatorset_shape) | Edit Shape | `edit` |  |  |
+| [`modulator.unmap`](#modulatorunmap) | Unmap Modulator | `edit` |  |  |
 | [`note.add`](#noteadd) | Add Note | `edit` |  |  |
 | [`note.delete`](#notedelete) | Delete Notes | `destructive` |  |  |
 | [`note.move`](#notemove) | Move Notes | `edit` |  |  |
@@ -1760,7 +1774,7 @@ Result: nothing (`null`).
 
 **Load Selected Item**. Permission: `external`. Contexts: `browser`.
 
-Loads the browser's selected audio files into the Arrangement, as Enter or a double-click does: onto the selected track at the insert marker if it's an audio track, otherwise onto a new audio track below the last one, one after another, as one undo step. A clip placed over part of another replaces that part, so when a clip on that track ends after the insert marker it's destructive as well as external. Reads the files, outside the project.
+Loads the browser's selected audio files into the Arrangement, as Enter or a double-click does: onto the selected track at the insert marker if it's an audio track, otherwise onto a new audio track below the last one, one after another, as one undo step. A clip placed over part of another replaces that part, so when a clip on that track ends after the insert marker it's destructive as well as external. While a device is being hot-swapped (`device.hot_swap`), a selected preset loads into it instead, and so does a selected audio file, if the device plays samples (the sampler, or the eight-slot drum sampler, into its selected slot: `device.load_sample`). Reads the files, outside the project.
 
 Default keys:
 
@@ -2244,6 +2258,41 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `clip.delete_warp_markers`
+
+**Delete Warp Markers**. Permission: `edit`. Contexts: `clip-view`.
+
+Deletes the warp markers named in `markers` (their place in the map, the first being 0) of each of the warped audio clips `clips`, which must hold files of the same length: the segments either side of each join into one straight segment. Deleting the last marker leaves the audio after the new last one at the clip's tempo. A warped clip keeps at least one marker: deleting them all is refused.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clips` | array of [`ClipId`](#clipid) | yes | The warped audio clips: their files must be as long as each other's. |
+| `markers` | array of integer, at least 0 | yes | The markers to delete, by their place in the map, the first being 0. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `clip.insert_warp_marker`
+
+**Insert Warp Marker**. Permission: `edit`. Contexts: `clip-view`.
+
+Adds a warp marker to each of the warped audio clips `clips`, which must hold files of the same length: at a `beat` of the clip's contents (ticks from its 1.1.1, negative before it), at the time in the file the map already places there, or at a `time` in the file (seconds), on the beat the map already places it. Give one of the two. Nothing moves; the audio either side stays where it is. Inserting where a marker is already changes nothing. Markers are named by their place in the map (`data.audio.warp_markers`), the first being 0. The edit is made to every clip in one undo step, or to none if it's refused for one.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clips` | array of [`ClipId`](#clipid) | yes | The warped audio clips: their files must be as long as each other's. |
+| `beat` | [`Ticks`](#ticks) or null | no | The beat, in ticks from the clip's 1.1.1, to put the marker on, at the time in the file the map already places there. Give this or `time`. |
+| `time` | number or null | no | The time in the file, in seconds, to put the marker at, on the beat the map already places it. Give this or `beat`. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `clip.move`
 
 **Move Clip**. Permission: `edit`. Contexts: `arrangement`.
@@ -2317,6 +2366,24 @@ Arguments:
 
 Result: [`ChangeSet`](#changeset).
 
+#### `clip.move_warp_markers`
+
+**Move Warp Markers**. Permission: `edit`. Contexts: `clip-view`.
+
+Moves the warp markers named in `markers` (their place in the map, the first being 0) of each of the warped audio clips `clips`, which must hold files of the same length, by the same number of ticks `by` (negative moves them earlier). Each keeps its time in the file, so the audio either side of it stretches or squeezes to fit. Refused, changing nothing, if a marker would pass or reach a neighbour that isn't moving with it. Moving the last marker sets the clip's tempo to the new last segment's, so the audio after it carries on at that speed.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clips` | array of [`ClipId`](#clipid) | yes | The warped audio clips: their files must be as long as each other's. |
+| `markers` | array of integer, at least 0 | yes | The markers to move, by their place in the map, the first being 0. |
+| `by` | [`Ticks`](#ticks) | yes | How far to move them, in ticks: negative moves them earlier. |
+
+Result: [`ChangeSet`](#changeset).
+
 #### `clip.rename`
 
 **Rename Clip**. Permission: `edit`. Contexts: `arrangement`.
@@ -2335,6 +2402,23 @@ Arguments:
 |---|---|---|---|
 | `clip` | [`ClipId`](#clipid) | yes | The clip. |
 | `name` | string | yes | The new name. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `clip.scale_tempo`
+
+**Scale Clip Tempo**. Permission: `edit`. Contexts: `clip-view`.
+
+Multiplies every segment's tempo and the clip's own tempo of a warped audio clip by `factor`: 2 is Live's ×2 and 0.5 its ÷2, which correct a tempo found at half or double. Each marker's distance in ticks from the first marker is multiplied by it, and the Start and End markers and loop brace move with them about the first marker, so each keeps its place in the audio. The clip's place and length in the arrangement don't change. Refused if the clip's tempo would leave 1 to 1,000 BPM.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The warped audio clip. |
+| `factor` | number | yes | What to multiply by: 2 for ×2, 0.5 for ÷2. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -2518,7 +2602,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Set Clip Loop**. Permission: `edit`. Contexts: `clip-view`.
 
-Moves an audio clip's loop brace, in seconds into its audio file (`end` `null` for the end of the file), as the Clip View's loop Position and Length fields do. It doesn't switch the loop on or off: use `clip.set_loop_enabled`. While the loop is on, the clip plays from its Start marker into the brace, then repeats the brace until the clip ends in the arrangement; make the clip longer with `clip.set_length` to hear more repeats. A new clip's brace is the whole file.
+Moves an audio clip's loop brace, in seconds into its audio file for an unwarped clip or in ticks of its contents (`ticks` true) for a warped one (a command in the other form is refused; `end` `null` for the end of the file), as the Clip View's loop Position and Length fields do. It doesn't switch the loop on or off: use `clip.set_loop_enabled`. While the loop is on, the clip plays from its Start marker into the brace, then repeats the brace until the clip ends in the arrangement; make the clip longer with `clip.set_length` to hear more repeats. A new clip's brace is the whole file.
 
 Default keys: none.
 
@@ -2527,8 +2611,9 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `clip` | [`ClipId`](#clipid) | yes | The audio clip. |
-| `start` | number, at least 0 | yes | Where the brace starts, in seconds into the file: 0 or more. |
+| `start` | number | yes | Where the brace starts, in seconds into the file: 0 or more. A warped clip's is whole ticks of its contents (`ticks` true). |
 | `end` | number or null | no | Where it ends, in seconds into the file, after `start`; `null` (or nothing) for the end of the file. |
+| `ticks` | boolean | no | Whether `start` and `end` are ticks of a warped clip's contents instead of seconds in the file of an unwarped one: they must be the form the clip shows. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -2610,7 +2695,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Set Clip Start and End**. Permission: `edit`. Contexts: `clip-view`.
 
-Moves an audio clip's Start and End markers, in seconds into its audio file: the clip starts playing its file at `start` when the song reaches the clip, and, while its loop is off, plays until `end` (`null` for the end of the file) or the clip's own end in the arrangement, whichever comes first, then is silent. Clips play unwarped, at the file's own speed. While the loop is on, `start` must be before the loop's end. Use `clip.set_length` to change how long the clip lasts in the arrangement.
+Moves an audio clip's Start and End markers: the clip starts playing at `start` when the song reaches the clip, and, while its loop is off, plays until `end` (`null` for the end of the file) or the clip's own end in the arrangement, whichever comes first, then is silent. An unwarped clip plays at its file's own speed and its positions are seconds into the file (`ticks` false, the default). A warped clip (`clip.set_warp`) follows the set's tempo and its positions are ticks of its contents, from the clip's 1.1.1, with `ticks` true; a command in the other form is refused. While the loop is on, `start` must be before the loop's end. Use `clip.set_length` to change how long the clip lasts in the arrangement.
 
 Default keys: none.
 
@@ -2619,8 +2704,27 @@ Arguments:
 | Name | Type | Required | Description |
 |---|---|---|---|
 | `clip` | [`ClipId`](#clipid) | yes | The audio clip. |
-| `start` | number, at least 0 | yes | The Start marker, in seconds into the file: 0 or more. While the loop is on, it must be before the loop brace's end. |
+| `start` | number | yes | The Start marker, in seconds into the file: 0 or more. While the loop is on, it must be before the loop brace's end. A warped clip's is whole ticks of its contents (`ticks` true). |
 | `end` | number or null | no | The End marker, in seconds into the file, after `start`; `null` (or nothing) for the end of the file. |
+| `ticks` | boolean | no | Whether `start` and `end` are ticks of a warped clip's contents instead of seconds in the file of an unwarped one: they must be the form the clip shows. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `clip.set_segment_bpm`
+
+**Set Warp Segment BPM**. Permission: `edit`. Contexts: `clip-view`.
+
+Sets a warped audio clip's BPM field. With `marker` (its place in the map, the first being 0), `bpm` is the tempo of the segment that starts at that marker: every later marker moves by the same number of ticks, so that segment alone changes and each later one keeps its tempo; for the last marker it is the clip's own tempo, from 1 to 1,000. Without `marker`, `bpm` is the first segment's tempo (the clip's when there's one marker) and every tempo of the clip scales by the same factor, as `clip.scale_tempo` does.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The warped audio clip. |
+| `bpm` | number | yes | The tempo in BPM: positive, and from 1 to 1,000 for the clip's. |
+| `marker` | integer or null | no | The marker whose segment to set, by its place in the map, the first being 0: `null` (or nothing) for the first segment's tempo, which scales every segment. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -2638,6 +2742,41 @@ Arguments:
 |---|---|---|---|
 | `clip` | [`ClipId`](#clipid) | yes | The clip, which sits in a Session slot. |
 | `amount` | number from 0 to 1 | yes | 0 for no influence, up to 1 for 100 %. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `clip.set_warp`
+
+**Clip Warp On/Off**. Permission: `edit`. Contexts: `clip-view`.
+
+Switches an audio clip's Warp on or off. Off, the clip plays at its file's own speed whatever the set's tempo, and its Start and End markers and loop brace are seconds into the file. On, it follows the set's tempo through its warp map (`data.audio.warp_markers`: each pairs a time in the file with a beat, in ticks from the clip's 1.1.1, and `data.audio.tempo` is the speed of the file after the last marker), and its markers and brace are ticks of its contents. Switching on a clip that has no map gives it one marker at its Start marker on 1.1.1, at the set's tempo there, so it goes on playing at the speed it did; switching off keeps the map. Either way the markers and brace convert, so each keeps its place in the audio, and the clip keeps its place and length in the arrangement. Until warped playback arrives (Phase 4), a warped clip still plays at its file's own speed.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The audio clip. |
+| `warp` | boolean | yes | Whether the clip follows the set's tempo through its warp map. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `clip.shift_warp_marker`
+
+**Shift Warp Marker**. Permission: `edit`. Contexts: `clip-view`.
+
+Moves the time in the file of warp marker `marker` (its place in the map, the first being 0) of each of the warped audio clips `clips`, which must hold files of the same length, by `by` seconds (negative moves it earlier), keeping its beat: the waveform moves under the marker. Refused, changing nothing, if the marker would pass a neighbour or leave the file.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `clips` | array of [`ClipId`](#clipid) | yes | The warped audio clips: their files must be as long as each other's. |
+| `marker` | integer, at least 0 | yes | The marker, by its place in the map, the first being 0. |
+| `by` | number | yes | How far to move its time in the file, in seconds: negative moves it earlier. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -2962,7 +3101,7 @@ Result: [`PresetResult`](#presetresult).
 
 **Load Sample**. Permission: `external`. Contexts: `device-view`.
 
-Loads an audio file into a device that plays one sample (the sampler), as dropping the file on the device does: the file goes into the set's media store, named by its content hash, and the device keeps that reference, so the set reopens playing it. One undo step, named Load Sample. Reads a file outside the project. A device whose type doesn't play a sample is refused.
+Loads an audio file into a device that plays samples (the sampler, or the eight-slot drum sampler), as dropping the file on the device does: the file goes into the set's media store, named by its content hash, and the device keeps that reference, so the set reopens playing it. `slot` says which of a device's sample slots takes it (counted from 0); left out, it is the slot selected in the panel, or the only one. One undo step, named Load Sample. Reads a file outside the project. A device whose type doesn't play a sample, or a slot it doesn't have, is refused. `device.set_sample` with a null `media` clears a slot.
 
 Default keys: none.
 
@@ -2972,6 +3111,7 @@ Arguments:
 |---|---|---|---|
 | `path` | string | yes | The audio file to load into the device. |
 | `device` | [`DeviceId`](#deviceid) or null | no | The device; the selected one if left out. |
+| `slot` | integer or null | no | The sample slot to load it into, counted from 0; the slot the panel has selected for a device with several, and 0 for one with one. |
 
 Result: [`LoadSampleResult`](#loadsampleresult).
 
@@ -3139,6 +3279,23 @@ Arguments:
 
 Result: [`DeviceViewState`](#deviceviewstate).
 
+#### `device.select_slot`
+
+**Select Sample Slot**. Permission: `read`. Contexts: `device-view`.
+
+Selects one of a device's sample slots, as clicking its cell in the panel does: the panel then shows that slot's controls, and a sample loaded without naming a slot goes into it. Only a device with sample slots has any (the eight-slot drum sampler has eight, counted from 0). It changes only the view: it isn't an undo step, and isn't saved with the set. The selected slot is `selected_slot` in the device's panel (`device.state`).
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `slot` | integer, at least 0 | yes | The slot, counted from 0. |
+| `device` | [`DeviceId`](#deviceid) or null | no | The device; the selected one if left out. |
+
+Result: [`DeviceViewState`](#deviceviewstate).
+
 #### `device.set_display_view`
 
 **Set Display View**. Permission: `read`. Contexts: `device-view`.
@@ -3237,7 +3394,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Set Sample**. Permission: `edit`. Contexts: `device-view`.
 
-Sets the audio a device plays (`media`, a content hash, or null to play none), which the media store holds like a clip's audio. A device whose type plays a sample plays that file; other devices ignore it. The set keeps the reference, so it reopens playing the same file. To load a file from disk as a person does, use `device.load_sample`.
+Sets the audio a device plays (`media`, a content hash, or null to play none), which the media store holds like a clip's audio, in sample slot `slot` (counted from 0, and 0 unless given: the sampler has the one, the eight-slot drum sampler eight). A device whose type plays samples plays that file; other devices ignore it. The set keeps the reference, so it reopens playing the same file. Null clears the slot, one undo step named Clear Sample. To load a file from disk as a person does, use `device.load_sample`.
 
 Default keys: none.
 
@@ -3247,6 +3404,7 @@ Arguments:
 |---|---|---|---|
 | `device` | [`DeviceId`](#deviceid) | yes | The device. |
 | `media` | [`ContentHash`](#contenthash) or null | no | The media, by content hash, or `null` to play none. The media store is where the audio comes from; a device given media the store doesn't hold is silent. |
+| `slot` | integer from 0 to 255 | no | The sample slot to set: 0, the only one the sampler has, unless given; the eight-slot drum sampler's are 0 to 7 (WP-5.17). |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -3367,6 +3525,7 @@ Arguments:
 | `device` | [`DeviceId`](#deviceid) | yes | The device. |
 | `params` | array of pair of [`ParamId`](#paramid) and number | yes | The parameter values, as `[parameter, value]` pairs, each finite and each parameter once. |
 | `name` | string | yes | The name the title bar shows while Show Preset Name is on, such as the preset's; empty for the device's own name. |
+| `shape` | array or null | no | A Curve Mod's breakpoint shape (the modulation spec, R23), which a preset of one holds; `null` for the default shape. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -3403,6 +3562,22 @@ Arguments:
 | `shown` | boolean or null | no | Show (true) or hide (false); switches if left out. |
 
 Result: [`DeviceViewState`](#deviceviewstate).
+
+#### `device.swap_to_snapshot`
+
+**Swap to Snapshot**. Permission: `edit`. Contexts: `device-view`.
+
+Replaces a Strike drum sampler with the Snapshot sampler in One-Shot mode, as Strike's context menu does: the new device takes the old one's place, sample, and on or off state, and keeps its sample's Start and Length; every other setting is Snapshot's default. One undo step, named Swap to Snapshot, and the new device is selected. A device that isn't a Strike drum sampler is refused.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) or null | no | The device; the selected one if left out. |
+
+Result: [`DeviceAdded`](#deviceadded).
 
 #### `device.ungroup`
 
@@ -3691,6 +3866,18 @@ Arguments: none (send `{}`).
 Result: [`SwitchResult`](#switchresult).
 
 ### Area `midi`
+
+#### `midi.capture`
+
+**Capture MIDI**. Permission: `edit`. Contexts: `global`.
+
+Capture MIDI (Create ▸ Capture MIDI; the Control Bar's button). Brings back the notes played on the MIDI tracks that monitor their input, since the last capture or recording, as one clip on each track that was played, with their velocities and timing. A track with a clip playing while the transport runs gets the notes added to that clip: it grows to the loop pass the last note falls in and its loop moves there, keeping its length. Any other track gets a new clip in the selected scene's slot if it is empty, else the next empty slot below, else a scene added at the end; the clip's loop is the whole bars that cover its last phrase, from the first note-on to the last. With the transport stopped the first note is on 1.1.1 and the song's tempo may change to the played tempo; with it running the tempo stays. Control changes, pitch bend and pressure are not captured yet. Refused when no note was played; `transport.state` shows `capture_midi_ready`. One undo step.
+
+Default keys: none.
+
+Arguments: none (send `{}`).
+
+Result: [`Captured`](#captured).
 
 #### `midi.computer_keyboard_key`
 
@@ -4228,7 +4415,7 @@ Result: [`MixerViewState`](#mixerviewstate).
 
 **Modulation State**. Permission: `read`. Contexts: `global`.
 
-Reports the parameters a track's clips modulate (all tracks' when `track` is left out): for each, the track and the parameter (a mixer control, a send, or a device's parameter), its base (what its automation or its control sets), the value it played in the last block, and the clip envelopes modulating it, each with its value at the play position and what it contributes, as a share of the parameter's travel. A clip envelope modulates by a share: 0 to 1 for a volume or a send, which brings its level down to that share, and −1 to 1 for the rest. It reads back `clip.set_envelope_breakpoint` and the other clip envelope commands. Changes nothing.
+Reports the parameters a track's clips and the modulators act on (all tracks' when `track` is left out): for each, the track and the parameter (a mixer control, a send, or a device's parameter), its base (what its automation, a modulator in Remote Control or its control sets), the value it played in the last block, the clip envelopes modulating it, each with its value at the play position and what it contributes, as a share of the parameter's travel, the modulator slots mapping it (`modulators`), and the modulator that holds it in Remote Control (`held_by`). A clip envelope modulates by a share: 0 to 1 for a volume or a send, which brings its level down to that share, and −1 to 1 for the rest. It reads back `clip.set_envelope_breakpoint` and the other clip envelope commands, and `modulator.map`. Changes nothing.
 
 Default keys: none.
 
@@ -4239,6 +4426,78 @@ Arguments:
 | `track` | [`TrackId`](#trackid) or null | no | The track, or every track when left out. |
 
 Result: [`ModulationState`](#modulationstate).
+
+### Area `modulator`
+
+#### `modulator.arm_map`
+
+**Map**. Permission: `read`. Contexts: `device-view`.
+
+Lights or puts out a modulator slot's Map button, as clicking it does. While one is lit, every parameter in the set that can be mapped is tinted, and clicking one maps it to the slot (`modulator.map`); Esc, or the button again (`armed`: false), puts it out and changes nothing. Lighting a button puts out the one that was lit. It changes only the view: it isn't an undo step, and `device_view.state` reports the lit button in `armed_map`. Only a modulator has slots.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `slot` | integer from 0 to 255 | yes | The slot, from 0 to 7. |
+| `armed` | boolean or null | no | Arm (true) or disarm (false); switches if left out. |
+| `device` | [`DeviceId`](#deviceid) or null | no | The modulator; the selected device if left out. |
+
+Result: [`DeviceViewState`](#deviceviewstate).
+
+#### `modulator.map`
+
+**Map Modulator**. Permission: `edit`. Contexts: `device-view`.
+
+Maps one of a modulator's eight slots (`slot`, 0 to 7) to a parameter, as the slot's Map button and a click on the parameter's control do. `target` is a mixer control (`volume`, `pan` or `mute`) or a send of any track, or a parameter of any device on any track, but not a parameter of the modulator itself. The slot's earlier mapping is replaced; one modulator doesn't map one parameter twice. A modulator in Remote Control can't map a parameter another modulator in Remote Control holds. The mapping is saved with the set, goes with its target when that is deleted, and shows in the `mappings` field of the query tool's `device`. One undo step (Map Modulator).
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The modulator device. |
+| `slot` | integer from 0 to 255 | yes | The slot, from 0 to 7. |
+| `target` | [`ModTarget`](#modtarget) | yes | The parameter to map: a mixer control or send of any track, or a parameter of any device but the modulator's own. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `modulator.set_shape`
+
+**Edit Shape**. Permission: `edit`. Contexts: `device-view`.
+
+Replaces the breakpoint shape of a Curve Mod, as every edit of its display does (adding, moving, bending or deleting a breakpoint, Clear and the six presets). `points` lists up to 64 breakpoints in order along the cycle, each with `x` (its place, 0 to 1), `y` (the output there, 0 to 1) and `bend` (of the segment starting there, from -1 to 1, 0 straight). An empty list outputs 0. One undo step (Edit Shape).
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The Curve Mod device. |
+| `points` | array of [`ShapePoint`](#shapepoint) | yes | The breakpoints, in order along the cycle (at most 64), each with its place and output from 0 to 1 and the bend of the segment starting there, from −1 to 1. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `modulator.unmap`
+
+**Unmap Modulator**. Permission: `edit`. Contexts: `device-view`.
+
+Removes the mapping of a modulator's slot (`slot`, 0 to 7), as its Unmap button does: the parameter plays its own value again from the next frame. A slot with no mapping stays as it is. One undo step (Unmap Modulator).
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The modulator device. |
+| `slot` | integer from 0 to 255 | yes | The slot, from 0 to 7. |
+
+Result: [`ChangeSet`](#changeset).
 
 ### Area `note`
 
@@ -6796,11 +7055,15 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.delete`](#clipdelete) | the query tool's `track` | `clips` |
 | [`clip.delete_envelope`](#clipdelete_envelope) | the query tool's `clip` | `envelopes` |
 | [`clip.delete_envelope_breakpoint`](#clipdelete_envelope_breakpoint) | the query tool's `clip` | `envelopes` |
+| [`clip.delete_warp_markers`](#clipdelete_warp_markers) | the query tool's `clip` | `data.audio.warp_markers` |
+| [`clip.insert_warp_marker`](#clipinsert_warp_marker) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.move`](#clipmove) | the query tool's `clip` | `start` |
 | [`clip.move_by`](#clipmove_by) | the query tool's `clip` | `start` |
 | [`clip.move_envelope_breakpoint`](#clipmove_envelope_breakpoint) | the query tool's `clip` | `envelopes` |
 | [`clip.move_to_slot`](#clipmove_to_slot) | the query tool's `track` | `slots` |
+| [`clip.move_warp_markers`](#clipmove_warp_markers) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.rename`](#cliprename) | the query tool's `clip` | `name` |
+| [`clip.scale_tempo`](#clipscale_tempo) | the query tool's `clip` | `data.audio.tempo` |
 | [`clip.set_data`](#clipset_data) | the query tool's `clip` | `data` |
 | [`clip.set_envelope_breakpoint`](#clipset_envelope_breakpoint) | the query tool's `clip` | `envelopes` |
 | [`clip.set_envelope_curve`](#clipset_envelope_curve) | the query tool's `clip` | `envelopes` |
@@ -6817,7 +7080,10 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`clip.set_midi_region`](#clipset_midi_region) | the query tool's `clip` | `data.midi.start` |
 | [`clip.set_mute`](#clipset_mute) | the query tool's `clip` | `mute` |
 | [`clip.set_region`](#clipset_region) | the query tool's `clip` | `data.audio.start` |
+| [`clip.set_segment_bpm`](#clipset_segment_bpm) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.set_velocity_amount`](#clipset_velocity_amount) | the query tool's `clip` | `launch.velocity_amount` |
+| [`clip.set_warp`](#clipset_warp) | the query tool's `clip` | `data.audio.warp` |
+| [`clip.shift_warp_marker`](#clipshift_warp_marker) | the query tool's `clip` | `data.audio.warp_markers` |
 | [`clip.trim_start`](#cliptrim_start) | the query tool's `clip` | `offset` |
 | [`device.add`](#deviceadd) | the query tool's `track` | `devices` |
 | [`device.compare_copy`](#devicecompare_copy) | the query tool's `device` | `compare` |
@@ -6846,11 +7112,13 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`device.set_sidechain_listen`](#deviceset_sidechain_listen) | the query tool's `device` | `sidechain.listen` |
 | [`device.set_sidechain_mix`](#deviceset_sidechain_mix) | the query tool's `device` | `sidechain.mix` |
 | [`device.set_state`](#deviceset_state) | the query tool's `device` | `params` |
+| [`device.swap_to_snapshot`](#deviceswap_to_snapshot) | the query tool's `track` | `devices` |
 | [`device.ungroup`](#deviceungroup) | the query tool's `track` | `devices` |
 | [`device.unwrap_rack`](#deviceunwrap_rack) | the query tool's `track` | `devices` |
 | [`device.wrap_in_rack`](#devicewrap_in_rack) | the query tool's `track` | `devices` |
 | [`edit.redo`](#editredo) | the query tool's `song` | `undo.next_redo` |
 | [`edit.undo`](#editundo) | the query tool's `song` | `undo.next_undo` |
+| [`midi.capture`](#midicapture) | the query tool's `track` | `slots` |
 | [`midi.import_file`](#midiimport_file) | the query tool's `track` | `clips` |
 | [`midi.set_port`](#midiset_port) | `midi.ports` | `ports` |
 | [`midi.toggle_computer_keyboard`](#miditoggle_computer_keyboard) | `midi.ports` | `keyboard.on` |
@@ -6866,6 +7134,9 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`mixer.set_solo_in_place`](#mixerset_solo_in_place) | the query tool's `song` | `settings.solo_in_place` |
 | [`mixer.set_volume`](#mixerset_volume) | the query tool's `track` | `mixer.volume` |
 | [`mixer.solo_exclusive`](#mixersolo_exclusive) | the query tool's `track` | `mixer.solo` |
+| [`modulator.map`](#modulatormap) | the query tool's `device` | `mappings` |
+| [`modulator.set_shape`](#modulatorset_shape) | the query tool's `device` | `shape` |
+| [`modulator.unmap`](#modulatorunmap) | the query tool's `device` | `mappings` |
 | [`note.add`](#noteadd) | the query tool's `clip` | `data.midi.notes` |
 | [`note.delete`](#notedelete) | the query tool's `clip` | `data.midi.notes` |
 | [`note.move`](#notemove) | the query tool's `clip` | `data.midi.notes` |
@@ -7331,6 +7602,43 @@ What `perception.analyze` returns. A measure not asked for is null.
 
 </details>
 
+### `ArmedMap`
+
+A lit Map button.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The modulator. |
+| `slot` | integer from 0 to 255 | yes | Its slot. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A lit Map button.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The modulator."
+    },
+    "slot": {
+      "description": "Its slot.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "device",
+    "slot"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ArrangementState`
 
 What the Arrangement View shows: every view command returns it.
@@ -7643,7 +7951,11 @@ An audio clip's data: the audio file it plays, named by content hash, and how it
 | `loop_end` | number or null | no | Where the loop brace ends in the file, in seconds, after its start; `null` (or nothing) for the end of the file. While the loop is on, the Start marker must be before it. |
 | `loop_start` | number, at least 0 | no | Where the loop brace starts in the file, in seconds. 0 or more; 0 unless given. |
 | `looping` | boolean | no | The Loop switch: whether the clip repeats its loop brace. Off unless given. |
+| `signature` | [`TimeSignature`](#timesignature) or null | no | A warped clip's own time signature, the Clip View's Signature fields; `null` (or nothing) means the song's signature at the clip's start. |
 | `start` | number, at least 0 | no | The Start marker: where in the file, in seconds, the clip starts playing. 0 or more; 0 unless given. |
+| `tempo` | number or null | no | The clip's tempo in BPM, from 1 to 1,000: the speed of the file after the last warp marker (R2). Given whenever there are markers. |
+| `warp` | boolean | no | The Warp switch (the warping spec, R1): off unless given. On, the clip follows the set's tempo through its warp map, and `start`, `end`, `loop_start` and `loop_end` are whole ticks of its contents, counted from the clip's 1.1.1, instead of seconds in the file. |
+| `warp_markers` | array of [`WarpMarker`](#warpmarker) | no | The warp markers, in increasing order of both fields: a warped clip has at least one. Switching Warp off keeps them (R3). |
 
 <details><summary>JSON Schema</summary>
 
@@ -7699,11 +8011,43 @@ An audio clip's data: the audio file it plays, named by content hash, and how it
       "$ref": "#/$defs/ContentHash",
       "description": "The media file the clip plays, by content hash."
     },
+    "signature": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TimeSignature"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "A warped clip's own time signature, the Clip View's Signature fields; `null` (or nothing) means the song's signature at the clip's start."
+    },
     "start": {
       "description": "The Start marker: where in the file, in seconds, the clip starts playing. 0 or more; 0 unless given.",
       "format": "double",
       "minimum": 0.0,
       "type": "number"
+    },
+    "tempo": {
+      "description": "The clip's tempo in BPM, from 1 to 1,000: the speed of the file after the last warp marker (R2). Given whenever there are markers.",
+      "format": "double",
+      "maximum": 1000.0,
+      "minimum": 1.0,
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "warp": {
+      "description": "The Warp switch (the warping spec, R1): off unless given. On, the clip follows the set's tempo through its warp map, and `start`, `end`, `loop_start` and `loop_end` are whole ticks of its contents, counted from the clip's 1.1.1, instead of seconds in the file.",
+      "type": "boolean"
+    },
+    "warp_markers": {
+      "description": "The warp markers, in increasing order of both fields: a warped clip has at least one. Switching Warp off keeps them (R3).",
+      "items": {
+        "$ref": "#/$defs/WarpMarker"
+      },
+      "type": "array"
     }
   },
   "required": [
@@ -8557,6 +8901,93 @@ What `perception.capture_view` returns, beside the image.
     "mime_type",
     "bytes",
     "pixels_per_point"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `Captured`
+
+What `midi.capture` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clips` | array of [`CapturedClip`](#capturedclip) | yes | The clips, one for each track that was played. |
+| `tempo` | number or null | yes | The song's new tempo, when the capture changed it (only with the transport stopped); `null` when it stayed. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `midi.capture` returns.",
+  "properties": {
+    "clips": {
+      "description": "The clips, one for each track that was played.",
+      "items": {
+        "$ref": "#/$defs/CapturedClip"
+      },
+      "type": "array"
+    },
+    "tempo": {
+      "description": "The song's new tempo, when the capture changed it (only with the transport stopped); `null` when it stayed.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "clips",
+    "tempo"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `CapturedClip`
+
+One clip a capture made or changed.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track whose notes it holds. |
+| `scene` | [`SceneId`](#sceneid) | yes | The scene whose slot it is in. |
+| `clip` | [`ClipId`](#clipid) | yes | The clip. |
+| `merged` | boolean | yes | Whether the notes joined the clip that was playing, rather than making a new clip. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One clip a capture made or changed.",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The clip."
+    },
+    "merged": {
+      "description": "Whether the notes joined the clip that was playing, rather than making a new clip.",
+      "type": "boolean"
+    },
+    "scene": {
+      "$ref": "#/$defs/SceneId",
+      "description": "The scene whose slot it is in."
+    },
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "The track whose notes it holds."
+    }
+  },
+  "required": [
+    "track",
+    "scene",
+    "clip",
+    "merged"
   ],
   "type": "object"
 }
@@ -9448,6 +9879,7 @@ A band of controls, of a fixed size.
 | `width` | number | yes | Its width. |
 | `height` | number | yes | Its height. |
 | `controls` | array of [`Control`](#control) | yes | Its controls. |
+| `slots` | [`SlotGroup`](#slotgroup) or null | no | Set for a band that shows the selected sample slot's controls: its controls name the first slot's parameters, and the band is placed for the selected slot ([`DeviceLayout::place_for`]). |
 
 <details><summary>JSON Schema</summary>
 
@@ -9466,6 +9898,17 @@ A band of controls, of a fixed size.
       "description": "Its height.",
       "format": "float",
       "type": "number"
+    },
+    "slots": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SlotGroup"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Set for a band that shows the selected sample slot's controls: its controls name the first slot's parameters, and the band is placed for the selected slot ([`DeviceLayout::place_for`])."
     },
     "width": {
       "description": "Its width.",
@@ -9578,11 +10021,13 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 | `b_active` | boolean | no | Whether the device's B state is the active one, whose values [`params`](Self::params) holds (device compare R1). Left out of the saved set while A is active. |
 | `chains` | array of [`Chain`](#chain) | no | A rack's chains, in order (WP-5.1). Empty for every device that isn't a rack, and left out of the saved set then, so sets saved before racks load unchanged. |
 | `floating` | boolean | no | Whether the device floats in a window of its own rather than showing in the Device View (IMP-14, WP-2.5b), where its place in the chain shows as a strip. Only native devices float. Left out of the saved set while docked. Where its window sits isn't part of the document: moving or resizing a window isn't an undo step ([`WindowFrame`]). |
-| `media` | [`ContentHash`](#contenthash) or null | no | The media the device plays, by content hash (WP-2.16): the sampler's sample, which the media store holds like a clip's audio (the sampler spec, R11). Left out of the saved set for a device that plays none. |
+| `mappings` | array of [`Mapping`](#mapping) | no | The parameters a modulator maps, one per slot (the modulation spec, R19). Left out of the saved set for a device that maps none. |
+| `media` | array of [`ContentHash`](#contenthash) or null | no | The media the device plays, by content hash, one entry per sample slot (WP-2.16, WP-5.17): the sampler's sample is slot 0, the eight-slot drum sampler's slots are 0 to 7. The media store holds each like a clip's audio (the sampler spec, R11). A slot with no sample is `None`, and the list never ends in one. Left out of the saved set for a device that plays none; a set saved before slots existed holds one hash, which loads as slot 0. |
 | `other_params` | array or null | no | The values of the state that isn't active, in the same form as [`params`](Self::params) (device compare R1, R10). `None` while the two states are equal, as a new device's are, and left out of the saved set then. Use [`other_params`](Self::other_params) to read it. |
 | `own_name` | string | no | The device's own name, such as `Auto Filter`, which the title bar shows while Show Preset Name is off. Empty while it's the same as [`name`](Self::name), and left out of the saved set then. |
 | `plugin` | [`PluginState`](#pluginstate) or null | no | A plug-in's own state and where it was loaded from (WP-2.6), as last saved with the set. Left out of the saved set for a native device, and for a plug-in until the set is first saved with it. |
 | `role` | [`DeviceRole`](#devicerole) | no | Where it goes in a chain: MIDI effects, then the instrument, then audio effects. Audio effects aren't marked in the saved set. |
+| `shape` | array or null | no | The breakpoints of a Curve Mod's shape (R23); `None` plays the default shape. Left out of the saved set while it is the default. |
 | `show_preset_name` | boolean | no | Whether the title bar shows the preset's or the given name (on, as a new device is) or the device's own name: the context menu's Show Preset Name. Left out of the saved set while on. |
 | `sidechain` | [`Sidechain`](#sidechain) or null | no | The device's sidechain input, if its type declares one (WP-2.19b): where its detector can listen other than its own input. Left out of the saved set for a device without one. |
 
@@ -9619,16 +10064,26 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
       "$ref": "#/$defs/DeviceKind",
       "description": "What the device is."
     },
+    "mappings": {
+      "description": "The parameters a modulator maps, one per slot (the modulation spec, R19). Left out of the saved set for a device that maps none.",
+      "items": {
+        "$ref": "#/$defs/Mapping"
+      },
+      "type": "array"
+    },
     "media": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/ContentHash"
-        },
-        {
-          "type": "null"
-        }
-      ],
-      "description": "The media the device plays, by content hash (WP-2.16): the sampler's sample, which the media store holds like a clip's audio (the sampler spec, R11). Left out of the saved set for a device that plays none."
+      "description": "The media the device plays, by content hash, one entry per sample slot (WP-2.16, WP-5.17): the sampler's sample is slot 0, the eight-slot drum sampler's slots are 0 to 7. The media store holds each like a clip's audio (the sampler spec, R11). A slot with no sample is `None`, and the list never ends in one. Left out of the saved set for a device that plays none; a set saved before slots existed holds one hash, which loads as slot 0.",
+      "items": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ContentHash"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "type": "array"
     },
     "name": {
       "description": "The name the title bar shows while Show Preset Name is on: the device's own name until a preset or Rename gives it another.",
@@ -9691,6 +10146,16 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
     "role": {
       "$ref": "#/$defs/DeviceRole",
       "description": "Where it goes in a chain: MIDI effects, then the instrument, then audio effects. Audio effects aren't marked in the saved set."
+    },
+    "shape": {
+      "description": "The breakpoints of a Curve Mod's shape (R23); `None` plays the default shape. Left out of the saved set while it is the default.",
+      "items": {
+        "$ref": "#/$defs/ShapePoint"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
     },
     "show_preset_name": {
       "description": "Whether the title bar shows the preset's or the given name (on, as a new device is) or the device's own name: the context menu's Show Preset Name. Left out of the saved set while on.",
@@ -9905,6 +10370,7 @@ One device as the Device View shows it.
 | `role` | [`DeviceRole`](#devicerole) | yes | Where it goes in a chain. |
 | `enabled` | boolean | yes | Whether it's switched on. |
 | `takes_sample` | boolean | yes | Whether its type plays one sample, so a sample dropped on it loads into it (`device.load_sample`, WP-2.16). |
+| `swaps_to_snapshot` | boolean | yes | Whether its type is the drum sampler, whose context menu offers the swap to Snapshot and Save as Default Pad (`device.swap_to_snapshot`, one-shot drum sampler R23). |
 | `show_preset_name` | boolean | yes | Whether its title shows its preset's or given name. |
 | `folded` | boolean | yes | Whether it's folded to its title bar. |
 | `expandable` | boolean | yes | Whether it has an expanded part, which its title bar's expand toggle shows and hides (L-DEV-004; WP-5.42). |
@@ -9915,6 +10381,7 @@ One device as the Device View shows it.
 | `hot_swap` | boolean | yes | Whether it's the device being hot-swapped. |
 | `sidechain` | [`SidechainSection`](#sidechainsection) or null | yes | Its sidechain section, if it has a sidechain input (WP-2.19b). |
 | `display_view` | string or null | no | The view its display shows, if its display has views (WP-5.43): one of its description's `views`. |
+| `modulator` | [`ModulatorFrame`](#modulatorframe) or null | no | For a modulator, what it maps and which Map button is armed (WP-5.10). |
 | `panel` | [`DevicePanel`](#devicepanel) or null | no | Its parameters and layout, for the generic UI; left out for a device whose type doesn't describe them. |
 
 <details><summary>JSON Schema</summary>
@@ -9970,6 +10437,17 @@ One device as the Device View shows it.
       "$ref": "#/$defs/DeviceKind",
       "description": "What it is."
     },
+    "modulator": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ModulatorFrame"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "For a modulator, what it maps and which Map button is armed (WP-5.10)."
+    },
     "name": {
       "description": "Its own name, such as `Auto Filter`.",
       "type": "string"
@@ -10008,6 +10486,11 @@ One device as the Device View shows it.
       ],
       "description": "Its sidechain section, if it has a sidechain input (WP-2.19b)."
     },
+    "swaps_to_snapshot": {
+      "default": false,
+      "description": "Whether its type is the drum sampler, whose context menu offers the swap to Snapshot and Save as Default Pad (`device.swap_to_snapshot`, one-shot drum sampler R23).",
+      "type": "boolean"
+    },
     "takes_sample": {
       "default": false,
       "description": "Whether its type plays one sample, so a sample dropped on it loads into it (`device.load_sample`, WP-2.16).",
@@ -10026,6 +10509,7 @@ One device as the Device View shows it.
     "role",
     "enabled",
     "takes_sample",
+    "swaps_to_snapshot",
     "show_preset_name",
     "folded",
     "expandable",
@@ -10317,6 +10801,9 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
 | `description` | [`DeviceDescription`](#devicedescription) | yes | Its parameters' descriptors and its layout. |
 | `values` | array of number | yes | Each parameter's value now, in the description's order, in the parameter's own units. |
 | `plugin` | boolean | yes | Whether this is a plug-in device's panel (WP-2.10, D19): eight knobs mapped to the plug-in's own parameters, with the rest of the body a target that opens the plug-in's editor. False for a native device. |
+| `selected_slot` | integer, at least 0 | yes | For a device with sample slots (WP-5.17): the slot whose controls the panel shows, a view setting that isn't saved with the set. |
+| `loaded_slots` | array of boolean | no | For a device with sample slots: whether each slot holds a sample. |
+| `slot_keys` | array of string | no | For a device with sample slots: the key each slot plays, as Live names notes (`C3`). |
 
 <details><summary>JSON Schema</summary>
 
@@ -10328,10 +10815,31 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
       "$ref": "#/$defs/DeviceDescription",
       "description": "Its parameters' descriptors and its layout."
     },
+    "loaded_slots": {
+      "description": "For a device with sample slots: whether each slot holds a sample.",
+      "items": {
+        "type": "boolean"
+      },
+      "type": "array"
+    },
     "plugin": {
       "default": false,
       "description": "Whether this is a plug-in device's panel (WP-2.10, D19): eight knobs mapped to the plug-in's own parameters, with the rest of the body a target that opens the plug-in's editor. False for a native device.",
       "type": "boolean"
+    },
+    "selected_slot": {
+      "default": 0,
+      "description": "For a device with sample slots (WP-5.17): the slot whose controls the panel shows, a view setting that isn't saved with the set.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "slot_keys": {
+      "description": "For a device with sample slots: the key each slot plays, as Live names notes (`C3`).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
     },
     "values": {
       "description": "Each parameter's value now, in the description's order, in the parameter's own units.",
@@ -10345,7 +10853,8 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
   "required": [
     "description",
     "values",
-    "plugin"
+    "plugin",
+    "selected_slot"
   ],
   "type": "object"
 }
@@ -10481,6 +10990,7 @@ What `device_view.state` returns.
 | `selected` | [`DeviceId`](#deviceid) or null | yes | The selected device, if it's in this chain. |
 | `hot_swap` | [`HotSwap`](#hotswap) or null | yes | The device being hot-swapped, on any track, and what the browser's bar says ("Swapping Audio Effect"). |
 | `can_paste` | boolean | yes | Whether the clipboard holds a device to paste. |
+| `armed_map` | [`ArmedMap`](#armedmap) or null | no | The Map button that is lit, on any track: a click on any parameter's control maps it to the slot (WP-5.10). |
 
 <details><summary>JSON Schema</summary>
 
@@ -10488,6 +10998,17 @@ What `device_view.state` returns.
 {
   "description": "What `device_view.state` returns.",
   "properties": {
+    "armed_map": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ArmedMap"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The Map button that is lit, on any track: a click on any parameter's control maps it to the slot (WP-5.10)."
+    },
     "can_paste": {
       "description": "Whether the clipboard holds a device to paste.",
       "type": "boolean"
@@ -10634,6 +11155,7 @@ A display cell: a graph, a spectrum, a waveform, or an envelope editor, which gr
 | `height` | number | yes | Its docked height, the least it has. |
 | `weight` | number | yes | Its share of extra room, against the other cells it shares with. |
 | `bottom` | [`ControlBand`](#controlband) or null | no | Controls inside its bottom edge, from its left. |
+| `slot` | integer or null | no | The sample slot the cell stands for, if it does: it shows the slot and takes a click that selects it, and a sample dropped on it (WP-5.17). |
 | `top` | [`ControlBand`](#controlband) or null | no | Controls inside its top edge, from its left. |
 
 <details><summary>JSON Schema</summary>
@@ -10661,6 +11183,15 @@ A display cell: a graph, a spectrum, a waveform, or an envelope editor, which gr
     "name": {
       "description": "What it shows, for the device that draws it and for screen readers.",
       "type": "string"
+    },
+    "slot": {
+      "description": "The sample slot the cell stands for, if it does: it shows the slot and takes a click that selects it, and a sample dropped on it (WP-5.17).",
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
     },
     "top": {
       "anyOf": [
@@ -11848,7 +12379,7 @@ The index of the places' files, built in the background.
 
 ### `Input`
 
-Where a track takes its input from. Audio tracks: `external` (Ext. In, the audio interface's inputs, with its `channel`; a new audio track's), `resampling` (the Main output), `track` (another audio track, a return, or Main, tapped at `tap`), or `none` (No Input). MIDI tracks: `all_ins` (every MIDI input; a new MIDI track's), `computer_keyboard`, `port` (one MIDI input, by its name as the MIDI settings list it), `track` (another MIDI track), or `none`.
+Where a track takes its input from. Audio tracks: `external` (Ext. In, the audio interface's inputs, with its `channel`; a new audio track's), `resampling` (the Main output), `track` (another audio track, a MIDI track with an instrument, a return, or Main, tapped at `tap`; with a `chain` of an instrument or audio effect rack on that track, that chain's signal at `tap`), or `none` (No Input). MIDI tracks: `all_ins` (every MIDI input; a new MIDI track's), `computer_keyboard`, `port` (one MIDI input, by its name as the MIDI settings list it), `track` (another MIDI track), or `none`.
 
 One of:
 
@@ -11858,13 +12389,13 @@ One of:
 - an object with `type` = `"computer_keyboard"`: The computer MIDI keyboard. MIDI tracks only.
 - an object with `type` = `"port"`, `name` (string): One MIDI input port, by the name the MIDI system gives it. MIDI tracks only. The track keeps the name while the port is away and receives again when a port of that name returns.
 - an object with `type` = `"resampling"`: Resampling: the Main output. Audio tracks only.
-- an object with `type` = `"track"`, `track` ([`TrackId`](#trackid)), `tap` ([`Tap`](#tap)): Another track's signal.
+- an object with `type` = `"track"`, `track` ([`TrackId`](#trackid)), `chain` ([`ChainId`](#chainid) or null), `tap` ([`Tap`](#tap)): Another track's signal.
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "Where a track takes its input from. Audio tracks: `external` (Ext. In, the audio interface's inputs, with its `channel`; a new audio track's), `resampling` (the Main output), `track` (another audio track, a return, or Main, tapped at `tap`), or `none` (No Input). MIDI tracks: `all_ins` (every MIDI input; a new MIDI track's), `computer_keyboard`, `port` (one MIDI input, by its name as the MIDI settings list it), `track` (another MIDI track), or `none`.",
+  "description": "Where a track takes its input from. Audio tracks: `external` (Ext. In, the audio interface's inputs, with its `channel`; a new audio track's), `resampling` (the Main output), `track` (another audio track, a MIDI track with an instrument, a return, or Main, tapped at `tap`; with a `chain` of an instrument or audio effect rack on that track, that chain's signal at `tap`), or `none` (No Input). MIDI tracks: `all_ins` (every MIDI input; a new MIDI track's), `computer_keyboard`, `port` (one MIDI input, by its name as the MIDI settings list it), `track` (another MIDI track), or `none`.",
   "oneOf": [
     {
       "description": "No Input.",
@@ -11956,6 +12487,17 @@ One of:
     {
       "description": "Another track's signal.",
       "properties": {
+        "chain": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChainId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "A chain of an instrument or audio effect rack on that track, at any depth, whose signal is taken at `tap` instead of the track's own (the racks spec, R38 to R41)."
+        },
         "tap": {
           "$ref": "#/$defs/Tap",
           "description": "Where in that track the signal is taken: Post Mixer if it's left out."
@@ -12056,6 +12598,7 @@ One of:
 - `"set"`: A Beatlayer set.
 - `"preset"`: A Beatlayer device preset, which loads into the device being hot-swapped (WP-2.4).
 - `"plugin"`: A plug-in the scanner found (WP-2.9).
+- `"device"`: One of Beatlayer's own devices, listed under a device label (the Modulators label, WP-5.10); its path is the device type's ID.
 
 <details><summary>JSON Schema</summary>
 
@@ -12086,6 +12629,11 @@ One of:
     {
       "const": "plugin",
       "description": "A plug-in the scanner found (WP-2.9).",
+      "type": "string"
+    },
+    {
+      "const": "device",
+      "description": "One of Beatlayer's own devices, listed under a device label (the Modulators label, WP-5.10); its path is the device type's ID.",
       "type": "string"
     }
   ]
@@ -12825,6 +13373,7 @@ What `device.load_sample` returns.
 |---|---|---|---|
 | `device` | [`DeviceId`](#deviceid) | yes | The device that took the sample. |
 | `media` | [`ContentHash`](#contenthash) | yes | The sample's media, by content hash: what the device and the set name it by. |
+| `slot` | integer from 0 to 255 | yes | The slot that took it, counted from 0. |
 | `name` | string | yes | The file's name, for messages. |
 
 <details><summary>JSON Schema</summary>
@@ -12844,11 +13393,20 @@ What `device.load_sample` returns.
     "name": {
       "description": "The file's name, for messages.",
       "type": "string"
+    },
+    "slot": {
+      "default": 0,
+      "description": "The slot that took it, counted from 0.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
     }
   },
   "required": [
     "device",
     "media",
+    "slot",
     "name"
   ],
   "type": "object"
@@ -12931,6 +13489,86 @@ Loudness, as EBU R 128 reports it (ITU-R BS.1770-4).
     "short_term",
     "range_lu",
     "true_peak_dbtp"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `Mapping`
+
+One slot's mapping: the parameter it modulates.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `slot` | integer from 0 to 255 | yes | The slot, from 0 to 7. |
+| `target` | [`ModTarget`](#modtarget) | yes | The parameter it maps. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One slot's mapping: the parameter it modulates.",
+  "properties": {
+    "slot": {
+      "description": "The slot, from 0 to 7.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "target": {
+      "$ref": "#/$defs/ModTarget",
+      "description": "The parameter it maps."
+    }
+  },
+  "required": [
+    "slot",
+    "target"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `MappingRow`
+
+One slot's mapping as its panel names it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `slot` | integer from 0 to 255 | yes | The slot, from 0 to 7. |
+| `target` | [`ModTarget`](#modtarget) | yes | The parameter it maps. |
+| `label` | string | yes | The target's device and parameter, or track and control, by name, as the slot shows them. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One slot's mapping as its panel names it.",
+  "properties": {
+    "label": {
+      "description": "The target's device and parameter, or track and control, by name, as the slot shows them.",
+      "type": "string"
+    },
+    "slot": {
+      "description": "The slot, from 0 to 7.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "target": {
+      "$ref": "#/$defs/ModTarget",
+      "description": "The parameter it maps."
+    }
+  },
+  "required": [
+    "slot",
+    "target",
+    "label"
   ],
   "type": "object"
 }
@@ -13526,9 +14164,100 @@ What `mixer_view.state` and the other view commands return.
 
 </details>
 
+### `ModTarget`
+
+A parameter a modulator maps: `mixer` with a `track` and a `param`, `send` with the sending `track` and the return track `to`, or `device` with the device and its `param`.
+
+One of:
+
+- an object with `type` = `"mixer"`, `track` ([`TrackId`](#trackid)), `param` ([`MixerParam`](#mixerparam)): A control of a track's mixer.
+- an object with `type` = `"send"`, `track` ([`TrackId`](#trackid)), `to` ([`TrackId`](#trackid)): The level of a track's send to a return track.
+- an object with `type` = `"device"`, `device` ([`DeviceId`](#deviceid)), `param` ([`ParamId`](#paramid)): A parameter of a device, on any track.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A parameter a modulator maps: `mixer` with a `track` and a `param`, `send` with the sending `track` and the return track `to`, or `device` with the device and its `param`.",
+  "oneOf": [
+    {
+      "description": "A control of a track's mixer.",
+      "properties": {
+        "param": {
+          "$ref": "#/$defs/MixerParam",
+          "description": "The control."
+        },
+        "track": {
+          "$ref": "#/$defs/TrackId",
+          "description": "The track."
+        },
+        "type": {
+          "const": "mixer",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "track",
+        "param"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "The level of a track's send to a return track.",
+      "properties": {
+        "to": {
+          "$ref": "#/$defs/TrackId",
+          "description": "The return track the send feeds."
+        },
+        "track": {
+          "$ref": "#/$defs/TrackId",
+          "description": "The sending track."
+        },
+        "type": {
+          "const": "send",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "track",
+        "to"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A parameter of a device, on any track.",
+      "properties": {
+        "device": {
+          "$ref": "#/$defs/DeviceId",
+          "description": "The device."
+        },
+        "param": {
+          "$ref": "#/$defs/ParamId",
+          "description": "Its parameter."
+        },
+        "type": {
+          "const": "device",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "device",
+        "param"
+      ],
+      "type": "object"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `ModulatedParameter`
 
-A parameter a track's clips modulate.
+A parameter a track's clips or modulators act on.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -13537,17 +14266,38 @@ A parameter a track's clips modulate.
 | `base` | number | yes | Its base, in the parameter's own units: its automation envelope's value or its control's, as the last block played it while the song plays under modulation, and its control's otherwise. |
 | `played` | number | yes | The value it played in the last block; the base while nothing modulates it now. |
 | `sources` | array of [`ModulationSource`](#modulationsource) | yes | The clip envelopes modulating it. |
+| `modulators` | array of [`ModulatorSource`](#modulatorsource) | yes | The modulator slots mapping it. |
+| `held_by` | [`DeviceId`](#deviceid) or null | no | The modulator in Remote Control that holds it, if one does. |
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "A parameter a track's clips modulate.",
+  "description": "A parameter a track's clips or modulators act on.",
   "properties": {
     "base": {
       "description": "Its base, in the parameter's own units: its automation envelope's value or its control's, as the last block played it while the song plays under modulation, and its control's otherwise.",
       "format": "double",
       "type": "number"
+    },
+    "held_by": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DeviceId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The modulator in Remote Control that holds it, if one does."
+    },
+    "modulators": {
+      "default": [],
+      "description": "The modulator slots mapping it.",
+      "items": {
+        "$ref": "#/$defs/ModulatorSource"
+      },
+      "type": "array"
     },
     "played": {
       "description": "The value it played in the last block; the base while nothing modulates it now.",
@@ -13575,7 +14325,8 @@ A parameter a track's clips modulate.
     "target",
     "base",
     "played",
-    "sources"
+    "sources",
+    "modulators"
   ],
   "type": "object"
 }
@@ -13652,6 +14403,112 @@ What `modulation.state` reports.
   },
   "required": [
     "parameters"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ModulatorFrame`
+
+What a modulator's panel shows beside its parameters (WP-5.10; the modulation spec, R15, R19, R23).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `mappings` | array of [`MappingRow`](#mappingrow) | yes | Its mappings, by slot. |
+| `armed` | integer or null | no | The slot whose Map button is lit, while a click on a parameter maps it. |
+| `shape` | array or null | no | A Curve Mod's breakpoint shape (the default one until it is edited); left out for a modulator that has none. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a modulator's panel shows beside its parameters (WP-5.10; the modulation spec, R15, R19, R23).",
+  "properties": {
+    "armed": {
+      "description": "The slot whose Map button is lit, while a click on a parameter maps it.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "mappings": {
+      "description": "Its mappings, by slot.",
+      "items": {
+        "$ref": "#/$defs/MappingRow"
+      },
+      "type": "array"
+    },
+    "shape": {
+      "description": "A Curve Mod's breakpoint shape (the default one until it is edited); left out for a modulator that has none.",
+      "items": {
+        "$ref": "#/$defs/ShapePoint"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "mappings"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ModulatorSource`
+
+One modulator slot acting on a parameter (WP-5.10).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The modulator device. |
+| `slot` | integer from 0 to 255 | yes | Its slot, from 0 to 7. |
+| `remote_control` | boolean | yes | Whether the modulator is in Remote Control, holding the parameter rather than modulating it. |
+| `contribution` | number or null | yes | What it contributes now, as a share of the parameter's travel, when it is the only source and the engine's published values tell: `null` when several sources act together (the engine publishes their sum) or when it holds the parameter. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One modulator slot acting on a parameter (WP-5.10).",
+  "properties": {
+    "contribution": {
+      "description": "What it contributes now, as a share of the parameter's travel, when it is the only source and the engine's published values tell: `null` when several sources act together (the engine publishes their sum) or when it holds the parameter.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The modulator device."
+    },
+    "remote_control": {
+      "description": "Whether the modulator is in Remote Control, holding the parameter rather than modulating it.",
+      "type": "boolean"
+    },
+    "slot": {
+      "description": "Its slot, from 0 to 7.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "device",
+    "slot",
+    "remote_control",
+    "contribution"
   ],
   "type": "object"
 }
@@ -16628,6 +17485,48 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
 
 </details>
 
+### `ShapePoint`
+
+One breakpoint of a Curve Mod's shape (R23): a place in the cycle, the output there, and the bend of the segment starting at it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `x` | number | yes | Where in the cycle, from 0 (its start) to 1 (its end). |
+| `y` | number | yes | The output there, from 0 to 1. |
+| `bend` | number | no | The bend of the segment starting here, from −1 to 1, by the automation spec's curve law; 0 is straight. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One breakpoint of a Curve Mod's shape (R23): a place in the cycle, the output there, and the bend of the segment starting at it.",
+  "properties": {
+    "bend": {
+      "description": "The bend of the segment starting here, from −1 to 1, by the automation spec's curve law; 0 is straight.",
+      "format": "double",
+      "type": "number"
+    },
+    "x": {
+      "description": "Where in the cycle, from 0 (its start) to 1 (its end).",
+      "format": "double",
+      "type": "number"
+    },
+    "y": {
+      "description": "The output there, from 0 to 1.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "x",
+    "y"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ShortTerm`
 
 One short-term loudness reading.
@@ -16780,6 +17679,44 @@ A device's sidechain section, as its left strip and the section show it (WP-2.19
     "mix",
     "gain",
     "listen"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SlotGroup`
+
+The parameters of a device's sample slots: slot `k`'s copy of a parameter is the first slot's number plus `k` times `stride` (WP-5.17).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `stride` | integer, at least 0 | yes | How far apart one slot's parameter numbers are from the next's. |
+| `count` | integer, at least 0 | yes | How many slots there are. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The parameters of a device's sample slots: slot `k`'s copy of a parameter is the first slot's number plus `k` times `stride` (WP-5.17).",
+  "properties": {
+    "count": {
+      "description": "How many slots there are.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "stride": {
+      "description": "How far apart one slot's parameter numbers are from the next's.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "stride",
+    "count"
   ],
   "type": "object"
 }
@@ -17743,6 +18680,7 @@ What `transport.state` returns: the transport and the Control Bar's transport se
 | `automation_arm` | boolean | yes | Whether Automation Arm is on (view state, not saved with the set). |
 | `recording` | [`RunningRecording`](#runningrecording) or null | yes | The recording under way, from the moment recording starts until its clips are made; null when none is. |
 | `last_recording` | [`RecordingReport`](#recordingreport) or null | yes | What the last recording that ended came to; null until one has ended in this session. |
+| `capture_midi_ready` | boolean | yes | Whether Capture MIDI has notes to bring back: a monitoring MIDI track was played since the last capture or recording, so `midi.capture` runs and the Control Bar's button and Create menu item are enabled. |
 
 <details><summary>JSON Schema</summary>
 
@@ -17760,6 +18698,11 @@ What `transport.state` returns: the transport and the Control Bar's transport se
     },
     "automation_arm": {
       "description": "Whether Automation Arm is on (view state, not saved with the set).",
+      "type": "boolean"
+    },
+    "capture_midi_ready": {
+      "default": false,
+      "description": "Whether Capture MIDI has notes to bring back: a monitoring MIDI track was played since the last capture or recording, so `midi.capture` runs and the Control Bar's button and Create menu item are enabled.",
       "type": "boolean"
     },
     "counting_in": {
@@ -17886,7 +18829,8 @@ What `transport.state` returns: the transport and the Control Bar's transport se
     "midi_overdub",
     "automation_arm",
     "recording",
-    "last_recording"
+    "last_recording",
+    "capture_midi_ready"
   ],
   "type": "object"
 }
@@ -18113,6 +19057,42 @@ What `view.state` returns: what the view commands switch, without switching any 
     "clip_view",
     "assistant",
     "plug_in_windows"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `WarpMarker`
+
+A warp marker: `time`, seconds into the audio file, plays on `beat`, in ticks (705,600 to the quarter note) counted from the clip's 1.1.1 (negative before it).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `time` | number, at least 0 | yes | Seconds into the file: 0 or more. |
+| `beat` | [`Ticks`](#ticks) | yes | The beat the time plays on, in ticks from the clip's 1.1.1. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A warp marker: `time`, seconds into the audio file, plays on `beat`, in ticks (705,600 to the quarter note) counted from the clip's 1.1.1 (negative before it).",
+  "properties": {
+    "beat": {
+      "$ref": "#/$defs/Ticks",
+      "description": "The beat the time plays on, in ticks from the clip's 1.1.1."
+    },
+    "time": {
+      "description": "Seconds into the file: 0 or more.",
+      "format": "double",
+      "minimum": 0.0,
+      "type": "number"
+    }
+  },
+  "required": [
+    "time",
+    "beat"
   ],
   "type": "object"
 }

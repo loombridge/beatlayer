@@ -52,7 +52,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        147,
+        148,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
          the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
          routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -65,7 +65,7 @@ fn every_document_command_is_registered() {
          settings, WP-3.5 two for a scene's tempo and signature, WP-3.3 \
          set_clip_launch_mode, WP-4.1 seven for the warp map, WP-4.3 five for transients and ranged warp markers, WP-5.1 fifteen for racks and \
          their chains, WP-5.12 the two Compare commands, WP-5.10 map_modulator, \
-         unmap_modulator and set_shape, WP-5.13 eleven for a multisampler's layers, WP-5.15 \
+         unmap_modulator and set_shape, WP-5.3 set_chain_zone, WP-5.13 eleven for a multisampler's layers, WP-5.15 \
          three for a sample's edits, and WP-3.10 the two for follow actions"
     );
 
@@ -1119,6 +1119,10 @@ fn every_command_runs_by_id() {
     );
     agent.run("chain.set_solo", json!({ "chain": second, "solo": true }));
     agent.run(
+        "chain.set_zone",
+        json!({ "chain": first, "kind": "select", "zone": { "low": 1, "high": 9, "fade_high": 3 } }),
+    );
+    agent.run(
         "chain.move",
         json!({ "chain": second, "rack": rack, "index": 0 }),
     );
@@ -1129,6 +1133,15 @@ fn every_command_runs_by_id() {
     );
     assert_eq!((direct.mixer.volume, direct.mixer.pan), (0.5, -0.25));
     assert!(!direct.mixer.enabled);
+    assert_eq!(
+        direct.zones.select,
+        bl_model::Zone {
+            low: 1,
+            high: 9,
+            fade_low: 0,
+            fade_high: 3
+        }
+    );
     let order: Vec<ChainId> = agent
         .editor
         .document()
@@ -2404,6 +2417,19 @@ fn schemas_match_what_commands_serialise() {
             Command::SetChainSolo {
                 chain: ChainId(fresh_id),
                 solo: true,
+            },
+        ),
+        (
+            "chain.set_zone",
+            Command::SetChainZone {
+                chain: ChainId(fresh_id),
+                kind: bl_model::ZoneKind::Select,
+                zone: bl_model::Zone {
+                    low: 0,
+                    high: 10,
+                    fade_low: 0,
+                    fade_high: 4,
+                },
             },
         ),
         (

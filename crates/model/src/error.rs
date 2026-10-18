@@ -239,6 +239,15 @@ pub enum ModelError {
     },
     /// The chain is a MIDI effect rack's, which has no volume or pan.
     ChainHasNoMixer(ChainId),
+    /// The chain's rack doesn't give its chains a zone of this kind: an audio
+    /// effect rack's chains have only a chain select zone, and a drum
+    /// rack's none.
+    ChainHasNoZone {
+        /// The chain.
+        chain: ChainId,
+        /// The zone.
+        kind: crate::layers::ZoneKind,
+    },
     /// What was asked to group or ungroup can't be: the devices aren't all
     /// in one chain, or the rack isn't one new rack with one empty chain, or
     /// the rack to take apart holds several chains.
@@ -271,6 +280,15 @@ impl fmt::Display for ModelError {
             Self::ChainNotInTrack { chain, track } => {
                 write!(f, "{chain} isn't in {track}'s chain")
             }
+            Self::ChainHasNoZone { chain, kind } => write!(
+                f,
+                "{chain} belongs to a rack whose chains have no {} zone",
+                match kind {
+                    crate::layers::ZoneKind::Key => "key",
+                    crate::layers::ZoneKind::Velocity => "velocity",
+                    crate::layers::ZoneKind::Select => "chain select",
+                }
+            ),
             Self::BadGroup(what) => f.write_str(what),
             Self::ChainHasNoMixer(id) => write!(
                 f,

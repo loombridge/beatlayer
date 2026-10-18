@@ -6,6 +6,7 @@
 //! devices may be racks too, so racks nest to any depth.
 
 use std::collections::BTreeSet;
+use std::sync::LazyLock;
 
 use bl_core::id::Id;
 use schemars::JsonSchema;
@@ -13,11 +14,39 @@ use serde::{Deserialize, Serialize};
 
 use crate::device::{Device, DeviceKind, DeviceRole};
 use crate::error::ModelError;
-use crate::ids::{ChainId, DeviceId};
+use crate::ids::{ChainId, DeviceId, ParamId};
+use crate::layers::{Zone, ZoneKind};
+use crate::param::{DeviceDescription, ParamDescriptor, ParamUnit};
 
 /// How many colours a chain can take: the palette's 5 rows of 14 swatches
 /// (C-TRACK-015).
 pub const CHAIN_COLOURS: u8 = 70;
+
+/// The rack's chain selector (racks spec, R33): a whole number from 0 to 127.
+pub const CHAIN_SELECTOR: ParamId = ParamId(0);
+
+/// Whether the chain select zones filter messages other than notes too
+/// (Chain Selector Filters MIDI Ctrl, racks spec, R31).
+pub const FILTER_MIDI_CTRL: ParamId = ParamId(1);
+
+/// What every kind of rack describes of its parameters (device framework
+/// R3): the chain selector and Chain Selector Filters MIDI Ctrl.
+#[must_use]
+pub fn description() -> &'static DeviceDescription {
+    static DESCRIPTION: LazyLock<DeviceDescription> = LazyLock::new(|| {
+        DeviceDescription::new(vec![
+            ParamDescriptor::integer(
+                CHAIN_SELECTOR,
+                "Chain Selector",
+                (0, 127),
+                0,
+                ParamUnit::None,
+            ),
+            ParamDescriptor::toggle(FILTER_MIDI_CTRL, "Chain Selector Filters MIDI Ctrl", false),
+        ])
+    });
+    &DESCRIPTION
+}
 
 /// The four kinds of rack. A rack has the role of what it holds
 /// ([`RackKind::role`]).
@@ -57,6 +86,20 @@ impl RackKind {
             Self::AudioEffect => "Audio Effect Rack",
             Self::MidiEffect => "MIDI Effect Rack",
             Self::Drum => "Drum Rack",
+        }
+    }
+
+    /// The zones a chain of this kind of rack has (racks spec, R30): all
+    /// three, only chain select for an audio effect rack, none for a drum
+    /// rack.
+    #[must_use]
+    pub fn zone_kinds(self) -> &'static [ZoneKind] {
+        match self {
+            Self::Instrument | Self::MidiEffect => {
+                &[ZoneKind::Key, ZoneKind::Velocity, ZoneKind::Select]
+            }
+            Self::AudioEffect => &[ZoneKind::Select],
+            Self::Drum => &[],
         }
     }
 
@@ -161,6 +204,105 @@ fn on() -> bool {
     true
 }
 
+/// A chain's three zones (racks spec, R30). A new chain passes everything:
+/// every note, every velocity, and the chain select value 0 alone, with no
+/// fades.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(
+    description = "A chain's zones, each `low`, `high` and the `fade_low` and `fade_high` values \
+                   its fades span: `key` (0 to 127), `velocity` (1 to 127) and `select` (the \
+                   chain select zone, 0 to 127). One left out passes everything: every note, \
+                   every velocity, and chain select 0 alone."
+)]
+pub struct ChainZones {
+    /// The key zone.
+    #[serde(default = "whole_keys", skip_serializing_if = "is_whole_keys")]
+    pub key: Zone,
+    /// The velocity zone.
+    #[serde(
+        default = "whole_velocities",
+        skip_serializing_if = "is_whole_velocities"
+    )]
+    pub velocity: Zone,
+    /// The chain select zone.
+    #[serde(default = "select_zero", skip_serializing_if = "is_select_zero")]
+    pub select: Zone,
+}
+
+fn whole_keys() -> Zone {
+    Zone::whole(ZoneKind::Key)
+}
+
+fn whole_velocities() -> Zone {
+    Zone::whole(ZoneKind::Velocity)
+}
+
+fn select_zero() -> Zone {
+    Zone::new(0, 0)
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde passes a reference"
+)]
+fn is_whole_keys(zone: &Zone) -> bool {
+    *zone == whole_keys()
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde passes a reference"
+)]
+fn is_whole_velocities(zone: &Zone) -> bool {
+    *zone == whole_velocities()
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde passes a reference"
+)]
+fn is_select_zero(zone: &Zone) -> bool {
+    *zone == select_zero()
+}
+
+impl Default for ChainZones {
+    fn default() -> Self {
+        Self {
+            key: whole_keys(),
+            velocity: whole_velocities(),
+            select: select_zero(),
+        }
+    }
+}
+
+impl ChainZones {
+    /// The zone of this kind.
+    #[must_use]
+    pub fn get(&self, kind: ZoneKind) -> Zone {
+        match kind {
+            ZoneKind::Key => self.key,
+            ZoneKind::Velocity => self.velocity,
+            ZoneKind::Select => self.select,
+        }
+    }
+
+    /// The same zones with this kind's replaced.
+    #[must_use]
+    pub fn with(mut self, kind: ZoneKind, zone: Zone) -> Self {
+        match kind {
+            ZoneKind::Key => self.key = zone,
+            ZoneKind::Velocity => self.velocity = zone,
+            ZoneKind::Select => self.select = zone,
+        }
+        self
+    }
+
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 /// One of the views a rack's frame can show (racks spec, R18).
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
@@ -181,7 +323,9 @@ pub enum RackView {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[schemars(
     description = "Which views of a rack are shown: `macros` (the Macro Controls), `chain_list` \
-                   and `devices` (the selected chain's devices). All on in a new rack."
+                   and `devices` (the selected chain's devices), all on in a new rack; \
+                   `zone_editor` (`key`, `velocity` or `select`, none in a new rack) and \
+                   `auto_select` (off in a new rack)."
 )]
 pub struct RackViews {
     /// The Macro Controls.
@@ -193,6 +337,15 @@ pub struct RackViews {
     /// The selected chain's devices.
     #[serde(default = "on")]
     pub devices: bool,
+    /// The zone editor beside the chain list (racks spec, R35): the Key,
+    /// Vel (`velocity`) or Chain (`select`) editor, or none while Hide is
+    /// on, as in a new rack.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub zone_editor: Option<ZoneKind>,
+    /// Auto Select: the chain list selects the chains that are processing
+    /// (racks spec, R37). Off in a new rack.
+    #[serde(default, skip_serializing_if = "is_off")]
+    pub auto_select: bool,
 }
 
 impl Default for RackViews {
@@ -201,6 +354,8 @@ impl Default for RackViews {
             macros: true,
             chain_list: true,
             devices: true,
+            zone_editor: None,
+            auto_select: false,
         }
     }
 }
@@ -269,6 +424,10 @@ pub struct Chain {
     /// The chain's mixer.
     #[serde(default)]
     pub mixer: ChainMixer,
+    /// The chain's zones. Left out of the saved set while they pass
+    /// everything.
+    #[serde(default, skip_serializing_if = "ChainZones::is_default")]
+    pub zones: ChainZones,
     /// The chain's devices, in signal order.
     #[serde(default)]
     pub devices: Vec<Device>,
@@ -284,6 +443,7 @@ impl Chain {
             colour: None,
             info: String::new(),
             mixer: ChainMixer::default(),
+            zones: ChainZones::default(),
             devices: Vec::new(),
         }
     }
@@ -519,6 +679,7 @@ fn check_rack(device: &Device) -> Result<(), ModelError> {
         Some(_) => {}
     }
     check_order(device)?;
+    let kind = device.rack_kind().expect("checked above to be a rack");
     for chain in &device.chains {
         let mixer = &chain.mixer;
         crate::command::check_value(
@@ -530,6 +691,7 @@ fn check_rack(device: &Device) -> Result<(), ModelError> {
         if let Some(colour) = chain.colour {
             crate::command::check_value("chain colour", f64::from(colour), colour < CHAIN_COLOURS)?;
         }
+        check_zones(kind, chain)?;
     }
     if device
         .rack_kind()
@@ -572,6 +734,27 @@ pub(crate) fn check_order(rack: &Device) -> Result<(), ModelError> {
                 return Err(ModelError::ChainOrder { rack: rack.id });
             }
             last = Some(device.role);
+        }
+    }
+    Ok(())
+}
+
+/// Checks that each of a chain's zones is valid and that the chain has only
+/// the zones its rack's kind gives it (racks spec, R30): the others stay as
+/// a new chain has them.
+fn check_zones(kind: RackKind, chain: &Chain) -> Result<(), ModelError> {
+    for zone_kind in [ZoneKind::Key, ZoneKind::Velocity, ZoneKind::Select] {
+        let zone = chain.zones.get(zone_kind);
+        if !zone.is_valid(zone_kind) {
+            return Err(ModelError::InvalidInput(
+                "a chain's zone must hold a value of its scale, with its fades inside it",
+            ));
+        }
+        if !kind.zone_kinds().contains(&zone_kind) && zone != ChainZones::default().get(zone_kind) {
+            return Err(ModelError::ChainHasNoZone {
+                chain: chain.id,
+                kind: zone_kind,
+            });
         }
     }
     Ok(())

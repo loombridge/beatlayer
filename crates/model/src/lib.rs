@@ -124,7 +124,8 @@ pub use layers::{
 pub use metronome::{CountIn, MetronomeRhythm, MetronomeSettings, MetronomeSound};
 pub use param::{DeviceDescription, ParamDescriptor, ParamKind, ParamUnit};
 pub use rack::{
-    CHAIN_COLOURS, Chain, ChainMixer, DevicePlace, RackKind, RackView, RackViewMap, RackViews,
+    CHAIN_COLOURS, CHAIN_SELECTOR, Chain, ChainMixer, ChainZones, DevicePlace, FILTER_MIDI_CTRL,
+    RackKind, RackView, RackViewMap, RackViews, description as rack_description,
 };
 pub use repr::{SavedSong, saved_schema};
 pub use sample_edits::{SampleEdit, SampleEditKind, SampleRange};

@@ -1000,3 +1000,250 @@ fn a_focused_slider_keeps_up_down_and_delete_for_itself() {
     );
     assert_eq!(rack_state(&h, rack).chains.len(), 2, "and deletes no chain");
 }
+
+/// The point on a zone editor bar that a drag of `part` starts from, and the
+/// width of one value on its scale.
+fn bar_point(layout: &RackLayout, chain: usize, zone: bl_model::Zone, part: &str) -> (Pos2, f32) {
+    let zones = layout.zone_editor.as_ref().expect("a zone editor shows");
+    let (_, row) = zones.rows[chain];
+    let parts = bl_ui::multisampler::bar_parts(zones.bars, row, zones.kind, zone);
+    let rect = match part {
+        "low" => parts.low,
+        "high" => parts.high,
+        "fade-low" => parts.fade_low,
+        "fade-high" => parts.fade_high,
+        _ => parts.body,
+    };
+    let (low, high) = zones.kind.range();
+    (
+        rect.center(),
+        zones.bars.width() / (f32::from(high - low) + 1.0),
+    )
+}
+
+fn zone_of(h: &Harness, chain: ChainId) -> bl_model::Zone {
+    h.shell
+        .editor()
+        .document()
+        .chain(chain)
+        .unwrap()
+        .zones
+        .select
+}
+
+// Spec: racks R35
+#[test]
+fn the_zone_editor_moves_resizes_and_fades_a_zone() {
+    use bl_model::{Zone, ZoneKind};
+    let mut h = harness();
+    let (rack, chains) = rack(&mut h, &["Dry", "Wet"]);
+    // An audio effect rack has only the Chain editor; Hide closes it.
+    let list = layout_of(&mut h, rack).chain_list.unwrap();
+    let names: Vec<_> = list
+        .buttons
+        .iter()
+        .map(|(b, _)| rack_view::zone_button_name(*b))
+        .collect();
+    assert_eq!(names, ["Chain", "Hide", "Auto Select"]);
+    assert!(layout_of(&mut h, rack).zone_editor.is_none());
+    let chain = list
+        .buttons
+        .iter()
+        .find(|(b, _)| *b == rack_view::ZoneButton::Editor(ZoneKind::Select))
+        .unwrap()
+        .1;
+    let steps = h.shell.editor().undo_history().len();
+    click(&mut h, chain.center());
+    assert_eq!(rack_state(&h, rack).zone_editor(), Some(ZoneKind::Select));
+    let layout = layout_of(&mut h, rack);
+    let zones = layout.zone_editor.as_ref().expect("the editor shows");
+    assert_eq!(zones.rows.len(), 2);
+    assert_eq!(
+        zones.rows[0].1.top(),
+        row(&layout, 0).row.top(),
+        "a row level with the chain list's"
+    );
+    assert_eq!(h.shell.editor().undo_history().len(), steps, "a view only");
+
+    // Give the second chain room to drag in.
+    h.shell
+        .invoke(
+            "chain.set_zone",
+            json!({ "chain": chains[1], "kind": "select", "zone": {
+                "low": 40, "high": 80, "fade_low": 0, "fade_high": 0 } }),
+        )
+        .unwrap();
+    h.settle();
+    let steps = h.shell.editor().undo_history().len();
+    let zone = zone_of(&h, chains[1]);
+    assert_eq!((zone.low, zone.high), (40, 80));
+
+    // An edge moves that end, as one undo step.
+    let layout = layout_of(&mut h, rack);
+    let (from, per_value) = bar_point(&layout, 1, zone, "low");
+    drag(&mut h, from, from + egui::vec2(10.0 * per_value, 0.0));
+    let zone = zone_of(&h, chains[1]);
+    assert_eq!((zone.low, zone.high), (50, 80));
+    assert_eq!(h.shell.editor().undo_history().len(), steps + 1);
+    assert_eq!(last_step(&h), "Change Chain Zone");
+
+    // The body moves the zone.
+    let layout = layout_of(&mut h, rack);
+    let (from, per_value) = bar_point(&layout, 1, zone, "body");
+    drag(&mut h, from, from - egui::vec2(20.0 * per_value, 0.0));
+    let zone = zone_of(&h, chains[1]);
+    assert_eq!((zone.low, zone.high), (30, 60));
+    assert_eq!(h.shell.editor().undo_history().len(), steps + 2);
+
+    // The narrow bar above sets a fade.
+    let layout = layout_of(&mut h, rack);
+    let (from, per_value) = bar_point(&layout, 1, zone, "fade-low");
+    drag(&mut h, from, from + egui::vec2(6.0 * per_value, 0.0));
+    let zone = zone_of(&h, chains[1]);
+    assert_eq!((zone.fade_low, zone.fade_high), (6, 0));
+    let layout = layout_of(&mut h, rack);
+    let (from, per_value) = bar_point(&layout, 1, zone, "fade-high");
+    drag(&mut h, from, from - egui::vec2(4.0 * per_value, 0.0));
+    let zone = zone_of(&h, chains[1]);
+    assert_eq!((zone.fade_low, zone.fade_high), (6, 4));
+    assert_eq!(h.shell.editor().undo_history().len(), steps + 4);
+    // Each undoes alone.
+    h.shell.invoke("edit.undo", json!({})).unwrap();
+    assert_eq!(zone_of(&h, chains[1]).fade_high, 0);
+    let _ = Zone::new(0, 0);
+
+    // The chain selector above the scale is draggable, and sets the rack's
+    // parameter as one step.
+    let layout = layout_of(&mut h, rack);
+    let zones = layout.zone_editor.as_ref().unwrap();
+    let start = pos2(
+        bl_ui::multisampler::x_of(zones.bars, ZoneKind::Select, 0.5),
+        zones.selector.center().y,
+    );
+    let per_value = zones.bars.width() / 128.0;
+    let before = h.shell.editor().undo_history().len();
+    drag(&mut h, start, start + egui::vec2(45.0 * per_value, 0.0));
+    assert_eq!(rack_state(&h, rack).selector, 45);
+    assert_eq!(h.shell.editor().undo_history().len(), before + 1);
+    assert_eq!(last_step(&h), "Change \"Chain Selector\"");
+
+    // Hide closes the editor.
+    let hide = layout_of(&mut h, rack)
+        .chain_list
+        .unwrap()
+        .buttons
+        .iter()
+        .find(|(b, _)| *b == rack_view::ZoneButton::Hide)
+        .unwrap()
+        .1;
+    click(&mut h, hide.center());
+    assert_eq!(rack_state(&h, rack).zone_editor(), None);
+    assert!(layout_of(&mut h, rack).zone_editor.is_none());
+
+    // Every gesture is the command an agent runs; the readback agrees.
+    let nodes = Harness::nodes(&h.settle());
+    assert_eq!(Harness::node(&nodes, "Hide").role, Role::Button);
+}
+
+/// Runs frames, at a display's pace, until `done` holds, for up to five
+/// seconds.
+fn wait(h: &mut Harness, what: &str, done: impl Fn(&Harness) -> bool) {
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        h.frame(vec![]);
+        if done(h) {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < until,
+            "timed out waiting for {what}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(4));
+    }
+}
+
+// Spec: racks R37
+#[test]
+fn auto_select_follows_the_notes() {
+    use bl_core::time::Ticks;
+    use bl_model::{Clip, ClipData, Command, MidiData, Note};
+    let mut h = Harness::with_title_bar(Window::Main);
+    h.settle();
+    let midi: TrackId = h.shell.editor().document().top_level().next().unwrap();
+    h.shell
+        .invoke("arrangement.select_tracks", json!({ "tracks": [midi] }))
+        .unwrap();
+    let rack = add(
+        &mut h,
+        json!({ "device": { "kind": { "rack": { "kind": "instrument" } },
+            "name": "Rack", "role": "instrument" } }),
+    );
+    let chains: Vec<ChainId> = ["Low", "High", "Never"]
+        .iter()
+        .map(|n| add_chain(&mut h, rack, n))
+        .collect();
+    for (chain, kind, low, high) in [
+        (chains[0], "key", 0, 59),
+        (chains[1], "key", 60, 127),
+        (chains[2], "select", 5, 5),
+    ] {
+        h.shell
+            .invoke(
+                "chain.set_zone",
+                json!({ "chain": chain, "kind": kind,
+                    "zone": { "low": low, "high": high } }),
+            )
+            .unwrap();
+    }
+    // Two notes held long: a low one from the start, and a high one a beat
+    // in.
+    let beat = Ticks(bl_core::time::TICKS_PER_QUARTER);
+    h.shell.edit(|editor| {
+        let clip = editor.new_id();
+        let notes = [
+            Note::new(40, Ticks::ZERO, beat * 16, 100),
+            Note::new(70, beat, beat * 16, 100),
+        ];
+        editor
+            .apply(Command::CreateClip {
+                track: midi,
+                clip: Clip::new(
+                    clip,
+                    Ticks::ZERO,
+                    beat * 16,
+                    ClipData::Midi(MidiData::new(notes)),
+                ),
+            })
+            .unwrap();
+    });
+    h.settle();
+    let auto = layout_of(&mut h, rack)
+        .chain_list
+        .unwrap()
+        .buttons
+        .iter()
+        .find(|(b, _)| *b == rack_view::ZoneButton::AutoSelect)
+        .unwrap()
+        .1;
+    let steps = h.shell.editor().undo_history().len();
+    click(&mut h, auto.center());
+    assert!(rack_state(&h, rack).views.auto_select);
+    assert_eq!(selected(&h, rack), [chains[0]], "none processes yet");
+
+    h.shell.run("transport.play", json!({})).unwrap();
+    // The low note is held: its chain is selected, and no other.
+    wait(&mut h, "the low chain to be selected", |h| {
+        h.engine.playing && selected(h, rack) == [chains[0]]
+    });
+    // A beat in, the high note starts on the other chain too; the chain
+    // no note reaches is never selected.
+    wait(&mut h, "both chains to be selected", |h| {
+        selected(h, rack) == [chains[0], chains[1]]
+    });
+    assert_eq!(
+        h.shell.editor().undo_history().len(),
+        steps,
+        "neither the switch nor the selections are undo steps"
+    );
+    h.shell.run("transport.stop", json!({})).unwrap();
+}

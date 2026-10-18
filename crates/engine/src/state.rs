@@ -1,7 +1,7 @@
 //! What the engine tells the UI: playhead, meters, CPU load, and reports.
 
 use bl_core::time::{Frames, SampleRate, Ticks};
-use bl_model::{ParamId, TrackId};
+use bl_model::{ChainId, ParamId, TrackId};
 use rtrb::Consumer;
 
 use crate::capture::CapturedMidi;
@@ -144,6 +144,11 @@ pub struct EngineState {
     /// The parameters under modulation while the song plays, as the last
     /// block played them (WP-5.9); the rest play their base.
     pub modulated: Vec<PlayedParam>,
+    /// The rack chains that were processing in the last block (WP-5.3, the
+    /// racks spec, R37): in an instrument or MIDI effect rack each chain a
+    /// held note reached, in an audio effect rack each chain whose chain
+    /// select zone held the selector's value.
+    pub processing: Vec<ChainId>,
     /// The audio thread's counters.
     pub counters: EngineCounters,
 }
@@ -155,6 +160,7 @@ impl EngineState {
         tracks: usize,
         slots: usize,
         modulated: usize,
+        processing: usize,
         sample_rate: SampleRate,
     ) -> Self {
         Self {
@@ -180,6 +186,7 @@ impl EngineState {
             meters: Vec::with_capacity(tracks),
             meters_truncated: false,
             modulated: Vec::with_capacity(modulated),
+            processing: Vec::with_capacity(processing),
             counters: EngineCounters::default(),
         }
     }
@@ -222,6 +229,8 @@ impl Clone for EngineState {
         session.extend_from_slice(&self.session);
         let mut modulated = Vec::with_capacity(self.modulated.capacity());
         modulated.extend_from_slice(&self.modulated);
+        let mut processing = Vec::with_capacity(self.processing.capacity());
+        processing.extend_from_slice(&self.processing);
         let mut session_over = Vec::with_capacity(self.session_over.capacity());
         session_over.extend_from_slice(&self.session_over);
         Self {
@@ -247,6 +256,7 @@ impl Clone for EngineState {
             meters,
             meters_truncated: self.meters_truncated,
             modulated,
+            processing,
             counters: self.counters,
         }
     }

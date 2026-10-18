@@ -23,7 +23,7 @@ use crate::follow::FollowPatch;
 use crate::ids::{ChainId, ClipId, ContentHash, DeviceId, ParamId, SceneId, TrackId};
 use crate::launch::{ClipLaunch, LaunchMode, LaunchQuantization};
 use crate::layers::{
-    Distribution, Layer, LayerId, LayerSettings, LayerSort, LayerZone, Layers, ZoneKind,
+    Distribution, Layer, LayerId, LayerSettings, LayerSort, LayerZone, Layers, Zone, ZoneKind,
 };
 use crate::metronome::{CountIn, MetronomeRhythm, MetronomeSound};
 use crate::rack::{CHAIN_COLOURS, Chain, RackKind};
@@ -1539,6 +1539,19 @@ pub enum Command {
         /// Whether it's soloed.
         solo: bool,
     },
+    /// Sets one of a chain's zones (the racks spec, R30): the key zone
+    /// (notes 0 to 127), the velocity zone (1 to 127) or the chain select
+    /// zone (0 to 127), with its two fades. The zone holds at least one
+    /// value of its scale and its fades stay inside it. A chain of an audio
+    /// effect rack has only a chain select zone, and a drum rack's none.
+    SetChainZone {
+        /// The chain.
+        chain: ChainId,
+        /// Which zone.
+        kind: ZoneKind,
+        /// The new zone.
+        zone: Zone,
+    },
 }
 
 impl Command {
@@ -1733,6 +1746,7 @@ impl Command {
             Self::SetChainPan { .. } => "Change chain pan",
             Self::SetChainEnabled { .. } => "Change \"Chain On\"",
             Self::SetChainSolo { .. } => "Solo chain",
+            Self::SetChainZone { .. } => "Change Chain Zone",
         }
     }
 
@@ -2716,6 +2730,25 @@ impl Document {
             Command::SetChainSolo { chain, solo } => {
                 if self.chain_ref(*chain)?.mixer.solo != *solo {
                     self.chain_mut(*chain)?.mixer.solo = *solo;
+                }
+                Ok(())
+            }
+            Command::SetChainZone { chain, kind, zone } => {
+                let rack = self.chain_rack(*chain).and_then(Device::rack_kind);
+                if !rack.is_some_and(|rack| rack.zone_kinds().contains(kind)) {
+                    return Err(ModelError::ChainHasNoZone {
+                        chain: *chain,
+                        kind: *kind,
+                    });
+                }
+                if !zone.is_valid(*kind) {
+                    return Err(ModelError::InvalidInput(
+                        "a chain's zone must hold a value of its scale, with its fades inside it",
+                    ));
+                }
+                let zones = self.chain_ref(*chain)?.zones;
+                if zones.get(*kind) != *zone {
+                    self.chain_mut(*chain)?.zones = zones.with(*kind, *zone);
                 }
                 Ok(())
             }

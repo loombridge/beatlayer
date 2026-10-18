@@ -42,6 +42,7 @@ pub fn channel(config: &EngineConfig) -> (Sender, Processor, Monitor) {
         config.max_tracks,
         config.max_slots,
         config.max_modulated,
+        config.max_processing,
         config.sample_rate,
     ));
     let sender = Sender {

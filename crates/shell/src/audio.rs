@@ -744,6 +744,15 @@ impl AudioHost {
         }
     }
 
+    /// The rack chains the engine found processing in the last block
+    /// (WP-5.3): what Auto Select follows. Empty while no engine runs.
+    pub fn processing_into(&mut self, out: &mut Vec<bl_model::ChainId>) {
+        out.clear();
+        if let Some(engine) = self.engine.as_mut() {
+            out.extend_from_slice(&engine.state().processing);
+        }
+    }
+
     /// Gives the engine what to record while the transport records
     /// (WP-2.13): the armed tracks' inputs and the rings their samples go
     /// to. It replaces any earlier plan; the take that ends drops it, which

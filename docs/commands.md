@@ -15,7 +15,7 @@ Each command has:
 - **arguments** and a **result** as JSON Schemas generated from the Rust types. An agent sends the arguments as a JSON object. The types they use are under [Types](#types);
 - a **readback** for every command that isn't `read`: the read command or query that shows its effect, so an agent can check what it did ([Readback](#readback)).
 
-425 commands in 35 areas.
+428 commands in 35 areas.
 
 ## Permission classes
 
@@ -135,6 +135,7 @@ Each command has:
 | [`chain.set_info`](#chainset_info) | Edit Chain Info Text | `edit` |  |  |
 | [`chain.set_pan`](#chainset_pan) | Set Chain Pan | `edit` |  |  |
 | [`chain.set_solo`](#chainset_solo) | Solo Chain | `edit` |  |  |
+| [`chain.set_zone`](#chainset_zone) | Change Chain Zone | `edit` |  |  |
 | [`chain.solo`](#chainsolo) | Solo Chain | `edit` | `S` | `S` |
 | [`clip.create`](#clipcreate) | Create Clip | `edit` |  |  |
 | [`clip.create_in_slot`](#clipcreate_in_slot) | Create Clip in Slot | `edit` |  |  |
@@ -321,7 +322,9 @@ Each command has:
 | [`plugin.set_window`](#pluginset_window) | Set Plug-In Window Place | `read` |  |  |
 | [`plugin.settings`](#pluginsettings) | Plug-In Settings | `edit` |  |  |
 | [`plugin.show_window`](#pluginshow_window) | Show Plug-In Window | `read` |  |  |
+| [`rack.set_auto_select`](#rackset_auto_select) | Auto Select | `edit` |  |  |
 | [`rack.set_view`](#rackset_view) | Show or Hide a Rack's View | `edit` | `Plus`; `Minus` | `Plus`; `Minus` |
+| [`rack.set_zone_editor`](#rackset_zone_editor) | Show a Rack's Zone Editor | `edit` |  |  |
 | [`routing.set_cue_out`](#routingset_cue_out) | Set Cue Out | `edit` |  |  |
 | [`routing.set_input`](#routingset_input) | Set Input | `edit` |  |  |
 | [`routing.set_main_out`](#routingset_main_out) | Set Main Out | `edit` |  |  |
@@ -2325,6 +2328,24 @@ Arguments:
 |---|---|---|---|
 | `chain` | [`ChainId`](#chainid) | yes | The chain. |
 | `solo` | boolean | yes | Whether it's soloed. |
+
+Result: [`ChangeSet`](#changeset).
+
+#### `chain.set_zone`
+
+**Change Chain Zone**. Permission: `edit`. Contexts: `device-view`.
+
+Sets one of a chain's zones: `kind` key (notes 0 to 127), velocity (1 to 127) or select (the chain select zone, 0 to 127), with `low`, `high` and the values each fade spans (`fade_low`, `fade_high`). A zone holds at least one value of its scale and its fades stay inside it. A note in a key or velocity fade reaches the chain with its velocity scaled linearly, silent at the zone's edge and full at the fade's inner edge, as a multisampler's linear fades are; a chain select fade scales the chain's output the same way. A new chain's zones pass everything: every note, every velocity, and chain select 0 alone. An audio effect rack's chains have only a chain select zone, and a drum rack's none. One undo step, as one drag in the zone editor is. What it sets reads back in the `zones` of the query tool's `device` object.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `chain` | [`ChainId`](#chainid) | yes | The chain. |
+| `kind` | [`ZoneKind`](#zonekind) | yes | Which zone. |
+| `zone` | [`Zone`](#zone) | yes | The new zone. |
 
 Result: [`ChangeSet`](#changeset).
 
@@ -5681,6 +5702,23 @@ Result: [`PluginInfo`](#plugininfo).
 
 ### Area `rack`
 
+#### `rack.set_auto_select`
+
+**Auto Select**. Permission: `edit`. Contexts: `device-view`.
+
+Switches a rack's Auto Select, the selected device's or `rack`'s: while it is on, the chain list selects every chain that is processing, which the engine publishes after each block: in an instrument or MIDI effect rack each chain a held note reached, in an audio effect rack each chain whose chain select zone holds the chain selector's value. The devices view follows. It changes only the view: neither the switch nor the selections it makes are undo steps, and the set keeps the switch.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean or null | no | Switch on (true) or off (false); switches if left out. |
+| `rack` | [`DeviceId`](#deviceid) or null | no | The rack; the selected device if left out, which must be a rack. |
+
+Result: [`DeviceViewState`](#deviceviewstate).
+
 #### `rack.set_view`
 
 **Show or Hide a Rack's View**. Permission: `edit`. Contexts: `device-view`.
@@ -5701,6 +5739,23 @@ Arguments:
 | `view` | [`RackView`](#rackview) | yes | The view. |
 | `rack` | [`DeviceId`](#deviceid) or null | no | The rack; the selected device if left out, which must be a rack. |
 | `shown` | boolean or null | no | Show (true) or hide (false); switches if left out. |
+
+Result: [`DeviceViewState`](#deviceviewstate).
+
+#### `rack.set_zone_editor`
+
+**Show a Rack's Zone Editor**. Permission: `edit`. Contexts: `device-view`.
+
+Shows the zone editor of a rack, the selected device or `rack`, beside its chain list: `editor` is `key` (the Key button), `velocity` (Vel) or `select` (Chain); an audio effect rack has only `select`, and a drum rack none. Leaving `editor` out, or null, hides it (Hide). It changes only the view: it isn't an undo step, and the set keeps which editor each rack shows.
+
+Default keys: none.
+
+Arguments:
+
+| Name | Type | Required | Description |
+|---|---|---|---|
+| `editor` | [`ZoneKind`](#zonekind) or null | no | The editor to show: `key`, `velocity` (the Vel button) or `select` (the Chain button). None, or left out, is Hide. |
+| `rack` | [`DeviceId`](#deviceid) or null | no | The rack; the selected device if left out, which must be a rack. |
 
 Result: [`DeviceViewState`](#deviceviewstate).
 
@@ -7978,6 +8033,7 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`chain.set_info`](#chainset_info) | the query tool's `device` | `chains` |
 | [`chain.set_pan`](#chainset_pan) | the query tool's `device` | `chains` |
 | [`chain.set_solo`](#chainset_solo) | the query tool's `device` | `chains` |
+| [`chain.set_zone`](#chainset_zone) | the query tool's `device` | `chains` |
 | [`chain.solo`](#chainsolo) | the query tool's `device` | `chains` |
 | [`clip.create`](#clipcreate) | the query tool's `track` | `clips` |
 | [`clip.create_in_slot`](#clipcreate_in_slot) | the query tool's `track` | `slots` |
@@ -8108,7 +8164,9 @@ Anything an agent can set, it can read back. Each command that isn't `read` name
 | [`plugin.scan`](#pluginscan) | `plugin.list` | `plugins` |
 | [`plugin.set_panel_param`](#pluginset_panel_param) | `device_view.state` | `devices` |
 | [`plugin.settings`](#pluginsettings) | `settings.state` | `plug_ins` |
+| [`rack.set_auto_select`](#rackset_auto_select) | `device_view.state` | `devices` |
 | [`rack.set_view`](#rackset_view) | `device_view.state` | `devices` |
+| [`rack.set_zone_editor`](#rackset_zone_editor) | `device_view.state` | `devices` |
 | [`routing.set_cue_out`](#routingset_cue_out) | the query tool's `track` | `routing.cue_out` |
 | [`routing.set_input`](#routingset_input) | the query tool's `track` | `routing.input` |
 | [`routing.set_main_out`](#routingset_main_out) | the query tool's `track` | `routing.main_out` |
@@ -10053,6 +10111,7 @@ One chain of a rack: its own name, colour, info text and mixer, and its devices 
 | `devices` | array of [`Device`](#device) | no | The chain's devices, in signal order. |
 | `info` | string | no | The info text the user gave the chain (Edit Info Text). |
 | `mixer` | [`ChainMixer`](#chainmixer) | no | The chain's mixer. |
+| `zones` | [`ChainZones`](#chainzones) | no | The chain's zones. Left out of the saved set while they pass everything. |
 
 <details><summary>JSON Schema</summary>
 
@@ -10094,6 +10153,10 @@ One chain of a rack: its own name, colour, info text and mixer, and its devices 
     "name": {
       "description": "The chain's name.",
       "type": "string"
+    },
+    "zones": {
+      "$ref": "#/$defs/ChainZones",
+      "description": "The chain's zones. Left out of the saved set while they pass everything."
     }
   },
   "required": [
@@ -10227,6 +10290,7 @@ One row of a rack's chain list (racks spec, R21).
 | `pan` | number | yes | Its Pan, from -1 to 1. |
 | `has_mixer` | boolean | yes | Whether it has Volume and Pan: all but a MIDI effect rack's chains do. |
 | `selected` | boolean | yes | Whether it's selected. |
+| `zones` | [`ChainZones`](#chainzones) | yes | Its key, velocity and chain select zones (WP-5.3, racks spec R30). |
 
 <details><summary>JSON Schema</summary>
 
@@ -10281,6 +10345,10 @@ One row of a rack's chain list (racks spec, R21).
       "description": "Its Volume as linear gain; 1 is 0 dB.",
       "format": "double",
       "type": "number"
+    },
+    "zones": {
+      "$ref": "#/$defs/ChainZones",
+      "description": "Its key, velocity and chain select zones (WP-5.3, racks spec R30)."
     }
   },
   "required": [
@@ -10293,7 +10361,8 @@ One row of a rack's chain list (racks spec, R21).
     "volume",
     "pan",
     "has_mixer",
-    "selected"
+    "selected",
+    "zones"
   ],
   "type": "object"
 }
@@ -10345,6 +10414,42 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `ChainZones`
+
+A chain's zones, each `low`, `high` and the `fade_low` and `fade_high` values its fades span: `key` (0 to 127), `velocity` (1 to 127) and `select` (the chain select zone, 0 to 127). One left out passes everything: every note, every velocity, and chain select 0 alone.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `key` | [`Zone`](#zone) | no | The key zone. |
+| `select` | [`Zone`](#zone) | no | The chain select zone. |
+| `velocity` | [`Zone`](#zone) | no | The velocity zone. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "A chain's zones, each `low`, `high` and the `fade_low` and `fade_high` values its fades span: `key` (0 to 127), `velocity` (1 to 127) and `select` (the chain select zone, 0 to 127). One left out passes everything: every note, every velocity, and chain select 0 alone.",
+  "properties": {
+    "key": {
+      "$ref": "#/$defs/Zone",
+      "description": "The key zone."
+    },
+    "select": {
+      "$ref": "#/$defs/Zone",
+      "description": "The chain select zone."
+    },
+    "velocity": {
+      "$ref": "#/$defs/Zone",
+      "description": "The velocity zone."
+    }
+  },
+  "type": "object"
 }
 ```
 
@@ -18749,6 +18854,8 @@ A rack as the Device View shows it (WP-5.2; the racks spec, R18 to R23): a view 
 | `selected_chains` | array of [`ChainId`](#chainid) | yes | The selected chains: those clicked, or the first chain while none is. |
 | `devices` | array of [`DeviceFrame`](#deviceframe) | yes | The devices of the selected chain, left to right: empty while no chain or several are selected. |
 | `chain_list_focused` | boolean | yes | Whether the chain list has the focus, so S solos the selected chain. |
+| `selector` | integer from 0 to 255 | yes | The chain selector's value (racks spec, R33): 0 to 127. |
+| `filters_midi_ctrl` | boolean | yes | Chain Selector Filters MIDI Ctrl (racks spec, R31). |
 | `note` | string or null | no | What the devices view says instead of devices while several chains are selected, such as `3 chains selected`. |
 
 <details><summary>JSON Schema</summary>
@@ -18775,6 +18882,10 @@ A rack as the Device View shows it (WP-5.2; the racks spec, R18 to R23): a view 
       },
       "type": "array"
     },
+    "filters_midi_ctrl": {
+      "description": "Chain Selector Filters MIDI Ctrl (racks spec, R31).",
+      "type": "boolean"
+    },
     "kind": {
       "$ref": "#/$defs/RackKind",
       "description": "Its kind."
@@ -18793,6 +18904,13 @@ A rack as the Device View shows it (WP-5.2; the racks spec, R18 to R23): a view 
       },
       "type": "array"
     },
+    "selector": {
+      "description": "The chain selector's value (racks spec, R33): 0 to 127.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
     "views": {
       "$ref": "#/$defs/RackViews",
       "description": "Which views it shows: kept with the set, so reopening it shows them."
@@ -18804,7 +18922,9 @@ A rack as the Device View shows it (WP-5.2; the racks spec, R18 to R23): a view 
     "chains",
     "selected_chains",
     "devices",
-    "chain_list_focused"
+    "chain_list_focused",
+    "selector",
+    "filters_midi_ctrl"
   ],
   "type": "object"
 }
@@ -18894,20 +19014,26 @@ One of:
 
 ### `RackViews`
 
-Which views of a rack are shown: `macros` (the Macro Controls), `chain_list` and `devices` (the selected chain's devices). All on in a new rack.
+Which views of a rack are shown: `macros` (the Macro Controls), `chain_list` and `devices` (the selected chain's devices), all on in a new rack; `zone_editor` (`key`, `velocity` or `select`, none in a new rack) and `auto_select` (off in a new rack).
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `macros` | boolean | yes | The Macro Controls. |
 | `chain_list` | boolean | yes | The chain list. |
 | `devices` | boolean | yes | The selected chain's devices. |
+| `auto_select` | boolean | no | Auto Select: the chain list selects the chains that are processing (racks spec, R37). Off in a new rack. |
+| `zone_editor` | [`ZoneKind`](#zonekind) or null | no | The zone editor beside the chain list (racks spec, R35): the Key, Vel (`velocity`) or Chain (`select`) editor, or none while Hide is on, as in a new rack. |
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "Which views of a rack are shown: `macros` (the Macro Controls), `chain_list` and `devices` (the selected chain's devices). All on in a new rack.",
+  "description": "Which views of a rack are shown: `macros` (the Macro Controls), `chain_list` and `devices` (the selected chain's devices), all on in a new rack; `zone_editor` (`key`, `velocity` or `select`, none in a new rack) and `auto_select` (off in a new rack).",
   "properties": {
+    "auto_select": {
+      "description": "Auto Select: the chain list selects the chains that are processing (racks spec, R37). Off in a new rack.",
+      "type": "boolean"
+    },
     "chain_list": {
       "default": true,
       "description": "The chain list.",
@@ -18922,6 +19048,17 @@ Which views of a rack are shown: `macros` (the Macro Controls), `chain_list` and
       "default": true,
       "description": "The Macro Controls.",
       "type": "boolean"
+    },
+    "zone_editor": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ZoneKind"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The zone editor beside the chain list (racks spec, R35): the Key, Vel (`velocity`) or Chain (`select`) editor, or none while Hide is on, as in a new rack."
     }
   },
   "required": [

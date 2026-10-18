@@ -1324,3 +1324,144 @@ fn a_copied_rack_maps_its_own_copies_and_a_removed_chain_takes_its_mappings() {
     }));
     assert_eq!(targets.len(), 2);
 }
+
+// Spec: racks R36
+#[test]
+fn zones_save_load_and_undo() {
+    let Set {
+        mut shell,
+        midi,
+        audio,
+    } = set();
+    select_track(&mut shell, midi);
+    let (rack, chains) = rack_with_chains(&mut shell, "instrument", 2);
+    let before = steps(&shell);
+    let zone = |kind: &str, low: u8, high: u8, fade_low: u8, fade_high: u8| {
+        json!({ "chain": chains[1], "kind": kind,
+            "zone": { "low": low, "high": high, "fade_low": fade_low, "fade_high": fade_high } })
+    };
+    for args in [
+        zone("key", 36, 72, 6, 0),
+        zone("velocity", 20, 127, 0, 10),
+        zone("select", 2, 8, 0, 3),
+    ] {
+        shell.invoke("chain.set_zone", args).unwrap();
+        assert_eq!(last_step(&shell), "Change Chain Zone");
+    }
+    // The selector and Chain Selector Filters MIDI Ctrl are the rack's
+    // parameters.
+    shell
+        .invoke(
+            "device.set_param",
+            json!({ "device": rack, "param": 0, "value": 5 }),
+        )
+        .unwrap();
+    shell
+        .invoke(
+            "device.set_param",
+            json!({ "device": rack, "param": 1, "value": 1 }),
+        )
+        .unwrap();
+    assert_eq!(steps(&shell), before + 5, "one undo step each");
+    let parameters = shell
+        .run("device.parameters", json!({ "device": rack }))
+        .unwrap();
+    let value = |name: &str| {
+        parameters["params"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["name"] == name)
+            .unwrap_or_else(|| panic!("no {name} in {parameters}"))["value"]
+            .clone()
+    };
+    assert_eq!(value("Chain Selector"), json!(5.0));
+    assert_eq!(value("Chain Selector Filters MIDI Ctrl"), json!(1.0));
+    // The frame the Device View draws carries them.
+    let rack_frame = frame(&shell, rack);
+    assert_eq!(rack_frame.selector, 5);
+    assert!(rack_frame.filters_midi_ctrl);
+    assert_eq!(rack_frame.chains[1].zones.select.high, 8);
+    assert_eq!(rack_frame.chains[0].zones, bl_model::ChainZones::default());
+
+    // A zone the rack's kind doesn't give its chains is refused.
+    assert!(
+        shell
+            .invoke(
+                "chain.set_zone",
+                json!({
+        "chain": chains[1], "kind": "key", "zone": { "low": 50, "high": 40 } })
+            )
+            .is_err()
+    );
+
+    // Reopened, the zones, the selector and the switch are as they were.
+    let folder = std::env::temp_dir().join(format!("bl-zones-{}", std::process::id()));
+    std::fs::create_dir_all(&folder).unwrap();
+    let saved = shell
+        .run(
+            "set.save_as",
+            json!({ "path": folder.join("Zones.blset").to_string_lossy() }),
+        )
+        .unwrap();
+    let mut reopened = Shell::headless();
+    reopened
+        .run("set.open", json!({ "path": saved["path"] }))
+        .unwrap();
+    std::fs::remove_dir_all(&folder).ok();
+    assert_eq!(
+        reopened.editor().document().device(rack),
+        shell.editor().document().device(rack)
+    );
+    let chain = reopened.editor().document().chain(chains[1]).unwrap().zones;
+    assert_eq!(chain.key.fade_low, 6);
+    assert_eq!(chain.velocity.fade_high, 10);
+    assert_eq!((chain.select.low, chain.select.high), (2, 8));
+
+    // Each undoes alone.
+    for _ in 0..5 {
+        shell.invoke("edit.undo", json!({})).unwrap();
+    }
+    assert_eq!(steps(&shell), before);
+    assert_eq!(
+        shell.editor().document().chain(chains[1]).unwrap().zones,
+        bl_model::ChainZones::default()
+    );
+
+    // Which editor shows and Auto Select are view state: not undo steps, and
+    // the set keeps them.
+    shell
+        .invoke(
+            "rack.set_zone_editor",
+            json!({ "rack": rack, "editor": "velocity" }),
+        )
+        .unwrap();
+    shell
+        .invoke("rack.set_auto_select", json!({ "rack": rack }))
+        .unwrap();
+    assert_eq!(steps(&shell), before);
+    let views = frame(&shell, rack).views;
+    assert_eq!(views.zone_editor, Some(bl_model::ZoneKind::Velocity));
+    assert!(views.auto_select);
+    shell
+        .invoke("rack.set_zone_editor", json!({ "rack": rack }))
+        .unwrap();
+    assert_eq!(frame(&shell, rack).views.zone_editor, None);
+    // An audio effect rack has only the chain select editor.
+    select_track(&mut shell, audio);
+    let (effect_rack, _) = rack_with_chains(&mut shell, "audio_effect", 1);
+    assert!(
+        shell
+            .invoke(
+                "rack.set_zone_editor",
+                json!({ "rack": effect_rack, "editor": "key" })
+            )
+            .is_err()
+    );
+    shell
+        .invoke(
+            "rack.set_zone_editor",
+            json!({ "rack": effect_rack, "editor": "select" }),
+        )
+        .unwrap();
+}

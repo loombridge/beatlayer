@@ -2134,6 +2134,15 @@ const ENTRIES: &[Entry] = &[
         description: "Solos or unsolos a chain: while any chain of a rack is soloed, the rack's unsoloed chains add nothing. It leaves every other rack and every track as it is.",
     },
     Entry {
+        id: "chain.set_zone",
+        action: Action::Apply("set_chain_zone"),
+        label: "Change Chain Zone",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sets one of a chain's zones: `kind` key (notes 0 to 127), velocity (1 to 127) or select (the chain select zone, 0 to 127), with `low`, `high` and the values each fade spans (`fade_low`, `fade_high`). A zone holds at least one value of its scale and its fades stay inside it. A note in a key or velocity fade reaches the chain with its velocity scaled linearly, silent at the zone's edge and full at the fade's inner edge, as a multisampler's linear fades are; a chain select fade scales the chain's output the same way. A new chain's zones pass everything: every note, every velocity, and chain select 0 alone. An audio effect rack's chains have only a chain select zone, and a drum rack's none. One undo step, as one drag in the zone editor is. What it sets reads back in the `zones` of the query tool's `device` object.",
+    },
+    Entry {
         id: "device.wrap_in_rack",
         action: Action::Apply("group_devices"),
         label: "Wrap Devices in a Rack",

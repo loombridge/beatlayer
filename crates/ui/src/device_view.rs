@@ -55,6 +55,8 @@ pub struct DeviceViewUi {
     sample_displays: crate::sample_display::Displays,
     renaming: Option<Renaming>,
     pub(crate) renaming_chain: Option<crate::rack_view::ChainRenaming>,
+    /// A drag on a chain's zone bar in a rack's zone editor (WP-5.3).
+    pub(crate) zone_drag: Option<crate::rack_view::RackZoneDrag>,
     scroll: f32,
     /// The device that was selected when the last frame was drawn, so a new
     /// selection scrolls into view (racks spec, R25).
@@ -207,6 +209,7 @@ impl DeviceViewUi {
             sample_displays: crate::sample_display::Displays::default(),
             renaming: None,
             renaming_chain: None,
+            zone_drag: None,
             scroll: 0.0,
             seen_selected: None,
             chain_scrolls: std::collections::HashMap::new(),

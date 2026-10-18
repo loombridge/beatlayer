@@ -61,6 +61,10 @@ pub enum NodeKey {
     /// Volume, Pan, and Chain Activator, which solo mutes. Its parameters are
     /// [`mixer::track`](crate::mixer::track).
     ChainMixer(ChainId),
+    /// The filter at a rack chain's input (WP-5.3): its key, velocity and
+    /// chain select zones, which reach it as parameter changes numbered by
+    /// [`zones`](crate::zones).
+    ChainZones(ChainId),
 }
 
 impl fmt::Display for NodeKey {
@@ -76,6 +80,7 @@ impl fmt::Display for NodeKey {
             Self::SidechainInput(device) => write!(f, "the sidechain input of {device}"),
             Self::Sidechain(device) => write!(f, "the sidechain of {device}"),
             Self::ChainMixer(chain) => write!(f, "the mixer of {chain}"),
+            Self::ChainZones(chain) => write!(f, "the zones of {chain}"),
         }
     }
 }

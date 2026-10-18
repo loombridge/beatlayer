@@ -2,8 +2,9 @@
 
 use bl_core::time::Ticks;
 use bl_model::{
-    AutomationTarget, Chain, ChainId, Command, Device, DeviceId, DeviceKind, DeviceRole, Editor,
-    MixerParam, ModelError, ParamId, RackKind, TrackId, TrackKind,
+    AutomationTarget, Chain, ChainId, ChainZones, Command, ContentHash, Device, DeviceId,
+    DeviceKind, DeviceRole, Editor, FadeMode, Layer, LayerId, MixerParam, ModelError, ParamId,
+    RackKind, TrackId, TrackKind, Zone, ZoneKind,
 };
 
 fn rejected(editor: &mut Editor, command: Command) -> ModelError {
@@ -746,4 +747,203 @@ fn deleting_a_track_forgets_everything_inside_its_racks() {
     song.checked();
     assert_eq!(song.doc().device_count(), 0);
     assert_eq!(song.doc().chain_ids().len(), 0);
+}
+
+// Spec: racks R30
+#[test]
+fn new_zones_pass_everything_and_keep_their_order() {
+    let mut song = Song::new();
+    let instrument = song.rack(RackKind::Instrument, 1);
+    let instrument_chain = instrument.chains[0].id;
+    song.insert(song.midi, 0, instrument).unwrap();
+    let effect = song.rack(RackKind::AudioEffect, 1);
+    let effect_chain = effect.chains[0].id;
+    song.insert(song.audio, 0, effect).unwrap();
+
+    // A new chain passes every note and velocity and holds selector 0.
+    let zones = song.doc().chain(instrument_chain).unwrap().zones;
+    assert_eq!(zones, ChainZones::default());
+    assert_eq!(zones.key, Zone::new(0, 127));
+    assert_eq!(zones.velocity, Zone::new(1, 127));
+    assert_eq!(zones.select, Zone::new(0, 0));
+
+    // Each zone is set alone, as one undo step, and keeps the order: a
+    // value of its scale, and fades that fit inside it.
+    let steps = song.editor.undo_history().len();
+    let faded = Zone {
+        low: 20,
+        high: 100,
+        fade_low: 30,
+        fade_high: 50,
+    };
+    for (kind, zone) in [
+        (ZoneKind::Key, faded),
+        (ZoneKind::Velocity, Zone::new(10, 120)),
+        (ZoneKind::Select, Zone::new(3, 9)),
+    ] {
+        song.editor
+            .apply(Command::SetChainZone {
+                chain: instrument_chain,
+                kind,
+                zone,
+            })
+            .unwrap();
+        song.checked();
+    }
+    assert_eq!(song.editor.undo_history().len(), steps + 3);
+    let zones = song.doc().chain(instrument_chain).unwrap().zones;
+    assert_eq!(
+        (zones.key, zones.velocity, zones.select),
+        (faded, Zone::new(10, 120), Zone::new(3, 9))
+    );
+    // Setting a zone to what it is changes nothing.
+    let before = song.doc().clone();
+    song.editor
+        .apply(Command::SetChainZone {
+            chain: instrument_chain,
+            kind: ZoneKind::Select,
+            zone: Zone::new(3, 9),
+        })
+        .unwrap();
+    assert_eq!(song.doc(), &before);
+
+    // Zones out of order, off their scale or with fades too wide for them
+    // are refused and change nothing.
+    for (kind, zone) in [
+        (ZoneKind::Key, Zone::new(50, 40)),
+        (ZoneKind::Key, Zone::new(0, 128)),
+        (ZoneKind::Velocity, Zone::new(0, 100)),
+        (
+            ZoneKind::Select,
+            Zone {
+                low: 0,
+                high: 10,
+                fade_low: 6,
+                fade_high: 6,
+            },
+        ),
+    ] {
+        let error = rejected(
+            &mut song.editor,
+            Command::SetChainZone {
+                chain: instrument_chain,
+                kind,
+                zone,
+            },
+        );
+        assert!(matches!(error, ModelError::InvalidInput(_)), "{error:?}");
+    }
+    assert_eq!(song.doc(), &before);
+
+    // An audio effect rack's chains have only a chain select zone.
+    for kind in [ZoneKind::Key, ZoneKind::Velocity] {
+        let error = rejected(
+            &mut song.editor,
+            Command::SetChainZone {
+                chain: effect_chain,
+                kind,
+                zone: Zone::new(1, 5),
+            },
+        );
+        assert!(
+            matches!(error, ModelError::ChainHasNoZone { .. }),
+            "{error:?}"
+        );
+    }
+    song.editor
+        .apply(Command::SetChainZone {
+            chain: effect_chain,
+            kind: ZoneKind::Select,
+            zone: Zone::new(2, 4),
+        })
+        .unwrap();
+
+    // The zones save with the set, only where they differ from a new
+    // chain's, and load back; a file whose audio effect rack has a key zone
+    // is refused.
+    let value = serde_json::to_value(song.doc()).unwrap();
+    let saved = &value["tracks"][0]["devices"][0]["chains"][0];
+    assert_eq!(
+        saved["zones"],
+        serde_json::json!({ "select": { "low": 2, "high": 4 } })
+    );
+    let saved = &value["tracks"][1]["devices"][0]["chains"][0];
+    assert_eq!(
+        saved["zones"]["key"],
+        serde_json::json!({ "low": 20, "high": 100, "fade_low": 30, "fade_high": 50 })
+    );
+    let back: bl_model::Document = serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(&back, song.doc());
+    back.check_invariants().unwrap();
+    let mut broken = value;
+    broken["tracks"][0]["devices"][0]["chains"][0]["zones"]["key"] =
+        serde_json::json!({ "low": 1, "high": 5 });
+    let broken: Result<bl_model::Document, _> = serde_json::from_value(broken);
+    assert!(
+        broken.map_or(true, |doc| doc.check_invariants().is_err()),
+        "an audio effect rack's chain has no key zone"
+    );
+
+    // Every undo step goes back whole.
+    while song.editor.undo_history().len() > steps {
+        song.editor.undo().unwrap();
+        song.checked();
+    }
+    assert_eq!(
+        song.doc().chain(instrument_chain).unwrap().zones,
+        ChainZones::default()
+    );
+}
+
+/// R32's share, as the rule words it and not as the model works it out.
+fn share(zone: Zone, value: u8) -> f32 {
+    let (low, high) = (i32::from(zone.low), i32::from(zone.high));
+    let (n, m) = (i32::from(zone.fade_low), i32::from(zone.fade_high));
+    let v = i32::from(value);
+    if v < low || v > high {
+        0.0
+    } else if v < low + n {
+        (v - low) as f32 / n as f32
+    } else if v > high - m {
+        (high - v) as f32 / m as f32
+    } else {
+        1.0
+    }
+}
+
+// Spec: racks R32, multisampler R5
+#[test]
+fn a_racks_fades_and_a_multisamplers_give_the_same_share_at_every_value() {
+    let layer = |zone: Zone| {
+        let mut layer = Layer::new(LayerId(1), "Layer", ContentHash([0; 32]), 1000, 48_000, 1);
+        layer.key = zone;
+        layer
+    };
+    for (low, high) in [(0u8, 127u8), (10, 20), (33, 33), (0, 1), (60, 127)] {
+        for fade_low in (0..=high - low).step_by(7) {
+            for fade_high in (0..=high - low - fade_low).step_by(5) {
+                let zone = Zone {
+                    low,
+                    high,
+                    fade_low,
+                    fade_high,
+                };
+                assert!(zone.is_valid(ZoneKind::Key));
+                let rack = ChainZones::default().with(ZoneKind::Key, zone);
+                for value in 0..=127u8 {
+                    let expected = share(zone, value);
+                    assert_eq!(
+                        rack.key.gain(value, FadeMode::Lin),
+                        expected,
+                        "a rack's {zone:?} at {value}"
+                    );
+                    assert_eq!(
+                        layer(zone).key.gain(value, FadeMode::Lin),
+                        expected,
+                        "a multisampler's {zone:?} at {value}"
+                    );
+                }
+            }
+        }
+    }
 }

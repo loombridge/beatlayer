@@ -366,6 +366,14 @@ impl View<'_> {
     }
 
     fn chain_summary(&self, chain: &Chain) -> Value {
+        let zone = |z: bl_model::Zone| {
+            json!({
+                "low": z.low,
+                "high": z.high,
+                "fade_low": z.fade_low,
+                "fade_high": z.fade_high,
+            })
+        };
         let mixer = &chain.mixer;
         json!({
             "id": chain.id,
@@ -378,6 +386,11 @@ impl View<'_> {
                 "pan": mixer.pan,
                 "enabled": mixer.enabled,
                 "solo": mixer.solo,
+            },
+            "zones": {
+                "key": zone(chain.zones.key),
+                "velocity": zone(chain.zones.velocity),
+                "select": zone(chain.zones.select),
             },
             "devices": chain.devices.iter().map(|d| self.device_summary(d)).collect::<Vec<_>>(),
         })

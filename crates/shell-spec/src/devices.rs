@@ -16,9 +16,9 @@ use bl_commands::Context::{Browser, DeviceView, Global, RackChains};
 use bl_commands::{Binding, CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_model::device_layout::BODY_HEIGHT;
 use bl_model::{
-    ChainId, ContentHash, DeviceDescription, DeviceDisplay, DeviceId, DeviceKind, DeviceLayout,
-    DeviceRole, ParamDescriptor, ParamId, RackKind, RackView, RackViews, Tap, TrackId, TrackKind,
-    WindowFrame,
+    ChainId, ChainZones, ContentHash, DeviceDescription, DeviceDisplay, DeviceId, DeviceKind,
+    DeviceLayout, DeviceRole, ParamDescriptor, ParamId, RackKind, RackView, RackViews, Tap,
+    TrackId, TrackKind, WindowFrame, ZoneKind,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -102,6 +102,11 @@ pub const CHAIN_CREATE: &str = "chain.create";
 pub const CHAIN_DROP_ON_TRACK: &str = "chain.drop_on_track";
 /// `rack.set_view`: show or hide a view of a rack (WP-5.2).
 pub const RACK_SET_VIEW: &str = "rack.set_view";
+/// `rack.set_zone_editor`: show one of a rack's zone editors, or none
+/// (WP-5.3).
+pub const RACK_SET_ZONE_EDITOR: &str = "rack.set_zone_editor";
+/// `rack.set_auto_select`: switch a rack's Auto Select (WP-5.3).
+pub const RACK_SET_AUTO_SELECT: &str = "rack.set_auto_select";
 
 /// `device.windows`: the floating devices' windows (WP-2.5b).
 pub const WINDOWS: &str = "device.windows";
@@ -157,6 +162,8 @@ pub const IDS: &[&str] = &[
     CHAIN_CREATE,
     CHAIN_DROP_ON_TRACK,
     RACK_SET_VIEW,
+    RACK_SET_ZONE_EDITOR,
+    RACK_SET_AUTO_SELECT,
 ];
 
 /// The document's device commands that act on the selected device when
@@ -210,6 +217,16 @@ pub const RACK_MACROS_WIDTH: f32 = 100.0;
 /// The width at 100% of a rack's chain list (to observe).
 pub const RACK_CHAIN_LIST_WIDTH: f32 = 168.0;
 
+/// The width at 100% of a rack's zone editor, right of its chain list while
+/// one of its editors is shown (racks spec, R35; to observe).
+pub const RACK_ZONE_EDITOR_WIDTH: f32 = 232.0;
+
+/// The height at 100% of the header above a rack's chain list while its
+/// chains have zones: the Key, Vel, Chain and Hide buttons, and Auto Select
+/// under them (racks spec, R35, R37). The zone editor's scale has the same
+/// height, so its rows sit level with the chain list's.
+pub const RACK_LIST_HEADER_HEIGHT: f32 = 34.0;
+
 /// The width at 100% of the end bracket that closes a rack's devices
 /// (racks spec, R18; to observe).
 pub const RACK_END_BRACKET_WIDTH: f32 = 8.0;
@@ -252,6 +269,11 @@ pub fn rack_width(rack: &RackFrame) -> f32 {
         }
         + if rack.views.chain_list {
             RACK_CHAIN_LIST_WIDTH
+        } else {
+            0.0
+        }
+        + if rack.zone_editor().is_some() {
+            RACK_ZONE_EDITOR_WIDTH
         } else {
             0.0
         }
@@ -547,9 +569,27 @@ pub struct RackFrame {
     pub note: Option<String>,
     /// Whether the chain list has the focus, so S solos the selected chain.
     pub chain_list_focused: bool,
+    /// The chain selector's value (racks spec, R33): 0 to 127.
+    pub selector: u8,
+    /// Chain Selector Filters MIDI Ctrl (racks spec, R31).
+    pub filters_midi_ctrl: bool,
 }
 
 impl RackFrame {
+    /// The zone editor shown right of the chain list, if any: it needs the
+    /// chain list, whose rows it lines up with (racks spec, R35).
+    #[must_use]
+    pub fn zone_editor(&self) -> Option<ZoneKind> {
+        self.views.zone_editor.filter(|_| self.views.chain_list)
+    }
+
+    /// Whether the rack's chains have zones, so the chain list has its
+    /// header: all but a drum rack's do.
+    #[must_use]
+    pub fn has_zones(&self) -> bool {
+        !self.kind.zone_kinds().is_empty()
+    }
+
     /// Whether the rack is drawn as a strip a title bar wide: every view is
     /// hidden, so it folds into its view column (racks spec, R19).
     #[must_use]
@@ -581,6 +621,8 @@ pub struct ChainRow {
     pub has_mixer: bool,
     /// Whether it's selected.
     pub selected: bool,
+    /// Its key, velocity and chain select zones (WP-5.3, racks spec R30).
+    pub zones: ChainZones,
 }
 
 /// One entry of the Device View selector's device list (racks spec, R25).
@@ -1030,6 +1072,31 @@ pub struct SetRackViewArgs {
     /// Show (true) or hide (false); switches if left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shown: Option<bool>,
+}
+
+/// Arguments of `rack.set_zone_editor`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetZoneEditorArgs {
+    /// The rack; the selected device if left out, which must be a rack.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rack: Option<DeviceId>,
+    /// The editor to show: `key`, `velocity` (the Vel button) or `select`
+    /// (the Chain button). None, or left out, is Hide.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub editor: Option<ZoneKind>,
+}
+
+/// Arguments of `rack.set_auto_select`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetAutoSelectArgs {
+    /// The rack; the selected device if left out, which must be a rack.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rack: Option<DeviceId>,
+    /// Switch on (true) or off (false); switches if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
 }
 
 /// Arguments of `chain.paste`.
@@ -1597,6 +1664,32 @@ fn specs() -> Vec<CommandSpec> {
                     .arg("shown", false),
             )
             .args::<SetRackViewArgs>()
+            .result::<DeviceViewState>(),
+        CommandSpec::new(RACK_SET_ZONE_EDITOR, "Show a Rack's Zone Editor")
+            .description(
+                "Shows the zone editor of a rack, the selected device or `rack`, beside its \
+                 chain list: `editor` is `key` (the Key button), `velocity` (Vel) or `select` \
+                 (Chain); an audio effect rack has only `select`, and a drum rack none. \
+                 Leaving `editor` out, or null, hides it (Hide). It changes only the view: it \
+                 isn't an undo step, and the set keeps which editor each rack shows.",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<SetZoneEditorArgs>()
+            .result::<DeviceViewState>(),
+        CommandSpec::new(RACK_SET_AUTO_SELECT, "Auto Select")
+            .description(
+                "Switches a rack's Auto Select, the selected device's or `rack`'s: while it \
+                 is on, the chain list selects every chain that is processing, which the \
+                 engine publishes after each block: in an instrument or MIDI effect rack \
+                 each chain a held note reached, in an audio effect rack each chain whose \
+                 chain select zone holds the chain selector's value. The devices view \
+                 follows. It changes only the view: neither the switch nor the selections it \
+                 makes are undo steps, and the set keeps the switch.",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<SetAutoSelectArgs>()
             .result::<DeviceViewState>(),
         CommandSpec::new(DISPLAY, "Device Display")
             .description(

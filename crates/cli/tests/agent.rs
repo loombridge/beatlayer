@@ -2059,6 +2059,137 @@ fn an_agent_drives_a_racks_frame_by_command_id() {
     );
 }
 
+// Spec: racks R42 to R47 (WP-5.8): an agent saves a rack and a chain as
+// presets, loads both back, and hot-swaps a device with the rack preset, by
+// command ID, and reads each result back from the track's devices and
+// `device_view.state`.
+#[test]
+fn an_agent_saves_and_loads_a_rack_preset() {
+    let dir = TempDir::new("rack-presets");
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("rack-presets").unwrap();
+    let audio = default_tracks(&mut client)[2];
+    let run = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        let out = call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }] }),
+        );
+        out["results"][0]["result"].clone()
+    };
+    run(
+        &mut client,
+        "arrangement.select_tracks",
+        json!({ "tracks": [audio] }),
+    );
+    let through = json!({
+        "id": {"$new": "x"}, "name": "Through", "enabled": true, "params": [],
+        "kind": { "native": { "device_type": "test.through" } },
+    });
+    let built = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "device.insert", "args": { "track": audio, "index": 0, "device": {
+            "id": {"$new": "rack"}, "name": "Layers", "enabled": true, "params": [],
+            "kind": { "rack": { "kind": "audio_effect" } },
+            "chains": [
+                { "id": {"$new": "a"}, "name": "Wide", "devices": [through] },
+                { "id": {"$new": "b"}, "name": "Narrow", "devices": [] },
+            ],
+        } } }] }),
+    );
+    let id = |name: &str| built["ids"][name].as_u64().unwrap();
+    let (rack, a) = (id("rack"), id("a"));
+    let devices = |client: &mut Client<InProcess>| -> Vec<Value> {
+        call(client, "query", json!({ "id": audio }))["devices"]
+            .as_array()
+            .unwrap()
+            .clone()
+    };
+
+    // Saved: the file is named, the set is unchanged.
+    let rack_file = dir.0.join("Layers.blpreset");
+    let chain_file = dir.0.join("Wide.blpreset");
+    let history = call(&mut client, "query", json!({ "path": "history" }));
+    let saved = run(
+        &mut client,
+        "device.save_preset",
+        json!({ "device": rack, "path": rack_file }),
+    );
+    assert_eq!(saved["name"], "Layers");
+    let saved = run(
+        &mut client,
+        "chain.save_preset",
+        json!({ "chain": a, "path": chain_file }),
+    );
+    assert_eq!(saved["name"], "Wide");
+    assert!(rack_file.is_file() && chain_file.is_file());
+    assert_eq!(
+        call(&mut client, "query", json!({ "path": "history" })),
+        history
+    );
+
+    // Loaded back: a second rack with the same chains, new IDs, and a chain
+    // preset added to the first as a third chain.
+    let added = run(
+        &mut client,
+        "device.add_preset",
+        json!({ "path": rack_file, "track": audio }),
+    );
+    let copy = added["device"].as_u64().unwrap();
+    assert_ne!(copy, rack);
+    let copy_chains = call(&mut client, "query", json!({ "id": copy }))["chains"].clone();
+    let names: Vec<&str> = copy_chains
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["Wide", "Narrow"]);
+    let loaded = run(
+        &mut client,
+        "chain.load_preset",
+        json!({ "path": chain_file, "rack": rack }),
+    );
+    assert_eq!(loaded["chains"].as_array().unwrap().len(), 1);
+    let chains = call(&mut client, "query", json!({ "id": rack }))["chains"].clone();
+    assert_eq!(chains.as_array().unwrap().len(), 3);
+    assert_eq!(chains[2]["name"], "Wide");
+
+    // Hot-swapped: the first rack is replaced by the preset's, and the
+    // swap stays on for the replacement.
+    run(&mut client, "device.hot_swap", json!({ "device": rack }));
+    let swapped = run(
+        &mut client,
+        "device.replace",
+        json!({ "preset": rack_file }),
+    );
+    let new = swapped["device"].as_u64().unwrap();
+    assert_ne!(new, rack);
+    let now: Vec<u64> = devices(&mut client)
+        .iter()
+        .map(|d| d["id"].as_u64().unwrap())
+        .collect();
+    assert_eq!(now, [new, copy]);
+    let state = run(&mut client, "device_view.state", json!({}));
+    assert_eq!(state["hot_swap"]["device"], json!(new));
+    assert_eq!(state["hot_swap"]["label"], json!("Swapping Audio Effect"));
+
+    // Newer or damaged presets are refused and change nothing.
+    let damaged = dir.0.join("Damaged.blpreset");
+    let text = fs::read_to_string(&rack_file).unwrap();
+    fs::write(&damaged, &text[..text.len() / 2]).unwrap();
+    let before = devices(&mut client).len();
+    let refused = client
+        .call(
+            "run",
+            json!({ "commands": [{ "command": "device.add_preset", "args": { "path": damaged } }] }),
+        )
+        .unwrap();
+    assert!(refused.is_error, "{}", refused.text);
+    assert_eq!(devices(&mut client).len(), before);
+}
+
 // Spec: racks R41 (WP-5.7): an agent takes a rack chain's tap as a track's
 // input by command ID, reads it back as the track's input, and sees it go
 // to No Input with the chain.

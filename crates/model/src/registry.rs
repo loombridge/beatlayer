@@ -1315,8 +1315,13 @@ const ENTRIES: &[Entry] = &[
             the clip's track the envelope modulates (a control of its mixer, one of its sends, \
             or a parameter of a device in its chain), `at` the position in ticks from the \
             beginning of the clip's contents, and `value` the value there, in the parameter's \
-            own units. A parameter with no clip envelope gets one, linked to the clip, with \
-            this breakpoint as its first.",
+            own units. A MIDI clip's `target` can instead be a MIDI controller (MIDI Ctrl in \
+            the Envelopes tab): `{\"type\": \"midi.cc\", \"number\": 1}` (a controller from 1 to \
+            31 or 33 to 119, value 0 to 127), `{\"type\": \"midi.pitch_bend\"}` (-8192 to 8191, \
+            0 at rest) or `{\"type\": \"midi.channel_pressure\"}` (0 to 127); the value is \
+            the message the clip sends to its track's devices while it plays, on any channel. \
+            A parameter with no clip envelope gets one, linked to the clip, with this \
+            breakpoint as its first.",
     },
     Entry {
         id: "clip.set_envelope_curve",

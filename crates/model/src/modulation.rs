@@ -212,6 +212,10 @@ impl Document {
                             ),
                         // A set from before relative modulation holds no racks.
                         AutomationTarget::Chain { .. } => old.clamp(-1.0, 1.0),
+                        // MIDI controllers came after relative modulation.
+                        AutomationTarget::MidiCc { .. }
+                        | AutomationTarget::MidiPitchBend
+                        | AutomationTarget::MidiChannelPressure => old,
                     });
                 }
                 if let Some(clip) = track.clip_mut(clip) {

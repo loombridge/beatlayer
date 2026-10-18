@@ -25,6 +25,10 @@ fn travel_of<'a>(
 ) -> Option<(Travel<'a>, f64)> {
     let track = document.track(track)?;
     Some(match *target {
+        // A MIDI controller sends messages; it modulates no parameter.
+        AutomationTarget::MidiCc { .. }
+        | AutomationTarget::MidiPitchBend
+        | AutomationTarget::MidiChannelPressure => return None,
         AutomationTarget::Mixer {
             param: MixerParam::Volume,
         } => (Travel::Fader, track.mixer().volume),

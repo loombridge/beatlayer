@@ -21,7 +21,8 @@
 //! Beatlayer ships its first native devices: the compressor ([`compressor`]),
 //! the parametric EQ ([`eq`], WP-2.18a), the algorithmic reverb
 //! ([`reverb`]), the limiter ([`limiter`]), the tempo-synced delay
-//! ([`delay`]) and the Utility device ([`utility`], WP-2.18b); [`register`]
+//! ([`delay`]), the Utility device ([`utility`], WP-2.18b) and the multiband
+//! dynamics ([`multiband_dynamics`], WP-5.22); [`register`]
 //! adds them to the engine, with the three delays of WP-5.25
 //! ([`filter_delay`], [`grain_delay`], [`alignment_delay`]). The instruments
 //! are the polysynth
@@ -58,6 +59,7 @@ pub mod lift;
 pub mod limiter;
 mod midi_fx;
 pub mod modulator;
+pub mod multiband_dynamics;
 pub mod multisampler;
 pub mod overdrive;
 pub mod polysynth;
@@ -96,6 +98,7 @@ pub use kitbag::{KITBAG, Kitbag, kitbag_type};
 pub use lfo::{Lfo, Rate, Shape, Stereo, Wave};
 pub use lift::{LIFT, lift_type};
 pub use limiter::{Brickwall, limiter_type};
+pub use multiband_dynamics::{MULTIBAND_DYNAMICS, Triband, multiband_dynamics_type};
 pub use multisampler::{MULTISAMPLER, Multisampler, multisampler_type};
 pub use overdrive::{OVERDRIVE, overdrive_type};
 pub use polysynth::{POLYSYNTH, PolySynth, polysynth_type};
@@ -137,6 +140,12 @@ pub fn display(
         OVERDRIVE => Some(overdrive::display(device, description, values, data)),
         TUBE => Some(tube::display(device, description, values, data)),
         bl_model::modulator::WAVE_MOD => Some(modulator::wave_display(device, description, values)),
+        MULTIBAND_DYNAMICS => Some(multiband_dynamics::display(
+            device,
+            description,
+            values,
+            data,
+        )),
         _ => None,
     }
 }
@@ -178,6 +187,7 @@ pub fn register(registry: &mut Registry) {
     overdrive::register(registry);
     tube::register(registry);
     beat_repeat::register(registry);
+    multiband_dynamics::register(registry);
 }
 
 /// The native device types Beatlayer ships, for the browser and the shell:

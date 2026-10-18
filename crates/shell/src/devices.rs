@@ -17,8 +17,8 @@ use bl_engine::DeviceType;
 use bl_model::device_layout::{BODY_HEIGHT, ControlBand, LayoutNode, Widget};
 use bl_model::{
     Chain, ChainId, Command, Device, DeviceDescription, DeviceId, DeviceKind, DeviceLayout,
-    DevicePlace, DeviceRole, DeviceWindows, Document, Editor, ParamId, RackKind, TrackId,
-    TrackKind,
+    DevicePlace, DeviceRole, DeviceWindows, Document, Editor, LayerId, MultisamplerView,
+    MultisamplerViews, ParamId, RackKind, TrackId, TrackKind,
 };
 use bl_project::preset::{self, Preset};
 use bl_shell_spec::arrangement as view_ids;
@@ -31,6 +31,7 @@ use bl_shell_spec::devices::{
     Ungrouped,
 };
 use bl_shell_spec::devices::{ArmMapArgs, ArmedMap, MappingRow, ModulatorFrame};
+use bl_shell_spec::multisampler::MultisamplerState;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
@@ -72,6 +73,17 @@ pub struct DeviceView {
     /// (WP-2.10, D19), by `format/plugin_id`: absent entries keep the
     /// plug-in's own parameter at that place. Synced from the preferences.
     plugin_panels: std::collections::BTreeMap<String, std::collections::BTreeMap<usize, ParamId>>,
+    /// What each multisampler's views show (WP-5.13): saved with the set,
+    /// never an undo step.
+    multisamplers: MultisamplerViews,
+    /// Each multisampler's selected layers, in the layer list (R11).
+    selections: std::collections::BTreeMap<DeviceId, Vec<LayerId>>,
+    /// The multisampler layer whose sample the browser's next load replaces
+    /// (WP-5.13, R10).
+    layer_hot_swap: Option<(DeviceId, LayerId)>,
+    /// With Auto Select on, the layers each held key plays (R7): while a
+    /// note is held they are the selection.
+    held: std::collections::BTreeMap<DeviceId, std::collections::BTreeMap<u8, Vec<LayerId>>>,
 }
 
 /// Why a device command didn't run.
@@ -382,6 +394,9 @@ impl DeviceView {
         self.folded.retain(exists);
         self.expanded.retain(exists);
         self.sidechains_shown.retain(exists);
+        self.selections.retain(|device, _| exists(device));
+        self.held.retain(|device, _| exists(device));
+        self.layer_hot_swap = self.layer_hot_swap.filter(|(device, _)| exists(device));
         self.armed = self.armed.filter(|(d, _)| exists(d));
         self.display_views.retain(|d, _| exists(d));
         self.displays.retain(|d, _| exists(d));
@@ -577,6 +592,140 @@ impl DeviceView {
         FloatingWindows { windows }
     }
 
+    /// Whether `device` is a multisampler (WP-5.13).
+    #[must_use]
+    pub fn is_multisampler(device: &Device) -> bool {
+        matches!(
+            &device.kind,
+            DeviceKind::Native { device_type } if device_type == bl_devices::multisampler::MULTISAMPLER
+        )
+    }
+
+    /// What a multisampler's views show: a new device's until a command
+    /// changes them.
+    #[must_use]
+    pub fn multisampler_view(&self, device: DeviceId) -> MultisamplerView {
+        self.multisamplers.get(&device).copied().unwrap_or_default()
+    }
+
+    /// Changes what a multisampler's views show.
+    pub fn set_multisampler_view(&mut self, device: DeviceId, view: MultisamplerView) {
+        if view == MultisamplerView::default() {
+            self.multisamplers.remove(&device);
+        } else {
+            self.multisamplers.insert(device, view);
+        }
+    }
+
+    /// Every multisampler's views, for the next save.
+    #[must_use]
+    pub fn multisampler_views(&self) -> &MultisamplerViews {
+        &self.multisamplers
+    }
+
+    /// Takes the views an opened set saved, or none for a new set.
+    pub fn set_multisampler_views(&mut self, views: MultisamplerViews) {
+        self.multisamplers = views;
+        self.selections.clear();
+        self.held.clear();
+        self.layer_hot_swap = None;
+    }
+
+    /// A multisampler's selected layers that are still in it, in list
+    /// order: the layers of the notes held while Auto Select is on, else the
+    /// ones picked in the list.
+    #[must_use]
+    pub fn layer_selection(&self, doc: &Document, device: DeviceId) -> Vec<LayerId> {
+        doc.device(device)
+            .map_or_else(Vec::new, |d| self.layer_selection_of(d))
+    }
+
+    /// The layer a load from the browser replaces the sample of, if one is
+    /// being hot-swapped.
+    #[must_use]
+    pub fn layer_hot_swap(&self) -> Option<(DeviceId, LayerId)> {
+        self.layer_hot_swap
+    }
+
+    /// Starts or ends hot-swapping a layer's sample.
+    pub fn set_layer_hot_swap(&mut self, layer: Option<(DeviceId, LayerId)>) {
+        self.layer_hot_swap = layer;
+    }
+
+    /// Picks a multisampler's layers in the list.
+    pub fn select_layers(&mut self, device: DeviceId, layers: Vec<LayerId>) {
+        self.selections.insert(device, layers);
+    }
+
+    /// A key went down or up on the computer keyboard: with Auto Select on,
+    /// a multisampler on `track` selects the layers the note plays for as
+    /// long as it's held (R7). Plays nothing in the set.
+    pub fn note(&mut self, doc: &Document, track: TrackId, key: u8, velocity: u8, down: bool) {
+        // A key goes up on every track, in case the view moved while it was
+        // held.
+        if !down {
+            for held in self.held.values_mut() {
+                held.remove(&key);
+            }
+            return;
+        }
+        let Some(track) = doc.track(track) else {
+            return;
+        };
+        for device in track.devices().filter(|d| Self::is_multisampler(d)) {
+            let held = self.held.entry(device.id).or_default();
+            if self
+                .multisamplers
+                .get(&device.id)
+                .is_some_and(|v| v.auto_select)
+            {
+                let selector = device
+                    .params
+                    .get(&bl_devices::multisampler::SELECTOR)
+                    .map_or(0, |v| *v as u8);
+                held.insert(key, device.layers.matching(key, velocity, selector));
+            }
+        }
+    }
+
+    /// A multisampler's views and selection, as `device_view.state` reports
+    /// them.
+    fn multisampler_state(&self, d: &Device) -> Option<MultisamplerState> {
+        Self::is_multisampler(d).then(|| MultisamplerState {
+            view: self.multisampler_view(d.id),
+            selection: self.layer_selection_of(d),
+            layers: d.layers.list.len(),
+            hot_swap: self
+                .layer_hot_swap
+                .filter(|(device, _)| *device == d.id)
+                .map(|(_, layer)| layer),
+        })
+    }
+
+    /// As [`layer_selection`](Self::layer_selection), for a device already
+    /// in hand.
+    fn layer_selection_of(&self, d: &Device) -> Vec<LayerId> {
+        let held: std::collections::BTreeSet<LayerId> = self
+            .held
+            .get(&d.id)
+            .into_iter()
+            .flat_map(|keys| keys.values().flatten().copied())
+            .collect();
+        let picked = self.selections.get(&d.id);
+        d.layers
+            .list
+            .iter()
+            .map(|l| l.id)
+            .filter(|id| {
+                if held.is_empty() {
+                    picked.is_some_and(|p| p.contains(id))
+                } else {
+                    held.contains(id)
+                }
+            })
+            .collect()
+    }
+
     /// One device as the Device View, or its floating window, shows it.
     fn frame(&self, doc: &Document, d: &Device) -> DeviceFrame {
         DeviceFrame {
@@ -590,6 +739,10 @@ impl DeviceView {
                 &d.kind,
                 DeviceKind::Native { device_type } if bl_devices::plays_samples(device_type)
             ),
+            swaps_to_snapshot: matches!(
+                &d.kind,
+                DeviceKind::Native { device_type } if device_type == bl_devices::DRUM_SAMPLER
+            ),
             show_preset_name: d.show_preset_name,
             folded: self.folded.contains(&d.id),
             expandable: self.expandable(d),
@@ -598,6 +751,7 @@ impl DeviceView {
             b_active: d.b_active,
             selected: self.selected == Some(d.id),
             hot_swap: self.hot_swap == Some(d.id),
+            multisampler: self.multisampler_state(d),
             panel: self.panel(d),
             sidechain: d.sidechain.as_ref().map(|sidechain| {
                 let (source, tap) = match &sidechain.input {
@@ -981,6 +1135,14 @@ impl DeviceView {
                 outcome.value = to_value(&added);
                 return Ok(outcome);
             }
+            ids::SWAP_TO_SNAPSHOT => {
+                let DeviceArgs { device } = parse(args)?;
+                let device = self.target(editor.document(), device)?;
+                let added = self.swap_to_snapshot(editor, device)?;
+                outcome.document_changed = true;
+                outcome.value = to_value(&added);
+                return Ok(outcome);
+            }
             ids::GROUP => {
                 let args: GroupArgs = parse(args)?;
                 let grouped = self.group(editor, args)?;
@@ -1170,6 +1332,67 @@ impl DeviceView {
         }
         outcome.value = state(self, editor, arrangement);
         Ok(outcome)
+    }
+
+    /// Replaces the Strike drum sampler `device` with Snapshot in One-Shot
+    /// mode (`device.swap_to_snapshot`; one-shot drum sampler R22): the
+    /// same place, sample and on or off state, and the same Start and
+    /// Length, in one undo step.
+    fn swap_to_snapshot(
+        &mut self,
+        editor: &mut Editor,
+        device: DeviceId,
+    ) -> Result<DeviceAdded, DeviceError> {
+        use bl_devices::{drum_sampler, sampler};
+        let doc = editor.document();
+        let old = doc.device(device).expect("the target exists");
+        let strike = drum_sampler::drum_sampler_type();
+        if old.kind != strike.kind {
+            return Err(DeviceError::Unavailable(format!(
+                "{device} isn't a drum sampler"
+            )));
+        }
+        let place = doc.device_place(device).expect("the target has a place");
+        let kept = |id| {
+            strike
+                .description
+                .value(&old.params, id)
+                .expect("Strike describes it")
+        };
+        let (enabled, media) = (old.enabled, old.media.clone());
+        let (start, length) = (kept(drum_sampler::START), kept(drum_sampler::LENGTH));
+        let id: DeviceId = editor.new_id();
+        let mut snapshot = sampler::sampler_type().device(id);
+        snapshot.enabled = enabled;
+        snapshot.media = media;
+        snapshot.params.insert(sampler::MODE, 1.0);
+        snapshot.params.insert(sampler::START, start);
+        snapshot.params.insert(sampler::LENGTH, length);
+        // A chain holds one instrument, so the old one goes first.
+        editor
+            .transact("Swap to Snapshot", |editor| {
+                editor.apply(Command::RemoveDevice { device })?;
+                match place.chain {
+                    None => editor.apply(Command::InsertDevice {
+                        track: place.track,
+                        index: place.index,
+                        device: snapshot,
+                    }),
+                    Some(chain) => editor.apply(Command::InsertChainDevice {
+                        chain,
+                        index: place.index,
+                        device: snapshot,
+                    }),
+                }
+            })
+            .map_err(|e| DeviceError::Failed(e.to_string()))?;
+        self.selected = Some(id);
+        Ok(DeviceAdded {
+            device: id,
+            track: place.track,
+            new_track: false,
+            default_preset: None,
+        })
     }
 
     /// Adds a device as a person does (`device.add`).

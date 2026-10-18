@@ -333,6 +333,14 @@ impl Lfo {
         self.step = self.hz / self.sample_rate.as_f64();
     }
 
+    /// Where each channel's LFO is in its cycle after the last
+    /// [`step`](Self::step), from 0 to 1: for a device that holds the LFO in
+    /// steps within each cycle.
+    #[must_use]
+    pub fn phases(&self) -> [f64; 2] {
+        [self.voices[0].phase, self.voices[1].phase]
+    }
+
     /// Moves on one frame (the `frame`th of the stretch) and gives the left
     /// and right values of `shape`. `tempo` is the song's tempo map
     /// ([`Audio::tempo`]).

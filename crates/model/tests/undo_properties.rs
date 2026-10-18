@@ -599,16 +599,66 @@ impl Op {
                 let clip = at.audio_clip(c);
                 // Past 3 seconds (or not a number), an end is the file's.
                 let end = (*b <= 3.0).then_some(*b);
+                // Warp edits (WP-4.1): most are refused on a clip that
+                // isn't warped, or with these numbers, and must then change
+                // nothing; the ones that land are one undo step.
+                let ticks = Ticks((*a * 100_000.0) as i64);
+                match which % 12 {
+                    5 => {
+                        return Command::SetClipWarp {
+                            clip,
+                            warp: *a > 1.0,
+                        };
+                    }
+                    6 => {
+                        return Command::InsertWarpMarker {
+                            clips: vec![clip],
+                            beat: Some(ticks),
+                            time: None,
+                        };
+                    }
+                    7 => {
+                        return Command::MoveWarpMarkers {
+                            clips: vec![clip],
+                            markers: vec![0],
+                            by: ticks - Ticks(150_000),
+                        };
+                    }
+                    8 => {
+                        return Command::ShiftWarpMarker {
+                            clips: vec![clip],
+                            marker: 0,
+                            by: *a - 1.0,
+                        };
+                    }
+                    9 => {
+                        return Command::DeleteWarpMarkers {
+                            clips: vec![clip],
+                            markers: vec![1],
+                        };
+                    }
+                    10 => {
+                        return Command::SetSegmentBpm {
+                            clip,
+                            marker: (*b > 1.0).then_some(0),
+                            bpm: *a * 60.0,
+                        };
+                    }
+                    11 => return Command::ScaleTempo { clip, factor: *a },
+                    _ => {}
+                }
                 match which % 5 {
                     0 => Command::SetClipRegion {
                         clip,
                         start: *a,
                         end,
+                        ticks: false,
                     },
                     1 => Command::SetClipLoop {
                         clip,
                         start: *a,
                         end,
+                        ticks: false,
                     },
                     2 => Command::SetClipLoopEnabled {
                         clip,

@@ -56,6 +56,7 @@ pub mod main_window;
 pub mod mapping;
 pub mod menus;
 pub mod mixer;
+pub mod multisampler;
 pub mod scene_fields;
 pub mod scene_view;
 pub mod session_view;

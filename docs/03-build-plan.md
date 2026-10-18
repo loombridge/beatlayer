@@ -470,7 +470,7 @@ Total to 1.0: 163 packages planned in Phases 0 to 5, and about 135 estimated in 
 | 4.10 | done | 18 October 2026 | [#190](https://github.com/loombridge/beatlayer/pull/190); the Sample Editor in the Clip View, its waveform drawn through the warp map (in the Arrangement too), warp markers, transients and pseudo-warp markers made, moved and deleted by mouse, keys and menus, each drag one undo step; the side-by-side layout check waits for the new L-CLIP rows, and Quantize for WP-4.12; [the spec](specs/sample-editor.md) |
 | 4.10b | todo |  |  |
 | 4.11 | todo |  |  |
-| 4.12 | todo |  |  |
+| 4.12 | done | 19 October 2026 | [#221](https://github.com/loombridge/beatlayer/pull/221); audio quantise: `clip.quantize_audio` moves each grid line's nearest transient's warp marker `amount` percent of the way to the line, one undo step, refusing unwarped clips, run by Cmd+U, the Sample Editor's context menu and Edit ▸ Quantize, with the quantise settings shared with the note editor (Cmd+Shift+U); [the spec](specs/warping.md) |
 | 4.13 | todo |  |  |
 | 4.14 | todo |  |  |
 | 4.15 | todo |  |  |

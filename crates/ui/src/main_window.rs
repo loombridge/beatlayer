@@ -1329,6 +1329,28 @@ fn look(element: Element, shell: &Shell) -> Look {
             on: shell.main_view() == MainView::Arrangement,
             ..Look::default()
         },
+        Element::MidiIndicators => {
+            // Spec: midi-io R25; external-devices R7. The number holds the
+            // two lamps: 1 for the input's, 2 for the output's.
+            let (input, output) = shell.midi_indicators();
+            let lit = |on: bool, what: &str| if on { what.to_owned() } else { String::new() };
+            Look {
+                number: Some(f64::from(u8::from(input) | u8::from(output) << 1)),
+                value: Some(
+                    [lit(input, "receiving"), lit(output, "sending")]
+                        .into_iter()
+                        .filter(|s| !s.is_empty())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                ),
+                description: Some(
+                    "The upper light flashes when MIDI reaches a track's input, the lower \
+                     when a track sends MIDI to a port."
+                        .to_owned(),
+                ),
+                ..Look::default()
+            }
+        }
         Element::Message => match (shell.message(), shell.hint()) {
             (Some(message), _) => Look {
                 text: Some(message.text.clone()),

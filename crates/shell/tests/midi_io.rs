@@ -52,6 +52,7 @@ impl Rig {
         let (engine, mut processor) =
             Engine::start(EngineConfig::new(SampleRate::HZ_48000, BLOCK), registry).unwrap();
         processor.set_midi_input(shell.midi().sender().attach(1024));
+        processor.set_midi_output(shell.midi().output().attach(1024));
         let mut rig = Self {
             shell,
             test,
@@ -97,6 +98,23 @@ impl Rig {
     fn play(&mut self, port: &str, message: impl AsRef<[u8]>) -> usize {
         self.test.send(port, Instant::now(), message.as_ref());
         self.blocks_run(2)
+    }
+
+    /// Plays a message from a port and runs blocks until the engine has taken
+    /// it: after a pause the block clock has drifted from the clock the
+    /// message is stamped on, and takes a few blocks to catch up.
+    fn play_settled(&mut self, port: &str, message: impl AsRef<[u8]>) {
+        let before = self.processor.midi_counters().received;
+        self.test.send(port, Instant::now(), message.as_ref());
+        for _ in 0..400 {
+            self.blocks_run(1);
+            if self.processor.midi_counters().received > before {
+                // One more block, where the message lands.
+                self.blocks_run(1);
+                return;
+            }
+        }
+        panic!("the engine never took the message");
     }
 
     /// Runs `count` blocks, each starting after the last and after now, and
@@ -786,4 +804,96 @@ fn learn_sets_stacks_shifts_from_the_chord_played() {
     key(&mut rig, "S", true);
     key(&mut rig, "D", true);
     assert_eq!(shifts(&rig), fixed);
+}
+
+/// Waits until `done` holds, for up to two seconds: the MIDI output thread
+/// hands messages on a thread of its own.
+fn wait_for(mut done: impl FnMut() -> bool) -> bool {
+    let began = Instant::now();
+    while began.elapsed() < Duration::from_secs(2) {
+        if done() {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    done()
+}
+
+// Spec: external-devices R2, R5
+#[test]
+fn a_track_keeps_a_missing_ports_name_and_sends_again_when_it_returns() {
+    let mut rig = Rig::new();
+    rig.run(
+        "midi.set_port",
+        json!({ "direction": "output", "name": "Synth", "track": true }),
+    );
+    rig.run(
+        "routing.set_monitor",
+        json!({ "track": rig.track, "monitor": "in" }),
+    );
+    rig.run(
+        "routing.set_midi_output",
+        json!({ "track": rig.track, "to": { "name": "Synth", "channel": 2 } }),
+    );
+    rig.sync();
+    // The port is open, with Track on, and the note leaves on channel 2.
+    assert!(rig.test.is_open(Direction::Output, "Synth"));
+    rig.play_settled("Keys A", [0x90, 60, 100]);
+    assert!(wait_for(|| !rig.test.sent("Synth").is_empty()));
+    assert_eq!(rig.test.sent("Synth")[0], [0x91, 60, 100]);
+    assert_eq!(rig.shell.midi().output().stats().snapshot().sent, 1);
+
+    // The port goes: the track keeps its name and sends nothing.
+    rig.test.remove_port(Direction::Output, "Synth");
+    rig.shell.refresh_midi();
+    assert_eq!(rig.shell.midi().output_names(), Vec::<String>::new());
+    rig.play_settled("Keys A", [0x90, 62, 100]);
+    assert!(wait_for(|| rig
+        .shell
+        .midi()
+        .output()
+        .stats()
+        .snapshot()
+        .unrouted
+        >= 1));
+    let routing = rig
+        .shell
+        .editor()
+        .document()
+        .track(rig.track)
+        .unwrap()
+        .routing();
+    assert_eq!(
+        routing.midi_output,
+        Some(bl_model::MidiTo::Port {
+            name: "Synth".to_owned(),
+            channel: 2
+        })
+    );
+
+    // It returns, with the Track switch it had, and the track sends again.
+    rig.test.add_port(Direction::Output, "Synth");
+    rig.shell.refresh_midi();
+    assert_eq!(rig.shell.midi().output_names(), vec!["Synth".to_owned()]);
+    rig.play_settled("Keys A", [0x90, 64, 100]);
+    assert!(wait_for(|| !rig.test.sent("Synth").is_empty()));
+    assert_eq!(rig.test.sent("Synth")[0], [0x91, 64, 100]);
+
+    // A port whose Track switch is off takes nothing, though it is open
+    // for another reason.
+    rig.run(
+        "midi.set_port",
+        json!({ "direction": "output", "name": "Synth", "track": false, "sync": true }),
+    );
+    let unrouted = rig.shell.midi().output().stats().snapshot().unrouted;
+    rig.play_settled("Keys A", [0x90, 65, 100]);
+    assert!(wait_for(|| rig
+        .shell
+        .midi()
+        .output()
+        .stats()
+        .snapshot()
+        .unrouted
+        > unrouted));
+    assert_eq!(rig.test.sent("Synth").len(), 1);
 }

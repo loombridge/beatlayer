@@ -10,6 +10,7 @@ use imbl::OrdMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::external::External;
 use crate::ids::{ContentHash, DeviceId, ParamId, TrackId};
 use crate::layers::Layers;
 use crate::modulator::{Mapping, ShapePoint};
@@ -72,6 +73,12 @@ pub struct Device {
     /// of the saved set for a device without one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sidechain: Option<Sidechain>,
+    /// The device's routing to external hardware, if its type declares one
+    /// (WP-5.34): an external instrument's output port and channel, the
+    /// interface inputs it comes back on, and its Hardware Latency. Left out
+    /// of the saved set for a device without one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external: Option<External>,
     /// The device's MIDI sidechain input, if its type declares one (the
     /// routing spec, R32): a MIDI track whose notes and channel messages
     /// the device hears beside its audio. Left out of the saved set for a
@@ -345,6 +352,7 @@ impl Device {
             b_active: false,
             other_params: None,
             sidechain: None,
+            external: None,
             midi_sidechain: None,
             floating: false,
             plugin: None,
@@ -440,6 +448,14 @@ impl Device {
         if self.other_params.as_ref() == Some(&self.params) {
             self.other_params = None;
         }
+    }
+
+    /// The same device with routing to external hardware, as a new external
+    /// device has.
+    #[must_use]
+    pub fn with_external(mut self) -> Self {
+        self.external = Some(External::default());
+        self
     }
 
     /// The same device with a sidechain input, as a new device has.

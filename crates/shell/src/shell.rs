@@ -344,6 +344,11 @@ pub struct Shell {
     /// When the MIDI ports were last listed, so [`Shell::poll`] lists them
     /// again every few seconds and a replugged device shows.
     midi_listed: std::time::Instant,
+    /// The counts of messages that reached tracks' inputs and left for
+    /// ports when [`Shell::poll`] last looked, and when each last changed
+    /// while the indicator still lit (external-devices R7).
+    midi_seen: (u64, u64),
+    midi_lit: [Option<std::time::Instant>; 2],
     /// The chord a Chord device's Learn is hearing.
     chord_learn: crate::chord_learn::ChordLearn,
     prefs: Preferences,
@@ -654,6 +659,9 @@ fn snapshot(editor: &Editor) -> Editor {
 /// How often [`Shell::poll`] lists the MIDI ports again.
 const MIDI_RELIST: std::time::Duration = std::time::Duration::from_secs(2);
 
+/// How long a MIDI indicator stays lit after a message.
+const MIDI_LAMP: std::time::Duration = std::time::Duration::from_millis(120);
+
 impl Shell {
     /// A shell with these preferences, saving them to `config_dir` (or
     /// nowhere), playing through `audio`, and opening and saving sets
@@ -682,7 +690,14 @@ impl Shell {
         // hardware. The queue has no engine yet; each engine attaches its own.
         let (midi_sender, _) = bl_midi_io::input_queue(1);
         audio.set_midi(midi_sender.clone());
-        let midi = MidiHost::new(Box::new(bl_midi_io::NullBackend), midi_sender, &prefs.midi);
+        let midi_output = bl_midi_io::OutputBus::new();
+        audio.set_midi_output(midi_output.clone());
+        let midi = MidiHost::new(
+            Box::new(bl_midi_io::NullBackend),
+            midi_sender,
+            midi_output,
+            &prefs.midi,
+        );
         let browser_view = BrowserView::new(&prefs.browser, Waker::default());
         audio.set_preview_gain(prefs.browser.preview_volume as f32);
         // Spec: file-management R1. A saved default set is what a new set
@@ -734,6 +749,8 @@ impl Shell {
             audio,
             midi,
             midi_listed: std::time::Instant::now(),
+            midi_seen: (0, 0),
+            midi_lit: [None; 2],
             chord_learn: crate::chord_learn::ChordLearn::default(),
             settings_open: false,
             prefs,
@@ -1269,7 +1286,40 @@ impl Shell {
             inputs,
             outputs,
             midi_inputs: self.midi.input_names(),
+            midi_outputs: self.midi.output_names(),
         }
+    }
+
+    /// Lights the Control Bar's MIDI indicators for a moment when messages
+    /// have reached tracks' inputs or left for ports since the last call;
+    /// returns whether either changed (midi-io R25; external-devices R7).
+    fn track_midi_activity(&mut self) -> bool {
+        let now = std::time::Instant::now();
+        let seen = (
+            self.midi.sender().stats().snapshot().to_tracks,
+            self.midi.output().stats().snapshot().sent,
+        );
+        let counts = [(seen.0, self.midi_seen.0), (seen.1, self.midi_seen.1)];
+        let mut changed = false;
+        for (lit, (new, old)) in self.midi_lit.iter_mut().zip(counts) {
+            if new != old {
+                *lit = Some(now);
+                changed = true;
+            } else if lit.is_some_and(|since| now.duration_since(since) >= MIDI_LAMP) {
+                *lit = None;
+                changed = true;
+            }
+        }
+        self.midi_seen = seen;
+        changed
+    }
+
+    /// Whether the Control Bar's MIDI track input and output indicators are
+    /// lit: a message reached a track's input, or left for a port, a moment
+    /// ago (L-CTRL-026).
+    #[must_use]
+    pub fn midi_indicators(&self) -> (bool, bool) {
+        (self.midi_lit[0].is_some(), self.midi_lit[1].is_some())
     }
 
     /// Plays MIDI through `backend` from now on: the platform's MIDI system
@@ -1277,7 +1327,8 @@ impl Shell {
     /// the preferences hold.
     pub fn use_midi_backend(&mut self, backend: Box<dyn bl_midi_io::MidiBackend>) {
         let sender = self.midi.sender().clone();
-        self.midi = MidiHost::new(backend, sender, &self.prefs.midi);
+        let output = self.midi.output().clone();
+        self.midi = MidiHost::new(backend, sender, output, &self.prefs.midi);
     }
 
     /// The MIDI ports and the computer MIDI keyboard.
@@ -3163,6 +3214,7 @@ impl Shell {
             changed |= self.refresh_midi();
         }
         changed |= self.learn_chords();
+        changed |= self.track_midi_activity();
         // Plug-ins' main-thread work (WP-2.6 to WP-2.8), and the changes
         // they made themselves.
         changed |= self.poll_plugin_scan();

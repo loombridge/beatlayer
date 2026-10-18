@@ -11,9 +11,21 @@ use crate::document::Document;
 use crate::error::ModelError;
 use crate::ids::{ChainId, TrackId};
 use crate::rack::RackKind;
-use crate::track::{Channel, Input, Output, Routing, Track, TrackKind};
+use crate::track::{Channel, Input, MidiTo, Output, Routing, Track, TrackKind};
 
 impl Document {
+    /// The devices that work with hardware outside the computer and are
+    /// switched on, each as the name its title bar shows and its ID: what an
+    /// offline render silences (the external devices spec, R16).
+    #[must_use]
+    pub fn external_devices(&self) -> Vec<String> {
+        self.tracks()
+            .flat_map(|track| track.devices_deep())
+            .filter(|device| device.external.is_some() && device.enabled)
+            .map(|device| format!("{} ({})", device.title(), device.id))
+            .collect()
+    }
+
     /// Where a track's audio goes in the end: Main, a group or another
     /// audio track, or nowhere (Sends Only, Ext. Out). `None` for Main
     /// itself.
@@ -43,15 +55,29 @@ impl Document {
         check_input(self, track)?;
         check_output(self, track)?;
         check_main_out(track)?;
-        if let Some(to) = track.routing.midi_output {
+        if let Some(to) = &track.routing.midi_output {
             if track.kind != TrackKind::Midi {
                 return Err(wrong_kind(track, "a MIDI track"));
             }
-            self.check_target(track, to, |kind| kind == TrackKind::Midi)?;
+            match to {
+                MidiTo::Track(to) => {
+                    self.check_target(track, *to, |kind| kind == TrackKind::Midi)?;
+                }
+                MidiTo::Port { name, channel } => check_port(name, *channel)?,
+            }
         }
         for device in track.devices_deep() {
             if let Some(sidechain) = &device.sidechain {
                 check_sidechain_input(self, track, sidechain.input.clone())?;
+            }
+            // Spec: external-devices R9, R12
+            if let Some(external) = &device.external {
+                check_port(external.port.as_deref().unwrap_or("-"), external.channel)?;
+                if !external.hardware_latency.is_valid() {
+                    return Err(ModelError::InvalidInput(
+                        "the hardware latency is out of range",
+                    ));
+                }
             }
             if let Some(source) = device.midi_sidechain.as_ref().and_then(|s| s.source) {
                 check_midi_sidechain_source(self, track, source)?;
@@ -167,7 +193,12 @@ impl Document {
                 {
                     routing.input = Input::None;
                 }
-                if routing.midi_output.is_some_and(|to| gone.contains(&to)) {
+                if routing
+                    .midi_output
+                    .as_ref()
+                    .and_then(MidiTo::track)
+                    .is_some_and(|to| gone.contains(&to))
+                {
                     routing.midi_output = None;
                 }
             }
@@ -274,7 +305,11 @@ fn taps_any(input: &Input, gone: &BTreeSet<ChainId>) -> bool {
 fn names_any(routing: &Routing, gone: &BTreeSet<TrackId>) -> bool {
     matches!(routing.output, Output::Track { track } if gone.contains(&track))
         || matches!(&routing.input, Input::Track { track, .. } if gone.contains(track))
-        || routing.midi_output.is_some_and(|to| gone.contains(&to))
+        || routing
+            .midi_output
+            .as_ref()
+            .and_then(MidiTo::track)
+            .is_some_and(|to| gone.contains(&to))
 }
 
 fn wrong_kind(track: &Track, needs: &'static str) -> ModelError {
@@ -394,6 +429,18 @@ fn check_output(doc: &Document, track: &Track) -> Result<(), ModelError> {
     }
 }
 
+/// A MIDI output port a track or the external instrument names: a name, and
+/// a channel from 1 to 16.
+pub(crate) fn check_port(name: &str, channel: u8) -> Result<(), ModelError> {
+    if name.is_empty() {
+        return Err(ModelError::InvalidInput("a port needs a name"));
+    }
+    if !(1..=16).contains(&channel) {
+        return Err(ModelError::InvalidInput("the MIDI channel must be 1 to 16"));
+    }
+    Ok(())
+}
+
 /// Main Out and Cue Out belong to Main and take a stereo pair of the
 /// interface's outputs; every other track keeps them at their default.
 fn check_main_out(track: &Track) -> Result<(), ModelError> {
@@ -468,7 +515,7 @@ mod tests {
     use crate::error::ModelError;
     use crate::ids::{ChainId, DeviceId, TrackId};
     use crate::rack::{Chain, RackKind};
-    use crate::track::{Channel, Input, Monitor, Output, Routing, Tap, TrackKind};
+    use crate::track::{Channel, Input, MidiTo, Monitor, Output, Routing, Tap, TrackKind};
     use crate::{Document, SendTap};
 
     fn add(editor: &mut Editor, kind: TrackKind, parent: Option<TrackId>) -> TrackId {
@@ -683,14 +730,14 @@ mod tests {
         editor
             .apply(Command::SetMidiOutput {
                 track: m,
-                to: Some(n),
+                to: Some(MidiTo::Track(n)),
             })
             .unwrap();
         assert!(
             editor
                 .apply(Command::SetMidiOutput {
                     track: m,
-                    to: Some(a)
+                    to: Some(MidiTo::Track(a))
                 })
                 .is_err()
         );
@@ -698,7 +745,7 @@ mod tests {
             editor
                 .apply(Command::SetMidiOutput {
                     track: a,
-                    to: Some(m)
+                    to: Some(MidiTo::Track(m))
                 })
                 .is_err()
         );

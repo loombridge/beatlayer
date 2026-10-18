@@ -202,4 +202,7 @@ pub(crate) enum Message {
     Cancel(u64),
     /// What to record while the transport records (WP-2.13).
     Record(Owned<RecordingPlan>),
+    /// The frames between the engine handing the device a sound and it
+    /// coming out, as the device reports it now (WP-5.34).
+    OutputLatency(u32),
 }

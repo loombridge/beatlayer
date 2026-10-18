@@ -284,6 +284,10 @@ impl StreamClient for EngineClient {
         let config = EngineConfig {
             sample_rate,
             max_frames: (info.max_block_frames as usize).max(1),
+            // The device's own figures (WP-5.34); the shell adds Driver Error
+            // Compensation when it hosts the stream.
+            output_latency: info.output_latency,
+            round_trip_latency: info.output_latency.saturating_add(info.input_latency),
             ..self.base
         };
         // Taken, so a processor that never comes back can't leave a stale

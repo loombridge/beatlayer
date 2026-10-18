@@ -452,6 +452,7 @@ impl DeviceView {
                 chain: None,
                 index: None,
             },
+            &self.types,
         );
         device.media = vec![Some(sample.media)];
         device
@@ -579,6 +580,7 @@ impl DeviceView {
                             chain: None,
                             index: None,
                         },
+                        &self.types,
                     );
                     Some((new, None))
                 }

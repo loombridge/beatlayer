@@ -1308,6 +1308,25 @@ fn a_midi_sidechained_device(h: &mut Harness) {
         .unwrap();
 }
 
+/// An External Instrument on a new MIDI track, its section showing, no
+/// device selected (WP-5.34).
+fn a_hardware_device(h: &mut Harness) {
+    let track = h.shell.editor().document().top_level().nth(2).unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let t = bl_devices::hardware_instrument_type();
+    h.shell
+        .run(
+            "device.add",
+            json!({ "device": { "kind": t.kind, "name": t.name, "role": t.role } }),
+        )
+        .unwrap();
+    h.shell
+        .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
 /// An LFO and a test utility on the selected audio track (WP-5.10),
 /// with the LFO's slot 1 mapped to the utility's gain when `mapped`
 /// and its Map button lit when `lit`.
@@ -2606,6 +2625,16 @@ fn paths() -> BTreeMap<&'static str, Path> {
                 device_view,
                 "MIDI Sidechain Source",
                 Key::ArrowUp,
+            ),
+        ),
+        // Down on the external instrument's channel chooser.
+        (
+            "device.set_external",
+            main(
+                a_hardware_device,
+                device_view,
+                "External MIDI Channel",
+                Key::ArrowDown,
             ),
         ),
         (

@@ -478,6 +478,26 @@ impl TempoMap {
         piece.segment.start().saturating_add(Ticks(tau))
     }
 
+    /// The position `seconds` from tick zero falls on, in ticks and not
+    /// rounded: what a player that follows the tempo frame by frame (a
+    /// warped clip launched from a Session slot) reads. Within half a tick of
+    /// [`TempoMap::seconds_to_ticks`], and as exact as the arithmetic is.
+    #[must_use]
+    pub fn seconds_to_ticks_exact(&self, seconds: f64) -> f64 {
+        if seconds.is_nan() {
+            return 0.0;
+        }
+        if seconds < 0.0 {
+            return seconds / self.pieces[0].seconds_per_tick;
+        }
+        let index = self
+            .pieces
+            .partition_point(|piece| piece.start_seconds <= seconds)
+            - 1;
+        let piece = &self.pieces[index];
+        piece.segment.start().get() as f64 + piece.ticks_at(seconds - piece.start_seconds)
+    }
+
     /// The frame nearest to `ticks` at `rate`, with halves rounded away from
     /// zero.
     ///
@@ -585,6 +605,26 @@ mod tests {
         );
         assert_eq!(map.bpm_at(q(100)), bpm(120.0));
         assert_eq!(map, TempoMap::default());
+    }
+
+    #[test]
+    fn exact_ticks_agree_with_the_rounded_ones_to_half_a_tick() {
+        let map =
+            TempoMap::from_breakpoints([(Ticks::ZERO, bpm(60.0)), (q(8), bpm(120.0))]).unwrap();
+        for i in 0..200 {
+            let seconds = f64::from(i) * 0.0731 - 0.5;
+            let exact = map.seconds_to_ticks_exact(seconds);
+            let rounded = map.seconds_to_ticks(seconds).get() as f64;
+            assert!(
+                (exact - rounded).abs() <= 0.5 + 1e-6,
+                "{seconds}: {exact} {rounded}"
+            );
+            if seconds >= 0.0 {
+                // The inverse of ticks to seconds, with no rounding.
+                let back = map.ticks_to_seconds(Ticks(exact.round() as i64));
+                assert!((back - seconds).abs() < 1e-6);
+            }
+        }
     }
 
     #[test]

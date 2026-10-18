@@ -10,8 +10,8 @@ use bl_model::{
     AudioData, AutomationTarget, Channel, Clip, ClipData, Command, ContentHash, CountIn,
     CrossfadeAssign, Device, DeviceKind, DeviceRole, Editor, Input, LaunchMode, LaunchQuantization,
     LaunchSettings, MetronomeRhythm, MetronomeSound, MidiData, MixerParam, Monitor, Note, Output,
-    ParamId, PressurePoint, SendTap, Sidechain, TakeClip, TakeLane, Tap, TrackId, TrackKind,
-    TransientEdits, WarpMarker,
+    ParamId, PressurePoint, SendTap, Sidechain, TakeClip, TakeLane, Tap, TonesSettings, TrackId,
+    TrackKind, TransientEdits, WarpMarker, WarpMode, WarpSettings,
 };
 use bl_project::{Media, Project};
 use bl_shell::Shell;
@@ -431,6 +431,13 @@ fn fixture() -> Project {
             ],
             tempo: Some(100.0),
             signature: Some(TimeSignature::new(3, 4).unwrap()),
+            warp_mode: WarpMode::Tones,
+            warp_settings: WarpSettings {
+                tones: TonesSettings { grain_size: 40.0 },
+                ..WarpSettings::default()
+            },
+            ram: true,
+            high_quality: false,
             transient_edits: TransientEdits {
                 added: vec![0.5],
                 removed: vec![1.25],
@@ -853,6 +860,10 @@ fn the_fixture_sets_a_non_default_value_of_every_saved_field() {
                 "data.audio.warp_markers.1.beat",
                 "data.audio.tempo",
                 "data.audio.signature",
+                "data.audio.warp_mode",
+                "data.audio.warp_settings.tones.grain_size",
+                "data.audio.ram",
+                "data.audio.high_quality",
                 "data.audio.transient_edits.added.0",
                 "data.audio.transient_edits.removed.0",
             ][..],

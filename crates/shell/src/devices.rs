@@ -505,12 +505,10 @@ impl DeviceView {
 
     /// What a modulator's panel shows beside its parameters.
     fn modulator_frame(&self, doc: &Document, d: &Device) -> Option<ModulatorFrame> {
-        use bl_model::modulator::{CURVE_MOD, default_shape, is_modulator_kind};
+        use bl_model::modulator::{default_shape_of, has_shape_kind, is_modulator_kind};
         if !is_modulator_kind(&d.kind) {
             return None;
         }
-        let curve =
-            matches!(&d.kind, DeviceKind::Native { device_type } if device_type == CURVE_MOD);
         Some(ModulatorFrame {
             mappings: d
                 .mappings
@@ -525,7 +523,8 @@ impl DeviceView {
                 .armed
                 .filter(|(device, _)| *device == d.id)
                 .map(|(_, slot)| slot),
-            shape: curve.then(|| d.shape.clone().unwrap_or_else(default_shape)),
+            shape: has_shape_kind(&d.kind)
+                .then(|| d.shape.clone().unwrap_or_else(|| default_shape_of(&d.kind))),
         })
     }
 
@@ -1598,10 +1597,16 @@ impl DeviceView {
                         "{device} isn't a modulator"
                     )));
                 }
-                if slot >= bl_model::modulator::SLOTS {
+                let slots = editor
+                    .document()
+                    .device(device)
+                    .map_or(bl_model::modulator::SLOTS, |d| {
+                        bl_model::modulator::slots_of(&d.kind)
+                    });
+                if slot >= slots {
                     return Err(DeviceError::InvalidArgs(format!(
-                        "a modulator's slots are 0 to {}",
-                        bl_model::modulator::SLOTS - 1
+                        "that modulator's slots are 0 to {}",
+                        slots - 1
                     )));
                 }
                 let lit = self.armed == Some((device, slot));

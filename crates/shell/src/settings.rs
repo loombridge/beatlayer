@@ -95,6 +95,17 @@ pub struct Preferences {
     /// The format to prefer when a plug-in exists in several formats
     /// (WP-2.9, IMP-07).
     pub plugin_format_preference: Option<PluginFormat>,
+    /// Use Audio Units v2 (Plug-Ins, Plug-In Sources, L-SET-017): Audio
+    /// Units in `.component` bundles are scanned and listed (WP-2.9b). Off
+    /// by default, as L-SET-017 records Live's default.
+    pub use_audio_units_v2: bool,
+    /// Use Audio Units v3 (L-SET-017): kept and shown; Beatlayer doesn't
+    /// scan app-extension Audio Units yet (WP-2.9b). Off by default.
+    pub use_audio_units_v3: bool,
+    /// Use VST3 Plug-In System Folders (L-SET-017): VST3 plug-ins in the
+    /// format's system folders are scanned and listed (WP-2.9b). Off by
+    /// default, as L-SET-017 records Live's default.
+    pub vst3_system_folders: bool,
     /// Which parameter each knob of a plug-in device's panel shows
     /// (WP-2.10, D19), by `format/plugin_id` and then by knob: absent
     /// entries keep the plug-in's own parameter at that place. Remembered

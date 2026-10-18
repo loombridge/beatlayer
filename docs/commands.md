@@ -1830,7 +1830,7 @@ Result: nothing (`null`).
 
 **Load Selected Item**. Permission: `external`. Contexts: `browser`.
 
-Loads the browser's selected audio files into the Arrangement, as Enter or a double-click does: onto the selected track at the insert marker if it's an audio track, otherwise onto a new audio track below the last one, one after another, as one undo step. A clip placed over part of another replaces that part, so when a clip on that track ends after the insert marker it's destructive as well as external. A selected preset file, or a device or rack listed under a label (Drums, Instruments, Audio Effects, MIDI Effects or Modulators), is added to the shown track as `device.add_preset` and `device.add` add it, and a chain preset to the chain list's rack (`chain.load_preset`). While a device is being hot-swapped (`device.hot_swap`), a selected preset or device replaces it instead (`device.replace`), as does a chain preset the chain armed by its Hot-Swap button (`chain.load_preset`); a selected audio file loads into it if the device plays samples (the sampler, or the eight-slot drum sampler, into its selected slot: `device.load_sample`). Reads the files, outside the project.
+Loads the browser's selected audio files into the Arrangement, as Enter or a double-click does: onto the selected track at the insert marker if it's an audio track, otherwise onto a new audio track below the last one, one after another, as one undo step. A clip placed over part of another replaces that part, so when a clip on that track ends after the insert marker it's destructive as well as external. A selected preset file, or a device or rack listed under a label (Drums, Instruments, Audio Effects, MIDI Effects or Modulators), is added to the shown track as `device.add_preset` and `device.add` add it, and a chain preset to the chain list's rack (`chain.load_preset`). While a device is being hot-swapped (`device.hot_swap`), a selected preset or device replaces it instead (`device.replace`), as does a chain preset the chain armed by its Hot-Swap button (`chain.load_preset`); a selected audio file loads into it if the device plays samples (the sampler, or the eight-slot drum sampler, into its selected slot: `device.load_sample`). With one plug-in selected it loads that plug-in instead, as `plugin.load` does: onto the selected track (a new track when none is), an instrument onto a new MIDI track when the selected track holds audio, or in place of the device being hot-swapped. Reads the files, outside the project.
 
 Default keys:
 
@@ -1846,7 +1846,7 @@ Result: [`AddResult`](#addresult).
 
 **Open Folder**. Permission: `external`. Contexts: `browser`.
 
-Opens or closes a folder in the browser's content pane, listing its folders and audio files indented under it. Opening a folder closes the other open folders it isn't inside, unless `keep_others` (Cmd or Ctrl held). Right and Left do this on the selected folder. Changes nothing, but reads folders outside the project.
+Opens or closes a folder in the browser's content pane, listing its folders and audio files indented under it (in the Plug-Ins label, a vendor's folder and its plug-ins). Opening a folder closes the other open folders it isn't inside, unless `keep_others` (Cmd or Ctrl held). Right and Left do this on the selected folder. Changes nothing, but reads folders outside the project.
 
 Default keys: none.
 
@@ -1929,7 +1929,7 @@ Result: [`BrowserState`](#browserstate).
 
 **Select in Browser**. Permission: `external`. Contexts: `browser`.
 
-Selects items in the browser's content pane by path, replacing the selection or, with `add`, adding to it, as clicking, Shift-clicking, and Up and Down do. While the Preview switch is on, selecting one audio file previews it through the audio device; selecting anything else stops the preview. Changes nothing in the set.
+Selects items in the browser's content pane by path (or, in the Plug-Ins label, by the row's key), replacing the selection or, with `add`, adding to it, as clicking, Shift-clicking, and Up and Down do. While the Preview switch is on, selecting one audio file previews it through the audio device; selecting anything else stops the preview. Changes nothing in the set.
 
 Default keys: none.
 
@@ -5458,7 +5458,7 @@ Result: [`DeviceViewState`](#deviceviewstate).
 
 **Map Modulator**. Permission: `edit`. Contexts: `device-view`.
 
-Maps one of a modulator's eight slots (`slot`, 0 to 7) to a parameter, as the slot's Map button and a click on the parameter's control do. `target` is a mixer control (`volume`, `pan` or `mute`) or a send of any track, or a parameter of any device on any track, but not a parameter of the modulator itself. The slot's earlier mapping is replaced; one modulator doesn't map one parameter twice. A modulator in Remote Control can't map a parameter another modulator in Remote Control holds. The mapping is saved with the set, goes with its target when that is deleted, and shows in the `mappings` field of the query tool's `device`. One undo step (Map Modulator).
+Maps one of a modulator's slots (`slot`, 0 to 7; the Play Mod's are 0 to 4) to a parameter, as the slot's Map button and a click on the parameter's control do. `target` is a mixer control (`volume`, `pan` or `mute`) or a send of any track, or a parameter of any device on any track, but not a parameter of the modulator itself. The slot's earlier mapping is replaced; one modulator doesn't map one parameter twice. A modulator in Remote Control can't map a parameter another modulator in Remote Control holds. A modulator driven by audio, notes or MIDI (the Level Mod, Gate Mod, Strike Mod and Play Mod) doesn't map another modulator's parameters, nor one on a track that feeds its own track, which would make the two tracks wait on each other. The mapping is saved with the set, goes with its target when that is deleted, and shows in the `mappings` field of the query tool's `device`. One undo step (Map Modulator).
 
 Default keys: none.
 
@@ -5476,7 +5476,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Edit Shape**. Permission: `edit`. Contexts: `device-view`.
 
-Replaces the breakpoint shape of a Curve Mod, as every edit of its display does (adding, moving, bending or deleting a breakpoint, Clear and the six presets). `points` lists up to 64 breakpoints in order along the cycle, each with `x` (its place, 0 to 1), `y` (the output there, 0 to 1) and `bend` (of the segment starting there, from -1 to 1, 0 straight). An empty list outputs 0. One undo step (Edit Shape).
+Replaces the breakpoint shape of a Curve Mod or a Strike Mod, as every edit of its display does (adding, moving, bending or deleting a breakpoint, making one the sustain breakpoint, Clear and the six presets). `points` lists up to 64 breakpoints in order along the cycle, each with `x` (its place, 0 to 1), `y` (the output there, 0 to 1), `bend` (of the segment starting there, from -1 to 1, 0 straight) and `sustain` (true on the Strike Mod's sustain breakpoint, at most one in a shape). An empty list outputs 0. One undo step (Edit Shape).
 
 Default keys: none.
 
@@ -5493,7 +5493,7 @@ Result: [`ChangeSet`](#changeset).
 
 **Unmap Modulator**. Permission: `edit`. Contexts: `device-view`.
 
-Removes the mapping of a modulator's slot (`slot`, 0 to 7), as its Unmap button does: the parameter plays its own value again from the next frame. A slot with no mapping stays as it is. One undo step (Unmap Modulator).
+Removes the mapping of a modulator's slot (`slot`, 0 to 7; the Play Mod's are 0 to 4), as its Unmap button does: the parameter plays its own value again from the next frame. A slot with no mapping stays as it is. One undo step (Unmap Modulator).
 
 Default keys: none.
 
@@ -5777,7 +5777,7 @@ Result: [`PluginLoaded`](#pluginloaded).
 
 **Rescan Plug-Ins**. Permission: `external`. Contexts: `global`, `device-view`.
 
-Scans the plug-ins in `paths` (or each format's system plug-in folders) again, ignoring the cache and clearing the blocklist for them, as the Rescan button does. Returns `plugin.scan`'s report.
+Scans the plug-ins in `paths` (or each format's system plug-in folders) again, ignoring the cache and clearing the blocklist for them, as the Rescan button does. Returns `plugin.scan`'s report; with `background`, returns at once and the browser lists what was found when the scan is done.
 
 Default keys: none.
 
@@ -5785,6 +5785,7 @@ Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
+| `background` | boolean | no | Scan the system folders in the background and return at once, with an empty report, as the Settings window's Rescan button does; the browser lists what was found when it's done. |
 | `paths` | array or null | no | The files or folders to scan; each format's system plug-in folders if left out. |
 
 Result: [`PluginScan`](#pluginscan).
@@ -5793,7 +5794,7 @@ Result: [`PluginScan`](#pluginscan).
 
 **Scan Plug-Ins**. Permission: `external`. Contexts: `global`, `device-view`.
 
-Finds the plug-ins installed on this machine and describes each one: its format, its file, its identifier, name, vendor, version, and role in a chain. Scans the files or folders in `paths`, or each format's own system plug-in folders (CLAP's and VST3's conventions, and on macOS Apple's Audio Units') when `paths` is left out. Plug-ins of every hosted format are scanned. Each one is loaded in a separate process with a timeout, so a plug-in that crashes or hangs is put on a blocklist with the reason instead of taking Beatlayer down; a file whose size and modification time are unchanged is answered from the cache. Reads plug-in files outside the project, so an agent asks first.
+Finds the plug-ins installed on this machine and describes each one: its format, its file, its identifier, name, vendor, version, and role in a chain. Scans the files or folders in `paths` for every hosted format, or, when `paths` is left out, the system plug-in folders of CLAP and of the formats the Plug-Ins settings switch on (`plugin.settings`: `vst3_system_folders`, and on macOS `use_audio_units_v2`). The app also runs this at start, in the background, and when one of those switches turns on. Each one is loaded in a separate process with a timeout, so a plug-in that crashes or hangs is put on a blocklist with the reason instead of taking Beatlayer down; a file whose size and modification time are unchanged is answered from the cache. Reads plug-in files outside the project, so an agent asks first.
 
 Default keys: none.
 
@@ -5801,6 +5802,7 @@ Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
+| `background` | boolean | no | Scan the system folders in the background and return at once, with an empty report, as the Settings window's Rescan button does; the browser lists what was found when it's done. |
 | `paths` | array or null | no | The files or folders to scan; each format's system plug-in folders if left out. |
 
 Result: [`PluginScan`](#pluginscan).
@@ -5844,7 +5846,7 @@ Result: [`PluginInfo`](#plugininfo).
 
 **Plug-In Settings**. Permission: `edit`. Contexts: `global`.
 
-Reads or changes how the browser shows plug-ins (IMP-07): `hidden` is the plug-ins to hide, as `format/plugin_id` keys; `show_hidden` whether hidden plug-ins still show; and `format_preference` the format to prefer when a plug-in exists in several. Fields left out are unchanged. Returns the settings. A set that uses a hidden plug-in still loads it.
+Reads or changes how the browser shows plug-ins (IMP-07): `hidden` is the plug-ins to hide, as `format/plugin_id` keys; `show_hidden` whether hidden plug-ins still show; and `format_preference` the format to prefer when a plug-in exists in several. Also the Plug-In Sources switches of Settings ▸ Plug-Ins: `use_audio_units_v2`, `use_audio_units_v3` and `vst3_system_folders`, all off in a new install; the browser lists a format's plug-ins only while its switch is on (CLAP has none and is always listed), and turning one on scans that format in the background. Fields left out are unchanged. Returns the settings. A set that uses a hidden plug-in still loads it.
 
 Default keys: none.
 
@@ -5855,6 +5857,9 @@ Arguments:
 | `format_preference` | [`PluginFormat`](#pluginformat) or null | no | The format to prefer when a plug-in exists in several. |
 | `hidden` | array or null | no | The hidden plug-ins to remember, as `format/plugin_id` keys (IMP-07); empty hides none. |
 | `show_hidden` | boolean or null | no | Whether the browser shows hidden plug-ins. |
+| `use_audio_units_v2` | boolean or null | no | Use Audio Units v2 (Settings ▸ Plug-Ins): scan and list Audio Units on macOS. Turning it on scans them. |
+| `use_audio_units_v3` | boolean or null | no | Use Audio Units v3 (Settings ▸ Plug-Ins). Kept; app-extension Audio Units aren't scanned yet. |
+| `vst3_system_folders` | boolean or null | no | Use VST3 Plug-In System Folders (Settings ▸ Plug-Ins): scan and list the VST3 plug-ins in the format's system folders. Turning it on scans them. |
 
 Result: [`PluginSettings`](#pluginsettings).
 
@@ -14756,12 +14761,13 @@ One row of the content pane.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `path` | string | yes | Its path on disk. |
+| `path` | string | yes | Its path on disk; in the Plug-Ins label, the row's key instead: a vendor folder's is `plug-ins:/` and the vendor, a plug-in's is its file, `#`, and its identifier (the plug-in scanning spec, R11). |
 | `name` | string | yes | Its name, as the Name column shows it. |
 | `kind` | [`ItemKind`](#itemkind) | yes | What it is. |
 | `depth` | integer from 0 to 65535 | yes | How deep it's indented: 0 at the top of the list. |
 | `open` | boolean | yes | For a folder, whether it's open. |
 | `folder` | string or null | no | In search results, the folder it's in, relative to its place. |
+| `format` | [`PluginFormat`](#pluginformat) or null | no | For a plug-in, its format, which the row's badge shows (the plug-in scanning spec, R11). |
 
 <details><summary>JSON Schema</summary>
 
@@ -14783,6 +14789,17 @@ One row of the content pane.
         "null"
       ]
     },
+    "format": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PluginFormat"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "For a plug-in, its format, which the row's badge shows (the plug-in scanning spec, R11)."
+    },
     "kind": {
       "$ref": "#/$defs/ItemKind",
       "description": "What it is."
@@ -14797,7 +14814,7 @@ One row of the content pane.
       "type": "boolean"
     },
     "path": {
-      "description": "Its path on disk.",
+      "description": "Its path on disk; in the Plug-Ins label, the row's key instead: a vendor folder's is `plug-ins:/` and the vendor, a plug-in's is its file, `#`, and its identifier (the plug-in scanning spec, R11).",
       "type": "string"
     }
   },
@@ -18786,6 +18803,9 @@ What `plugin.settings` returns.
 |---|---|---|---|
 | `hidden` | array of string | yes | The hidden plug-ins, as `format/plugin_id` keys. |
 | `show_hidden` | boolean | yes | Whether the browser shows hidden plug-ins. |
+| `use_audio_units_v2` | boolean | yes | Use Audio Units v2. |
+| `use_audio_units_v3` | boolean | yes | Use Audio Units v3. |
+| `vst3_system_folders` | boolean | yes | Use VST3 Plug-In System Folders. |
 | `format_preference` | [`PluginFormat`](#pluginformat) or null | no | The preferred format, if one is chosen. |
 
 <details><summary>JSON Schema</summary>
@@ -18815,11 +18835,26 @@ What `plugin.settings` returns.
     "show_hidden": {
       "description": "Whether the browser shows hidden plug-ins.",
       "type": "boolean"
+    },
+    "use_audio_units_v2": {
+      "description": "Use Audio Units v2.",
+      "type": "boolean"
+    },
+    "use_audio_units_v3": {
+      "description": "Use Audio Units v3.",
+      "type": "boolean"
+    },
+    "vst3_system_folders": {
+      "description": "Use VST3 Plug-In System Folders.",
+      "type": "boolean"
     }
   },
   "required": [
     "hidden",
-    "show_hidden"
+    "show_hidden",
+    "use_audio_units_v2",
+    "use_audio_units_v3",
+    "vst3_system_folders"
   ],
   "type": "object"
 }
@@ -21380,6 +21415,7 @@ One breakpoint of a Curve Mod's shape (R23): a place in the cycle, the output th
 | `x` | number | yes | Where in the cycle, from 0 (its start) to 1 (its end). |
 | `y` | number | yes | The output there, from 0 to 1. |
 | `bend` | number | no | The bend of the segment starting here, from −1 to 1, by the automation spec's curve law; 0 is straight. |
+| `sustain` | boolean | no | Whether it is the Strike Mod's sustain breakpoint (R26): at most one in a shape. |
 
 <details><summary>JSON Schema</summary>
 
@@ -21391,6 +21427,10 @@ One breakpoint of a Curve Mod's shape (R23): a place in the cycle, the output th
       "description": "The bend of the segment starting here, from −1 to 1, by the automation spec's curve law; 0 is straight.",
       "format": "double",
       "type": "number"
+    },
+    "sustain": {
+      "description": "Whether it is the Strike Mod's sustain breakpoint (R26): at most one in a shape.",
+      "type": "boolean"
     },
     "x": {
       "description": "Where in the cycle, from 0 (its start) to 1 (its end).",

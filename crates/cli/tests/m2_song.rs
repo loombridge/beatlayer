@@ -1146,6 +1146,9 @@ impl Song {
     /// Looks for Surge XT (CLAP), Dexed (VST3) and an Airwindows effect with
     /// the scanner, and says which are missing.
     fn find_local(&mut self) -> Result<Local, String> {
+        // VST3 is scanned only with its Plug-In Sources switch on (the
+        // plug-in scanning spec, R12), and Dexed is wanted as a VST3.
+        self.run("plugin.settings", json!({ "vst3_system_folders": true }));
         let scanned = self.run("plugin.scan", json!({}));
         let found: Vec<Value> = scanned["plugins"].as_array().cloned().unwrap_or_default();
         // A plug-in is Airwindows's if its name or its vendor says so.

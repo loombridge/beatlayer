@@ -257,8 +257,10 @@ fn every_part_reaches_assistive_technology() {
     let user_library = Harness::node(&nodes, "User Library");
     assert_eq!(user_library.role, Role::ListItem);
     assert!(user_library.description.contains("User Library"));
-    let instruments = Harness::node(&nodes, "Instruments");
-    assert!(instruments.description.contains("M2"));
+    // Instruments lists the instrument rack since WP-5.8, so Sounds stands
+    // for a label whose content is still to come.
+    let sounds = Harness::node(&nodes, "Sounds");
+    assert!(sounds.description.contains("M2"));
     assert!(
         Harness::node(&nodes, "Favorites").disabled,
         "collections are M6"

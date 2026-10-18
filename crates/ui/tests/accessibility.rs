@@ -1963,6 +1963,7 @@ fn paths() -> BTreeMap<&'static str, Path> {
         ),
         ("device.set_show_preset_name", Exception(device_menu)),
         ("device.save_default_preset", Exception(device_menu)),
+        ("device.swap_to_snapshot", Exception(device_menu)),
         (
             "device.load_preset",
             Exception(Equivalent(

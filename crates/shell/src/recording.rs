@@ -9,10 +9,10 @@
 //! files and reports them, and the shell makes the clips from them
 //! ([`crate::Shell`]).
 //!
-//! An armed MIDI track records without a file: its ring holds the note
-//! messages the engine stamped with song frames, the main thread drains it
-//! as the take runs, and the clip's notes are made from the messages when
-//! the take ends (WP-2.14).
+//! An armed MIDI track records without a file: its ring holds the note and
+//! controller messages the engine stamped with song frames, the main thread
+//! drains it as the take runs, and the clip's notes and controller envelopes
+//! are made from the messages when the take ends (WP-2.14, WP-2.29b).
 //!
 //! A ring that fills up (a writer that fell behind) is reported by the
 //! engine's frames-dropped count, and a write that fails (a full disk) by
@@ -26,14 +26,17 @@ use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread;
 use std::time::{Duration, SystemTime};
 
+use bl_core::midi::MidiMessage;
 use bl_core::time::{Frames, SampleRate, TempoMap, Ticks};
+use bl_engine::controller_take::{self, REST};
 use bl_engine::{
     LaunchLog, MidiRecordTrack, RecordTrack, RecordedMidi, RecordingPlan, SessionEvent,
     SessionTarget, TakeBounds,
 };
 use bl_media::{AudioWriter, BitDepth, Dither, EncodeSpec, FileType};
 use bl_model::{
-    Channel, Clip, ClipData, ClipId, Command, EditError, Editor, MidiData, Note, TrackId,
+    AutomationTarget, Channel, Clip, ClipData, ClipId, Command, EditError, Editor, EnvelopeKind,
+    MidiData, Note, TrackId,
 };
 use rtrb::{Consumer, RingBuffer};
 use std::collections::BTreeMap;
@@ -301,12 +304,13 @@ struct MidiReading {
     dropped: Arc<AtomicU64>,
 }
 
-/// The note messages one MIDI track received while the take ran.
+/// The note and controller messages one MIDI track received while the take
+/// ran.
 #[derive(Debug)]
 pub struct MidiTake {
     /// The track.
     pub track: TrackId,
-    /// Its notes' ons and offs, in order.
+    /// Its notes' ons and offs and its controllers, in order.
     pub messages: Vec<RecordedMidi>,
 }
 
@@ -322,7 +326,7 @@ pub struct Outcome {
     pub delay: i64,
     /// The finished files, or why the writer gave up.
     pub files: Result<Vec<RecordedFile>, String>,
-    /// What each MIDI track that received a note recorded.
+    /// What each MIDI track that received a note or a controller recorded.
     pub midi: Vec<MidiTake>,
     /// Frames (and MIDI messages) a ring was too full to take: the disk or
     /// the main thread fell behind, and the recording ended before them.
@@ -566,7 +570,8 @@ fn writer(path: &Path, channels: usize, rate: SampleRate) -> Result<AudioWriter,
 /// note-on starts a note on its key, and the next note-off on that key (or a
 /// note-on on it again) ends it. A note still held when the take ends at
 /// `end` ends there; a note-off with no note held is ignored. Every note
-/// lasts at least a tick.
+/// lasts at least a tick, and carries the polyphonic pressure its key was
+/// sent while it was held (the MIDI controller data spec, R11).
 fn notes(messages: &[RecordedMidi], end: Frames, tempo: &TempoMap, rate: SampleRate) -> Vec<Note> {
     let ticks = |frames| tempo.frames_to_ticks(frames, rate);
     let finish = |key: u8, (from, velocity): (Frames, u8), to: Frames, release: u8| {
@@ -580,6 +585,9 @@ fn notes(messages: &[RecordedMidi], end: Frames, tempo: &TempoMap, rate: SampleR
     let mut held: [Option<(Frames, u8)>; 128] = [None; 128];
     let mut notes = Vec::new();
     for RecordedMidi { frame, message } in messages {
+        if !(message.is_note_on() || message.is_note_off()) {
+            continue;
+        }
         let key = message.data1();
         let on = message.is_note_on();
         if let Some(note) = held[usize::from(key)].take() {
@@ -597,7 +605,113 @@ fn notes(messages: &[RecordedMidi], end: Frames, tempo: &TempoMap, rate: SampleR
     for (key, note) in (0u8..).zip(held) {
         notes.extend(note.map(|note| finish(key, note, end, 0)));
     }
+    controller_take::give_pressure(&mut notes, &moves(messages, tempo, rate));
     notes
+}
+
+/// The controller messages a MIDI track received, as absolute positions.
+fn moves(
+    messages: &[RecordedMidi],
+    tempo: &TempoMap,
+    rate: SampleRate,
+) -> Vec<(Ticks, MidiMessage)> {
+    messages
+        .iter()
+        .filter(|m| controller_take::is_controller(&m.message))
+        .map(|m| (tempo.frames_to_ticks(m.frame, rate), m.message))
+        .collect()
+}
+
+/// The control change, pitch bend and channel pressure messages a MIDI track
+/// played in a Session take, placed from the take's start like
+/// [`session_notes`]. Polyphonic pressure is in the notes.
+#[must_use]
+pub fn session_moves(
+    messages: &[RecordedMidi],
+    start: Frames,
+    tempo: &TempoMap,
+    rate: SampleRate,
+) -> Vec<(Ticks, MidiMessage)> {
+    let origin = tempo.frames_to_ticks(start, rate);
+    moves(messages, tempo, rate)
+        .into_iter()
+        .filter(|(_, message)| controller_take::envelope_move(message).is_some())
+        .map(|(at, message)| (at - origin, message))
+        .collect()
+}
+
+/// Writes controller messages into the envelopes of a MIDI clip, as steps
+/// (the MIDI controller data spec, R11): `moves` are positions in the clip's
+/// contents. With `replace_to`, a controller's envelope is replaced from its
+/// first move to there, and what the old one held after it stays (R13, R14); without,
+/// the steps are added and the breakpoints already there stay (R15). A
+/// controller the clip had no envelope for starts at its resting value.
+///
+/// # Errors
+///
+/// [`EditError`] if the document refuses a step.
+pub fn write_moves(
+    editor: &mut Editor,
+    clip: ClipId,
+    moves: &[(Ticks, MidiMessage)],
+    replace_to: Option<Ticks>,
+) -> Result<(), EditError> {
+    let mut by_target: BTreeMap<AutomationTarget, Vec<(Ticks, f64)>> = BTreeMap::new();
+    for (at, message) in moves {
+        if let Some((target, value)) = controller_take::envelope_move(message) {
+            by_target.entry(target).or_default().push((*at, value));
+        }
+    }
+    for (target, mut moves) in by_target {
+        moves.sort_by_key(|(at, _)| *at);
+        let existing = editor
+            .document()
+            .clip(clip)
+            .and_then(|clip| clip.envelope(&target))
+            .map(|clip_envelope| clip_envelope.envelope.clone())
+            .unwrap_or_default();
+        let first = moves[0].0;
+        let before = existing.value_at(first - Ticks(1)).unwrap_or(REST);
+        let mut written = controller_take::stepped(&moves, before);
+        if existing.is_empty() && written[0].0 > Ticks::ZERO {
+            written.insert(0, (Ticks::ZERO, before));
+        }
+        let (mut removed, mut set) = (Vec::new(), written);
+        if let Some(end) = replace_to {
+            removed = existing
+                .points()
+                .map(|point| point.at)
+                .filter(|at| *at >= set[0].0 && *at < end)
+                .collect();
+            // An envelope that goes on past the end holds the last step to
+            // it, then steps back to where it was.
+            let last = *set.last().expect("a move was written");
+            if end > last.0 && existing.points().any(|point| point.at >= end) {
+                if end > last.0 + Ticks(1) {
+                    set.push((end - Ticks(1), last.1));
+                }
+                set.push((end, existing.value_at(end).unwrap_or(REST)));
+            }
+        }
+        for at in removed {
+            editor.apply(Command::DeleteClipEnvelopeBreakpoint {
+                clip,
+                target,
+                kind: EnvelopeKind::Modulation,
+                at,
+            })?;
+        }
+        for (at, value) in set {
+            editor.apply(Command::SetClipEnvelopeBreakpoint {
+                clip,
+                target,
+                kind: EnvelopeKind::Modulation,
+                at,
+                value,
+            })?;
+        }
+    }
+    Ok(())
 }
 
 /// The notes a MIDI track played in a Session take, placed from the take's
@@ -621,19 +735,12 @@ pub fn session_notes(
         .collect()
 }
 
-/// Sorts the notes an overdub played into the passes of the clip's loop
-/// they fall in, placed where the clip plays them (the session recording
-/// spec, R8). `played` starts are counted from the frame the clip launched
-/// on. A looping clip plays its Start marker to the loop's end, then its
-/// loop again and again; a clip that doesn't loop plays once, so notes past
-/// its end are dropped. A note that would run past the end of its pass is
-/// cut there. The map is in order of pass.
-#[must_use]
-pub fn overdub_passes(
-    data: &MidiData,
-    length: Ticks,
-    played: Vec<Note>,
-) -> BTreeMap<usize, Vec<Note>> {
+/// Where an overdub puts something played `start` ticks after the clip
+/// launched: the pass of the clip's loop it falls in, its place in the
+/// contents, and the end of that pass. A looping clip plays its Start marker
+/// to the loop's end, then its loop again and again; a clip that doesn't
+/// loop plays once, so what is played past its end is `None`.
+fn locate(data: &MidiData, length: Ticks, start: Ticks) -> Option<(usize, Ticks, Ticks)> {
     let marker = data.start;
     let (loop_start, loop_end) = (
         data.loop_start,
@@ -642,26 +749,39 @@ pub fn overdub_passes(
     );
     let (first, rest) = (loop_end - marker, loop_end - loop_start);
     let end = data.end.unwrap_or(marker + length).min(marker + length);
+    if start < Ticks::ZERO {
+        return None;
+    }
+    if !data.looping {
+        return (marker + start < end).then_some((0, marker + start, end));
+    }
+    if start < first {
+        return Some((0, marker + start, loop_end));
+    }
+    let past = start - first;
+    let pass = 1 + (past.get() / rest.get().max(1)) as usize;
+    Some((
+        pass,
+        loop_start + Ticks(past.get() % rest.get().max(1)),
+        loop_end,
+    ))
+}
+
+/// Sorts the notes an overdub played into the passes of the clip's loop
+/// they fall in, placed where the clip plays them (the session recording
+/// spec, R8). `played` starts are counted from the frame the clip launched
+/// on. A note that would run past the end of its pass is cut there. The map
+/// is in order of pass.
+#[must_use]
+pub fn overdub_passes(
+    data: &MidiData,
+    length: Ticks,
+    played: Vec<Note>,
+) -> BTreeMap<usize, Vec<Note>> {
     let mut passes: BTreeMap<usize, Vec<Note>> = BTreeMap::new();
     for note in played {
-        if note.start < Ticks::ZERO {
+        let Some((pass, at, limit)) = locate(data, length, note.start) else {
             continue;
-        }
-        let (pass, at, limit) = if !data.looping {
-            if marker + note.start >= end {
-                continue;
-            }
-            (0, marker + note.start, end)
-        } else if note.start < first {
-            (0, marker + note.start, loop_end)
-        } else {
-            let past = note.start - first;
-            let pass = 1 + (past.get() / rest.get().max(1)) as usize;
-            (
-                pass,
-                loop_start + Ticks(past.get() % rest.get().max(1)),
-                loop_end,
-            )
         };
         passes.entry(pass).or_default().push(Note {
             start: at,
@@ -672,12 +792,36 @@ pub fn overdub_passes(
     passes
 }
 
+/// Sorts the controller messages an overdub played into the passes of the
+/// clip's loop as [`overdub_passes`] does, with the end of each pass, where
+/// a controller's replaced envelope resumes (the MIDI controller data spec,
+/// R14).
+#[must_use]
+pub fn overdub_moves(
+    data: &MidiData,
+    length: Ticks,
+    moves: &[(Ticks, MidiMessage)],
+) -> BTreeMap<usize, (Ticks, Vec<(Ticks, MidiMessage)>)> {
+    let mut passes: BTreeMap<usize, (Ticks, Vec<(Ticks, MidiMessage)>)> = BTreeMap::new();
+    for &(start, message) in moves {
+        if let Some((pass, at, limit)) = locate(data, length, start) {
+            passes
+                .entry(pass)
+                .or_insert((limit, Vec::new()))
+                .1
+                .push((at, message));
+        }
+    }
+    passes
+}
+
 /// Puts what MIDI tracks recorded into the Arrangement, inside the caller's
-/// transaction: a new clip over the take on each track that received notes,
-/// replacing what was there; or, with `overdub` on, each note merged into
-/// the MIDI clip it starts in, and the notes that start in no clip making
-/// new clips over the gaps between the track's clips, so nothing is replaced
-/// (WP-2.14). `placed` holds the clips already made, which clearing leaves
+/// transaction: a new clip over the take on each track that received notes
+/// or controllers, replacing what was there; or, with `overdub` on, each note
+/// merged into the MIDI clip it starts in, and the notes that start in no
+/// clip making new clips over the gaps between the track's clips, so nothing
+/// is replaced (WP-2.14). Controllers go the same way, as steps of the
+/// clip's envelopes (WP-2.29b). `placed` holds the clips already made, which clearing leaves
 /// alone.
 ///
 /// # Errors
@@ -698,7 +842,9 @@ pub fn place_midi(
     );
     for recorded in takes {
         let mut played = notes(&recorded.messages, take.end, &tempo, rate);
-        if played.is_empty() {
+        let mut moved = moves(&recorded.messages, &tempo, rate);
+        moved.retain(|(_, m)| controller_take::envelope_move(m).is_some());
+        if played.is_empty() && moved.is_empty() {
             continue;
         }
         // The spans of the track's clips the take crosses, in order of
@@ -721,26 +867,32 @@ pub fn place_midi(
                 .into_iter()
                 .partition(|note| note.start >= *from && note.start < *to);
             played = rest;
-            if inside.is_empty() {
-                continue;
-            }
+            let (steps, rest): (Vec<_>, Vec<_>) =
+                moved.into_iter().partition(|(at, _)| at >= from && at < to);
+            moved = rest;
             let Some(ClipData::Midi(mut data)) =
                 editor.document().clip(*id).map(|clip| clip.data.clone())
             else {
                 continue;
             };
-            for note in inside {
-                data.notes.push_back(Note {
-                    start: note.start - *origin,
-                    ..note
-                });
+            if !inside.is_empty() {
+                for note in inside {
+                    data.notes.push_back(Note {
+                        start: note.start - *origin,
+                        ..note
+                    });
+                }
+                editor.apply(Command::SetClipData {
+                    clip: *id,
+                    data: ClipData::Midi(data),
+                })?;
             }
-            editor.apply(Command::SetClipData {
-                clip: *id,
-                data: ClipData::Midi(data),
-            })?;
+            // Spec: midi-controller-data R13. Each controller replaces its
+            // envelope from its first message to the take's end.
+            let steps: Vec<_> = steps.into_iter().map(|(at, m)| (at - *origin, m)).collect();
+            write_moves(editor, *id, &steps, Some(end.min(*to) - *origin))?;
         }
-        if played.is_empty() {
+        if played.is_empty() && moved.is_empty() {
             continue;
         }
         // What is left makes new clips: over the take, or over the gaps the
@@ -765,7 +917,12 @@ pub fn place_midi(
                     ..note.clone()
                 })
                 .collect();
-            if inside.is_empty() {
+            let steps: Vec<_> = moved
+                .iter()
+                .filter(|(at, _)| *at >= from && *at < to)
+                .map(|&(at, m)| (at - from, m))
+                .collect();
+            if inside.is_empty() && steps.is_empty() {
                 continue;
             }
             let id = editor.new_id();
@@ -776,6 +933,7 @@ pub fn place_midi(
                 track: recorded.track,
                 clip,
             })?;
+            write_moves(editor, id, &steps, None)?;
         }
     }
     Ok(())
@@ -783,8 +941,6 @@ pub fn place_midi(
 
 #[cfg(test)]
 mod tests {
-    use bl_core::midi::MidiMessage;
-
     use super::*;
 
     // Spec: recording R12. A take that wrapped is a lead-in and passes.
@@ -1200,6 +1356,338 @@ mod tests {
             tempo.ticks_to_frames(found[0].start, RATE).get(),
             12_000,
             "a quarter second in"
+        );
+    }
+
+    fn cc(controller: u8, value: u8) -> MidiMessage {
+        MidiMessage::from_bytes(&[0xB0, controller, value]).unwrap()
+    }
+
+    /// A pitch bend message on `channel` (0 to 15) to `value` (−8192 to 8191).
+    fn bend(channel: u8, value: i32) -> MidiMessage {
+        let raw = value + 8192;
+        MidiMessage::from_bytes(&[0xE0 | channel, (raw & 0x7F) as u8, (raw >> 7) as u8]).unwrap()
+    }
+
+    /// The tick a frame of the song is at, 120 BPM.
+    fn tick(frame: i64) -> Ticks {
+        TempoMap::default().frames_to_ticks(Frames(frame), RATE)
+    }
+
+    /// A clip's breakpoints for `target`.
+    fn points(editor: &Editor, clip: ClipId, target: AutomationTarget) -> Vec<(Ticks, f64)> {
+        editor
+            .document()
+            .clip(clip)
+            .and_then(|clip| clip.envelope(&target))
+            .map(|e| e.envelope.points().map(|p| (p.at, p.value)).collect())
+            .unwrap_or_default()
+    }
+
+    /// The only clip of the track.
+    fn only_clip(editor: &Editor, track: TrackId) -> Clip {
+        let mut all: Vec<_> = editor
+            .document()
+            .track(track)
+            .unwrap()
+            .clips()
+            .cloned()
+            .collect();
+        assert_eq!(all.len(), 1, "{all:?}");
+        all.remove(0)
+    }
+
+    fn cc1() -> AutomationTarget {
+        AutomationTarget::MidiCc { number: 1 }
+    }
+
+    // Spec: midi-controller-data R11 (S1, S4). CC1 rising and pitch bend
+    // alternating with eight quarter notes, and the resets sent after the
+    // last note-off while the take still runs: each controller is a stepped
+    // envelope at its resting value before its first message, keeping
+    // messages to the end of the take.
+    #[test]
+    fn a_take_makes_stepped_envelopes_from_the_controllers_played() {
+        let (mut editor, track) = editor_with_track();
+        let beat = 24_000;
+        let mut messages = Vec::new();
+        for i in 0..8 {
+            let at = i * beat + beat;
+            messages.push((at, cc(1, 10 * (i as u8 + 1))));
+            messages.push((at, bend(0, if i % 2 == 0 { 4_000 } else { -4_000 })));
+            messages.push((at, MidiMessage::note_on(0, 60, 100)));
+            messages.push((at + 6_000, MidiMessage::note_off(0, 60)));
+        }
+        // After the last note-off, with the take still running.
+        messages.push((9 * beat + 12_000, cc(1, 0)));
+        messages.push((9 * beat + 12_000, bend(0, 0)));
+        messages.sort_by_key(|(at, _)| *at);
+        let takes = played(track, &messages);
+        let mut placed = Default::default();
+        place_midi(&mut editor, &takes, take(0, 3), RATE, false, &mut placed).unwrap();
+
+        let clip = only_clip(&editor, track);
+        let one = |frame, value| (tick(frame), value);
+        let hold = |frame, value| (tick(frame) - Ticks(1), value);
+        let mut expected = vec![(Ticks::ZERO, 0.0), hold(beat, 0.0)];
+        for i in 0..8 {
+            let at = (i + 1) * beat;
+            if i > 0 {
+                expected.push(hold(at, 10.0 * i as f64));
+            }
+            expected.push(one(at, 10.0 * (i as f64 + 1.0)));
+        }
+        expected.push(hold(9 * beat + 12_000, 80.0));
+        expected.push(one(9 * beat + 12_000, 0.0));
+        assert_eq!(points(&editor, clip.id, cc1()), expected);
+        let bends = points(&editor, clip.id, AutomationTarget::MidiPitchBend);
+        assert_eq!(
+            bends[0],
+            (Ticks::ZERO, 0.0),
+            "centre before the first message"
+        );
+        assert_eq!(bends[2], one(beat, 4_000.0));
+        assert_eq!(bends[4], one(2 * beat, -4_000.0));
+        assert_eq!(*bends.last().unwrap(), one(9 * beat + 12_000, 0.0));
+        assert!(
+            clip.envelope(&AutomationTarget::MidiChannelPressure)
+                .is_none()
+        );
+    }
+
+    // Spec: midi-controller-data R11 (S3). The same controller on two
+    // channels on one frame makes one envelope holding the later message.
+    #[test]
+    fn the_later_of_two_messages_on_one_frame_wins_whatever_the_channel() {
+        let (mut editor, track) = editor_with_track();
+        let on_one = MidiMessage::from_bytes(&[0xB0, 1, 30]).unwrap();
+        let on_two = MidiMessage::from_bytes(&[0xB1, 1, 90]).unwrap();
+        let takes = played(
+            track,
+            &[
+                (24_000, MidiMessage::note_on(0, 60, 100)),
+                (24_000, on_one),
+                (24_000, on_two),
+                (30_000, MidiMessage::note_off(0, 60)),
+            ],
+        );
+        let mut placed = Default::default();
+        place_midi(&mut editor, &takes, take(0, 1), RATE, false, &mut placed).unwrap();
+        let clip = only_clip(&editor, track);
+        assert_eq!(clip.envelopes().len(), 1, "one envelope, no channel");
+        assert_eq!(
+            points(&editor, clip.id, cc1()).last(),
+            Some(&(tick(24_000), 90.0))
+        );
+    }
+
+    // Spec: midi-controller-data R12 (S4). A take that received only a
+    // controller still makes a clip over the whole take, with no notes.
+    #[test]
+    fn a_controller_only_take_still_makes_a_clip() {
+        let (mut editor, track) = editor_with_track();
+        add_clip(&mut editor, track, 0, 4, 40);
+        let takes = played(track, &[(96_000 + 24_000, cc(1, 77))]);
+        let mut placed = Default::default();
+        place_midi(&mut editor, &takes, take(1, 2), RATE, false, &mut placed).unwrap();
+        // The old clip keeps bar 0 and bars 2 to 3; the take is bar 1.
+        assert_eq!(
+            clips(&editor, track),
+            vec![(0, 1, vec![40]), (1, 1, vec![]), (2, 2, vec![40])]
+        );
+        let clip = editor
+            .document()
+            .track(track)
+            .unwrap()
+            .clips()
+            .find(|clip| clip.start == Ticks::WHOLE)
+            .unwrap();
+        assert_eq!(
+            points(&editor, clip.id, cc1()).last(),
+            Some(&(tick(24_000), 77.0))
+        );
+    }
+
+    // Spec: midi-controller-data R11 (S1). Polyphonic pressure is the held
+    // note's own pressure and makes no envelope; with no note held it is
+    // left out, and a take of nothing else makes no clip.
+    #[test]
+    fn polyphonic_pressure_becomes_the_pressure_of_the_note_held() {
+        let (mut editor, track) = editor_with_track();
+        let pressure = |key, value| MidiMessage::from_bytes(&[0xA0, key, value]).unwrap();
+        let takes = played(
+            track,
+            &[
+                (5_000, pressure(60, 9)),
+                (24_000, MidiMessage::note_on(0, 60, 100)),
+                (30_000, pressure(60, 127)),
+                (36_000, pressure(60, 112)),
+                (40_000, pressure(61, 1)),
+                (48_000, MidiMessage::note_off(0, 60)),
+            ],
+        );
+        let mut placed = Default::default();
+        place_midi(&mut editor, &takes, take(0, 1), RATE, false, &mut placed).unwrap();
+        let clip = only_clip(&editor, track);
+        let ClipData::Midi(data) = &clip.data else {
+            panic!("a MIDI clip")
+        };
+        let note = data.notes.iter().next().unwrap();
+        assert_eq!(
+            note.pressure
+                .iter()
+                .map(|p| (p.at, p.value))
+                .collect::<Vec<_>>(),
+            vec![
+                (tick(30_000) - tick(24_000), 127),
+                (tick(36_000) - tick(24_000), 112)
+            ]
+        );
+        assert_eq!(clip.envelopes().len(), 0);
+
+        let (mut editor, track) = editor_with_track();
+        let takes = played(track, &[(5_000, pressure(60, 9))]);
+        place_midi(
+            &mut editor,
+            &takes,
+            take(0, 1),
+            RATE,
+            false,
+            &mut Default::default(),
+        )
+        .unwrap();
+        assert!(clips(&editor, track).is_empty());
+    }
+
+    /// A one-bar looping clip over bar 0 with a CC1 envelope that steps from
+    /// 10 to 20 half way.
+    fn clip_with_cc1(editor: &mut Editor, track: TrackId) -> ClipId {
+        let id = editor.new_id();
+        let data = MidiData {
+            looping: true,
+            ..MidiData::new([])
+        };
+        editor
+            .apply(Command::CreateClip {
+                track,
+                clip: Clip::new(id, Ticks::ZERO, Ticks::WHOLE, ClipData::Midi(data)),
+            })
+            .unwrap();
+        let half = tick(48_000);
+        for (at, value) in [(Ticks::ZERO, 10.0), (half - Ticks(1), 10.0), (half, 20.0)] {
+            editor
+                .apply(Command::SetClipEnvelopeBreakpoint {
+                    clip: id,
+                    target: cc1(),
+                    kind: EnvelopeKind::Modulation,
+                    at,
+                    value,
+                })
+                .unwrap();
+        }
+        id
+    }
+
+    // Spec: midi-controller-data R13 (S5). With MIDI Arrangement Overdub on,
+    // CC1 = 127 replaces that controller's envelope from its first message
+    // to the take's end, keeping its earlier breakpoints; CC2, which the
+    // clip didn't have, starts at its resting value, and the clip's notes
+    // stay.
+    #[test]
+    fn arrangement_overdub_replaces_a_controller_from_its_first_message() {
+        let (mut editor, track) = editor_with_track();
+        let id = clip_with_cc1(&mut editor, track);
+        let takes = played(
+            track,
+            &[
+                (60_000, cc(1, 127)),
+                (70_000, cc(2, 20)),
+                (80_000, cc(1, 127)),
+            ],
+        );
+        let mut placed = Default::default();
+        place_midi(&mut editor, &takes, take(0, 1), RATE, true, &mut placed).unwrap();
+
+        let ids: Vec<_> = editor
+            .document()
+            .track(track)
+            .unwrap()
+            .clips()
+            .map(|c| c.id)
+            .collect();
+        assert_eq!(ids, vec![id], "the same clip, no new one");
+        assert_eq!(
+            points(&editor, id, cc1()),
+            vec![
+                (Ticks::ZERO, 10.0),
+                (tick(48_000) - Ticks(1), 10.0),
+                (tick(48_000), 20.0),
+                (tick(60_000) - Ticks(1), 20.0),
+                (tick(60_000), 127.0),
+                (tick(80_000) - Ticks(1), 127.0),
+                (tick(80_000), 127.0),
+            ],
+            "the old step after the first message is gone"
+        );
+        assert_eq!(
+            points(&editor, id, AutomationTarget::MidiCc { number: 2 }),
+            vec![
+                (Ticks::ZERO, 0.0),
+                (tick(70_000) - Ticks(1), 0.0),
+                (tick(70_000), 20.0),
+            ]
+        );
+    }
+
+    // Spec: midi-controller-data R14 (S5). A Session overdub replaces each
+    // controller from its first message to the end of the loop, in the pass
+    // it was played in, keeping the breakpoints before it.
+    #[test]
+    fn a_session_overdub_replaces_a_controller_to_the_end_of_the_loop() {
+        let (mut editor, track) = editor_with_track();
+        let id = clip_with_cc1(&mut editor, track);
+        let Some(ClipData::Midi(data)) = editor.document().clip(id).map(|c| c.data.clone()) else {
+            panic!("a MIDI clip")
+        };
+        // Played 60,000 frames after the clip launched, and again 96,000 later.
+        let moves = [
+            (tick(60_000), cc(1, 127)),
+            (tick(96_000 + 70_000), cc(1, 5)),
+        ];
+        let passes = overdub_moves(&data, Ticks::WHOLE, &moves);
+        assert_eq!(passes.keys().copied().collect::<Vec<_>>(), vec![0, 1]);
+        let (end, first) = &passes[&0];
+        assert_eq!(*end, Ticks::WHOLE);
+        write_moves(&mut editor, id, first, Some(*end)).unwrap();
+        assert_eq!(
+            points(&editor, id, cc1()),
+            vec![
+                (Ticks::ZERO, 10.0),
+                (tick(48_000) - Ticks(1), 10.0),
+                (tick(48_000), 20.0),
+                (tick(60_000) - Ticks(1), 20.0),
+                (tick(60_000), 127.0),
+            ],
+            "127 holds to the end of the loop"
+        );
+    }
+
+    // Spec: midi-controller-data R15 (S2). Controllers captured into a clip
+    // that plays are added as steps, and the clip's breakpoints stay.
+    #[test]
+    fn captured_controllers_are_added_and_the_old_breakpoints_stay() {
+        let (mut editor, track) = editor_with_track();
+        let id = clip_with_cc1(&mut editor, track);
+        write_moves(&mut editor, id, &[(tick(60_000), cc(1, 127))], None).unwrap();
+        assert_eq!(
+            points(&editor, id, cc1()),
+            vec![
+                (Ticks::ZERO, 10.0),
+                (tick(48_000) - Ticks(1), 10.0),
+                (tick(48_000), 20.0),
+                (tick(60_000) - Ticks(1), 20.0),
+                (tick(60_000), 127.0),
+            ]
         );
     }
 }

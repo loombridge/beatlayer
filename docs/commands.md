@@ -18530,7 +18530,7 @@ What the last recording that ended came to, in `transport.state`: the same facts
 | `error` | string or null | yes | Why it failed, if it did: it made no clips. Null when it made its clips, or when nothing was played. |
 | `clips_made` | boolean | yes | Whether it made clips in the set. |
 | `files` | array of [`RecordedFileReport`](#recordedfilereport) | yes | The audio files it wrote, one per armed audio track that was played. |
-| `midi_tracks` | array of [`TrackId`](#trackid) | yes | The MIDI tracks that received notes. |
+| `midi_tracks` | array of [`TrackId`](#trackid) | yes | The MIDI tracks that received notes or controllers. |
 | `dropped_frames` | integer, at least 0 | yes | Frames and MIDI messages dropped: the recording ended early. |
 | `delay_frames` | integer | yes | Frames the audio was moved earlier to line up with what was played. |
 
@@ -18570,7 +18570,7 @@ What the last recording that ended came to, in `transport.state`: the same facts
       "type": "array"
     },
     "midi_tracks": {
-      "description": "The MIDI tracks that received notes.",
+      "description": "The MIDI tracks that received notes or controllers.",
       "items": {
         "$ref": "#/$defs/TrackId"
       },

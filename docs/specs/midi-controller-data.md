@@ -1,6 +1,6 @@
 # MIDI controller data in clips: MIDI Ctrl envelopes, per-note pressure, and recording them
 
-- **Status:** partial (WP-2.29: R1 to R9 are implemented and tested; WP-2.29b, R10 to R16, is not built yet)
+- **Status:** implemented (WP-2.29: R1 to R9; WP-2.29b: R10 to R16); the items under "To observe in Live" stay open
 - **Work packages:** WP-2.29 (the model, saving, commands, playback and the Envelopes tab's MIDI Ctrl entry: R1 to R9; playback reaches devices through WP-5.44's path for channel messages, and MIDI To's output comes with WP-5.34) and WP-2.29b (recording controllers into clips: Arrangement Record, Session recording and Capture MIDI: R10 to R16)
 - **Parity-matrix row:** Clips and launching: MIDI controller clip envelopes (MIDI Ctrl)
 - **Checked against:** Live 12.4.3 on macOS, 17 October 2026
@@ -66,4 +66,10 @@ This spec covers what a clip holds, how it plays and saves, the commands that ed
 | R7 | `crates/model/src/repr.rs`, `controller_envelopes_and_note_pressure_save_with_the_clip_and_load_back` | unit |
 | R8 | `crates/ui/tests/clip_envelope.rs`, `midi_ctrl_lists_the_controllers_and_dots_the_ones_with_envelopes`; `crates/ui/src/clip_envelope.rs`, `pitch_bend_is_drawn_centred_and_the_others_from_the_bottom` | UI script, unit |
 | R9 | `crates/agent/tests/readback.rs`, `full_query_results_hold_everything_the_set_format_encodes` | unit |
-| R10 to R16 | Named in WP-2.29b's pull request | |
+| R10 | `crates/engine/tests/midi_recording.rs`, `notes_played_during_a_take_are_on_their_exact_samples`, `every_kind_of_controller_goes_into_the_ring_whatever_its_channel`, `messages_no_clip_keeps_are_left_out_of_the_ring` (every block under the allocation trap); `crates/engine/src/controller_take.rs`, `messages_become_the_moves_of_their_envelopes_whatever_the_channel` | frame by frame, unit |
+| R11 | `crates/shell/src/recording.rs`, `a_take_makes_stepped_envelopes_from_the_controllers_played`, `the_later_of_two_messages_on_one_frame_wins_whatever_the_channel`, `polyphonic_pressure_becomes_the_pressure_of_the_note_held`; `crates/engine/src/controller_take.rs`, `moves_step_from_the_value_held_before`, `pressure_goes_to_the_note_held_on_its_key`; `crates/shell/tests/midi_controller_recording.rs`, `a_session_recording_keeps_the_controllers_with_its_notes_in_one_undo_step` | unit, shell |
+| R12 | `crates/shell/src/recording.rs`, `a_controller_only_take_still_makes_a_clip`; `crates/shell/tests/midi_controller_recording.rs`, `an_arrangement_take_of_a_controller_alone_makes_a_clip` | unit, shell |
+| R13 | `crates/shell/src/recording.rs`, `arrangement_overdub_replaces_a_controller_from_its_first_message` | unit |
+| R14 | `crates/shell/src/recording.rs`, `a_session_overdub_replaces_a_controller_to_the_end_of_the_loop`; `crates/shell/tests/midi_controller_recording.rs`, `a_session_recording_keeps_the_controllers_with_its_notes_in_one_undo_step` | unit, shell |
+| R15 | `crates/engine/src/capture.rs`, `controllers_are_kept_up_to_the_last_note_off_and_never_pair_as_notes`, `a_stopped_capture_places_controllers_by_their_time`, `the_loops_breakpoints_are_copied_into_the_passes_added`; `crates/engine/tests/capture_midi.rs`, `notes_played_with_the_transport_stopped_are_logged_on_their_exact_samples`; `crates/shell/src/recording.rs`, `captured_controllers_are_added_and_the_old_breakpoints_stay`; `crates/shell/tests/midi_controller_recording.rs`, `capture_midi_keeps_the_controllers_up_to_the_last_note_off` | unit, frame by frame, shell |
+| R16 | `crates/shell/tests/midi_controller_recording.rs`, `a_session_recording_keeps_the_controllers_with_its_notes_in_one_undo_step`, `capture_midi_keeps_the_controllers_up_to_the_last_note_off` (one undo step each; the clip query reads the envelopes back, R9) | shell |

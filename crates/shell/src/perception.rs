@@ -339,6 +339,13 @@ fn render_range(
             "the range was cut to its first {longest} seconds, the longest this command renders"
         ));
     }
+    // Spec: external-devices R16, R27. A preview reaches no hardware: an
+    // external device sends nothing and brings back silence.
+    for device in document.external_devices() {
+        notes.push(format!(
+            "{device} sent nothing and played silence: a preview doesn't reach hardware"
+        ));
+    }
     let signatures = &settings.time_signatures;
     Ok((
         samples,

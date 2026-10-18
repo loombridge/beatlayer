@@ -27,7 +27,8 @@ use bl_shell_spec::devices::{
     DevicePanel, DeviceParameters, DeviceViewState, ExpandDeviceArgs, FloatingWindow,
     FloatingWindows, FoldDeviceArgs, GroupArgs, Grouped, HotSwap, HotSwapArgs, LoadPresetArgs,
     ParameterState, PasteChainArgs, PasteDeviceArgs, PresetResult, SavePresetArgs,
-    SelectDeviceArgs, SelectSlotArgs, SetWindowArgs, ShowSidechainArgs, SidechainSection,
+    ExternalSection, SelectDeviceArgs, SelectSlotArgs, SetWindowArgs, ShowSidechainArgs,
+    SidechainSection,
     Ungrouped,
 };
 use bl_shell_spec::devices::{ArmMapArgs, ArmedMap, MappingRow, ModulatorFrame};
@@ -615,6 +616,12 @@ impl DeviceView {
                     gain: sidechain.gain,
                     listen: sidechain.listen,
                 }
+            }),
+            external: d.external.as_ref().map(|external| ExternalSection {
+                port: external.port.clone(),
+                channel: external.channel,
+                audio_from: external.audio_from.label(),
+                hardware_latency: external.hardware_latency,
             }),
             display_view: self.display_view(d),
             modulator: self.modulator_frame(doc, d),

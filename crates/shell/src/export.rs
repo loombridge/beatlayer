@@ -1292,6 +1292,8 @@ pub fn run_command(
         took_seconds: total_took.as_secs_f64(),
         speed,
         missing_media,
+        // Spec: external-devices R16. An offline export reaches no hardware.
+        silenced_external_devices: document.external_devices(),
     })
 }
 

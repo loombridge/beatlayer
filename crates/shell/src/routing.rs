@@ -919,6 +919,93 @@ pub fn sidechain_source(doc: &Document, device: DeviceId) -> Option<Chooser> {
     Some(chooser)
 }
 
+/// The choosers of an external instrument's section (the external devices
+/// spec, R9): MIDI To, its channel, and Audio From.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExternalChoosers {
+    /// MIDI To: the output ports whose Track switch is on, No Output, and
+    /// Configure… at the end.
+    pub midi_to: Chooser,
+    /// The MIDI channel, 1 to 16.
+    pub channel: Chooser,
+    /// Audio From: the interface's input channels, the single channels then
+    /// the pairs, and Configure… at the end.
+    pub audio_from: Chooser,
+}
+
+fn set_external(device: DeviceId, change: Value) -> Invocation {
+    let mut args = json!({ "device": device });
+    if let (Some(args), Value::Object(change)) = (args.as_object_mut(), change) {
+        args.extend(change);
+    }
+    Invocation::new("device.set_external", args)
+}
+
+/// An external device's choosers (observed in Live 12.4.6 only as far as the
+/// manual names them): MIDI To lists the output ports, a port the device
+/// keeps that is away or has Track off dimmed, then No Output; Audio From
+/// lists the open device's inputs. `None` for a device without routing to
+/// hardware.
+#[must_use]
+pub fn external_choosers(
+    doc: &Document,
+    device: DeviceId,
+    interface: &Interface,
+) -> Option<ExternalChoosers> {
+    let external = doc.device(device)?.external.clone()?;
+    let kept = external.port.as_deref();
+    let mut midi_to = Vec::new();
+    for name in &interface.midi_outputs {
+        midi_to.push(Entry::choice(
+            name,
+            set_external(device, json!({ "midi_to": { "type": "port", "name": name } })),
+            kept == Some(name.as_str()),
+        ));
+    }
+    if let Some(name) = kept.filter(|name| !interface.midi_outputs.iter().any(|p| p == name)) {
+        midi_to.push(Entry::Choice {
+            label: name.to_owned(),
+            run: None,
+            chosen: true,
+            pending: None,
+        });
+    }
+    midi_to.push(Entry::choice(
+        "No Output",
+        set_external(device, json!({ "midi_to": { "type": "none" } })),
+        kept.is_none(),
+    ));
+    midi_to.push(Entry::Separator);
+    midi_to.push(configure("tempo-midi"));
+    let mut audio_from = interface_channels(interface.inputs, external.audio_from, |channel| {
+        set_external(device, json!({ "audio_from": channel_value(channel) }))
+    });
+    audio_from.push(Entry::Separator);
+    audio_from.push(configure("audio"));
+    let mut audio = chooser("External Audio From", audio_from);
+    if audio.text.is_empty() {
+        external.audio_from.label().clone_into(&mut audio.text);
+    }
+    Some(ExternalChoosers {
+        midi_to: chooser("External MIDI To", midi_to),
+        channel: Chooser {
+            name: "External MIDI Channel",
+            text: external.channel.to_string(),
+            entries: (1..=16u8)
+                .map(|n| {
+                    Entry::choice(
+                        n.to_string(),
+                        set_external(device, json!({ "channel": n })),
+                        n == external.channel,
+                    )
+                })
+                .collect(),
+            pending: None,
+        },
+        audio_from: audio,
+    })
+}
+
 /// A device's sidechain channel chooser: Pre FX · Post FX · Post Mixer with
 /// a track as the source, empty with No Input (observed). `None` for a
 /// device without a sidechain input.

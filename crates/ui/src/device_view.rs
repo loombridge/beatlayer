@@ -432,6 +432,9 @@ impl DeviceViewUi {
                 if let (Some(section), false) = (&frame.sidechain, strip) {
                     crate::sidechain::draw(ui, shell, theme, frame.id, section, rect, events);
                 }
+                if let (Some(section), false) = (&frame.external, strip) {
+                    crate::external::draw(ui, shell, theme, frame.id, section, rect, events);
+                }
             },
         );
     }

@@ -14,6 +14,18 @@ use crate::rack::RackKind;
 use crate::track::{Channel, Input, MidiTo, Output, Routing, Track, TrackKind};
 
 impl Document {
+    /// The devices that work with hardware outside the computer and are
+    /// switched on, each as the name its title bar shows and its ID: what an
+    /// offline render silences (the external devices spec, R16).
+    #[must_use]
+    pub fn external_devices(&self) -> Vec<String> {
+        self.tracks()
+            .flat_map(|track| track.devices_deep())
+            .filter(|device| device.external.is_some() && device.enabled)
+            .map(|device| format!("{} ({})", device.title(), device.id))
+            .collect()
+    }
+
     /// Where a track's audio goes in the end: Main, a group or another
     /// audio track, or nowhere (Sends Only, Ext. Out). `None` for Main
     /// itself.

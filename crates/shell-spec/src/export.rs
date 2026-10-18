@@ -214,6 +214,11 @@ pub struct ExportResult {
     /// Media that clips name and that couldn't be found, by content hash:
     /// those clips are silent in the export.
     pub missing_media: Vec<String>,
+    /// The devices that work with hardware (an external instrument), by the
+    /// name their title bar shows and their ID: they send nothing to
+    /// hardware in an offline render and bring back silence.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub silenced_external_devices: Vec<String>,
 }
 
 /// Adds the export commands to a registry.
